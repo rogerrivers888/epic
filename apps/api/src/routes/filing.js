@@ -17,6 +17,9 @@
  *   POST /subcategories/:key/accept    agree with everything proposed at once
  *   GET  /mapping                      every provider word, and where it points
  *   GET  /mapping/excluded             what is kept out of Epic, and why
+ *   GET  /labels                       every question set, and the global labels
+ *   GET  /labels/sets/:key             one set, and the words waiting on it
+ *   GET  /labels/vocabulary            our own labels, and where each is asked
  *
  * Nothing here calls a provider. Every number comes from the index, the owned
  * records, the search log and the rules, so a screen can be refreshed as often
@@ -28,6 +31,7 @@ import { requires } from '../access.js';
 import { query } from '../db.js';
 import * as filing from '../repositories/filing.js';
 import * as placeAttributes from '../repositories/placeAttributes.js';
+import * as questionSets from '../repositories/questionSets.js';
 import * as taxonomyAudit from '../repositories/taxonomyAudit.js';
 import { CORPUS_OPENS, auditAll } from '../domain/taxonomyAudit.js';
 import { setThreshold, thresholds, thresholdValues } from '../repositories/settings.js';
@@ -673,5 +677,210 @@ filingRoutes.get('/mapping/excluded', requires('view_library'), async (_req, res
       };
     });
     res.json({ excluded: rows, counts: { words: rows.length, places: rows.reduce((n, r) => n + r.brings, 0) } });
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// Labels — question sets, the words waiting on a person, and our own vocabulary
+// ---------------------------------------------------------------------------
+
+/**
+ * What state a harvested word is in, in the screen's vocabulary.
+ *
+ * Five, and they are genuinely five. A word the classifier could not call is
+ * **held** — not pending, not ignored, not waiting on a human (brief §5.1) —
+ * and comes back at the next harvest. A word validated against a source we own
+ * is **confirmed**; one that was looked for and not found is **not confirmed**,
+ * which is a real answer and a different fact from never having looked.
+ */
+function candidateState(c) {
+  if (c.kind !== 'feature') return 'held';
+  const owned = Object.entries(c.sources ?? {}).filter(([k]) => k !== 'reviews' && k !== 'google');
+  const found = owned.reduce((n, [, v]) => n + Number(v || 0), 0);
+  if (found > 0) return 'confirmed';
+  if (c.classified_at) return 'notconfirmed';
+  return 'validating';
+}
+
+/** How a source is named to a person. Never the table's own word. */
+const SOURCE_WORDS = {
+  site: 'venue page', venue: 'venue page', osm: 'OSM tag', wikipedia: 'Wikipedia',
+  wikidata: 'Wikidata', fsa: 'the hygiene register', reviews: 'reviews', google: 'reviews',
+};
+
+/**
+ * The provenance line, written here so no screen composes a number into prose.
+ *
+ * "seen in reviews of 2 of 60 · confirmed on 2 venue pages · 1 OSM tag" is one
+ * string, because the rules for which clause appears when are rules about the
+ * data and belong beside it.
+ */
+function provenanceOf(c) {
+  const bits = [`seen in ${c.places_seen} of ${c.places_total} read`];
+  for (const [k, v] of Object.entries(c.sources ?? {})) {
+    if (k === 'reviews' || k === 'google' || !Number(v)) continue;
+    const word = SOURCE_WORDS[k] ?? k;
+    bits.push(`${v} ${word}${Number(v) === 1 ? '' : 's'}`);
+  }
+  if (bits.length === 1 && c.classified_at) bits.push('no owned source agreed');
+  return bits.join(' · ');
+}
+
+const candidateRow = (c) => ({
+  id: Number(c.id),
+  word: c.raw_forms?.[0] ?? c.norm,
+  seen: c.places_seen,
+  of: c.places_total,
+  state: candidateState(c),
+  mark: c.gateWord ? 'GATE' : c.ageSignal ? 'AGE' : null,
+  provenance: provenanceOf(c),
+  raised: `raised ${new Date(c.first_seen).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`,
+  // Null where the harvest predates polarity, which is not the same as nought
+  // denials (migration 210).
+  denies: (c.asserts + c.denies + c.asks) > 0 ? c.denies : null,
+  quotes: [],
+  snippet: null,
+  places: (c.examples ?? []).slice(0, 4),
+  why: c.kind === 'unclear' ? 'nobody can call it — a feature, a condition or an opinion'
+    : c.kind === 'condition' ? 'a condition, not a feature'
+      : c.kind === 'opinion' ? 'an opinion — that is the Epic score’s job' : null,
+  doing: candidateState(c) === 'validating' ? 'reading the venue pages, OSM and Wikipedia' : null,
+  subcategory: c.subcategory,
+});
+
+/** GET /labels — every question set, and the labels asked of everything. */
+filingRoutes.get('/labels', requires('view_library'), async (_req, res, next) => {
+  try {
+    const [sets, all, d, limits] = await Promise.all([
+      questionSets.sets(), questionSets.questionsFor(null), filing.drawers(), thresholdValues(),
+    ]);
+    const cands = await questionSets.candidates({ status: 'new', limit: 5000 });
+
+    const rows = sets.map((s) => {
+      const subs = (s.subcategories ?? []).map((k) => d.subcategories.find((x) => x.key === k)).filter(Boolean);
+      const places = subs.reduce((n, x) => n + (d.refsBySub.get(x.key)?.length ?? 0), 0);
+      const questions = all.filter((q) => q.set_key === s.key);
+      const waiting = cands.filter((c) => subs.some((x) => x.key === c.subcategory)
+        && c.places_seen >= limits.sightingFloor && c.kind === 'feature').length;
+      return {
+        key: s.key,
+        name: s.name,
+        // Settled only when the queue is empty: a set that has stopped
+        // producing words but still has candidates waiting is *settling*, and
+        // the two must not look the same.
+        state: s.vocabulary_settled ? (waiting === 0 ? 'settled' : 'settling') : null,
+        tooFewForTooMany: subs.length >= 4 && questions.length < 6,
+        usedBy: subs.map((x) => x.label),
+        questions: questions.length,
+        places,
+        waiting,
+      };
+    });
+
+    res.json({
+      sets: rows,
+      globals: all.filter((q) => q.scope === 'global')
+        .map((q) => ({ key: q.attribute_key, name: q.label, shape: shapeWord(q) })),
+      counts: { sets: rows.length, questions: all.length, waiting: rows.reduce((n, r) => n + r.waiting, 0) },
+    });
+  } catch (err) { next(err); }
+});
+
+/** A label's kind, said in words rather than in the table's own. */
+const shapeWord = (q) => (q.kind === 'yesno' ? 'Yes or no'
+  : q.kind === 'range' ? 'A range'
+    : q.kind === 'scale' ? 'A scale, 0 to 4'
+      : 'One of a list');
+
+/** GET /labels/sets/:key — one set: its questions, and the words waiting on it. */
+filingRoutes.get('/labels/sets/:key', requires('view_library'), async (req, res, next) => {
+  try {
+    const key = String(req.params.key);
+    const [sets, all, d, limits] = await Promise.all([
+      questionSets.sets(), questionSets.questionsFor(key), filing.drawers(), thresholdValues(),
+    ]);
+    const set = sets.find((s) => s.key === key);
+    if (!set) throw bad(`${key} is not one of our question sets.`);
+    const subs = (set.subcategories ?? []).map((k) => d.subcategories.find((x) => x.key === k)).filter(Boolean);
+    const subKeys = subs.map((x) => x.key);
+    const places = subs.reduce((n, x) => n + (d.refsBySub.get(x.key)?.length ?? 0), 0);
+
+    const [fresh, held] = await Promise.all([
+      questionSets.candidates({ subcategories: subKeys, status: 'new', limit: 1000 }),
+      questionSets.candidates({ subcategories: subKeys, status: 'unresolved', limit: 1000 }),
+    ]);
+    const rows = fresh.map(candidateRow);
+    const floor = limits.sightingFloor;
+
+    res.json({
+      set: {
+        key: set.key, name: set.name,
+        state: set.vocabulary_settled ? 'settled' : null,
+        usedBy: subs.map((x) => ({ key: x.key, label: x.label })),
+        places,
+      },
+      questions: all.filter((q) => q.set_key === key).map((q) => ({
+        id: Number(q.id),
+        name: q.label,
+        shape: shapeWord(q),
+        gate: q.gate,
+        // Both numbers, never the share alone: 4 of 5 and 800 of 1,000 are not
+        // the same thing and the whole point of the list is that they differ.
+        share: Number(q.answered) > 0
+          ? (q.kind === 'yesno'
+            ? `${Math.round((Number(q.said_yes) / Number(q.answered)) * 100)}% say yes · ${q.answered} answered`
+            : `${q.answered} answered`)
+          : 'nothing has answered it yet',
+        thin: Number(q.answered) < 6,
+      })),
+      // Judgeable, at or above the floor, least evenly spread first — the ones
+      // that tell two places apart.
+      candidates: rows.filter((c) => c.state !== 'held' && c.seen >= floor),
+      // The holding pen: not pending, not ignored, not waiting on a human.
+      pen: held.map(candidateRow),
+      inFlight: rows.filter((c) => c.state === 'validating'),
+      // Visible, and deliberately not promotable.
+      thin: rows.filter((c) => c.state !== 'held' && c.seen < floor),
+      readNote: `${rows.reduce((n, c) => Math.max(n, c.of), 0)} places were read to find these words`
+        + ` · ${places} are asked them`,
+    });
+  } catch (err) { next(err); }
+});
+
+/** GET /labels/vocabulary — our own labels, and where each is asked. */
+filingRoutes.get('/labels/vocabulary', requires('view_library'), async (_req, res, next) => {
+  try {
+    const [{ list: attrs }, all, sets, d] = await Promise.all([
+      placeAttributes.attributes(), questionSets.questionsFor(null), questionSets.sets(), filing.drawers(),
+    ]);
+    const setName = new Map(sets.map((s) => [s.key, s.name]));
+    const rows = attrs.filter((a) => a.active).map((a) => {
+      const asked = all.filter((q) => q.attribute_key === a.key);
+      const global = asked.some((q) => q.scope === 'global');
+      const inSets = [...new Set(asked.filter((q) => q.set_key).map((q) => q.set_key))];
+      const places = global
+        ? [...d.refsBySub.values()].reduce((n, r) => n + r.length, 0)
+        : inSets.reduce((n, k) => {
+          const s = sets.find((x) => x.key === k);
+          return n + (s?.subcategories ?? []).reduce((m, sub) => m + (d.refsBySub.get(sub)?.length ?? 0), 0);
+        }, 0);
+      return {
+        key: a.key,
+        name: a.label,
+        // Nowhere is the orphan case and reads differently: approved, and then
+        // never asked of anything.
+        scope: global ? 'everywhere' : inSets.length ? 'sets' : 'nowhere',
+        sets: inSets.map((k) => setName.get(k)).filter(Boolean),
+        places,
+      };
+    });
+    res.json({
+      vocabulary: rows,
+      counts: {
+        labels: rows.length,
+        everywhere: rows.filter((r) => r.scope === 'everywhere').length,
+        nowhere: rows.filter((r) => r.scope === 'nowhere').length,
+      },
+    });
   } catch (err) { next(err); }
 });
