@@ -286,13 +286,21 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
     ringKey: `${ring.cell}|${ring.cells.length}`, box: ring.box, cells: ring.cells,
     category, page, meter, householdId, cellAt: reach.cellAt,
   });
-  // Held to the category by our own taxonomy rather than by Google's words: a
-  // text search answers with whatever matched, and Food & drink must mean food
-  // and drink (routes/places.js keeps the same fence on the other search path).
+  // Held to the category by our own taxonomy — but only where the taxonomy
+  // actually knows.
+  //
+  // A text search answers with whatever matched, so Food & drink must mean food
+  // and drink. Dropping everything our shelves did not positively agree with
+  // was far too blunt: Sport came back with twenty places and showed none of
+  // them, because a leisure centre shelves as Active and a golf club as
+  // Outdoors. So a place is dropped only when we *know* it belongs on another
+  // shelf; a place we cannot shelve is kept, because Google was answering our
+  // own question about this category and its answer is the only evidence there
+  // is (20 Sep 2026).
   const mine = got.venues.filter((v) => {
     if (category === 'food') return true;
     const shelves = shelvesForVenue(v, taught, tax.vocab)?.shelves ?? [];
-    return shelves.includes(category);
+    return shelves.length === 0 || shelves.includes(category);
   });
   const refs = mine.map((v) => `${v.source}:${v.sourcePlaceId}`);
   const scores = refs.length
@@ -333,7 +341,15 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
       if (b.epicScore != null) return 1;
       return a.theirRank - b.theirRank;
     });
-  return { items, nextPageToken: got.nextPageToken, requests: got.requests, cached: got.cached, problem: got.problem ?? null };
+  return {
+    items, nextPageToken: got.nextPageToken, requests: got.requests, cached: got.cached,
+    problem: got.problem ?? null,
+    // What the search returned, what survived the ring, and what survived the
+    // shelves — three numbers, because a board that shows two of twenty should
+    // be able to say which fence took the other eighteen.
+    returned: got.returned ?? got.venues.length, inRing: got.venues.length, onShelf: mine.length,
+    scored: got.scored ?? 0,
+  };
 }
 
 inspire.get('/around', async (req, res, next) => {
@@ -379,6 +395,8 @@ inspire.get('/around', async (req, res, next) => {
         censused: census.missing.length === 0,
         items: got.items.slice(0, shows),
         of: got.items.length,
+        // Where the twenty went.
+        sifted: { returned: got.returned, inRing: got.inRing, onShelf: got.onShelf, scored: got.scored },
         more: Boolean(got.nextPageToken),
         cached: got.cached,
         why: got.problem,
