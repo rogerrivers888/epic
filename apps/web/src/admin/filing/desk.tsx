@@ -237,7 +237,7 @@ export function Cell({ col, children, style }: { col: Col; children?: React.Reac
 /** A value in a cell: 13.5px, tabular where it is a number. */
 export function Value({ children, tone = 'ink', weight = '400', size = 13.5, numeric }: {
   children: React.ReactNode;
-  tone?: 'ink' | 'muted' | 'dim' | 'lime' | 'warn';
+  tone?: 'ink' | 'muted' | 'dim' | 'faint' | 'lime' | 'warn';
   weight?: '400' | '500' | '600' | '700' | '800';
   size?: number;
   numeric?: boolean;
@@ -246,6 +246,9 @@ export function Value({ children, tone = 'ink', weight = '400', size = 13.5, num
     : tone === 'warn' ? WARN
     : tone === 'muted' ? desk.inkMuted
     : tone === 'dim' ? desk.inkDim
+    // Faint is not text you are meant to read — it is a placeholder standing
+    // in for text that is not there ("no copy line").
+    : tone === 'faint' ? desk.inkFaint
     : desk.ink;
   return (
     <Text style={{ fontFamily: fonts.body, fontSize: size, fontWeight: weight, color, ...(numeric ? tabular : null) }}>

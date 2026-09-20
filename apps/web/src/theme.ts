@@ -450,3 +450,29 @@ export const desk = {
    */
   warn: '#FF6A65',
 } as const;
+
+/**
+ * The household surface, as the back office previews it.
+ *
+ * The Rows tab draws a 390px column of what a household would actually see, and
+ * that column is **pinned light** whatever the back office is set to. It has to
+ * be: it is a picture of the app, and a picture of the app that follows the
+ * back office's dark setting is a picture of something nobody will ever be
+ * shown. Reading `colors` here would do exactly that.
+ *
+ * So these are the light palette's own values, fixed. Cream is the reading
+ * ground, ink is every letter, and the two rules are the app's own — the
+ * heavier one between sections, the hairline between rows.
+ */
+export const house = {
+  ground: CREAM,
+  ink: INK,
+  /** A second line under a row's title. */
+  inkMuted: '#605D5D',
+  /** Between sections, and round the frame. */
+  rule: '#D7D3D3',
+  /** Between rows. */
+  ruleSoft: '#EAE6DE',
+  /** A hearted row, and the panel the first-heart question sits in. */
+  warm: '#F4F1EA',
+} as const;
