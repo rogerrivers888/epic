@@ -224,17 +224,38 @@ export async function recordCandidates(subcategory, entries = [], { placesTotal 
     "select norm from harvest_candidates where subcategory = $1 and status = 'ignored'", [subcategory],
   );
   const closed = new Set(ignored.map((r) => r.norm));
-  let written = 0;
+  const rows = [];
   let skipped = 0;
   for (const entry of entries) {
     const norm = normalise(entry.norm ?? entry.raw);
     if (!norm) continue;
     if (closed.has(norm)) { skipped += 1; continue; }
     const sources = entry.sources instanceof Set ? [...entry.sources] : (entry.sources ?? []);
-    const counts = Object.fromEntries(sources.map((s) => [s, entry.placesSeen ?? 1]));
+    rows.push([
+      norm,
+      entry.rawForms ?? [entry.raw ?? norm],
+      subcategory,
+      entry.placesSeen ?? 1,
+      placesTotal,
+      JSON.stringify(Object.fromEntries(sources.map((s) => [s, entry.placesSeen ?? 1]))),
+      (entry.examples ?? []).slice(0, 5),
+    ]);
+  }
+  // In batches, because a subcategory raises hundreds of words and a sweep of
+  // fifty-two of them would otherwise be twenty-odd thousand round trips — long
+  // enough for the request that started it to give up on itself.
+  const CHUNK = 200;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const batch = rows.slice(i, i + CHUNK);
+    const params = [];
+    const values = batch.map((r) => {
+      params.push(...r);
+      const n = params.length;
+      return `($${n - 6}, $${n - 5}, $${n - 4}, $${n - 3}, $${n - 2}, $${n - 1}::jsonb, $${n})`;
+    });
     await run(
       `insert into harvest_candidates (norm, raw_forms, subcategory, places_seen, places_total, sources, examples)
-       values ($1, $2, $3, $4, $5, $6::jsonb, $7)
+       values ${values.join(', ')}
        on conflict (subcategory, norm) do update set
          raw_forms    = (select array_agg(distinct f) from unnest(harvest_candidates.raw_forms || excluded.raw_forms) f),
          places_seen  = greatest(harvest_candidates.places_seen, excluded.places_seen),
@@ -243,12 +264,10 @@ export async function recordCandidates(subcategory, entries = [], { placesTotal 
          examples     = (select array_agg(distinct e) from unnest((harvest_candidates.examples || excluded.examples)[1:5]) e),
          last_seen    = now()
        where harvest_candidates.status = 'new'`,
-      [norm, entry.rawForms ?? [entry.raw ?? norm], subcategory, entry.placesSeen ?? 1, placesTotal,
-        JSON.stringify(counts), (entry.examples ?? []).slice(0, 5)],
+      params,
     );
-    written += 1;
   }
-  return { written, skipped };
+  return { written: rows.length, skipped };
 }
 
 /**
@@ -312,10 +331,17 @@ export async function promote(id, { gate = false, kind = 'yesno', label = null, 
     if (!key) {
       const text = label ?? candidate.raw_forms?.[0] ?? candidate.norm;
       key = slug(text);
-      await client.query(
-        `insert into place_attributes (key, label, kind, position) values ($1, $2, $3, 200)
-         on conflict (key) do nothing`, [key, sentence(text), kind],
-      );
+      try {
+        await client.query(
+          `insert into place_attributes (key, label, kind, position) values ($1, $2, $3, 200)
+           on conflict (key) do nothing`, [key, sentence(text), kind],
+        );
+      } catch (err) {
+        // Our labels are one vocabulary (migration 110): a secondary label may
+        // not take a subcategory's name. The trigger says so in a sentence;
+        // pass it on rather than letting it reach the screen as a 500.
+        throw bad(`${key} is already one of our labels. Promote it onto the label we have, or give it another name.`);
+      }
       await client.query(
         `insert into attribute_aliases (norm, target_key, raw) values ($1, $2, $3)
          on conflict (norm) do nothing`, [candidate.norm, key, candidate.raw_forms?.[0] ?? null],
