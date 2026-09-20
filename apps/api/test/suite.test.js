@@ -99,14 +99,29 @@ test('a rate is never scaled, however long the window', () => {
   assert.equal(year.overview.subscriptions.churnPct, month.overview.subscriptions.churnPct);
 });
 
-test('live subscriptions is the same number whatever the window, and the book still balances', () => {
+test('the book of subscriptions balances at every window, and never goes negative', () => {
   for (const p of PERIODS) {
     const m = scaleFixtures(fixtures(), resolvePeriod(p.key, AT));
     const s = m.overview.subscriptions;
-    assert.equal(s.live, 579, p.key);
+
     // opening + new − lost = live, at every window. A book that does not
     // balance is the first thing anybody checks.
     assert.equal(Math.round(s.opening + s.added - s.lost), s.live, p.key);
+
+    /**
+     * And it is a book of real counts.
+     *
+     * Deriving the opening as `live − new + lost` from a scaled monthly flow
+     * gave **−253 subscriptions** over a twelve-month window (20 Sep 2026). The
+     * two ends are stocks read at their own moments, and only `lost` is
+     * derived, which is the only arrangement that cannot go negative.
+     */
+    assert.ok(s.opening >= 0, `${p.key} opening ${s.opening}`);
+    assert.ok(s.lost >= 0, `${p.key} lost ${s.lost}`);
+    assert.ok(s.added >= 0, `${p.key} added ${s.added}`);
+    // A closing count is a count at a moment, so "last month" closes on the
+    // month it names rather than on today.
+    assert.equal(s.live, p.key === 'last-month' ? 561 : 579, p.key);
   }
 });
 

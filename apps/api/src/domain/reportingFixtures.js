@@ -47,6 +47,20 @@ const MONTH_DAYS = 30.4;
 
 export const FIXTURE_SUBSCRIBERS = 579;
 
+/**
+ * Live subscriptions at the end of each month, Oct 25 → Sep 26.
+ *
+ * A **stock**, and the reason it has to exist: "live at the start of the period"
+ * was derived as `live − new + lost` from the stated monthly flows, and over a
+ * twelve-month window that came out at **−253 subscriptions** (20 Sep 2026).
+ * You cannot have had minus two hundred of anything. A count at a moment is
+ * read at that moment; it is not arithmetic on a scaled rate.
+ *
+ * It is the sum of the tier series — Solo 193 → 321 and Household 155 → 258 —
+ * so the two screens cannot disagree about how many subscriptions there are.
+ */
+const LIVE_SERIES = [348, 371, 393, 406, 429, 451, 475, 498, 521, 544, 561, 579];
+
 /** Twelve months of total revenue, Oct 25 → Sep 26. */
 const REVENUE_SERIES = [6640, 7210, 7880, 6980, 7340, 7910, 8460, 8120, 8690, 9130, 8160, 9244];
 
@@ -820,13 +834,40 @@ export function scaleFixtures(model, period) {
     ? text.replace(/\{(\d+(?:\.\d+)?)\}/g, (_, n) => Math.round(Number(n) * factor).toLocaleString())
     : text);
 
+  /**
+   * A flow scales; a stock, a rate and a fixed window do not.
+   *
+   * A counted flow is rounded whole on the way out: 283.2 new subscribers is
+   * not a number anybody has. The screen would have rounded it anyway, but a
+   * payload that carries a fifth of a subscriber is a payload that will be
+   * summed somewhere and come out wrong.
+   */
+  const scaleMeasure = (v, unit) => {
+    if (typeof v !== 'number') return v;
+    const n = v * factor;
+    return unit === 'count' ? Math.round(n) : Math.round(n * 100) / 100;
+  };
   m.overview.measures = m.overview.measures.map((mm) => (mm.kind === 'flow'
-    ? { ...mm, value: scale(mm.value), expected: scale(mm.expected) }
+    ? { ...mm, value: scaleMeasure(mm.value, mm.unit), expected: scaleMeasure(mm.expected, mm.unit) }
     : mm));
 
+  /**
+   * The book of subscriptions, and it balances at every window.
+   *
+   * Opening and closing are **stocks**, read off `LIVE_SERIES` at the two ends
+   * of the window. New is a **flow**, counted over it. Lost is then the
+   * difference — which is how a book is actually constructed from a subscriber
+   * count and a joiner count, and is the only arrangement that cannot produce a
+   * negative opening.
+   */
   const s = m.overview.subscriptions;
-  s.added = scale(s.added);
-  s.lost = scale(s.lost);
+  const months = Math.max(1, Math.min(LIVE_SERIES.length - 1, Math.round(factor)));
+  const end = period.key === 'last-month' ? LIVE_SERIES.length - 2 : LIVE_SERIES.length - 1;
+  s.live = LIVE_SERIES[end];
+  s.opening = LIVE_SERIES[Math.max(0, end - months)];
+  s.added = Math.round(s.added * factor);
+  // Never below nought: a period cannot have lost subscriptions it never had.
+  s.lost = Math.max(0, s.opening + s.added - s.live);
   s.opening = Math.round(s.live - s.added + s.lost);
   s.arrivals = scaleRows(s.arrivals);
   s.sources = scaleRows(s.sources);
