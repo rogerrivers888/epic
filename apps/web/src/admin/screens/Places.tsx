@@ -403,6 +403,20 @@ function Level(props: {
   // the last address's "nothing here by that name" until its refresh landed.
   useEffect(() => { setNoSuchArea(null); }, [scoped]);
 
+  // Whether the level we are holding is the one the address asks for.
+  //
+  // A board keeps its last answer while the next one is on its way, and an
+  // effect that runs on the render where the address has moved but the answer
+  // has not reads the *previous* level. That is how Great Britain came to be
+  // drawn as "5 minutes by car": clicking the country from a postcode ran the
+  // rule below against the postcode's own level and wrote a band into the
+  // country's address (owner, 20 Sep 2026 — "it's telling me 5 minutes by car,
+  // which is clearly a nonsense for the whole country"). So everything that
+  // follows from the level asks this first.
+  const levelIsHere = level != null && (level.areaKind === 'ring'
+    ? (level.area ?? String(level.name ?? '').toLowerCase().replace(/\s+/g, '-')) === where
+    : level.slug === where);
+
   // An address that says nothing about how far out gets the default, and says
   // so. Every way of *picking* an outcode already writes the band (`intoArea`);
   // this is the one that was typed, bookmarked or shared before the band
@@ -421,9 +435,19 @@ function Level(props: {
       // rather than left claiming a scope that does not exist (Codex, 20 Sep
       // 2026).
       || (within === 0 && level?.areaKind === 'ring' && !level?.area);
+    if (!levelIsHere) return;
+    // The other way round: a band in the address of something that cannot have
+    // one. The API answers a country or a county as itself whatever `within`
+    // says, so the word sat there drawing nothing and claiming a ring — it is
+    // taken out rather than left to mislead the next person the link is sent
+    // to (20 Sep 2026).
+    if (within != null && level?.areaKind !== 'ring' && level?.areaKind !== 'postcode') {
+      props.onWithin(null, { replace: true });
+      return;
+    }
     if (!unsaid) return;
     if (level?.areaKind === 'postcode' || level?.areaKind === 'ring') props.onWithin(BANDS[0], { replace: true });
-  }, [level, within, props.onWithin]);
+  }, [level, levelIsHere, within, props.onWithin]);
 
   if (noSuchArea) {
     return (
@@ -464,6 +488,13 @@ function Level(props: {
   const lensHere: Lens = lens === 'coverage' && onAPostcode ? 'category' : lens;
 
 
+  // A ring is a ring because the answer on the screen is one, not because the
+  // address carries a `within`. A country with a stray band in its address is
+  // still a country, and drawing it as one hid the search box and put "5
+  // minutes by car" in the breadcrumb over the whole of Great Britain (owner,
+  // 20 Sep 2026).
+  const ringHere = levelIsHere && level.areaKind === 'ring';
+
   const body = (() => {
     if (lensHere === 'category' && sub) return <PlacesBoard q={q} cat={cat} sub={sub} onPlace={props.onPlace} onBar={props.onBar} canManage={props.canManage} missing={missing || null} onMissing={(f) => setMissing(f ?? '')} onNames={setNames} onWiden={props.onWithin} within={within} />;
     if (lensHere === 'category') return <CategoryBoard q={q} cat={cat} onCat={props.onCat} onSub={props.onSub} canManage={props.canManage} onNames={setNames} onWiden={props.onWithin} within={within} onCollect={() => props.onLens('collect')} areaKind={level.areaKind} />;
@@ -476,7 +507,7 @@ function Level(props: {
     if (lensHere === 'quality') return <QualityBoard q={q} onPlace={props.onPlace} canManage={props.canManage} />;
     if (lensHere === 'demand') return <DemandLens q={q} canManage={props.canManage} onCollect={() => props.onLens('collect')} />;
     if (lensHere === 'collect') return <CollectBoard q={q} level={level} canManage={props.canManage} cat={cat} sub={sub} />;
-    if (ring) return <RingBoard q={q} onSub={props.onSub} onLens={props.onLens} onWithin={props.onWithin} />;
+    if (ringHere) return <RingBoard q={q} onSub={props.onSub} onLens={props.onLens} onWithin={props.onWithin} />;
     if (level.areaKind === 'country') return <BreakdownBoard q={q} by={props.breakdownBy} onBy={props.onBy} onWhere={props.onWhere} canManage={props.canManage}
                                                              onCollectIn={(slug) => { props.onWhere(slug); props.onLens('collect'); }} />;
     return <CoverageBoard q={q} onWhere={props.onWhere} onCollect={() => props.onLens('collect')} />;
@@ -487,7 +518,7 @@ function Level(props: {
   const deep = [
     // A ring is a step in its own right: the board's breadcrumb reads
     // "Great Britain · SL4 1QN · 30 minutes by car · Family · Playgrounds".
-    ...(ring ? [{ label: `${level.name} · ${within} minutes by ${MODE_LABEL[mode].toLowerCase()}`, onPress: (cat || sub) ? () => { props.onCat(''); props.onSub(''); } : undefined }] : []),
+    ...(ringHere ? [{ label: `${level.name} · ${level.minutes ?? within} minutes by ${MODE_LABEL[level.mode ?? mode].toLowerCase()}`, onPress: (cat || sub) ? () => { props.onCat(''); props.onSub(''); } : undefined }] : []),
     ...(lens === 'category' && cat ? [{ label: names.cat ?? cat, onPress: sub ? () => props.onSub('') : undefined }] : []),
     ...(lens === 'category' && sub ? [{ label: names.sub ?? sub }] : []),
   ];
@@ -502,7 +533,7 @@ function Level(props: {
       <Trail level={level} onUp={props.onUp} onWhere={props.onWhere} extra={deep}
              onSelf={() => { props.onCat(''); props.onSub(''); props.onLens('coverage'); }} />
       <Band kicker={kicker} title={title}
-            stats={lens === 'demand' ? null : <Five stats={level.stats} ring={ring} kind={lens === 'category' && sub ? names.sub ?? null : null} needs={names.needs ?? null} />} />
+            stats={lens === 'demand' ? null : <Five stats={level.stats} ring={ringHere} kind={lens === 'category' && sub ? names.sub ?? null : null} needs={names.needs ?? null} />} />
       {/* The word that is underlined is the board you are on, not the word in
           the address — otherwise an outcode drew its categories under a lit
           "Coverage" (18 Sep 2026). */}
@@ -515,8 +546,8 @@ function Level(props: {
           everywhere above a postcode, which is where searching for one is the
           thing you came to do. */}
       <LensRow lens={lensHere} onLens={props.onLens}
-               right={ring || level.areaKind === 'ring' || level.areaKind === 'postcode'
-                 ? <RingChooser minutes={ring ? within : 0} mode={mode} onMinutes={props.onWithin}
+               right={ringHere || (levelIsHere && level.areaKind === 'postcode')
+                 ? <RingChooser minutes={ringHere ? level.minutes ?? within : 0} mode={level.mode ?? mode} onMinutes={props.onWithin}
                                 /* Only where taking the ring away leaves a board to
                                    stand on: a postcode district. A full postcode has
                                    no area behind it, and a ring round a town would
@@ -528,7 +559,7 @@ function Level(props: {
                                    the same act as picking a way to travel in the search
                                    box, which has always drawn the ring. Otherwise the
                                    word lights nothing and the board does not move. */
-                                onMode={(m) => { props.onBy(m); if (!ring) props.onWithin(BANDS[0]); }}
+                                onMode={(m) => { props.onBy(m); if (!ringHere) props.onWithin(BANDS[0]); }}
                                 cells={level.cells} modesBuilt={level.modesBuilt} />
                  : <AreaSearch onWhere={props.onWhere} onPlace={props.onPlace} />} />
       {body}
