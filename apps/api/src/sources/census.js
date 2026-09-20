@@ -175,8 +175,13 @@ const boxLabel = (box) => [box.minLat, box.minLng, box.maxLat, box.maxLng].map((
  * thing to look at when a count reads wrong, and a tree that quietly replaced
  * the parent with its tiles would hide it.
  */
-async function sliceDown({ box, type, words = null, category, subcategory, areaSlug, outcode, householdId, runId, depth = 0, parentId = null, found, surfaced, meter, stats }) {
+async function sliceDown({ box, type, words = null, category, subcategory, areaSlug, outcode, householdId, runId, depth = 0, parentId = null, found, surfaced, meter, stats, pace = null }) {
   if (stats.requests >= stats.maxRequests) { stats.stopped = true; return; }
+  // A long run is paced rather than budgeted: Essentials is free and the only
+  // thing that can go wrong is asking Google faster than the project's quota
+  // allows. Waiting here rather than between tiles keeps the rate honest
+  // inside a tile that splits forty times (brief, §4).
+  if (pace) await pace();
   const before = meter['google'] ?? 0;
   // `words` only where Google has no word for the drawer. The type still goes
   // as `includedType`, so what comes back is fenced by Google's own answer and
@@ -252,7 +257,7 @@ async function sliceDown({ box, type, words = null, category, subcategory, areaS
   for (const q of quarters(box)) {
     await sliceDown({
       box: q, type, words, category, subcategory, areaSlug, outcode, householdId, runId,
-      depth: depth + 1, parentId: row.id, found, surfaced, meter, stats,
+      depth: depth + 1, parentId: row.id, found, surfaced, meter, stats, pace,
     });
   }
 }
@@ -268,7 +273,17 @@ async function sliceDown({ box, type, words = null, category, subcategory, areaS
  * fetched, held or shown. It is the one Google call Epic makes that produces
  * something it may keep for ever.
  */
-export async function censusArea({ areaSlug = null, outcode = null, box, subcategories = null, householdId = null, onProgress = null, maxRequests = MAX_REQUESTS_PER_RUN } = {}) {
+export async function censusArea({
+  areaSlug = null, outcode = null, box, subcategories = null, householdId = null,
+  onProgress = null, maxRequests = MAX_REQUESTS_PER_RUN,
+  // Called before every request. A tile census hands in a rate limiter here.
+  pace = null,
+  // Whether to write this area's board counts. A tile is not an area anybody
+  // browses — its counts are rolled up to the outcodes it covers afterwards
+  // (`rollUpOutcodes`), and writing tile keys into `area_counts` would put
+  // rows on the board for places nobody can navigate to.
+  rollUpCounts = true,
+} = {}) {
   if (!box || box.minLat == null) throw Object.assign(new Error('a census needs a box'), { status: 400 });
   const plan = await slicePlan({ subcategories });
   if (!plan.length) return { noted: 0, requests: 0, slices: 0, plan: 0, problems: ['no Google types are taught onto any active subcategory'] };
@@ -289,7 +304,7 @@ export async function censusArea({ areaSlug = null, outcode = null, box, subcate
 
   for (const { category, subcategory, questions } of plan) {
     for (const { type, words } of questions) {
-      await sliceDown({ box, type, words, category, subcategory, areaSlug, outcode, householdId, runId, found, surfaced, meter, stats });
+      await sliceDown({ box, type, words, category, subcategory, areaSlug, outcode, householdId, runId, found, surfaced, meter, stats, pace });
       if (stats.stopped || stats.refused) break;
     }
     if (stats.refused) { stats.problems.push(`the provider refused: ${stats.refused}`); break; }
@@ -332,13 +347,20 @@ export async function censusArea({ areaSlug = null, outcode = null, box, subcate
   for (const batch of chunks([...surfaced.values()], WRITE_BATCH)) {
     await writeSurfacings(batch, runId);
   }
-  await rollUp({ areaSlug, runId, done, found: places, surfaced: [...surfaced.values()] });
+  if (rollUpCounts) await rollUp({ areaSlug, runId, done, found: places, surfaced: [...surfaced.values()] });
 
   return {
     noted: places.length, surfacings: surfaced.size, ...stats,
     // A Set does not survive JSON, and the count is what a caller wants anyway.
     answered: stats.answered.size,
     runId, plan: plan.length, completed: done.length,
+    // *Which* drawers finished, not only how many. A tile census checkpoints on
+    // this: a tile interrupted half way through resumes at the next drawer
+    // rather than paying again for the ones already answered (brief, §4).
+    done: done.map((d) => d.subcategory),
+    // The whole plan, so a caller can tell "this drawer was never reached" from
+    // "this drawer was asked and there was nothing there".
+    planned: plan.map((p) => p.subcategory),
   };
 }
 
