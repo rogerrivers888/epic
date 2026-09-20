@@ -930,6 +930,12 @@ router.get('/household', requires('view_library'), async (req, res, next) => {
       // Whole places only: `?limit=1.5` reached the database as a decimal and
       // came back a 500 (Codex, 20 Sep 2026).
       limit: Math.min(50, Math.max(1, Math.trunc(Number(req.query.limit)) || 10)),
+      // And the next ten, and the next (owner, 20 Sep 2026: "users can also go
+      // to the next 10 and the next 10, and you haven't provided me that
+      // option"). One-based in the address, because that is what a page is;
+      // an offset by the time it reaches the database.
+      offset: (Math.min(500, Math.max(1, Math.trunc(Number(req.query.page)) || 1)) - 1)
+        * Math.min(50, Math.max(1, Math.trunc(Number(req.query.limit)) || 10)),
     });
     res.json({
       ...(await head(scope)),
