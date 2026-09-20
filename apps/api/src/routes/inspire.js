@@ -54,6 +54,7 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import * as searchLog from '../repositories/searches.js';
 import * as placeIndex from '../repositories/placeIndex.js';
+import * as visitsRepo from '../repositories/visits.js';
 import { currentHousehold, loadMembers, toAttendees } from './household.js';
 import { householdStatus } from './places.js';
 import { thingsAround, THINGS_RADIUS_KM } from './plan.js';
@@ -283,7 +284,18 @@ async function ringFrom(q, { minutes, mode }) {
  */
 async function placesFor({ ring, category, page, meter, taught, tax, householdId }) {
   const got = await categoryPage({
-    ringKey: `${ring.cell}|${ring.cells.length}`, box: ring.box, cells: ring.cells,
+    /**
+     * The ring, not its size.
+     *
+     * Two searches from the same origin can reach a different set of cells and
+     * happen to reach the same *number* of them — half an hour's drive and half
+     * an hour on a train, most obviously — and the key was the count. A page
+     * fetched and filtered for one ring was then handed to the other, dropping
+     * places that were in reach and offering places that were not (Codex, 20
+     * Sep 2026). The cells themselves are what the page is about.
+     */
+    ringKey: `${ring.cell}|${[...ring.cells].sort().join(',')}`,
+    box: ring.box, cells: ring.cells,
     category, page, meter, householdId, cellAt: reach.cellAt,
   });
   // The fence is the ring, and the question was the category.
@@ -402,6 +414,23 @@ inspire.get('/around', async (req, res, next) => {
       });
     }
 
+    /**
+     * What it cost, written down.
+     *
+     * Every cache miss here is up to eight paid Google display searches, and
+     * the route was reporting them in `spent` and never writing them to
+     * `provider_calls` — so they were invisible to the spend ceiling, to the
+     * supplier register and to every cost-per-household figure, while the
+     * answer on screen said what they had cost (Codex, 20 Sep 2026).
+     *
+     * The meter goes in as an **object** rather than as JSON text, so the
+     * outcome the adapter observed rides along with it (`sources/meter.js`)
+     * and this provider's failures are counted like everybody else's.
+     */
+    if (meter.google) {
+      await visitsRepo.recordProviderCall(household.id, 'google', 'inspire.around', meter).catch(() => null);
+    }
+
     res.json({
       ring: {
         where: ring.label, outcodes: ring.outcodes, cells: ring.cells.length,
@@ -460,6 +489,105 @@ inspire.get('/near', async (req, res, next) => {
     const mode = travelMode(req.query.mode);
     const label = String(req.query.label || '').trim() || household.home_label || null;
     const locality = req.query.locality ? String(req.query.locality) : null;
+
+    // --- the ring, which is the pool now ------------------------------------
+    //
+    // The owner, 20 Sep 2026: "Retire Inspire's atlas and food-sweep pools and
+    // the km-from-minutes conversion. The atlas stays as a source of images and
+    // summaries for owned records, not as the pool the app searches."
+    //
+    // So this is the answer wherever the reachability matrix can draw a ring.
+    // Everything below it — the atlas pool, the sweep's food, the look-around —
+    // is what happens outside that: abroad, or in a country whose matrix has
+    // not been built. It is kept for exactly that, and for nothing else.
+    const minutes = Math.min(90, Math.max(5, Math.trunc(Number(req.query.minutes)) || 30));
+    const ring = await ringFrom({ ...req.query, lat: centre.lat, lng: centre.lng, label }, { minutes, mode });
+    if (ring) {
+      const census = await censusCounts(ring.outcodes);
+      const taught = await shelfRules();
+      const tax = await taxonomy();
+      const meter = { google: 0 };
+      const moods = [];
+      const items = [];
+      let requests = 0;
+      for (const key of Object.keys(ASKED)) {
+        const got = await placesFor({ ring, category: key, page: 1, meter, taught, tax, householdId: household.id });
+        requests += got.requests;
+        moods.push({
+          key,
+          label: tax.vocab?.categories?.[key]?.label ?? key,
+          // The census count for the reach: free, ours, and the number the
+          // screen prints beside the name.
+          count: census.counts[key] ?? 0,
+          icon: tax.vocab?.categories?.[key]?.icon ?? null,
+          // Food is a shelf again, not a door: it is bought the same way as
+          // everything else now.
+          isDoor: false,
+          subcategories: [],
+          shown: got.items.length,
+          sifted: { returned: got.returned, inRing: got.inRing, scored: got.scored },
+          more: Boolean(got.nextPageToken),
+        });
+        for (const it of got.items) {
+          items.push({
+            venueRef: it.venueRef, source: 'google', name: it.name, category: it.category,
+            moods: [key], subcategory: it.subcategory ?? null,
+            experiences: [], cuisines: [],
+            rating: it.rating, ratingCount: it.ratingCount, priceLevel: it.priceLevel,
+            goodForChildren: null,
+            // The reference only. The bytes are fetched for a tile in the
+            // viewport, a row at a time — never for a list (data policy).
+            photos: it.photo ? [{ name: it.photo }] : [],
+            attribution: ['Powered by Google'],
+            lat: it.lat, lng: it.lng,
+            distanceKm: Number(kmBetween(centre, it).toFixed(1)),
+            travelMinutes: estimateTravelMinutes(origin, it, mode),
+            estimated: true,
+            dwellMinutes: 90,
+            household: null,
+            image: null,
+            epicScore: it.epicScore,
+            outcode: it.outcode,
+          });
+        }
+      }
+      const answer = {
+        place: { label, lat: centre.lat, lng: centre.lng, locality },
+        from: { label: origin.label ?? null, lat: origin.lat, lng: origin.lng, how: origin.how },
+        mode, radiusKm: null,
+        ring: {
+          where: ring.label, minutes, cells: ring.cells.length,
+          outcodes: ring.outcodes.length, notCensused: census.missing.length,
+          box: boxKm(ring.box),
+        },
+        moods, items,
+        pools: { atlas: false, live: false, ring: true, why: null, failed: false },
+        spent: { displaySearches: requests },
+        cached: requests === 0,
+        tookMs: Date.now() - started,
+        attribution: ['Powered by Google'],
+      };
+      // The home screen is a search, and what happens to each card afterwards
+      // is the click stream Demand counts. A count-only caller is not drawing
+      // anything and does not log one (the same rule the old pool kept).
+      const counting = String(req.query.count ?? '') === '1';
+      const searchId = counting ? null : await searchLog.noteSearch({
+        householdId: household.id, accountId: req.account?.id ?? null, surface: 'inspire',
+        ...(await searchLog.whereOf({ lat: centre.lat, lng: centre.lng, areaSlug: locality })),
+        lat: centre.lat, lng: centre.lng, mode,
+        asked: { party: members.length, minutes, ring: true },
+        subject: null,
+        shownTotal: items.length,
+        shown: Object.entries(items.reduce((acc, i) => { const k = i.subcategory ?? 'unshelved'; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {})).map(([subcategory, n]) => ({ subcategory, n })),
+        sourcesQueried: ['google'],
+        degraded: [],
+      });
+      if (searchId) await searchLog.noteShown(searchId, items.map((i, n) => ({ ref: i.venueRef, position: n + 1 })));
+      // And into the index: a place a provider told us about is a place we have
+      // seen, whether or not it fitted on the page.
+      await placeIndex.noteSeen(items).catch(() => null);
+      return res.json({ queryId: searchId, ...answer });
+    }
 
     // The atlas alone unless somebody deliberately asks for more. `owned=1` is
     // kept as the older spelling of the same default so a client that still

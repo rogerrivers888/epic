@@ -70,6 +70,8 @@ export const PURPOSE_CLASSES = {
   'plan.corridor.detour': 'serve',
   'plan.inspire': 'serve',
   'plan.inspire.things': 'serve',
+  // The Inspire board's own display searches — marginal, and the household's.
+  'inspire.around': 'serve',
   'plan.tastes': 'serve',
   'plan.tastes.routing': 'serve',
   'trip.along': 'serve',

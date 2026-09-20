@@ -40,9 +40,15 @@ export const annualPence = (monthlyPence, discountPct) =>
 export async function readTiers() {
   const { rows: plans } = await query(
     `select p.key, p.label, p.note, p.price_pence, p.active, p.position,
+            -- Subscriptions, not logins. Household is up to six logins, and a
+            -- member who claims their profile gets an account of their own on
+            -- the same plan, so counting accounts made a family of six read as
+            -- six subscriptions and the tier's revenue as six times what it is
+            -- (Codex, 20 Sep 2026). member_id is null is the household's own.
             (select count(*)::int from accounts a
                join households h on h.id = a.household_id
-              where a.plan = p.key and a.status <> 'suspended' and h.origin <> 'guest_invite') as subscribers
+              where a.plan = p.key and a.status <> 'suspended'
+                and a.member_id is null and h.origin <> 'guest_invite') as subscribers
        from plans p
       where p.key = any($1::text[])
       order by p.position, p.key`,
@@ -235,7 +241,8 @@ export async function readChannels() {
        from accounts a
        join households h on h.id = a.household_id
        join plans p on p.key = a.plan
-      where a.status <> 'suspended' and p.price_pence is not null and h.origin <> 'guest_invite'`,
+      where a.status <> 'suspended' and a.member_id is null
+        and p.price_pence is not null and h.origin <> 'guest_invite'`,
   );
   return {
     // Everything Epic has is a plan somebody was put on by hand, which is the

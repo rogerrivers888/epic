@@ -44,10 +44,10 @@ export async function record(householdId, provider, purpose, units = null, sessi
    */
   const health = healthOf(typeof units === 'string' ? null : units);
   await query(
-    `insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd, venue_ref, ok, ms, failed, fault)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    `insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd, venue_ref, ok, ms, failed, fault, watched)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
     [householdId, sessionId, provider, purpose, units, costOf(units, provider) || null, venueRef,
-      health.ok, health.ms, health.failed, health.fault],
+      health.ok, health.ms, health.failed, health.fault, health.watched],
   );
   void meter;
 }
@@ -57,11 +57,13 @@ export async function recordTokens(c) {
   await query(
     `insert into provider_calls
        (household_id, session_id, provider, purpose, input_tokens, output_tokens,
-        cache_read_tokens, cache_write_tokens, estimated_cost_usd, ok, ms, failed, fault)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        cache_read_tokens, cache_write_tokens, estimated_cost_usd, ok, ms, failed, fault, watched)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
     [c.householdId, c.sessionId, c.provider, c.purpose, c.inputTokens ?? null, c.outputTokens ?? null,
       c.cacheReadTokens ?? null, c.cacheWriteTokens ?? null, c.costUsd,
-      c.ok ?? null, c.ms ?? null, c.ok === false ? 1 : 0, c.fault ?? null],
+      c.ok ?? null, c.ms ?? null, c.ok === false ? 1 : 0, c.fault ?? null,
+      // One request, which is what a token-billed call always is.
+      c.ok == null ? null : 1],
   );
 }
 
@@ -74,8 +76,8 @@ export async function recordTokens(c) {
  */
 export async function recordFailure({ householdId = null, sessionId = null, provider, purpose, ms = null, fault }) {
   await query(
-    `insert into provider_calls (household_id, session_id, provider, purpose, estimated_cost_usd, ok, ms, failed, fault)
-     values ($1, $2, $3, $4, 0, false, $5, 1, $6)`,
+    `insert into provider_calls (household_id, session_id, provider, purpose, estimated_cost_usd, ok, ms, failed, fault, watched)
+     values ($1, $2, $3, $4, 0, false, $5, 1, $6, 1)`,
     [householdId, sessionId, provider, purpose, ms, String(fault ?? 'error').slice(0, 40)],
   ).catch(() => null);
 }
@@ -87,9 +89,10 @@ export async function recordFailure({ householdId = null, sessionId = null, prov
  */
 export async function recordMetered({ householdId, sessionId = null, provider, purpose, units, costUsd = null, ok = null, ms = null, fault = null }) {
   await query(
-    `insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd, ok, ms, failed, fault)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-    [householdId, sessionId, provider, purpose, units, costUsd, ok, ms, ok === false ? 1 : 0, fault],
+    `insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd, ok, ms, failed, fault, watched)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    [householdId, sessionId, provider, purpose, units, costUsd, ok, ms, ok === false ? 1 : 0, fault,
+      ok == null ? null : 1],
   );
 }
 

@@ -758,16 +758,18 @@ test('a meter nobody observed is not a success', () => {
   // The one that matters: an adapter that has never been instrumented must
   // record `ok: null`, which reads as "not recorded". Defaulting it to true
   // would write four thousand successes nobody watched.
-  assert.deepEqual(healthOf({ google: 3 }), { ok: null, ms: null, failed: 0, fault: null });
-  assert.deepEqual(healthOf(null), { ok: null, ms: null, failed: 0, fault: null });
-  assert.deepEqual(healthOf(undefined), { ok: null, ms: null, failed: 0, fault: null });
+  // `watched` is null too, so a rate is never computed over nought.
+  const nothing = { ok: null, ms: null, failed: 0, fault: null, watched: null };
+  assert.deepEqual(healthOf({ google: 3 }), nothing);
+  assert.deepEqual(healthOf(null), nothing);
+  assert.deepEqual(healthOf(undefined), nothing);
 });
 
 test('a meter that saw a call says so, and counts the ones that fell over', () => {
   const ok = {};
   noteCall(ok, 120);
   noteCall(ok, 80);
-  assert.deepEqual(healthOf(ok), { ok: true, ms: 200, failed: 0, fault: null });
+  assert.deepEqual(healthOf(ok), { ok: true, ms: 200, failed: 0, fault: null, watched: 2 });
 
   const bad = {};
   noteCall(bad, 100);
@@ -780,10 +782,81 @@ test('a meter that saw a call says so, and counts the ones that fell over', () =
   // echo back a query, a key or somebody's address.
   assert.equal(h.fault, 'timeout');
   assert.equal(h.ms, 100);
+  /**
+   * Three calls watched, of which two fell over — **not** one row.
+   *
+   * A row is often several calls, and a rate computed over rows read a search
+   * of eight requests with one failure as 100% failed, and two failures in one
+   * row as 200% (Codex, 20 Sep 2026). The denominator is what was watched.
+   */
+  assert.equal(h.watched, 3);
+  assert.ok(h.failed <= h.watched);
 });
 
 test('a fault reason is a token, not a paragraph', () => {
   const m = {};
   noteFault(m, 'x'.repeat(200));
   assert.equal(healthOf(m).fault.length, 40);
+});
+
+test('a family of six is one subscription, not six', async () => {
+  /**
+   * Household is up to six **logins**, and a member who claims their profile
+   * gets an account of their own on the same plan (`createAccountOnHousehold`).
+   * Counting accounts made a family of six read as six subscriptions and six
+   * times the MRR — a figure that grew every time somebody's daughter signed in
+   * (Codex, 20 Sep 2026).
+   *
+   * Asserted against the database rather than against a fixture, because the
+   * bug was in the SQL and only the SQL can be wrong about it.
+   */
+  const { rows: [r] = [] } = await query(
+    `select count(*) filter (where a.member_id is null)::int as leads,
+            count(*)::int                                     as logins
+       from accounts a
+       join households h on h.id = a.household_id
+      where a.status <> 'suspended' and h.origin <> 'guest_invite'`,
+  );
+  // A household's own account is the one with no member behind it, so the leads
+  // can never outnumber the logins, and there is one per household at most.
+  assert.ok(r.leads <= r.logins);
+
+  const { rows: doubled } = await query(
+    `select household_id, count(*)::int as n
+       from accounts where member_id is null
+      group by 1 having count(*) > 1`,
+  );
+  assert.deepEqual(doubled, [], 'a household has one account of its own');
+
+  // And every figure the suite counts subscriptions with must agree with that
+  // number rather than with the login count.
+  const tiers = await readTiers();
+  const standing = await readStanding();
+  const counted = tiers.reduce((n, t) => n + t.subscribers, 0);
+  assert.ok(counted <= r.leads, `tiers counted ${counted} of at most ${r.leads} households`);
+  assert.equal(
+    standing.mrrPence,
+    tiers.reduce((n, t) => n + t.subscribers * (t.webPence ?? 0), 0),
+    'MRR is the tiers times their prices, and the tiers are households',
+  );
+});
+
+test('a health rate is over the calls that were watched, never over the rows', async () => {
+  /**
+   * One row is often several calls — a search hands one meter to every adapter
+   * and writes a single row for the whole search, with `failed` counting how
+   * many of its requests fell over. A rate over rows read a search of eight
+   * requests with one failure as 100% failed (Codex, 20 Sep 2026).
+   */
+  const { rows: [col] } = await query(
+    `select count(*)::int as n from information_schema.columns
+      where table_name = 'provider_calls' and column_name = 'watched'`,
+  );
+  assert.equal(col.n, 1, 'the row has to say how many calls it watched');
+
+  // No row may claim more failures than it watched, or the rate goes above 100%.
+  const { rows: impossible } = await query(
+    `select id from provider_calls where watched is not null and failed > watched limit 5`,
+  );
+  assert.deepEqual(impossible, []);
 });

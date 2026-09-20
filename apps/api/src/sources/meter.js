@@ -69,14 +69,23 @@ const write = (meter, key, value) => {
  * success nobody saw.
  */
 export function healthOf(meter) {
-  if (!meter || typeof meter !== 'object') return { ok: null, ms: null, failed: 0, fault: null };
+  if (!meter || typeof meter !== 'object') return { ok: null, ms: null, failed: 0, fault: null, watched: null };
   const faults = read(meter, FAULTS) ?? [];
   const calls = read(meter, CALLS) ?? 0;
-  if (!faults.length && !calls) return { ok: null, ms: null, failed: 0, fault: null };
+  if (!faults.length && !calls) return { ok: null, ms: null, failed: 0, fault: null, watched: null };
   return {
     ok: faults.length === 0,
     ms: read(meter, MS) ?? null,
     failed: faults.length,
     fault: faults[0] ?? null,
+    /**
+     * How many calls this meter actually watched — the denominator.
+     *
+     * One row is often several calls: a search hands one meter to every adapter
+     * and writes a single row for the whole search. A rate computed over rows
+     * read a search of eight requests with one failure as 100% failed (Codex,
+     * 20 Sep 2026).
+     */
+    watched: calls + faults.length,
   };
 }

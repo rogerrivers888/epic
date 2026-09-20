@@ -132,12 +132,25 @@ async function estate(period) {
        (select count(*)::int from households)                                          as households,
        (select count(*)::int from households h where ${NOT_GUEST} and h.origin <> 'founding') as customers,
        (select count(*)::int from members)                                             as people,
+       -- A subscription is a HOUSEHOLD, not a login. Household is up to six
+       -- logins, and a member who claims their profile gets an account of
+       -- their own on the same plan, so counting accounts made a family of six
+       -- read as six subscriptions and six times the MRR — a figure that grew
+       -- every time somebody's daughter signed in (Codex, 20 Sep 2026).
+       -- member_id is null is the household's own account; the rest are the
+       -- people inside it.
        (select count(*)::int from accounts a join households h on h.id = a.household_id
-         where a.status <> 'suspended' and ${NOT_GUEST}
+         where a.status <> 'suspended' and a.member_id is null and ${NOT_GUEST}
            and exists (select 1 from plans p where p.key = a.plan and p.price_pence is not null)) as paying,
        (select count(*)::int from accounts a join households h on h.id = a.household_id
-         where a.status <> 'suspended' and ${NOT_GUEST}
+         where a.status <> 'suspended' and a.member_id is null and ${NOT_GUEST}
            and exists (select 1 from plans p where p.key = a.plan and p.price_pence is null))    as trial,
+       -- On at least one device right now, which is what the Households screen
+       -- counted before it was retired into Customers.
+       (select count(distinct a.household_id)::int from api_sessions s
+          join accounts a on a.id = s.account_id
+          join households h on h.id = a.household_id
+         where s.revoked_at is null and s.expires_at > now() and ${NOT_GUEST})         as signed_in,
        -- Bounded at both ends. A lower bound alone counted the current month
        -- inside "last month", so the figure was not the window's (Codex, 20 Sep 2026).
        (select count(distinct e.household_id)::int from activity_events e
@@ -164,7 +177,7 @@ async function estate(period) {
        from accounts a
        join households h on h.id = a.household_id
        join plans p on p.key = a.plan
-      where a.status = 'active' and p.price_pence is not null and ${NOT_GUEST}
+      where a.status = 'active' and a.member_id is null and p.price_pence is not null and ${NOT_GUEST}
         and not exists (
           select 1 from activity_events e
            where e.household_id = a.household_id and e.at >= now() - interval '30 days'
@@ -243,7 +256,10 @@ async function subscriptionRevenue(from, to) {
               a.status                                                            as now_status,
               (a.created_at < m.month + interval '1 month')                       as existed
          from months m
-         left join accounts a on true
+         -- One account per household: the household's own. A member who claims
+         -- their profile gets a login on the same plan, and counting it would
+         -- charge the family twice (Codex, 20 Sep 2026).
+         left join accounts a on a.member_id is null
          left join households h on h.id = a.household_id
         where a.id is null or h.origin <> 'guest_invite'
      ),
@@ -307,7 +323,8 @@ async function mrr() {
               p.price_pence
             )) filter (where a.status <> 'suspended' and h.origin <> 'guest_invite'), 0)::int as pence
        from plans p
-       left join accounts a on a.plan = p.key
+       -- The household's own account, not every login on it.
+       left join accounts a on a.plan = p.key and a.member_id is null
        left join households h on h.id = a.household_id
       group by p.key, p.label, p.price_pence, p.position
       order by p.position`,
@@ -552,7 +569,8 @@ async function history(now) {
                from accounts a
                join households h on h.id = a.household_id
                left join plans p on p.key = a.plan
-              where a.created_at >= $1 and ${NOT_GUEST} and p.price_pence is not null group by 1`),
+              where a.created_at >= $1 and a.member_id is null and ${NOT_GUEST}
+                and p.price_pence is not null group by 1`),
     monthly(`select to_char(date_trunc('month', e.at), 'YYYY-MM') as month, count(distinct e.household_id)::int as n
                from activity_events e join households h on h.id = e.household_id
               where e.at >= $1 and ${NOT_GUEST} group by 1`),
@@ -613,7 +631,8 @@ async function history(now) {
               a.status                                                        as now_status,
               (a.created_at < s.month + interval '1 month')                   as existed
          from span s
-         left join accounts a on true
+         -- One account per household: the household's own (Codex, 20 Sep 2026).
+         left join accounts a on a.member_id is null
          left join households h on h.id = a.household_id
         where a.id is null or h.origin <> 'guest_invite'
      )
@@ -1141,7 +1160,10 @@ function costByCounterparty(register, byProvider) {
  */
 async function providerHealth(providerKey, period) {
   const { rows: [h] } = await query(
-    `select count(*) filter (where c.ok is not null)::int                       as observed,
+    // The denominator is **calls**, not rows. One row is often several calls —
+    // a search writes one for the whole search — so counting rows read a search
+    // of eight requests with one failure as 100% failed (Codex, 20 Sep 2026).
+    `select coalesce(sum(c.watched), 0)::int                                    as observed,
             count(*) filter (where c.ok is null)::int                           as unobserved,
             coalesce(sum(c.failed), 0)::int                                     as failed,
             coalesce(round(percentile_cont(0.95) within group (order by c.ms)
@@ -1154,7 +1176,10 @@ async function providerHealth(providerKey, period) {
     [providerKey, period.from, period.to],
   );
   const observed = int(h.observed);
-  const failed = int(h.failed);
+  // Never above a hundred per cent: a row cannot have failed more calls than
+  // it watched, and if the ledger ever says otherwise the figure is capped
+  // rather than printed as 200%.
+  const failed = Math.min(int(h.failed), observed);
   return {
     observed,
     unobserved: int(h.unobserved),
@@ -1363,7 +1388,7 @@ export async function readSuite(period, { now = new Date() } = {}) {
        from accounts a
        join households h on h.id = a.household_id
        left join plans p on p.key = a.plan
-      where ${NOT_GUEST}`,
+      where a.member_id is null and ${NOT_GUEST}`,
     [period.from, period.to, period.prevFrom, period.prevTo],
   );
 
