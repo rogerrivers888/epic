@@ -51,6 +51,16 @@ import * as providerCalls from '../repositories/providerCalls.js';
  * bounds one branch, and what actually needs bounding is the run.
  */
 const MAX_DEPTH = Number(process.env.EPIC_CENSUS_MAX_DEPTH || 6);
+/**
+ * The ceiling, for anything that reports on a run.
+ *
+ * Exported because a reporting script that keeps its own copy will keep the
+ * old one: the first SE1 report was written against a limit of three and went
+ * on calling saturation at depth three "at the limit" after the limit became
+ * six, which reads as forty-one truncated drawers where the true figure is
+ * nought (20 Sep 2026).
+ */
+export const CENSUS_MAX_DEPTH = MAX_DEPTH;
 /** A census is good for 30 days; the policy's own figure. */
 export const CENSUS_FRESH_DAYS = 30;
 /**
