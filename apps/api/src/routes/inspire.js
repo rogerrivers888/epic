@@ -431,6 +431,11 @@ inspire.get('/around', async (req, res, next) => {
       await visitsRepo.recordProviderCall(household.id, 'google', 'inspire.around', meter).catch(() => null);
     }
 
+    // Every outbound call attributed to a household, before the answer goes
+    // out (Technical Constraints §11, and the data policy's own rule). The
+    // purpose is a stable string and is added to, never renamed.
+    if (requests) await visitsRepo.recordProviderCall(household.id, 'google', 'inspire.ring', meter).catch(() => null);
+
     res.json({
       ring: {
         where: ring.label, outcodes: ring.outcodes, cells: ring.cells.length,
@@ -567,6 +572,7 @@ inspire.get('/near', async (req, res, next) => {
         tookMs: Date.now() - started,
         attribution: ['Powered by Google'],
       };
+      if (requests) await visitsRepo.recordProviderCall(household.id, 'google', 'inspire.ring', meter).catch(() => null);
       // The home screen is a search, and what happens to each card afterwards
       // is the click stream Demand counts. A count-only caller is not drawing
       // anything and does not log one (the same rule the old pool kept).
