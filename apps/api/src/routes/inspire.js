@@ -314,7 +314,7 @@ async function ringFrom(q, { minutes, mode }) {
  * the other way round: their order is a fact about their index, ours is a
  * judgement about the place (data policy, 19 Sep 2026).
  */
-async function placesFor({ ring, category, page, meter, taught, tax, householdId }) {
+async function placesFor({ ring, category, page, meter, taught, tax, householdId, minutes = 30, mode = 'driving' }) {
   const got = await categoryPage({
     /**
      * The ring, not its size.
@@ -330,6 +330,26 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
     box: ring.box, cells: ring.cells,
     category, page, meter, householdId, cellAt: reach.cellAt,
   });
+  /**
+   * The exact pass, which the browsing screens have never had.
+   *
+   * The matrix is a *finder* and is deliberately wide: ten minutes past the
+   * band, because the estimator's error and a place's offset from its sector's
+   * centre together have a p95 of 9.5 minutes, and hiding a place that is
+   * inside the band is the worse harm (`domain/reach.js`, owner, 20 Sep 2026).
+   * Its own note says the price of erring wide is that "on the browsing screens
+   * there is no exact pass to rescue the second kind".
+   *
+   * This is that pass. A display search returns each place's own point, so the
+   * journey can be worked out for the place rather than for the sector it
+   * stands in — and a place further than the band was asked for is not shown.
+   * It is fenced on exactly the number the card prints, so the screen agrees
+   * with itself: no more spa in Chiswick, forty minutes away, on a thirty
+   * minute ring (owner, 20 Sep 2026).
+   */
+  const from = ring.at ?? null;
+  const within = (v) => !from || v.lat == null || estimateTravelMinutes(from, v, mode) <= minutes;
+
   // The fence is the ring, and the question was the category.
   //
   // Two goes at filtering by our own shelves both took the answer away: Sport
@@ -344,7 +364,7 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
   // The shelves still travel on every item — they name the drawer and they
   // decide what the place page says — they simply no longer decide whether a
   // household may see it.
-  const mine = got.venues;
+  const mine = got.venues.filter(within);
   const refs = mine.map((v) => `${v.source}:${v.sourcePlaceId}`);
   const scores = refs.length
     ? (await query(
@@ -402,6 +422,10 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
     // shelves — three numbers, because a board that shows two of twenty should
     // be able to say which fence took the other eighteen.
     returned: got.returned ?? got.venues.length, inRing: got.venues.length, onShelf: mine.length,
+    // How many the matrix offered that the exact pass then put back: the price
+    // of a finder that errs wide, and the number to watch if it ever looks
+    // like the band is doing nothing.
+    pastTheBand: got.venues.length - mine.length,
     scored: got.scored ?? 0,
   };
 }
@@ -442,7 +466,7 @@ inspire.get('/around', async (req, res, next) => {
     const categories = [];
     let requests = 0;
     const asked = await Promise.all(wantedCats.map(async (key) =>
-      [key, await placesFor({ ring, category: key, page, meter, taught, tax, householdId: household.id })]));
+      [key, await placesFor({ ring, category: key, page, meter, taught, tax, householdId: household.id, minutes, mode })]));
     for (const [key, got] of asked) {
       requests += got.requests;
       categories.push({
@@ -575,7 +599,7 @@ inspire.get('/near', async (req, res, next) => {
       // each other; a page's own next page still does, because the token comes
       // from the page before it.
       const asked = await Promise.all(Object.keys(ASKED).map(async (key) =>
-        [key, await placesFor({ ring, category: key, page: 1, meter, taught, tax, householdId: household.id })]));
+        [key, await placesFor({ ring, category: key, page: 1, meter, taught, tax, householdId: household.id, minutes, mode })]));
       for (const [key, got] of asked) {
         requests += got.requests;
         moods.push({
