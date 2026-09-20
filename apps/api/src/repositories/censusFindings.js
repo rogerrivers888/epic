@@ -18,13 +18,15 @@
  * here rather than at the screen, so two screens cannot describe the same
  * number differently.
  *
- * **Empty splits three ways, and the third is about us.** A drawer can be empty
- * because nowhere it would be has been censused, because Google was asked and
- * had nothing, or because *no question was ever asked* — a subcategory with no
- * Google type and no word question generates no queries at all, comes back
- * nought, and is indistinguishable from a part of the country with no climbing
- * walls in it. The first is a gap, the second is a fact, the third is a fault in
- * the taxonomy, and they must not be drawn the same way.
+ * **Empty splits four ways, and only one of them is about the world.** A drawer
+ * can be empty because nowhere it would be has been censused; because it has no
+ * question at all — no Google type taught onto it and no word question, so the
+ * census generates no queries and it can only ever read nought; because it has a
+ * question that no run in this scope has yet asked, which is what happens to
+ * every drawer for a while after somebody teaches it; or because Google was
+ * asked, here, and had nothing. Only the last is a fact about the ground. The
+ * other three are facts about us, and a screen that drew them the same way would
+ * retire a perfectly good drawer for the sin of being new.
  *
  * Everything is read from what the census already wrote. Nothing here calls a
  * provider, so the board it feeds cannot spend a penny however often it is
@@ -137,13 +139,16 @@ export async function coverageFor(outcodes = null) {
 }
 
 /** Why a drawer reads the way it does, in one sentence a person can act on. */
-export function reasonForState(state, { label, found, questions, coverage }) {
+export function reasonForState(state, { label, found, questions, coverage, slices = 0 }) {
   if (state === 'never_asked') {
     return `No question is ever asked for ${label}: no Google type is taught onto it and it has no word question, so the census generates no queries and it can only ever read nought.`;
   }
   if (state === 'never_censused') return `Nowhere ${label} would be has been censused yet.`;
+  if (state === 'question_not_run') {
+    return `${label} has ${n(questions)} question${questions === 1 ? '' : 's'} and no run has asked ${questions === 1 ? 'it' : 'them'} here yet, so nought means nobody has looked — not that there are none.`;
+  }
   if (state === 'censused_empty') {
-    return `Asked ${n(questions)} question${questions === 1 ? '' : 's'} across ${coverage.says}, and Google returned nothing. Either there are none, or the question is the wrong one.`;
+    return `Asked ${n(questions)} question${questions === 1 ? '' : 's'} in ${n(slices)} slice${slices === 1 ? '' : 's'} across ${coverage.says}, and Google returned nothing. Either there are none, or the question is the wrong one.`;
   }
   return `${n(found)} found across ${coverage.says}.`;
 }
@@ -172,12 +177,23 @@ export async function subcategories({ outcodes = null } = {}) {
   const { rows: censused } = await query(
     `select ps.subcategory, count(distinct ps.venue_ref)::int as places
        from place_subcategories ps where ${scoped} group by 1`, params);
+  // Which drawers a run in this scope has actually put a question to. A
+  // subcategory taught yesterday has a question and no answer, and calling that
+  // "censused and empty" would be Google being blamed for a run that has not
+  // happened yet. Refusals are excluded: a slice that failed is not a slice
+  // that was asked and answered.
+  const { rows: askedHere } = await query(
+    `select cs.subcategory, count(*)::int as slices
+       from census_slices cs
+      where cs.problem is null ${outcodes ? slicesInScope([outcodes]) : ''}
+      group by 1`, params);
   const { rows: scored } = await query(
     `select ps.subcategory, count(distinct ps.venue_ref)::int as places
        from place_subcategories ps
        join epic_scores e on e.venue_ref = ps.venue_ref
       where ${scoped} group by 1`, params);
 
+  const askedBy = new Map(askedHere.map((r) => [r.subcategory, r.slices]));
   const knownBy = new Map(known.map((r) => [r.subcategory, r.places]));
   const censusedBy = new Map(censused.map((r) => [r.subcategory, r.places]));
   const scoredBy = new Map(scored.map((r) => [r.subcategory, r.places]));
@@ -186,9 +202,11 @@ export async function subcategories({ outcodes = null } = {}) {
   const rows = subs.map((s) => {
     const questions = asked.get(s.key) ?? [];
     const found = censusedBy.get(s.key) ?? 0;
+    const askedSlices = askedBy.get(s.key) ?? 0;
     const state = !questions.length ? 'never_asked'
       : !anywhereCensused ? 'never_censused'
-        : found ? 'censused_found' : 'censused_empty';
+        : found ? 'censused_found'
+          : askedSlices ? 'censused_empty' : 'question_not_run';
     return {
       key: s.key,
       label: s.label,
@@ -202,7 +220,10 @@ export async function subcategories({ outcodes = null } = {}) {
       // A fenced count is narrower by construction and should be read as such.
       fenced: questions.some((q) => q.words),
       state,
-      reason: reasonForState(state, { label: s.label, found, questions: questions.length, coverage }),
+      // How many times the question was actually put here, so "empty" can be
+      // read against the effort behind it rather than taken on trust.
+      slices: askedSlices,
+      reason: reasonForState(state, { label: s.label, found, questions: questions.length, coverage, slices: askedSlices }),
     };
   });
   return { coverage, subcategories: rows };
@@ -223,6 +244,7 @@ export async function subcategories({ outcodes = null } = {}) {
  */
 export async function silentTypes({ outcodes = null } = {}) {
   const params = outcodes ? [outcodes] : [];
+  const coverage = await coverageFor(outcodes);
   const { rows } = await query(
     `select cs.google_type, cs.subcategory,
             count(*)::int                                      as slices,
@@ -258,10 +280,14 @@ export async function silentTypes({ outcodes = null } = {}) {
       areas: r.areas,
       failed: r.failed,
       lastAt: r.last_at,
-      reason: `Asked ${n(r.slices)} time${r.slices === 1 ? '' : 's'} across ${n(r.areas)} area${r.areas === 1 ? '' : 's'} and returned nothing, ever. Either Google does not use this word here, or the rule points at the wrong one — and both are a free fix.`,
+      // Where it was silent, not only how often. Ninety-six silent slices
+      // across the home counties is not evidence that Google has no word for an
+      // Israeli restaurant; it is evidence about the home counties, and a row
+      // that did not say so would retire the type on the strength of it.
+      reason: `Asked ${n(r.slices)} time${r.slices === 1 ? '' : 's'} across ${n(r.areas)} area${r.areas === 1 ? '' : 's'} and returned nothing, ever — over ${coverage.says}. Either Google does not use this word in the ground covered, or the rule points at the wrong one; both are a free fix, and neither is a fact about the country until the ground is wider.`,
     }));
 
-  return { silent, neverAsked, coverage: await coverageFor(outcodes) };
+  return { silent, neverAsked, coverage };
 }
 
 /**

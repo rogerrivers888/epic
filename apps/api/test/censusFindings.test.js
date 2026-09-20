@@ -74,14 +74,31 @@ test('a drawer nobody ever asked about is not a drawer with nothing in it', asyn
   assert.equal(asked.questions, 1);
 });
 
-test('a drawer that was asked and came back empty says which of the two it was', async () => {
-  await aSubcategory('test-empty', 'Test drawer Google had nothing for');
-  await aRule('test-empty', 'test_type_empty');
+test('a drawer whose question no run has asked here is not an empty drawer', async () => {
+  await aSubcategory('test-taught-today', 'Test drawer taught this morning');
+  await aRule('test-taught-today', 'test_type_taught_today');
   await aCensusedTile({ gridKey: 'test/findings/2', outcodes: ['ZZ98'], subcategory: 'test-other', places: 2 });
 
   const { subcategories } = await findings.subcategories({ outcodes: ['ZZ98'] });
+  const fresh = subcategories.find((s) => s.key === 'test-taught-today');
+  assert.equal(fresh.state, 'question_not_run', 'it has a question and nothing has put it yet');
+  assert.match(fresh.reason, /nobody has looked/);
+  assert.equal(fresh.slices, 0);
+});
+
+test('a drawer that was asked here and came back empty says so, with the effort behind it', async () => {
+  await aSubcategory('test-empty', 'Test drawer Google had nothing for');
+  await aRule('test-empty', 'test_type_empty');
+  await aCensusedTile({ gridKey: 'test/findings/2b', outcodes: ['ZZ95'], subcategory: 'test-other', places: 2 });
+  await query(
+    `insert into census_slices (area_slug, min_lat, min_lng, max_lat, max_lng, category, subcategory,
+                                google_type, query, returned, new_ids, saturated, depth, requests)
+     values ('test/findings/2b', 51.4, -0.2, 51.48, -0.08, 'activity', 'test-empty', 'test_type_empty', 'test type empty', 0, 0, false, 0, 1)`);
+
+  const { subcategories } = await findings.subcategories({ outcodes: ['ZZ95'] });
   const empty = subcategories.find((s) => s.key === 'test-empty');
-  assert.equal(empty.state, 'censused_empty', 'somewhere it would be has been censused, and it found none');
+  assert.equal(empty.state, 'censused_empty', 'the question was put here, and it found none');
+  assert.equal(empty.slices, 1);
   assert.match(empty.reason, /Either there are none, or the question is the wrong one/);
 });
 
