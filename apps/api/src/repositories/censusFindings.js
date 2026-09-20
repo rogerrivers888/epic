@@ -107,6 +107,18 @@ export async function coverageFor(outcodes = null) {
     `select count(distinct o)::int as outcodes
        from census_tiles t, unnest(t.outcodes) o
       where ${where}`, params);
+  // Every district covered either way, counted once. The grid and the old
+  // per-outcode runs cover different ground and overlap in places, so adding
+  // the two would double-count and taking the larger would drop the rest — and
+  // the sentence would then contradict the count beside it, which is the exact
+  // failure §5 exists to stop.
+  const { rows: [u] } = await query(
+    `select count(*)::int as outcodes from (
+       select distinct upper(o) as code from census_tiles t, unnest(t.outcodes) o where ${where}
+       union
+       select distinct upper(area_slug) from area_counts
+        where ${outcodes ? 'upper(area_slug) = any($1::text[])' : 'true'}
+     ) covered`, params);
   // The districts censused the old way, before the grid. They hold real places,
   // and leaving them out would make the coverage sentence contradict the count
   // standing next to it.
@@ -119,7 +131,7 @@ export async function coverageFor(outcodes = null) {
   // with time only while they share a format, and these come from two tables.
   const lastAt = [t.last_at, a.last_at].filter(Boolean)
     .sort((x, y) => new Date(x) - new Date(y)).pop() ?? null;
-  const outcodesCovered = o.outcodes || a.areas || 0;
+  const outcodesCovered = u.outcodes || 0;
 
   return {
     tiles: t.tiles,
@@ -127,6 +139,8 @@ export async function coverageFor(outcodes = null) {
     tilesCutOff: t.cut_off,
     outcodes: o.outcodes,
     districtsCensusedByOutcode: a.areas,
+    // Both ways, counted once: what the coverage sentence is drawn from.
+    districtsCovered: outcodesCovered,
     places: t.places,
     firstAt: t.first_at,
     lastAt,
