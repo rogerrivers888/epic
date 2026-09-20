@@ -528,6 +528,13 @@ export async function expireRentedCoordinates({ days = 30 } = {}) {
     const { rowCount } = await query('delete from place_cells where venue_ref = any($1)', [batch]);
     cells += rowCount;
   }
+  // Written down as it happens, because it cannot be recovered afterwards: an
+  // expired row looks exactly like a census row that never had a point
+  // (migration 205). A count and a date, never the refs — keeping those would
+  // be keeping a Google-derived collection past its thirty days by another
+  // name.
+  await query('insert into coordinate_expiries (expired, cells) values ($1, $2)', [rows.length, cells])
+    .catch(() => null);
   return { expired: rows.length, cells };
 }
 

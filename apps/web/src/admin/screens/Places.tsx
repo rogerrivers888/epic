@@ -1594,6 +1594,16 @@ function CensusBoard({ where }: { where: string }) {
           </Text>
         </Explain>
       </View>
+      {data?.rented ? (
+        <Explain tip="censusRented">
+          <Text style={styles.censusFree}>
+            {`RENTED COORDS \u00b7 ${data.rented.held} HELD HERE \u00b7 ${data.rented.expiringSoon} GO WITHIN 7 DAYS`
+              + (data.rented.droppedInNinetyDays
+                ? ` \u00b7 ${data.rented.droppedInNinetyDays} DROPPED IN 90 DAYS (ESTATE-WIDE)`
+                : ' \u00b7 NONE DROPPED YET')}
+          </Text>
+        </Explain>
+      ) : null}
       {data ? (
         data.rows.length ? (
           <Ladder columns={columns} rows={data.rows} keyOf={(r) => `${r.category}/${r.subcategory}`} />

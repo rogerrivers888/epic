@@ -756,6 +756,30 @@ router.get('/census', requires('view_library'), async (req, res, next) => {
               count(*) filter (where checked_on_google_at is not null)::int checked
          from place_index`);
 
+    // Rented coordinates: what is held here, what is about to go, and what has
+    // already gone (owner, 20 Sep 2026 — "without it, 2,763 places quietly
+    // leaving the matrix in October becomes a mystery in November").
+    //
+    // Held and expiring are scoped to this board's outcodes, through the cell
+    // the place still has. What has already gone cannot be: the sweep nulls the
+    // cell along with the point, deliberately, so an expired row has no area
+    // any more. That figure is estate-wide and the screen says so rather than
+    // letting it read as local.
+    const { rows: [rented] } = await query(
+      `select count(*)::int as held,
+              count(*) filter (where coords_at < now() - interval '23 days')::int as expiring_soon
+         from place_index
+        where coords_from = 'google' and lat is not null
+          and cell is not null
+          and lower(split_part(replace(cell, 'sector:', ''), ' ', 1)) = any($1)`, [slugs]);
+    // Tolerant of its own table not being there yet: migrations are a separate
+    // step from the deploy, and a board that 500s for the minute in between is
+    // a worse answer than a board that says nothing has been dropped.
+    const gone = await query(
+      `select coalesce(sum(expired), 0)::int as dropped, max(at) as last_at
+         from coordinate_expiries where at > now() - interval '90 days'`)
+      .then((r) => r.rows[0]).catch(() => ({ dropped: 0, last_at: null }));
+
     res.json({
       where: code,
       reach,
@@ -763,6 +787,13 @@ router.get('/census', requires('view_library'), async (req, res, next) => {
       rows,
       empties,
       livesOn,
+      rented: {
+        held: rented?.held ?? 0,
+        expiringSoon: rented?.expiring_soon ?? 0,
+        // Estate-wide, and not scopeable — see above.
+        droppedInNinetyDays: gone?.dropped ?? 0,
+        lastDropAt: gone?.last_at ?? null,
+      },
       censused: seen?.censused ?? 0,
       oldest: seen?.oldest ?? null,
       newest: seen?.newest ?? null,

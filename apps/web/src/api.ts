@@ -1242,6 +1242,12 @@ export type InspireNear = {
    */
   pools?: {
     atlas: boolean; live: boolean;
+    /**
+     * The answer is the reachability ring's own: every place in it is inside
+     * the time by the matrix, so nothing on the client may filter it by the
+     * straight-line estimate the cards print.
+     */
+    ring?: boolean;
     /** Why the look-around ran: asked for, or because the sweep has not reached this town. */
     why?: 'asked' | 'unswept' | null;
     /** A source refused, so an empty Food tab means "could not look", not "nowhere to eat". */
@@ -2587,6 +2593,10 @@ export const api = {
       empties: { category: string; subcategory: string; outcode: string; censused_at: string | null }[];
       // Where a drawer's surplus is actually filed, biggest shelf first.
       livesOn: Record<string, { subcategory: string; n: number }[]>;
+      // Rented coordinates. `held` and `expiringSoon` are this board's
+      // outcodes; `droppedInNinetyDays` cannot be — the sweep nulls the cell
+      // with the point, so an expired row has no area any more.
+      rented: { held: number; expiringSoon: number; droppedInNinetyDays: number; lastDropAt: string | null };
       censused: number; oldest: string | null; newest: string | null;
       residual: number; checkedOnGoogle: number; free: boolean;
     }>(`/api/admin/place-index/census${qs(p)}`),
