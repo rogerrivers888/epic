@@ -101,6 +101,24 @@ test('a page is bought once for the ring, held for the next household, and paged
   assert.equal(third.asked, search.THEN.fun[0]);
 });
 
+test('a shop is not a day out', async () => {
+  search.forgetPool();
+  const fake = async () => ({
+    venues: [
+      { source: 'google', sourcePlaceId: 'shop', name: 'Halfords', primaryType: 'bicycle_store', lat: 51.4, lng: -0.6 },
+      { source: 'google', sourcePlaceId: 'park', name: 'Go Ape', primaryType: 'tourist_attraction', lat: 51.4, lng: -0.6 },
+    ],
+    nextPageToken: null, requests: 1, problem: null,
+  });
+  const at = async () => ({ code: 'sector:ZZ1 1' });
+  const out = await search.categoryPage({
+    ringKey: 'ring-shops', box: { minLat: 0, maxLat: 1, minLng: 0, maxLng: 1 },
+    cells: ['sector:ZZ1 1'], category: 'adrenaline', page: 1, cellAt: at, search: fake,
+  });
+  assert.deepEqual(out.venues.map((v) => v.name), ['Go Ape'],
+    'a bike shop matched "quad biking" and is not an afternoon out');
+});
+
 test('the questions run out, and then it really does end', async () => {
   search.forgetPool();
   const fake = async () => ({ venues: [], nextPageToken: null, requests: 1, problem: null });

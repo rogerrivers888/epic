@@ -109,7 +109,10 @@ export const THEN = {
   sport: ['swimming pools', 'golf courses', 'climbing walls', 'tennis and racquets'],
   active: ['cycling and bike hire', 'watersports centres', 'adventure playgrounds'],
   adrenaline: ['go karting', 'high ropes and zip lines', 'skydiving and indoor skydiving',
-    'quad biking and off-road driving', 'paintball and laser tag', 'motorsport circuits'],
+    // "quad biking and off-road driving" brought back motorcycle dealers and
+    // Halfords: the words a shop uses about itself and the words an afternoon
+    // out uses are the same until you say what you are buying (20 Sep 2026).
+    'quad biking experience', 'paintball and laser tag', 'motorsport circuit'],
   relaxing: ['spas and wellness', 'saunas', 'quiet gardens'],
 };
 
@@ -213,9 +216,25 @@ export async function categoryPage({
   // trip, and twenty of them one after another is most of a second per
   // category. They are independent, so they go together (20 Sep 2026, on the
   // home screen's cold load).
+  // A shop is not a day out.
+  //
+  // A text search answers with whatever matched, and "quad biking" matches a
+  // motorcycle dealer's own page as surely as a quad biking centre's. Our
+  // shelves are no longer the fence — the categories overlap too much for that
+  // — but Google's own primary type is enough to keep a bike shop and a
+  // supermarket off an Adrenaline shelf, which is the one kind of wrong answer
+  // a household would call broken (20 Sep 2026).
+  const SHOPS = new Set([
+    'store', 'shopping_mall', 'car_dealer', 'car_repair', 'car_rental', 'car_wash', 'bicycle_store',
+    'sporting_goods_store', 'clothing_store', 'department_store', 'electronics_store', 'furniture_store',
+    'hardware_store', 'home_goods_store', 'supermarket', 'grocery_store', 'convenience_store',
+    'gas_station', 'bank', 'atm', 'insurance_agency', 'real_estate_agency', 'travel_agency',
+    'lodging', 'hotel', 'storage', 'moving_company', 'warehouse_store',
+  ]);
   const inRing = new Set(cells);
   const placed = await Promise.all(out.venues.map(async (v) => {
     if (v.lat == null || v.lng == null) return null;
+    if (category !== 'food' && SHOPS.has(v.primaryType)) return null;
     const at = await cellAt({ lat: v.lat, lng: v.lng }).catch(() => null);
     if (!at?.code || !inRing.has(at.code)) return null;
     return { ...v, cell: at.code, outcode: outcodeOfCell(at.code) };
