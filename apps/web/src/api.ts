@@ -3257,7 +3257,7 @@ export const api = {
   /** Our own secondary labels, with what every drawer is taken to be. */
   taxonomyAttributes: () => request<TaxonomyAttributes>('/api/admin/taxonomy/attributes'),
   /** Name a secondary label, or change one. */
-  taxonomySaveAttribute: (body: { key?: string; label?: string; kind?: 'yesno' | 'range' | 'oneof'; blurb?: string | null; options?: string[]; rangeMin?: number; rangeMax?: number; unit?: string; position?: number; active?: boolean }) =>
+  taxonomySaveAttribute: (body: { key?: string; label?: string; kind?: AttributeKind; blurb?: string | null; options?: string[]; rangeMin?: number; rangeMax?: number; unit?: string; position?: number; active?: boolean }) =>
     put<{ attribute: PlaceAttribute }>('/api/admin/taxonomy/attributes', body),
   /**
    * One place, secondary label by secondary label, with `setAt` saying whether
@@ -3945,12 +3945,12 @@ export type TaxonomyLabel = {
    * What else the word says, besides where it sends a place. `italian_restaurant`
    * still sends a place to Restaurants; it also says Cuisine · Italian.
    */
-  carries?: { key: string; label: string; kind: 'yesno' | 'range' | 'oneof'; value: AttributeValue }[];
+  carries?: { key: string; label: string; kind: AttributeKind; value: AttributeValue }[];
 };
 
 /** A secondary label a word can be given, and the shape of its control. */
 export type SecondaryLabel = {
-  key: string; label: string; kind: 'yesno' | 'range' | 'oneof';
+  key: string; label: string; kind: AttributeKind;
   options: string[]; range_min: number | null; range_max: number | null; unit: string | null;
   /** The categories this label is a question about; empty means all of them. */
   only_in?: string[];
@@ -4019,7 +4019,7 @@ export type NotSureRun = {
 
 /** One of our secondary labels: something true about a place, not what it is. */
 export type PlaceAttribute = {
-  key: string; label: string; kind: 'yesno' | 'range' | 'oneof'; blurb: string | null;
+  key: string; label: string; kind: AttributeKind; blurb: string | null;
   options: string[]; range_min: number | null; range_max: number | null; unit: string | null;
   position: number; active: boolean; seeded: boolean;
   /** Other labels of ours that always arrive with this one, and as what. Never a provider's word. */
@@ -4027,8 +4027,25 @@ export type PlaceAttribute = {
 };
 
 /** A value one carries: a yes or no, a range, or one of a list. */
+/**
+ * The four shapes a label's answer can take.
+ *
+ * `scale` is the eight — how thrilling, how much walking — and is the one a
+ * provider may never answer (`neverCarried` on the API): a word can raise a
+ * question about a place, it can never answer one.
+ */
+export type AttributeKind = 'yesno' | 'range' | 'oneof' | 'scale';
+
 export type AttributeValue = {
   yesno?: boolean; from?: number | null; to?: number | null; choice?: string;
+  /**
+   * One number on a nought-to-four run — the eight (migration 216). Separate
+   * from `from`/`to` because a range is two facts and a scale is one, and a
+   * scale wearing a range would make every reader decide what `from !== to`
+   * meant. Anything rendering a value must handle it: a `level` read by a
+   * yes/no formatter says "Yes" for every number, nought included.
+   */
+  level?: number | null;
   /**
    * Where the answer came from. `came` means another label brought it and
    * `word` means one of the place's own provider words said it, so both are

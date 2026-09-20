@@ -444,17 +444,41 @@ filingRoutes.put('/subcategories/:key/defaults', requires('manage_library'), asy
     const attr = byKey.get(attribute);
     if (!attr) throw bad(`${attribute} is not one of our labels.`);
 
+    /**
+     * What the drawer answers *now*, stored or merely proposed.
+     *
+     * Accept and flip both act on what the screen is showing, and most of what
+     * it shows has never been written down: a proposal read off the places in
+     * the drawer has no `shelf_subcategory_attributes` row behind it. An
+     * `update` would touch nothing and the screen would be told there was
+     * nothing to accept, for the one row it was most obviously pointing at
+     * (Codex, 20 Sep 2026).
+     */
+    const effective = async () => {
+      const d = await filing.drawers();
+      const stored = d.defaultsBySub.get(key)?.get(attribute) ?? null;
+      if (stored) return { value: stored, stored: true };
+      const drawer = await filing.drawerOf(key, d);
+      const shown = [...drawer.facets, ...drawer.axes].find((a) => a.key === attribute) ?? null;
+      return { value: shown?.value ?? null, stored: false, mixed: Boolean(shown?.mixed) };
+    };
+
     if (req.body?.accept) {
-      const value = await placeAttributes.settleDefault(key, attribute);
+      const now = await effective();
+      if (now.mixed) throw bad(`The places here disagree about ${attr.label.toLowerCase()}, so there is no answer to accept.`);
+      if (!now.value) throw bad(`There is nothing proposed there to accept.`);
+      // Settling a row that exists, or writing down the proposal that did not.
+      const value = now.stored
+        ? await placeAttributes.settleDefault(key, attribute)
+        : await placeAttributes.setDefault(key, attribute, now.value, { settled: true });
       return res.json({ attribute, value, settled: true });
     }
 
     if (req.body?.flip) {
       if (attr.kind !== 'yesno') throw bad(`${attr.label} is not a yes or no, so there is nothing to flip.`);
-      const d = await filing.drawers();
-      const now = d.defaultsBySub.get(key)?.get(attribute) ?? null;
-      if (now?.yesno == null) throw bad(`${attr.label} has no answer here to flip.`);
-      const value = await placeAttributes.setDefault(key, attribute, { yesno: !now.yesno }, { settled: true });
+      const now = await effective();
+      if (now.value?.yesno == null) throw bad(`${attr.label} has no answer here to flip.`);
+      const value = await placeAttributes.setDefault(key, attribute, { yesno: !now.value.yesno }, { settled: true });
       return res.json({ attribute, value, settled: true });
     }
 
@@ -487,6 +511,7 @@ filingRoutes.post('/subcategories/:key/accept', requires('manage_library'), asyn
       else await placeAttributes.setDefault(key, a.key, a.value, { settled: true });
       accepted += 1;
     }
+    placeAttributes.forget();
     res.json({ accepted, by: actorOf(req) });
   } catch (err) { next(err); }
 });

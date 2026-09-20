@@ -148,6 +148,7 @@ export async function saveAttribute({ key, label, kind, blurb, options, rangeMin
 export async function setBrings(attributeKey, bringsKey, value) {
   if (!attributeKey || !bringsKey) throw bad('Which label, and what does it bring?');
   if (attributeKey === bringsKey) throw bad('A label cannot bring itself.');
+  await neverCarried(bringsKey);
   if (value == null) {
     await query('delete from attribute_brings where attribute_key = $1 and brings_key = $2', [attributeKey, bringsKey]);
     forget();
@@ -177,6 +178,7 @@ export async function setCarries(label, attributeKey, value) {
   const [namespace, ...rest] = String(label ?? '').split(':');
   const key = rest.join(':');
   if (!namespace || !key || !attributeKey) throw bad('Which word, and which label?');
+  await neverCarried(attributeKey);
   if (value == null) {
     await query('delete from taxonomy_label_carries where namespace = $1 and key = $2 and attribute_key = $3',
       [namespace, key, attributeKey]);
@@ -222,6 +224,28 @@ export async function carriedByWord() {
  * triggers do this for a brought value; a drawer's default and a place's own
  * answer had no equivalent.
  */
+/**
+ * The eight are judged, never carried.
+ *
+ * A provider's word may bring a fact with it — `italian_restaurant` says
+ * Italian, and that is a fact about the place Google is entitled to state. It
+ * may not say how thrilling somewhere is. That is a judgement, it is ours, and
+ * CLAUDE.md is explicit: Google may raise a candidate word, but Google may
+ * never answer a question about a place. The eight are answered on the drawer
+ * and corrected on the place, by a person or by a model reading what we own.
+ *
+ * So a scale is refused here rather than plumbed through, and refused with the
+ * reason rather than with a shape error — "is not a scale" would read as a bug
+ * in the caller when it is a rule about what a source is allowed to say.
+ */
+async function neverCarried(attributeKey) {
+  const { byKey } = await attributes();
+  const a = byKey.get(attributeKey);
+  if (a?.kind === 'scale') {
+    throw bad(`${a.label} is one of the eight. A word can raise a question about a place; it can never answer one.`);
+  }
+}
+
 export async function mustFit(attributeKey, value) {
   const { byKey } = await attributes();
   const a = byKey.get(attributeKey);

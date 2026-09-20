@@ -205,8 +205,11 @@ export function drawerAnswer({ attribute, refs, valuesByRef, defaults, spreadLim
   const agree = value ? said_.filter((v) => sameValue(v, value)).length : 0;
   const spread = said_.length ? (said_.length - agree) / said_.length : 0;
 
-  // A drawer with nothing to read from is not a drawer whose places disagree.
-  const mixed = said_.length > 0 && !current?.settled && spread >= spreadLimit;
+  // A drawer with nothing to read from is not a drawer whose places disagree,
+  // and neither is one whose places all say the same thing: `spread > 0` is
+  // what stops a threshold of nought marking every unanimous answer as mixed
+  // (Codex, 20 Sep 2026). "Past the limit" is read as past it, not at it.
+  const mixed = said_.length > 0 && !current?.settled && spread > 0 && spread >= spreadLimit;
 
   return {
     key: attribute.key,
@@ -227,7 +230,7 @@ export function drawerAnswer({ attribute, refs, valuesByRef, defaults, spreadLim
     // asked are different problems, and "set" outranks both because a person
     // having agreed to something is the strongest thing the row can say.
     why: current?.settled ? 'set'
-      : refs.length === 0 ? 'nothing fills this drawer'
+      : refs.length === 0 ? 'no places to read it from'
         : said_.length === 0 ? 'no place here has answered yet'
           : `${agree} of ${said_.length} agree`,
   };

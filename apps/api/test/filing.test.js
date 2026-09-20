@@ -62,7 +62,7 @@ test('an empty drawer and an unasked drawer say different things, and neither gu
   const empty = answer({ attribute: YESNO, refs: [], valuesByRef: new Map() });
   assert.equal(empty.value, null);
   assert.equal(empty.proposed, false);
-  assert.equal(empty.why, 'nothing fills this drawer');
+  assert.equal(empty.why, 'no places to read it from');
 
   const unasked = answer({ attribute: YESNO, refs: ['a', 'b'], valuesByRef: new Map() });
   assert.equal(unasked.value, null);

@@ -971,8 +971,13 @@ taxonomyRoutes.put('/labels/carries', requires('manage_library'), async (req, re
  */
 taxonomyRoutes.put('/attributes/default', requires('manage_library'), async (req, res, next) => {
   try {
+    // Settled: this route is a person choosing a value on the Categories screen,
+    // and a default a person chose is not a proposal waiting to be reviewed.
+    // Without it the filing desk puts every hand-set default straight back into
+    // its "to review" queue (Codex, 20 Sep 2026).
     const value = await placeAttributes.setDefault(
-      String(req.body?.subcategory || ''), String(req.body?.attribute || ''), req.body?.value ?? null);
+      String(req.body?.subcategory || ''), String(req.body?.attribute || ''), req.body?.value ?? null,
+      { settled: true });
     res.json({ subcategory: req.body?.subcategory, attribute: req.body?.attribute, value });
   } catch (err) { next(err); }
 });
