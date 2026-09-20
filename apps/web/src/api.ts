@@ -5129,7 +5129,11 @@ export type FilingAnswer = {
 };
 
 export type FilingRule = {
-  id: string; scope: string; subject: string; label: string; words: string[];
+  id: string; scope: string; subject: string; label: string;
+  /** The bare words, for a row. */
+  words: string[];
+  /** The same words with their namespace, so a screen can name the source. */
+  labels: string[];
   brings: number; opens: number;
   brought: { ref: string; name: string | null }[];
 };
@@ -5153,6 +5157,12 @@ export type FilingSubcategory = {
   /** Offered where nothing fills the drawer. An empty list is a real answer. */
   likely: { word: string; label: string; brings: number }[];
   splitting: boolean;
+  /**
+   * Whether "never opened" means anything yet. Below the corpus floor nothing
+   * has been opened, so the words are true of every rule and the red they are
+   * drawn in stops carrying information.
+   */
+  demandReadable: boolean;
 };
 
 export type FilingPlaces = {

@@ -354,6 +354,11 @@ filingRoutes.get('/subcategories/:key', requires('view_library'), async (req, re
         subject: r.subject,
         label: r.subject_label ?? r.subject,
         words,
+        // The words with their namespace still on, because a screen saying
+        // "from Google: Q2022036" is naming the wrong source: `labels` rules
+        // are a provider's words and every other scope is ours or the open
+        // map's, and stripping the namespace made them indistinguishable.
+        labels: (r.labels ?? []).map(String),
         brings: unique.length,
         opens: opened,
         // The first few it brought, named where we own a name. "What it brought"
@@ -393,6 +398,15 @@ filingRoutes.get('/subcategories/:key', requires('view_library'), async (req, re
       // belongs here" — and the screen has to say that rather than nothing.
       likely: drawer.refs.length === 0 ? await likelyFor(sub, evidence) : [],
       splitting: disagreeing.length > drawer.refs.length * limits.spreadLimit,
+      /**
+       * Whether "nobody has opened this" means anything yet.
+       *
+       * Below the corpus floor it does not: nothing has been opened, so every
+       * rule on the screen reads "never opened" in red and the colour stops
+       * meaning anything. Same floor as the audit and the front door, so the
+       * three cannot disagree about when demand is readable.
+       */
+      demandReadable: [...evidence.openedByRef.values()].reduce((n, v) => n + v, 0) >= CORPUS_OPENS,
     });
   } catch (err) { next(err); }
 });

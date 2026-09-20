@@ -237,8 +237,12 @@ export function SubcategoryBoard({ data, busy, onAccept, onFlip, onAcceptAll, on
                 </Cell>
                 <Cell col={RULE_COLS[1]}><Value numeric>{r.brings.toLocaleString()}</Value></Cell>
                 <Cell col={RULE_COLS[2]}>
-                  <Value tone={r.opens === 0 ? 'warn' : 'muted'} numeric size={13}>
-                    {r.opens ? `${r.opens.toLocaleString()} opened` : 'never opened'}
+                  {/* Red only where never-opened is a fact about the rule. Below
+                      the corpus floor it is a fact about the product's age, and
+                      every row would wear it. */}
+                  <Value tone={r.opens === 0 && data.demandReadable ? 'warn' : 'muted'} numeric size={13}>
+                    {r.opens ? `${r.opens.toLocaleString()} opened`
+                      : data.demandReadable ? 'never opened' : 'no opens to read yet'}
                   </Value>
                 </Cell>
                 <Cell col={RULE_COLS[3]} />
@@ -401,11 +405,27 @@ export function SubcategoryBoard({ data, busy, onAccept, onFlip, onAcceptAll, on
   );
 }
 
-/** "from Google: golf_course", or the honest absence of one. */
+/**
+ * "from Google: golf_course", and only when it really is from Google.
+ *
+ * A drawer is filled by rules of several scopes — a provider's word, a
+ * Wikidata kind, one of our own labels — and the first draft of this stripped
+ * every namespace and called the lot Google, so a golf drawer announced
+ * itself as "from Google: Q2022036". Naming the wrong source is worse than
+ * naming none.
+ */
 function ruleSummary(data: FilingSubcategory): string {
-  const words = data.rules.flatMap((r) => r.words).filter(Boolean);
-  if (!words.length) return 'no provider word points here';
-  return `from Google: ${words.slice(0, 3).join(', ')}${words.length > 3 ? `, and ${words.length - 3} more` : ''}`;
+  const google = data.rules
+    .flatMap((r) => r.labels)
+    .filter((l) => l.startsWith('google:'))
+    .map((l) => l.slice('google:'.length));
+  if (google.length) {
+    const shown = google.slice(0, 3).join(', ');
+    return `from Google: ${shown}${google.length > 3 ? `, and ${google.length - 3} more` : ''}`;
+  }
+  const rules = data.rules.length;
+  if (!rules) return 'no rule points here';
+  return `${rules} ${rules === 1 ? 'rule fills it' : 'rules fill it'}, none of them a Google type`;
 }
 
 function FacetRow({ a, busy, onAccept, onFlip }: {
