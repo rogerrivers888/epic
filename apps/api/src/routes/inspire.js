@@ -390,7 +390,11 @@ inspire.get('/around', async (req, res, next) => {
     const tax = await taxonomy();
     const meter = { google: 0 };
     const wantedCats = wanted ? [wanted] : Object.keys(ASKED);
-    const page = Math.min(3, Math.max(1, Math.trunc(Number(req.query.page)) || 1));
+    // Three was the cap when a page could only follow Google's own token, and
+    // sixty places was the end of it. Paging walks the category's drawers now,
+    // so the ceiling is the number of questions there are to ask — each one
+    // bought only when somebody has reached the end of the last.
+    const page = Math.min(12, Math.max(1, Math.trunc(Number(req.query.page)) || 1));
     // The whole board asks for its first page; one category asks for the page
     // the household has scrolled to.
     const shows = wanted ? Math.min(20, Math.max(1, Math.trunc(Number(req.query.shows)) || 20)) : 5;
