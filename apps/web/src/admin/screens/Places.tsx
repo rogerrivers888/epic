@@ -648,7 +648,7 @@ function RingChooser({ minutes, here, mode, onMinutes, onMode, cells, modesBuilt
                     // absence reads as a way of clearing the control rather
                     // than as a place to stand.
                     { key: '0', label: `${here} only`, on: !ring },
-                    ...BANDS.map((b) => ({ key: String(b), label: bandLabel(b), on: minutes === b, group: 'Look around it' })),
+                    ...BANDS.map((b) => ({ key: String(b), label: bandLabel(b), on: minutes === b })),
                   ]}
                   onPick={(k) => onMinutes(Number(k))} />
       </Explain>
@@ -3441,7 +3441,12 @@ const styles = StyleSheet.create({
   nothingHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: spacing.md },
   nothingRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md, paddingVertical: spacing.sm, borderTopWidth: BORDER, borderColor: colors.line },
   nothingWhere: { flex: 1, minWidth: 0, textAlign: 'right' },
-  lensRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.lg, flexWrap: 'wrap' },
+  // Above the board under it. Every View react-native-web draws is
+  // position:relative with z-index 0, which makes a stacking context of each
+  // one, so the list inside this row paints *under* the table however high its
+  // own z-index is — the ladder's headings showed through the open list (20 Sep
+  // 2026). The same fix every other board with a list over a table uses.
+  lensRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.lg, flexWrap: 'wrap', zIndex: 20 },
   // The label-above-lenses column has to be told it may be narrower than its
   // content, or it takes the width of six lenses and carries the row off the
   // frame with it (measured at 390, 18 Sep 2026).
@@ -3459,7 +3464,7 @@ const styles = StyleSheet.create({
   subRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg, flexWrap: 'wrap' },
 
   // the ring chooser
-  chooser: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
+  chooser: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap', zIndex: 20 },
   segment: { flexDirection: 'row', borderWidth: 1, borderColor: colors.ruleMuted },
   segItem: { paddingHorizontal: 14, paddingVertical: 8 },
   segItemOn: { backgroundColor: colors.selected },
