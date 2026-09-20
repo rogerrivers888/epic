@@ -1,4 +1,4 @@
-import { bump } from './meter.js';
+import { bump, noteCall, noteFault } from './meter.js';
 import { crowdBand, countBand } from '../domain/scoring.js';
 import { stampPhotos } from './photoLinks.js';
 // Google Places API (New) — the primary licensed source (Technical Constraints §3.1).
@@ -384,24 +384,47 @@ export function skuFor(fieldMask, path = '') {
   return 'google-essentials';
 }
 
+/**
+ * Every Google Places request goes through here, which is why this is where the
+ * outcome is observed (owner, 20 Sep 2026: the supplier record "should show
+ * failures also").
+ *
+ * The meter carries what happened alongside what it cost — `noteCall` with the
+ * wall clock, `noteFault` with a short reason — and the row that the meter's
+ * owner writes to `provider_calls` carries both. The reason is a token like
+ * `http_429`, never Google's own message: a body can echo back the query, and a
+ * query can be somebody's address.
+ */
 async function call(path, { method = 'POST', body, fieldMask, meter }) {
   const key = KEY();
-  if (!key) throw new Error('GOOGLE_MAPS_API_KEY not set');
+  if (!key) { noteFault(meter, 'no_key'); throw new Error('GOOGLE_MAPS_API_KEY not set'); }
   // One billable request, at the tier the mask puts it in. `google` stays as
   // the count of Google requests however they were priced, because Settings ›
   // Usage and the free-allowance lines are counted in requests.
   bump(meter, 'google');
   bump(meter, skuFor(fieldMask, path));
-  const res = await fetch(`${PLACES}${path}`, {
-    method,
-    headers: { 'content-type': 'application/json', 'X-Goog-Api-Key': key, ...(fieldMask ? { 'X-Goog-FieldMask': fieldMask } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(15_000),
-  });
+
+  const began = Date.now();
+  let res;
+  try {
+    res = await fetch(`${PLACES}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json', 'X-Goog-Api-Key': key, ...(fieldMask ? { 'X-Goog-FieldMask': fieldMask } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (err) {
+    // A timeout and a dropped connection are different faults and the ledger
+    // should be able to tell them apart.
+    noteFault(meter, err?.name === 'TimeoutError' || err?.name === 'AbortError' ? 'timeout' : 'unreachable');
+    throw err;
+  }
   if (!res.ok) {
+    noteFault(meter, `http_${res.status}`);
     const text = await res.text().catch(() => '');
     throw new Error(`Google Places ${res.status}: ${text.slice(0, 200)}`);
   }
+  noteCall(meter, Date.now() - began);
   return res.json();
 }
 
@@ -778,6 +801,60 @@ export async function examplesOfType({ center, radiusKm = 40, type, words = null
  * Returns `{ places, requests, saturated, problem }`. `places` carries only
  * what the free tier gives: the id, and where it came in the answer.
  */
+/**
+ * What a household is actually shown, fenced to a ring's box.
+ *
+ * The census counts with ids; this is the other half of the same idea — one
+ * paid search per category, over the same rectangle, buying the twenty places
+ * that will be put in front of somebody (owner, 20 Sep 2026: "one Enterprise +
+ * Atmosphere display search per category, locationRestriction set to the ring's
+ * bounding box").
+ *
+ * The mask is the display mask, so this bills at Enterprise + Atmosphere and
+ * `skuFor` says so out loud. That is the tier that carries the rating and the
+ * review count, which is the whole point: they are read, turned into an Epic
+ * score of ours on the spot, and never written down.
+ *
+ * Paging is Google's own `nextPageToken`, which is why the list can go past
+ * twenty at all — and each page is another billed request, so the caller only
+ * asks for one when somebody has scrolled far enough to need it.
+ */
+export async function displaySlice({ box, includedType, query, pageToken = null, pageSize = 20, meter = null } = {}) {
+  if (!KEY() || !box) return { venues: [], nextPageToken: null, requests: 0, problem: 'no Google key' };
+  const body = {
+    textQuery: query || googleTypeWords(includedType) || 'things to do',
+    pageSize: Math.min(20, Math.max(1, pageSize)),
+    languageCode: 'en-GB',
+    locationRestriction: {
+      rectangle: {
+        low: { latitude: box.minLat, longitude: box.minLng },
+        high: { latitude: box.maxLat, longitude: box.maxLng },
+      },
+    },
+    ...(includedType ? { includedType } : {}),
+    ...(pageToken ? { pageToken } : {}),
+  };
+  let data;
+  try {
+    data = await call('/places:searchText', { fieldMask: `${SEARCH_FIELDS},nextPageToken`, meter, body });
+  } catch (err) {
+    // The same rule the census keeps: a type Google does not have is a rule to
+    // fix, not a question to rephrase into something that answers anything.
+    return {
+      venues: [], nextPageToken: null, requests: 1,
+      problem: /Invalid included_type/i.test(String(err.message)) && includedType
+        ? `Google has no type "${includedType}" — the rule needs a type from Table A`
+        : String(err.message).slice(0, 160),
+    };
+  }
+  const venues = (data.places || [])
+    // A hotel is where you sleep, not a thing to do — even when Google also
+    // types it as a restaurant because it has one.
+    .filter((p) => !LODGING.has(p.primaryType))
+    .map((p) => toVenue(p));
+  return { venues, nextPageToken: data.nextPageToken ?? null, requests: 1, problem: null };
+}
+
 async function censusSlice({ box, includedType, query, pages = 3, meter = null } = {}) {
   if (!KEY() || !box) return { places: [], requests: 0, saturated: false, problem: 'no Google key' };
   const rectangle = {

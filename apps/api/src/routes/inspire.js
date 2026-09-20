@@ -51,6 +51,7 @@
  */
 
 import { Router } from 'express';
+import { query } from '../db.js';
 import * as searchLog from '../repositories/searches.js';
 import * as placeIndex from '../repositories/placeIndex.js';
 import { currentHousehold, loadMembers, toAttendees } from './household.js';
@@ -69,6 +70,10 @@ import { publishedNear, heroesForPlaces } from '../repositories/library.js';
 import { foodNear } from '../repositories/scout.js';
 import { enabledSources } from '../sources/index.js';
 import { needsLookAround, lookAroundOutcome } from '../domain/lookAround.js';
+import { censusCounts, categoryPage, ASKED } from '../sources/ringSearch.js';
+import { boxAround, boxKm, outcodeOfCell } from '../domain/ring.js';
+import * as reach from '../repositories/reach.js';
+import { sectorOf } from '../domain/reach.js';
 
 /**
  * A stored picture, in the shape a card draws.
@@ -209,6 +214,181 @@ function attributionOf(v, lines) {
   const keys = v.contributingSources ?? (Array.isArray(v.attribution) ? v.attribution : [v.source]);
   return [...new Set(keys.map((k) => lines[k]).filter(Boolean))];
 }
+
+/**
+ * GET /api/inspire/around?where=sl5&minutes=30&mode=drive
+ *
+ * What is around a household, the way the owner set it out on 20 Sep 2026:
+ * the census count for the reach, free, and the first five of each category
+ * from one paid display search fenced to the ring.
+ *
+ * This is the pool Inspire reads now. The atlas and the sweep are no longer
+ * searched — the atlas stays exactly where it was useful, as a source of
+ * pictures and summaries for the records we own — and "thirty minutes" is a
+ * ring out of the reachability matrix rather than twenty-four kilometres of
+ * straight line.
+ *
+ * Nothing here is stored except the Epic scores derived on the way through.
+ */
+/**
+ * The ring itself: which cells are within the time, and the box round them.
+ *
+ * A postcode is its own cell; a point is snapped to the nearest one we hold.
+ * Both then read the matrix, which was worked out once — so drawing a ring
+ * does no sums and asks nobody.
+ */
+async function ringFrom(q, { minutes, mode }) {
+  const said = String(q.where ?? '').trim();
+  const sector = said ? sectorOf(said.replace(/-/g, ' ')) : null;
+  let cell = sector ? `sector:${sector}` : null;
+  let label = sector ? said.toUpperCase() : null;
+  if (!cell && q.lat != null && q.lng != null) {
+    const at = await reach.cellAt({ lat: Number(q.lat), lng: Number(q.lng) }).catch(() => null);
+    cell = at?.code ?? null;
+    label = String(q.label ?? '').trim() || at?.code || null;
+  }
+  if (!cell) return null;
+  const within = await reach.reachableCells(cell, { minutes, mode });
+  const codes = [...new Set([cell, ...within.map((c) => c.to_cell)])];
+  if (!codes.length) return null;
+  const { rows } = await query('select code, lat, lng from geo_cells where code = any($1)', [codes]);
+  const box = boxAround(rows);
+  if (!box) return null;
+  return {
+    cell, label: label ?? cell, cells: codes, box,
+    outcodes: [...new Set(codes.map(outcodeOfCell).filter(Boolean))],
+  };
+}
+
+/**
+ * One category's page, ranked the way a household is shown it.
+ *
+ * Our own score first, where a place has one — which, after this very search,
+ * is every place we have ever bought. Google's order is the fallback and not
+ * the other way round: their order is a fact about their index, ours is a
+ * judgement about the place (data policy, 19 Sep 2026).
+ */
+async function placesFor({ ring, category, page, meter, taught, tax, householdId }) {
+  const got = await categoryPage({
+    ringKey: `${ring.cell}|${ring.cells.length}`, box: ring.box, cells: ring.cells,
+    category, page, meter, householdId, cellAt: reach.cellAt,
+  });
+  // Held to the category by our own taxonomy rather than by Google's words: a
+  // text search answers with whatever matched, and Food & drink must mean food
+  // and drink (routes/places.js keeps the same fence on the other search path).
+  const mine = got.venues.filter((v) => {
+    if (category === 'food') return true;
+    const shelves = shelvesForVenue(v, taught, tax.vocab)?.shelves ?? [];
+    return shelves.includes(category);
+  });
+  const refs = mine.map((v) => `${v.source}:${v.sourcePlaceId}`);
+  const scores = refs.length
+    ? (await query(
+      `select venue_ref, coalesce(r.epic_score, s.epic_score) as epic
+         from unnest($1::text[]) as t(venue_ref)
+         left join place_records r on r.venue_ref = t.venue_ref
+         left join lateral (select epic_score from scout_places s2 where s2.venue_ref = t.venue_ref order by last_seen desc limit 1) s on true`,
+      [refs])).rows
+    : [];
+  const byRef = new Map(scores.map((r) => [r.venue_ref, r.epic == null ? null : Number(r.epic)]));
+  const items = mine
+    .map((v, i) => {
+      const ref = `${v.source}:${v.sourcePlaceId}`;
+      const p = shelvesForVenue(v, taught, tax.vocab);
+      return {
+        venueRef: ref, name: v.name, category: v.category,
+        subcategory: p?.subcategory ?? null, moods: p?.shelves ?? [],
+        epicScore: byRef.get(ref) ?? null,
+        // Their order, kept so a place nobody has scored still has somewhere to
+        // sit — and so the two can be compared on the bench.
+        theirRank: i + 1,
+        outcode: v.outcode ?? null,
+        lat: v.lat, lng: v.lng,
+        // Rented, shown, never written down: the card draws them and the
+        // database never sees them.
+        rating: v.rating ?? null, ratingCount: v.ratingCount ?? null,
+        priceLevel: v.priceLevel ?? null, openNow: v.openNow ?? null,
+        // The photo reference only — the bytes are fetched for a tile in the
+        // viewport, a row at a time, and never for a list.
+        photo: (v.photos ?? [])[0]?.name ?? null,
+        website: v.website ?? null,
+      };
+    })
+    .sort((a, b) => {
+      if (a.epicScore != null && b.epicScore != null) return b.epicScore - a.epicScore;
+      if (a.epicScore != null) return -1;
+      if (b.epicScore != null) return 1;
+      return a.theirRank - b.theirRank;
+    });
+  return { items, nextPageToken: got.nextPageToken, requests: got.requests, cached: got.cached, problem: got.problem ?? null };
+}
+
+inspire.get('/around', async (req, res, next) => {
+  try {
+    const started = Date.now();
+    const household = await currentHousehold();
+    const minutes = Math.min(90, Math.max(5, Math.trunc(Number(req.query.minutes)) || 30));
+    const mode = travelMode(req.query.mode);
+    const wanted = String(req.query.cat ?? '').trim();
+
+    // Where the ring is drawn from: a postcode, or a point.
+    const ring = await ringFrom(req.query, { minutes, mode });
+    if (!ring) {
+      return res.status(400).json({
+        error: 'where_required',
+        message: 'Search for a town or a postcode, or set your home address, and Epic will look around it.',
+      });
+    }
+
+    // Free, and no provider: what the census found in these outcodes.
+    const census = await censusCounts(ring.outcodes);
+
+    const taught = await shelfRules();
+    const tax = await taxonomy();
+    const meter = { google: 0 };
+    const wantedCats = wanted ? [wanted] : Object.keys(ASKED);
+    const page = Math.min(3, Math.max(1, Math.trunc(Number(req.query.page)) || 1));
+    // The whole board asks for its first page; one category asks for the page
+    // the household has scrolled to.
+    const shows = wanted ? Math.min(20, Math.max(1, Math.trunc(Number(req.query.shows)) || 20)) : 5;
+
+    const categories = [];
+    let requests = 0;
+    for (const key of wantedCats) {
+      const got = await placesFor({ ring, category: key, page, meter, taught, tax, householdId: household.id });
+      requests += got.requests;
+      categories.push({
+        key,
+        label: tax.vocab?.categories?.[key]?.label ?? key,
+        // What the census says is here — the number the screen prints beside
+        // the name, and the one thing on this board that never costs anything.
+        count: census.counts[key] ?? 0,
+        censused: census.missing.length === 0,
+        items: got.items.slice(0, shows),
+        of: got.items.length,
+        more: Boolean(got.nextPageToken),
+        cached: got.cached,
+        why: got.problem,
+      });
+    }
+
+    res.json({
+      ring: {
+        where: ring.label, outcodes: ring.outcodes, cells: ring.cells.length,
+        minutes, mode, box: ring.box, boxKm: boxKm(ring.box),
+        // Which of the ring's outcodes the census has never been run in: the
+        // difference between "nothing here" and "we have not looked".
+        notCensused: census.missing,
+      },
+      categories,
+      // What this answer cost, said plainly, because every screen that spends
+      // says so (data policy, 19 Sep 2026).
+      spent: { displaySearches: requests, google: meter.google ?? 0 },
+      tookMs: Date.now() - started,
+      attribution: ['Powered by Google'],
+    });
+  } catch (err) { next(err); }
+});
 
 /**
  * GET /api/inspire/near?lat=&lng=&label=&locality=&from=lat,lng&mode=driving&live=1
