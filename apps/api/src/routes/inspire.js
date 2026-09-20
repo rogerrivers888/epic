@@ -340,9 +340,12 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
         // database never sees them.
         rating: v.rating ?? null, ratingCount: v.ratingCount ?? null,
         priceLevel: v.priceLevel ?? null, openNow: v.openNow ?? null,
-        // The photo reference only — the bytes are fetched for a tile in the
-        // viewport, a row at a time, and never for a list.
-        photo: (v.photos ?? [])[0]?.name ?? null,
+        // The reference and its credit, signed the way every other photo on
+        // this screen is. The bytes are fetched for a tile in the viewport, a
+        // row at a time, and never for a list — that is the card's job, and it
+        // already knows how (data policy: "Photos only for tiles in the
+        // viewport, a row at a time").
+        photos: (v.photos ?? []).slice(0, 1),
         website: v.website ?? null,
       };
     })
@@ -540,9 +543,7 @@ inspire.get('/near', async (req, res, next) => {
             experiences: [], cuisines: [],
             rating: it.rating, ratingCount: it.ratingCount, priceLevel: it.priceLevel,
             goodForChildren: null,
-            // The reference only. The bytes are fetched for a tile in the
-            // viewport, a row at a time — never for a list (data policy).
-            photos: it.photo ? [{ name: it.photo }] : [],
+            photos: it.photos ?? [],
             attribution: ['Powered by Google'],
             lat: it.lat, lng: it.lng,
             distanceKm: Number(kmBetween(centre, it).toFixed(1)),
