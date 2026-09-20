@@ -703,6 +703,13 @@ router.get('/census', requires('view_library'), async (req, res, next) => {
       `select ps.subcategory as asked, i.subcategory as filed_under, count(*)::int n
          from place_subcategories ps
          join place_index i on i.venue_ref = ps.venue_ref
+         -- The same run as the count it sits beside. A surfacing outlives the
+         -- census that found it on purpose, so that "this used to be here"
+         -- stays legible — but an explanation drawn from every run ever could
+         -- read "+1" beside "on museums 10" (Codex, 20 Sep 2026).
+         join area_counts a
+           on a.area_slug = ps.area_slug and a.subcategory = ps.subcategory
+          and a.run_id is not distinct from ps.run_id
         where ps.area_slug = any($1)
           and i.subcategory is not null
           and i.subcategory <> ps.subcategory

@@ -278,7 +278,7 @@ export async function censusArea({ areaSlug = null, outcode = null, box, subcate
     await writeCensusFacts(batch);
   }
   for (const batch of chunks([...surfaced.values()], WRITE_BATCH)) {
-    await writeSurfacings(batch);
+    await writeSurfacings(batch, runId);
   }
   await rollUp({ areaSlug, runId, done, found: places, surfaced: [...surfaced.values()] });
 
@@ -340,11 +340,12 @@ async function writeCensusFacts(places) {
  * finding a place keeps its row, which is how "this used to be here" stays
  * legible rather than silently vanishing.
  */
-async function writeSurfacings(rows) {
-  const values = rows.map((_, i) => `($${i * 6 + 1},$${i * 6 + 2},$${i * 6 + 3},$${i * 6 + 4},$${i * 6 + 5}::int,$${i * 6 + 6}, now(), now())`).join(',');
+async function writeSurfacings(rows, runId) {
+  const values = rows.map((_, i) => `($${i * 6 + 1},$${i * 6 + 2},$${i * 6 + 3},$${i * 6 + 4},$${i * 6 + 5}::int,$${i * 6 + 6}, now(), now(), $${rows.length * 6 + 1})`).join(',');
   const params = rows.flatMap((r) => [r.ref, r.category, r.subcategory, r.foundBy, r.rank, r.areaSlug ?? null]);
+  params.push(runId);
   await query(
-    `insert into place_subcategories (venue_ref, category, subcategory, found_by, found_rank, area_slug, first_seen, last_seen)
+    `insert into place_subcategories (venue_ref, category, subcategory, found_by, found_rank, area_slug, first_seen, last_seen, run_id)
      values ${values}
      on conflict (venue_ref, subcategory, coalesce(area_slug, '')) do update
         -- The category too. A taxonomy change can move a subcategory to another
@@ -353,7 +354,10 @@ async function writeSurfacings(rows) {
         -- contradicts the one thing the plan being read from shelf_rules is
         -- meant to buy, that a re-map costs nothing (Codex, 19 Sep 2026).
         set category = excluded.category,
-            found_by = excluded.found_by, found_rank = excluded.found_rank, last_seen = now()`,
+            found_by = excluded.found_by, found_rank = excluded.found_rank, last_seen = now(),
+            -- The run that last found it, so a count and the explanation beside
+            -- it come from the same census (Codex, 20 Sep 2026).
+            run_id = excluded.run_id`,
     params,
   );
 }
