@@ -100,7 +100,13 @@ const row = (label, value, pctOf = null) => ({ label, value, pct: pctOf });
 /** Bars sized against the largest in the set, which is how the design draws them. */
 function bars(rows) {
   const max = Math.max(1, ...rows.map((r) => (typeof r.value === 'number' ? r.value : 0)));
-  return rows.map((r) => ({ ...r, pct: typeof r.value === 'number' ? Math.round((r.value / max) * 100) : 0 }));
+  return rows.map((r) => {
+    if (typeof r.value !== 'number') return { ...r, pct: 0 };
+    const share = (r.value / max) * 100;
+    // A share that is real but tiny keeps a tenth, so the bar can draw a
+    // hairline rather than rounding to an empty track beside a figure.
+    return { ...r, pct: share > 0 && share < 1 ? Math.round(share * 10) / 10 : Math.round(share) };
+  });
 }
 
 /**

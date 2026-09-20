@@ -27,7 +27,9 @@ import { HouseholdRecordView } from './HouseholdRecord';
 import { joinedDay, lastSeen, share, sortRows, statusWord, type HouseholdRow } from './model';
 
 const PLANS = ['All', 'Household', 'Solo', 'Annual', 'Trial', 'Standard'] as const;
-const STATUSES = ['All', 'Live', 'Trial', 'At risk', 'Cancelled'] as const;
+// "Invited" joins the handoff's five now that inviting happens on this screen
+// and an invited household appears in the list the moment the link goes out.
+const STATUSES = ['All', 'Live', 'Trial', 'Invited', 'At risk', 'Cancelled'] as const;
 type Plan = typeof PLANS[number];
 type Status = typeof STATUSES[number];
 const SORTS = ['name', 'plan', 'monthPence', 'joined', 'lastSeenDays', 'places', 'daysOut', 'bookings', 'ratings', 'status'] as const;

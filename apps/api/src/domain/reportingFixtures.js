@@ -345,7 +345,13 @@ const rate = (label, value) => row(label, value, null, { rate: true });
  */
 const bars = (rows) => {
   const max = Math.max(1, ...rows.map((r) => (typeof r.value === 'number' ? r.value : 0)));
-  return rows.map((r) => ({ ...r, pct: typeof r.value === 'number' ? Math.round((r.value / max) * 100) : 0 }));
+  return rows.map((r) => {
+    if (typeof r.value !== 'number') return { ...r, pct: 0 };
+    const share = (r.value / max) * 100;
+    // A share that is real but tiny keeps a tenth, so the bar can draw a
+    // hairline rather than rounding to an empty track beside a figure.
+    return { ...r, pct: share > 0 && share < 1 ? Math.round(share * 10) / 10 : Math.round(share) };
+  });
 };
 
 /**
@@ -540,6 +546,18 @@ export function fixtures() {
       trialConvertPct: 48,
       trialGranted: 34,
       atRisk: 48,
+      /**
+       * The summary the Households screen carried at the top of it, before it
+       * was retired into this one (owner, 20 Sep 2026). Same shape as the real
+       * reader's, so the screen draws it the same either way.
+       */
+      estate: {
+        households: 1284,
+        people: 3612,
+        invited: 61,
+        suspended: 27,
+        signedIn: 214,
+      },
     },
 
     // -----------------------------------------------------------------------

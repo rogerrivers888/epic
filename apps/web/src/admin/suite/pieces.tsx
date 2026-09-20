@@ -401,7 +401,16 @@ export function Kv({ label, value, gap, strong, lime, last, onPress, action, wid
         : (
           <Text
             style={[styles.rowValue, wide && styles.rowValueWide, strong && styles.rowValueStrong, lime && { color: colors.accent }]}
-            numberOfLines={1}
+            /**
+             * A wide value takes a second line rather than losing its end.
+             *
+             * The handoff fixes the column at 190px so that long values do not
+             * wrap — but "AIza…Kd41 · restricted to server IPs" does not fit in
+             * 190px, and truncating it to "restricted to se…" throws away the
+             * part that says what the restriction is. The row is aligned to the
+             * top, so a second line pushes nothing out of line.
+             */
+            numberOfLines={wide ? 2 : 1}
           >
             {value}
           </Text>
@@ -513,7 +522,19 @@ export function Bar({ label, value, pct, gap, high }: {
     <View style={styles.barRow}>
       <Text style={styles.barLabel} numberOfLines={2}>{label}</Text>
       <View style={styles.barTrack}>
-        <View style={{ width: `${Math.max(0, Math.min(100, pct ?? 0))}%`, height: 14, backgroundColor: high ? colors.lime : colors.decor }} />
+        {/* A share that rounds to nought still draws a hairline where there is
+            something to draw. One founding household against 743 signups is
+            0.1% — and an empty track beside the figure "1" reads as a full-width
+            bar rather than as a very small one (20 Sep 2026). Nothing at all is
+            still nothing at all. */}
+        <View
+          style={[
+            { height: 14, backgroundColor: high ? colors.lime : colors.decor },
+            (pct ?? 0) > 0 && (pct ?? 0) < 1
+              ? { width: 3 }
+              : { width: `${Math.max(0, Math.min(100, pct ?? 0))}%` },
+          ]}
+        />
       </View>
       {value == null ? <Gap says={gap} small /> : <Text style={styles.barValue} numberOfLines={1}>{value}</Text>}
     </View>
