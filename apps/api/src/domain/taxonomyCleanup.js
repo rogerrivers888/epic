@@ -47,10 +47,11 @@ export const LANDMARK_SPLIT = {
   from: 'landmarks',
   halves: [
     { key: 'monuments-memorials', label: 'Monuments & memorials',
-      words: ['monument', 'memorial', 'statue', 'war_memorial'],
+      words: ['monument', 'memorial', 'statue', 'war_memorial', 'sculpture', 'fountain'],
       kinds: ['monument', 'memorial', 'statue', 'war memorial', 'sculpture', 'fountain'] },
     { key: 'landmarks-you-can-see', label: 'Landmarks',
-      words: ['lighthouse', 'pier', 'tower', 'viaduct', 'observation_wheel', 'ferris_wheel'],
+      words: ['lighthouse', 'pier', 'tower', 'viaduct', 'observation_wheel', 'ferris_wheel',
+        'historical_landmark', 'cultural_landmark', 'historical_place'],
       kinds: ['lighthouse', 'pier', 'tower', 'viaduct', 'railway viaduct', 'windmill',
         'historical landmark', 'cultural landmark', 'historical place'] },
   ],
@@ -132,6 +133,10 @@ export function agreed({ have = new Set(), words = new Set(), kinds = new Map() 
     ifWord(k, 'exclude', 'Not in Epic',
       'A building, not a visit. Cathedrals, abbeys, minsters and priories stay; individual churches get filed by hand.');
   }
+  // "Leave cemetery unmapped and file individual places by hand." A churchyard
+  // is not a day out and the one Highgate is a place, not a type.
+  ifKind('cemetery', 'exclude', 'Not in Epic',
+    'Forty churchyards and one Highgate. The type comes out; the one place worth visiting gets filed by hand.');
   ifSub('landmarks', 'split', 'Monuments & memorials  \u00b7  Landmarks',
     'Junk drawer. What was raised to remember somebody is one thing; what you go and look at is another. A lighthouse is not a memorial.');
   ifSub('days-out', 'retire', null,
