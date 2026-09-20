@@ -295,8 +295,14 @@ export async function recordCandidates(subcategory, entries = [], { placesTotal 
          -- person's, is not overwritten by the code's first pass on a later
          -- run. Only the holding pen is open to being called.
          kind         = case when harvest_candidates.kind = 'unclear' then excluded.kind else harvest_candidates.kind end,
-         status       = case when harvest_candidates.kind = 'unclear' and excluded.kind = 'feature' then 'new'
-                             else harvest_candidates.status end,
+         -- The status follows the kind, always. Deriving it only on a *change*
+         -- of kind left every row written before there was a kind sitting in
+         -- the promotable list unclassified (migration 209).
+         status       = case
+                          when harvest_candidates.kind = 'feature' then harvest_candidates.status
+                          when excluded.kind = 'feature' then 'new'
+                          else 'unresolved'
+                        end,
          last_seen    = now()
        where harvest_candidates.status in ('new', 'unresolved')`,
       params,
