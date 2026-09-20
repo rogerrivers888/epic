@@ -27,6 +27,7 @@ import { query } from '../db.js';
 import * as filing from '../repositories/filing.js';
 import * as placeAttributes from '../repositories/placeAttributes.js';
 import * as taxonomyAudit from '../repositories/taxonomyAudit.js';
+import { CORPUS_OPENS } from '../domain/taxonomyAudit.js';
 import { setThreshold, thresholds, thresholdValues } from '../repositories/settings.js';
 
 export const filingRoutes = Router();
@@ -165,6 +166,25 @@ async function unengagedShare() {
   const attributed = shown.rows.reduce((n, r) => n + r.n, 0);
   const total = all.rows[0]?.n ?? 0;
   if (!total) return { share: null, impressions: 0, attributed: 0, words: [], why: 'nothing has been shown yet' };
+
+  /**
+   * It does not speak until opening happens at all.
+   *
+   * Run against production the day it was written this said 96% of everything
+   * shown came through a dead mapping — because the corpus held almost no
+   * opens, so "never engaged with" was true of every word in it. That is the
+   * same trap the audit's *nobody goes* fell into on the same day, and it is
+   * the more dangerous of the two here: a number that large on the front door
+   * reads as an emergency and it is measuring how young the product is.
+   *
+   * Same floor as the audit, from the same constant, so the two can never
+   * disagree about when engagement is readable.
+   */
+  const opensAll = opened.rows.reduce((n, r) => n + r.n, 0);
+  if (opensAll < CORPUS_OPENS) {
+    return { share: null, impressions: total, attributed, opens: opensAll, needs: CORPUS_OPENS, words: [],
+      why: `too few opens to read engagement — ${opensAll.toLocaleString()} against the ${CORPUS_OPENS} this needs` };
+  }
   // The share is of what we can *attribute*, and the two numbers are both
   // returned so the screen can say which it is. Dividing the dead impressions
   // by every impression would read the ones we cannot attribute as healthy,

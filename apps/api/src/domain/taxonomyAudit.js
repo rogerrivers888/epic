@@ -86,6 +86,17 @@ export function orphans({ subs, rulesBySub, placesBySub, unmapped }) {
 }
 
 /**
+ * The opens the whole corpus needs before any of it can be read as engagement.
+ *
+ * Exported because two signals depend on it and they must not drift: the
+ * audit's *nobody goes*, and the filing desk's "share of what a household was
+ * shown that came through a mapping nobody engages with". Both measured how
+ * young the product is rather than what they claim to measure, on the same
+ * day, for the same reason (20 Sep 2026). One number, one place.
+ */
+export const CORPUS_OPENS = 200;
+
+/**
  * Words whose places nobody has ever opened.
  *
  * Only where there is enough of both to mean anything: a word has to have
@@ -95,7 +106,7 @@ export function orphans({ subs, rulesBySub, placesBySub, unmapped }) {
  */
 export function nobodyGoes({
   words, placesByWord, shownByRef, openedByRef,
-  floor = 25, seen = 20, corpusOpens = 200, worseThan = 0.25,
+  floor = 25, seen = 20, corpusOpens = CORPUS_OPENS, worseThan = 0.25,
 }) {
   const out = []; const thin = [];
 
