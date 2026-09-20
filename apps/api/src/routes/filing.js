@@ -15,6 +15,8 @@
  *   GET  /subcategories/:key/places    every place in it
  *   PUT  /subcategories/:key/defaults  accept, flip or set one of its answers
  *   POST /subcategories/:key/accept    agree with everything proposed at once
+ *   GET  /mapping                      every provider word, and where it points
+ *   GET  /mapping/excluded             what is kept out of Epic, and why
  *
  * Nothing here calls a provider. Every number comes from the index, the owned
  * records, the search log and the rules, so a screen can be refreshed as often
@@ -27,7 +29,7 @@ import { query } from '../db.js';
 import * as filing from '../repositories/filing.js';
 import * as placeAttributes from '../repositories/placeAttributes.js';
 import * as taxonomyAudit from '../repositories/taxonomyAudit.js';
-import { CORPUS_OPENS } from '../domain/taxonomyAudit.js';
+import { CORPUS_OPENS, auditAll } from '../domain/taxonomyAudit.js';
 import { setThreshold, thresholds, thresholdValues } from '../repositories/settings.js';
 
 export const filingRoutes = Router();
@@ -529,5 +531,147 @@ filingRoutes.post('/subcategories/:key/accept', requires('manage_library'), asyn
     }
     placeAttributes.forget();
     res.json({ accepted, by: actorOf(req) });
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// Mapping
+// ---------------------------------------------------------------------------
+
+/**
+ * The six flags, in the words the screen prints.
+ *
+ * `grave` is the difference between "this looks wrong" and "this is wrong":
+ * only the two that mean a word is bringing in places nobody could ever want
+ * are drawn as danger. The design brief is explicit that a flag is a
+ * suggestion and plenty will be wrong — "never a red error".
+ */
+const FLAGS = {
+  nobody_goes: { key: 'nobody', name: 'Nobody goes', grave: true },
+  not_visitable: { key: 'notvisitable', name: 'Not a visitable place', grave: true },
+  singleton: { key: 'singleton', name: 'Singleton', grave: false },
+  mixed: { key: 'mixed', name: 'Mixed', grave: false },
+  orphan: { key: 'orphan', name: 'Orphan', grave: false },
+  primary_mismatch: { key: 'mismatch', name: 'Primary mismatch', grave: false },
+};
+
+/**
+ * The four states a row can be in, from the five words the table stores.
+ *
+ * `aside` is Not in Epic. `generic` is a word that is a label rather than a
+ * drawer. `travel` and `nearby` are answers too — parking, and the chemist
+ * beside the museum — and they are neither unanswered nor a drawer, so they
+ * read as kept-as-a-label here and carry their own word in `answer`.
+ */
+const decisionOf = (w) => (w.points_at ? 'mapped'
+  : w.decision === 'aside' ? 'notinepic'
+    : (w.decision === 'generic' || w.decision === 'travel' || w.decision === 'nearby') ? 'secondary'
+      : 'notsure');
+
+/**
+ * Every provider word, what it brings, and what looks wrong about it.
+ *
+ * **The flags are the audit's own signals, not a second opinion.** Running
+ * `auditAll` and turning its proposals into marks on the rows is what stops
+ * the Mapping screen and the Audit screen disagreeing about the same word —
+ * which they would, within a week, if the six conditions were written out
+ * twice. It also means the audit's guards come for free: *nobody goes* stays
+ * silent until the corpus has opens, so the flag cannot appear on every row in
+ * the table on a young product.
+ */
+filingRoutes.get('/mapping', requires('view_library'), async (_req, res, next) => {
+  try {
+    const evidence = await taxonomyAudit.evidence();
+    const { proposals, evidence: saw } = auditAll(evidence);
+    const carried = await placeAttributes.carriedByWord();
+
+    // A proposal is about a word or about a subcategory; a row wears both —
+    // its own, and the ones about the drawer it points at.
+    const byWord = new Map();
+    const bySub = new Map();
+    for (const p of proposals) {
+      const spec = FLAGS[p.flag];
+      if (!spec) continue;
+      const flag = { ...spec, why: p.because };
+      const into = p.subject_kind === 'word' ? byWord : bySub;
+      into.set(p.subject, [...(into.get(p.subject) ?? []), flag]);
+    }
+
+    // The rows are read here rather than taken from the evidence: `evidence.words`
+    // is deliberately narrowed to the *undecided* ones, because that is all the
+    // audit has an opinion about. The Mapping table is the whole vocabulary,
+    // decided and not, and reading the audit's list would have shown 260 of 479
+    // words and called every one of them "not answered".
+    const { rows } = await query(
+      `select l.key, l.label, l.decision, l.points_at, l.active, s.label as sub_label
+         from taxonomy_labels l
+         left join shelf_subcategories s on s.key = l.points_at
+        where l.namespace = 'google'
+        order by l.key`);
+
+    const words = rows.map((w) => {
+      const refs = evidence.placesByWord.get(w.key) ?? [];
+      return {
+        word: w.key,
+        label: w.label ?? w.key,
+        brings: refs.length,
+        opens: refs.reduce((n, ref) => n + (evidence.openedByRef.get(ref) ?? 0), 0),
+        pointsAt: w.points_at ? { key: w.points_at, label: w.sub_label ?? w.points_at } : null,
+        decision: decisionOf(w),
+        // Our own word for it, kept beside the screen's four because they are
+        // not the same vocabulary: `travel` and `nearby` are real answers a
+        // person gave — parking, and the chemist beside the museum — and both
+        // collapse into "kept as a label" if only the four survive.
+        answer: w.decision ?? null,
+        labels: (carried.get(`google:${w.key}`) ?? []).map((c) => c.key),
+        flags: [...(byWord.get(w.key) ?? []), ...(w.points_at ? bySub.get(w.points_at) ?? [] : [])],
+      };
+    });
+
+    res.json({
+      words,
+      counts: {
+        answered: words.filter((w) => w.decision === 'mapped').length,
+        notSure: words.filter((w) => w.decision === 'notsure').length,
+        secondary: words.filter((w) => w.decision === 'secondary').length,
+        // First-class, and counted beside the others: excluding is the correct
+        // answer for a large fraction of Google's types, and the brief is that
+        // it has to read as progress rather than as a gap.
+        notInEpic: words.filter((w) => w.decision === 'notinepic').length,
+        flagged: words.filter((w) => w.flags.length).length,
+        words: words.length,
+      },
+      // What the signals could not see, so an unflagged table does not read as
+      // a clean one.
+      evidence: saw,
+    });
+  } catch (err) { next(err); }
+});
+
+/** GET /mapping/excluded — what is kept out, and why. Reversible from here. */
+filingRoutes.get('/mapping/excluded', requires('view_library'), async (_req, res, next) => {
+  try {
+    const evidence = await taxonomyAudit.evidence();
+    const { proposals } = auditAll(evidence);
+    const why = new Map(proposals.filter((p) => p.subject_kind === 'word').map((p) => [p.subject, p.because]));
+    const { rows: kept } = await query(
+      `select key, label, decision from taxonomy_labels
+        where namespace = 'google' and decision = 'aside' order by key`);
+    const rows = kept.map((w) => {
+      const refs = evidence.placesByWord.get(w.key) ?? [];
+      const opened = refs.reduce((n, ref) => n + (evidence.openedByRef.get(ref) ?? 0), 0);
+      return {
+        word: w.key,
+        label: w.label ?? w.key,
+        brings: refs.length,
+        // A reason, always, and the honest one: where no signal has anything to
+        // say, "somebody decided this" is the truth and beats inventing one.
+        why: why.get(w.key)
+          ?? (opened === 0 && refs.length
+            ? `Brings in ${refs.length.toLocaleString()} places and nobody has ever opened one.`
+            : 'Kept out by hand.'),
+      };
+    });
+    res.json({ excluded: rows, counts: { words: rows.length, places: rows.reduce((n, r) => n + r.brings, 0) } });
   } catch (err) { next(err); }
 });
