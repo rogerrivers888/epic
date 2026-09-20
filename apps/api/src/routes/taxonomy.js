@@ -30,6 +30,7 @@ import { Router } from 'express';
 import { requires } from '../access.js';
 import { query, withTransaction } from '../db.js';
 import * as shelfRules from '../repositories/shelfRules.js';
+import * as taxonomyAudit from '../repositories/taxonomyAudit.js';
 import * as library from '../repositories/library.js';
 import * as taxonomy from '../repositories/shelfTaxonomy.js';
 import * as labelRepo from '../repositories/taxonomyLabels.js';
@@ -572,6 +573,71 @@ taxonomyRoutes.get('/would', requires('view_library'), async (req, res, next) =>
     }
     moving.sort((x, y) => String(x.name).localeCompare(String(y.name)));
     res.json({ add, subcategory, already, carriers, of: all.length, moving: moving.slice(0, 200), count: moving.length });
+  } catch (err) { next(err); }
+});
+
+/**
+ * The audit — the taxonomy examined against evidence Epic already holds.
+ *
+ * The brief, 20 Sep 2026: "Do not fix this by hand, and do not ask a human to
+ * review 485 rows." So: a run proposes, a person accepts in bulk, the accepted
+ * set is applied as one transaction, and the whole thing can be put back.
+ *
+ * Nothing here calls a provider, so a run costs nothing and can be scheduled.
+ */
+taxonomyRoutes.get('/audit', requires('view_library'), async (req, res, next) => {
+  try {
+    const out = await taxonomyAudit.read(req.query.id ? String(req.query.id) : null);
+    if (!out) return res.json({ audit: null, groups: [], effect: null });
+    return res.json(out);
+  } catch (err) { return next(err); }
+});
+
+taxonomyRoutes.post('/audit/run', requires('manage_library'), async (req, res, next) => {
+  try {
+    const audit = await taxonomyAudit.run({ by: actorOf(req), withAgreed: req.body?.agreed === true });
+    res.json(await taxonomyAudit.read(audit.id));
+  } catch (err) { next(err); }
+});
+
+/** One proposal, accepted or rejected. A rejection is remembered. */
+taxonomyRoutes.put('/audit/proposal', requires('manage_library'), async (req, res, next) => {
+  try {
+    const state = String(req.body?.state || '');
+    if (!['open', 'accepted', 'rejected'].includes(state)) throw bad('Accepted, rejected, or back to open.');
+    const p = await taxonomyAudit.decide({ id: String(req.body?.id || ''), state, by: actorOf(req) });
+    if (!p) throw bad('No such proposal.');
+    res.json({ proposal: p });
+  } catch (err) { next(err); }
+});
+
+/** A whole group at once — "Forty exclusions of structural map furniture is one decision." */
+taxonomyRoutes.put('/audit/group', requires('manage_library'), async (req, res, next) => {
+  try {
+    const state = String(req.body?.state || '');
+    if (!['accepted', 'rejected'].includes(state)) throw bad('Accepted or rejected.');
+    const rows = await taxonomyAudit.decideGroup({
+      auditId: String(req.body?.auditId || ''), flag: String(req.body?.flag || ''), state, by: actorOf(req),
+    });
+    res.json({ decided: rows.length });
+  } catch (err) { next(err); }
+});
+
+taxonomyRoutes.post('/audit/apply', requires('manage_library'), async (req, res, next) => {
+  try {
+    const out = await taxonomyAudit.apply({ auditId: String(req.body?.auditId || ''), by: actorOf(req) });
+    shelfRules.forget();
+    taxonomy.forget?.();
+    res.json(out);
+  } catch (err) { next(err); }
+});
+
+taxonomyRoutes.post('/audit/undo', requires('manage_library'), async (req, res, next) => {
+  try {
+    const out = await taxonomyAudit.undo({ auditId: String(req.body?.auditId || ''), by: actorOf(req) });
+    shelfRules.forget();
+    taxonomy.forget?.();
+    res.json(out);
   } catch (err) { next(err); }
 });
 
