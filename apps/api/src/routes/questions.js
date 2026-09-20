@@ -15,7 +15,10 @@
  *   POST   /questions                ask something of a set
  *   PATCH  /questions/:id            gate it, re-order it, change when it goes stale
  *   DELETE /questions/:id            stop asking it
- *   GET    /candidates               the harvest's words, with their share
+ *   GET    /candidates               the harvest's words, with their share and polarity
+ *   GET    /candidates/pen            the holding pen: words nobody has called yet
+ *   POST   /candidates/classify       sort the pen into features, conditions and opinions
+ *   POST   /candidates/:id/kind       call one by hand
  *   POST   /candidates/:id/promote   make one a question (or a gate)
  *   POST   /candidates/:id/ignore    never again — and it means never
  *   POST   /candidates/:id/restore   the way back the design brief asks for
@@ -36,7 +39,8 @@ import { requires } from '../access.js';
 import { query } from '../db.js';
 import * as sets from '../repositories/questionSets.js';
 import * as harvest from '../sources/vocabulary.js';
-import { ENRICH_AFTER, REGIONS, SAMPLE, enrichmentOn, settle } from '../domain/questions.js';
+import { ENRICH_AFTER, KINDS, REGIONS, SAMPLE, enrichmentOn, settle } from '../domain/questions.js';
+import * as placeAttributes from '../repositories/placeAttributes.js';
 import { currentHousehold } from './household.js';
 
 export const questionRoutes = Router();
@@ -54,7 +58,9 @@ questionRoutes.get('/', requires('view_questions'), async (_req, res, next) => {
     const [all, globals, pending, unattached] = await Promise.all([
       sets.sets(),
       sets.questionsFor(null),
-      query("select count(*) from harvest_candidates where status = 'new'"),
+      query(`select count(*) filter (where status = 'new') as promotable,
+                    count(*) filter (where status = 'unresolved' and kind = 'unclear') as pen
+               from harvest_candidates`),
       query(
         `select s.key, s.label, count(p.venue_ref) as places
            from shelf_subcategories s
@@ -67,7 +73,10 @@ questionRoutes.get('/', requires('view_questions'), async (_req, res, next) => {
       sets: all,
       // Shown greyed on a set's screen, and not editable there.
       global: globals.filter((q) => q.scope === 'global'),
-      pending: Number(pending.rows[0]?.count ?? 0),
+      // The count on the tab is what is waiting for a person. The pen is
+      // waiting for a classifier and is nobody's queue.
+      pending: Number(pending.rows[0]?.promotable ?? 0),
+      holdingPen: Number(pending.rows[0]?.pen ?? 0),
       // "If it uses none, that is a state worth showing — those places are
       // being asked only the global questions."
       withoutASet: unattached.rows,
@@ -169,6 +178,61 @@ questionRoutes.get('/candidates', requires('view_questions'), async (req, res, n
   } catch (err) { next(err); }
 });
 
+/**
+ * The holding pen.
+ *
+ * Brief §5.2, and the design comments' third state on L28: words the
+ * classifier could not call, "shown apart from the promotable ones, and
+ * reconsidered when the next harvest raises their count. Not pending, not
+ * ignored, not waiting on a human. Just unresolved."
+ */
+questionRoutes.get('/candidates/pen', requires('view_questions'), async (req, res, next) => {
+  try {
+    const subcategory = req.query.subcategory ? String(req.query.subcategory) : null;
+    const [unclear, resolved] = await Promise.all([
+      sets.candidates({ subcategory, status: 'unresolved', kind: 'unclear', limit: 500 }),
+      sets.candidates({ subcategory, status: 'unresolved', limit: 500 }),
+    ]);
+    res.json({
+      // What nobody has called yet, and what has been called something that is
+      // not a question. The two are different states and the screen shows them
+      // differently.
+      waiting: unclear,
+      notQuestions: resolved.filter((c) => c.kind !== 'unclear'),
+    });
+  } catch (err) { next(err); }
+});
+
+/**
+ * Sort the pen.
+ *
+ * One model call per eighty words, on the vocabulary rather than the text, so
+ * the verdict "wave machine is a feature" is bought once for every water park
+ * there will ever be. A word it cannot call stays in the pen.
+ */
+questionRoutes.post('/candidates/classify', requires('manage_questions'), async (req, res, next) => {
+  try {
+    const household = await currentHousehold().catch(() => null);
+    res.json(await harvest.classifyCandidates({
+      subcategory: req.body?.subcategory ? String(req.body.subcategory) : null,
+      limit: Math.min(2000, Number(req.body?.limit ?? 400) || 400),
+      householdId: household?.id ?? null,
+      sessionId: req.session?.id ?? null,
+    }));
+  } catch (err) { next(err); }
+});
+
+/** Call one by hand, where somebody knows better than the classifier did. */
+questionRoutes.post('/candidates/:id/kind', requires('manage_questions'), async (req, res, next) => {
+  try {
+    const kind = String(req.body?.kind ?? '');
+    if (!KINDS.includes(kind)) throw bad(`A word is one of ${KINDS.join(', ')}.`);
+    const row = await sets.setKind(Number(req.params.id), { kind, by: actorOf(req) });
+    if (!row) return res.status(404).json({ error: 'not_found', message: 'That word has already been decided.' });
+    return res.json(row);
+  } catch (err) { return next(err); }
+});
+
 questionRoutes.post('/candidates/:id/promote', requires('manage_questions'), async (req, res, next) => {
   try {
     const { gate = false, kind = 'yesno', label = null, attributeKey = null, refreshDays = null } = req.body ?? {};
@@ -209,15 +273,21 @@ questionRoutes.get('/answers/:ref', requires('view_questions'), async (req, res,
     const set = subcategory ? await sets.setForSubcategory(subcategory) : null;
     const asked = await sets.questionsFor(set?.key ?? null);
     const answers = await sets.answersFor(ref);
+    // Tier one of the brief's three (§5.5): what the place inherits from its
+    // drawer, free and instant, so "a water park nobody has ever looked at
+    // still has indoors, booking, the age range and the eight. The page is
+    // never empty."
+    const defaults = subcategory ? (await placeAttributes.attributes()).bySubcategory.get(subcategory) : null;
     const byQuestion = new Map();
     for (const a of answers) byQuestion.set(a.question_id, [...(byQuestion.get(a.question_id) ?? []), a]);
     res.json({
       venueRef: ref,
       subcategory,
-      set: set ?? null,
+      set: set ? { ...set, readsReviews: !set.vocabulary_settled } : null,
       questions: asked.map((q) => {
         const rows = byQuestion.get(q.id) ?? [];
         const answer = settle(rows);
+        const inherited = defaults?.get(q.attribute_key) ?? null;
         return {
           id: q.id, label: q.label, kind: q.kind, gate: q.gate, scope: q.scope,
           // No row at all is "not asked yet" — a different fact from silence.
@@ -225,6 +295,10 @@ questionRoutes.get('/answers/:ref', requires('view_questions'), async (req, res,
           value: answer?.value ?? null,
           unresolved: answer?.unresolved ?? false,
           sources: answer?.sources ?? [],
+          // Drawn where the place itself has said nothing. It is what the
+          // drawer says about places of this kind, not a claim about this one,
+          // and it is labelled that way rather than dressed as an answer.
+          inherited: answer ? null : inherited,
           ...(answer?.other ? { other: answer.other } : {}),
         };
       }),

@@ -20,8 +20,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { testDatabase } from './helpers/db.js';
 import {
-  candidatesFor, disagree, earnsEnrichment, enrichmentOn, mayAnswer, phrasesIn, phrasesInTags,
-  pickSample, regionOfArea, saturation, settle, spreadByRegion,
+  candidatesFor, disagree, discriminates, earnsEnrichment, enrichmentOn, gateWord, mayAnswer,
+  phrasesIn, phrasesInTags, pickSample, plainKindOf, polarityOf, regionOfArea, saturation, settle,
+  spreadByRegion,
 } from '../src/domain/questions.js';
 import { skuFor } from '../src/sources/google.js';
 
@@ -74,6 +75,52 @@ test('a word carries every source that raised it', () => {
     texts: [{ source: 'google', text: 'A water park with flumes.' }],
   });
   assert.deepEqual([...raised.get('water park').sources].sort(), ['google', 'osm']);
+});
+
+// ---------------------------------------------------------------------------
+// polarity, which cannot be recovered later
+// ---------------------------------------------------------------------------
+
+test('a question about a feature is not evidence that the place has it', () => {
+  // The brief's own example. "It cannot be recovered later, so capture it at
+  // extraction or not at all" — by the time anything else runs, the text is
+  // gone.
+  assert.equal(polarityOf('The wave machine is great', 'wave machine'), 'asserts');
+  assert.equal(polarityOf('No wave machine any more, sadly', 'wave machine'), 'denies');
+  assert.equal(polarityOf("Does it have a wave machine? We couldn't find one", 'wave machine'), 'asks');
+});
+
+test('one sentence can assert one thing and deny another', () => {
+  // Reading the whole sentence would have marked the flume as denied too,
+  // which is how a place ends up answered backwards.
+  assert.equal(polarityOf('There is a flume and no toddler pool', 'flume'), 'asserts');
+  assert.equal(polarityOf('There is a flume and no toddler pool', 'toddler pool'), 'denies');
+});
+
+test('polarity is counted per place, not per mention', () => {
+  const raised = candidatesFor({
+    texts: [
+      { source: 'google', text: 'A water park with flumes. No toddler pool.' },
+      { source: 'site', text: 'Does it have a toddler pool?' },
+    ],
+  });
+  const pool = raised.get('toddler pool');
+  assert.equal(pool.asserts, 0, 'nobody said it has one');
+  assert.equal(pool.denies, 1);
+  assert.equal(pool.asks, 1);
+});
+
+test('an opinion and a condition are not questions about a place', () => {
+  assert.equal(plainKindOf('rude staff'), 'opinion');
+  assert.equal(plainKindOf('busy at weekend'), 'condition');
+  assert.equal(plainKindOf('wave machine'), null, 'a word code cannot call goes to the classifier');
+});
+
+test('a word that everywhere has tells nothing apart — unless it is a gate', () => {
+  assert.equal(discriminates(0.2), true, '4 of 20 is a find');
+  assert.equal(discriminates(0.98), false, '20 of 20 is the category, not a question');
+  assert.equal(discriminates(0.98, { gate: true }), true, 'a gate is decisive at any frequency');
+  assert.equal(gateWord('step free access'), true);
 });
 
 // ---------------------------------------------------------------------------
@@ -197,16 +244,30 @@ test('two owned sources that disagree are both kept, and neither wins', async ()
 // the queue
 // ---------------------------------------------------------------------------
 
-test('an ignored word never raises a second candidate', async () => {
+test('a word nobody has classified waits in the holding pen', async () => {
   await sets.recordCandidates('water-parks', [
-    { norm: 'wave machine', raw: 'wave machine', rawForms: ['wave machine'], sources: ['google'], placesSeen: 2, examples: ['google:a'] },
-    { norm: 'locker', raw: 'lockers', rawForms: ['lockers'], sources: ['google'], placesSeen: 19, examples: ['google:a'] },
+    { norm: 'wave machine', raw: 'wave machine', rawForms: ['wave machine'], sources: ['google'], placesSeen: 2, examples: ['google:a'], asserts: 2 },
+    { norm: 'locker', raw: 'lockers', rawForms: ['lockers'], sources: ['google'], placesSeen: 19, examples: ['google:a'], asserts: 19 },
+    { norm: 'rude staff', raw: 'rude staff', rawForms: ['rude staff'], sources: ['google'], placesSeen: 5, asserts: 5 },
   ], { placesTotal: 20 });
 
-  const before = await sets.candidates({ subcategory: 'water-parks' });
+  // Nothing is promotable until something has said it is a feature. "Rude
+  // staff" never will be: the code's own pass called it an opinion.
+  assert.equal((await sets.candidates({ subcategory: 'water-parks', status: 'new' })).length, 0);
+  const pen = await sets.unclassified({ subcategory: 'water-parks' });
+  assert.deepEqual(pen.map((p) => p.norm).sort(), ['locker', 'wave machine'], 'the opinion is not waiting on anybody');
+  const opinions = await sets.candidates({ subcategory: 'water-parks', status: 'unresolved', kind: 'opinion' });
+  assert.equal(opinions[0].norm, 'rude staff');
+
+  // The classifier calls the two it was given, and they become promotable.
+  const verdicts = { 'wave machine': 'feature', locker: 'feature' };
+  for (const row of pen) await sets.setKind(row.id, { kind: verdicts[row.norm], by: 'test' });
+  const before = await sets.candidates({ subcategory: 'water-parks', status: 'new' });
   assert.equal(before.length, 2);
-  // The share is what the screen sorts on: a 10% find above a 95% word.
+  // Seen-on is what the screen sorts by: a 10% find above a 95% word.
   assert.equal(before[0].norm, 'wave machine', 'the rarest word comes back first');
+  assert.equal(before[0].discriminates, true);
+  assert.equal(before.find((c) => c.norm === 'locker').discriminates, false, '19 of 20 is the category');
 
   const lockers = before.find((c) => c.norm === 'locker');
   await sets.ignoreCandidate(lockers.id, { actor: 'test' });
@@ -214,11 +275,33 @@ test('an ignored word never raises a second candidate', async () => {
     { norm: 'locker', raw: 'lockers', sources: ['osm'], placesSeen: 19 },
   ], { placesTotal: 20 });
   assert.equal(written.skipped, 1, 'the harvest skipped it rather than writing it again');
-  assert.equal((await sets.candidates({ subcategory: 'water-parks' })).length, 1);
+  assert.equal((await sets.candidates({ subcategory: 'water-parks', status: 'new' })).length, 1);
+});
+
+test('a candidate says when its mentions are mostly against it', async () => {
+  await sets.recordCandidates('water-parks', [
+    { norm: 'slide tower', raw: 'slide tower', sources: ['google'], placesSeen: 4, asserts: 1, denies: 2, asks: 1 },
+  ], { placesTotal: 20 });
+  const [row] = await sets.candidates({ subcategory: 'water-parks', status: 'unresolved', kind: 'unclear' })
+    .then((rows) => rows.filter((r) => r.norm === 'slide tower'));
+  assert.equal(row.polarity.mostlyAgainst, true, 'three of its four mentions are a denial or a question');
+  assert.equal(row.seenOn, 0.2);
+});
+
+test('a settled set leaves the Google pass, and a new subcategory brings it back', async () => {
+  await sets.settleSet('water', { on: { places: 20 } });
+  let settled = await sets.settledSubcategories();
+  assert.equal(settled.get('water-parks').vocabulary_settled, true);
+
+  await query("insert into shelf_subcategories (key, label, category_key) values ('lidos', 'Lidos', 'test-cat') on conflict do nothing");
+  await sets.attach('water', 'lidos');
+  settled = await sets.settledSubcategories();
+  assert.equal(settled.get('water-parks').vocabulary_settled, false,
+    'lidos bring a vocabulary nobody has harvested, so the set is not settled any more');
 });
 
 test('promoting a word makes a question, reuses a label we have, and drops the scaffolding', async () => {
-  const [candidate] = await sets.candidates({ subcategory: 'water-parks' });
+  const [candidate] = await sets.candidates({ subcategory: 'water-parks', status: 'new' });
   assert.ok(candidate.examples.length, 'examples are there while it is being reviewed');
   const promoted = await sets.promote(candidate.id, { gate: false, actor: 'test' });
   assert.equal(promoted.attributeKey, 'wave-machine', 'the label we already had was reused, not duplicated twice');
@@ -263,4 +346,30 @@ test('the enrichment hook is built and off', () => {
   assert.equal(enrichmentOn({ EPIC_ENRICHMENT: 'on' }), true);
   assert.equal(earnsEnrichment({ shown: 40 }), true);
   assert.equal(earnsEnrichment({ shown: 1, opened: 0 }), false);
+});
+
+// ---------------------------------------------------------------------------
+// being a good guest
+// ---------------------------------------------------------------------------
+
+test('a venue that says no is not read', async () => {
+  // Brief §5.5: enrichment reads venue pages, so it respects robots.txt and a
+  // per-domain crawl delay, "set centrally in the client". Centrally is the
+  // word — three places in Epic fetch a venue's own page, and a rule that
+  // lives in one of them is a rule the other two break.
+  const polite = await import('../src/sources/politeness.js');
+  const theirs = polite.parse([
+    'User-agent: *', 'Disallow: /admin', 'Crawl-delay: 2', '',
+    'User-agent: EpicBot', 'Disallow: /private', 'Allow: /private/menu',
+  ].join('\n'));
+  assert.equal(polite.allowedBy(theirs.rules, '/private/prices'), false, 'they named us and said no');
+  assert.equal(polite.allowedBy(theirs.rules, '/private/menu'), true, 'the longer rule wins');
+  assert.equal(polite.allowedBy(theirs.rules, '/admin'), true, 'the wildcard group is not ours once they name us');
+
+  const blanket = polite.parse('User-agent: *\nDisallow: /');
+  assert.equal(polite.allowedBy(blanket.rules, '/anything'), false);
+  // An empty Disallow is the standard's way of saying "nothing is disallowed".
+  assert.equal(polite.allowedBy(polite.parse('User-agent: *\nDisallow:').rules, '/x'), true);
+  // A site with no robots.txt has not refused anything.
+  assert.equal(polite.allowedBy(polite.parse('').rules, '/x'), true);
 });

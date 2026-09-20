@@ -128,9 +128,10 @@ export const MAX_PHRASE_WORDS = 3;
  */
 export function phrasesIn(text) {
   const found = new Map();
-  const clean = String(text ?? '')
+  const source = String(text ?? '');
+  const clean = source
     .replace(/https?:\/\/\S+/g, ' ')
-    .replace(/[^\p{L}\p{N}'’\-\s]+/gu, ' ');
+    .replace(/[^\p{L}\p{N}'’\-\s.!?;,]+/gu, ' ');
   if (!clean.trim()) return found;
   let run = [];
   const flush = () => {
@@ -145,14 +146,162 @@ export function phrasesIn(text) {
     run = [];
   };
   for (const token of clean.split(/\s+/)) {
-    const t = token.toLowerCase().replace(/^[-'’]+|[-'’]+$/g, '');
-    if (isWord(t)) run.push(t);
-    else flush();
+    const t = token.toLowerCase().replace(/^[-'’]+|[-'’.,!?;]+$/g, '');
+    // Punctuation ends a run as surely as a stopword does: a phrase may not
+    // span a full stop, or "the pool. Parking is free" becomes "pool parking".
+    const punctuated = /[.!?;,]/.test(token);
+    if (isWord(t)) { run.push(t); if (punctuated) flush(); } else flush();
     if (run.length > 60) flush();
   }
   flush();
   return found;
 }
+
+/**
+ * The phrases in a piece of text, each with what the text *did* to it.
+ *
+ * The same extraction as `phrasesIn`, plus the polarity read from the clause
+ * the phrase sits in — the one thing that cannot be recovered once the text
+ * is discarded, which for a rented summary is immediately.
+ */
+export function phrasesWithPolarity(text) {
+  const out = new Map();
+  for (const [norm, raw] of phrasesIn(text)) {
+    out.set(norm, { raw, polarity: polarityOf(text, raw) });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Polarity: asserted, denied, or merely asked
+// ---------------------------------------------------------------------------
+
+/**
+ * What a sentence does to the thing it mentions.
+ *
+ * Brief §5.1, settled 20 September 2026: *"Does it have a wave machine? We
+ * couldn't find one"* mentions the feature and means the opposite. **"It
+ * cannot be recovered later, so capture it at extraction or not at all"** —
+ * once the text is discarded, which for a rented summary is within
+ * milliseconds of it arriving, there is nothing left to re-read.
+ *
+ * Read from the clause the phrase sits in rather than the whole passage: a
+ * summary that says a place has a flume and no toddler pool is one sentence
+ * with two different answers in it.
+ */
+export const ASSERTS = 'asserts';
+export const DENIES = 'denies';
+export const ASKS = 'asks';
+
+/** "no wave machine", "not step free", "without a toddler pool", "the lido closed". */
+const DENIAL = /\b(no|not|never|without|lacks?|lacking|missing|nothing|none|neither|nor|closed|removed|gone|no longer|isn'?t|aren'?t|doesn'?t|don'?t|didn'?t|wasn'?t|weren'?t|hasn'?t|haven'?t|couldn'?t|can'?t)\b/i;
+/** "does it have…", "is there…", "anyone know if…" — anything that is a question. */
+const ENQUIRY = /\?|\b(does|do|is there|are there|was there|were there|has it|have they|anyone know|any idea|wondering|wonder if)\b[^.!?]*$/i;
+
+/**
+ * The clause a phrase sits in, which is as much as polarity can honestly be
+ * read from.
+ */
+export function clauseAround(text, phrase) {
+  const haystack = String(text ?? '');
+  const needle = String(phrase ?? '');
+  const at = haystack.toLowerCase().indexOf(needle.toLowerCase());
+  if (at < 0) return haystack;
+  const before = haystack.slice(0, at);
+  const after = haystack.slice(at);
+
+  // Breaks on the left: the end of the previous claim. " and " is one of them
+  // — "a flume and no toddler pool" is two claims, and reading it whole marks
+  // the flume as denied.
+  let start = 0;
+  for (const mark of ['.', '!', '?', ';', ',', ' but ', ' although ', ' though ', ' however ', ' and ', ' with ', ' plus ']) {
+    const i = before.lastIndexOf(mark);
+    if (i >= 0) start = Math.max(start, i + mark.length);
+  }
+
+  // Breaks on the right: the start of the next claim. A question mark belongs
+  // to this clause rather than the next one — cutting it off would turn an
+  // enquiry into an assertion.
+  let end = after.length;
+  for (const mark of ['.', '!', ';', ',', ' but ', ' and ', ' with ', ' plus ', ' as well as ']) {
+    const i = after.indexOf(mark, needle.length);
+    if (i >= 0) end = Math.min(end, i);
+  }
+  const q = after.indexOf('?', needle.length);
+  if (q >= 0) end = Math.min(end, q + 1);
+
+  return `${before.slice(start)}${after.slice(0, end)}`.trim();
+}
+
+/**
+ * Asserted, denied or asked, for one phrase in one piece of text.
+ *
+ * The order matters: a question that also contains a negation ("does it have a
+ * wave machine? we couldn't find one") is an enquiry rather than a denial,
+ * because somebody wondering is weaker evidence than somebody saying no. Both
+ * are the opposite of evidence that it is there, which is the distinction that
+ * had to survive.
+ */
+export function polarityOf(text, phrase) {
+  const clause = clauseAround(text, phrase);
+  if (ENQUIRY.test(clause)) return ASKS;
+  if (DENIAL.test(clause)) return DENIES;
+  return ASSERTS;
+}
+
+// ---------------------------------------------------------------------------
+// Kind: a feature, a condition, an opinion, or not yet known
+// ---------------------------------------------------------------------------
+
+export const KINDS = ['feature', 'condition', 'opinion', 'unclear'];
+
+/**
+ * Words that are plainly not a question about a place, without asking anybody.
+ *
+ * Brief §5.1: only features are candidates. *Busy at weekends* is a condition
+ * and *rude staff* is an opinion, and neither is something a place either has
+ * or has not got — an opinion is the Epic score's job. This first pass is in
+ * code and free; a word it cannot call goes to the classifier, and a word the
+ * classifier cannot call goes to the holding pen rather than being guessed at.
+ */
+const OPINION_WORDS = /\b(rude|friendly|helpful|unhelpful|welcoming|attentive|slow|quick|clean|dirty|filthy|tired|dated|shabby|charming|overpriced|expensive|cheap|value|bargain|disappointing|impressive|stunning|beautiful|ugly|boring|magical|worth|rubbish|awful|terrible|fantastic|wonderful|perfect|horrible|favourite|highlight)\b/i;
+const CONDITION_WORDS = /\b(busy|quiet|crowded|packed|rammed|empty|queue|queuing|wait|waiting|weekend|weekday|holiday|holidays|peak|season|seasonal|rain|rainy|sunny|weather|early|late|morning|afternoon|evening|sold out|refurbishment|maintenance)\b/i;
+
+/** The kind this phrase plainly is, or null where a model has to decide. */
+export function plainKindOf(norm) {
+  const w = String(norm ?? '');
+  if (OPINION_WORDS.test(w)) return 'opinion';
+  if (CONDITION_WORDS.test(w)) return 'condition';
+  return null;
+}
+
+/**
+ * Does a word tell two places apart?
+ *
+ * Brief §5.3: "4 of 20 is a find; 20 of 20 is a definition of the category,
+ * not a question about a place. Gates and age signals are exempt." Returned
+ * rather than acted on — promotion is a human act on a reviewed list, and this
+ * is what that list sorts and marks by.
+ */
+export const DISCRIMINATES = { floor: 0.02, ceiling: 0.9 };
+export function discriminates(share, { gate = false, ageSignal = false } = {}) {
+  if (gate || ageSignal) return true;
+  if (share == null) return false;
+  return share >= DISCRIMINATES.floor && share <= DISCRIMINATES.ceiling;
+}
+
+/**
+ * The words that are common and essential at once.
+ *
+ * The design brief's two exceptions that must not be sorted away: a gate is
+ * decisive for the people who need it at any frequency, and an age signal sets
+ * the age range whether or not it is rare. Marked here so a screen can lift
+ * them above the sort rather than bury them under it.
+ */
+const GATE_WORDS = /\b(step.?free|level access|wheelchair|accessible|disabled|hearing loop|induction loop|ramp|lift|braille|changing places|blue badge|assistance dog|guide dog|hoist|adapted)\b/i;
+const AGE_WORDS = /\b(toddler|baby|babies|infant|pushchair|pram|buggy|high.?chair|baby chang|nappy|soft play|teen|teenager|adult only|family)\b/i;
+export const gateWord = (norm) => GATE_WORDS.test(String(norm ?? ''));
+export const ageWord = (norm) => AGE_WORDS.test(String(norm ?? ''));
 
 /**
  * The tags on the open map, as candidate phrases.
@@ -194,17 +343,18 @@ export function phrasesInTags(tags = {}) {
  */
 export function candidatesFor({ tags = null, texts = [] } = {}) {
   const out = new Map();
-  const add = (map, source) => {
-    for (const [norm, raw] of map) {
-      const seen = out.get(norm) ?? { norm, raw, sources: new Set() };
-      seen.sources.add(source);
-      out.set(norm, seen);
-    }
+  const add = (norm, raw, source, polarity) => {
+    const seen = out.get(norm) ?? { norm, raw, sources: new Set(), asserts: 0, denies: 0, asks: 0 };
+    seen.sources.add(source);
+    seen[polarity] += 1;
+    out.set(norm, seen);
   };
-  if (tags) add(phrasesInTags(tags), 'osm');
+  // A tag is an assertion by construction: `changing_table=yes` is the open map
+  // saying there is one, and `=no` never reaches here (`phrasesInTags`).
+  if (tags) for (const [norm, raw] of phrasesInTags(tags)) add(norm, raw, 'osm', ASSERTS);
   for (const { source, text } of texts) {
     if (!text) continue;
-    add(phrasesIn(text), source);
+    for (const [norm, { raw, polarity }] of phrasesWithPolarity(text)) add(norm, raw, source, polarity);
   }
   return out;
 }

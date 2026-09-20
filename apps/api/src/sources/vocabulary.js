@@ -30,7 +30,9 @@
  *     costs money, so it will not run without being told to in as many words.
  */
 
+import { z } from 'zod/v4';
 import { query } from '../db.js';
+import { MODEL, parseStructured } from '../claude.js';
 import { googleSource } from './google.js';
 import { placeTags } from './inside.js';
 import * as providerCalls from '../repositories/providerCalls.js';
@@ -202,6 +204,7 @@ export async function freeSweep({ subcategories = null, size = SAMPLE.top + SAMP
   const report = [];
   let places = 0;
   let found = 0;
+  let settled = [];
   const curves = {};
   try {
     for (const kind of kinds) {
@@ -215,10 +218,15 @@ export async function freeSweep({ subcategories = null, size = SAMPLE.top + SAMP
         const raised = candidatesFor({ tags: osmTags, texts });
         perPlace.push([...raised.keys()]);
         for (const [norm, entry] of raised) {
-          const seen = counts.get(norm) ?? { norm, raw: entry.raw, rawForms: new Set(), sources: new Set(), examples: [], placesSeen: 0 };
+          const seen = counts.get(norm) ?? { norm, raw: entry.raw, rawForms: new Set(), sources: new Set(), examples: [], placesSeen: 0, asserts: 0, denies: 0, asks: 0 };
           seen.placesSeen += 1;
           seen.rawForms.add(entry.raw);
           for (const s of entry.sources) seen.sources.add(s);
+          // Counted in places rather than mentions: this place asserted it,
+          // denied it, or wondered about it.
+          if (entry.asserts) seen.asserts += 1;
+          if (entry.denies) seen.denies += 1;
+          if (entry.asks) seen.asks += 1;
           if (seen.examples.length < 5) seen.examples.push(place.venue_ref);
           counts.set(norm, seen);
         }
@@ -228,15 +236,21 @@ export async function freeSweep({ subcategories = null, size = SAMPLE.top + SAMP
       const written = await sets.recordCandidates(kind.key, entries, { placesTotal: sample.length });
       found += written.written;
       curves[kind.key] = { ...saturation(perPlace), sampled: sample.length, held, regions };
-      report.push({ subcategory: kind.key, sampled: sample.length, candidates: written.written, ignoredAgain: written.skipped, regions });
+      report.push({
+        subcategory: kind.key, sampled: sample.length, candidates: written.written,
+        inHoldingPen: written.held, ignoredAgain: written.skipped, regions,
+      });
       onProgress?.({ subcategory: kind.key, done: report.length, of: kinds.length });
     }
+    // A set whose subcategories have all stopped teaching new words leaves the
+    // Google pass for good (brief §5.4).
+    settled = await settleFromSaturation(curves, { runId: run.id });
     await sets.finishRun(run.id, { places, calls: 0, candidates: found, costUsd: 0, saturation: curves });
   } catch (err) {
     await sets.finishRun(run.id, { status: 'failed', places, candidates: found, saturation: curves, note: String(err.message).slice(0, 200) });
     throw err;
   }
-  return { run: run.id, places, candidates: found, subcategories: report, saturation: curves };
+  return { run: run.id, places, candidates: found, subcategories: report, saturation: curves, settled };
 }
 
 /** The open map, asked about one place. Free, paced, and allowed to come back with nothing. */
@@ -360,7 +374,13 @@ export async function googleHarvest({
   if (plan.requests > MAX_GOOGLE_REQUESTS) {
     throw Object.assign(new Error(`${plan.requests} requests is past the ${MAX_GOOGLE_REQUESTS} ceiling for one run. Narrow it, or raise the ceiling for this run deliberately.`), { status: 400 });
   }
-  const kinds = await harvestable({ subcategories });
+  const all = await harvestable({ subcategories });
+  // A settled set has stopped needing Google. Skipping it here is what makes
+  // the brief's "expect Google spend on this to trend to zero" true rather
+  // than aspirational, and the run says which were skipped and why.
+  const bySub = await sets.settledSubcategories();
+  const kinds = all.filter((k) => !bySub.get(k.key)?.vocabulary_settled);
+  const skipped = all.filter((k) => bySub.get(k.key)?.vocabulary_settled).map((k) => k.key);
   const regions = REGIONS.slice(0, Math.min(regionsPer, REGIONS.length));
   const run = await sets.startRun({
     kind: 'google',
@@ -399,10 +419,16 @@ export async function googleHarvest({
           const raised = candidatesFor({ texts: [{ source: 'google', text: p.summary }] });
           perPlace.push([...raised.keys()]);
           for (const [norm, entry] of raised) {
-            const seen = counts.get(norm) ?? { norm, raw: entry.raw, rawForms: new Set(), sources: new Set(), examples: [], placesSeen: 0 };
+            const seen = counts.get(norm) ?? { norm, raw: entry.raw, rawForms: new Set(), sources: new Set(), examples: [], placesSeen: 0, asserts: 0, denies: 0, asks: 0 };
             seen.placesSeen += 1;
             seen.rawForms.add(entry.raw);
             seen.sources.add('google');
+            // The polarity, read from the clause before the text goes. A
+            // review asking whether a place has a wave machine is not evidence
+            // that it has one, and this is the only moment it can be caught.
+            if (entry.asserts) seen.asserts += 1;
+            if (entry.denies) seen.denies += 1;
+            if (entry.asks) seen.asks += 1;
             // The id is storable — it is an identifier — and it is scaffolding
             // that goes the moment the candidate is decided.
             if (seen.examples.length < 5) seen.examples.push(`google:${p.id}`);
@@ -415,12 +441,13 @@ export async function googleHarvest({
       const written = await sets.recordCandidates(kind.key, entries, { placesTotal: seenHere });
       found += written.written;
       curves[kind.key] = { ...saturation(perPlace), sampled: seenHere };
-      report.push({ subcategory: kind.key, places: seenHere, candidates: written.written });
+      report.push({ subcategory: kind.key, places: seenHere, candidates: written.written, inHoldingPen: written.held });
     }
     await providerCalls.record(householdId, 'google', 'harvest.vocabulary', meter, sessionId).catch(() => null);
     const { usd } = await costOfRun(run.started_at);
+    const settled = await settleFromSaturation(curves, { runId: run.id });
     await sets.finishRun(run.id, { places, calls: requests, candidates: found, costUsd: usd, saturation: curves });
-    return { run: run.id, requests, places, candidates: found, costUsd: usd, subcategories: report, saturation: curves };
+    return { run: run.id, requests, places, candidates: found, costUsd: usd, subcategories: report, saturation: curves, settled, skippedAsSettled: skipped };
   } catch (err) {
     await providerCalls.record(householdId, 'google', 'harvest.vocabulary', meter, sessionId).catch(() => null);
     await sets.finishRun(run.id, { status: 'failed', places, calls: requests, candidates: found, saturation: curves, note: String(err.message).slice(0, 200) });
@@ -482,6 +509,28 @@ export async function enrichmentQueue({ limit = 50, since = 90 } = {}) {
 }
 
 /**
+ * The search that just happened, offered to enrichment.
+ *
+ * Brief §5.5: "**Trigger enrichment on the search, not on the open.** A search
+ * returning ten water parks queues all ten. It reads only owned sources, so it
+ * is free; by the time a household taps one it is usually already answered."
+ *
+ * The call site is the search path, and it is a no-op while the switch is off
+ * — which is how it ships, per §6. It is here rather than inside the search so
+ * that turning enrichment on is one environment variable and not a change to
+ * the path a household waits on.
+ */
+export async function offerToEnrichment(refs = [], { reason = 'search' } = {}) {
+  if (!enrichmentOn() || !refs.length) return { queued: 0, on: false };
+  const queue = await enrichmentQueue({ limit: refs.length });
+  const wanted = new Set(refs);
+  const due = queue.filter((r) => wanted.has(r.venue_ref));
+  // Nothing runs yet: the answerer is the next piece of work, and the brief is
+  // explicit that nothing may batch-enrich in the meantime.
+  return { queued: due.length, on: true, reason, refs: due.map((r) => r.venue_ref) };
+}
+
+/**
  * Answer one place's questions from the sources Epic owns.
  *
  * **Off, and the brief says to leave it off**: "Build the hook now, leave it
@@ -504,4 +553,141 @@ export async function enrichPlace(venueRef, { force = false } = {}) {
     new Error('Enrichment has no answerer yet. The hook and the queue are built; the per-place research pass is the next piece of work.'),
     { status: 501, code: 'not_built' },
   );
+}
+
+// ---------------------------------------------------------------------------
+// the classifier: is this word a feature, a condition, or an opinion?
+// ---------------------------------------------------------------------------
+
+/**
+ * What kind of word this is, decided once per word rather than once per place.
+ *
+ * Brief §5.1 asks for the kind at extraction and prices it at "a fraction of a
+ * penny per place". Classifying the *vocabulary* instead of the text is the
+ * same verdict an order of magnitude cheaper: "wave machine is a feature" is
+ * true of every water park at once, and a subcategory's five hundred distinct
+ * words are five calls rather than twenty.
+ *
+ * The code's own pass has already called the obvious half for nothing
+ * (`plainKindOf`). What arrives here is what it could not call.
+ *
+ * **A word the model cannot call stays in the holding pen.** So does every
+ * word, if the budget is spent or the key is missing: the run reports it and
+ * nothing is guessed at. That is the brief's rule — "never force a verdict,
+ * never promote on thin evidence" — and it is also what makes this safe to run
+ * unattended.
+ */
+const Verdicts = z.object({
+  words: z.array(z.object({
+    word: z.string(),
+    kind: z.enum(['feature', 'condition', 'opinion', 'unclear']),
+  })),
+});
+
+const CLASSIFY_SYSTEM = `You are sorting words that were noticed in what people write about places to visit in the UK — reviews, venue pages, the open map, encyclopedia articles. Epic asks closed questions about places ("does it have a wave machine?"), and needs to know which of these words could be such a question.
+
+Sort each word into exactly one kind:
+
+- feature — something a place either has or has not got, and which a family might choose on. A wave machine, a toddler pool, step free access, a gift shop, a guided tour, parking, a paddling pool, a miniature railway, a licensed bar.
+- condition — true of a place sometimes rather than always, or about circumstances rather than the place. Busy at weekends, long queues, seasonal opening, sunny.
+- opinion — a judgement rather than a fact. Rude staff, overpriced, charming, the best day out.
+- unclear — you genuinely cannot tell, or the word is a fragment, a place name, a person, a date or otherwise not about the place at all.
+
+Prefer unclear to a guess. A wrong "feature" becomes a question asked of thousands of places; an unclear word simply waits and is looked at again.`;
+
+/**
+ * Classify what is in the holding pen.
+ *
+ * `ask` is injectable so the tests can exercise the queue, the writes and the
+ * batching without a model call.
+ */
+export async function classifyCandidates({
+  subcategory = null, limit = 400, batch = 80, householdId = null, sessionId = null, ask = null,
+} = {}) {
+  const waiting = await sets.unclassified({ subcategory, limit });
+  if (!waiting.length) return { looked: 0, called: [], held: 0, problem: null };
+  const counts = { feature: 0, condition: 0, opinion: 0, unclear: 0 };
+  let problem = null;
+  for (let i = 0; i < waiting.length; i += batch) {
+    const slice = waiting.slice(i, i + batch);
+    let verdicts;
+    try {
+      verdicts = ask
+        ? await ask(slice)
+        : (await parseStructured({
+          system: CLASSIFY_SYSTEM,
+          messages: [{
+            role: 'user',
+            content: `These words were noticed in what is written about ${subcategory ? `places filed under "${subcategory}"` : 'places to visit'}. Sort every one of them.\n\n${slice.map((w) => `- ${w.raw_forms?.[0] ?? w.norm}`).join('\n')}`,
+          }],
+          schema: Verdicts,
+          householdId,
+          sessionId,
+          purpose: 'harvest.classify',
+          effort: 'low',
+          thinking: 'off',
+          maxTokens: 4096,
+        })).words;
+    } catch (err) {
+      // A spent budget or a missing key leaves the pen exactly as it was,
+      // which is the right outcome: nothing is promoted on a guess and the run
+      // says what stopped it.
+      problem = String(err.message).slice(0, 160);
+      break;
+    }
+    const byWord = new Map((verdicts ?? []).map((v) => [normalise(v.word), v.kind]));
+    for (const row of slice) {
+      const kind = byWord.get(row.norm) ?? byWord.get(normalise(row.raw_forms?.[0] ?? '')) ?? 'unclear';
+      if (kind === 'unclear') { counts.unclear += 1; continue; }
+      await sets.setKind(row.id, { kind, by: ask ? 'test' : MODEL });
+      counts[kind] += 1;
+    }
+  }
+  return {
+    looked: waiting.length,
+    features: counts.feature,
+    conditions: counts.condition,
+    opinions: counts.opinion,
+    held: counts.unclear,
+    problem,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// when a set stops reading reviews
+// ---------------------------------------------------------------------------
+
+/**
+ * Settle every set whose subcategories have stopped teaching Epic new words.
+ *
+ * Brief §5.4, and it is the moment a category stops costing money: a settled
+ * set is skipped by the Google pass for ever after, and enrichment for it
+ * reads owned sources only. A set is settled when *every* subcategory attached
+ * to it came back saturated in the run being considered — one unsaturated
+ * subcategory means the set has vocabulary left to learn.
+ */
+export async function settleFromSaturation(saturation = {}, { runId = null } = {}) {
+  const { rows } = await query(
+    `select s.key, s.vocabulary_settled, array_agg(ss.subcategory_key) as subcategories
+       from question_sets s join question_set_subcategories ss on ss.set_key = s.key
+      group by s.key, s.vocabulary_settled`,
+  );
+  const settled = [];
+  for (const set of rows) {
+    if (set.vocabulary_settled) continue;
+    const seen = set.subcategories.map((k) => saturation[k]).filter(Boolean);
+    if (seen.length !== set.subcategories.length) continue;
+    if (!seen.every((c) => c.saturated)) continue;
+    await sets.settleSet(set.key, {
+      on: {
+        run: runId,
+        places: seen.reduce((n, c) => n + (c.places ?? 0), 0),
+        regions: [...new Set(seen.flatMap((c) => c.regions ?? []))],
+        subcategories: set.subcategories,
+        at: new Date().toISOString(),
+      },
+    });
+    settled.push(set.key);
+  }
+  return settled;
 }

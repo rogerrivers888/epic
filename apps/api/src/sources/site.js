@@ -19,6 +19,7 @@
 import { findMenuUrl } from './menuLink.js';
 import { phoneOf } from '../domain/contact.js';
 import { userAgent } from '../origins.js';
+import { beforeFetching } from './politeness.js';
 
 const TIMEOUT_MS = 6000;
 const MAX_BYTES = 1_500_000;
@@ -116,7 +117,23 @@ export function printedPhone(html) {
   return null;
 }
 
+/**
+ * One page of a venue's own site.
+ *
+ * Every fetch asks `sources/politeness.js` first: robots.txt, and a per-domain
+ * crawl delay. The brief settled 20 September 2026 requires it of the
+ * enrichment pass, and this is the client that pass uses — along with the
+ * owned-record research and the menu ladder, which should be equally polite
+ * and were not.
+ *
+ * A site that disallows us simply yields nothing, exactly as an unreachable
+ * one does. That is a real cost: a venue whose robots.txt is written for
+ * search engines may lose us a phone number. It is the cost of being able to
+ * say, honestly, that Epic asks before it reads.
+ */
 async function fetchPage(url) {
+  const polite = await beforeFetching(url);
+  if (!polite.ok) return null;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {

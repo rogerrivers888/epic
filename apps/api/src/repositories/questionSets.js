@@ -23,7 +23,9 @@
  */
 
 import { query, withTransaction } from '../db.js';
-import { normalise, mayAnswer, OWNED_SOURCES } from '../domain/questions.js';
+import {
+  ageWord, discriminates, gateWord, mayAnswer, normalise, plainKindOf, OWNED_SOURCES,
+} from '../domain/questions.js';
 import * as attrs from './placeAttributes.js';
 
 const bad = (message) => Object.assign(new Error(message), { status: 400, code: 'bad_request' });
@@ -82,6 +84,12 @@ export async function saveSet({ key, name, active = true }) {
  * else moves it rather than adding a second.
  */
 export async function attach(setKey, subcategoryKey) {
+  // A new subcategory brings vocabulary nobody has harvested, so the set is no
+  // longer settled whatever it said a moment ago (brief §5.4).
+  await query(
+    `update question_sets set vocabulary_settled = false, settled_at = null, settled_on = '{}'::jsonb, updated_at = now()
+      where key = $1 and vocabulary_settled`, [setKey],
+  );
   const { rows } = await query(
     `insert into question_set_subcategories (subcategory_key, set_key) values ($1, $2)
      on conflict (subcategory_key) do update set set_key = excluded.set_key, attached_at = now()
@@ -218,7 +226,7 @@ export async function removeQuestion(id) {
  *    collapse, and an administrator still sees the words as people wrote them.
  */
 export async function recordCandidates(subcategory, entries = [], { placesTotal = 0, client = null } = {}) {
-  if (!entries.length) return { written: 0, skipped: 0 };
+  if (!entries.length) return { written: 0, skipped: 0, held: 0 };
   const run = on(client);
   const { rows: ignored } = await run(
     "select norm from harvest_candidates where subcategory = $1 and status = 'ignored'", [subcategory],
@@ -226,11 +234,19 @@ export async function recordCandidates(subcategory, entries = [], { placesTotal 
   const closed = new Set(ignored.map((r) => r.norm));
   const rows = [];
   let skipped = 0;
+  let held = 0;
   for (const entry of entries) {
     const norm = normalise(entry.norm ?? entry.raw);
     if (!norm) continue;
     if (closed.has(norm)) { skipped += 1; continue; }
     const sources = entry.sources instanceof Set ? [...entry.sources] : (entry.sources ?? []);
+    // The free half of the kind test (brief §5.1). A word code can call is
+    // called here; everything else starts in the holding pen and the
+    // classifier moves it out — never a guess, and never a human's time spent
+    // on "rude staff".
+    const plain = plainKindOf(norm);
+    const kind = plain ?? 'unclear';
+    if (kind === 'unclear') held += 1;
     rows.push([
       norm,
       entry.rawForms ?? [entry.raw ?? norm],
@@ -239,6 +255,15 @@ export async function recordCandidates(subcategory, entries = [], { placesTotal 
       placesTotal,
       JSON.stringify(Object.fromEntries(sources.map((s) => [s, entry.placesSeen ?? 1]))),
       (entry.examples ?? []).slice(0, 5),
+      kind,
+      // `unresolved` is the holding pen: not pending, not ignored, not waiting
+      // on a human. A condition or an opinion is resolved — it is simply not a
+      // question — and sits as `unresolved` too rather than cluttering the
+      // promotable list, with its kind saying which it is.
+      kind === 'feature' ? 'new' : 'unresolved',
+      entry.asserts ?? 0,
+      entry.denies ?? 0,
+      entry.asks ?? 0,
     ]);
   }
   // In batches, because a subcategory raises hundreds of words and a sweep of
@@ -251,10 +276,11 @@ export async function recordCandidates(subcategory, entries = [], { placesTotal 
     const values = batch.map((r) => {
       params.push(...r);
       const n = params.length;
-      return `($${n - 6}, $${n - 5}, $${n - 4}, $${n - 3}, $${n - 2}, $${n - 1}::jsonb, $${n})`;
+      return `($${n - 11}, $${n - 10}, $${n - 9}, $${n - 8}, $${n - 7}, $${n - 6}::jsonb, $${n - 5}, $${n - 4}, $${n - 3}, $${n - 2}, $${n - 1}, $${n})`;
     });
     await run(
-      `insert into harvest_candidates (norm, raw_forms, subcategory, places_seen, places_total, sources, examples)
+      `insert into harvest_candidates
+         (norm, raw_forms, subcategory, places_seen, places_total, sources, examples, kind, status, asserts, denies, asks)
        values ${values.join(', ')}
        on conflict (subcategory, norm) do update set
          raw_forms    = (select array_agg(distinct f) from unnest(harvest_candidates.raw_forms || excluded.raw_forms) f),
@@ -262,12 +288,21 @@ export async function recordCandidates(subcategory, entries = [], { placesTotal 
          places_total = greatest(harvest_candidates.places_total, excluded.places_total),
          sources      = harvest_candidates.sources || excluded.sources,
          examples     = (select array_agg(distinct e) from unnest((harvest_candidates.examples || excluded.examples)[1:5]) e),
+         asserts      = greatest(harvest_candidates.asserts, excluded.asserts),
+         denies       = greatest(harvest_candidates.denies, excluded.denies),
+         asks         = greatest(harvest_candidates.asks, excluded.asks),
+         -- A kind already decided stands: the classifier's verdict, or a
+         -- person's, is not overwritten by the code's first pass on a later
+         -- run. Only the holding pen is open to being called.
+         kind         = case when harvest_candidates.kind = 'unclear' then excluded.kind else harvest_candidates.kind end,
+         status       = case when harvest_candidates.kind = 'unclear' and excluded.kind = 'feature' then 'new'
+                             else harvest_candidates.status end,
          last_seen    = now()
-       where harvest_candidates.status = 'new'`,
+       where harvest_candidates.status in ('new', 'unresolved')`,
       params,
     );
   }
-  return { written: rows.length, skipped };
+  return { written: rows.length, skipped, held };
 }
 
 /**
@@ -278,7 +313,7 @@ export async function recordCandidates(subcategory, entries = [], { placesTotal 
  * and `known` says whether the word is already one of our labels, so promoting
  * it reuses the label rather than making a second one.
  */
-export async function candidates({ subcategory = null, subcategories = null, status = 'new', limit = 500 } = {}) {
+export async function candidates({ subcategory = null, subcategories = null, status = 'new', kind = null, limit = 500 } = {}) {
   // A set's screen asks for *its* subcategories, not for the first four hundred
   // words in the estate filtered afterwards — which returned an empty list for
   // a set whose words happened to sort below the limit.
@@ -290,15 +325,72 @@ export async function candidates({ subcategory = null, subcategories = null, sta
       where ($1::text is null or c.subcategory = $1)
         and ($2::text[] is null or c.subcategory = any($2))
         and ($3::text is null or c.status = $3)
+        and ($4::text is null or c.kind = $4)
       order by c.places_seen::float / greatest(c.places_total, 1) asc, c.places_seen desc
-      limit $4`,
-    [subcategory, subcategories?.length ? subcategories : null, status, limit],
+      limit $5`,
+    [subcategory, subcategories?.length ? subcategories : null, status, kind, limit],
   );
-  return rows.map((r) => ({
-    ...r,
-    share: r.places_total ? r.places_seen / r.places_total : null,
-    known: r.known_key ? { key: r.known_key, label: r.known_label, kind: r.known_kind } : null,
-  }));
+  return rows.map((r) => {
+    // **Seen on**, which is how much of the harvest text mentioned it — not
+    // the same number as "say yes", which is what places answered, and the
+    // design comments are explicit that showing them identically teaches the
+    // wrong thing.
+    const seenOn = r.places_total ? r.places_seen / r.places_total : null;
+    const mentions = r.asserts + r.denies + r.asks;
+    return {
+      ...r,
+      seenOn,
+      // Kept under the old name too, so nothing reading `share` breaks while
+      // the screens are drawn.
+      share: seenOn,
+      gateWord: gateWord(r.norm),
+      ageSignal: ageWord(r.norm),
+      discriminates: discriminates(seenOn, { gate: gateWord(r.norm), ageSignal: ageWord(r.norm) }),
+      // "Seen on 4%, but half of those say it hasn't got one" is a materially
+      // different candidate from one asserted every time.
+      polarity: mentions
+        ? { asserts: r.asserts, denies: r.denies, asks: r.asks, mostlyAgainst: (r.denies + r.asks) > r.asserts }
+        : null,
+      known: r.known_key ? { key: r.known_key, label: r.known_label, kind: r.known_kind } : null,
+    };
+  });
+}
+
+/**
+ * The verdict on what kind of word this is.
+ *
+ * Moves a word out of the holding pen, or confirms it belongs there. A feature
+ * becomes promotable; a condition or an opinion stays `unresolved` with its
+ * kind saying why, because "not a question" is a resolved state even though it
+ * is not a decision anybody has to take.
+ *
+ * `by` is who said so — `plain` for the code's own pass, a model name, or a
+ * person — so a verdict can be re-run when the classifier improves without
+ * overwriting one somebody took by hand.
+ */
+export async function setKind(id, { kind, by = null } = {}) {
+  const { rows } = await query(
+    `update harvest_candidates
+        set kind = $2, status = case when $2 = 'feature' then 'new' else 'unresolved' end,
+            classified_at = now(), classified_by = $3
+      where id = $1 and status in ('new', 'unresolved') returning *`,
+    [id, kind, by],
+  );
+  return rows[0] ?? null;
+}
+
+/** The holding pen, oldest first: what a classifier has yet to call. */
+export async function unclassified({ subcategory = null, limit = 200 } = {}) {
+  const { rows } = await query(
+    `select id, norm, raw_forms, subcategory, places_seen, places_total
+       from harvest_candidates
+      where kind = 'unclear' and status = 'unresolved'
+        and ($1::text is null or subcategory = $1)
+      order by places_seen desc, id
+      limit $2`,
+    [subcategory, limit],
+  );
+  return rows;
 }
 
 /**
@@ -521,4 +613,57 @@ export async function resolveAttribute(raw) {
       where al.norm = $1`, [norm],
   );
   return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// when a set stops costing money
+// ---------------------------------------------------------------------------
+
+/**
+ * Settle a set's vocabulary, which is what takes Google out of the category.
+ *
+ * Brief §5.4: "When water parks have a saturated question set, Epic already
+ * knows what to ask of every water park it ever sees. It does not need
+ * Google's reviews to tell it again." So this is a switch the Google pass
+ * reads, not a badge — and `settled_on` records what it was settled on,
+ * because a set settled on nineteen places in one county is a weaker claim
+ * than one settled on a hundred across five regions, and the difference has to
+ * survive the decision.
+ */
+export async function settleSet(setKey, { on = {}, settled = true } = {}) {
+  const { rows } = await query(
+    `update question_sets
+        set vocabulary_settled = $2,
+            settled_at = case when $2 then now() else null end,
+            settled_on = case when $2 then $3::jsonb else '{}'::jsonb end,
+            updated_at = now()
+      where key = $1 returning *`,
+    [setKey, settled, JSON.stringify(on)],
+  );
+  return rows[0] ?? null;
+}
+
+/** Which subcategories still read reviews, and which have stopped. */
+export async function settledSubcategories() {
+  const { rows } = await query(
+    `select ss.subcategory_key, s.key as set_key, s.vocabulary_settled
+       from question_set_subcategories ss join question_sets s on s.key = ss.set_key`,
+  );
+  return new Map(rows.map((r) => [r.subcategory_key, r]));
+}
+
+/**
+ * A subcategory joining a set unsettles it.
+ *
+ * Lidos attached to the water-parks set bring a vocabulary nobody has
+ * harvested, and a set that says "settled" while holding an unharvested
+ * subcategory would quietly stop Epic ever learning the word *lido*.
+ */
+export async function unsettleForSubcategory(subcategoryKey) {
+  await query(
+    `update question_sets set vocabulary_settled = false, settled_at = null, settled_on = '{}'::jsonb, updated_at = now()
+      where key = (select set_key from question_set_subcategories where subcategory_key = $1)
+        and vocabulary_settled`,
+    [subcategoryKey],
+  );
 }
