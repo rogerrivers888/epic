@@ -393,3 +393,21 @@ test('the squares between the sectors we hold are censused too', async () => {
     'a padded square still says which outcodes it reports to, or it could never be reported at all');
   assert.ok(added.length < bare.length, 'and padding fills gaps rather than doubling the run');
 });
+
+test('a tile counts the places it found, even when it found them in the same second', async (t) => {
+  await clean();
+  t.after(clean);
+  const run = await startTestRun({ label: 'test dating' });
+  await seedTile(run, 'test/dating');
+  await withCensus(async () => ({ places: [{ id: 'ChIJrun_test_dated', rank: 1 }], requests: 1, saturated: false, problem: null }),
+    () => advance({ runId: run.id, budgetMs: 20_000 }));
+
+  const { rows: [tile] } = await query(
+    `select places, started_at, censused_at from census_tiles where grid_key = 'test/dating'`);
+  // The bug this pins: `started_at` backfilled from `censused_at` is the moment
+  // the sweep *ended*, so everything it found was last seen before its own
+  // start — by forty-six milliseconds in Ascot, and the district vanished from
+  // the roll-up entirely (20 Sep 2026).
+  assert.ok(new Date(tile.started_at) <= new Date(tile.censused_at), 'a sweep starts before it ends');
+  assert.equal(tile.places, 1, 'and counts what it found while it was going');
+});
