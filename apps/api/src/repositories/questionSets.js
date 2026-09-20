@@ -308,7 +308,39 @@ export async function recordCandidates(subcategory, entries = [], { placesTotal 
       params,
     );
   }
-  return { written: rows.length, skipped, held };
+  const glued = await dropGlued(subcategory, run);
+  return { written: rows.length, skipped, held, glued };
+}
+
+/**
+ * The same word, written without its spaces, by an older extractor.
+ *
+ * A key is written three ways in our own facts — `step_free`,
+ * `wheelchair:toilet`, `stepFree` — and a sweep that missed one of them raised
+ * `stepfree` and `wheelchairtoilet` as words in their own right (20 Sep 2026).
+ * Migration 211 cleared the ones sitting there at the time; this is the same
+ * test run every sweep, so the next change to extraction cleans up after
+ * itself rather than waiting for somebody to notice a duplicate in the queue.
+ *
+ * Only the undecided are touched. A word somebody ignored stays ignored and a
+ * promoted one is a question that exists.
+ */
+export async function dropGlued(subcategory, run = query) {
+  const { rowCount } = await run(
+    `delete from harvest_candidates c
+      where c.subcategory = $1
+        and c.status in ('new', 'unresolved')
+        and c.norm not like '% %'
+        and (
+          exists (select 1 from attribute_aliases a
+                   where a.norm like '% %' and replace(a.norm, ' ', '') = c.norm)
+          or exists (select 1 from harvest_candidates o
+                      where o.subcategory = c.subcategory
+                        and o.norm like '% %' and replace(o.norm, ' ', '') = c.norm)
+        )`,
+    [subcategory],
+  );
+  return rowCount ?? 0;
 }
 
 /**

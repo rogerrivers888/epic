@@ -405,3 +405,18 @@ test('a key is split however it was written, so stepFree meets step free', async
   assert.ok(!raised.includes('stepfree'), 'a glued key is a word nobody wrote');
   await query('delete from place_facts where venue_ref = $1', [ref]);
 });
+
+test('a sweep clears the glued spelling of a word it now raises properly', async () => {
+  // Migration 211 cleared what was in the queue; this is the same test run on
+  // every sweep, so the next change to extraction cleans up after itself.
+  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  await query("delete from harvest_candidates where subcategory = $1 and norm in ('splash zone', 'splashzone')", [sub]);
+  await query(
+    `insert into harvest_candidates (norm, raw_forms, subcategory, places_seen, places_total, kind, status)
+     values ('splashzone', '{splashzone}', $1, 6, 20, 'feature', 'new')`, [sub],
+  );
+  await sets.recordCandidates(sub, [{ norm: 'splash zone', raw: 'splash zone', placesSeen: 6, sources: ['osm'], asserts: 6 }], { placesTotal: 20 });
+  const left = await query("select norm from harvest_candidates where subcategory = $1 and norm in ('splash zone', 'splashzone')", [sub]);
+  assert.deepEqual(left.rows.map((r) => r.norm), ['splash zone'], 'the glued spelling should have gone with the sweep');
+  await query("delete from harvest_candidates where subcategory = $1 and norm = 'splash zone'", [sub]);
+});
