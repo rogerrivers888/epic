@@ -329,7 +329,15 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
       const p = shelvesForVenue(v, taught, tax.vocab);
       return {
         venueRef: ref, name: v.name, category: v.category,
-        subcategory: p?.subcategory ?? null, moods: p?.shelves ?? [],
+        subcategory: p?.subcategory ?? null,
+        // The category that asked the question comes first.
+        //
+        // These carried our computed shelves alone, and a screen that filters a
+        // list by the category it is showing threw every one of them away the
+        // moment they were appended — the count stayed at three however many
+        // pages were bought (20 Sep 2026). The shelves still travel behind it:
+        // they name the drawer, and the categories genuinely overlap.
+        moods: [category, ...(p?.shelves ?? []).filter((m) => m !== category)],
         epicScore: byRef.get(ref) ?? null,
         // Their order, kept so a place nobody has scored still has somewhere to
         // sit — and so the two can be compared on the bench.
