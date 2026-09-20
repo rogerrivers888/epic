@@ -2951,20 +2951,6 @@ export const api = {
   adminPerson: (id: string, days = 30) => request<PersonRecord>(`/api/admin/people/${id}?days=${days}`),
   adminSetRole: (id: string, roleId: string | null) => patch<{ account: { id: string; role: any } }>(`/api/admin/people/${id}/role`, { roleId }),
   adminActivity: (days = 30) => request<{ window: { days: number }; feed: FeedRow[]; screens: ScreenRow[]; daily: DailyRow[]; active: Engagement['active'] }>(`/api/admin/activity?days=${days}`),
-  /**
-   * The reporting suite: Overview, Money, Customers, Suppliers and Behaviour,
-   * over one estate model (routes/suite.js).
-   *
-   * `data: 'mock'` asks for the handoff's numbers model instead of the database
-   * — the fixtures live on the server, so a real reading can never carry one.
-   * `period` is resolved to a date range there and comes back already correct
-   * for the window; nothing on this side multiplies anything.
-   */
-  adminSuite: ({ period, data }: { period: string; data: 'real' | 'mock' }) =>
-    request<AdminSuite>(`/api/admin/suite?period=${encodeURIComponent(period)}${data === 'mock' ? '&data=mock' : ''}`),
-  adminSuiteHousehold: (id: string, { period, data }: { period: string; data: 'real' | 'mock' }) =>
-    request<{ mock: boolean; household: Record<string, any> }>(
-      `/api/admin/suite/household/${encodeURIComponent(id)}?period=${encodeURIComponent(period)}${data === 'mock' ? '&data=mock' : ''}`),
   adminEngagement: (days = 30) => request<Engagement>(`/api/admin/reporting/engagement?days=${days}`),
   adminRevenue: () => request<RevenueReport>('/api/admin/reporting/revenue'),
   adminUsage: (days = 30) => request<UsageReport>(`/api/admin/reporting/usage?days=${days}`),
@@ -4230,15 +4216,6 @@ export type SourcesReport = {
   };
   searchable: Record<string, boolean>;
 };
-
-/**
- * The reporting suite's answer.
- *
- * Shaped in `apps/web/src/admin/suite/model.ts`, which is where the suite's own
- * arithmetic lives; re-exported here so the client method has a return type
- * without api.ts having to hold two hundred lines of reporting shape.
- */
-export type AdminSuite = import('./admin/suite/model').Suite;
 
 export type AdminOverview = {
   window: { days: number };
