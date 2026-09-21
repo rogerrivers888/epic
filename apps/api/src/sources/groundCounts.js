@@ -325,10 +325,21 @@ export async function fhrsAuthoritiesFor(box) {
 }
 
 /** Which councils have already been counted into a tile. */
-export async function contributorsTo(gridKey, source = 'fhrs') {
+export async function contributorsTo(gridKey, source = 'fhrs', drawers = null) {
   const { rows } = await query(
-    'select distinct contributor from ground_counts where grid_key = $1 and source = $2', [gridKey, source]);
-  return new Set(rows.map((r) => r.contributor));
+    'select contributor, subcategory from ground_counts where grid_key = $1 and source = $2', [gridKey, source]);
+  const by = new Map();
+  for (const r of rows) {
+    if (!by.has(r.contributor)) by.set(r.contributor, new Set());
+    by.get(r.contributor).add(r.subcategory);
+  }
+  // A council counts as having contributed only when it has answered for every
+  // drawer being asked about. Otherwise a drawer added after the sweep would be
+  // invisible: every council would already be "in", the tile would settle, and
+  // the new drawer would have no ground count until the tile went stale a month
+  // later (epic-71, 21 Sep 2026).
+  const wanted = drawers ?? Object.keys(FHRS_GROUND);
+  return new Set([...by].filter(([, has]) => wanted.every((d) => has.has(d))).map(([who]) => who));
 }
 
 /**
@@ -422,6 +433,66 @@ const askedFhrs = () => Object.fromEntries(Object.entries(FHRS_GROUND)
   .map(([k, v]) => [k, v.types.map((t) => FHRS_TYPE_NAMES[t] ?? t).join(', ')]));
 
 /**
+ * Which drawers a tile still owes a ground count for.
+ *
+ * **The question is per drawer, not per tile** (epic-71, 21 Sep 2026). A tile
+ * asked "have you been counted?" is a tile that answers yes for ever, and the
+ * taxonomy is being rewritten underneath this: Landmarks & monuments was split
+ * into two drawers in an afternoon. A drawer created after a tile was counted
+ * has no row here, and a tile-level date made it invisible until the whole tile
+ * went stale a month later.
+ *
+ * Asked this way a re-opened tile needs no special handling, a split that makes
+ * two drawers out of one gets both counted, and a drawer whose rules changed
+ * without the tile changing is picked up too.
+ */
+async function owedBy(source, subcategories, { staleDays, limit }) {
+  const { rows } = await query(
+    `select t.grid_key, t.min_lat, t.min_lng, t.max_lat, t.max_lng, t.fhrs_authorities,
+            array(select s from unnest($2::text[]) s
+                   where not exists (
+                     select 1 from ground_counts g
+                      where g.grid_key = t.grid_key and g.source = $3
+                        and g.subcategory = s
+                        and g.counted_at > now() - ($1 || ' days')::interval)) as owed
+       from census_tiles t
+      where t.state = 'done'
+      order by t.censused_at desc nulls last`,
+    [String(staleDays), subcategories, source]);
+  return rows.filter((r) => r.owed.length).slice(0, limit);
+}
+
+/**
+ * The same question for the register, where a tile has more than one counter.
+ *
+ * A tile owes the register a count when a drawer has no fresh row *from one of
+ * its councils*. Asked per drawer alone it would drop out the moment the first
+ * council answered for all five — which is the fault 226 was written to stop,
+ * coming back in through the selection instead of through the settling.
+ *
+ * A tile whose councils have never been asked owes by definition: it has to be
+ * probed before anything is known about what it is short of.
+ */
+async function owedFhrs(drawers, { staleDays, limit = 2000 }) {
+  const { rows } = await query(
+    `select t.grid_key, t.min_lat, t.min_lng, t.max_lat, t.max_lng, t.fhrs_authorities
+       from census_tiles t
+      where t.state = 'done'
+        and (t.fhrs_authorities is null
+             or exists (
+               select 1
+                 from unnest(t.fhrs_authorities) c, unnest($2::text[]) s
+                where not exists (
+                  select 1 from ground_counts g
+                   where g.grid_key = t.grid_key and g.source = 'fhrs'
+                     and g.subcategory = s and g.contributor = c
+                     and g.counted_at > now() - ($1 || ' days')::interval)))
+      order by t.censused_at desc nulls last
+      limit $3`, [String(staleDays), drawers, limit]);
+  return rows;
+}
+
+/**
  * The open-map check, over tiles the census has already done.
  *
  * Deliberately *after* Google rather than in the same pass, though the brief
@@ -431,26 +502,27 @@ const askedFhrs = () => Object.fromEntries(Object.entries(FHRS_GROUND)
  * time-boxed like every other loop in this API, so a deploy costs at most the
  * tile in flight.
  */
-export async function sweepOsm({ limit = 25, staleDays = 30, msBudget = 50_000 } = {}) {
+export async function sweepOsm({ limit = 25, staleDays = 30, msBudget = 50_000, ask = overpassQuery } = {}) {
   const began = Date.now();
-  const { rows: tiles } = await query(
-    `select grid_key, min_lat, min_lng, max_lat, max_lng
-       from census_tiles
-      where state = 'done'
-        and (osm_at is null or osm_at < now() - ($2 || ' days')::interval)
-      order by censused_at desc nulls last
-      limit $1`, [limit, String(staleDays)]);
-  let done = 0; let requests = 0; const problems = [];
+  // Only drawers the open map has a word for, and only the ones this tile is
+  // actually short of — a tile that gained one new drawer costs one question,
+  // not fifty.
+  const { rows: active } = await query('select key from shelf_subcategories where active');
+  const checkable = active.map((r) => r.key).filter((k) => OSM_GROUND[k]);
+  const tiles = await owedBy('osm', checkable, { staleDays, limit });
+
+  let done = 0; let requests = 0; let drawers = 0; const problems = [];
   for (const t of tiles) {
     if (Date.now() - began > msBudget) break;
     const box = { minLat: Number(t.min_lat), minLng: Number(t.min_lng), maxLat: Number(t.max_lat), maxLng: Number(t.max_lng) };
-    const out = await osmCountsForBox(box);
+    const out = await osmCountsForBox(box, { subcategories: t.owed, ask });
     requests += out.requests;
+    drawers += Object.keys(out.counts).length;
     await noteGround({ gridKey: t.grid_key, source: 'osm', counts: out.counts, asked: askedOsm(), problem: out.problems[0] ?? null });
     if (out.problems.length) problems.push(...out.problems.slice(0, 2));
     done += 1;
   }
-  return { tiles: done, requests, problems, left: Math.max(0, tiles.length - done) };
+  return { tiles: done, drawers, requests, problems, left: Math.max(0, tiles.length - done) };
 }
 
 /**
@@ -478,14 +550,10 @@ const REGISTER = { authorities: fhrsAuthorities, councilsFor: fhrsAuthoritiesFor
  */
 export async function sweepFhrs({ authorities = 2, staleDays = 30, msBudget = 50_000, register = REGISTER } = {}) {
   const began = Date.now();
-  const { rows: tiles } = await query(
-    `select grid_key, min_lat, min_lng, max_lat, max_lng, fhrs_authorities,
-            (fhrs_at is not null) as stale
-       from census_tiles
-      where state = 'done'
-        and (fhrs_at is null or fhrs_at < now() - ($1 || ' days')::interval)
-      order by censused_at desc nulls last
-      limit 2000`, [String(staleDays)]);
+  // The same per-drawer question the open map is asked. A tile is in this list
+  // because some food drawer of it has no count, or has one a month old.
+  const drawers = Object.keys(FHRS_GROUND);
+  const tiles = await owedFhrs(drawers, { staleDays });
   if (!tiles.length) return { authorities: 0, tiles: 0, requests: 0, problems: [] };
 
   // The register's own list of councils. Empty is not fatal — the probe names
@@ -516,7 +584,13 @@ export async function sweepFhrs({ authorities = 2, staleDays = 30, msBudget = 50
     // contributors as present is what made a stale tile re-date itself without
     // re-counting anything, so a ground count could never change after its
     // first sweep (Codex, 21 Sep 2026).
-    have.set(t.grid_key, t.stale ? new Set() : await contributorsTo(t.grid_key));
+    // A tile owing a drawer because its count is a month old is being
+    // refreshed, and the councils that took the old one have to be asked again;
+    // each replaces its own row, so re-counting is safe. A tile owing a drawer
+    // because the drawer is new keeps the councils that have answered for the
+    // rest — `contributorsTo` only counts a council in when it has answered for
+    // every drawer being asked.
+    have.set(t.grid_key, await contributorsTo(t.grid_key, 'fhrs', drawers));
   }
 
   /** Every council with a real share of this tile, asked once and written down. */

@@ -162,6 +162,9 @@ test('the ground count is compared only over tiles that carry both numbers', asy
   assert.equal(row.ground, 9);
   assert.equal(row.shortfall, 7);
   assert.match(row.reason, /22% of the ground count/);
+  assert.match(row.reason, /as it stands today/, 'the free side says what it is');
+  assert.match(row.reason, /found 2 in all/, 'and so does ours');
+  assert.match(out.reading, /Neither side is a count of what is there/);
   assert.ok(row.caveat, 'a free count never travels without its caveat');
 });
 
@@ -369,4 +372,33 @@ test('a count found by plain words says so, because nothing checked the kind', a
   assert.equal(row.byText, 3);
   assert.match(row.reason, /plain text query with no type to fence it/);
   assert.match(row.reason, /open a few before trusting the number/);
+});
+
+test('a drawer created after a tile was counted is still counted', async () => {
+  // epic-71, 21 Sep 2026: "a tile asked 'have you been counted?' is a tile that
+  // answers yes for ever, and the taxonomy is being rewritten underneath this."
+  // Landmarks & monuments was split into two drawers in an afternoon; the new
+  // one had no ground count and no way of asking for one until the whole tile
+  // went stale a month later.
+  const gridKey = 'test/ground/new-drawer';
+  await aCensusedTile({ gridKey, outcodes: ['ZZ89'], subcategory: 'marina', places: 0 });
+  await query(`update census_tiles set osm_at = now() where grid_key = $1`, [gridKey]);
+  await query(`delete from ground_counts where grid_key = $1`, [gridKey]);
+  // Counted for one drawer only, as a sweep before the split would have left it.
+  await ground.noteGround({ gridKey, source: 'osm', counts: { marina: 4 } });
+  await aSubcategory('golf', 'Golf clubs', 'sport');
+
+  const asked = [];
+  const ask = async (body) => {
+    asked.push(body);
+    return { elements: [{ type: 'count', tags: { total: '9' } }] };
+  };
+  // The sweep is given the one tile and has to work out what it is short of.
+  const out = await ground.sweepOsm({ limit: 50, msBudget: 20_000, ask });
+  assert.ok(out.tiles >= 1);
+  const { rows } = await query(
+    `select subcategory, places from ground_counts where grid_key = $1 and source = 'osm' order by subcategory`, [gridKey]);
+  const golf = rows.find((r) => r.subcategory === 'golf');
+  assert.ok(golf, 'the drawer that did not exist when the tile was counted has a count now');
+  assert.equal(rows.find((r) => r.subcategory === 'marina').places, 4, 'and the drawer that was already counted was not asked again');
 });

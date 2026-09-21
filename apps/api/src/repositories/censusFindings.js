@@ -387,9 +387,13 @@ export async function gaps({ outcodes = null, source = 'osm' } = {}) {
       key: r.key, label: r.label, category: r.category,
       census: r.census, byText: r.by_text, ground: r.ground, shortfall, foundShare: share,
       tiles: r.tiles, countedAt: r.counted_at, source, asked: r.asked, caveat: r.caveat,
+      // Both sides say what they are. The census side is everything it has ever
+      // found in these tiles; the free side is the source as it stands today.
+      // Neither is "the number of places here", and two numbers with the same
+      // name on one screen is the thing to avoid (epic-71, 21 Sep 2026).
       reason: shortfall > 0
-        ? `The census has ${n(r.census)}${r.by_text ? ` (${n(r.by_text)} of them from a plain text query)` : ''} where ${whose} has ${n(r.ground)} in the same ${n(r.tiles)} tile${r.tiles === 1 ? '' : 's'} — ${share}% of the ground count.${r.caveat ? ` ${r.caveat}` : ''}`
-        : `The census has ${n(r.census)} where ${whose} has ${n(r.ground)} in the same ${n(r.tiles)} tile${r.tiles === 1 ? '' : 's'}, so nothing is obviously missing.${r.caveat ? ` ${r.caveat}` : ''}`,
+        ? `The census has found ${n(r.census)} in all${r.by_text ? `, ${n(r.by_text)} of them from a plain text query` : ''}, where ${whose} has ${n(r.ground)} as it stands today — the same ${n(r.tiles)} tile${r.tiles === 1 ? '' : 's'}, ${share}% of the ground count.${r.caveat ? ` ${r.caveat}` : ''}`
+        : `The census has found ${n(r.census)} in all, where ${whose} has ${n(r.ground)} as it stands today over the same ${n(r.tiles)} tile${r.tiles === 1 ? '' : 's'}, so nothing is obviously missing.${r.caveat ? ` ${r.caveat}` : ''}`,
     };
   });
 
@@ -404,7 +408,16 @@ export async function gaps({ outcodes = null, source = 'osm' } = {}) {
     reason: `${whose[0].toUpperCase()}${whose.slice(1)} has no equivalent of ${s.label}, so there is nothing free to check it against.`,
   }));
 
-  return { source, gaps: found, noGroundCount, coverage: await coverageFor(outcodes) };
+  return {
+    source,
+    // What is being subtracted from what, in one line, because the two sides
+    // answer different questions and a shortfall read as "places we are
+    // missing" would be the wrong subtraction.
+    reading: `Everything the census has found in these tiles, against ${whose} as it stands today. Neither side is a count of what is there; the gap is where to look.`,
+    gaps: found,
+    noGroundCount,
+    coverage: await coverageFor(outcodes),
+  };
 }
 
 /**
