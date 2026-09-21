@@ -3326,10 +3326,23 @@ router.post('/census/run/:id/stop', requires('manage_library'), async (req, res,
   } catch (err) { next(err); }
 });
 
+/**
+ * Start a stopped run again.
+ *
+ * Audited, because it is a control that spends. The London run was stopped at
+ * 08:29 on 21 September and was asking again by 08:40 — and there was no way to
+ * say who had restarted it, because only starting and stopping were written
+ * down. A control that can spend a day's quota belongs on the record whichever
+ * direction it points (21 Sep 2026).
+ */
 router.post('/census/run/:id/resume', requires('manage_library'), async (req, res, next) => {
   try {
     const run = await censusRun.resume(String(req.params.id));
-    if (!run) throw bad('that run is not paused');
+    if (!run) throw bad('that run is not stopped, paused or waiting');
+    await writeAudit({
+      ...actor(req), action: 'census.resume', subjectType: 'region', subjectId: run.id,
+      subjectLabel: run.label, after: { state: 'running', tilesDone: run.tiles_done, requests: run.requests },
+    });
     res.json({ resumed: true, id: run.id });
   } catch (err) { next(err); }
 });
