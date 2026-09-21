@@ -278,7 +278,10 @@ async function rollDay(runId) {
   const { rows: [row] } = await query(
     `update census_runs r
         set day = (now() at time zone 'utc')::date,
-            day_requests = case when r.day = (now() at time zone 'utc')::date then r.day_requests else 0 end
+            -- Every census slice asked today, by any run. The quota belongs to
+            -- the project, so the budget has to as well.
+            day_requests = coalesce((select sum(cs.requests)::int from census_slices cs
+                                      where cs.ran_at >= date_trunc('day', now() at time zone 'utc')), 0)
       where r.id = $1
       returning day_requests, coalesce(daily_cap, $2) as daily_cap`, [runId, DAILY_CAP]);
   return { dayRequests: Number(row?.day_requests ?? 0), dailyCap: Number(row?.daily_cap ?? DAILY_CAP) };
@@ -304,11 +307,16 @@ async function refreshProgress(runId) {
     `update census_runs r
         set tiles_total = t.total, tiles_done = t.done,
             requests = t.requests, slices = t.slices, places = t.places, saturated = t.saturated,
-            -- What has been asked today, from the slices themselves: a counter
-            -- held in memory would start again with the process.
+            -- What the census has asked today — all of it, whoever asked it.
+            --
+            -- From the slices themselves, because a counter held in memory
+            -- would start again with the process. And across every run, not
+            -- this one's tiles, because the quota is the project's: a second
+            -- run over a different region on the same day started with a full
+            -- allowance again while both spent the same 75,000 (Codex, 21 Sep
+            -- 2026). The budget is a fact about the day, not about the region.
             day_requests = coalesce((select sum(cs.requests)::int from census_slices cs
-                                      where cs.area_slug in (select grid_key from census_tiles where run_id = $1)
-                                        and cs.ran_at >= date_trunc('day', now() at time zone 'utc')), 0),
+                                      where cs.ran_at >= date_trunc('day', now() at time zone 'utc')), 0),
             last_seen_at = now()
        -- What *this* run asked, not what the ground already knew. A tile still
        -- fresh from a census a fortnight ago is skipped — that is the point of

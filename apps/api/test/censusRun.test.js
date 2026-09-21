@@ -597,3 +597,34 @@ test('a run reports per area and in total, with the money read from the ledger',
   assert.equal(out.ledger.usd, 0);
   assert.equal(out.ledger.free, true);
 });
+
+test('the day\'s budget is the project\'s, not the region\'s', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from census_slices where area_slug = 'test/other-region'`);
+    await clean();
+  });
+
+  // Another run, another part of the country, earlier today. Both spend the
+  // same project-wide quota, so the second run may not start with a full
+  // allowance (Codex, 21 Sep 2026).
+  await query(
+    `insert into census_slices (area_slug, min_lat, min_lng, max_lat, max_lng, category, subcategory,
+                                google_type, query, returned, new_ids, saturated, depth, requests, ran_at)
+     values ('test/other-region', 53.4, -2.9, 53.5, -2.8, 'sport', 'golf', 'golf_course', 'golf course',
+             20, 20, false, 0, 40, now())`);
+
+  const { rows: [run] } = await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, daily_cap, day, day_requests)
+     values ('test other region', array['ZZ'], 0.08, 0.12, 100000, 0, 30, 41, (now() at time zone 'utc')::date, 0)
+     returning *`);
+  await seedTile(run, 'test/dayscope');
+
+  // A cap of 41 against 40 already spent elsewhere: one or two requests in, it
+  // is over, where counting only its own region it would have had 41 to itself.
+  await withCensus(answers(1), () => advance({ runId: run.id, budgetMs: 20_000 }));
+  const { rows: [after] } = await query(
+    `select state, day_requests from census_runs where id = $1`, [run.id]);
+  assert.ok(after.day_requests >= 41, `the other region's requests are part of today (${after.day_requests})`);
+  assert.equal(after.state, 'waiting', 'so it stops for the day rather than spending twice over');
+});
