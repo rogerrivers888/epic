@@ -214,6 +214,7 @@ test('a tile census is reported by outcode, and a box across the edge is neither
     await query(`delete from area_counts where area_slug in ('zz9a', 'zz9b')`);
     await query(`delete from geo_cells where code like 'ZZ9%'`);
     await query(`delete from place_index where venue_ref like 'google:rollup_%'`);
+    await query(`delete from place_index where venue_ref like 'google:report_%'`);
     await clean();
   });
 
@@ -593,18 +594,36 @@ test('a run reports per area and in total, with the money read from the ledger',
             ('test/report-b', 52.80, 0.80, 52.88, 0.92, 'sport', 'golf', 'golf_course', 'golf course',
              20, 20, false, 0, 272, now())`);
 
+  // And the places it found, the same way the total counts them: from the
+  // surfacings, not from the tile's own counter, so an area and the total
+  // cannot disagree inside one report.
+  for (const [ref, tile] of [['google:report_a1', 'test/report-a'], ['google:report_a2', 'test/report-a'], ['google:report_b1', 'test/report-b']]) {
+    await query(
+      `insert into place_index (venue_ref, country_code, slice, category, subcategory)
+       values ($1, 'GB', '51.4,-0.7,51.48,-0.58', 'sport', 'golf')
+       on conflict (venue_ref) do nothing`, [ref]);
+    await query(
+      `insert into place_subcategories (venue_ref, category, subcategory, found_by, area_slug, first_seen, last_seen)
+       values ($1, 'sport', 'golf', 'golf_course', $2, now(), now())
+       on conflict (venue_ref, subcategory, coalesce(area_slug, '')) do nothing`, [ref, tile]);
+  }
+
   const out = await report(run.id);
   const se = out.areas.find((a) => a.area === 'SE');
   const nr = out.areas.find((a) => a.area === 'NR');
   assert.equal(se.requests, 1500, 'a postcode area is the letters of its outcodes: SE1 and SE11 are one area');
   assert.equal(se.outcodes, 2);
-  assert.equal(nr.places, 46);
+  assert.equal(se.places, 2, 'and its places are counted from what it surfaced');
+  assert.equal(nr.places, 1);
   // A tile touching two areas is one tile, so the total comes from the tiles
   // rather than from adding the areas up — the same double count the census
   // fixed one level down.
   assert.equal(out.total.tiles, 2);
   assert.equal(out.total.requests, 1772, 'and the run reports what it asked');
   assert.equal(out.total.ground.requests, 1772, 'beside what the ground has cost altogether');
+  // The areas and the total are the same arithmetic, so they add up.
+  assert.equal(out.areas.reduce((n, a) => n + a.requests, 0), out.total.requests);
+  assert.equal(out.areas.reduce((n, a) => n + a.places, 0), out.total.places);
   // The claim the whole design rests on, read rather than repeated.
   assert.equal(out.ledger.usd, 0);
   assert.equal(out.ledger.free, true);
@@ -702,4 +721,61 @@ test('a plan that has not changed re-opens nothing', async (t) => {
   await withCensus(async ({ includedType }) => { asked.push(includedType); return { places: [], requests: 1, saturated: false, problem: null }; },
     () => advance({ runId: run.id, budgetMs: 10_000 }));
   assert.equal(asked.length, 0, 'a settled taxonomy costs nothing to check');
+});
+
+test('a tile may not spend more than the day has left', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from census_slices where area_slug = 'test/yesterday-spend'`);
+    await clean();
+  });
+  // 39 of a 40 cap already spent today, and a run ceiling far above it. Handing
+  // the tile the run's allowance let it ask its way through a whole drawer
+  // before the daily check came round again, so the client met the 429 the
+  // budget exists to avoid (Codex, 21 Sep 2026).
+  await query(
+    `insert into census_slices (area_slug, min_lat, min_lng, max_lat, max_lng, category, subcategory,
+                                google_type, query, returned, new_ids, saturated, depth, requests, ran_at)
+     values ('test/yesterday-spend', 51.4, -0.7, 51.5, -0.6, 'sport', 'golf', 'golf_course', 'golf course',
+             20, 20, false, 0, 39, now())`);
+  const { rows: [run] } = await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, daily_cap, day, day_requests)
+     values ('test tile budget', array['ZZ'], 0.08, 0.12, 100000, 0, 30, 40, (now() at time zone 'utc')::date, 0)
+     returning *`);
+  await seedTile(run, 'test/tilebudget');
+
+  let asked = 0;
+  await withCensus(async () => {
+    asked += 1;
+    return { places: [{ id: `ChIJrun_test_b${asked}`, rank: 1 }], requests: 1, saturated: false, problem: null };
+  }, () => advance({ runId: run.id, budgetMs: 20_000 }));
+
+  assert.ok(asked <= 2, `the tile stopped inside the day's last request, not after a drawer (${asked} asked)`);
+  const { rows: [after] } = await query(`select state from census_runs where id = $1`, [run.id]);
+  assert.equal(after.state, 'waiting', 'and the run waits for the reset');
+});
+
+test('a run waiting for the quota day still owns its region', async (t) => {
+  await clean();
+  t.after(clean);
+  const sleeping = await startTestRun({ label: 'test sleeping' });
+  await query(
+    `update census_runs set state = 'waiting', resume_after = now() + interval '3 hours' where id = $1`,
+    [sleeping.id]);
+
+  // Starting another while one waits reassigned its tiles, and at midnight the
+  // sleeper woke into a region somebody else was working (Codex, 21 Sep 2026).
+  await assert.rejects(
+    () => startRun({ label: 'test barging in', outcodes: ['SL5'], padKm: 0 }),
+    /waiting for the quota day/,
+    'a sleeping run is still a run');
+
+  // And the clock will not wake it into a live run either.
+  await query(`update census_runs set resume_after = now() - interval '1 minute' where id = $1`, [sleeping.id]);
+  const live = await startTestRun({ label: 'test live one' });
+  const woke = await resumeInterrupted();
+  assert.equal(woke.woken, 0, 'the sleeper stays asleep while another run is going');
+  await query(`update census_runs set state = 'done' where id = $1`, [live.id]);
+  const now = await resumeInterrupted();
+  assert.ok(now.woken >= 1, 'and wakes once the other is finished');
 });

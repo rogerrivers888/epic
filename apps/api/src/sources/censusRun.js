@@ -188,10 +188,19 @@ export async function startRun({
   if (!areas?.length && !outcodes?.length) {
     throw Object.assign(new Error('a run needs postcode areas or districts'), { status: 400 });
   }
+  // A run waiting for the quota day to turn over is still a run, and still owns
+  // its tiles. Letting a second one start while one waits reassigned those
+  // tiles, and at midnight the sleeper woke into a region somebody else was
+  // working — two rows saying running, one of them stripped of its ground
+  // (Codex, 21 Sep 2026).
   const { rows: going } = await query(
-    `select id, label from census_runs where state = 'running' limit 1`);
+    `select id, label, state from census_runs where state in ('running', 'waiting') limit 1`);
   if (going.length) {
-    throw Object.assign(new Error(`“${going[0].label}” is already running; stop it before starting another`), { status: 409 });
+    throw Object.assign(
+      new Error(going[0].state === 'waiting'
+        ? `“${going[0].label}” is waiting for the quota day to turn over; stop it before starting another`
+        : `“${going[0].label}” is already running; stop it before starting another`),
+      { status: 409 });
   }
   const tiles = await planTiles({ areas, outcodes, dLat, dLng, padKm });
   if (!tiles.length) throw Object.assign(new Error('no postcode sectors in those areas'), { status: 400 });
@@ -561,7 +570,17 @@ export async function advance({ runId = null, budgetMs = SLICE_MS, now = () => D
 
     const out = await censusOneTile({
       run, tile, pace,
-      remaining: Math.max(0, (fresh?.max_requests ?? run.max_requests) - (fresh?.requests ?? 0)),
+      // The smaller of what the run has left and what the day has left.
+      //
+      // Handing the tile the run's allowance meant a tile starting at 74,999 of
+      // 75,000 could ask its way through a whole drawer before the daily check
+      // came round again — so the client would meet the 429 it exists to avoid
+      // (Codex, 21 Sep 2026). The budget is only a budget if it is spent
+      // against.
+      remaining: Math.min(
+        Math.max(0, (fresh?.max_requests ?? run.max_requests) - (fresh?.requests ?? 0)),
+        Math.max(0, today.dailyCap - today.dayRequests),
+      ),
       // The deadline goes *into* the tile, not around it. A tile of central
       // London is twenty minutes of asking, and a budget checked only between
       // tiles meant the pass ran for as long as the tile did — so a deploy
@@ -759,6 +778,11 @@ export async function resumeInterrupted() {
         set state = 'running', resume_after = null, problem = null,
             day = (now() at time zone 'utc')::date, day_requests = 0, last_seen_at = now()
       where state = 'waiting' and resume_after is not null and resume_after <= now()
+        -- Never into a region somebody else is working. Starting refuses while
+        -- a run waits, so this should not arise — but a clock that wakes a run
+        -- regardless of what else is going is the half of the pair that turns a
+        -- refused start into two live runs (Codex, 21 Sep 2026).
+        and not exists (select 1 from census_runs other where other.state = 'running')
       returning id, label`);
 
   const { rows } = await query(
@@ -965,10 +989,16 @@ export async function report(runId = null) {
   // One row per area per tile, *distinct*, before anything is added up: a tile
   // touching SE1 and SE11 is one SE tile, and summing over the outcodes counted
   // its requests twice (21 Sep 2026).
+  //
+  // And the work is counted from the questions asked, exactly as the total
+  // below is. Summing the tile counters here attributed an earlier census's
+  // requests to this run for every tile it skipped as fresh, so the areas and
+  // the total disagreed with each other in the same report (Codex, 21 Sep
+  // 2026).
   const { rows: areas } = await query(
     `with touching as (
        select distinct upper(substring(o from '^[A-Z]+')) as area,
-              t.grid_key, t.state, t.requests, t.places, t.saturated, t.censused_at
+              t.grid_key, t.state, t.censused_at
          from census_tiles t
          cross join lateral unnest(t.outcodes) as o
         where t.run_id = $1
@@ -978,21 +1008,37 @@ export async function report(runId = null) {
          cross join lateral unnest(t.outcodes) as o
         where t.run_id = $1
         group by 1
+     ), spent as (
+       select cs.area_slug as grid_key,
+              sum(cs.requests)::int as requests,
+              count(*) filter (where cs.saturated and cs.depth >= $3)::int as saturated
+         from census_slices cs
+        where cs.ran_at >= $2
+          and cs.area_slug in (select grid_key from census_tiles where run_id = $1)
+        group by 1
+     ), found as (
+       select ps.area_slug as grid_key, count(distinct ps.venue_ref)::int as places
+         from place_subcategories ps
+        where ps.last_seen >= $2
+          and ps.area_slug in (select grid_key from census_tiles where run_id = $1)
+        group by 1
      )
      select tt.area,
             d.outcodes,
-            count(*)::int                                  as tiles,
-            count(*) filter (where tt.state = 'done')::int   as done,
-            count(*) filter (where tt.state = 'failed')::int as failed,
-            coalesce(sum(tt.requests), 0)::int              as requests,
-            coalesce(sum(tt.places), 0)::int                as places,
-            coalesce(sum(tt.saturated), 0)::int             as saturated,
-            min(tt.censused_at)                             as first_seen,
-            max(tt.censused_at)                             as last_seen
+            count(*)::int                                    as tiles,
+            count(*) filter (where tt.state = 'done')::int     as done,
+            count(*) filter (where tt.state = 'failed')::int   as failed,
+            coalesce(sum(sp.requests), 0)::int                as requests,
+            coalesce(sum(fo.places), 0)::int                  as places,
+            coalesce(sum(sp.saturated), 0)::int               as saturated,
+            min(tt.censused_at)                               as first_seen,
+            max(tt.censused_at)                               as last_seen
        from touching tt
        join districts d on d.area = tt.area
+       left join spent sp on sp.grid_key = tt.grid_key
+       left join found fo on fo.grid_key = tt.grid_key
       group by tt.area, d.outcodes
-      order by tt.area`, [run.id]);
+      order by tt.area`, [run.id, run.started_at, CENSUS_MAX_DEPTH]);
 
   // Every tile once, whatever it touches — and separately, what this run
   // actually asked. A tile still fresh from an earlier census is skipped rather
@@ -1023,7 +1069,11 @@ export async function report(runId = null) {
             coalesce(sum((units->>'google-pro')::int), 0)::int pro,
             coalesce(sum((units->>'google-search')::int), 0)::int search
        from provider_calls
-      where purpose = 'census.slice' and created_at >= $1`, [run.started_at]);
+      -- Between the run starting and the run ending. Without the second bound
+      -- an old run's cost grew every time a later one asked Google, which is a
+      -- report that changes after the fact (Codex, 21 Sep 2026).
+      where purpose = 'census.slice' and created_at >= $1 and created_at <= $2`,
+    [run.started_at, run.finished_at ?? new Date()]);
 
   // How the places were found, which is the thing the nine text-query drawers
   // exist to be judged on.
