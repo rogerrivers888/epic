@@ -71,7 +71,7 @@ import { generalLimit, photoLimit, signInLimit, spendLimit, voiceLimit } from '.
 import { sweepDeadSessions } from './repositories/sessions.js';
 import { sweepExpiredPlanSessions } from './repositories/planSessions.js';
 import { refresh as refreshReach } from './repositories/reach.js';
-import { buildIfEmpty, drawersUnjudged, drawersWithoutABar, rescore, seedBars, settleNew } from './repositories/placeIndex.js';
+import { buildIfEmpty, drawersUnjudged, drawersWithoutABar, refreshStats, rescore, seedBars, settleNew } from './repositories/placeIndex.js';
 import { expireRentedCoordinates } from './sources/census.js';
 import * as censusRun from './sources/censusRun.js';
 import * as ground from './sources/groundCounts.js';
@@ -683,6 +683,12 @@ void indexBuilt
     console.error(`epic-api: places — ${unjudged.length} drawer(s) have a bar and not one judged place: `
       + `${unjudged.map((d) => `${d.key} (${d.places})`).join(', ')} — rescoring`);
     for (const d of unjudged) await rescore({ subcategory: d.key }).catch(() => {});
+    // The boards read `area_stats`, not `place_index`. Rescoring without this
+    // leaves the invariant clean and every ready count and average on the
+    // Places boards stale -- indefinitely, if nothing else rebuilds the
+    // rollups. `seedBars` and the bar-edit route both refresh; this did not
+    // (Codex, via epic-f4, 21 Sep 2026).
+    await refreshStats().catch(() => {});
     const left = await drawersUnjudged();
     if (left.length) {
       console.error(`epic-api: places — still unjudged after rescoring: ${left.map((d) => d.key).join(', ')}`);

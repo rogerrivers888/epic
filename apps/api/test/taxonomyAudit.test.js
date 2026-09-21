@@ -382,3 +382,32 @@ test('an empty drawer is not unjudged, it is empty', async (t) => {
   assert.ok(!unjudged.some((d) => d.key === 'tmp-made'),
     'no places is not a fault, and flagging it would cry wolf on every new drawer');
 });
+
+test('the unjudged count is places, not places times facts', async (t) => {
+  t.after(async () => {
+    await query("delete from place_index where venue_ref like 'test:count-%'");
+    await query("delete from ready_bars where subcategory_key = 'tmp-made'");
+    await query("delete from shelf_subcategories where key = 'tmp-made'");
+  });
+  const { rows: [sib] } = await query('select category_key from shelf_subcategories where active limit 1');
+  await query(
+    `insert into shelf_subcategories (key, label, category_key, active)
+     values ('tmp-made', 'Made by an API', $1, true)
+     on conflict (key) do update set active = true`, [sib.category_key]);
+  await inheritBar('tmp-made');
+  const { rows: [bar] } = await query(
+    "select count(*)::int as facts from ready_bars where subcategory_key = 'tmp-made'");
+  assert.ok(bar.facts > 1, 'a drawer has several bar rows, which is the trap');
+
+  const unset = JSON.stringify({ set: false, held: [], judged: [], missing: [], notCounted: [] });
+  for (const n of [1, 2, 3]) {
+    await query(
+      `insert into place_index (venue_ref, subcategory, country_code, score_parts)
+       values ($1, 'tmp-made', 'GB', $2::jsonb)
+       on conflict (venue_ref) do update set subcategory = 'tmp-made', score_parts = $2::jsonb`,
+      [`test:count-${n}`, unset]);
+  }
+  const found = (await drawersUnjudged()).find((d) => d.key === 'tmp-made');
+  assert.ok(found, 'it is caught');
+  assert.equal(found.places, 3, `three places, not three times ${bar.facts}`);
+});

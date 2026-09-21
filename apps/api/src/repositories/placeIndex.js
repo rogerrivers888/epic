@@ -221,14 +221,20 @@ export async function drawersWithoutABar() {
  * exactly what a rescore turns into a real score once the bar arrives.
  */
 export async function drawersUnjudged() {
+  // `exists`, not a join. A drawer has one `ready_bars` row per fact -- six of
+  // them -- so joining the table counted every place once per fact and reported
+  // 3,882 places in a drawer holding 647. The detection survived that (nought
+  // times six is still nought) but the number put in front of somebody about to
+  // approve a repair did not, which is the worse half (Codex, via epic-f4,
+  // 21 Sep 2026).
   const { rows } = await query(
     `select s.key, s.label,
             count(p.venue_ref)::int as places,
             count(p.venue_ref) filter (where (p.score_parts->>'set')::boolean)::int as judged
        from shelf_subcategories s
-       join ready_bars b on b.subcategory_key = s.key
        join place_index p on p.subcategory = s.key
       where s.active
+        and exists (select 1 from ready_bars b where b.subcategory_key = s.key)
       group by s.key, s.label
      having count(p.venue_ref) > 0
         and count(p.venue_ref) filter (where (p.score_parts->>'set')::boolean) = 0
