@@ -32,7 +32,7 @@
  *     review, and nothing else is written down.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v4';
 
 import { MODEL, SESSION_CALL_BOUND, parseStructured } from '../claude.js';
 import { query } from '../db.js';
