@@ -22,28 +22,55 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { googleSource } from '../src/sources/google.js';
-import { pool } from '../src/db.js';
+import { pool, query } from '../src/db.js';
 
 const own = await import('../src/sources/own.js');
 
-test.after(() => pool.end());
+/**
+ * `enrich` writes a record for the ref it is given, which is the point of it.
+ * Each test here uses a fresh ref so the runs cannot interfere, and that means
+ * they would otherwise pile up a row per run for ever (Codex, 21 Sep 2026).
+ * They share one prefix so the clean-up can name them exactly.
+ */
+const PREFIX = 'google:ChIJ_own_free_sweep_test_';
+const ref = (what) => `${PREFIX}${what}_${Date.now()}`;
+
+test.after(async () => {
+  await query('delete from place_records where venue_ref like $1', [`${PREFIX}%`]).catch(() => null);
+  await pool.end();
+});
 
 /**
- * Count what the research asks Google.
+ * Count what the research asks Google, with nothing else allowed out.
  *
- * The key has to be present or the gate short-circuits before it reaches the
- * flag, and every assertion here would pass for the wrong reason — which is
- * exactly what happened the first time this was written. `brief` is swapped
- * out, so the key is only ever a gate and no request leaves the machine.
+ * Two things had to be arranged for this to mean anything.
+ *
+ * The key has to be present, or `sourceHasKey('google')` short-circuits the
+ * gate before it ever reaches the flag and every assertion here holds whatever
+ * the code does — which is what the first version of this file did. `brief` is
+ * swapped out, so the key is only ever a gate and no Google request is made.
+ *
+ * And the rest of the research has to be stopped at the door. `enrich` goes on
+ * to ask Overpass, Nominatim and Wikipedia, none of which this file is about;
+ * left alone they made a three-assertion test two minutes long, and made it
+ * depend on three services being up (Codex, 21 Sep 2026). `fetch` is the one
+ * road out of the process for all of them, so stubbing it closes every one at
+ * once — and keeps the test honest about what it is measuring, which is a
+ * decision taken before any of that happens.
  */
 const countingBriefs = async (run) => {
   const wasBrief = googleSource.brief;
   const wasKey = process.env.GOOGLE_MAPS_API_KEY;
+  const wasFetch = globalThis.fetch;
   let asked = 0;
   process.env.GOOGLE_MAPS_API_KEY = 'test-key-never-sent';
   googleSource.brief = async () => { asked += 1; return { name: 'Bought', lat: 51.5, lng: -0.1, website: null }; };
+  // Nothing answers, which is a state the research already knows how to hold:
+  // it records that it could not ask rather than that the place said no.
+  globalThis.fetch = async () => { throw new Error('no network in this test'); };
   try { await run(); return asked; } finally {
     googleSource.brief = wasBrief;
+    globalThis.fetch = wasFetch;
     if (wasKey === undefined) delete process.env.GOOGLE_MAPS_API_KEY;
     else process.env.GOOGLE_MAPS_API_KEY = wasKey;
   }
@@ -52,16 +79,14 @@ const countingBriefs = async (run) => {
 test('a free sweep does not buy a place ID back from Google', async () => {
   // A bare Google ref with nothing of ours behind it — the exact case that
   // reaches for the brief.
-  const ref = `google:ChIJ_free_sweep_${Date.now()}`;
-  const asked = await countingBriefs(() => own.enrich(ref, { force: true, paid: false }));
+  const asked = await countingBriefs(() => own.enrich(ref('bare_free'), { force: true, paid: false }));
   assert.equal(asked, 0, 'paid: false must reach seedFor, not stop at the website lead');
 });
 
 test('a paid pass still identifies a place it has nothing of its own on', async () => {
   // The guard is the flag, not the removal of the capability: research that is
   // allowed to spend still turns an ID into something searchable.
-  const ref = `google:ChIJ_paid_sweep_${Date.now()}`;
-  const asked = await countingBriefs(() => own.enrich(ref, { force: true, paid: true }));
+  const asked = await countingBriefs(() => own.enrich(ref('bare_paid'), { force: true, paid: true }));
   assert.ok(asked >= 1, 'a paid pass may still ask what the place is');
 });
 
@@ -76,9 +101,9 @@ test('a seeded place costs nothing to research for free, and one request to rese
   // buy an identification, and `paid` decides whether we may buy a way in to
   // their page. Free and seeded is the only combination that spends nothing.
   const seed = { name: 'Aberdulais Falls', lat: 51.6, lng: -3.8 };
-  const free = await countingBriefs(() => own.enrich(`google:ChIJ_seeded_free_${Date.now()}`, { force: true, paid: false, seed }));
+  const free = await countingBriefs(() => own.enrich(ref('seeded_free'), { force: true, paid: false, seed }));
   assert.equal(free, 0, 'seeded and unpaid is the free sweep');
 
-  const paid = await countingBriefs(() => own.enrich(`google:ChIJ_seeded_paid_${Date.now()}`, { force: true, paid: true, seed }));
+  const paid = await countingBriefs(() => own.enrich(ref('seeded_paid'), { force: true, paid: true, seed }));
   assert.equal(paid, 1, 'the website lead, not a second identification');
 });
