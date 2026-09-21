@@ -24,7 +24,7 @@ import React from 'react';
 import { Text, View } from 'react-native';
 import { Press } from '../../components/press';
 import { desk, fonts, LIME } from '../../theme';
-import { Act, Band, DeskSection, Kicker, Value, WARN, tabular } from './desk';
+import { Act, Band, DeskSection, Kicker, Mark, Value, WARN, tabular } from './desk';
 import type { FilingOverview, Threshold } from '../../api';
 
 /** A time said the way a person would say it. */
@@ -201,16 +201,29 @@ function BlindNote({ data }: { data: FilingOverview }) {
   const u = data.unengaged;
   const blind = u.share === null && u.why;
   if (!blind) return null;
+  /*
+   * One line, not a paragraph.
+   *
+   * "No prose on screen. No commentary captions. If something needs explaining
+   * it goes behind an information icon" — the handoff's own rule, which the
+   * first version of this broke with three lines of reasoning (the
+   * side-by-side audit, 21 Sep 2026). But hiding it entirely breaks the rule
+   * it exists to serve: a queue at nought reads as good news unless the
+   * screen says it could not look. So the fact is one line, attached to the
+   * numbers it qualifies, and the reasoning is behind the icon.
+   */
   return (
-    <View style={{ borderLeftWidth: 2, borderLeftColor: WARN, paddingLeft: 14, paddingVertical: 4, gap: 4 }}>
-      <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: WARN }}>
-        Demand cannot be read yet
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, borderLeftWidth: 2, borderLeftColor: WARN, paddingLeft: 14, paddingVertical: 2 }}>
+      <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: WARN }}>
+        Demand cannot be read yet — {u.why}
       </Text>
-      <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkMuted, lineHeight: 19 }}>
-        {u.why}. Until it can, nothing here can tell a mapping nobody wants from one nobody has been
-        offered — so a word bringing in places that have never been opened is not yet evidence of
-        anything.
-      </Text>
+      <Mark
+        label="WHY"
+        tone="warn"
+        title={'Nothing here can tell a mapping nobody wants from one nobody has been offered, so a word '
+          + 'bringing in places that have never been opened is not yet evidence of anything. The same floor '
+          + "governs the audit's nobody-goes signal, the Mapping table's never-opened colour and this number."}
+      />
     </View>
   );
 }

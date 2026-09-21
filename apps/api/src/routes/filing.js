@@ -901,7 +901,17 @@ filingRoutes.get('/labels/vocabulary', requires('view_library'), async (_req, re
       placeAttributes.attributes(), questionSets.everyQuestion(), questionSets.sets(), filing.drawers(),
     ]);
     const setName = new Map(sets.map((s) => [s.key, s.name]));
-    const rows = attrs.filter((a) => a.active).map((a) => {
+    /**
+     * The eight are not on this list, and must not be.
+     *
+     * This screen is our own vocabulary and where each word is *asked*. A
+     * scale is never asked: it is judged on the drawer and corrected on the
+     * place, and no question can carry one (`neverCarried`). Listed here they
+     * were eight red rows reading "asked nowhere", each offered "Ask it in…"
+     * and "Retire" — a screen inviting somebody to retire the taxonomy (the
+     * side-by-side audit, 21 Sep 2026).
+     */
+    const rows = attrs.filter((a) => a.active && a.kind !== 'scale').map((a) => {
       const asked = all.filter((q) => q.attribute_key === a.key);
       const global = asked.some((q) => q.scope === 'global');
       const inSets = [...new Set(asked.filter((q) => q.set_key).map((q) => q.set_key))];

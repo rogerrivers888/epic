@@ -161,6 +161,12 @@ export type Col = {
   /** Fixed width in px, or 'auto' to take the slack. */
   w: number | 'auto';
   label?: string;
+  /**
+   * The reason, on hover. Where a column needs explaining it explains itself
+   * here rather than in a caption under the table — "no prose on screen, no
+   * commentary captions" (the handoff's Interactions section).
+   */
+  title?: string;
   align?: 'left' | 'right';
 };
 
@@ -179,13 +185,19 @@ export function Head({ cols }: { cols: Col[] }) {
       {cols.map((c, i) => (
         <View key={i} style={c.w === 'auto' ? { flex: 1, minWidth: 0 } : { width: c.w, flexGrow: 0, flexShrink: 0 }}>
           {c.label ? (
-            <Text style={{
-              fontFamily: fonts.body,
-              fontSize: 12.5,
-              fontWeight: '600',
-              color: desk.inkDim,
-              textAlign: c.align === 'right' ? 'right' : 'left',
-            }}>
+            <Text
+              // @ts-expect-error react-native-web passes `title` through to the
+              // DOM node, which is how every other hover reason on this surface
+              // is drawn (`Mark`).
+              title={c.title}
+              style={{
+                fontFamily: fonts.body,
+                fontSize: 12.5,
+                fontWeight: '600',
+                color: desk.inkDim,
+                textAlign: c.align === 'right' ? 'right' : 'left',
+                ...(c.title ? { textDecorationLine: 'underline', textDecorationStyle: 'dotted' } : null),
+              }}>
               {c.label}
             </Text>
           ) : null}

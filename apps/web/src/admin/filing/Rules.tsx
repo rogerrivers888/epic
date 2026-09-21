@@ -34,8 +34,10 @@ const RULE_COLS: Col[] = [
   { w: 120, label: 'Level' },
   { w: 'auto', label: 'Where' },
   { w: 90, label: 'Places', align: 'right' },
-  { w: 150, label: 'Places contradict it', align: 'right' },
-  { w: 150, label: 'People called it wrong', align: 'right' },
+  { w: 150, label: 'Places contradict it', align: 'right',
+    title: 'Computed. Of the places this default files, how many hold a different value. A high count can mean the rule is too broad, or that the drawer wants splitting — nobody has said anything, the data disagrees with itself.' },
+  { w: 150, label: 'People called it wrong', align: 'right',
+    title: 'Human. Of those, how many were set by a person. Every one is somebody who looked at a place and said no, which makes it the stronger signal of the two and the reason it is counted separately.' },
   { w: 130, label: '' },
 ];
 
@@ -112,11 +114,12 @@ export function Rules({ rows, total, onRetire, onEdit }: {
           );
         })}
       </View>
-      <View style={{ paddingTop: 4 }}>
-        <Value tone="dim" size={12}>
-          {'Places contradict it is computed from what the drawer holds. People called it wrong is how many times somebody overrode it by hand.'}
-        </Value>
-      </View>
+      {/*
+        The explanation belongs on the columns it explains, not in a caption
+        under the table — "no prose on screen, no commentary captions" (the
+        handoff's Interactions section, and the side-by-side audit found three
+        of these). The two headers carry it on hover instead.
+      */}
     </>
   );
 }

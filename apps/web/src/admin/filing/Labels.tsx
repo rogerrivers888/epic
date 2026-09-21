@@ -645,7 +645,7 @@ export function Pending({ words, sets, why, counts, onApprove, onMerge, onReject
 const VOCAB_COLS: Col[] = [
   { w: 240, label: 'Label' },
   { w: 150, label: 'Asked' },
-  { w: 'auto', label: 'Where it is asked' },
+  { w: 'auto', label: 'Where it is asked', title: 'Everywhere means a global question asks it of every place. In n sets means only the drawers those sets cover. Nowhere is the orphan case \u2014 approved into the vocabulary and never attached, so nothing ever asks it of a place.' },
   { w: 100, label: 'Places', align: 'right' },
   { w: 200, label: '' },
 ];
@@ -668,13 +668,13 @@ export function AllLabels({ rows, onAskIn, onRetire, onOpenSet }: {
           { label: 'Used nowhere', value: nowhere, strong: nowhere > 0 },
         ]}
       />
-      {nowhere ? (
-        <Alarm title={`${nowhere} ${nowhere === 1 ? 'label is' : 'labels are'} asked nowhere`}>
-          <Value tone="muted" size={12.5}>
-            Approved into the vocabulary and never attached to a set, so nothing ever asks them of a place.
-          </Value>
-        </Alarm>
-      ) : null}
+      {/*
+        The "used nowhere" stat is already in the band above, and the column
+        beside each row already says "nowhere" in red. A block restating both
+        in a sentence is the commentary caption the handoff rules out, so the
+        explanation lives on the column instead (the side-by-side audit,
+        21 Sep 2026).
+      */}
       <View>
         <Head cols={VOCAB_COLS} />
         {rows.map((r) => {
@@ -705,7 +705,11 @@ export function AllLabels({ rows, onAskIn, onRetire, onOpenSet }: {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, justifyContent: 'flex-end' }}>
                   {orphan ? <Act label="Ask it in…" onPress={() => onAskIn(r.key)} /> : null}
                   {/* Retiring takes it out of the vocabulary and out of every set. */}
-                  <Act label="Retire" tone="dim" ruled={false} onPress={() => onRetire(r.key)} />
+                  {/* Red, like every other irreversible thing on this surface.
+                      Retiring a label stops it being asked anywhere and drops
+                      it from every set that had it — the prototype draws it
+                      red with a red rule and it was grey. */}
+                  <Act label="Retire" tone="warn" onPress={() => onRetire(r.key)} />
                 </View>
               </Cell>
             </Row>
