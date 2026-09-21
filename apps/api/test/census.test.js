@@ -571,3 +571,35 @@ test('a mask that asks for more than an id is not free, and the census would kno
   assert.equal(skuFor('places.id,places.types,nextPageToken', '/places:searchText'), 'google-pro');
   assert.ok(costOf({ google: 1, 'google-search': 1 }) > 0, 'and so does a rating');
 });
+
+test('a ledger write that fails keeps what it could not write down', async () => {
+  // Emptying the meter before the write, and swallowing the failure, threw away
+  // up to a hundred requests every time the database hiccupped — which is the
+  // under-reporting the flush was written to stop, by a shorter road (Codex,
+  // via epic-f4, 21 Sep 2026).
+  const { ledger } = await import('../src/sources/census.js');
+
+  const meter = { google: 5, 'google-essentials': 5 };
+  const written = [];
+  const down = async () => { throw new Error('the database is not answering'); };
+  const up = async (_h, _p, _purpose, units) => { written.push(JSON.parse(units)); };
+
+  assert.equal(await ledger(meter, null, { force: true, record: down }), 0, 'a failed write records nothing');
+  assert.deepEqual(meter, { google: 5, 'google-essentials': 5 },
+    'and leaves every request it could not write down on the meter');
+
+  // Three more asked while the database was away.
+  meter.google += 3;
+  meter['google-essentials'] += 3;
+  assert.equal(await ledger(meter, null, { force: true, record: up }), 8, 'the next write carries the lot');
+  assert.deepEqual(written, [{ google: 8, 'google-essentials': 8 }]);
+  assert.deepEqual(meter, {}, 'and only then is the meter emptied');
+
+  // Anything counted while a write is in flight survives it: the recorded
+  // snapshot is subtracted, never cleared.
+  const busy = { google: 2, 'google-essentials': 2 };
+  const slowly = async () => { busy.google += 1; busy['google-essentials'] += 1; };
+  await ledger(busy, null, { force: true, record: slowly });
+  assert.deepEqual(busy, { google: 1, 'google-essentials': 1 },
+    'the request that arrived mid-write is still there to be written');
+});

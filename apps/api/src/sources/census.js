@@ -409,12 +409,27 @@ const LEDGER_EVERY = 100;
  * object of units, and the faults and timings it carries are on symbols, so a
  * spread copies exactly what `provider_calls.units` should hold.
  */
-async function ledger(meter, householdId, { force = false } = {}) {
+export async function ledger(meter, householdId, { force = false, record = providerCalls.record } = {}) {
   const asked = meter['google'] ?? 0;
   if (!asked || (!force && asked < LEDGER_EVERY)) return 0;
   const units = { ...meter };
-  for (const key of Object.keys(meter)) delete meter[key];
-  await providerCalls.record(householdId, 'google', 'census.slice', JSON.stringify(units)).catch(() => null);
+  try {
+    await record(householdId, 'google', 'census.slice', JSON.stringify(units));
+  } catch {
+    // Emptied before the write, and swallowing the failure, threw away up to a
+    // hundred requests every time the database hiccupped — recreating exactly
+    // the under-reporting this was written to stop (Codex, via epic-f4, 21 Sep
+    // 2026). What could not be written down stays on the meter and goes in the
+    // next one.
+    return 0;
+  }
+  // Only what was actually recorded. Subtracted rather than cleared, because
+  // slices carry on counting while the write is in flight and clearing would
+  // discard whatever arrived in the meantime.
+  for (const [key, n] of Object.entries(units)) {
+    const left = (meter[key] ?? 0) - n;
+    if (left > 0) meter[key] = left; else delete meter[key];
+  }
   return asked;
 }
 
