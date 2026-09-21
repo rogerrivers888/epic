@@ -144,14 +144,29 @@ const outcodeOf = (p) => {
   return pc ? String(pc).trim().split(/\s+/)[0] : null;
 };
 
-/** Who has hearted what, for one household. */
+/**
+ * Who has hearted what, for one household — **every** heart, not one per row.
+ *
+ * Keyed by row and holding a list, because more than one person in a household
+ * can heart the same row and a Map keyed on `row_key` silently kept whichever
+ * came back last. That lost two things at once: the screen named one person
+ * when two had said yes, and unhearting aimed at the name it happened to be
+ * showing deleted a real heart while another survived — so the row stayed
+ * hearted and the screen reported success (Codex, 21 Sep 2026).
+ *
+ * Oldest first, so "who hearted this" has a stable answer rather than one that
+ * depends on row order.
+ */
 export async function heartsFor(householdId) {
   if (!householdId) return new Map();
   const { rows: list } = await query(
     `select h.row_key, h.member_id, h.hearted_at, m.name
        from browse_row_hearts h join members m on m.id = h.member_id
-      where h.household_id = $1`, [householdId]);
-  return new Map(list.map((r) => [r.row_key, r]));
+      where h.household_id = $1
+      order by h.hearted_at, h.member_id`, [householdId]);
+  const out = new Map();
+  for (const r of list) out.set(r.row_key, [...(out.get(r.row_key) ?? []), r]);
+  return out;
 }
 
 /**

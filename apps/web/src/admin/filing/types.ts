@@ -260,6 +260,16 @@ export type BrowseRow = {
   hearted: boolean;
   /** Who hearted it, and how long ago in days. */
   heartedBy: string | null;
+  /**
+   * Whose heart it is, by id.
+   *
+   * A name is not an identity — two members of one household can share one — so
+   * a screen deciding what to unheart from `heartedBy` is guessing. This is the
+   * row the delete is aimed at.
+   */
+  heartedById: string | null;
+  /** Everyone who has hearted it, where more than one person has. */
+  heartedByAll: { id: string; name: string }[];
   heartedDays: number | null;
   /** The share of households that heart it, or null where nobody has. */
   share: number | null;

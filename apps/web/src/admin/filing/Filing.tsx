@@ -553,9 +553,11 @@ export function Filing({ canManage }: { canManage: boolean }) {
                  * back office asks it, the signed-in household's first adult is
                  * the honest stand-in and the toast says who it was.
                  */
-                const owner = row?.heartedBy
-                  ? rows.members.find((m) => m.name === row.heartedBy)?.id ?? null
-                  : null;
+                // The id, from the row. Matching on `heartedBy` was matching
+                // on a *name*, and two members of one household can share one —
+                // so the delete could still be aimed at the wrong person, which
+                // is the same bug one step further in.
+                const owner = row?.heartedById ?? null;
                 const member = row?.hearted ? owner : (rows.members.find((m) => m.role === 'adult') ?? rows.members[0])?.id ?? null;
                 if (!member) {
                   said(row?.hearted

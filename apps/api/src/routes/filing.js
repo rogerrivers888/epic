@@ -1071,7 +1071,11 @@ filingRoutes.get('/rows', requires('view_library'), async (req, res, next) => {
 
     const rows = list.map((r) => {
       const { fill, total } = browseRows.fillFor(r, ctx, dists.districts);
-      const heart = hearts.get(r.key) ?? null;
+      // Every heart on this row, oldest first. More than one member of a
+      // household can heart the same row, and the screen has to be able to
+      // unheart the right one rather than the first person it can find.
+      const mine = hearts.get(r.key) ?? [];
+      const heart = mine[0] ?? null;
       return {
         id: r.key,
         group: r.grouping,
@@ -1089,8 +1093,18 @@ filingRoutes.get('/rows', requires('view_library'), async (req, res, next) => {
         // Why it is empty, where it is: a gap in what we have asked and a gap
         // in what exists want different fixes and must not look the same.
         why: total === 0 ? browseRows.emptyBecause(r, ctx) : null,
-        hearted: Boolean(heart),
+        hearted: mine.length > 0,
         heartedBy: heart?.name ?? null,
+        /**
+         * Whose heart it is, by id.
+         *
+         * A name is not an identity — two members of one household can share
+         * one — so a screen matching on `heartedBy` to decide what to delete is
+         * guessing. This is the row the unheart is aimed at.
+         */
+        heartedById: heart?.member_id ?? null,
+        /** Everyone who has hearted it, where more than one person has. */
+        heartedByAll: mine.map((h) => ({ id: h.member_id, name: h.name })),
         heartedDays: heart ? Math.floor((Date.now() - new Date(heart.hearted_at).getTime()) / 86400000) : null,
         share: shares.get(r.key) ?? null,
       };
