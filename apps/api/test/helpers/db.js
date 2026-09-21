@@ -9,10 +9,17 @@
  * Building it from the migration files is half the point: "the migrations apply
  * cleanly from an empty database" is the one thing a deploy depends on and
  * nothing else here checks.
+ *
+ * From the committed ones only — see `migrationFiles`. What a deploy applies is
+ * what is on the branch, so that is what the tests have to be built from; a
+ * `.sql` sitting untracked in somebody's working copy is not part of the
+ * product yet and must not decide whether anybody else's tests run.
  */
 
+import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import dotenv from 'dotenv';
@@ -21,6 +28,44 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(here, '../../../../.env'), quiet: true });
 
 const BASE = process.env.DATABASE_URL || 'postgres://epic:epic@localhost:5434/epic';
+const run = promisify(execFile);
+
+/**
+ * The migrations this branch actually has, which is not the same as the `.sql`
+ * files on disk.
+ *
+ * Reading the directory meant a migration somebody had written and not yet
+ * committed was applied to *everybody's* test database. On 21 Sep 2026 one of
+ * mine was broken and took 22 test files down across every session on the
+ * machine, each of them failing at the build step before running a single
+ * assertion — and none of the failures were theirs to read. An uncommitted
+ * migration is one session's work in progress and should cost the others
+ * nothing.
+ *
+ * So: `git ls-files`, and anything untracked is named out loud rather than
+ * silently skipped. Silence would be its own trap — the author would be testing
+ * against a database that does not have their migration in it and would have no
+ * way to know.
+ */
+async function migrationFiles(dir) {
+  let tracked;
+  try {
+    const { stdout } = await run('git', ['ls-files', '--', 'migrations'], { cwd: path.resolve(dir, '..') });
+    tracked = new Set(stdout.split('\n').map((f) => path.basename(f.trim())).filter((f) => f.endsWith('.sql')));
+  } catch {
+    // No git, or not a checkout: fall back to the directory rather than
+    // refusing to run at all. A CI image without .git still has to test.
+    return (await fs.readdir(dir)).filter((f) => f.endsWith('.sql')).sort();
+  }
+  const onDisk = (await fs.readdir(dir)).filter((f) => f.endsWith('.sql'));
+  const skipped = onDisk.filter((f) => !tracked.has(f)).sort();
+  if (skipped.length) {
+    // One line, once, naming them: whoever wrote them needs to know their work
+    // is not in the database they are about to test against.
+    console.warn(`[test db] skipping ${skipped.length} uncommitted migration${skipped.length === 1 ? '' : 's'}: ${skipped.join(', ')} — commit to include`);
+  }
+  return onDisk.filter((f) => tracked.has(f)).sort();
+}
 
 /**
  * One database per test file.
@@ -63,7 +108,7 @@ export function testDatabase() {
 
     const { pool, query, withTransaction } = await import('../../src/db.js');
     const dir = path.resolve(here, '../../migrations');
-    const files = (await fs.readdir(dir)).filter((f) => f.endsWith('.sql')).sort();
+    const files = await migrationFiles(dir);
     for (const file of files) {
       const sql = await fs.readFile(path.join(dir, file), 'utf8');
       try {
