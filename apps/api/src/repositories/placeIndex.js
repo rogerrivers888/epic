@@ -205,21 +205,36 @@ export async function seedBars() {
   const { rows: subs } = await query('select key from shelf_subcategories where active');
   const have = new Set((await query('select distinct subcategory_key from ready_bars')).rows.map((r) => r.subcategory_key));
   let added = 0;
+  // Which drawers gained one, so their places can be scored against it. A bar
+  // arriving does not rescore anything by itself: `data_score`, `ready` and
+  // `score_parts` are persisted per place, so a drawer judged before it had a
+  // bar keeps reading "not set" and the invariant reads clean over places the
+  // change was meant to repair (Codex, 21 Sep 2026).
+  const gained = [];
   for (const { key } of subs) {
     if (have.has(key)) continue;
     const facts = seed[key];
     // No coded bar for it: it was made through an API rather than a migration,
     // so it inherits one instead of staying invisible.
-    if (!facts) { await inheritBar(key); added += 1; continue; }
+    if (!facts) { await inheritBar(key); gained.push(key); added += 1; continue; }
     for (const fact of FACT_KEYS) {
       await query(
         `insert into ready_bars (subcategory_key, fact, weight, required, set_by)
          values ($1,$2,$3,$4,'seed') on conflict do nothing`,
         [key, fact, FACT_WEIGHTS[fact] ?? 0, facts.includes(fact)]);
     }
+    gained.push(key);
     added += 1;
   }
-  return { added };
+  // Scored against the bar they just got. Only the drawers that gained one:
+  // rescoring everything on every boot would be the whole index for nothing.
+  let rescored = 0;
+  for (const key of gained) {
+    const out = await rescore({ subcategory: key }).catch(() => null);
+    rescored += out?.rescored ?? 0;
+  }
+  if (gained.length) await refreshStats().catch(() => {});
+  return { added, gained, rescored };
 }
 
 /** Change one subcategory's bar. Returns what it was, for the audit trail. */

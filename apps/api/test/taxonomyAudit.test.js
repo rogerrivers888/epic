@@ -251,7 +251,7 @@ test('the consequence line refuses an empty ask rather than answering for everyt
 
 // --- the invariant, against data rather than the schema --------------------
 
-import { drawersWithoutABar, inheritBar } from '../src/repositories/placeIndex.js';
+import { drawersWithoutABar, inheritBar, seedBars } from '../src/repositories/placeIndex.js';
 
 test('a drawer made outside a migration still gets a bar, and it says it was inherited', async (t) => {
   t.after(async () => {
@@ -304,4 +304,30 @@ test('inheriting twice does not overwrite a bar somebody set', async (t) => {
   const { rows } = await query(
     "select set_by from ready_bars where subcategory_key = 'tmp-made'");
   assert.deepEqual(rows.map((r) => r.set_by), ['somebody'], 'and leaves theirs alone');
+});
+
+test('a drawer that gains a bar has its places scored against it', async (t) => {
+  t.after(async () => {
+    await query("delete from place_index where venue_ref = 'test:bar-me'");
+    await query("delete from ready_bars where subcategory_key = 'tmp-made'");
+    await query("delete from shelf_subcategories where key = 'tmp-made'");
+  });
+  const { rows: [sib] } = await query('select category_key from shelf_subcategories where active limit 1');
+  await query(
+    `insert into shelf_subcategories (key, label, category_key, active)
+     values ('tmp-made', 'Made by an API', $1, true)
+     on conflict (key) do update set active = true`, [sib.category_key]);
+  await query(
+    `insert into place_index (venue_ref, subcategory, country_code, data_score, ready)
+     values ('test:bar-me', 'tmp-made', 'GB', null, false)
+     on conflict (venue_ref) do update set subcategory = 'tmp-made', data_score = null, ready = false`);
+
+  const before = await query("select data_score from place_index where venue_ref = 'test:bar-me'");
+  assert.equal(before.rows[0].data_score, null, 'it starts unscored, as a place in a barless drawer is');
+
+  const out = await seedBars();
+  assert.ok(out.gained.includes('tmp-made'), 'the drawer gained a bar');
+  // The point of the finding: the bar alone is not the repair.
+  const after = await query("select data_score, score_parts from place_index where venue_ref = 'test:bar-me'");
+  assert.notEqual(after.rows[0].score_parts, null, 'and its places were scored against it, not left "not set"');
 });

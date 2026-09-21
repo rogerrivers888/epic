@@ -655,7 +655,16 @@ const indexBuilt = buildIfEmpty()
 // judged on something by the time anybody looks (owner, 21 Sep 2026).
 void indexBuilt
   .then(() => seedBars())
-  .then(() => drawersWithoutABar())
+  .then((out) => {
+    // A bar arriving does not score anything by itself, so `seedBars` rescores
+    // the drawers that gained one. Saying how many, because "the invariant is
+    // clean" and "the places are judged" are two different facts and the second
+    // is the one this was for (Codex, 21 Sep 2026).
+    if (out?.gained?.length) {
+      console.log(`epic-api: places — gave ${out.gained.length} drawer(s) a bar and rescored ${out.rescored} place(s)`);
+    }
+    return drawersWithoutABar();
+  })
   .then((bare) => {
     if (!bare.length) return;
     console.warn(`epic-api: places — ${bare.length} active drawer(s) with no bar: ${bare.map((d) => d.key).join(', ')}`);
