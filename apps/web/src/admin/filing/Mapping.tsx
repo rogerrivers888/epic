@@ -78,11 +78,15 @@ export function Words({
     onNotInEpic: (word: WordRow) => void;
     onAdopt: (word: WordRow) => void;
     onCarry: (word: WordRow, label: string) => void;
+    /** A row has opened, so whatever it needs can be fetched for it alone. */
+    onOpen?: (word: WordRow) => void;
   };
   /** The last change, by name, and how to put it back. */
   undo: { what: string; onPress: () => void } | null;
 }) {
   const [open, setOpen] = useState<string | null>(null);
+  /** Whether "never opened" is a fact about a word or about the product's age. */
+  const demandReadable = !evidence?.demandBlind;
   const [sortMenu, setSortMenu] = useState(false);
   const [filterMenu, setFilterMenu] = useState(false);
   const [filterQuery, setFilterQuery] = useState('');
@@ -231,14 +235,29 @@ export function Words({
                   <Value numeric weight={w.brings > BIG ? '800' : '400'}>{w.brings.toLocaleString()}</Value>
                 </Cell>
                 <Cell col={WORD_COLS[2]}>
-                  {/* Never opened is the cleanup signal, so it is red. */}
-                  <Value numeric tone={w.opens === 0 ? 'warn' : 'muted'}>
-                    {w.opens ? w.opens.toLocaleString() : 'never'}
+                  {/*
+                    Never opened is the cleanup signal, so it is red — but only
+                    once opening happens at all. Below the corpus floor it is
+                    true of every word in the table and the colour stops
+                    carrying information, which is the same trap the audit's
+                    "nobody goes" and the front door both guard against. The
+                    evidence band above says why.
+                  */}
+                  <Value numeric tone={w.opens === 0 && demandReadable ? 'warn' : 'muted'}>
+                    {w.opens ? w.opens.toLocaleString() : demandReadable ? 'never' : '\u2014'}
                   </Value>
                 </Cell>
                 <Cell col={WORD_COLS[3]}>
                   <Press effect="none" accessibilityRole="button" accessibilityState={{ expanded: isOpen }}
-                    onPress={() => { setOpen(isOpen ? null : w.word); setDestQuery(''); }}>
+                    onPress={() => {
+                      // Telling the caller a row opened is what lets the
+                      // consequence lines be fetched for this word alone. The
+                      // note depends on the word, and 485 words against 74
+                      // drawers is 36,000 sentences nobody would read.
+                      if (!isOpen) picker.onOpen?.(w);
+                      setOpen(isOpen ? null : w.word);
+                      setDestQuery('');
+                    }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
                       <Value weight="600" tone={w.pointsAt ? 'ink' : w.decision === 'secondary' ? 'muted' : 'lime'}>
                         {pointsAt(w)}

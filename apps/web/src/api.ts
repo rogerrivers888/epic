@@ -3302,6 +3302,23 @@ export const api = {
   filingMapping: () => request<FilingMapping>('/api/admin/filing/mapping'),
   /** What is kept out of Epic, and why. Reversible from here. */
   filingExcluded: () => request<FilingExcluded>('/api/admin/filing/mapping/excluded'),
+  /**
+   * Where one word could point, and what each destination would do.
+   *
+   * Fetched when a row opens rather than with the table: the consequence
+   * depends on the word, and 485 words against 74 drawers is 36,000 sentences
+   * nobody would read.
+   */
+  filingDestinations: (word: string) => request<FilingDestinations>(
+    `/api/admin/filing/mapping/${encodeURIComponent(word)}/destinations`),
+  /** Where a word points: a drawer, or an answer that is not one. */
+  filingPoint: (word: string, body: { subcategory?: string; decision?: string }) =>
+    put<{ word: string; said: string; before: { subcategory: string | null; decision: string | null } }>(
+      `/api/admin/filing/mapping/${encodeURIComponent(word)}`, body),
+  /** A fact riding along on every place a word brings. */
+  filingCarry: (word: string, body: { label: string; on: boolean; value?: AttributeValue }) =>
+    put<{ word: string; attribute: string; on: boolean; said: string }>(
+      `/api/admin/filing/mapping/${encodeURIComponent(word)}/carries`, body),
   /** Every question set, and the labels asked of everything. */
   filingLabels: () => request<FilingLabels>('/api/admin/filing/labels'),
   /** One set, its questions, and the words waiting on it. */
@@ -5217,6 +5234,16 @@ export type FilingMapping = {
   words: FilingWord[];
   counts: { answered: number; notSure: number; secondary: number; notInEpic: number; flagged: number; words: number };
   evidence: Record<string, unknown>;
+};
+
+export type FilingDestinations = {
+  word: string;
+  brings: number;
+  opened: number;
+  categories: { key: string; name: string; count: number }[];
+  subcategories: { key: string; name: string; category: string; kind: string; note: string; grave: boolean }[];
+  labels: { key: string; name: string; kind: string; note: string }[];
+  notInEpic: { key: string; name: string; kind: string; note: string };
 };
 
 export type FilingExcluded = {

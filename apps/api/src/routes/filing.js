@@ -22,6 +22,7 @@
  *   GET  /labels/vocabulary            our own labels, and where each is asked
  *   PUT  /mapping/:word                where one of Google's words points
  *   PUT  /mapping/:word/carries        a fact riding along on what it brings
+ *   GET  /mapping/:word/destinations   where it could point, and what each would do
  *   GET  /rows                         the rows a household browses, and their fill
  *   PUT  /rows/:id                     its words, or its rule
  *   POST /rows/:id/heart               heart it, as somebody
@@ -1765,5 +1766,82 @@ filingRoutes.post('/subcategories/:key/not-sure', requires('manage_library'), as
       queued += 1;
     }
     res.json({ queued, said: `${queued} sent to Not sure`, by: actorOf(req) });
+  } catch (err) { next(err); }
+});
+
+/**
+ * GET /mapping/:word/destinations — where this word could point, and what
+ * each would do.
+ *
+ * Fetched when a row opens rather than sent with the table, because the
+ * consequence depends on the *word*: 485 words against 74 drawers is 36,000
+ * sentences nobody will read, and one row-open is exactly when you need the
+ * twelve that matter.
+ *
+ * **The note is written here and is never optional.** The design brief calls
+ * it "the single highest-value thing on this screen" — "Landmarks & monuments
+ * — brings in 1,240 places · 1,180 have never been opened" is what would have
+ * prevented most of the present mess. Composed in the screen it would get the
+ * plurals wrong the first time a word brought one place.
+ */
+filingRoutes.get('/mapping/:word/destinations', requires('view_library'), async (req, res, next) => {
+  try {
+    const word = String(req.params.word);
+    const [evidence, d, { list: attrs }] = await Promise.all([
+      taxonomyAudit.evidence(), filing.drawers(), placeAttributes.attributes(),
+    ]);
+    const refs = evidence.placesByWord.get(word) ?? [];
+    const opened = refs.filter((r) => (evidence.openedByRef.get(r) ?? 0) > 0).length;
+    const brings = refs.length;
+    const never = Math.max(0, brings - opened);
+    const readable = [...evidence.openedByRef.values()].reduce((n, v) => n + v, 0) >= CORPUS_OPENS;
+
+    const plural = (n, one, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+    const noteFor = (already) => {
+      const bits = [`brings in ${plural(brings, 'place')}`];
+      // "None of them has ever been opened" only means something once opening
+      // happens at all — the same floor the audit and the front door use.
+      if (readable && brings) bits.push(`${plural(never, 'has', 'have')} never been opened`);
+      bits.push(`joins ${plural(already, 'place')} already there`);
+      return bits.join(' · ');
+    };
+
+    const categories = d.categories.filter((c) => c.active)
+      .map((c) => ({
+        key: c.key,
+        name: c.label,
+        count: d.subcategories.filter((s) => s.active && s.category_key === c.key).length,
+      }));
+
+    const subcategories = d.subcategories.filter((s) => s.active).map((s) => ({
+      key: s.key,
+      name: s.label,
+      category: s.category_key,
+      kind: 'subcategory',
+      note: noteFor(d.refsBySub.get(s.key)?.length ?? 0),
+      // Bad news on a destination is a word that would bring in a lot of
+      // places nobody wants. Only sayable once demand can be read.
+      grave: readable && brings > 100 && never === brings,
+    }));
+
+    res.json({
+      word,
+      brings,
+      opened,
+      categories,
+      subcategories,
+      labels: attrs.filter((a) => a.active && a.kind !== 'scale').map((a) => ({
+        key: a.key,
+        name: a.label,
+        kind: 'label',
+        note: `a fact carried by every place ${word} brings`,
+      })),
+      notInEpic: {
+        key: 'aside',
+        name: 'Not in Epic',
+        kind: 'out',
+        note: `keeps ${plural(brings, 'place')} out · excluding is an answer`,
+      },
+    });
   } catch (err) { next(err); }
 });

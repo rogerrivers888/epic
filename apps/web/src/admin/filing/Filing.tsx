@@ -34,12 +34,13 @@ import { SegStrip } from './desk';
 import { Overview } from './Overview';
 import { CategoryBoard, CategoryList, PlacesBoard, SubcategoryBoard } from './Categories';
 import { AllLabels, QuestionSet, QuestionSets } from './Labels';
-import { NotInEpic } from './Mapping';
+import { NotInEpic, Words } from './Mapping';
 import { Rows, type RowFilter } from './Rows';
 import { Train } from './Train';
 import { Rules } from './Rules';
 import { DecisionLog, Runs } from './Runs';
-import type { Decision, Trail } from './types';
+import type { Decision, Trail, WordRow } from './types';
+import type { SortKey } from './say';
 
 /** The six the strip draws. */
 const TABS = ['overview', 'categories', 'labels', 'mapping', 'rules', 'rows'] as const;
@@ -94,6 +95,13 @@ export function Filing({ canManage }: { canManage: boolean }) {
   const [decision, setDecision] = useState<Decision['decision'] | 'all'>('all');
   const [decisionSet, setDecisionSet] = useState<string | 'all'>('all');
   const [trails, setTrails] = useState<Record<string, Trail>>({});
+  const [mapping, setMapping] = useState<Awaited<ReturnType<typeof api.filingMapping>> | null>(null);
+  const [sort, setSort] = useState<SortKey>('brings');
+  const [descending, setDescending] = useState(true);
+  const [filters, setFilters] = useState<{ key: string; name: string }[]>([]);
+  /** Fetched when a row opens, because the consequence depends on the word. */
+  const [dests, setDests] = useState<Record<string, Awaited<ReturnType<typeof api.filingDestinations>>>>({});
+  const [undo, setUndo] = useState<{ what: string; onPress: () => void } | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -140,6 +148,7 @@ export function Filing({ canManage }: { canManage: boolean }) {
         } else setLabels(await api.filingLabels());
       }
       if (tab === 'mapping' && view === 'excluded') setExcluded(await api.filingExcluded());
+      if (tab === 'mapping' && view !== 'excluded') setMapping(await api.filingMapping());
       if (tab === 'rows') setRows(await api.adminFilingRows());
       if (tab === 'rules') setRules(await api.adminFilingRules());
       if (tab === 'runs') {
@@ -196,6 +205,47 @@ export function Filing({ canManage }: { canManage: boolean }) {
    * here is a setting of the page you are already on, and `setQuery` replaces
    * by default, which is why the distinction has to be made explicitly.
    */
+  /**
+   * Point a word somewhere, and keep the way back.
+   *
+   * The design brief asks for no confirm step and an undo on the row, so the
+   * reply's `before` is turned straight into the undo rather than the screen
+   * remembering what it thought the word was.
+   */
+  const point = useCallback(async (
+    w: { word: string; labels: string[] },
+    what: { subcategory?: string; decision?: string; carry?: string },
+  ) => {
+    await run(w.word, async () => {
+      if (what.carry) {
+        const on = !w.labels.includes(what.carry);
+        const out = await api.filingCarry(w.word, { label: what.carry, on });
+        setUndo({
+          what: out.said,
+          onPress: () => void run(w.word, async () => {
+            const back = await api.filingCarry(w.word, { label: what.carry!, on: !on });
+            setUndo(null);
+            return back.said;
+          }),
+        });
+        return out.said;
+      }
+      const out = await api.filingPoint(w.word, what);
+      setUndo({
+        what: out.said,
+        onPress: () => void run(w.word, async () => {
+          const back = await api.filingPoint(w.word, out.before.subcategory
+            ? { subcategory: out.before.subcategory }
+            : { decision: out.before.decision ?? 'none' });
+          setUndo(null);
+          return back.said;
+        }),
+      });
+      return out.said;
+    });
+    setDests({});
+  }, [run]);
+
   const go = useCallback((next: Partial<{ tab: Tab; cat: string; sub: string; set: string; view: string }>) => {
     const patch: Record<string, string | null> = {};
     const put = (k: string, v: string | undefined) => {
@@ -425,6 +475,53 @@ export function Filing({ canManage }: { canManage: boolean }) {
             />
           ) : null}
 
+          {tab === 'mapping' && view !== 'excluded' && mapping ? (
+            <Words
+              // Sorted here, because the table draws what it is given and the
+              // header says which order it is in — a strip claiming "most
+              // first" over an alphabetical list is worse than no sort at all.
+              words={sortWords(mapping.words as WordRow[], sort, descending, filters)}
+              counts={mapping.counts}
+              evidence={mapping.evidence as never}
+              sort={sort}
+              desc={descending}
+              onSort={(k, d) => { setSort(k); setDescending(d); }}
+              filters={filters}
+              onFilters={setFilters}
+              filterOptions={filterOptionsFor(mapping)}
+              undo={undo}
+              picker={{
+                // The rail is the same for every word; only the notes differ.
+                categories: Object.values(dests)[0]?.categories ?? [],
+                subcategoriesIn: (categoryKey: string, w: WordRow) =>
+                  (dests[w.word]?.subcategories ?? []).filter((x) => x.category === categoryKey)
+                    .map((x) => ({ ...x, on: w.pointsAt?.key === x.key })),
+                labels: (w: WordRow) => (dests[w.word]?.labels ?? []).map((x) => ({ ...x, on: w.labels.includes(x.key) })),
+                results: (q: string, w: WordRow) => {
+                  const d = dests[w.word];
+                  if (!d || !q.trim()) return [];
+                  const needle = q.trim().toLowerCase();
+                  return [...d.subcategories, ...d.labels]
+                    .filter((x) => x.name.toLowerCase().includes(needle));
+                },
+                folds: (w: WordRow) => (dests[w.word]?.subcategories ?? []).slice(0, 3)
+                  .map((x) => ({ key: x.key, name: x.name })),
+                onOpen: (w: WordRow) => {
+                  if (dests[w.word]) return;
+                  void api.filingDestinations(w.word)
+                    .then((d) => setDests((was) => ({ ...was, [w.word]: d })))
+                    .catch(() => {});
+                },
+                onPoint: (w: WordRow, d: { key: string; kind: string }) => void point(w, d.kind === 'label'
+                  ? { carry: d.key }
+                  : { subcategory: d.key }),
+                onNotInEpic: (w: WordRow) => void point(w, { decision: 'aside' }),
+                onAdopt: () => said('Adopting a word as a new subcategory is not wired yet.'),
+                onCarry: (w: WordRow, label: string) => void point(w, { carry: label }),
+              }}
+            />
+          ) : null}
+
           {tab === 'mapping' && view === 'excluded' && excluded ? (
             <NotInEpic
               rows={excluded.excluded}
@@ -566,7 +663,7 @@ export function Filing({ canManage }: { canManage: boolean }) {
           {/* The tabs whose screens are drawn but not yet fed. Saying which is
               better than a blank panel: a screen that is coming and a screen
               that is broken look identical otherwise. */}
-          {notYet(tab, view) ? (
+          {notYet() ? (
             <View style={{ paddingVertical: 40, gap: 6 }}>
               <Text style={{ fontFamily: fonts.heading, fontSize: 20, fontWeight: '800', color: desk.ink }}>
                 {TAB_LABEL[tab]} is drawn, and not yet fed
@@ -586,9 +683,65 @@ export function Filing({ canManage }: { canManage: boolean }) {
 const anyLoaded = (o: Record<string, unknown>) => Object.values(o).some(Boolean);
 
 /** Which tabs have no data behind them yet, so the screen can say so. */
-function notYet(tab: Tab, view: string): boolean {
-  if (tab === 'mapping' && view !== 'excluded') return true;
-  return false;
+function notYet(): boolean { return false; }
+
+/**
+ * The rows, filtered and in the order the header claims.
+ *
+ * A name sorts the opposite way round from a count — `desc` on a count is
+ * most-first and on a word is Z to A — and one flag meaning both is how a
+ * column comes to claim the opposite of what it shows (epic-f4's `say.ts`
+ * makes the same point about `startsDescending`).
+ */
+function sortWords(words: WordRow[], sort: SortKey, desc: boolean, filters: { key: string }[]): WordRow[] {
+  const keep = words.filter((w) => filters.every(({ key }) => {
+    const [kind, val] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)];
+    if (kind === 'state') return w.decision === val;
+    if (kind === 'flag') return w.flags.some((f) => f.key === val);
+    if (kind === 'sub') return w.pointsAt?.key === val;
+    return true;
+  }));
+  const way = desc ? -1 : 1;
+  const text = (a: string, b: string) => a.localeCompare(b) * (desc ? -1 : 1);
+  return [...keep].sort((a, b) => {
+    if (sort === 'word') return text(a.word, b.word);
+    if (sort === 'points') return text(a.pointsAt?.label ?? '', b.pointsAt?.label ?? '');
+    if (sort === 'opens') return (a.opens - b.opens) * way;
+    if (sort === 'flags') return ((a.flags.length - b.flags.length) * way) || (b.brings - a.brings);
+    return (a.brings - b.brings) * way;
+  });
+}
+
+/**
+ * Everything the table can be filtered by, built from what it holds.
+ *
+ * States and flags come from the rows themselves rather than from a list kept
+ * beside them, so a flag the audit stops raising stops being offered.
+ */
+function filterOptionsFor(m: { words: { decision: string; flags: { key: string; name: string; why: string }[]; pointsAt: { key: string; label: string } | null }[] }) {
+  const states: { key: string; name: string; kind: string; note: string }[] = [
+    { key: 'state:mapped', name: 'Answered', kind: 'STATE', note: 'points at a drawer' },
+    { key: 'state:notsure', name: 'Not sure', kind: 'STATE', note: 'nobody has said' },
+    { key: 'state:secondary', name: 'Kept as a label', kind: 'STATE', note: 'a fact, not a drawer' },
+    { key: 'state:notinepic', name: 'Not in Epic', kind: 'STATE', note: 'kept out on purpose' },
+  ].filter((s) => m.words.some((w) => `state:${w.decision}` === s.key
+    || (s.key === 'state:mapped' && w.decision === 'mapped')));
+  const flags = new Map<string, { key: string; name: string; kind: string; note: string }>();
+  for (const w of m.words) {
+    for (const f of w.flags) {
+      if (!flags.has(f.key)) flags.set(f.key, { key: `flag:${f.key}`, name: f.name, kind: 'FLAG', note: f.why });
+    }
+  }
+  const drawers = new Map<string, { key: string; name: string; kind: string; note: string }>();
+  for (const w of m.words) {
+    if (w.pointsAt && !drawers.has(w.pointsAt.key)) {
+      drawers.set(w.pointsAt.key, {
+        key: `sub:${w.pointsAt.key}`, name: w.pointsAt.label, kind: 'SUBCATEGORY',
+        note: 'words pointing here',
+      });
+    }
+  }
+  return [...states, ...flags.values(), ...drawers.values()];
 }
 
 const labelOf = (d: FilingSubcategory, key: string) =>
