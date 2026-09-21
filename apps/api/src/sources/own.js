@@ -230,7 +230,7 @@ async function compose(venueRef) {
  * want to find in the open world — a name and a point — and it is read here and
  * nowhere else. Nothing on this object is stored.
  */
-async function seedFor(venueRef, given = {}, { householdId = null } = {}) {
+async function seedFor(venueRef, given = {}, { householdId = null, paid = true } = {}) {
   if (given.name && given.lat != null) return given;
   const r = await owned.seedFromHousehold(venueRef);
   // What we already worked out about this place last time. A category is what
@@ -265,8 +265,19 @@ async function seedFor(venueRef, given = {}, { householdId = null } = {}) {
   // lets us keep. Turning it back into a name and a point costs one request on
   // the narrowest field mask there is, and none of it is written down: it is
   // used to search the open map and the encyclopedias, and dropped.
+  // …and `paid: false` means it does not. This call was outside the flag that
+  // stops the website lead and the web search below, so a pass told not to
+  // spend still bought one Place Details request — at Pro rates, 3.2p — for
+  // every place we had no owned name and point for. A sweep over a drawer of
+  // twenty is then £0.64 that nobody asked for, and the data policy's "no paid
+  // research pass per place in V1" is broken by the one caller that was
+  // written to obey it.
+  //
+  // Unpaid and unidentified is not a failure: `canAsk` is false, the record
+  // says we could not ask, and it is asked again the day somebody claims the
+  // place or a display search gives us its point for free.
   const [source, ...rest] = String(venueRef).split(':');
-  if (source === 'google' && sourceHasKey('google') && !sourceOff('google')) {
+  if (paid && source === 'google' && sourceHasKey('google') && !sourceOff('google')) {
     try {
       const meter = {};
       const brief = await googleSource.brief(rest.join(':'), { meter });
@@ -407,7 +418,7 @@ export async function enrich(venueRef, { householdId = null, seed: given = {}, f
     if (row?.enrich_state === 'done' && fresh && isIdentified(row?.provenance)) return { state: 'done', skipped: 'already researched' };
   }
 
-  const seed = await seedFor(venueRef, given, { householdId });
+  const seed = await seedFor(venueRef, given, { householdId, paid });
   // Whether we can ask a well-formed question at all. Without a name and a
   // point there is nothing to search the open map or the encyclopedias for, and
   // "we could not ask" must never be mistaken for "they said no" — see
