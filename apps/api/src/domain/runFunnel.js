@@ -184,3 +184,31 @@ export function stageOf({ stage, funnel, places, items }) {
     recorded: LISTABLE.has(stage) ? true : recorded != null,
   };
 }
+
+/**
+ * How long a run may go untouched before the screen stops believing in it.
+ *
+ * Long enough that a slow subcategory is not mistaken for a corpse — a sweep
+ * reading a few hundred venue pages politely can be quiet for a while — and
+ * short enough that nobody watches a dead run for an afternoon.
+ */
+export const STALL_AFTER_MS = 12 * 60 * 1000;
+
+/**
+ * Is this run alive, stalled, or neither?
+ *
+ * A run interrupted between starting and finishing keeps `status = 'running'`
+ * for ever, because the process that would have written the ending is gone —
+ * and every deploy restarts the process a sweep lives inside. Reading `status`
+ * alone therefore makes the live panel claim a sweep is going, with a red Stop
+ * beside it, until somebody edits the database.
+ *
+ * Stalled is deliberately its own answer rather than "finished". We do not know
+ * how it ended; we know only that nothing has touched it. Saying it finished
+ * would invent a result, and saying it is running would keep the lie going.
+ */
+export function livenessOf(run, now = Date.now()) {
+  if (!run || run.finished_at) return 'done';
+  const last = +new Date(run.touched_at ?? run.started_at);
+  return now - last > STALL_AFTER_MS ? 'stalled' : 'running';
+}

@@ -632,7 +632,8 @@ export async function answersFor(venueRef) {
 
 export async function startRun({ kind, subcategories = [], params = {} }) {
   const { rows } = await query(
-    `insert into vocabulary_runs (kind, subcategories, params) values ($1, $2, $3::jsonb) returning *`,
+    `insert into vocabulary_runs (kind, subcategories, params, touched_at)
+     values ($1, $2, $3::jsonb, now()) returning *`,
     [kind, subcategories, JSON.stringify(params)],
   );
   return rows[0];
@@ -660,7 +661,7 @@ export async function noteRun(id, { funnel = null, places = 0, candidates: found
   if (!id) return null;
   const { rows } = await query(
     `update vocabulary_runs
-        set funnel = $2::jsonb, places = $3, candidates = $4
+        set funnel = $2::jsonb, places = $3, candidates = $4, touched_at = now()
       where id = $1 and finished_at is null
       returning id`,
     [id, funnel ? JSON.stringify(funnel) : null, places, found]);
@@ -670,7 +671,8 @@ export async function noteRun(id, { funnel = null, places = 0, candidates: found
 export async function finishRun(id, { status = 'done', places = 0, calls = 0, candidates: found = 0, costUsd = 0, saturation = {}, note = null, funnel = null } = {}) {
   const { rows } = await query(
     `update vocabulary_runs set status = $2, places = $3, calls = $4, candidates = $5, cost_usd = $6,
-            saturation = $7::jsonb, note = $8, funnel = $9::jsonb, finished_at = now()
+            saturation = $7::jsonb, note = $8, funnel = $9::jsonb,
+            finished_at = now(), touched_at = now()
       where id = $1 returning *`,
     [id, status, places, calls, found, costUsd, JSON.stringify(saturation), note, funnel ? JSON.stringify(funnel) : null],
   );

@@ -52,7 +52,9 @@ import { currentHousehold } from './household.js';
 import * as taxonomyAudit from '../repositories/taxonomyAudit.js';
 import { CORPUS_OPENS, auditAll } from '../domain/taxonomyAudit.js';
 import { setThreshold, thresholds, thresholdValues } from '../repositories/settings.js';
-import { STAGES, clearsOf, diagnose, headlineOf, saturationOf, stageOf } from '../domain/runFunnel.js';
+import {
+  STAGES, clearsOf, diagnose, headlineOf, livenessOf, saturationOf, stageOf,
+} from '../domain/runFunnel.js';
 
 export const filingRoutes = Router();
 
@@ -1313,7 +1315,9 @@ filingRoutes.get('/runs', requires('view_library'), async (_req, res, next) => {
       query(`select subcategory, status, kind, places_seen, places_total, first_seen from harvest_candidates`),
     ]);
 
-    const runs = runList.filter((r) => r.status !== 'running').map((r) => {
+    // A stalled run belongs in the list, not in the live panel: it is not
+    // going, and pretending it finished would invent a result.
+    const runs = runList.filter((r) => livenessOf(r) !== 'running').map((r) => {
       const f = r.funnel ?? null;
       // Raised by *this* run: its own subcategories, inside its own window.
       // `first_seen` is when a word was raised, so a word this run saw again
@@ -1324,7 +1328,11 @@ filingRoutes.get('/runs', requires('view_library'), async (_req, res, next) => {
       const thin = mine.filter((c) => (c.places_seen ?? 0) < limits.sightingFloor).length;
       const waiting = mine.filter((c) => c.status === 'new' && c.kind === 'feature'
         && (c.places_seen ?? 0) >= limits.sightingFloor).length;
-      const d = diagnose(f);
+      const d = livenessOf(r) === 'stalled'
+        // It did not report, and we do not know how it ended. "Not recorded"
+        // would blame the funnel for something the run never got to.
+        ? { says: 'stopped without finishing', at: null, healthy: false, recorded: Boolean(f) }
+        : diagnose(f);
 
       return {
         id: String(r.id),
@@ -1333,7 +1341,7 @@ filingRoutes.get('/runs', requires('view_library'), async (_req, res, next) => {
         scope: `${(r.subcategories ?? []).length} subcategories`,
         sources: r.kind === 'google' ? 'reviews only' : 'the venue’s page · OSM · Wikipedia',
         cost: Number(r.cost_usd ?? 0),
-        state: r.status === 'failed' ? 'failed' : 'done',
+        state: r.status === 'failed' ? 'failed' : livenessOf(r) === 'stalled' ? 'stalled' : 'done',
         funnel: STAGES.map(([key, name]) => ({
           key,
           name,
@@ -1356,7 +1364,7 @@ filingRoutes.get('/runs', requires('view_library'), async (_req, res, next) => {
       // A run in flight is the one thing this screen cannot be missing: runs
       // take hours, and a screen with no live state looks like a screen where
       // nothing is happening.
-      live: liveOf(runList.find((r) => r.status === 'running') ?? null),
+      live: liveOf(runList.find((r) => livenessOf(r) === 'running') ?? null),
       runs,
       weeks,
       clears: clearsOf(weeks),

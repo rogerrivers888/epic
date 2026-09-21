@@ -15,7 +15,8 @@ import assert from 'node:assert/strict';
 
 import {
   COLLAPSE_FLOOR, ENOUGH_TO_JUDGE, KEPT_FLOOR, PEN_CEILING, STAGES,
-  LISTABLE, clearsOf, diagnose, headlineOf, saturationOf, stageOf, verdictOf,
+  LISTABLE, STALL_AFTER_MS, clearsOf, diagnose, headlineOf, livenessOf, saturationOf, stageOf,
+  verdictOf,
 } from '../src/domain/runFunnel.js';
 
 // --- the stages ------------------------------------------------------------
@@ -247,4 +248,42 @@ test('words out is never listed, however much the run recorded', () => {
   const s = stageOf({ stage: 'raw', funnel: { raw: 1480 }, places: 620, items: [] });
   assert.equal(s.count, 1480);
   assert.equal(LISTABLE.has('raw'), false);
+});
+
+// --- alive, stalled, or neither --------------------------------------------
+
+test('a finished run is done however long ago it was touched', () => {
+  assert.equal(livenessOf({ finished_at: '2026-09-01T00:00:00Z', touched_at: null }), 'done');
+});
+
+test('a run touched a moment ago is running', () => {
+  const now = Date.now();
+  assert.equal(livenessOf({ finished_at: null, touched_at: new Date(now - 1000).toISOString() }, now), 'running');
+});
+
+test('a run nothing has touched for a long time is stalled, not finished', () => {
+  // Every deploy restarts the process a sweep lives inside, so an interrupted
+  // run keeps `status = running` for ever. Reading status alone made the live
+  // panel claim a sweep was going — with a red Stop beside it — for half an
+  // hour after it died.
+  const now = Date.now();
+  const cold = new Date(now - STALL_AFTER_MS - 1000).toISOString();
+  assert.equal(livenessOf({ finished_at: null, touched_at: cold }, now), 'stalled');
+});
+
+test('stalled is its own answer and never becomes finished', () => {
+  // We do not know how it ended; we know only that nothing has touched it.
+  // Calling it finished would invent a result.
+  const now = Date.now();
+  const cold = new Date(now - STALL_AFTER_MS - 1).toISOString();
+  assert.notEqual(livenessOf({ finished_at: null, touched_at: cold }, now), 'done');
+});
+
+test('a run from before the heartbeat falls back to when it started', () => {
+  // `touched_at` is null on every row written before migration 239, and an old
+  // run was last known alive when it began — which correctly reads as long
+  // stalled rather than as touched just now.
+  const now = Date.now();
+  const old = new Date(now - 60 * 60 * 1000).toISOString();
+  assert.equal(livenessOf({ finished_at: null, touched_at: null, started_at: old }, now), 'stalled');
 });
