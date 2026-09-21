@@ -159,7 +159,7 @@ const RULE_COLS: Col[] = [
   { w: 200, align: 'right' },
 ];
 
-export function SubcategoryBoard({ data, busy, canManage, onAccept, onFlip, onAcceptAll, onPlaces, onSet, onStrike, onMap }: {
+export function SubcategoryBoard({ data, busy, canManage, onAccept, onFlip, onAcceptAll, onPlaces, onTrain, onSet, onStrike, onMap }: {
   data: FilingSubcategory;
   busy: string | null;
   /**
@@ -173,6 +173,7 @@ export function SubcategoryBoard({ data, busy, canManage, onAccept, onFlip, onAc
   onFlip: (attribute: string) => void;
   onAcceptAll: () => void;
   onPlaces: () => void;
+  onTrain: () => void;
   onSet: (key: string) => void;
   onStrike: (word: string) => void;
   onMap: (word: string) => void;
@@ -296,6 +297,7 @@ export function SubcategoryBoard({ data, busy, canManage, onAccept, onFlip, onAc
       </DeskSection>
 
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 20 }}>
+        <DeskButton label={`Train · ${data.disagreeing.length} to look at`} onPress={onTrain} />
         <DeskButton label={`All ${s.places.toLocaleString()} places`} tone="outline" onPress={onPlaces} />
         {s.set ? (
           <DeskButton label={`Question set · ${s.set.name ?? s.set.key}`} tone="outline" onPress={() => onSet(s.set!.key)} />

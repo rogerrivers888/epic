@@ -25,6 +25,9 @@
  *   GET  /rows                         the rows a household browses, and their fill
  *   PUT  /rows/:id                     its words, or its rule
  *   POST /rows/:id/heart               heart it, as somebody
+ *   GET  /subcategories/:key/train     the places worth looking at, and why
+ *   GET  /places/:ref                  one place, as the desk and a household see it
+ *   PUT  /places/:ref                  what one place says for itself
  *
  * Nothing here calls a provider. Every number comes from the index, the owned
  * records, the search log and the rules, so a screen can be refreshed as often
@@ -45,7 +48,7 @@ import { currentHousehold } from './household.js';
 import * as taxonomyAudit from '../repositories/taxonomyAudit.js';
 import { CORPUS_OPENS, auditAll } from '../domain/taxonomyAudit.js';
 import { setThreshold, thresholds, thresholdValues } from '../repositories/settings.js';
-import { STAGES, clearsOf, diagnose, headlineOf, verdictOf } from '../domain/runFunnel.js';
+import { STAGES, clearsOf, diagnose, headlineOf, saturationOf } from '../domain/runFunnel.js';
 
 export const filingRoutes = Router();
 
@@ -1285,7 +1288,7 @@ filingRoutes.get('/runs', requires('view_library'), async (_req, res, next) => {
     const [runList, sets, counted] = await Promise.all([
       questionSets.runs({ limit: 12 }),
       questionSets.sets(),
-      query(`select subcategory, status, kind, places_seen, first_seen from harvest_candidates`),
+      query(`select subcategory, status, kind, places_seen, places_total, first_seen from harvest_candidates`),
     ]);
 
     const runs = runList.filter((r) => r.status !== 'running').map((r) => {
@@ -1378,29 +1381,6 @@ function liveOf(run) {
   };
 }
 
-/**
- * New words per ten places, and what is still waiting beside it.
- *
- * Three verdicts and not two. A set at 0.4 with eight waiting has *stopped
- * growing* and is not finished, and that used to look exactly like finished.
- */
-function saturationOf(sets, candidates, limits) {
-  return sets.map((s) => {
-    const subs = s.subcategories ?? [];
-    const mine = candidates.filter((c) => subs.includes(c.subcategory));
-    const waiting = mine.filter((c) => c.status === 'new' && c.kind === 'feature'
-      && (c.places_seen ?? 0) >= limits.sightingFloor).length;
-    const places = mine.reduce((n, c) => Math.max(n, c.places_seen ?? 0), 0);
-    const rate = places ? Number(((mine.length / places) * 10).toFixed(1)) : 0;
-    return {
-      set: s.name,
-      rate,
-      trend: [],
-      waiting,
-      ...verdictOf({ rate, waiting, limit: limits.saturationLimit }),
-    };
-  });
-}
 
 // ---------------------------------------------------------------------------
 // The decision log
@@ -1520,5 +1500,203 @@ filingRoutes.get('/decisions/:word/trail', requires('view_library'), async (req,
     }
 
     res.json({ trail: { word: c.raw_forms?.[0] ?? c.norm, steps } });
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// Train — teaching one place at a time
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /subcategories/:key/train — the places worth looking at, and why.
+ *
+ * The queue is ordered by how much a place argues with its drawer, because
+ * that is where a human's attention is worth most: a place agreeing with every
+ * default teaches nothing by being confirmed.
+ *
+ * **What we thought, and why** is the point of the panel beside each place, and
+ * it is two different sentences. "A human set this" means somebody has already
+ * looked and the drawer disagrees — worth reading before overruling. "No rule
+ * matched" means the value is inherited and nobody has ever checked it, which
+ * is the one the screen draws in red.
+ */
+filingRoutes.get('/subcategories/:key/train', requires('view_library'), async (req, res, next) => {
+  try {
+    const key = String(req.params.key);
+    const d = await filing.drawers();
+    const sub = d.subcategories.find((s) => s.key === key);
+    if (!sub) throw bad(`${key} is not one of our subcategories.`);
+    const drawer = await filing.drawerOf(key, d);
+    const answers = [...drawer.facets, ...drawer.axes];
+    const byKey = new Map(answers.map((a) => [a.key, a]));
+
+    const queue = [];
+    for (const ref of drawer.refs) {
+      const mine = d.valuesByRef.get(ref) ?? new Map();
+      const rec = d.recordsByRef.get(ref) ?? null;
+      const asks = [];
+      for (const a of drawer.axes) {
+        const own = mine.get(a.key);
+        // Nothing to ask where the place already answers and agrees.
+        if (own && a.value && filing.sameValue(own, a.value)) continue;
+        asks.push({
+          key: a.key,
+          label: a.label,
+          anchor: a.anchor,
+          // What we think, which is the place's own answer if it has one and
+          // the drawer's otherwise.
+          level: own?.level ?? a.value?.level ?? null,
+          drawer: a.value?.level ?? null,
+          why: own?.by
+            ? `a human set this · the drawer says ${a.value?.level ?? 'nothing'}`
+            : own
+              ? `read from what we hold · the drawer says ${a.value?.level ?? 'nothing'}`
+              : 'no rule matched — this is the drawer’s, and nobody has checked it',
+          // Red where nobody has ever looked at this place, lime where
+          // somebody has and the drawer disagrees.
+          tone: own?.by ? 'lime' : 'warn',
+        });
+      }
+      if (!asks.length) continue;
+      queue.push({
+        ref,
+        name: rec?.name ?? null,
+        town: townOf(rec),
+        photo: rec?.image_url ?? null,
+        facts: answers.filter((a) => a.kind === 'yesno' && (mine.get(a.key)?.yesno ?? a.value?.yesno) === true)
+          .map((a) => a.label).slice(0, 4),
+        human: [...mine.values()].some((v) => v.by),
+        asks,
+      });
+    }
+    // Most argued-with first: the places where a person's judgement buys most.
+    queue.sort((a, b) => b.asks.length - a.asks.length);
+
+    res.json({
+      subcategory: { key: sub.key, label: sub.label, places: drawer.refs.length },
+      queue,
+      // Twelve for the grid — a screenful, and enough that being wrong about
+      // one is obvious beside eleven that are right.
+      grid: drawer.refs.slice(0, 12).map((ref) => {
+        const rec = d.recordsByRef.get(ref) ?? null;
+        return { ref, name: rec?.name ?? null, town: townOf(rec), photo: rec?.image_url ?? null };
+      }),
+      axes: drawer.axes.map((a) => ({ key: a.key, label: a.label, anchor: a.anchor })),
+    });
+  } catch (err) { next(err); }
+});
+
+/**
+ * PUT /places/:ref — what one place says for itself.
+ *
+ * Always attributed. A value a person set outranks the drawer for good, and
+ * the screens draw it differently, so an unattributed write would be a value
+ * nobody could later argue with.
+ */
+filingRoutes.put('/places/:ref', requires('manage_library'), async (req, res, next) => {
+  try {
+    const ref = String(req.params.ref);
+    const attribute = String(req.body?.attribute ?? '');
+    if (!attribute) throw bad('Which answer?');
+    const { byKey } = await placeAttributes.attributes();
+    const attr = byKey.get(attribute);
+    if (!attr) throw bad(`${attribute} is not one of our labels.`);
+    const value = req.body?.value ?? null;
+    const saved = await placeAttributes.setValue(ref, attribute, value, {
+      reason: req.body?.reason ? String(req.body.reason).slice(0, 300) : null,
+      by: actorOf(req),
+    });
+    res.json({
+      ref,
+      attribute,
+      value: saved ? filing.said(value, attr) : null,
+      said: saved
+        ? `${attr.label} set to ${filing.said(value, attr)}`
+        : `${attr.label} back to what it inherits`,
+    });
+  } catch (err) { next(err); }
+});
+
+/**
+ * GET /places/:ref — one place, as both the back office and a household see it.
+ *
+ * The question set's answers come back in the three states they are genuinely
+ * in, and the middle one is the one worth keeping: **nothing found** is a real
+ * answer. Three sources were read and none mentioned it, which is a different
+ * fact from never having asked — and the two look identical if a screen only
+ * knows "answered" and "blank" (the question-sets brief, 20 Sep 2026).
+ */
+filingRoutes.get('/places/:ref', requires('view_library'), async (req, res, next) => {
+  try {
+    const ref = String(req.params.ref);
+    const d = await filing.drawers();
+    const { rows: where } = await query(
+      'select subcategory, category from place_index where venue_ref = $1', [ref]);
+    const subKey = where[0]?.subcategory ?? null;
+    if (!subKey) throw bad('That place is not filed anywhere yet.');
+    const sub = d.subcategories.find((s) => s.key === subKey) ?? null;
+    const drawer = await filing.drawerOf(subKey, d);
+    const mine = d.valuesByRef.get(ref) ?? new Map();
+    const rec = d.recordsByRef.get(ref) ?? null;
+
+    const say = (a) => {
+      const own = mine.get(a.key);
+      return {
+        key: a.key,
+        label: a.label,
+        kind: a.kind,
+        anchor: a.anchor,
+        value: own ?? a.value ?? null,
+        said: filing.said(own ?? a.value, a),
+        // Where the answer came from, which is what the control's colour says:
+        // a person's own answer is drawn filled, an inherited one in lime.
+        from: own?.by ? 'a person' : own ? 'what we hold' : a.value ? 'the drawer' : null,
+        mine: Boolean(own),
+      };
+    };
+
+    const setKey = d.setBySub.get(subKey) ?? null;
+    let questions = [];
+    if (setKey) {
+      const [qs, { rows: answered }] = await Promise.all([
+        questionSets.questionsFor(setKey),
+        query('select * from place_answers where venue_ref = $1', [ref]),
+      ]);
+      const byQ = new Map(answered.map((a) => [String(a.question_id), a]));
+      questions = qs.filter((q) => q.set_key === setKey).map((q) => {
+        const a = byQ.get(String(q.id));
+        if (!a) {
+          return { id: Number(q.id), name: q.label, state: 'notasked',
+            said: 'Not asked yet', source: 'added after this place was last read' };
+        }
+        if (a.state !== 'answered') {
+          return { id: Number(q.id), name: q.label, state: 'nothing',
+            said: 'Nothing found',
+            source: a.source ? `${a.source} read it and did not mention it` : 'read, and not mentioned' };
+        }
+        return {
+          id: Number(q.id), name: q.label, state: 'answered',
+          said: a.yesno != null ? (a.yesno ? 'Yes' : 'No')
+            : a.choice ?? (a.number != null ? String(a.number) : '—'),
+          source: `${a.source}${a.checked_at ? ` · checked ${new Date(a.checked_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}`,
+          url: a.source_url ?? null,
+          unresolved: a.unresolved,
+        };
+      });
+    }
+
+    res.json({
+      place: {
+        ref,
+        name: rec?.name ?? null,
+        town: townOf(rec),
+        photo: rec?.image_url ?? null,
+        subcategory: sub ? { key: sub.key, label: sub.label } : null,
+      },
+      axes: drawer.axes.map(say),
+      facets: drawer.facets.map(say),
+      questions,
+      set: setKey ? { key: setKey, name: d.setByKey.get(setKey)?.name ?? setKey } : null,
+    });
   } catch (err) { next(err); }
 });

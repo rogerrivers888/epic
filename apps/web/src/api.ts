@@ -3308,6 +3308,14 @@ export const api = {
   filingSet: (key: string) => request<FilingSet>(`/api/admin/filing/labels/sets/${encodeURIComponent(key)}`),
   /** Our own labels, and where each is asked. */
   filingVocabulary: () => request<FilingVocabulary>('/api/admin/filing/labels/vocabulary'),
+  /** The places in a drawer worth looking at, and why each one is. */
+  filingTrain: (key: string) => request<FilingTrain>(`/api/admin/filing/subcategories/${encodeURIComponent(key)}/train`),
+  /** One place, as the desk and a household each see it. */
+  filingPlace: (ref: string) => request<FilingPlace>(`/api/admin/filing/places/${encodeURIComponent(ref)}`),
+  /** What one place says for itself. Always attributed to whoever said it. */
+  filingSetPlace: (ref: string, body: { attribute: string; value: AttributeValue | null; reason?: string }) =>
+    put<{ ref: string; attribute: string; value: string | null; said: string }>(
+      `/api/admin/filing/places/${encodeURIComponent(ref)}`, body),
 
   /** Our own secondary labels, with what every drawer is taken to be. */
   taxonomyAttributes: () => request<TaxonomyAttributes>('/api/admin/taxonomy/attributes'),
@@ -5243,6 +5251,58 @@ export type FilingSet = {
   inFlight: FilingCandidate[];
   thin: FilingCandidate[];
   readNote: string;
+};
+
+/** A place worth looking at, and what it is worth asking about it. */
+export type FilingTrainRow = {
+  ref: string; name: string | null; town: string | null; photo: string | null;
+  facts: string[]; human: boolean;
+  asks: {
+    key: string; label: string; anchor: string | null;
+    /** What we think, which is the place's own answer if it has one. */
+    level: number | null;
+    /** What the drawer says, for the panel beside it. */
+    drawer: number | null;
+    why: string;
+    /** Red where nobody has ever checked this place; lime where somebody has. */
+    tone: 'lime' | 'warn';
+  }[];
+};
+
+export type FilingTrain = {
+  subcategory: { key: string; label: string; places: number };
+  queue: FilingTrainRow[];
+  grid: { ref: string; name: string | null; town: string | null; photo: string | null }[];
+  axes: { key: string; label: string; anchor: string | null }[];
+};
+
+export type FilingPlace = {
+  place: {
+    ref: string; name: string | null; town: string | null; photo: string | null;
+    subcategory: { key: string; label: string } | null;
+  };
+  axes: FilingPlaceAnswer[];
+  facets: FilingPlaceAnswer[];
+  /**
+   * Three states and not two. **Nothing found** is a real answer — sources were
+   * read and none mentioned it — and a different fact from never having asked,
+   * which is the absence of a row (the question-sets brief, 20 Sep 2026).
+   */
+  questions: {
+    id: number; name: string;
+    state: 'answered' | 'nothing' | 'notasked';
+    said: string; source: string; url?: string | null; unresolved?: boolean;
+  }[];
+  set: { key: string; name: string } | null;
+};
+
+export type FilingPlaceAnswer = {
+  key: string; label: string; kind: AttributeKind; anchor: string | null;
+  value: AttributeValue | null; said: string;
+  /** Where the answer came from — a person, what we hold, or the drawer. */
+  from: 'a person' | 'what we hold' | 'the drawer' | null;
+  /** Whether the place says it for itself rather than inheriting it. */
+  mine: boolean;
 };
 
 export type FilingVocabulary = {

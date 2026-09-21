@@ -35,6 +35,7 @@ import { CategoryBoard, CategoryList, PlacesBoard, SubcategoryBoard } from './Ca
 import { AllLabels, QuestionSet, QuestionSets } from './Labels';
 import { NotInEpic } from './Mapping';
 import { Rows, type RowFilter } from './Rows';
+import { Train } from './Train';
 
 const TABS = ['overview', 'categories', 'labels', 'mapping', 'rules', 'rows'] as const;
 type Tab = typeof TABS[number];
@@ -70,6 +71,9 @@ export function Filing({ canManage }: { canManage: boolean }) {
   const [excluded, setExcluded] = useState<FilingExcluded | null>(null);
   const [rows, setRows] = useState<Awaited<ReturnType<typeof api.adminFilingRows>> | null>(null);
   const [rowFilter, setRowFilter] = useState<RowFilter>('all');
+  const [train, setTrain] = useState<Awaited<ReturnType<typeof api.filingTrain>> | null>(null);
+  const [onePlace, setOnePlace] = useState<Awaited<ReturnType<typeof api.filingPlace>> | null>(null);
+  const [mode, setMode] = useState<'sweep' | 'grid' | 'inspect'>('sweep');
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -97,6 +101,9 @@ export function Filing({ canManage }: { canManage: boolean }) {
         if (sub && view === 'places') {
           const [d, p] = await Promise.all([api.filingSubcategory(sub), api.filingPlaces(sub)]);
           setDrawer(d); setPlaces(p);
+        } else if (sub && view === 'train') {
+          const [d, t] = await Promise.all([api.filingSubcategory(sub), api.filingTrain(sub)]);
+          setDrawer(d); setTrain(t);
         } else if (sub) setDrawer(await api.filingSubcategory(sub));
         else if (cat) setCategory(await api.filingCategory(cat));
         else setCategories(await api.filingCategories());
@@ -298,12 +305,31 @@ export function Filing({ canManage }: { canManage: boolean }) {
             <PlacesBoard data={places} label={drawer.subcategory.label} />
           ) : null}
 
-          {tab === 'categories' && sub && view !== 'places' && drawer ? (
+          {tab === 'categories' && sub && view === 'train' && train ? (
+            <Train
+              data={train}
+              place={onePlace}
+              mode={mode}
+              onMode={setMode}
+              busy={busy}
+              canManage={canManage}
+              onOpen={(ref) => { void api.filingPlace(ref).then(setOnePlace).catch(() => setOnePlace(null)); }}
+              onHousehold={() => go({ tab: 'rows', cat: '', sub: '', set: '', view: '' })}
+              onSet={(ref, attribute, level) => void run(`${ref}:${attribute}`, async () => {
+                const out = await api.filingSetPlace(ref, { attribute, value: { level } });
+                if (onePlace?.place.ref === ref) setOnePlace(await api.filingPlace(ref));
+                return out.said;
+              })}
+            />
+          ) : null}
+
+          {tab === 'categories' && sub && view !== 'places' && view !== 'train' && drawer ? (
             <SubcategoryBoard
               data={drawer}
               busy={busy}
               canManage={canManage}
               onPlaces={() => go({ view: 'places' })}
+              onTrain={() => go({ view: 'train' })}
               onSet={(key) => go({ tab: 'labels', set: key, cat: '', sub: '', view: '' })}
               onMap={() => go({ tab: 'mapping', cat: '', sub: '', set: '', view: '' })}
               onStrike={(word) => void run(word, async () => `${word} — striking a rule is not wired yet`)}
@@ -491,6 +517,7 @@ function crumbs({ tab, cat, sub, set, view, category, drawer, oneSet, go }: {
     }
     if (sub) out.push({ label: drawer?.subcategory.label ?? sub, go: view ? () => go({ view: '' }) : undefined });
     if (view === 'places') out.push({ label: 'All places' });
+    if (view === 'train') out.push({ label: 'Train' });
   }
   if (tab === 'labels') {
     if (set) out.push({ label: oneSet?.set.name ?? set });
