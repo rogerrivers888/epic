@@ -103,7 +103,15 @@ export function testDatabase() {
   if (ready) return ready;
   ready = (async () => {
     // `postgres` is the database that always exists; connect there to make ours.
-    const admin = new pg.Pool({ connectionString: urlFor('postgres') });
+    // Two connections, not the driver's default ten.
+    //
+    // Postgres allows a hundred. `node --test` runs about ten files at once and
+    // each opens its own pool, so one suite reaches a hundred on its own and two
+    // sessions testing together go past it — which is why a run under load
+    // fails in thirty unrelated database-backed files at once and every one of
+    // them passes alone (21 Sep 2026). Nothing here needs ten: a test file
+    // queries in sequence.
+    const admin = new pg.Pool({ connectionString: urlFor('postgres'), max: 2 });
     try {
       await admin.query(`drop database if exists ${TEST_DB} with (force)`);
       await admin.query(`create database ${TEST_DB}`);
@@ -112,8 +120,10 @@ export function testDatabase() {
     }
 
     // Everything downstream reads DATABASE_URL when it is first imported, so it
-    // is set before any of it is.
+    // is set before any of it is. The pool size travels the same way: `src/db.js`
+    // opens ten connections by default, which is ten per test file.
     process.env.DATABASE_URL = urlFor(TEST_DB);
+    process.env.EPIC_TEST_POOL = '1';
 
     const { pool, query, withTransaction } = await import('../../src/db.js');
     const dir = path.resolve(here, '../../migrations');
