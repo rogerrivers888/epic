@@ -36,7 +36,7 @@ import { z } from 'zod';
 
 import { MODEL, SESSION_CALL_BOUND, parseStructured } from '../claude.js';
 import { query } from '../db.js';
-import { looksLikeMenu, namesOf, strip } from '../domain/boilerplate.js';
+import { asserted, looksLikeMenu, namesOf, strip } from '../domain/boilerplate.js';
 import * as sets from '../repositories/questionSets.js';
 
 /** Places sampled per drawer. Twenty is the brief's number. */
@@ -111,22 +111,6 @@ async function placesFor(subcategory, { size = SAMPLE_SIZE } = {}) {
 /** A list column, however the record happens to hold it. */
 const listOf = (v) => (Array.isArray(v) ? v : []).map((x) => String(x)).filter(Boolean);
 
-/**
- * The accessibility keys a place actually *has*, said in words.
- *
- * `own.js` writes a key for every field it looked at, including the ones it
- * found absent or unknown — `{stepFree: false, hearingLoop: null}`. Reading the
- * keys alone presents all of them as facilities the place provides, so a
- * drawer where nobody has a hearing loop would still have raised "hearing
- * loop" as a feature recurring across it, with the corpus check agreeing,
- * because the words really were in every place's text (Codex, 21 Sep 2026).
- *
- * The keys are camelCase and the extractor reads English, so they are spaced
- * out on the way: `stepFree` is a step free entrance, not a token.
- */
-export const asserted = (accessibility) => Object.entries(accessibility ?? {})
-  .filter(([, v]) => v === true || v === 'yes' || v === 'limited')
-  .map(([k]) => String(k).replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase());
 
 /** One place's text, cleaned, with menus routed away from the feature path. */
 export function textOf(place) {

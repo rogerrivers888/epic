@@ -14,7 +14,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const { looksLikeMenu, namesOf, strip } = await import('../src/domain/boilerplate.js');
+const { asserted, looksLikeMenu, namesOf, strip } = await import('../src/domain/boilerplate.js');
 const { countAcross, evidenced, poolFor, textOf } = await import('../src/sources/featureHarvest.js');
 
 // --- boilerplate -----------------------------------------------------------
@@ -181,7 +181,6 @@ test('a real day range is still stripped', () => {
 
 // --- what Codex found ------------------------------------------------------
 
-const { asserted } = await import('../src/sources/featureHarvest.js');
 
 test('an accessibility field we looked at and did not find is not a facility', () => {
   // `own.js` writes a key for every field it checked, including the absent
@@ -227,4 +226,15 @@ test('a plural is the same feature', () => {
     { ref: 'b', text: 'One wave machine.' },
   ];
   assert.equal(countAcross({ name: 'Wave machine' }, plural).seen, 2);
+});
+
+test('the sweep path reads accessibility the same way', () => {
+  // The same helper feeds the free sweep's `heldTextFor`, which was turning
+  // every checked accessibility field into text the place asserted. It is
+  // shared rather than copied, because two implementations of "what does this
+  // place actually have" is how one of them drifts.
+  assert.deepEqual(asserted({ stepFree: true, hearingLoop: false, lift: null, ramp: 'yes', bay: 'limited' }),
+    ['step free', 'ramp', 'bay']);
+  assert.deepEqual(asserted(null), []);
+  assert.deepEqual(asserted({}), []);
 });

@@ -160,3 +160,20 @@ export function looksLikeMenu(text) {
   }).length;
   return lines.length >= 6 && short / lines.length > 0.7;
 }
+
+/**
+ * The accessibility keys a place actually *has*, said in words.
+ *
+ * `own.js` writes a key for every field it looked at, including the ones it
+ * found absent or unknown — `{stepFree: false, hearingLoop: null}`. Reading the
+ * keys alone presents all of them as facilities the place provides, so a
+ * drawer where nobody has a hearing loop would still have raised "hearing
+ * loop" as a feature recurring across it, with the corpus check agreeing,
+ * because the words really were in every place's text (Codex, 21 Sep 2026).
+ *
+ * The keys are camelCase and the extractor reads English, so they are spaced
+ * out on the way: `stepFree` is a step free entrance, not a token.
+ */
+export const asserted = (accessibility) => Object.entries(accessibility ?? {})
+  .filter(([, v]) => v === true || v === 'yes' || v === 'limited')
+  .map(([k]) => String(k).replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase());

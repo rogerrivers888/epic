@@ -38,6 +38,7 @@ import { placeTags } from './inside.js';
 import * as providerCalls from '../repositories/providerCalls.js';
 import * as sets from '../repositories/questionSets.js';
 import { PRICE_PER_UNIT_USD, USD_TO_GBP } from '../domain/providerPrices.js';
+import { asserted } from '../domain/boilerplate.js';
 import {
   ENRICH_AFTER, REGIONS, SAMPLE, candidatesFor, enrichmentOn, normalise, pickSample, regionOfArea,
   saturation, spreadByRegion,
@@ -158,7 +159,11 @@ export async function heldTextFor(venueRef) {
   const r = record.rows[0];
   if (r) {
     const bits = [r.summary, ...listOf(r.cuisines), ...listOf(r.experiences), ...listOf(r.dietary_options),
-      ...Object.keys(r.accessibility ?? {}).map(keyWords)];
+      // Only the ones the place actually has. `own.js` writes a key for every
+      // field it checked, so reading them all fed "hearing loop" into the text
+      // of a place where nobody found one — and the sweep then raised it as a
+      // feature that place asserted (Codex, 21 Sep 2026).
+      ...asserted(r.accessibility).map(keyWords)];
     texts.push({ source: 'site', text: bits.filter(Boolean).join('. ') });
   }
   const a = atlas.rows[0];
