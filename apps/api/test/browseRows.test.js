@@ -12,7 +12,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const { attributesIn, checkPredicate, matches, shorthand } =
+const { attributesIn, checkPredicate, evaluate, matches, shorthand } =
   await import('../src/domain/browseRows.js');
 
 const ATTRS = new Map([
@@ -99,6 +99,44 @@ test('"not" over something unknown is still unknown, and sweeps nothing in', () 
   // A drawer is always known, so a "not" over one behaves normally.
   assert.equal(matches({ not: { subcategory: ['coast'] } }, place('golf', {}), valueOf), true);
   assert.equal(matches({ not: { subcategory: ['coast'] } }, place('coast', {}), valueOf), false);
+});
+
+test('unknown survives nesting, however deep somebody buries it', () => {
+  // The one a boolean cannot do. `any` of a known-false and an unknown is
+  // *unknown*, not false — so negating it must not produce a match. A first
+  // attempt asked "knowable?" and "true?" in two passes and got this wrong:
+  // the `any` had one known child so it looked knowable, returned false, and
+  // the negation turned that into a yes for a place nobody had asked.
+  const p = place('golf', { indoor: { yesno: false } });
+  const rule = { not: { any: [
+    { attribute: 'indoor', yes: true },          // known, and false
+    { attribute: 'how-much-walking', atLeast: 3 }, // nobody has said
+  ] } };
+  assert.equal(evaluate(rule.not, p, valueOf), 'unknown');
+  assert.equal(matches(rule, p, valueOf), false);
+
+  // Once the unknown is answered it settles, both ways.
+  const walked = place('golf', { indoor: { yesno: false }, 'how-much-walking': { level: 1 } });
+  assert.equal(matches(rule, walked, valueOf), true);
+  const strode = place('golf', { indoor: { yesno: false }, 'how-much-walking': { level: 4 } });
+  assert.equal(matches(rule, strode, valueOf), false);
+});
+
+test('an "all" with one unknown in it is unknown, not false', () => {
+  const p = place('golf', { indoor: { yesno: true } });
+  // Knowing a place is indoors does not answer "indoors and step free".
+  assert.equal(evaluate({ all: [
+    { attribute: 'indoor', yes: true }, { attribute: 'step-free', yes: true },
+  ] }, p, valueOf), 'unknown');
+  // But one plain no settles it without needing the rest.
+  assert.equal(evaluate({ all: [
+    { attribute: 'indoor', yes: false }, { attribute: 'step-free', yes: true },
+  ] }, p, valueOf), 'no');
+});
+
+test('an empty list of drawers is a rule that can never match, and is refused', () => {
+  assert.throws(() => checkPredicate({ subcategory: [] }, CONTEXT), /at least one subcategory/);
+  assert.throws(() => checkPredicate({ category: [] }, CONTEXT), /at least one category/);
 });
 
 test('a scale is compared as a number, and nought is a value', () => {

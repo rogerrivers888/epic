@@ -34,6 +34,7 @@ import { Overview } from './Overview';
 import { CategoryBoard, CategoryList, PlacesBoard, SubcategoryBoard } from './Categories';
 import { AllLabels, QuestionSet, QuestionSets } from './Labels';
 import { NotInEpic } from './Mapping';
+import { Rows, type RowFilter } from './Rows';
 
 const TABS = ['overview', 'categories', 'labels', 'mapping', 'rules', 'rows'] as const;
 type Tab = typeof TABS[number];
@@ -67,6 +68,8 @@ export function Filing({ canManage }: { canManage: boolean }) {
   const [oneSet, setOneSet] = useState<FilingSet | null>(null);
   const [vocabulary, setVocabulary] = useState<FilingVocabulary | null>(null);
   const [excluded, setExcluded] = useState<FilingExcluded | null>(null);
+  const [rows, setRows] = useState<Awaited<ReturnType<typeof api.adminFilingRows>> | null>(null);
+  const [rowFilter, setRowFilter] = useState<RowFilter>('all');
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -110,6 +113,7 @@ export function Filing({ canManage }: { canManage: boolean }) {
         } else setLabels(await api.filingLabels());
       }
       if (tab === 'mapping' && view === 'excluded') setExcluded(await api.filingExcluded());
+      if (tab === 'rows') setRows(await api.adminFilingRows());
     } catch (err) {
       // A provider's error never reaches a screen in its own words, and neither
       // does ours: one sentence, and the detail is in the network tab.
@@ -357,6 +361,43 @@ export function Filing({ canManage }: { canManage: boolean }) {
             />
           ) : null}
 
+          {tab === 'rows' && rows ? (
+            <Rows
+              rows={rows.rows}
+              districts={rows.districts}
+              minFill={rows.minFill ?? 4}
+              household={rows.household?.name ?? 'this household'}
+              filter={rowFilter}
+              onFilter={setRowFilter}
+              onHeart={(id) => {
+                const row = rows.rows.find((r) => r.id === id);
+                // Hearting with nobody chosen is a question to ask, not a tap
+                // to drop: the API refuses it and says so, and until the screen
+                // asks "whose list is this?" the only honest thing is to say
+                // which member it would be attributed to.
+                const member = rows.members[0]?.id ?? null;
+                if (!member) { said('Nobody is in this household to heart it as.'); return; }
+                void run(id, async () => {
+                  await api.adminFilingHeart(id, !row?.hearted, member);
+                  return `${row?.title ?? id} ${row?.hearted ? 'unhearted' : 'hearted'}`;
+                });
+              }}
+              onEdit={(id, field, value) => {
+                if (field === 'rule') {
+                  // The shorthand is rendered from the rule; typing over it
+                  // cannot set one. Saying so beats saving nothing and
+                  // reporting success, which is the prototype's own failure.
+                  said('A row\u2019s rule is set as structure, not by typing over its shorthand.');
+                  return;
+                }
+                void run(id, async () => {
+                  await api.adminFilingEditRow(id, { [field]: value });
+                  return `${field === 'title' ? 'Title' : 'Copy line'} saved`;
+                });
+              }}
+            />
+          ) : null}
+
           {/* The tabs whose screens are drawn but not yet fed. Saying which is
               better than a blank panel: a screen that is coming and a screen
               that is broken look identical otherwise. */}
@@ -381,7 +422,7 @@ const anyLoaded = (o: Record<string, unknown>) => Object.values(o).some(Boolean)
 
 /** Which tabs have no data behind them yet, so the screen can say so. */
 function notYet(tab: Tab, view: string): boolean {
-  if (tab === 'rules' || tab === 'rows') return true;
+  if (tab === 'rules') return true;
   if (tab === 'mapping' && view !== 'excluded') return true;
   return false;
 }

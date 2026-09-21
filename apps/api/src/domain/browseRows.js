@@ -70,11 +70,15 @@ export function checkPredicate(clause, { attributes, subcategories, categories }
 
   if (clause.subcategory) {
     const keys = [clause.subcategory].flat();
+    // An empty list is not "any drawer", it is a rule that can never match —
+    // and it would sit there returning nothing for ever without saying why.
+    if (!keys.length) throw bad('Name at least one subcategory.');
     for (const k of keys) if (!subcategories.has(k)) throw bad(`${k} is not one of our subcategories.`);
     return;
   }
   if (clause.category) {
     const keys = [clause.category].flat();
+    if (!keys.length) throw bad('Name at least one category.');
     for (const k of keys) if (!categories.has(k)) throw bad(`${k} is not one of our categories.`);
     return;
   }
@@ -108,6 +112,63 @@ export function checkPredicate(clause, { attributes, subcategories, categories }
 }
 
 /**
+ * Yes, no, or nobody has said — and the third one is not a kind of no.
+ *
+ * Three states rather than a boolean, because negation over two of them is
+ * wrong in a way that only shows up nested. A first attempt asked "is this
+ * knowable?" and "is it true?" in two separate passes, and
+ * `not(any([known-false, unknown]))` then matched: the `any` had one known
+ * child so the first pass called it knowable, and returned false so the
+ * second pass negated it to true — for a place nobody had asked (Codex,
+ * 21 Sep 2026). Three-valued logic gets this right by construction, and an
+ * editable rule can nest as deeply as somebody likes.
+ */
+const YES = 'yes';
+const NO = 'no';
+const UNKNOWN = 'unknown';
+
+export function evaluate(clause, place, valueOf) {
+  if (!clause) return UNKNOWN;
+
+  if (Array.isArray(clause.all)) {
+    const seen = clause.all.map((c) => evaluate(c, place, valueOf));
+    // One no settles it. Otherwise an unknown leaves the whole thing unknown:
+    // "indoors and step free" is not answered by a place we know is indoors
+    // and have never asked about steps.
+    if (seen.includes(NO)) return NO;
+    return seen.includes(UNKNOWN) ? UNKNOWN : YES;
+  }
+  if (Array.isArray(clause.any)) {
+    const seen = clause.any.map((c) => evaluate(c, place, valueOf));
+    if (seen.includes(YES)) return YES;
+    return seen.includes(UNKNOWN) ? UNKNOWN : NO;
+  }
+  if (clause.not) {
+    const inner = evaluate(clause.not, place, valueOf);
+    return inner === UNKNOWN ? UNKNOWN : inner === YES ? NO : YES;
+  }
+
+  // Which drawer a place is in is always known: it is how it got here.
+  if (clause.subcategory) return [clause.subcategory].flat().includes(place.subcategory) ? YES : NO;
+  if (clause.category) return [clause.category].flat().includes(place.category) ? YES : NO;
+
+  const v = valueOf(place, clause.attribute);
+  if (!v) return UNKNOWN;
+  const said = (b) => (b ? YES : NO);
+  if (clause.atLeast != null) return v.level == null ? UNKNOWN : said(v.level >= Number(clause.atLeast));
+  if (clause.atMost != null) return v.level == null ? UNKNOWN : said(v.level <= Number(clause.atMost));
+  if (clause.is != null) return v.level == null ? UNKNOWN : said(v.level === Number(clause.is));
+  if (clause.yes != null) return v.yesno == null ? UNKNOWN : said(v.yesno === Boolean(clause.yes));
+  if (clause.overlaps) {
+    const [lo, hi] = clause.overlaps.map(Number);
+    return said((v.from ?? 0) <= hi && (v.to ?? 99) >= lo);
+  }
+  if (clause.from != null) return said((v.from ?? 0) >= Number(clause.from));
+  if (clause.to != null) return said((v.to ?? 99) <= Number(clause.to));
+  return UNKNOWN;
+}
+
+/**
  * Does this place answer the rule?
  *
  * `valueOf` is handed in rather than looked up, so the caller decides the
@@ -120,42 +181,7 @@ export function checkPredicate(clause, { attributes, subcategories, categories }
  * false is how a row fills up with places nobody has checked.
  */
 export function matches(clause, place, valueOf) {
-  if (!clause) return false;
-  if (Array.isArray(clause.all)) return clause.all.every((c) => matches(c, place, valueOf));
-  if (Array.isArray(clause.any)) return clause.any.some((c) => matches(c, place, valueOf));
-  // `not` over an unknown is still unknown, so it cannot be a plain negation:
-  // "not indoors" must not sweep in every place nobody has asked.
-  if (clause.not) {
-    const known = sayable(clause.not, place, valueOf);
-    return known && !matches(clause.not, place, valueOf);
-  }
-  if (clause.subcategory) return [clause.subcategory].flat().includes(place.subcategory);
-  if (clause.category) return [clause.category].flat().includes(place.category);
-
-  const v = valueOf(place, clause.attribute);
-  if (!v) return false;
-  if (clause.atLeast != null) return v.level != null && v.level >= Number(clause.atLeast);
-  if (clause.atMost != null) return v.level != null && v.level <= Number(clause.atMost);
-  if (clause.is != null) return v.level != null && v.level === Number(clause.is);
-  if (clause.yes != null) return v.yesno === Boolean(clause.yes);
-  if (clause.overlaps) {
-    const [lo, hi] = clause.overlaps.map(Number);
-    const from = v.from ?? 0;
-    const to = v.to ?? 99;
-    return from <= hi && to >= lo;
-  }
-  if (clause.from != null) return (v.from ?? 0) >= Number(clause.from);
-  if (clause.to != null) return (v.to ?? 99) <= Number(clause.to);
-  return false;
-}
-
-/** Whether anything is known about what this clause asks of this place. */
-function sayable(clause, place, valueOf) {
-  if (Array.isArray(clause.all)) return clause.all.every((c) => sayable(c, place, valueOf));
-  if (Array.isArray(clause.any)) return clause.any.some((c) => sayable(c, place, valueOf));
-  if (clause.not) return sayable(clause.not, place, valueOf);
-  if (clause.subcategory || clause.category) return true;
-  return Boolean(valueOf(place, clause.attribute));
+  return evaluate(clause, place, valueOf) === YES;
 }
 
 /**

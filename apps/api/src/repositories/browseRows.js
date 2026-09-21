@@ -71,13 +71,19 @@ export async function pool() {
  *
  * Where there are not three to choose from, that is said rather than padded.
  */
-export async function districts() {
-  const { rows: out } = await query(
-    `select split_part(trim(postcode), ' ', 1) as code, count(*)::int as places
-       from place_records
-      where postcode is not null and postcode <> ''
-      group by 1 having count(*) > 0
-      order by count(*) desc`);
+export function districts(ctx) {
+  // Counted over the places a row can actually return — indexed, in an active
+  // drawer — and not over every record with a postcode. An outcode full of
+  // unfiled records would otherwise be chosen as the dense district and then
+  // return nothing for every row on the screen (Codex, 21 Sep 2026).
+  const counts = new Map();
+  for (const p of ctx.places) {
+    const code = outcodeOf(p);
+    if (!code) continue;
+    counts.set(code, (counts.get(code) ?? 0) + 1);
+  }
+  const out = [...counts].map(([code, places]) => ({ code, places }))
+    .sort((a, b) => b.places - a.places);
   // An outward code is one or two letters then a digit. Anything else in that
   // column is not a postcode — foreign addresses put their own formats there.
   const real = out.filter((r) => /^[A-Z]{1,2}[0-9][0-9A-Z]?$/i.test(r.code));

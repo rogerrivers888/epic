@@ -3542,8 +3542,25 @@ export const api = {
 
   /** The browse rows, what each returns per district, and who hearts it. */
   adminFilingRows: () =>
-    request<{ rows: BrowseRow[]; districts: District[]; members: HouseMember[]; household: string }>(
-      '/api/admin/filing/rows'),
+    request<{
+      rows: BrowseRow[]; districts: District[]; members: HouseMember[];
+      /**
+       * The household the preview is for, or null where nobody is signed in to
+       * one — which is a real state on a back office and not a missing name.
+       */
+      household: { id: string; name: string | null } | null;
+      /** How many households there are, which is the denominator of `share`. */
+      households: number;
+      /** The threshold a row's district fill is judged against. */
+      minFill: number;
+      /**
+       * What the districts amount to, said in words. It may say the preview is
+       * not a preview: three outcodes holding one place between two of them
+       * cannot show that a rule returning fourteen in one returns two in
+       * another, which is the whole point of previewing in three.
+       */
+      districtsNote: string;
+    }>('/api/admin/filing/rows'),
   adminFilingEditRow: (id: string, body: { title?: string; copy?: string; rule?: string }) =>
     put<{ row: BrowseRow }>(`/api/admin/filing/rows/${encodeURIComponent(id)}`, body),
   adminFilingHeart: (id: string, on: boolean, member?: string | null) =>
