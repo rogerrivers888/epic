@@ -270,6 +270,14 @@ export async function recordCandidates(subcategory, entries = [], { placesTotal 
   // fifty-two of them would otherwise be twenty-odd thousand round trips — long
   // enough for the request that started it to give up on itself.
   const CHUNK = 200;
+  // What the database actually did, rather than what we asked it to do. A
+  // repeat harvest prepares a row for every word it saw, and most of those
+  // conflict onto a candidate that already existed — and some are refused
+  // outright by the `where` below, because a decided word is not reopened. The
+  // funnel on the Runs screen is a claim about volume getting through, so it
+  // has to count the writes and not the attempts (Codex, 21 Sep 2026).
+  let stored = 0;
+  let touched = 0;
   for (let i = 0; i < rows.length; i += CHUNK) {
     const batch = rows.slice(i, i + CHUNK);
     const params = [];
@@ -278,7 +286,7 @@ export async function recordCandidates(subcategory, entries = [], { placesTotal 
       const n = params.length;
       return `($${n - 11}, $${n - 10}, $${n - 9}, $${n - 8}, $${n - 7}, $${n - 6}::jsonb, $${n - 5}, $${n - 4}, $${n - 3}, $${n - 2}, $${n - 1}, $${n})`;
     });
-    await run(
+    const res = await run(
       `insert into harvest_candidates
          (norm, raw_forms, subcategory, places_seen, places_total, sources, examples, kind, status, asserts, denies, asks)
        values ${values.join(', ')}
@@ -304,12 +312,21 @@ export async function recordCandidates(subcategory, entries = [], { placesTotal 
                           else 'unresolved'
                         end,
          last_seen    = now()
-       where harvest_candidates.status in ('new', 'unresolved')`,
+       where harvest_candidates.status in ('new', 'unresolved')
+       returning (xmax = 0) as inserted`,
       params,
     );
+    // `xmax = 0` is true only of a row this statement inserted; an updated row
+    // carries the transaction that touched it. A row the `where` refused does
+    // not come back at all, which is why `touched` is the returned count.
+    touched += res.rows.length;
+    stored += res.rows.filter((r) => r.inserted).length;
   }
   const glued = await dropGlued(subcategory, run);
-  return { written: rows.length, skipped, held, glued };
+  // `written` is words raised — every word this run saw and did not skip, which
+  // is what "63 words raised" means. `stored` and `touched` are what reached
+  // the table, and are what the funnel counts.
+  return { written: rows.length, stored, touched, skipped, held, glued };
 }
 
 /**

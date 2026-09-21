@@ -255,7 +255,7 @@ export async function freeSweep({ subcategories = null, size = SAMPLE.top + SAMP
       const written = await sets.recordCandidates(kind.key, entries, { placesTotal: sample.length });
       found += written.written;
       funnel.collapsed += counts.size;
-      funnel.stored += written.written;
+      funnel.stored += written.stored ?? 0;
       funnel.held += written.held ?? 0;
       funnel.ignored += written.skipped ?? 0;
       curves[kind.key] = { ...saturation(perPlace), sampled: sample.length, held, regions };
@@ -468,7 +468,7 @@ export async function googleHarvest({
       const written = await sets.recordCandidates(kind.key, entries, { placesTotal: seenHere });
       found += written.written;
       funnel.collapsed += counts.size;
-      funnel.stored += written.written;
+      funnel.stored += written.stored ?? 0;
       funnel.held += written.held ?? 0;
       funnel.ignored += written.skipped ?? 0;
       curves[kind.key] = { ...saturation(perPlace), sampled: seenHere };

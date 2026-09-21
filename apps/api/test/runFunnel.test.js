@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 
 import {
   COLLAPSE_FLOOR, ENOUGH_TO_JUDGE, KEPT_FLOOR, PEN_CEILING, STAGES,
-  clearsOf, diagnose, headlineOf, verdictOf,
+  clearsOf, diagnose, headlineOf, saturationOf, verdictOf,
 } from '../src/domain/runFunnel.js';
 
 // --- the stages ------------------------------------------------------------
@@ -148,4 +148,58 @@ test('a set that has stopped growing with a queue is not finished', () => {
 
 test('a set still growing says so even with nothing waiting', () => {
   assert.equal(verdictOf({ rate: 3, waiting: 0, limit: 1 }).tone, 'growing');
+});
+
+// --- the saturation denominator --------------------------------------------
+
+const SETS = [{ key: 'water', name: 'Water parks & pools', subcategories: ['pools', 'waterparks'] }];
+const LIMITS = { sightingFloor: 2, saturationLimit: 1 };
+const raised = (subcategory, n, { placesTotal, placesSeen = 1, status = 'unresolved', kind = 'unclear' } = {}) =>
+  Array.from({ length: n }, () => ({
+    subcategory, status, kind, places_seen: placesSeen, places_total: placesTotal,
+  }));
+
+test('saturation is words per ten places read, not per sighting of the commonest word', () => {
+  // The bug this pins: a hundred distinct words each seen once across a
+  // hundred places is a rate of ten, not a thousand. Using a word's own
+  // frequency as the denominator reported a settled set as still growing for
+  // ever, and "still growing · read more" is an instruction to spend money.
+  const [s] = saturationOf(SETS, raised('pools', 100, { placesTotal: 100, placesSeen: 1 }), LIMITS);
+  assert.equal(s.rate, 10);
+});
+
+test('the denominator is the sample, so a word on every place does not shrink it', () => {
+  // Ten words, one of which turned up on all hundred places. The rate is still
+  // ten words per hundred places.
+  const rows = [
+    ...raised('pools', 9, { placesTotal: 100, placesSeen: 1 }),
+    ...raised('pools', 1, { placesTotal: 100, placesSeen: 100 }),
+  ];
+  assert.equal(saturationOf(SETS, rows, LIMITS)[0].rate, 1);
+});
+
+test('a set spanning two drawers adds their samples together', () => {
+  // `places_total` is recorded per subcategory, so a set covering two of them
+  // was read over both samples and the denominator is the sum.
+  const rows = [
+    ...raised('pools', 10, { placesTotal: 60 }),
+    ...raised('waterparks', 10, { placesTotal: 40 }),
+  ];
+  assert.equal(saturationOf(SETS, rows, LIMITS)[0].rate, 2);
+});
+
+test('a set nothing has been read for has no rate rather than an infinite one', () => {
+  assert.equal(saturationOf(SETS, [], LIMITS)[0].rate, 0);
+  assert.equal(saturationOf(SETS, raised('pools', 5, { placesTotal: 0 }), LIMITS)[0].rate, 0);
+});
+
+test('only a promotable word counts as waiting on somebody', () => {
+  // Held words and words below the floor are not a queue: nobody can act on
+  // them, and counting them would make every set look permanently stuck.
+  const rows = [
+    ...raised('pools', 3, { placesTotal: 50, placesSeen: 5, status: 'new', kind: 'feature' }),
+    ...raised('pools', 4, { placesTotal: 50, placesSeen: 1, status: 'new', kind: 'feature' }),
+    ...raised('pools', 5, { placesTotal: 50, placesSeen: 9, status: 'unresolved', kind: 'unclear' }),
+  ];
+  assert.equal(saturationOf(SETS, rows, LIMITS)[0].waiting, 3);
 });

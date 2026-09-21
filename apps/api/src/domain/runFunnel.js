@@ -120,3 +120,36 @@ export function verdictOf({ rate, waiting, limit }) {
   if (waiting) return { verdict: `stopped growing, ${waiting} waiting`, tone: 'stuck' };
   return { verdict: 'settled · no more reviews read', tone: 'settled' };
 }
+
+/** Every set's saturation, its queue, and its verdict. */
+export function saturationOf(sets, candidates, limits) {
+  return sets.map((s) => {
+    const subs = s.subcategories ?? [];
+    const mine = candidates.filter((c) => subs.includes(c.subcategory));
+    const waiting = mine.filter((c) => c.status === 'new' && c.kind === 'feature'
+      && (c.places_seen ?? 0) >= limits.sightingFloor).length;
+    /**
+     * New words per ten *places read* — so the denominator is how many places
+     * were read, never how often the commonest word turned up.
+     *
+     * `places_seen` is a word's own frequency, and using it read a hundred
+     * words each seen once across a hundred places as a rate of a thousand
+     * rather than ten, which would have reported a settled set as still
+     * growing for ever (Codex, 21 Sep 2026). `places_total` is what the
+     * harvest recorded as the size of the sample, and it is per subcategory,
+     * so the set's denominator is the sum of its drawers' samples.
+     */
+    const places = subs.reduce((n, sub) => {
+      const here = mine.filter((c) => c.subcategory === sub);
+      return n + here.reduce((m, c) => Math.max(m, c.places_total ?? 0), 0);
+    }, 0);
+    const rate = places ? Number(((mine.length / places) * 10).toFixed(1)) : 0;
+    return {
+      set: s.name,
+      rate,
+      trend: [],
+      waiting,
+      ...verdictOf({ rate, waiting, limit: limits.saturationLimit }),
+    };
+  });
+}
