@@ -220,6 +220,10 @@ export async function freeSweep({ subcategories = null, size = SAMPLE.top + SAMP
   let found = 0;
   let settled = [];
   const curves = {};
+  // Where the volume goes, counted as it goes (migration 232). `raw` is
+  // mentions and not words: the same word on ten places is ten, which is the
+  // only way the collapse rate afterwards means anything.
+  const funnel = { read: 0, raw: 0, collapsed: 0, stored: 0, held: 0, ignored: 0 };
   try {
     for (const kind of kinds) {
       const { places: sample, regions, held } = await sampleFor(kind.key, { size });
@@ -231,6 +235,7 @@ export async function freeSweep({ subcategories = null, size = SAMPLE.top + SAMP
         if (!osmTags && live) osmTags = await liveTags(place);
         const raised = candidatesFor({ tags: osmTags, texts });
         perPlace.push([...raised.keys()]);
+        funnel.raw += raised.size;
         for (const [norm, entry] of raised) {
           const seen = counts.get(norm) ?? { norm, raw: entry.raw, rawForms: new Set(), sources: new Set(), examples: [], placesSeen: 0, asserts: 0, denies: 0, asks: 0 };
           seen.placesSeen += 1;
@@ -249,6 +254,10 @@ export async function freeSweep({ subcategories = null, size = SAMPLE.top + SAMP
       const entries = [...counts.values()].map((c) => ({ ...c, rawForms: [...c.rawForms] }));
       const written = await sets.recordCandidates(kind.key, entries, { placesTotal: sample.length });
       found += written.written;
+      funnel.collapsed += counts.size;
+      funnel.stored += written.written;
+      funnel.held += written.held ?? 0;
+      funnel.ignored += written.skipped ?? 0;
       curves[kind.key] = { ...saturation(perPlace), sampled: sample.length, held, regions };
       report.push({
         subcategory: kind.key, sampled: sample.length, candidates: written.written,
@@ -259,9 +268,11 @@ export async function freeSweep({ subcategories = null, size = SAMPLE.top + SAMP
     // A set whose subcategories have all stopped teaching new words leaves the
     // Google pass for good (brief §5.4).
     settled = await settleFromSaturation(curves, { runId: run.id });
-    await sets.finishRun(run.id, { places, calls: 0, candidates: found, costUsd: 0, saturation: curves });
+    funnel.read = places;
+    await sets.finishRun(run.id, { places, calls: 0, candidates: found, costUsd: 0, saturation: curves, funnel });
   } catch (err) {
-    await sets.finishRun(run.id, { status: 'failed', places, candidates: found, saturation: curves, note: String(err.message).slice(0, 200) });
+    funnel.read = places;
+    await sets.finishRun(run.id, { status: 'failed', places, candidates: found, saturation: curves, funnel, note: String(err.message).slice(0, 200) });
     throw err;
   }
   return { run: run.id, places, candidates: found, subcategories: report, saturation: curves, settled };
@@ -404,6 +415,7 @@ export async function googleHarvest({
   const meter = {};
   const report = [];
   const curves = {};
+  const funnel = { read: 0, raw: 0, collapsed: 0, stored: 0, held: 0, ignored: 0 };
   let places = 0;
   let requests = 0;
   let found = 0;
@@ -432,6 +444,7 @@ export async function googleHarvest({
           // and does not leave this loop.
           const raised = candidatesFor({ texts: [{ source: 'google', text: p.summary }] });
           perPlace.push([...raised.keys()]);
+          funnel.raw += raised.size;
           for (const [norm, entry] of raised) {
             const seen = counts.get(norm) ?? { norm, raw: entry.raw, rawForms: new Set(), sources: new Set(), examples: [], placesSeen: 0, asserts: 0, denies: 0, asks: 0 };
             seen.placesSeen += 1;
@@ -454,17 +467,23 @@ export async function googleHarvest({
       const entries = [...counts.values()].map((c) => ({ ...c, rawForms: [...c.rawForms] }));
       const written = await sets.recordCandidates(kind.key, entries, { placesTotal: seenHere });
       found += written.written;
+      funnel.collapsed += counts.size;
+      funnel.stored += written.written;
+      funnel.held += written.held ?? 0;
+      funnel.ignored += written.skipped ?? 0;
       curves[kind.key] = { ...saturation(perPlace), sampled: seenHere };
       report.push({ subcategory: kind.key, places: seenHere, candidates: written.written, inHoldingPen: written.held });
     }
     await providerCalls.record(householdId, 'google', 'harvest.vocabulary', meter, sessionId).catch(() => null);
     const { usd } = await costOfRun(run.started_at);
     const settled = await settleFromSaturation(curves, { runId: run.id });
-    await sets.finishRun(run.id, { places, calls: requests, candidates: found, costUsd: usd, saturation: curves });
+    funnel.read = places;
+    await sets.finishRun(run.id, { places, calls: requests, candidates: found, costUsd: usd, saturation: curves, funnel });
     return { run: run.id, requests, places, candidates: found, costUsd: usd, subcategories: report, saturation: curves, settled, skippedAsSettled: skipped };
   } catch (err) {
     await providerCalls.record(householdId, 'google', 'harvest.vocabulary', meter, sessionId).catch(() => null);
-    await sets.finishRun(run.id, { status: 'failed', places, calls: requests, candidates: found, saturation: curves, note: String(err.message).slice(0, 200) });
+    funnel.read = places;
+    await sets.finishRun(run.id, { status: 'failed', places, calls: requests, candidates: found, saturation: curves, funnel, note: String(err.message).slice(0, 200) });
     throw err;
   }
 }

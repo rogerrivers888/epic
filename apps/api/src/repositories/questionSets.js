@@ -595,12 +595,17 @@ export async function startRun({ kind, subcategories = [], params = {} }) {
   return rows[0];
 }
 
-export async function finishRun(id, { status = 'done', places = 0, calls = 0, candidates: found = 0, costUsd = 0, saturation = {}, note = null } = {}) {
+/**
+ * `funnel` is where the run's volume went — read, raw, collapsed, stored, held,
+ * ignored. Null where a run did not record it, which the screen draws as "not
+ * recorded" rather than as nought (migration 232).
+ */
+export async function finishRun(id, { status = 'done', places = 0, calls = 0, candidates: found = 0, costUsd = 0, saturation = {}, note = null, funnel = null } = {}) {
   const { rows } = await query(
     `update vocabulary_runs set status = $2, places = $3, calls = $4, candidates = $5, cost_usd = $6,
-            saturation = $7::jsonb, note = $8, finished_at = now()
+            saturation = $7::jsonb, note = $8, funnel = $9::jsonb, finished_at = now()
       where id = $1 returning *`,
-    [id, status, places, calls, found, costUsd, JSON.stringify(saturation), note],
+    [id, status, places, calls, found, costUsd, JSON.stringify(saturation), note, funnel ? JSON.stringify(funnel) : null],
   );
   return rows[0] ?? null;
 }

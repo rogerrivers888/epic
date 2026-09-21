@@ -45,6 +45,7 @@ import { currentHousehold } from './household.js';
 import * as taxonomyAudit from '../repositories/taxonomyAudit.js';
 import { CORPUS_OPENS, auditAll } from '../domain/taxonomyAudit.js';
 import { setThreshold, thresholds, thresholdValues } from '../repositories/settings.js';
+import { STAGES, clearsOf, diagnose, headlineOf, verdictOf } from '../domain/runFunnel.js';
 
 export const filingRoutes = Router();
 
@@ -437,7 +438,11 @@ async function likelyFor(sub, evidence) {
   const stems = String(sub.label).toLowerCase().split(/[^a-z]+/).filter((t) => t.length > 3)
     .map((t) => t.replace(/s$/, ''));
   if (!stems.length) return [];
-  const unanswered = evidence.words.filter((w) => !w.points_at && w.decision !== 'notinepic');
+  // `evidence.unmapped` and not `evidence.words`: the latter is mapped down to
+  // {key, label, subcategoryLabel} before we see it, so reading `points_at`
+  // off it found undefined on every row and offered words already pointing at
+  // another drawer as candidates for this empty one (epic-f2, 21 Sep 2026).
+  const unanswered = evidence.unmapped;
   return unanswered
     .filter((w) => stems.some((t) => w.key.toLowerCase().includes(t)))
     .map((w) => ({
@@ -1042,9 +1047,10 @@ filingRoutes.put('/mapping/:word/carries', requires('manage_library'), async (re
  */
 filingRoutes.get('/rows', requires('view_library'), async (req, res, next) => {
   try {
-    const [list, ctx, dists, limits, household] = await Promise.all([
-      browseRows.rows(), browseRows.pool(), browseRows.districts(), thresholdValues(), currentHousehold(),
+    const [list, ctx, limits, household] = await Promise.all([
+      browseRows.rows(), browseRows.pool(), thresholdValues(), currentHousehold(),
     ]);
+    const dists = browseRows.districts(ctx);
     const [hearts, { shares, households }] = await Promise.all([
       browseRows.heartsFor(household?.id ?? null), browseRows.shares(),
     ]);
@@ -1113,6 +1119,13 @@ filingRoutes.get('/rows', requires('view_library'), async (req, res, next) => {
 /** PUT /rows/:id — its words, or its rule. The rule is checked before it is kept. */
 filingRoutes.put('/rows/:id', requires('manage_library'), async (req, res, next) => {
   try {
+    // The shorthand is rendered from the rule and is not a way of setting it.
+    // Accepting it silently would return 200 having saved nothing, which is
+    // precisely the prototype's own failure — an editable field that changes
+    // nothing — reappearing on the other side of the wire (Codex, 21 Sep 2026).
+    if (req.body?.rule !== undefined) {
+      throw bad('A row\u2019s rule is set as structure, not as its shorthand. Send `predicate`.');
+    }
     const ctx = await browseRows.pool();
     const row = await browseRows.save(String(req.params.id), {
       title: req.body?.title,
@@ -1140,9 +1153,372 @@ filingRoutes.post('/rows/:id/heart', requires('manage_library'), async (req, res
     if (!household) throw bad('Which household? Nobody is signed in to one.');
     const memberId = req.body?.member ? String(req.body.member) : null;
     if (!memberId) throw bad('Whose list is this? Pick somebody first.');
+    // And they have to be somebody in *this* household. Without the check any
+    // member id would be recorded against the signed-in household, and
+    // `heartsFor` would then read that person's name back out onto its screen
+    // (Codex, 21 Sep 2026).
+    const { rows: [mine] } = await query(
+      'select id from members where id = $1 and household_id = $2', [memberId, household.id]);
+    if (!mine) throw bad('That is not somebody in this household.');
     const out = await browseRows.heart(String(req.params.id), {
       householdId: household.id, memberId, on: req.body?.on !== false,
     });
     res.json({ row: req.params.id, hearted: Boolean(out) });
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// Rules — the defaults, and the two ways one can be wrong
+// ---------------------------------------------------------------------------
+
+/**
+ * A default contradicted by more than this share of what it files is doing
+ * more harm than good, and the screen tints the row.
+ *
+ * It is not `spreadLimit`. That one decides whether a drawer has an answer at
+ * all — past it the places disagree too much for a default to be proposed.
+ * This one is about a default that *already exists*, usually because somebody
+ * accepted it, and is now wrong about most of what it touches. A drawer can
+ * sit under the first and over the second.
+ */
+const DEAD_SHARE = 0.6;
+
+/**
+ * GET /rules — every default a drawer sets, worst first.
+ *
+ * **Two columns, because there are two different ways to be wrong** (owner,
+ * 20 Sep 2026), and they must not be added together:
+ *
+ *  - **Places contradict it** is computed. Of the places this default files,
+ *    how many hold a different value. A high count can mean the rule is too
+ *    broad, or that the drawer wants splitting. Nobody has said anything — the
+ *    data disagrees with itself.
+ *  - **People called it wrong** is human: of those, how many were set by a
+ *    person. Every one is somebody who looked at a place and said no, which
+ *    makes it the stronger signal of the two and the reason it is counted
+ *    separately rather than folded in.
+ *
+ * It is deliberately *not* `rule_overrides`. That table records a place being
+ * moved to a different drawer — a fact about filing — and a default is a fact
+ * about what a drawer says. Counting one as the other would put "41 people
+ * moved this place" beside "how thrilling · 3" and invite somebody to retire a
+ * default because of a filing argument.
+ */
+filingRoutes.get('/rules', requires('view_library'), async (_req, res, next) => {
+  try {
+    const d = await filing.drawers();
+    const { byKey } = await placeAttributes.attributes();
+    const { rows, defaults } = filing.rulesFrom({
+      subcategories: d.subcategories,
+      refsBySub: d.refsBySub,
+      defaultsBySub: d.defaultsBySub,
+      valuesByRef: d.valuesByRef,
+      byKey,
+      deadShare: DEAD_SHARE,
+    });
+
+    res.json({
+      rules: rows,
+      counts: {
+        rules: defaults,
+        arguedWith: rows.filter((r) => r.contradicted > 0).length,
+        dead: rows.filter((r) => r.dead).length,
+        overruled: rows.filter((r) => r.overridden > 0).length,
+      },
+    });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST /rules/:id/retire — the drawer stops saying this.
+ *
+ * Retiring is deleting the default, not overwriting it with a blank: a row
+ * holding nothing would have to be read as "we looked and could not say",
+ * which is a different answer from never having had one. Every place keeps
+ * whatever it says for itself.
+ */
+filingRoutes.post('/rules/:id/retire', requires('manage_library'), async (req, res, next) => {
+  try {
+    const [subcategory, attribute] = String(req.params.id).split(':');
+    if (!subcategory || !attribute) throw bad('Which drawer, and which answer?');
+    const { rowCount } = await query(
+      `delete from shelf_subcategory_attributes where subcategory_key = $1 and attribute_key = $2`,
+      [subcategory, attribute],
+    );
+    if (!rowCount) throw bad('That drawer does not set that answer.');
+    res.json({ retired: true, subcategory, attribute, by: actorOf(req) });
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// Runs — where the volume dies, and whether the queue is winning
+// ---------------------------------------------------------------------------
+
+
+
+/** The runs that can be started, with what each would cost before the click. */
+const TRIGGERS = [
+  {
+    key: 'free', name: 'Free sweep', action: 'Run the sweep', cost: '£0.00', rate: null,
+    sources: 'the venue’s page · OSM · Wikipedia · nothing paid for',
+  },
+  {
+    key: 'harvest', name: 'Vocabulary harvest', action: 'Run the harvest', cost: null,
+    rate: '0.33p a place', sources: 'reviews only',
+  },
+  {
+    key: 'validate', name: 'Validation pass', action: 'Validate them', cost: '£0.00', rate: null,
+    sources: 'the venue’s page · OSM · Wikipedia',
+  },
+];
+
+/**
+ * GET /runs — the funnel per run, the queue's direction, and saturation.
+ *
+ * Readable cold: every number carries its own scope in words rather than
+ * relying on a column header, and a bad drop is named rather than left as a
+ * shape for somebody to interpret.
+ */
+filingRoutes.get('/runs', requires('view_library'), async (_req, res, next) => {
+  try {
+    const limits = await thresholdValues();
+    const [runList, sets, counted] = await Promise.all([
+      questionSets.runs({ limit: 12 }),
+      questionSets.sets(),
+      query(`select subcategory, status, kind, places_seen, first_seen from harvest_candidates`),
+    ]);
+
+    const runs = runList.filter((r) => r.status !== 'running').map((r) => {
+      const f = r.funnel ?? null;
+      // Raised by *this* run: its own subcategories, inside its own window.
+      // `first_seen` is when a word was raised, so a word this run saw again
+      // belongs to the run that found it, not to this one.
+      const mine = counted.rows.filter((c) => (r.subcategories ?? []).includes(c.subcategory)
+        && c.first_seen >= r.started_at
+        && (!r.finished_at || c.first_seen <= r.finished_at));
+      const thin = mine.filter((c) => (c.places_seen ?? 0) < limits.sightingFloor).length;
+      const waiting = mine.filter((c) => c.status === 'new' && c.kind === 'feature'
+        && (c.places_seen ?? 0) >= limits.sightingFloor).length;
+      const d = diagnose(f);
+
+      return {
+        id: String(r.id),
+        name: r.kind === 'google' ? 'Vocabulary harvest' : r.kind === 'free' ? 'Free sweep' : r.kind === 'probe' ? 'Probe' : r.kind,
+        at: r.finished_at ?? r.started_at,
+        scope: `${(r.subcategories ?? []).length} subcategories`,
+        sources: r.kind === 'google' ? 'reviews only' : 'the venue’s page · OSM · Wikipedia',
+        cost: Number(r.cost_usd ?? 0),
+        state: r.status === 'failed' ? 'failed' : 'done',
+        funnel: STAGES.map(([key, name]) => ({
+          key,
+          name,
+          // Null where the run did not record it. Nought would read as
+          // "nothing came through", which is the one thing it does not mean.
+          count: key === 'thin' ? thin : key === 'waiting' ? waiting : (f ? f[key] ?? null : null),
+          bad: d.at === key,
+        })),
+        diagnosis: d.says,
+        healthy: d.healthy,
+        recorded: d.recorded,
+      };
+    });
+
+    const weeks = await weeksOf(counted.rows);
+    res.json({
+      headline: headlineOf(weeks),
+      scope: `${sets.length} question sets · ${counted.rows.length} words raised in all`,
+      triggers: TRIGGERS,
+      // A run in flight is the one thing this screen cannot be missing: runs
+      // take hours, and a screen with no live state looks like a screen where
+      // nothing is happening.
+      live: liveOf(runList.find((r) => r.status === 'running') ?? null),
+      runs,
+      weeks,
+      clears: clearsOf(weeks),
+      saturation: saturationOf(sets, counted.rows, limits),
+    });
+  } catch (err) { next(err); }
+});
+
+/** Four weeks of raised against decided, oldest first. */
+async function weeksOf(candidates) {
+  const week = 7 * 24 * 3600 * 1000;
+  const now = Date.now();
+  const out = [];
+  for (let i = 3; i >= 0; i -= 1) {
+    const from = now - (i + 1) * week;
+    const to = now - i * week;
+    const label = new Date(from).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    out.push({
+      label,
+      raised: candidates.filter((c) => +new Date(c.first_seen) >= from && +new Date(c.first_seen) < to).length,
+      decided: 0,
+    });
+  }
+  const { rows } = await query(
+    `select decided_at from harvest_candidates where decided_at is not null and decided_at > now() - interval '28 days'`);
+  for (const r of rows) {
+    const at = +new Date(r.decided_at);
+    const i = Math.floor((now - at) / week);
+    if (i >= 0 && i < 4) out[3 - i].decided += 1;
+  }
+  return out;
+}
+
+
+
+/** The live run, with its stages filling one at a time. */
+function liveOf(run) {
+  if (!run) return null;
+  const f = run.funnel ?? {};
+  return {
+    name: run.kind === 'google' ? 'Vocabulary harvest' : 'Free sweep',
+    scope: `${(run.subcategories ?? []).length} subcategories`,
+    funnel: STAGES.map(([key, name]) => ({ name, count: f[key] ?? 0, done: f[key] != null })),
+  };
+}
+
+/**
+ * New words per ten places, and what is still waiting beside it.
+ *
+ * Three verdicts and not two. A set at 0.4 with eight waiting has *stopped
+ * growing* and is not finished, and that used to look exactly like finished.
+ */
+function saturationOf(sets, candidates, limits) {
+  return sets.map((s) => {
+    const subs = s.subcategories ?? [];
+    const mine = candidates.filter((c) => subs.includes(c.subcategory));
+    const waiting = mine.filter((c) => c.status === 'new' && c.kind === 'feature'
+      && (c.places_seen ?? 0) >= limits.sightingFloor).length;
+    const places = mine.reduce((n, c) => Math.max(n, c.places_seen ?? 0), 0);
+    const rate = places ? Number(((mine.length / places) * 10).toFixed(1)) : 0;
+    return {
+      set: s.name,
+      rate,
+      trend: [],
+      waiting,
+      ...verdictOf({ rate, waiting, limit: limits.saturationLimit }),
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// The decision log
+// ---------------------------------------------------------------------------
+
+/** What each ending is called on the row, and which of them reads as a gain. */
+const DECISIONS = {
+  promoted: { word: 'approved', decision: 'approved' },
+  ignored: { word: 'ignored', decision: 'ignored' },
+  merged: { word: 'merged', decision: 'merged' },
+  parked: { word: 'parked', decision: 'parked' },
+  rejected: { word: 'rejected', decision: 'rejected' },
+  unresolved: { word: 'held', decision: 'held' },
+};
+
+/**
+ * GET /decisions — what was decided, newest first.
+ *
+ * Without this there is no answer to "what did I do last Tuesday", which is
+ * the difference between traceable and auditable (handoff §15). It reads
+ * `harvest_candidates` rather than a log of its own: a candidate carries its
+ * status, who decided it and when, so a second table would be a second
+ * version of the same truth and the two would drift.
+ */
+filingRoutes.get('/decisions', requires('view_library'), async (req, res, next) => {
+  try {
+    const want = String(req.query.decision ?? '').trim();
+    const inSet = String(req.query.set ?? '').trim();
+    const [{ rows }, sets, d] = await Promise.all([
+      query(`select id, norm, raw_forms, subcategory, status, decided_by, decided_at, question_id
+               from harvest_candidates
+              where decided_at is not null
+              order by decided_at desc limit 500`),
+      questionSets.sets(),
+      filing.drawers(),
+    ]);
+
+    const setOf = new Map();
+    for (const s of sets) for (const sub of s.subcategories ?? []) setOf.set(sub, s);
+
+    const all = rows.map((r) => {
+      const spec = DECISIONS[r.status] ?? { word: r.status, decision: r.status };
+      const set = setOf.get(r.subcategory) ?? null;
+      const drawer = d.subcategories.find((x) => x.key === r.subcategory) ?? null;
+      return {
+        id: Number(r.id),
+        // The word a person typed, where we kept it, rather than the
+        // normalised key — the log is read by the person who decided it.
+        word: r.raw_forms?.[0] ?? r.norm,
+        set: set?.name ?? null,
+        setKey: set?.key ?? null,
+        decision: spec.decision,
+        // The decision said in full, so a row reads without its column header.
+        said: spec.decision === 'merged' && drawer ? `merged into ${drawer.label}` : spec.word,
+        at: r.decided_at,
+        by: r.decided_by ?? null,
+      };
+    });
+
+    const decisions = all.filter((r) => (!want || want === 'all' || r.decision === want)
+      && (!inSet || inSet === 'all' || r.setKey === inSet));
+
+    res.json({
+      decisions,
+      sets: sets.map((s) => ({ key: s.key, name: s.name })),
+      counts: { shown: decisions.length, all: all.length },
+    });
+  } catch (err) { next(err); }
+});
+
+/**
+ * GET /decisions/:word/trail — one word, from first sighting to what it is
+ * asked of now.
+ *
+ * Built from the dates the candidate already carries rather than from an
+ * event stream, so it cannot disagree with the row it came from. Where a step
+ * has no date of its own it is left out rather than guessed at.
+ */
+filingRoutes.get('/decisions/:word/trail', requires('view_library'), async (req, res, next) => {
+  try {
+    const word = String(req.params.word);
+    const { rows } = await query(
+      `select * from harvest_candidates where norm = $1 or $1 = any(raw_forms) limit 1`, [word]);
+    const c = rows[0];
+    if (!c) throw bad(`Nothing has been raised called “${word}”.`);
+
+    const when = (at) => (at ? new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—');
+    const steps = [];
+    steps.push({
+      when: when(c.first_seen),
+      what: `seen on ${c.places_seen} of ${c.places_total ?? c.places_seen} places read`,
+    });
+    if (c.denies) {
+      steps.push({ when: when(c.first_seen), what: `${c.denies} of those said it hasn’t got one` });
+    }
+    if (c.classified_at) {
+      steps.push({
+        when: when(c.classified_at),
+        what: c.kind === 'unclear'
+          ? 'held · the classifier could not call it'
+          : `classified as ${c.kind === 'feature' ? 'a feature' : c.kind}`,
+      });
+    }
+    if (c.decided_at) {
+      const spec = DECISIONS[c.status] ?? { word: c.status };
+      steps.push({
+        when: when(c.decided_at),
+        what: c.decided_by ? `${spec.word} by ${c.decided_by}` : spec.word,
+      });
+    }
+    if (c.question_id) {
+      const asked = await query(
+        `select count(*)::int n from place_answers where question_id = $1`, [c.question_id]);
+      steps.push({ when: '—', what: `asked of ${asked.rows[0].n} places` });
+    } else if (c.status === 'promoted') {
+      steps.push({ when: '—', what: 'approved · not attached to a set, so nothing asks it' });
+    }
+
+    res.json({ trail: { word: c.raw_forms?.[0] ?? c.norm, steps } });
   } catch (err) { next(err); }
 });

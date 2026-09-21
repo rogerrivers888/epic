@@ -257,3 +257,131 @@ test('a place with no owned name is offered without one rather than with a borro
   assert.equal(out[0].name, null);
   assert.equal(out[0].ref, 'google:abc');
 });
+
+// ---------------------------------------------------------------------------
+// Rules — the two different ways a default can be wrong
+// ---------------------------------------------------------------------------
+
+const { rulesFrom } = await import('../src/repositories/filing.js');
+
+const RULES_IN = ({ refs = ['a', 'b', 'c', 'd'], values = {}, defaults = { parking: { yesno: true } } } = {}) => ({
+  subcategories: [{ key: 'golf', label: 'Golf clubs', active: true }],
+  refsBySub: new Map([['golf', refs]]),
+  defaultsBySub: new Map([['golf', new Map(Object.entries(defaults))]]),
+  valuesByRef: valuesOf(values),
+  // `active` is on every row `attributes()` returns; a fixture without it
+  // would be testing a shape the repository never sees.
+  byKey: new Map([['parking', { ...YESNO, active: true }], ['how-thrilling', { ...SCALE, active: true }]]),
+});
+
+test('a place that says nothing is not contradicting the drawer', () => {
+  // Silence is a place nobody has asked, not a place that disagrees. Counting
+  // it as disagreement would condemn every default in an unresearched drawer —
+  // which, on an estate this young, is nearly all of them.
+  const { rows } = rulesFrom(RULES_IN());
+  assert.equal(rows[0].places, 4);
+  assert.equal(rows[0].contradicted, 0);
+  assert.equal(rows[0].overridden, 0);
+});
+
+test('a place holding the same answer is not contradicting it either', () => {
+  const { rows } = rulesFrom(RULES_IN({ values: { a: { parking: { yesno: true } } } }));
+  assert.equal(rows[0].contradicted, 0);
+});
+
+test('a place that disagrees is counted, and a person saying so is counted twice over', () => {
+  // The distinction the whole screen exists for: "12 places contradict this"
+  // is a rule that may be too broad; "somebody looked and said no" is a rule
+  // that is simply wrong, and the second must not be lost inside the first.
+  const { rows } = rulesFrom(RULES_IN({
+    values: {
+      a: { parking: { yesno: false } },
+      b: { parking: { yesno: false }, $by: null },
+      c: { parking: { yesno: false, by: 'roger@epic.day', at: '2026-09-18T10:00:00Z' } },
+    },
+  }));
+  assert.equal(rows[0].contradicted, 3);
+  assert.equal(rows[0].overridden, 1);
+  assert.equal(rows[0].overriddenAt, '2026-09-18');
+});
+
+test('the date is the most recent time somebody overruled it', () => {
+  // A count of corrections with no date behind it cannot tell an argument that
+  // ended a month ago from one still going on.
+  const { rows } = rulesFrom(RULES_IN({
+    values: {
+      a: { parking: { yesno: false, by: 'a@epic.day', at: '2026-08-01T10:00:00Z' } },
+      b: { parking: { yesno: false, by: 'b@epic.day', at: '2026-09-19T10:00:00Z' } },
+      c: { parking: { yesno: false, by: 'c@epic.day', at: '2026-09-02T10:00:00Z' } },
+    },
+  }));
+  assert.equal(rows[0].overridden, 3);
+  assert.equal(rows[0].overriddenAt, '2026-09-19');
+});
+
+test('a default contradicted by most of what it files is dead', () => {
+  const mostly = rulesFrom(RULES_IN({
+    values: {
+      a: { parking: { yesno: false } }, b: { parking: { yesno: false } },
+      c: { parking: { yesno: false } }, d: { parking: { yesno: false } },
+    },
+  }));
+  assert.equal(mostly.rows[0].dead, true);
+  const some = rulesFrom(RULES_IN({ values: { a: { parking: { yesno: false } } } }));
+  assert.equal(some.rows[0].dead, false);
+});
+
+test('a default in an empty drawer is counted but is not a row', () => {
+  // It is still a default — the header counts it — but an empty drawer cannot
+  // argue with one, and listing it would pad the screen with rows nobody can
+  // act on.
+  const { rows, defaults } = rulesFrom(RULES_IN({ refs: [] }));
+  assert.equal(defaults, 1);
+  assert.deepEqual(rows, []);
+});
+
+test('the id is the pair, so a retire cannot be aimed at the wrong drawer', () => {
+  const { rows } = rulesFrom(RULES_IN());
+  assert.equal(rows[0].id, 'golf:parking');
+  assert.equal(rows[0].subcategory, 'golf');
+});
+
+test('the row says what it sets, in the value’s own words', () => {
+  assert.equal(rulesFrom(RULES_IN()).rows[0].what, 'Parking · Yes');
+  assert.equal(
+    rulesFrom(RULES_IN({ defaults: { 'how-thrilling': { level: 3 } } })).rows[0].what,
+    'How thrilling · 3');
+});
+
+test('a human correction outranks a quiet disagreement in the ordering', () => {
+  // Two defaults contradicted equally often are not equally wrong.
+  const { rows } = rulesFrom({
+    subcategories: [
+      { key: 'golf', label: 'Golf clubs', active: true },
+      { key: 'pubs', label: 'Pubs', active: true },
+    ],
+    refsBySub: new Map([['golf', ['a', 'b']], ['pubs', ['c', 'd']]]),
+    defaultsBySub: new Map([
+      ['golf', new Map([['parking', { yesno: true }]])],
+      ['pubs', new Map([['parking', { yesno: true }]])],
+    ]),
+    valuesByRef: valuesOf({
+      a: { parking: { yesno: false } }, b: { parking: { yesno: false } },
+      c: { parking: { yesno: false, by: 'roger@epic.day', at: '2026-09-19T10:00:00Z' } },
+      d: { parking: { yesno: false } },
+    }),
+    byKey: new Map([['parking', { ...YESNO, active: true }]]),
+  });
+  assert.equal(rows[0].where, 'Pubs');
+  assert.equal(rows[0].overridden, 1);
+  assert.equal(rows[1].where, 'Golf clubs');
+});
+
+test('a retired attribute is not a rule, however many drawers still name it', () => {
+  const { rows, defaults } = rulesFrom({
+    ...RULES_IN(),
+    byKey: new Map([['parking', { ...YESNO, active: false }]]),
+  });
+  assert.deepEqual(rows, []);
+  assert.equal(defaults, 0);
+});

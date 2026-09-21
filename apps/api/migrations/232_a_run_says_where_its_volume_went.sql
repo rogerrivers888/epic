@@ -1,0 +1,36 @@
+-- Where a run's volume went, and not just how much came out of it.
+--
+-- The Places redesign rebuilds Runs from a table into the one screen that
+-- answers "is this working?" (handoff §14). A harvest reads 620 places, raises
+-- 1,480 raw phrases, collapses them to 1,290, and 24 reach a person. Every one
+-- of those steps can be the broken one, and `vocabulary_runs` recorded only the
+-- two ends — places in, candidates out — so "63 words" could not tell you
+-- whether the resolver had stopped collapsing or the holding pen was taking
+-- half of everything.
+--
+-- So the run writes down its own middle. Six numbers, all of them things the
+-- run genuinely knows as it goes:
+--
+--   read      places whose text was actually read
+--   raw       mentions before normalisation — the same word on ten places is ten
+--   collapsed distinct words after the resolver
+--   stored    new candidates written
+--   held      words the classifier could not call, into the holding pen
+--   ignored   words raised again after somebody had already ignored them
+--
+-- `jsonb` and not six columns because this is a shape that will grow: the
+-- validation pass has stages the harvest does not, and a seventh number should
+-- not be a migration. Nothing reads it positionally.
+--
+-- The two stages the screen draws that are *not* in here — too thin to judge,
+-- and waiting on you — are deliberately absent, because they are facts about
+-- the queue now rather than about the run then. A word raised in August that
+-- somebody decided yesterday is not still waiting, and a funnel that froze the
+-- figure would go on claiming it was. They are counted at read time from
+-- `harvest_candidates`, against the run's own window and subcategories.
+--
+-- Null for every run that has already happened. A run that did not record its
+-- middle has an unknown middle, and the screen says "not recorded" rather than
+-- drawing nought — which would read as "nothing came through", the one thing
+-- it certainly does not mean.
+alter table vocabulary_runs add column if not exists funnel jsonb;

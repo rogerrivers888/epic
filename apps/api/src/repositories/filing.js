@@ -119,7 +119,11 @@ export async function drawers() {
             where subcategory is not null`),
     query('select * from place_attribute_values'),
     query('select * from shelf_subcategory_attributes'),
-    query(`select venue_ref, name, postcode, image_url from place_records where name is not null`),
+    // Not `where name is not null`: a place we have not researched still has a
+    // postcode, and a row's district count has to include it even though its
+    // name is not ours to print. Only the *name* is withheld, never the place.
+    query(`select venue_ref, name, postcode, image_url from place_records
+            where name is not null or postcode is not null`),
     query(`select venue_ref, area_slug from place_areas`),
     query('select key, name, active, vocabulary_settled from question_sets'),
     query('select subcategory_key, set_key from question_set_subcategories'),
@@ -137,7 +141,12 @@ export async function drawers() {
     const m = valuesByRef.get(v.venue_ref) ?? new Map();
     // `set_by` is what makes a value a person's rather than a sweep's, and the
     // screen draws the two differently ("a human answered" against "defaults").
-    m.set(v.attribute_key, { ...value, by: v.set_by ?? null, reason: v.reason ?? null });
+    // `at` rides with it because the Rules tab dates the last time somebody
+    // overruled a default, and a count of corrections with no date behind it
+    // cannot tell an argument that ended a month ago from one still going on.
+    m.set(v.attribute_key, {
+      ...value, by: v.set_by ?? null, reason: v.reason ?? null, at: v.updated_at ?? null,
+    });
     valuesByRef.set(v.venue_ref, m);
   }
 
@@ -332,4 +341,78 @@ export function disagreeingIn({ refs, valuesByRef, answers, recordsByRef }) {
     });
   }
   return out;
+}
+
+/**
+ * Every default a drawer sets, and the two different ways one can be wrong.
+ *
+ * Pure, so the counting can be exercised without a database — which matters
+ * here because the two counts are easy to conflate and the difference is the
+ * whole point of the screen (owner, 20 Sep 2026):
+ *
+ *  - **contradicted** is computed. Of the places this default files, how many
+ *    hold a different value. Nobody has said anything; the data disagrees with
+ *    itself, which can mean the rule is too broad or the drawer wants
+ *    splitting.
+ *  - **overridden** is human: of those, how many a person set. Every one is
+ *    somebody who looked at a place and said no, which makes it the stronger
+ *    signal and the reason it is counted apart rather than folded in.
+ *
+ * A place that says nothing is not a contradiction. It is a place nobody has
+ * asked, and counting silence as disagreement would condemn every default in a
+ * drawer nobody has researched.
+ */
+export function rulesFrom({ subcategories, refsBySub, defaultsBySub, valuesByRef, byKey, deadShare = 0.6 }) {
+  const rows = [];
+  let defaults = 0;
+
+  for (const sub of subcategories) {
+    if (!sub.active) continue;
+    const refs = refsBySub.get(sub.key) ?? [];
+    for (const [attributeKey, value] of defaultsBySub.get(sub.key) ?? new Map()) {
+      const attribute = byKey.get(attributeKey);
+      if (!attribute || !attribute.active) continue;
+      defaults += 1;
+      // A default nothing can contradict is still a default and is counted as
+      // one, but it is not a row here: "being argued with" is the question
+      // this screen asks, and an empty drawer cannot argue.
+      if (!refs.length) continue;
+
+      let contradicted = 0;
+      let overridden = 0;
+      let last = null;
+      for (const ref of refs) {
+        const mine = valuesByRef.get(ref)?.get(attributeKey);
+        if (!mine || sameValue(mine, value)) continue;
+        contradicted += 1;
+        if (!mine.by) continue;
+        overridden += 1;
+        if (!last || (mine.at && +new Date(mine.at) > +new Date(last))) last = mine.at ?? last;
+      }
+
+      rows.push({
+        // A default has no id of its own — it *is* the pair — so the pair is
+        // the id, and a retire cannot be aimed at the wrong drawer.
+        id: `${sub.key}:${attributeKey}`,
+        what: `${attribute.label} · ${said(value, attribute)}`,
+        level: 'Subcategory',
+        where: sub.label,
+        places: refs.length,
+        contradicted,
+        overridden,
+        overriddenAt: last ? new Date(last).toISOString().slice(0, 10) : null,
+        dead: contradicted > refs.length * deadShare,
+        subcategory: sub.key,
+      });
+    }
+  }
+
+  // Worst first, and a human correction outranks a quiet disagreement: two
+  // defaults contradicted equally often are not equally wrong if somebody took
+  // the trouble to overrule one of them.
+  rows.sort((a, b) => (b.overridden - a.overridden)
+    || (b.contradicted - a.contradicted)
+    || a.where.localeCompare(b.where));
+
+  return { rows, defaults };
 }
