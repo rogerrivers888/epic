@@ -263,6 +263,11 @@ export async function freeSweep({ subcategories = null, size = SAMPLE.top + SAMP
         subcategory: kind.key, sampled: sample.length, candidates: written.written,
         inHoldingPen: written.held, ignoredAgain: written.skipped, regions,
       });
+      // The live panel reads this. Between subcategories, never inside the
+      // per-place loop: a progress figure costing a write per place would make
+      // the sweep slower than the thing it reports on.
+      funnel.read = places;
+      await sets.noteRun(run.id, { funnel, places, candidates: found });
       onProgress?.({ subcategory: kind.key, done: report.length, of: kinds.length });
     }
     // A set whose subcategories have all stopped teaching new words leaves the
@@ -473,6 +478,8 @@ export async function googleHarvest({
       funnel.ignored += written.skipped ?? 0;
       curves[kind.key] = { ...saturation(perPlace), sampled: seenHere };
       report.push({ subcategory: kind.key, places: seenHere, candidates: written.written, inHoldingPen: written.held });
+      funnel.read = places;
+      await sets.noteRun(run.id, { funnel, places, candidates: found });
     }
     await providerCalls.record(householdId, 'google', 'harvest.vocabulary', meter, sessionId).catch(() => null);
     const { usd } = await costOfRun(run.started_at);

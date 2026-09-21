@@ -203,3 +203,17 @@ test('only a promotable word counts as waiting on somebody', () => {
   ];
   assert.equal(saturationOf(SETS, rows, LIMITS)[0].waiting, 3);
 });
+
+// --- a run in flight -------------------------------------------------------
+
+test('the live panel shows a stage only once the run has reached it', () => {
+  // `noteRun` writes the six stages a run counts as it goes; `thin` and
+  // `waiting` are computed at read time and are not in it. Drawing them as
+  // nought mid-run would say the run had reached them and found nothing.
+  const midRun = { read: 400, raw: 900, collapsed: 210, stored: 40, held: 12, ignored: 3 };
+  const reached = (key) => midRun[key] != null;
+  assert.equal(reached('read'), true);
+  assert.equal(reached('collapsed'), true);
+  assert.equal(reached('thin'), false);
+  assert.equal(reached('waiting'), false);
+});

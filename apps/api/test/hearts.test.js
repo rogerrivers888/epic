@@ -140,3 +140,27 @@ test('a heart cannot be set without saying whose it is', async () => {
     () => browseRows.heart(key, { householdId: household.id, memberId: null, on: true }),
     /whose heart/i);
 });
+
+// --- a run's middle, written while it runs ---------------------------------
+
+const sets = await import('../src/repositories/questionSets.js');
+
+test('a run in flight records its middle, and a finished one is left alone', async () => {
+  // Without this the live panel is seven noughts until the run ends, which is
+  // the moment it stops mattering. And a late note must never reopen a run
+  // that has already reported: `finishRun` is the last word.
+  const { rows: [run] } = await query(
+    `insert into vocabulary_runs (kind, subcategories, params) values ('free', '{}', '{}'::jsonb) returning *`);
+
+  await sets.noteRun(run.id, { funnel: { read: 40, raw: 90 }, places: 40, candidates: 7 });
+  const { rows: [mid] } = await query('select * from vocabulary_runs where id = $1', [run.id]);
+  assert.equal(mid.funnel.read, 40);
+  assert.equal(mid.places, 40);
+
+  await sets.finishRun(run.id, { places: 100, candidates: 12, funnel: { read: 100, raw: 260 } });
+  await sets.noteRun(run.id, { funnel: { read: 1 }, places: 1, candidates: 1 });
+
+  const { rows: [after] } = await query('select * from vocabulary_runs where id = $1', [run.id]);
+  assert.equal(after.places, 100, 'a note after the run finished overwrote its report');
+  assert.equal(after.funnel.read, 100);
+});

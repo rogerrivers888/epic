@@ -617,6 +617,30 @@ export async function startRun({ kind, subcategories = [], params = {} }) {
  * ignored. Null where a run did not record it, which the screen draws as "not
  * recorded" rather than as nought (migration 232).
  */
+/**
+ * A run's middle, written down while it is still going.
+ *
+ * Without this the live panel on Runs is seven noughts: `funnel` is only
+ * written by `finishRun`, so a sweep that takes a quarter of an hour reports
+ * nothing at all until the moment it no longer matters. The handoff is explicit
+ * that a run in flight fills stage by stage, and runs take hours — "this state
+ * is not optional".
+ *
+ * Deliberately cheap and deliberately lossy: one small update between
+ * subcategories, never inside the per-place loop. A progress figure that costs
+ * a write per place would make the sweep slower than the thing it reports on.
+ */
+export async function noteRun(id, { funnel = null, places = 0, candidates: found = 0 } = {}) {
+  if (!id) return null;
+  const { rows } = await query(
+    `update vocabulary_runs
+        set funnel = $2::jsonb, places = $3, candidates = $4
+      where id = $1 and finished_at is null
+      returning id`,
+    [id, funnel ? JSON.stringify(funnel) : null, places, found]);
+  return rows[0] ?? null;
+}
+
 export async function finishRun(id, { status = 'done', places = 0, calls = 0, candidates: found = 0, costUsd = 0, saturation = {}, note = null, funnel = null } = {}) {
   const { rows } = await query(
     `update vocabulary_runs set status = $2, places = $3, calls = $4, candidates = $5, cost_usd = $6,
