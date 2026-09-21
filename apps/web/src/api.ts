@@ -3280,6 +3280,23 @@ export const api = {
     put<{ threshold: Threshold; thresholds: Threshold[] }>('/api/admin/filing/thresholds', body),
   /** Every category, with what is in it and what waits. */
   filingCategories: () => request<FilingCategories>('/api/admin/filing/categories'),
+  /** Name a category. It starts empty and says so. */
+  filingAddCategory: (label: string) =>
+    post<{ category: { key: string; label: string }; said: string }>('/api/admin/filing/categories', { label }),
+  /**
+   * Name a drawer — and give it a bar in the same breath.
+   *
+   * A drawer without one is a drawer full of invisible places: every place in
+   * it reads "not set" for ever, never scored and never on a board. `bar` says
+   * whether it got one, and the screen must say so if it did not.
+   */
+  filingAddSubcategory: (body: { category: string; label: string }) =>
+    post<{ subcategory: { key: string; label: string }; bar: boolean; said: string }>(
+      '/api/admin/filing/subcategories', body),
+  /** Say one thing about several drawers at once. */
+  filingApply: (category: string, body: { subcategories: string[]; picks: { kind: string; key: string }[] }) =>
+    post<{ applied: number; said: string }>(
+      `/api/admin/filing/categories/${encodeURIComponent(category)}/apply`, body),
   /** One category's drawers, as the table draws them. */
   filingCategory: (key: string) => request<FilingCategory>(`/api/admin/filing/categories/${encodeURIComponent(key)}`),
   /** One drawer: what fills it, what it says, and which of its places argue back. */
@@ -5165,6 +5182,8 @@ export type FilingOverview = {
 
 export type FilingCategories = {
   categories: { key: string; label: string; subs: number; places: number; sets: string[]; review: number }[];
+  /** Every drawer, flat, so the shared picker can browse all of them. */
+  subcategories: { key: string; label: string; category: string; places: number }[];
   counts: { categories: number; subcategories: number; places: number; review: number };
 };
 

@@ -21,6 +21,9 @@
  *   GET  /labels/sets/:key             one set, and the words waiting on it
  *   GET  /labels/vocabulary            our own labels, and where each is asked
  *   GET  /pending                      words a person typed that nothing asks yet
+ *   POST /categories                   name a category
+ *   POST /subcategories                name a drawer, with a bar in the same breath
+ *   POST /categories/:key/apply        say one thing about several drawers at once
  *   PUT  /mapping/:word                where one of Google's words points
  *   PUT  /mapping/:word/carries        a fact riding along on what it brings
  *   GET  /mapping/:word/destinations   where it could point, and what each would do
@@ -48,6 +51,7 @@ import * as shelfRules from '../repositories/shelfRules.js';
 import * as shelfTaxonomy from '../repositories/shelfTaxonomy.js';
 import * as browseRows from '../repositories/browseRows.js';
 import * as notSure from '../repositories/notSure.js';
+import * as placeIndex from '../repositories/placeIndex.js';
 import { currentHousehold } from './household.js';
 import * as taxonomyAudit from '../repositories/taxonomyAudit.js';
 import { CORPUS_OPENS, auditAll } from '../domain/taxonomyAudit.js';
@@ -278,6 +282,20 @@ filingRoutes.get('/categories', requires('view_library'), async (_req, res, next
 
     res.json({
       categories,
+      /**
+       * Every drawer, flat, for the picker.
+       *
+       * §4's control browses categories in a rail and shows their drawers
+       * beside it, so it needs all of them and not only the one whose screen
+       * it is on — fed from the current category alone it showed an empty
+       * list for every other rung of the rail.
+       */
+      subcategories: d.subcategories.filter((s) => s.active).map((s) => ({
+        key: s.key,
+        label: s.label,
+        category: s.category_key,
+        places: d.refsBySub.get(s.key)?.length ?? 0,
+      })),
       counts: {
         categories: categories.length,
         subcategories: d.subcategories.filter((s) => s.active).length,
@@ -1352,7 +1370,7 @@ filingRoutes.get('/runs', requires('view_library'), async (_req, res, next) => {
       const d = livenessOf(r) === 'stalled'
         // It did not report, and we do not know how it ended. "Not recorded"
         // would blame the funnel for something the run never got to.
-        ? { says: 'stopped without finishing', at: null, healthy: false, recorded: Boolean(f) }
+        ? { says: 'stopped without finishing', at: null, healthy: false, recorded: Boolean(f), spoke: false }
         : diagnose(f);
 
       return {
@@ -1374,6 +1392,10 @@ filingRoutes.get('/runs', requires('view_library'), async (_req, res, next) => {
         diagnosis: d.says,
         healthy: d.healthy,
         recorded: d.recorded,
+        // Whether that diagnosis is a verdict or a shrug. A run too small to
+        // judge is not unhealthy, so `healthy` alone cannot tell the screen to
+        // draw it quietly.
+        spoke: d.spoke,
         /**
          * Saturation per *subcategory*, which is what the run measured.
          *
@@ -2107,5 +2129,116 @@ filingRoutes.get('/runs/:id/stages/:stage', requires('view_library'), async (req
         : 'the words this run raised for the first time; the count above includes ones it saw again',
       subs: subs.length ? `${subs.length} subcategories · ${subs.slice(0, 6).join(', ')}${subs.length > 6 ? '…' : ''}` : 'every question set',
     });
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// Making a category, making a drawer, and filling several at once
+// ---------------------------------------------------------------------------
+
+/** POST /categories — name a category. It starts empty, and says so. */
+filingRoutes.post('/categories', requires('manage_library'), async (req, res, next) => {
+  try {
+    const label = String(req.body?.label ?? '').trim();
+    if (!label) throw bad('Name the category.');
+    const row = await shelfTaxonomy.saveCategory({ label, by: actorOf(req) });
+    res.json({ category: { key: row.key, label: row.label }, said: `${row.label} added · no subcategories yet` });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST /subcategories — name a drawer, and give it a bar in the same breath.
+ *
+ * **A drawer without a bar is a drawer full of invisible places.** Every place
+ * in it reads "not set" for ever: never scored, never ready, never on a board.
+ * Twenty-four of seventy-four drawers on production were in that state this
+ * morning, thirteen of them made through an API rather than by a migration —
+ * and the test that guards the invariant builds from migrations, so it could
+ * not see a single one of them (epic-1c, 21 Sep 2026).
+ *
+ * `seedBars()` would give it one at the next boot. Between now and then is a
+ * window in which somebody files places into a drawer that cannot score them,
+ * so the bar is written here rather than waited for.
+ */
+filingRoutes.post('/subcategories', requires('manage_library'), async (req, res, next) => {
+  try {
+    const label = String(req.body?.label ?? '').trim();
+    const categoryKey = String(req.body?.category ?? '').trim();
+    if (!label) throw bad('Name the subcategory.');
+    if (!categoryKey) throw bad('Which category does it belong to?');
+    const row = await shelfTaxonomy.saveSubcategory({ categoryKey, label, by: actorOf(req) });
+    // Inherited from the drawers beside it, because there is no coded bar for
+    // a drawer nobody has written one for.
+    const bar = await placeIndex.inheritBar(row.key).catch(() => null);
+    res.json({
+      subcategory: { key: row.key, label: row.label },
+      bar: Boolean(bar),
+      said: bar
+        ? `${row.label} added · no places yet, and it knows what would make one ready`
+        : `${row.label} added · no places yet, and it has no bar — its places cannot be scored`,
+    });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST /categories/:key/apply — say one thing about several drawers at once.
+ *
+ * Two kinds of pick, and they do different things. A **label** becomes a
+ * default on every ticked drawer — a fact about the places in it. A
+ * **subcategory** lists the ticked drawers in that one's *cabinet*, which is
+ * what "Also in" holds: our schema files a drawer under extra categories, not
+ * under other drawers.
+ *
+ * The reply says what happened in the words the screen will print, because
+ * "applied 3" is not a sentence a person can check against what they meant.
+ */
+filingRoutes.post('/categories/:key/apply', requires('manage_library'), async (req, res, next) => {
+  try {
+    const subs = (Array.isArray(req.body?.subcategories) ? req.body.subcategories : []).map(String).filter(Boolean);
+    const picks = (Array.isArray(req.body?.picks) ? req.body.picks : []).slice(0, 20);
+    if (!subs.length) throw bad('Which drawers?');
+    if (!picks.length) throw bad('What should land on them?');
+
+    const [d, { byKey }] = await Promise.all([filing.drawers(), placeAttributes.attributes()]);
+    const byKeySub = new Map(d.subcategories.map((s) => [s.key, s]));
+    for (const key of subs) if (!byKeySub.has(key)) throw bad(`${key} is not one of our subcategories.`);
+
+    const did = [];
+    for (const pick of picks) {
+      const kind = String(pick?.kind ?? '');
+      const key = String(pick?.key ?? '');
+      if (kind === 'label') {
+        const attr = byKey.get(key);
+        if (!attr) throw bad(`${key} is not one of our labels.`);
+        if (attr.kind !== 'yesno') {
+          // A yes/no can be applied to many drawers at once and mean the same
+          // thing on each. A range or a one-of cannot, and guessing a value
+          // onto twelve drawers is not a bulk action, it is twelve mistakes.
+          throw bad(`${attr.label} is not a yes or no, so it cannot be set on several drawers at once.`);
+        }
+        for (const sub of subs) {
+          await placeAttributes.setDefault(sub, key, { yesno: true }, { settled: true });
+        }
+        did.push(`${attr.label} set on ${subs.length} ${subs.length === 1 ? 'drawer' : 'drawers'}`);
+      } else if (kind === 'subcategory' || kind === 'category') {
+        // A drawer is listed in a *cabinet*. Picking a drawer means the cabinet
+        // that drawer is in, which is the only thing "Also in" can hold.
+        const cabinet = kind === 'category' ? key : byKeySub.get(key)?.category_key;
+        if (!cabinet) throw bad(`${key} is not in a category we know.`);
+        const cat = d.categories.find((c) => c.key === cabinet);
+        for (const sub of subs) {
+          if (byKeySub.get(sub)?.category_key === cabinet) continue;
+          await query(
+            `insert into shelf_subcategory_categories (subcategory_key, category_key)
+             values ($1, $2) on conflict do nothing`, [sub, cabinet]);
+        }
+        did.push(`${subs.length} also in ${cat?.label ?? cabinet}`);
+      } else {
+        throw bad('A pick is a label or a subcategory.');
+      }
+    }
+    shelfTaxonomy.forget();
+    placeAttributes.forget();
+    res.json({ applied: picks.length, said: did.join(' · '), by: actorOf(req) });
   } catch (err) { next(err); }
 });

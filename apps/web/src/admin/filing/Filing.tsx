@@ -137,7 +137,14 @@ export function Filing({ canManage }: { canManage: boolean }) {
           const [d, t] = await Promise.all([api.filingSubcategory(sub), api.filingTrain(sub)]);
           setDrawer(d); setTrain(t);
         } else if (sub) setDrawer(await api.filingSubcategory(sub));
-        else if (cat) setCategory(await api.filingCategory(cat));
+        else if (cat) {
+          // The picker (§4) offers every label and every category, so the
+          // category screen needs both beside its own drawers.
+          const [one, all, vocab] = await Promise.all([
+            api.filingCategory(cat), api.filingCategories(), api.filingVocabulary(),
+          ]);
+          setCategory(one); setCategories(all); setVocabulary(vocab);
+        }
         else setCategories(await api.filingCategories());
       }
       if (tab === 'labels') {
@@ -429,7 +436,47 @@ export function Filing({ canManage }: { canManage: boolean }) {
           ) : null}
 
           {tab === 'categories' && cat && !sub && category ? (
-            <CategoryBoard data={category} onOpen={(key) => go({ sub: key, view: '' })} />
+            <CategoryBoard
+              data={category}
+              canManage={canManage}
+              busy={busy}
+              onOpen={(key) => go({ sub: key, view: '' })}
+              onAdd={(label) => void run('add', async () => {
+                const out = await api.filingAddSubcategory({ category: cat, label });
+                return out.said;
+              })}
+              onApply={(subcategories, picks) => void run('apply', async () => {
+                const out = await api.filingApply(cat, { subcategories, picks });
+                return out.said;
+              })}
+              picker={{
+                categories: (categories?.categories ?? []).map((c) => ({
+                  key: c.key, name: c.label, count: c.subs,
+                })),
+                // Every category's drawers, not only this one's: the rail
+                // browses all of them and showed an empty list for the rest.
+                subcategoriesIn: (key) => (categories?.subcategories ?? [])
+                  .filter((sc) => sc.category === key)
+                  .map((sc) => ({
+                    key: sc.key, name: sc.label, kind: 'subcategory',
+                    note: `${sc.places.toLocaleString()} ${sc.places === 1 ? 'place' : 'places'} in it already`,
+                  })),
+                labels: (vocabulary?.vocabulary ?? []).map((v) => ({
+                  key: v.key, name: v.name, kind: 'label',
+                  note: 'a fact about every place in whatever it is set on',
+                })),
+                results: (q) => {
+                  const needle = q.trim().toLowerCase();
+                  if (!needle) return [];
+                  return [
+                    ...(categories?.subcategories ?? []).filter((sc) => sc.label.toLowerCase().includes(needle))
+                      .map((sc) => ({ key: sc.key, name: sc.label, kind: 'subcategory', note: `${sc.places.toLocaleString()} places in it already` })),
+                    ...(vocabulary?.vocabulary ?? []).filter((v) => v.name.toLowerCase().includes(needle))
+                      .map((v) => ({ key: v.key, name: v.name, kind: 'label', note: 'a fact about every place in whatever it is set on' })),
+                  ];
+                },
+              }}
+            />
           ) : null}
 
           {tab === 'categories' && sub && view === 'places' && places && drawer ? (

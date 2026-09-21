@@ -25,9 +25,11 @@ import { Press } from '../../components/press';
 import { Icon } from '../../components/Icon';
 import { desk, fonts, LIME } from '../../theme';
 import {
-  Act, Alarm, Band, Cell, DeskButton, DeskSection, Head, Kicker, Link, Mark,
-  Nothing, Row, Steps, Value, WARN, tabular, type Col,
+  Act, Alarm, Band, Cell, DeskButton, DeskPill, DeskSection, Head, Kicker,
+  LimeOutline, Link, Mark, Nothing, Row, Steps, TickBox, Value, WARN, tabular, type Col,
 } from './desk';
+import { Picker, type Destination, type PickCategory } from './Picker';
+import { TextInput } from 'react-native';
 import type {
   FilingAnswer, FilingCategories, FilingCategory, FilingPlaces, FilingSubcategory,
 } from '../../api';
@@ -87,6 +89,7 @@ export function CategoryList({ data, onOpen }: {
 // ---------------------------------------------------------------------------
 
 const SUB_COLS: Col[] = [
+  { w: 20 },
   { w: 250, label: 'Subcategory' },
   { w: 270, label: 'Also in' },
   { w: 90, label: 'Places', align: 'right' },
@@ -94,10 +97,33 @@ const SUB_COLS: Col[] = [
   { w: 130, label: 'To review', align: 'right' },
 ];
 
-export function CategoryBoard({ data, onOpen }: {
+export function CategoryBoard({ data, canManage, busy, picker, onOpen, onAdd, onApply }: {
   data: FilingCategory;
+  canManage: boolean;
+  busy: string | null;
+  /** The shared control (§4), fed for this category. */
+  picker: {
+    categories: PickCategory[];
+    subcategoriesIn: (categoryKey: string) => Destination[];
+    labels: Destination[];
+    results: (query: string) => Destination[];
+  };
   onOpen: (key: string) => void;
+  onAdd: (label: string) => void;
+  onApply: (subcategories: string[], picks: { kind: string; key: string }[]) => void;
 }) {
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
+  const [picks, setPicks] = useState<Destination[]>([]);
+  const [query, setQuery] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+
+  const tick = (key: string) => setTicked((was) => {
+    const next = new Set(was);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+
   return (
     <>
       <Band
@@ -105,15 +131,110 @@ export function CategoryBoard({ data, onOpen }: {
         stats={[
           { label: 'SUBCATEGORIES', value: data.counts.subcategories },
           { label: 'PLACES', value: data.counts.places.toLocaleString() },
+          { label: 'TICKED', value: ticked.size, strong: ticked.size > 0 },
         ]}
       />
+
+      {/*
+        The bulk control, which only exists once something is ticked. Picks
+        land as pills and the summary says what is about to happen in words —
+        "applied 3" is not a sentence anybody can check against what they meant.
+      */}
+      {ticked.size ? (
+        <>
+          <View style={{
+            flexDirection: 'row', alignItems: 'center', gap: 20,
+            borderTopWidth: 2, borderTopColor: LIME,
+            borderBottomWidth: 1, borderBottomColor: desk.rule,
+            backgroundColor: desk.lifted, paddingVertical: 13, paddingHorizontal: 8, minHeight: 56,
+          }}>
+            <Value weight="800">{ticked.size} ticked</Value>
+            <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              {picks.length === 0 ? (
+                <Value tone="dim" size={13}>Pick below — they land here as pills</Value>
+              ) : picks.map((p) => (
+                <DeskPill key={`${p.kind}:${p.key}`} name={p.name} kind={p.kind === 'label' ? 'label' : 'sub'}
+                  onRemove={() => setPicks((was) => was.filter((x) => x.key !== p.key))} />
+              ))}
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, flexGrow: 0, flexShrink: 0 }}>
+              <DeskButton
+                label={picks.length ? `Apply to ${ticked.size}` : 'Apply'}
+                disabled={!canManage || !picks.length || Boolean(busy)}
+                onPress={() => { onApply([...ticked], picks.map((p) => ({ kind: p.kind, key: p.key }))); setPicks([]); }}
+              />
+              <Act label="×" tone="dim" ruled={false} onPress={() => { setTicked(new Set()); setPicks([]); }} />
+            </View>
+          </View>
+
+          <View style={{ flexDirection: 'row', gap: 24, alignItems: 'flex-start' }}>
+            <Picker
+              width={660}
+              categories={picker.categories}
+              subcategoriesIn={(k) => picker.subcategoriesIn(k).map((x) => ({ ...x, on: picks.some((p) => p.key === x.key) }))}
+              labels={picker.labels.map((x) => ({ ...x, on: picks.some((p) => p.key === x.key) }))}
+              results={picker.results(query)}
+              query={query}
+              onQuery={setQuery}
+              onPick={(d) => setPicks((was) => (was.some((p) => p.key === d.key) ? was : [...was, d]))}
+              onClose={() => setPicks([])}
+            />
+            <View style={{ flex: 1, minWidth: 0, gap: 10 }}>
+              <Kicker>ABOUT TO LAND</Kicker>
+              <Value tone="muted" size={12.5}>{aboutToLand(picks, [...ticked], data)}</Value>
+            </View>
+          </View>
+        </>
+      ) : null}
+
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+        {adding ? (
+          <>
+            <TextInput
+              value={name}
+              onChangeText={setName}
+              autoFocus
+              placeholder="Name the subcategory"
+              placeholderTextColor={desk.inkDim}
+              onSubmitEditing={() => { if (name.trim()) { onAdd(name.trim()); setName(''); setAdding(false); } }}
+              onKeyPress={(e) => { if ((e as unknown as { nativeEvent: { key: string } }).nativeEvent.key === 'Escape') { setAdding(false); setName(''); } }}
+              style={{
+                width: 300, backgroundColor: desk.well, borderWidth: 1.5, borderColor: LIME,
+                color: desk.ink, fontFamily: fonts.body, fontSize: 13.5, fontWeight: '600',
+                paddingVertical: 10, paddingHorizontal: 12,
+              }}
+            />
+            <DeskButton label="Add it" disabled={!name.trim()}
+              onPress={() => { onAdd(name.trim()); setName(''); setAdding(false); }} />
+            <Act label="cancel" tone="dim" ruled={false} onPress={() => { setAdding(false); setName(''); }} />
+          </>
+        ) : canManage ? (
+          <LimeOutline label="Add a subcategory" plus onPress={() => setAdding(true)} />
+        ) : null}
+        {data.subcategories.length ? (
+          <>
+            <Act
+              label={ticked.size === data.subcategories.length ? 'Clear the ticks' : `Tick all ${data.subcategories.length}`}
+              tone="ink"
+              onPress={() => setTicked(ticked.size === data.subcategories.length
+                ? new Set()
+                : new Set(data.subcategories.map((s) => s.key)))}
+            />
+            <Value tone="dim" size={12}>click a row to tick it · the name opens it</Value>
+          </>
+        ) : null}
+      </View>
+
       <View>
         <Head cols={SUB_COLS} />
         {data.subcategories.length === 0 ? <Nothing>Nothing here yet.</Nothing> : null}
         {data.subcategories.map((s) => (
-          <Row key={s.key} align="flex-start" padded={false}>
+          <Row key={s.key} align="flex-start" padded={false} lifted={ticked.has(s.key)}>
             <View style={{ flexDirection: 'row', gap: 18, flex: 1, paddingVertical: 12 }}>
               <Cell col={SUB_COLS[0]}>
+                <TickBox on={ticked.has(s.key)} onPress={() => tick(s.key)} />
+              </Cell>
+              <Cell col={SUB_COLS[1]}>
                 <Link onPress={() => onOpen(s.key)}>{s.label}</Link>
                 {s.words.length ? (
                   <Text style={{ fontFamily: fonts.body, fontSize: 11.5, color: desk.inkDim, marginTop: 3 }}>
@@ -122,11 +243,11 @@ export function CategoryBoard({ data, onOpen }: {
                   </Text>
                 ) : null}
               </Cell>
-              <Cell col={SUB_COLS[1]}>
+              <Cell col={SUB_COLS[2]}>
                 <Value tone="muted" size={12.5}>{s.alsoIn.length ? s.alsoIn.join(' · ') : '—'}</Value>
               </Cell>
-              <Cell col={SUB_COLS[2]}><Value numeric>{s.places.toLocaleString()}</Value></Cell>
-              <Cell col={SUB_COLS[3]}>
+              <Cell col={SUB_COLS[3]}><Value numeric>{s.places.toLocaleString()}</Value></Cell>
+              <Cell col={SUB_COLS[4]}>
                 {/* An empty drawer is a mapping gap and has to look like one. */}
                 {s.empty ? (
                   <Value tone="warn" weight="700" size={12.5}>nothing fills it — a mapping gap</Value>
@@ -134,7 +255,7 @@ export function CategoryBoard({ data, onOpen }: {
                   <Value tone="muted" size={12.5}>{s.labels.length ? s.labels.join(' · ') : 'nothing set'}</Value>
                 )}
               </Cell>
-              <Cell col={SUB_COLS[4]}>
+              <Cell col={SUB_COLS[5]}>
                 <Value tone={s.review ? 'lime' : 'dim'} weight="700" size={12.5}>
                   {s.review ? `${s.review} to review` : 'all set'}
                 </Value>
@@ -145,6 +266,23 @@ export function CategoryBoard({ data, onOpen }: {
       </View>
     </>
   );
+}
+
+/**
+ * What is about to happen, in words.
+ *
+ * "Applied 3" is not a sentence anybody can check against what they meant, and
+ * a bulk action is exactly where being wrong is expensive. A label becomes a
+ * default on every ticked drawer; a drawer means the *cabinet* that drawer is
+ * in, because "Also in" holds categories and not other drawers.
+ */
+function aboutToLand(picks: Destination[], ticked: string[], data: FilingCategory): string {
+  if (!picks.length) return 'Nothing picked yet. Ticked rows show what is about to land, in lime.';
+  const names = ticked.map((k) => data.subcategories.find((s) => s.key === k)?.label ?? k);
+  const said = picks.map((p) => (p.kind === 'label'
+    ? `${p.name} set on ${names.length === 1 ? names[0] : `${names.length} drawers`}`
+    : `${names.length === 1 ? names[0] : `${names.length} drawers`} also listed wherever ${p.name} is`));
+  return said.join(' · ');
 }
 
 // ---------------------------------------------------------------------------
