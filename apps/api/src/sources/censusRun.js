@@ -68,6 +68,9 @@ export const PAD_KM = Number(process.env.EPIC_CENSUS_PAD_KM || 8);
 /** How long one pass of the loop works before handing the process back. */
 const SLICE_MS = Number(process.env.EPIC_CENSUS_SLICE_MS || 55_000);
 
+/** How many goes a tile gets before the run is allowed to finish without it. */
+export const MAX_TILE_TRIES = Number(process.env.EPIC_CENSUS_TILE_TRIES || 3);
+
 /** A run untouched for this long has lost its process. */
 export const STRANDED_AFTER_MS = 5 * 60_000;
 
@@ -184,6 +187,10 @@ export async function startRun({
   // Tiles outlive runs: the same square keeps its row and its history, and this
   // run simply claims the ones that are not fresh. `do update` on the outcodes
   // because the sector table moves and a stale list would misreport.
+  // Whether the square has been looked at recently enough to leave alone. Said
+  // once and used in every branch below, because ON CONFLICT DO UPDATE has no
+  // FROM clause to hang a computed value on.
+  const FRESH = "census_tiles.censused_at is not null and census_tiles.censused_at > now() - ($8 || ' days')::interval";
   for (const t of tiles) {
     await query(
       `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, run_id, state)
@@ -193,14 +200,22 @@ export async function startRun({
               run_id   = excluded.run_id,
               -- A tile censused inside the freshness window keeps its state, so
               -- the run walks past it. One outside it is work again.
-              state    = case
-                           when census_tiles.censused_at is not null
-                            and census_tiles.censused_at > now() - ($8 || ' days')::interval
-                           then census_tiles.state else 'todo' end,
-              done_subcategories = case
-                           when census_tiles.censused_at is not null
-                            and census_tiles.censused_at > now() - ($8 || ' days')::interval
-                           then census_tiles.done_subcategories else '{}'::text[] end`,
+              state    = case when ${FRESH} then census_tiles.state else 'todo' end,
+              done_subcategories = case when ${FRESH} then census_tiles.done_subcategories else '{}'::text[] end,
+              -- And a tile that is work again starts its accounting again.
+              --
+              -- Taking the tile over while keeping the last run's requests,
+              -- slices and saturation meant the progress pass attributed all of
+              -- it to the new run: a second run over the same ground could hit
+              -- its own ceiling before making a single request, and reported
+              -- spending somebody else had done (Codex, 21 Sep 2026).
+              requests   = case when ${FRESH} then census_tiles.requests else 0 end,
+              slices     = case when ${FRESH} then census_tiles.slices else 0 end,
+              places     = case when ${FRESH} then census_tiles.places else 0 end,
+              saturated  = case when ${FRESH} then census_tiles.saturated else 0 end,
+              failures   = case when ${FRESH} then census_tiles.failures else 0 end,
+              problem    = case when ${FRESH} then census_tiles.problem else null end,
+              started_at = case when ${FRESH} then census_tiles.started_at else null end`,
       [t.gridKey, t.minLat, t.minLng, t.maxLat, t.maxLng, t.outcodes, run.id, String(freshDays)]);
   }
   await refreshProgress(run.id);
@@ -216,6 +231,15 @@ export async function requestStop(id) {
 
 /** Start again where it left off. Nothing is re-asked; the tiles remember. */
 export async function resume(id) {
+  // The same rule as starting. Without it, resuming an older paused run while a
+  // newer one is going left two rows saying "running" — and since the loop
+  // advances the earliest, the other one sat there looking active and being
+  // given no work at all (Codex, 21 Sep 2026).
+  const { rows: going } = await query(
+    `select id, label from census_runs where state = 'running' and id <> $1 limit 1`, [id]);
+  if (going.length) {
+    throw Object.assign(new Error(`“${going[0].label}” is running; stop it before resuming another`), { status: 409 });
+  }
   const { rows } = await query(
     `update census_runs
         set state = 'running', stop_requested = false, problem = null,
@@ -264,11 +288,17 @@ async function claimTile(run) {
         select id from census_tiles
          where run_id = $1
            and (state = 'todo'
+                -- A run of four hundred tiles will have one throw: a connection
+                -- reset, a statement timeout, a deploy landing on an open
+                -- transaction. Leaving it failed and unclaimable left the run
+                -- run for ever, unable to claim its last tile and unable to finish
+                -- (Codex, 21 Sep 2026). Three goes, then it is let go of out loud.
+                or (state = 'failed' and failures < $4)
                 or (state = 'doing' and claimed_at < now() - ($3 || ' milliseconds')::interval))
          order by state desc, min_lat, min_lng
          for update skip locked
          limit 1)
-      returning *`, [run.id, INSTANCE, String(STRANDED_AFTER_MS)]);
+      returning *`, [run.id, INSTANCE, String(STRANDED_AFTER_MS), MAX_TILE_TRIES]);
   return rows[0] ?? null;
 }
 
@@ -351,8 +381,11 @@ export async function advance({ runId = null, budgetMs = SLICE_MS, now = () => D
     const tile = await claimTile(run);
     if (!tile) {
       await refreshProgress(run.id);
+      // A tile given up on is not outstanding. It is on the record as failed,
+      // with its reason and its three attempts, and the run is allowed to end.
       const { rows: [left] } = await query(
-        `select count(*) filter (where state <> 'done')::int outstanding from census_tiles where run_id = $1`, [run.id]);
+        `select count(*) filter (where state <> 'done' and not (state = 'failed' and failures >= $2))::int outstanding
+           from census_tiles where run_id = $1`, [run.id, MAX_TILE_TRIES]);
       if (!left.outstanding) { await finish(run.id, 'done', null); return { working: false, reason: 'done', tiles }; }
       return { working: true, reason: 'every tile is claimed', tiles };
     }
@@ -455,8 +488,11 @@ async function censusOneTile({ run, tile, pace, remaining, until = Infinity, sto
       });
     } catch (err) {
       await query(
-        `update census_tiles set state = 'failed', problem = $2, claimed_at = null, claimed_by = null where id = $1`,
-        [tile.id, String(err.message).slice(0, 200)]);
+        `update census_tiles
+          set state = 'failed', failures = failures + 1, problem = $2,
+              claimed_at = null, claimed_by = null
+        where id = $1`,
+      [tile.id, String(err.message).slice(0, 200)]);
       return { problem: err.message, requests: spentHere };
     }
 
@@ -605,9 +641,13 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
 
   let written = 0;
   for (const code of codes) {
+    // Asked about one run, answer about that run. Rolling every censused tile
+    // carrying the outcode meant another run's tiles in an overlapping district
+    // were counted into this one's result (Codex, 21 Sep 2026).
     const { rows: tiles } = await query(
       `select grid_key, saturated, censused_at, state from census_tiles
-        where outcodes @> array[$1] and censused_at is not null`, [code]);
+        where outcodes @> array[$1] and censused_at is not null
+          ${runId ? 'and run_id = $2' : ''}`, runId ? [code, runId] : [code]);
     if (!tiles.length) continue;
     const keys = tiles.map((t) => t.grid_key);
 

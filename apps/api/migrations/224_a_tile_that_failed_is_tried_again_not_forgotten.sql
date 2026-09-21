@@ -1,0 +1,15 @@
+-- A tile that failed is tried again, and then given up on out loud.
+--
+-- Codex, 21 Sep 2026: "If `censusArea()` throws, the tile is left in `failed`,
+-- but `claimTile()` only selects `todo` or stale `doing` tiles. Once the
+-- remaining tiles finish, `advance()` sees this failed tile as outstanding yet
+-- cannot claim it, repeatedly returning 'every tile is claimed' and leaving the
+-- run permanently `running` with no retry or completion path."
+--
+-- A run of four hundred tiles will have one throw — a connection reset, a
+-- statement timeout, a deploy landing on an open transaction — so this is not a
+-- rare path, it is the normal end of a long run. Counting the attempts is what
+-- lets a tile be retried without a permanent failure turning into a permanent
+-- loop: three goes, and then the run may finish with the tile named rather than
+-- waiting for it for ever.
+alter table census_tiles add column if not exists failures integer not null default 0;

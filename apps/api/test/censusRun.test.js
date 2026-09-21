@@ -455,3 +455,77 @@ test('a drawer invented after a tile was censused is still asked of that tile', 
   // tile does not re-ask what it already answered.
   assert.ok(asked.length <= 2, `only the new drawer was asked, not the plan again (${asked.length} questions)`);
 });
+
+// ---------------------------------------------------------------------------
+// what Codex found (21 Sep 2026)
+// ---------------------------------------------------------------------------
+
+test('a second run over the same ground does not inherit the first run\'s spending', async (t) => {
+  await clean();
+  t.after(clean);
+  const first = await startTestRun({ label: 'test handover one' });
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, run_id, state,
+                               requests, slices, places, saturated, censused_at, done_subcategories, failures)
+     values ('test/handover', 51.40, -0.70, 51.48, -0.58, array['SL5'], $1, 'done',
+             9000, 800, 400, 7, now() - interval '90 days', array['golf'], 2)`, [first.id]);
+
+  // Ninety days later the ground is stale, so the next run takes the tile on.
+  // Taking it over with the last run's numbers attached meant the new run could
+  // hit its own ceiling before making a single request (Codex, 21 Sep 2026).
+  const second = await startRun({ label: 'test handover two', outcodes: ['SL5'], maxRequests: 5000, padKm: 0 })
+    .catch(() => null);
+  if (!second) return; // no SL5 in this database
+  const { rows: [tile] } = await query(`select * from census_tiles where grid_key = 'test/handover'`);
+  if (tile.run_id !== second.id) return; // the tile is not in this run's region here
+
+  assert.equal(tile.requests, 0, 'the new run starts from nothing');
+  assert.equal(tile.state, 'todo', 'and the stale ground is work again');
+  assert.equal(tile.failures, 0, 'including its attempts');
+  assert.equal(tile.started_at, null, 'and its sweep has not begun');
+  const { rows: [run] } = await query(`select requests from census_runs where id = $1`, [second.id]);
+  assert.equal(run.requests, 0, 'so the run reports its own spending, not somebody else\'s');
+  await query(`delete from census_runs where id = $1`, [second.id]);
+});
+
+test('a tile that throws is tried again, and then the run is allowed to finish', async (t) => {
+  await clean();
+  t.after(clean);
+  const run = await startTestRun({ label: 'test failing' });
+  await seedTile(run, 'test/failing');
+
+  // A run of four hundred tiles will have one throw. Left failed and
+  // unclaimable, it kept the run running for ever with no path to finish.
+  let tries = 0;
+  await withCensus(async () => { tries += 1; throw new Error('connection reset by peer'); },
+    () => advance({ runId: run.id, budgetMs: 20_000 }));
+
+  const { rows: [tile] } = await query(`select state, failures, problem from census_tiles where grid_key = 'test/failing'`);
+  assert.equal(tile.state, 'failed');
+  assert.ok(tile.failures >= 1, 'the attempt is counted');
+  assert.match(tile.problem ?? '', /connection reset/);
+
+  // Three goes in all, then the run ends rather than waiting for it.
+  for (let i = 0; i < 4; i += 1) {
+    await query(`update census_runs set state = 'running', finished_at = null where id = $1`, [run.id]);
+    await withCensus(async () => { throw new Error('connection reset by peer'); },
+      () => advance({ runId: run.id, budgetMs: 10_000 }));
+  }
+  const { rows: [after] } = await query(`select state from census_runs where id = $1`, [run.id]);
+  const { rows: [gone] } = await query(`select failures from census_tiles where grid_key = 'test/failing'`);
+  assert.ok(gone.failures >= 3, 'it had its goes');
+  assert.equal(after.state, 'done', 'and the run finished, with the tile on the record as failed');
+});
+
+test('a paused run cannot be resumed on top of a running one', async (t) => {
+  await clean();
+  t.after(clean);
+  const paused = await startTestRun({ label: 'test paused one' });
+  await query(`update census_runs set state = 'paused' where id = $1`, [paused.id]);
+  const going = await startTestRun({ label: 'test running two' });
+
+  await assert.rejects(() => resume(paused.id), /running/,
+    'two rows saying "running" is one run being given no work while looking busy');
+  await query(`update census_runs set state = 'done' where id = $1`, [going.id]);
+  assert.ok((await resume(paused.id))?.state === 'running', 'and once the other is done it picks up');
+});
