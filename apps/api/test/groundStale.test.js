@@ -20,7 +20,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sweepFhrs, FHRS_GROUND, contributorsTo } from '../src/sources/groundCounts.js';
+import { sweepFhrs, FHRS_GROUND, contributorsTo, askedFhrs } from '../src/sources/groundCounts.js';
 import { query, pool } from '../src/db.js';
 
 test.after(() => pool.end());
@@ -59,14 +59,18 @@ const tileThatWasCounted = async (daysAgo) => {
              now() - ($2 || ' days')::interval, now() - ($2 || ' days')::interval,
              array[$3], now() - ($2 || ' days')::interval)`,
     [TILE, String(daysAgo), COUNCIL]);
-  // What that council said at the time, one row per drawer (migration 230).
+  // What that council said at the time, one row per drawer (migration 230),
+  // asked the way the sweep asks — a row that does not say what it asked cannot
+  // be checked against what we would ask now, and is re-counted rather than
+  // taken on trust.
+  const asked = askedFhrs();
   for (const drawer of DRAWERS) {
     await query(
       `insert into ground_counts (grid_key, source, subcategory, places, asked, caveat, contributor, counted_at)
-       values ($1, 'fhrs', $2, 11, null, null, $3, now() - ($4 || ' days')::interval)
+       values ($1, 'fhrs', $2, 11, $5, null, $3, now() - ($4 || ' days')::interval)
        on conflict (grid_key, source, subcategory, contributor) do update
           set places = excluded.places, counted_at = excluded.counted_at`,
-      [TILE, drawer, COUNCIL, String(daysAgo)]);
+      [TILE, drawer, COUNCIL, String(daysAgo), asked[drawer]]);
   }
 };
 

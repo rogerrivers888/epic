@@ -325,7 +325,7 @@ export async function fhrsAuthoritiesFor(box) {
 }
 
 /** Which councils have already been counted into a tile. */
-export async function contributorsTo(gridKey, source = 'fhrs', drawers = null, { staleDays = null } = {}) {
+export async function contributorsTo(gridKey, source = 'fhrs', drawers = null, { staleDays = null, asked = null } = {}) {
   // Only what is still within the window, when there is one.
   //
   // The question the settling asked was *whether* a council had answered and
@@ -339,11 +339,15 @@ export async function contributorsTo(gridKey, source = 'fhrs', drawers = null, {
   // Worse than a gap, because the comparison this feeds is the one that says
   // which drawers the census is short on: a stale ground count does not read as
   // missing, it reads as agreement.
+  const params = [gridKey, source];
+  if (staleDays != null) params.push(String(staleDays));
+  const askedAt = asked ? params.push(asked) : null;
   const { rows } = await query(
     `select contributor, subcategory from ground_counts
       where grid_key = $1 and source = $2
-        ${staleDays == null ? '' : "and counted_at > now() - ($3 || ' days')::interval"}`,
-    staleDays == null ? [gridKey, source] : [gridKey, source, String(staleDays)]);
+        ${staleDays == null ? '' : "and counted_at > now() - ($3 || ' days')::interval"}
+        ${askedAt ? `and asked = any($${askedAt}::text[])` : ''}`,
+    params);
   const by = new Map();
   for (const r of rows) {
     if (!by.has(r.contributor)) by.set(r.contributor, new Set());
@@ -443,9 +447,17 @@ export async function noteGround({ gridKey, source, counts, asked = {}, problem 
   return { written: keys.length };
 }
 
-/** How the count was asked, in the words the source itself uses. */
-const askedOsm = () => Object.fromEntries(Object.entries(OSM_GROUND).map(([k, v]) => [k, v.selectors.join(' ')]));
-const askedFhrs = () => Object.fromEntries(Object.entries(FHRS_GROUND)
+/**
+ * How the count was asked, in the words the source itself uses.
+ *
+ * Exported because it is now part of the question, not only a note on the row:
+ * a count taken with one set of selectors is not an answer to another set, so
+ * the sweep compares what a row says it asked against what it would ask now. A
+ * test that writes a ground row by hand has to write the same thing, or it is
+ * describing a row the sweep would never have written.
+ */
+export const askedOsm = () => Object.fromEntries(Object.entries(OSM_GROUND).map(([k, v]) => [k, v.selectors.join(' ')]));
+export const askedFhrs = () => Object.fromEntries(Object.entries(FHRS_GROUND)
   .map(([k, v]) => [k, v.types.map((t) => FHRS_TYPE_NAMES[t] ?? t).join(', ')]));
 
 /**
@@ -462,19 +474,26 @@ const askedFhrs = () => Object.fromEntries(Object.entries(FHRS_GROUND)
  * two drawers out of one gets both counted, and a drawer whose rules changed
  * without the tile changing is picked up too.
  */
-async function owedBy(source, subcategories, { staleDays, limit }) {
+async function owedBy(source, subcategories, asked, { staleDays, limit }) {
   const { rows } = await query(
     `select t.grid_key, t.min_lat, t.min_lng, t.max_lat, t.max_lng, t.fhrs_authorities,
-            array(select s from unnest($2::text[]) s
+            array(select w.sub
+                    from unnest($2::text[], $4::text[]) as w(sub, asked)
                    where not exists (
                      select 1 from ground_counts g
                       where g.grid_key = t.grid_key and g.source = $3
-                        and g.subcategory = s
-                        and g.counted_at > now() - ($1 || ' days')::interval)) as owed
+                        and g.subcategory = w.sub
+                        and g.counted_at > now() - ($1 || ' days')::interval
+                        -- And counted by asking what we would ask now. The
+                        -- selectors are ours and they change: a count taken by
+                        -- one set of tags is not an answer to a different set,
+                        -- and no date can tell those apart. The selectors are
+                        -- stored on the row for exactly this, so it is free.
+                        and g.asked is not distinct from w.asked)) as owed
        from census_tiles t
       where t.state = 'done'
       order by t.censused_at desc nulls last`,
-    [String(staleDays), subcategories, source]);
+    [String(staleDays), subcategories, source, asked]);
   return rows.filter((r) => r.owed.length).slice(0, limit);
 }
 
@@ -489,7 +508,7 @@ async function owedBy(source, subcategories, { staleDays, limit }) {
  * A tile whose councils have never been asked owes by definition: it has to be
  * probed before anything is known about what it is short of.
  */
-async function owedFhrs(drawers, { staleDays, limit = 2000 }) {
+async function owedFhrs(drawers, asked, { staleDays, limit = 2000 }) {
   const { rows } = await query(
     `select t.grid_key, t.min_lat, t.min_lng, t.max_lat, t.max_lng, t.fhrs_authorities
        from census_tiles t
@@ -497,14 +516,19 @@ async function owedFhrs(drawers, { staleDays, limit = 2000 }) {
         and (t.fhrs_authorities is null
              or exists (
                select 1
-                 from unnest(t.fhrs_authorities) c, unnest($2::text[]) s
+                 from unnest(t.fhrs_authorities) c,
+                      unnest($2::text[], $4::text[]) as w(sub, asked)
                 where not exists (
                   select 1 from ground_counts g
                    where g.grid_key = t.grid_key and g.source = 'fhrs'
-                     and g.subcategory = s and g.contributor = c
-                     and g.counted_at > now() - ($1 || ' days')::interval)))
+                     and g.subcategory = w.sub and g.contributor = c
+                     and g.counted_at > now() - ($1 || ' days')::interval
+                     -- The business types this drawer stands for, as they are
+                     -- now. Changing which of the register's fifteen words a
+                     -- drawer claims changes the number it should have.
+                     and g.asked is not distinct from w.asked)))
       order by t.censused_at desc nulls last
-      limit $3`, [String(staleDays), drawers, limit]);
+      limit $3`, [String(staleDays), drawers, limit, asked]);
   return rows;
 }
 
@@ -525,7 +549,8 @@ export async function sweepOsm({ limit = 25, staleDays = 30, msBudget = 50_000, 
   // not fifty.
   const { rows: active } = await query('select key from shelf_subcategories where active');
   const checkable = active.map((r) => r.key).filter((k) => OSM_GROUND[k]);
-  const tiles = await owedBy('osm', checkable, { staleDays, limit });
+  const words = askedOsm();
+  const tiles = await owedBy('osm', checkable, checkable.map((k) => words[k]), { staleDays, limit });
 
   let done = 0; let requests = 0; let drawers = 0; const problems = [];
   for (const t of tiles) {
@@ -569,7 +594,8 @@ export async function sweepFhrs({ authorities = 2, staleDays = 30, msBudget = 50
   // The same per-drawer question the open map is asked. A tile is in this list
   // because some food drawer of it has no count, or has one a month old.
   const drawers = Object.keys(FHRS_GROUND);
-  const tiles = await owedFhrs(drawers, { staleDays });
+  const askedNow = askedFhrs();
+  const tiles = await owedFhrs(drawers, drawers.map((d) => askedNow[d]), { staleDays });
   if (!tiles.length) return { authorities: 0, tiles: 0, requests: 0, problems: [] };
 
   // The register's own list of councils. Empty is not fatal — the probe names
@@ -606,7 +632,11 @@ export async function sweepFhrs({ authorities = 2, staleDays = 30, msBudget = 50
     // because the drawer is new keeps the councils that have answered for the
     // rest — `contributorsTo` only counts a council in when it has answered for
     // every drawer being asked.
-    have.set(t.grid_key, await contributorsTo(t.grid_key, 'fhrs', drawers, { staleDays }));
+    // Counted recently *and* by asking what we would ask now. A council whose
+    // rows were written against a different set of business types has not
+    // answered the question being asked, any more than a council that never
+    // answered at all.
+    have.set(t.grid_key, await contributorsTo(t.grid_key, 'fhrs', drawers, { staleDays, asked: drawers.map((d) => askedNow[d]) }));
   }
 
   /** Every council with a real share of this tile, asked once and written down. */

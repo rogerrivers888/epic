@@ -388,11 +388,9 @@ test('a drawer created after a tile was counted is still counted', async () => {
   await ground.noteGround({ gridKey, source: 'osm', counts: { marina: 4 } });
   await aSubcategory('golf', 'Golf clubs', 'sport');
 
-  const asked = [];
-  const ask = async (body) => {
-    asked.push(body);
-    return { elements: [{ type: 'count', tags: { total: '9' } }] };
-  };
+  const ask = async (body) => ({
+    elements: Array.from({ length: body.split('out count').length - 1 }, () => ({ type: 'count', tags: { total: '9' } })),
+  });
   // The sweep is given the one tile and has to work out what it is short of.
   const out = await ground.sweepOsm({ limit: 50, msBudget: 20_000, ask });
   assert.ok(out.tiles >= 1);
@@ -515,4 +513,32 @@ test('two tiles asked the same type with different words are not the same questi
   const { subcategories } = await findings.subcategories({ outcodes: ['ZZ85'] });
   const row = subcategories.find((s) => s.key === 'test-same-type');
   assert.equal(row.askedDifferently, 1, 'the words are part of the question');
+});
+
+test('a count taken by asking something else is not an answer to this question', async () => {
+  // The ground count does not go stale because *our Google question* changed —
+  // the open map is answering "what is in this box", and that is the same
+  // question whatever we ask Google. What does invalidate it is our own
+  // selectors changing, and no date can tell those apart. So the row says what
+  // it asked, and the sweep compares it with what it would ask now.
+  const gridKey = 'test/ground/other-question';
+  await aSubcategory('golf', 'Golf clubs', 'sport');
+  await aCensusedTile({ gridKey, outcodes: ['ZZ84'], subcategory: 'golf', places: 1 });
+  await query(`delete from ground_counts where grid_key = $1`, [gridKey]);
+  // Counted today, but by asking something this file no longer asks.
+  await query(
+    `insert into ground_counts (grid_key, source, subcategory, places, asked, contributor)
+     values ($1, 'osm', 'golf', 4, '["leisure"="golf"]', 'box')`, [gridKey]);
+
+  // One count per output statement, the way Overpass answers — the sweep asks
+  // for every drawer this tile is short of, not only the one under test.
+  const ask = async (body) => ({
+    elements: Array.from({ length: body.split('out count').length - 1 }, () => ({ type: 'count', tags: { total: '9' } })),
+  });
+  await ground.sweepOsm({ limit: 50, msBudget: 20_000, ask });
+
+  const { rows } = await query(
+    `select places, asked from ground_counts where grid_key = $1 and subcategory = 'golf'`, [gridKey]);
+  assert.equal(rows[0].places, 9, 'counted again, because the old row answers a question nobody is asking');
+  assert.equal(rows[0].asked, ground.OSM_GROUND.golf.selectors.join(' '), 'and it now says what was actually asked');
 });
