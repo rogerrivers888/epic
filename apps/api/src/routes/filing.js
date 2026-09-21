@@ -1353,6 +1353,30 @@ filingRoutes.get('/runs', requires('view_library'), async (_req, res, next) => {
         diagnosis: d.says,
         healthy: d.healthy,
         recorded: d.recorded,
+        /**
+         * Saturation per *subcategory*, which is what the run measured.
+         *
+         * The panel below reports it per question set, because a set is what
+         * settles and stops being read. But a set is made of drawers, there are
+         * no sets yet, and the question somebody actually has after a run is
+         * "which drawers need more places" — which the run already answers and
+         * nothing surfaced (owner, 21 Sep 2026: "Saturation per subcategory —
+         * which are settled, which need more places").
+         */
+        curves: Object.entries(r.saturation ?? {})
+          .map(([key, c]) => ({
+            subcategory: key,
+            sampled: c.sampled ?? c.places ?? 0,
+            distinct: c.distinct ?? 0,
+            // New words the last full block of ten places taught.
+            newWordsPerTen: c.curve?.filter((x) => !x.partial).at(-1)?.newWords ?? null,
+            settled: Boolean(c.saturated),
+            // Twenty places that taught nothing because there was nothing to
+            // read about them is the drawer that most needs the next pass, not
+            // one we have finished with.
+            nothingToRead: Boolean(c.nothingToRead),
+          }))
+          .sort((a, b) => (b.newWordsPerTen ?? 0) - (a.newWordsPerTen ?? 0)),
       };
     });
 
@@ -2022,7 +2046,15 @@ filingRoutes.get('/runs/:id/stages/:stage', requires('view_library'), async (req
       collapsed: { items: raised.map(word), note: `${raised.length} distinct words after the resolver` },
       thin: { items: thin.map(word), note: `below ${floor} sightings · visible, and not promotable` },
       held: { items: held.map(word), note: 'the classifier could not call these' },
-      stored: { items: raised.filter((c) => c.kind === 'feature').map(word), note: 'written down as features' },
+      // Everything the run wrote down, which is what the funnel counts. It
+      // filtered to features here and the expander opened on nothing while the
+      // row above it said forty thousand — the exact failure the drill exists
+      // to prevent.
+      stored: {
+        items: raised.map(word),
+        note: `${raised.filter((c) => c.kind === 'feature').length} of these are features;`
+          + ` the rest are in the holding pen until something can call them`,
+      },
       waiting: { items: waiting.map(word), note: 'at or above the floor, and nobody has decided them' },
     };
 
