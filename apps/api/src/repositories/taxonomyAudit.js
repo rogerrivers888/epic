@@ -7,6 +7,7 @@
  */
 
 import { query, withTransaction } from '../db.js';
+import { inheritBar } from './placeIndex.js';
 import { auditAll } from '../domain/taxonomyAudit.js';
 import { agreed, LANDMARK_SPLIT } from '../domain/taxonomyCleanup.js';
 
@@ -460,6 +461,10 @@ export async function apply({ auditId, by = null }) {
              on conflict (key) do update set label = excluded.label, category_key = excluded.category_key,
                                              active = true, updated_at = now()`,
             [p.subject, p.proposed, cat]);
+          // A drawer with no bar is invisible: every place in it reads "not
+          // set" for ever. Thirteen made this way had that hole for weeks and
+          // no test could see them (owner, 21 Sep 2026).
+          await inheritBar(p.subject, client);
           // Undoing a create means removing it, which the snapshot cannot say
           // by holding a row that did not exist. It is recorded as a birth.
           snapshot.created = [...(snapshot.created ?? []), p.subject];

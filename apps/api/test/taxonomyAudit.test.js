@@ -248,3 +248,60 @@ test('the consequence line refuses an empty ask rather than answering for everyt
   assert.equal(none.openable, false);
   assert.deepEqual(none.words, {});
 });
+
+// --- the invariant, against data rather than the schema --------------------
+
+import { drawersWithoutABar, inheritBar } from '../src/repositories/placeIndex.js';
+
+test('a drawer made outside a migration still gets a bar, and it says it was inherited', async (t) => {
+  t.after(async () => {
+    await query("delete from ready_bars where subcategory_key = 'tmp-made'");
+    await query("delete from shelf_subcategories where key = 'tmp-made'");
+  });
+  // A sibling with a bar somebody wrote down, so there is something to inherit.
+  const { rows: [sibling] } = await query(
+    `select category_key from shelf_subcategories s
+      where s.active and exists (select 1 from ready_bars b where b.subcategory_key = s.key)
+      limit 1`);
+  await query(
+    `insert into shelf_subcategories (key, label, category_key, active)
+     values ('tmp-made', 'Made by an API', $1, true)
+     on conflict (key) do update set active = true, category_key = excluded.category_key`,
+    [sibling.category_key]);
+
+  const bare = await drawersWithoutABar();
+  assert.ok(bare.some((d) => d.key === 'tmp-made'), 'the invariant sees a drawer a migration never made');
+
+  const got = await inheritBar('tmp-made');
+  assert.ok(got, 'it inherits one');
+  assert.ok(got.facts.length, 'with facts');
+  const { rows } = await query(
+    "select distinct set_by from ready_bars where subcategory_key = 'tmp-made'");
+  assert.deepEqual(rows.map((r) => r.set_by), ['inherited'],
+    'marked inherited, so it does not pretend somebody considered it');
+
+  const after = await drawersWithoutABar();
+  assert.ok(!after.some((d) => d.key === 'tmp-made'), 'and the invariant is satisfied');
+});
+
+test('inheriting twice does not overwrite a bar somebody set', async (t) => {
+  t.after(async () => {
+    await query("delete from ready_bars where subcategory_key = 'tmp-made'");
+    await query("delete from shelf_subcategories where key = 'tmp-made'");
+  });
+  const { rows: [sibling] } = await query(
+    `select category_key from shelf_subcategories where active limit 1`);
+  await query(
+    `insert into shelf_subcategories (key, label, category_key, active)
+     values ('tmp-made', 'Made by an API', $1, true)
+     on conflict (key) do update set active = true`, [sibling.category_key]);
+  await query(
+    `insert into ready_bars (subcategory_key, fact, weight, required, set_by)
+     values ('tmp-made', 'picture', 30, true, 'somebody')
+     on conflict do nothing`);
+
+  assert.equal(await inheritBar('tmp-made'), null, 'it stands aside where a bar exists');
+  const { rows } = await query(
+    "select set_by from ready_bars where subcategory_key = 'tmp-made'");
+  assert.deepEqual(rows.map((r) => r.set_by), ['somebody'], 'and leaves theirs alone');
+});

@@ -71,7 +71,7 @@ import { generalLimit, photoLimit, signInLimit, spendLimit, voiceLimit } from '.
 import { sweepDeadSessions } from './repositories/sessions.js';
 import { sweepExpiredPlanSessions } from './repositories/planSessions.js';
 import { refresh as refreshReach } from './repositories/reach.js';
-import { buildIfEmpty, settleNew } from './repositories/placeIndex.js';
+import { buildIfEmpty, drawersWithoutABar, seedBars, settleNew } from './repositories/placeIndex.js';
 import { expireRentedCoordinates } from './sources/census.js';
 import * as censusRun from './sources/censusRun.js';
 import * as ground from './sources/groundCounts.js';
@@ -124,10 +124,22 @@ app.get('/health', async (_req, res) => {
     // "is my change live yet" is a question the API can answer itself.
     // `auth` is reported because an API that is not asking for a passcode is a
     // fact the owner needs to be able to see without reading the logs.
+    // The invariant, against live data rather than the schema: no active
+    // drawer without a bar. A drawer with none makes every place in it read
+    // "not set" for ever, and thirteen created through the audit API had that
+    // hole for weeks because the test that checks it builds its database from
+    // migrations and could not see them (owner, 21 Sep 2026: "add an invariant
+    // that runs against live data, not migrations… the next route in will
+    // repeat this silently").
+    //
+    // Reported, never fatal. An unjudged drawer is a thing to fix today, not a
+    // reason to fail the health check Railway restarts the service on.
+    const bare = await drawersWithoutABar().catch(() => null);
     res.json({
       ok: true, service: 'epic-api', db: 'up',
       commit: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? null,
       auth: authConfigured() ? 'on' : 'not-configured',
+      ...(bare === null ? {} : { drawersWithoutABar: bare.map((d) => d.key) }),
     });
   } catch (err) {
     res.status(503).json({ ok: false, service: 'epic-api', db: 'down', error: err.message });
@@ -637,6 +649,18 @@ const sweep = async () => {
 const indexBuilt = buildIfEmpty()
   .then((r) => { if (r?.built) console.log(`epic-api: places — built the index for the first time, ${r.places} place(s)`); })
   .catch((err) => console.warn(`epic-api: places — could not build the index: ${err.message}`));
+// On deploy: give every drawer that has none a bar, then say what is still
+// bare. `seedBars` uses the coded list where there is one and inherits where
+// there is not, so a drawer created through an API since the last deploy is
+// judged on something by the time anybody looks (owner, 21 Sep 2026).
+void indexBuilt
+  .then(() => seedBars())
+  .then(() => drawersWithoutABar())
+  .then((bare) => {
+    if (!bare.length) return;
+    console.warn(`epic-api: places — ${bare.length} active drawer(s) with no bar: ${bare.map((d) => d.key).join(', ')}`);
+  })
+  .catch((err) => console.warn(`epic-api: places — could not check the bars: ${err.message}`));
 void indexBuilt.then(() => sweep());
 setInterval(() => { void sweep(); }, 3600_000).unref?.();
 

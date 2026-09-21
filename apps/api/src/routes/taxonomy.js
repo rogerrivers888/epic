@@ -30,6 +30,7 @@ import { Router } from 'express';
 import { requires } from '../access.js';
 import { query, withTransaction } from '../db.js';
 import * as shelfRules from '../repositories/shelfRules.js';
+import * as placeIndexRepo from '../repositories/placeIndex.js';
 import * as taxonomyAudit from '../repositories/taxonomyAudit.js';
 import * as library from '../repositories/library.js';
 import * as taxonomy from '../repositories/shelfTaxonomy.js';
@@ -1674,6 +1675,10 @@ taxonomyRoutes.post('/adopt', requires('manage_library'), async (req, res, next)
           `insert into shelf_subcategories (category_key, key, label, position, seeded) values ($1, $2, $3, 100, false) returning *`,
           [categoryKey, key, name]);
         sc = ins.rows[0];
+        // Inherited, so a drawer adopted from a word is judged on something
+        // from the moment it exists (owner, 21 Sep 2026). On the transaction's
+        // own connection: the row is not committed yet.
+        await placeIndexRepo.inheritBar(sc.key, c);
       }
       // Which menus also list it, inside the same transaction: split across two
       // requests, a failure after the adopt left the drawer created without its

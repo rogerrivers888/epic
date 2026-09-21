@@ -121,6 +121,85 @@ export async function bars() {
  * subcategories with no rows at all — a bar somebody has composed is never
  * overwritten by a redeploy.
  */
+/**
+ * Give one drawer a bar by inheriting it, and say that is what happened.
+ *
+ * The owner, 21 Sep 2026: "A new drawer inherits one from its nearest
+ * subcategory or its category, marked inherited, so it can't be invisible and
+ * doesn't pretend to have been considered."
+ *
+ * Nearest is the commonest bar among its own category's other drawers, because
+ * the category is the closest thing to a statement about what kind of day out
+ * this is. Failing that — a drawer in an empty category — the safe floor: a
+ * picture, a sentence and when it is open, which is true of everything.
+ *
+ * `set_by` is `inherited`, never `seed`. A seeded bar is one somebody wrote
+ * down for that drawer; an inherited one is a guess standing in until they do,
+ * and the back office can tell them apart.
+ */
+const FLOOR = ['picture', 'what_it_is', 'hours'];
+
+export async function inheritBar(key, client = null) {
+  // Takes the transaction's own connection where there is one. A drawer being
+  // created is not committed yet, so the pool cannot see it — and the adopt
+  // path holds `for update` on that row, so asking the pool would wait for a
+  // lock the caller is holding.
+  const ask = client ? (sql, args) => client.query(sql, args) : query;
+  const { rows: [sub] } = await ask(
+    'select key, category_key from shelf_subcategories where key = $1', [key]);
+  if (!sub) return null;
+  const { rows: have } = await ask('select 1 from ready_bars where subcategory_key = $1 limit 1', [key]);
+  if (have.length) return null;
+
+  // What its siblings are judged on. Grouped by the exact set of required
+  // facts, commonest first, so one odd sibling cannot decide it.
+  const { rows: siblings } = await ask(
+    `select b.subcategory_key, array_agg(b.fact order by b.fact) filter (where b.required) as facts
+       from ready_bars b
+       join shelf_subcategories s on s.key = b.subcategory_key
+      where s.category_key = $1 and s.key <> $2 and s.active
+      group by b.subcategory_key`, [sub.category_key, key]);
+  const tally = new Map();
+  for (const r of siblings) {
+    if (!r.facts?.length) continue;
+    const k = r.facts.join(',');
+    tally.set(k, (tally.get(k) ?? 0) + 1);
+  }
+  const best = [...tally.entries()].sort((a, b) => b[1] - a[1])[0];
+  const facts = best ? best[0].split(',') : FLOOR;
+  const from = best ? `the rest of ${sub.category_key}` : 'the floor every place shares';
+
+  for (const fact of FACT_KEYS) {
+    await ask(
+      `insert into ready_bars (subcategory_key, fact, weight, required, set_by)
+       values ($1,$2,$3,$4,'inherited') on conflict do nothing`,
+      [key, fact, FACT_WEIGHTS[fact] ?? 0, facts.includes(fact)]);
+  }
+  return { key, facts, from };
+}
+
+/**
+ * The invariant: no active drawer without a bar.
+ *
+ * The owner, 21 Sep 2026: "add an invariant that runs against live data, not
+ * migrations… Your test couldn't see API-created drawers, and the next route in
+ * will repeat this silently."
+ *
+ * That is exactly what happened: `searchLog.test.js` builds its database from
+ * migrations, so the thirteen drawers the audit API created were invisible to
+ * it and every place in them read "not set" for weeks. A test that reads the
+ * schema cannot see the data, so this reads the data.
+ */
+export async function drawersWithoutABar() {
+  const { rows } = await query(
+    `select s.key, s.label
+       from shelf_subcategories s
+      where s.active
+        and not exists (select 1 from ready_bars b where b.subcategory_key = s.key)
+      order by s.key`);
+  return rows;
+}
+
 export async function seedBars() {
   const seed = defaultBars();
   const { rows: subs } = await query('select key from shelf_subcategories where active');
@@ -129,7 +208,9 @@ export async function seedBars() {
   for (const { key } of subs) {
     if (have.has(key)) continue;
     const facts = seed[key];
-    if (!facts) continue;                       // genuinely "not set", and says so
+    // No coded bar for it: it was made through an API rather than a migration,
+    // so it inherits one instead of staying invisible.
+    if (!facts) { await inheritBar(key); added += 1; continue; }
     for (const fact of FACT_KEYS) {
       await query(
         `insert into ready_bars (subcategory_key, fact, weight, required, set_by)
