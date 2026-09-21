@@ -223,7 +223,7 @@ export async function freeSweep({ subcategories = null, size = SAMPLE.top + SAMP
   // Where the volume goes, counted as it goes (migration 232). `raw` is
   // mentions and not words: the same word on ten places is ten, which is the
   // only way the collapse rate afterwards means anything.
-  const funnel = { read: 0, raw: 0, collapsed: 0, stored: 0, held: 0, ignored: 0 };
+  const funnel = { read: 0, raw: 0, collapsed: 0, stored: 0, fresh: 0, held: 0, ignored: 0 };
   try {
     for (const kind of kinds) {
       const { places: sample, regions, held } = await sampleFor(kind.key, { size });
@@ -255,7 +255,13 @@ export async function freeSweep({ subcategories = null, size = SAMPLE.top + SAMP
       const written = await sets.recordCandidates(kind.key, entries, { placesTotal: sample.length });
       found += written.written;
       funnel.collapsed += counts.size;
-      funnel.stored += written.stored ?? 0;
+      // Touched, not inserted. A word this run saw again was written down by it
+      // just as surely as a new one, and counting only the new ones made a
+      // second harvest of the same set read as though its words had died —
+      // "most words die unconfirmed", in words, about a run that worked
+      // (Codex via epic-f2, 21 Sep 2026).
+      funnel.stored += written.touched ?? written.stored ?? 0;
+      funnel.fresh += written.stored ?? 0;
       funnel.held += written.held ?? 0;
       funnel.ignored += written.skipped ?? 0;
       curves[kind.key] = { ...saturation(perPlace), sampled: sample.length, held, regions };
@@ -420,7 +426,7 @@ export async function googleHarvest({
   const meter = {};
   const report = [];
   const curves = {};
-  const funnel = { read: 0, raw: 0, collapsed: 0, stored: 0, held: 0, ignored: 0 };
+  const funnel = { read: 0, raw: 0, collapsed: 0, stored: 0, fresh: 0, held: 0, ignored: 0 };
   let places = 0;
   let requests = 0;
   let found = 0;
@@ -473,7 +479,13 @@ export async function googleHarvest({
       const written = await sets.recordCandidates(kind.key, entries, { placesTotal: seenHere });
       found += written.written;
       funnel.collapsed += counts.size;
-      funnel.stored += written.stored ?? 0;
+      // Touched, not inserted. A word this run saw again was written down by it
+      // just as surely as a new one, and counting only the new ones made a
+      // second harvest of the same set read as though its words had died —
+      // "most words die unconfirmed", in words, about a run that worked
+      // (Codex via epic-f2, 21 Sep 2026).
+      funnel.stored += written.touched ?? written.stored ?? 0;
+      funnel.fresh += written.stored ?? 0;
       funnel.held += written.held ?? 0;
       funnel.ignored += written.skipped ?? 0;
       curves[kind.key] = { ...saturation(perPlace), sampled: seenHere };

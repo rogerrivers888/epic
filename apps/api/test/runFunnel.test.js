@@ -315,3 +315,23 @@ test('a listable stage on a run with no funnel falls back to its list', () => {
   assert.equal(s.count, 2);
   assert.equal(s.recorded, true);
 });
+
+test('a repeat harvest is not told its words died because it had seen them before', () => {
+  // `stored` means written-down-or-updated. When it counted only newly
+  // inserted rows, a second harvest of the same set recorded stored ≈ 0 and
+  // this printed "most words die unconfirmed" on the Runs tab — a confident
+  // verdict that a working run had failed (Codex via epic-f2, 21 Sep 2026).
+  // A healthy collapse, so the verdict under test is the one that fires.
+  const repeat = { read: 800, raw: 20000, collapsed: 4000, stored: 3900, fresh: 12, held: 90 };
+  assert.equal(diagnose(repeat).says, 'drop-off looks normal');
+  // The same run judged on fresh inserts alone is the bug.
+  const asItWas = { ...repeat, stored: repeat.fresh };
+  assert.equal(diagnose(asItWas).says, 'most words die unconfirmed');
+});
+
+test('a run that never recorded a kept share is not accused of losing everything', () => {
+  // Every run from before the funnel counted written-down-or-updated has no
+  // `stored` at all, and accusing them all is worse than saying nothing.
+  const noKept = { read: 100, raw: 400, collapsed: 100, held: 10 };
+  assert.notEqual(diagnose(noKept).says, 'most words die unconfirmed');
+});

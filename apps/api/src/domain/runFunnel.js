@@ -38,7 +38,15 @@ export const COLLAPSE_FLOOR = 0.3;
 export const ENOUGH_TO_JUDGE = 100;
 /** Above this share into the holding pen, the classifier is the bottleneck. */
 export const PEN_CEILING = 0.4;
-/** Below this share written down, most of what was raised died. */
+/**
+ * Below this share written down, most of what was raised died.
+ *
+ * `stored` has to mean written-down-*or-updated* for this to be true. Counting
+ * only newly inserted rows made a second harvest of the same set read as
+ * though its words had died, when they had merely been seen again — a
+ * confident verdict, printed on the Runs tab, that the run had failed when it
+ * had worked (Codex via epic-f2, 21 Sep 2026).
+ */
 export const KEPT_FLOOR = 0.4;
 
 /**
@@ -62,7 +70,10 @@ export function diagnose(f) {
   if (judged && (f.held ?? 0) / judged > PEN_CEILING) {
     return { says: 'the holding pen is taking half', at: 'held', healthy: false, recorded: true };
   }
-  if (judged && (f.stored ?? 0) / judged < KEPT_FLOOR) {
+  // A run that recorded no `stored` at all cannot be judged on its kept share:
+  // every run from before the funnel counted written-down-or-updated is in
+  // that state, and accusing them all is worse than saying nothing.
+  if (judged && f.stored != null && f.stored / judged < KEPT_FLOOR) {
     return { says: 'most words die unconfirmed', at: 'stored', healthy: false, recorded: true };
   }
   return { says: 'drop-off looks normal', at: null, healthy: true, recorded: true };
