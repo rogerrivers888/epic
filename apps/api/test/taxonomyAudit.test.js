@@ -251,7 +251,7 @@ test('the consequence line refuses an empty ask rather than answering for everyt
 
 // --- the invariant, against data rather than the schema --------------------
 
-import { drawersWithoutABar, inheritBar, seedBars } from '../src/repositories/placeIndex.js';
+import { drawersUnjudged, drawersWithoutABar, inheritBar, rescore, seedBars } from '../src/repositories/placeIndex.js';
 
 test('a drawer made outside a migration still gets a bar, and it says it was inherited', async (t) => {
   t.after(async () => {
@@ -330,4 +330,55 @@ test('a drawer that gains a bar has its places scored against it', async (t) => 
   // The point of the finding: the bar alone is not the repair.
   const after = await query("select data_score, score_parts from place_index where venue_ref = 'test:bar-me'");
   assert.notEqual(after.rows[0].score_parts, null, 'and its places were scored against it, not left "not set"');
+});
+
+test('a bar with nothing judged against it is a fault the first invariant cannot see', async (t) => {
+  t.after(async () => {
+    await query("delete from place_index where venue_ref = 'test:unjudged'");
+    await query("delete from ready_bars where subcategory_key = 'tmp-made'");
+    await query("delete from shelf_subcategories where key = 'tmp-made'");
+  });
+  const { rows: [sib] } = await query('select category_key from shelf_subcategories where active limit 1');
+  await query(
+    `insert into shelf_subcategories (key, label, category_key, active)
+     values ('tmp-made', 'Made by an API', $1, true)
+     on conflict (key) do update set active = true`, [sib.category_key]);
+  await inheritBar('tmp-made');
+  // A place indexed before the bar arrived: scored as "not set" and never since.
+  // `{ set: false }` is what `scorePlace` writes for a place whose drawer had
+  // no bar: asked, and found unanswerable. The column is NOT NULL, so this is
+  // the shape of "never judged" rather than an absent row.
+  const unset = JSON.stringify({ set: false, held: [], judged: [], missing: [], notCounted: [] });
+  await query(
+    `insert into place_index (venue_ref, subcategory, country_code, data_score, ready, score_parts)
+     values ('test:unjudged', 'tmp-made', 'GB', null, false, $1::jsonb)
+     on conflict (venue_ref) do update set subcategory = 'tmp-made', score_parts = $1::jsonb, data_score = null`,
+    [unset]);
+
+  assert.deepEqual(await drawersWithoutABar(), [],
+    'the first invariant is clean, because the bar exists');
+  const unjudged = await drawersUnjudged();
+  assert.ok(unjudged.some((d) => d.key === 'tmp-made'),
+    'and the second one catches what it cannot see');
+  assert.equal(unjudged.find((d) => d.key === 'tmp-made').judged, 0);
+
+  await rescore({ subcategory: 'tmp-made' });
+  const after = await drawersUnjudged();
+  assert.ok(!after.some((d) => d.key === 'tmp-made'), 'rescoring settles it');
+});
+
+test('an empty drawer is not unjudged, it is empty', async (t) => {
+  t.after(async () => {
+    await query("delete from ready_bars where subcategory_key = 'tmp-made'");
+    await query("delete from shelf_subcategories where key = 'tmp-made'");
+  });
+  const { rows: [sib] } = await query('select category_key from shelf_subcategories where active limit 1');
+  await query(
+    `insert into shelf_subcategories (key, label, category_key, active)
+     values ('tmp-made', 'Made by an API', $1, true)
+     on conflict (key) do update set active = true`, [sib.category_key]);
+  await inheritBar('tmp-made');
+  const unjudged = await drawersUnjudged();
+  assert.ok(!unjudged.some((d) => d.key === 'tmp-made'),
+    'no places is not a fault, and flagging it would cry wolf on every new drawer');
 });

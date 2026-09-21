@@ -71,7 +71,7 @@ import { generalLimit, photoLimit, signInLimit, spendLimit, voiceLimit } from '.
 import { sweepDeadSessions } from './repositories/sessions.js';
 import { sweepExpiredPlanSessions } from './repositories/planSessions.js';
 import { refresh as refreshReach } from './repositories/reach.js';
-import { buildIfEmpty, drawersWithoutABar, seedBars, settleNew } from './repositories/placeIndex.js';
+import { buildIfEmpty, drawersUnjudged, drawersWithoutABar, rescore, seedBars, settleNew } from './repositories/placeIndex.js';
 import { expireRentedCoordinates } from './sources/census.js';
 import * as censusRun from './sources/censusRun.js';
 import * as ground from './sources/groundCounts.js';
@@ -135,11 +135,15 @@ app.get('/health', async (_req, res) => {
     // Reported, never fatal. An unjudged drawer is a thing to fix today, not a
     // reason to fail the health check Railway restarts the service on.
     const bare = await drawersWithoutABar().catch(() => null);
+    const unjudged = await drawersUnjudged().catch(() => null);
     res.json({
       ok: true, service: 'epic-api', db: 'up',
       commit: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? null,
       auth: authConfigured() ? 'on' : 'not-configured',
       ...(bare === null ? {} : { drawersWithoutABar: bare.map((d) => d.key) }),
+      // Named separately because it is a different fault with a different fix:
+      // one drawer needs a bar, the other needs its places rescoring.
+      ...(unjudged === null ? {} : { drawersUnjudged: unjudged.map((d) => d.key) }),
     });
   } catch (err) {
     res.status(503).json({ ok: false, service: 'epic-api', db: 'down', error: err.message });
@@ -665,9 +669,24 @@ void indexBuilt
     }
     return drawersWithoutABar();
   })
-  .then((bare) => {
-    if (!bare.length) return;
-    console.warn(`epic-api: places — ${bare.length} active drawer(s) with no bar: ${bare.map((d) => d.key).join(', ')}`);
+  .then(async (bare) => {
+    if (bare.length) {
+      console.warn(`epic-api: places — ${bare.length} active drawer(s) with no bar: ${bare.map((d) => d.key).join(', ')}`);
+    }
+    // The second invariant, and this one is loud. A bar nobody's places have
+    // been judged against is worse than no bar: the first invariant reads clean
+    // over it. Repaired here rather than only reported, because the repair is
+    // one call and leaving it for somebody to notice is how 1,251 places sat
+    // unscored behind a green check (21 Sep 2026).
+    const unjudged = await drawersUnjudged();
+    if (!unjudged.length) return;
+    console.error(`epic-api: places — ${unjudged.length} drawer(s) have a bar and not one judged place: `
+      + `${unjudged.map((d) => `${d.key} (${d.places})`).join(', ')} — rescoring`);
+    for (const d of unjudged) await rescore({ subcategory: d.key }).catch(() => {});
+    const left = await drawersUnjudged();
+    if (left.length) {
+      console.error(`epic-api: places — still unjudged after rescoring: ${left.map((d) => d.key).join(', ')}`);
+    }
   })
   .catch((err) => console.warn(`epic-api: places — could not check the bars: ${err.message}`));
 void indexBuilt.then(() => sweep());

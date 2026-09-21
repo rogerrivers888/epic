@@ -200,6 +200,42 @@ export async function drawersWithoutABar() {
   return rows;
 }
 
+/**
+ * The second invariant: a bar nothing has been judged against.
+ *
+ * "Invariant clean" and "places judged" are two different facts, and the first
+ * was hiding the second. `drawersWithoutABar` goes green the moment a bar row
+ * exists — but `data_score`, `ready` and `score_parts` are persisted per place,
+ * so a drawer that got its bar after its places were indexed keeps every one of
+ * them reading "not set" and nothing says so. Monuments & memorials and
+ * Landmarks were both in exactly that state after the split: bar set, six
+ * facts, 1,251 places, none of them ever scored against it (21 Sep 2026).
+ *
+ * A drawer with places and a bar and no *judged* place is the shape of that
+ * fault. A drawer with no places is not a fault, it is empty.
+ *
+ * Judged is `score_parts->set`, not "score_parts exists": the column is NOT
+ * NULL, and `scorePlace` writes `{ set: false }` for a place it could not judge
+ * because its drawer had no bar. So an unjudged place is one carrying that
+ * answer, which is a record of having been asked and found unanswerable — and
+ * exactly what a rescore turns into a real score once the bar arrives.
+ */
+export async function drawersUnjudged() {
+  const { rows } = await query(
+    `select s.key, s.label,
+            count(p.venue_ref)::int as places,
+            count(p.venue_ref) filter (where (p.score_parts->>'set')::boolean)::int as judged
+       from shelf_subcategories s
+       join ready_bars b on b.subcategory_key = s.key
+       join place_index p on p.subcategory = s.key
+      where s.active
+      group by s.key, s.label
+     having count(p.venue_ref) > 0
+        and count(p.venue_ref) filter (where (p.score_parts->>'set')::boolean) = 0
+      order by count(p.venue_ref) desc`);
+  return rows;
+}
+
 export async function seedBars() {
   const seed = defaultBars();
   const { rows: subs } = await query('select key from shelf_subcategories where active');

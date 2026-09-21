@@ -1,0 +1,37 @@
+#!/bin/sh
+# The full suite, under the lock, before anything leaves this machine.
+#
+# There is no hosted CI and there is not going to be (CLAUDE.md). So the last
+# check before a push is this one, and it is the only thing standing between a
+# broken commit and four other sessions pulling it. On 21 Sep 2026 a broken
+# uncommitted migration took 22 test files down across every session on this
+# machine; a commit that does it is worse, because it travels.
+#
+# `npm test` takes the suite lock itself, so two sessions pushing at once queue
+# rather than fight over the database.
+#
+# Never `--no-verify`. If the suite is wrong, fix the suite.
+set -e
+
+root=$(git rev-parse --show-toplevel)
+cd "$root/apps/api"
+
+echo "pre-push: running the API suite (takes the lock; another session's run will make this wait)…"
+if npm test --silent; then
+  echo "pre-push: green — pushing."
+  exit 0
+fi
+
+cat >&2 <<'MSG'
+
+pre-push: the suite failed, so nothing was pushed.
+
+  · Run `npm run test:files -- test/<file>.test.js` to look at one file.
+  · Failures spread across many database-backed files usually mean another
+    session is running its own suite — the lock should prevent that, so check
+    for a stale one at $TMPDIR/epic-suite.lock.
+  · If a migration of yours is uncommitted, the test database does not have it:
+    commit it with the tests that need it.
+
+MSG
+exit 1
