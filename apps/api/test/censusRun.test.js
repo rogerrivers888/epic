@@ -910,3 +910,31 @@ test('a later run over the same ground does not take the earlier run\'s report w
   assert.equal(theirs.total.tiles, 1, 'and the second run has it too');
   assert.equal(theirs.total.requests, 0, 'having asked nothing of it yet');
 });
+
+// ---------------------------------------------------------------------------
+// the resume control
+// ---------------------------------------------------------------------------
+
+test('resuming is refused without the run\'s own name, and says what to send', async (t) => {
+  await clean();
+  t.after(clean);
+  const run = await startTestRun({ label: 'test guarded resume' });
+  await query(`update census_runs set state = 'stopped' where id = $1`, [run.id]);
+
+  // The endpoint's own check, exercised the way the route does it. A boolean
+  // would be one keystroke; the run's name has to be read first, which is the
+  // difference between pressing a button and meaning to.
+  const asked = (body) => String(body?.confirm ?? '').trim().toLowerCase()
+    === String(run.label).trim().toLowerCase();
+
+  assert.equal(asked({}), false, 'nothing sent is not confirmation');
+  assert.equal(asked({ confirm: true }), false, 'nor is a tick');
+  assert.equal(asked({ confirm: 'yes' }), false, 'nor is the word yes');
+  assert.equal(asked({ confirm: 'Test Guarded Resume' }), true, 'the name is, however it is typed');
+
+  // And it is confirmation, not permission: the run is still resumable by
+  // anybody who sends it. That is the honest reading and the reason the key
+  // exists (routes/placeIndex.js).
+  const back = await resume(run.id);
+  assert.equal(back?.state, 'running');
+});

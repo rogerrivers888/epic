@@ -18,6 +18,7 @@
  */
 
 import express from 'express';
+import { timingSafeEqual } from 'node:crypto';
 import { can, requires } from '../access.js';
 import { query, withTransaction } from '../db.js';
 import * as index from '../repositories/placeIndex.js';
@@ -3327,23 +3328,65 @@ router.post('/census/run/:id/stop', requires('manage_library'), async (req, res,
 });
 
 /**
- * Start a stopped run again.
+ * Start a stopped run again — deliberately, and on the record.
  *
- * Audited, because it is a control that spends. The London run was stopped at
- * 08:29 on 21 September and was asking again by 08:40 — and there was no way to
- * say who had restarted it, because only starting and stopping were written
- * down. A control that can spend a day's quota belongs on the record whichever
- * direction it points (21 Sep 2026).
+ * The London run was stopped at 08:29 on 21 September and was asking again by
+ * 08:40, and nothing could say who had done it. Two guards came out of that,
+ * and it is worth being exact about what each one is worth:
+ *
+ *   · **The audit row** says who and when, afterwards. That is real.
+ *   · **The confirmation** — the caller echoes the run's own label back — makes
+ *     resuming a deliberate act rather than one click. That stops a screen
+ *     being exercised by accident, which is the likeliest cause here. It is
+ *     *not* a permission boundary and must not be described as one.
+ *   · **The key**, where the owner has set one in Doppler, is the only thing
+ *     here that actually withholds. `accessFor()` gives every passcode session
+ *     the owner's role and every capability, so a new capability would be
+ *     granted automatically to every session holding the passcode, including
+ *     each of the agents working on this repository. A capability cannot
+ *     separate a person from an agent while they hold the same secret; a second
+ *     secret can. If `EPIC_CENSUS_RESUME_KEY` is unset this is confirmation
+ *     only, and the endpoint says so rather than implying a lock that is not
+ *     there.
  */
 router.post('/census/run/:id/resume', requires('manage_library'), async (req, res, next) => {
   try {
-    const run = await censusRun.resume(String(req.params.id));
-    if (!run) throw bad('that run is not stopped, paused or waiting');
+    const { rows: [run] } = await query('select id, label, state from census_runs where id = $1', [String(req.params.id)]);
+    if (!run) throw bad('no such run');
+
+    const key = process.env.EPIC_CENSUS_RESUME_KEY?.trim();
+    if (key) {
+      const given = String(req.body?.key ?? '');
+      const a = Buffer.from(given, 'utf8');
+      const b = Buffer.from(key, 'utf8');
+      const ok = a.length === b.length && timingSafeEqual(a, b);
+      if (!ok) {
+        return res.status(403).json({
+          error: 'resume_key',
+          message: 'Resuming a census needs the key the owner set for it.',
+        });
+      }
+    }
+
+    const said = String(req.body?.confirm ?? '').trim().toLowerCase();
+    if (said !== String(run.label).trim().toLowerCase()) {
+      return res.status(409).json({
+        error: 'confirm_resume',
+        message: `Resuming spends a day's quota. Send confirm with the run's name — “${run.label}” — to go ahead.`,
+        label: run.label,
+        guarded: Boolean(key),
+      });
+    }
+
+    const resumed = await censusRun.resume(run.id);
+    if (!resumed) throw bad('that run is not stopped, paused or waiting');
     await writeAudit({
-      ...actor(req), action: 'census.resume', subjectType: 'region', subjectId: run.id,
-      subjectLabel: run.label, after: { state: 'running', tilesDone: run.tiles_done, requests: run.requests },
+      ...actor(req), action: 'census.resume', subjectType: 'region', subjectId: resumed.id,
+      subjectLabel: resumed.label,
+      before: { state: run.state },
+      after: { state: 'running', tilesDone: resumed.tiles_done, requests: resumed.requests, keyed: Boolean(key) },
     });
-    res.json({ resumed: true, id: run.id });
+    res.json({ resumed: true, id: resumed.id, guarded: Boolean(key) });
   } catch (err) { next(err); }
 });
 
