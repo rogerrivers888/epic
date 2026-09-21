@@ -779,3 +779,38 @@ test('a run waiting for the quota day still owns its region', async (t) => {
   const now = await resumeInterrupted();
   assert.ok(now.woken >= 1, 'and wakes once the other is finished');
 });
+
+test('a tile part way through is reconciled too, and the signature waits for the ones in flight', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from shelf_rules where subject = 'google:test_partway_question'`);
+    await clean();
+  });
+  const run = await startTestRun({ label: 'test partway' });
+  await seedTile(run, 'test/partway');
+
+  // A tile that answered some drawers and stopped: the shape of a deploy, the
+  // stop control, or the day's budget landing mid-tile.
+  const plan = await slicePlan();
+  const someDrawers = plan.slice(0, 3).map((p) => p.subcategory);
+  await query(
+    `update census_tiles set state = 'todo', done_subcategories = $1::text[] where grid_key = 'test/partway'`,
+    [someDrawers]);
+
+  // A question lands on a drawer it had already answered.
+  await query(
+    `insert into shelf_rules (scope, subject, labels, subcategory, weights, reason)
+     values ('labels', 'google:test_partway_question', array['google:museum'], $1, '{}'::jsonb, 'landed mid-tile')`,
+    [someDrawers[0]]);
+
+  await withCensus(async () => ({ places: [], requests: 1, saturated: false, problem: null }),
+    () => advance({ runId: run.id, budgetMs: 30_000 }));
+
+  // Keyed on done alone this drawer was never reconciled, and the signature was
+  // stored anyway — so every later pass took the fast path and it was never
+  // asked again (Codex, 21 Sep 2026).
+  const { rows } = await query(
+    `select 1 from census_slices where area_slug = 'test/partway' and subcategory = $1 and google_type = 'museum'`,
+    [someDrawers[0]]);
+  assert.ok(rows.length, 'the new question reached a tile that was only part way through');
+});

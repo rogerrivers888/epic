@@ -460,7 +460,16 @@ async function reopenForChangedQuestions(runId) {
        select t.grid_key, array_agg(distinct p.subcategory) as drawers
          from census_tiles t
          join plan p on p.subcategory = any(t.done_subcategories)
-        where t.run_id = $1 and t.state = 'done'
+        -- Every tile carrying a checkpoint, not only the finished ones.
+        --
+        -- Keyed on done alone, a tile part way through — or one the
+        -- drawer-level re-open had just put back to todo — kept its
+        -- checkpointed drawers unreconciled, and the signature was stored
+        -- anyway: every later pass then took the fast path and that drawer was
+        -- never re-asked (Codex, 21 Sep 2026). A tile in flight is left to its
+        -- own worker and the signature is withheld until it lands.
+        where t.run_id = $1 and t.state <> 'doing'
+          and t.done_subcategories <> '{}'::text[]
           and not exists (
             select 1 from census_slices s
              where s.area_slug = t.grid_key
@@ -482,8 +491,14 @@ async function reopenForChangedQuestions(runId) {
       where short.grid_key = t.grid_key
       returning t.grid_key`, [runId, subs, types, queries]);
 
-  await query('update census_runs set plan_signature = $2 where id = $1', [runId, signature]);
-  return { reopened: rows.length };
+  // Only once nothing is in flight. A tile being worked now cannot be
+  // reconciled — its own worker will write the checkpoint it loaded, over
+  // anything done to it here — so the signature is withheld and the next pass
+  // picks it up. Storing it regardless is what made the fast path permanent.
+  const { rows: [busy] } = await query(
+    `select count(*)::int n from census_tiles where run_id = $1 and state = 'doing'`, [runId]);
+  if (!busy.n) await query('update census_runs set plan_signature = $2 where id = $1', [runId, signature]);
+  return { reopened: rows.length, deferred: Boolean(busy.n) };
 }
 
 /** A rate limiter that is a rate, not a sleep between tiles. */
