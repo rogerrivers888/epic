@@ -39,6 +39,7 @@ import { requires } from '../access.js';
 import { query } from '../db.js';
 import * as sets from '../repositories/questionSets.js';
 import * as harvest from '../sources/vocabulary.js';
+import * as features from '../sources/featureHarvest.js';
 import { ENRICH_AFTER, KINDS, REGIONS, SAMPLE, enrichmentOn, settle } from '../domain/questions.js';
 import * as placeAttributes from '../repositories/placeAttributes.js';
 import { currentHousehold } from './household.js';
@@ -347,6 +348,37 @@ questionRoutes.post('/harvest/free', requires('manage_questions'), async (req, r
       subcategories: Array.isArray(req.body?.subcategories) ? req.body.subcategories : null,
       size: Number(req.body?.size ?? 0) || undefined,
       live: req.body?.live === true,
+    }));
+  } catch (err) { next(err); }
+});
+
+/**
+ * The feature pass: one call per drawer, asking what recurs across it.
+ *
+ * Replaces the per-word extractor, which raised 46,000 words over two runs and
+ * produced nought decisions. Same confirm-the-cost gate as the Google pass —
+ * `confirm` must equal the number of calls the estimate reported, so the only
+ * way to start it is to have read what it costs. A 409 carries the plan back.
+ */
+questionRoutes.post('/harvest/features', requires('manage_questions'), async (req, res, next) => {
+  try {
+    const household = await currentHousehold().catch(() => null);
+    res.json(await features.run({
+      subcategories: Array.isArray(req.body?.subcategories) ? req.body.subcategories : null,
+      size: Number(req.body?.size ?? 0) || undefined,
+      confirm: req.body?.confirm ?? null,
+      householdId: household?.id ?? null,
+      sessionId: req.session?.id ?? null,
+    }));
+  } catch (err) { next(err); }
+});
+
+/** What the feature pass would cost, without running it. */
+questionRoutes.get('/harvest/features/estimate', requires('view_library'), async (req, res, next) => {
+  try {
+    res.json(await features.estimate({
+      subcategories: req.query.subcategories ? String(req.query.subcategories).split(',') : null,
+      size: Number(req.query.size ?? 0) || undefined,
     }));
   } catch (err) { next(err); }
 });
