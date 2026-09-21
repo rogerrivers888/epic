@@ -28,7 +28,7 @@ import { ownSite } from '../sources/logo.js';
 import * as reach from '../repositories/reach.js';
 import { OURS_TO_KEEP, slicePlan } from '../sources/census.js';
 import * as censusRun from '../sources/censusRun.js';
-import { LIVE_ROW } from '../repositories/searches.js';
+import { LIVE_ROW, FOLDED_MONTH } from '../repositories/searches.js';
 import { sectorOf, labelOf, CAP_MINUTES, EDGE_MINUTES } from '../domain/reach.js';
 import { searchAreas } from '../sources/areas.js';
 import { outcodesFor } from '../sources/localities.js';
@@ -552,10 +552,11 @@ router.get('/demand', requires('view_library'), async (req, res, next) => {
           from search_rollups r
          where $3::text[] is null
            and ($2::text[] is null or r.area_slug = any($2))
-           and r.month >= date_trunc('month', now() - ($1 || ' days')::interval)
-                        + (case when date_trunc('month', now() - ($1 || ' days')::interval)
-                                     >= (now() - ($1 || ' days')::interval)
-                                then interval '0 month' else interval '1 month' end)
+           -- Both halves of the rule from where it is written, not one of
+           -- them. This lens shared LIVE_ROW and kept its own copy of the
+           -- month predicate, which is half a rule shared and half copied
+           -- (21 Sep 2026).
+           and ${FOLDED_MONTH('r')}
          group by 1
       )
       select subject, sum(searches)::int as searches, sum(empty)::int as empty,

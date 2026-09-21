@@ -251,6 +251,17 @@ export const FIRST_WHOLE_MONTH = `date_trunc('month', now() - ($1 || ' days')::i
 /** A live row this window still needs: never rolled, or rolled into a month the fold cannot claim. */
 export const LIVE_ROW = (t) => `(${t}.rolled_at is null or date_trunc('month', ${t}.at) < ${FIRST_WHOLE_MONTH})`;
 
+/**
+ * The months a window of $1 days may take whole from the roll-ups.
+ *
+ * The other half of the same rule, and exported for the same reason. `LIVE_ROW`
+ * was shared and the folded term was not, so three queries agreed about which
+ * rows to leave out and each kept its own copy of which months to add back —
+ * and a reader holding only the first half counts a rolled month as nothing at
+ * all (21 Sep 2026).
+ */
+export const FOLDED_MONTH = (t) => `${t}.month >= ${FIRST_WHOLE_MONTH}`;
+
 export async function totals({ areaSlugs = null, cells = null, since = 30 } = {}) {
   // The rows we still hold, plus the months we have folded up and dropped.
   //
@@ -293,10 +304,7 @@ export async function totals({ areaSlugs = null, cells = null, since = 30 } = {}
         -- edge to the first of the month pulled the whole of August into a
         -- thirty-day report made on the 18th of September (Codex, 17 Sep 2026),
         -- and a rolled month cannot be cut: it is one number for the month.
-        where month >= date_trunc('month', now() - ($1 || ' days')::interval)
-                     + (case when date_trunc('month', now() - ($1 || ' days')::interval)
-                                  >= (now() - ($1 || ' days')::interval)
-                             then interval '0 month' else interval '1 month' end)
+        where ${FOLDED_MONTH('search_rollups')}
           and ($2::text[] is null or area_slug = any($2))
           -- A roll-up is filed by area and has no cell, so a town scoped by its
           -- own cells takes the live rows only rather than claiming a month it
@@ -337,10 +345,7 @@ export async function bySubject({ areaSlugs = null, cells = null, since = 30, li
         -- The same rule as the headline figures: a rolled month is one number
         -- and cannot be cut, so it counts only when the whole of it is inside
         -- the window (Codex, 17 Sep 2026).
-        where month >= date_trunc('month', now() - ($1 || ' days')::interval)
-                     + (case when date_trunc('month', now() - ($1 || ' days')::interval)
-                                  >= (now() - ($1 || ' days')::interval)
-                             then interval '0 month' else interval '1 month' end)
+        where ${FOLDED_MONTH('search_rollups')}
           and ($2::text[] is null or area_slug = any($2))
           and $4::text[] is null
      )
