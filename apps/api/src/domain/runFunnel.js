@@ -50,6 +50,21 @@ export const PEN_CEILING = 0.4;
 export const KEPT_FLOOR = 0.4;
 
 /**
+ * Below this many words judged, no share of them is a rate.
+ *
+ * The collapse test already had a floor. The holding-pen and kept tests had
+ * none, so a run that raised thirteen words and kept nine was told "the
+ * holding pen is taking half" — nine of nine, which is a fraction rather than
+ * a rate — and a run that raised nothing at all from sixty places was told
+ * "drop-off looks normal", which is a confident verdict on an empty funnel.
+ *
+ * Both were on the deployed Runs screen, and both break the rule this project
+ * was given on 21 Sep 2026: every diagnostic has a can't-speak state, and a
+ * signal without enough evidence says so rather than recommending an action.
+ */
+export const ENOUGH_TO_SPEAK = 20;
+
+/**
  * What went wrong with a run, named.
  *
  * The first test that fires is the one reported, because a run with two faults
@@ -61,22 +76,37 @@ export const KEPT_FLOOR = 0.4;
  * Without it the oldest runs would all read as a clean bill of health.
  */
 export function diagnose(f) {
-  if (!f) return { says: 'not recorded', at: null, healthy: true, recorded: false };
+  if (!f) return { says: 'not recorded', at: null, healthy: true, recorded: false, spoke: false };
   const collapse = f.raw ? (f.raw - f.collapsed) / f.raw : 0;
   const judged = f.collapsed || 0;
   if (f.raw >= ENOUGH_TO_JUDGE && collapse < COLLAPSE_FLOOR) {
-    return { says: 'the resolver is not collapsing', at: 'collapsed', healthy: false, recorded: true };
+    return { says: 'the resolver is not collapsing', at: 'collapsed', healthy: false, recorded: true, spoke: true };
   }
-  if (judged && (f.held ?? 0) / judged > PEN_CEILING) {
-    return { says: 'the holding pen is taking half', at: 'held', healthy: false, recorded: true };
+  if (judged >= ENOUGH_TO_SPEAK && (f.held ?? 0) / judged > PEN_CEILING) {
+    return { says: 'the holding pen is taking half', at: 'held', healthy: false, recorded: true, spoke: true };
   }
   // A run that recorded no `stored` at all cannot be judged on its kept share:
   // every run from before the funnel counted written-down-or-updated is in
   // that state, and accusing them all is worse than saying nothing.
-  if (judged && f.stored != null && f.stored / judged < KEPT_FLOOR) {
-    return { says: 'most words die unconfirmed', at: 'stored', healthy: false, recorded: true };
+  if (judged >= ENOUGH_TO_SPEAK && f.stored != null && f.stored / judged < KEPT_FLOOR) {
+    return { says: 'most words die unconfirmed', at: 'stored', healthy: false, recorded: true, spoke: true };
   }
-  return { says: 'drop-off looks normal', at: null, healthy: true, recorded: true };
+  // Nothing above could be asked of a run this small, so the answer is that
+  // there is not enough here to judge — not that it looks fine. "Normal" on an
+  // empty funnel is the worst of the two, because it is the only one somebody
+  // would act on.
+  //
+  // Not unhealthy: a run nobody can judge is not a run that went wrong, and
+  // putting an alarm beside it would teach the screen's loudest signal to mean
+  // nothing. `spoke` is how the screen can draw the difference between a
+  // verdict and a shrug.
+  if ((f.raw ?? 0) < ENOUGH_TO_JUDGE && judged < ENOUGH_TO_SPEAK) {
+    return {
+      says: (f.read ?? 0) ? 'too little came through to judge it' : 'it did not get far enough to say',
+      at: null, healthy: true, recorded: true, spoke: false,
+    };
+  }
+  return { says: 'drop-off looks normal', at: null, healthy: true, recorded: true, spoke: true };
 }
 
 /**

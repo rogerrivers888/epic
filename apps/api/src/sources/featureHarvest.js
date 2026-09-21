@@ -456,7 +456,7 @@ export async function run({ subcategories = null, size = SAMPLE_SIZE, confirm = 
         subcategory: d.key, read: out.read, proposed: out.proposed ?? 0,
         kept: out.features.length, menusSkipped: out.menusSkipped, tooThin: out.tooThin,
       });
-      await sets.noteRun(runRow.id, { funnel, places: funnel.read, candidates: funnel.collapsed });
+      await sets.noteRun(runRow.id, { funnel, places: funnel.read, candidates: funnel.collapsed, costUsd: usd });
       onProgress?.({ subcategory: d.key, done: report.length, of: drawers.length });
     }
     await sets.finishRun(runRow.id, {

@@ -93,12 +93,49 @@ test('the thresholds are the boundary, not a hair past it', () => {
   assert.notEqual(atCollapse.says, 'the resolver is not collapsing');
 });
 
-test('a run that raised nothing is not accused of a bad collapse', () => {
+test('a run that raised nothing is not accused of a bad collapse — nor told it looks fine', () => {
   // Nought raw words is an absence of evidence. Dividing by it would make the
-  // emptiest run the loudest thing on the screen.
+  // emptiest run the loudest thing on the screen — and this test used to settle
+  // for the opposite mistake, asserting "drop-off looks normal" about forty
+  // places that produced no words at all. Not accusing it was right; calling it
+  // healthy was a confident verdict on an empty funnel, and the only one of the
+  // two somebody would act on.
   const d = diagnose({ read: 40, raw: 0, collapsed: 0, held: 0, stored: 0 });
-  assert.equal(d.says, 'drop-off looks normal');
+  assert.equal(d.says, 'too little came through to judge it');
   assert.equal(d.recorded, true);
+  assert.equal(d.healthy, true, 'unjudgeable is not unhealthy');
+  assert.equal(d.spoke, false);
+});
+
+test('a run that did not start is told apart from one that found nothing', () => {
+  // Two different facts and the screen must not merge them: one read sixty
+  // places and got nothing out of them, the other never got going. The first
+  // is about the corpus, the second is about the run.
+  assert.equal(diagnose({ read: 0, raw: 0, collapsed: 0 }).says, 'it did not get far enough to say');
+  assert.equal(diagnose({ read: 60, raw: 2, collapsed: 0 }).says, 'too little came through to judge it');
+});
+
+test('nine words out of nine is a fraction, not a rate', () => {
+  // Live on the deployed Runs screen: a feature pass raised thirteen words and
+  // kept nine, all nine of them held, and it was told "the holding pen is
+  // taking half". Nine of nine is 100%, and 100% of nine proves nothing. The
+  // collapse test had a floor from the start; the pen and kept tests had none.
+  const tiny = diagnose({ read: 21, raw: 13, collapsed: 9, held: 9, stored: 9 });
+  assert.equal(tiny.says, 'too little came through to judge it');
+  assert.equal(tiny.spoke, false);
+
+  // The same shape with enough behind it still gets named.
+  const real = diagnose({ read: 500, raw: 400, collapsed: 200, held: 200, stored: 200 });
+  assert.equal(real.says, 'the holding pen is taking half');
+  assert.equal(real.spoke, true);
+});
+
+test('a verdict says it is one, and a shrug says it is not', () => {
+  // `healthy` cannot carry this on its own: a run nobody can judge is not
+  // unhealthy, so an alarm would be wrong and silence would be misread as a
+  // clean bill. `spoke` is the difference.
+  assert.equal(diagnose({ read: 100, raw: 400, collapsed: 100, held: 10, stored: 80 }).spoke, true);
+  assert.equal(diagnose(null).spoke, false);
 });
 
 // --- the headline ----------------------------------------------------------

@@ -325,6 +325,20 @@ export type RunRow = {
   diagnosis: string;
   healthy: boolean;
   /**
+   * Whether that diagnosis is a verdict or a shrug.
+   *
+   * A run too small to judge says so — "too little came through to judge it",
+   * or "it did not get far enough to say" where it read nothing at all — and
+   * neither is an accusation. `healthy` cannot carry that on its own: such a
+   * run is not unhealthy, so an alarm would be wrong, and nothing at all would
+   * read as a clean bill of health beside the runs that earned one.
+   *
+   * The project's rule, 21 Sep 2026: every diagnostic has a can't-speak state,
+   * and a signal without enough evidence says so rather than recommending an
+   * action. Draw a `spoke: false` line quietly.
+   */
+  spoke: boolean;
+  /**
    * Whether the run wrote its middle down at all.
    *
    * `recorded: false` is not `healthy: true`. A run from before the funnel was

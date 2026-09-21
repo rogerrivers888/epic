@@ -666,15 +666,24 @@ export async function startRun({ kind, subcategories = [], params = {} }) {
  * Deliberately cheap and deliberately lossy: one small update between
  * subcategories, never inside the per-place loop. A progress figure that costs
  * a write per place would make the sweep slower than the thing it reports on.
+ *
+ * The cost goes down here too, and not only at the finish. A run lives inside
+ * an HTTP request on a service that redeploys whenever anybody pushes, so the
+ * process it is in can be killed at any moment — and when one was, thirty-two
+ * drawers in, the row it left behind said £0.00 against about £0.45 actually
+ * spent. Money that has gone has to be on the record whether or not the run
+ * that spent it got to the end; `coalesce` so a caller that does not track
+ * cost as it goes leaves the column alone rather than zeroing it.
  */
-export async function noteRun(id, { funnel = null, places = 0, candidates: found = 0 } = {}) {
+export async function noteRun(id, { funnel = null, places = 0, candidates: found = 0, costUsd = null } = {}) {
   if (!id) return null;
   const { rows } = await query(
     `update vocabulary_runs
-        set funnel = $2::jsonb, places = $3, candidates = $4, touched_at = now()
+        set funnel = $2::jsonb, places = $3, candidates = $4,
+            cost_usd = coalesce($5, cost_usd), touched_at = now()
       where id = $1 and finished_at is null
       returning id`,
-    [id, funnel ? JSON.stringify(funnel) : null, places, found]);
+    [id, funnel ? JSON.stringify(funnel) : null, places, found, costUsd]);
   return rows[0] ?? null;
 }
 
