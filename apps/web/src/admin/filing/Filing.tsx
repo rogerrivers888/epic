@@ -35,11 +35,11 @@ import { Overview } from './Overview';
 import { CategoryBoard, CategoryList, PlacesBoard, SubcategoryBoard } from './Categories';
 import { AllLabels, Pending, QuestionSet, QuestionSets } from './Labels';
 import { NotInEpic, Words } from './Mapping';
-import { Rows, type RowFilter } from './Rows';
+import { HouseholdView, Rows, type HouseState, type RowFilter } from './Rows';
 import { Train } from './Train';
 import { Rules } from './Rules';
 import { DecisionLog, Runs } from './Runs';
-import type { Decision, Trail, WordRow } from './types';
+import type { Decision, HouseMember, Trail, WordRow } from './types';
 import type { SortKey } from './say';
 
 /** The six the strip draws. */
@@ -86,6 +86,8 @@ export function Filing({ canManage }: { canManage: boolean }) {
   const [excluded, setExcluded] = useState<FilingExcluded | null>(null);
   const [rows, setRows] = useState<Awaited<ReturnType<typeof api.adminFilingRows>> | null>(null);
   const [rowFilter, setRowFilter] = useState<RowFilter>('all');
+  const [houseState, setHouseState] = useState<HouseState>('list');
+  const [district, setDistrict] = useState<string>('');
   const [train, setTrain] = useState<Awaited<ReturnType<typeof api.filingTrain>> | null>(null);
   const [onePlace, setOnePlace] = useState<Awaited<ReturnType<typeof api.filingPlace>> | null>(null);
   const [mode, setMode] = useState<'sweep' | 'grid' | 'inspect'>('sweep');
@@ -247,6 +249,41 @@ export function Filing({ canManage }: { canManage: boolean }) {
     });
     setDests({});
   }, [run]);
+
+  /**
+   * Heart a row, or take the heart back, as the right person.
+   *
+   * A heart belongs to a member, so unhearting has to be aimed at whoever owns
+   * it — `(row, first member)` deleted nothing in any household where somebody
+   * else set it, and the screen said it had worked. The id comes off the row
+   * and not the name, because two members of one household can share a name
+   * (Codex via epic-f4, 21 Sep 2026).
+   *
+   * Hearting *on* is a different case: nobody owns it yet, and whose list this
+   * is, is the first-heart question. Until the back office asks it, the
+   * household's first adult is the honest stand-in and the toast says who.
+   */
+  const heartRow = useCallback((id: string) => {
+    if (!rows) return;
+    const row = rows.rows.find((r) => r.id === id);
+    const owner = row?.heartedById ?? null;
+    const member = row?.hearted
+      ? owner
+      : (rows.members.find((m) => m.role === 'adult') ?? rows.members[0])?.id ?? null;
+    if (!member) {
+      said(row?.hearted
+        ? 'Nobody in this household owns that heart.'
+        : 'Nobody is in this household to heart it as.');
+      return;
+    }
+    const who = rows.members.find((m) => m.id === member)?.name ?? 'somebody';
+    void run(id, async () => {
+      await api.adminFilingHeart(id, !row?.hearted, member);
+      return row?.hearted
+        ? `${row?.title ?? id} unhearted for ${who}`
+        : `${row?.title ?? id} hearted for ${who}`;
+    });
+  }, [rows, run, said]);
 
   const go = useCallback((next: Partial<{ tab: Tab; cat: string; sub: string; set: string; view: string }>) => {
     const patch: Record<string, string | null> = {};
@@ -415,7 +452,10 @@ export function Filing({ canManage }: { canManage: boolean }) {
                 done(out.said);
                 return out.said;
               })}
-              onHousehold={() => go({ tab: 'rows', cat: '', sub: '', set: '', view: '' })}
+              // The household *view*, not the back-office list. "See what a
+              // household sees" landing on a table of rules was the button
+              // saying one thing and doing another.
+              onHousehold={() => go({ tab: 'rows', cat: '', sub: '', set: '', view: 'household' })}
               onSet={(ref, attribute, level) => void run(`${ref}:${attribute}`, async () => {
                 const out = await api.filingSetPlace(ref, { attribute, value: { level } });
                 if (onePlace?.place.ref === ref) setOnePlace(await api.filingPlace(ref));
@@ -570,6 +610,44 @@ export function Filing({ canManage }: { canManage: boolean }) {
           ) : null}
 
           {tab === 'rows' && rows ? (
+            <View style={{ flexDirection: 'row' }}>
+              {/*
+                §17's household view was built in full — district switch, the
+                first-heart question, Inspire with unhearted rows mixed in, the
+                waiting row — and imported by nothing. One control turns dead
+                code into the screen (the side-by-side audit, 21 Sep 2026).
+              */}
+              <SegStrip
+                value={view === 'household' ? 'household' : 'rows'}
+                options={[
+                  { key: 'rows', label: `The rows · ${rows.rows.length}` },
+                  { key: 'household', label: 'The household view' },
+                ]}
+                onChange={(k) => go({ view: k === 'household' ? 'household' : '' })}
+              />
+            </View>
+          ) : null}
+
+          {tab === 'rows' && view === 'household' && rows ? (
+            <HouseholdView
+              state={houseState}
+              onState={setHouseState}
+              districts={rows.districts}
+              district={district || rows.districts[0]?.code || ''}
+              onDistrict={setDistrict}
+              rows={householdRows(rows, houseState, district || rows.districts[0]?.code || '', rows.minFill)}
+              members={rows.members}
+              owner={owner(rows, houseState)}
+              minFill={rows.minFill}
+              hearts={rows.rows.filter((r) => r.hearted).map((r) => ({
+                id: r.id, title: r.title, who: r.heartedBy ?? 'somebody', days: r.heartedDays ?? 0,
+              }))}
+              onHeart={(id) => heartRow(id)}
+              onOwner={() => said('Choosing whose list it is happens on the phone, not here.')}
+            />
+          ) : null}
+
+          {tab === 'rows' && view !== 'household' && rows ? (
             <Rows
               rows={rows.rows}
               districts={rows.districts}
@@ -577,41 +655,7 @@ export function Filing({ canManage }: { canManage: boolean }) {
               household={rows.household?.name ?? 'this household'}
               filter={rowFilter}
               onFilter={setRowFilter}
-              onHeart={(id) => {
-                const row = rows.rows.find((r) => r.id === id);
-                /**
-                 * Unhearting has to be aimed at whoever owns the heart.
-                 *
-                 * A heart belongs to a person, so `(row, first member)` is the
-                 * wrong row to delete in any household where somebody else set
-                 * it — the delete matched nothing, the real heart survived, and
-                 * the screen said it had worked (Codex via epic-f4, 21 Sep).
-                 *
-                 * Hearting *on* is a different case: nobody owns it yet, and
-                 * whose list this is, is the first-heart question. Until the
-                 * back office asks it, the signed-in household's first adult is
-                 * the honest stand-in and the toast says who it was.
-                 */
-                // The id, from the row. Matching on `heartedBy` was matching
-                // on a *name*, and two members of one household can share one —
-                // so the delete could still be aimed at the wrong person, which
-                // is the same bug one step further in.
-                const owner = row?.heartedById ?? null;
-                const member = row?.hearted ? owner : (rows.members.find((m) => m.role === 'adult') ?? rows.members[0])?.id ?? null;
-                if (!member) {
-                  said(row?.hearted
-                    ? 'Nobody in this household owns that heart.'
-                    : 'Nobody is in this household to heart it as.');
-                  return;
-                }
-                const who = rows.members.find((m) => m.id === member)?.name ?? 'somebody';
-                void run(id, async () => {
-                  await api.adminFilingHeart(id, !row?.hearted, member);
-                  return row?.hearted
-                    ? `${row?.title ?? id} unhearted for ${who}`
-                    : `${row?.title ?? id} hearted for ${who}`;
-                });
-              }}
+              onHeart={heartRow}
               onEdit={(id, field, value) => {
                 if (field === 'rule') {
                   // The shorthand is rendered from the rule; typing over it
@@ -724,6 +768,64 @@ export function Filing({ canManage }: { canManage: boolean }) {
 const anyLoaded = (o: Record<string, unknown>) => Object.values(o).some(Boolean);
 
 /** Which tabs have no data behind them yet, so the screen can say so. */
+/**
+ * The rows the phone would show, in the order it would show them.
+ *
+ * Five states, and the ordering is the whole of what separates them. Inspire
+ * is the one that matters: hearted rows rise, and **two or three unhearted
+ * ones stay mixed in among them, never only at the bottom** — a list that
+ * only ever shows you what you have already said yes to stops being a way of
+ * finding anything.
+ */
+function householdRows(
+  data: { rows: BrowseRowWithFill[]; minFill: number },
+  state: HouseState,
+  district: string,
+  minFill: number,
+) {
+  const shelf = (r: BrowseRowWithFill) => ({
+    ...r,
+    shelf: (r.fill?.[district]?.places ?? []).slice(0, 3).map((name) => ({ name, photo: null })),
+  });
+  const waiting = (r: BrowseRowWithFill) => (r.fill?.[district]?.count ?? 0) < minFill;
+  const hearted = data.rows.filter((r) => r.hearted);
+  const cold = data.rows.filter((r) => !r.hearted);
+
+  if (state === 'inspire') {
+    const ready = hearted.filter((r) => !waiting(r));
+    const mixed: BrowseRowWithFill[] = [];
+    ready.forEach((r, i) => {
+      mixed.push(r);
+      // After the second, and again after the fourth: discovery does not stop
+      // because somebody has hearted a few things.
+      if ((i === 1 || i === 3) && cold[mixed.length - ready.length + 1]) {
+        mixed.push(cold[Math.min(cold.length - 1, i === 1 ? 0 : 1)]);
+      }
+    });
+    return [...mixed, ...cold.slice(2, 5)].map(shelf);
+  }
+  if (state === 'thin') {
+    const quiet = hearted.filter(waiting);
+    return [...(quiet.length ? quiet : hearted.slice(0, 1)), ...hearted.filter((r) => !waiting(r)).slice(0, 2),
+      ...cold.slice(0, 3)].map(shelf);
+  }
+  if (state === 'named') {
+    return data.rows.filter((r) => /yourself|Jonah|Big kids|Older kids|Sneakily|Teenager/.test(r.title))
+      .map(shelf);
+  }
+  return data.rows.slice(0, 14).map(shelf);
+}
+
+type BrowseRowWithFill = Parameters<typeof Rows>[0]['rows'][number];
+
+/** Whose hearts these are — nobody, until the first-heart question is answered. */
+function owner(data: { rows: { hearted: boolean; heartedById: string | null }[]; members: HouseMember[] }, state: HouseState) {
+  // "First heart" is the state that exists to ask, so it deliberately has none.
+  if (state === 'first') return null;
+  const id = data.rows.find((r) => r.hearted)?.heartedById ?? null;
+  return data.members.find((m) => m.id === id) ?? null;
+}
+
 function notYet(): boolean { return false; }
 
 /**
