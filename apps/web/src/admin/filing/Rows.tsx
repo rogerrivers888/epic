@@ -129,7 +129,10 @@ export function Rows({
                 <Press effect="pop" onPress={() => onHeart(r.id)} accessibilityRole="button"
                   accessibilityLabel={r.hearted ? `Unheart ${r.title}` : `Heart ${r.title}`}
                   style={{ width: 44, flexGrow: 0, flexShrink: 0 }}>
-                  <Icon name="favourite" size={17} color={r.hearted ? LIME : desk.inkFaint}
+                  {/* `keep` is the heart; `favourite` is a star. Every word on this
+                      screen says heart, the handoff calls hearting the highest-signal
+                      tap in the product, and CLAUDE.md says the loved heart is ink. */}
+                  <Icon name="keep" size={17} color={r.hearted ? LIME : desk.inkFaint}
                     fill={r.hearted} fillColor={LIME} />
                 </Press>
 
@@ -503,7 +506,7 @@ export function HouseholdView({
                     <Press effect="pop" onPress={() => onHeart(r.id)} accessibilityRole="button"
                       accessibilityLabel={r.hearted ? `Unheart ${r.title}` : `Heart ${r.title}`}
                       style={{ paddingTop: 2 }}>
-                      <Icon name="favourite" size={21} color={house.ink} fill={r.hearted} fillColor={house.ink} />
+                      <Icon name="keep" size={21} color={house.ink} fill={r.hearted} fillColor={house.ink} />
                     </Press>
                   </View>
                   {/*
