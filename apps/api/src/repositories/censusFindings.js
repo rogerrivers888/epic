@@ -153,7 +153,7 @@ export async function coverageFor(outcodes = null) {
 }
 
 /** Why a drawer reads the way it does, in one sentence a person can act on. */
-export function reasonForState(state, { label, found, questions, coverage, slices = 0, byText = 0, byWords = 0 }) {
+export function reasonForState(state, { label, found, questions, coverage, slices = 0, byText = 0, byWords = 0, mixed = null }) {
   if (state === 'never_asked') {
     return `No question is ever asked for ${label}: no Google type is taught onto it and it has no word question, so the census generates no queries and it can only ever read nought.`;
   }
@@ -171,7 +171,48 @@ export function reasonForState(state, { label, found, questions, coverage, slice
   const how = byText
     ? ` ${n(byText)} of them found by a plain text query with no type to fence it, so open a few before trusting the number.`
     : byWords ? ` ${n(byWords)} of them found by words fenced to a Google type.` : '';
-  return `${n(found)} found across ${coverage.says}.${how}`;
+  // Asked one way here and another way there: the sum is of two questions, and
+  // saying so is the only honest thing to do with it until the census has been
+  // re-asked over the tiles that had the old one.
+  const same = mixed
+    ? ` Asked ${n(mixed.variants)} different ways across ${n(mixed.tiles)} tiles, so this is a sum of more than one question and not yet a denominator.`
+    : '';
+  return `${n(found)} found across ${coverage.says}.${how}${same}`;
+}
+
+
+/**
+ * Drawers that were not asked the same question everywhere.
+ *
+ * A census is only a denominator if every tile was asked the same thing. It is
+ * not, always: a tile is re-opened when the plan gains a *drawer*, but not when
+ * an existing drawer gains a *question* — so four subcategories asked in plain
+ * words today would keep those answers in every tile already done if somebody
+ * taught them a Google type tomorrow, while later tiles answered a different
+ * question entirely (epic-71, 21 Sep 2026).
+ *
+ * That is not something this file can fix and it is not something it may hide.
+ * A count summed across tiles that were asked different questions is not one
+ * number, and a comparison against a ground count is then measuring two things
+ * at once. So it is detected — by the set of questions each tile was actually
+ * asked for the drawer — and it travels with the count as a caveat.
+ *
+ * Refused slices are left out: a tile that was cut short asked fewer questions
+ * because of a quota, which is a coverage fact, not a change of question.
+ */
+export async function askedDifferently({ outcodes = null } = {}) {
+  const params = outcodes ? [outcodes] : [];
+  const { rows } = await query(
+    `with per_tile as (
+       select cs.subcategory, cs.area_slug,
+              string_agg(distinct coalesce(cs.google_type, cs.query, ''), ',' order by coalesce(cs.google_type, cs.query, '')) as questions
+         from census_slices cs
+        where cs.problem is null ${slicesInScope(params)}
+        group by 1, 2
+     )
+     select subcategory, count(*)::int as tiles, count(distinct questions)::int as variants
+       from per_tile group by 1 having count(distinct questions) > 1`, params);
+  return new Map(rows.map((r) => [r.subcategory, { tiles: r.tiles, variants: r.variants }]));
 }
 
 /**
@@ -223,6 +264,7 @@ export async function subcategories({ outcodes = null } = {}) {
       where ${scoped} group by 1`, params);
 
   const askedBy = new Map(askedHere.map((r) => [r.subcategory, r.slices]));
+  const mixed = await askedDifferently({ outcodes });
   const knownBy = new Map(known.map((r) => [r.subcategory, r.places]));
   const censusedBy = new Map(censused.map((r) => [r.subcategory, r.places]));
   const howFound = new Map(censused.map((r) => [r.subcategory, { text: r.by_text, words: r.by_words }]));
@@ -255,6 +297,9 @@ export async function subcategories({ outcodes = null } = {}) {
       // the ones to open before the number is trusted.
       byText: howFound.get(s.key)?.text ?? 0,
       byWords: howFound.get(s.key)?.words ?? 0,
+      // Whether every tile was asked the same thing. A count summed over tiles
+      // that were asked different questions is not one number.
+      askedDifferently: mixed.get(s.key)?.variants ?? 0,
       state,
       // How many times the question was actually put here, so "empty" can be
       // read against the effort behind it rather than taken on trust.
@@ -262,6 +307,7 @@ export async function subcategories({ outcodes = null } = {}) {
       reason: reasonForState(state, {
         label: s.label, found, questions: questions.length, coverage, slices: askedSlices,
         byText: howFound.get(s.key)?.text ?? 0, byWords: howFound.get(s.key)?.words ?? 0,
+        mixed: mixed.get(s.key) ?? null,
       }),
     };
   });
@@ -393,6 +439,7 @@ export async function gaps({ outcodes = null, source = 'osm', staleDays = 30 } =
       order by (ground.places - coalesce(census.places, 0)) desc`, [...params, source]);
 
   const whose = source === 'osm' ? 'the open map' : 'the hygiene register';
+  const mixed = await askedDifferently({ outcodes });
   const found = rows.map((r) => {
     const shortfall = r.ground - r.census;
     const share = r.ground ? Math.round((r.census / r.ground) * 100) : null;
@@ -406,6 +453,7 @@ export async function gaps({ outcodes = null, source = 'osm', staleDays = 30 } =
       key: r.key, label: r.label, category: r.category,
       census: r.census, byText: r.by_text, ground: r.ground, shortfall, foundShare: share,
       tiles: r.tiles, countedAt: r.counted_at, oldestAt: r.oldest_at, stale, source, asked: r.asked, caveat: r.caveat,
+      askedDifferently: mixed.get(r.key)?.variants ?? 0,
       // Both sides say what they are. The census side is everything it has ever
       // found in these tiles; the free side is the source as it stands today.
       // Neither is "the number of places here", and two numbers with the same
@@ -413,6 +461,9 @@ export async function gaps({ outcodes = null, source = 'osm', staleDays = 30 } =
       reason: shortfall > 0
         ? `The census has found ${n(r.census)} in all${r.by_text ? `, ${n(r.by_text)} of them from a plain text query` : ''}, where ${whose} has ${n(r.ground)} ${asOf} — the same ${n(r.tiles)} tile${r.tiles === 1 ? '' : 's'}, ${share}% of the ground count.${r.caveat ? ` ${r.caveat}` : ''}`
         : `The census has found ${n(r.census)} in all, where ${whose} has ${n(r.ground)} ${asOf} over the same ${n(r.tiles)} tile${r.tiles === 1 ? '' : 's'}, so nothing is obviously missing.${r.caveat ? ` ${r.caveat}` : ''}`,
+      // Appended rather than folded in, so a gap computed against a census that
+      // asked two different questions cannot be read as a measurement.
+      ...(mixed.get(r.key) ? { warning: `The census asked this drawer ${n(mixed.get(r.key).variants)} different ways across ${n(mixed.get(r.key).tiles)} tiles, so the shortfall is not yet a measurement of anything.` } : {}),
     };
   });
 

@@ -429,3 +429,34 @@ test('a ground count nobody has refreshed does not pass itself off as this morni
   assert.match(now.reason, /as it stands today/);
   assert.equal(now.ground, 11);
 });
+
+test('a drawer asked two different ways is a sum, not a denominator', async () => {
+  // epic-71, 21 Sep 2026: a tile is re-opened when the plan gains a drawer, not
+  // when a drawer gains a question. So four subcategories asked in plain words
+  // today would keep those answers in every tile already done if somebody
+  // taught them a Google type tomorrow. This file cannot fix that and must not
+  // hide it: a count summed over tiles asked different questions is not one
+  // number.
+  await aSubcategory('test-two-ways', 'Test drawer asked two ways');
+  await aRule('test-two-ways', 'test_type_two_ways');
+  await aCensusedTile({ gridKey: 'test/two-ways/a', outcodes: ['ZZ87'], subcategory: 'test-two-ways', places: 2 });
+  await aCensusedTile({ gridKey: 'test/two-ways/b', outcodes: ['ZZ87'], subcategory: 'test-two-ways', places: 3 });
+  const slice = (area, type, q) => query(
+    `insert into census_slices (area_slug, min_lat, min_lng, max_lat, max_lng, category, subcategory,
+                                google_type, query, returned, new_ids, saturated, depth, requests)
+     values ($1, 51.4, -0.2, 51.48, -0.08, 'activity', 'test-two-ways', $2, $3, 2, 2, false, 0, 1)`,
+    [area, type, q]);
+  // One tile asked in plain words, the other by a type it was taught later.
+  await slice('test/two-ways/a', null, 'somewhere to do the thing');
+  await slice('test/two-ways/b', 'test_type_two_ways', 'test type two ways');
+
+  const { subcategories } = await findings.subcategories({ outcodes: ['ZZ87'] });
+  const row = subcategories.find((s) => s.key === 'test-two-ways');
+  assert.equal(row.askedDifferently, 2, 'two question sets across two tiles');
+  assert.match(row.reason, /sum of more than one question and not yet a denominator/);
+
+  // And a drawer asked the same way everywhere says nothing about it.
+  const clean = subcategories.find((s) => s.key === 'test-asked');
+  assert.equal(clean.askedDifferently, 0);
+  assert.doesNotMatch(clean.reason, /more than one question/);
+});
