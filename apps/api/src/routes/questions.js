@@ -173,6 +173,9 @@ questionRoutes.get('/candidates', requires('view_questions'), async (req, res, n
       candidates: await sets.candidates({
         subcategory: req.query.subcategory ? String(req.query.subcategory) : null,
         status: status === 'all' ? null : status,
+        // Which run raised it. Without this a drawer's feature pass is
+        // unreadable behind forty thousand words from the Google pass.
+        source: req.query.source ? String(req.query.source) : null,
         limit: Math.min(1000, Number(req.query.limit ?? 500) || 500),
       }),
     });

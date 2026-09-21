@@ -393,8 +393,17 @@ export async function dropGlued(subcategory, run = query) {
  * at 4% should look like a find; something at 96% should look like noise" —
  * and `known` says whether the word is already one of our labels, so promoting
  * it reuses the label rather than making a second one.
+ *
+ * `source` narrows to the run that raised the word — `features`, `google`,
+ * `osm` and the rest, matched against the `sources` count map rather than
+ * against a run id, because a word raised twice belongs to both.
+ *
+ * Needed because the ordering puts a high-share word last: a feature raised
+ * on two places out of twenty sorts *below* forty thousand Google words seen
+ * on one in a hundred, so reading a drawer's feature pass off a limited list
+ * silently returned nothing for the drawers with the most in them.
  */
-export async function candidates({ subcategory = null, subcategories = null, status = 'new', kind = null, limit = 500 } = {}) {
+export async function candidates({ subcategory = null, subcategories = null, status = 'new', kind = null, source = null, limit = 500 } = {}) {
   // A set's screen asks for *its* subcategories, not for the first four hundred
   // words in the estate filtered afterwards — which returned an empty list for
   // a set whose words happened to sort below the limit.
@@ -407,9 +416,10 @@ export async function candidates({ subcategory = null, subcategories = null, sta
         and ($2::text[] is null or c.subcategory = any($2))
         and ($3::text is null or c.status = $3)
         and ($4::text is null or c.kind = $4)
+        and ($5::text is null or c.sources ? $5)
       order by c.places_seen::float / greatest(c.places_total, 1) asc, c.places_seen desc
-      limit $5`,
-    [subcategory, subcategories?.length ? subcategories : null, status, kind, limit],
+      limit $6`,
+    [subcategory, subcategories?.length ? subcategories : null, status, kind, source, limit],
   );
   return rows.map((r) => {
     // **Seen on**, which is how much of the harvest text mentioned it — not

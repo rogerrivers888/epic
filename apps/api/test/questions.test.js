@@ -420,3 +420,35 @@ test('a sweep clears the glued spelling of a word it now raises properly', async
   assert.deepEqual(left.rows.map((r) => r.norm), ['splash zone'], 'the glued spelling should have gone with the sweep');
   await query("delete from harvest_candidates where subcategory = $1 and norm = 'splash zone'", [sub]);
 });
+
+test('a feature pass is readable behind the words a Google pass left', async () => {
+  // Why the filter exists. The list is ordered by share ascending, so a
+  // feature seen on two places of twenty (10%) sorts *below* every Google word
+  // seen on one place in a hundred (1%). Read off a limited list, the drawers
+  // with the most in them came back with nothing — which is how a run that had
+  // worked was read as a run that had not.
+  await query("insert into shelf_categories (key, label) values ('test-cat', 'Test') on conflict do nothing");
+  await query("insert into shelf_subcategories (key, label, category_key) values ('trig-points', 'Trig points', 'test-cat') on conflict do nothing");
+  const google = Array.from({ length: 40 }, (_, i) => ({
+    norm: `google word ${i}`, raw: `google word ${i}`, sources: ['google'], placesSeen: 1, asserts: 1,
+  }));
+  await sets.recordCandidates('trig-points', google, { placesTotal: 100 });
+  await sets.recordCandidates('trig-points', [
+    { norm: 'trig point', raw: 'Trig point', sources: ['features'], placesSeen: 4, asserts: 4 },
+    { norm: 'steep slope', raw: 'Steep slopes', sources: ['features'], placesSeen: 2, asserts: 2 },
+  ], { placesTotal: 20 });
+
+  const capped = await sets.candidates({ subcategory: 'trig-points', status: null, limit: 40 });
+  assert.equal(capped.length, 40);
+  assert.equal(capped.filter((c) => c.sources?.features).length, 0,
+    'the feature pass is exactly what a limit hides');
+
+  const mine = await sets.candidates({ subcategory: 'trig-points', status: null, source: 'features', limit: 40 });
+  assert.deepEqual(mine.map((c) => c.norm).sort(), ['steep slope', 'trig point']);
+
+  // The filter narrows and does not re-sort: rarest still first.
+  assert.equal(mine[0].norm, 'steep slope');
+
+  // A source nothing was raised under is an empty list, not everything.
+  assert.equal((await sets.candidates({ subcategory: 'trig-points', status: null, source: 'wikipedia' })).length, 0);
+});
