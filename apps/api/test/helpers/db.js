@@ -47,7 +47,14 @@ const run = promisify(execFile);
  * against a database that does not have their migration in it and would have no
  * way to know.
  */
+let listed = null;
 async function migrationFiles(dir) {
+  // Worked out once per process. `node --test` gives each test file its own
+  // process, so this is one `git` call per file rather than per database — but
+  // a file that builds more than one database should not pay for it twice, and
+  // on a machine running several sessions' suites at once every spawn avoided
+  // is contention avoided.
+  if (listed) return listed;
   let tracked;
   try {
     const { stdout } = await run('git', ['ls-files', '--', 'migrations'], { cwd: path.resolve(dir, '..') });
@@ -55,7 +62,8 @@ async function migrationFiles(dir) {
   } catch {
     // No git, or not a checkout: fall back to the directory rather than
     // refusing to run at all. A CI image without .git still has to test.
-    return (await fs.readdir(dir)).filter((f) => f.endsWith('.sql')).sort();
+    listed = (await fs.readdir(dir)).filter((f) => f.endsWith('.sql')).sort();
+    return listed;
   }
   const onDisk = (await fs.readdir(dir)).filter((f) => f.endsWith('.sql'));
   const skipped = onDisk.filter((f) => !tracked.has(f)).sort();
@@ -64,7 +72,8 @@ async function migrationFiles(dir) {
     // is not in the database they are about to test against.
     console.warn(`[test db] skipping ${skipped.length} uncommitted migration${skipped.length === 1 ? '' : 's'}: ${skipped.join(', ')} — commit to include`);
   }
-  return onDisk.filter((f) => tracked.has(f)).sort();
+  listed = onDisk.filter((f) => tracked.has(f)).sort();
+  return listed;
 }
 
 /**
