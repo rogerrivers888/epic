@@ -175,7 +175,7 @@ export function reasonForState(state, { label, found, questions, coverage, slice
   // saying so is the only honest thing to do with it until the census has been
   // re-asked over the tiles that had the old one.
   const same = mixed
-    ? ` Asked ${n(mixed.variants)} different ways across ${n(mixed.tiles)} tiles, so this is a sum of more than one question and not yet a denominator.`
+    ? ` ${n(mixed.tiles)} tile${mixed.tiles === 1 ? ' was' : 's were'} censused before ${n(mixed.questions)} of this drawer's question${mixed.questions === 1 ? '' : 's'} existed and ${mixed.tiles === 1 ? 'has' : 'have'} never been asked ${mixed.questions === 1 ? 'it' : 'them'}, so this is a sum of more than one question and not yet a denominator.`
     : '';
   return `${n(found)} found across ${coverage.says}.${how}${same}`;
 }
@@ -197,22 +197,55 @@ export function reasonForState(state, { label, found, questions, coverage, slice
  * at once. So it is detected — by the set of questions each tile was actually
  * asked for the drawer — and it travels with the count as a caveat.
  *
- * Refused slices are left out: a tile that was cut short asked fewer questions
- * because of a quota, which is a coverage fact, not a change of question.
+ * A tile that missed a question which already existed was cut short by a quota
+ * — that is coverage, and the coverage sentence already says it. The difference
+ * this looks for is a tile censused *before* a question existed at all, which is
+ * the plan having changed underneath the census and cannot be read off the
+ * counts (Codex, 21 Sep 2026, on both halves of getting this wrong).
  */
 export async function askedDifferently({ outcodes = null } = {}) {
   const params = outcodes ? [outcodes] : [];
   const { rows } = await query(
-    `with per_tile as (
+    `with asked as (
+       -- A question is a type *and* the words sent with it. Keyed on the type
+       -- alone, a tile asked "sports_activity_location + climbing wall" and one
+       -- asked "sports_activity_location + bouldering centre" had the same
+       -- signature, so the detector missed exactly the change it was written to
+       -- catch (Codex, 21 Sep 2026).
+       --
+       -- Refused slices are kept here, because a slice that failed is still a
+       -- question that was *asked*; leaving them out made a tile whose one
+       -- question was refused look like a tile asked a different question.
        select cs.subcategory, cs.area_slug,
-              string_agg(distinct coalesce(cs.google_type, cs.query, ''), ',' order by coalesce(cs.google_type, cs.query, '')) as questions
+              coalesce(cs.google_type, '') || '|' || coalesce(cs.query, '') as q,
+              min(cs.ran_at) as at
          from census_slices cs
-        where cs.problem is null ${slicesInScope(params)}
-        group by 1, 2
+        where true ${slicesInScope(params)}
+        group by 1, 2, 3
+     ),
+     first_asked as (
+       select subcategory, q, min(at) as first_at from asked group by 1, 2
+     ),
+     tile as (
+       select subcategory, area_slug, max(at) as ran_at from asked group by 1, 2
+     ),
+     behind as (
+       -- A tile that was censused *before* one of this drawer's questions
+       -- existed anywhere, and has never been asked it. That is the plan having
+       -- changed underneath the census, and it is the only difference worth
+       -- warning about: a tile that missed a question which already existed was
+       -- cut short by a quota, which is coverage, and the coverage sentence
+       -- already says so.
+       select t.subcategory, t.area_slug, f.q
+         from tile t
+         join first_asked f on f.subcategory = t.subcategory and f.first_at > t.ran_at
+        where not exists (
+          select 1 from asked a
+           where a.subcategory = t.subcategory and a.area_slug = t.area_slug and a.q = f.q)
      )
-     select subcategory, count(*)::int as tiles, count(distinct questions)::int as variants
-       from per_tile group by 1 having count(distinct questions) > 1`, params);
-  return new Map(rows.map((r) => [r.subcategory, { tiles: r.tiles, variants: r.variants }]));
+     select subcategory, count(distinct area_slug)::int as tiles, count(distinct q)::int as questions
+       from behind group by 1`, params);
+  return new Map(rows.map((r) => [r.subcategory, { tiles: r.tiles, questions: r.questions }]));
 }
 
 /**
@@ -299,7 +332,7 @@ export async function subcategories({ outcodes = null } = {}) {
       byWords: howFound.get(s.key)?.words ?? 0,
       // Whether every tile was asked the same thing. A count summed over tiles
       // that were asked different questions is not one number.
-      askedDifferently: mixed.get(s.key)?.variants ?? 0,
+      askedDifferently: mixed.get(s.key)?.tiles ?? 0,
       state,
       // How many times the question was actually put here, so "empty" can be
       // read against the effort behind it rather than taken on trust.
@@ -453,7 +486,7 @@ export async function gaps({ outcodes = null, source = 'osm', staleDays = 30 } =
       key: r.key, label: r.label, category: r.category,
       census: r.census, byText: r.by_text, ground: r.ground, shortfall, foundShare: share,
       tiles: r.tiles, countedAt: r.counted_at, oldestAt: r.oldest_at, stale, source, asked: r.asked, caveat: r.caveat,
-      askedDifferently: mixed.get(r.key)?.variants ?? 0,
+      askedDifferently: mixed.get(r.key)?.tiles ?? 0,
       // Both sides say what they are. The census side is everything it has ever
       // found in these tiles; the free side is the source as it stands today.
       // Neither is "the number of places here", and two numbers with the same
@@ -463,7 +496,7 @@ export async function gaps({ outcodes = null, source = 'osm', staleDays = 30 } =
         : `The census has found ${n(r.census)} in all, where ${whose} has ${n(r.ground)} ${asOf} over the same ${n(r.tiles)} tile${r.tiles === 1 ? '' : 's'}, so nothing is obviously missing.${r.caveat ? ` ${r.caveat}` : ''}`,
       // Appended rather than folded in, so a gap computed against a census that
       // asked two different questions cannot be read as a measurement.
-      ...(mixed.get(r.key) ? { warning: `The census asked this drawer ${n(mixed.get(r.key).variants)} different ways across ${n(mixed.get(r.key).tiles)} tiles, so the shortfall is not yet a measurement of anything.` } : {}),
+      ...(mixed.get(r.key) ? { warning: `${n(mixed.get(r.key).tiles)} of these tiles were censused before ${n(mixed.get(r.key).questions)} of this drawer's questions existed and have never been asked them, so the shortfall is not yet a measurement of anything.` } : {}),
     };
   });
 

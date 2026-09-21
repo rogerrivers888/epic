@@ -441,22 +441,78 @@ test('a drawer asked two different ways is a sum, not a denominator', async () =
   await aRule('test-two-ways', 'test_type_two_ways');
   await aCensusedTile({ gridKey: 'test/two-ways/a', outcodes: ['ZZ87'], subcategory: 'test-two-ways', places: 2 });
   await aCensusedTile({ gridKey: 'test/two-ways/b', outcodes: ['ZZ87'], subcategory: 'test-two-ways', places: 3 });
-  const slice = (area, type, q) => query(
+  const slice = (area, type, q, ago, problem = null) => query(
     `insert into census_slices (area_slug, min_lat, min_lng, max_lat, max_lng, category, subcategory,
-                                google_type, query, returned, new_ids, saturated, depth, requests)
-     values ($1, 51.4, -0.2, 51.48, -0.08, 'activity', 'test-two-ways', $2, $3, 2, 2, false, 0, 1)`,
-    [area, type, q]);
-  // One tile asked in plain words, the other by a type it was taught later.
-  await slice('test/two-ways/a', null, 'somewhere to do the thing');
-  await slice('test/two-ways/b', 'test_type_two_ways', 'test type two ways');
+                                google_type, query, returned, new_ids, saturated, depth, requests, problem, ran_at)
+     values ($1, 51.4, -0.2, 51.48, -0.08, 'activity', 'test-two-ways', $2, $3, 2, 2, false, 0, 1, $5,
+             now() - ($4 || ' hours')::interval)`,
+    [area, type, q, String(ago), problem]);
+
+  // The first tile, censused before anybody taught the drawer a Google type.
+  await slice('test/two-ways/a', null, 'somewhere to do the thing', 3);
+  // The second, censused after — with the old question and the new one.
+  await slice('test/two-ways/b', null, 'somewhere to do the thing', 1);
+  await slice('test/two-ways/b', 'test_type_two_ways', 'test type two ways', 1);
 
   const { subcategories } = await findings.subcategories({ outcodes: ['ZZ87'] });
   const row = subcategories.find((s) => s.key === 'test-two-ways');
-  assert.equal(row.askedDifferently, 2, 'two question sets across two tiles');
-  assert.match(row.reason, /sum of more than one question and not yet a denominator/);
+  assert.equal(row.askedDifferently, 1, 'one tile is behind the plan');
+  assert.match(row.reason, /censused before 1 of this drawer.s question/);
+  assert.match(row.reason, /not yet a denominator/);
 
   // And a drawer asked the same way everywhere says nothing about it.
   const clean = subcategories.find((s) => s.key === 'test-asked');
   assert.equal(clean.askedDifferently, 0);
   assert.doesNotMatch(clean.reason, /more than one question/);
+});
+
+test('a tile cut short by a quota is coverage, not a different question', async () => {
+  // Codex, 21 Sep 2026: filtering out the failed slice left those tiles with a
+  // smaller signature, so a quota refusal read as a change of plan — and would
+  // have fired the warning across half the region the morning after a cap was
+  // hit. The question was asked; it was refused.
+  await aSubcategory('test-cut-short', 'Test drawer cut short in one tile');
+  await aRule('test-cut-short', 'test_type_cut_short');
+  await aCensusedTile({ gridKey: 'test/cut/a', outcodes: ['ZZ86'], subcategory: 'test-cut-short', places: 2 });
+  await aCensusedTile({ gridKey: 'test/cut/b', outcodes: ['ZZ86'], subcategory: 'test-cut-short', places: 0 });
+  const slice = (area, type, q, ago, returned, problem = null) => query(
+    `insert into census_slices (area_slug, min_lat, min_lng, max_lat, max_lng, category, subcategory,
+                                google_type, query, returned, new_ids, saturated, depth, requests, problem, ran_at)
+     values ($1, 51.4, -0.2, 51.48, -0.08, 'activity', 'test-cut-short', $2, $3, $5, 0, false, 0, 1, $6,
+             now() - ($4 || ' hours')::interval)`,
+    [area, type, q, String(ago), returned, problem]);
+
+  await slice('test/cut/a', 'test_type_cut_short', 'a', 3, 2);
+  await slice('test/cut/a', 'test_type_cut_short_two', 'b', 3, 1);
+  // The later tile asked both and had one refused by the quota.
+  await slice('test/cut/b', 'test_type_cut_short', 'a', 1, 0, '429 RESOURCE_EXHAUSTED');
+  await slice('test/cut/b', 'test_type_cut_short_two', 'b', 1, 0, '429 RESOURCE_EXHAUSTED');
+
+  const { subcategories } = await findings.subcategories({ outcodes: ['ZZ86'] });
+  const row = subcategories.find((s) => s.key === 'test-cut-short');
+  assert.equal(row.askedDifferently, 0, 'a refused question is still a question that was asked');
+});
+
+test('two tiles asked the same type with different words are not the same question', async () => {
+  // Codex, 21 Sep 2026: keyed on the type alone, "sports_activity_location +
+  // climbing wall" and "sports_activity_location + bouldering centre" had the
+  // same signature — and those are exactly the drawers Google has no word for,
+  // which is where the risk lives.
+  await aSubcategory('test-same-type', 'Test drawer fenced two ways');
+  await aRule('test-same-type', 'sports_activity_location');
+  await aCensusedTile({ gridKey: 'test/words/a', outcodes: ['ZZ85'], subcategory: 'test-same-type', places: 1 });
+  await aCensusedTile({ gridKey: 'test/words/b', outcodes: ['ZZ85'], subcategory: 'test-same-type', places: 1 });
+  const slice = (area, q, ago) => query(
+    `insert into census_slices (area_slug, min_lat, min_lng, max_lat, max_lng, category, subcategory,
+                                google_type, query, returned, new_ids, saturated, depth, requests, ran_at)
+     values ($1, 51.4, -0.2, 51.48, -0.08, 'activity', 'test-same-type', 'sports_activity_location', $2, 1, 1, false, 0, 1,
+             now() - ($3 || ' hours')::interval)`,
+    [area, q, String(ago)]);
+  await slice('test/words/a', 'climbing wall', 3);
+  await slice('test/words/b', 'climbing wall', 1);
+  await slice('test/words/b', 'bouldering centre', 1);
+
+  const { subcategories } = await findings.subcategories({ outcodes: ['ZZ85'] });
+  const row = subcategories.find((s) => s.key === 'test-same-type');
+  assert.equal(row.askedDifferently, 1, 'the words are part of the question');
 });
