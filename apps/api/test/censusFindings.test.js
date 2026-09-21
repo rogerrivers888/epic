@@ -593,3 +593,29 @@ test('a district no tile covers is the one nothing will go back for', async () =
   assert.equal(row.superseded, 0);
   assert.match(row.reason, /no tile covers, which no run will go back for/);
 });
+
+test('a gap measured over two tiles is not ranked above one measured over forty', async () => {
+  // The pattern epic-fe named on 21 Sep 2026, having hit three versions of it
+  // in a day: a signal that does not know when it cannot speak. The list is
+  // ordered by shortfall and read as a list of things to act on, so a drawer
+  // checked over two tiles with three places on the free side would outrank a
+  // real gap measured over forty.
+  await aSubcategory('golf', 'Golf clubs', 'sport');
+  await aSubcategory('parks', 'Parks & commons', 'outdoors');
+  for (let i = 0; i < 4; i += 1) {
+    await aCensusedTile({ gridKey: `test/thin/wide${i}`, outcodes: ['ZZ80'], subcategory: 'parks', places: 5, osmAt: new Date() });
+    await ground.noteGround({ gridKey: `test/thin/wide${i}`, source: 'osm', counts: { parks: 20 } });
+  }
+  // And one tile with a huge-looking shortfall on almost no ground.
+  await aCensusedTile({ gridKey: 'test/thin/narrow', outcodes: ['ZZ80'], subcategory: 'golf', places: 0, osmAt: new Date() });
+  await ground.noteGround({ gridKey: 'test/thin/narrow', source: 'osm', counts: { golf: 3 } });
+
+  const out = await findings.gaps({ outcodes: ['ZZ80'], source: 'osm' });
+  const golf = out.gaps.find((g) => g.key === 'golf');
+  const parks = out.gaps.find((g) => g.key === 'parks');
+  assert.equal(golf.thin, true, 'one tile, three places: too little ground to call a gap on');
+  assert.match(golf.thinReason, /too little ground/);
+  assert.equal(parks.thin, false);
+  assert.ok(out.gaps.indexOf(parks) < out.gaps.indexOf(golf),
+    'the real gap is ranked above the rounding error, whatever the arithmetic says');
+});

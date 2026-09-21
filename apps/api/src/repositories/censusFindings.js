@@ -481,6 +481,17 @@ export async function silentTypes({ outcodes = null } = {}) {
  * café; a ground count presented as a target is how a census gets taught to
  * count pitches as grounds.
  */
+/**
+ * How much ground a comparison has to stand on before it is a finding.
+ *
+ * Three tiles is about 220 square kilometres, and five on the free side is
+ * enough that one mapper's afternoon cannot swing it. Both are judgements
+ * rather than measurements, which is why they are named here rather than
+ * written into the query.
+ */
+const THIN_TILES = 3;
+const THIN_GROUND = 5;
+
 export async function gaps({ outcodes = null, source = 'osm', staleDays = 30 } = {}) {
   if (!['osm', 'fhrs'].includes(source)) throw Object.assign(new Error('the ground count is osm or fhrs'), { status: 400 });
   const params = outcodes ? [outcodes] : [];
@@ -539,12 +550,23 @@ export async function gaps({ outcodes = null, source = 'osm', staleDays = 30 } =
     // "As it stands today" is only true while every part of the sum is inside
     // the freshness window. Past it the sentence names the day instead, so a
     // number nobody has refreshed cannot pass itself off as this morning's.
+    // How much ground this comparison stands on. A drawer checked over two
+    // tiles with three places on the free side is not a finding, it is a
+    // rounding error with a percentage attached — and the list is ordered by
+    // shortfall, so it would outrank a real gap measured over forty tiles.
+    //
+    // The pattern this belongs to is worth naming: a signal that does not know
+    // when it cannot speak (epic-fe, 21 Sep 2026, on the third version of it in
+    // one day). It does not stop the row being shown; it stops it being ranked
+    // as evidence.
+    const thin = r.tiles < THIN_TILES || r.ground < THIN_GROUND;
     const oldest = r.oldest_at ? new Date(r.oldest_at) : null;
     const stale = oldest ? Date.now() - oldest.getTime() > staleDays * 86_400_000 : false;
     const asOf = stale ? `as it was counted on ${day(r.oldest_at)}` : 'as it stands today';
     return {
       key: r.key, label: r.label, category: r.category,
       census: r.census, byText: r.by_text, ground: r.ground, shortfall, foundShare: share,
+      thin,
       tiles: r.tiles, countedAt: r.counted_at, oldestAt: r.oldest_at, stale, source, asked: r.asked, caveat: r.caveat,
       askedDifferently: (mixed.get(r.key)?.tiles ?? 0) + (mixed.get(r.key)?.districts ?? 0),
       // Both sides say what they are. The census side is everything it has ever
@@ -556,6 +578,7 @@ export async function gaps({ outcodes = null, source = 'osm', staleDays = 30 } =
         : `The census has found ${n(r.census)} in all, where ${whose} has ${n(r.ground)} ${asOf} over the same ${n(r.tiles)} tile${r.tiles === 1 ? '' : 's'}, so nothing is obviously missing.${r.caveat ? ` ${r.caveat}` : ''}`,
       // Appended rather than folded in, so a gap computed against a census that
       // asked two different questions cannot be read as a measurement.
+      ...(thin ? { thinReason: `Measured over ${n(r.tiles)} tile${r.tiles === 1 ? '' : 's'} with ${n(r.ground)} on the free side, which is too little ground to call a gap on.` } : {}),
       ...(mixed.get(r.key)?.tiles ? { warning: `${n(mixed.get(r.key).tiles)} of these tiles were censused before ${n(mixed.get(r.key).questions)} of this drawer's questions existed and have never been asked them, so the shortfall is not yet a measurement of anything.` } : {}),
     };
   });
@@ -570,6 +593,11 @@ export async function gaps({ outcodes = null, source = 'osm', staleDays = 30 } =
     label: s.label,
     reason: `${whose[0].toUpperCase()}${whose.slice(1)} has no equivalent of ${s.label}, so there is nothing free to check it against.`,
   }));
+
+  // Thin rows last, whatever their shortfall. Ordering is a claim about
+  // importance and a two-tile sample has no business at the top of a list
+  // somebody is going to act on.
+  found.sort((a, b) => (a.thin === b.thin ? b.shortfall - a.shortfall : (a.thin ? 1 : -1)));
 
   return {
     source,
