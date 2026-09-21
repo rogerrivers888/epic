@@ -582,6 +582,17 @@ test('a run reports per area and in total, with the money read from the ledger',
             ('test/report-b', 52.80, 0.80, 52.88, 0.92, array['NR21'], $1, 'done', 272, 270, 46, 0, now(), now())`,
     [run.id]);
 
+  // The run's own spending is counted from the questions it asked, so the
+  // fixture has to have asked them: a tile carries the whole of its history,
+  // which is right for the ground and wrong for a run.
+  await query(
+    `insert into census_slices (area_slug, min_lat, min_lng, max_lat, max_lng, category, subcategory,
+                                google_type, query, returned, new_ids, saturated, depth, requests, ran_at)
+     values ('test/report-a', 51.40, -0.70, 51.48, -0.58, 'sport', 'golf', 'golf_course', 'golf course',
+             20, 20, false, 0, 1500, now()),
+            ('test/report-b', 52.80, 0.80, 52.88, 0.92, 'sport', 'golf', 'golf_course', 'golf course',
+             20, 20, false, 0, 272, now())`);
+
   const out = await report(run.id);
   const se = out.areas.find((a) => a.area === 'SE');
   const nr = out.areas.find((a) => a.area === 'NR');
@@ -592,7 +603,8 @@ test('a run reports per area and in total, with the money read from the ledger',
   // rather than from adding the areas up — the same double count the census
   // fixed one level down.
   assert.equal(out.total.tiles, 2);
-  assert.equal(out.total.requests, 1772);
+  assert.equal(out.total.requests, 1772, 'and the run reports what it asked');
+  assert.equal(out.total.ground.requests, 1772, 'beside what the ground has cost altogether');
   // The claim the whole design rests on, read rather than repeated.
   assert.equal(out.ledger.usd, 0);
   assert.equal(out.ledger.free, true);

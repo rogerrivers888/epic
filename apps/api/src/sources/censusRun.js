@@ -36,7 +36,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { query } from '../db.js';
-import { censusArea, slicePlan, CENSUS_FRESH_DAYS } from './census.js';
+import { censusArea, slicePlan, CENSUS_FRESH_DAYS, CENSUS_MAX_DEPTH } from './census.js';
 // The same corner test the ring count uses. One piece of arithmetic for "is
 // this box inside this area", not two that can disagree (repositories/censusRing.js).
 import { whereBoxSits } from '../repositories/censusRing.js';
@@ -303,38 +303,39 @@ async function waitUntil(id, when, why) {
 
 /** Tiles left, and what the run has spent so far. */
 async function refreshProgress(runId) {
+  // What this run asked, from the questions themselves.
+  //
+  // Not from the tile counters. A tile carries the whole of its history — which
+  // is right for the ground and wrong for a run — and a tile re-opened to be
+  // asked a drawer invented mid-run keeps the start of its original sweep, so
+  // no filter on the tile can separate the two. The slices are dated one by
+  // one, so this is exact: every question asked since the run began, inside its
+  // own tiles.
   await query(
     `update census_runs r
         set tiles_total = t.total, tiles_done = t.done,
-            requests = t.requests, slices = t.slices, places = t.places, saturated = t.saturated,
-            -- What the census has asked today — all of it, whoever asked it.
-            --
-            -- From the slices themselves, because a counter held in memory
-            -- would start again with the process. And across every run, not
-            -- this one's tiles, because the quota is the project's: a second
-            -- run over a different region on the same day started with a full
-            -- allowance again while both spent the same 75,000 (Codex, 21 Sep
-            -- 2026). The budget is a fact about the day, not about the region.
+            requests = s.requests, slices = s.slices, saturated = s.saturated,
+            places = p.places,
+            -- What the census has asked today — all of it, whoever asked it,
+            -- because the quota is the project's and not the region's.
             day_requests = coalesce((select sum(cs.requests)::int from census_slices cs
                                       where cs.ran_at >= date_trunc('day', now() at time zone 'utc')), 0),
             last_seen_at = now()
-       -- What *this* run asked, not what the ground already knew. A tile still
-       -- fresh from a census a fortnight ago is skipped — that is the point of
-       -- the freshness window — and counting its requests here would report the
-       -- run as having spent them: the London run opened at 1,774 requests
-       -- before it had asked anything, which are the calibration's (21 Sep
-       -- 2026). Tiles done still counts every tile, skipped or swept, because
-       -- that is progress through the region rather than spending.
-       from (select count(*)::int total,
-                    count(*) filter (where ct.state = 'done')::int done,
-                    coalesce(sum(ct.requests) filter (where ct.started_at >= r0.began), 0)::int requests,
-                    coalesce(sum(ct.slices) filter (where ct.started_at >= r0.began), 0)::int slices,
-                    coalesce(sum(ct.places) filter (where ct.started_at >= r0.began), 0)::int places,
-                    coalesce(sum(ct.saturated) filter (where ct.started_at >= r0.began), 0)::int saturated
-               from census_tiles ct,
-                    (select started_at as began from census_runs where id = $1) r0
-              where ct.run_id = $1) t
-      where r.id = $1`, [runId]);
+       from (select started_at as began from census_runs where id = $1) r0,
+            (select count(*)::int total,
+                    count(*) filter (where state = 'done')::int done
+               from census_tiles where run_id = $1) t,
+            lateral (select coalesce(sum(cs.requests), 0)::int as requests,
+                    count(*)::int as slices,
+                    count(*) filter (where cs.saturated and cs.depth >= $2)::int as saturated
+               from census_slices cs
+              where cs.ran_at >= r0.began
+                and cs.area_slug in (select grid_key from census_tiles where run_id = $1)) s,
+            lateral (select count(distinct ps.venue_ref)::int as places
+               from place_subcategories ps
+              where ps.last_seen >= r0.began
+                and ps.area_slug in (select grid_key from census_tiles where run_id = $1)) p
+      where r.id = $1`, [runId, CENSUS_MAX_DEPTH]);
 }
 
 /**
@@ -918,10 +919,13 @@ export async function report(runId = null) {
             count(*) filter (where state = 'done')::int done,
             count(*) filter (where state = 'failed')::int failed,
             count(*) filter (where started_at < $2)::int skipped,
-            coalesce(sum(requests) filter (where started_at >= $2), 0)::int requests,
-            coalesce(sum(places) filter (where started_at >= $2), 0)::int places,
-            coalesce(sum(slices) filter (where started_at >= $2), 0)::int slices,
-            coalesce(sum(saturated) filter (where started_at >= $2), 0)::int saturated,
+            coalesce((select sum(cs.requests)::int from census_slices cs
+                       where cs.ran_at >= $2 and cs.area_slug in (select grid_key from census_tiles where run_id = $1)), 0) as requests,
+            coalesce((select count(distinct ps.venue_ref)::int from place_subcategories ps
+                       where ps.last_seen >= $2 and ps.area_slug in (select grid_key from census_tiles where run_id = $1)), 0) as places,
+            coalesce((select count(*)::int from census_slices cs
+                       where cs.ran_at >= $2 and cs.area_slug in (select grid_key from census_tiles where run_id = $1)), 0) as slices,
+            coalesce(sum(saturated), 0)::int saturated,
             coalesce(sum(requests), 0)::int ground_requests,
             coalesce(sum(places), 0)::int ground_places
        from census_tiles where run_id = $1`, [run.id, run.started_at]);
