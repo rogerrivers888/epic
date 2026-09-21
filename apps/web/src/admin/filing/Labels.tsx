@@ -511,9 +511,22 @@ const PENDING_COLS: Col[] = [
   { w: 260, label: '' },
 ];
 
-export function Pending({ words, sets, onApprove, onMerge, onReject, onPark }: {
+/** What is waiting, said as what it is. */
+function pendingTitle({ typed, orphans }: { typed: number; orphans: number }): string {
+  const n = (k: number, one: string, many = `${one}s`) => `${k} ${k === 1 ? one : many}`;
+  if (typed && orphans) return `${n(typed, 'word')} typed, and ${n(orphans, 'label')} nothing asks`;
+  if (typed) return `${n(typed, 'word')} a human typed`;
+  if (orphans) return `${n(orphans, 'label')} nothing asks`;
+  return 'Nothing waiting';
+}
+
+export function Pending({ words, sets, why, counts, onApprove, onMerge, onReject, onPark }: {
   words: PendingWord[];
   sets: { key: string; name: string }[];
+  /** Why the list is empty, where it is. Never shown beside rows. */
+  why?: string | null;
+  /** How the list divides, so the title can say what is in it. */
+  counts?: { typed: number; orphans: number };
   onApprove: (id: number, setKeys: string[]) => void;
   onMerge: (id: number) => void;
   onReject: (id: number) => void;
@@ -524,11 +537,22 @@ export function Pending({ words, sets, onApprove, onMerge, onReject, onPark }: {
 
   return (
     <>
-      <Band title={`${words.length} ${words.length === 1 ? 'word' : 'words'} a human typed`}
+      {/*
+        The title is what is actually in the list. Two different things arrive
+        here — a word somebody typed on a place, and a label approved into the
+        vocabulary and never attached — and calling seven orphan labels "words
+        a human typed" is a sentence nobody wrote (21 Sep 2026).
+      */}
+      <Band title={pendingTitle(counts ?? { typed: words.length, orphans: 0 })}
         sub="approve into a set, merge into something we already ask, or reject" />
       <View>
         <Head cols={PENDING_COLS} />
-        {words.length === 0 ? <Nothing>Nothing waiting.</Nothing> : null}
+        {/*
+          Which kind of empty. "Nothing waiting" and "nothing can produce a row
+          here yet" look identical and are not the same news — a reviewer read
+          one of these screens as broken (the side-by-side audit, 21 Sep 2026).
+        */}
+        {words.length === 0 ? <Nothing>{why ?? 'Nothing waiting.'}</Nothing> : null}
         {words.map((w) => {
           const chosen = picked[w.id] ?? [];
           return (

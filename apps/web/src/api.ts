@@ -3547,7 +3547,18 @@ export const api = {
     request<{ removed: true }>(`/api/admin/filing/questions/${id}`, { method: 'DELETE' }),
 
   /** Words a human typed that nothing asks yet. */
-  adminFilingPending: () => request<{ pending: PendingWord[] }>('/api/admin/filing/pending'),
+  /**
+   * Words a person typed that nothing asks yet, and labels approved into the
+   * vocabulary and never attached. `why` says which kind of empty it is when
+   * the list is empty — an empty list and a list nothing can produce look
+   * identical otherwise.
+   */
+  adminFilingPending: () => request<{
+    pending: (PendingWord & { kind: 'typed' | 'orphan' })[];
+    sets: { key: string; name: string }[];
+    counts: { typed: number; orphans: number };
+    why: string | null;
+  }>('/api/admin/filing/pending'),
   adminFilingApprove: (id: number, sets: string[]) =>
     post<{ asked: number }>(`/api/admin/filing/pending/${id}/approve`, { sets }),
   /** Parked: in the vocabulary, asked nowhere, and All labels says so. */

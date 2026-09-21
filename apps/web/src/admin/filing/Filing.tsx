@@ -33,7 +33,7 @@ import type {
 import { SegStrip } from './desk';
 import { Overview } from './Overview';
 import { CategoryBoard, CategoryList, PlacesBoard, SubcategoryBoard } from './Categories';
-import { AllLabels, QuestionSet, QuestionSets } from './Labels';
+import { AllLabels, Pending, QuestionSet, QuestionSets } from './Labels';
 import { NotInEpic, Words } from './Mapping';
 import { Rows, type RowFilter } from './Rows';
 import { Train } from './Train';
@@ -102,6 +102,7 @@ export function Filing({ canManage }: { canManage: boolean }) {
   /** Fetched when a row opens, because the consequence depends on the word. */
   const [dests, setDests] = useState<Record<string, Awaited<ReturnType<typeof api.filingDestinations>>>>({});
   const [undo, setUndo] = useState<{ what: string; onPress: () => void } | null>(null);
+  const [pending, setPending] = useState<Awaited<ReturnType<typeof api.adminFilingPending>> | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -137,7 +138,8 @@ export function Filing({ canManage }: { canManage: boolean }) {
         else setCategories(await api.filingCategories());
       }
       if (tab === 'labels') {
-        if (view === 'vocabulary') setVocabulary(await api.filingVocabulary());
+        if (view === 'pending') setPending(await api.adminFilingPending());
+        else if (view === 'vocabulary') setVocabulary(await api.filingVocabulary());
         else if (set) {
           // Both, always. The set screen draws the global labels and its own
           // row from the list, so fetching only the set left a shared link
@@ -266,7 +268,10 @@ export function Filing({ canManage }: { canManage: boolean }) {
   /** Where a queue card on the Overview lands. */
   const goQueue = (where: string) => {
     if (where === 'labels') return root('labels');
-    if (where === 'pen') return go({ tab: 'labels', cat: '', sub: '', set: '', view: '' });
+    // The holding pen is the words nobody can call, which live on a set's own
+    // screen. Until a set exists to open, Pending is the nearest true thing —
+    // and it says so rather than landing on an empty list.
+    if (where === 'pen') return go({ tab: 'labels', cat: '', sub: '', set: '', view: 'pending' });
     if (where === 'audit') return go({ tab: 'mapping', cat: '', sub: '', set: '', view: 'audit' });
     if (where === 'arguing') return root('rules');
     return root('overview');
@@ -444,7 +449,41 @@ export function Filing({ canManage }: { canManage: boolean }) {
             />
           ) : null}
 
-          {tab === 'labels' && !set && view !== 'vocabulary' && labels ? (
+          {tab === 'labels' && !set ? (
+            <View style={{ flexDirection: 'row' }}>
+              {/*
+                Persistent across all three Labels screens, as §6 specifies.
+                Without it All labels was reachable only by typing the address
+                and Pending had no entry point at all — which also left the
+                front door's biggest number, the holding pen, landing on an
+                empty Question sets list (the side-by-side audit, 21 Sep 2026).
+              */}
+              <SegStrip
+                value={view === 'pending' ? 'pending' : view === 'vocabulary' ? 'vocabulary' : 'sets'}
+                options={[
+                  { key: 'sets', label: 'Question sets' },
+                  { key: 'pending', label: `Pending${pending ? ` · ${pending.pending.length}` : ''}` },
+                  { key: 'vocabulary', label: `All labels${vocabulary ? ` · ${vocabulary.counts.labels}` : ''}` },
+                ]}
+                onChange={(k) => go({ view: k === 'sets' ? '' : k })}
+              />
+            </View>
+          ) : null}
+
+          {tab === 'labels' && view === 'pending' && pending ? (
+            <Pending
+              words={pending.pending}
+              sets={pending.sets}
+              why={pending.why}
+              counts={pending.counts}
+              onApprove={() => said('Approving a word into a set is not wired yet.')}
+              onMerge={() => said('Merging a word is not wired yet.')}
+              onReject={() => said('Rejecting a word is not wired yet.')}
+              onPark={() => said('Parking a word is not wired yet.')}
+            />
+          ) : null}
+
+          {tab === 'labels' && !set && view !== 'vocabulary' && view !== 'pending' && labels ? (
             <QuestionSets sets={labels.sets} onOpen={(key) => go({ set: key, view: '' })} />
           ) : null}
 
@@ -818,6 +857,7 @@ function crumbs({ tab, cat, sub, set, view, category, drawer, oneSet, go }: {
   if (tab === 'labels') {
     if (set) out.push({ label: oneSet?.set.name ?? set });
     if (view === 'vocabulary') out.push({ label: 'All labels' });
+    if (view === 'pending') out.push({ label: 'Pending' });
   }
   if (tab === 'mapping' && view === 'excluded') out.push({ label: 'Not in Epic' });
   // The last crumb is where you are, and is never a link.

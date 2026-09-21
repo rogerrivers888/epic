@@ -20,6 +20,7 @@
  *   GET  /labels                       every question set, and the global labels
  *   GET  /labels/sets/:key             one set, and the words waiting on it
  *   GET  /labels/vocabulary            our own labels, and where each is asked
+ *   GET  /pending                      words a person typed that nothing asks yet
  *   PUT  /mapping/:word                where one of Google's words points
  *   PUT  /mapping/:word/carries        a fact riding along on what it brings
  *   GET  /mapping/:word/destinations   where it could point, and what each would do
@@ -1859,3 +1860,84 @@ filingRoutes.get('/mapping/:word/destinations', requires('view_library'), async 
     });
   } catch (err) { next(err); }
 });
+
+/**
+ * GET /pending — words a person typed that nothing asks yet.
+ *
+ * The third of the Labels screens, and the one with the least data behind it
+ * on a young estate: every harvested word came from a source, and a word a
+ * *person* typed is a different thing — somebody looked at a place, wrote
+ * something down, and it has been sitting there ever since.
+ *
+ * Two things arrive here. A candidate raised by a human rather than by a
+ * source, and one of our own labels that was approved into the vocabulary and
+ * then never attached to anything — the orphan case, which is the commoner of
+ * the two and is the one the screen exists to clear.
+ *
+ * **When it is empty it says which kind of empty.** An empty list and a list
+ * nobody can produce look identical, and the second is what this is today.
+ */
+filingRoutes.get('/pending', requires('view_library'), async (_req, res, next) => {
+  try {
+    const [{ list: attrs }, all, sets, typed] = await Promise.all([
+      placeAttributes.attributes(),
+      questionSets.questionsFor(null),
+      questionSets.sets(),
+      query(`select id, norm, raw_forms, subcategory, places_seen, sources, examples
+               from harvest_candidates
+              where status in ('new', 'unresolved') and sources ? 'human'
+              order by places_seen desc limit 200`),
+    ]);
+    const asked = new Set(all.map((q) => q.attribute_key));
+    const setName = new Map(sets.map((s) => [s.key, s.name]));
+
+    const orphans = attrs
+      .filter((a) => a.active && a.kind !== 'scale' && !asked.has(a.key))
+      .map((a) => ({
+        id: a.key,
+        word: a.label,
+        times: 1,
+        from: 'approved into the vocabulary, and never attached to a set',
+        // The closest things we already have, by the words they share.
+        near: nearestLabels(a, attrs).map((x) => x.label),
+        repoint: 'nothing asks it, so nothing would move',
+        kind: 'orphan',
+      }));
+
+    const human = typed.rows.map((c) => ({
+      id: String(c.id),
+      word: c.raw_forms?.[0] ?? c.norm,
+      times: Number(c.sources?.human ?? 1),
+      from: c.subcategory ? `typed on a place in ${c.subcategory}` : 'typed by a person',
+      near: nearestLabels({ label: c.norm }, attrs).map((x) => x.label),
+      repoint: `${c.places_seen} ${c.places_seen === 1 ? 'place' : 'places'}`,
+      kind: 'typed',
+    }));
+
+    res.json({
+      pending: [...human, ...orphans],
+      sets: sets.map((s) => ({ key: s.key, name: setName.get(s.key) ?? s.key })),
+      counts: { typed: human.length, orphans: orphans.length },
+      why: human.length + orphans.length === 0
+        ? 'nothing is waiting: every label we have is asked somewhere, and nobody has typed a new word on a place yet'
+        : human.length === 0
+          ? 'nobody has typed a word on a place yet — these are labels approved into the vocabulary that nothing asks'
+          : null,
+    });
+  } catch (err) { next(err); }
+});
+
+/** The labels closest to a word, by the words they have in common. */
+function nearestLabels(a, attrs) {
+  const words = new Set(String(a.label ?? '').toLowerCase().split(/[^a-z]+/).filter((w) => w.length > 2));
+  if (!words.size) return [];
+  return attrs
+    .filter((x) => x.active && x.key !== a.key)
+    .map((x) => ({
+      ...x,
+      shared: String(x.label).toLowerCase().split(/[^a-z]+/).filter((w) => words.has(w)).length,
+    }))
+    .filter((x) => x.shared > 0)
+    .sort((x, y) => y.shared - x.shared)
+    .slice(0, 3);
+}
