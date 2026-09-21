@@ -179,7 +179,10 @@ export function reasonForState(state, { label, found, questions, coverage, slice
   // box per outcode, is in no run and nothing will go back for it.
   const behind = [];
   if (mixed?.tiles) behind.push(`${n(mixed.tiles)} tile${mixed.tiles === 1 ? '' : 's'} of the grid`);
-  if (mixed?.districts) behind.push(`${n(mixed.districts)} district${mixed.districts === 1 ? '' : 's'} censused before the grid, which no run will go back for`);
+  if (mixed?.districtsRunning) behind.push(`${n(mixed.districtsRunning)} district${mixed.districtsRunning === 1 ? '' : 's'} censused before the grid and now being covered by it`);
+  if (mixed?.districtsAlone) behind.push(`${n(mixed.districtsAlone)} district${mixed.districtsAlone === 1 ? '' : 's'} no tile covers, which no run will go back for`);
+  // A drawer whose only laggards are superseded districts is not behind
+  // anything: the grid has asked those questions over the same ground.
   const same = behind.length
     ? ` ${behind.join(' and ')} ${behind.length === 1 && mixed.tiles === 1 ? 'was' : 'were'} censused before ${n(mixed.questions)} of this drawer's question${mixed.questions === 1 ? '' : 's'} existed and ${behind.length === 1 && mixed.tiles === 1 ? 'has' : 'have'} never been asked ${mixed.questions === 1 ? 'it' : 'them'}, so this is a sum of more than one question and not yet a denominator.`
     : '';
@@ -248,23 +251,51 @@ export async function askedDifferently({ outcodes = null } = {}) {
         where not exists (
           select 1 from asked a
            where a.subcategory = t.subcategory and a.area_slug = t.area_slug and a.q = f.q)
+     ),
+     covered as (
+       -- A district censused the old way is not necessarily abandoned: the grid
+       -- may cover the same ground under different keys. So each one is asked
+       -- how much of it the grid has done — all of it, some of it, or none.
+       -- All 41 of the ring's districts turned out to be inside this run's
+       -- region (epic-71, 21 Sep 2026), which makes "no run will go back for
+       -- it" false for every one of them, and that sentence was on the board.
+       select b.area_slug,
+              count(t.grid_key)::int                                        as tiles,
+              count(*) filter (where t.state = 'done')::int                 as done
+         from (select distinct area_slug from behind) b
+         left join census_tiles t on t.outcodes @> array[upper(b.area_slug)]
+        group by 1
      )
      select b.subcategory,
-            -- A tile of the grid, which the run will re-ask on its own once the
-            -- plan settles...
+            -- A tile of the grid, which the run re-opens and re-asks itself.
             count(distinct b.area_slug) filter (where t.grid_key is not null)::int as tiles,
-            -- ...and a district censused the old way, one box per outcode,
-            -- which nothing is going to re-ask because it is not in any run.
-            -- Both are behind the plan and only one of them is going to fix
-            -- itself, so they are never added together: 41 districts of
-            -- yesterday's ring read as 41 tiles of this morning's region, and
-            -- the two are not the same unit or the same problem (21 Sep 2026).
-            count(distinct b.area_slug) filter (where t.grid_key is null)::int as districts,
+            -- A district the grid has finished covering. Its questions have
+            -- been asked, on better-shaped ground, under another key: it is
+            -- superseded rather than behind, and saying otherwise would leave a
+            -- warning on the board for ever with nothing anybody could do about
+            -- it.
+            count(distinct b.area_slug) filter (
+              where t.grid_key is null and c.tiles > 0 and c.done = c.tiles)::int as superseded,
+            -- One the grid is still working through.
+            count(distinct b.area_slug) filter (
+              where t.grid_key is null and c.tiles > 0 and c.done < c.tiles)::int as districts_running,
+            -- And one no tile covers at all, which is the only case where
+            -- nothing is going to go back for it.
+            count(distinct b.area_slug) filter (
+              where t.grid_key is null and coalesce(c.tiles, 0) = 0)::int          as districts_alone,
             count(distinct b.q)::int as questions
        from behind b
        left join census_tiles t on t.grid_key = b.area_slug
+       left join covered c on c.area_slug = b.area_slug
       group by 1`, params);
-  return new Map(rows.map((r) => [r.subcategory, { tiles: r.tiles, districts: r.districts, questions: r.questions }]));
+  return new Map(rows.map((r) => [r.subcategory, {
+    tiles: r.tiles,
+    superseded: r.superseded,
+    districtsRunning: r.districts_running,
+    districtsAlone: r.districts_alone,
+    districts: r.districts_running + r.districts_alone,
+    questions: r.questions,
+  }]));
 }
 
 /**
@@ -352,6 +383,9 @@ export async function subcategories({ outcodes = null } = {}) {
       // Whether every tile was asked the same thing. A count summed over tiles
       // that were asked different questions is not one number.
       askedDifferently: (mixed.get(s.key)?.tiles ?? 0) + (mixed.get(s.key)?.districts ?? 0),
+      // Counted but never added to the total: their questions have been asked
+      // on the grid, over the same ground, under a different key.
+      superseded: mixed.get(s.key)?.superseded ?? 0,
       behind: mixed.get(s.key) ?? null,
       state,
       // How many times the question was actually put here, so "empty" can be

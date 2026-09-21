@@ -543,13 +543,13 @@ test('a count taken by asking something else is not an answer to this question',
   assert.equal(rows[0].asked, ground.OSM_GROUND.golf.selectors.join(' '), 'and it now says what was actually asked');
 });
 
-test('a district censused before the grid is behind the plan in a way no run will fix', async () => {
-  // Live, the detector read "golf: 41 tiles behind" while every tile of the run
-  // had already been re-asked. The 41 were yesterday's ring census — one box
-  // per outcode, `area_slug` an outcode rather than a grid key — which is in no
-  // run and which nothing is going to go back for. Both are behind the plan and
-  // only one of them fixes itself, so they are never added together (21 Sep
-  // 2026).
+test('a district the grid has covered is superseded, not behind', async () => {
+  // Live, the detector said 41 districts were behind the plan "which no run
+  // will go back for" — and epic-71 then checked and found every one of them
+  // sits inside this run's region. The grid is covering the same ground under
+  // different keys, so the sentence on the board was false. A district whose
+  // covering tiles are done has had its questions asked, on better-shaped
+  // ground; a district no tile covers is the only one nothing will go back for.
   await aSubcategory('test-two-units', 'Test drawer censused both ways');
   await aRule('test-two-units', 'test_type_two_units');
   await aCensusedTile({ gridKey: 'test/units/tile', outcodes: ['ZZ83'], subcategory: 'test-two-units', places: 1 });
@@ -558,19 +558,38 @@ test('a district censused before the grid is behind the plan in a way no run wil
                                 google_type, query, returned, new_ids, saturated, depth, requests, ran_at)
      values ($1, 51.4, -0.2, 51.48, -0.08, 'activity', 'test-two-units', $2, $3, 1, 1, false, 0, 1,
              now() - ($4 || ' hours')::interval)`, [area, type, q, String(ago)]);
-  // The old way: a district, censused yesterday with the old question.
-  await query(
-    `insert into area_counts (area_slug, category, subcategory, census_count, censused_at)
-     values ('zz83', 'activity', 'test-two-units', 1, now() - interval '20 hours')
-     on conflict (area_slug, category, subcategory) do nothing`);
+  // The old way: a district, censused yesterday with the old question, and
+  // sitting inside a tile the grid has since finished.
   await slice('zz83', null, 'the old words', 20);
-  // The new way: a tile of the grid, censused after the type was taught.
+  // The new way: that tile, censused after the type was taught.
   await slice('test/units/tile', null, 'the old words', 1);
   await slice('test/units/tile', 'test_type_two_units', 'test type two units', 1);
 
   const { subcategories } = await findings.subcategories({ outcodes: ['ZZ83'] });
   const row = subcategories.find((s) => s.key === 'test-two-units');
-  assert.equal(row.behind.districts, 1, 'the district is behind and no run will go back for it');
-  assert.equal(row.behind.tiles, 0, 'and no tile of the grid is');
-  assert.match(row.reason, /censused before the grid, which no run will go back for/);
+  assert.equal(row.superseded, 1, 'the grid has asked its questions over the same ground');
+  assert.equal(row.askedDifferently, 0, 'so nothing is behind, and the row says nothing');
+  assert.doesNotMatch(row.reason, /not yet a denominator/);
+});
+
+test('a district no tile covers is the one nothing will go back for', async () => {
+  await aSubcategory('test-alone', 'Test drawer censused only the old way');
+  await aRule('test-alone', 'test_type_alone');
+  // A district censused the old way, inside no tile of any run.
+  const slice = (area, type, q, ago) => query(
+    `insert into census_slices (area_slug, min_lat, min_lng, max_lat, max_lng, category, subcategory,
+                                google_type, query, returned, new_ids, saturated, depth, requests, ran_at)
+     values ($1, 51.4, -0.2, 51.48, -0.08, 'activity', 'test-alone', $2, $3, 1, 1, false, 0, 1,
+             now() - ($4 || ' hours')::interval)`, [area, type, q, String(ago)]);
+  await slice('zz82', null, 'the old words', 20);
+  // And a tile elsewhere, censused later with a question the district never got.
+  await aCensusedTile({ gridKey: 'test/alone/tile', outcodes: ['ZZ81'], subcategory: 'test-alone', places: 1 });
+  await slice('test/alone/tile', null, 'the old words', 1);
+  await slice('test/alone/tile', 'test_type_alone', 'test type alone', 1);
+
+  const { subcategories } = await findings.subcategories({});
+  const row = subcategories.find((s) => s.key === 'test-alone');
+  assert.equal(row.behind.districtsAlone, 1);
+  assert.equal(row.superseded, 0);
+  assert.match(row.reason, /no tile covers, which no run will go back for/);
 });
