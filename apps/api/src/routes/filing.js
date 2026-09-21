@@ -1297,6 +1297,14 @@ filingRoutes.post('/rules/:id/retire', requires('manage_library'), async (req, r
 
 
 /** The runs that can be started, with what each would cost before the click. */
+/** What each kind of run is called on the screen. */
+const RUN_NAMES = {
+  google: 'Vocabulary harvest',
+  free: 'Free sweep',
+  probe: 'Probe',
+  features: 'Feature pass',
+};
+
 const TRIGGERS = [
   {
     key: 'free', name: 'Free sweep', action: 'Run the sweep', cost: '£0.00', rate: null,
@@ -1349,7 +1357,7 @@ filingRoutes.get('/runs', requires('view_library'), async (_req, res, next) => {
 
       return {
         id: String(r.id),
-        name: r.kind === 'google' ? 'Vocabulary harvest' : r.kind === 'free' ? 'Free sweep' : r.kind === 'probe' ? 'Probe' : r.kind,
+        name: RUN_NAMES[r.kind] ?? r.kind,
         at: r.finished_at ?? r.started_at,
         scope: `${(r.subcategories ?? []).length} subcategories`,
         sources: r.kind === 'google' ? 'reviews only' : 'the venue’s page · OSM · Wikipedia',
@@ -1442,7 +1450,7 @@ function liveOf(run) {
   if (!run) return null;
   const f = run.funnel ?? {};
   return {
-    name: run.kind === 'google' ? 'Vocabulary harvest' : 'Free sweep',
+    name: RUN_NAMES[run.kind] ?? run.kind,
     scope: `${(run.subcategories ?? []).length} subcategories`,
     funnel: STAGES.map(([key, name]) => ({ name, count: f[key] ?? 0, done: f[key] != null })),
   };
