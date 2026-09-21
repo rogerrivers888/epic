@@ -1,0 +1,24 @@
+-- An atlas place is found by its own id, and that lookup had no index.
+--
+-- An atlas place sits in `place_index` under `atlas:<uuid>` and in
+-- `attractions` under the ref it was matched to, so anything joining the two
+-- has to try both ways in:
+--
+--   where at.venue_ref = p.venue_ref
+--      or ('atlas:' || at.id::text) = p.venue_ref
+--
+-- The first half uses `attractions_venue_ref`. The second half is an
+-- expression, and a plain index on `id` cannot answer it — so every lookup of
+-- an atlas place by its index ref was a sequential scan of the whole table.
+--
+-- That is a hole anything reading the atlas falls into, and the feature
+-- harvest's estimate fell into it hard: seventy-three drawers, twenty places
+-- each, a scan apiece, and the request timed out at five and a half minutes
+-- against production. The estimate is now one aggregate query rather than
+-- seventy-three, which is the larger part of the fix, but the index is the
+-- part that makes every *other* reader of the atlas cheap as well.
+--
+-- Immutable by construction — `id` is a uuid and the cast and concatenation of
+-- one are both immutable — so it can be indexed as an expression.
+create index if not exists attractions_atlas_ref
+  on attractions ((('atlas:' || id::text)));

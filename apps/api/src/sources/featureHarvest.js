@@ -233,35 +233,72 @@ const USD = { input: 5 / 1_000_000, output: 25 / 1_000_000 };
 const GBP_PER_USD = 0.79;
 
 export async function estimate({ subcategories = null, size = SAMPLE_SIZE } = {}) {
-  const drawers = await harvestable({ subcategories });
-  const rows = [];
-  let inputTokens = 0;
-  for (const d of drawers) {
-    const places = await placesFor(d.key, { size });
-    const { pooled, kept, menus } = poolFor(places);
-    // The same eligibility rule the run uses. Counting a drawer the run will
-    // skip overstates the confirm number, the cost and the recorded calls —
-    // and the confirm number is the one thing a person reads before spending.
-    if (kept.length < ENOUGH_TO_ASK) continue;
-    const tokens = SYSTEM_TOKENS + Math.ceil(pooled.length / CHARS_PER_TOKEN);
-    inputTokens += tokens;
+  /**
+   * One aggregate query, not one per drawer.
+   *
+   * The first version called `placesFor` for every drawer — seventy-three
+   * round trips, each pulling twenty places' full text through a lateral join
+   * over the atlas — and timed out at five and a half minutes against
+   * production. Nothing about an estimate needs the text itself; it needs how
+   * much of it there is. So the length is summed in the database and the text
+   * stays there.
+   *
+   * `size` is applied with a window rather than a limit, because the estimate
+   * has to measure the same twenty places the run will read — the longest
+   * descriptions — and not all of them.
+   */
+  const { rows } = await query(
+    `with said as (
+       select p.subcategory,
+              length(concat_ws(' ', r.summary, a.summary)) as len,
+              row_number() over (
+                partition by p.subcategory
+                order by length(concat_ws(' ', r.summary, a.summary)) desc
+              ) as rank
+         from place_index p
+         left join place_records r on r.venue_ref = p.venue_ref
+         left join lateral (
+           select at.summary
+             from attractions at
+            where at.venue_ref = p.venue_ref
+               or ('atlas:' || at.id::text) = p.venue_ref
+            order by length(at.summary) desc nulls last
+            limit 1
+         ) a on true
+         join shelf_subcategories s on s.key = p.subcategory and s.active
+        where length(concat_ws(' ', r.summary, a.summary)) > 80
+          ${subcategories?.length ? 'and p.subcategory = any($2)' : ''}
+     )
+     select subcategory, count(*)::int as places, sum(len)::bigint as chars
+       from said
+      where rank <= $1
+      group by 1
+     having count(*) >= ${ENOUGH_TO_ASK}
+      order by count(*) desc`,
+    subcategories?.length ? [size, subcategories] : [size],
+  );
+
+  const drawers = rows.map((r) => ({
+    subcategory: r.subcategory,
+    places: r.places,
     // This drawer's own estimate, not the running total.
-    rows.push({ subcategory: d.key, label: d.label, places: kept.length, menusSkipped: menus, inputTokens: tokens });
-  }
-  const calls = rows.length;
+    inputTokens: SYSTEM_TOKENS + Math.ceil(Number(r.chars) / CHARS_PER_TOKEN),
+  }));
+  const inputTokens = drawers.reduce((n, d) => n + d.inputTokens, 0);
+  const calls = drawers.length;
   const outputTokens = calls * OUTPUT_TOKENS;
   const usd = inputTokens * USD.input + outputTokens * USD.output;
   return {
     calls,
     model: MODEL,
-    places: rows.reduce((n, r) => n + r.places, 0),
+    places: drawers.reduce((n, d) => n + d.places, 0),
     inputTokens,
     outputTokens,
     costUsd: Number(usd.toFixed(2)),
     costGbp: Number((usd * GBP_PER_USD).toFixed(2)),
     // The output half is the estimate's soft edge and the note says so.
     basis: `${calls} calls · input measured from the pooled text · output assumed at ${OUTPUT_TOKENS} tokens a call`,
-    drawers: rows,
+    drawers,
   };
 }
 
