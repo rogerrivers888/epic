@@ -24,7 +24,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
 import { Press } from '../../components/press';
 import { desk, fonts, LIME } from '../../theme';
-import { asOneOf, asText, useQueryState } from '../../router';
+import { asOneOf, asText, useQueryState, useRouter } from '../../router';
 import { api } from '../../api';
 import type {
   FilingCategories, FilingCategory, FilingExcluded, FilingLabels, FilingOverview,
@@ -51,11 +51,12 @@ const TAB_LABEL: Record<Tab, string> = {
 const MIN_WIDTH = 1180;
 
 export function Filing({ canManage }: { canManage: boolean }) {
-  const [tab, setTab] = useQueryState<Tab>('tab', 'overview', asOneOf(TABS, 'overview'));
-  const [cat, setCat] = useQueryState<string>('cat', '', asText);
-  const [sub, setSub] = useQueryState<string>('sub', '', asText);
-  const [set, setSet] = useQueryState<string>('set', '', asText);
-  const [view, setView] = useQueryState<string>('view', '', asText);
+  const { setQuery } = useRouter();
+  const [tab] = useQueryState<Tab>('tab', 'overview', asOneOf(TABS, 'overview'));
+  const [cat] = useQueryState<string>('cat', '', asText);
+  const [sub] = useQueryState<string>('sub', '', asText);
+  const [set] = useQueryState<string>('set', '', asText);
+  const [view] = useQueryState<string>('view', '', asText);
 
   const [overview, setOverview] = useState<FilingOverview | null>(null);
   const [categories, setCategories] = useState<FilingCategories | null>(null);
@@ -133,15 +134,33 @@ export function Filing({ canManage }: { canManage: boolean }) {
     }
   }, [load, said]);
 
+  /**
+   * Move, as one write to the address.
+   *
+   * `setQuery` reads the live address rather than the render's, so several
+   * calls in a handler do compose — but they are several history entries, and
+   * a Back out of a drawer would then step through the four intermediate
+   * addresses nobody was ever on. One patch, one entry.
+   *
+   * **A move pushes and a filter replaces** (the house rule). Changing tab or
+   * opening a drawer is a move: Back should come out of it. Everything else
+   * here is a setting of the page you are already on, and `setQuery` replaces
+   * by default, which is why the distinction has to be made explicitly.
+   */
   const go = useCallback((next: Partial<{ tab: Tab; cat: string; sub: string; set: string; view: string }>) => {
-    // Order matters: the tab last, so the layer state is in place before the
-    // effect that reads it fires.
-    if (next.cat !== undefined) setCat(next.cat);
-    if (next.sub !== undefined) setSub(next.sub);
-    if (next.set !== undefined) setSet(next.set);
-    if (next.view !== undefined) setView(next.view);
-    if (next.tab !== undefined) setTab(next.tab);
-  }, [setCat, setSub, setSet, setView, setTab]);
+    const patch: Record<string, string | null> = {};
+    const put = (k: string, v: string | undefined) => {
+      if (v === undefined) return;
+      patch[k] = v === '' ? null : v;
+    };
+    put('cat', next.cat);
+    put('sub', next.sub);
+    put('set', next.set);
+    put('view', next.view);
+    if (next.tab !== undefined) patch.tab = next.tab === 'overview' ? null : next.tab;
+    const moved = next.tab !== undefined || Boolean(next.cat) || Boolean(next.sub) || Boolean(next.set);
+    setQuery(patch, { replace: !moved });
+  }, [setQuery]);
 
   const root = (t: Tab) => go({ tab: t, cat: '', sub: '', set: '', view: '' });
 

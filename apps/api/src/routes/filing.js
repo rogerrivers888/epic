@@ -22,6 +22,9 @@
  *   GET  /labels/vocabulary            our own labels, and where each is asked
  *   PUT  /mapping/:word                where one of Google's words points
  *   PUT  /mapping/:word/carries        a fact riding along on what it brings
+ *   GET  /rows                         the rows a household browses, and their fill
+ *   PUT  /rows/:id                     its words, or its rule
+ *   POST /rows/:id/heart               heart it, as somebody
  *
  * Nothing here calls a provider. Every number comes from the index, the owned
  * records, the search log and the rules, so a screen can be refreshed as often
@@ -37,6 +40,8 @@ import * as questionSets from '../repositories/questionSets.js';
 import * as labelRepo from '../repositories/taxonomyLabels.js';
 import * as shelfRules from '../repositories/shelfRules.js';
 import * as shelfTaxonomy from '../repositories/shelfTaxonomy.js';
+import * as browseRows from '../repositories/browseRows.js';
+import { currentHousehold } from './household.js';
 import * as taxonomyAudit from '../repositories/taxonomyAudit.js';
 import { CORPUS_OPENS, auditAll } from '../domain/taxonomyAudit.js';
 import { setThreshold, thresholds, thresholdValues } from '../repositories/settings.js';
@@ -1018,5 +1023,126 @@ filingRoutes.put('/mapping/:word/carries', requires('manage_library'), async (re
     }
     await placeAttributes.setCarries(`google:${word}`, attribute, value);
     res.json({ word, attribute, on, said: `${attr.label} ${on ? 'carried by' : 'off'} ${word}` });
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// Rows — the long list a household browses
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /rows — every row, what its rule returns in each district, and its hearts.
+ *
+ * The fill is the expensive part and the reason it is one pass: forty rules
+ * against every place is forty full scans if each row fetches for itself.
+ *
+ * `share` is null where nobody has hearted a row, which is a different fact
+ * from nought — "nobody has yet" and "households looked and declined" read
+ * differently, and a screen handed 0 cannot tell them apart.
+ */
+filingRoutes.get('/rows', requires('view_library'), async (req, res, next) => {
+  try {
+    const [list, ctx, dists, limits, household] = await Promise.all([
+      browseRows.rows(), browseRows.pool(), browseRows.districts(), thresholdValues(), currentHousehold(),
+    ]);
+    const [hearts, { shares, households }] = await Promise.all([
+      browseRows.heartsFor(household?.id ?? null), browseRows.shares(),
+    ]);
+
+    // The labels a shorthand is rendered with: our own attributes, plus the
+    // drawers and cabinets a rule can name.
+    const labels = new Map([
+      ...[...ctx.attributes].map(([k, a]) => [k, { label: a.label }]),
+      ...[...ctx.subcategories].map(([k, s]) => [k, { label: s.label }]),
+      ...ctx.categories.map((c) => [c.key, { label: c.label }]),
+    ]);
+
+    const rows = list.map((r) => {
+      const { fill, total } = browseRows.fillFor(r, ctx, dists.districts);
+      const heart = hearts.get(r.key) ?? null;
+      return {
+        id: r.key,
+        group: r.grouping,
+        title: r.title,
+        copy: r.copy ?? '',
+        rule: browseRows.shorthand(r.predicate, labels),
+        // The rule itself, so the screen can edit it as structure rather than
+        // as a caption it cannot parse back.
+        predicate: r.predicate,
+        fill,
+        total,
+        // Below the minimum fill *somewhere*: a row that works in one district
+        // and is empty in another is the case the preview exists to find.
+        thin: dists.districts.some((d) => (fill[d.code]?.count ?? 0) < limits.minRowFill),
+        // Why it is empty, where it is: a gap in what we have asked and a gap
+        // in what exists want different fixes and must not look the same.
+        why: total === 0 ? browseRows.emptyBecause(r, ctx) : null,
+        hearted: Boolean(heart),
+        heartedBy: heart?.name ?? null,
+        heartedDays: heart ? Math.floor((Date.now() - new Date(heart.hearted_at).getTime()) / 86400000) : null,
+        share: shares.get(r.key) ?? null,
+      };
+    });
+
+    const { rows: members } = await query(
+      `select id, name, is_minor, birth_year, birth_date from members
+        where household_id = $1 order by is_minor, name`, [household?.id ?? null]);
+
+    res.json({
+      rows,
+      districts: dists.districts.map((d) => ({ code: d.code, town: d.code, density: d.density, places: d.places })),
+      // Said rather than padded: three districts that differ is the whole
+      // point of the preview, and inventing them would make it a picture of
+      // somewhere Epic holds nothing.
+      districtsNote: dists.enough
+        ? `previewed in three districts · ${dists.districts.map((d) => `${d.code} ${d.density}`).join(' · ')}`
+        : `not enough places to preview a row in three districts — ${
+          dists.districts.map((d) => `${d.code} holds ${d.places}`).join(' · ')}`,
+      members: members.map((m) => ({
+        id: m.id, name: m.name,
+        role: m.is_minor ? 'child' : 'adult',
+        age: m.birth_year ? new Date().getFullYear() - m.birth_year : null,
+      })),
+      household: household ? { id: household.id, name: household.name ?? null } : null,
+      households,
+      minFill: limits.minRowFill,
+    });
+  } catch (err) { next(err); }
+});
+
+/** PUT /rows/:id — its words, or its rule. The rule is checked before it is kept. */
+filingRoutes.put('/rows/:id', requires('manage_library'), async (req, res, next) => {
+  try {
+    const ctx = await browseRows.pool();
+    const row = await browseRows.save(String(req.params.id), {
+      title: req.body?.title,
+      copy: req.body?.copy,
+      predicate: req.body?.predicate,
+    }, {
+      attributes: ctx.attributes,
+      subcategories: new Set(ctx.subcategories.keys()),
+      categories: new Set(ctx.categories.map((c) => c.key)),
+    });
+    res.json({ row });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST /rows/:id/heart — heart it, or take it back.
+ *
+ * `member` is required and is the first-heart question's answer. Hearting with
+ * nobody chosen is not a heart to drop quietly; it is a question the screen
+ * has to ask, so this refuses and says so rather than guessing an owner.
+ */
+filingRoutes.post('/rows/:id/heart', requires('manage_library'), async (req, res, next) => {
+  try {
+    const household = await currentHousehold();
+    if (!household) throw bad('Which household? Nobody is signed in to one.');
+    const memberId = req.body?.member ? String(req.body.member) : null;
+    if (!memberId) throw bad('Whose list is this? Pick somebody first.');
+    const out = await browseRows.heart(String(req.params.id), {
+      householdId: household.id, memberId, on: req.body?.on !== false,
+    });
+    res.json({ row: req.params.id, hearted: Boolean(out) });
   } catch (err) { next(err); }
 });
