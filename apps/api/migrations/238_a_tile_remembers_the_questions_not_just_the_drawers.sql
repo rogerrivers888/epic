@@ -1,0 +1,22 @@
+-- A tile remembers which questions it was asked, not only which drawers.
+--
+-- A typed rule for High ropes & zip lines landed at 06:40 this morning, an
+-- hour and a half into the London run: `google:adventure_sports_center`, a real
+-- Table A type for the Go Ape kind of place. Twenty tiles had already been
+-- finished by then, and nothing would ever have asked them the new question —
+-- a tile is re-opened when the plan gains a *drawer*, and this was an existing
+-- drawer gaining a *question*.
+--
+-- That is the one failure the brief says cannot be repaired afterwards. A
+-- mapping change re-maps for free, but an unasked question has no answer to
+-- re-map: those twenty tiles would have carried a ropes count from a different
+-- question than the other four hundred, and the region's number for that drawer
+-- would have been a sum of two different questions wearing one name.
+--
+-- Reconciling every tile against every question costs a hundred and thirty
+-- thousand probes, which is not a thing to do once a minute for the sake of a
+-- taxonomy that changes twice a day. So the run keeps the signature of the plan
+-- it last reconciled against: when it is unchanged there is nothing to do, and
+-- when it changes the tiles are checked once and the drawers whose questions
+-- moved are asked again — those drawers only, on those tiles only.
+alter table census_runs add column if not exists plan_signature text;

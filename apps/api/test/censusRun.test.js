@@ -640,3 +640,66 @@ test('the day\'s budget is the project\'s, not the region\'s', async (t) => {
   assert.ok(after.day_requests >= 41, `the other region's requests are part of today (${after.day_requests})`);
   assert.equal(after.state, 'waiting', 'so it stops for the day rather than spending twice over');
 });
+
+test('a drawer that gains a question is asked again, and only that drawer', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from shelf_rules where subject = 'google:test_second_question'`);
+    await clean();
+  });
+  const run = await startTestRun({ label: 'test new question' });
+  await seedTile(run, 'test/newquestion');
+
+  const first = [];
+  await withCensus(async ({ includedType }) => {
+    first.push(includedType);
+    return { places: [{ id: `ChIJrun_test_q${first.length}`, rank: 1 }], requests: 1, saturated: false, problem: null };
+  }, () => advance({ runId: run.id, budgetMs: 30_000 }));
+  const { rows: [done] } = await query(`select state, done_subcategories from census_tiles where grid_key = 'test/newquestion'`);
+  assert.equal(done.state, 'done');
+  const answered = done.done_subcategories.length;
+
+  // A typed rule lands on a drawer that already exists and was already
+  // answered. This is not a new drawer, so the drawer-level re-open cannot see
+  // it — and it is exactly what happened to High ropes & zip lines an hour and
+  // a half into the London run (21 Sep 2026).
+  const { rows: [existing] } = await query(
+    `select r.subcategory from shelf_rules r join shelf_subcategories s on s.key = r.subcategory
+      where r.scope = 'labels' and s.active limit 1`);
+  if (!existing) return;
+  await query(
+    `insert into shelf_rules (scope, subject, labels, subcategory, weights, reason)
+     values ('labels', 'google:test_second_question', array['google:museum'], $1, '{}'::jsonb, 'landed mid-run')`,
+    [existing.subcategory]);
+  await query(`update census_runs set state = 'running', finished_at = null where id = $1`, [run.id]);
+
+  const second = [];
+  await withCensus(async ({ includedType }) => {
+    second.push(includedType);
+    return { places: [], requests: 1, saturated: false, problem: null };
+  }, () => advance({ runId: run.id, budgetMs: 30_000 }));
+
+  const { rows: [again] } = await query(
+    `select state, done_subcategories from census_tiles where grid_key = 'test/newquestion'`);
+  assert.equal(again.state, 'done', 'the tile was finished again');
+  assert.equal(again.done_subcategories.length, answered, 'with the same drawers answered');
+  // Only the drawer whose questions moved, and only its missing question: the
+  // checkpoint keeps the rest, so this costs one question rather than the plan.
+  assert.ok(second.length < first.length,
+    `only the changed drawer was re-asked (${second.length} questions against ${first.length})`);
+  assert.ok(second.includes('museum'), 'and the new question is among them');
+});
+
+test('a plan that has not changed re-opens nothing', async (t) => {
+  await clean();
+  t.after(clean);
+  const run = await startTestRun({ label: 'test unchanged plan' });
+  await seedTile(run, 'test/unchanged');
+  await withCensus(answers(1), () => advance({ runId: run.id, budgetMs: 30_000 }));
+
+  await query(`update census_runs set state = 'running', finished_at = null where id = $1`, [run.id]);
+  const asked = [];
+  await withCensus(async ({ includedType }) => { asked.push(includedType); return { places: [], requests: 1, saturated: false, problem: null }; },
+    () => advance({ runId: run.id, budgetMs: 10_000 }));
+  assert.equal(asked.length, 0, 'a settled taxonomy costs nothing to check');
+});

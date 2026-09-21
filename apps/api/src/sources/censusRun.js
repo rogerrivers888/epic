@@ -394,6 +394,89 @@ async function reopenForNewDrawers(runId) {
   return { reopened: rowCount };
 }
 
+/**
+ * The signature of the plan: every question, in order, as one string.
+ *
+ * A question is a type *and* the words sent with it. Keyed on the type alone,
+ * "sports_activity_location + climbing wall" and "sports_activity_location +
+ * bouldering centre" are the same question — and those are exactly the drawers
+ * Google has no word for, which is where the whole risk lives (Codex, 21 Sep
+ * 2026, on the detector next door).
+ */
+const signatureOf = (plan) => plan
+  .flatMap((p) => p.questions.map((q) => `${p.subcategory}|${q.type ?? ''}|${q.words ?? q.type ?? ''}`))
+  .sort()
+  .join('\n');
+
+/**
+ * Tiles finished before a drawer's questions changed.
+ *
+ * Not the same thing as a new drawer, and the difference cost twenty tiles this
+ * morning: a typed rule for High ropes & zip lines landed an hour and a half
+ * into the London run, and those tiles were already done with the drawer marked
+ * answered, so nothing would ever have asked them the new question. The
+ * region's ropes number would have been a sum of two different questions
+ * wearing one name.
+ *
+ * Only the drawers whose questions moved, and only on the tiles that missed
+ * them: the checkpoint keeps everything else, so a tile re-opened this way pays
+ * for one question rather than two hundred and eighty-one.
+ *
+ * Reconciling every tile against every question is a hundred and thirty
+ * thousand probes, so it runs when the plan has actually changed and not once a
+ * minute. The run remembers the signature it last reconciled against.
+ */
+async function reopenForChangedQuestions(runId) {
+  const plan = await slicePlan();
+  if (!plan.length) return { reopened: 0 };
+  const signature = signatureOf(plan);
+  const { rows: [run] } = await query('select plan_signature from census_runs where id = $1', [runId]);
+  if (run?.plan_signature === signature) return { reopened: 0, unchanged: true };
+
+  const subs = []; const types = []; const queries = [];
+  for (const p of plan) {
+    for (const q of p.questions) {
+      subs.push(p.subcategory);
+      types.push(q.type ?? null);
+      // What `sliceDown` writes: the words where there are words, the type's
+      // own words otherwise. The pair is the question.
+      queries.push(q.words ?? q.type);
+    }
+  }
+
+  const { rows } = await query(
+    `with plan as (
+       select * from unnest($2::text[], $3::text[], $4::text[]) as p(subcategory, gtype, q)
+     ), short as (
+       select t.grid_key, array_agg(distinct p.subcategory) as drawers
+         from census_tiles t
+         join plan p on p.subcategory = any(t.done_subcategories)
+        where t.run_id = $1 and t.state = 'done'
+          and not exists (
+            select 1 from census_slices s
+             where s.area_slug = t.grid_key
+               and s.subcategory = p.subcategory
+               and s.google_type is not distinct from p.gtype
+               and s.query is not distinct from p.q
+               -- A refused slice is a question that was asked and not
+               -- answered, which is not an answer to re-map.
+               and s.problem is null
+               and s.ran_at >= coalesce(t.started_at, t.censused_at))
+        group by t.grid_key
+     )
+     update census_tiles t
+        set state = 'todo',
+            done_subcategories = coalesce(
+              (select array_agg(d) from unnest(t.done_subcategories) d
+                where d <> all (short.drawers)), '{}'::text[])
+       from short
+      where short.grid_key = t.grid_key
+      returning t.grid_key`, [runId, subs, types, queries]);
+
+  await query('update census_runs set plan_signature = $2 where id = $1', [runId, signature]);
+  return { reopened: rows.length };
+}
+
 /** A rate limiter that is a rate, not a sleep between tiles. */
 const paceAt = (perSec) => {
   const gap = perSec > 0 ? 1000 / perSec : 0;
@@ -438,6 +521,7 @@ export async function advance({ runId = null, budgetMs = SLICE_MS, now = () => D
   // answered, and it keeps its `started_at` — one census of that tile, carried
   // on, not a second one.
   await reopenForNewDrawers(run.id);
+  await reopenForChangedQuestions(run.id);
 
   while (now() < until) {
     const { rows: [fresh] } = await query(
