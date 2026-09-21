@@ -236,9 +236,42 @@ export async function osmCountsForBox(box, { subcategories = null, chunk = SELEC
  * authorities cover London and the home counties — and every tile in them is
  * counted from the same download.
  */
+/**
+ * How long to leave between two questions to the register, and how long to
+ * leave it alone once it has said no.
+ *
+ * The register is a free government service with no key and no published rate
+ * limit, and it answered 403 the first time a sweep asked it six times in a few
+ * seconds (21 Sep 2026). So the calls are spaced, and a refusal buys it ten
+ * minutes off rather than being retried — the same rule `sources/overpass.js`
+ * keeps for the map mirrors, and for the same reason: there is nobody waiting
+ * on a ground count, and being rude to a service that costs nothing is how it
+ * stops costing nothing.
+ */
+const FHRS_PAUSE_MS = Number(process.env.EPIC_FHRS_PAUSE_MS || 400);
+const FHRS_COOL_OFF_MS = 10 * 60_000;
+let fhrsNextAt = 0;
+let fhrsRestingUntil = 0;
+
+/** Is the register having its ten minutes? */
+export const fhrsResting = () => fhrsRestingUntil > Date.now();
+
 async function fhrsPage(path) {
+  if (fhrsResting()) {
+    throw Object.assign(new Error('the register is resting after a refusal'), { resting: true });
+  }
+  const wait = fhrsNextAt - Date.now();
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  fhrsNextAt = Date.now() + FHRS_PAUSE_MS;
   const res = await fetch(`${FHRS_ROOT}${path}`, { headers: FHRS_HEADERS, signal: AbortSignal.timeout(30_000) });
-  if (!res.ok) throw new Error(`FHRS ${res.status}`);
+  if (!res.ok) {
+    // 403 and 429 are both "you are asking too often" from this service; a 5xx
+    // is it being unwell. Either way the answer is to stop asking, not to ask
+    // again — a pass that retried through a refusal would turn one rude minute
+    // into an hour of them.
+    if ([403, 429, 503].includes(res.status)) fhrsRestingUntil = Date.now() + FHRS_COOL_OFF_MS;
+    throw Object.assign(new Error(`FHRS ${res.status}`), { status: res.status });
+  }
   return res.json();
 }
 
@@ -455,7 +488,16 @@ export async function sweepFhrs({ authorities = 2, staleDays = 30, msBudget = 50
       limit 2000`, [String(staleDays)]);
   if (!tiles.length) return { authorities: 0, tiles: 0, requests: 0, problems: [] };
 
-  const byCode = await register.authorities().catch(() => new Map());
+  // The register's own list of councils. Empty is not fatal — the probe names
+  // the council either way — but without the numeric id nothing can be
+  // downloaded, so a pass that cannot get it says so rather than working
+  // through every tile finding no id.
+  let byCode;
+  try {
+    byCode = await register.authorities();
+  } catch (err) {
+    return { authorities: 0, tiles: 0, requests: 1, problems: [`the register would not list its councils: ${err.message}`] };
+  }
   let requests = 1;
   const problems = [];
   const boxOf = (t) => ({ minLat: Number(t.min_lat), minLng: Number(t.min_lng), maxLat: Number(t.max_lat), maxLng: Number(t.max_lng) });
@@ -508,7 +550,17 @@ export async function sweepFhrs({ authorities = 2, staleDays = 30, msBudget = 50
     let next = null; let code = null;
     for (const t of tiles) {
       if (settled.has(t.grid_key)) continue;
-      const want = await councilsFor(t);
+      let want;
+      try {
+        want = await councilsFor(t);
+      } catch (err) {
+        // Asking which councils a tile is in is the one call that happens per
+        // tile, so it is where a refusal is met first. It ends the pass with
+        // the reason on the record; the loop comes round again in five minutes
+        // and the register will have finished resting.
+        problems.push(`${t.grid_key}: ${err.message}`);
+        return { authorities: done, tiles: settled.size, waiting: tiles.length - settled.size, requests, problems };
+      }
       if (Date.now() - began > msBudget) break;
       if (!want.size) {
         // Not one inspected kitchen within a mile of any of its five points.

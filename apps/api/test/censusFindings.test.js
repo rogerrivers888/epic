@@ -326,3 +326,25 @@ test('a ground count a month old is counted again, not simply re-dated', async (
   const { rows: tile } = await query(`select fhrs_at from census_tiles where grid_key = $1`, [gridKey]);
   assert.ok(new Date(tile[0].fhrs_at).getTime() > Date.now() - 60_000, 'dated today, on the strength of a count taken today');
 });
+
+test('a refusal from the register ends the pass, not the process', async () => {
+  // It answered 403 the first time a sweep asked it six times in a few seconds
+  // (21 Sep 2026), and the throw came out of the pass and killed it. A free
+  // service with no key and no published limit gets spacing and, once it says
+  // no, ten minutes off.
+  const gridKey = 'test/ground/refused';
+  await aCensusedTile({ gridKey, outcodes: ['ZZ91'], subcategory: 'restaurants', places: 0 });
+  await query(`update census_tiles set fhrs_at = null, fhrs_authorities = null where grid_key = $1`, [gridKey]);
+
+  const register = {
+    authorities: async () => new Map([['701', { id: 701, name: 'A borough' }]]),
+    councilsFor: async () => { throw Object.assign(new Error('FHRS 403'), { status: 403 }); },
+    points: async () => ({ points: [] }),
+  };
+  const out = await ground.sweepFhrs({ authorities: 1, register });
+  assert.equal(out.authorities, 0);
+  assert.ok(out.problems.some((p) => p.includes('403')), 'the reason is on the record rather than in a stack trace');
+
+  const { rows } = await query(`select fhrs_at from census_tiles where grid_key = $1`, [gridKey]);
+  assert.equal(rows[0].fhrs_at, null, 'and the tile is not dated on the strength of a refusal');
+});
