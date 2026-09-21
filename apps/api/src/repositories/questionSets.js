@@ -124,6 +124,32 @@ export async function setForSubcategory(subcategoryKey) {
  * the set answer yes" — and it is read from the answers rather than kept,
  * because it changes every time a place is enriched.
  */
+/**
+ * Every question, of every set, plus the global ones.
+ *
+ * Not `questionsFor(null)`. That reads `q.scope = 'global' or q.set_key = $1`
+ * with `$1` null, and `set_key = NULL` is never true in SQL — so it returns
+ * the globals alone, which is exactly what its one other caller wants and is
+ * a trap for anybody who reads the name and expects all of them. Asking for
+ * all of them is a different question and now has its own name (Codex via
+ * epic-f2, 21 Sep 2026).
+ */
+export async function everyQuestion() {
+  const { rows } = await query(
+    `select q.*, a.label, a.kind, a.blurb, a.options, a.unit,
+            (select count(*) from place_answers pa where pa.question_id = q.id and pa.state = 'answered') as answered,
+            (select count(*) from place_answers pa where pa.question_id = q.id and pa.state = 'answered' and pa.yesno) as said_yes,
+            (select count(*) from place_answers pa where pa.question_id = q.id and pa.state = 'asked_nothing_found') as nothing_found
+       from questions q
+       join place_attributes a on a.key = q.attribute_key
+      where q.active
+      order by q.scope desc, q.position, a.label`);
+  return rows.map((r) => ({
+    ...r,
+    yesShare: Number(r.answered) > 0 ? Number(r.said_yes) / Number(r.answered) : null,
+  }));
+}
+
 export async function questionsFor(setKey = null) {
   const { rows } = await query(
     `select q.*, a.label, a.kind, a.blurb, a.options, a.unit,

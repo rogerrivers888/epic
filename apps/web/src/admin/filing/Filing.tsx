@@ -793,16 +793,29 @@ function householdRows(
 
   if (state === 'inspire') {
     const ready = hearted.filter((r) => !waiting(r));
+    /**
+     * Hearted rows rise, and unhearted ones stay *among* them.
+     *
+     * The handoff is specific that two or three sit mixed in rather than at
+     * the bottom: a list that only ever shows you what you have already said
+     * yes to has stopped being a way of finding anything.
+     *
+     * Counted off the insertion point and not off the list's length. The first
+     * attempt indexed `cold` by `mixed.length - ready.length + 1`, so whether
+     * an insertion happened at all depended on how many hearted rows there
+     * were — with five, the first was skipped; with one, nothing mixed in
+     * (Codex via epic-f2, 21 Sep 2026).
+     */
+    const AFTER = [1, 3, 5];
     const mixed: BrowseRowWithFill[] = [];
+    let next = 0;
     ready.forEach((r, i) => {
       mixed.push(r);
-      // After the second, and again after the fourth: discovery does not stop
-      // because somebody has hearted a few things.
-      if ((i === 1 || i === 3) && cold[mixed.length - ready.length + 1]) {
-        mixed.push(cold[Math.min(cold.length - 1, i === 1 ? 0 : 1)]);
-      }
+      if (AFTER.includes(i) && cold[next]) mixed.push(cold[next++]);
     });
-    return [...mixed, ...cold.slice(2, 5)].map(shelf);
+    // Where there were too few hearted rows to mix into, the rest follow — so
+    // a household with one heart still gets a list rather than one row.
+    return [...mixed, ...cold.slice(next, next + 3)].map(shelf);
   }
   if (state === 'thin') {
     const quiet = hearted.filter(waiting);
