@@ -87,21 +87,42 @@ Rules:
 /**
  * The places to read for one drawer, the best-described first.
  *
- * `summary` is the owned description — what `sources/own.js` researched from
- * the venue's own page, OSM and the open encyclopedias. It is the only long
- * text we may keep, and it is what this run reads. Places with nothing written
- * about them are not sampled at all: they would contribute no evidence and
- * would only make the drawer's denominator flattering.
+ * Three sources, and the third is the one that matters most. `place_records`
+ * is what `sources/own.js` researched from the venue's own page; `attractions`
+ * is the atlas — the open encyclopedias — and on this estate it holds four
+ * times as much long text as the records do. The free sweep already reads it
+ * and calls it "the richest free material there is"; reading only the records
+ * costed a 65-drawer job as a 14-drawer one, because most drawers looked empty
+ * when they were merely being read in the wrong place.
+ *
+ * An atlas place is in the index under its own id (`atlas:<uuid>`) *and* in
+ * `attractions` under the ref it was matched to, so both ways in are needed or
+ * half the atlas is invisible — the same trap `heldTextFor` documents.
+ *
+ * Places with nothing written about them anywhere are not sampled: they
+ * contribute no evidence and would only flatter the drawer's denominator.
  */
 async function placesFor(subcategory, { size = SAMPLE_SIZE } = {}) {
   const { rows } = await query(
-    `select p.venue_ref, r.name, r.postcode, r.summary, r.accessibility, r.experiences
+    `select p.venue_ref,
+            r.name,
+            r.postcode,
+            r.accessibility,
+            r.experiences,
+            concat_ws(' ', r.summary, a.summary) as summary
        from place_index p
-       join place_records r on r.venue_ref = p.venue_ref
+       left join place_records r on r.venue_ref = p.venue_ref
+       left join lateral (
+         select at.summary
+           from attractions at
+          where at.venue_ref = p.venue_ref
+             or ('atlas:' || at.id::text) = p.venue_ref
+          order by length(at.summary) desc nulls last
+          limit 1
+       ) a on true
       where p.subcategory = $1
-        and r.summary is not null
-        and length(r.summary) > 80
-      order by length(r.summary) desc
+        and length(concat_ws(' ', r.summary, a.summary)) > 80
+      order by length(concat_ws(' ', r.summary, a.summary)) desc
       limit $2`,
     [subcategory, size],
   );
@@ -247,17 +268,24 @@ export async function estimate({ subcategories = null, size = SAMPLE_SIZE } = {}
 /** Drawers worth asking about: active, and with places that have text. */
 export async function harvestable({ subcategories = null } = {}) {
   const { rows } = await query(
-    `select s.key, s.label, count(r.venue_ref) as places
+    `select s.key, s.label, count(*) as places
        from shelf_subcategories s
        join place_index p on p.subcategory = s.key
-       join place_records r on r.venue_ref = p.venue_ref
+       left join place_records r on r.venue_ref = p.venue_ref
+       left join lateral (
+         select at.summary
+           from attractions at
+          where at.venue_ref = p.venue_ref
+             or ('atlas:' || at.id::text) = p.venue_ref
+          order by length(at.summary) desc nulls last
+          limit 1
+       ) a on true
       where s.active
-        and r.summary is not null
-        and length(r.summary) > 80
+        and length(concat_ws(' ', r.summary, a.summary)) > 80
         ${subcategories?.length ? 'and s.key = any($1)' : ''}
       group by 1, 2
-      having count(r.venue_ref) > 1
-      order by count(r.venue_ref) desc`,
+      having count(*) >= ${ENOUGH_TO_ASK}
+      order by count(*) desc`,
     subcategories?.length ? [subcategories] : [],
   );
   return rows;
