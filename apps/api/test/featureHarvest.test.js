@@ -178,3 +178,53 @@ test('a real day range is still stripped', () => {
   assert.doesNotMatch(strip('Open Sa-Su. Parking free.'), /Sa-Su/i);
   assert.match(strip('Open Sa-Su. Parking free.'), /Parking/);
 });
+
+// --- what Codex found ------------------------------------------------------
+
+const { asserted } = await import('../src/sources/featureHarvest.js');
+
+test('an accessibility field we looked at and did not find is not a facility', () => {
+  // `own.js` writes a key for every field it checked, including the absent
+  // ones. Reading the keys alone presented all of them as things the place
+  // provides — so a drawer where nobody had a hearing loop would still have
+  // raised "hearing loop" as recurring, and the corpus check would have agreed,
+  // because the words really were in every place's text.
+  const { text } = textOf({
+    name: 'A', postcode: 'RG1', experiences: [],
+    summary: 'A lake with a boathouse and a jetty for hire.',
+    accessibility: { stepFree: true, hearingLoop: false, wheelchairToilet: null, audioGuide: 'no' },
+  });
+  assert.match(text, /step free/);
+  assert.doesNotMatch(text, /hearing/i);
+  assert.doesNotMatch(text, /wheelchair/i);
+  assert.doesNotMatch(text, /audio/i);
+});
+
+test('a camelCase accessibility key is said in words', () => {
+  // The extractor reads English; `stepFree` is a token and "step free" is a
+  // facility.
+  const { text } = textOf({
+    name: 'A', postcode: 'RG1', experiences: [], summary: 'A long enough description to keep.',
+    accessibility: { stepFree: true },
+  });
+  assert.match(text, /step free/);
+  assert.doesNotMatch(text, /stepFree/);
+});
+
+test('a feature word does not match inside an unrelated word', () => {
+  // "wave machine" counted a place saying "waveform" and "machinery" — two
+  // substrings, no feature, and the corpus check defeated.
+  const decoys = [
+    { ref: 'a', text: 'A waveform display and some machinery.' },
+    { ref: 'b', text: 'More machinery beside the waveform.' },
+  ];
+  assert.equal(countAcross({ name: 'Wave machine' }, decoys).seen, 0);
+});
+
+test('a plural is the same feature', () => {
+  const plural = [
+    { ref: 'a', text: 'Two wave machines.' },
+    { ref: 'b', text: 'One wave machine.' },
+  ];
+  assert.equal(countAcross({ name: 'Wave machine' }, plural).seen, 2);
+});

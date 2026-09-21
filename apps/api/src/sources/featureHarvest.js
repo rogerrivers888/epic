@@ -34,7 +34,7 @@
 
 import { z } from 'zod';
 
-import { MODEL, parseStructured } from '../claude.js';
+import { MODEL, SESSION_CALL_BOUND, parseStructured } from '../claude.js';
 import { query } from '../db.js';
 import { looksLikeMenu, namesOf, strip } from '../domain/boilerplate.js';
 import * as sets from '../repositories/questionSets.js';
@@ -111,6 +111,23 @@ async function placesFor(subcategory, { size = SAMPLE_SIZE } = {}) {
 /** A list column, however the record happens to hold it. */
 const listOf = (v) => (Array.isArray(v) ? v : []).map((x) => String(x)).filter(Boolean);
 
+/**
+ * The accessibility keys a place actually *has*, said in words.
+ *
+ * `own.js` writes a key for every field it looked at, including the ones it
+ * found absent or unknown — `{stepFree: false, hearingLoop: null}`. Reading the
+ * keys alone presents all of them as facilities the place provides, so a
+ * drawer where nobody has a hearing loop would still have raised "hearing
+ * loop" as a feature recurring across it, with the corpus check agreeing,
+ * because the words really were in every place's text (Codex, 21 Sep 2026).
+ *
+ * The keys are camelCase and the extractor reads English, so they are spaced
+ * out on the way: `stepFree` is a step free entrance, not a token.
+ */
+export const asserted = (accessibility) => Object.entries(accessibility ?? {})
+  .filter(([, v]) => v === true || v === 'yes' || v === 'limited')
+  .map(([k]) => String(k).replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase());
+
 /** One place's text, cleaned, with menus routed away from the feature path. */
 export function textOf(place) {
   const names = namesOf({ name: place.name, town: place.postcode });
@@ -123,7 +140,7 @@ export function textOf(place) {
   const said = [
     place.summary,
     listOf(place.experiences).join(', '),
-    Object.keys(place.accessibility ?? {}).join(', '),
+    asserted(place.accessibility).join(', '),
   ];
   for (const raw of said) {
     if (!raw) continue;
@@ -164,17 +181,28 @@ export function poolFor(places) {
 export function countAcross(feature, kept) {
   const words = String(feature.name).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
   if (!words.length) return { seen: 0, on: [] };
+  // Every word of the feature, as a *word*. `includes` let each token match
+  // inside an unrelated one, so "wave machine" counted a place that said
+  // "waveform" and "machinery" — two substrings, no feature, and the corpus
+  // check this function exists to be had been defeated (Codex, 21 Sep 2026).
+  //
+  // A trailing `s` or `es` is allowed, because "wave machines" and "wave
+  // machine" are the same feature and a household says both.
+  const res = words.map((w) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:e?s)?\\b`, 'i'));
   const on = [];
   for (const place of kept) {
-    const hay = place.text.toLowerCase();
-    // Every significant word of the feature has to be present, and the first
-    // one has to be present as a word rather than inside another.
-    const all = words.every((w) => hay.includes(w));
-    const head = new RegExp(`\\b${words[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i').test(hay);
-    if (all && head) on.push(place.ref);
+    if (res.every((re) => re.test(place.text))) on.push(place.ref);
   }
   return { seen: on.length, on };
 }
+
+/**
+ * Two places is the least that can show something recurring.
+ *
+ * Used by the estimate and by the run, so the number a run is confirmed against
+ * is the number of calls it will actually make.
+ */
+export const ENOUGH_TO_ASK = 2;
 
 /** Is the evidence quote actually in the text we sent? */
 export function evidenced(feature, pooled) {
@@ -206,10 +234,14 @@ export async function estimate({ subcategories = null, size = SAMPLE_SIZE } = {}
   for (const d of drawers) {
     const places = await placesFor(d.key, { size });
     const { pooled, kept, menus } = poolFor(places);
-    if (!kept.length) continue;
+    // The same eligibility rule the run uses. Counting a drawer the run will
+    // skip overstates the confirm number, the cost and the recorded calls —
+    // and the confirm number is the one thing a person reads before spending.
+    if (kept.length < ENOUGH_TO_ASK) continue;
     const tokens = SYSTEM_TOKENS + Math.ceil(pooled.length / CHARS_PER_TOKEN);
     inputTokens += tokens;
-    rows.push({ subcategory: d.key, label: d.label, places: kept.length, menusSkipped: menus, inputTokens });
+    // This drawer's own estimate, not the running total.
+    rows.push({ subcategory: d.key, label: d.label, places: kept.length, menusSkipped: menus, inputTokens: tokens });
   }
   const calls = rows.length;
   const outputTokens = calls * OUTPUT_TOKENS;
@@ -257,7 +289,7 @@ export async function harvestable({ subcategories = null } = {}) {
 export async function featuresIn(subcategory, { size = SAMPLE_SIZE, householdId = null, sessionId = null } = {}) {
   const places = await placesFor(subcategory, { size });
   const { pooled, kept, menus } = poolFor(places);
-  if (kept.length < 2) {
+  if (kept.length < ENOUGH_TO_ASK) {
     // Two places cannot show what recurs. Saying so is a real answer.
     return { subcategory, read: kept.length, menusSkipped: menus, features: [], tooThin: true, why: 'fewer than two places have text to read' };
   }
@@ -310,6 +342,25 @@ export async function run({ subcategories = null, size = SAMPLE_SIZE, confirm = 
   if (Number(confirm) !== plan.calls) {
     const err = new Error(`This run is ${plan.calls} calls at about £${plan.costGbp}. Confirm with that number to run it.`);
     err.code = 'confirm_required';
+    err.status = 409;
+    err.plan = plan;
+    throw err;
+  }
+
+  /**
+   * A run longer than the session allowance would spend and then die.
+   *
+   * `parseStructured` asserts the session bound before every call, so a
+   * fifty-nine drawer run on one session pays for the first forty, writes
+   * their candidates, and then fails — with no resume, and the money already
+   * gone (Codex, 21 Sep 2026). Refused up front, with the number that would
+   * fit, rather than discovered two thirds of the way through.
+   */
+  if (sessionId && plan.calls > SESSION_CALL_BOUND) {
+    const err = new Error(
+      `This run is ${plan.calls} calls and a session may make ${SESSION_CALL_BOUND}. `
+      + 'Scope it to fewer subcategories, or run it without a session.');
+    err.code = 'over_session_bound';
     err.status = 409;
     err.plan = plan;
     throw err;

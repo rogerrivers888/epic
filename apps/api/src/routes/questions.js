@@ -370,7 +370,15 @@ questionRoutes.post('/harvest/features', requires('manage_questions'), async (re
       householdId: household?.id ?? null,
       sessionId: req.session?.id ?? null,
     }));
-  } catch (err) { next(err); }
+  } catch (err) {
+    // The 409 has to carry the estimate, or "confirm with that number" names a
+    // number the caller cannot see. The global handler serialises `error` and
+    // `message` only and drops `err.plan` (Codex, 21 Sep 2026).
+    if (err?.code === 'confirm_required' || err?.code === 'over_session_bound') {
+      return res.status(409).json({ error: err.code, message: err.message, plan: err.plan ?? null });
+    }
+    return next(err);
+  }
 });
 
 /** What the feature pass would cost, without running it. */
