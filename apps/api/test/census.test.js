@@ -504,3 +504,70 @@ test('the words go to Google as the query, and the type still fences the answer'
   await query(`delete from area_counts where area_slug = 'census-test-words'`);
   await query(`delete from place_subcategories where area_slug = 'census-test-words'`);
 });
+
+// ---------------------------------------------------------------------------
+// the mask, and the money it is supposed to mean
+// ---------------------------------------------------------------------------
+
+test('every request the census makes is ledgered, at the free tier, even when it is interrupted', async () => {
+  // Owner, 21 Sep 2026: a test asserting the field mask and the ledgered cost.
+  // Those are two claims and they are checked against each other here: the mask
+  // the census actually sends, and the money the ledger records for having sent
+  // it. Either one alone can be true while the pair is wrong.
+  const plan = await slicePlan();
+  if (!plan.length) return;
+
+  // What the census asks for, and what that costs. `CENSUS_FIELDS` is not
+  // exported on purpose, so this asserts the tier through the one function that
+  // prices it — which is what Google charges on.
+  assert.equal(skuFor('places.id,nextPageToken', '/places:searchText'), 'google-essentials');
+  assert.equal(costOf({ google: 250, 'google-essentials': 250 }), 0, 'IDs Only is free at any volume');
+
+  const before = (await query(
+    `select coalesce(sum((units->>'google')::int), 0)::int n,
+            coalesce(sum(estimated_cost_usd), 0)::float usd
+       from provider_calls where purpose = 'census.slice'`)).rows[0];
+
+  // A drawer that throws part way through. Before the meter was written down as
+  // it went, everything asked before the throw was recorded in `census_slices`
+  // and never reached the ledger: 48,523 asked against 47,408 ledgered on the
+  // London run. It costs nothing while the mask is free, which is precisely why
+  // it matters — the ledger is what would catch the mask drifting.
+  let asked = 0;
+  const impl = async ({ meter }) => {
+    asked += 1;
+    // What `call()` does to the meter for one request at the census's mask.
+    meter.google = (meter.google ?? 0) + 1;
+    meter['google-essentials'] = (meter['google-essentials'] ?? 0) + 1;
+    if (asked > 120) throw new Error('connection reset by peer');
+    return { places: [place(asked)], requests: 1, saturated: false, problem: null };
+  };
+
+  await assert.rejects(() => withCensus(impl, () => censusArea({
+    areaSlug: 'census-test-ledger', outcode: 'ZZ96', box: BOX,
+  })), /connection reset/);
+
+  const after = (await query(
+    `select coalesce(sum((units->>'google')::int), 0)::int n,
+            coalesce(sum(estimated_cost_usd), 0)::float usd
+       from provider_calls where purpose = 'census.slice'`)).rows[0];
+
+  assert.equal(after.n - before.n, asked,
+    `every request asked is a request ledgered (${asked} asked, ${after.n - before.n} ledgered)`);
+  assert.equal(after.usd - before.usd, 0, 'and the whole of it is free, which is the claim the policy rests on');
+
+  await query(`delete from census_slices where area_slug = 'census-test-ledger'`);
+  await query(`delete from area_counts where area_slug = 'census-test-ledger'`);
+  await query(`delete from place_subcategories where area_slug = 'census-test-ledger'`);
+});
+
+test('a mask that asks for more than an id is not free, and the census would know', async () => {
+  // The guard the ledger exists to make possible. If somebody adds a field to
+  // the census's mask, the tier changes, the ledger stops reading nought, and
+  // `censusRun` stops the run on the first penny. That chain is only as good as
+  // its first link, so the first link is asserted.
+  assert.equal(skuFor('places.id,places.location,nextPageToken', '/places:searchText'), 'google-pro');
+  assert.ok(costOf({ google: 1, 'google-pro': 1 }) > 0, 'a point costs money');
+  assert.equal(skuFor('places.id,places.types,nextPageToken', '/places:searchText'), 'google-pro');
+  assert.ok(costOf({ google: 1, 'google-search': 1 }) > 0, 'and so does a rating');
+});

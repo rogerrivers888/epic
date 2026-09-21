@@ -233,6 +233,11 @@ async function sliceDown({ box, type, words = null, sourced = SOURCED.TYPE, cate
     }
   }
 
+  // Written down as it goes, not at the end. A drawer that is interrupted —
+  // by a deploy, by the stop control, by the day's budget — has still asked
+  // everything it asked.
+  await ledger(meter, householdId);
+
   const saturated = res.saturated && depth < MAX_DEPTH;
   const { rows: [row] } = await query(
     `insert into census_slices
@@ -315,6 +320,9 @@ export async function censusArea({
   // board showed empty drawers as fact (Codex, 19 Sep 2026).
   const done = [];
 
+  // The asking in a `try`, so that a throw — a dropped connection, a statement
+  // timeout — still writes down what it spent on the way out.
+  try {
   for (const { category, subcategory, questions } of plan) {
     for (const { type, words, sourced } of questions) {
       await sliceDown({ box, type, words, sourced, category, subcategory, areaSlug, outcode, householdId, runId, found, surfaced, meter, stats, pace });
@@ -329,14 +337,14 @@ export async function censusArea({
     done.push({ category, subcategory });
     onProgress?.({ subcategory, found: found.size, requests: stats.requests });
   }
-
-  // One ledger row for the whole census, metered at the tier it actually used.
-  // Priced at nought by `domain/providerPrices.js` — which is the point, and is
-  // the thing the first run is asked to demonstrate from the ledger rather than
-  // from a promise.
-  if (stats.requests) {
-    await providerCalls.record(householdId, 'google', 'census.slice', JSON.stringify(meter)).catch(() => null);
+  } finally {
+    await ledger(meter, householdId, { force: true });
   }
+
+  // Whatever is left, metered at the tier it actually used. Priced at nought by
+  // `domain/providerPrices.js` — which is the point, and is the thing the run
+  // is asked to demonstrate from the ledger rather than from a promise.
+  await ledger(meter, householdId, { force: true });
 
   const places = [...found.values()];
   // In chunks, because a census of a city centre is tens of thousands of places
@@ -375,6 +383,39 @@ export async function censusArea({
     // "this drawer was asked and there was nothing there".
     planned: plan.map((p) => p.subcategory),
   };
+}
+
+/**
+ * How many requests may go unledgered before the meter is written down.
+ *
+ * The ledger row used to be written once, at the end of the whole call — so a
+ * drawer interrupted part way through recorded every slice in `census_slices`
+ * and told `provider_calls` nothing. Measured on the London run: 48,523
+ * requests asked against 47,408 ledgered, a shortfall of 1,115 (21 Sep 2026).
+ *
+ * It costs nothing today, because IDs Only is free — and that is exactly why it
+ * matters. The ledger is the thing that would *catch* the mask drifting into a
+ * paid tier, and a ledger that under-reports by however much was in flight
+ * cannot do that job. Every outbound provider call is attributed in
+ * `provider_calls` (Technical Constraints §2), which means every one, not every
+ * one that finished tidily.
+ */
+const LEDGER_EVERY = 100;
+
+/**
+ * The meter, into the ledger, and emptied.
+ *
+ * Snapshot and clear rather than accumulate-and-subtract: the meter is a plain
+ * object of units, and the faults and timings it carries are on symbols, so a
+ * spread copies exactly what `provider_calls.units` should hold.
+ */
+async function ledger(meter, householdId, { force = false } = {}) {
+  const asked = meter['google'] ?? 0;
+  if (!asked || (!force && asked < LEDGER_EVERY)) return 0;
+  const units = { ...meter };
+  for (const key of Object.keys(meter)) delete meter[key];
+  await providerCalls.record(householdId, 'google', 'census.slice', JSON.stringify(units)).catch(() => null);
+  return asked;
 }
 
 /**
