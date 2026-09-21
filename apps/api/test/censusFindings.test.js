@@ -239,3 +239,49 @@ test('a tile on a boundary is counted by both councils, and by neither twice', a
     `select places from ground_counts where grid_key = $1 and source = 'osm' and subcategory = 'restaurants'`, [gridKey]));
   assert.equal(rows[0].places, 28, 'a re-count is the same ground measured later, not more ground');
 });
+
+test('a tile is dated only when every council that shares it has been counted', async () => {
+  // Codex, 21 Sep 2026: the first council to contribute was ending the tile, so
+  // a boundary tile kept half its kitchens and read as finished. The region is
+  // 455 tiles of about 8.9 km and most London boroughs are smaller than that,
+  // so this is the common case in exactly the place the census is densest.
+  const gridKey = 'test/ground/two-councils';
+  await aCensusedTile({ gridKey, outcodes: ['ZZ93'], subcategory: 'restaurants', places: 0 });
+  await query(`update census_tiles set fhrs_at = null, fhrs_authorities = null where grid_key = $1`, [gridKey]);
+  await query(`delete from ground_counts where grid_key = $1`, [gridKey]);
+
+  // A tile shared by two boroughs: one with two kitchens in it, one with none —
+  // a council that contributes nought has still contributed, and a tile that
+  // did not record that would wait for it for ever.
+  const register = {
+    authorities: async () => new Map([['501', { id: 501, name: 'Borough one' }], ['502', { id: 502, name: 'Borough two' }]]),
+    councilsFor: async () => [{ code: '501', name: 'Borough one' }, { code: '502', name: 'Borough two' }],
+    points: async (id) => ({ points: id === 501
+      ? [{ lat: 51.44, lng: -0.15, type: 1 }, { lat: 51.44, lng: -0.15, type: 7844 }]
+      : [{ lat: 52.90, lng: -0.15, type: 1 }] }),
+  };
+
+  const first = await ground.sweepFhrs({ authorities: 1, register });
+  assert.equal(first.authorities, 1);
+  let { rows } = await query(`select fhrs_at, fhrs_authorities from census_tiles where grid_key = $1`, [gridKey]);
+  assert.equal(rows[0].fhrs_at, null, 'one council of two is not a counted tile');
+  assert.deepEqual(rows[0].fhrs_authorities.sort(), ['501', '502'], 'and the tile says which two it is made of');
+
+  const second = await ground.sweepFhrs({ authorities: 1, register });
+  assert.equal(second.authorities, 1, 'the tile is still in the sweep, waiting on its neighbour');
+  ({ rows } = await query(`select fhrs_at from census_tiles where grid_key = $1`, [gridKey]));
+  assert.ok(rows[0].fhrs_at, 'and is dated once both have been counted');
+
+  const contributors = await ground.contributorsTo(gridKey);
+  assert.deepEqual([...contributors].sort(), ['501', '502']);
+  ({ rows } = await query(
+    `select places from ground_counts where grid_key = $1 and source = 'fhrs' and subcategory = 'restaurants'`, [gridKey]));
+  assert.equal(rows[0].places, 1, "the first borough's café; the second's is outside the box");
+
+  // And a later pass never counts either of them again. (It may well pick up
+  // another tile — there are others in this database — but this one is done.)
+  await ground.sweepFhrs({ authorities: 1, register });
+  ({ rows } = await query(
+    `select places from ground_counts where grid_key = $1 and source = 'fhrs' and subcategory = 'restaurants'`, [gridKey]));
+  assert.equal(rows[0].places, 1, 'a council already counted adds nothing');
+});

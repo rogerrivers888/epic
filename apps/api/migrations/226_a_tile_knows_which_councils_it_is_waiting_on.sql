@@ -1,0 +1,26 @@
+-- A tile knows which councils it is waiting on.
+--
+-- Codex, 21 Sep 2026, on the first attempt at this: "For a tile spanning two
+-- local authorities, the first authority that contributes any establishments
+-- adds the tile to `counted`; `noteGround()` also stamps `fhrs_at`. The tile is
+-- therefore skipped for later authorities in this pass and excluded from
+-- subsequent passes until stale, so the contributor-accumulation logic never
+-- receives the neighbouring authority's establishments."
+--
+-- Migration 219 made the counts additive and the code then never added to them.
+-- The reason is that nothing knew when a tile was *finished*: the sweep found a
+-- tile's authority by asking the register which council the middle of the tile
+-- was in, and the middle only ever names one.
+--
+-- So a tile is asked at five points — its four corners and its middle — and the
+-- councils that answer are written here. The tile is then counted once by each
+-- of them and is only dated when every one has contributed, which is the
+-- difference between "this tile has been counted" and "one of this tile's two
+-- boroughs has been counted".
+--
+-- It matters most exactly where the census is densest: the region is 455 tiles
+-- of about 8.9 by 8.3 kilometres and most London boroughs are smaller than
+-- that, so a large share of the London tiles span two councils or more. An
+-- understated ground count does not read as an error — it reads as a census
+-- that has found everything there is.
+alter table census_tiles add column if not exists fhrs_authorities text[];

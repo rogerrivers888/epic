@@ -253,19 +253,50 @@ export async function fhrsAuthorities() {
 }
 
 /**
- * Which authority a box is in, at the cost of one row.
+ * Which councils a tile is in — all of them, not the one in the middle.
  *
  * Asked of the register rather than worked out from our own district table,
  * because the id needed is the register's own and the two lists disagree about
- * boundaries — a tile is assigned to whichever authority the nearest inspected
- * kitchen belongs to, which is the register's own answer to the question.
+ * boundaries; the register's answer to "whose kitchen is nearest this point" is
+ * the register's own boundary.
+ *
+ * **Five points, because the middle only ever names one.** A tile is 8.9 by 8.3
+ * kilometres and most London boroughs are smaller than that, so a tile counted
+ * from its middle alone holds one borough's kitchens and reads as a whole-tile
+ * number — and an understated ground count does not read as an error, it reads
+ * as a census that has found everything there is (Codex, 21 Sep 2026). The four
+ * corners and the middle catch every council with a real share of the tile; a
+ * sliver of a third touching only the middle of an edge is possible, and the
+ * caveat on the count says so.
  */
-export async function fhrsAuthorityFor(box) {
-  const lat = (box.minLat + box.maxLat) / 2;
-  const lng = (box.minLng + box.maxLng) / 2;
-  const data = await fhrsPage(`/Establishments?longitude=${lng}&latitude=${lat}&maxDistanceLimit=3&pageSize=1`);
-  const first = data.establishments?.[0];
-  return first ? { code: String(first.LocalAuthorityCode), name: first.LocalAuthorityName } : null;
+export async function fhrsAuthoritiesFor(box) {
+  const points = [
+    [(box.minLat + box.maxLat) / 2, (box.minLng + box.maxLng) / 2],
+    [box.minLat, box.minLng], [box.minLat, box.maxLng],
+    [box.maxLat, box.minLng], [box.maxLat, box.maxLng],
+  ];
+  const found = new Map();
+  let requests = 0;
+  for (const [lat, lng] of points) {
+    // A mile, not three: a corner asked with a wide radius answers with the
+    // council on the other side of the tile and puts a borough on the list that
+    // has nothing in it — which would leave the tile waiting for a contributor
+    // that can never contribute.
+    const data = await fhrsPage(`/Establishments?longitude=${lng}&latitude=${lat}&maxDistanceLimit=1&pageSize=1`);
+    requests += 1;
+    const first = data.establishments?.[0];
+    if (first) found.set(String(first.LocalAuthorityCode), { code: String(first.LocalAuthorityCode), name: first.LocalAuthorityName });
+  }
+  await providerCalls.record(null, 'fhrs', 'ground.fhrs.where', { fhrs: requests }).catch(() => null);
+  return [...found.values()];
+}
+
+/** Which councils have already been counted into a tile. */
+export async function contributorsTo(gridKey, source = 'fhrs') {
+  const { rows } = await query(
+    `select distinct c as code from ground_counts g, unnest(g.contributors) c
+      where g.grid_key = $1 and g.source = $2`, [gridKey, source]);
+  return new Set(rows.map((r) => r.code));
 }
 
 /**
@@ -348,9 +379,14 @@ export async function noteGround({ gridKey, source, counts, asked = {}, problem 
   if (problem) {
     await query('update ground_counts set problem = $3 where grid_key = $1 and source = $2', [gridKey, source, problem]);
   }
-  await query(
-    `update census_tiles set ${source === 'osm' ? 'osm_at' : 'fhrs_at'} = now() where grid_key = $1`, [gridKey],
-  );
+  // The open map is done the moment it answers: Overpass was asked about this
+  // box and no other machine has anything to add. The register is not — a tile
+  // is dated by `sweepFhrs` only once every council that shares it has
+  // contributed, because dating it on the first one is precisely how a boundary
+  // tile ended up holding half its kitchens (Codex, 21 Sep 2026).
+  if (source === 'osm') {
+    await query('update census_tiles set osm_at = now() where grid_key = $1', [gridKey]);
+  }
   return { written: keys.length };
 }
 
@@ -392,17 +428,32 @@ export async function sweepOsm({ limit = 25, staleDays = 30, msBudget = 50_000 }
 }
 
 /**
+ * The three questions the register is asked, in one object.
+ *
+ * A seam rather than three imports, so the sweep can be driven end to end in a
+ * test. The fault Codex found — a boundary tile dated after one of its two
+ * councils — is a fault in the *loop*, not in any one call, and a test that
+ * could only reach the calls would have gone on passing through it.
+ */
+const REGISTER = { authorities: fhrsAuthorities, councilsFor: fhrsAuthoritiesFor, points: fhrsPoints };
+
+/**
  * The register check, one authority at a time.
  *
  * An authority is downloaded once and every censused tile inside it is counted
  * from that download, which is why this is not a per-tile sweep: the rows are
  * the same rows, and asking for them once per tile would be asking a free
  * government service for the same twenty thousand kitchens four hundred times.
+ *
+ * A tile is counted by each of the councils that share it and is only dated
+ * when all of them have been. Until then it stays in the sweep, holding a
+ * partial count that says which councils it is made of — which is honest, where
+ * a dated tile holding one borough of two is not.
  */
-export async function sweepFhrs({ authorities = 2, staleDays = 30, msBudget = 50_000 } = {}) {
+export async function sweepFhrs({ authorities = 2, staleDays = 30, msBudget = 50_000, register = REGISTER } = {}) {
   const began = Date.now();
   const { rows: tiles } = await query(
-    `select grid_key, min_lat, min_lng, max_lat, max_lng
+    `select grid_key, min_lat, min_lng, max_lat, max_lng, fhrs_authorities
        from census_tiles
       where state = 'done'
         and (fhrs_at is null or fhrs_at < now() - ($1 || ' days')::interval)
@@ -410,66 +461,107 @@ export async function sweepFhrs({ authorities = 2, staleDays = 30, msBudget = 50
       limit 2000`, [String(staleDays)]);
   if (!tiles.length) return { authorities: 0, tiles: 0, requests: 0, problems: [] };
 
-  const byCode = await fhrsAuthorities().catch(() => new Map());
+  const byCode = await register.authorities().catch(() => new Map());
   let requests = 1;
   const problems = [];
-  const counted = new Set();
-  let authoritiesDone = 0;
+  const boxOf = (t) => ({ minLat: Number(t.min_lat), minLng: Number(t.min_lng), maxLat: Number(t.max_lat), maxLng: Number(t.max_lng) });
 
-  while (authoritiesDone < authorities && Date.now() - began < msBudget) {
-    const next = tiles.find((t) => !counted.has(t.grid_key));
-    if (!next) break;
-    const box = (t) => ({ minLat: Number(t.min_lat), minLng: Number(t.min_lng), maxLat: Number(t.max_lat), maxLng: Number(t.max_lng) });
-    let where;
-    try {
-      where = await fhrsAuthorityFor(box(next));
-      requests += 1;
-    } catch (err) {
-      problems.push(`${next.grid_key}: ${err.message}`);
-      counted.add(next.grid_key);
-      continue;
+  // What each tile is waiting on, and what it already has. Both are read once
+  // and kept here: the pass adds to them as it goes, and a tile is only dated
+  // when it is waiting on nothing.
+  const waiting = new Map();
+  const have = new Map();
+  for (const t of tiles) {
+    waiting.set(t.grid_key, t.fhrs_authorities ? new Set(t.fhrs_authorities) : null);
+    have.set(t.grid_key, await contributorsTo(t.grid_key));
+  }
+
+  /** Every council with a real share of this tile, asked once and written down. */
+  const councilsFor = async (t) => {
+    const known = waiting.get(t.grid_key);
+    if (known) return known;
+    const found = await register.councilsFor(boxOf(t));
+    requests += 5;
+    const codes = new Set(found.map((f) => f.code));
+    for (const f of found) if (!byCode.has(f.code)) byCode.set(f.code, { id: null, name: f.name });
+    await query('update census_tiles set fhrs_authorities = $2 where grid_key = $1', [t.grid_key, [...codes]]);
+    waiting.set(t.grid_key, codes);
+    return codes;
+  };
+
+  /** Nothing left to wait for: date it, and it drops out of the next sweep. */
+  const settle = async (gridKey) => {
+    const want = waiting.get(gridKey);
+    const got = have.get(gridKey) ?? new Set();
+    if (!want || [...want].some((c) => !got.has(c))) return false;
+    await query(`update census_tiles set fhrs_at = now() where grid_key = $1`, [gridKey]);
+    return true;
+  };
+
+  let done = 0;
+  const settled = new Set();
+  const attempted = new Set();
+
+  while (done < authorities && Date.now() - began < msBudget) {
+    // A tile still waiting on a council nobody has downloaded this pass.
+    let next = null; let code = null;
+    for (const t of tiles) {
+      if (settled.has(t.grid_key)) continue;
+      const want = await councilsFor(t);
+      if (Date.now() - began > msBudget) break;
+      if (!want.size) {
+        // Not one inspected kitchen within a mile of any of its five points.
+        // That is a real answer about the ground — nought of ours here — and it
+        // is written as one rather than left as "never checked".
+        await noteGround({
+          gridKey: t.grid_key, source: 'fhrs',
+          counts: Object.fromEntries(Object.keys(FHRS_GROUND).map((k) => [k, 0])),
+          asked: askedFhrs(), from: 'no council within a mile',
+        });
+        await query(`update census_tiles set fhrs_at = now() where grid_key = $1`, [t.grid_key]);
+        settled.add(t.grid_key);
+        continue;
+      }
+      const got = have.get(t.grid_key) ?? new Set();
+      const missing = [...want].find((c) => !got.has(c) && !attempted.has(c));
+      if (missing) { next = t; code = missing; break; }
+      if (await settle(t.grid_key)) settled.add(t.grid_key);
     }
-    const authority = where && byCode.get(where.code);
-    if (!authority) {
-      // No inspected kitchen within three miles of the middle of the tile. That
-      // is a real answer about the ground — nought of ours here — and it is
-      // written as one rather than left as "never checked".
-      await noteGround({
-        gridKey: next.grid_key, source: 'fhrs',
-        counts: Object.fromEntries(Object.keys(FHRS_GROUND).map((k) => [k, 0])),
-        asked: askedFhrs(), from: 'none within three miles',
-      });
-      counted.add(next.grid_key);
+    if (!next) break;
+
+    const authority = byCode.get(code);
+    attempted.add(code);
+    if (!authority?.id) {
+      problems.push(`no register id for authority ${authority?.name ?? code}`);
       continue;
     }
     let points;
     try {
-      ({ points } = await fhrsPoints(authority.id));
+      ({ points } = await register.points(authority.id));
     } catch (err) {
       problems.push(`${authority.name}: ${err.message}`);
-      counted.add(next.grid_key);
       continue;
     }
-    // Every tile this download can answer for, not only the one that found it.
+    done += 1;
+
+    // Every tile this download can speak for, which is every tile that named
+    // this council — including one it turns out to have no kitchens in. A
+    // council that contributes nought has still contributed, and a tile that
+    // did not record that would wait for it for ever.
     for (const t of tiles) {
-      if (counted.has(t.grid_key)) continue;
-      const counts = fhrsCountsInBox(points, box(t));
-      const any = Object.values(counts).some((n) => n > 0);
-      // A tile with nothing of this authority's in it is a tile this download
-      // cannot speak for — it belongs to a neighbour, and saying nought would
-      // be this authority answering for ground it does not cover.
-      if (!any) continue;
-      // Added rather than written. A tile that straddles a boundary gets this
-      // authority's kitchens now and its neighbour's when that authority is
-      // downloaded in a later pass — which happens on its own, because some
-      // tile's middle sits in every authority in the region.
-      await noteGround({ gridKey: t.grid_key, source: 'fhrs', counts, asked: askedFhrs(), from: String(authority.id) });
-      counted.add(t.grid_key);
+      const want = waiting.get(t.grid_key);
+      if (!want?.has(code)) continue;
+      if ((have.get(t.grid_key) ?? new Set()).has(code)) continue;
+      await noteGround({
+        gridKey: t.grid_key, source: 'fhrs',
+        counts: fhrsCountsInBox(points, boxOf(t)), asked: askedFhrs(), from: code,
+      });
+      have.get(t.grid_key).add(code);
+      if (await settle(t.grid_key)) settled.add(t.grid_key);
     }
-    counted.add(next.grid_key);
-    authoritiesDone += 1;
   }
-  return { authorities: authoritiesDone, tiles: counted.size, requests, problems };
+
+  return { authorities: done, tiles: settled.size, waiting: tiles.length - settled.size, requests, problems };
 }
 
 /**
