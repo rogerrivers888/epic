@@ -109,13 +109,31 @@ export const WORD_QUESTIONS = {
  * every phrasing is a question of every tile in the region.
  */
 export const TEXT_QUESTIONS = {
+  // The sport and adrenaline drawers Google has no Table A type for. The owner,
+  // 21 Sep 2026: "for each sport drawer also make sure there's a Google
+  // question: a Table A type where one exists … and a text query where none
+  // does, marked text-sourced per the census rule."
+  //
+  // Only the ones with nothing at all are here. Eleven sport drawers already
+  // have a real type doing the work — athletic_field, arena, cycling_park,
+  // fishing_charter, golf_course, go_karting_venue, swimming_pool, race_course,
+  // tennis_court, ice_skating_rink, adventure_sports_center — and the ordinary
+  // census asks those already.
+  'skateboard-park': ['skate park', 'skatepark bmx track'],
+  'ski-resort': ['dry ski slope', 'indoor ski centre'],
+  'indoor-snow': ['indoor snow centre', 'snow dome real snow'],
+  'paintball-lasertag': ['paintball centre', 'laser tag arena'],
+  'off-road': ['off road driving experience', 'quad biking centre'],
   circuits: ['motor racing circuit', 'race track motorsport'],
   'ancient-sites': ['ancient monument', 'stone circle', 'roman ruins'],
   'historic-houses': ['historic house', 'stately home'],
   'days-out': ['family day out attraction', 'visitor attraction'],
   lidos: ['lido', 'outdoor swimming pool'],
   'caves-falls': ['cave', 'waterfall'],
-  scenic: ['scenic drive', 'heritage railway'],
+  // `scenic` was here and is gone: Scenic drives & rides is retired (owner,
+  // 21 Sep 2026, "it's an editorial grouping, not a place type"), and a
+  // question for a drawer nothing can be filed into is requests spent on
+  // nothing. Heritage railways kept its own drawer and its own words.
   football: ['football ground', 'football club stadium'],
   'rugby-cricket': ['rugby club ground', 'cricket ground'],
 };
