@@ -272,6 +272,25 @@ async function claimTile(run) {
   return rows[0] ?? null;
 }
 
+/**
+ * Tiles that finished before a drawer existed.
+ *
+ * Compared against the plan as it is now, not as it was when the run started:
+ * the point is precisely that the taxonomy moved underneath it.
+ */
+async function reopenForNewDrawers(runId) {
+  const plan = await slicePlan();
+  if (!plan.length) return { reopened: 0 };
+  const keys = plan.map((p) => p.subcategory);
+  const { rowCount } = await query(
+    `update census_tiles
+        set state = 'todo'
+      where run_id = $1 and state = 'done'
+        and not (done_subcategories @> $2::text[])`,
+    [runId, keys]);
+  return { reopened: rowCount };
+}
+
 /** A rate limiter that is a rate, not a sleep between tiles. */
 const paceAt = (perSec) => {
   const gap = perSec > 0 ? 1000 / perSec : 0;
@@ -302,6 +321,20 @@ export async function advance({ runId = null, budgetMs = SLICE_MS, now = () => D
   const until = now() + budgetMs;
   const pace = paceAt(Number(run.rate_per_sec));
   let tiles = 0;
+  // A drawer that did not exist when the tile was censused.
+  //
+  // The taxonomy is being rewritten while this runs — drawers are split, words
+  // are moved, subcategories are created — and the policy's promise that "a
+  // taxonomy change re-maps for free" is only true for *filing*. A brand new
+  // drawer is a brand new question, and a tile already marked done would never
+  // be asked it: the run would finish with its earliest tiles missing whatever
+  // was invented after they ran, and nothing would say so.
+  //
+  // So a finished tile that does not cover the current plan is work again. It
+  // costs only the new drawer, because the checkpoint is what it already
+  // answered, and it keeps its `started_at` — one census of that tile, carried
+  // on, not a second one.
+  await reopenForNewDrawers(run.id);
 
   while (now() < until) {
     const { rows: [fresh] } = await query(

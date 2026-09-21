@@ -411,3 +411,47 @@ test('a tile counts the places it found, even when it found them in the same sec
   assert.ok(new Date(tile.started_at) <= new Date(tile.censused_at), 'a sweep starts before it ends');
   assert.equal(tile.places, 1, 'and counts what it found while it was going');
 });
+
+test('a drawer invented after a tile was censused is still asked of that tile', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from shelf_rules where subject = 'google:test_new_drawer'`);
+    await query(`delete from shelf_subcategories where key = 'test-new-drawer'`);
+    await clean();
+  });
+  const run = await startTestRun({ label: 'test new drawer' });
+  await seedTile(run, 'test/newdrawer');
+
+  await withCensus(answers(1), () => advance({ runId: run.id, budgetMs: 30_000 }));
+  const { rows: [first] } = await query(`select state, started_at from census_tiles where grid_key = 'test/newdrawer'`);
+  assert.equal(first.state, 'done');
+
+  // The taxonomy moves under a run that takes hours: drawers are split, words
+  // are moved, subcategories are created. A tile already marked done would
+  // never be asked the new question, and nothing would say so.
+  const { rows: [cat] } = await query(`select category_key from shelf_subcategories where active limit 1`);
+  if (!cat) return;
+  await query(
+    `insert into shelf_subcategories (key, label, category_key, active)
+     values ('test-new-drawer', 'A drawer invented mid-run', $1, true)
+     on conflict (key) do update set active = true`, [cat.category_key]);
+  await query(
+    `insert into shelf_rules (scope, subject, labels, subcategory, weights, reason)
+     values ('labels', 'google:test_new_drawer', array['google:museum'], 'test-new-drawer', '{}'::jsonb, 'invented mid-run')`);
+  await query(`update census_runs set state = 'running', finished_at = null where id = $1`, [run.id]);
+
+  const asked = [];
+  await withCensus(async ({ includedType }) => {
+    asked.push(includedType);
+    return { places: [], requests: 1, saturated: false, problem: null };
+  }, () => advance({ runId: run.id, budgetMs: 30_000 }));
+
+  const { rows: [second] } = await query(
+    `select state, started_at, done_subcategories from census_tiles where grid_key = 'test/newdrawer'`);
+  assert.ok(second.done_subcategories.includes('test-new-drawer'), 'the new drawer was asked');
+  assert.equal(String(second.started_at), String(first.started_at),
+    'and the tile keeps its start: this is the same census of it, carried on');
+  // Only the new one. The whole value of the checkpoint is that re-opening a
+  // tile does not re-ask what it already answered.
+  assert.ok(asked.length <= 2, `only the new drawer was asked, not the plan again (${asked.length} questions)`);
+});
