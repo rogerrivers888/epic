@@ -277,7 +277,12 @@ export type Stage = {
   key: string;
   /** "places read", "after the resolver" — the words under the number. */
   name: string;
-  count: number;
+  /**
+   * Null where the run never wrote this stage down, which is not nought: an
+   * unknown middle and an empty one are different facts and are drawn
+   * differently — an em dash rather than a number.
+   */
+  count: number | null;
   /**
    * The biggest bad drop, which the screen enlarges and reddens. At most one
    * stage per run carries it, and it arrives with the reason named.
@@ -302,6 +307,16 @@ export type RunRow = {
    */
   diagnosis: string;
   healthy: boolean;
+  /**
+   * Whether the run wrote its middle down at all.
+   *
+   * `recorded: false` is not `healthy: true`. A run from before the funnel was
+   * recorded has an *unknown* middle: its stages come back null and the
+   * diagnosis reads "not recorded". Drawn in the same dim as "drop-off looks
+   * normal" it would claim something nobody measured, so it gets a third
+   * reading of its own (epic-f4, 21 Sep 2026).
+   */
+  recorded: boolean;
   state: 'done' | 'running' | 'failed';
 };
 

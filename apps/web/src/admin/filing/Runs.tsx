@@ -33,6 +33,24 @@ import type { Decision, RunRow, Saturation, Trail, Trigger, RunWeek } from './ty
 /** The tallest a funnel bar or a week column is drawn. */
 const BAR = 104;
 
+/**
+ * A time the way a person says it.
+ *
+ * Shared with the Overview's run list on purpose: two screens describing the
+ * same run as "2 hours ago" and "20 Sept" would look like two different runs.
+ */
+function when(iso: string | null): string {
+  if (!iso) return '\u2014';
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} ${mins === 1 ? 'minute' : 'minutes'} ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs} ${hrs === 1 ? 'hour' : 'hours'} ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 8) return `${days} ${days === 1 ? 'day' : 'days'} ago`;
+  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
 export function Runs({
   headline, scope, triggers, live, runs, weeks, clears, saturation,
   onTrigger, onStop, onOpenStage, stage, onStage,
@@ -118,7 +136,7 @@ export function Runs({
                   fontFamily: fonts.heading, fontSize: 17, fontWeight: '800',
                   color: s.done ? LIME : desk.inkDim, ...tabular,
                 }}>
-                  {s.done ? s.count.toLocaleString() : '—'}
+                  {s.done && s.count != null ? s.count.toLocaleString() : '\u2014'}
                 </Text>
                 <Value size={11} tone="dim">{s.name}</Value>
                 <View style={{ height: 3, backgroundColor: s.done ? LIME : desk.rule }} />
@@ -145,7 +163,10 @@ export function Runs({
                     <View style={{ width: 250, flexGrow: 0, flexShrink: 0, minWidth: 0 }}>
                       <Value weight="700">{r.name}</Value>
                       <View style={{ marginTop: 3 }}>
-                        <Value size={11.5} tone="dim">{`${r.at} · ${r.scope}`}</Value>
+                        {/* Relative, not an ISO string. "2026-09-20T16:03:16.352Z"
+                            is a timestamp somebody has to decode; the handoff
+                            asks for the time a person would say. */}
+                        <Value size={11.5} tone="dim">{`${when(r.at)} · ${r.scope}`}</Value>
                       </View>
                     </View>
                     <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'flex-end', gap: 7 }}>
@@ -163,7 +184,14 @@ export function Runs({
                             color: s.bad ? WARN : s.key === 'waiting' ? LIME : desk.ink,
                             ...tabular,
                           }}>
-                            {s.count.toLocaleString()}
+                            {/*
+                              A stage a run never wrote down has an *unknown*
+                              count, not a count of nought. Every run from
+                              before the funnel was recorded is in that state,
+                              and `.toLocaleString()` on it took the whole
+                              screen down (21 Sep 2026).
+                            */}
+                            {s.count == null ? '\u2014' : s.count.toLocaleString()}
                           </Text>
                           <Text style={{
                             fontFamily: fonts.body, fontSize: 10.5, lineHeight: 13,
@@ -179,7 +207,17 @@ export function Runs({
                       ))}
                     </View>
                     <View style={{ width: 210, flexGrow: 0, flexShrink: 0, alignItems: 'flex-end' }}>
-                      <Value size={12.5} weight="700" tone={r.healthy ? 'dim' : 'warn'}>{r.diagnosis}</Value>
+                      {/*
+                        Three readings, not two. A run that did not write its
+                        middle down is neither healthy nor broken — it is
+                        unknown, and drawing it in the same dim as "drop-off
+                        looks normal" would claim something nobody measured
+                        (epic-f4, 21 Sep 2026).
+                      */}
+                      <Value size={12.5} weight={r.recorded ? '700' : '500'}
+                             tone={!r.recorded ? 'faint' : r.healthy ? 'dim' : 'warn'}>
+                        {r.diagnosis}
+                      </Value>
                       <View style={{ marginTop: 3 }}>
                         <Value size={12} tone="dim">
                           {`${r.cost ? `£${r.cost.toFixed(2)}` : '£0.00'} · ${r.sources}`}
