@@ -310,13 +310,22 @@ async function refreshProgress(runId) {
                                       where cs.area_slug in (select grid_key from census_tiles where run_id = $1)
                                         and cs.ran_at >= date_trunc('day', now() at time zone 'utc')), 0),
             last_seen_at = now()
+       -- What *this* run asked, not what the ground already knew. A tile still
+       -- fresh from a census a fortnight ago is skipped — that is the point of
+       -- the freshness window — and counting its requests here would report the
+       -- run as having spent them: the London run opened at 1,774 requests
+       -- before it had asked anything, which are the calibration's (21 Sep
+       -- 2026). Tiles done still counts every tile, skipped or swept, because
+       -- that is progress through the region rather than spending.
        from (select count(*)::int total,
-                    count(*) filter (where state = 'done')::int done,
-                    coalesce(sum(requests), 0)::int requests,
-                    coalesce(sum(slices), 0)::int slices,
-                    coalesce(sum(places), 0)::int places,
-                    coalesce(sum(saturated), 0)::int saturated
-               from census_tiles where run_id = $1) t
+                    count(*) filter (where ct.state = 'done')::int done,
+                    coalesce(sum(ct.requests) filter (where ct.started_at >= r0.began), 0)::int requests,
+                    coalesce(sum(ct.slices) filter (where ct.started_at >= r0.began), 0)::int slices,
+                    coalesce(sum(ct.places) filter (where ct.started_at >= r0.began), 0)::int places,
+                    coalesce(sum(ct.saturated) filter (where ct.started_at >= r0.began), 0)::int saturated
+               from census_tiles ct,
+                    (select started_at as began from census_runs where id = $1) r0
+              where ct.run_id = $1) t
       where r.id = $1`, [runId]);
 }
 
@@ -892,16 +901,22 @@ export async function report(runId = null) {
       group by tt.area, d.outcodes
       order by tt.area`, [run.id]);
 
-  // Every tile once, whatever it touches.
+  // Every tile once, whatever it touches — and separately, what this run
+  // actually asked. A tile still fresh from an earlier census is skipped rather
+  // than swept, so its requests belong to that census and its places belong to
+  // the ground.
   const { rows: [whole] } = await query(
     `select count(*)::int tiles,
             count(*) filter (where state = 'done')::int done,
             count(*) filter (where state = 'failed')::int failed,
-            coalesce(sum(requests), 0)::int requests,
-            coalesce(sum(places), 0)::int places,
-            coalesce(sum(slices), 0)::int slices,
-            coalesce(sum(saturated), 0)::int saturated
-       from census_tiles where run_id = $1`, [run.id]);
+            count(*) filter (where started_at < $2)::int skipped,
+            coalesce(sum(requests) filter (where started_at >= $2), 0)::int requests,
+            coalesce(sum(places) filter (where started_at >= $2), 0)::int places,
+            coalesce(sum(slices) filter (where started_at >= $2), 0)::int slices,
+            coalesce(sum(saturated) filter (where started_at >= $2), 0)::int saturated,
+            coalesce(sum(requests), 0)::int ground_requests,
+            coalesce(sum(places), 0)::int ground_places
+       from census_tiles where run_id = $1`, [run.id, run.started_at]);
 
   // The money, from the ledger and nowhere else.
   const { rows: [spend] } = await query(
@@ -945,6 +960,9 @@ export async function report(runId = null) {
     },
     total: {
       ...whole,
+      // "Places the region is now known to hold", beside "places this run
+      // found". They differ by whatever was already fresh.
+      ground: { requests: whole.ground_requests, places: whole.ground_places },
       hours: run.started_at
         ? Math.round(((new Date(run.finished_at ?? Date.now()) - new Date(run.started_at)) / 3_600_000) * 10) / 10
         : null,
