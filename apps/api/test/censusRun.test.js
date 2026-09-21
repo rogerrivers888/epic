@@ -814,3 +814,52 @@ test('a tile part way through is reconciled too, and the signature waits for the
     [someDrawers[0]]);
   assert.ok(rows.length, 'the new question reached a tile that was only part way through');
 });
+
+test('how a drawer was found is read from the places inside the outcode, not beside it', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from area_counts where area_slug in ('zz8a', 'zz8b')`);
+    await query(`delete from geo_cells where code like 'ZZ8%'`);
+    await query(`delete from place_index where venue_ref like 'google:sourced_%'`);
+    await clean();
+  });
+  await query(
+    `insert into geo_cells (code, scheme, label, outcode, lat, lng, source) values
+       ('ZZ8A 1', 'sector', 'ZZ8A 1', 'ZZ8A', 51.41, -0.68, 'test'),
+       ('ZZ8B 1', 'sector', 'ZZ8B 1', 'ZZ8B', 51.47, -0.59, 'test')
+     on conflict (code) do update set outcode = excluded.outcode, lat = excluded.lat, lng = excluded.lng`);
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, started_at)
+     values ('test/sourced', 51.40, -0.72, 51.48, -0.56, array['ZZ8A','ZZ8B'], 'done', now(), now() - interval '1 minute')
+     on conflict (grid_key) do update set outcodes = excluded.outcodes, state = 'done', censused_at = now()`);
+
+  // One place in each district: the one in ZZ8A was found by a typed question,
+  // the one in ZZ8B only by a text query. A tile is wider than an outcode, so
+  // both are in this tile.
+  const place = async (ref, slice, sourced, foundBy) => {
+    await query(
+      `insert into place_index (venue_ref, country_code, slice, category, subcategory)
+       values ($1, 'GB', $2::text, 'culture', 'museums') on conflict (venue_ref) do update set slice = excluded.slice`,
+      [ref, slice]);
+    await query(
+      `insert into place_subcategories (venue_ref, category, subcategory, found_by, area_slug, sourced, first_seen, last_seen)
+       values ($1, 'culture', 'museums', $2::text, 'test/sourced', $3::text, now(), now())
+       on conflict (venue_ref, subcategory, coalesce(area_slug, '')) do update set sourced = excluded.sourced`,
+      [ref, foundBy, sourced]);
+  };
+  await place('google:sourced_typed', '51.4050,-0.6900,51.4250,-0.6600', 'type', 'museum');
+  await place('google:sourced_text', '51.4600,-0.6000,51.4750,-0.5800', 'text', 'text');
+
+  await rollUpOutcodes({ outcodes: ['ZZ8A', 'ZZ8B'] });
+
+  const { rows: [a] } = await query(
+    `select sourced, text_count, census_count from area_counts where area_slug = 'zz8a' and subcategory = 'museums'`);
+  assert.equal(a.census_count, 1);
+  assert.equal(a.sourced, 'type', 'the caveat comes from the place that is actually here');
+  assert.equal(a.text_count, 0, 'and a text match in the next district does not travel');
+
+  const { rows: [b] } = await query(
+    `select sourced, text_count from area_counts where area_slug = 'zz8b' and subcategory = 'museums'`);
+  assert.equal(b.sourced, 'text');
+  assert.equal(b.text_count, 1);
+});

@@ -923,8 +923,6 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
     for (const r of rows) {
       const key = `${r.category}/${r.subcategory}`;
       drawer.set(key, { category: r.category, subcategory: r.subcategory });
-      if (!sourcedBy.has(key)) sourcedBy.set(key, new Set());
-      sourcedBy.get(key).add(r.sourced ?? 'type');
       // Its own point beats any box: that is exact, and a display search will
       // have bought one for anything a household has actually looked at.
       const inside = (r.lat != null && r.lng != null)
@@ -932,6 +930,15 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
         : (r.slice ? verdictOf(r.slice) : 'nowhere');
       if (inside === 'inside') {
         add(counted, key, r.venue_ref);
+        // How it was found, counted only where it is counted.
+        //
+        // A tile is wider than an outcode and reaches into its neighbours, so
+        // reading the label off every row in the tile let a drawer be marked
+        // "mixed", or even "text", on the strength of places in the next
+        // district — a caveat attached to a number that none of those places
+        // are in (21 Sep 2026).
+        if (!sourcedBy.has(key)) sourcedBy.set(key, new Set());
+        sourcedBy.get(key).add(r.sourced ?? 'type');
         if ((r.sourced ?? 'type') === 'text') add(fromText, key, r.venue_ref);
       } else if (inside === 'across') {
         add(unresolved, key, r.venue_ref);
