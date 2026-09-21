@@ -81,6 +81,16 @@ export const WORD_QUESTIONS = {
     { type: 'sports_activity_location', words: 'wakeboarding cable park' },
     { type: 'sports_activity_location', words: 'water ski club' },
   ],
+  // There is no `horse_riding` type. There is `stable`, which Google files
+  // under Facilities beside public baths — so it is a real Table A type and
+  // this drawer gets fenced questions rather than bare text. `stable` alone
+  // would miss the riding schools that type themselves as activity locations,
+  // which is what the second and third ask for.
+  'riding-stables': [
+    { type: 'stable', words: 'riding stables' },
+    { type: 'sports_activity_location', words: 'horse riding school' },
+    { type: 'sports_activity_location', words: 'pony trekking centre' },
+  ],
 };
 
 /**
