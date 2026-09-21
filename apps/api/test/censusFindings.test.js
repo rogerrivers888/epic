@@ -348,3 +348,25 @@ test('a refusal from the register ends the pass, not the process', async () => {
   const { rows } = await query(`select fhrs_at from census_tiles where grid_key = $1`, [gridKey]);
   assert.equal(rows[0].fhrs_at, null, 'and the tile is not dated on the strength of a refusal');
 });
+
+test('a count found by plain words says so, because nothing checked the kind', async () => {
+  // Owner, 21 Sep 2026: a text-sourced count has to say so, so twenty can be
+  // opened in Places and the precision judged before the number is trusted.
+  // Nine drawers have no Table A type at all and are asked in plain words.
+  await aSubcategory('test-by-words', 'Test drawer with no Google word');
+  await aRule('test-by-words', 'test_type_words');
+  await aCensusedTile({ gridKey: 'test/findings/text', outcodes: ['ZZ90'], subcategory: 'test-by-words', places: 3 });
+  await query(
+    `update place_subcategories set sourced = 'text' where area_slug = 'test/findings/text' and subcategory = 'test-by-words'`);
+  await query(
+    `insert into census_slices (area_slug, min_lat, min_lng, max_lat, max_lng, category, subcategory,
+                                google_type, query, returned, new_ids, saturated, depth, requests)
+     values ('test/findings/text', 51.4, -0.2, 51.48, -0.08, 'activity', 'test-by-words', null, 'historic house', 3, 3, false, 0, 1)`);
+
+  const { subcategories } = await findings.subcategories({ outcodes: ['ZZ90'] });
+  const row = subcategories.find((s) => s.key === 'test-by-words');
+  assert.equal(row.censused, 3);
+  assert.equal(row.byText, 3);
+  assert.match(row.reason, /plain text query with no type to fence it/);
+  assert.match(row.reason, /open a few before trusting the number/);
+});

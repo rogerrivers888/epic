@@ -153,7 +153,7 @@ export async function coverageFor(outcodes = null) {
 }
 
 /** Why a drawer reads the way it does, in one sentence a person can act on. */
-export function reasonForState(state, { label, found, questions, coverage, slices = 0 }) {
+export function reasonForState(state, { label, found, questions, coverage, slices = 0, byText = 0, byWords = 0 }) {
   if (state === 'never_asked') {
     return `No question is ever asked for ${label}: no Google type is taught onto it and it has no word question, so the census generates no queries and it can only ever read nought.`;
   }
@@ -164,7 +164,14 @@ export function reasonForState(state, { label, found, questions, coverage, slice
   if (state === 'censused_empty') {
     return `Asked ${n(questions)} question${questions === 1 ? '' : 's'} in ${n(slices)} slice${slices === 1 ? '' : 's'} across ${coverage.says}, and Google returned nothing. Either there are none, or the question is the wrong one.`;
   }
-  return `${n(found)} found across ${coverage.says}.`;
+  // Asked in plain words because Google has no word for the drawer: the places
+  // are whatever the words matched, and nothing checked the kind. Said on the
+  // row rather than in a footnote, because the number is only as good as the
+  // words and the only way to know is to open a few.
+  const how = byText
+    ? ` ${n(byText)} of them found by a plain text query with no type to fence it, so open a few before trusting the number.`
+    : byWords ? ` ${n(byWords)} of them found by words fenced to a Google type.` : '';
+  return `${n(found)} found across ${coverage.says}.${how}`;
 }
 
 /**
@@ -188,8 +195,16 @@ export async function subcategories({ outcodes = null } = {}) {
     'select s.key, s.label, s.category_key as category from shelf_subcategories s where s.active order by s.category_key, s.key');
   const { rows: known } = await query(
     'select subcategory, count(*)::int as places from place_index where subcategory is not null group by 1');
+  // How the count was got, not only how big it is. A drawer Google has no word
+  // for is asked in plain words, and a place only a text query found is a place
+  // Google never confirmed the kind of — so the number has to say so, or
+  // somebody reads "42 historic houses" as forty-two houses (owner, 21 Sep
+  // 2026: open twenty in Places and judge the precision before trusting it).
   const { rows: censused } = await query(
-    `select ps.subcategory, count(distinct ps.venue_ref)::int as places
+    `select ps.subcategory,
+            count(distinct ps.venue_ref)::int as places,
+            count(distinct ps.venue_ref) filter (where ps.sourced = 'text')::int  as by_text,
+            count(distinct ps.venue_ref) filter (where ps.sourced = 'words')::int as by_words
        from place_subcategories ps where ${scoped} group by 1`, params);
   // Which drawers a run in this scope has actually put a question to. A
   // subcategory taught yesterday has a question and no answer, and calling that
@@ -210,6 +225,7 @@ export async function subcategories({ outcodes = null } = {}) {
   const askedBy = new Map(askedHere.map((r) => [r.subcategory, r.slices]));
   const knownBy = new Map(known.map((r) => [r.subcategory, r.places]));
   const censusedBy = new Map(censused.map((r) => [r.subcategory, r.places]));
+  const howFound = new Map(censused.map((r) => [r.subcategory, { text: r.by_text, words: r.by_words }]));
   const scoredBy = new Map(scored.map((r) => [r.subcategory, r.places]));
   const anywhereCensused = coverage.tiles > 0 || coverage.districtsCensusedByOutcode > 0;
 
@@ -233,11 +249,20 @@ export async function subcategories({ outcodes = null } = {}) {
       // rather than from a type Google has a word for (`censusQuestions.js`).
       // A fenced count is narrower by construction and should be read as such.
       fenced: questions.some((q) => q.words),
+      // And how many of the places actually came that way. `words` is fenced by
+      // a real Table A type and Google confirms the kind; `text` is not fenced
+      // at all, because the drawer has no type to fence it with, so those are
+      // the ones to open before the number is trusted.
+      byText: howFound.get(s.key)?.text ?? 0,
+      byWords: howFound.get(s.key)?.words ?? 0,
       state,
       // How many times the question was actually put here, so "empty" can be
       // read against the effort behind it rather than taken on trust.
       slices: askedSlices,
-      reason: reasonForState(state, { label: s.label, found, questions: questions.length, coverage, slices: askedSlices }),
+      reason: reasonForState(state, {
+        label: s.label, found, questions: questions.length, coverage, slices: askedSlices,
+        byText: howFound.get(s.key)?.text ?? 0, byWords: howFound.get(s.key)?.words ?? 0,
+      }),
     };
   });
   return { coverage, subcategories: rows };
@@ -340,12 +365,14 @@ export async function gaps({ outcodes = null, source = 'osm' } = {}) {
         group by 1
      ),
      census as (
-       select ps.subcategory, count(distinct ps.venue_ref)::int as places
+       select ps.subcategory, count(distinct ps.venue_ref)::int as places,
+              count(distinct ps.venue_ref) filter (where ps.sourced = 'text')::int as by_text
          from place_subcategories ps join checked c on c.grid_key = ps.area_slug
         group by 1
      )
      select s.key, s.label, s.category_key as category,
-            coalesce(census.places, 0) as census, ground.places as ground,
+            coalesce(census.places, 0) as census, coalesce(census.by_text, 0) as by_text,
+            ground.places as ground,
             ground.tiles, ground.counted_at, ground.caveat, ground.asked
        from ground
        join shelf_subcategories s on s.key = ground.subcategory and s.active
@@ -358,10 +385,10 @@ export async function gaps({ outcodes = null, source = 'osm' } = {}) {
     const share = r.ground ? Math.round((r.census / r.ground) * 100) : null;
     return {
       key: r.key, label: r.label, category: r.category,
-      census: r.census, ground: r.ground, shortfall, foundShare: share,
+      census: r.census, byText: r.by_text, ground: r.ground, shortfall, foundShare: share,
       tiles: r.tiles, countedAt: r.counted_at, source, asked: r.asked, caveat: r.caveat,
       reason: shortfall > 0
-        ? `The census has ${n(r.census)} where ${whose} has ${n(r.ground)} in the same ${n(r.tiles)} tile${r.tiles === 1 ? '' : 's'} — ${share}% of the ground count.${r.caveat ? ` ${r.caveat}` : ''}`
+        ? `The census has ${n(r.census)}${r.by_text ? ` (${n(r.by_text)} of them from a plain text query)` : ''} where ${whose} has ${n(r.ground)} in the same ${n(r.tiles)} tile${r.tiles === 1 ? '' : 's'} — ${share}% of the ground count.${r.caveat ? ` ${r.caveat}` : ''}`
         : `The census has ${n(r.census)} where ${whose} has ${n(r.ground)} in the same ${n(r.tiles)} tile${r.tiles === 1 ? '' : 's'}, so nothing is obviously missing.${r.caveat ? ` ${r.caveat}` : ''}`,
     };
   });
