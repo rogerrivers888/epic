@@ -3340,6 +3340,15 @@ router.post('/census/run/:id/resume', requires('manage_library'), async (req, re
  * surfacings, and this is only the summary a board reads. It costs nothing and
  * calls nobody.
  */
+/** What a run did, by postcode area and in total, with the ledger's own figure. */
+router.get('/census/report', requires('view_library'), async (req, res, next) => {
+  try {
+    const out = await censusRun.report(req.query.runId ? String(req.query.runId) : null);
+    if (!out) throw bad('no census run to report on');
+    res.json(out);
+  } catch (err) { next(err); }
+});
+
 router.post('/census/rollup', requires('manage_library'), async (req, res, next) => {
   try {
     const outcodes = Array.isArray(req.body?.outcodes) ? req.body.outcodes : null;

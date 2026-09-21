@@ -422,7 +422,13 @@ async function call(path, { method = 'POST', body, fieldMask, meter }) {
   if (!res.ok) {
     noteFault(meter, `http_${res.status}`);
     const text = await res.text().catch(() => '');
-    throw new Error(`Google Places ${res.status}: ${text.slice(0, 200)}`);
+    // A refusal is the one body worth keeping more of. Google's 429 names the
+    // quota metric and the number — "limit 'Text Search requests per day' of
+    // service places.googleapis.com" — and the owner asked what the 429 says
+    // the limit actually is (21 Sep 2026); at two hundred characters the number
+    // falls off the end. It is also the one body that cannot be an echo of the
+    // query, which is why every other status stays short.
+    throw new Error(`Google Places ${res.status}: ${text.slice(0, res.status === 429 ? 500 : 200)}`);
   }
   noteCall(meter, Date.now() - began);
   return res.json();

@@ -83,8 +83,62 @@ export const WORD_QUESTIONS = {
   ],
 };
 
-/** The questions for one subcategory, or none. */
-export const wordQuestionsFor = (subcategory) => WORD_QUESTIONS[subcategory] ?? [];
+/**
+ * The nine with no typed form at all, asked in plain words and labelled as
+ * such.
+ *
+ * Owner, 21 September 2026: "The nine drawers with no Table A type: add a text
+ * query for each before the run, but mark the slice as text-sourced. On the
+ * board, a text-sourced count carries that label, and a place found only by a
+ * text query is filed under that drawer with found_by = text, so I can open
+ * twenty in the Places tab and judge precision before trusting the number.
+ * **This is different from the earlier P1: that was a text fallback for invalid
+ * typed queries; these questions have no typed form at all.**"
+ *
+ * That distinction is the whole licence for this file's second half. The thing
+ * Codex stopped in September was a slice quietly *rephrasing* a type Google
+ * rejected into a text search and counting the answer as that type — membership
+ * invented where nobody could see it, on a mask with no `types` field to check
+ * it against. Here there was never a type to fall back from, the slice says so
+ * on its own row, the count says so on the board, and the places say so on
+ * themselves. An answer a person can audit and reject is a different object
+ * from one that hides.
+ *
+ * So these are asked bare: no `includedType`, because there is no honest one.
+ * Two or three phrasings each, which is what a person would type, and no more —
+ * every phrasing is a question of every tile in the region.
+ */
+export const TEXT_QUESTIONS = {
+  circuits: ['motor racing circuit', 'race track motorsport'],
+  'ancient-sites': ['ancient monument', 'stone circle', 'roman ruins'],
+  'historic-houses': ['historic house', 'stately home'],
+  'days-out': ['family day out attraction', 'visitor attraction'],
+  lidos: ['lido', 'outdoor swimming pool'],
+  'caves-falls': ['cave', 'waterfall'],
+  scenic: ['scenic drive', 'heritage railway'],
+  football: ['football ground', 'football club stadium'],
+  'rugby-cricket': ['rugby club ground', 'cricket ground'],
+};
 
-/** Every subcategory that is asked in words because Google has no word for it. */
-export const WORD_QUESTION_SUBCATEGORIES = Object.keys(WORD_QUESTIONS);
+/**
+ * What a slice was sourced from, which travels with every count made of it.
+ *
+ *   type  — an `includedType` Google guarantees. The ordinary census.
+ *   words — words narrowing a real type, for the five Google has no word for.
+ *   text  — words and nothing else, for the nine with no typed form at all.
+ */
+export const SOURCED = { TYPE: 'type', WORDS: 'words', TEXT: 'text' };
+
+/** The questions for one subcategory: the type-fenced ones, then the bare text. */
+export const wordQuestionsFor = (subcategory) => [
+  ...(WORD_QUESTIONS[subcategory] ?? []).map((q) => ({ ...q, sourced: SOURCED.WORDS })),
+  // Last, deliberately. A place a typed question already found keeps that
+  // question as its `found_by`, so "found only by a text query" means exactly
+  // that — which is what makes the twenty a person opens the right twenty.
+  ...(TEXT_QUESTIONS[subcategory] ?? []).map((words) => ({ type: null, words, sourced: SOURCED.TEXT })),
+];
+
+/** Every subcategory Google has no word for, asked in words either way. */
+export const WORD_QUESTION_SUBCATEGORIES = [
+  ...new Set([...Object.keys(WORD_QUESTIONS), ...Object.keys(TEXT_QUESTIONS)]),
+];

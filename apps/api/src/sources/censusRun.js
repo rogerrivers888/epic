@@ -40,6 +40,7 @@ import { censusArea, slicePlan, CENSUS_FRESH_DAYS } from './census.js';
 // The same corner test the ring count uses. One piece of arithmetic for "is
 // this box inside this area", not two that can disagree (repositories/censusRing.js).
 import { whereBoxSits } from '../repositories/censusRing.js';
+import { USD_TO_GBP } from '../domain/providerPrices.js';
 
 /**
  * The grid.
@@ -67,6 +68,24 @@ export const PAD_KM = Number(process.env.EPIC_CENSUS_PAD_KM || 8);
 
 /** How long one pass of the loop works before handing the process back. */
 const SLICE_MS = Number(process.env.EPIC_CENSUS_SLICE_MS || 55_000);
+
+/**
+ * What Google will answer in a day, until it says otherwise.
+ *
+ * 75,000 Text Search requests, because that is what the cap was on 20 September
+ * 2026 (owner, 21 Sep 2026: "assume the daily Text Search cap is 75,000 (it was
+ * yesterday)"). An assumption with a date on it, held in one place, and checked
+ * against the only authority there is — a refusal, which says what the limit
+ * actually is and is stored verbatim when it arrives.
+ */
+export const DAILY_CAP = Number(process.env.EPIC_CENSUS_DAILY_CAP || 75_000);
+
+/** The next 00:00 UTC, which is when Google's daily quota starts again. */
+export const nextUtcMidnight = (from = new Date()) => {
+  const d = new Date(from);
+  d.setUTCHours(24, 0, 0, 0);
+  return d;
+};
 
 /** How many goes a tile gets before the run is allowed to finish without it. */
 export const MAX_TILE_TRIES = Number(process.env.EPIC_CENSUS_TILE_TRIES || 3);
@@ -164,7 +183,7 @@ export async function planTiles({ areas = [], outcodes = [], dLat = TILE_LAT, dL
  */
 export async function startRun({
   label, areas = [], outcodes = [], maxRequests = 250_000, ratePerSec = 5, freshDays = CENSUS_FRESH_DAYS,
-  dLat = TILE_LAT, dLng = TILE_LNG, padKm = PAD_KM, startedBy = null,
+  dLat = TILE_LAT, dLng = TILE_LNG, padKm = PAD_KM, dailyCap = DAILY_CAP, startedBy = null,
 } = {}) {
   if (!areas?.length && !outcodes?.length) {
     throw Object.assign(new Error('a run needs postcode areas or districts'), { status: 400 });
@@ -178,11 +197,11 @@ export async function startRun({
   if (!tiles.length) throw Object.assign(new Error('no postcode sectors in those areas'), { status: 400 });
 
   const { rows: [run] } = await query(
-    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, started_by, tiles_total)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *`,
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, started_by, tiles_total, daily_cap, day, day_requests)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, (now() at time zone 'utc')::date, 0) returning *`,
     [label ?? [...areas, ...outcodes].join(', '),
       [...areas.map((a) => a.toUpperCase()), ...outcodes.map((o) => o.toUpperCase())], dLat, dLng,
-      maxRequests, ratePerSec, freshDays, startedBy, tiles.length]);
+      maxRequests, ratePerSec, freshDays, startedBy, tiles.length, dailyCap]);
 
   // Tiles outlive runs: the same square keeps its row and its history, and this
   // run simply claims the ones that are not fresh. `do update` on the outcodes
@@ -243,9 +262,40 @@ export async function resume(id) {
   const { rows } = await query(
     `update census_runs
         set state = 'running', stop_requested = false, problem = null,
-            finished_at = null, last_seen_at = now()
-      where id = $1 and state in ('paused', 'stopped', 'refused') returning *`, [id]);
+            resume_after = null, finished_at = null, last_seen_at = now()
+      where id = $1 and state in ('paused', 'stopped', 'refused', 'waiting') returning *`, [id]);
   return rows[0] ?? null;
+}
+
+/**
+ * Today's spending, rolled over at 00:00 UTC.
+ *
+ * Counted from the slices rather than kept as a running total, because the
+ * process restarts and a counter in memory would start again with it. The day
+ * is UTC because Google's quota day is.
+ */
+async function rollDay(runId) {
+  const { rows: [row] } = await query(
+    `update census_runs r
+        set day = (now() at time zone 'utc')::date,
+            day_requests = case when r.day = (now() at time zone 'utc')::date then r.day_requests else 0 end
+      where r.id = $1
+      returning day_requests, coalesce(daily_cap, $2) as daily_cap`, [runId, DAILY_CAP]);
+  return { dayRequests: Number(row?.day_requests ?? 0), dailyCap: Number(row?.daily_cap ?? DAILY_CAP) };
+}
+
+/**
+ * Stop, and say when to try again.
+ *
+ * A separate state from paused, because the difference matters to whoever is
+ * watching: paused is waiting for a person, waiting is waiting for a clock.
+ */
+async function waitUntil(id, when, why) {
+  await query(
+    `update census_runs
+        set state = 'waiting', resume_after = $2, problem = $3, last_seen_at = now()
+      where id = $1`, [id, when, why]);
+  await refreshProgress(id);
 }
 
 /** Tiles left, and what the run has spent so far. */
@@ -254,6 +304,11 @@ async function refreshProgress(runId) {
     `update census_runs r
         set tiles_total = t.total, tiles_done = t.done,
             requests = t.requests, slices = t.slices, places = t.places, saturated = t.saturated,
+            -- What has been asked today, from the slices themselves: a counter
+            -- held in memory would start again with the process.
+            day_requests = coalesce((select sum(cs.requests)::int from census_slices cs
+                                      where cs.area_slug in (select grid_key from census_tiles where run_id = $1)
+                                        and cs.ran_at >= date_trunc('day', now() at time zone 'utc')), 0),
             last_seen_at = now()
        from (select count(*)::int total,
                     count(*) filter (where state = 'done')::int done,
@@ -368,7 +423,8 @@ export async function advance({ runId = null, budgetMs = SLICE_MS, now = () => D
 
   while (now() < until) {
     const { rows: [fresh] } = await query(
-      `select stop_requested, requests, max_requests from census_runs where id = $1`, [run.id]);
+      `select stop_requested, requests, max_requests, daily_cap, day, day_requests
+         from census_runs where id = $1`, [run.id]);
     if (fresh?.stop_requested) {
       await finish(run.id, 'stopped', null);
       return { working: false, reason: 'stopped', tiles };
@@ -376,6 +432,17 @@ export async function advance({ runId = null, budgetMs = SLICE_MS, now = () => D
     if (fresh && fresh.requests >= fresh.max_requests) {
       await finish(run.id, 'paused', `stopped at the ${fresh.max_requests}-request ceiling; resume to carry on`);
       return { working: false, reason: 'ceiling', tiles };
+    }
+    // The day's allowance, spent before Google has to refuse it. A quota is a
+    // promise about a day, and a client that waits to be told no has already
+    // spent somebody's goodwill — so the run stops itself and picks up at the
+    // reset (owner, 21 Sep 2026).
+    const today = await rollDay(run.id);
+    if (today.dayRequests >= today.dailyCap) {
+      const back = nextUtcMidnight();
+      await waitUntil(run.id, back,
+        `${today.dayRequests.toLocaleString('en-GB')} requests today, which is the ${today.dailyCap.toLocaleString('en-GB')} assumed daily cap; back at ${back.toISOString().slice(11, 16)} UTC`);
+      return { working: false, reason: 'daily cap', resumeAfter: back, tiles };
     }
 
     const tile = await claimTile(run);
@@ -427,9 +494,16 @@ export async function advance({ runId = null, budgetMs = SLICE_MS, now = () => D
     if (out.refused) {
       // A refusal is the provider telling the whole run to stop, not one tile
       // failing. The first ring census fired 9,321 doomed requests past a daily
-      // cap because nothing read the answer (sources/census.js).
-      await finish(run.id, 'refused', out.refused);
-      return { working: false, reason: 'refused', problem: out.refused, tiles };
+      // cap because nothing read the answer (sources/census.js) — and a run
+      // that retries against a refusal spends the whole of the next day's
+      // allowance proving the same point. So: stop, keep what it said word for
+      // word, and come back after the reset (owner, 21 Sep 2026).
+      const back = nextUtcMidnight();
+      await query(
+        `update census_runs set refusal = $2, refused_at = now() where id = $1`,
+        [run.id, String(out.refused).slice(0, 500)]);
+      await waitUntil(run.id, back, `Google refused: ${String(out.refused).slice(0, 200)}`);
+      return { working: false, reason: 'refused', problem: out.refused, resumeAfter: back, tiles };
     }
   }
   await query(`update census_runs set last_seen_at = now() where id = $1`, [run.id]);
@@ -574,16 +648,27 @@ async function finish(id, state, problem) {
  * run is still meant to be going.
  */
 export async function resumeInterrupted() {
+  // A run waiting for the quota day to turn over, whose clock has come round.
+  // Automatic, because the owner asked for it to be — "resume automatically
+  // after the 00:00 UTC reset" — and because a run that needs a person at
+  // midnight is a run that loses a day (21 Sep 2026).
+  const { rows: woken } = await query(
+    `update census_runs
+        set state = 'running', resume_after = null, problem = null,
+            day = (now() at time zone 'utc')::date, day_requests = 0, last_seen_at = now()
+      where state = 'waiting' and resume_after is not null and resume_after <= now()
+      returning id, label`);
+
   const { rows } = await query(
     `select id, label, last_seen_at from census_runs
       where state = 'running' and last_seen_at < now() - ($1 || ' milliseconds')::interval`,
     [String(STRANDED_AFTER_MS)]);
-  if (!rows.length) return { resumed: 0 };
+  if (!rows.length) return { resumed: 0, woken: woken.length, runs: woken };
   await query(
     `update census_tiles set state = 'todo', claimed_at = null, claimed_by = null
       where run_id = any($1) and state = 'doing' and claimed_at < now() - ($2 || ' milliseconds')::interval`,
     [rows.map((r) => r.id), String(STRANDED_AFTER_MS)]);
-  return { resumed: rows.length, runs: rows };
+  return { resumed: rows.length, woken: woken.length, runs: [...rows, ...woken] };
 }
 
 /** What a run looks like to somebody watching it. */
@@ -656,7 +741,7 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
     // keeping — but a board counting those would report a district as growing
     // every time it was re-censused, however many places had closed.
     const { rows } = await query(
-      `select ps.category, ps.subcategory, ps.venue_ref, pi.lat, pi.lng, pi.slice
+      `select ps.category, ps.subcategory, ps.venue_ref, ps.sourced, pi.lat, pi.lng, pi.slice
          from place_subcategories ps
          join place_index pi on pi.venue_ref = ps.venue_ref
          join census_tiles t on t.grid_key = ps.area_slug
@@ -685,6 +770,11 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
     const counted = new Map();
     const unresolved = new Map();
     const drawer = new Map();
+    // How each drawer's places were found. A count made of text-query answers
+    // is a different kind of number from one Google guaranteed the type of, and
+    // it says so wherever it is shown (owner, 21 Sep 2026).
+    const sourcedBy = new Map();
+    const fromText = new Map();
     const add = (map, key, ref) => {
       if (!map.has(key)) map.set(key, new Set());
       map.get(key).add(ref);
@@ -692,16 +782,19 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
     for (const r of rows) {
       const key = `${r.category}/${r.subcategory}`;
       drawer.set(key, { category: r.category, subcategory: r.subcategory });
+      if (!sourcedBy.has(key)) sourcedBy.set(key, new Set());
+      sourcedBy.get(key).add(r.sourced ?? 'type');
       // Its own point beats any box: that is exact, and a display search will
       // have bought one for anything a household has actually looked at.
-      if (r.lat != null && r.lng != null) {
-        if (mine.has(nearest(Number(r.lat), Number(r.lng)))) add(counted, key, r.venue_ref);
-        continue;
+      const inside = (r.lat != null && r.lng != null)
+        ? (mine.has(nearest(Number(r.lat), Number(r.lng))) ? 'inside' : 'outside')
+        : (r.slice ? verdictOf(r.slice) : 'nowhere');
+      if (inside === 'inside') {
+        add(counted, key, r.venue_ref);
+        if ((r.sourced ?? 'type') === 'text') add(fromText, key, r.venue_ref);
+      } else if (inside === 'across') {
+        add(unresolved, key, r.venue_ref);
       }
-      if (!r.slice) continue;
-      const v = verdictOf(r.slice);
-      if (v === 'inside') add(counted, key, r.venue_ref);
-      else if (v === 'across') add(unresolved, key, r.venue_ref);
     }
 
     const censusedAt = tiles.map((t) => new Date(t.censused_at).getTime()).sort((a, b) => a - b);
@@ -712,21 +805,28 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
       const { rows: [scored] } = refs.size
         ? await query('select count(*)::int n from epic_scores where venue_ref = any($1)', [[...refs]])
         : { rows: [{ n: 0 }] };
+      const kinds = [...(sourcedBy.get(key) ?? ['type'])];
       await query(
         `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, scored_count,
-                                  saturated, censused_at, complete, tiles, tiles_saturated, unresolved)
-         values ($1,$2,$3,$4,$4,$5,$6,$7,$8,$9,$10,$11)
+                                  saturated, censused_at, complete, tiles, tiles_saturated, unresolved,
+                                  sourced, text_count)
+         values ($1,$2,$3,$4,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
          on conflict (area_slug, category, subcategory) do update
             set census_count = excluded.census_count, surfaced_count = excluded.surfaced_count,
                 scored_count = excluded.scored_count, saturated = excluded.saturated,
                 censused_at = excluded.censused_at, complete = excluded.complete,
                 tiles = excluded.tiles, tiles_saturated = excluded.tiles_saturated,
-                unresolved = excluded.unresolved`,
+                unresolved = excluded.unresolved,
+                sourced = excluded.sourced, text_count = excluded.text_count`,
         [code.toLowerCase(), category, subcategory, refs.size, scored.n, saturatedTiles,
           // The oldest tile, not the newest: a count is only as fresh as the
           // stalest ground it is drawn from.
           new Date(censusedAt[0]), complete,
-          tiles.length, saturatedTiles, unresolved.get(key)?.size ?? 0]);
+          tiles.length, saturatedTiles, unresolved.get(key)?.size ?? 0,
+          // One word where a drawer was answered one way, "mixed" where it was
+          // not — and how many of the places came from a text query either way,
+          // because that is the number a person is being asked to trust.
+          kinds.length === 1 ? kinds[0] : 'mixed', fromText.get(key)?.size ?? 0]);
       written += 1;
     }
   }
@@ -739,3 +839,137 @@ const boxFromSlice = (slice) => {
   if (n.length !== 4 || n.some((x) => !Number.isFinite(x))) return null;
   return { minLat: n[0], minLng: n[1], maxLat: n[2], maxLng: n[3] };
 };
+
+/**
+ * What a run did, by postcode area and in total.
+ *
+ * Owner, 21 September 2026: "Report per area and in total; ledger cost from
+ * `provider_calls`." So the money is read out of the ledger rather than
+ * asserted from the tier the code believes it used — the two have disagreed
+ * before, and the ledger is the one that would show it.
+ *
+ * A postcode area is the letters of an outcode: SE1 and SE22 are both SE. A
+ * tile can touch two areas, so its requests are attributed to each area it
+ * touches and the total is taken from the tiles themselves rather than by
+ * adding the areas up — otherwise a boundary tile is counted twice, which is
+ * the same double count the census fixed one level down.
+ */
+export async function report(runId = null) {
+  const { rows: [run] } = runId
+    ? await query('select * from census_runs where id = $1', [runId])
+    : await query("select * from census_runs order by started_at desc limit 1");
+  if (!run) return null;
+
+  // One row per area per tile, *distinct*, before anything is added up: a tile
+  // touching SE1 and SE11 is one SE tile, and summing over the outcodes counted
+  // its requests twice (21 Sep 2026).
+  const { rows: areas } = await query(
+    `with touching as (
+       select distinct upper(substring(o from '^[A-Z]+')) as area,
+              t.grid_key, t.state, t.requests, t.places, t.saturated, t.censused_at
+         from census_tiles t
+         cross join lateral unnest(t.outcodes) as o
+        where t.run_id = $1
+     ), districts as (
+       select upper(substring(o from '^[A-Z]+')) as area, count(distinct o)::int as outcodes
+         from census_tiles t
+         cross join lateral unnest(t.outcodes) as o
+        where t.run_id = $1
+        group by 1
+     )
+     select tt.area,
+            d.outcodes,
+            count(*)::int                                  as tiles,
+            count(*) filter (where tt.state = 'done')::int   as done,
+            count(*) filter (where tt.state = 'failed')::int as failed,
+            coalesce(sum(tt.requests), 0)::int              as requests,
+            coalesce(sum(tt.places), 0)::int                as places,
+            coalesce(sum(tt.saturated), 0)::int             as saturated,
+            min(tt.censused_at)                             as first_seen,
+            max(tt.censused_at)                             as last_seen
+       from touching tt
+       join districts d on d.area = tt.area
+      group by tt.area, d.outcodes
+      order by tt.area`, [run.id]);
+
+  // Every tile once, whatever it touches.
+  const { rows: [whole] } = await query(
+    `select count(*)::int tiles,
+            count(*) filter (where state = 'done')::int done,
+            count(*) filter (where state = 'failed')::int failed,
+            coalesce(sum(requests), 0)::int requests,
+            coalesce(sum(places), 0)::int places,
+            coalesce(sum(slices), 0)::int slices,
+            coalesce(sum(saturated), 0)::int saturated
+       from census_tiles where run_id = $1`, [run.id]);
+
+  // The money, from the ledger and nowhere else.
+  const { rows: [spend] } = await query(
+    `select count(*)::int rows,
+            coalesce(sum(estimated_cost_usd), 0)::float usd,
+            coalesce(sum((units->>'google')::int), 0)::int requests,
+            coalesce(sum((units->>'google-essentials')::int), 0)::int essentials,
+            coalesce(sum((units->>'google-pro')::int), 0)::int pro,
+            coalesce(sum((units->>'google-search')::int), 0)::int search
+       from provider_calls
+      where purpose = 'census.slice' and created_at >= $1`, [run.started_at]);
+
+  // How the places were found, which is the thing the nine text-query drawers
+  // exist to be judged on.
+  const { rows: sourced } = await query(
+    `select coalesce(ps.sourced, 'type') as sourced,
+            count(distinct ps.venue_ref)::int as places,
+            count(distinct ps.subcategory)::int as drawers
+       from place_subcategories ps
+       join census_tiles t on t.grid_key = ps.area_slug
+      where t.run_id = $1 and ps.last_seen >= coalesce(t.started_at, t.censused_at)
+      group by 1 order by 1`, [run.id]);
+
+  return {
+    run: {
+      id: run.id,
+      label: run.label,
+      state: run.state,
+      areas: run.areas,
+      startedAt: run.started_at,
+      finishedAt: run.finished_at,
+      ratePerSec: Number(run.rate_per_sec),
+      dailyCap: run.daily_cap,
+      dayRequests: run.day_requests,
+      resumeAfter: run.resume_after,
+      // What Google said, word for word, if it ever refused. The owner asked
+      // what the 429 says the limit actually is, and this is where it says it.
+      refusal: run.refusal,
+      refusedAt: run.refused_at,
+      problem: run.problem,
+    },
+    total: {
+      ...whole,
+      hours: run.started_at
+        ? Math.round(((new Date(run.finished_at ?? Date.now()) - new Date(run.started_at)) / 3_600_000) * 10) / 10
+        : null,
+    },
+    areas: areas.map((a) => ({
+      area: a.area,
+      outcodes: a.outcodes,
+      tiles: a.tiles,
+      done: a.done,
+      failed: a.failed,
+      requests: a.requests,
+      places: a.places,
+      saturated: a.saturated,
+      firstSeen: a.first_seen,
+      lastSeen: a.last_seen,
+    })),
+    sourced,
+    ledger: {
+      rows: spend.rows,
+      requests: spend.requests,
+      byTier: { essentials: spend.essentials, pro: spend.pro, search: spend.search },
+      usd: spend.usd,
+      gbp: Math.round(spend.usd * USD_TO_GBP * 10000) / 10000,
+      // The claim the whole design rests on, checked rather than repeated.
+      free: spend.usd === 0,
+    },
+  };
+}

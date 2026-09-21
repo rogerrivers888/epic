@@ -34,7 +34,7 @@ import { randomUUID } from 'node:crypto';
 import { query } from '../db.js';
 import { googleSource } from './google.js';
 import { NOT_ASKABLE } from './googleTypes.js';
-import { wordQuestionsFor, WORD_QUESTION_SUBCATEGORIES } from './censusQuestions.js';
+import { wordQuestionsFor, WORD_QUESTION_SUBCATEGORIES, SOURCED } from './censusQuestions.js';
 import * as index from '../repositories/placeIndex.js';
 import * as providerCalls from '../repositories/providerCalls.js';
 
@@ -126,7 +126,8 @@ export async function slicePlan({ subcategories = null } = {}) {
     .map((r) => ({
       category: r.category,
       subcategory: r.subcategory,
-      questions: r.types.filter((t) => t && !NOT_ASKABLE.has(t)).map((type) => ({ type, words: null })),
+      questions: r.types.filter((t) => t && !NOT_ASKABLE.has(t))
+        .map((type) => ({ type, words: null, sourced: SOURCED.TYPE })),
     }))
     .map((r) => [r.subcategory, r]));
 
@@ -142,8 +143,8 @@ export async function slicePlan({ subcategories = null } = {}) {
   }
   for (const [key, row] of byKey) {
     for (const q of wordQuestionsFor(key)) {
-      if (NOT_ASKABLE.has(q.type)) continue;
-      row.questions.push({ type: q.type, words: q.words });
+      if (q.type && NOT_ASKABLE.has(q.type)) continue;
+      row.questions.push({ type: q.type ?? null, words: q.words, sourced: q.sourced });
     }
   }
 
@@ -175,7 +176,7 @@ const boxLabel = (box) => [box.minLat, box.minLng, box.maxLat, box.maxLng].map((
  * thing to look at when a count reads wrong, and a tree that quietly replaced
  * the parent with its tiles would hide it.
  */
-async function sliceDown({ box, type, words = null, category, subcategory, areaSlug, outcode, householdId, runId, depth = 0, parentId = null, found, surfaced, meter, stats, pace = null }) {
+async function sliceDown({ box, type, words = null, sourced = SOURCED.TYPE, category, subcategory, areaSlug, outcode, householdId, runId, depth = 0, parentId = null, found, surfaced, meter, stats, pace = null }) {
   if (stats.requests >= stats.maxRequests) { stats.stopped = true; return; }
   // A long run is paced rather than budgeted: Essentials is free and the only
   // thing that can go wrong is asking Google faster than the project's quota
@@ -186,7 +187,12 @@ async function sliceDown({ box, type, words = null, category, subcategory, areaS
   // `words` only where Google has no word for the drawer. The type still goes
   // as `includedType`, so what comes back is fenced by Google's own answer and
   // not only by a string match (`censusQuestions.js`).
-  const res = await googleSource.censusSlice({ box, includedType: type, query: words ?? undefined, meter });
+  // No `includedType` where there is no honest one: the nine drawers with no
+  // typed form at all are asked in plain words, and every row they touch says
+  // so (owner, 21 Sep 2026). The five that do have a fence keep it.
+  const res = await googleSource.censusSlice({
+    box, includedType: type ?? undefined, query: words ?? undefined, meter,
+  });
   // Count what was *attempted*, not what succeeded. `call` bumps the meter
   // before it fetches, so a timeout or a 429 is still a request Google saw —
   // and counting only the successes meant a run of failures never reached the
@@ -206,7 +212,12 @@ async function sliceDown({ box, type, words = null, category, subcategory, areaS
     // filing — a place lives on one shelf — and this keeps the count.
     const key = `${ref}|${subcategory}|${areaSlug ?? ''}`;
     if (!surfaced.has(key)) {
-      surfaced.set(key, { ref, category, subcategory, foundBy: type, rank: p.rank, areaSlug });
+      // "A place found only by a text query is filed under that drawer with
+      // found_by = text, so I can open twenty in the Places tab and judge
+      // precision" (owner, 21 Sep 2026). Text questions are asked last, so a
+      // place a typed question already found keeps that question — which is
+      // what makes "only by a text query" mean exactly that.
+      surfaced.set(key, { ref, category, subcategory, foundBy: type ?? 'text', rank: p.rank, areaSlug, sourced });
     }
     if (!found.has(ref)) fresh += 1;
     // Later slices do not overwrite the first one to find a place: the narrowest
@@ -217,7 +228,7 @@ async function sliceDown({ box, type, words = null, category, subcategory, areaS
       // IDs Only, and both of those are Pro fields that bill (owner, 19 Sep
       // 2026). They arrive with the first display search that returns the place.
       found.set(ref, {
-        ref, category, subcategory, foundBy: type, rank: p.rank, slice: boxLabel(box),
+        ref, category, subcategory, foundBy: type ?? 'text', rank: p.rank, slice: boxLabel(box), sourced,
       });
     }
   }
@@ -226,15 +237,15 @@ async function sliceDown({ box, type, words = null, category, subcategory, areaS
   const { rows: [row] } = await query(
     `insert into census_slices
        (area_slug, outcode, min_lat, min_lng, max_lat, max_lng, category, subcategory,
-        google_type, query, returned, new_ids, saturated, parent_id, depth, requests, problem, run_id)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+        google_type, query, returned, new_ids, saturated, parent_id, depth, requests, problem, run_id, sourced)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
      returning id`,
     [areaSlug, outcode, box.minLat, box.minLng, box.maxLat, box.maxLng, category, subcategory,
-      type, words ?? type, res.places.length, fresh, res.saturated, parentId, depth, attempted, res.problem, runId],
+      type, words ?? type, res.places.length, fresh, res.saturated, parentId, depth, attempted, res.problem, runId, sourced],
   );
   stats.slices += 1;
   if (res.problem) {
-    stats.problems.push(`${subcategory}/${words ? `${type} “${words}”` : type}: ${res.problem}`);
+    stats.problems.push(`${subcategory}/${words ? `${type ?? 'text'} “${words}”` : type}: ${res.problem}`);
     // A refusal is not a slice that found nothing; it is the whole run being
     // told to stop. The first ring census walked into the console's daily
     // Text Search cap after two outcodes and then fired **9,321 more doomed
@@ -242,7 +253,9 @@ async function sliceDown({ box, type, words = null, category, subcategory, areaS
     // nothing read the answer. Worse, each of those outcodes then rolled up as
     // a completed census of nought places (19 Sep 2026).
     if (/\b429\b|RESOURCE_EXHAUSTED|Quota exceeded|rate limit/i.test(res.problem)) {
-      stats.refused = res.problem.slice(0, 200);
+      // Word for word, because the number in it is the only authority on
+      // what the daily cap really is (owner, 21 Sep 2026).
+      stats.refused = res.problem.slice(0, 500);
       stats.stopped = true;
     }
   } else {
@@ -256,7 +269,7 @@ async function sliceDown({ box, type, words = null, category, subcategory, areaS
   if (!saturated) return;
   for (const q of quarters(box)) {
     await sliceDown({
-      box: q, type, words, category, subcategory, areaSlug, outcode, householdId, runId,
+      box: q, type, words, sourced, category, subcategory, areaSlug, outcode, householdId, runId,
       depth: depth + 1, parentId: row.id, found, surfaced, meter, stats, pace,
     });
   }
@@ -303,8 +316,8 @@ export async function censusArea({
   const done = [];
 
   for (const { category, subcategory, questions } of plan) {
-    for (const { type, words } of questions) {
-      await sliceDown({ box, type, words, category, subcategory, areaSlug, outcode, householdId, runId, found, surfaced, meter, stats, pace });
+    for (const { type, words, sourced } of questions) {
+      await sliceDown({ box, type, words, sourced, category, subcategory, areaSlug, outcode, householdId, runId, found, surfaced, meter, stats, pace });
       if (stats.stopped || stats.refused) break;
     }
     if (stats.refused) { stats.problems.push(`the provider refused: ${stats.refused}`); break; }
@@ -415,11 +428,11 @@ async function writeCensusFacts(places) {
  * legible rather than silently vanishing.
  */
 async function writeSurfacings(rows, runId) {
-  const values = rows.map((_, i) => `($${i * 6 + 1},$${i * 6 + 2},$${i * 6 + 3},$${i * 6 + 4},$${i * 6 + 5}::int,$${i * 6 + 6}, now(), now(), $${rows.length * 6 + 1})`).join(',');
-  const params = rows.flatMap((r) => [r.ref, r.category, r.subcategory, r.foundBy, r.rank, r.areaSlug ?? null]);
+  const values = rows.map((_, i) => `($${i * 7 + 1},$${i * 7 + 2},$${i * 7 + 3},$${i * 7 + 4},$${i * 7 + 5}::int,$${i * 7 + 6},$${i * 7 + 7}, now(), now(), $${rows.length * 7 + 1})`).join(',');
+  const params = rows.flatMap((r) => [r.ref, r.category, r.subcategory, r.foundBy, r.rank, r.areaSlug ?? null, r.sourced ?? 'type']);
   params.push(runId);
   await query(
-    `insert into place_subcategories (venue_ref, category, subcategory, found_by, found_rank, area_slug, first_seen, last_seen, run_id)
+    `insert into place_subcategories (venue_ref, category, subcategory, found_by, found_rank, area_slug, sourced, first_seen, last_seen, run_id)
      values ${values}
      on conflict (venue_ref, subcategory, coalesce(area_slug, '')) do update
         -- The category too. A taxonomy change can move a subcategory to another
@@ -429,6 +442,7 @@ async function writeSurfacings(rows, runId) {
         -- meant to buy, that a re-map costs nothing (Codex, 19 Sep 2026).
         set category = excluded.category,
             found_by = excluded.found_by, found_rank = excluded.found_rank, last_seen = now(),
+            sourced = excluded.sourced,
             -- The run that last found it, so a count and the explanation beside
             -- it come from the same census (Codex, 20 Sep 2026).
             run_id = excluded.run_id`,

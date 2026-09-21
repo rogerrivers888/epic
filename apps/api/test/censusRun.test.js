@@ -15,7 +15,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { googleSource } from '../src/sources/google.js';
-import { tileOf, planTiles, startRun, advance, requestStop, resume, rollUpOutcodes } from '../src/sources/censusRun.js';
+import { tileOf, planTiles, startRun, advance, requestStop, resume, resumeInterrupted, rollUpOutcodes, nextUtcMidnight, report } from '../src/sources/censusRun.js';
 import { slicePlan } from '../src/sources/census.js';
 import { query, pool } from '../src/db.js';
 
@@ -177,8 +177,19 @@ test('a provider refusal stops the whole run, not one tile', async (t) => {
 
   assert.equal(out.reason, 'refused');
   assert.ok(calls < 50, `the run stopped asking rather than working through the plan (${calls} calls)`);
-  const { rows: [after] } = await query(`select state, problem from census_runs where id = $1`, [run.id]);
-  assert.equal(after.state, 'refused');
+  const { rows: [after] } = await query(
+    `select state, problem, refusal, refused_at, resume_after from census_runs where id = $1`, [run.id]);
+  // Waiting, not refused-and-finished: "stop cleanly on the first 429, never
+  // retry against it, resume automatically after the 00:00 UTC reset" (owner,
+  // 21 Sep 2026). Paused waits for a person; waiting waits for a clock.
+  assert.equal(after.state, 'waiting');
+  assert.ok(after.resume_after, 'and it says when it will try again');
+  assert.ok(new Date(after.resume_after) > new Date(), 'which is in the future');
+  assert.equal(new Date(after.resume_after).getUTCHours(), 0, 'at the quota reset, which is 00:00 UTC');
+  // Word for word, because the number in it is the only authority on what the
+  // daily cap really is.
+  assert.match(after.refusal ?? '', /Quota exceeded/);
+  assert.ok(after.refused_at, 'with the moment it happened');
   assert.match(after.problem ?? '', /Quota|RESOURCE_EXHAUSTED/);
 });
 
@@ -528,4 +539,61 @@ test('a paused run cannot be resumed on top of a running one', async (t) => {
     'two rows saying "running" is one run being given no work while looking busy');
   await query(`update census_runs set state = 'done' where id = $1`, [going.id]);
   assert.ok((await resume(paused.id))?.state === 'running', 'and once the other is done it picks up');
+});
+
+
+test('a run stops itself at the day\'s allowance and comes back at the reset', async (t) => {
+  await clean();
+  t.after(clean);
+  const { rows: [run] } = await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, daily_cap, day, day_requests)
+     values ('test daily cap', array['ZZ'], 0.08, 0.12, 100000, 0, 30, 3, (now() at time zone 'utc')::date, 0)
+     returning *`);
+  await seedTile(run, 'test/dailycap');
+
+  // A quota is a promise about a day, and a client that waits to be told no has
+  // already spent somebody's goodwill. Three requests, then it stops itself.
+  await withCensus(answers(1), () => advance({ runId: run.id, budgetMs: 20_000 }));
+
+  const { rows: [after] } = await query(
+    `select state, resume_after, problem, day_requests from census_runs where id = $1`, [run.id]);
+  assert.equal(after.state, 'waiting', 'it stopped itself rather than being refused');
+  assert.ok(after.day_requests >= 3, 'having spent the day\'s allowance');
+  assert.equal(new Date(after.resume_after).getUTCHours(), 0, 'and comes back at 00:00 UTC');
+  assert.match(after.problem ?? '', /daily cap/);
+
+  // The clock comes round, and nobody had to be awake for it.
+  await query(`update census_runs set resume_after = now() - interval '1 minute' where id = $1`, [run.id]);
+  const woke = await resumeInterrupted();
+  assert.ok(woke.woken >= 1, 'the run wakes itself');
+  const { rows: [back] } = await query(`select state, day_requests from census_runs where id = $1`, [run.id]);
+  assert.equal(back.state, 'running');
+  assert.equal(back.day_requests, 0, 'with a fresh day to spend');
+});
+
+test('a run reports per area and in total, with the money read from the ledger', async (t) => {
+  await clean();
+  t.after(clean);
+  const run = await startTestRun({ label: 'test report' });
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, run_id, state,
+                               requests, slices, places, saturated, censused_at, started_at)
+     values ('test/report-a', 51.40, -0.70, 51.48, -0.58, array['SE1','SE11'], $1, 'done', 1500, 924, 4221, 0, now(), now()),
+            ('test/report-b', 52.80, 0.80, 52.88, 0.92, array['NR21'], $1, 'done', 272, 270, 46, 0, now(), now())`,
+    [run.id]);
+
+  const out = await report(run.id);
+  const se = out.areas.find((a) => a.area === 'SE');
+  const nr = out.areas.find((a) => a.area === 'NR');
+  assert.equal(se.requests, 1500, 'a postcode area is the letters of its outcodes: SE1 and SE11 are one area');
+  assert.equal(se.outcodes, 2);
+  assert.equal(nr.places, 46);
+  // A tile touching two areas is one tile, so the total comes from the tiles
+  // rather than from adding the areas up — the same double count the census
+  // fixed one level down.
+  assert.equal(out.total.tiles, 2);
+  assert.equal(out.total.requests, 1772);
+  // The claim the whole design rests on, read rather than repeated.
+  assert.equal(out.ledger.usd, 0);
+  assert.equal(out.ledger.free, true);
 });
