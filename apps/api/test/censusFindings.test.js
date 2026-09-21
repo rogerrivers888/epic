@@ -402,3 +402,30 @@ test('a drawer created after a tile was counted is still counted', async () => {
   assert.ok(golf, 'the drawer that did not exist when the tile was counted has a count now');
   assert.equal(rows.find((r) => r.subcategory === 'marina').places, 4, 'and the drawer that was already counted was not asked again');
 });
+
+test('a ground count nobody has refreshed does not pass itself off as this morning’s', async () => {
+  // The same fault as the sweep's, in the reader: a sum is only as fresh as its
+  // stalest part, and "as it stands today" over a month-old component is how a
+  // number nobody has checked reads as agreement (owner, 21 Sep 2026).
+  const gridKey = 'test/ground/old-number';
+  await aSubcategory('marina', 'Marina', 'outdoors');
+  await aCensusedTile({ gridKey, outcodes: ['ZZ88'], subcategory: 'marina', places: 2, osmAt: new Date() });
+  await query(`delete from ground_counts where grid_key = $1`, [gridKey]);
+  await ground.noteGround({ gridKey, source: 'osm', counts: { marina: 9 } });
+  await query(
+    `update ground_counts set counted_at = now() - interval '45 days' where grid_key = $1`, [gridKey]);
+
+  const out = await findings.gaps({ outcodes: ['ZZ88'], source: 'osm' });
+  const row = out.gaps.find((g) => g.key === 'marina');
+  assert.equal(row.stale, true);
+  assert.match(row.reason, /as it was counted on/, 'it names the day rather than claiming today');
+  assert.doesNotMatch(row.reason, /as it stands today/);
+
+  // And once it is counted again, it speaks in the present tense.
+  await ground.noteGround({ gridKey, source: 'osm', counts: { marina: 11 } });
+  const fresh = await findings.gaps({ outcodes: ['ZZ88'], source: 'osm' });
+  const now = fresh.gaps.find((g) => g.key === 'marina');
+  assert.equal(now.stale, false);
+  assert.match(now.reason, /as it stands today/);
+  assert.equal(now.ground, 11);
+});

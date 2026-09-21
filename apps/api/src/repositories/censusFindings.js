@@ -342,7 +342,7 @@ export async function silentTypes({ outcodes = null } = {}) {
  * café; a ground count presented as a target is how a census gets taught to
  * count pitches as grounds.
  */
-export async function gaps({ outcodes = null, source = 'osm' } = {}) {
+export async function gaps({ outcodes = null, source = 'osm', staleDays = 30 } = {}) {
   if (!['osm', 'fhrs'].includes(source)) throw Object.assign(new Error('the ground count is osm or fhrs'), { status: 400 });
   const params = outcodes ? [outcodes] : [];
   const at = source === 'osm' ? 'osm_at' : 'fhrs_at';
@@ -364,7 +364,15 @@ export async function gaps({ outcodes = null, source = 'osm' } = {}) {
               -- comparison covered more ground than it did, which is the one
               -- thing this query exists to get right.
               count(distinct g.grid_key)::int as tiles,
-              max(g.counted_at) as counted_at, min(g.caveat) as caveat, min(g.asked) as asked
+              max(g.counted_at) as counted_at,
+              -- And the oldest, because a sum is only as fresh as its stalest
+              -- part. The register is counted per council and the open map per
+              -- box; a total whose newest component is today and whose oldest
+              -- is from August is not "as it stands today", and saying so would
+              -- be the reader making the same mistake the sweep was making
+              -- (owner, 21 Sep 2026 — a stale ground count reads as agreement).
+              min(g.counted_at) as oldest_at,
+              min(g.caveat) as caveat, min(g.asked) as asked
          from ground_counts g join checked c on c.grid_key = g.grid_key
         where g.source = $${params.length + 1}
         group by 1
@@ -378,7 +386,7 @@ export async function gaps({ outcodes = null, source = 'osm' } = {}) {
      select s.key, s.label, s.category_key as category,
             coalesce(census.places, 0) as census, coalesce(census.by_text, 0) as by_text,
             ground.places as ground,
-            ground.tiles, ground.counted_at, ground.caveat, ground.asked
+            ground.tiles, ground.counted_at, ground.oldest_at, ground.caveat, ground.asked
        from ground
        join shelf_subcategories s on s.key = ground.subcategory and s.active
        left join census on census.subcategory = ground.subcategory
@@ -388,17 +396,23 @@ export async function gaps({ outcodes = null, source = 'osm' } = {}) {
   const found = rows.map((r) => {
     const shortfall = r.ground - r.census;
     const share = r.ground ? Math.round((r.census / r.ground) * 100) : null;
+    // "As it stands today" is only true while every part of the sum is inside
+    // the freshness window. Past it the sentence names the day instead, so a
+    // number nobody has refreshed cannot pass itself off as this morning's.
+    const oldest = r.oldest_at ? new Date(r.oldest_at) : null;
+    const stale = oldest ? Date.now() - oldest.getTime() > staleDays * 86_400_000 : false;
+    const asOf = stale ? `as it was counted on ${day(r.oldest_at)}` : 'as it stands today';
     return {
       key: r.key, label: r.label, category: r.category,
       census: r.census, byText: r.by_text, ground: r.ground, shortfall, foundShare: share,
-      tiles: r.tiles, countedAt: r.counted_at, source, asked: r.asked, caveat: r.caveat,
+      tiles: r.tiles, countedAt: r.counted_at, oldestAt: r.oldest_at, stale, source, asked: r.asked, caveat: r.caveat,
       // Both sides say what they are. The census side is everything it has ever
       // found in these tiles; the free side is the source as it stands today.
       // Neither is "the number of places here", and two numbers with the same
       // name on one screen is the thing to avoid (epic-71, 21 Sep 2026).
       reason: shortfall > 0
-        ? `The census has found ${n(r.census)} in all${r.by_text ? `, ${n(r.by_text)} of them from a plain text query` : ''}, where ${whose} has ${n(r.ground)} as it stands today — the same ${n(r.tiles)} tile${r.tiles === 1 ? '' : 's'}, ${share}% of the ground count.${r.caveat ? ` ${r.caveat}` : ''}`
-        : `The census has found ${n(r.census)} in all, where ${whose} has ${n(r.ground)} as it stands today over the same ${n(r.tiles)} tile${r.tiles === 1 ? '' : 's'}, so nothing is obviously missing.${r.caveat ? ` ${r.caveat}` : ''}`,
+        ? `The census has found ${n(r.census)} in all${r.by_text ? `, ${n(r.by_text)} of them from a plain text query` : ''}, where ${whose} has ${n(r.ground)} ${asOf} — the same ${n(r.tiles)} tile${r.tiles === 1 ? '' : 's'}, ${share}% of the ground count.${r.caveat ? ` ${r.caveat}` : ''}`
+        : `The census has found ${n(r.census)} in all, where ${whose} has ${n(r.ground)} ${asOf} over the same ${n(r.tiles)} tile${r.tiles === 1 ? '' : 's'}, so nothing is obviously missing.${r.caveat ? ` ${r.caveat}` : ''}`,
     };
   });
 
