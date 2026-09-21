@@ -51,19 +51,37 @@ export const FACT_WEIGHTS = { picture: 30, what_it_is: 25, hours: 20, menu: 25, 
  */
 const DEFAULT_BARS = [
   // Somewhere that serves food is not ready without a menu.
-  [['restaurants', 'pubs-bars', 'cafes', 'food-markets', 'fast-food'], ['picture', 'what_it_is', 'hours', 'menu']],
+  [['restaurants', 'pubs-bars', 'cafes', 'food-markets', 'fast-food',
+    // The food drawers section 4 created. A brewery tour and an afternoon tea
+    // are both bookings with a card, and a farm shop lives or dies on what it
+    // sells, so all three want a menu like the rest.
+    'afternoon-tea', 'breweries-distilleries', 'farm-shops-delis'],
+   ['picture', 'what_it_is', 'hours', 'menu']],
   // Somewhere you pay to get into, and where getting in is a real question.
-  [['theme-parks', 'zoos-wildlife', 'castles', 'historic-houses', 'museums', 'galleries'],
+  [['theme-parks', 'zoos-wildlife', 'castles', 'historic-houses', 'museums', 'galleries',
+    // Pay at the gate, and getting in is a real question for a family.
+    'water-park', 'heritage-railways', 'model-villages', 'mazes', 'county-shows', 'pick-your-own'],
    ['picture', 'what_it_is', 'hours', 'prices', 'step_free']],
   [['spas', 'gardens', 'lidos', 'cinema-bowling', 'theatre', 'live-music', 'karting', 'circuits',
     'flying', 'watersports', 'ropes', 'off-road', 'pools', 'climbing', 'skating', 'athletics',
-    'racquet-clubs', 'golf', 'racecourses', 'football', 'rugby-cricket', 'arenas', 'markets'],
+    'racquet-clubs', 'golf', 'racecourses', 'football', 'rugby-cricket', 'arenas', 'markets',
+    // With Off-road & quad biking, which is the drawer riding sat in until 237
+    // gave it its own and left it with nothing to be judged on (21 Sep 2026).
+    'riding-stables',
+    // Everything else you book and pay for by the session.
+    'miniature-golf-course', 'karaoke', 'skateboard-park', 'ski-resort', 'indoor-snow',
+    'paintball-lasertag', 'paintball-center', 'adventure-sports-center', 'indoor-golf-course',
+    'fishing-charter', 'cultural-center'],
    ['picture', 'what_it_is', 'hours', 'prices']],
   // Open ground: there are no opening hours on a common, and no price either.
-  [['parks', 'woodland', 'coast', 'water', 'hills', 'nature', 'viewpoints', 'trails', 'caves-falls', 'scenic'],
+  [['parks', 'woodland', 'coast', 'water', 'hills', 'nature', 'viewpoints', 'trails', 'caves-falls', 'scenic',
+    // A marina and a splash pad have no ticket and no closing time either.
+    'marina', 'splash-pads'],
    ['picture', 'what_it_is']],
   // Everything else: a picture, a sentence and when it is open.
-  [['play', 'days-out', 'ancient-sites', 'churches', 'landmarks', 'cycling', 'paddling'],
+  [['play', 'days-out', 'ancient-sites', 'churches', 'landmarks', 'cycling', 'paddling',
+    // The two halves of the Landmarks split, judged the way Landmarks was.
+    'monuments-memorials', 'landmarks-you-can-see'],
    ['picture', 'what_it_is', 'hours']],
 ];
 
