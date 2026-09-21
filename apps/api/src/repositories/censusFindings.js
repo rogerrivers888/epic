@@ -174,8 +174,14 @@ export function reasonForState(state, { label, found, questions, coverage, slice
   // Asked one way here and another way there: the sum is of two questions, and
   // saying so is the only honest thing to do with it until the census has been
   // re-asked over the tiles that had the old one.
-  const same = mixed
-    ? ` ${n(mixed.tiles)} tile${mixed.tiles === 1 ? ' was' : 's were'} censused before ${n(mixed.questions)} of this drawer's question${mixed.questions === 1 ? '' : 's'} existed and ${mixed.tiles === 1 ? 'has' : 'have'} never been asked ${mixed.questions === 1 ? 'it' : 'them'}, so this is a sum of more than one question and not yet a denominator.`
+  // Two different things, and only one of them fixes itself. A tile of the grid
+  // is re-opened and re-asked by the run; a district censused the old way, one
+  // box per outcode, is in no run and nothing will go back for it.
+  const behind = [];
+  if (mixed?.tiles) behind.push(`${n(mixed.tiles)} tile${mixed.tiles === 1 ? '' : 's'} of the grid`);
+  if (mixed?.districts) behind.push(`${n(mixed.districts)} district${mixed.districts === 1 ? '' : 's'} censused before the grid, which no run will go back for`);
+  const same = behind.length
+    ? ` ${behind.join(' and ')} ${behind.length === 1 && mixed.tiles === 1 ? 'was' : 'were'} censused before ${n(mixed.questions)} of this drawer's question${mixed.questions === 1 ? '' : 's'} existed and ${behind.length === 1 && mixed.tiles === 1 ? 'has' : 'have'} never been asked ${mixed.questions === 1 ? 'it' : 'them'}, so this is a sum of more than one question and not yet a denominator.`
     : '';
   return `${n(found)} found across ${coverage.says}.${how}${same}`;
 }
@@ -243,9 +249,22 @@ export async function askedDifferently({ outcodes = null } = {}) {
           select 1 from asked a
            where a.subcategory = t.subcategory and a.area_slug = t.area_slug and a.q = f.q)
      )
-     select subcategory, count(distinct area_slug)::int as tiles, count(distinct q)::int as questions
-       from behind group by 1`, params);
-  return new Map(rows.map((r) => [r.subcategory, { tiles: r.tiles, questions: r.questions }]));
+     select b.subcategory,
+            -- A tile of the grid, which the run will re-ask on its own once the
+            -- plan settles...
+            count(distinct b.area_slug) filter (where t.grid_key is not null)::int as tiles,
+            -- ...and a district censused the old way, one box per outcode,
+            -- which nothing is going to re-ask because it is not in any run.
+            -- Both are behind the plan and only one of them is going to fix
+            -- itself, so they are never added together: 41 districts of
+            -- yesterday's ring read as 41 tiles of this morning's region, and
+            -- the two are not the same unit or the same problem (21 Sep 2026).
+            count(distinct b.area_slug) filter (where t.grid_key is null)::int as districts,
+            count(distinct b.q)::int as questions
+       from behind b
+       left join census_tiles t on t.grid_key = b.area_slug
+      group by 1`, params);
+  return new Map(rows.map((r) => [r.subcategory, { tiles: r.tiles, districts: r.districts, questions: r.questions }]));
 }
 
 /**
@@ -332,7 +351,8 @@ export async function subcategories({ outcodes = null } = {}) {
       byWords: howFound.get(s.key)?.words ?? 0,
       // Whether every tile was asked the same thing. A count summed over tiles
       // that were asked different questions is not one number.
-      askedDifferently: mixed.get(s.key)?.tiles ?? 0,
+      askedDifferently: (mixed.get(s.key)?.tiles ?? 0) + (mixed.get(s.key)?.districts ?? 0),
+      behind: mixed.get(s.key) ?? null,
       state,
       // How many times the question was actually put here, so "empty" can be
       // read against the effort behind it rather than taken on trust.
@@ -394,7 +414,8 @@ export async function silentTypes({ outcodes = null } = {}) {
     .map((r) => ({
       type: r.google_type,
       subcategory: r.subcategory,
-      slices: r.slices,
+      // What was actually asked and answered, and what never got that far.
+      slices: r.slices - r.failed,
       areas: r.areas,
       failed: r.failed,
       lastAt: r.last_at,
@@ -402,7 +423,12 @@ export async function silentTypes({ outcodes = null } = {}) {
       // across the home counties is not evidence that Google has no word for an
       // Israeli restaurant; it is evidence about the home counties, and a row
       // that did not say so would retire the type on the strength of it.
-      reason: `Asked ${n(r.slices)} time${r.slices === 1 ? '' : 's'} across ${n(r.areas)} area${r.areas === 1 ? '' : 's'} and returned nothing, ever — over ${coverage.says}. Either Google does not use this word in the ground covered, or the rule points at the wrong one; both are a free fix, and neither is a fact about the country until the ground is wider.`,
+      // Asked, and separately refused. Nine thousand of the refusals in this
+      // table are one incident — yesterday's ring census firing past the daily
+      // cap because nothing read the answer — and folding them into "asked"
+      // would put that incident's weight behind a recommendation to retire a
+      // rule (21 Sep 2026).
+      reason: `Asked ${n(r.slices - r.failed)} time${r.slices - r.failed === 1 ? '' : 's'} across ${n(r.areas)} area${r.areas === 1 ? '' : 's'} and returned nothing, ever${r.failed ? `, with ${n(r.failed)} more refused before they could answer` : ''} — over ${coverage.says}. Either Google does not use this word in the ground covered, or the rule points at the wrong one; both are a free fix, and neither is a fact about the country until the ground is wider.`,
     }));
 
   return { silent, neverAsked, coverage };
@@ -486,7 +512,7 @@ export async function gaps({ outcodes = null, source = 'osm', staleDays = 30 } =
       key: r.key, label: r.label, category: r.category,
       census: r.census, byText: r.by_text, ground: r.ground, shortfall, foundShare: share,
       tiles: r.tiles, countedAt: r.counted_at, oldestAt: r.oldest_at, stale, source, asked: r.asked, caveat: r.caveat,
-      askedDifferently: mixed.get(r.key)?.tiles ?? 0,
+      askedDifferently: (mixed.get(r.key)?.tiles ?? 0) + (mixed.get(r.key)?.districts ?? 0),
       // Both sides say what they are. The census side is everything it has ever
       // found in these tiles; the free side is the source as it stands today.
       // Neither is "the number of places here", and two numbers with the same
@@ -496,7 +522,7 @@ export async function gaps({ outcodes = null, source = 'osm', staleDays = 30 } =
         : `The census has found ${n(r.census)} in all, where ${whose} has ${n(r.ground)} ${asOf} over the same ${n(r.tiles)} tile${r.tiles === 1 ? '' : 's'}, so nothing is obviously missing.${r.caveat ? ` ${r.caveat}` : ''}`,
       // Appended rather than folded in, so a gap computed against a census that
       // asked two different questions cannot be read as a measurement.
-      ...(mixed.get(r.key) ? { warning: `${n(mixed.get(r.key).tiles)} of these tiles were censused before ${n(mixed.get(r.key).questions)} of this drawer's questions existed and have never been asked them, so the shortfall is not yet a measurement of anything.` } : {}),
+      ...(mixed.get(r.key)?.tiles ? { warning: `${n(mixed.get(r.key).tiles)} of these tiles were censused before ${n(mixed.get(r.key).questions)} of this drawer's questions existed and have never been asked them, so the shortfall is not yet a measurement of anything.` } : {}),
     };
   });
 
