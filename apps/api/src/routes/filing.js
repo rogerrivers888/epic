@@ -20,6 +20,8 @@
  *   GET  /labels                       every question set, and the global labels
  *   GET  /labels/sets/:key             one set, and the words waiting on it
  *   GET  /labels/vocabulary            our own labels, and where each is asked
+ *   PUT  /mapping/:word                where one of Google's words points
+ *   PUT  /mapping/:word/carries        a fact riding along on what it brings
  *
  * Nothing here calls a provider. Every number comes from the index, the owned
  * records, the search log and the rules, so a screen can be refreshed as often
@@ -32,6 +34,9 @@ import { query } from '../db.js';
 import * as filing from '../repositories/filing.js';
 import * as placeAttributes from '../repositories/placeAttributes.js';
 import * as questionSets from '../repositories/questionSets.js';
+import * as labelRepo from '../repositories/taxonomyLabels.js';
+import * as shelfRules from '../repositories/shelfRules.js';
+import * as shelfTaxonomy from '../repositories/shelfTaxonomy.js';
 import * as taxonomyAudit from '../repositories/taxonomyAudit.js';
 import { CORPUS_OPENS, auditAll } from '../domain/taxonomyAudit.js';
 import { setThreshold, thresholds, thresholdValues } from '../repositories/settings.js';
@@ -188,8 +193,13 @@ async function unengagedShare() {
    */
   const opensAll = opened.rows.reduce((n, r) => n + r.n, 0);
   if (opensAll < CORPUS_OPENS) {
+    // Worded as what it is rather than as a shortfall: a count against a
+    // target reads as a fault, and this is the product being new (epic-1c,
+    // 21 Sep 2026). The numbers still come back for anybody who wants them.
     return { share: null, impressions: total, attributed, opens: opensAll, needs: CORPUS_OPENS, words: [],
-      why: `too few opens to read engagement — ${opensAll.toLocaleString()} against the ${CORPUS_OPENS} this needs` };
+      why: opensAll === 0
+        ? 'nobody has opened anything yet, so engagement cannot be read'
+        : `almost nothing has been opened yet — ${opensAll.toLocaleString()} so far — so engagement cannot be read` };
   }
   // The share is of what we can *attribute*, and the two numbers are both
   // returned so the screen can say which it is. Dividing the dead impressions
@@ -896,5 +906,117 @@ filingRoutes.get('/labels/vocabulary', requires('view_library'), async (_req, re
         nowhere: rows.filter((r) => r.scope === 'nowhere').length,
       },
     });
+  } catch (err) { next(err); }
+});
+
+/**
+ * PUT /mapping/:word — where one of Google's words points.
+ *
+ * Three answers and they are one field between them, because they are three
+ * values of the same decision: a drawer, a label, or Not in Epic. The reply
+ * carries what it *was* so the row can offer an undo — the design brief asks
+ * for "no confirm step, undo on the row", and an undo needs somewhere to go
+ * back to.
+ *
+ * Excluding is a first-class answer here and not a failure to answer. For a
+ * road bridge it is the correct one, and the counter on this screen treats it
+ * as progress rather than as a gap.
+ */
+filingRoutes.put('/mapping/:word', requires('manage_library'), async (req, res, next) => {
+  try {
+    const word = String(req.params.word);
+    const { rows: was } = await query(
+      "select key, points_at, decision from taxonomy_labels where namespace = 'google' and key = $1", [word]);
+    if (!was[0]) throw bad(`Google has no word ${word}.`);
+    const before = { subcategory: was[0].points_at ?? null, decision: was[0].decision ?? null };
+
+    const subcategory = req.body?.subcategory ? String(req.body.subcategory) : null;
+    const decision = req.body?.decision ? String(req.body.decision) : null;
+    if (subcategory && decision) throw bad('A word points at a drawer or it is answered some other way, not both.');
+    if (!subcategory && !decision) throw bad('Where should it point?');
+
+    const tax = await shelfTaxonomy.taxonomy();
+    let said;
+    if (subcategory) {
+      const sub = tax.subByKey.get(subcategory);
+      if (!sub) throw bad(`${subcategory} is not one of our subcategories.`);
+      // And here the rule goes last, for the same reason read the other way:
+      // a word that reads as pointing at a drawer it does not yet fill is a
+      // visible, harmless half-state, and a rule filing places into a drawer
+      // the word does not admit to is not.
+      await labelRepo.save({ namespace: 'google', key: word, decision: 'none', active: true });
+      await labelRepo.pointAt('google', word, subcategory);
+      await shelfRules.teach({
+        scope: 'labels',
+        labels: [`google:${word}`],
+        subcategory,
+        reason: `Pointed at ${sub.label} from the filing desk.`,
+        by: actorOf(req),
+      });
+      said = `${word} → ${sub.label}`;
+    } else {
+      if (!['aside', 'generic', 'travel', 'nearby'].includes(decision)) {
+        throw bad(`${decision} is not one of the answers.`);
+      }
+      /**
+       * The rule first, deliberately.
+       *
+       * These are three statements and not one transaction, because each goes
+       * through the repository that owns its table and none of them takes a
+       * client. So the order is chosen for what a failure between them leaves
+       * behind. The rule is the thing that actually files places; the other
+       * two are how the word *reads*. Dropping the rule first means the worst
+       * half-finished state is a word that still looks mapped and fills
+       * nothing — visible on this very screen as "brings 0", and answerable
+       * again. The other order would leave a word answered "not in Epic" that
+       * is still quietly filing places into a drawer, which is the one state
+       * nobody would go looking for.
+       */
+      const byScope = await shelfRules.rules();
+      // Keyed by scope and then by subject, not a list — a canonicalised
+      // `labels` rule is looked up by the subject the canonicaliser wrote,
+      // which for a single word is the word itself.
+      const rule = byScope.labels?.get(`google:${word}`);
+      if (rule) await shelfRules.forgetRule(rule.id);
+      await labelRepo.pointAt('google', word, null);
+      await labelRepo.save({ namespace: 'google', key: word, decision });
+      said = decision === 'aside' ? `${word} → Not in Epic` : `${word} → kept as a label`;
+    }
+
+    placeAttributes.forget();
+    res.json({ word, said, before });
+  } catch (err) { next(err); }
+});
+
+/**
+ * PUT /mapping/:word/carries — a fact riding along on every place a word brings.
+ *
+ * Separate from where it points, because they are two different statements
+ * about the same word and they never compete: `italian_restaurant` files a
+ * place in Restaurants *and* says Italian. A scale is refused by the
+ * repository, and rightly — a word may raise a question about a place and
+ * never answer one.
+ */
+filingRoutes.put('/mapping/:word/carries', requires('manage_library'), async (req, res, next) => {
+  try {
+    const word = String(req.params.word);
+    const attribute = String(req.body?.label ?? '');
+    if (!attribute) throw bad('Which label?');
+    const { byKey } = await placeAttributes.attributes();
+    const attr = byKey.get(attribute);
+    if (!attr) throw bad(`${attribute} is not one of our labels.`);
+    const on = req.body?.on !== false;
+
+    // What "on" means is the label's own shape. A yes/no carried by a word is
+    // a yes; anything else has to be told what it carries, and says so rather
+    // than guessing a value onto every place the word brings.
+    let value = null;
+    if (on) {
+      if (attr.kind === 'yesno') value = { yesno: true };
+      else if (req.body?.value) value = req.body.value;
+      else throw bad(`${attr.label} is not a yes or no, so say what it carries.`);
+    }
+    await placeAttributes.setCarries(`google:${word}`, attribute, value);
+    res.json({ word, attribute, on, said: `${attr.label} ${on ? 'carried by' : 'off'} ${word}` });
   } catch (err) { next(err); }
 });
