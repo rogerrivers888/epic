@@ -348,8 +348,13 @@ export async function gaps({ outcodes = null, source = 'osm' } = {}) {
   const at = source === 'osm' ? 'osm_at' : 'fhrs_at';
   const { rows } = await query(
     `with checked as (
+       -- Censused at some point and ground-counted, rather than sitting in
+       -- state 'done' right now. A tile is re-opened whenever the plan gains a
+       -- drawer, which during a run is most of them — and a comparison that
+       -- vanished while the census was working would be blank exactly when
+       -- somebody is watching it (21 Sep 2026).
        select t.grid_key from census_tiles t
-        where t.${at} is not null and t.state = 'done'
+        where t.${at} is not null and t.censused_at is not null
           ${outcodes ? 'and t.outcodes && $1::text[]' : ''}
      ),
      ground as (
