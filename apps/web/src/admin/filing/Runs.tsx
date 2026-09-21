@@ -73,8 +73,22 @@ export function Runs({
   onTrigger: (key: Trigger['key']) => void;
   onStop: () => void;
   onOpenStage: (runId: string, stageKey: string) => void;
-  /** Which stage of which run is open, and what is in it. */
-  stage: { runId: string; key: string; name: string; note: string; items: string[]; subs: string } | null;
+  /**
+   * Which stage of which run is open, and what is in it.
+   *
+   * `count` is null where the stage cannot be listed and the run did not
+   * record it — unknown, not nought. And `exact: false` means the list is a
+   * subset: on a repeat run the funnel counts every word that passed through
+   * while the list holds only the ones that run raised for the first time.
+   * `listNote` carries that sentence and has to be drawn, or a shorter list
+   * than the count reads as a shortfall (epic-f4, 21 Sep 2026).
+   */
+  stage: {
+    runId: string; key: string; name: string; note: string;
+    items: string[]; subs: string;
+    count: number | null; listed: number; more: number;
+    recorded: boolean; exact: boolean; listNote: string | null;
+  } | null;
   onStage: (runId: string | null) => void;
 }) {
   const [open, setOpen] = useState<string | null>(null);
@@ -238,12 +252,58 @@ export function Runs({
                         );
                       })}
                     </View>
+                    {r.curves?.length ? (
+                      <View style={{ gap: 6, paddingTop: 4 }}>
+                        <Kicker>SATURATION, PER DRAWER · WORST FIRST</Kicker>
+                        {r.curves.slice(0, 8).map((c) => (
+                          <View key={c.subcategory} style={{
+                            flexDirection: 'row', alignItems: 'baseline', gap: 14,
+                            paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: desk.rule,
+                          }}>
+                            <View style={{ width: 200, flexGrow: 0, flexShrink: 0 }}>
+                              <Value size={12.5} weight="600">{c.subcategory}</Value>
+                            </View>
+                            <View style={{ width: 90, flexGrow: 0, flexShrink: 0 }}>
+                              <Value size={12.5} numeric tone="dim">{c.sampled} read</Value>
+                            </View>
+                            <View style={{ width: 110, flexGrow: 0, flexShrink: 0 }}>
+                              <Value size={12.5} numeric>{c.newWordsPerTen} per ten</Value>
+                            </View>
+                            <View style={{ flex: 1, minWidth: 0 }}>
+                              {/*
+                                Three verdicts, not two. A drawer that taught
+                                nothing *because there was nothing to read* is
+                                the one that most needs the next pass — and it
+                                looks identical to a finished one unless it is
+                                said (epic-f4, 21 Sep 2026).
+                              */}
+                              <Value size={12} tone={c.nothingToRead ? 'warn' : c.settled ? 'dim' : 'ink'}>
+                                {c.nothingToRead
+                                  ? 'nothing to read about these — the next pass needs somewhere else to look'
+                                  : c.settled ? 'settled' : 'still producing words · read more'}
+                              </Value>
+                            </View>
+                          </View>
+                        ))}
+                        {r.curves.length > 8 ? (
+                          <Value size={12} tone="dim">and {r.curves.length - 8} more drawers</Value>
+                        ) : null}
+                      </View>
+                    ) : null}
+
                     {stage?.runId === r.id ? (
                       <>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
                           <Kicker>{stage.name}</Kicker>
+                          {/* Unknown is an em dash, never a nought. */}
+                          <Value size={12.5} weight="800" numeric>
+                            {stage.count == null ? '\u2014' : stage.count.toLocaleString()}
+                          </Value>
                           <Value size={12} tone="dim">{stage.note}</Value>
                         </View>
+                        {stage.listNote ? (
+                          <Value size={12} tone="dim">{stage.listNote}</Value>
+                        ) : null}
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                           {stage.items.length === 0 ? (
                             <Value size={12} tone="dim">Nothing in this stage.</Value>
@@ -253,6 +313,9 @@ export function Runs({
                               <Value tone="muted" size={12}>{w}</Value>
                             </View>
                           ))}
+                          {stage.more ? (
+                            <Value size={12} tone="dim">and {stage.more.toLocaleString()} more</Value>
+                          ) : null}
                         </View>
                         <Value size={12} tone="dim">{stage.subs}</Value>
                       </>

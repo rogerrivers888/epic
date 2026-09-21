@@ -334,7 +334,28 @@ export type RunRow = {
    * reading of its own (epic-f4, 21 Sep 2026).
    */
   recorded: boolean;
-  state: 'done' | 'running' | 'failed';
+  /**
+   * `stalled` is its own state and never "finished".
+   *
+   * Every deploy restarts the process a sweep lives inside, and the row keeps
+   * `running` with no finish. A run untouched for twelve minutes is stalled —
+   * we do not know how it ended, and saying "done" would claim we did
+   * (epic-f4, 21 Sep 2026).
+   */
+  state: 'done' | 'running' | 'stalled' | 'failed';
+  /**
+   * Saturation per drawer, worst first — what Roger asked for by name and
+   * what the set-level panel cannot show while there are no question sets.
+   */
+  curves?: {
+    subcategory: string;
+    sampled: number;
+    distinct: number;
+    newWordsPerTen: number;
+    settled: boolean;
+    /** Taught nothing because there was nothing to read, not because it is done. */
+    nothingToRead: boolean;
+  }[];
 };
 
 /** A run somebody could start, with what it would cost before they do. */

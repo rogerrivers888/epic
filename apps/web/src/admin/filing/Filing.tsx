@@ -105,6 +105,7 @@ export function Filing({ canManage }: { canManage: boolean }) {
   const [dests, setDests] = useState<Record<string, Awaited<ReturnType<typeof api.filingDestinations>>>>({});
   const [undo, setUndo] = useState<{ what: string; onPress: () => void } | null>(null);
   const [pending, setPending] = useState<Awaited<ReturnType<typeof api.adminFilingPending>> | null>(null);
+  const [stage, setStage] = useState<Awaited<ReturnType<typeof api.adminFilingStage>> & { runId: string } | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -719,11 +720,15 @@ export function Filing({ canManage }: { canManage: boolean }) {
               saturation={runs.saturation}
               onTrigger={() => said('Starting a run from here is not wired yet.')}
               onStop={() => said('Stopping a run from here is not wired yet.')}
-              // The stage drill has no endpoint behind it yet. Saying so beats
-              // an expander that opens on nothing.
-              onOpenStage={() => said('Opening a stage is not built yet.')}
-              stage={null}
-              onStage={() => {}}
+              onOpenStage={(runId, key) => {
+                void api.adminFilingStage(runId, key)
+                  .then((out) => setStage({ ...out, runId }))
+                  .catch(() => said('That stage did not load.'));
+              }}
+              stage={stage}
+              // Closing a run closes whatever it had open, so a stage cannot
+              // outlive the run it belongs to.
+              onStage={(runId) => { if (!runId) setStage(null); }}
             />
           ) : null}
 

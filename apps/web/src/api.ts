@@ -3615,10 +3615,23 @@ export const api = {
       weeks: RunWeek[]; clears: { says: string; note: string; ever: boolean }; saturation: Saturation[];
       live: { name: string; scope: string; funnel: { name: string; count: number; done: boolean }[] } | null;
     }>('/api/admin/filing/runs'),
-  /** One stage of one run, and what is actually in it. */
+  /**
+   * One stage of one run, and what is actually in it.
+   *
+   * `count` is null where the stage cannot be listed and the run did not
+   * record it — unknown, not nought. `exact: false` means the list is a
+   * subset of the count: on a repeat run the funnel counts every word that
+   * passed through, while the list holds only the ones that run raised for
+   * the first time. `listNote` says so, and has to be drawn, or a list
+   * shorter than its count reads as a shortfall.
+   */
   adminFilingStage: (runId: string, stage: string) =>
-    request<{ key: string; name: string; note: string; items: string[]; subs: string }>(
-      `/api/admin/filing/runs/${encodeURIComponent(runId)}/stages/${encodeURIComponent(stage)}`),
+    request<{
+      run: string; key: string; name: string; note: string;
+      items: string[]; subs: string;
+      count: number | null; listed: number; more: number;
+      recorded: boolean; exact: boolean; listNote: string | null;
+    }>(`/api/admin/filing/runs/${encodeURIComponent(runId)}/stages/${encodeURIComponent(stage)}`),
   adminFilingStartRun: (kind: string) => post<{ started: true }>('/api/admin/filing/runs', { kind }),
   adminFilingStopRun: () => post<{ stopped: true }>('/api/admin/filing/runs/stop', {}),
 
