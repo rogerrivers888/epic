@@ -110,7 +110,7 @@ const valueOfRow = (row) => {
  * at once, and a query per drawer is fifty-two round trips for one screen.
  */
 export async function drawers() {
-  const [tax, places, values, defaults, records, areas, sets, setSubs] = await Promise.all([
+  const [tax, places, values, defaults, records, atlas, areas, sets, setSubs] = await Promise.all([
     // Through the repository, not a query of our own: `also_in` is the extra
     // cabinets a drawer is listed in and lives in its own table, and reading it
     // twice in two ways is how two screens come to disagree about it.
@@ -124,6 +124,18 @@ export async function drawers() {
     // name is not ours to print. Only the *name* is withheld, never the place.
     query(`select venue_ref, name, postcode, image_url from place_records
             where name is not null or postcode is not null`),
+    /**
+     * The atlas, which is ours.
+     *
+     * A place with no owned record still has a name where it came from the
+     * atlas — Wikipedia, Wikidata and Commons are open sources we may keep for
+     * good (CLAUDE.md), and `attractions.name` is that name. Reading only
+     * `place_records` left whole drawers rendering as a hundred and seventy-
+     * nine rows of "not researched yet", which is not a data-policy
+     * consequence, it is a table we forgot to join (the side-by-side audit,
+     * 21 Sep 2026).
+     */
+    query(`select 'atlas:' || id as venue_ref, name, region_slug from attractions where name is not null`),
     query(`select venue_ref, area_slug from place_areas`),
     query('select key, name, active, vocabulary_settled from question_sets'),
     query('select subcategory_key, set_key from question_set_subcategories'),
@@ -168,7 +180,28 @@ export async function drawers() {
     refsBySub,
     valuesByRef,
     defaultsBySub,
-    recordsByRef: new Map(records.rows.map((r) => [r.venue_ref, r])),
+    /**
+     * What we may print about a place, owned first and atlas behind it.
+     *
+     * A researched record wins — it is the more specific and the more recent.
+     * The atlas fills in the name and where it is for everything else, and a
+     * place in neither has genuinely nothing we are allowed to show.
+     */
+    recordsByRef: (() => {
+      const m = new Map();
+      for (const a of atlas.rows) {
+        m.set(a.venue_ref, { venue_ref: a.venue_ref, name: a.name, postcode: null, image_url: null, where: a.region_slug });
+      }
+      for (const r of records.rows) {
+        const had = m.get(r.venue_ref);
+        m.set(r.venue_ref, {
+          ...r,
+          name: r.name ?? had?.name ?? null,
+          where: had?.where ?? null,
+        });
+      }
+      return m;
+    })(),
     areasByRef: (() => {
       const m = new Map();
       for (const a of areas.rows) m.set(a.venue_ref, [...(m.get(a.venue_ref) ?? []), a.area_slug]);

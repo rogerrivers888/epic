@@ -63,10 +63,13 @@ const actorOf = (req) => req.account?.email ?? 'the owner (passcode)';
 
 /** The town a place reads as, from what we own. Never from a provider. */
 const townOf = (rec) => {
-  if (!rec?.postcode) return null;
   // The outward code is the part of a postcode that names somewhere. It is the
   // most we can say about where a place is without holding a rented address.
-  return String(rec.postcode).trim().split(/\s+/)[0] || null;
+  if (rec?.postcode) return String(rec.postcode).trim().split(/\s+/)[0] || null;
+  // Failing that, the atlas's own region — coarser, and ours. A place we can
+  // name and cannot place at all is rarer than it looks.
+  if (rec?.where) return String(rec.where).replace(/-/g, ' ');
+  return null;
 };
 
 // ---------------------------------------------------------------------------
