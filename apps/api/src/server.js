@@ -729,17 +729,37 @@ const CENSUS_EVERY_MS = Number(process.env.EPIC_CENSUS_EVERY_MS || 60_000);
 // limit, because each pass paces itself independently and two together would
 // ask Google at twice the rate somebody chose.
 let censusPassGoing = false;
-const advanceCensus = () => (censusPassGoing ? Promise.resolve() : ((censusPassGoing = true), censusRun.resumeInterrupted()
-  .then((back) => {
+const advanceCensus = async () => {
+  // One pass at a time in this process. Two overlapping passes each pace
+  // themselves, and together they would ask Google at twice the rate somebody
+  // chose.
+  if (censusPassGoing) return;
+  censusPassGoing = true;
+  let more = false;
+  try {
+    const back = await censusRun.resumeInterrupted();
     if (back?.resumed) console.log(`epic-api: census — picked up ${back.resumed} interrupted run(s)`);
-    return censusRun.advance();
-  })
-  .then((r) => {
+    if (back?.woken) console.log(`epic-api: census — the quota day turned over, ${back.woken} run(s) back on`);
+    const r = await censusRun.advance();
     if (r?.tiles) console.log(`epic-api: census — ${r.tiles} tile(s) this pass${r.reason ? `, ${r.reason}` : ''}`);
     else if (r && !r.working && r.reason && r.reason !== 'nothing running') console.log(`epic-api: census — ${r.reason}${r.problem ? `: ${r.problem}` : ''}`);
-  })
-  .catch((err) => console.error('census run', err.message))
-  .finally(() => { censusPassGoing = false; })));
+    more = Boolean(r?.working && r?.tiles);
+  } catch (err) {
+    console.error('census run', err.message);
+  } finally {
+    censusPassGoing = false;
+  }
+  // Straight back to work while there is work.
+  //
+  // The deadline is checked between drawers, so a pass ends a little *after* it
+  // — and a pass that ends after the next tick has already fired loses that
+  // tick to the guard above, and idles for a whole minute. Measured on the
+  // London run: 461 seconds idle against 205 busy, in five gaps of one and two
+  // minutes (21 Sep 2026). Waiting on a timer is the right shape for a loop
+  // that usually has nothing to do; this one has four hundred tiles to get
+  // through.
+  if (more) setTimeout(() => { void advanceCensus(); }, 1000).unref?.();
+};
 setTimeout(() => { void advanceCensus(); }, RESUME_AFTER_MS + 45_000).unref?.();
 setInterval(() => { void advanceCensus(); }, CENSUS_EVERY_MS).unref?.();
 
