@@ -328,7 +328,12 @@ export async function gaps({ outcodes = null, source = 'osm' } = {}) {
           ${outcodes ? 'and t.outcodes && $1::text[]' : ''}
      ),
      ground as (
-       select g.subcategory, sum(g.places)::int as places, count(*)::int as tiles,
+       select g.subcategory, sum(g.places)::int as places,
+              -- Tiles, not rows. A tile on a council boundary carries one row
+              -- per council (migration 230); counting rows would claim the
+              -- comparison covered more ground than it did, which is the one
+              -- thing this query exists to get right.
+              count(distinct g.grid_key)::int as tiles,
               max(g.counted_at) as counted_at, min(g.caveat) as caveat, min(g.asked) as asked
          from ground_counts g join checked c on c.grid_key = g.grid_key
         where g.source = $${params.length + 1}

@@ -221,22 +221,29 @@ test('a tile on a boundary is counted by both councils, and by neither twice', a
   await ground.noteGround({ gridKey, source: 'fhrs', counts: { restaurants: 12 }, from: '501' });
   await ground.noteGround({ gridKey, source: 'fhrs', counts: { restaurants: 9 }, from: '502' });
   let { rows } = await query(
-    `select places, contributors from ground_counts where grid_key = $1 and source = 'fhrs' and subcategory = 'restaurants'`, [gridKey]);
-  assert.equal(rows[0].places, 21, 'both councils, added — a tile counted by one of its two is an undercount presented as a ground count');
-  assert.deepEqual(rows[0].contributors.sort(), ['501', '502']);
+    `select sum(places)::int as places, array_agg(contributor order by contributor) as who
+       from ground_counts where grid_key = $1 and source = 'fhrs' and subcategory = 'restaurants'`, [gridKey]);
+  assert.equal(rows[0].places, 21, 'both councils — a tile counted by one of its two is an undercount presented as a ground count');
+  assert.deepEqual(rows[0].who, ['501', '502'], 'and the working is there: which council counted what');
 
   // The same download again, because a pass was interrupted and repeated.
   await ground.noteGround({ gridKey, source: 'fhrs', counts: { restaurants: 12 }, from: '501' });
   ({ rows } = await query(
-    `select places from ground_counts where grid_key = $1 and source = 'fhrs' and subcategory = 'restaurants'`, [gridKey]));
-  assert.equal(rows[0].places, 21, 'an authority already counted adds nothing, so a re-run is safe');
+    `select sum(places)::int as places from ground_counts where grid_key = $1 and source = 'fhrs' and subcategory = 'restaurants'`, [gridKey]));
+  assert.equal(rows[0].places, 21, 'a council counted again replaces its own row and nobody else\'s, so a repeated pass is safe');
+
+  // And counted again with a different answer, which is what a refresh is.
+  await ground.noteGround({ gridKey, source: 'fhrs', counts: { restaurants: 15 }, from: '501' });
+  ({ rows } = await query(
+    `select sum(places)::int as places from ground_counts where grid_key = $1 and source = 'fhrs' and subcategory = 'restaurants'`, [gridKey]));
+  assert.equal(rows[0].places, 24, 'a month later the council has three more, and the tile says 24 rather than 36');
 
   // The open map has no boundary problem: Overpass answers about the box, so a
   // re-count replaces and the number can go down as well as up.
   await ground.noteGround({ gridKey, source: 'osm', counts: { restaurants: 30 } });
   await ground.noteGround({ gridKey, source: 'osm', counts: { restaurants: 28 } });
   ({ rows } = await query(
-    `select places from ground_counts where grid_key = $1 and source = 'osm' and subcategory = 'restaurants'`, [gridKey]));
+    `select sum(places)::int as places from ground_counts where grid_key = $1 and source = 'osm' and subcategory = 'restaurants'`, [gridKey]));
   assert.equal(rows[0].places, 28, 'a re-count is the same ground measured later, not more ground');
 });
 
@@ -275,13 +282,47 @@ test('a tile is dated only when every council that shares it has been counted', 
   const contributors = await ground.contributorsTo(gridKey);
   assert.deepEqual([...contributors].sort(), ['501', '502']);
   ({ rows } = await query(
-    `select places from ground_counts where grid_key = $1 and source = 'fhrs' and subcategory = 'restaurants'`, [gridKey]));
+    `select sum(places)::int as places from ground_counts where grid_key = $1 and source = 'fhrs' and subcategory = 'restaurants'`, [gridKey]));
   assert.equal(rows[0].places, 1, "the first borough's café; the second's is outside the box");
 
   // And a later pass never counts either of them again. (It may well pick up
   // another tile — there are others in this database — but this one is done.)
   await ground.sweepFhrs({ authorities: 1, register });
   ({ rows } = await query(
-    `select places from ground_counts where grid_key = $1 and source = 'fhrs' and subcategory = 'restaurants'`, [gridKey]));
+    `select sum(places)::int as places from ground_counts where grid_key = $1 and source = 'fhrs' and subcategory = 'restaurants'`, [gridKey]));
   assert.equal(rows[0].places, 1, 'a council already counted adds nothing');
+});
+
+test('a ground count a month old is counted again, not simply re-dated', async () => {
+  // Codex, 21 Sep 2026: a stale tile still held every council from the last
+  // sweep, so the loop found nothing missing, dated it and downloaded nothing —
+  // and a ground count could never change after its first pass. A stale tile is
+  // treated as holding nothing, because each council replaces its own row.
+  const gridKey = 'test/ground/stale';
+  await aCensusedTile({ gridKey, outcodes: ['ZZ92'], subcategory: 'restaurants', places: 0 });
+  await query(
+    `update census_tiles set fhrs_authorities = array['601'], fhrs_at = now() - interval '40 days' where grid_key = $1`,
+    [gridKey]);
+  await query(`delete from ground_counts where grid_key = $1`, [gridKey]);
+  await ground.noteGround({ gridKey, source: 'fhrs', counts: { restaurants: 4 }, from: '601' });
+
+  let downloads = 0;
+  const register = {
+    authorities: async () => new Map([['601', { id: 601, name: 'A borough that has grown' }]]),
+    councilsFor: async () => [{ code: '601', name: 'A borough that has grown' }],
+    points: async () => {
+      downloads += 1;
+      // Two more kitchens than last month.
+      return { points: [1, 2, 3, 4, 5, 6].map(() => ({ lat: 51.44, lng: -0.15, type: 1 })) };
+    },
+  };
+
+  await ground.sweepFhrs({ authorities: 1, register });
+  assert.equal(downloads, 1, 'the council is asked again rather than taken on trust');
+  const { rows } = await query(
+    `select sum(places)::int as places from ground_counts where grid_key = $1 and source = 'fhrs' and subcategory = 'restaurants'`,
+    [gridKey]);
+  assert.equal(rows[0].places, 6, 'and the number moves — it is not 4, and it is not 10');
+  const { rows: tile } = await query(`select fhrs_at from census_tiles where grid_key = $1`, [gridKey]);
+  assert.ok(new Date(tile[0].fhrs_at).getTime() > Date.now() - 60_000, 'dated today, on the strength of a count taken today');
 });

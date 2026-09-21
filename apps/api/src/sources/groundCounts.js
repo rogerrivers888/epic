@@ -294,9 +294,8 @@ export async function fhrsAuthoritiesFor(box) {
 /** Which councils have already been counted into a tile. */
 export async function contributorsTo(gridKey, source = 'fhrs') {
   const { rows } = await query(
-    `select distinct c as code from ground_counts g, unnest(g.contributors) c
-      where g.grid_key = $1 and g.source = $2`, [gridKey, source]);
-  return new Set(rows.map((r) => r.code));
+    'select distinct contributor from ground_counts where grid_key = $1 and source = $2', [gridKey, source]);
+  return new Set(rows.map((r) => r.contributor));
 }
 
 /**
@@ -348,33 +347,27 @@ export async function noteGround({ gridKey, source, counts, asked = {}, problem 
   const keys = Object.keys(counts);
   if (!keys.length) return { written: 0 };
   const caveats = source === 'osm' ? OSM_GROUND : FHRS_GROUND;
-  const values = keys.map((_, i) => `($${i * 7 + 1},$${i * 7 + 2},$${i * 7 + 3},$${i * 7 + 4}::int,$${i * 7 + 5},$${i * 7 + 6},$${i * 7 + 7}::text[])`).join(',');
+  // Who counted. The open map has one counter — Overpass answers about the
+  // rectangle itself — and the register has one per council that shares the
+  // tile (migration 230).
+  const counter = String(from ?? 'box');
+  const values = keys.map((_, i) => `($${i * 7 + 1},$${i * 7 + 2},$${i * 7 + 3},$${i * 7 + 4}::int,$${i * 7 + 5},$${i * 7 + 6},$${i * 7 + 7})`).join(',');
   const params = keys.flatMap((key) => [
-    gridKey, source, key, counts[key], asked[key] ?? null, caveats[key]?.caveat ?? null, from ? [from] : [],
+    gridKey, source, key, counts[key], asked[key] ?? null, caveats[key]?.caveat ?? null, counter,
   ]);
-  // **Added to, when the count comes from one contributor of several.** A grid
-  // takes no notice of a council boundary: a tile straddling two boroughs is
-  // counted once by each, and replacing the row would leave it holding one
-  // borough's kitchens while looking like a whole-tile number. An authority
-  // already in `contributors` adds nothing, which is what makes a re-run safe.
-  //
-  // The open map has no such problem — Overpass answers about the box itself —
-  // so an OSM count replaces, which is what lets a re-count move the number.
+  // **A counter replaces its own row and nobody else's.** That is what makes a
+  // re-count the same operation as a first count: the tile's number is the sum
+  // of its counters, so Southwark counted again moves Southwark's row and
+  // leaves Lambeth's alone. Held as one total it could only ever be added to,
+  // and adding again would double it — which is how the first version of this
+  // could never refresh (Codex, 21 Sep 2026).
   await query(
-    `insert into ground_counts (grid_key, source, subcategory, places, asked, caveat, contributors)
+    `insert into ground_counts (grid_key, source, subcategory, places, asked, caveat, contributor)
      values ${values}
-     on conflict (grid_key, source, subcategory) do update
-        set places = case when $${keys.length * 7 + 1}::boolean
-                            then (case when ground_counts.contributors @> excluded.contributors
-                                       then ground_counts.places
-                                       else ground_counts.places + excluded.places end)
-                          else excluded.places end,
-            contributors = case when ground_counts.contributors @> excluded.contributors
-                                then ground_counts.contributors
-                                else ground_counts.contributors || excluded.contributors end,
-            asked = excluded.asked, caveat = excluded.caveat,
+     on conflict (grid_key, source, subcategory, contributor) do update
+        set places = excluded.places, asked = excluded.asked, caveat = excluded.caveat,
             counted_at = now(), problem = null`,
-    [...params, Boolean(from)],
+    params,
   );
   if (problem) {
     await query('update ground_counts set problem = $3 where grid_key = $1 and source = $2', [gridKey, source, problem]);
@@ -453,7 +446,8 @@ const REGISTER = { authorities: fhrsAuthorities, councilsFor: fhrsAuthoritiesFor
 export async function sweepFhrs({ authorities = 2, staleDays = 30, msBudget = 50_000, register = REGISTER } = {}) {
   const began = Date.now();
   const { rows: tiles } = await query(
-    `select grid_key, min_lat, min_lng, max_lat, max_lng, fhrs_authorities
+    `select grid_key, min_lat, min_lng, max_lat, max_lng, fhrs_authorities,
+            (fhrs_at is not null) as stale
        from census_tiles
       where state = 'done'
         and (fhrs_at is null or fhrs_at < now() - ($1 || ' days')::interval)
@@ -473,7 +467,14 @@ export async function sweepFhrs({ authorities = 2, staleDays = 30, msBudget = 50
   const have = new Map();
   for (const t of tiles) {
     waiting.set(t.grid_key, t.fhrs_authorities ? new Set(t.fhrs_authorities) : null);
-    have.set(t.grid_key, await contributorsTo(t.grid_key));
+    // A tile is only in this list because it has never been counted or because
+    // its count is a month old. In the second case what it already holds is
+    // exactly what is being refreshed, so it counts as having nothing: every
+    // council is asked again and each replaces its own row. Treating the old
+    // contributors as present is what made a stale tile re-date itself without
+    // re-counting anything, so a ground count could never change after its
+    // first sweep (Codex, 21 Sep 2026).
+    have.set(t.grid_key, t.stale ? new Set() : await contributorsTo(t.grid_key));
   }
 
   /** Every council with a real share of this tile, asked once and written down. */
@@ -576,7 +577,10 @@ export async function sweepFhrs({ authorities = 2, staleDays = 30, msBudget = 50
 export async function groundForArea(areaSlug) {
   const { rows } = await query(
     `select g.subcategory, g.source, sum(g.places)::int as places,
-            count(*)::int as tiles, max(g.counted_at) as counted_at
+            -- Tiles, not rows: a tile shared by two councils has a row for each
+            -- of them (migration 230), and counting rows would report twice the
+            -- ground it was drawn from.
+            count(distinct g.grid_key)::int as tiles, max(g.counted_at) as counted_at
        from ground_counts g
        join census_tiles t on t.grid_key = g.grid_key
       where upper($1) = any(t.outcodes)
