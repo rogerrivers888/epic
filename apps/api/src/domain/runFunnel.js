@@ -162,26 +162,42 @@ export const LISTABLE = new Set(['collapsed', 'thin', 'held', 'stored', 'waiting
  *
  * A funnel is a shape, and a shape is not evidence: "1,290 after the resolver"
  * is a claim somebody has to be able to open and disagree with. Five of the
- * seven stages can be listed exactly from the candidates the run raised. Two
- * cannot, and say so rather than showing something close:
+ * seven stages can be listed from the candidates the run raised. Two cannot,
+ * and say so rather than showing something close:
  *
  *   · **places read** is a count and never a list — a run records how many
  *     places it read, not which — and building one from the drawer's places
  *     today would be a different set, because places have been added since.
  *   · **words out** is mentions before normalisation, and those are gone by
  *     design: read out of rented text in memory and never written down. That
- *     is the policy working, not a hole in the record.
+ *     is the data policy working, not a hole in the record.
  *
- * `count` is null where a stage cannot be listed *and* the run did not record
- * it. Nought there would read as "nothing came through", which is the one thing
- * it does not mean.
+ * **The list is what the run raised for the first time, and on a repeat run
+ * that is fewer than the count.** A candidate is found by `first_seen`, which
+ * never moves, so a word this harvest saw again belongs to the run that first
+ * found it — while the funnel counted it as passing through this one. Both are
+ * true and they are different questions. The recorded count therefore wins and
+ * the list says what it is, rather than the list quietly replacing the count
+ * with a smaller number and calling it exact (Codex, 21 Sep 2026).
+ *
+ * `count` is null only where a stage cannot be listed *and* the run did not
+ * record it. Nought there would read as "nothing came through", which is the
+ * one thing it does not mean.
  */
 export function stageOf({ stage, funnel, places, items }) {
   const recorded = funnel?.[stage] ?? (stage === 'read' ? places ?? null : null);
+  const listed = items.length;
+  const listable = LISTABLE.has(stage);
+  const count = recorded ?? (listable ? listed : null);
   return {
     key: stage,
-    count: LISTABLE.has(stage) ? items.length : recorded,
-    recorded: LISTABLE.has(stage) ? true : recorded != null,
+    count,
+    listed,
+    recorded: recorded != null || listable,
+    // The list is every word the stage holds only when the two agree. On a
+    // repeat run it is the newly raised ones, and the screen has to be able to
+    // say so rather than imply the rest are missing.
+    exact: !listable ? false : count === listed,
   };
 }
 

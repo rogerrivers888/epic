@@ -2043,7 +2043,7 @@ filingRoutes.get('/runs/:id/stages/:stage', requires('view_library'), async (req
       raw: { items: [], note: counted == null
         ? 'this run did not record its middle'
         : 'mentions before normalisation · read in memory and never written down' },
-      collapsed: { items: raised.map(word), note: `${raised.length} distinct words after the resolver` },
+      collapsed: { items: raised.map(word), note: 'distinct words after the resolver' },
       thin: { items: thin.map(word), note: `below ${floor} sightings · visible, and not promotable` },
       held: { items: held.map(word), note: 'the classifier could not call these' },
       // Everything the run wrote down, which is what the funnel counts. It
@@ -2066,11 +2066,24 @@ filingRoutes.get('/runs/:id/stages/:stage', requires('view_library'), async (req
       // be listed: nought would read as "nothing came through", which is the
       // one thing it does not mean.
       ...stageOf({ stage, funnel: run.funnel, places: run.places, items: out.items }),
+      // Where the run counted more than this list holds, the difference is
+      // words it saw again rather than words that are missing — and the note
+      // has to say which, or the list reads as a shortfall.
       note: out.note,
       // Capped, because a stage can hold a thousand words and the expander is a
       // row on a table. The count above is the whole of it.
       items: out.items.slice(0, 60),
       more: Math.max(0, out.items.length - 60),
+      /**
+       * What the list is, said plainly.
+       *
+       * On a repeat run the funnel counts every word that passed through and
+       * the list holds only the ones first raised then, because `first_seen`
+       * never moves. Both are true; they are different questions.
+       */
+      listNote: stageOf({ stage, funnel: run.funnel, places: run.places, items: out.items }).exact
+        ? null
+        : 'the words this run raised for the first time; the count above includes ones it saw again',
       subs: subs.length ? `${subs.length} subcategories · ${subs.slice(0, 6).join(', ')}${subs.length > 6 ? '…' : ''}` : 'every question set',
     });
   } catch (err) { next(err); }

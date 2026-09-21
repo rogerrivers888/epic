@@ -221,11 +221,16 @@ test('the live panel shows a stage only once the run has reached it', () => {
 
 // --- opening a stage -------------------------------------------------------
 
-test('a stage that can be listed counts its list', () => {
+test('where the recorded count and the list disagree, the count stands and the list says so', () => {
+  // This test used to assert the opposite, and asserted a bug: it let a short
+  // list overwrite a larger recorded figure and call the result exact. On a
+  // repeat run the two disagree for a good reason — the funnel counted every
+  // word that passed through, the list holds the ones first raised then — and
+  // silently reporting the smaller number loses the run's own measurement.
   const s = stageOf({ stage: 'collapsed', funnel: { collapsed: 9999 }, places: 40, items: ['a', 'b'] });
-  // The list is the evidence. If the recorded figure and the list disagree, the
-  // list is what somebody can open and argue with.
-  assert.equal(s.count, 2);
+  assert.equal(s.count, 9999);
+  assert.equal(s.listed, 2);
+  assert.equal(s.exact, false);
   assert.equal(s.recorded, true);
 });
 
@@ -286,4 +291,27 @@ test('a run from before the heartbeat falls back to when it started', () => {
   const now = Date.now();
   const old = new Date(now - 60 * 60 * 1000).toISOString();
   assert.equal(livenessOf({ finished_at: null, touched_at: null, started_at: old }, now), 'stalled');
+});
+
+test('a repeat run keeps its recorded count and says what the list is', () => {
+  // `first_seen` never moves, so a word a second harvest saw again belongs to
+  // the run that first found it — while the funnel counted it passing through
+  // this one. The list must not quietly replace the count with a smaller
+  // number and call it exact (Codex, 21 Sep 2026).
+  const s = stageOf({ stage: 'collapsed', funnel: { collapsed: 4330 }, places: 868, items: ['a', 'b', 'c'] });
+  assert.equal(s.count, 4330);
+  assert.equal(s.listed, 3);
+  assert.equal(s.exact, false);
+});
+
+test('a first run lists everything it counted', () => {
+  const s = stageOf({ stage: 'collapsed', funnel: { collapsed: 3 }, places: 10, items: ['a', 'b', 'c'] });
+  assert.equal(s.count, 3);
+  assert.equal(s.exact, true);
+});
+
+test('a listable stage on a run with no funnel falls back to its list', () => {
+  const s = stageOf({ stage: 'held', funnel: null, places: 10, items: ['a', 'b'] });
+  assert.equal(s.count, 2);
+  assert.equal(s.recorded, true);
 });
