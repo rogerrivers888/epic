@@ -30,15 +30,28 @@ import type {
   FilingCategories, FilingCategory, FilingExcluded, FilingLabels, FilingOverview,
   FilingPlaces, FilingSet, FilingSubcategory, FilingVocabulary,
 } from '../../api';
+import { SegStrip } from './desk';
 import { Overview } from './Overview';
 import { CategoryBoard, CategoryList, PlacesBoard, SubcategoryBoard } from './Categories';
 import { AllLabels, QuestionSet, QuestionSets } from './Labels';
 import { NotInEpic } from './Mapping';
 import { Rows, type RowFilter } from './Rows';
 import { Train } from './Train';
+import { Rules } from './Rules';
+import { DecisionLog, Runs } from './Runs';
+import type { Decision, Trail } from './types';
 
+/** The six the strip draws. */
 const TABS = ['overview', 'categories', 'labels', 'mapping', 'rules', 'rows'] as const;
-type Tab = typeof TABS[number];
+/**
+ * Runs is a place you can be without being a tab.
+ *
+ * The handoff puts it behind the corner link and the left nav rather than in
+ * the strip — it is where you go to ask "is this working?", not one of the six
+ * things you work on. It still has an address, because everything here does.
+ */
+const PLACES = [...TABS, 'runs'] as const;
+type Tab = typeof PLACES[number];
 
 const TAB_LABEL: Record<Tab, string> = {
   overview: 'Overview',
@@ -47,6 +60,7 @@ const TAB_LABEL: Record<Tab, string> = {
   mapping: 'Mapping',
   rules: 'Rules',
   rows: 'Rows',
+  runs: 'Runs',
 };
 
 /** The minimum this surface is drawn at. It is a desktop back office. */
@@ -54,7 +68,7 @@ const MIN_WIDTH = 1180;
 
 export function Filing({ canManage }: { canManage: boolean }) {
   const { setQuery } = useRouter();
-  const [tab] = useQueryState<Tab>('tab', 'overview', asOneOf(TABS, 'overview'));
+  const [tab] = useQueryState<Tab>('tab', 'overview', asOneOf(PLACES, 'overview'));
   const [cat] = useQueryState<string>('cat', '', asText);
   const [sub] = useQueryState<string>('sub', '', asText);
   const [set] = useQueryState<string>('set', '', asText);
@@ -74,6 +88,12 @@ export function Filing({ canManage }: { canManage: boolean }) {
   const [train, setTrain] = useState<Awaited<ReturnType<typeof api.filingTrain>> | null>(null);
   const [onePlace, setOnePlace] = useState<Awaited<ReturnType<typeof api.filingPlace>> | null>(null);
   const [mode, setMode] = useState<'sweep' | 'grid' | 'inspect'>('sweep');
+  const [rules, setRules] = useState<Awaited<ReturnType<typeof api.adminFilingRules>> | null>(null);
+  const [runs, setRuns] = useState<Awaited<ReturnType<typeof api.adminFilingRuns>> | null>(null);
+  const [decisions, setDecisions] = useState<Awaited<ReturnType<typeof api.adminFilingDecisions>> | null>(null);
+  const [decision, setDecision] = useState<Decision['decision'] | 'all'>('all');
+  const [decisionSet, setDecisionSet] = useState<string | 'all'>('all');
+  const [trails, setTrails] = useState<Record<string, Trail>>({});
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -121,6 +141,15 @@ export function Filing({ canManage }: { canManage: boolean }) {
       }
       if (tab === 'mapping' && view === 'excluded') setExcluded(await api.filingExcluded());
       if (tab === 'rows') setRows(await api.adminFilingRows());
+      if (tab === 'rules') setRules(await api.adminFilingRules());
+      if (tab === 'runs') {
+        if (view === 'decisions') {
+          setDecisions(await api.adminFilingDecisions({
+            decision: decision === 'all' ? undefined : decision,
+            set: decisionSet === 'all' ? undefined : decisionSet,
+          }));
+        } else setRuns(await api.adminFilingRuns());
+      }
     } catch (err) {
       // A provider's error never reaches a screen in its own words, and neither
       // does ours: one sentence, and the detail is in the network tab.
@@ -128,7 +157,7 @@ export function Filing({ canManage }: { canManage: boolean }) {
     } finally {
       setLoading(false);
     }
-  }, [tab, cat, sub, set, view]);
+  }, [tab, cat, sub, set, view, decision, decisionSet]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -240,7 +269,7 @@ export function Filing({ canManage }: { canManage: boolean }) {
             {toast ? (
               <Text style={{ fontFamily: fonts.body, fontSize: 12, fontWeight: '700', color: LIME }}>{toast}</Text>
             ) : null}
-            <Press effect="none" onPress={() => root('rows')} accessibilityRole="button">
+            <Press effect="none" onPress={() => root('runs')} accessibilityRole="button">
               <Text style={{
                 fontFamily: fonts.body, fontSize: 12, fontWeight: '700', color: desk.inkMuted,
                 borderBottomWidth: 1, borderBottomColor: desk.ruleStrong, paddingBottom: 2,
@@ -457,6 +486,73 @@ export function Filing({ canManage }: { canManage: boolean }) {
             />
           ) : null}
 
+          {tab === 'rules' && rules ? (
+            <Rules
+              rows={rules.rules}
+              total={rules.counts.rules}
+              onRetire={(id) => void run(String(id), async () => {
+                await api.adminFilingRetireRule(id);
+                return 'The drawer stops saying it. Every place keeps what it says for itself.';
+              })}
+              onEdit={(rule) => {
+                // A default is edited where it lives, which is the drawer.
+                const [subKey] = String(rule.id).split(':');
+                go({ tab: 'categories', cat: '', sub: subKey, set: '', view: '' });
+              }}
+            />
+          ) : null}
+
+          {tab === 'runs' ? (
+            <View style={{ flexDirection: 'row' }}>
+              <SegStrip
+                value={view === 'decisions' ? 'decisions' : 'runs'}
+                options={[
+                  { key: 'runs', label: 'Runs' },
+                  { key: 'decisions', label: `Decision log${decisions ? ` · ${decisions.decisions.length}` : ''}` },
+                ]}
+                onChange={(k) => go({ view: k === 'decisions' ? 'decisions' : '' })}
+              />
+            </View>
+          ) : null}
+
+          {tab === 'runs' && view !== 'decisions' && runs ? (
+            <Runs
+              headline={runs.headline}
+              scope={runs.scope}
+              triggers={runs.triggers}
+              live={runs.live}
+              runs={runs.runs}
+              weeks={runs.weeks}
+              clears={runs.clears}
+              saturation={runs.saturation}
+              onTrigger={() => said('Starting a run from here is not wired yet.')}
+              onStop={() => said('Stopping a run from here is not wired yet.')}
+              // The stage drill has no endpoint behind it yet. Saying so beats
+              // an expander that opens on nothing.
+              onOpenStage={() => said('Opening a stage is not built yet.')}
+              stage={null}
+              onStage={() => {}}
+            />
+          ) : null}
+
+          {tab === 'runs' && view === 'decisions' && decisions ? (
+            <DecisionLog
+              rows={decisions.decisions}
+              sets={decisions.sets}
+              decision={decision}
+              onDecision={setDecision}
+              set={decisionSet}
+              onSet={setDecisionSet}
+              trailFor={(word) => {
+                if (trails[word]) return trails[word];
+                void api.adminFilingTrail(word)
+                  .then((t) => setTrails((was) => ({ ...was, [word]: t.trail })))
+                  .catch(() => {});
+                return null;
+              }}
+            />
+          ) : null}
+
           {/* The tabs whose screens are drawn but not yet fed. Saying which is
               better than a blank panel: a screen that is coming and a screen
               that is broken look identical otherwise. */}
@@ -481,7 +577,6 @@ const anyLoaded = (o: Record<string, unknown>) => Object.values(o).some(Boolean)
 
 /** Which tabs have no data behind them yet, so the screen can say so. */
 function notYet(tab: Tab, view: string): boolean {
-  if (tab === 'rules') return true;
   if (tab === 'mapping' && view !== 'excluded') return true;
   return false;
 }
@@ -551,6 +646,9 @@ function crumbs({ tab, cat, sub, set, view, category, drawer, oneSet, go }: {
     if (sub) out.push({ label: drawer?.subcategory.label ?? sub, go: view ? () => go({ view: '' }) : undefined });
     if (view === 'places') out.push({ label: 'All places' });
     if (view === 'train') out.push({ label: 'Train' });
+  }
+  if (tab === 'runs') {
+    if (view === 'decisions') out.push({ label: 'Decision log' });
   }
   if (tab === 'labels') {
     if (set) out.push({ label: oneSet?.set.name ?? set });
