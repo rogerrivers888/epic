@@ -126,6 +126,23 @@ export const PURPOSE_CLASSES = {
   'places.where': 'library',
   'reach.stamp': 'library',
 
+  /**
+   * Six more, surfaced by the "Not classified" row itself on 21 Sep 2026.
+   *
+   * $24.38 of a $664.30 production bill, from work that landed after the first
+   * pass — which is the mechanism working rather than failing. The screen names
+   * what nothing has classified, somebody goes and classifies it, and the
+   * sentence goes back to adding up. It is the live check the local test cannot
+   * be: the test reads whichever ledger it is run against, and the one that
+   * matters is production's.
+   */
+  'inspire.ring': 'serve',          // a household's own Inspire search, attributed to them
+  'harvest.features': 'library',    // the vocabulary a drawer is described by
+  'ground.osm': 'library',          // the free count the census is measured against
+  'ground.fhrs': 'library',
+  'ground.fhrs.where': 'library',
+  'bench.reach.accuracy': 'research',
+
   // Serve — marginal, and a household's own.
   'places.photo': 'serve',
   'plan.inspire.headline': 'serve',
