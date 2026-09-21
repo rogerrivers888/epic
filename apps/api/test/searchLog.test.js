@@ -1304,11 +1304,19 @@ test('the part of a rolled month inside the window is still counted', async () =
   await query('delete from search_rollups where area_slug = $1', [slug]);
   await query('delete from searches where area_slug = $1', [slug]);
 
-  // One search twenty days ago — inside a thirty-day window, and in the month
-  // before this one if the report is made early enough in the month. Rolled up,
-  // as a month that has finished would be.
+  // One search just inside the window, in the month the window opens in — the
+  // *edge* month, the one the fold can never claim because only part of it lies
+  // inside thirty days. Rolled up, as a month that has finished would be.
+  //
+  // Dated from the edge of the window rather than "twenty days ago", which is
+  // the same month as today for most of a month and the month before for the
+  // rest: written on 18 Sep the row fell in August and this passed, and on
+  // 21 Sep it fell on the 1st of September — a month the fold *can* claim — so
+  // the live half correctly held nothing and the test failed on the calendar
+  // rather than on anything anybody had changed (21 Sep 2026).
   const id = await log.noteSearch({ surface: 'places', areaSlug: slug, subject: 'museums' });
-  await query(`update searches set at = now() - interval '20 days' where id = $1`, [id]);
+  await query(
+    `update searches set at = now() - interval '30 days' + interval '1 hour' where id = $1`, [id]);
   const before = await log.totals({ areaSlugs: [slug], since: 30 });
   assert.equal(before.searches, 1);
 
@@ -1337,7 +1345,7 @@ test('the part of a rolled month inside the window is still counted', async () =
       where s.at > now() - ($1 || ' days')::interval
         and ${log.LIVE_ROW('s')}
         and s.area_slug = any($2)`, ['30', [slug]]);
-  assert.equal(lens[0].n, 1, 'the lens counts what the board counts');
+  assert.equal(lens[0].n, 1, 'the lens counts what the board counts: the edge month is the live half\'s to hold');
 });
 
 test('a place that moves does not keep the travel cell of where it was', async () => {
