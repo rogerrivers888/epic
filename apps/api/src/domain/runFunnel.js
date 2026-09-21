@@ -153,3 +153,34 @@ export function saturationOf(sets, candidates, limits) {
     };
   });
 }
+
+/** The stages that can be listed out of the candidates a run raised. */
+export const LISTABLE = new Set(['collapsed', 'thin', 'held', 'stored', 'waiting']);
+
+/**
+ * What one stage of one run holds, and what may honestly be said about it.
+ *
+ * A funnel is a shape, and a shape is not evidence: "1,290 after the resolver"
+ * is a claim somebody has to be able to open and disagree with. Five of the
+ * seven stages can be listed exactly from the candidates the run raised. Two
+ * cannot, and say so rather than showing something close:
+ *
+ *   · **places read** is a count and never a list — a run records how many
+ *     places it read, not which — and building one from the drawer's places
+ *     today would be a different set, because places have been added since.
+ *   · **words out** is mentions before normalisation, and those are gone by
+ *     design: read out of rented text in memory and never written down. That
+ *     is the policy working, not a hole in the record.
+ *
+ * `count` is null where a stage cannot be listed *and* the run did not record
+ * it. Nought there would read as "nothing came through", which is the one thing
+ * it does not mean.
+ */
+export function stageOf({ stage, funnel, places, items }) {
+  const recorded = funnel?.[stage] ?? (stage === 'read' ? places ?? null : null);
+  return {
+    key: stage,
+    count: LISTABLE.has(stage) ? items.length : recorded,
+    recorded: LISTABLE.has(stage) ? true : recorded != null,
+  };
+}

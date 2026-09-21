@@ -52,7 +52,7 @@ import { currentHousehold } from './household.js';
 import * as taxonomyAudit from '../repositories/taxonomyAudit.js';
 import { CORPUS_OPENS, auditAll } from '../domain/taxonomyAudit.js';
 import { setThreshold, thresholds, thresholdValues } from '../repositories/settings.js';
-import { STAGES, clearsOf, diagnose, headlineOf, saturationOf } from '../domain/runFunnel.js';
+import { STAGES, clearsOf, diagnose, headlineOf, saturationOf, stageOf } from '../domain/runFunnel.js';
 
 export const filingRoutes = Router();
 
@@ -793,7 +793,9 @@ const candidateRow = (c) => ({
 filingRoutes.get('/labels', requires('view_library'), async (_req, res, next) => {
   try {
     const [sets, all, d, limits] = await Promise.all([
-      questionSets.sets(), questionSets.questionsFor(null), filing.drawers(), thresholdValues(),
+      // Every question, not `questionsFor(null)`: that returns the globals
+      // alone, so every set on this table counted nought of its own.
+      questionSets.sets(), questionSets.everyQuestion(), filing.drawers(), thresholdValues(),
     ]);
     const cands = await questionSets.candidates({ status: 'new', limit: 5000 });
 
@@ -892,7 +894,9 @@ filingRoutes.get('/labels/sets/:key', requires('view_library'), async (req, res,
 filingRoutes.get('/labels/vocabulary', requires('view_library'), async (_req, res, next) => {
   try {
     const [{ list: attrs }, all, sets, d] = await Promise.all([
-      placeAttributes.attributes(), questionSets.questionsFor(null), questionSets.sets(), filing.drawers(),
+      // Same trap: with the globals alone every label read "nowhere", which is
+      // the orphan case, so the whole vocabulary looked unasked.
+      placeAttributes.attributes(), questionSets.everyQuestion(), questionSets.sets(), filing.drawers(),
     ]);
     const setName = new Map(sets.map((s) => [s.key, s.name]));
     const rows = attrs.filter((a) => a.active).map((a) => {
@@ -1881,7 +1885,9 @@ filingRoutes.get('/pending', requires('view_library'), async (_req, res, next) =
   try {
     const [{ list: attrs }, all, sets, typed] = await Promise.all([
       placeAttributes.attributes(),
-      questionSets.questionsFor(null),
+      // And here it mattered most: a label asked only by a set was never seen
+      // as asked, so it was offered as an orphan to be retired.
+      questionSets.everyQuestion(),
       questionSets.sets(),
       query(`select id, norm, raw_forms, subcategory, places_seen, sources, examples
                from harvest_candidates
@@ -1941,3 +1947,91 @@ function nearestLabels(a, attrs) {
     .sort((x, y) => y.shared - x.shared)
     .slice(0, 3);
 }
+
+/**
+ * GET /runs/:id/stages/:stage — what is actually in one stage of one run.
+ *
+ * The expander on a run row. It exists because a funnel is a shape and a shape
+ * is not evidence: "1,290 after the resolver" is a claim somebody has to be
+ * able to open and disagree with, and an expander that opens on nothing is the
+ * failure this section keeps re-learning.
+ *
+ * Three of the seven can be listed exactly, from the candidates the run raised:
+ * the words it collapsed to, the ones too thin to judge, and the ones in the
+ * holding pen. Two more — what it wrote down, and what is waiting on a person —
+ * are the same list under a different question.
+ *
+ * Two cannot, and say so rather than showing something close:
+ *
+ *   · **places read** is a count and not a list. A run records how many places
+ *     it read, never which, and inventing the list from the drawer's places
+ *     today would be a different set — places have been added since.
+ *   · **words out** is mentions before normalisation, and those are gone by
+ *     design. They are read out of rented text in memory and never written
+ *     down; the collapsed word is what survives. That is the policy working,
+ *     not a hole.
+ */
+filingRoutes.get('/runs/:id/stages/:stage', requires('view_library'), async (req, res, next) => {
+  try {
+    const stage = String(req.params.stage);
+    const known = STAGES.find(([key]) => key === stage);
+    if (!known) throw bad(`There is no stage called ${stage}.`);
+
+    const { rows: [run] } = await query('select * from vocabulary_runs where id = $1', [req.params.id]);
+    if (!run) throw bad('There is no run by that id.');
+
+    const limits = await thresholdValues();
+    const subs = run.subcategories ?? [];
+    const { rows: raised } = await query(
+      `select norm, raw_forms, subcategory, places_seen, places_total, status, kind
+         from harvest_candidates
+        where subcategory = any($1)
+          and first_seen >= $2
+          and ($3::timestamptz is null or first_seen <= $3)
+        order by places_seen desc, norm`,
+      [subs, run.started_at, run.finished_at]);
+
+    const floor = limits.sightingFloor;
+    const thin = raised.filter((c) => (c.places_seen ?? 0) < floor);
+    const held = raised.filter((c) => c.kind === 'unclear');
+    const waiting = raised.filter((c) => c.status === 'new' && c.kind === 'feature'
+      && (c.places_seen ?? 0) >= floor);
+    const word = (c) => c.raw_forms?.[0] ?? c.norm;
+
+    // What the run recorded for this stage, or null where it recorded nothing.
+    // `read` has a second home — `vocabulary_runs.places` predates the funnel —
+    // so a run from before migration 232 can still say how many it read.
+    const counted = run.funnel?.[stage] ?? (stage === 'read' ? run.places ?? null : null);
+    const lists = {
+      // Not a list, and saying so beats a plausible one: a run records how many
+      // places it read, never which.
+      read: { items: [], note: 'a run records how many places it read, never which' },
+      // Gone by design. The mentions are read out of rented text in memory and
+      // never written down; the collapsed word is what survives.
+      raw: { items: [], note: counted == null
+        ? 'this run did not record its middle'
+        : 'mentions before normalisation · read in memory and never written down' },
+      collapsed: { items: raised.map(word), note: `${raised.length} distinct words after the resolver` },
+      thin: { items: thin.map(word), note: `below ${floor} sightings · visible, and not promotable` },
+      held: { items: held.map(word), note: 'the classifier could not call these' },
+      stored: { items: raised.filter((c) => c.kind === 'feature').map(word), note: 'written down as features' },
+      waiting: { items: waiting.map(word), note: 'at or above the floor, and nobody has decided them' },
+    };
+
+    const out = lists[stage];
+    res.json({
+      run: String(run.id),
+      name: known[1],
+      // Null, not nought, where the run did not record it and the stage cannot
+      // be listed: nought would read as "nothing came through", which is the
+      // one thing it does not mean.
+      ...stageOf({ stage, funnel: run.funnel, places: run.places, items: out.items }),
+      note: out.note,
+      // Capped, because a stage can hold a thousand words and the expander is a
+      // row on a table. The count above is the whole of it.
+      items: out.items.slice(0, 60),
+      more: Math.max(0, out.items.length - 60),
+      subs: subs.length ? `${subs.length} subcategories · ${subs.slice(0, 6).join(', ')}${subs.length > 6 ? '…' : ''}` : 'every question set',
+    });
+  } catch (err) { next(err); }
+});

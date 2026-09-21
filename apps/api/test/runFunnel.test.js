@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 
 import {
   COLLAPSE_FLOOR, ENOUGH_TO_JUDGE, KEPT_FLOOR, PEN_CEILING, STAGES,
-  clearsOf, diagnose, headlineOf, saturationOf, verdictOf,
+  LISTABLE, clearsOf, diagnose, headlineOf, saturationOf, stageOf, verdictOf,
 } from '../src/domain/runFunnel.js';
 
 // --- the stages ------------------------------------------------------------
@@ -216,4 +216,35 @@ test('the live panel shows a stage only once the run has reached it', () => {
   assert.equal(reached('collapsed'), true);
   assert.equal(reached('thin'), false);
   assert.equal(reached('waiting'), false);
+});
+
+// --- opening a stage -------------------------------------------------------
+
+test('a stage that can be listed counts its list', () => {
+  const s = stageOf({ stage: 'collapsed', funnel: { collapsed: 9999 }, places: 40, items: ['a', 'b'] });
+  // The list is the evidence. If the recorded figure and the list disagree, the
+  // list is what somebody can open and argue with.
+  assert.equal(s.count, 2);
+  assert.equal(s.recorded, true);
+});
+
+test('places read is a count and never a list', () => {
+  const s = stageOf({ stage: 'read', funnel: null, places: 39, items: [] });
+  assert.equal(s.count, 39);
+  assert.equal(s.recorded, true);
+});
+
+test('a stage the run did not record is unknown, not empty', () => {
+  // Nought here would read as "nothing came through", which is the one thing
+  // it does not mean.
+  const s = stageOf({ stage: 'raw', funnel: null, places: 39, items: [] });
+  assert.equal(s.count, null);
+  assert.equal(s.recorded, false);
+});
+
+test('words out is never listed, however much the run recorded', () => {
+  // The mentions are read out of rented text in memory and never written down.
+  const s = stageOf({ stage: 'raw', funnel: { raw: 1480 }, places: 620, items: [] });
+  assert.equal(s.count, 1480);
+  assert.equal(LISTABLE.has('raw'), false);
 });
