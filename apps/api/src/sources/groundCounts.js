@@ -325,9 +325,25 @@ export async function fhrsAuthoritiesFor(box) {
 }
 
 /** Which councils have already been counted into a tile. */
-export async function contributorsTo(gridKey, source = 'fhrs', drawers = null) {
+export async function contributorsTo(gridKey, source = 'fhrs', drawers = null, { staleDays = null } = {}) {
+  // Only what is still within the window, when there is one.
+  //
+  // The question the settling asked was *whether* a council had answered and
+  // never *when*, so a tile whose numbers were a month old looked complete:
+  // nothing was downloaded, `fhrs_at` was stamped again with today's date, and
+  // month-old figures were presented as this week's (owner, 21 Sep 2026). The
+  // comment below this one already said the answer — "what it already holds is
+  // exactly what is being refreshed, so it counts as having nothing" — but
+  // nothing here could tell the difference between an old row and a new one.
+  //
+  // Worse than a gap, because the comparison this feeds is the one that says
+  // which drawers the census is short on: a stale ground count does not read as
+  // missing, it reads as agreement.
   const { rows } = await query(
-    'select contributor, subcategory from ground_counts where grid_key = $1 and source = $2', [gridKey, source]);
+    `select contributor, subcategory from ground_counts
+      where grid_key = $1 and source = $2
+        ${staleDays == null ? '' : "and counted_at > now() - ($3 || ' days')::interval"}`,
+    staleDays == null ? [gridKey, source] : [gridKey, source, String(staleDays)]);
   const by = new Map();
   for (const r of rows) {
     if (!by.has(r.contributor)) by.set(r.contributor, new Set());
@@ -590,7 +606,7 @@ export async function sweepFhrs({ authorities = 2, staleDays = 30, msBudget = 50
     // because the drawer is new keeps the councils that have answered for the
     // rest — `contributorsTo` only counts a council in when it has answered for
     // every drawer being asked.
-    have.set(t.grid_key, await contributorsTo(t.grid_key, 'fhrs', drawers));
+    have.set(t.grid_key, await contributorsTo(t.grid_key, 'fhrs', drawers, { staleDays }));
   }
 
   /** Every council with a real share of this tile, asked once and written down. */
