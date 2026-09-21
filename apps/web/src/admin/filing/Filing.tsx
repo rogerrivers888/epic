@@ -132,6 +132,15 @@ export function Filing({ canManage }: { canManage: boolean }) {
 
   useEffect(() => { void load(); }, [load]);
 
+  /**
+   * Inspect belongs to the drawer you are in.
+   *
+   * Leaving Train and opening it for a different drawer kept both the mode and
+   * the place, so the new drawer opened showing — and offering to edit — a
+   * place from the old one, under the new one's heading (Codex, 21 Sep 2026).
+   */
+  useEffect(() => { setOnePlace(null); setMode('sweep'); }, [sub]);
+
   /** Every write goes through here, so one of them cannot forget to reload. */
   const run = useCallback(async (key: string, what: () => Promise<string>) => {
     setBusy(key);
@@ -314,6 +323,10 @@ export function Filing({ canManage }: { canManage: boolean }) {
               busy={busy}
               canManage={canManage}
               onOpen={(ref) => { void api.filingPlace(ref).then(setOnePlace).catch(() => setOnePlace(null)); }}
+              onNotSure={(refs) => void run('notsure', async () => {
+                const out = await api.filingNotSure(sub, refs);
+                return out.said;
+              })}
               onHousehold={() => go({ tab: 'rows', cat: '', sub: '', set: '', view: '' })}
               onSet={(ref, attribute, level) => void run(`${ref}:${attribute}`, async () => {
                 const out = await api.filingSetPlace(ref, { attribute, value: { level } });
@@ -397,15 +410,35 @@ export function Filing({ canManage }: { canManage: boolean }) {
               onFilter={setRowFilter}
               onHeart={(id) => {
                 const row = rows.rows.find((r) => r.id === id);
-                // Hearting with nobody chosen is a question to ask, not a tap
-                // to drop: the API refuses it and says so, and until the screen
-                // asks "whose list is this?" the only honest thing is to say
-                // which member it would be attributed to.
-                const member = rows.members[0]?.id ?? null;
-                if (!member) { said('Nobody is in this household to heart it as.'); return; }
+                /**
+                 * Unhearting has to be aimed at whoever owns the heart.
+                 *
+                 * A heart belongs to a person, so `(row, first member)` is the
+                 * wrong row to delete in any household where somebody else set
+                 * it — the delete matched nothing, the real heart survived, and
+                 * the screen said it had worked (Codex via epic-f4, 21 Sep).
+                 *
+                 * Hearting *on* is a different case: nobody owns it yet, and
+                 * whose list this is, is the first-heart question. Until the
+                 * back office asks it, the signed-in household's first adult is
+                 * the honest stand-in and the toast says who it was.
+                 */
+                const owner = row?.heartedBy
+                  ? rows.members.find((m) => m.name === row.heartedBy)?.id ?? null
+                  : null;
+                const member = row?.hearted ? owner : (rows.members.find((m) => m.role === 'adult') ?? rows.members[0])?.id ?? null;
+                if (!member) {
+                  said(row?.hearted
+                    ? 'Nobody in this household owns that heart.'
+                    : 'Nobody is in this household to heart it as.');
+                  return;
+                }
+                const who = rows.members.find((m) => m.id === member)?.name ?? 'somebody';
                 void run(id, async () => {
                   await api.adminFilingHeart(id, !row?.hearted, member);
-                  return `${row?.title ?? id} ${row?.hearted ? 'unhearted' : 'hearted'}`;
+                  return row?.hearted
+                    ? `${row?.title ?? id} unhearted for ${who}`
+                    : `${row?.title ?? id} hearted for ${who}`;
                 });
               }}
               onEdit={(id, field, value) => {

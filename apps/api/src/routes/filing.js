@@ -28,6 +28,7 @@
  *   GET  /subcategories/:key/train     the places worth looking at, and why
  *   GET  /places/:ref                  one place, as the desk and a household see it
  *   PUT  /places/:ref                  what one place says for itself
+ *   POST /subcategories/:key/not-sure  these twelve do not belong here
  *
  * Nothing here calls a provider. Every number comes from the index, the owned
  * records, the search log and the rules, so a screen can be refreshed as often
@@ -44,6 +45,7 @@ import * as labelRepo from '../repositories/taxonomyLabels.js';
 import * as shelfRules from '../repositories/shelfRules.js';
 import * as shelfTaxonomy from '../repositories/shelfTaxonomy.js';
 import * as browseRows from '../repositories/browseRows.js';
+import * as notSure from '../repositories/notSure.js';
 import { currentHousehold } from './household.js';
 import * as taxonomyAudit from '../repositories/taxonomyAudit.js';
 import { CORPUS_OPENS, auditAll } from '../domain/taxonomyAudit.js';
@@ -1662,7 +1664,38 @@ filingRoutes.get('/places/:ref', requires('view_library'), async (req, res, next
         questionSets.questionsFor(setKey),
         query('select * from place_answers where venue_ref = $1', [ref]),
       ]);
-      const byQ = new Map(answered.map((a) => [String(a.question_id), a]));
+      /**
+       * One question can have several answers, one per source.
+       *
+       * `place_answers` is keyed `(venue_ref, question_id, source)` precisely
+       * so that two sources disagreeing are both kept — the brief is explicit
+       * that disagreement is stored unresolved and never silently resolved. A
+       * plain map by question id keeps whichever row the database happened to
+       * return first, so the same place could read Yes or Nothing found on
+       * consecutive loads (Codex, 21 Sep 2026).
+       *
+       * So: an answer beats a nothing-found, and among equals the most
+       * recently checked wins — and where two *answered* sources disagree the
+       * row says so rather than picking one.
+       */
+      const byQ = new Map();
+      for (const a of answered) {
+        const id = String(a.question_id);
+        const had = byQ.get(id);
+        if (!had) { byQ.set(id, a); continue; }
+        const better = (x, y) => {
+          if ((x.state === 'answered') !== (y.state === 'answered')) return x.state === 'answered' ? x : y;
+          return new Date(x.checked_at ?? 0) >= new Date(y.checked_at ?? 0) ? x : y;
+        };
+        const keep = better(a, had);
+        const other = keep === a ? had : a;
+        // Two sources that both answered and do not agree is a fact about the
+        // place, not a tie to break quietly.
+        const said = (r) => (r.yesno != null ? String(r.yesno) : r.choice ?? String(r.number ?? ''));
+        keep.unresolved = keep.unresolved
+          || (keep.state === 'answered' && other.state === 'answered' && said(keep) !== said(other));
+        byQ.set(id, keep);
+      }
       questions = qs.filter((q) => q.set_key === setKey).map((q) => {
         const a = byQ.get(String(q.id));
         if (!a) {
@@ -1698,5 +1731,39 @@ filingRoutes.get('/places/:ref', requires('view_library'), async (req, res, next
       questions,
       set: setKey ? { key: setKey, name: d.setByKey.get(setKey)?.name ?? setKey } : null,
     });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST /subcategories/:key/not-sure — these do not belong here.
+ *
+ * The honest half of the grid. Saying a place is not a museum is a real
+ * judgement and goes somewhere real: the not-sure list, where where-it-should-
+ * go is decided with the rest of its kind. Confirming the others writes
+ * nothing, because there is nowhere to write it and a screen that reported a
+ * confirmation it had not made would be worse than one that does not offer it.
+ */
+filingRoutes.post('/subcategories/:key/not-sure', requires('manage_library'), async (req, res, next) => {
+  try {
+    const key = String(req.params.key);
+    const d = await filing.drawers();
+    const sub = d.subcategories.find((s) => s.key === key);
+    if (!sub) throw bad(`${key} is not one of our subcategories.`);
+    const refs = (Array.isArray(req.body?.refs) ? req.body.refs : []).map(String).filter(Boolean).slice(0, 50);
+    if (!refs.length) throw bad('Which places?');
+    let queued = 0;
+    for (const ref of refs) {
+      const rec = d.recordsByRef.get(ref) ?? null;
+      await notSure.notSettled({
+        ref,
+        name: rec?.name ?? null,
+        address: rec?.postcode ?? null,
+        words: [],
+        wouldBe: key,
+        reason: `A person looked at it beside eleven others and said it is not ${sub.label.toLowerCase()}.`,
+      });
+      queued += 1;
+    }
+    res.json({ queued, said: `${queued} sent to Not sure`, by: actorOf(req) });
   } catch (err) { next(err); }
 });

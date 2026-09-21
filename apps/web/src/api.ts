@@ -3312,6 +3312,10 @@ export const api = {
   filingTrain: (key: string) => request<FilingTrain>(`/api/admin/filing/subcategories/${encodeURIComponent(key)}/train`),
   /** One place, as the desk and a household each see it. */
   filingPlace: (ref: string) => request<FilingPlace>(`/api/admin/filing/places/${encodeURIComponent(ref)}`),
+  /** These twelve do not belong here — off to the not-sure list. */
+  filingNotSure: (key: string, refs: string[]) =>
+    post<{ queued: number; said: string }>(
+      `/api/admin/filing/subcategories/${encodeURIComponent(key)}/not-sure`, { refs }),
   /** What one place says for itself. Always attributed to whoever said it. */
   filingSetPlace: (ref: string, body: { attribute: string; value: AttributeValue | null; reason?: string }) =>
     put<{ ref: string; attribute: string; value: string | null; said: string }>(

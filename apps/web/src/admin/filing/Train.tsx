@@ -25,7 +25,7 @@ import type { FilingTrain, FilingPlace } from '../../api';
 
 type Mode = 'sweep' | 'grid' | 'inspect';
 
-export function Train({ data, place, mode, onMode, busy, canManage, onSet, onOpen, onHousehold }: {
+export function Train({ data, place, mode, onMode, busy, canManage, onSet, onNotSure, onOpen, onHousehold }: {
   data: FilingTrain;
   /** The place Inspect is showing, fetched separately because it is a page of its own. */
   place: FilingPlace | null;
@@ -34,15 +34,48 @@ export function Train({ data, place, mode, onMode, busy, canManage, onSet, onOpe
   busy: string | null;
   canManage: boolean;
   onSet: (ref: string, attribute: string, level: number) => void;
+  /** The ones a person says do not belong here, off to the not-sure list. */
+  onNotSure: (refs: string[]) => void;
   onOpen: (ref: string) => void;
   onHousehold: () => void;
 }) {
-  const [at, setAt] = useState(0);
+  /**
+   * Where the sweep is, as a place *and* a question.
+   *
+   * A place usually has several axes worth asking about, and holding only a
+   * place index showed the first one for ever: answering it moved to the next
+   * place and the rest could never be taught, while the panel beside it said
+   * "3 more questions about this place" (Codex, 21 Sep 2026).
+   *
+   * Held as the ref rather than as an index, so that a save reloading the
+   * queue — which removes whatever was just settled — does not slide the
+   * cursor onto a different place than the one the screen was showing.
+   */
+  const [at, setAt] = useState<{ ref: string; ask: number } | null>(null);
   const [wrong, setWrong] = useState<Set<string>>(new Set());
+  const [sent, setSent] = useState<string | null>(null);
 
   const queue = data.queue;
-  const current = queue[Math.min(at, Math.max(0, queue.length - 1))] ?? null;
-  const ask = current?.asks[0] ?? null;
+  const current = (at && queue.find((q) => q.ref === at.ref)) ?? queue[0] ?? null;
+  const askAt = current && at?.ref === current.ref ? at.ask : 0;
+  const ask = current?.asks[Math.min(askAt, current.asks.length - 1)] ?? null;
+  const place_ = current;
+
+  /** The next question on this place, or the next place when it is done. */
+  const advance = () => {
+    if (!place_) return;
+    if (askAt + 1 < place_.asks.length) { setAt({ ref: place_.ref, ask: askAt + 1 }); return; }
+    const i = queue.findIndex((q) => q.ref === place_.ref);
+    const next = queue[i + 1] ?? null;
+    setAt(next ? { ref: next.ref, ask: 0 } : null);
+  };
+  const back = () => {
+    if (!place_) return;
+    if (askAt > 0) { setAt({ ref: place_.ref, ask: askAt - 1 }); return; }
+    const i = queue.findIndex((q) => q.ref === place_.ref);
+    const prev = queue[i - 1] ?? null;
+    if (prev) setAt({ ref: prev.ref, ask: Math.max(0, prev.asks.length - 1) });
+  };
 
   return (
     <>
@@ -93,10 +126,12 @@ export function Train({ data, place, mode, onMode, busy, canManage, onSet, onOpe
                 <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
                   {[0, 1, 2, 3, 4].map((n) => (
                     <Press key={n} effect="sink" accessibilityRole="button"
-                           onPress={canManage && !busy ? () => {
-                             onSet(current.ref, ask.key, n);
-                             setAt((i) => i + 1);
-                           } : undefined}>
+                           // Saving does not advance. A save that succeeds
+                           // takes this question out of the queue, and the
+                           // reload moves the cursor by itself; advancing here
+                           // as well skipped a place every time, and advanced
+                           // even when the save had failed (Codex, 21 Sep).
+                           onPress={canManage && !busy ? () => onSet(current.ref, ask.key, n) : undefined}>
                       <View style={{
                         width: 86,
                         paddingVertical: 16,
@@ -118,9 +153,12 @@ export function Train({ data, place, mode, onMode, busy, canManage, onSet, onOpe
                   ))}
                 </View>
                 <View style={{ flexDirection: 'row', gap: 20, marginTop: 16, alignItems: 'center' }}>
-                  <Act label="Skip" tone="dim" ruled={false} onPress={() => setAt((i) => i + 1)} />
-                  <Act label="Back" tone="dim" ruled={false} onPress={() => setAt((i) => Math.max(0, i - 1))} />
-                  <Value tone="dim" size={12}>{Math.min(at + 1, queue.length)} of {queue.length}</Value>
+                  <Act label="Skip" tone="dim" ruled={false} onPress={advance} />
+                  <Act label="Back" tone="dim" ruled={false} onPress={back} />
+                  <Value tone="dim" size={12}>
+                    {queue.findIndex((q) => q.ref === current.ref) + 1} of {queue.length}
+                    {current.asks.length > 1 ? ` · question ${askAt + 1} of ${current.asks.length}` : ''}
+                  </Value>
                 </View>
               </DeskSection>
             </View>
@@ -138,7 +176,9 @@ export function Train({ data, place, mode, onMode, busy, canManage, onSet, onOpe
               </Text>
               {current.asks.length > 1 ? (
                 <Value tone="dim" size={12}>
-                  {current.asks.length - 1} more {current.asks.length === 2 ? 'question' : 'questions'} about this place
+                  {current.asks.length - 1 - askAt > 0
+                    ? `${current.asks.length - 1 - askAt} more about this place`
+                    : 'the last question about this place'}
                 </Value>
               ) : null}
               <View style={{ marginTop: 8 }}>
@@ -183,15 +223,23 @@ export function Train({ data, place, mode, onMode, busy, canManage, onSet, onOpe
             {data.grid.length === 0 ? <Nothing>Nothing is filed here yet.</Nothing> : null}
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18 }}>
+            {/*
+              The button does the half that is real. Marking a place as not
+              belonging sends it to the not-sure list, where somewhere else
+              decides where it should go. Confirming the rest writes nothing,
+              because there is nowhere to write it — and a button that reported
+              a bulk decision it had not made would be worse than no button
+              (Codex, 21 Sep 2026).
+            */}
             <DeskButton
-              label={`Confirm the other ${Math.max(0, data.grid.length - wrong.size)}`}
-              disabled={!canManage || data.grid.length === 0}
-              onPress={() => setWrong(new Set())}
+              label={wrong.size ? `Send ${wrong.size} back to Not sure` : 'Nothing marked'}
+              disabled={!canManage || wrong.size === 0 || Boolean(busy)}
+              onPress={() => { onNotSure([...wrong]); setSent(`${wrong.size} sent`); setWrong(new Set()); }}
             />
             <Value tone="dim" size={12.5}>
-              {wrong.size
-                ? `${wrong.size} marked as not belonging here`
-                : 'nothing marked — confirming says the drawer is right about all twelve'}
+              {sent ?? (wrong.size
+                ? `${wrong.size} will go to Not sure, where where-they-belong is decided`
+                : 'tap the ones that are not this, and they go to Not sure')}
             </Value>
           </View>
         </>
