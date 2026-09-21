@@ -93,3 +93,43 @@ test('the three Google has no word for are asked in words, and say so', async ()
     }
   }
 });
+
+test('a word that points at a drawer is never switched off', async () => {
+  // Answering a word `aside` switches it off as well as answering it, so
+  // clearing the decision alone leaves it mapped *and* inactive — and every
+  // consumer that filters on `active`, the audit included, goes on skipping
+  // it. The two fields have to move together, or they contradict each other
+  // in a new way (Codex, 21 Sep 2026, on migration 234).
+  const { rows } = await query(
+    `select namespace || ':' || key as word, points_at
+       from taxonomy_labels
+      where points_at is not null and active = false`);
+  assert.deepEqual(rows, [],
+    `these words file places while switched off: ${rows.map((r) => `${r.word} → ${r.points_at}`).join(', ')}`);
+});
+
+test('every drawer the five file into exists and is active', async () => {
+  // A rule pointing at a drawer that is gone, or switched off, files places
+  // nowhere a household can reach — and the census would still spend requests
+  // asking about it.
+  const { rows } = await query(
+    `select distinct r.subcategory
+       from shelf_rules r
+       left join shelf_subcategories s on s.key = r.subcategory
+      where r.subcategory = any($1)
+        and (s.key is null or not s.active)`, [THE_FIVE]);
+  assert.deepEqual(rows, []);
+});
+
+test('the five are answered on a database built only from migrations', async () => {
+  // The test database is exactly that case, and it is the one 234 got wrong:
+  // an `update` against a vocabulary that boot has not written yet matches
+  // nothing, and the deployment ends up filing places into drawers it still
+  // calls undecided.
+  const { rows } = await query(
+    `select namespace || ':' || key as word, points_at, active
+       from taxonomy_labels
+      where points_at = any($1) order by 1`, [['ropes', 'flying']]);
+  assert.equal(rows.length, 5, 'the five words are not all answered on a fresh database');
+  assert.ok(rows.every((r) => r.active), 'a word is answered but switched off');
+});
