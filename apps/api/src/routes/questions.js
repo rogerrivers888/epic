@@ -352,6 +352,31 @@ questionRoutes.post('/harvest/free', requires('manage_questions'), async (req, r
   } catch (err) { next(err); }
 });
 
+/** Where the candidates now in the queue came from. */
+questionRoutes.get('/candidates/origins', requires('view_library'), async (_req, res, next) => {
+  try {
+    res.json({ origins: await sets.candidateOrigins() });
+  } catch (err) { next(err); }
+});
+
+/**
+ * Remove what the old sweep raised, leaving every decision alone.
+ *
+ * The sweep read every accessibility field it had *checked* as one the place
+ * has, so some of what it raised is a negative recorded as a feature. Confirm
+ * with the number it reports, the same gate the paid runs use.
+ */
+questionRoutes.post('/candidates/purge-sweep', requires('manage_questions'), async (req, res, next) => {
+  try {
+    res.json(await sets.purgeSweepCandidates({ confirm: req.body?.confirm ?? null }));
+  } catch (err) {
+    if (err?.code === 'confirm_required') {
+      return res.status(409).json({ error: err.code, message: err.message, plan: err.plan ?? null });
+    }
+    return next(err);
+  }
+});
+
 /**
  * The feature pass: one call per drawer, asking what recurs across it.
  *

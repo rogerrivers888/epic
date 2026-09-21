@@ -779,3 +779,57 @@ export async function unsettleForSubcategory(subcategoryKey) {
     [subcategoryKey],
   );
 }
+
+/**
+ * What the old extractor raised, counted by where it came from.
+ *
+ * `sources` is a jsonb map of source to how many places carried the word:
+ * `google` is the review harvest, and `site`, `wikipedia` and `osm` are the
+ * free sweep. A word both paths raised carries both keys, because the upsert
+ * merges them.
+ */
+export async function candidateOrigins() {
+  const { rows } = await query(
+    `select coalesce(sources ? 'google', false) as google,
+            coalesce(sources ?| array['site','wikipedia','osm'], false) as sweep,
+            decided_at is not null as decided,
+            count(*)::int as n
+       from harvest_candidates
+      group by 1, 2, 3
+      order by 4 desc`);
+  return rows;
+}
+
+/**
+ * Remove candidates the free sweep raised, leaving every decision alone.
+ *
+ * The sweep's extractor read `Object.keys(accessibility)` and fed every field
+ * it had *checked* into the place's text, so a place recorded as
+ * `{hearingLoop: false}` asserted "hearing loop" — a negative written down as
+ * a feature. That contamination cannot be unpicked from a row the Google pass
+ * also touched, because the upsert merged the two into one candidate with one
+ * `places_seen`; so a merged row goes as well, and the review path can raise
+ * it again cleanly if it was ever real.
+ *
+ * **A decided candidate is never removed.** Promoting or ignoring a word is a
+ * person's judgement, and the decision log says they made it. Deleting one
+ * would leave the log pointing at a row that no longer exists.
+ */
+export async function purgeSweepCandidates({ confirm = null } = {}) {
+  const { rows: [{ n }] } = await query(
+    `select count(*)::int n from harvest_candidates
+      where decided_at is null
+        and sources ?| array['site','wikipedia','osm']`);
+  if (Number(confirm) !== n) {
+    const err = new Error(`This would remove ${n} candidates the free sweep raised. Confirm with that number.`);
+    err.code = 'confirm_required';
+    err.status = 409;
+    err.plan = { removes: n };
+    throw err;
+  }
+  const { rowCount } = await query(
+    `delete from harvest_candidates
+      where decided_at is null
+        and sources ?| array['site','wikipedia','osm']`);
+  return { removed: rowCount };
+}
