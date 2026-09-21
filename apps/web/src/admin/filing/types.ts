@@ -217,7 +217,14 @@ export type ExcludedRow = { word: string; label: string; brings: number; why: st
  * broad, "41 people have called it wrong" is a rule that is simply wrong.
  */
 export type RuleRow = {
-  id: number;
+  /**
+   * `subcategory:attribute` — a string, because a default has no id of its
+   * own. It *is* the pair, which is what stops a retire being aimed at the
+   * wrong drawer. Declared as a number it was a trap: the value is a string
+   * at runtime and every reader that treated it as one happened to work
+   * (epic-f2, 21 Sep 2026).
+   */
+  id: string;
   /** What it sets: "How thrilling · 3". */
   what: string;
   level: string;

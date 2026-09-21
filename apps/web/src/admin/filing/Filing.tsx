@@ -352,8 +352,12 @@ export function Filing({ canManage }: { canManage: boolean }) {
               busy={busy}
               canManage={canManage}
               onOpen={(ref) => { void api.filingPlace(ref).then(setOnePlace).catch(() => setOnePlace(null)); }}
-              onNotSure={(refs) => void run('notsure', async () => {
+              onNotSure={(refs, done) => void run('notsure', async () => {
                 const out = await api.filingNotSure(sub, refs);
+                // Only now. Saying it before the request lands loses the
+                // selection and claims the work went through, so a refusal or
+                // a dropped connection reads as a success (epic-f2, 21 Sep).
+                done(out.said);
                 return out.said;
               })}
               onHousehold={() => go({ tab: 'rows', cat: '', sub: '', set: '', view: '' })}
@@ -495,9 +499,15 @@ export function Filing({ canManage }: { canManage: boolean }) {
                 return 'The drawer stops saying it. Every place keeps what it says for itself.';
               })}
               onEdit={(rule) => {
-                // A default is edited where it lives, which is the drawer.
-                const [subKey] = String(rule.id).split(':');
-                go({ tab: 'categories', cat: '', sub: subKey, set: '', view: '' });
+                // A default is edited where it lives, which is the drawer — and
+                // the drawer is read off the row rather than parsed out of the
+                // id, so a rule that has no drawer says so instead of
+                // navigating to a subcategory called "123".
+                if (!rule.subcategory) {
+                  said('That default is not attached to a drawer, so there is nowhere to edit it.');
+                  return;
+                }
+                go({ tab: 'categories', cat: '', sub: rule.subcategory, set: '', view: '' });
               }}
             />
           ) : null}

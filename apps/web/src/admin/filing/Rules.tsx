@@ -51,7 +51,7 @@ export function Rules({ rows, total, onRetire, onEdit }: {
   rows: RuleRow[];
   /** Every default, not just the arguable ones. */
   total: number;
-  onRetire: (id: number) => void;
+  onRetire: (id: string) => void;
   onEdit: (rule: RuleRow) => void;
 }) {
   const dead = rows.filter((r) => r.dead).length;

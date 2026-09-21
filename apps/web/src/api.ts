@@ -3550,7 +3550,9 @@ export const api = {
 
   /** The defaults, and the two different ways each can be wrong. */
   adminFilingRules: () => request<{ rules: RuleRow[]; counts: { rules: number } }>('/api/admin/filing/rules'),
-  adminFilingRetireRule: (id: number) => post<{ retired: true }>(`/api/admin/filing/rules/${id}/retire`, {}),
+  /** `subcategory:attribute` — a default has no id of its own, it is the pair. */
+  adminFilingRetireRule: (id: string) =>
+    post<{ retired: true }>(`/api/admin/filing/rules/${encodeURIComponent(id)}/retire`, {}),
 
   /** The browse rows, what each returns per district, and who hearts it. */
   adminFilingRows: () =>

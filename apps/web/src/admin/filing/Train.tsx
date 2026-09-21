@@ -34,8 +34,14 @@ export function Train({ data, place, mode, onMode, busy, canManage, onSet, onNot
   busy: string | null;
   canManage: boolean;
   onSet: (ref: string, attribute: string, level: number) => void;
-  /** The ones a person says do not belong here, off to the not-sure list. */
-  onNotSure: (refs: string[]) => void;
+  /**
+   * The ones a person says do not belong here, off to the not-sure list.
+   *
+   * `done` is called only when they have actually gone. Clearing the selection
+   * and saying so on the click loses the work and claims it succeeded if the
+   * request is refused (epic-f2, 21 Sep 2026).
+   */
+  onNotSure: (refs: string[], done: (said: string) => void) => void;
   onOpen: (ref: string) => void;
   onHousehold: () => void;
 }) {
@@ -234,7 +240,7 @@ export function Train({ data, place, mode, onMode, busy, canManage, onSet, onNot
             <DeskButton
               label={wrong.size ? `Send ${wrong.size} back to Not sure` : 'Nothing marked'}
               disabled={!canManage || wrong.size === 0 || Boolean(busy)}
-              onPress={() => { onNotSure([...wrong]); setSent(`${wrong.size} sent`); setWrong(new Set()); }}
+              onPress={() => onNotSure([...wrong], (said) => { setSent(said); setWrong(new Set()); })}
             />
             <Value tone="dim" size={12.5}>
               {sent ?? (wrong.size
