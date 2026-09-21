@@ -245,6 +245,13 @@ export async function startRun({
               problem    = case when ${FRESH} then census_tiles.problem else null end,
               started_at = case when ${FRESH} then census_tiles.started_at else null end`,
       [t.gridKey, t.minLat, t.minLng, t.maxLat, t.maxLng, t.outcodes, run.id, String(freshDays)]);
+    // Membership is its own fact. `run_id` is the run that last claimed the
+    // square, which is what the loop needs; this is the ground this run was
+    // given, which is what its report is drawn from — and the next run over
+    // overlapping country would otherwise take it away (21 Sep 2026).
+    await query(
+      `insert into census_run_tiles (run_id, grid_key) values ($1, $2) on conflict do nothing`,
+      [run.id, t.gridKey]);
   }
   await refreshProgress(run.id);
   return run;
@@ -332,18 +339,19 @@ async function refreshProgress(runId) {
             last_seen_at = now()
        from (select started_at as began from census_runs where id = $1) r0,
             (select count(*)::int total,
-                    count(*) filter (where state = 'done')::int done
-               from census_tiles where run_id = $1) t,
+                    count(*) filter (where t2.state = 'done')::int done
+               from census_tiles t2
+               join census_run_tiles m on m.grid_key = t2.grid_key and m.run_id = $1) t,
             lateral (select coalesce(sum(cs.requests), 0)::int as requests,
                     count(*)::int as slices,
                     count(*) filter (where cs.saturated and cs.depth >= $2)::int as saturated
                from census_slices cs
               where cs.ran_at >= r0.began
-                and cs.area_slug in (select grid_key from census_tiles where run_id = $1)) s,
+                and cs.area_slug in (select grid_key from census_run_tiles where run_id = $1)) s,
             lateral (select count(distinct ps.venue_ref)::int as places
                from place_subcategories ps
               where ps.last_seen >= r0.began
-                and ps.area_slug in (select grid_key from census_tiles where run_id = $1)) p
+                and ps.area_slug in (select grid_key from census_run_tiles where run_id = $1)) p
       where r.id = $1`, [runId, CENSUS_MAX_DEPTH]);
 }
 
@@ -367,17 +375,17 @@ async function claimTile(run) {
             started_at = case when t.done_subcategories = '{}'::text[] or t.started_at is null
                               then now() else t.started_at end
       where t.id = (
-        select id from census_tiles
-         where run_id = $1
-           and (state = 'todo'
+        select ct.id from census_tiles ct
+         join census_run_tiles m on m.grid_key = ct.grid_key and m.run_id = $1
+         where (ct.state = 'todo'
                 -- A run of four hundred tiles will have one throw: a connection
                 -- reset, a statement timeout, a deploy landing on an open
                 -- transaction. Leaving it failed and unclaimable left the run
                 -- run for ever, unable to claim its last tile and unable to finish
                 -- (Codex, 21 Sep 2026). Three goes, then it is let go of out loud.
-                or (state = 'failed' and failures < $4)
-                or (state = 'doing' and claimed_at < now() - ($3 || ' milliseconds')::interval))
-         order by state desc, min_lat, min_lng
+                or (ct.state = 'failed' and ct.failures < $4)
+                or (ct.state = 'doing' and ct.claimed_at < now() - ($3 || ' milliseconds')::interval))
+         order by ct.state desc, ct.min_lat, ct.min_lng
          for update skip locked
          limit 1)
       returning *`, [run.id, INSTANCE, String(STRANDED_AFTER_MS), MAX_TILE_TRIES]);
@@ -395,10 +403,12 @@ async function reopenForNewDrawers(runId) {
   if (!plan.length) return { reopened: 0 };
   const keys = plan.map((p) => p.subcategory);
   const { rowCount } = await query(
-    `update census_tiles
+    `update census_tiles t
         set state = 'todo'
-      where run_id = $1 and state = 'done'
-        and not (done_subcategories @> $2::text[])`,
+       from census_run_tiles m
+      where m.grid_key = t.grid_key and m.run_id = $1
+        and t.state = 'done'
+        and not (t.done_subcategories @> $2::text[])`,
     [runId, keys]);
   return { reopened: rowCount };
 }
@@ -496,7 +506,9 @@ async function reopenForChangedQuestions(runId) {
   // anything done to it here — so the signature is withheld and the next pass
   // picks it up. Storing it regardless is what made the fast path permanent.
   const { rows: [busy] } = await query(
-    `select count(*)::int n from census_tiles where run_id = $1 and state = 'doing'`, [runId]);
+    `select count(*)::int n from census_tiles t
+       join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1
+      where t.state = 'doing'`, [runId]);
   if (!busy.n) await query('update census_runs set plan_signature = $2 where id = $1', [runId, signature]);
   return { reopened: rows.length, deferred: Boolean(busy.n) };
 }
@@ -577,8 +589,9 @@ export async function advance({ runId = null, budgetMs = SLICE_MS, now = () => D
       // A tile given up on is not outstanding. It is on the record as failed,
       // with its reason and its three attempts, and the run is allowed to end.
       const { rows: [left] } = await query(
-        `select count(*) filter (where state <> 'done' and not (state = 'failed' and failures >= $2))::int outstanding
-           from census_tiles where run_id = $1`, [run.id, MAX_TILE_TRIES]);
+        `select count(*) filter (where t.state <> 'done' and not (t.state = 'failed' and t.failures >= $2))::int outstanding
+           from census_tiles t
+           join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1`, [run.id, MAX_TILE_TRIES]);
       if (!left.outstanding) { await finish(run.id, 'done', null); return { working: false, reason: 'done', tiles }; }
       return { working: true, reason: 'every tile is claimed', tiles };
     }
@@ -816,7 +829,8 @@ export async function resumeInterrupted() {
 export async function list({ limit = 10 } = {}) {
   const { rows } = await query(
     `select r.*,
-            (select count(*) filter (where state = 'failed')::int from census_tiles t where t.run_id = r.id) as tiles_failed
+            (select count(*) filter (where t.state = 'failed')::int from census_tiles t
+               join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = r.id) as tiles_failed
        from census_runs r order by started_at desc limit $1`, [Math.min(50, limit)]);
   return rows;
 }
@@ -1036,13 +1050,13 @@ export async function report(runId = null) {
               count(*) filter (where cs.saturated and cs.depth >= $3)::int as saturated
          from census_slices cs
         where cs.ran_at >= $2
-          and cs.area_slug in (select grid_key from census_tiles where run_id = $1)
+          and cs.area_slug in (select grid_key from census_run_tiles where run_id = $1)
         group by 1
      ), found as (
        select ps.area_slug as grid_key, count(distinct ps.venue_ref)::int as places
          from place_subcategories ps
         where ps.last_seen >= $2
-          and ps.area_slug in (select grid_key from census_tiles where run_id = $1)
+          and ps.area_slug in (select grid_key from census_run_tiles where run_id = $1)
         group by 1
      )
      select tt.area,
@@ -1068,19 +1082,20 @@ export async function report(runId = null) {
   // the ground.
   const { rows: [whole] } = await query(
     `select count(*)::int tiles,
-            count(*) filter (where state = 'done')::int done,
-            count(*) filter (where state = 'failed')::int failed,
-            count(*) filter (where started_at < $2)::int skipped,
+            count(*) filter (where t.state = 'done')::int done,
+            count(*) filter (where t.state = 'failed')::int failed,
+            count(*) filter (where t.started_at < $2)::int skipped,
             coalesce((select sum(cs.requests)::int from census_slices cs
-                       where cs.ran_at >= $2 and cs.area_slug in (select grid_key from census_tiles where run_id = $1)), 0) as requests,
+                       where cs.ran_at >= $2 and cs.area_slug in (select grid_key from census_run_tiles where run_id = $1)), 0) as requests,
             coalesce((select count(distinct ps.venue_ref)::int from place_subcategories ps
-                       where ps.last_seen >= $2 and ps.area_slug in (select grid_key from census_tiles where run_id = $1)), 0) as places,
+                       where ps.last_seen >= $2 and ps.area_slug in (select grid_key from census_run_tiles where run_id = $1)), 0) as places,
             coalesce((select count(*)::int from census_slices cs
-                       where cs.ran_at >= $2 and cs.area_slug in (select grid_key from census_tiles where run_id = $1)), 0) as slices,
-            coalesce(sum(saturated), 0)::int saturated,
-            coalesce(sum(requests), 0)::int ground_requests,
-            coalesce(sum(places), 0)::int ground_places
-       from census_tiles where run_id = $1`, [run.id, run.started_at]);
+                       where cs.ran_at >= $2 and cs.area_slug in (select grid_key from census_run_tiles where run_id = $1)), 0) as slices,
+            coalesce(sum(t.saturated), 0)::int saturated,
+            coalesce(sum(t.requests), 0)::int ground_requests,
+            coalesce(sum(t.places), 0)::int ground_places
+       from census_tiles t
+       join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1`, [run.id, run.started_at]);
 
   // The money, from the ledger and nowhere else.
   const { rows: [spend] } = await query(

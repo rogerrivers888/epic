@@ -41,6 +41,7 @@ const clean = async () => {
     await query(`delete from place_subcategories where area_slug = any($1)`, [keys]);
     await query(`delete from census_slices where area_slug = any($1)`, [keys]);
   }
+  await query(`delete from census_run_tiles where grid_key like 'test%'`);
   await query(`delete from census_tiles where grid_key like 'test%'`);
   await query(`delete from census_runs where label like 'test %'`);
 };
@@ -51,6 +52,11 @@ const seedTile = async (run, gridKey) => {
      values ($1, 51.40, -0.70, 51.48, -0.58, array['ZZ99'], $2, 'todo')
      on conflict (grid_key) do update set run_id = excluded.run_id, state = 'todo', done_subcategories = '{}'`,
     [gridKey, run.id]);
+  // The ground this run was given, which is what it works and what it reports.
+  // `run_id` is only who last claimed the square (migration 243).
+  await query(
+    `insert into census_run_tiles (run_id, grid_key) values ($1, $2) on conflict do nothing`,
+    [run.id, gridKey]);
 };
 
 const startTestRun = async (over = {}) => {
@@ -582,6 +588,9 @@ test('a run reports per area and in total, with the money read from the ledger',
      values ('test/report-a', 51.40, -0.70, 51.48, -0.58, array['SE1','SE11'], $1, 'done', 1500, 924, 4221, 0, now(), now()),
             ('test/report-b', 52.80, 0.80, 52.88, 0.92, array['NR21'], $1, 'done', 272, 270, 46, 0, now(), now())`,
     [run.id]);
+  await query(
+    `insert into census_run_tiles (run_id, grid_key)
+     values ($1, 'test/report-a'), ($1, 'test/report-b') on conflict do nothing`, [run.id]);
 
   // The run's own spending is counted from the questions it asked, so the
   // fixture has to have asked them: a tile carries the whole of its history,
@@ -862,4 +871,42 @@ test('how a drawer was found is read from the places inside the outcode, not bes
     `select sourced, text_count from area_counts where area_slug = 'zz8b' and subcategory = 'museums'`);
   assert.equal(b.sourced, 'text');
   assert.equal(b.text_count, 1);
+});
+
+test('a later run over the same ground does not take the earlier run\'s report with it', async (t) => {
+  await clean();
+  t.after(clean);
+  const first = await startTestRun({ label: 'test first over the ground' });
+  await seedTile(first, 'test/handover-report');
+  await query(
+    `update census_tiles set state = 'done', requests = 900, slices = 700, places = 300,
+                             censused_at = now(), started_at = now()
+      where grid_key = 'test/handover-report'`);
+  await query(
+    `insert into census_slices (area_slug, min_lat, min_lng, max_lat, max_lng, category, subcategory,
+                                google_type, query, returned, new_ids, saturated, depth, requests, ran_at)
+     values ('test/handover-report', 51.4, -0.7, 51.48, -0.58, 'sport', 'golf', 'golf_course', 'golf course',
+             20, 20, false, 0, 900, now())`);
+  await query(`update census_runs set state = 'done' where id = $1`, [first.id]);
+
+  const before = await report(first.id);
+  assert.equal(before.total.tiles, 1);
+  assert.equal(before.total.requests, 900, 'the run reports the ground it covered');
+
+  // A second run over overlapping country takes the square on — which is right,
+  // because tiles outlive runs and a census of the ground is a question about
+  // the ground. It must not take the first run's report with it.
+  const second = await startTestRun({ label: 'test second over the ground' });
+  await query(
+    `update census_tiles set run_id = $1 where grid_key = 'test/handover-report'`, [second.id]);
+  await query(
+    `insert into census_run_tiles (run_id, grid_key) values ($1, 'test/handover-report')
+     on conflict do nothing`, [second.id]);
+
+  const after = await report(first.id);
+  assert.equal(after.total.tiles, 1, 'the first run still has the tile in its report');
+  assert.equal(after.total.requests, 900, 'and still says what it asked');
+  const theirs = await report(second.id);
+  assert.equal(theirs.total.tiles, 1, 'and the second run has it too');
+  assert.equal(theirs.total.requests, 0, 'having asked nothing of it yet');
 });
