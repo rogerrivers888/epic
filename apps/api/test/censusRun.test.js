@@ -906,9 +906,27 @@ test('a later run over the same ground does not take the earlier run\'s report w
   const after = await report(first.id);
   assert.equal(after.total.tiles, 1, 'the first run still has the tile in its report');
   assert.equal(after.total.requests, 900, 'and still says what it asked');
+  assert.ok(after.areas.length, 'with its areas, which membership has to carry as well as the total');
+  assert.equal(after.areas.reduce((n, a) => n + a.requests, 0), after.total.requests,
+    'and the two halves of the report agree');
+
   const theirs = await report(second.id);
   assert.equal(theirs.total.tiles, 1, 'and the second run has it too');
   assert.equal(theirs.total.requests, 0, 'having asked nothing of it yet');
+
+  // The second run now asks something of the same ground. Membership keeps the
+  // ground but not the time, so without an upper bound the finished run's
+  // totals grow after the fact (Codex, 23 Sep 2026).
+  await query(`update census_runs set finished_at = now() where id = $1`, [first.id]);
+  await query(
+    `insert into census_slices (area_slug, min_lat, min_lng, max_lat, max_lng, category, subcategory,
+                                google_type, query, returned, new_ids, saturated, depth, requests, ran_at)
+     values ('test/handover-report', 51.4, -0.7, 51.48, -0.58, 'sport', 'golf', 'golf_course', 'golf course',
+             20, 20, false, 0, 400, now() + interval '2 seconds')`);
+
+  const later = await report(first.id);
+  assert.equal(later.total.requests, 900, 'a finished run says what it asked, not what happened afterwards');
+  assert.equal(later.areas.reduce((n, a) => n + a.requests, 0), 900, 'per area as well as in total');
 });
 
 // ---------------------------------------------------------------------------

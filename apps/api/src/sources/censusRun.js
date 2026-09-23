@@ -863,8 +863,9 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
   const codes = outcodes?.length
     ? outcodes.map((c) => String(c).toUpperCase())
     : (await query(
-      `select distinct unnest(outcodes) as code from census_tiles
-        where censused_at is not null ${runId ? 'and run_id = $1' : ''}`,
+      `select distinct unnest(t.outcodes) as code from census_tiles t
+         ${runId ? 'join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1' : ''}
+        where t.censused_at is not null`,
       runId ? [runId] : [])).rows.map((r) => r.code);
   if (!codes.length) return { outcodes: 0, rows: 0 };
 
@@ -885,9 +886,10 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
     // carrying the outcode meant another run's tiles in an overlapping district
     // were counted into this one's result (Codex, 21 Sep 2026).
     const { rows: tiles } = await query(
-      `select grid_key, saturated, censused_at, state from census_tiles
-        where outcodes @> array[$1] and censused_at is not null
-          ${runId ? 'and run_id = $2' : ''}`, runId ? [code, runId] : [code]);
+      `select t.grid_key, t.saturated, t.censused_at, t.state from census_tiles t
+         ${runId ? 'join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $2' : ''}
+        where t.outcodes @> array[$1] and t.censused_at is not null`,
+      runId ? [code, runId] : [code]);
     if (!tiles.length) continue;
     const keys = tiles.map((t) => t.grid_key);
 
@@ -1032,30 +1034,36 @@ export async function report(runId = null) {
   // the total disagreed with each other in the same report (Codex, 21 Sep
   // 2026).
   const { rows: areas } = await query(
-    `with touching as (
+    `with mine as (
+       -- The ground this run was given. Membership, not the claim: a later run
+       -- over the same country takes run_id and would otherwise empty this
+       -- half of the report while the total, which already read membership,
+       -- went on saying what it asked — one report disagreeing with itself
+       -- (Codex, 23 Sep 2026).
+       select t.* from census_tiles t
+        join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1
+     ), touching as (
        select distinct upper(substring(o from '^[A-Z]+')) as area,
               t.grid_key, t.state, t.censused_at
-         from census_tiles t
+         from mine t
          cross join lateral unnest(t.outcodes) as o
-        where t.run_id = $1
      ), districts as (
        select upper(substring(o from '^[A-Z]+')) as area, count(distinct o)::int as outcodes
-         from census_tiles t
+         from mine t
          cross join lateral unnest(t.outcodes) as o
-        where t.run_id = $1
         group by 1
      ), spent as (
        select cs.area_slug as grid_key,
               sum(cs.requests)::int as requests,
               count(*) filter (where cs.saturated and cs.depth >= $3)::int as saturated
          from census_slices cs
-        where cs.ran_at >= $2
+        where cs.ran_at >= $2 and cs.ran_at <= $4
           and cs.area_slug in (select grid_key from census_run_tiles where run_id = $1)
         group by 1
      ), found as (
        select ps.area_slug as grid_key, count(distinct ps.venue_ref)::int as places
          from place_subcategories ps
-        where ps.last_seen >= $2
+        where ps.last_seen >= $2 and ps.last_seen <= $4
           and ps.area_slug in (select grid_key from census_run_tiles where run_id = $1)
         group by 1
      )
@@ -1074,7 +1082,7 @@ export async function report(runId = null) {
        left join spent sp on sp.grid_key = tt.grid_key
        left join found fo on fo.grid_key = tt.grid_key
       group by tt.area, d.outcodes
-      order by tt.area`, [run.id, run.started_at, CENSUS_MAX_DEPTH]);
+      order by tt.area`, [run.id, run.started_at, CENSUS_MAX_DEPTH, run.finished_at ?? new Date()]);
 
   // Every tile once, whatever it touches — and separately, what this run
   // actually asked. A tile still fresh from an earlier census is skipped rather
@@ -1085,17 +1093,26 @@ export async function report(runId = null) {
             count(*) filter (where t.state = 'done')::int done,
             count(*) filter (where t.state = 'failed')::int failed,
             count(*) filter (where t.started_at < $2)::int skipped,
+            -- Between this run starting and this run ending. Membership keeps
+            -- the ground; it does not keep the *time*, so without the upper
+            -- bound every later census over the same tiles was added to this
+            -- run's totals and a finished report grew after the fact (Codex,
+            -- 23 Sep 2026). The spend query already had it; these did not.
             coalesce((select sum(cs.requests)::int from census_slices cs
-                       where cs.ran_at >= $2 and cs.area_slug in (select grid_key from census_run_tiles where run_id = $1)), 0) as requests,
+                       where cs.ran_at >= $2 and cs.ran_at <= $3
+                         and cs.area_slug in (select grid_key from census_run_tiles where run_id = $1)), 0) as requests,
             coalesce((select count(distinct ps.venue_ref)::int from place_subcategories ps
-                       where ps.last_seen >= $2 and ps.area_slug in (select grid_key from census_run_tiles where run_id = $1)), 0) as places,
+                       where ps.last_seen >= $2 and ps.last_seen <= $3
+                         and ps.area_slug in (select grid_key from census_run_tiles where run_id = $1)), 0) as places,
             coalesce((select count(*)::int from census_slices cs
-                       where cs.ran_at >= $2 and cs.area_slug in (select grid_key from census_run_tiles where run_id = $1)), 0) as slices,
+                       where cs.ran_at >= $2 and cs.ran_at <= $3
+                         and cs.area_slug in (select grid_key from census_run_tiles where run_id = $1)), 0) as slices,
             coalesce(sum(t.saturated), 0)::int saturated,
             coalesce(sum(t.requests), 0)::int ground_requests,
             coalesce(sum(t.places), 0)::int ground_places
        from census_tiles t
-       join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1`, [run.id, run.started_at]);
+       join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1`,
+    [run.id, run.started_at, run.finished_at ?? new Date()]);
 
   // The money, from the ledger and nowhere else.
   const { rows: [spend] } = await query(
@@ -1119,9 +1136,11 @@ export async function report(runId = null) {
             count(distinct ps.venue_ref)::int as places,
             count(distinct ps.subcategory)::int as drawers
        from place_subcategories ps
+       join census_run_tiles m on m.grid_key = ps.area_slug and m.run_id = $1
        join census_tiles t on t.grid_key = ps.area_slug
-      where t.run_id = $1 and ps.last_seen >= coalesce(t.started_at, t.censused_at)
-      group by 1 order by 1`, [run.id]);
+      where ps.last_seen >= coalesce(t.started_at, t.censused_at)
+        and ps.last_seen <= $2
+      group by 1 order by 1`, [run.id, run.finished_at ?? new Date()]);
 
   return {
     run: {
