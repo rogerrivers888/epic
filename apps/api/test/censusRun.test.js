@@ -993,3 +993,26 @@ test('a later sweep of the same tile does not change what a finished run found',
   const theirs = await report(second.id);
   assert.equal(theirs.total.places, 1, 'and the second found one, which is its own fact');
 });
+
+test('padding reaches the distance it claims on a fine grid, not one square', async (t) => {
+  t.after(() => query(`delete from geo_cells where code like 'ZZ6%'`));
+  // One sector on its own. Padding by eight kilometres should reach about
+  // eight kilometres from it whatever the grid — looking one square out did
+  // that only when a square was eight kilometres (Codex, 24 Sep 2026).
+  await query(
+    `insert into geo_cells (code, scheme, label, outcode, lat, lng, source)
+     values ('ZZ6A 1', 'sector', 'ZZ6A 1', 'ZZ6A', 51.50, -0.10, 'test')
+     on conflict (code) do update set outcode = excluded.outcode, lat = excluded.lat, lng = excluded.lng`);
+
+  const coarse = await planTiles({ outcodes: ['ZZ6A'], dLat: 0.08, dLng: 0.12, padKm: 8 });
+  const fine = await planTiles({ outcodes: ['ZZ6A'], dLat: 0.01, dLng: 0.015, padKm: 8 });
+  const reach = (tiles) => Math.max(...tiles.map((x) => Math.hypot((x.minLat + 0.5 * (x.maxLat - x.minLat) - 51.50) * 111.32,
+    (x.minLng + 0.5 * (x.maxLng - x.minLng) + 0.10) * 69.4)));
+  assert.ok(reach(coarse) > 5, `the coarse grid reaches out (${reach(coarse).toFixed(1)} km)`);
+  assert.ok(reach(fine) > 5, `and so does the fine one (${reach(fine).toFixed(1)} km), not a single square`);
+  assert.ok(fine.length > coarse.length * 4, 'which on a finer grid is many more squares');
+  // And with no padding asked for, a fine grid is exactly the squares the
+  // sectors fall in — one here.
+  const bare = await planTiles({ outcodes: ['ZZ6A'], dLat: 0.01, dLng: 0.015, padKm: 0 });
+  assert.equal(bare.length, 1);
+});

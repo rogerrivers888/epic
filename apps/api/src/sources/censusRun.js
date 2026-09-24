@@ -155,10 +155,18 @@ export async function planTiles({ areas = [], outcodes = [], dLat = TILE_LAT, dL
   // fills the gaps between sampled sectors and does not walk off into the sea.
   if (padKm > 0) {
     const km = (a, b) => Math.hypot((a.lat - b.lat) * 111.32, (a.lng - b.lng) * 69.4);
+    // As many squares out as it takes to reach `padKm` on *this* grid. Looking
+    // one square out assumed a square was eight kilometres, which the default
+    // is — and on a one-kilometre grid it padded by a kilometre while the
+    // quote said eight, so the gaps between sampled sectors stayed uncensused
+    // and nothing said so (Codex, 24 Sep 2026).
+    const rLat = Math.max(1, Math.ceil(padKm / (dLat * 111.32)));
+    const rLng = Math.max(1, Math.ceil(padKm / (dLng * 69.4)));
+    const range = (r) => Array.from({ length: 2 * r + 1 }, (_, i) => i - r);
     for (const key of [...tiles.keys()]) {
       const t = tiles.get(key);
-      for (const di of [-1, 0, 1]) {
-        for (const dj of [-1, 0, 1]) {
+      for (const di of range(rLat)) {
+        for (const dj of range(rLng)) {
           if (!di && !dj) continue;
           const centre = { lat: t.minLat + dLat * (di + 0.5), lng: t.minLng + dLng * (dj + 0.5) };
           const n = tileOf(centre.lat, centre.lng, dLat, dLng);
