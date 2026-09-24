@@ -348,10 +348,11 @@ async function refreshProgress(runId) {
                from census_slices cs
               where cs.ran_at >= r0.began
                 and cs.area_slug in (select grid_key from census_run_tiles where run_id = $1)) s,
-            lateral (select count(distinct ps.venue_ref)::int as places
-               from place_subcategories ps
-              where ps.last_seen >= r0.began
-                and ps.area_slug in (select grid_key from census_run_tiles where run_id = $1)) p
+            -- From the run's own record, which nothing later rewrites
+            -- (migration 244). Counted from the surfacing table, a finished
+            -- run's places fell the day the ground was swept again.
+            (select count(distinct venue_ref)::int as places
+               from census_run_surfacings where run_id = $1) p
       where r.id = $1`, [runId, CENSUS_MAX_DEPTH]);
 }
 
@@ -708,6 +709,7 @@ async function censusOneTile({ run, tile, pace, remaining, until = Infinity, sto
         maxRequests: Math.max(1, remaining - spentHere),
         pace,
         rollUpCounts: false,
+        censusRunId: run.id,
       });
     } catch (err) {
       await query(
@@ -1061,10 +1063,8 @@ export async function report(runId = null) {
           and cs.area_slug in (select grid_key from census_run_tiles where run_id = $1)
         group by 1
      ), found as (
-       select ps.area_slug as grid_key, count(distinct ps.venue_ref)::int as places
-         from place_subcategories ps
-        where ps.last_seen >= $2 and ps.last_seen <= $4
-          and ps.area_slug in (select grid_key from census_run_tiles where run_id = $1)
+       select grid_key, count(distinct venue_ref)::int as places
+         from census_run_surfacings where run_id = $1
         group by 1
      )
      select tt.area,
@@ -1101,9 +1101,7 @@ export async function report(runId = null) {
             coalesce((select sum(cs.requests)::int from census_slices cs
                        where cs.ran_at >= $2 and cs.ran_at <= $3
                          and cs.area_slug in (select grid_key from census_run_tiles where run_id = $1)), 0) as requests,
-            coalesce((select count(distinct ps.venue_ref)::int from place_subcategories ps
-                       where ps.last_seen >= $2 and ps.last_seen <= $3
-                         and ps.area_slug in (select grid_key from census_run_tiles where run_id = $1)), 0) as places,
+            coalesce((select count(distinct venue_ref)::int from census_run_surfacings where run_id = $1), 0) as places,
             coalesce((select count(*)::int from census_slices cs
                        where cs.ran_at >= $2 and cs.ran_at <= $3
                          and cs.area_slug in (select grid_key from census_run_tiles where run_id = $1)), 0) as slices,
@@ -1132,15 +1130,12 @@ export async function report(runId = null) {
   // How the places were found, which is the thing the nine text-query drawers
   // exist to be judged on.
   const { rows: sourced } = await query(
-    `select coalesce(ps.sourced, 'type') as sourced,
-            count(distinct ps.venue_ref)::int as places,
-            count(distinct ps.subcategory)::int as drawers
-       from place_subcategories ps
-       join census_run_tiles m on m.grid_key = ps.area_slug and m.run_id = $1
-       join census_tiles t on t.grid_key = ps.area_slug
-      where ps.last_seen >= coalesce(t.started_at, t.censused_at)
-        and ps.last_seen <= $2
-      group by 1 order by 1`, [run.id, run.finished_at ?? new Date()]);
+    `select sourced,
+            count(distinct venue_ref)::int as places,
+            count(distinct subcategory)::int as drawers
+       from census_run_surfacings
+      where run_id = $1
+      group by 1 order by 1`, [run.id]);
 
   return {
     run: {

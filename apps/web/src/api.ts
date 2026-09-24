@@ -1466,9 +1466,11 @@ export type PlaceCensusRow = {
    * Places whose census box straddles the edge of this area: neither in nor
    * out, and never dropped. A count with these hidden is a floor wearing the
    * clothes of a total — Bloomsbury read 3 places with hundreds sitting here
-   * (owner, 24 Sep 2026). Shown beside the count, always.
+   * (owner, 24 Sep 2026). Exact on one outcode; `null` on a ring, because a
+   * place straddling two districts that are both in the ring is inside it and
+   * the per-district figures cannot say which (Codex, 24 Sep 2026).
    */
-  unresolved: number;
+  unresolved: number | null;
   /** How the drawer was found: 'type' | 'words' | 'text' | 'mixed'. Text is the one to judge before trusting. */
   sourced: string | null;
   /** How many of the counted places only a bare text query found. */

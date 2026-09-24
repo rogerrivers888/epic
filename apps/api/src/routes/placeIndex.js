@@ -3289,12 +3289,20 @@ router.get('/census/runs', requires('view_library'), async (req, res, next) => {
  * a free one still has a size: tiles, questions, and the requests they come to
  * at the rates two censuses have actually been measured at.
  */
+/** A grid parameter inside its bounds, or nothing — never a number outside them. */
+const within = (v, lo, hi) => (v != null && Number.isFinite(Number(v)) && Number(v) >= lo && Number(v) <= hi ? Number(v) : undefined);
+
 router.get('/census/quote', requires('view_library'), async (req, res, next) => {
   try {
     const areas = String(req.query.areas ?? '').split(',').map((a) => a.trim()).filter(Boolean);
     const outcodes = String(req.query.outcodes ?? '').split(',').map((a) => a.trim()).filter(Boolean);
     if (!areas.length && !outcodes.length) throw bad('a quote needs postcode areas or districts');
-    const tiles = await censusRun.planTiles({ areas, outcodes });
+    const tiles = await censusRun.planTiles({
+      areas, outcodes,
+      dLat: within(req.query.tileLat, 0.005, censusRun.TILE_LAT),
+      dLng: within(req.query.tileLng, 0.0075, censusRun.TILE_LNG),
+      padKm: within(req.query.padKm, 0, censusRun.PAD_KM),
+    });
     const plan = await slicePlan();
     const questions = plan.reduce((n, p) => n + p.questions.length, 0);
 
@@ -3339,6 +3347,12 @@ router.post('/census/run', requires('manage_library'), async (req, res, next) =>
   try {
     const areas = Array.isArray(req.body?.areas) ? req.body.areas : [];
     const outcodes = Array.isArray(req.body?.outcodes) ? req.body.outcodes : [];
+    // The grid, where a run wants a finer one than the default. Central London
+    // outcodes are a few streets wide and the default 8 km square straddles
+    // every one it touches, so those districts are re-asked at about a
+    // kilometre (24 Sep 2026). Bounded: below 0.005° a tile is narrower than
+    // the error in a pin, above the default it is coarser than what has been
+    // measured, and a finer grid multiplies the request floor.
     const run = await censusRun.startRun({
       label: req.body?.label,
       areas,
@@ -3346,6 +3360,9 @@ router.post('/census/run', requires('manage_library'), async (req, res, next) =>
       maxRequests: Number(req.body?.maxRequests) || undefined,
       ratePerSec: Number(req.body?.ratePerSec) || undefined,
       freshDays: Number(req.body?.freshDays) || undefined,
+      dLat: within(req.body?.tileLat, 0.005, censusRun.TILE_LAT),
+      dLng: within(req.body?.tileLng, 0.0075, censusRun.TILE_LNG),
+      padKm: within(req.body?.padKm, 0, censusRun.PAD_KM),
       startedBy: actor(req).actorLabel,
     });
     await writeAudit({

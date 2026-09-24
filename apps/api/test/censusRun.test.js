@@ -41,6 +41,7 @@ const clean = async () => {
     await query(`delete from place_subcategories where area_slug = any($1)`, [keys]);
     await query(`delete from census_slices where area_slug = any($1)`, [keys]);
   }
+  await query(`delete from census_run_surfacings where grid_key like 'test%'`);
   await query(`delete from census_run_tiles where grid_key like 'test%'`);
   await query(`delete from census_tiles where grid_key like 'test%'`);
   await query(`delete from census_runs where label like 'test %'`);
@@ -615,6 +616,11 @@ test('a run reports per area and in total, with the money read from the ledger',
       `insert into place_subcategories (venue_ref, category, subcategory, found_by, area_slug, first_seen, last_seen)
        values ($1, 'sport', 'golf', 'golf_course', $2, now(), now())
        on conflict (venue_ref, subcategory, coalesce(area_slug, '')) do nothing`, [ref, tile]);
+    // And the run's own record of it, which is what its report counts from
+    // (migration 244).
+    await query(
+      `insert into census_run_surfacings (run_id, venue_ref, subcategory, grid_key)
+       values ($1, $2, 'golf', $3) on conflict do nothing`, [run.id, ref, tile]);
   }
 
   const out = await report(run.id);
@@ -955,4 +961,35 @@ test('resuming is refused without the run\'s own name, and says what to send', a
   // exists (routes/placeIndex.js).
   const back = await resume(run.id);
   assert.equal(back?.state, 'running');
+});
+
+test('a later sweep of the same tile does not change what a finished run found', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from census_run_surfacings where grid_key like 'test%'`);
+    await clean();
+  });
+  const first = await startTestRun({ label: 'test first sweep' });
+  await seedTile(first, 'test/resweep');
+  await withCensus(async () => ({ places: [{ id: 'ChIJrun_test_resweep_a', rank: 1 }, { id: 'ChIJrun_test_resweep_b', rank: 2 }], requests: 1, saturated: false, problem: null }),
+    () => advance({ runId: first.id, budgetMs: 30_000 }));
+  await query(`update census_runs set state = 'done', finished_at = now() where id = $1`, [first.id]);
+  const before = await report(first.id);
+  assert.equal(before.total.places, 2);
+
+  // A month on, the ground is swept again and one of the two is still there.
+  // The surfacing table moves — that is what the board wants — and the first
+  // run's report must not move with it (Codex, via epic-4e, 24 Sep 2026).
+  await query(`update census_tiles set state = 'todo', done_subcategories = '{}', censused_at = now() - interval '40 days', started_at = null where grid_key = 'test/resweep'`);
+  const second = await startTestRun({ label: 'test second sweep' });
+  await query(`update census_tiles set run_id = $1 where grid_key = 'test/resweep'`, [second.id]);
+  await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'test/resweep') on conflict do nothing`, [second.id]);
+  await withCensus(async () => ({ places: [{ id: 'ChIJrun_test_resweep_a', rank: 1 }], requests: 1, saturated: false, problem: null }),
+    () => advance({ runId: second.id, budgetMs: 30_000 }));
+
+  const after = await report(first.id);
+  assert.equal(after.total.places, 2, 'the first run still found two');
+  assert.equal(after.areas.reduce((n, a) => n + a.places, 0), 2, 'per area as well');
+  const theirs = await report(second.id);
+  assert.equal(theirs.total.places, 1, 'and the second found one, which is its own fact');
 });

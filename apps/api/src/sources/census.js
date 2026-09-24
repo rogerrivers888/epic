@@ -313,6 +313,11 @@ export async function censusArea({
   onProgress = null, maxRequests = MAX_REQUESTS_PER_RUN,
   // Called before every request. A tile census hands in a rate limiter here.
   pace = null,
+  // The census run this call is part of, where there is one. A run keeps its
+  // own record of what it found (migration 244): the surfacing table moves
+  // when a later run finds the same place, and a finished run's report must
+  // not move with it.
+  censusRunId = null,
   // Whether to write this area's board counts. A tile is not an area anybody
   // browses — its counts are rolled up to the outcodes it covers afterwards
   // (`rollUpOutcodes`), and writing tile keys into `area_counts` would put
@@ -384,6 +389,7 @@ export async function censusArea({
   }
   for (const batch of chunks([...surfaced.values()], WRITE_BATCH)) {
     await writeSurfacings(batch, runId);
+    if (censusRunId) await writeRunSurfacings(batch, censusRunId);
   }
   if (rollUpCounts) await rollUp({ areaSlug, runId, done, found: places, surfaced: [...surfaced.values()] });
 
@@ -530,6 +536,25 @@ async function writeSurfacings(rows, runId) {
             -- The run that last found it, so a count and the explanation beside
             -- it come from the same census (Codex, 20 Sep 2026).
             run_id = excluded.run_id`,
+    params,
+  );
+}
+
+/**
+ * What this run found, written once and never touched again.
+ *
+ * `do nothing` on conflict, deliberately: a run that finds the same place twice
+ * (two questions, one drawer) has found it once, and nothing later — not a
+ * re-sweep, not a taxonomy move — rewrites what a finished run saw.
+ */
+async function writeRunSurfacings(rows, censusRunId) {
+  const values = rows.map((_, i) => `($${i * 4 + 1},$${i * 4 + 2},$${i * 4 + 3},$${i * 4 + 4}, $${rows.length * 4 + 1})`).join(',');
+  const params = rows.flatMap((r) => [r.ref, r.subcategory, r.areaSlug ?? '', r.sourced ?? 'type']);
+  params.push(censusRunId);
+  await query(
+    `insert into census_run_surfacings (venue_ref, subcategory, grid_key, sourced, run_id)
+     values ${values}
+     on conflict (run_id, venue_ref, subcategory) do nothing`,
     params,
   );
 }
