@@ -140,11 +140,18 @@ export async function bars() {
 const FLOOR = ['picture', 'what_it_is', 'hours'];
 
 export async function inheritBar(key, client = null) {
+  // Atomic. Six fact rows go in one at a time, and a failure after the first
+  // left a bar with some of its facts: `drawersWithoutABar` asks only whether
+  // any row exists, so the drawer read as repaired, no later run would inherit
+  // for it again, and the incomplete bar was permanent and invisible (Codex,
+  // 24 Sep 2026). Inside a caller's transaction that cannot happen; on its own
+  // it opens one, so a bar is written whole or not at all.
+  if (!client) return withTransaction((c) => inheritBar(key, c));
   // Takes the transaction's own connection where there is one. A drawer being
   // created is not committed yet, so the pool cannot see it — and the adopt
   // path holds `for update` on that row, so asking the pool would wait for a
   // lock the caller is holding.
-  const ask = client ? (sql, args) => client.query(sql, args) : query;
+  const ask = (sql, args) => client.query(sql, args);
   const { rows: [sub] } = await ask(
     'select key, category_key from shelf_subcategories where key = $1', [key]);
   if (!sub) return null;

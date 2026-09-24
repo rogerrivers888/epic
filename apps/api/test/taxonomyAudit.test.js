@@ -294,6 +294,12 @@ test('a drawer made outside a migration still gets a bar, and it says it was inh
   const got = await inheritBar('tmp-made');
   assert.ok(got, 'it inherits one');
   assert.ok(got.facts.length, 'with facts');
+  // Whole or not at all: every fact has a row, so a bar can never be read as
+  // present while half-written.
+  const { rows: [n] } = await query(
+    "select count(*)::int n from ready_bars where subcategory_key = 'tmp-made'");
+  const { FACT_KEYS } = await import('../src/domain/placeIndex.js');
+  assert.equal(n.n, FACT_KEYS.length, 'one row per fact, all of them');
   const { rows } = await query(
     "select distinct set_by from ready_bars where subcategory_key = 'tmp-made'");
   assert.deepEqual(rows.map((r) => r.set_by), ['inherited'],
