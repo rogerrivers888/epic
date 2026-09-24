@@ -185,9 +185,10 @@ test('a provider refusal stops the whole run, not one tile', async (t) => {
   // The first ring census walked into the daily cap and then fired 9,321 more
   // doomed requests, because nothing read the answer (sources/census.js).
   let calls = 0;
+  const body = 'Google Places 429: {"error":{"code":429,"message":"Quota exceeded for quota metric \'SearchTextRequest\' and limit \'SearchTextRequest per day\' of service \'places.googleapis.com\' for consumer \'project_number:123456789012\'.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"RATE_LIMIT_EXCEEDED","metadata":{"quota_limit_value":"75000","quota_limit":"SearchTextRequestPerDay"}}]}}';
   const out = await withCensus(async () => {
     calls += 1;
-    return { places: [], requests: 1, saturated: false, problem: 'RESOURCE_EXHAUSTED: Quota exceeded' };
+    return { places: [], requests: 1, saturated: false, problem: body };
   }, () => advance({ runId: run.id, budgetMs: 10_000 }));
 
   assert.equal(out.reason, 'refused');
@@ -204,6 +205,9 @@ test('a provider refusal stops the whole run, not one tile', async (t) => {
   // Word for word, because the number in it is the only authority on what the
   // daily cap really is.
   assert.match(after.refusal ?? '', /Quota exceeded/);
+  // And the number. The owner asked what the 429 says the limit actually is;
+  // cut at two hundred characters the sentence ended at "of" (24 Sep 2026).
+  assert.match(after.refusal ?? '', /quota_limit_value.{0,5}75000/, 'the limit\'s value survives to the row');
   assert.ok(after.refused_at, 'with the moment it happened');
   assert.match(after.problem ?? '', /Quota|RESOURCE_EXHAUSTED/);
 });
@@ -655,18 +659,18 @@ test('a run reports per area and in total, with the money read from the ledger',
 test('the day\'s budget is the project\'s, not the region\'s', async (t) => {
   await clean();
   t.after(async () => {
-    await query(`delete from census_slices where area_slug = 'test/other-region'`);
+    await query(`delete from provider_calls where ms = -4243`);
     await clean();
   });
 
   // Another run, another part of the country, earlier today. Both spend the
   // same project-wide quota, so the second run may not start with a full
   // allowance (Codex, 21 Sep 2026).
+  // Forty requests spent by *something else* on the project today — a display
+  // search, a research pass — which the quota counts and the census must too.
   await query(
-    `insert into census_slices (area_slug, min_lat, min_lng, max_lat, max_lng, category, subcategory,
-                                google_type, query, returned, new_ids, saturated, depth, requests, ran_at)
-     values ('test/other-region', 53.4, -2.9, 53.5, -2.8, 'sport', 'golf', 'golf_course', 'golf course',
-             20, 20, false, 0, 40, now())`);
+    `insert into provider_calls (provider, purpose, units, ms, created_at)
+     values ('google', 'inspire.ring', '{"google": 40, "google-search": 40}'::jsonb, -4243, now())`);
 
   const { rows: [run] } = await query(
     `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, daily_cap, day, day_requests)
@@ -679,7 +683,7 @@ test('the day\'s budget is the project\'s, not the region\'s', async (t) => {
   await withCensus(answers(1), () => advance({ runId: run.id, budgetMs: 20_000 }));
   const { rows: [after] } = await query(
     `select state, day_requests from census_runs where id = $1`, [run.id]);
-  assert.ok(after.day_requests >= 41, `the other region's requests are part of today (${after.day_requests})`);
+  assert.ok(after.day_requests >= 41, `every Google request on the project is part of today (${after.day_requests})`);
   assert.equal(after.state, 'waiting', 'so it stops for the day rather than spending twice over');
 });
 

@@ -340,8 +340,9 @@ async function rollDay(runId) {
         set day = (now() at time zone 'utc')::date,
             -- Every census slice asked today, by any run. The quota belongs to
             -- the project, so the budget has to as well.
-            day_requests = coalesce((select sum(cs.requests)::int from census_slices cs
-                                      where cs.ran_at >= date_trunc('day', now() at time zone 'utc')), 0)
+            day_requests = coalesce((select sum((pc.units->>'google')::int) from provider_calls pc
+                                      where pc.provider = 'google'
+                                        and pc.created_at >= date_trunc('day', now() at time zone 'utc')), 0)
       where r.id = $1
       returning day_requests, coalesce(daily_cap, $2) as daily_cap`, [runId, DAILY_CAP]);
   return { dayRequests: Number(row?.day_requests ?? 0), dailyCap: Number(row?.daily_cap ?? DAILY_CAP) };
@@ -378,8 +379,16 @@ async function refreshProgress(runId) {
             places = p.places,
             -- What the census has asked today — all of it, whoever asked it,
             -- because the quota is the project's and not the region's.
-            day_requests = coalesce((select sum(cs.requests)::int from census_slices cs
-                                      where cs.ran_at >= date_trunc('day', now() at time zone 'utc')), 0),
+            -- Every Google request on the project today, not only the
+            -- census's. The quota is the project's: the London run stopped
+            -- itself at 74,999 census requests and Google refused the next
+            -- one, because eighty display and research calls had already
+            -- spent the difference (24 Sep 2026). Over-counting Details and
+            -- Nearby, which do not share the Text Search limit, is the safe
+            -- direction — it stops a run a little early, never late.
+            day_requests = coalesce((select sum((pc.units->>'google')::int) from provider_calls pc
+                                      where pc.provider = 'google'
+                                        and pc.created_at >= date_trunc('day', now() at time zone 'utc')), 0),
             last_seen_at = now()
        from (select started_at as began from census_runs where id = $1) r0,
             (select count(*)::int total,
@@ -695,7 +704,7 @@ export async function advance({ runId = null, budgetMs = SLICE_MS, now = () => D
       const back = nextUtcMidnight();
       await query(
         `update census_runs set refusal = $2, refused_at = now() where id = $1`,
-        [run.id, String(out.refused).slice(0, 500)]);
+        [run.id, String(out.refused).slice(0, 600)]);
       await waitUntil(run.id, back, `Google refused: ${String(out.refused).slice(0, 200)}`);
       return { working: false, reason: 'refused', problem: out.refused, resumeAfter: back, tiles };
     }

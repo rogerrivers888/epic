@@ -277,7 +277,7 @@ async function sliceDown({ box, type, words = null, sourced = SOURCED.TYPE, cate
     if (/\b429\b|RESOURCE_EXHAUSTED|Quota exceeded|rate limit/i.test(res.problem)) {
       // Word for word, because the number in it is the only authority on
       // what the daily cap really is (owner, 21 Sep 2026).
-      stats.refused = res.problem.slice(0, 500);
+      stats.refused = res.problem.slice(0, 600);
       stats.stopped = true;
     }
   } else {

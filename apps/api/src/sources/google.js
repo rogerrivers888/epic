@@ -917,7 +917,15 @@ async function censusSlice({ box, includedType, query, pages = 3, meter = null }
         // A slice that failed is not a slice that was empty, and the difference
         // has to survive to the census row: an area under-counted because
         // Google refused must never read as an area with nothing in it.
-        return { places: [...out.values()], requests, saturated: false, problem: String(err.message).slice(0, 160) };
+        // A refusal keeps its whole message. The limit's name and number are
+        // in it, the owner asked what the 429 says the limit actually is, and
+        // at a hundred and sixty characters the sentence ended at "of" — the
+        // number never reached the row (24 Sep 2026). Every other failure
+        // stays short, as before.
+        return {
+          places: [...out.values()], requests, saturated: false,
+          problem: String(err.message).slice(0, /\b429\b/.test(String(err.message)) ? 600 : 160),
+        };
       }
     }
     // An id and its rank. No point and no type: those are Pro, and the census
