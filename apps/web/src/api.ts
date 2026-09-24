@@ -5203,8 +5203,12 @@ export type FilingOverview = {
 export type InvariantRun = {
   ranAt: string;
   trigger: 'deploy' | 'daily' | 'manual';
-  /** Active drawers with no bar. */
+  /** Active drawers with no bar, before repair. */
   bare: string[];
+  /** Of those, the ones the check gave a bar to. */
+  inherited: string[];
+  /** Of those, the ones it could not -- still a fault after the run. */
+  stillBare: string[];
   /** Drawers with a bar and not one judged place, before repair. */
   unjudged: { key: string; places: number }[];
   rescored: number;

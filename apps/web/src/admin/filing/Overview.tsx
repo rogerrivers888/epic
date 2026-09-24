@@ -200,19 +200,20 @@ function Checks({ data }: { data: FilingOverview }) {
     );
   }
   const found = r.bare.length + r.unjudged.length;
-  const tone: 'warn' | 'lime' | 'dim' = r.error || r.left.length ? 'warn' : found ? 'lime' : 'dim';
+  const tone: 'warn' | 'lime' | 'dim' = r.error || r.left.length || (r.stillBare ?? []).length ? 'warn' : found ? 'lime' : 'dim';
   const colour = tone === 'warn' ? WARN : tone === 'lime' ? LIME : desk.inkDim;
   const said = r.error
     ? `failed — ${r.error}`
     : found === 0
       ? 'nothing found'
       : [
-        r.bare.length ? `${r.bare.length} drawer${r.bare.length === 1 ? '' : 's'} with no bar` : null,
+        r.bare.length ? `${r.bare.length} drawer${r.bare.length === 1 ? '' : 's'} with no bar, ${(r.inherited ?? []).length} given one` : null,
         r.unjudged.length ? `${r.unjudged.length} unjudged, ${r.rescored.toLocaleString()} places rescored` : null,
+        (r.stillBare ?? []).length ? `${r.stillBare.length} still with no bar` : null,
         r.left.length ? `${r.left.length} still unjudged` : null,
       ].filter(Boolean).join(' · ');
   const detail = [
-    ...r.bare.map((k) => `no bar: ${k}`),
+    ...r.bare.map((k) => `${(r.inherited ?? []).includes(k) ? 'given a bar' : 'no bar'}: ${k}`),
     ...r.unjudged.map((d) => `unjudged: ${d.key} (${d.places} places)`),
     ...r.left.map((k) => `still unjudged: ${k}`),
   ];

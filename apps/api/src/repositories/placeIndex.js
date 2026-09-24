@@ -256,16 +256,33 @@ export async function drawersUnjudged() {
  * 1,251 places sat unscored behind a green check. Off, it only reports, which
  * is what a test wants.
  *
- * What comes back is the record the Overview draws: when, what was bare, what
- * was unjudged, how many places were rescored, and what was still wrong after.
+ * What comes back is the record the Overview draws: when, what was bare and
+ * what was given a bar, what was unjudged, how many places were rescored, and
+ * what was still wrong after.
  * An error is part of the record too -- a check that threw is not a check that
  * passed, and it must not read as one.
  */
 export async function checkBars({ repair = true, trigger = 'manual' } = {}) {
   const ranAt = new Date().toISOString();
-  const out = { ranAt, trigger, bare: [], unjudged: [], rescored: 0, left: [], error: null };
+  const out = { ranAt, trigger, bare: [], inherited: [], stillBare: [], unjudged: [], rescored: 0, left: [], error: null };
   try {
     out.bare = (await drawersWithoutABar()).map((d) => d.key);
+    // A bare drawer is repaired here too, not only reported. The deploy runs
+    // `seedBars` first, which inherits; the daily run did not, so a drawer made
+    // through the filing desk between deploys was named every morning and
+    // mended by nobody until the next push (Codex, 24 Sep 2026). Given a bar,
+    // it is then picked up as unjudged below and scored in the same pass.
+    if (repair) {
+      for (const key of out.bare) {
+        const got = await inheritBar(key).catch(() => null);
+        if (got) out.inherited.push(key);
+      }
+    }
+    // What is still bare after the repair -- or all of it, when not repairing.
+    // Kept apart from `left` (still unjudged) because they are different faults
+    // with different fixes, and a check that could not mend a drawer must not
+    // read as a pass because it mended the other kind.
+    out.stillBare = out.bare.filter((k) => !out.inherited.includes(k));
     const unjudged = await drawersUnjudged();
     out.unjudged = unjudged.map((d) => ({ key: d.key, places: d.places }));
     if (repair && unjudged.length) {

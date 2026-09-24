@@ -472,6 +472,7 @@ test('the check sees an unjudged drawer, repairs it, and says so in its record',
      on conflict (venue_ref) do update set subcategory = 'tmp-made', score_parts = $1::jsonb`, [unset]);
 
   const seen = await checkBars({ repair: false });
+  assert.ok(Array.isArray(seen.stillBare), 'a record says what is still bare, even when repairing nothing');
   assert.ok(seen.unjudged.some((d) => d.key === 'tmp-made'), 'reported without repair');
   assert.ok(seen.left.includes('tmp-made'), 'and still wrong, because nothing was repaired');
 
@@ -491,4 +492,33 @@ test('the history keeps the last fourteen runs, newest first', async (t) => {
   assert.equal(got.history.length, 14);
   assert.equal(got.last.ranAt, '2026-09-16T00:00:00.000Z');
   assert.equal(got.history[0].ranAt, got.last.ranAt, 'newest first');
+});
+
+test('the daily check gives a bare drawer a bar and judges its places in the same pass', async (t) => {
+  t.after(async () => {
+    await query("delete from place_index where venue_ref = 'test:bare-daily'");
+    await query("delete from ready_bars where subcategory_key = 'tmp-made'");
+    await query("delete from shelf_subcategories where key = 'tmp-made'");
+    await query("delete from app_settings where key = 'invariants.bars'");
+  });
+  await seedBars();
+  const { rows: [sib] } = await query('select category_key from shelf_subcategories where active limit 1');
+  // Made between deploys, through an API: no bar, and a place already in it.
+  await query(
+    `insert into shelf_subcategories (key, label, category_key, active)
+     values ('tmp-made', 'Made by an API', $1, true)
+     on conflict (key) do update set active = true`, [sib.category_key]);
+  const unset = JSON.stringify({ set: false, held: [], judged: [], missing: [], notCounted: [] });
+  await query(
+    `insert into place_index (venue_ref, subcategory, country_code, score_parts)
+     values ('test:bare-daily', 'tmp-made', 'GB', $1::jsonb)
+     on conflict (venue_ref) do update set subcategory = 'tmp-made', score_parts = $1::jsonb`, [unset]);
+
+  const run = await checkBars({ repair: true, trigger: 'daily' });
+  assert.ok(run.bare.includes('tmp-made'), 'seen bare');
+  assert.ok(run.inherited.includes('tmp-made'), 'and given a bar, not only named');
+  assert.ok(!run.left.includes('tmp-made'), 'and its place judged in the same pass');
+  assert.deepEqual(run.stillBare, [], 'nothing left bare');
+  const { rows } = await query("select distinct set_by from ready_bars where subcategory_key = 'tmp-made'");
+  assert.deepEqual(rows.map((r) => r.set_by), ['inherited']);
 });
