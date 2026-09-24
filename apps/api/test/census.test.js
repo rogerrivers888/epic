@@ -533,13 +533,19 @@ test('every request the census makes is ledgered, at the free tier, even when it
   // and never reached the ledger: 48,523 asked against 47,408 ledgered on the
   // London run. It costs nothing while the mask is free, which is precisely why
   // it matters — the ledger is what would catch the mask drifting.
+  // Throw part way through whatever plan this database has. A fixed number
+  // assumed a plan of more than a hundred and twenty questions, and a fresh
+  // database seeded with forty-three never reached it — so the drawer finished
+  // cleanly and the test failed for want of a failure (24 Sep 2026).
+  const questions = plan.reduce((n, p) => n + p.questions.length, 0);
+  const breakAt = Math.max(2, Math.floor(questions / 2));
   let asked = 0;
   const impl = async ({ meter }) => {
     asked += 1;
     // What `call()` does to the meter for one request at the census's mask.
     meter.google = (meter.google ?? 0) + 1;
     meter['google-essentials'] = (meter['google-essentials'] ?? 0) + 1;
-    if (asked > 120) throw new Error('connection reset by peer');
+    if (asked > breakAt) throw new Error('connection reset by peer');
     return { places: [place(asked)], requests: 1, saturated: false, problem: null };
   };
 
@@ -602,4 +608,56 @@ test('a ledger write that fails keeps what it could not write down', async () =>
   await ledger(busy, null, { force: true, record: slowly });
   assert.deepEqual(busy, { google: 1, 'google-essentials': 1 },
     'the request that arrived mid-write is still there to be written');
+});
+
+// ---------------------------------------------------------------------------
+// the box a place is known by
+// ---------------------------------------------------------------------------
+
+test('the box a place is known by is the narrowest one that returned it, not the first', async () => {
+  // A saturated box is asked *before* it is split, so its first sixty places
+  // were written down with the whole eight-kilometre box and then found again
+  // by the quarter that actually holds them — and nothing updated them. In
+  // central London that box straddles every outcode it touches, so Bloomsbury
+  // rolled up as 3 places with hundreds unresolved (owner, 24 Sep 2026).
+  const plan = await slicePlan();
+  if (!plan.length) return;
+  const one = plan[0].subcategory;
+  const ref = 'google:ChIJcensus_test_narrow';
+  await query(`delete from place_subcategories where venue_ref = $1`, [ref]);
+  await query(`delete from place_index where venue_ref = $1`, [ref]);
+
+  // The same place from the top box (cut off, so it splits) and from one
+  // quarter. Everything else in the top box is filler to reach sixty.
+  const half = (BOX.maxLat - BOX.minLat) / 2;
+  const impl = async ({ box }) => {
+    const top = box.maxLat - box.minLat > half + 1e-9;
+    if (top) {
+      return { places: [{ id: 'ChIJcensus_test_narrow', rank: 1 }, ...Array.from({ length: 59 }, (_, i) => place(`filler${i}`))], requests: 3, saturated: true, problem: null };
+    }
+    // Only the south-west quarter has it.
+    const sw = box.minLat === BOX.minLat && box.minLng === BOX.minLng;
+    return { places: sw ? [{ id: 'ChIJcensus_test_narrow', rank: 1 }] : [], requests: 1, saturated: false, problem: null };
+  };
+  await withCensus(impl, () => censusArea({
+    areaSlug: 'census-test-narrow', outcode: 'ZZ94', box: BOX, subcategories: [one],
+  }));
+
+  const { rows: [row] } = await query('select slice from place_index where venue_ref = $1', [ref]);
+  const n = row.slice.split(',').map(Number);
+  assert.ok(n[2] - n[0] < half + 1e-9, `known by the quarter, not the whole box (${row.slice})`);
+  assert.ok(Math.abs(n[0] - BOX.minLat) < 1e-6 && Math.abs(n[1] - BOX.minLng) < 1e-6, 'and the right quarter');
+
+  // A later census at a coarser grid must not widen it back. Only ever narrower.
+  await withCensus(async () => ({ places: [{ id: 'ChIJcensus_test_narrow', rank: 1 }], requests: 1, saturated: false, problem: null }),
+    () => censusArea({ areaSlug: 'census-test-narrow-coarse', outcode: 'ZZ94', box: BOX, subcategories: [one] }));
+  const { rows: [again] } = await query('select slice from place_index where venue_ref = $1', [ref]);
+  assert.equal(again.slice, row.slice, 'a wider box asked later does not undo what a narrower one established');
+
+  for (const slug of ['census-test-narrow', 'census-test-narrow-coarse']) {
+    await query(`delete from census_slices where area_slug = $1`, [slug]);
+    await query(`delete from area_counts where area_slug = $1`, [slug]);
+    await query(`delete from place_subcategories where area_slug = $1`, [slug]);
+  }
+  await query(`delete from place_index where venue_ref = $1 or venue_ref like 'google:ChIJcensus_test_filler%'`, [ref]);
 });

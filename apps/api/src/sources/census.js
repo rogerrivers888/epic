@@ -167,6 +167,13 @@ function quarters(box) {
 
 const boxLabel = (box) => [box.minLat, box.minLng, box.maxLat, box.maxLng].map((n) => Number(n).toFixed(4)).join(',');
 
+/** How wide a slice label is, in metres, the way `censusRing.widthOf` reckons it. */
+const widthOfLabel = (label) => {
+  const n = String(label ?? '').split(',').map(Number);
+  if (n.length !== 4 || n.some((x) => !Number.isFinite(x))) return Infinity;
+  return Math.max((n[2] - n[0]) * 111320, (n[3] - n[1]) * 70000);
+};
+
 /**
  * One type, one box, splitting itself until nothing is cut off.
  *
@@ -220,9 +227,6 @@ async function sliceDown({ box, type, words = null, sourced = SOURCED.TYPE, cate
       surfaced.set(key, { ref, category, subcategory, foundBy: type ?? 'text', rank: p.rank, areaSlug, sourced });
     }
     if (!found.has(ref)) fresh += 1;
-    // Later slices do not overwrite the first one to find a place: the narrowest
-    // question that returned it is the most informative thing about it, and the
-    // first slice is always at least as narrow as any that follows it.
     if (!found.has(ref)) {
       // An id, and which question found it. No point and no type: the census is
       // IDs Only, and both of those are Pro fields that bill (owner, 19 Sep
@@ -230,6 +234,19 @@ async function sliceDown({ box, type, words = null, sourced = SOURCED.TYPE, cate
       found.set(ref, {
         ref, category, subcategory, foundBy: type ?? 'text', rank: p.rank, slice: boxLabel(box), sourced,
       });
+    } else {
+      // The narrowest box that found it, not the first.
+      //
+      // The comment that stood here said the first slice was always at least
+      // as narrow as any that followed it. It is the opposite: a saturated box
+      // is asked *before* it is split, so its first sixty places were written
+      // down with the whole eight-kilometre box and then found again by the
+      // quarter that actually holds them — and nothing updated them. In central
+      // London that box straddles every outcode it touches, so Bloomsbury rolled
+      // up as 3 places with hundreds unresolved (owner, 24 Sep 2026). The box a
+      // place is known by is the smallest one that returned it.
+      const had = found.get(ref);
+      if (widthOfLabel(boxLabel(box)) < widthOfLabel(had.slice)) had.slice = boxLabel(box);
     }
   }
 
@@ -461,7 +478,18 @@ async function writeCensusFacts(places) {
         set censused_at = now(),
             found_by     = v.found_by,
             found_rank   = v.found_rank,
-            slice        = v.slice,
+            -- Only ever narrower. A later census of the same ground at a finer
+            -- grid may know a place by a smaller box than the index holds, and
+            -- should; a later census at a coarser one must not widen what a
+            -- finer one already established. Width is the larger side of the
+            -- box, as the ring count reckons it.
+            slice        = case
+                             when i.slice is null then v.slice
+                             when greatest((split_part(v.slice, ',', 3)::float - split_part(v.slice, ',', 1)::float) * 111320,
+                                           (split_part(v.slice, ',', 4)::float - split_part(v.slice, ',', 2)::float) * 70000)
+                                < greatest((split_part(i.slice, ',', 3)::float - split_part(i.slice, ',', 1)::float) * 111320,
+                                           (split_part(i.slice, ',', 4)::float - split_part(i.slice, ',', 2)::float) * 70000)
+                             then v.slice else i.slice end,
             -- The census is allowed to file a place it found under the drawer
             -- whose question found it, but never to overwrite a filing somebody
             -- made by hand: a rule taught in the back office outranks a guess
