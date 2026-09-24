@@ -669,6 +669,60 @@ router.get('/demand', requires('view_library'), async (req, res, next) => {
  * The two differ by the overlap with other drawers, and both are shown because
  * one number standing for both had golf reading nought in Ascot.
  */
+/**
+ * The rows of the census board, for the outcodes it covers.
+ *
+ * Two of the columns are only honest on a single outcode, and say so rather
+ * than adding up (Codex, 24 Sep 2026):
+ *
+ *   · **unresolved** — a place whose box straddles an outcode edge is recorded
+ *     as unresolved in *each* outcode it straddles, on purpose, so that no
+ *     outcode drops it. Summed over a ring that counts one place twice, and a
+ *     place straddling two outcodes that are both on the board is in fact
+ *     inside the board. The per-outcode figures cannot say which, so a
+ *     multi-outcode board reports null here — a can't-speak state, never a
+ *     number that overstates the very thing it exists to expose.
+ *   · **sourced** — a null on an outcode means nobody has said how that drawer
+ *     was found there (rows from before migration 227). Ignored, a board of one
+ *     known outcode and nine unknown ones read as authoritatively "type".
+ *     Unknown is a value: mixed with a known one it is "mixed", alone it is
+ *     null.
+ */
+export async function censusBoardRows(slugs) {
+  const single = slugs.length === 1;
+  const { rows } = await query(
+    `select a.category, a.subcategory,
+            sum(a.census_count)::int                     as filed,
+            sum(coalesce(a.surfaced_count, 0))::int      as surfaced,
+            sum(a.scored_count)::int                     as scored,
+            sum(a.saturated)::int                        as saturated,
+            -- Neither in nor out, and never hidden: a count drawn with these
+            -- out of sight is a floor reading as a total. Bloomsbury showed 3
+            -- places with hundreds sitting here (owner, 24 Sep 2026). Exact on
+            -- one outcode; null on several, for the reason above.
+            case when $2 then sum(coalesce(a.unresolved, 0))::int else null end as unresolved,
+            -- How the drawer was found. One word where every outcode agrees and
+            -- says so, "mixed" where they do not or where any is unknown, null
+            -- where none says (owner, 21 Sep 2026).
+            case when count(a.sourced) = 0 then null
+                 when count(a.sourced) < count(*) then 'mixed'
+                 when count(distinct a.sourced) = 1 then min(a.sourced)
+                 else 'mixed' end                        as sourced,
+            sum(coalesce(a.text_count, 0))::int          as text_count,
+            -- Null, not nought, where nobody has run the free cross-check.
+            case when count(a.osm_count) = 0 then null else sum(coalesce(a.osm_count, 0))::int end  as osm,
+            case when count(a.fhrs_count) = 0 then null else sum(coalesce(a.fhrs_count, 0))::int end as fhrs,
+            case when count(a.residual) = 0 then null else sum(coalesce(a.residual, 0))::int end     as residual,
+            max(a.censused_at)                           as censused_at,
+            bool_and(a.complete)                         as complete
+       from area_counts a
+      where a.area_slug = any($1)
+      group by 1, 2
+      order by 1, sum(coalesce(a.surfaced_count, 0)) desc, 2`,
+    [slugs, single]);
+  return rows;
+}
+
 router.get('/census', requires('view_library'), async (req, res, next) => {
   try {
     const where = String(req.query.where ?? '').trim().toUpperCase();
@@ -692,35 +746,7 @@ router.get('/census', requires('view_library'), async (req, res, next) => {
     }
     const slugs = codes.map((c) => c.toLowerCase());
 
-    const { rows } = await query(
-      `select a.category, a.subcategory,
-              sum(a.census_count)::int                     as filed,
-              sum(coalesce(a.surfaced_count, 0))::int      as surfaced,
-              sum(a.scored_count)::int                     as scored,
-              sum(a.saturated)::int                        as saturated,
-              -- Neither in nor out, and never hidden: a count drawn with these
-              -- out of sight is a floor reading as a total. Bloomsbury showed 3
-              -- places with hundreds sitting here (owner, 24 Sep 2026).
-              sum(coalesce(a.unresolved, 0))::int          as unresolved,
-              -- How the drawer was found, across the outcodes on the board. One
-              -- word where every outcode agrees, "mixed" where they do not, and
-              -- the text-only share either way — the number to open a few of
-              -- before trusting (owner, 21 Sep 2026).
-              case when count(distinct a.sourced) = 1 then min(a.sourced)
-                   when count(a.sourced) = 0 then null
-                   else 'mixed' end                        as sourced,
-              sum(coalesce(a.text_count, 0))::int          as text_count,
-              -- Null, not nought, where nobody has run the free cross-check.
-              case when count(a.osm_count) = 0 then null else sum(coalesce(a.osm_count, 0))::int end  as osm,
-              case when count(a.fhrs_count) = 0 then null else sum(coalesce(a.fhrs_count, 0))::int end as fhrs,
-              case when count(a.residual) = 0 then null else sum(coalesce(a.residual, 0))::int end     as residual,
-              max(a.censused_at)                           as censused_at,
-              bool_and(a.complete)                         as complete
-         from area_counts a
-        where a.area_slug = any($1)
-        group by 1, 2
-        order by 1, sum(coalesce(a.surfaced_count, 0)) desc, 2`,
-      [slugs]);
+    const rows = await censusBoardRows(slugs);
 
     // **Which drawer is empty, and where.** The grouped rows above lose that:
     // a subcategory with nothing across thirty-nine outcodes and one with
