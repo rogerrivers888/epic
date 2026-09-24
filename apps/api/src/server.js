@@ -666,7 +666,13 @@ setInterval(() => { void runBarChecks('daily').catch(() => {}); }, BAR_CHECK_EVE
 // "refreshed on the 30-day census cycle… never computed while the household
 // waits"). Checked daily; a ring older than the window is counted again from
 // whatever the census now knows. Bounded by the number of homes, not sectors.
-setInterval(() => { void ringTables.refreshDue().catch(() => {}); }, BAR_CHECK_EVERY_MS).unref?.();
+// Once at boot as well (Codex, 24 Sep 2026): a service that restarts more than
+// once a day never reaches the first tick of a daily interval, and a ring that
+// has aged past the window would then never be counted again. Safe to run
+// early — a refresh reads only our own tables and never asks Google anything.
+const refreshRingsDue = () => { void ringTables.refreshDue().catch(() => {}); };
+void indexBuilt.then(refreshRingsDue);
+setInterval(refreshRingsDue, BAR_CHECK_EVERY_MS).unref?.();
 void indexBuilt.then(() => sweep());
 setInterval(() => { void sweep(); }, 3600_000).unref?.();
 
