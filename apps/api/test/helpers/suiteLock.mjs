@@ -21,10 +21,21 @@
  */
 
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const LOCK = path.join(os.tmpdir(), 'epic-suite.lock');
+/**
+ * A fixed path every session shares.
+ *
+ * This lived under `os.tmpdir()`, which reads `$TMPDIR` — and the sessions on
+ * this machine do not all have the same one, so two of them could each hold
+ * "the" lock and run two suites into one database. A whole day of red runs was
+ * dismissed as machine load before anybody noticed (owner, 24 Sep 2026: "A lock
+ * sessions cannot see is not a lock"). The one thing every session demonstrably
+ * shares is this checkout, so the lock lives at its root, git-ignored.
+ */
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
+const LOCK = path.join(ROOT, '.epic-suite.lock');
 const STALE_MS = 20 * 60_000;
 const WAIT_MS = 5_000;
 

@@ -13,3 +13,6 @@ web-build/
 # history of building it (the estate's engineering standard, rule 11).
 Supporting docs/
 *-tmp.mjs
+
+# One full test suite on this machine at a time (apps/api/test/helpers/suiteLock.mjs)
+.epic-suite.lock
