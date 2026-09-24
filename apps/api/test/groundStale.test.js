@@ -25,7 +25,9 @@ import { query, pool } from '../src/db.js';
 
 test.after(() => pool.end());
 
-const TILE = 'test-stale/0';
+// Not under `test/`, which is censusRun.test.js's cleaner's prefix. Two files
+// sharing one database must not share a namespace either.
+const TILE = 'stale-fixture/0';
 const COUNCIL = 'E09000028';
 const DRAWERS = Object.keys(FHRS_GROUND);
 

@@ -33,17 +33,25 @@ const answers = (n = 1) => async () => ({
   requests: 1, saturated: false, problem: null,
 });
 
-/** Everything this test made, gone, whatever it found. */
+/**
+ * Everything this test made, gone, whatever it found.
+ *
+ * `test/` with the slash, not `test`: this file's tiles are all `test/...`,
+ * and the bare prefix also matched groundStale's `test-stale/0`. Files run in
+ * parallel on one database, so this cleaner was deleting the other file's
+ * fixture in the middle of its test — the solo red that was called machine
+ * load all day (24 Sep 2026). A cleaner reaches only what its own file made.
+ */
 const clean = async () => {
-  const { rows } = await query(`select grid_key from census_tiles where grid_key like 'test%'`);
+  const { rows } = await query(`select grid_key from census_tiles where grid_key like 'test/%'`);
   const keys = rows.map((r) => r.grid_key);
   if (keys.length) {
     await query(`delete from place_subcategories where area_slug = any($1)`, [keys]);
     await query(`delete from census_slices where area_slug = any($1)`, [keys]);
   }
-  await query(`delete from census_run_surfacings where grid_key like 'test%'`);
-  await query(`delete from census_run_tiles where grid_key like 'test%'`);
-  await query(`delete from census_tiles where grid_key like 'test%'`);
+  await query(`delete from census_run_surfacings where grid_key like 'test/%'`);
+  await query(`delete from census_run_tiles where grid_key like 'test/%'`);
+  await query(`delete from census_tiles where grid_key like 'test/%'`);
   await query(`delete from census_runs where label like 'test %'`);
 };
 
@@ -966,7 +974,7 @@ test('resuming is refused without the run\'s own name, and says what to send', a
 test('a later sweep of the same tile does not change what a finished run found', async (t) => {
   await clean();
   t.after(async () => {
-    await query(`delete from census_run_surfacings where grid_key like 'test%'`);
+    await query(`delete from census_run_surfacings where grid_key like 'test/%'`);
     await clean();
   });
   const first = await startTestRun({ label: 'test first sweep' });
