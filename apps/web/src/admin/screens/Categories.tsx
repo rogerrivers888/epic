@@ -4144,10 +4144,23 @@ function GoogleView({ tax, wide, roomy, by, view, catLabel, subLabel, canManage,
         put(name, name, r);
       }
       out.sort((a, b) => a.name.localeCompare(b.name));
-      // The right-hand column: which of our categories the group's words land in.
+      // The right-hand column: every destination the group's words go to, with
+      // how many go where. Naming only the categories hid the rest:
+      // Transportation read "Lands in Adrenaline" when eleven of its thirteen
+      // words are Travel and only two are Adrenaline (the sign-off, 24 Sep 2026, §8).
       for (const g of out) {
-        const lands = [...new Set(g.types.filter((r) => r.active !== false && !r.decision && r.landing.category && r.landing.how !== 'fallback').map((r) => r.landing.category as string))];
-        g.aside = lands.map(catLabel).join(', ') || '—';
+        const per = new Map<string, number>();
+        const bump = (k: string) => per.set(k, (per.get(k) ?? 0) + 1);
+        for (const r of g.types) {
+          const std = standing(r);
+          if (std === 'travel') bump('Travel');
+          else if (std === 'nearby') bump('Useful nearby');
+          else if (std === 'generic') bump('Secondary label');
+          else if (std === 'aside') bump('Excluded');
+          else if (r.landing.category && r.landing.how !== 'fallback') bump(catLabel(r.landing.category));
+          else bump('Unmapped');
+        }
+        g.aside = [...per.entries()].sort((x, y) => y[1] - x[1]).map(([k, n]) => `${k} ${n}`).join(' · ') || '—';
       }
     } else {
       for (const c of tax.categories) {

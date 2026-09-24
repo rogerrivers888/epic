@@ -55,7 +55,7 @@ import * as placeIndex from '../repositories/placeIndex.js';
 import { currentHousehold } from './household.js';
 import * as taxonomyAudit from '../repositories/taxonomyAudit.js';
 import { CORPUS_OPENS, auditAll } from '../domain/taxonomyAudit.js';
-import { invariantRuns, setThreshold, thresholds, thresholdValues } from '../repositories/settings.js';
+import { invariantRuns, noteInvariantRun, setThreshold, thresholds, thresholdValues } from '../repositories/settings.js';
 import {
   STAGES, clearsOf, diagnose, headlineOf, livenessOf, saturationOf, stageOf,
 } from '../domain/runFunnel.js';
@@ -87,6 +87,22 @@ const townOf = (rec) => {
  * done everything it can and these are the decisions left. A queue at nought
  * is drawn grey rather than hidden, because "nothing waiting" is worth seeing.
  */
+/**
+ * POST /checks/run — the bar checks, now rather than at the next daily tick.
+ *
+ * The same pass the schedule runs (server.js), recorded the same way, so the
+ * Overview says "ran just now, by hand" rather than waiting a day to say
+ * anything. Asked for by the sign-off of 24 Sep 2026 (§9): "afterwards, run
+ * the invariants and report".
+ */
+filingRoutes.post('/checks/run', requires('manage_library'), async (req, res, next) => {
+  try {
+    const run = await placeIndex.checkBars({ repair: req.body?.repair !== false, trigger: 'manual' });
+    await noteInvariantRun(run).catch(() => {});
+    res.json({ run });
+  } catch (err) { next(err); }
+});
+
 filingRoutes.get('/overview', requires('view_library'), async (_req, res, next) => {
   try {
     const limits = await thresholdValues();

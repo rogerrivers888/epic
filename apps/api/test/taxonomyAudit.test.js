@@ -528,3 +528,163 @@ test('the daily check gives a bare drawer a bar and judges its places in the sam
   const { rows } = await query("select distinct set_by from ready_bars where subcategory_key = 'tmp-made'");
   assert.deepEqual(rows.map((r) => r.set_by), ['inherited']);
 });
+
+// --- the signed-off set (24 Sep 2026) ------------------------------------------
+
+const { signedOff, SIGNED_OFF } = await import('../src/domain/taxonomyCleanup.js');
+const { alreadyTrue } = await import('../src/repositories/taxonomyAudit.js');
+
+test('the signed-off set only proposes what this database can carry, and addresses rules as the rules do', () => {
+  const out = signedOff({
+    have: new Set(['landmarks', 'ski-resort', 'museums']),
+    words: new Set(['ski_resort', 'library']),
+    kinds: new Map([['distillery', 'Q1']]),
+    rules: new Set(['osm:sport=archery']),
+  });
+  assert.ok(out.every((p) => p.flag === SIGNED_OFF));
+  const by = (kind, subject) => out.find((p) => p.subject_kind === kind && p.subject === subject);
+  assert.equal(by('subcategory', 'landmarks').action, 'fold');
+  assert.equal(by('subcategory', 'landmarks').proposed, 'landmarks-you-can-see');
+  assert.equal(by('word', 'osm:sport=archery').proposed, 'have-a-go', 'an OSM tag is addressed as its rule subject');
+  assert.equal(by('word', 'osm:sport=bowls'), undefined, 'a tag nobody taught is not proposed');
+  assert.equal(by('kind', 'Q1').proposed, 'breweries-distilleries');
+  assert.equal(by('word', 'library').action, 'exclude');
+  assert.equal(by('word', 'ours:rainy-day').action, 'retire', 'one of our labels is addressed as ours:');
+  assert.deepEqual(by('subcategory', 'museums').numbers, { defaults: { 'kid-friendly': null } });
+  assert.equal(by('subcategory', 'indoor-snow'), undefined, 'settling a drawer this database lacks is not proposed');
+  const created = out.filter((p) => p.action === 'create').map((p) => p.subject);
+  assert.deepEqual(created.sort(), ['factory-tours', 'have-a-go']);
+  assert.deepEqual(by('subcategory', 'have-a-go').numbers.also_in, ['adrenaline', 'outdoors']);
+});
+
+test('a signed-off change that is already true is not proposed again', () => {
+  const input = {
+    subs: [{ key: 'days-out', label: 'Days out', active: false }, { key: 'water-park', label: 'Water parks', active: true },
+      { key: 'landmarks', label: 'Landmarks & monuments', active: true }],
+    words: [{ key: 'library', decision: 'aside', active: false, points_at: null },
+      { key: 'winery', decision: null, active: true, points_at: 'breweries-distilleries' },
+      { key: 'ski_resort', decision: null, active: true, points_at: 'ski-resort' }],
+    rules: [{ scope: 'labels', subject: 'google:winery', subcategory: 'breweries-distilleries' },
+      { scope: 'labels', subject: 'osm:sport=archery', subcategory: 'have-a-go' },
+      { scope: 'kind', subject: 'Q1', subcategory: 'breweries-distilleries' },
+      { scope: 'ours', subject: 'landmarks', subcategory: 'landmarks' }],
+  };
+  const p = (subject_kind, subject, action, proposed = null) => ({ subject_kind, subject, action, proposed });
+  assert.equal(alreadyTrue(p('subcategory', 'days-out', 'retire'), input), true);
+  assert.equal(alreadyTrue(p('subcategory', 'water-park', 'rename', 'Water parks'), input), true);
+  assert.equal(alreadyTrue(p('subcategory', 'water-park', 'rename', 'Water park'), input), false);
+  assert.equal(alreadyTrue(p('subcategory', 'landmarks', 'split', 'x'), input), true, 'only its own rule is left');
+  assert.equal(alreadyTrue(p('subcategory', 'landmarks', 'fold', 'landmarks-you-can-see'), input), false);
+  assert.equal(alreadyTrue(p('word', 'library', 'exclude'), input), true);
+  assert.equal(alreadyTrue(p('word', 'winery', 'repoint', 'breweries-distilleries'), input), true);
+  assert.equal(alreadyTrue(p('word', 'ski_resort', 'repoint', 'indoor-snow'), input), false);
+  assert.equal(alreadyTrue(p('word', 'osm:sport=archery', 'repoint', 'have-a-go'), input), true);
+  assert.equal(alreadyTrue(p('word', 'osm:sport=bowls', 'repoint', 'have-a-go'), input), false);
+  assert.equal(alreadyTrue(p('kind', 'Q1', 'repoint', 'breweries-distilleries'), input), true);
+  assert.equal(alreadyTrue(p('kind', 'Q9', 'repoint', 'anywhere'), input), true, 'a kind rule that is gone has nothing to move');
+  assert.equal(alreadyTrue(p('word', 'ours:rainy-day', 'retire'), input), false, 'labels are judged at apply');
+});
+
+test('a settle sets a second cabinet and a default, mirrors the old column, and undo puts all three back', async (t) => {
+  await query(`insert into shelf_categories (key, label) values ('sport', 'Sport'), ('adrenaline', 'Adrenaline')
+               on conflict (key) do nothing`);
+  await query(`insert into shelf_subcategories (category_key, key, label, for_kids) values ('adrenaline', 'settle-me', 'Settle me', true)
+               on conflict (key) do update set for_kids = true`);
+  await query(`insert into place_attributes (key, label, kind) values ('indoor', 'Indoors', 'yesno'), ('kid-friendly', 'Kid friendly', 'yesno')
+               on conflict (key) do nothing`);
+  await query(`insert into shelf_subcategory_attributes (subcategory_key, attribute_key, yesno) values ('settle-me', 'kid-friendly', true)
+               on conflict (subcategory_key, attribute_key) do update set yesno = true`);
+  t.after(async () => {
+    await query(`delete from taxonomy_proposals where subject = 'settle-me'`);
+    await query(`delete from shelf_subcategories where key = 'settle-me'`);
+  });
+  const audit = await run({
+    by: 'test',
+    extra: [{ flag: 'test-settle', subject_kind: 'subcategory', subject: 'settle-me', action: 'settle', proposed: null,
+      because: 'test', moves: 0, numbers: { also_in: ['sport'], defaults: { indoor: { yesno: true }, 'kid-friendly': null } } }],
+  });
+  await query(`update taxonomy_proposals set state = 'accepted' where audit_id = $1 and subject = 'settle-me'`, [audit.id]);
+  const done = await apply({ auditId: audit.id, by: 'test' });
+  assert.equal(done.applied, 1);
+  const also = await query(`select category_key from shelf_subcategory_categories where subcategory_key = 'settle-me'`);
+  assert.deepEqual(also.rows.map((r) => r.category_key), ['sport']);
+  const defs = await query(`select attribute_key, yesno, settled from shelf_subcategory_attributes where subcategory_key = 'settle-me' order by 1`);
+  assert.deepEqual(defs.rows, [{ attribute_key: 'indoor', yesno: true, settled: true }]);
+  const { rows: [cols] } = await query(`select indoor, for_kids from shelf_subcategories where key = 'settle-me'`);
+  assert.deepEqual(cols, { indoor: true, for_kids: null }, 'the old columns follow the defaults');
+
+  const back = await undo({ auditId: audit.id, by: 'test' });
+  assert.equal(back.settled, 1);
+  const also2 = await query(`select category_key from shelf_subcategory_categories where subcategory_key = 'settle-me'`);
+  assert.equal(also2.rows.length, 0);
+  const defs2 = await query(`select attribute_key, yesno from shelf_subcategory_attributes where subcategory_key = 'settle-me'`);
+  assert.deepEqual(defs2.rows, [{ attribute_key: 'kid-friendly', yesno: true }]);
+  const { rows: [cols2] } = await query(`select indoor, for_kids from shelf_subcategories where key = 'settle-me'`);
+  assert.deepEqual(cols2, { indoor: null, for_kids: true });
+});
+
+test('a rule on an open-map tag is repointed by its own subject, and one of our labels is retired and put back', async (t) => {
+  await query(`insert into shelf_categories (key, label) values ('sport', 'Sport') on conflict (key) do nothing`);
+  await query(`insert into shelf_subcategories (category_key, key, label) values ('sport', 'from-here', 'From here'), ('sport', 'to-there', 'To there')
+               on conflict (key) do nothing`);
+  await query(`insert into shelf_rules (scope, subject, subject_label, subcategory, labels) values ('labels', 'osm:sport=testing', 'Testing', 'from-here', array['osm:sport=testing'])
+               on conflict (scope, subject) do update set subcategory = 'from-here'`);
+  await query(`insert into place_attributes (key, label, kind, active) values ('test-label', 'Test label', 'yesno', true)
+               on conflict (key) do update set active = true`);
+  t.after(async () => {
+    await query(`delete from taxonomy_proposals where subject in ('osm:sport=testing', 'ours:test-label')`);
+    await query(`delete from shelf_rules where subject = 'osm:sport=testing'`);
+    await query(`delete from place_attributes where key = 'test-label'`);
+    await query(`delete from shelf_subcategories where key in ('from-here', 'to-there')`);
+  });
+  const audit = await run({
+    by: 'test',
+    extra: [
+      { flag: 'test-tag', subject_kind: 'word', subject: 'osm:sport=testing', action: 'repoint', proposed: 'to-there', because: 'test', moves: 0, numbers: {} },
+      { flag: 'test-tag', subject_kind: 'word', subject: 'ours:test-label', action: 'retire', proposed: null, because: 'test', moves: 0, numbers: {} },
+    ],
+  });
+  await query(`update taxonomy_proposals set state = 'accepted' where audit_id = $1`, [audit.id]);
+  const done = await apply({ auditId: audit.id, by: 'test' });
+  assert.equal(done.applied, 2);
+  const { rows: [rule] } = await query(`select subcategory from shelf_rules where subject = 'osm:sport=testing'`);
+  assert.equal(rule.subcategory, 'to-there');
+  const { rows: [label] } = await query(`select active from place_attributes where key = 'test-label'`);
+  assert.equal(label.active, false);
+
+  const back = await undo({ auditId: audit.id, by: 'test' });
+  assert.equal(back.labels, 1);
+  const { rows: [rule2] } = await query(`select subcategory from shelf_rules where subject = 'osm:sport=testing'`);
+  assert.equal(rule2.subcategory, 'from-here');
+  const { rows: [label2] } = await query(`select active from place_attributes where key = 'test-label'`);
+  assert.equal(label2.active, true);
+});
+
+test('a rule touched by a fold and then a repoint is kept once, so undo puts it where it started', async (t) => {
+  await query(`insert into shelf_categories (key, label) values ('sport', 'Sport') on conflict (key) do nothing`);
+  await query(`insert into shelf_subcategories (category_key, key, label) values ('sport', 'husk', 'Husk'), ('sport', 'heap', 'Heap'), ('sport', 'home', 'Home')
+               on conflict (key) do nothing`);
+  await query(`insert into shelf_rules (scope, subject, subject_label, subcategory, labels) values ('labels', 'osm:sport=twice', 'Twice', 'husk', array['osm:sport=twice'])
+               on conflict (scope, subject) do update set subcategory = 'husk'`);
+  t.after(async () => {
+    await query(`delete from taxonomy_proposals where subject in ('husk', 'osm:sport=twice')`);
+    await query(`delete from shelf_rules where subject = 'osm:sport=twice'`);
+    await query(`delete from shelf_subcategories where key in ('husk', 'heap', 'home')`);
+  });
+  const audit = await run({
+    by: 'test',
+    extra: [
+      { flag: 'test-twice', subject_kind: 'subcategory', subject: 'husk', action: 'fold', proposed: 'heap', because: 'test', moves: 0, numbers: {} },
+      { flag: 'test-twice', subject_kind: 'word', subject: 'osm:sport=twice', action: 'repoint', proposed: 'home', because: 'test', moves: 0, numbers: {} },
+    ],
+  });
+  await query(`update taxonomy_proposals set state = 'accepted' where audit_id = $1`, [audit.id]);
+  await apply({ auditId: audit.id, by: 'test' });
+  const { rows: [after] } = await query(`select subcategory from shelf_rules where subject = 'osm:sport=twice'`);
+  assert.equal(after.subcategory, 'home', 'the fold ran first (by action), then the repoint');
+  await undo({ auditId: audit.id, by: 'test' });
+  const { rows: [back] } = await query(`select subcategory from shelf_rules where subject = 'osm:sport=twice'`);
+  assert.equal(back.subcategory, 'husk');
+  const { rows: [husk] } = await query(`select active from shelf_subcategories where key = 'husk'`);
+  assert.equal(husk.active, true);
+});

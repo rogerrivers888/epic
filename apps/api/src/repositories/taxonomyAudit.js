@@ -9,7 +9,9 @@
 import { query, withTransaction } from '../db.js';
 import { inheritBar } from './placeIndex.js';
 import { auditAll } from '../domain/taxonomyAudit.js';
-import { agreed, LANDMARK_SPLIT } from '../domain/taxonomyCleanup.js';
+import { agreed, LANDMARK_SPLIT, signedOff } from '../domain/taxonomyCleanup.js';
+import { forget as forgetTaxonomy } from './shelfTaxonomy.js';
+import { forget as forgetAttributes } from './placeAttributes.js';
 
 /** What the signals need, read in one pass. */
 export async function evidence() {
@@ -84,6 +86,8 @@ export async function evidence() {
 
   return {
     subs: subs.rows,
+    // Every rule as held, so an agreed set can address one by its subject.
+    rules: rules.rows,
     rulesBySub,
     placesBySub: new Map(places.rows.map((r) => [r.subcategory, Number(r.n)])),
     words: words.rows
@@ -181,17 +185,62 @@ export async function consequence(keys = []) {
 }
 
 /** Run every signal and keep what it found. Returns the run. */
+/**
+ * Whether a proposal from an agreed set describes the state the database is
+ * already in. Only what can be read from the evidence is judged; a proposal
+ * this cannot see through is kept, and apply decides.
+ */
+export function alreadyTrue(p, input) {
+  const sub = input.subs.find((s) => s.key === p.subject);
+  const ruleFor = (subject) => input.rules.find((r) => r.subject === subject);
+  if (p.subject_kind === 'subcategory') {
+    if (p.action === 'retire' || p.action === 'fold') return Boolean(sub) && sub.active === false;
+    if (p.action === 'rename') return Boolean(sub) && sub.label === p.proposed;
+    // A split is done when nothing but the drawer's own rule is left in it.
+    if (p.action === 'split') {
+      return Boolean(sub) && !input.rules.some((r) => r.subcategory === p.subject && !(r.scope === 'ours' && r.subject === p.subject));
+    }
+    return false;
+  }
+  if (p.subject_kind === 'kind') {
+    const r = input.rules.find((x) => x.scope === 'kind' && x.subject === p.subject);
+    if (!r) return true;
+    if (p.action === 'repoint') return r.subcategory === p.proposed;
+    return false;
+  }
+  // A word: a Google type by bare key, or a rule subject of any namespace.
+  if (p.subject.startsWith('ours:')) return false;
+  const qualified = p.subject.includes(':');
+  const w = qualified ? null : input.words.find((x) => x.key === p.subject);
+  const r = ruleFor(qualified ? p.subject : `google:${p.subject}`) ?? (qualified ? null : ruleFor(p.subject));
+  if (p.action === 'exclude') return w ? w.decision === 'aside' || w.active === false : !r;
+  if (p.action === 'repoint') {
+    if (w) return w.points_at === p.proposed && (!r || r.subcategory === p.proposed);
+    return Boolean(r) && r.subcategory === p.proposed;
+  }
+  return false;
+}
+
 export async function run({ by = null, extra = [], withAgreed = false } = {}) {
   const input = await evidence();
   // Section 4 of the brief, signed off already, proposed through the same flow
   // so the first use of accept-and-apply is on changes somebody trusts.
-  const first = withAgreed
-    ? agreed({
-      have: new Set(input.subs.map((s) => s.key)),
-      words: new Set(input.words.map((w) => w.key)),
-      kinds: input.kindsByName,
-    })
+  const sets = withAgreed
+    ? (() => {
+      const args = {
+        have: new Set(input.subs.map((s) => s.key)),
+        words: new Set(input.words.map((w) => w.key)),
+        kinds: input.kindsByName,
+        rules: new Set(input.rules.map((r) => r.subject)),
+      };
+      return [...agreed(args), ...signedOff(args)];
+    })()
     : [];
+  // A signed-off change that is already true is not proposed again. The two
+  // agreed sets are stable lists, so every run after the first would otherwise
+  // offer the same retirements and renames a second time, and accepting them
+  // would take a snapshot of the finished state over the one that can undo it.
+  const first = sets.filter((p) => !alreadyTrue(p, input));
   const { proposals, evidence: saw } = auditAll(input);
   // What somebody has already said no to does not come back.
   const { rows: refused } = await query('select flag, subject_kind, subject from taxonomy_refusals');
@@ -252,6 +301,7 @@ export function effectOf(accepted) {
     retiring: accepted.filter((p) => p.action === 'retire' || p.action === 'fold').length,
     creating: accepted.filter((p) => p.action === 'create' || p.action === 'split').length,
     renaming: accepted.filter((p) => p.action === 'rename').length,
+    settling: accepted.filter((p) => p.action === 'settle').length,
   };
 }
 
@@ -305,7 +355,18 @@ export async function decideGroup({ auditId, flag, state, by = null }) {
  * places incidentally. Each needs somebody to choose, so each is left open and
  * counted in `advisory`.
  */
-const DOES = new Set(['exclude', 'rename', 'retire', 'fold', 'create', 'carry', 'repoint', 'split']);
+const DOES = new Set(['exclude', 'rename', 'retire', 'fold', 'create', 'carry', 'repoint', 'split', 'settle']);
+
+/**
+ * Where a word proposal's subject lives. A bare key is a Google type, the way
+ * every proposal named one before 24 Sep 2026; `osm:sport=archery` is a rule on
+ * a tag from the open map, addressed exactly as `shelf_rules` holds it.
+ */
+function subjectOf(subject) {
+  const at = subject.indexOf(':');
+  if (at < 0) return { namespace: 'google', key: subject, full: `google:${subject}`, bare: subject };
+  return { namespace: subject.slice(0, at), key: subject.slice(at + 1), full: subject, bare: null };
+}
 
 export async function apply({ auditId, by = null }) {
   // Applied once, and once only. A run that left advisory proposals sitting in
@@ -327,11 +388,11 @@ export async function apply({ auditId, by = null }) {
     // capturing it again after the first had already changed it made undo
     // restore the mutated state (Codex, 20 Sep 2026).
     const kept = new Set();
-    const keepWord = async (key) => {
-      if (kept.has(`w:${key}`)) return;
-      kept.add(`w:${key}`);
+    const keepWord = async (key, namespace = 'google') => {
+      if (kept.has(`w:${namespace}:${key}`)) return;
+      kept.add(`w:${namespace}:${key}`);
       const { rows } = await client.query(
-        "select namespace, key, decision, points_at, active from taxonomy_labels where namespace = 'google' and key = $1", [key]);
+        'select namespace, key, decision, points_at, active from taxonomy_labels where namespace = $2 and key = $1', [key, namespace]);
       if (rows[0]) snapshot.words.push(rows[0]);
     };
     const keepSub = async (key) => {
@@ -346,14 +407,70 @@ export async function apply({ auditId, by = null }) {
       const { rows } = await client.query(
         "select namespace, key, decision, points_at, active from taxonomy_labels where points_at = $1", [subKey]);
       for (const r of rows) {
-        if (kept.has(`w:${r.key}`)) continue;
-        kept.add(`w:${r.key}`);
+        if (kept.has(`w:${r.namespace}:${r.key}`)) continue;
+        kept.add(`w:${r.namespace}:${r.key}`);
         snapshot.words.push(r);
       }
     };
+    // A rule is kept once, before anything has moved it. A fold and a repoint
+    // in the same set both touch the same rule, and a second capture after the
+    // fold would have undo put the rule back where the fold left it.
     const keepRules = async (where, args) => {
       const { rows } = await client.query(`select * from shelf_rules where ${where}`, args);
-      snapshot.rules.push(...rows);
+      for (const r of rows) {
+        if (kept.has(`r:${r.id}`)) continue;
+        kept.add(`r:${r.id}`);
+        snapshot.rules.push(r);
+      }
+    };
+    /** One of our own labels, before it is switched off. */
+    const keepLabel = async (key) => {
+      if (kept.has(`l:${key}`)) return;
+      kept.add(`l:${key}`);
+      const { rows } = await client.query('select key, active from place_attributes where key = $1', [key]);
+      if (rows[0]) snapshot.labels = [...(snapshot.labels ?? []), rows[0]];
+    };
+    /** A drawer's secondary categories and defaults, before a settle or a create changes them. */
+    const keepSettled = async (key) => {
+      if (kept.has(`d:${key}`)) return;
+      kept.add(`d:${key}`);
+      const [{ rows: also }, { rows: defaults }, { rows: [cols] }] = await Promise.all([
+        client.query('select category_key, position from shelf_subcategory_categories where subcategory_key = $1', [key]),
+        client.query('select attribute_key, yesno, from_value, to_value, choice, level, settled from shelf_subcategory_attributes where subcategory_key = $1', [key]),
+        client.query('select indoor, for_kids from shelf_subcategories where key = $1', [key]),
+      ]);
+      snapshot.settled = [...(snapshot.settled ?? []), { key, also, defaults, columns: cols ?? null }];
+    };
+    /**
+     * Set a drawer's secondary categories and defaults. Indoors and For kids
+     * are still columns on the row as well as attributes, and the two must
+     * not disagree (repositories/shelfTaxonomy.js, mirrorOldColumns).
+     */
+    const settle = async (key, numbers) => {
+      for (const cat of numbers?.also_in ?? []) {
+        await client.query(
+          `insert into shelf_subcategory_categories (subcategory_key, category_key, position)
+           values ($1, $2, coalesce((select max(position) + 1 from shelf_subcategory_categories where subcategory_key = $1), 1))
+           on conflict (subcategory_key, category_key) do nothing`, [key, cat]);
+      }
+      const MIRROR = { indoor: 'indoor', 'kid-friendly': 'for_kids' };
+      for (const [attribute, value] of Object.entries(numbers?.defaults ?? {})) {
+        if (value == null) {
+          await client.query('delete from shelf_subcategory_attributes where subcategory_key = $1 and attribute_key = $2', [key, attribute]);
+        } else {
+          await client.query(
+            `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, yesno, from_value, to_value, choice, level, settled)
+             values ($1, $2, $3, $4, $5, $6, $7, true)
+             on conflict (subcategory_key, attribute_key) do update
+                set yesno = excluded.yesno, from_value = excluded.from_value, to_value = excluded.to_value,
+                    choice = excluded.choice, level = excluded.level, settled = true, updated_at = now()`,
+            [key, attribute, value.yesno ?? null, value.from ?? null, value.to ?? null, value.choice ?? null, value.level ?? null]);
+        }
+        if (MIRROR[attribute]) {
+          await client.query(`update shelf_subcategories set ${MIRROR[attribute]} = $2, updated_at = now() where key = $1`,
+            [key, value == null ? null : value.yesno ?? null]);
+        }
+      }
     };
 
     let applied = 0; let advisory = 0;
@@ -369,25 +486,33 @@ export async function apply({ auditId, by = null }) {
             `update shelf_rules set subcategory = $2, updated_at = now()
               where scope = 'kind' and subject = $1`, [p.subject, p.proposed]);
         } else { advisory += 1; continue; }
+      } else if (p.subject_kind === 'word' && p.subject.startsWith('ours:')) {
+        // One of our own labels (place_attributes), addressed the way the
+        // rules address ours. Retiring one switches it off; its defaults and
+        // answers keep their rows and nothing reads an inactive label.
+        const key = p.subject.slice('ours:'.length);
+        if (p.action !== 'retire') { advisory += 1; continue; }
+        await keepLabel(key);
+        await client.query('update place_attributes set active = false, updated_at = now() where key = $1', [key]);
       } else if (p.subject_kind === 'word') {
-        await keepWord(p.subject);
-        await keepRules('subject = $1 or subject = $2', [`google:${p.subject}`, p.subject]);
+        const at = subjectOf(p.subject);
+        await keepWord(at.key, at.namespace);
+        await keepRules('subject = $1 or subject = $2', [at.full, at.bare ?? at.full]);
         if (p.action === 'exclude') {
           // The same shape 125 and 138 used: said aside, switched off, and its
           // rules taken with it or the drawer keeps filling from a word nobody
           // can see any more.
           await client.query(
             `update taxonomy_labels set decision = 'aside', points_at = null, active = false, updated_at = now()
-              where namespace = 'google' and key = $1`, [p.subject]);
-          await client.query('delete from shelf_rules where subject = $1 or subject = $2',
-            [`google:${p.subject}`, p.subject]);
+              where namespace = $2 and key = $1`, [at.key, at.namespace]);
+          await client.query('delete from shelf_rules where subject = $1 or subject = $2', [at.full, at.bare ?? at.full]);
         } else if (p.action === 'repoint') {
           await client.query(
             `update taxonomy_labels set points_at = $2, decision = null, updated_at = now()
-              where namespace = 'google' and key = $1`, [p.subject, p.proposed]);
+              where namespace = $3 and key = $1`, [at.key, p.proposed, at.namespace]);
           await client.query(
-            `update shelf_rules set subcategory = $2, updated_at = now() where subject = $1`,
-            [`google:${p.subject}`, p.proposed]);
+            `update shelf_rules set subcategory = $2, updated_at = now() where subject = $1 or subject = $3`,
+            [at.full, p.proposed, at.bare ?? at.full]);
         } else if (p.action === 'carry') {
           advisory += 1; continue;
         }
@@ -449,6 +574,9 @@ export async function apply({ auditId, by = null }) {
           if (left.n === 0) {
             await client.query('update shelf_subcategories set active = false, updated_at = now() where key = $1', [p.subject]);
           }
+        } else if (p.action === 'settle') {
+          await keepSettled(p.subject);
+          await settle(p.subject, p.numbers);
         } else if (p.action === 'create') {
           // The category comes with the proposal, because a drawer without a
           // cabinet is not a drawer. Made switched on and empty; what fills it
@@ -465,6 +593,9 @@ export async function apply({ auditId, by = null }) {
           // set" for ever. Thirteen made this way had that hole for weeks and
           // no test could see them (owner, 21 Sep 2026).
           await inheritBar(p.subject, client);
+          // A second cabinet, where the proposal names one: Have a go is Sport
+          // first and Adrenaline too (section 2, 24 Sep 2026).
+          await settle(p.subject, { also_in: p.numbers?.also_in ?? [] });
           // Undoing a create means removing it, which the snapshot cannot say
           // by holding a row that did not exist. It is recorded as a birth.
           snapshot.created = [...(snapshot.created ?? []), p.subject];
@@ -477,6 +608,7 @@ export async function apply({ auditId, by = null }) {
     await client.query(
       'update taxonomy_audits set applied_at = now(), applied_by = $2, snapshot = $3::jsonb where id = $1',
       [auditId, by, JSON.stringify(snapshot)]);
+    forgetTaxonomy(); forgetAttributes();
     return { applied, advisory, snapshot };
   });
 }
@@ -493,6 +625,28 @@ export async function undo({ auditId, by = null }) {
       await client.query(
         `update taxonomy_labels set decision = $3, points_at = $4, active = $5, updated_at = now()
           where namespace = $1 and key = $2`, [w.namespace, w.key, w.decision, w.points_at, w.active]);
+    }
+    for (const l of snap.labels ?? []) {
+      await client.query('update place_attributes set active = $2, updated_at = now() where key = $1', [l.key, l.active]);
+    }
+    for (const d of snap.settled ?? []) {
+      await client.query('delete from shelf_subcategory_categories where subcategory_key = $1', [d.key]);
+      for (const a of d.also) {
+        await client.query(
+          'insert into shelf_subcategory_categories (subcategory_key, category_key, position) values ($1, $2, $3) on conflict do nothing',
+          [d.key, a.category_key, a.position]);
+      }
+      await client.query('delete from shelf_subcategory_attributes where subcategory_key = $1', [d.key]);
+      for (const v of d.defaults) {
+        await client.query(
+          `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, yesno, from_value, to_value, choice, level, settled)
+           values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [d.key, v.attribute_key, v.yesno, v.from_value, v.to_value, v.choice, v.level, v.settled]);
+      }
+      if (d.columns) {
+        await client.query('update shelf_subcategories set indoor = $2, for_kids = $3, updated_at = now() where key = $1',
+          [d.key, d.columns.indoor, d.columns.for_kids]);
+      }
     }
     for (const key of snap.created ?? []) {
       // A drawer this audit made goes away again. Anything filed into it since
@@ -518,6 +672,8 @@ export async function undo({ auditId, by = null }) {
     }
     await client.query("update taxonomy_proposals set state = 'accepted' where audit_id = $1 and state = 'applied'", [auditId]);
     await client.query('update taxonomy_audits set undone_at = now() where id = $1', [auditId]);
-    return { words: snap.words.length, subcategories: snap.subcategories.length, rules: snap.rules.length };
+    forgetTaxonomy(); forgetAttributes();
+    return { words: snap.words.length, subcategories: snap.subcategories.length, rules: snap.rules.length,
+      labels: (snap.labels ?? []).length, settled: (snap.settled ?? []).length };
   });
 }

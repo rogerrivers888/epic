@@ -155,7 +155,9 @@ export function agreed({ have = new Set(), words = new Set(), kinds = new Map() 
   ifSub('miniature-golf-course', 'rename', 'Crazy golf & mini golf', 'Singleton, given the name a household would use.');
   ifSub('skateboard-park', 'rename', 'Skateparks & BMX', 'Singleton renamed, and moved to Active.');
   ifSub('library', 'retire', null, 'Retire; file individual places by hand.');
-  ifSub('cultural-centre', 'retire', null, 'Retire; file individual places by hand.');
+  // The drawer's key is spelled the American way; the brief's spelling never
+  // matched it, so this line proposed nothing for four days (found 24 Sep 2026).
+  ifSub('cultural-center', 'retire', null, 'Retire; file individual places by hand.');
   ifWord('indoor_golf_course', 'repoint', 'golf', 'Fold into Golf clubs and carry it as a secondary label rather than a drawer of its own.');
   ifSub('barbecue-area', 'fold', 'Parks & commons', 'A facet of a park, not somewhere you browse to.');
 
@@ -184,5 +186,122 @@ export function agreed({ have = new Set(), words = new Set(), kinds = new Map() 
     if (have.has(n.key)) continue;
     out.push(sub(n.key, 'create', n.label, n.because, { category: n.category }));
   }
+  return out;
+}
+
+/**
+ * "Epic — Taxonomy cleanup, signed off" (24 Sep 2026), as proposals.
+ *
+ * The second real use of the flow on changes already agreed. Everything here
+ * is the document's own wording; where the document names a *word* the rule is
+ * actually held as something else, the comment says which. The document's own
+ * terms: a rule is a word attached to a subcategory, and retiring a subcategory
+ * means moving its rules first, then the drawer — in that order, or the rules
+ * are orphaned. A `fold` does both in one action and keeps what it moved, so
+ * it is used wherever a drawer's own rule would otherwise be left behind.
+ *
+ * `rules` is the set of rule subjects this database holds, so a proposal about
+ * an OpenStreetMap tag nobody has taught is left out rather than failing at
+ * apply, the same way `have` and `words` guard the section-4 set.
+ */
+export const SIGNED_OFF = 'signed-off';
+
+const so = (p) => ({ ...p, flag: SIGNED_OFF });
+
+export const SIGNED_OFF_SUBCATEGORIES = [
+  // Section 2. "Activities you try once rather than a venue you watch or
+  // belong to. Sport's other drawers are all spectator or club venues, so
+  // there is nowhere for these." Outdoors is second because Bowls files here
+  // and "many greens sit in parks".
+  { key: 'have-a-go', label: 'Have a go', category: 'sport', alsoIn: ['adrenaline', 'outdoors'],
+    because: 'Section 2: activities you try once. Archery, shooting and bowls, which had no drawer of their own.' },
+  // Section 4. "No existing drawer fits, so create Fun › Factory tours &
+  // makers, with Food & drink as a secondary category."
+  { key: 'factory-tours', label: 'Factory tours & makers', category: 'fun', alsoIn: ['food'],
+    because: 'Section 4: chocolate factory had nowhere to go. Brewery and distillery tours may carry it later.' },
+];
+
+export function signedOff({ have = new Set(), words = new Set(), kinds = new Map(), rules = new Set() } = {}) {
+  const out = [];
+  const ifWord = (k, ...rest) => { if (words.has(k)) out.push(so(word(k, ...rest))); };
+  const ifSub = (k, ...rest) => { if (have.has(k)) out.push(so(sub(k, ...rest))); };
+  const ifKind = (name, ...rest) => { const qid = kinds.get(name); if (qid) out.push(so(kind(qid, name, ...rest))); };
+  /** A rule on a tag from another namespace, addressed as the rule holds it: `osm:sport=archery`. */
+  const ifRule = (subject, ...rest) => { if (rules.has(subject)) out.push(so(word(subject, ...rest))); };
+  /** One of our own labels, addressed the way `shelf_rules` addresses ours: `ours:<key>`. */
+  const label = (key, because) => out.push(so(word(`ours:${key}`, 'retire', null, because)));
+  const settle = (key, numbers, because) => { if (have.has(key)) out.push(so(sub(key, 'settle', null, because, numbers))); };
+
+  // ---- 1. Retire these subcategories ------------------------------------
+  // "Landmarks & monuments (1 rule): repoint landmark to Landmarks." The one
+  // rule is the drawer's own; folding carries it and retires the husk.
+  ifSub('landmarks', 'fold', 'landmarks-you-can-see',
+    'Section 1: a husk left by the Landmarks split. Its one rule goes to Culture › Landmarks, then the drawer is retired.');
+  // "Adventure sports center (2): Archery → Sport › Have a go; Adventure
+  // sports center → High ropes & zip lines, which already carries it."
+  // Archery is the OSM tag, and the Google word already points at High ropes.
+  ifRule('osm:sport=archery', 'repoint', 'have-a-go', 'Section 1: Archery goes to Sport › Have a go.');
+  ifSub('adventure-sports-center', 'fold', 'ropes',
+    'Section 1: what is left goes to High ropes & zip lines, which already carries the Google word, then the drawer is retired.');
+  // Paintball centre, Indoor golf course and Barbecue area are already off with
+  // nothing in them; a retire that is already true is not proposed (see run()).
+  ifSub('paintball-center', 'retire', null, 'Section 1: superseded by Paintball, laser tag & airsoft.');
+  ifSub('indoor-golf-course', 'retire', null, 'Section 1: already a rule inside Golf clubs.');
+  ifSub('barbecue-area', 'retire', null, 'Section 1: already a rule inside Parks & commons.');
+  // "Days out (off, 4): distillery and whisky distillery → Breweries, wineries
+  // & distilleries; heritage railway → Heritage railways." Three Wikidata
+  // types, held by QID and named here by their label.
+  ifKind('distillery', 'repoint', 'breweries-distilleries', 'Section 1: rehomed from Days out.');
+  ifKind('whisky distillery', 'repoint', 'breweries-distilleries', 'Section 1: rehomed from Days out.');
+  ifKind('heritage railway', 'repoint', 'heritage-railways', 'Section 1: rehomed from Days out.');
+  ifSub('days-out', 'retire', null, 'Section 1: a husk once its three rules are rehomed.');
+  // "Library (off, 2): exclude the Library word entirely." Section 4 says it again.
+  ifWord('library', 'exclude', 'Not in Epic', 'Sections 1 and 4: exclude the word entirely.');
+  ifSub('library', 'retire', null, 'Section 1: retired; file individual places by hand.');
+  // "Ski resort (2): ski resort → Adrenaline › Indoor snow & dry slopes."
+  ifWord('ski_resort', 'repoint', 'indoor-snow',
+    'Sections 1 and 3: in the UK that type covers indoor snow centres and dry slopes, which is exactly this drawer.');
+  ifRule('osm:sport=skiing', 'repoint', 'indoor-snow', 'Section 3: the open map’s word for the same places, for the census cross-check.');
+  ifSub('ski-resort', 'fold', 'indoor-snow', 'Section 1: its rules go to Indoor snow & dry slopes, then the drawer is retired.');
+
+  // ---- 2. Create one subcategory; 4. one more ---------------------------
+  for (const n of SIGNED_OFF_SUBCATEGORIES) {
+    if (have.has(n.key)) continue;
+    out.push(so(sub(n.key, 'create', n.label, n.because, { category: n.category, also_in: n.alsoIn })));
+  }
+  // "Rules: Archery, and any of axe throwing, clay shooting or fencing that
+  // exist as Google words." None of the three is a Google word; shooting is an
+  // OSM tag, unmapped, and goes here for the cross-check.
+  ifRule('osm:sport=shooting', 'repoint', 'have-a-go', 'Section 2: clay shooting, as the open map has it.');
+  // "Also file Bowls here, moved out of Outdoors › Parks & commons."
+  ifRule('osm:sport=bowls', 'repoint', 'have-a-go', 'Section 2: bowls is something you have a go at, not a facet of a park.');
+
+  // ---- 3. Fill Indoor snow & dry slopes ---------------------------------
+  settle('indoor-snow', { also_in: ['sport'], defaults: { indoor: { yesno: true } } },
+    'Section 3: primary Adrenaline, secondary Sport, and the indoors label set on it.');
+
+  // ---- 4. The three unmapped words --------------------------------------
+  ifWord('winery', 'repoint', 'breweries-distilleries', 'Section 4: not Pubs & bars as suggested.');
+  ifWord('chocolate_factory', 'repoint', 'factory-tours', 'Section 4: Fun › Factory tours & makers.');
+
+  // ---- 5. Secondary labels ----------------------------------------------
+  // "Exclude four as secondary labels." Each sits on essentially every place
+  // held, so it discriminates nothing. Nothing reads them: no rule, no
+  // carried label, no question set (checked 24 Sep 2026; the boot pass only
+  // decides words nobody has decided, so it will not put them back).
+  for (const k of ['establishment', 'point_of_interest', 'food', 'health']) {
+    ifWord(k, 'exclude', 'Not in Epic', 'Section 5: on essentially every place held, so it discriminates nothing.');
+  }
+  label('rainy-day', 'Section 5: a duplicate of Indoors — both default in the same 45 of 72 drawers, the same fact stored twice.');
+  label('kid-friendly', 'Section 5: its own description says it is not the same as which ages it suits, and Suits ages is the field that answers the question.');
+
+  // ---- 6. Rule and default corrections ----------------------------------
+  ifRule('osm:leisure=escape_game', 'repoint', 'cinema-bowling', 'Section 6: an escape room is not soft play.');
+  // "Remove water park as a rule from Theme parks & rides. It has its own
+  // Water parks drawer." The rule is the Wikidata type; sent to that drawer
+  // rather than deleted, so a water park still lands somewhere.
+  ifKind('water park', 'repoint', 'water-park', 'Section 6: it has its own Water parks drawer.');
+  settle('museums', { defaults: { 'kid-friendly': null } }, 'Section 6: remove the for kids default from Museums.');
+  settle('castles', { defaults: { 'kid-friendly': { yesno: true } } }, 'Section 6: add the for kids default to Castles & forts.');
   return out;
 }
