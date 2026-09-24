@@ -341,7 +341,12 @@ async function rollDay(runId) {
             -- Every census slice asked today, by any run. The quota belongs to
             -- the project, so the budget has to as well.
             day_requests = coalesce((select sum((pc.units->>'google')::int) from provider_calls pc
-                                      where pc.provider = 'google'
+                                      -- Any row carrying a Google unit, whatever it is labelled. A search
+                                      -- that used several sources is ledgered as
+                                      -- 'fixtures+osm+google+tripadvisor' with the Google
+                                      -- count in units.google, and a predicate on the label
+                                      -- missed every one of those (Codex, 24 Sep 2026).
+                                      where pc.units ? 'google'
                                         and pc.created_at >= date_trunc('day', now() at time zone 'utc')), 0)
       where r.id = $1
       returning day_requests, coalesce(daily_cap, $2) as daily_cap`, [runId, DAILY_CAP]);
@@ -387,7 +392,12 @@ async function refreshProgress(runId) {
             -- Nearby, which do not share the Text Search limit, is the safe
             -- direction — it stops a run a little early, never late.
             day_requests = coalesce((select sum((pc.units->>'google')::int) from provider_calls pc
-                                      where pc.provider = 'google'
+                                      -- Any row carrying a Google unit, whatever it is labelled. A search
+                                      -- that used several sources is ledgered as
+                                      -- 'fixtures+osm+google+tripadvisor' with the Google
+                                      -- count in units.google, and a predicate on the label
+                                      -- missed every one of those (Codex, 24 Sep 2026).
+                                      where pc.units ? 'google'
                                         and pc.created_at >= date_trunc('day', now() at time zone 'utc')), 0),
             last_seen_at = now()
        from (select started_at as began from census_runs where id = $1) r0,

@@ -670,7 +670,7 @@ test('the day\'s budget is the project\'s, not the region\'s', async (t) => {
   // search, a research pass — which the quota counts and the census must too.
   await query(
     `insert into provider_calls (provider, purpose, units, ms, created_at)
-     values ('google', 'inspire.ring', '{"google": 40, "google-search": 40}'::jsonb, -4243, now())`);
+     values ('fixtures+osm+google+tripadvisor', 'inspire.ring', '{"google": 40, "google-search": 40, "osm": 3}'::jsonb, -4243, now())`);
 
   const { rows: [run] } = await query(
     `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, daily_cap, day, day_requests)
