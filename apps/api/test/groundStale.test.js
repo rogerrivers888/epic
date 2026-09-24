@@ -93,7 +93,7 @@ test('a stale tile is counted again rather than re-dated on the strength of old 
   await tileThatWasCounted(40);
 
   const asked = [];
-  const out = await sweepFhrs({ authorities: 4, staleDays: 30, register: registerThatCounts(asked) });
+  const out = await sweepFhrs({ authorities: 4, staleDays: 30, register: registerThatCounts(asked), only: [TILE] });
 
   assert.deepEqual(asked, [4242], 'the council was asked again, because its answer had expired');
   assert.ok(out.tiles >= 1, 'and the tile settled on the new answer');
@@ -114,7 +114,7 @@ test('a tile counted this week is left alone, and its register is not downloaded
   await tileThatWasCounted(3);
 
   const asked = [];
-  await sweepFhrs({ authorities: 4, staleDays: 30, register: registerThatCounts(asked) });
+  await sweepFhrs({ authorities: 4, staleDays: 30, register: registerThatCounts(asked), only: [TILE] });
 
   assert.deepEqual(asked, [], 'a fresh count is not paid for twice');
   const { rows: [row] } = await query(

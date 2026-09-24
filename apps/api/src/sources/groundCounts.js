@@ -508,11 +508,16 @@ async function owedBy(source, subcategories, asked, { staleDays, limit }) {
  * A tile whose councils have never been asked owes by definition: it has to be
  * probed before anything is known about what it is short of.
  */
-async function owedFhrs(drawers, asked, { staleDays, limit = 2000 }) {
+async function owedFhrs(drawers, asked, { staleDays, limit = 2000, only = null }) {
   const { rows } = await query(
     `select t.grid_key, t.min_lat, t.min_lng, t.max_lat, t.max_lng, t.fhrs_authorities
        from census_tiles t
       where t.state = 'done'
+        -- Named tiles only, where a caller says so. A test's sweep must not
+        -- reach another file's tiles: the suite runs files in parallel on one
+        -- database, and a register fake that answers for any box was
+        -- downloading a council onto somebody else's fixture (24 Sep 2026).
+        and ($4::text[] is null or t.grid_key = any($4))
         and (t.fhrs_authorities is null
              or exists (
                select 1
@@ -528,7 +533,7 @@ async function owedFhrs(drawers, asked, { staleDays, limit = 2000 }) {
                      -- drawer claims changes the number it should have.
                      and g.asked is not distinct from w.asked)))
       order by t.censused_at desc nulls last
-      limit $3`, [String(staleDays), drawers, limit, asked]);
+      limit $3`, [String(staleDays), drawers, limit, asked, only]);
   return rows;
 }
 
@@ -589,13 +594,13 @@ const REGISTER = { authorities: fhrsAuthorities, councilsFor: fhrsAuthoritiesFor
  * partial count that says which councils it is made of — which is honest, where
  * a dated tile holding one borough of two is not.
  */
-export async function sweepFhrs({ authorities = 2, staleDays = 30, msBudget = 50_000, register = REGISTER } = {}) {
+export async function sweepFhrs({ authorities = 2, staleDays = 30, msBudget = 50_000, register = REGISTER, only = null } = {}) {
   const began = Date.now();
   // The same per-drawer question the open map is asked. A tile is in this list
   // because some food drawer of it has no count, or has one a month old.
   const drawers = Object.keys(FHRS_GROUND);
   const askedNow = askedFhrs();
-  const tiles = await owedFhrs(drawers, drawers.map((d) => askedNow[d]), { staleDays });
+  const tiles = await owedFhrs(drawers, drawers.map((d) => askedNow[d]), { staleDays, only });
   if (!tiles.length) return { authorities: 0, tiles: 0, requests: 0, problems: [] };
 
   // The register's own list of councils. Empty is not fatal — the probe names

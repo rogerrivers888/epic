@@ -163,20 +163,55 @@ export async function planTiles({ areas = [], outcodes = [], dLat = TILE_LAT, dL
     const rLat = Math.max(1, Math.ceil(padKm / (dLat * 111.32)));
     const rLng = Math.max(1, Math.ceil(padKm / (dLng * 69.4)));
     const range = (r) => Array.from({ length: 2 * r + 1 }, (_, i) => i - r);
-    for (const key of [...tiles.keys()]) {
-      const t = tiles.get(key);
+    const cell = (lat, lng) => [Math.floor(lat / dLat), Math.floor(lng / dLng)];
+
+    // The sectors, bucketed by the square they fall in, so a candidate square
+    // asks only the buckets within reach of it rather than every sector in the
+    // region. Scanning them all per candidate was fine at one square out and
+    // eight sectors a tile; on a one-kilometre grid with eight kilometres of
+    // padding it was a thousand candidates per occupied square, each reading
+    // every sector, on the request thread (Codex, 24 Sep 2026).
+    const buckets = new Map();
+    for (const q of points) {
+      const [i, j] = cell(q.lat, q.lng);
+      const k = `${i}/${j}`;
+      if (!buckets.has(k)) buckets.set(k, []);
+      buckets.get(k).push(q);
+    }
+    const nearPoints = (centre) => {
+      const [ci, cj] = cell(centre.lat, centre.lng);
+      const near = [];
+      for (const di of range(rLat)) {
+        for (const dj of range(rLng)) {
+          const b = buckets.get(`${ci + di}/${cj + dj}`);
+          if (!b) continue;
+          for (const q of b) if (km(q, centre) <= padKm) near.push(q);
+        }
+      }
+      return near;
+    };
+
+    // Each candidate once, however many occupied squares it neighbours.
+    const candidates = new Map();
+    for (const t of tiles.values()) {
+      const [ti, tj] = cell(t.minLat + dLat / 2, t.minLng + dLng / 2);
       for (const di of range(rLat)) {
         for (const dj of range(rLng)) {
           if (!di && !dj) continue;
-          const centre = { lat: t.minLat + dLat * (di + 0.5), lng: t.minLng + dLng * (dj + 0.5) };
+          const k = `${ti + di}/${tj + dj}`;
+          if (candidates.has(k)) continue;
+          const centre = { lat: (ti + di + 0.5) * dLat, lng: (tj + dj + 0.5) * dLng };
           const n = tileOf(centre.lat, centre.lng, dLat, dLng);
           if (tiles.has(n.gridKey)) continue;
-          const near = points.filter((p) => km(p, centre) <= padKm);
-          if (!near.length) continue;
-          put(n.gridKey, n, null);
-          for (const p of near) put(n.gridKey, n, p.outcode);
+          candidates.set(k, { n, centre });
         }
       }
+    }
+    for (const { n, centre } of candidates.values()) {
+      const near = nearPoints(centre);
+      if (!near.length) continue;
+      put(n.gridKey, n, null);
+      for (const q of near) put(n.gridKey, n, q.outcode);
     }
   }
   return [...tiles.values()].map((t) => ({ ...t, outcodes: [...t.outcodes].sort() }));

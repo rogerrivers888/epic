@@ -1016,3 +1016,20 @@ test('padding reaches the distance it claims on a fine grid, not one square', as
   const bare = await planTiles({ outcodes: ['ZZ6A'], dLat: 0.01, dLng: 0.015, padKm: 0 });
   assert.equal(bare.length, 1);
 });
+
+test('padding a broad region on a fine grid does not take the request thread hostage', async (t) => {
+  t.after(() => query(`delete from geo_cells where code like 'ZZ5%'`));
+  // A few hundred sectors spread over a county, padded eight kilometres on a
+  // one-kilometre grid. Scanning every sector for every candidate square was
+  // billions of distance checks at this size (Codex, 24 Sep 2026).
+  const values = [];
+  for (let i = 0; i < 300; i += 1) {
+    values.push(`('ZZ5A ${i}', 'sector', 'ZZ5A ${i}', 'ZZ5A', ${(51.3 + (i % 20) * 0.02).toFixed(4)}, ${(-0.9 + Math.floor(i / 20) * 0.03).toFixed(4)}, 'test')`);
+  }
+  await query(`insert into geo_cells (code, scheme, label, outcode, lat, lng, source) values ${values.join(',')} on conflict (code) do nothing`);
+  const began = Date.now();
+  const tiles = await planTiles({ outcodes: ['ZZ5A'], dLat: 0.01, dLng: 0.015, padKm: 8 });
+  const took = Date.now() - began;
+  assert.ok(tiles.length > 300, `it padded (${tiles.length} tiles)`);
+  assert.ok(took < 3000, `and did so in ${took} ms, not minutes`);
+});
