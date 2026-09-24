@@ -403,6 +403,21 @@ test('a household keeps the price it was sold at when the price goes up', async 
    * Exercised against a real account rather than asserted about the SQL,
    * because the fault was in what the query returned and not in what it said.
    */
+  // An account to be sold to. This read the first account the dev database
+  // happened to hold, and on 24 Sep 2026 the local Postgres came up with an
+  // empty volume: migrated and seeded, the database has a household and no
+  // accounts, and the test fell over on `undefined.plan` before asserting
+  // anything. A test that needs an account makes one, and takes it away again.
+  let made = null;
+  if (!(await query('select 1 from accounts limit 1')).rows.length) {
+    const { rows: [h] } = await query(
+      "select id from households where coalesce(origin, '') <> 'guest_invite' order by created_at limit 1");
+    assert.ok(h, 'a household to hang the account on');
+    const { rows: [row] } = await query(
+      `insert into accounts (household_id, email, name, status, plan)
+       values ($1, 'sold-at@test.local', 'A test account', 'active', 'household') returning id`, [h.id]);
+    made = row.id;
+  }
   const { rows: [a] } = await query('select id, plan, status from accounts order by created_at limit 1');
   const was = { plan: a.plan, status: a.status };
   const { rows: [price] } = await query(
@@ -445,6 +460,7 @@ test('a household keeps the price it was sold at when the price goes up', async 
     );
     await query('update plans set price_pence = $1 where key = $2', [price.amount_pence, 'household']);
     await query('update accounts set plan = $2, status = $3 where id = $1', [a.id, was.plan, was.status]);
+    if (made) await query('delete from accounts where id = $1', [made]);
   }
 });
 
