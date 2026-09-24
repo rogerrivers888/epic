@@ -26,10 +26,12 @@
  *     becomes known.
  *   · **On the 30-day cycle**, matching the census: a ring older than that is
  *     counted again from whatever the census now knows.
- *   · **When a census run finishes**, every ring counted before that run
- *     started is counted again (Codex, 24 Sep 2026): a home that asked for its
- *     districts to be censused would otherwise keep reading the snapshot taken
- *     before the census found anything.
+ *   · **When a census run finishes**, every ring counted before it finished is
+ *     counted again (Codex, 24 Sep 2026): a home that asked for its districts
+ *     to be censused would otherwise keep reading the snapshot taken before
+ *     the census found anything — and a ring counted *during* the run read a
+ *     half-filled index, so the cutoff is the moment the run ended, not the
+ *     moment it began.
  *
  * A ring that has been counted and holds nothing is still a ring that has been
  * counted: it carries a marker row (category '') so the cycle can find it and
@@ -236,4 +238,26 @@ export async function refreshDue({ olderThanDays = CYCLE_DAYS, before = null, li
     catch (err) { done.push({ cell: r.cell, mode: r.mode, minutes: r.minutes, error: String(err.message).slice(0, 120) }); }
   }
   return done;
+}
+
+/**
+ * Every ring counted before a moment, however many there are: `refreshDue`
+ * takes a page, and a counted ring leaves the page, so asking again with the
+ * same moment walks the rest (Codex, 24 Sep 2026: one page of a thousand left
+ * the rings beyond it on their pre-census snapshot). A ring that fails to
+ * count stays before the cutoff, so a page that brings back nothing new ends
+ * the walk rather than repeating it.
+ */
+export async function refreshAllBefore({ before, pageSize = 200 } = {}) {
+  const seen = new Set();
+  const out = [];
+  for (;;) {
+    const page = await refreshDue({ before, limit: pageSize });
+    const fresh = page.filter((r) => r && !seen.has(`${r.cell}|${r.mode}|${r.minutes}`));
+    if (!fresh.length) break;
+    for (const r of fresh) seen.add(`${r.cell}|${r.mode}|${r.minutes}`);
+    out.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return out;
 }

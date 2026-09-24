@@ -40,7 +40,7 @@ import { censusArea, slicePlan, CENSUS_FRESH_DAYS, CENSUS_MAX_DEPTH } from './ce
 // The same corner test the ring count uses. One piece of arithmetic for "is
 // this box inside this area", not two that can disagree (repositories/censusRing.js).
 import { whereBoxSits } from '../repositories/censusRing.js';
-import { refreshDue as refreshRingsBefore } from '../repositories/ringTables.js';
+import { refreshAllBefore as refreshRingsBefore } from '../repositories/ringTables.js';
 import { USD_TO_GBP } from '../domain/providerPrices.js';
 
 /**
@@ -830,17 +830,23 @@ async function spentSince(startedAt) {
 async function finish(id, state, problem) {
   const { rows: [run] } = await query(
     `update census_runs set state = $2, problem = $3, finished_at = now(), last_seen_at = now(), stop_requested = false
-      where id = $1 returning started_at`, [id, state, problem]);
+      where id = $1 returning finished_at`, [id, state, problem]);
   await refreshProgress(id);
   // A run that got to the end is rolled onto the board and into every ring
-  // counted before it began (Codex, 24 Sep 2026: a home that asked for its
+  // counted before it ended (Codex, 24 Sep 2026: a home that asked for its
   // districts to be censused kept reading the snapshot taken before the census
-  // had found anything). The roll-up is the run's own outcodes, as the button
-  // on the board would do; the rings are recounted behind it, never awaited —
-  // a ring is a few reads of our own tables, and a run touches nothing else.
-  if (state === 'done' && run?.started_at) {
-    await rollUpOutcodes({ runId: id }).catch((err) => console.warn(`epic-api: census — could not roll up run ${id}: ${err.message}`));
-    void refreshRingsBefore({ before: run.started_at, limit: 1000 }).catch(() => {});
+  // had found anything, and a ring counted while the run was going read a
+  // half-filled index). The roll-up is the run's own outcodes, as the button
+  // on the board would do. The rings come after it and only if it succeeded:
+  // a ring counted from a board that failed to roll up would carry a wrong
+  // floor with a fresh date, and nothing would look at it again for thirty
+  // days — left alone, the cycle is its retry. Recounted behind the finish,
+  // never awaited: a ring is a few reads of our own tables.
+  if (state === 'done' && run?.finished_at) {
+    let rolled = false;
+    try { await rollUpOutcodes({ runId: id }); rolled = true; }
+    catch (err) { console.warn(`epic-api: census — could not roll up run ${id}, so its rings keep their date: ${err.message}`); }
+    if (rolled) void refreshRingsBefore({ before: run.finished_at }).catch(() => {});
   }
 }
 

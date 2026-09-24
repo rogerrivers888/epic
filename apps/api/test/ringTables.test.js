@@ -100,14 +100,27 @@ test('a counted ring with nothing in it is a counted ring, not an unlooked-at on
   assert.ok(done.some((d) => d.cell === CELL), 'an empty ring still ages');
 });
 
-test('a finished census counts again every ring computed before it started', async () => {
+test('a finished census counts again every ring computed before it ended', async () => {
   await seed();
   await tables.refreshRing({ cell: CELL, mode: 'drive', minutes: 30 });
   const { rows: [{ at }] } = await query('select max(computed_at) as at from ring_counts where cell = $1', [CELL]);
   const earlier = new Date(new Date(at).getTime() - 1000);
-  assert.ok(!(await tables.refreshDue({ before: earlier })).some((d) => d.cell === CELL), 'counted after the run began: left alone');
+  assert.ok(!(await tables.refreshDue({ before: earlier })).some((d) => d.cell === CELL), 'counted after the run ended: left alone');
   const later = new Date(new Date(at).getTime() + 1000);
-  assert.ok((await tables.refreshDue({ before: later })).some((d) => d.cell === CELL), 'counted before the run began: counted again');
+  assert.ok((await tables.refreshDue({ before: later })).some((d) => d.cell === CELL), 'counted before the run ended: counted again');
+});
+
+test('the walk after a census takes every ring, however many pages that is', async () => {
+  await seed();
+  await tables.refreshBands({ cell: CELL, mode: 'drive', bands: [20, 30, 60] });
+  await query(`update ring_counts set computed_at = now() - interval '1 hour' where cell = $1`, [CELL]);
+  // One ring a page, three rings: three pages, none repeated.
+  const done = await tables.refreshAllBefore({ before: new Date(), pageSize: 1 });
+  const mine = done.filter((d) => d?.cell === CELL).map((d) => d.minutes).sort((a, b) => a - b);
+  assert.deepEqual(mine, [20, 30, 60]);
+  const { rows: [{ stale }] } = await query(
+    `select count(*)::int as stale from ring_counts where cell = $1 and computed_at < now() - interval '30 minutes'`, [CELL]);
+  assert.equal(stale, 0, 'and every row now carries the new date');
 });
 
 test('the order is by our score, and an unscored place has no rank', async () => {
