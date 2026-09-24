@@ -593,6 +593,42 @@ test('a signed-off change that is already true is not proposed again', () => {
   assert.equal(alreadyTrue(settle('water-park', { defaults: { indoor: { yesno: false } } }), input), false, 'a default that reads differently');
   assert.equal(alreadyTrue(settle('water-park', { defaults: { 'kid-friendly': null } }), input), true, 'null means no row, and there is none');
   assert.equal(alreadyTrue(settle('water-park', { defaults: { indoor: null } }), input), false, 'null against a row that exists');
+  const unsettled = { ...input, defaultsBySub: new Map([['water-park', new Map([['indoor', { yesno: true, settled: false }]])]]) };
+  assert.equal(alreadyTrue(settle('water-park', { defaults: { indoor: { yesno: true } } }), unsettled), false,
+    'a default the machine proposed and nobody agreed to is still worth settling');
+});
+
+test('a repointed word is switched back on, and a created drawer with places filed in it is kept on undo', async (t) => {
+  await query(`insert into shelf_categories (key, label) values ('sport', 'Sport') on conflict (key) do nothing`);
+  await query(`insert into shelf_subcategories (category_key, key, label) values ('sport', 'kept-home', 'Kept home') on conflict (key) do nothing`);
+  await query(`insert into taxonomy_labels (namespace, key, label, decision, active) values ('google', 'test_revived', 'Revived', 'aside', false)
+               on conflict (namespace, key) do update set decision = 'aside', active = false, points_at = null`);
+  t.after(async () => {
+    await query(`delete from taxonomy_proposals where subject in ('kept-new', 'test_revived')`);
+    await query(`delete from place_index where venue_ref = 'test:kept-new-place'`);
+    await query(`delete from taxonomy_labels where key = 'test_revived'`);
+    await query(`delete from ready_bars where subcategory_key = 'kept-new'`);
+    await query(`delete from shelf_subcategories where key in ('kept-new', 'kept-home')`);
+  });
+  const audit = await run({
+    by: 'test',
+    extra: [
+      { flag: 'test-kept', subject_kind: 'subcategory', subject: 'kept-new', action: 'create', proposed: 'Kept new', because: 'test', moves: 0, numbers: { category: 'sport' } },
+      { flag: 'test-kept', subject_kind: 'word', subject: 'test_revived', action: 'repoint', proposed: 'kept-new', because: 'test', moves: 0, numbers: {} },
+    ],
+  });
+  await query(`update taxonomy_proposals set state = 'accepted' where audit_id = $1`, [audit.id]);
+  await apply({ auditId: audit.id, by: 'test' });
+  const { rows: [w] } = await query(`select active, decision, points_at from taxonomy_labels where key = 'test_revived'`);
+  assert.deepEqual(w, { active: true, decision: null, points_at: 'kept-new' });
+  // The index files a place there before anybody undoes it.
+  await query(`insert into place_index (venue_ref, subcategory) values ('test:kept-new-place', 'kept-new')
+               on conflict (venue_ref) do update set subcategory = 'kept-new'`);
+  await undo({ auditId: audit.id, by: 'test' });
+  const { rows: [sub] } = await query(`select active from shelf_subcategories where key = 'kept-new'`);
+  assert.equal(sub?.active, false, 'switched off, not deleted, because a place points at it');
+  const { rows: [w2] } = await query(`select active, decision from taxonomy_labels where key = 'test_revived'`);
+  assert.deepEqual(w2, { active: false, decision: 'aside' });
 });
 
 test('undoing a create that was filled in the same audit deletes the drawer, its bar and its second cabinet', async (t) => {

@@ -53,14 +53,14 @@ export async function evidence() {
     // agreed set has to be able to see to know it has already been applied.
     query('select key, active from place_attributes'),
     query('select subcategory_key, category_key from shelf_subcategory_categories'),
-    query('select subcategory_key, attribute_key, yesno, from_value, to_value, choice, level from shelf_subcategory_attributes'),
+    query('select subcategory_key, attribute_key, yesno, from_value, to_value, choice, level, settled from shelf_subcategory_attributes'),
   ]);
   const alsoBySub = new Map();
   for (const r of alsoIn.rows) alsoBySub.set(r.subcategory_key, [...(alsoBySub.get(r.subcategory_key) ?? []), r.category_key]);
   const defaultsBySub = new Map();
   for (const r of defaults.rows) {
     const m = defaultsBySub.get(r.subcategory_key) ?? new Map();
-    m.set(r.attribute_key, { yesno: r.yesno, from: r.from_value, to: r.to_value, choice: r.choice, level: r.level });
+    m.set(r.attribute_key, { yesno: r.yesno, from: r.from_value, to: r.to_value, choice: r.choice, level: r.level, settled: r.settled });
     defaultsBySub.set(r.subcategory_key, m);
   }
 
@@ -231,6 +231,9 @@ export function alreadyTrue(p, input) {
         const now = have.get(attribute) ?? null;
         if (value == null) return now === null;
         if (now === null) return false;
+        // A default the machine proposed and nobody agreed to is not done: the
+        // settle would mark it settled, so it is still worth proposing.
+        if (now.settled === false) return false;
         return ['yesno', 'from', 'to', 'choice', 'level'].every((k) => (value[k] ?? null) === (now[k] ?? null));
       });
     }
@@ -545,8 +548,10 @@ export async function apply({ auditId, by = null }) {
               where namespace = $2 and key = $1`, [at.key, at.namespace]);
           await client.query('delete from shelf_rules where subject = $1 or subject = $2', [at.full, at.bare ?? at.full]);
         } else if (p.action === 'repoint') {
+          // A word sent somewhere is in use again, whatever was decided before:
+          // one set aside and later given a drawer must not stay switched off.
           await client.query(
-            `update taxonomy_labels set points_at = $2, decision = null, updated_at = now()
+            `update taxonomy_labels set points_at = $2, decision = null, active = true, updated_at = now()
               where namespace = $3 and key = $1`, [at.key, p.proposed, at.namespace]);
           await client.query(
             `update shelf_rules set subcategory = $2, updated_at = now() where subject = $1 or subject = $3`,
@@ -706,9 +711,13 @@ export async function undo({ auditId, by = null }) {
     for (const key of snap.created ?? []) {
       // A drawer this audit made goes away again. Anything filed into it since
       // would block the delete, so it is switched off instead and said so.
+      // Rules, and places the index has filed there since: the index has no
+      // foreign key to clear, so a deleted drawer would leave them pointing at
+      // nothing (Codex, 24 Sep 2026).
       const { rows: [used] } = await client.query(
-        'select count(*)::int n from shelf_rules where subcategory = $1', [key]);
-      if (used.n > 0) { await client.query('update shelf_subcategories set active = false where key = $1', [key]); continue; }
+        `select (select count(*) from shelf_rules where subcategory = $1)
+              + (select count(*) from place_index where subcategory = $1) as n`, [key]);
+      if (Number(used.n) > 0) { await client.query('update shelf_subcategories set active = false where key = $1', [key]); continue; }
       // The bar it inherited and its second cabinets go with it; a bar left
       // behind would make the key read as a drawer that exists.
       await client.query('delete from ready_bars where subcategory_key = $1', [key]);
