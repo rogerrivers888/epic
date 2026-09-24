@@ -483,12 +483,14 @@ export async function placesWithin(cell, { minutes = 30, mode = 'driving', edge 
  * rather than a sector (20 Sep 2026). A full postcode is its own sector; an
  * outcode or a named place is snapped to the nearest sector we hold.
  */
-export async function ringFor({ where = null, lat = null, lng = null, label = null, minutes = 30, mode = 'driving' } = {}) {
+export async function ringFor({ where = null, lat = null, lng = null, label = null, minutes = 30, mode = 'driving', cell: given = null } = {}) {
   const said = String(where ?? '').trim();
   const slug = said.toLowerCase().replace(/\s+/g, '-');
   const sector = said ? sectorOf(said.replace(/-/g, ' ')) : null;
-  let cell = sector ? `sector:${sector}` : null;
-  let name = sector ? said.toUpperCase() : null;
+  // A cell named outright — the ring tables are keyed on one, and a refresh
+  // must draw exactly the ring the row is about, not the nearest to a point.
+  let cell = given ? String(given) : sector ? `sector:${sector}` : null;
+  let name = given ? labelOf(given) : sector ? said.toUpperCase() : null;
   if (!cell && slug) {
     const { rows: [area] } = await query(
       'select name, lat, lng from localities where slug = $1 and lat is not null limit 1', [slug]);

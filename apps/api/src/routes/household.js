@@ -10,6 +10,8 @@ import { enabledSources, bedRatesOn } from '../sources/index.js';
 import { routingEnabled } from '../sources/routing.js';
 import { paceOf, DEFAULT_PACE } from '../domain/pace.js';
 import { browseOf, mergeBrowse } from '../domain/browse.js';
+import * as ringTables from '../repositories/ringTables.js';
+import * as censusRun from '../sources/censusRun.js';
 import { isValidTimezone } from '../domain/time.js';
 import { currentAccount } from '../context.js';
 import {
@@ -259,6 +261,29 @@ router.patch('/', async (req, res, next) => {
       pace: mergedPace, timezone, homeRadiusMiles: radius, homePhotoUrl: photo,
       browseDefaults: browse ? mergeBrowse(household, browse) : null,
     });
+    // A home that has moved is a ring that has to be counted (owner, 20 Sep
+    // 2026: "On registration and on any home-location change, census the
+    // household's ring automatically, and store a ranking"). Behind the
+    // response, never in front of it: the household gets its answer now and the
+    // next look at Inspire reads the rows. The census is asked to look only at
+    // districts it has never seen — free on the IDs Only mask — and only where
+    // no run is already going, because the runner takes one at a time; a 409
+    // here is not an error, it is a run that will catch these districts next.
+    if (homePlace?.lat != null) {
+      const moved = household.home_lat !== homePlace.lat || household.home_lng !== homePlace.lng;
+      if (moved) {
+        void ringTables.refreshForHome({ lat: homePlace.lat, lng: homePlace.lng, mode: h.travel_mode ?? travelMode ?? 'driving' })
+          .then(async (ring) => {
+            if (!ring?.notCensusedOutcodes?.length) return;
+            await censusRun.startRun({
+              label: `home · ${ring.cell}`,
+              outcodes: ring.notCensusedOutcodes,
+              startedBy: `household:${household.id}`,
+            }).catch(() => null);
+          })
+          .catch(() => null);
+      }
+    }
     res.json({ household: { id: h.id, name: h.name, defaultVisitMinutes: h.default_visit_minutes, maxTravelMinutes: h.max_travel_minutes, travelMode: h.travel_mode ?? null, defaultIntensity: h.default_intensity,
       home: h.home_lat != null ? { label: h.home_label, lat: h.home_lat, lng: h.home_lng } : null, homeRadiusMiles: h.home_radius_miles ?? 10,
       homePhotoUrl: h.home_photo_url ?? null, pace: paceOf(h), timezone: h.timezone, browse: browseOf(h) } });

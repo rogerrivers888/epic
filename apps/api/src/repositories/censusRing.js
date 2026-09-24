@@ -168,6 +168,9 @@ export async function censusInRing({ cells = [], outcodes = [] } = {}) {
 
   return {
     counts: Object.fromEntries([...counted].map(([k, set]) => [k, set.size])),
+    // The places behind each count, so a ranking can be built from exactly the
+    // set that was counted and never from a second, drifting idea of the ring.
+    refs: Object.fromEntries([...counted].map(([k, set]) => [k, [...set]])),
     // Places in a box that crosses the ring's edge: they are in the ring or
     // they are not, and the only way to know is to census that box finer. Never
     // dropped — a count that leaves them out silently undercounts, which is the
