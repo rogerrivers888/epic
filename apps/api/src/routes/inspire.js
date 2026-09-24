@@ -76,7 +76,6 @@ import { needsLookAround, lookAroundOutcome } from '../domain/lookAround.js';
 import { censusForRing, categoryPage, ASKED } from '../sources/ringSearch.js';
 import { boxAround, boxKm, outcodeOfCell } from '../domain/ring.js';
 import * as reach from '../repositories/reach.js';
-import * as ringTables from '../repositories/ringTables.js';
 import { sectorOf } from '../domain/reach.js';
 
 /**
@@ -454,7 +453,7 @@ inspire.get('/around', async (req, res, next) => {
     ring.bandBox = boxAround(ring.bandPoints ?? ring.points);
     // Counted properly: one place once per category, box-tested, with the
     // straddlers beside it (owner, 24 Sep 2026). Not the outcode sum.
-    const census = await censusForRing(ring);
+    const census = await censusForRing(ring, { mode, minutes });
 
     const taught = await shelfRules();
     const tax = await taxonomy();
@@ -593,7 +592,7 @@ inspire.get('/near', async (req, res, next) => {
     const ring = await ringFrom({ ...req.query, lat: centre.lat, lng: centre.lng, label }, { minutes, mode });
     if (ring) {
       ring.bandBox = boxAround(ring.bandPoints ?? ring.points);
-      const census = await censusForRing(ring);
+      const census = await censusForRing(ring, { mode, minutes });
       const taught = await shelfRules();
       const tax = await taxonomy();
       const meter = { google: 0 };
@@ -608,14 +607,6 @@ inspire.get('/near', async (req, res, next) => {
       // the screen"). They do not depend on each other, so they do not wait for
       // each other; a page's own next page still does, because the token comes
       // from the page before it.
-      // The depth of each shelf — how many places the census knows in this
-      // band — read from the ring's own rows, instantly, and never computed
-      // while the household waits (owner, 20 Sep 2026). A ring with no rows
-      // yet answers no depth, and is counted behind the screen for next time.
-      const depths = await ringTables.countsFor({ cell: ring.cell, mode, minutes }).catch(() => ({}));
-      if (!Object.keys(depths).length) {
-        void ringTables.refreshRing({ cell: ring.cell, mode, minutes }).catch(() => null);
-      }
       const asked = await Promise.all(Object.keys(ASKED).map(async (key) =>
         [key, await placesFor({ ring, category: key, page: 1, meter, taught, tax, householdId: household.id, minutes, mode, from: origin })]));
       for (const [key, got] of asked) {
@@ -642,12 +633,6 @@ inspire.get('/near', async (req, res, next) => {
           count: census.counts[key] ?? 0,
           unresolved: census.unresolved[key] ?? 0,
           floor: (census.unresolved[key] ?? 0) > 0 || census.missing.length > 0,
-          // How deep the shelf goes: what the census knows in this band, from
-          // the ring's own rows. The places behind it are showable — names are
-          // rented at display and paging walks the drawers — so it may be
-          // printed, as "10 of 41", and as "41+" where it is a floor.
-          depth: depths[key]?.places ?? null,
-          depthFloor: depths[key]?.floor ?? false,
           icon: tax.vocab?.categories?.[key]?.icon ?? null,
           // Food is a shelf again, not a door: it is bought the same way as
           // everything else now.

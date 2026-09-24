@@ -33,6 +33,7 @@ import { censusInRing } from '../repositories/censusRing.js';
 import { displaySlice } from './google.js';
 import { outcodeOfCell } from '../domain/ring.js';
 import * as placeIndex from '../repositories/placeIndex.js';
+import { countsFor, refreshRing } from '../repositories/ringTables.js';
 
 /** The same twelve hours the rented search pool keeps. */
 const TTL_MS = 12 * 3600_000;
@@ -156,13 +157,30 @@ export const ASKED = {
  * `missing` is the ring's outcodes the census has never reached, which is the
  * difference between "nothing here" and "we have not looked".
  */
-export async function censusForRing(ring) {
+export async function censusForRing(ring, { mode = 'driving', minutes = 30 } = {}) {
   const outcodes = ring?.outcodes ?? [];
   if (!outcodes.length) return { counts: {}, unresolved: {}, missing: [], floor: false };
-  const [inRing, byOutcode] = await Promise.all([
-    censusInRing({ cells: ring.band ?? ring.cells ?? [], outcodes }),
-    censusCounts(outcodes),
-  ]);
+
+  // The table first — the ring's own rows, written by the census cycle and by
+  // a home moving (owner, 20 Sep 2026: "read from that table, instantly, every
+  // time, never computed while the household waits"). Only a ring nobody has
+  // counted yet is counted live, and that one is written down behind the
+  // screen so the next look reads it.
+  const byOutcode = await censusCounts(outcodes);
+  const stored = ring?.cell ? await countsFor({ cell: ring.cell, mode, minutes }).catch(() => ({})) : {};
+  if (Object.keys(stored).length) {
+    const counts = Object.fromEntries(Object.entries(stored).map(([k, v]) => [k, v.places]));
+    const unresolved = Object.fromEntries(Object.entries(stored).map(([k, v]) => [k, v.unresolved]));
+    return {
+      counts,
+      unresolved,
+      missing: byOutcode.missing,
+      floor: byOutcode.missing.length > 0 || Object.values(stored).some((v) => v.floor || v.unresolved > 0),
+    };
+  }
+
+  const inRing = await censusInRing({ cells: ring.band ?? ring.cells ?? [], outcodes });
+  if (ring?.cell) void refreshRing({ cell: ring.cell, mode, minutes }).catch(() => null);
   const unresolved = inRing.unresolved ?? {};
   return {
     counts: inRing.counts ?? {},
