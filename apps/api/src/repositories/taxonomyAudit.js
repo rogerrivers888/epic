@@ -15,7 +15,7 @@ import { forget as forgetAttributes } from './placeAttributes.js';
 
 /** What the signals need, read in one pass. */
 export async function evidence() {
-  const [subs, rules, places, words, shown, opened, owned, types, pairs] = await Promise.all([
+  const [subs, rules, places, words, shown, opened, owned, types, pairs, labels, alsoIn, defaults] = await Promise.all([
     query('select key, label, category_key, active from shelf_subcategories'),
     query('select id, scope, subject, subject_label, subcategory, labels from shelf_rules'),
     query('select subcategory, count(*) n from place_index where subcategory is not null group by 1'),
@@ -49,7 +49,20 @@ export async function evidence() {
     query(`select venue_ref, found_by from place_subcategories where found_by is not null
             union
            select venue_ref, found_by from place_index where found_by is not null`),
+    // Our own labels, each drawer's second cabinets and its defaults: what an
+    // agreed set has to be able to see to know it has already been applied.
+    query('select key, active from place_attributes'),
+    query('select subcategory_key, category_key from shelf_subcategory_categories'),
+    query('select subcategory_key, attribute_key, yesno, from_value, to_value, choice, level from shelf_subcategory_attributes'),
   ]);
+  const alsoBySub = new Map();
+  for (const r of alsoIn.rows) alsoBySub.set(r.subcategory_key, [...(alsoBySub.get(r.subcategory_key) ?? []), r.category_key]);
+  const defaultsBySub = new Map();
+  for (const r of defaults.rows) {
+    const m = defaultsBySub.get(r.subcategory_key) ?? new Map();
+    m.set(r.attribute_key, { yesno: r.yesno, from: r.from_value, to: r.to_value, choice: r.choice, level: r.level });
+    defaultsBySub.set(r.subcategory_key, m);
+  }
 
   const byWord = new Map();
   for (const r of pairs.rows) {
@@ -93,6 +106,13 @@ export async function evidence() {
     words: words.rows
       .filter((w) => w.active && !w.decision)
       .map((w) => ({ key: w.key, label: w.label, subcategoryLabel: w.sub_label })),
+    // Every Google word with what has been decided about it, for the agreed
+    // sets: `words` above is only the undecided ones, and a word already
+    // said aside or already pointing somewhere is exactly what those need to see.
+    allWords: words.rows.map((w) => ({ key: w.key, decision: w.decision, points_at: w.points_at, active: w.active })),
+    labels: labels.rows,
+    alsoBySub,
+    defaultsBySub,
     unmapped: words.rows.filter((w) => w.active && !w.decision && !w.points_at),
     placesByWord: byWord,
     shownByRef: new Map(shown.rows.map((r) => [r.venue_ref, Number(r.n)])),
@@ -200,6 +220,20 @@ export function alreadyTrue(p, input) {
     if (p.action === 'split') {
       return Boolean(sub) && !input.rules.some((r) => r.subcategory === p.subject && !(r.scope === 'ours' && r.subject === p.subject));
     }
+    // A settle is done when every second cabinet is listed and every default
+    // reads as proposed — a null proposed means no row, not a row saying no.
+    if (p.action === 'settle') {
+      if (!sub) return false;
+      const also = input.alsoBySub?.get(p.subject) ?? [];
+      if ((p.numbers?.also_in ?? []).some((c) => !also.includes(c))) return false;
+      const have = input.defaultsBySub?.get(p.subject) ?? new Map();
+      return Object.entries(p.numbers?.defaults ?? {}).every(([attribute, value]) => {
+        const now = have.get(attribute) ?? null;
+        if (value == null) return now === null;
+        if (now === null) return false;
+        return ['yesno', 'from', 'to', 'choice', 'level'].every((k) => (value[k] ?? null) === (now[k] ?? null));
+      });
+    }
     return false;
   }
   if (p.subject_kind === 'kind') {
@@ -208,10 +242,14 @@ export function alreadyTrue(p, input) {
     if (p.action === 'repoint') return r.subcategory === p.proposed;
     return false;
   }
+  // One of our own labels: retired once it is off.
+  if (p.subject.startsWith('ours:')) {
+    const l = input.labels?.find((x) => x.key === p.subject.slice('ours:'.length));
+    return p.action === 'retire' ? Boolean(l) && l.active === false : false;
+  }
   // A word: a Google type by bare key, or a rule subject of any namespace.
-  if (p.subject.startsWith('ours:')) return false;
   const qualified = p.subject.includes(':');
-  const w = qualified ? null : input.words.find((x) => x.key === p.subject);
+  const w = qualified ? null : (input.allWords ?? input.words).find((x) => x.key === p.subject);
   const r = ruleFor(qualified ? p.subject : `google:${p.subject}`) ?? (qualified ? null : ruleFor(p.subject));
   if (p.action === 'exclude') return w ? w.decision === 'aside' || w.active === false : !r;
   if (p.action === 'repoint') {
@@ -229,7 +267,7 @@ export async function run({ by = null, extra = [], withAgreed = false } = {}) {
     ? (() => {
       const args = {
         have: new Set(input.subs.map((s) => s.key)),
-        words: new Set(input.words.map((w) => w.key)),
+        words: new Set(input.allWords.map((w) => w.key)),
         kinds: input.kindsByName,
         rules: new Set(input.rules.map((r) => r.subject)),
       };
@@ -648,20 +686,15 @@ export async function undo({ auditId, by = null }) {
           [d.key, d.columns.indoor, d.columns.for_kids]);
       }
     }
-    for (const key of snap.created ?? []) {
-      // A drawer this audit made goes away again. Anything filed into it since
-      // would block the delete, so it is switched off instead and said so.
-      const { rows: [used] } = await client.query(
-        'select count(*)::int n from shelf_rules where subcategory = $1', [key]);
-      if (used.n > 0) await client.query('update shelf_subcategories set active = false where key = $1', [key]);
-      else await client.query('delete from shelf_subcategories where key = $1', [key]);
-    }
     for (const s of snap.subcategories) {
       await client.query(
         'update shelf_subcategories set label = $2, category_key = $3, active = $4, updated_at = now() where key = $1',
         [s.key, s.label, s.category_key, s.active]);
     }
-    // The rules were deleted or repointed, so they go back by id.
+    // The rules were deleted or repointed, so they go back by id — and before
+    // a created drawer is judged, or the rules this audit moved into it read
+    // as somebody filing there since and the drawer is only switched off
+    // (Codex, 24 Sep 2026).
     for (const r of snap.rules) {
       await client.query(
         `insert into shelf_rules (id, scope, subject, subject_label, weights, reason, taught_by, seeded, subcategory, labels)
@@ -669,6 +702,17 @@ export async function undo({ auditId, by = null }) {
          on conflict (id) do update set subcategory = excluded.subcategory, labels = excluded.labels, updated_at = now()`,
         [r.id, r.scope, r.subject, r.subject_label, JSON.stringify(r.weights ?? {}), r.reason,
           r.taught_by, r.seeded, r.subcategory, r.labels]);
+    }
+    for (const key of snap.created ?? []) {
+      // A drawer this audit made goes away again. Anything filed into it since
+      // would block the delete, so it is switched off instead and said so.
+      const { rows: [used] } = await client.query(
+        'select count(*)::int n from shelf_rules where subcategory = $1', [key]);
+      if (used.n > 0) { await client.query('update shelf_subcategories set active = false where key = $1', [key]); continue; }
+      // The bar it inherited and its second cabinets go with it; a bar left
+      // behind would make the key read as a drawer that exists.
+      await client.query('delete from ready_bars where subcategory_key = $1', [key]);
+      await client.query('delete from shelf_subcategories where key = $1', [key]);
     }
     await client.query("update taxonomy_proposals set state = 'accepted' where audit_id = $1 and state = 'applied'", [auditId]);
     await client.query('update taxonomy_audits set undone_at = now() where id = $1', [auditId]);

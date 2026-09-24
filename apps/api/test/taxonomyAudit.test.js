@@ -561,9 +561,12 @@ test('a signed-off change that is already true is not proposed again', () => {
   const input = {
     subs: [{ key: 'days-out', label: 'Days out', active: false }, { key: 'water-park', label: 'Water parks', active: true },
       { key: 'landmarks', label: 'Landmarks & monuments', active: true }],
-    words: [{ key: 'library', decision: 'aside', active: false, points_at: null },
+    allWords: [{ key: 'library', decision: 'aside', active: false, points_at: null },
       { key: 'winery', decision: null, active: true, points_at: 'breweries-distilleries' },
       { key: 'ski_resort', decision: null, active: true, points_at: 'ski-resort' }],
+    labels: [{ key: 'rainy-day', active: false }, { key: 'kid-friendly', active: true }],
+    alsoBySub: new Map([['water-park', ['sport']]]),
+    defaultsBySub: new Map([['water-park', new Map([['indoor', { yesno: true, from: null, to: null, choice: null, level: null }]])]]),
     rules: [{ scope: 'labels', subject: 'google:winery', subcategory: 'breweries-distilleries' },
       { scope: 'labels', subject: 'osm:sport=archery', subcategory: 'have-a-go' },
       { scope: 'kind', subject: 'Q1', subcategory: 'breweries-distilleries' },
@@ -582,7 +585,67 @@ test('a signed-off change that is already true is not proposed again', () => {
   assert.equal(alreadyTrue(p('word', 'osm:sport=bowls', 'repoint', 'have-a-go'), input), false);
   assert.equal(alreadyTrue(p('kind', 'Q1', 'repoint', 'breweries-distilleries'), input), true);
   assert.equal(alreadyTrue(p('kind', 'Q9', 'repoint', 'anywhere'), input), true, 'a kind rule that is gone has nothing to move');
-  assert.equal(alreadyTrue(p('word', 'ours:rainy-day', 'retire'), input), false, 'labels are judged at apply');
+  assert.equal(alreadyTrue(p('word', 'ours:rainy-day', 'retire'), input), true, 'a label already off is not retired again');
+  assert.equal(alreadyTrue(p('word', 'ours:kid-friendly', 'retire'), input), false);
+  const settle = (subject, numbers) => ({ subject_kind: 'subcategory', subject, action: 'settle', numbers });
+  assert.equal(alreadyTrue(settle('water-park', { also_in: ['sport'], defaults: { indoor: { yesno: true } } }), input), true);
+  assert.equal(alreadyTrue(settle('water-park', { also_in: ['fun'] }), input), false, 'a cabinet not yet listed');
+  assert.equal(alreadyTrue(settle('water-park', { defaults: { indoor: { yesno: false } } }), input), false, 'a default that reads differently');
+  assert.equal(alreadyTrue(settle('water-park', { defaults: { 'kid-friendly': null } }), input), true, 'null means no row, and there is none');
+  assert.equal(alreadyTrue(settle('water-park', { defaults: { indoor: null } }), input), false, 'null against a row that exists');
+});
+
+test('undoing a create that was filled in the same audit deletes the drawer, its bar and its second cabinet', async (t) => {
+  await query(`insert into shelf_categories (key, label) values ('sport', 'Sport'), ('adrenaline', 'Adrenaline') on conflict (key) do nothing`);
+  await query(`insert into shelf_subcategories (category_key, key, label) values ('sport', 'old-home', 'Old home') on conflict (key) do nothing`);
+  await query(`insert into shelf_rules (scope, subject, subject_label, subcategory, labels) values ('labels', 'osm:sport=born', 'Born', 'old-home', array['osm:sport=born'])
+               on conflict (scope, subject) do update set subcategory = 'old-home'`);
+  await seedBars();
+  t.after(async () => {
+    await query(`delete from taxonomy_proposals where subject in ('new-born', 'osm:sport=born')`);
+    await query(`delete from shelf_rules where subject = 'osm:sport=born'`);
+    await query(`delete from ready_bars where subcategory_key = 'new-born'`);
+    await query(`delete from shelf_subcategories where key in ('new-born', 'old-home')`);
+  });
+  const audit = await run({
+    by: 'test',
+    extra: [
+      { flag: 'test-born', subject_kind: 'subcategory', subject: 'new-born', action: 'create', proposed: 'New born', because: 'test', moves: 0,
+        numbers: { category: 'sport', also_in: ['adrenaline'] } },
+      { flag: 'test-born', subject_kind: 'word', subject: 'osm:sport=born', action: 'repoint', proposed: 'new-born', because: 'test', moves: 0, numbers: {} },
+    ],
+  });
+  await query(`update taxonomy_proposals set state = 'accepted' where audit_id = $1`, [audit.id]);
+  await apply({ auditId: audit.id, by: 'test' });
+  const { rows: [moved] } = await query(`select subcategory from shelf_rules where subject = 'osm:sport=born'`);
+  assert.equal(moved.subcategory, 'new-born');
+  const { rows: bars } = await query(`select count(*)::int n from ready_bars where subcategory_key = 'new-born'`);
+  assert.ok(bars[0].n > 0, 'the new drawer inherited a bar');
+  const { rows: also } = await query(`select category_key from shelf_subcategory_categories where subcategory_key = 'new-born'`);
+  assert.deepEqual(also.map((r) => r.category_key), ['adrenaline']);
+
+  await undo({ auditId: audit.id, by: 'test' });
+  const { rows: [back] } = await query(`select subcategory from shelf_rules where subject = 'osm:sport=born'`);
+  assert.equal(back.subcategory, 'old-home');
+  const { rows: gone } = await query(`select count(*)::int n from shelf_subcategories where key = 'new-born'`);
+  assert.equal(gone[0].n, 0, 'the drawer is deleted, not merely switched off');
+  const { rows: bars2 } = await query(`select count(*)::int n from ready_bars where subcategory_key = 'new-born'`);
+  assert.equal(bars2[0].n, 0, 'and its bar went with it');
+});
+
+test('the agreed sets see decided words, so an excluded word is not proposed again and a generic one can be', async (t) => {
+  await query(`insert into taxonomy_labels (namespace, key, label, decision, active) values
+               ('google', 'test_generic', 'Test generic', 'generic', true),
+               ('google', 'test_aside', 'Test aside', 'aside', false)
+               on conflict (namespace, key) do update set decision = excluded.decision, active = excluded.active`);
+  t.after(() => query(`delete from taxonomy_labels where key in ('test_generic', 'test_aside')`));
+  const { evidence } = await import('../src/repositories/taxonomyAudit.js');
+  const input = await evidence();
+  assert.ok(input.allWords.some((w) => w.key === 'test_generic' && w.decision === 'generic'));
+  assert.ok(!input.words.some((w) => w.key === 'test_generic'), 'the signals still see only the undecided');
+  const p = (subject, action) => ({ subject_kind: 'word', subject, action, proposed: 'Not in Epic' });
+  assert.equal(alreadyTrue(p('test_aside', 'exclude'), input), true);
+  assert.equal(alreadyTrue(p('test_generic', 'exclude'), input), false);
 });
 
 test('a settle sets a second cabinet and a default, mirrors the old column, and undo puts all three back', async (t) => {

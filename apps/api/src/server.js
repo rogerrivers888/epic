@@ -5,7 +5,7 @@ import express from 'express';
 import { perSearchCost } from './sources/pricing.js';
 import { usageBetween, windows } from './sources/usage.js';
 import cors from 'cors';
-import { ping, pool } from './db.js';
+import { pool } from './db.js';
 import householdRoutes from './routes/household.js';
 import discoverRoutes from './routes/discover.js';
 import tripRoutes from './routes/trips.js';
@@ -76,6 +76,7 @@ import { health } from './health.js';
 import { noteInvariantRun } from './repositories/settings.js';
 import { expireRentedCoordinates } from './sources/census.js';
 import * as censusRun from './sources/censusRun.js';
+import * as ringTables from './repositories/ringTables.js';
 import * as ground from './sources/groundCounts.js';
 import { resumeCollections } from './routes/placeIndex.js';
 import * as providerCalls from './repositories/providerCalls.js';
@@ -661,6 +662,11 @@ void indexBuilt
 // is where scheduled checks live (owner, 24 Sep 2026).
 const BAR_CHECK_EVERY_MS = 24 * 3600_000;
 setInterval(() => { void runBarChecks('daily').catch(() => {}); }, BAR_CHECK_EVERY_MS).unref?.();
+// The rings' own counts, on the census's thirty-day cycle (owner, 20 Sep 2026:
+// "refreshed on the 30-day census cycle… never computed while the household
+// waits"). Checked daily; a ring older than the window is counted again from
+// whatever the census now knows. Bounded by the number of homes, not sectors.
+setInterval(() => { void ringTables.refreshDue().catch(() => {}); }, BAR_CHECK_EVERY_MS).unref?.();
 void indexBuilt.then(() => sweep());
 setInterval(() => { void sweep(); }, 3600_000).unref?.();
 
