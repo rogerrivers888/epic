@@ -167,7 +167,13 @@ test('a ring is counted once per place, box-tested, with the straddlers beside i
   // size — against 16,258 counted this way.
   const { censusForRing } = search;
   const none = await censusForRing({ outcodes: [], cells: [] });
-  assert.deepEqual(none, { counts: {}, unresolved: {}, missing: [], floor: false }, 'no ring, no number');
+  // The four facts, not the exact object: the table-backed version adds a
+  // `from` saying where the number came from, and a test pinned to the shape
+  // would go red the moment it landed (24 Sep 2026).
+  assert.deepEqual(none.counts, {}, 'no ring, no number');
+  assert.deepEqual(none.unresolved, {});
+  assert.deepEqual(none.missing, []);
+  assert.equal(none.floor, false);
 
   // A ring whose outcodes the census has never reached is a floor by
   // definition, and says which ones.
