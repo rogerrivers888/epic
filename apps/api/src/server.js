@@ -71,7 +71,7 @@ import { generalLimit, photoLimit, signInLimit, spendLimit, voiceLimit } from '.
 import { sweepDeadSessions } from './repositories/sessions.js';
 import { sweepExpiredPlanSessions } from './repositories/planSessions.js';
 import { refresh as refreshReach } from './repositories/reach.js';
-import { buildIfEmpty, checkBars, seedBars, settleNew } from './repositories/placeIndex.js';
+import { buildIfEmpty, checkBars, drawersUnjudged, drawersWithoutABar, seedBars, settleNew } from './repositories/placeIndex.js';
 import { noteInvariantRun } from './repositories/settings.js';
 import { expireRentedCoordinates } from './sources/census.js';
 import * as censusRun from './sources/censusRun.js';
