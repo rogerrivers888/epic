@@ -92,6 +92,18 @@ test('a stale tile is counted again rather than re-dated on the strength of old 
   t.after(clean);
   await tileThatWasCounted(40);
 
+  // The preconditions, asserted by name. This test went red once on a solo
+  // run of a green tree (24 Sep 2026) and nothing in the failure said which
+  // of three things had not held: that the tile was still there, that it was
+  // owed a count, or that the register fake was the one being asked. A red
+  // that names its cause is a bug report; one that does not is an argument.
+  const { rows: still } = await query(
+    `select state, fhrs_authorities, fhrs_at from census_tiles where grid_key = $1`, [TILE]);
+  assert.equal(still.length, 1, 'the fixture tile is still on the table when the sweep starts');
+  assert.deepEqual(still[0].fhrs_authorities, [COUNCIL], 'and still names its council');
+  const contributed = await contributorsTo(TILE, 'fhrs', DRAWERS, { staleDays: 30, asked: DRAWERS.map((d) => askedFhrs()[d]) });
+  assert.equal(contributed.size, 0, 'and nothing fresh has been counted for it, so the council is owed');
+
   const asked = [];
   const out = await sweepFhrs({ authorities: 4, staleDays: 30, register: registerThatCounts(asked), only: [TILE] });
 
