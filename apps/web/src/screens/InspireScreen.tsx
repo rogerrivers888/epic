@@ -517,7 +517,12 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
       const kinds = new Set(inMode.map((i) => FOOD_KINDS[i.category]).filter(Boolean));
       return [all, ...FOOD_CATEGORIES.filter((k) => !pool || kinds.has(k)).map((k) => ({ key: k, label: FOOD_LABELS[k] }))];
     }
-    const cats = (pool?.moods ?? []).filter((m) => m.key !== 'food' && (m.count ?? 0) > 0).map((m) => ({ key: m.key, label: m.label }));
+    // Which shelves exist is decided by what was bought for display, never by
+    // the census figure: a ring the census has not reached counts nought while
+    // holding twenty paid results, and gating on the count emptied the screen
+    // (Codex, 24 Sep 2026). The census count is the headline on the shelf,
+    // not the reason the shelf is there.
+    const cats = (pool?.moods ?? []).filter((m) => m.key !== 'food' && (m.shown ?? m.count ?? 0) > 0).map((m) => ({ key: m.key, label: m.label }));
     return [all, ...(pool ? cats : ACTIVITY_CATEGORIES.map((k) => ({ key: k, label: label(k) })))];
   }, [mode, pool, label, inMode]);
   const categories = stripItems.filter((s) => s.key !== ALL);
