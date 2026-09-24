@@ -1574,6 +1574,23 @@ function CensusBoard({ where }: { where: string }) {
       cell: (r) => <Num n={r.scored || null} /> },
     { key: 'cut', label: 'Cut off', tip: 'censusCutOff', width: 84, align: 'right',
       cell: (r) => <Num n={r.saturated || null} /> },
+    // Neither in nor out, and never hidden. A count drawn with these out of
+    // sight is a floor reading as a total: Bloomsbury showed 3 places with
+    // hundreds sitting here, on the board taxonomy decisions come from (owner,
+    // 24 Sep 2026 — "the fourth time today a diagnostic has spoken when it
+    // could not see").
+    { key: 'unresolved', label: 'Unresolved', tip: 'censusUnresolved', width: 104, align: 'right',
+      cell: (r) => <Num n={r.unresolved || null} /> },
+    // Which kind of question the count came from. Text is the one to open a
+    // few of before trusting the number (owner, 21 Sep 2026).
+    { key: 'sourced', label: 'Found by', tip: 'censusSourced', width: 92, align: 'right',
+      cell: (r) => (
+        <Text style={styles.rowNote}>
+          {r.sourced === 'text' ? `text ${r.text_count ?? 0}`
+            : r.sourced === 'mixed' ? `mixed${(r.text_count ?? 0) > 0 ? ` · text ${r.text_count}` : ''}`
+            : (r.sourced ?? '')}
+        </Text>
+      ) },
   ];
 
   return (

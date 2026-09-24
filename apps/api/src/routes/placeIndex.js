@@ -698,6 +698,18 @@ router.get('/census', requires('view_library'), async (req, res, next) => {
               sum(coalesce(a.surfaced_count, 0))::int      as surfaced,
               sum(a.scored_count)::int                     as scored,
               sum(a.saturated)::int                        as saturated,
+              -- Neither in nor out, and never hidden: a count drawn with these
+              -- out of sight is a floor reading as a total. Bloomsbury showed 3
+              -- places with hundreds sitting here (owner, 24 Sep 2026).
+              sum(coalesce(a.unresolved, 0))::int          as unresolved,
+              -- How the drawer was found, across the outcodes on the board. One
+              -- word where every outcode agrees, "mixed" where they do not, and
+              -- the text-only share either way — the number to open a few of
+              -- before trusting (owner, 21 Sep 2026).
+              case when count(distinct a.sourced) = 1 then min(a.sourced)
+                   when count(a.sourced) = 0 then null
+                   else 'mixed' end                        as sourced,
+              sum(coalesce(a.text_count, 0))::int          as text_count,
               -- Null, not nought, where nobody has run the free cross-check.
               case when count(a.osm_count) = 0 then null else sum(coalesce(a.osm_count, 0))::int end  as osm,
               case when count(a.fhrs_count) = 0 then null else sum(coalesce(a.fhrs_count, 0))::int end as fhrs,
