@@ -517,7 +517,7 @@ async function owedFhrs(drawers, asked, { staleDays, limit = 2000, only = null }
         -- reach another file's tiles: the suite runs files in parallel on one
         -- database, and a register fake that answers for any box was
         -- downloading a council onto somebody else's fixture (24 Sep 2026).
-        and ($4::text[] is null or t.grid_key = any($4))
+        and ($5::text[] is null or t.grid_key = any($5))
         and (t.fhrs_authorities is null
              or exists (
                select 1
