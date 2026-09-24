@@ -242,6 +242,49 @@ export async function drawersUnjudged() {
   return rows;
 }
 
+/**
+ * Both invariants, run as one check, repaired where they can be, and the whole
+ * thing said back as a record.
+ *
+ * This was the boot-time block in server.js. It is a function now because the
+ * owner asked for it on a schedule (24 Sep 2026: "Run them on a schedule
+ * in-process in apps/api, alongside the existing loops, daily is fine") and a
+ * block cannot be scheduled, only copied -- and two copies of a repair drift.
+ *
+ * `repair` is on by default: the deploy and the daily both mend what they find,
+ * because the repair is one call and leaving it for somebody to notice is how
+ * 1,251 places sat unscored behind a green check. Off, it only reports, which
+ * is what a test wants.
+ *
+ * What comes back is the record the Overview draws: when, what was bare, what
+ * was unjudged, how many places were rescored, and what was still wrong after.
+ * An error is part of the record too -- a check that threw is not a check that
+ * passed, and it must not read as one.
+ */
+export async function checkBars({ repair = true, trigger = 'manual' } = {}) {
+  const ranAt = new Date().toISOString();
+  const out = { ranAt, trigger, bare: [], unjudged: [], rescored: 0, left: [], error: null };
+  try {
+    out.bare = (await drawersWithoutABar()).map((d) => d.key);
+    const unjudged = await drawersUnjudged();
+    out.unjudged = unjudged.map((d) => ({ key: d.key, places: d.places }));
+    if (repair && unjudged.length) {
+      for (const d of unjudged) {
+        const r = await rescore({ subcategory: d.key }).catch(() => null);
+        out.rescored += r?.rescored ?? 0;
+      }
+      // The boards read `area_stats`, not `place_index` (Codex, 21 Sep 2026).
+      await refreshStats().catch(() => {});
+      out.left = (await drawersUnjudged()).map((d) => d.key);
+    } else {
+      out.left = out.unjudged.map((d) => d.key);
+    }
+  } catch (err) {
+    out.error = err.message;
+  }
+  return out;
+}
+
 export async function seedBars() {
   const seed = defaultBars();
   const { rows: subs } = await query('select key from shelf_subcategories where active');

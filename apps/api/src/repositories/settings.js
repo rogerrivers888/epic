@@ -94,3 +94,35 @@ export async function setThreshold(key, value) {
   );
   return { ...spec, value: clamped, changed: clamped !== spec.value };
 }
+
+/**
+ * When the bar invariants last ran, and what they found.
+ *
+ * The owner, 24 Sep 2026: "Surface the result on Overview: when they last ran
+ * and what they found. A silent pass and a run that never happened must not
+ * look the same." So the record is the thing: no row is "never ran", and a row
+ * saying nought is a pass. Kept as one setting holding the last run and a
+ * short history rather than a table, because the question is "when did this
+ * last run and what did it see", not an audit trail -- and the history is
+ * enough to tell a repair that stuck from one that keeps coming back.
+ */
+const INVARIANTS_KEY = 'invariants.bars';
+const HISTORY = 14;
+
+export async function invariantRuns() {
+  const { rows } = await query('select value from app_settings where key = $1', [INVARIANTS_KEY]);
+  const v = rows[0]?.value;
+  if (!v || typeof v !== 'object' || !v.last) return null;
+  return { last: v.last, history: Array.isArray(v.history) ? v.history : [] };
+}
+
+export async function noteInvariantRun(run) {
+  const prior = await invariantRuns();
+  const history = [run, ...(prior?.history ?? [])].slice(0, HISTORY);
+  await query(
+    `insert into app_settings (key, value, updated_at) values ($1, $2, now())
+     on conflict (key) do update set value = excluded.value, updated_at = now()`,
+    [INVARIANTS_KEY, JSON.stringify({ last: run, history })],
+  );
+  return run;
+}

@@ -107,6 +107,8 @@ export function Overview({ data, onGo, canManage, onThreshold }: {
 
       <BlindNote data={data} />
 
+      <Checks data={data} />
+
       <View style={{
         flexDirection: 'row',
         gap: 40,
@@ -171,6 +173,60 @@ export function Overview({ data, onGo, canManage, onThreshold }: {
         </View>
       </View>
     </>
+  );
+}
+
+/**
+ * The bar invariants: when they last ran, and what they found.
+ *
+ * One line. Three states, and the first two must not look alike: never run,
+ * ran and found nothing, ran and found something. "A silent pass and a run that
+ * never happened must not look the same" (owner, 24 Sep 2026). The reasoning
+ * is behind the mark, as the house rule requires.
+ */
+function Checks({ data }: { data: FilingOverview }) {
+  const r = data.invariants?.last ?? null;
+  if (!r) {
+    return (
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, borderLeftWidth: 2, borderLeftColor: WARN, paddingLeft: 14, paddingVertical: 2 }}>
+        <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: WARN }}>
+          The bar checks have never run
+        </Text>
+        <Mark label="WHY" tone="warn"
+              title={'Two invariants run at every deploy and once a day: no active drawer without a bar, and no drawer '
+                + 'whose places were never judged against its bar. Until the first run there is no record, and no '
+                + 'record is not the same as a clean one.'} />
+      </View>
+    );
+  }
+  const found = r.bare.length + r.unjudged.length;
+  const tone: 'warn' | 'lime' | 'dim' = r.error || r.left.length ? 'warn' : found ? 'lime' : 'dim';
+  const colour = tone === 'warn' ? WARN : tone === 'lime' ? LIME : desk.inkDim;
+  const said = r.error
+    ? `failed — ${r.error}`
+    : found === 0
+      ? 'nothing found'
+      : [
+        r.bare.length ? `${r.bare.length} drawer${r.bare.length === 1 ? '' : 's'} with no bar` : null,
+        r.unjudged.length ? `${r.unjudged.length} unjudged, ${r.rescored.toLocaleString()} places rescored` : null,
+        r.left.length ? `${r.left.length} still unjudged` : null,
+      ].filter(Boolean).join(' · ');
+  const detail = [
+    ...r.bare.map((k) => `no bar: ${k}`),
+    ...r.unjudged.map((d) => `unjudged: ${d.key} (${d.places} places)`),
+    ...r.left.map((k) => `still unjudged: ${k}`),
+  ];
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, borderLeftWidth: 2, borderLeftColor: colour, paddingLeft: 14, paddingVertical: 2 }}>
+      <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: colour }}>
+        Bar checks ran {when(r.ranAt)} ({r.trigger}) — {said}
+      </Text>
+      <Mark label={detail.length ? 'WHAT' : 'WHY'} tone={tone === 'dim' ? 'dim' : tone}
+            title={detail.length
+              ? detail.join('\n')
+              : 'Every active drawer has a bar, and every drawer with places has at least one judged against it. '
+                + 'This is a pass, not an absence: the check ran and looked.'} />
+    </View>
   );
 }
 

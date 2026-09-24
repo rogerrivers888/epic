@@ -2,7 +2,25 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mixed, nobodyGoes, notVisitable, orphans, primaryMismatch, singletons } from '../src/domain/taxonomyAudit.js';
 import { agreed, DELIVERY_OUT, STRUCTURAL } from '../src/domain/taxonomyCleanup.js';
-import { effectOf } from '../src/repositories/taxonomyAudit.js';
+
+// A database of this file's own, built from the committed migrations, like the
+// other database-backed files. These tests used to run against whatever the
+// local dev database held, and on 24 Sep 2026 that database was recreated
+// empty mid-session -- thirteen tests failed with "relation does not exist",
+// none of which was a fault in the code under test. A test that depends on
+// what somebody's dev database happens to contain is not a test.
+//
+// The repositories are imported *after* the database is built, not hoisted:
+// each one opens the shared pool the moment it is imported, and a static
+// import would bind that pool to whatever DATABASE_URL said before
+// `testDatabase()` repointed it. The domain modules above are pure and safe.
+import { testDatabase } from './helpers/db.js';
+const { query, pool } = await testDatabase();
+const { effectOf, apply, consequence, run, undo } = await import('../src/repositories/taxonomyAudit.js');
+const { drawersUnjudged, drawersWithoutABar, inheritBar, rescore, seedBars, checkBars } = await import('../src/repositories/placeIndex.js');
+const { invariantRuns, noteInvariantRun } = await import('../src/repositories/settings.js');
+
+test.after(() => pool.end());
 
 const subs = [
   { key: 'one', label: 'One rule', category_key: 'fun', active: true },
@@ -131,8 +149,6 @@ test('the effect of a set is counted before it is applied', () => {
 
 // --- what Codex found in the apply path, 20 Sep 2026 -----------------------
 
-import { query } from '../src/db.js';
-import { apply, consequence, run, undo } from '../src/repositories/taxonomyAudit.js';
 
 const tidy = async () => {
   await query("delete from taxonomy_labels where key in ('tmp_word','tmp_two')");
@@ -251,7 +267,6 @@ test('the consequence line refuses an empty ask rather than answering for everyt
 
 // --- the invariant, against data rather than the schema --------------------
 
-import { drawersUnjudged, drawersWithoutABar, inheritBar, rescore, seedBars } from '../src/repositories/placeIndex.js';
 
 test('a drawer made outside a migration still gets a bar, and it says it was inherited', async (t) => {
   t.after(async () => {
@@ -259,10 +274,14 @@ test('a drawer made outside a migration still gets a bar, and it says it was inh
     await query("delete from shelf_subcategories where key = 'tmp-made'");
   });
   // A sibling with a bar somebody wrote down, so there is something to inherit.
+  // Bars are seeded at runtime, not by a migration, so a fresh database has
+  // none until `seedBars` runs -- which is also what the deploy does first.
+  await seedBars();
   const { rows: [sibling] } = await query(
     `select category_key from shelf_subcategories s
       where s.active and exists (select 1 from ready_bars b where b.subcategory_key = s.key)
       limit 1`);
+  assert.ok(sibling, 'seeding gave at least one drawer a bar to inherit from');
   await query(
     `insert into shelf_subcategories (key, label, category_key, active)
      values ('tmp-made', 'Made by an API', $1, true)
@@ -410,4 +429,66 @@ test('the unjudged count is places, not places times facts', async (t) => {
   const found = (await drawersUnjudged()).find((d) => d.key === 'tmp-made');
   assert.ok(found, 'it is caught');
   assert.equal(found.places, 3, `three places, not three times ${bar.facts}`);
+});
+
+// --- the checks, as a record ---------------------------------------------------
+
+
+test('a check that has never run is null, and a run that found nothing is not', async (t) => {
+  t.after(() => query("delete from app_settings where key = 'invariants.bars'"));
+  await query("delete from app_settings where key = 'invariants.bars'");
+  assert.equal(await invariantRuns(), null, 'never ran');
+
+  const run = await checkBars({ repair: false, trigger: 'manual' });
+  assert.equal(run.error, null);
+  assert.ok(run.ranAt);
+  await noteInvariantRun(run);
+
+  const got = await invariantRuns();
+  assert.ok(got, 'a record now exists');
+  assert.equal(got.last.ranAt, run.ranAt);
+  assert.equal(got.history.length, 1);
+  assert.deepEqual({ bare: got.last.bare, left: got.last.left }, { bare: [], left: [] },
+    'and what it found is written down, even when that is nothing');
+});
+
+test('the check sees an unjudged drawer, repairs it, and says so in its record', async (t) => {
+  t.after(async () => {
+    await query("delete from place_index where venue_ref = 'test:checked'");
+    await query("delete from ready_bars where subcategory_key = 'tmp-made'");
+    await query("delete from shelf_subcategories where key = 'tmp-made'");
+    await query("delete from app_settings where key = 'invariants.bars'");
+  });
+  const { rows: [sib] } = await query('select category_key from shelf_subcategories where active limit 1');
+  await query(
+    `insert into shelf_subcategories (key, label, category_key, active)
+     values ('tmp-made', 'Made by an API', $1, true)
+     on conflict (key) do update set active = true`, [sib.category_key]);
+  await inheritBar('tmp-made');
+  const unset = JSON.stringify({ set: false, held: [], judged: [], missing: [], notCounted: [] });
+  await query(
+    `insert into place_index (venue_ref, subcategory, country_code, score_parts)
+     values ('test:checked', 'tmp-made', 'GB', $1::jsonb)
+     on conflict (venue_ref) do update set subcategory = 'tmp-made', score_parts = $1::jsonb`, [unset]);
+
+  const seen = await checkBars({ repair: false });
+  assert.ok(seen.unjudged.some((d) => d.key === 'tmp-made'), 'reported without repair');
+  assert.ok(seen.left.includes('tmp-made'), 'and still wrong, because nothing was repaired');
+
+  const fixed = await checkBars({ repair: true, trigger: 'daily' });
+  assert.ok(fixed.unjudged.some((d) => d.key === 'tmp-made'), 'the record keeps what it found');
+  assert.ok(!fixed.left.includes('tmp-made'), 'and it is not left wrong');
+  assert.equal(fixed.trigger, 'daily');
+});
+
+test('the history keeps the last fourteen runs, newest first', async (t) => {
+  t.after(() => query("delete from app_settings where key = 'invariants.bars'"));
+  await query("delete from app_settings where key = 'invariants.bars'");
+  for (let i = 0; i < 16; i += 1) {
+    await noteInvariantRun({ ranAt: `2026-09-${String(i + 1).padStart(2, '0')}T00:00:00.000Z`, trigger: 'daily', bare: [], unjudged: [], rescored: 0, left: [], error: null });
+  }
+  const got = await invariantRuns();
+  assert.equal(got.history.length, 14);
+  assert.equal(got.last.ranAt, '2026-09-16T00:00:00.000Z');
+  assert.equal(got.history[0].ranAt, got.last.ranAt, 'newest first');
 });

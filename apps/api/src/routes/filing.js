@@ -55,7 +55,7 @@ import * as placeIndex from '../repositories/placeIndex.js';
 import { currentHousehold } from './household.js';
 import * as taxonomyAudit from '../repositories/taxonomyAudit.js';
 import { CORPUS_OPENS, auditAll } from '../domain/taxonomyAudit.js';
-import { setThreshold, thresholds, thresholdValues } from '../repositories/settings.js';
+import { invariantRuns, setThreshold, thresholds, thresholdValues } from '../repositories/settings.js';
 import {
   STAGES, clearsOf, diagnose, headlineOf, livenessOf, saturationOf, stageOf,
 } from '../domain/runFunnel.js';
@@ -90,7 +90,7 @@ const townOf = (rec) => {
 filingRoutes.get('/overview', requires('view_library'), async (_req, res, next) => {
   try {
     const limits = await thresholdValues();
-    const [cands, pen, audit, drawers, runs, mine] = await Promise.all([
+    const [cands, pen, audit, drawers, runs, mine, checks] = await Promise.all([
       // A word can be judged when it is a feature and enough places raised it.
       query(`select count(*)::int n from harvest_candidates
               where status = 'new' and kind = 'feature' and places_seen >= $1`, [limits.sightingFloor]),
@@ -102,6 +102,10 @@ filingRoutes.get('/overview', requires('view_library'), async (_req, res, next) 
       query(`select id, kind, status, places, candidates, cost_usd, started_at, finished_at, subcategories
                from vocabulary_runs order by started_at desc limit 4`),
       unengagedShare(),
+      // When the bar invariants last ran and what they found. Null is "never
+      // ran", which the screen must draw differently from "ran and found
+      // nothing" (owner, 24 Sep 2026).
+      invariantRuns().catch(() => null),
     ]);
 
     const open = audit?.groups?.reduce((n, g) => n + (g.open ?? 0), 0) ?? 0;
@@ -138,6 +142,7 @@ filingRoutes.get('/overview', requires('view_library'), async (_req, res, next) 
       // of what a household is shown got there through a mapping nobody has
       // ever engaged with.
       unengaged: mine,
+      invariants: checks,
       thresholds: await thresholds(),
     });
   } catch (err) { next(err); }

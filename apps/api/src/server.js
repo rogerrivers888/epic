@@ -71,7 +71,8 @@ import { generalLimit, photoLimit, signInLimit, spendLimit, voiceLimit } from '.
 import { sweepDeadSessions } from './repositories/sessions.js';
 import { sweepExpiredPlanSessions } from './repositories/planSessions.js';
 import { refresh as refreshReach } from './repositories/reach.js';
-import { buildIfEmpty, drawersUnjudged, drawersWithoutABar, refreshStats, rescore, seedBars, settleNew } from './repositories/placeIndex.js';
+import { buildIfEmpty, checkBars, seedBars, settleNew } from './repositories/placeIndex.js';
+import { noteInvariantRun } from './repositories/settings.js';
 import { expireRentedCoordinates } from './sources/census.js';
 import * as censusRun from './sources/censusRun.js';
 import * as ground from './sources/groundCounts.js';
@@ -653,48 +654,43 @@ const sweep = async () => {
 const indexBuilt = buildIfEmpty()
   .then((r) => { if (r?.built) console.log(`epic-api: places — built the index for the first time, ${r.places} place(s)`); })
   .catch((err) => console.warn(`epic-api: places — could not build the index: ${err.message}`));
-// On deploy: give every drawer that has none a bar, then say what is still
-// bare. `seedBars` uses the coded list where there is one and inherits where
-// there is not, so a drawer created through an API since the last deploy is
-// judged on something by the time anybody looks (owner, 21 Sep 2026).
+// On deploy: give every drawer that has none a bar, then run the invariants.
+// `seedBars` uses the coded list where there is one and inherits where there is
+// not, so a drawer created through an API since the last deploy is judged on
+// something by the time anybody looks (owner, 21 Sep 2026).
+//
+// The invariants themselves are `checkBars`, one function, because they also
+// run on a schedule now and a block cannot be scheduled, only copied. Every run
+// -- the deploy's and the daily's -- is written down, so the Overview can say
+// when they last ran and what they found. A run that never happened and a run
+// that found nothing must never look the same (owner, 24 Sep 2026).
+const runBarChecks = async (trigger) => {
+  const run = await checkBars({ repair: true, trigger });
+  await noteInvariantRun(run).catch((err) => console.warn(`epic-api: places — could not record the bar check: ${err.message}`));
+  if (run.error) { console.error(`epic-api: places — the bar check failed: ${run.error}`); return run; }
+  if (run.bare.length) console.warn(`epic-api: places — ${run.bare.length} active drawer(s) with no bar: ${run.bare.join(', ')}`);
+  if (run.unjudged.length) {
+    // Loud: a bar nobody's places have been judged against is worse than no bar,
+    // because the first invariant reads clean over it.
+    console.error(`epic-api: places — ${run.unjudged.length} drawer(s) had a bar and not one judged place: `
+      + `${run.unjudged.map((d) => `${d.key} (${d.places})`).join(', ')} — rescored ${run.rescored} place(s)`);
+  }
+  if (run.left.length) console.error(`epic-api: places — still unjudged after rescoring: ${run.left.join(', ')}`);
+  return run;
+};
 void indexBuilt
   .then(() => seedBars())
   .then((out) => {
-    // A bar arriving does not score anything by itself, so `seedBars` rescores
-    // the drawers that gained one. Saying how many, because "the invariant is
-    // clean" and "the places are judged" are two different facts and the second
-    // is the one this was for (Codex, 21 Sep 2026).
     if (out?.gained?.length) {
       console.log(`epic-api: places — gave ${out.gained.length} drawer(s) a bar and rescored ${out.rescored} place(s)`);
     }
-    return drawersWithoutABar();
-  })
-  .then(async (bare) => {
-    if (bare.length) {
-      console.warn(`epic-api: places — ${bare.length} active drawer(s) with no bar: ${bare.map((d) => d.key).join(', ')}`);
-    }
-    // The second invariant, and this one is loud. A bar nobody's places have
-    // been judged against is worse than no bar: the first invariant reads clean
-    // over it. Repaired here rather than only reported, because the repair is
-    // one call and leaving it for somebody to notice is how 1,251 places sat
-    // unscored behind a green check (21 Sep 2026).
-    const unjudged = await drawersUnjudged();
-    if (!unjudged.length) return;
-    console.error(`epic-api: places — ${unjudged.length} drawer(s) have a bar and not one judged place: `
-      + `${unjudged.map((d) => `${d.key} (${d.places})`).join(', ')} — rescoring`);
-    for (const d of unjudged) await rescore({ subcategory: d.key }).catch(() => {});
-    // The boards read `area_stats`, not `place_index`. Rescoring without this
-    // leaves the invariant clean and every ready count and average on the
-    // Places boards stale -- indefinitely, if nothing else rebuilds the
-    // rollups. `seedBars` and the bar-edit route both refresh; this did not
-    // (Codex, via epic-f4, 21 Sep 2026).
-    await refreshStats().catch(() => {});
-    const left = await drawersUnjudged();
-    if (left.length) {
-      console.error(`epic-api: places — still unjudged after rescoring: ${left.map((d) => d.key).join(', ')}`);
-    }
+    return runBarChecks('deploy');
   })
   .catch((err) => console.warn(`epic-api: places — could not check the bars: ${err.message}`));
+// And daily, in-process, beside the other loops. No hosted CI of any kind: this
+// is where scheduled checks live (owner, 24 Sep 2026).
+const BAR_CHECK_EVERY_MS = 24 * 3600_000;
+setInterval(() => { void runBarChecks('daily').catch(() => {}); }, BAR_CHECK_EVERY_MS).unref?.();
 void indexBuilt.then(() => sweep());
 setInterval(() => { void sweep(); }, 3600_000).unref?.();
 

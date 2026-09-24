@@ -1462,6 +1462,17 @@ export type PlaceAreaRow = PlaceStats & {
 export type PlaceCensusRow = {
   category: string; subcategory: string;
   filed: number; surfaced: number; scored: number; saturated: number;
+  /**
+   * Places whose census box straddles the edge of this area: neither in nor
+   * out, and never dropped. A count with these hidden is a floor wearing the
+   * clothes of a total — Bloomsbury read 3 places with hundreds sitting here
+   * (owner, 24 Sep 2026). Shown beside the count, always.
+   */
+  unresolved: number;
+  /** How the drawer was found: 'type' | 'words' | 'text' | 'mixed'. Text is the one to judge before trusting. */
+  sourced: string | null;
+  /** How many of the counted places only a bare text query found. */
+  text_count: number;
   osm: number | null; fhrs: number | null; residual: number | null;
   censused_at: string | null; complete: boolean;
 };
@@ -5177,7 +5188,29 @@ export type FilingOverview = {
     fromDead?: number; opens?: number; needs?: number;
     words: { word: string; shown: number }[]; why: string | null;
   };
+  /**
+   * The bar invariants: when they last ran and what they found. Null means
+   * they have never run, which is a different fact from a run that found
+   * nothing, and the screen draws the two differently.
+   */
+  invariants: {
+    last: InvariantRun;
+    history: InvariantRun[];
+  } | null;
   thresholds: Threshold[];
+};
+
+export type InvariantRun = {
+  ranAt: string;
+  trigger: 'deploy' | 'daily' | 'manual';
+  /** Active drawers with no bar. */
+  bare: string[];
+  /** Drawers with a bar and not one judged place, before repair. */
+  unjudged: { key: string; places: number }[];
+  rescored: number;
+  /** Still unjudged after the repair. */
+  left: string[];
+  error: string | null;
 };
 
 export type FilingCategories = {
