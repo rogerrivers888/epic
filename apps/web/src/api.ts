@@ -1124,14 +1124,27 @@ export type IdeaHeadline = { venueRef: string; name: string; category: string; e
 export type MoodKey = 'fun' | 'food' | 'culture' | 'sport' | 'activity' | 'adrenaline' | 'relaxing' | 'outdoors' | (string & {});
 export type Mood = {
   key: MoodKey; label: string;
-  /** What the census found in the reach — free, ours, and not what is on screen. */
+  /** What the census found in the reach — free, ours, and not what is on screen. Counted once per place; a floor. */
   count: number;
+  /** Places whose census box straddles the edge of the reach: neither counted nor dropped. Shown beside the count. */
+  unresolved?: number;
+  /** Whether `count` is a floor — anything unresolved, or any outcode the census never reached. */
+  floor?: boolean;
   /** How many of them this board actually holds, which is what the list draws. */
   shown?: number;
   /** Where the twenty went: what Google returned, what was inside the ring, what was scored. */
   sifted?: { returned: number; inRing: number; scored: number };
   /** Whether there is a next page to buy when somebody scrolls past the fifteenth. */
   more?: boolean;
+  /**
+   * How deep the shelf goes: what the census knows in this band, read from the
+   * ring's own rows (owner, 20 Sep 2026: "show depth as well as the count —
+   * '10 of 41'"). Null until the ring has been counted; then the places behind
+   * it are all showable, so the number may be printed.
+   */
+  depth?: number | null;
+  /** True where the depth is a floor — "41+" — rather than an exact count. */
+  depthFloor?: boolean;
   /** An `Icon` name, from the table rather than a lookup in the bundle. */
   icon?: string | null;
   /** Food is a chip that navigates into Places rather than a shelf that fills. */

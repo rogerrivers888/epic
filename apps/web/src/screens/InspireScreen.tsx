@@ -957,7 +957,10 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                 <Carousel
                   key={sh.key}
                   title={sh.label}
-                  count={sh.items.length}
+                  // The census count for the reach, not the length of the page
+                  // (owner, 24 Sep 2026). The shelf itself is the five bought.
+                  count={pool?.moods.find((m) => m.key === sh.key)?.count ?? sh.items.length}
+                  floor={pool?.moods.find((m) => m.key === sh.key)?.floor ?? false}
                   items={sh.items.slice(0, ACROSS)}
                   onAll={() => goTo('activities', sh.key)}
                   onOpen={open}

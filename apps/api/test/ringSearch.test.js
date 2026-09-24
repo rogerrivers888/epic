@@ -158,3 +158,21 @@ test('the keys are the ring, the category and the page', () => {
   assert.notEqual(search.pageKey('ring-a', 'fun', 1), search.pageKey('ring-a', 'food', 1));
   assert.notEqual(search.pageKey('ring-a', 'fun', 1), search.pageKey('ring-a', 'fun', 2));
 });
+
+test('a ring is counted once per place, box-tested, with the straddlers beside it', async () => {
+  // Owner, 24 Sep 2026: "never show the length of a page as if it were a
+  // count. Show the census count for the reach … censusInRing, with
+  // unresolved shown beside it. Every figure is a floor and should read as
+  // one." Culture read 19 on a ring covering most of London — Google's page
+  // size — against 16,258 counted this way.
+  const { censusForRing } = search;
+  const none = await censusForRing({ outcodes: [], cells: [] });
+  assert.deepEqual(none, { counts: {}, unresolved: {}, missing: [], floor: false }, 'no ring, no number');
+
+  // A ring whose outcodes the census has never reached is a floor by
+  // definition, and says which ones.
+  const unlooked = await censusForRing({ outcodes: ['ZZ90', 'ZZ91'], cells: [] });
+  assert.deepEqual(unlooked.missing.map((m) => m.toUpperCase()).sort(), ['ZZ90', 'ZZ91']);
+  assert.equal(unlooked.floor, true, 'an outcode nobody has looked at makes the count a floor');
+  assert.ok(typeof unlooked.counts === 'object' && typeof unlooked.unresolved === 'object');
+});

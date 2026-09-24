@@ -138,15 +138,18 @@ export function MediaCard({ thumb, name, muted, wide, selected, onPress, childre
  * A shelf's title, with "All N ›" opposite — the door into the whole of it.
  * One component so the shelves and the drill-down cannot drift apart.
  */
-export function SectionHead({ title, count, onAll }: { title: string; count: number; onAll?: () => void }) {
+export function SectionHead({ title, count, floor, onAll }: { title: string; count: number; floor?: boolean; onAll?: () => void }) {
   /**
-   * One number, and it is the length of the list behind it.
+   * The census count for the reach, read as the floor it is.
    *
-   * A second number — the census's count for the ring — was here and it was
-   * wrong in five directions at once (owner, 20 Sep 2026: "no household-facing
-   * number unless we can show the places behind it").
+   * This was the length of the list, under a rule the owner has since
+   * rewritten (24 Sep 2026): "never show the length of a page as if it were a
+   * count. Show the census count for the reach, then the five bought for
+   * display." The trailing mark says the number is a floor — places straddle
+   * the reach's edge, or an outcode has never been censused — because every
+   * figure is one and should read as one.
    */
-  const said = `All ${count}`;
+  const said = `${count.toLocaleString('en-GB')}${floor ? '+' : ''}`;
   const right = (
     <View style={styles.allLink}>
       <Text style={styles.meta}>{said}</Text>
@@ -165,8 +168,8 @@ export function SectionHead({ title, count, onAll }: { title: string; count: num
 }
 
 /** All: one category's worth, across. The title is a door into the whole of it. */
-export function Carousel({ title, count, items, onAll, onOpen, crowdOf, travel }: {
-  title: string; count: number; items: InspireItem[];
+export function Carousel({ title, count, floor, items, onAll, onOpen, crowdOf, travel }: {
+  title: string; count: number; floor?: boolean; items: InspireItem[];
   onAll: () => void; onOpen: (i: InspireItem) => void;
   /** What the crowd made of it, once Google has answered for this one. */
   crowdOf?: (i: InspireItem) => Crowd;
@@ -175,7 +178,7 @@ export function Carousel({ title, count, items, onAll, onOpen, crowdOf, travel }
   if (!items.length) return null;
   return (
     <View style={styles.section}>
-      <SectionHead title={title} count={count} onAll={onAll} />
+      <SectionHead title={title} count={count} floor={floor} onAll={onAll} />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carousel}>
         {items.map((i) => (
           <Card key={i.venueRef} item={i} crowd={crowdOf?.(i)} travel={travel} onOpen={() => onOpen(i)} />

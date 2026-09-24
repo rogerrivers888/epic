@@ -29,6 +29,7 @@
  */
 
 import { query } from '../db.js';
+import { censusInRing } from '../repositories/censusRing.js';
 import { displaySlice } from './google.js';
 import { outcodeOfCell } from '../domain/ring.js';
 import * as placeIndex from '../repositories/placeIndex.js';
@@ -135,6 +136,43 @@ export const ASKED = {
  * the screen can say "we have not looked here yet" rather than "there is
  * nothing here" — the one distinction the whole census exists to make.
  */
+/**
+ * What the census found in a ring, counted the way the board counts it.
+ *
+ * Owner, 24 Sep 2026: "The census count is free and permanent and is what
+ * should be shown … never show the length of a page as if it were a count.
+ * Show the census count for the reach, then the five bought for display."
+ * And: "censusInRing, with unresolved shown beside it. Every figure is a
+ * floor and should read as one."
+ *
+ * So this is `censusInRing` — one place counted once per category, placed by
+ * its own point where it has one and by the box the census found it in where
+ * it does not — and not `censusCounts` below, which sums the outcode roll-up
+ * and counts a place once per drawer it sits in. A ring covering most of
+ * London read 1,319 for Culture that way against 16,258 counted properly.
+ *
+ * `unresolved` is the places whose box straddles the ring's edge: neither in
+ * nor out, and shown beside the count so the count reads as the floor it is.
+ * `missing` is the ring's outcodes the census has never reached, which is the
+ * difference between "nothing here" and "we have not looked".
+ */
+export async function censusForRing(ring) {
+  const outcodes = ring?.outcodes ?? [];
+  if (!outcodes.length) return { counts: {}, unresolved: {}, missing: [], floor: false };
+  const [inRing, byOutcode] = await Promise.all([
+    censusInRing({ cells: ring.band ?? ring.cells ?? [], outcodes }),
+    censusCounts(outcodes),
+  ]);
+  const unresolved = inRing.unresolved ?? {};
+  return {
+    counts: inRing.counts ?? {},
+    unresolved,
+    missing: byOutcode.missing,
+    // A floor wherever anything straddles the edge or any outcode is unlooked-at.
+    floor: byOutcode.missing.length > 0 || Object.values(unresolved).some((n) => n > 0),
+  };
+}
+
 export async function censusCounts(outcodes = []) {
   if (!outcodes.length) return { counts: {}, censused: [], missing: [] };
   const slugs = outcodes.map((o) => String(o).toLowerCase());

@@ -73,9 +73,10 @@ import { publishedNear, heroesForPlaces } from '../repositories/library.js';
 import { foodNear } from '../repositories/scout.js';
 import { enabledSources } from '../sources/index.js';
 import { needsLookAround, lookAroundOutcome } from '../domain/lookAround.js';
-import { censusCounts, categoryPage, ASKED } from '../sources/ringSearch.js';
+import { censusForRing, categoryPage, ASKED } from '../sources/ringSearch.js';
 import { boxAround, boxKm, outcodeOfCell } from '../domain/ring.js';
 import * as reach from '../repositories/reach.js';
+import * as ringTables from '../repositories/ringTables.js';
 import { sectorOf } from '../domain/reach.js';
 
 /**
@@ -451,7 +452,9 @@ inspire.get('/around', async (req, res, next) => {
 
     // Free, and no provider: what the census found in these outcodes.
     ring.bandBox = boxAround(ring.bandPoints ?? ring.points);
-    const census = await censusCounts(ring.outcodes);
+    // Counted properly: one place once per category, box-tested, with the
+    // straddlers beside it (owner, 24 Sep 2026). Not the outcode sum.
+    const census = await censusForRing(ring);
 
     const taught = await shelfRules();
     const tax = await taxonomy();
@@ -477,7 +480,10 @@ inspire.get('/around', async (req, res, next) => {
         label: tax.vocab?.categories?.[key]?.label ?? key,
         // What the census says is here — the number the screen prints beside
         // the name, and the one thing on this board that never costs anything.
+        // A floor: the straddlers are beside it, never inside it.
         count: census.counts[key] ?? 0,
+        unresolved: census.unresolved[key] ?? 0,
+        floor: (census.unresolved[key] ?? 0) > 0 || census.missing.length > 0,
         censused: census.missing.length === 0,
         items: got.items.slice(0, shows).map((it) => asCard(it, {
           centre: { lat: ring.at?.lat ?? it.lat, lng: ring.at?.lng ?? it.lng },
@@ -587,7 +593,7 @@ inspire.get('/near', async (req, res, next) => {
     const ring = await ringFrom({ ...req.query, lat: centre.lat, lng: centre.lng, label }, { minutes, mode });
     if (ring) {
       ring.bandBox = boxAround(ring.bandPoints ?? ring.points);
-    const census = await censusCounts(ring.outcodes);
+      const census = await censusForRing(ring);
       const taught = await shelfRules();
       const tax = await taxonomy();
       const meter = { google: 0 };
@@ -602,6 +608,14 @@ inspire.get('/near', async (req, res, next) => {
       // the screen"). They do not depend on each other, so they do not wait for
       // each other; a page's own next page still does, because the token comes
       // from the page before it.
+      // The depth of each shelf — how many places the census knows in this
+      // band — read from the ring's own rows, instantly, and never computed
+      // while the household waits (owner, 20 Sep 2026). A ring with no rows
+      // yet answers no depth, and is counted behind the screen for next time.
+      const depths = await ringTables.countsFor({ cell: ring.cell, mode, minutes }).catch(() => ({}));
+      if (!Object.keys(depths).length) {
+        void ringTables.refreshRing({ cell: ring.cell, mode, minutes }).catch(() => null);
+      }
       const asked = await Promise.all(Object.keys(ASKED).map(async (key) =>
         [key, await placesFor({ ring, category: key, page: 1, meter, taught, tax, householdId: household.id, minutes, mode, from: origin })]));
       for (const [key, got] of asked) {
@@ -610,18 +624,30 @@ inspire.get('/near', async (req, res, next) => {
           key,
           label: tax.vocab?.categories?.[key]?.label ?? key,
           /**
-           * The length of the list, and nothing else.
+           * The census count for the reach, and the page bought for display
+           * beside it — never the one dressed as the other.
            *
-           * This carried the census's count for the ring, and the screen drew
-           * it: "23" over a ring holding three to five. It was wrong in five
-           * directions at once and none of them was fixable by wording (owner,
-           * 20 Sep 2026: "Stop showing any count that isn't the length of a
-           * list we can render… Where we can't produce a list, show no
-           * number"). The census has not gone anywhere — it is what the back
-           * office counts with, and what decides where to collect next — it is
-           * simply not a number a household is shown.
+           * This was the length of the list, under a rule of 20 Sep 2026 that
+           * the owner has since rewritten (24 Sep 2026): "My 20 Sep rule was
+           * about paid display, where showing 400 and rendering 20 is a lie.
+           * The census count is free and permanent and is what should be
+           * shown. The rule I should have written: never show the length of a
+           * page as if it were a count. Show the census count for the reach,
+           * then the five bought for display." So `count` is the census's,
+           * counted once per place and box-tested, `unresolved` is the
+           * straddlers beside it, and `shown` is what this board holds. A ring
+           * covering most of London read Culture 19 the old way — Google's
+           * page size — against 16,258.
            */
-          count: got.items.length,
+          count: census.counts[key] ?? 0,
+          unresolved: census.unresolved[key] ?? 0,
+          floor: (census.unresolved[key] ?? 0) > 0 || census.missing.length > 0,
+          // How deep the shelf goes: what the census knows in this band, from
+          // the ring's own rows. The places behind it are showable — names are
+          // rented at display and paging walks the drawers — so it may be
+          // printed, as "10 of 41", and as "41+" where it is a floor.
+          depth: depths[key]?.places ?? null,
+          depthFloor: depths[key]?.floor ?? false,
           icon: tax.vocab?.categories?.[key]?.icon ?? null,
           // Food is a shelf again, not a door: it is bought the same way as
           // everything else now.
