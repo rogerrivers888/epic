@@ -26,6 +26,15 @@
  *     becomes known.
  *   · **On the 30-day cycle**, matching the census: a ring older than that is
  *     counted again from whatever the census now knows.
+ *   · **When a census run finishes**, every ring counted before that run
+ *     started is counted again (Codex, 24 Sep 2026): a home that asked for its
+ *     districts to be censused would otherwise keep reading the snapshot taken
+ *     before the census found anything.
+ *
+ * A ring that has been counted and holds nothing is still a ring that has been
+ * counted: it carries a marker row (category '') so the cycle can find it and
+ * `countsFor` can tell "nothing here" from "nobody has looked" (Codex, 24 Sep
+ * 2026). The marker never reaches a household — `countsFor` leaves it out.
  *
  * The band, not the finder: the finder's ten-minute allowance belongs to the
  * search and never to a number a household reads (`domain/reach.js`).
@@ -48,6 +57,8 @@ export const BANDS = [20, 30, 60, 90];
 export const CYCLE_DAYS = 30;
 /** Enough of an order to page through; nobody scrolls past this. */
 const RANK_CAP = 500;
+/** The ring-level row: counted, whether or not anything was found. */
+const MARKER = '';
 
 /**
  * Count one ring and write its order down. Returns what it wrote.
@@ -64,13 +75,19 @@ export async function refreshRing({ cell, mode = 'driving', minutes = 30 } = {})
 
   const [placed, seen] = await Promise.all([
     censusInRing({ cells: band, outcodes: ring.outcodes }),
-    query('select distinct area_slug from area_counts where area_slug = any($1)',
+    query('select distinct area_slug, category from area_counts where area_slug = any($1)',
       [ring.outcodes.map((o) => o.toLowerCase())]),
   ]);
   const censused = new Set(seen.rows.map((r) => r.area_slug));
   const notCensused = ring.outcodes.filter((o) => !censused.has(o.toLowerCase())).length;
 
-  const categories = new Set([...Object.keys(placed.counts), ...Object.keys(placed.unresolved)]);
+  // Every category the census knows in these districts, so a category it
+  // looked for and found nothing of is written as nought rather than left
+  // out — nought from a census that looked is an answer; a missing row is not.
+  const categories = new Set([
+    ...Object.keys(placed.counts), ...Object.keys(placed.unresolved),
+    ...seen.rows.map((r) => r.category).filter((c) => c && c !== MARKER),
+  ]);
   const counts = [];
   for (const category of categories) {
     const unresolved = placed.unresolved[category] ?? 0;
@@ -84,6 +101,8 @@ export async function refreshRing({ cell, mode = 'driving', minutes = 30 } = {})
       floor: unresolved > 0 || notCensused > 0,
     });
   }
+  // The ring's own row, always: what makes an empty ring a counted one.
+  counts.push({ category: MARKER, places: 0, unresolved: 0, floor: notCensused > 0 });
 
   // The order: the places the count is made of, joined to the freshest score
   // we hold for each — the same rule `household()` ranks by, so a shelf and a
@@ -123,14 +142,12 @@ export async function refreshRing({ cell, mode = 'driving', minutes = 30 } = {})
   await withTransaction(async (client) => {
     await client.query('delete from ring_counts where cell = $1 and mode = $2 and minutes = $3', [cell, kind, minutes]);
     await client.query('delete from ring_rankings where cell = $1 and mode = $2 and minutes = $3', [cell, kind, minutes]);
-    if (counts.length) {
-      await client.query(
-        `insert into ring_counts (cell, mode, minutes, category, places, unresolved, floor, computed_at)
-         select $1, $2, $3, c.category, c.places, c.unresolved, c.floor, now()
-           from unnest($4::text[], $5::int[], $6::int[], $7::boolean[]) as c(category, places, unresolved, floor)`,
-        [cell, kind, minutes, counts.map((c) => c.category), counts.map((c) => c.places),
-          counts.map((c) => c.unresolved), counts.map((c) => c.floor)]);
-    }
+    await client.query(
+      `insert into ring_counts (cell, mode, minutes, category, places, unresolved, floor, computed_at)
+       select $1, $2, $3, c.category, c.places, c.unresolved, c.floor, now()
+         from unnest($4::text[], $5::int[], $6::int[], $7::boolean[]) as c(category, places, unresolved, floor)`,
+      [cell, kind, minutes, counts.map((c) => c.category), counts.map((c) => c.places),
+        counts.map((c) => c.unresolved), counts.map((c) => c.floor)]);
     if (rankings.length) {
       await client.query(
         `insert into ring_rankings (cell, mode, minutes, category, venue_ref, epic_score, rank, computed_at)
@@ -141,7 +158,7 @@ export async function refreshRing({ cell, mode = 'driving', minutes = 30 } = {})
     }
   });
   return {
-    cell, mode: kind, minutes, counts, ranked: rankings.length, notCensused,
+    cell, mode: kind, minutes, counts: counts.filter((c) => c.category !== MARKER), ranked: rankings.length, notCensused,
     // Named, so the caller can ask the census to look at them.
     notCensusedOutcodes: ring.outcodes.filter((o) => !censused.has(o.toLowerCase())),
   };
@@ -172,15 +189,17 @@ export async function refreshBands({ cell, mode = 'driving', bands = BANDS } = {
 /**
  * The counts a household reads. A read and nothing else.
  *
- * Empty means "not counted yet", and the caller's job is to refresh behind the
- * screen — never in front of it.
+ * `null` means "not counted yet", and the caller's job is to refresh behind the
+ * screen — never in front of it. `{}` means counted, and nothing there: a
+ * different fact, and one that must not send the caller counting again.
  */
 export async function countsFor({ cell, mode = 'driving', minutes = 30 } = {}) {
   const { rows } = await query(
     `select category, places, unresolved, floor, computed_at
        from ring_counts where cell = $1 and mode = $2 and minutes = $3`,
     [cell, travelMode(mode), minutes]);
-  return Object.fromEntries(rows.map((r) => [r.category, {
+  if (!rows.length) return null;
+  return Object.fromEntries(rows.filter((r) => r.category !== MARKER).map((r) => [r.category, {
     places: r.places, unresolved: r.unresolved, floor: r.floor, computedAt: r.computed_at,
   }]));
 }
@@ -199,13 +218,18 @@ export async function rankingFor({ cell, mode = 'driving', minutes = 30, categor
  * The 30-day cycle: every ring older than the census's own window is counted
  * again. Rings are only ever added by a household's home, so this is bounded
  * by the number of homes, not the number of sectors.
+ *
+ * `before` names a moment instead of an age: a census run that has just
+ * finished passes the moment it started, and every ring counted before it
+ * is counted again from what the run found.
  */
-export async function refreshDue({ olderThanDays = CYCLE_DAYS, limit = 200 } = {}) {
+export async function refreshDue({ olderThanDays = CYCLE_DAYS, before = null, limit = 200 } = {}) {
+  const cutoff = before ? new Date(before) : new Date(Date.now() - olderThanDays * 86_400_000);
   const { rows } = await query(
     `select cell, mode, minutes, min(computed_at) as at
        from ring_counts group by cell, mode, minutes
-     having min(computed_at) < now() - ($1 || ' days')::interval
-      order by at limit $2`, [String(olderThanDays), limit]);
+     having min(computed_at) < $1::timestamptz
+      order by at limit $2`, [cutoff.toISOString(), limit]);
   const done = [];
   for (const r of rows) {
     try { done.push(await refreshRing({ cell: r.cell, mode: r.mode, minutes: r.minutes })); }

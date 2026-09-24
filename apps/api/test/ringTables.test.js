@@ -80,7 +80,34 @@ test('the counts are a read, and read back what was written', async () => {
   assert.ok(got.fun.computedAt, 'and says when');
   // A ring nobody has counted answers nothing, and the caller refreshes behind
   // the screen — never in front of it.
-  assert.deepEqual(await tables.countsFor({ cell: 'sector:NOWHERE 0', mode: 'drive', minutes: 30 }), {});
+  assert.equal(await tables.countsFor({ cell: 'sector:NOWHERE 0', mode: 'drive', minutes: 30 }), null);
+});
+
+test('a counted ring with nothing in it is a counted ring, not an unlooked-at one', async () => {
+  await seed();
+  await query('delete from place_subcategories where venue_ref = any($1)', [REFS]);
+  const out = await tables.refreshRing({ cell: CELL, mode: 'drive', minutes: 30 });
+  // The census looked for Fun in this district and found none: nought is the
+  // answer, written down as such.
+  assert.equal(out.counts.find((c) => c.category === 'fun')?.places, 0);
+  const got = await tables.countsFor({ cell: CELL, mode: 'drive', minutes: 30 });
+  assert.ok(got, 'counted, so not null');
+  assert.equal(got.fun.places, 0);
+  assert.ok(!('' in got), 'the marker row never reaches a reader');
+  // And the cycle can find it: a counted-empty ring older than the window is due.
+  await query(`update ring_counts set computed_at = now() - interval '40 days' where cell = $1`, [CELL]);
+  const done = await tables.refreshDue({ olderThanDays: 30 });
+  assert.ok(done.some((d) => d.cell === CELL), 'an empty ring still ages');
+});
+
+test('a finished census counts again every ring computed before it started', async () => {
+  await seed();
+  await tables.refreshRing({ cell: CELL, mode: 'drive', minutes: 30 });
+  const { rows: [{ at }] } = await query('select max(computed_at) as at from ring_counts where cell = $1', [CELL]);
+  const earlier = new Date(new Date(at).getTime() - 1000);
+  assert.ok(!(await tables.refreshDue({ before: earlier })).some((d) => d.cell === CELL), 'counted after the run began: left alone');
+  const later = new Date(new Date(at).getTime() + 1000);
+  assert.ok((await tables.refreshDue({ before: later })).some((d) => d.cell === CELL), 'counted before the run began: counted again');
 });
 
 test('the order is by our score, and an unscored place has no rank', async () => {

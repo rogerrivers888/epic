@@ -269,10 +269,18 @@ router.patch('/', async (req, res, next) => {
     // districts it has never seen — free on the IDs Only mask — and only where
     // no run is already going, because the runner takes one at a time; a 409
     // here is not an error, it is a run that will catch these districts next.
-    if (homePlace?.lat != null) {
-      const moved = household.home_lat !== homePlace.lat || household.home_lng !== homePlace.lng;
-      if (moved) {
-        void ringTables.refreshForHome({ lat: homePlace.lat, lng: homePlace.lng, mode: h.travel_mode ?? travelMode ?? 'driving' })
+    //
+    // The rows are keyed on how the household travels as well as where from,
+    // so a change of travel mode alone — set-up saves home on one step and
+    // the mode on the next, and Settings changes it on its own — counts the
+    // same ring again under the new mode, from the home already held (Codex,
+    // 24 Sep 2026).
+    const at = homePlace?.lat != null ? homePlace : (h.home_lat != null ? { lat: h.home_lat, lng: h.home_lng } : null);
+    if (at) {
+      const moved = homePlace?.lat != null && (household.home_lat !== homePlace.lat || household.home_lng !== homePlace.lng);
+      const modeChanged = travelMode != null && travelMode !== household.travel_mode;
+      if (moved || modeChanged) {
+        void ringTables.refreshForHome({ lat: at.lat, lng: at.lng, mode: h.travel_mode ?? travelMode ?? 'driving' })
           .then(async (ring) => {
             if (!ring?.notCensusedOutcodes?.length) return;
             await censusRun.startRun({

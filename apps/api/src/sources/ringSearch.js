@@ -167,13 +167,25 @@ export async function censusForRing(ring, { mode = 'driving', minutes = 30 } = {
   // counted yet is counted live, and that one is written down behind the
   // screen so the next look reads it.
   const byOutcode = await censusCounts(outcodes);
-  const stored = ring?.cell ? await countsFor({ cell: ring.cell, mode, minutes }).catch(() => ({})) : {};
-  if (Object.keys(stored).length) {
+  // `null` is a ring nobody has counted; `{}` is a ring counted and empty, and
+  // that one is not counted again on every look.
+  const stored = ring?.cell ? await countsFor({ cell: ring.cell, mode, minutes }).catch(() => null) : null;
+  if (stored) {
     const counts = Object.fromEntries(Object.entries(stored).map(([k, v]) => [k, v.places]));
     const unresolved = Object.fromEntries(Object.entries(stored).map(([k, v]) => [k, v.unresolved]));
+    // The floor each row was written with, carried per category: a row counted
+    // while a district was still unlooked-at stays a floor until it is counted
+    // again, even once the census has reached that district (Codex, 24 Sep
+    // 2026). A floor nothing live explains is a ring the census has moved
+    // past — counted again behind the screen.
+    const floors = Object.fromEntries(Object.entries(stored).map(([k, v]) => [k, Boolean(v.floor)]));
+    const stale = byOutcode.missing.length === 0
+      && Object.values(stored).some((v) => v.floor && !(v.unresolved > 0));
+    if (stale) void refreshRing({ cell: ring.cell, mode, minutes }).catch(() => null);
     return {
       counts,
       unresolved,
+      floors,
       missing: byOutcode.missing,
       floor: byOutcode.missing.length > 0 || Object.values(stored).some((v) => v.floor || v.unresolved > 0),
     };
