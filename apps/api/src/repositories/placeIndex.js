@@ -278,11 +278,13 @@ export async function checkBars({ repair = true, trigger = 'manual' } = {}) {
         if (got) out.inherited.push(key);
       }
     }
-    // What is still bare after the repair -- or all of it, when not repairing.
-    // Kept apart from `left` (still unjudged) because they are different faults
-    // with different fixes, and a check that could not mend a drawer must not
-    // read as a pass because it mended the other kind.
-    out.stillBare = out.bare.filter((k) => !out.inherited.includes(k));
+    // What is still bare after the repair, read back from the database rather
+    // than worked out from what the repair said it did -- the same fresh read
+    // `left` takes for the unjudged (Codex, 24 Sep 2026). Kept apart from
+    // `left` because they are different faults with different fixes, and a
+    // check that could not mend a drawer must not read as a pass because it
+    // mended the other kind.
+    out.stillBare = (await drawersWithoutABar()).map((d) => d.key);
     const unjudged = await drawersUnjudged();
     out.unjudged = unjudged.map((d) => ({ key: d.key, places: d.places }));
     if (repair && unjudged.length) {
