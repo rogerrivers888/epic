@@ -176,3 +176,25 @@ test('reference mode is the run\u2019s, so a resume researches the same way the 
   const { rows: [rec] } = await query('select name, lat, lng from place_records where venue_ref = $1', ['google:ChIJ_ref_001']);
   assert.ok(rec.name && rec.lat != null && rec.lng != null);
 });
+
+test('an atlas place with no record of its own is seeded from the atlas', async () => {
+  // `referenceResearch` hands `enrich` a seed; with the researcher stubbed
+  // out through the fetch it would make, what matters is that the atlas
+  // place is asked about by name and point rather than "could not ask".
+  const { rows: [at] } = await query(`insert into attractions (name, slug, region_slug, lat, lng) values ('Test Atlas Arena', 'test-atlas-arena', 'aberdeen-city', 51.4, -0.7) returning id`);
+  const ref = `atlas:${at.id}`;
+  const wasFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('no network in this test'); };
+  try {
+    const out = await sweep.referenceResearch(ref, { householdId: HH, paid: false, search: false });
+    // Every source failed for want of a network — but it *asked*, which it
+    // only does with a name and a point.
+    assert.ok(!(out.problems ?? []).some((p) => /could not ask|nothing to go on/i.test(p)), JSON.stringify(out.problems));
+    assert.ok((out.problems ?? []).some((p) => /OpenStreetMap/.test(p)), 'the open map was asked');
+  } finally {
+    globalThis.fetch = wasFetch;
+    await query('delete from place_facts where venue_ref = $1', [ref]);
+    await query('delete from place_records where venue_ref = $1', [ref]);
+    await query('delete from attractions where id = $1', [at.id]);
+  }
+});

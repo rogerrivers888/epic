@@ -433,7 +433,15 @@ async function writeProgress(id, { problem = null, state = null } = {}) {
 export async function referenceResearch(venueRef, opts = {}) {
   const r = await query('select name, lat, lng, website, postcode from place_records where venue_ref = $1', [venueRef]);
   const rec = r.rows[0];
-  const seed = rec?.name && rec?.lat != null ? { name: rec.name, lat: rec.lat, lng: rec.lng, website: rec.website ?? undefined, postcode: rec.postcode ?? undefined } : {};
+  let seed = rec?.name && rec?.lat != null ? { name: rec.name, lat: rec.lat, lng: rec.lng, website: rec.website ?? undefined, postcode: rec.postcode ?? undefined } : {};
+  // An atlas place may have no record of its own yet; the atlas holds its
+  // name and point, and without them the research could not ask — eight of
+  // the sport picks were atlas places (found in the first proposal, 25 Sep
+  // 2026).
+  if (!seed.name && String(venueRef).startsWith('atlas:')) {
+    const { rows: [at] } = await query('select name, lat, lng, website from attractions where id::text = $1', [String(venueRef).slice(6)]);
+    if (at?.name && at?.lat != null) seed = { name: at.name, lat: at.lat, lng: at.lng, website: at.website ?? undefined };
+  }
   return own.enrich(venueRef, { ...opts, seed, force: true, replace: true, hygiene: true });
 }
 
