@@ -91,6 +91,62 @@ export const WORD_QUESTIONS = {
     { type: 'sports_activity_location', words: 'horse riding school' },
     { type: 'sports_activity_location', words: 'pony trekking centre' },
   ],
+
+  // The drawers that were asked in bare text until 25 Sep 2026, re-fenced.
+  //
+  // Owner, 25 Sep 2026, on the text-sourced table: "Historic houses at 8,159
+  // places all from a text query means most of them are estate agents, pubs
+  // called The Manor, and street names — the drawer is right and the query is
+  // wrong. Map each to its real Google type: historical_place, stadium,
+  // sports_complex, off_roading_area, swimming_pool and so on, then drop the
+  // bare-text query." The type here is the fence; the words still say which
+  // members of it the drawer means, because `historical_place` is already
+  // Landmarks' rule, `stadium` is Arenas' and `swimming_pool` is Pools' — a
+  // typed rule files, a fenced question only asks.
+  'historic-houses': [
+    { type: 'historical_place', words: 'historic house' },
+    { type: 'historical_place', words: 'stately home' },
+    { type: 'historical_landmark', words: 'stately home' },
+  ],
+  'ancient-sites': [
+    { type: 'historical_landmark', words: 'ancient monument' },
+    { type: 'historical_landmark', words: 'stone circle' },
+    { type: 'historical_place', words: 'roman ruins' },
+  ],
+  football: [
+    { type: 'stadium', words: 'football ground' },
+    { type: 'stadium', words: 'football club stadium' },
+    { type: 'sports_complex', words: 'football club ground' },
+  ],
+  'rugby-cricket': [
+    { type: 'sports_club', words: 'rugby club' },
+    { type: 'sports_club', words: 'cricket club' },
+    { type: 'sports_complex', words: 'rugby ground' },
+    { type: 'sports_complex', words: 'cricket ground' },
+  ],
+  lidos: [
+    { type: 'swimming_pool', words: 'lido' },
+    { type: 'swimming_pool', words: 'outdoor swimming pool' },
+  ],
+  'caves-falls': [
+    { type: 'tourist_attraction', words: 'cave' },
+    { type: 'tourist_attraction', words: 'waterfall' },
+    { type: 'hiking_area', words: 'waterfall' },
+  ],
+  circuits: [
+    { type: 'stadium', words: 'motor racing circuit' },
+    { type: 'event_venue', words: 'motor racing circuit' },
+    { type: 'sports_complex', words: 'race track motorsport' },
+  ],
+  'days-out': [
+    { type: 'tourist_attraction', words: 'family day out attraction' },
+    { type: 'tourist_attraction', words: 'visitor attraction' },
+  ],
+  // Paintball has its own Table A type and a typed rule already asks it; laser
+  // tag has none, so it is asked of the amusement centres by name.
+  'paintball-lasertag': [
+    { type: 'amusement_center', words: 'laser tag arena' },
+  ],
 };
 
 /**
@@ -119,33 +175,17 @@ export const WORD_QUESTIONS = {
  * every phrasing is a question of every tile in the region.
  */
 export const TEXT_QUESTIONS = {
-  // The sport and adrenaline drawers Google has no Table A type for. The owner,
-  // 21 Sep 2026: "for each sport drawer also make sure there's a Google
-  // question: a Table A type where one exists … and a text query where none
-  // does, marked text-sourced per the census rule."
-  //
-  // Only the ones with nothing at all are here. Eleven sport drawers already
-  // have a real type doing the work — athletic_field, arena, cycling_park,
-  // fishing_charter, golf_course, go_karting_venue, swimming_pool, race_course,
-  // tennis_court, ice_skating_rink, adventure_sports_center — and the ordinary
-  // census asks those already.
-  'skateboard-park': ['skate park', 'skatepark bmx track'],
-  'ski-resort': ['dry ski slope', 'indoor ski centre'],
-  'indoor-snow': ['indoor snow centre', 'snow dome real snow'],
-  'paintball-lasertag': ['paintball centre', 'laser tag arena'],
-  'off-road': ['off road driving experience', 'quad biking centre'],
-  circuits: ['motor racing circuit', 'race track motorsport'],
-  'ancient-sites': ['ancient monument', 'stone circle', 'roman ruins'],
-  'historic-houses': ['historic house', 'stately home'],
-  'days-out': ['family day out attraction', 'visitor attraction'],
-  lidos: ['lido', 'outdoor swimming pool'],
-  'caves-falls': ['cave', 'waterfall'],
-  // `scenic` was here and is gone: Scenic drives & rides is retired (owner,
-  // 21 Sep 2026, "it's an editorial grouping, not a place type"), and a
-  // question for a drawer nothing can be filed into is requests spent on
-  // nothing. Heritage railways kept its own drawer and its own words.
-  football: ['football ground', 'football club stadium'],
-  'rugby-cricket': ['rugby club ground', 'cricket ground'],
+  // Empty since 25 Sep 2026, and kept so the shape of the plan and the label
+  // on the board do not change under it. Thirteen drawers were asked here:
+  // eight are fenced word questions above now; four — Skateboard parks,
+  // Indoor snow and dry slopes, Off-road driving and Paintball — have a typed
+  // rule of their own that already asks (skateboard_park, ski_resort,
+  // off_roading_area, paintball_center), and their text was only ever adding
+  // places that carried none of those types; Ski resort is folded into Indoor
+  // snow and dry slopes and gets no question, so it empties as its tiles come
+  // round again. Nothing found by text was deleted: the places keep
+  // `found_by = text` for the owner to judge, and `textStillAsked` below is
+  // what stops them being counted as the drawer's number.
 };
 
 /**
@@ -165,6 +205,20 @@ export const wordQuestionsFor = (subcategory) => [
   // that — which is what makes the twenty a person opens the right twenty.
   ...(TEXT_QUESTIONS[subcategory] ?? []).map((words) => ({ type: null, words, sourced: SOURCED.TEXT })),
 ];
+
+/**
+ * Whether a drawer still asks a bare text question.
+ *
+ * A surfacing marked `text` was an answer to a question that no longer
+ * exists once the drawer is re-fenced, and a count that went on including it
+ * would carry the inflation the re-fencing was for until every tile had come
+ * round again. So the roll-up and the ring count read this: a text-sourced
+ * surfacing counts only while its drawer is still asked in text. The rows
+ * themselves stay, because "a place found only by a text query is filed under
+ * that drawer with found_by = text, so I can open twenty in the Places tab
+ * and judge precision" (owner, 21 Sep 2026) is still the point of them.
+ */
+export const textStillAsked = (subcategory) => Boolean(TEXT_QUESTIONS[subcategory]?.length);
 
 /** Every subcategory Google has no word for, asked in words either way. */
 export const WORD_QUESTION_SUBCATEGORIES = [

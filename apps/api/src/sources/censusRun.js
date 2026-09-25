@@ -40,6 +40,7 @@ import { censusArea, slicePlan, CENSUS_FRESH_DAYS, CENSUS_MAX_DEPTH } from './ce
 // The same corner test the ring count uses. One piece of arithmetic for "is
 // this box inside this area", not two that can disagree (repositories/censusRing.js).
 import { sectorsOfBox, nearestSector } from '../repositories/censusRing.js';
+import { textStillAsked } from './censusQuestions.js';
 import { refreshAllBefore as refreshRingsBefore } from '../repositories/ringTables.js';
 import { USD_TO_GBP } from '../domain/providerPrices.js';
 
@@ -1072,6 +1073,9 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
   for (const r of rows) {
     const tile = tileByKey.get(r.area_slug);
     if (!tile) continue;
+    // An answer to a question the drawer no longer asks. Kept on the place,
+    // not in the count (25 Sep 2026, the re-fencing).
+    if (r.sourced === 'text' && !textStillAsked(r.subcategory)) continue;
     const key = `${r.category}/${r.subcategory}`;
     if (!drawersOfTile.has(tile.grid_key)) drawersOfTile.set(tile.grid_key, new Map());
     drawersOfTile.get(tile.grid_key).set(key, { category: r.category, subcategory: r.subcategory });

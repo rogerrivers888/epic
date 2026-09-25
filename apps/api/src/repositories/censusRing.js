@@ -30,6 +30,7 @@
  */
 
 import { query } from '../db.js';
+import { TEXT_QUESTIONS, textStillAsked } from '../sources/censusQuestions.js';
 
 /**
  * How fine a box has to get before it is worth splitting further.
@@ -159,14 +160,20 @@ export async function censusInRing({ cells = [], outcodes = [] } = {}) {
   // place the tiled run found, which is most of them — and the corner test
   // below is what decides whether the place is in the ring either way, so
   // neither filing is trusted further than "it is somewhere around here".
+  // A text-sourced surfacing counts only while its drawer is still asked in
+  // text; once the drawer is re-fenced those rows are answers to a question
+  // that no longer exists, kept on the place for judging and left out of the
+  // number (25 Sep 2026). The same rule the outcode roll-up reads.
+  const textDrawers = Object.keys(TEXT_QUESTIONS).filter(textStillAsked);
   const { rows } = await query(`
     select ps.category, ps.venue_ref, pi.lat, pi.lng, pi.slice
       from place_subcategories ps
       join place_index pi on pi.venue_ref = ps.venue_ref
-     where ps.area_slug = any($1)
+     where (ps.area_slug = any($1)
         or ps.area_slug in (select grid_key from census_tiles
-                             where outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s))`,
-  [slugs]);
+                             where outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)))
+       and (ps.sourced is distinct from 'text' or ps.subcategory = any($2::text[]))`,
+  [slugs, textDrawers]);
 
   // One verdict per distinct box, not per row: the same slice found hundreds of
   // places and the corner test would otherwise run hundreds of times.

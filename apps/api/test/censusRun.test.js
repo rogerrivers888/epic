@@ -879,7 +879,9 @@ test('how a drawer was found is read from the places inside the outcode, not bes
       [ref, foundBy, sourced]);
   };
   await place('google:sourced_typed', '51.4050,-0.6900,51.4250,-0.6600', 'type', 'museum');
-  await place('google:sourced_text', '51.4600,-0.6000,51.4750,-0.5800', 'text', 'text');
+  // Fenced words, not bare text: since 25 Sep 2026 a text-sourced surfacing
+  // only counts while its drawer is still asked in text, and none is.
+  await place('google:sourced_text', '51.4600,-0.6000,51.4750,-0.5800', 'words', 'historical_place');
 
   await rollUpOutcodes({ outcodes: ['ZZ8A', 'ZZ8B'] });
 
@@ -891,8 +893,8 @@ test('how a drawer was found is read from the places inside the outcode, not bes
 
   const { rows: [b] } = await query(
     `select sourced, text_count from area_counts where area_slug = 'zz8b' and subcategory = 'museums'`);
-  assert.equal(b.sourced, 'text');
-  assert.equal(b.text_count, 1);
+  assert.equal(b.sourced, 'words');
+  assert.equal(b.text_count, 0);
 });
 
 test('a later run over the same ground does not take the earlier run\'s report with it', async (t) => {
@@ -1173,4 +1175,47 @@ test('a place on the edge of a tile that was never tagged with its district is s
   assert.deepEqual(rows.map((r) => [r.area_slug, r.census_count, r.unresolved]),
     [['zz5a', 1, 0], ['zz5b', 1, 0]],
     'the strayed place is counted in ZZ5B and nowhere else; the other in ZZ5A');
+});
+
+test('a text-sourced surfacing stops counting once its drawer is no longer asked in text', async (t) => {
+  // The re-fencing of 25 Sep 2026 dropped the bare-text questions. The places
+  // they found keep their rows and their found_by = text for judging; the
+  // drawer's number no longer includes them, or the inflation the re-fencing
+  // was for would stand until every tile had come round again.
+  await clean();
+  t.after(async () => {
+    await query(`delete from area_counts where area_slug = 'zz6a'`);
+    await query(`delete from geo_cells where code like 'ZZ6%'`);
+    await query(`delete from place_index where venue_ref like 'google:refence_%'`);
+    await clean();
+  });
+  await query(
+    `insert into geo_cells (code, scheme, label, outcode, lat, lng, source) values
+       ('ZZ6A 1', 'sector', 'ZZ6A 1', 'ZZ6A', 51.5200, -0.1300, 'test')
+     on conflict (code) do update set outcode = excluded.outcode, lat = excluded.lat, lng = excluded.lng`);
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, started_at)
+     values ('test/refence', 51.51, -0.14, 51.53, -0.12, array['ZZ6A'], 'done', now(), now() - interval '1 minute')
+     on conflict (grid_key) do update set outcodes = excluded.outcodes, state = 'done', censused_at = now(), started_at = excluded.started_at`);
+  const place = async (ref, sourced, foundBy) => {
+    await query(
+      `insert into place_index (venue_ref, country_code, slice, category, subcategory)
+       values ($1, 'GB', '51.5180,-0.1320,51.5220,-0.1280', 'culture', 'historic-houses') on conflict (venue_ref) do nothing`, [ref]);
+    await query(
+      `insert into place_subcategories (venue_ref, category, subcategory, found_by, sourced, area_slug, first_seen, last_seen)
+       values ($1, 'culture', 'historic-houses', $2, $3, 'test/refence', now(), now())
+       on conflict (venue_ref, subcategory, coalesce(area_slug, '')) do update set sourced = excluded.sourced`, [ref, foundBy, sourced]);
+  };
+  await place('google:refence_manor_pub', 'text', 'text');             // "The Manor", found by the old bare query
+  await place('google:refence_stately', 'words', 'historical_place');  // found by the fenced question
+  await place('google:refence_typed', 'type', 'historical_place');     // found by a typed rule
+
+  await rollUpOutcodes({ outcodes: ['ZZ6A'] });
+  const { rows: [row] } = await query(
+    `select census_count, text_count, sourced from area_counts where area_slug = 'zz6a' and subcategory = 'historic-houses'`);
+  assert.equal(row.census_count, 2, 'the two fenced finds are the number');
+  assert.equal(row.text_count, 0, 'and the text find is not in it');
+  assert.notEqual(row.sourced, 'text', 'nor on its label, which reads the fenced and typed finds only');
+  const { rows: kept } = await query(`select found_by from place_subcategories where venue_ref = 'google:refence_manor_pub'`);
+  assert.equal(kept[0]?.found_by, 'text', 'but the place still says how it was found, for judging');
 });

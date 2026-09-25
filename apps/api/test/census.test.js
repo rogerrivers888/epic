@@ -661,3 +661,22 @@ test('the box a place is known by is the narrowest one that returned it, not the
   }
   await query(`delete from place_index where venue_ref = $1 or venue_ref like 'google:ChIJcensus_test_filler%'`, [ref]);
 });
+
+test('a drawer once asked in bare text is fenced by a type now, and nothing is asked bare', async () => {
+  // Owner, 25 Sep 2026: "Historic houses at 8,159 places all from a text
+  // query means most of them are estate agents, pubs called The Manor, and
+  // street names — the drawer is right and the query is wrong. Map each to
+  // its real Google type … then drop the bare-text query."
+  const { WORD_QUESTIONS, TEXT_QUESTIONS, textStillAsked, wordQuestionsFor } = await import('../src/sources/censusQuestions.js');
+  assert.deepEqual(Object.keys(TEXT_QUESTIONS), [], 'no drawer is asked in bare text any more');
+  for (const key of ['historic-houses', 'ancient-sites', 'football', 'rugby-cricket', 'lidos', 'caves-falls', 'circuits', 'days-out']) {
+    assert.ok(WORD_QUESTIONS[key]?.length, `${key} is asked in words fenced by a type`);
+    assert.ok(WORD_QUESTIONS[key].every((q) => q.type), `${key}: every question carries its fence`);
+    assert.ok(wordQuestionsFor(key).every((q) => q.sourced === 'words'), `${key}: and is labelled as fenced words, not text`);
+    assert.equal(textStillAsked(key), false, `${key}: so a text-sourced surfacing is no longer its number`);
+  }
+  // Scenic drives is retired and Ski resort folded into Indoor snow: no
+  // question at all, so both empty as their tiles come round again.
+  assert.equal(wordQuestionsFor('scenic').length, 0);
+  assert.equal(wordQuestionsFor('ski-resort').length, 0);
+});
