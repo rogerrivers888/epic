@@ -27,8 +27,11 @@ git status --short
 - A **migration and the tests that depend on it are committed together, never
   separately.** An uncommitted migration is invisible to every other session on this
   machine. If `git status` shows one, stop and commit it with its tests before going on.
-- Commit by path. The tree is shared with other sessions — `git diff` the file before
-  `git commit -- <path>`, and never `git add -A`.
+- Stage hunks, never files. The tree is shared with other sessions and
+  `git commit -- <path>` takes the whole file, other sessions' lines included
+  (owner, 25 Sep 2026). `git add -p <path>` with its answers on stdin, or a
+  patch cut to your hunks and `git apply --cached`; then `git diff --cached`
+  must show only your lines. Never `git add -A`.
 
 ## 2. The suite, after the final commit
 

@@ -109,3 +109,8 @@ test('a restaurant lands in the Restaurants drawer, not beside the chip shop', (
   );
   assert.equal(out.subcategory, 'restaurants');
 });
+
+test('a venue carries Google’s primary type, so a filter written against it can fire', () => {
+  assert.equal(place('Halfords', ['bicycle_store', 'store'], 'bicycle_store').primaryType, 'bicycle_store');
+  assert.equal(place('Untyped', ['cafe'], undefined).primaryType, 'cafe', 'the first type stands in when Google gives no primary');
+});

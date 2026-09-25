@@ -318,6 +318,10 @@ export function toVenue(place, justification = null) {
     // that asks for it needs no cookie — see sources/photoLinks.js.
     photos: stampPhotos((place.photos || []).slice(0, 3).map((p) => ({ ref: p.name, attribution: (p.authorAttributions || []).map((a) => a.displayName).join(', ') }))),
     ticketed: ['movie_theater', 'performing_arts_theater', 'stadium', 'concert_hall'].includes(primary),
+    // Google's own first word for the place. The ring search's shop filter was
+    // written against this and it was never set, so the filter never fired
+    // and everyone assumed it did (the sign-off, 25 Sep 2026).
+    primaryType: primary || null,
     // Every type Google gave, in the label vocabulary (domain/labels.js), so a
     // rule can be taught against Google's own word rather than only against
     // the experience it was read into. The session's copy, like the rest.

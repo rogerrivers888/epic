@@ -320,3 +320,48 @@ test('a drawer listed in another cabinet is drawn there too, and the home comes 
   assert.deepEqual(shelvesOf('sport', 'skateboard-park', outdoorsOff), ['sport', 'fun']);
   assert.deepEqual(outdoorsOff.alsoIn.get('skateboard-park'), ['fun', 'outdoors']);
 });
+
+// --- the Travel fence (the sign-off, 24 Sep 2026, §7; owner, 25 Sep 2026) ---
+
+const TRAVEL_VOCAB = vocabularyOf(
+  [{ key: 'fun' }, { key: 'food' }, { key: 'culture' }],
+  [{ key: 'museums', category_key: 'culture' }],
+  new Map([['google:museum', 'museums']]),
+  new Set(['google:train_station', 'google:parking', 'google:bus_station']),
+);
+
+test('a place that is nothing but Travel words gets no shelf at all', () => {
+  const station = { source: 'google', sourcePlaceId: 'st', category: 'attraction', experiences: [],
+    labels: ['google:train_station', 'google:transit_station', 'google:point_of_interest'] };
+  const out = shelvesForVenue(station, NO_RULES, TRAVEL_VOCAB);
+  assert.equal(out.category, null);
+  assert.equal(out.subcategory, null);
+  assert.deepEqual(out.shelves, []);
+  assert.equal(out.travel, true);
+  assert.equal(out.because[0].subject, 'google:train_station');
+});
+
+test('a station with a museum in it is a museum, and a station with a café is somewhere to eat', () => {
+  const museum = { source: 'google', sourcePlaceId: 'm', category: 'attraction', experiences: [],
+    labels: ['google:train_station', 'google:museum'] };
+  // No rule names the drawer here, so it lands where an untaught place starts;
+  // the point is that the fence stood aside.
+  const out = shelvesForVenue(museum, NO_RULES, TRAVEL_VOCAB);
+  assert.equal(out.travel, undefined);
+  assert.notEqual(out.category, null);
+  const cafe = { source: 'google', sourcePlaceId: 'c', category: 'cafe', experiences: [], labels: ['google:parking', 'google:cafe'] };
+  assert.equal(shelvesForVenue(cafe, NO_RULES, TRAVEL_VOCAB).category, 'food');
+});
+
+test('a Travel-only place somebody filed by hand keeps their shelf', () => {
+  const carPark = { source: 'google', sourcePlaceId: 'cp', category: 'attraction', experiences: [], labels: ['google:parking'] };
+  const rules = { ...NO_RULES, place: new Map([['google:cp', { scope: 'place', subject: 'google:cp', weights: { fun: 1 }, subcategory: null }]]) };
+  const out = shelvesForVenue(carPark, rules, TRAVEL_VOCAB);
+  assert.equal(out.travel, undefined);
+  assert.equal(out.category, 'fun');
+});
+
+test('without a vocabulary the fence is off, so every pure caller still files a place somewhere', () => {
+  const station = { source: 'google', sourcePlaceId: 'st', category: 'attraction', experiences: [], labels: ['google:train_station'] };
+  assert.equal(shelvesForVenue(station).category, 'fun');
+});

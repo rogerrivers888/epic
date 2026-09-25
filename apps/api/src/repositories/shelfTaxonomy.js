@@ -30,7 +30,7 @@ export const forget = () => { cache = null; };
 /** Everything, in one read, in the shapes the resolver and the screens want. */
 export async function taxonomy() {
   if (cache && Date.now() - cachedAt < TTL_MS) return cache;
-  const [cats, subs, extra, points] = await Promise.all([
+  const [cats, subs, extra, points, travel] = await Promise.all([
     query('select * from shelf_categories order by position, label'),
     query('select * from shelf_subcategories order by position, label'),
     // The extra cabinets a drawer is listed in, beside its home (14 Sep 2026).
@@ -41,6 +41,9 @@ export async function taxonomy() {
     query(`select namespace || ':' || key as word, points_at from taxonomy_labels where points_at is not null
            union all
            select 'wikidata:' || qid as word, points_at from place_kinds where points_at is not null`),
+    // The words answered Travel: a place that is nothing but these gets no
+    // shelf (domain/moods.js, travelOnly).
+    query(`select namespace || ':' || key as word from taxonomy_labels where decision = 'travel'`),
   ]);
   const categories = cats.rows;
   // Every listing, live or not. Switching a category off must not quietly
@@ -68,7 +71,8 @@ export async function taxonomy() {
       subcategories: subcategories.filter((s) => s.active),
     },
     vocab: vocabularyOf(categories.filter((c) => c.active), subcategories.filter((s) => s.active),
-      new Map(points.rows.map((r) => [r.word, r.points_at]))),
+      new Map(points.rows.map((r) => [r.word, r.points_at])),
+      new Set(travel.rows.map((r) => r.word))),
     byKey: new Map(categories.map((c) => [c.key, c])),
     subByKey: new Map(subcategories.map((s) => [s.key, s])),
   };

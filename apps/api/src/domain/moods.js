@@ -258,8 +258,15 @@ function combine(matches, rank = RANK) {
  * Defaults to the eight in this file, so every pure caller — the tests, a
  * script, anything that has not read the table — still works without one.
  */
-export const NO_VOCAB = { parentOf: new Map(), alsoIn: new Map(), pointsAt: new Map(), rank: RANK };
-export const vocabularyOf = (categories, subcategories, pointsAt = new Map()) => ({
+export const NO_VOCAB = { parentOf: new Map(), alsoIn: new Map(), pointsAt: new Map(), travel: new Set(), rank: RANK };
+export const vocabularyOf = (categories, subcategories, pointsAt = new Map(), travel = new Set()) => ({
+  /**
+   * The provider words answered *Travel — getting there, parking* in the back
+   * office: a station, a car park, an airport. Infrastructure, held as an
+   * input to reachability and never a thing to visit (the sign-off, 24 Sep
+   * 2026, §7). A place that is nothing but these gets no shelf at all.
+   */
+  travel,
   /**
    * Which of our labels each provider's word means (migration 107). The owner,
    * 14 Sep 2026: "we don't use Google words; we use our own words." A rule
@@ -465,11 +472,48 @@ export function ourLabelsOf(labels, vocab = NO_VOCAB) {
   return out;
 }
 
+/**
+ * Whether a place is nothing but infrastructure: at least one of its words was
+ * answered Travel, none of them points at a drawer, and nothing else — an
+ * experience the source read, somewhere to eat — says it is a visit. A station
+ * with a museum in it is a museum; a station is a station.
+ */
+export function travelOnly(venue, labels, vocab = NO_VOCAB) {
+  const travel = vocab?.travel;
+  if (!travel?.size) return false;
+  if (!labels.some((l) => travel.has(String(l)))) return false;
+  if (labels.some((l) => vocab?.pointsAt?.get(String(l)))) return false;
+  if (venue?.experiences?.length) return false;
+  return !EATING.has(venue?.category);
+}
+
+/** The verdict for a place that is infrastructure: no cabinet, no drawer, no shelf. */
+const NO_SHELF = (word) => ({
+  category: null,
+  subcategory: null,
+  weights: {},
+  because: [{
+    scope: 'default', subject: word ?? null, subject_label: 'travel',
+    weights: {}, subcategory: null,
+    reason: 'Getting there, or parking when you do. Infrastructure is held for reachability and is never a thing to visit, so it goes on no shelf at all.',
+  }],
+  confident: true,
+  shelves: [],
+  travel: true,
+});
+
 export function shelvesForVenue(venue, rules = NO_RULES, vocab = NO_VOCAB) {
   const ref = venue?.source && venue?.sourcePlaceId ? `${venue.source}:${venue.sourcePlaceId}` : null;
   // The label rules that fire for this place: a provider's own word, or several
   // words at once. Narrower than an experience, broader than the one place.
   const labels = labelsOf(venue);
+  // The fence, at the one place every path classifies through rather than at
+  // each read path (owner, 25 Sep 2026: "fixing five read paths today means
+  // missing the sixth next month"). A rule about this one place still wins:
+  // somebody who filed a station by hand meant it.
+  if (!(ref && rules?.place?.get(ref)) && travelOnly(venue, labels, vocab)) {
+    return NO_SHELF(labels.find((l) => vocab.travel.has(String(l))));
+  }
   // A rule the owner wrote beats every rule Epic wrote for itself: the
   // owner's rules are matched on their own first, and only where none fires
   // do Epic's get a say — so neither the primary type nor a longer rule of
