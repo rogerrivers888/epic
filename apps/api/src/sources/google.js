@@ -11,6 +11,25 @@ import { currentSpender } from '../context.js';
  * database, and the helper then ran every migration into it (found 25 Sep
  * 2026, the same afternoon the cap was added).
  */
+/**
+ * Calls admitted by this process that the ledger may not show yet.
+ *
+ * The ledger row for a call is written by its caller once the whole
+ * operation is done, so a burst — two Nearby requests inside one search,
+ * or two requests arriving together — read the same count and were all
+ * admitted past the bound (Codex, 25 Sep 2026). What this process has
+ * admitted this month is counted as it goes, and the larger of the two
+ * figures is what the bound is checked against. It resets with the process,
+ * when the ledger has caught up.
+ */
+const admitted = new Map();
+let admittedMonth = null;
+const admittedFor = (householdId) => {
+  const month = new Date().toISOString().slice(0, 7);
+  if (admittedMonth !== month) { admitted.clear(); admittedMonth = month; }
+  return admitted.get(householdId) ?? 0;
+};
+
 let capDeps = null;
 const cap = () => (capDeps ??= Promise.all([import('../claude.js'), import('../repositories/providerCalls.js')])
   .then(([claude, ledger]) => ({ monthlyBoundFor: claude.monthlyBoundFor, SpendBoundError: claude.SpendBoundError, countThisMonth: ledger.countThisMonth })));
@@ -432,8 +451,10 @@ async function call(path, { method = 'POST', body, fieldMask, meter }) {
   const { householdId } = currentSpender();
   if (householdId) {
     const { countThisMonth, monthlyBoundFor, SpendBoundError } = await cap();
-    const [made, bound] = await Promise.all([countThisMonth(householdId), monthlyBoundFor(householdId)]);
+    const [onLedger, bound] = await Promise.all([countThisMonth(householdId), monthlyBoundFor(householdId)]);
+    const made = Math.max(onLedger, admittedFor(householdId));
     if (made >= bound) { noteFault(meter, 'household_cap'); throw new SpendBoundError('household', bound); }
+    admitted.set(householdId, made + 1);
   }
   // One billable request, at the tier the mask puts it in. `google` stays as
   // the count of Google requests however they were priced, because Settings ›

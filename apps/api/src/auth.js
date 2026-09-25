@@ -39,7 +39,8 @@ import crypto from 'node:crypto';
 import { findLiveSession, insertSession, revokeSession, touchSession } from './repositories/sessions.js';
 import { accountById, touchAccount } from './repositories/accounts.js';
 import { accessFor, accessOf } from './access.js';
-import { runAsAccount } from './context.js';
+import { runAsAccount, runAsSpender } from './context.js';
+import { firstHousehold } from './repositories/households.js';
 import { canonicalOrigins } from './origins.js';
 import { photoLinkValid } from './sources/photoLinks.js';
 
@@ -321,7 +322,13 @@ export async function requireSession(req, res, next) {
 
     // Everything downstream — including `currentHousehold()`, 86 call sites
     // deep — is served inside this account's context (context.js).
-    return runAsAccount(account, next);
+    if (account) return runAsAccount(account, () => runAsSpender({ householdId: account.household_id, sessionId: session.id }, next));
+    // The shared passcode carries no account and is the founding household's
+    // own traffic — the one whose spending the cap most needs to see. Left
+    // with no spender it read as background work and every Google call it
+    // made went uncapped (Codex, 25 Sep 2026).
+    const founding = await firstHousehold().catch(() => null);
+    return runAsAccount(null, () => runAsSpender({ householdId: founding?.id ?? null, sessionId: session.id }, next));
   } catch (err) {
     return next(err);
   }
