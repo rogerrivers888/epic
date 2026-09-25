@@ -1120,3 +1120,57 @@ test('a boundary place is counted in exactly one neighbour, never two and never 
   // The two-kilometre box is on neither side, and stays neither in nor out.
   assert.equal(a.unresolved, 1); assert.equal(b.unresolved, 1);
 });
+
+test('a place on the edge of a tile that was never tagged with its district is still counted there, once', async (t) => {
+  // Codex, 25 Sep 2026: a tile is tagged with the districts it was planned
+  // from, and a box on its edge can sit nearest a sector of a district it was
+  // never tagged with. Rolling each district up from only the tiles that named
+  // it made such a place "outside" its own tile's district and unread in the
+  // one it belonged to — gone, rather than counted once.
+  await clean();
+  t.after(async () => {
+    await query(`delete from area_counts where area_slug in ('zz5a', 'zz5b')`);
+    await query(`delete from geo_cells where code like 'ZZ5%'`);
+    await query(`delete from place_index where venue_ref like 'google:edge_%'`);
+    await clean();
+  });
+  await query(
+    `insert into geo_cells (code, scheme, label, outcode, lat, lng, source) values
+       ('ZZ5A 1', 'sector', 'ZZ5A 1', 'ZZ5A', 51.5200, -0.1300, 'test'),
+       ('ZZ5B 1', 'sector', 'ZZ5B 1', 'ZZ5B', 51.5200, -0.1200, 'test')
+     on conflict (code) do update set outcode = excluded.outcode, lat = excluded.lat, lng = excluded.lng`);
+  // Tile T reaches past the midline (-0.125) but was tagged with ZZ5A only;
+  // tile U names both.
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, started_at) values
+       ('test/edge-t', 51.51, -0.14, 51.53, -0.121, array['ZZ5A'], 'done', now(), now() - interval '1 minute'),
+       ('test/edge-u', 51.51, -0.121, 51.53, -0.10, array['ZZ5A','ZZ5B'], 'done', now(), now() - interval '1 minute')
+     on conflict (grid_key) do update set outcodes = excluded.outcodes, state = 'done', censused_at = now(), started_at = excluded.started_at`);
+  const place = async (ref, tile, slice) => {
+    await query(
+      `insert into place_index (venue_ref, country_code, slice, category, subcategory)
+       values ($1, 'GB', $2, 'culture', 'museums') on conflict (venue_ref) do update set slice = excluded.slice`, [ref, slice]);
+    await query(
+      `insert into place_subcategories (venue_ref, category, subcategory, found_by, area_slug, first_seen, last_seen)
+       values ($1, 'culture', 'museums', 'museum', $2, now(), now())
+       on conflict (venue_ref, subcategory, coalesce(area_slug, '')) do nothing`, [ref, tile]);
+  };
+  // Surfaced by T, centre at -0.124: nearest ZZ5B, which T does not name.
+  await place('google:edge_strayed', 'test/edge-t', '51.5180,-0.1260,51.5220,-0.1220');
+  // And one plainly in ZZ5A, surfaced by T, so T's district is not empty.
+  await place('google:edge_home', 'test/edge-t', '51.5180,-0.1340,51.5220,-0.1300');
+
+  // Each district rolled up on its own — the order and the separation are the
+  // point: neither roll-up may depend on the other having run.
+  const b = await rollUpOutcodes({ outcodes: ['ZZ5B'] });
+  const a = await rollUpOutcodes({ outcodes: ['ZZ5A'] });
+  assert.equal(b.unattributed, 1, 'and the roll-up says one place fell in a district its tile was not tagged with');
+  assert.equal(a.unattributed, 0);
+
+  const { rows } = await query(
+    `select area_slug, census_count, unresolved from area_counts
+      where area_slug in ('zz5a','zz5b') and subcategory = 'museums' order by 1`);
+  assert.deepEqual(rows.map((r) => [r.area_slug, r.census_count, r.unresolved]),
+    [['zz5a', 1, 0], ['zz5b', 1, 0]],
+    'the strayed place is counted in ZZ5B and nowhere else; the other in ZZ5A');
+});

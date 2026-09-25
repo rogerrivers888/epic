@@ -75,43 +75,65 @@ export const widthOf = (box) => (box
  * the middle.
  */
 export function whereBoxSits(box, { cells, universe }) {
-  if (!box) return 'nowhere';
+  const v = sectorsOfBox(box, universe);
+  if (v.kind === 'nowhere') return 'nowhere';
   const inRing = cells instanceof Set ? cells : new Set(cells);
-  // The rule at the top of this file, built at last. A box under a kilometre is
-  // placed by its centre: the nearest sector to the middle of a four-hundred-
-  // metre box is where the place is, near enough, and a boundary place is
-  // arbitrary either way — counted in the wrong one of two neighbours is a
-  // small error, counted nowhere is a missing place (owner, 25 Sep 2026).
-  // Every box, whatever its width, went through the corner test below, so a
-  // district a few streets wide — smaller than any box — could never resolve a
-  // single place: Bloomsbury counted 3 with hundreds unresolved, and the
-  // one-kilometre re-census made it worse. Wider boxes keep the corner test,
-  // because a box that big really can be on either side of the line.
-  if (widthOf(box) <= FINE_M) {
-    const centre = { lat: (box.minLat + box.maxLat) / 2, lng: (box.minLng + box.maxLng) / 2 };
-    let best = null; let bestD = Infinity;
-    for (const u of universe) {
-      const d = (u.lat - centre.lat) ** 2 + (u.lng - centre.lng) ** 2;
-      // A dead heat goes to the lower sector code, whatever order the universe
-      // was read in: two roll-ups over two neighbours read two universes, and
-      // "counted once globally" (owner, 25 Sep 2026) needs both to agree on
-      // which side a box exactly between them is on.
-      if (d < bestD || (d === bestD && best && u.code < best.code)) { bestD = d; best = u; }
-    }
-    return best && inRing.has(best.code) ? 'inside' : 'outside';
-  }
+  if (v.kind === 'inside') return inRing.has(v.code) ? 'inside' : 'outside';
   let ins = 0;
-  for (const p of cornersOf(box)) {
-    let best = null; let bestD = Infinity;
-    for (const u of universe) {
-      const d = (u.lat - p.lat) ** 2 + (u.lng - p.lng) ** 2;
-      if (d < bestD) { bestD = d; best = u; }
-    }
-    if (best && inRing.has(best.code)) ins += 1;
-  }
-  if (ins === 5) return 'inside';
+  for (const c of v.codes) if (inRing.has(c)) ins += 1;
+  if (ins === v.codes.size) return 'inside';
   if (ins === 0) return 'outside';
   return 'across';
+}
+
+/**
+ * The sector nearest a point. A dead heat goes to the lower sector code,
+ * whatever order the universe was read in: two roll-ups over two neighbours
+ * read two universes, and "counted once globally" (owner, 25 Sep 2026) needs
+ * both to agree on which side a box exactly between them is on.
+ */
+export function nearestSector(point, universe) {
+  let best = null; let bestD = Infinity;
+  for (const u of universe) {
+    const d = (u.lat - point.lat) ** 2 + (u.lng - point.lng) ** 2;
+    if (d < bestD || (d === bestD && best && u.code < best.code)) { bestD = d; best = u; }
+  }
+  return best;
+}
+
+/**
+ * Which sector, or sectors, a box belongs to — the one verdict the ring count
+ * and the outcode roll-up both draw from, so a place cannot be one district's
+ * in one and another's in the other.
+ *
+ * The rule at the top of this file, built at last (25 Sep 2026). A box under a
+ * kilometre is placed by its centre: the nearest sector to the middle of a
+ * four-hundred-metre box is where the place is, near enough, and a boundary
+ * place is arbitrary either way — counted in the wrong one of two neighbours
+ * is a small error, counted nowhere is a missing place. Every box, whatever
+ * its width, went through the corner test, so a district a few streets wide —
+ * smaller than any box — could never resolve a single place: Bloomsbury
+ * counted 3 with hundreds unresolved, and the one-kilometre re-census made it
+ * worse. Wider boxes keep the corner test, because a box that big really can
+ * be on either side of the line: five points, the corners and the middle, and
+ * the set of sectors they fall nearest to.
+ *
+ * @returns {{kind:'inside', code:string} | {kind:'across', codes:Set<string>} | {kind:'nowhere'}}
+ */
+export function sectorsOfBox(box, universe) {
+  if (!box) return { kind: 'nowhere' };
+  if (widthOf(box) <= FINE_M) {
+    const best = nearestSector({ lat: (box.minLat + box.maxLat) / 2, lng: (box.minLng + box.maxLng) / 2 }, universe);
+    return best ? { kind: 'inside', code: best.code } : { kind: 'nowhere' };
+  }
+  const codes = new Set();
+  for (const p of cornersOf(box)) {
+    const best = nearestSector(p, universe);
+    if (best) codes.add(best.code);
+  }
+  if (!codes.size) return { kind: 'nowhere' };
+  if (codes.size === 1) return { kind: 'inside', code: [...codes][0] };
+  return { kind: 'across', codes };
 }
 
 /**

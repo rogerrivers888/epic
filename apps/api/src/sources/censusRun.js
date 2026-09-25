@@ -39,7 +39,7 @@ import { query } from '../db.js';
 import { censusArea, slicePlan, CENSUS_FRESH_DAYS, CENSUS_MAX_DEPTH } from './census.js';
 // The same corner test the ring count uses. One piece of arithmetic for "is
 // this box inside this area", not two that can disagree (repositories/censusRing.js).
-import { whereBoxSits } from '../repositories/censusRing.js';
+import { sectorsOfBox, nearestSector } from '../repositories/censusRing.js';
 import { refreshAllBefore as refreshRingsBefore } from '../repositories/ringTables.js';
 import { USD_TO_GBP } from '../domain/providerPrices.js';
 
@@ -969,109 +969,169 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
          ${runId ? 'join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1' : ''}
         where t.censused_at is not null`,
       runId ? [runId] : [])).rows.map((r) => r.code);
-  if (!codes.length) return { outcodes: 0, rows: 0 };
+  if (!codes.length) return { outcodes: 0, rows: 0, unattributed: 0 };
 
-  // Every sector of every outcode these tiles touch. The verdict is a
-  // nearest-sector test, so the candidate set has to include the neighbours —
-  // otherwise every box on the edge of the region reads as inside it.
+  // Every sector there is. The verdict is a nearest-sector test, and it has to
+  // come out the same whichever district is being rolled up: a universe drawn
+  // from the tiles that happened to name one district gave a box one answer in
+  // that district's roll-up and another in its neighbour's, and a place could
+  // fall between the two (Codex, 25 Sep 2026). Six thousand points; cheap.
   const { rows: universe } = await query(
-    `select code, upper(outcode) as outcode, lat, lng from geo_cells
-      where outcode is not null
-        and upper(outcode) in (
-          select distinct unnest(t.outcodes) from census_tiles t where t.outcodes && $1)`,
-    [codes]);
-  if (!universe.length) return { outcodes: 0, rows: 0 };
+    'select code, upper(outcode) as outcode, lat, lng from geo_cells where outcode is not null');
+  const outcodeOf = new Map(universe.map((u) => [u.code, u.outcode]));
+  const mine = new Set(universe.filter((u) => codes.includes(u.outcode)).map((u) => u.code));
+  if (!mine.size) return { outcodes: 0, rows: 0, unattributed: 0 };
+
+  // The tiles whose places could belong to these districts — not only the
+  // tiles that *name* them. A tile is tagged with the districts whose sectors
+  // it was planned from, and a box on its edge can sit nearest a sector of a
+  // district it was never tagged with. Reading only the tagged tiles let that
+  // place read as outside its own tile's district and never be read at all in
+  // the district it belonged to (Codex, 25 Sep 2026). So: every censused tile
+  // of the run when there is one, otherwise every censused tile within reach
+  // of the districts' sectors — a box's centre is inside its tile, and the
+  // nearest sector to it is never further than the tile's own reach.
+  const REACH_LAT = 0.2; const REACH_LNG = 0.35; // ~22 km either way
+  const bounds = universe.filter((u) => mine.has(u.code)).reduce((b, u) => ({
+    minLat: Math.min(b.minLat, u.lat), maxLat: Math.max(b.maxLat, u.lat),
+    minLng: Math.min(b.minLng, u.lng), maxLng: Math.max(b.maxLng, u.lng),
+  }), { minLat: 90, maxLat: -90, minLng: 180, maxLng: -180 });
+  const { rows: tiles } = runId
+    ? await query(
+      `select t.grid_key, t.min_lat, t.min_lng, t.max_lat, t.max_lng, t.outcodes, t.saturated, t.censused_at, t.state
+         from census_tiles t join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1
+        where t.censused_at is not null`, [runId])
+    : await query(
+      `select t.grid_key, t.min_lat, t.min_lng, t.max_lat, t.max_lng, t.outcodes, t.saturated, t.censused_at, t.state
+         from census_tiles t
+        where t.censused_at is not null
+          and t.max_lat >= $1 and t.min_lat <= $2 and t.max_lng >= $3 and t.min_lng <= $4`,
+      [bounds.minLat - REACH_LAT, bounds.maxLat + REACH_LAT, bounds.minLng - REACH_LNG, bounds.maxLng + REACH_LNG]);
+  if (!tiles.length) return { outcodes: codes.length, rows: 0, unattributed: 0 };
+  const tileByKey = new Map(tiles.map((t) => [t.grid_key, t]));
+
+  // Only what the current census of each tile found. A surfacing is kept
+  // after its question stops finding it — "this used to be here" is worth
+  // keeping — but a board counting those would report a district as growing
+  // every time it was re-censused, however many places had closed.
+  const { rows } = await query(
+    `select ps.category, ps.subcategory, ps.venue_ref, ps.sourced, ps.area_slug, pi.lat, pi.lng, pi.slice
+       from place_subcategories ps
+       join place_index pi on pi.venue_ref = ps.venue_ref
+       join census_tiles t on t.grid_key = ps.area_slug
+      where ps.area_slug = any($1)
+        and ps.last_seen >= coalesce(t.started_at, t.censused_at)`, [tiles.map((t) => t.grid_key)]);
+
+  // The sectors within reach of each tile, so a box is judged against a few
+  // hundred points rather than all six thousand; the whole table if a tile is
+  // somehow out of reach of every sector.
+  const nearby = new Map();
+  const sectorsNear = (tile) => {
+    if (!nearby.has(tile.grid_key)) {
+      const near = universe.filter((u) => u.lat >= Number(tile.min_lat) - REACH_LAT && u.lat <= Number(tile.max_lat) + REACH_LAT
+        && u.lng >= Number(tile.min_lng) - REACH_LNG && u.lng <= Number(tile.max_lng) + REACH_LNG);
+      nearby.set(tile.grid_key, near.length ? near : universe);
+    }
+    return nearby.get(tile.grid_key);
+  };
+
+  // One verdict per box, whichever district asks: the district its centre is
+  // nearest, or — for a box wider than the fine grid — the set of districts its
+  // corners fall nearest. A box across two sectors of the same district is
+  // inside that district.
+  const verdicts = new Map();
+  const verdictOf = (tile, slice) => {
+    const k = `${tile.grid_key}|${slice}`;
+    if (!verdicts.has(k)) {
+      const v = sectorsOfBox(boxFromSlice(slice), sectorsNear(tile));
+      if (v.kind === 'nowhere') verdicts.set(k, { kind: 'nowhere' });
+      else if (v.kind === 'inside') verdicts.set(k, { kind: 'inside', outcode: outcodeOf.get(v.code) });
+      else {
+        const outs = new Set([...v.codes].map((c) => outcodeOf.get(c)));
+        verdicts.set(k, outs.size === 1 ? { kind: 'inside', outcode: [...outs][0] } : { kind: 'across', outcodes: outs });
+      }
+    }
+    return verdicts.get(k);
+  };
+
+  // Everything bucketed by the district it fell in, in one pass over the rows.
+  const bucket = new Map(); // outcode -> { counted, unresolved, sourcedBy, fromText, drawer }
+  const bucketFor = (code) => {
+    if (!bucket.has(code)) bucket.set(code, { counted: new Map(), unresolved: new Map(), sourcedBy: new Map(), fromText: new Map(), drawer: new Map() });
+    return bucket.get(code);
+  };
+  const add = (map, key, ref) => {
+    if (!map.has(key)) map.set(key, new Set());
+    map.get(key).add(ref);
+  };
+  // Every drawer a tile answered is a row for every district the tile names,
+  // nought or not: a district with no place in a drawer still gets the row that
+  // says so, as it always did.
+  const drawersOfTile = new Map();
+  const unattributed = new Set();
+  for (const r of rows) {
+    const tile = tileByKey.get(r.area_slug);
+    if (!tile) continue;
+    const key = `${r.category}/${r.subcategory}`;
+    if (!drawersOfTile.has(tile.grid_key)) drawersOfTile.set(tile.grid_key, new Map());
+    drawersOfTile.get(tile.grid_key).set(key, { category: r.category, subcategory: r.subcategory });
+    // Its own point beats any box: that is exact, and a display search will
+    // have bought one for anything a household has actually looked at.
+    let v;
+    if (r.lat != null && r.lng != null) {
+      const best = nearestSector({ lat: Number(r.lat), lng: Number(r.lng) }, sectorsNear(tile));
+      v = best ? { kind: 'inside', outcode: outcodeOf.get(best.code) } : { kind: 'nowhere' };
+    } else {
+      v = r.slice ? verdictOf(tile, r.slice) : { kind: 'nowhere' };
+    }
+    if (v.kind === 'inside') {
+      if (!codes.includes(v.outcode)) continue;
+      const b = bucketFor(v.outcode);
+      b.drawer.set(key, { category: r.category, subcategory: r.subcategory });
+      add(b.counted, key, r.venue_ref);
+      // How it was found, counted only where it is counted.
+      //
+      // A tile is wider than an outcode and reaches into its neighbours, so
+      // reading the label off every row in the tile let a drawer be marked
+      // "mixed", or even "text", on the strength of places in the next
+      // district — a caveat attached to a number that none of those places
+      // are in (21 Sep 2026).
+      if (!b.sourcedBy.has(key)) b.sourcedBy.set(key, new Set());
+      b.sourcedBy.get(key).add(r.sourced ?? 'type');
+      if ((r.sourced ?? 'type') === 'text') add(b.fromText, key, r.venue_ref);
+      if (!tile.outcodes?.includes(v.outcode)) unattributed.add(r.venue_ref);
+    } else if (v.kind === 'across') {
+      for (const o of v.outcodes) {
+        if (!codes.includes(o)) continue;
+        const b = bucketFor(o);
+        b.drawer.set(key, { category: r.category, subcategory: r.subcategory });
+        add(b.unresolved, key, r.venue_ref);
+      }
+    }
+  }
 
   let written = 0;
   for (const code of codes) {
-    // Asked about one run, answer about that run. Rolling every censused tile
-    // carrying the outcode meant another run's tiles in an overlapping district
-    // were counted into this one's result (Codex, 21 Sep 2026).
-    const { rows: tiles } = await query(
-      `select t.grid_key, t.saturated, t.censused_at, t.state from census_tiles t
-         ${runId ? 'join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $2' : ''}
-        where t.outcodes @> array[$1] and t.censused_at is not null`,
-      runId ? [code, runId] : [code]);
-    if (!tiles.length) continue;
-    const keys = tiles.map((t) => t.grid_key);
+    // The coverage on the row — how many tiles, how many cut off, when — is
+    // the tiles planned for this district, which are the ones that name it.
+    // Asked about one run, answer about that run: rolling every censused tile
+    // carrying the outcode meant another run's tiles in an overlapping
+    // district were counted into this one's result (Codex, 21 Sep 2026).
+    const own = tiles.filter((t) => t.outcodes?.includes(code));
+    if (!own.length) continue;
+    const b = bucketFor(code);
+    const drawer = new Map(b.drawer);
+    for (const t of own) for (const [key, d] of drawersOfTile.get(t.grid_key) ?? []) drawer.set(key, d);
 
-    // Only what the current census of each tile found. A surfacing is kept
-    // after its question stops finding it — "this used to be here" is worth
-    // keeping — but a board counting those would report a district as growing
-    // every time it was re-censused, however many places had closed.
-    const { rows } = await query(
-      `select ps.category, ps.subcategory, ps.venue_ref, ps.sourced, pi.lat, pi.lng, pi.slice
-         from place_subcategories ps
-         join place_index pi on pi.venue_ref = ps.venue_ref
-         join census_tiles t on t.grid_key = ps.area_slug
-        where ps.area_slug = any($1)
-          and ps.last_seen >= coalesce(t.started_at, t.censused_at)`, [keys]);
-
-    const mine = new Set(universe.filter((u) => u.outcode === code).map((u) => u.code));
-    if (!mine.size) continue;
-
-    const verdicts = new Map();
-    const verdictOf = (slice) => {
-      if (verdicts.has(slice)) return verdicts.get(slice);
-      const v = whereBoxSits(boxFromSlice(slice), { cells: mine, universe });
-      verdicts.set(slice, v);
-      return v;
-    };
-    const nearest = (lat, lng) => {
-      let best = null; let bestD = Infinity;
-      for (const u of universe) {
-        const d = (u.lat - lat) ** 2 + (u.lng - lng) ** 2;
-        if (d < bestD) { bestD = d; best = u; }
-      }
-      return best?.code ?? null;
-    };
-
-    const counted = new Map();
-    const unresolved = new Map();
-    const drawer = new Map();
-    // How each drawer's places were found. A count made of text-query answers
-    // is a different kind of number from one Google guaranteed the type of, and
-    // it says so wherever it is shown (owner, 21 Sep 2026).
-    const sourcedBy = new Map();
-    const fromText = new Map();
-    const add = (map, key, ref) => {
-      if (!map.has(key)) map.set(key, new Set());
-      map.get(key).add(ref);
-    };
-    for (const r of rows) {
-      const key = `${r.category}/${r.subcategory}`;
-      drawer.set(key, { category: r.category, subcategory: r.subcategory });
-      // Its own point beats any box: that is exact, and a display search will
-      // have bought one for anything a household has actually looked at.
-      const inside = (r.lat != null && r.lng != null)
-        ? (mine.has(nearest(Number(r.lat), Number(r.lng))) ? 'inside' : 'outside')
-        : (r.slice ? verdictOf(r.slice) : 'nowhere');
-      if (inside === 'inside') {
-        add(counted, key, r.venue_ref);
-        // How it was found, counted only where it is counted.
-        //
-        // A tile is wider than an outcode and reaches into its neighbours, so
-        // reading the label off every row in the tile let a drawer be marked
-        // "mixed", or even "text", on the strength of places in the next
-        // district — a caveat attached to a number that none of those places
-        // are in (21 Sep 2026).
-        if (!sourcedBy.has(key)) sourcedBy.set(key, new Set());
-        sourcedBy.get(key).add(r.sourced ?? 'type');
-        if ((r.sourced ?? 'type') === 'text') add(fromText, key, r.venue_ref);
-      } else if (inside === 'across') {
-        add(unresolved, key, r.venue_ref);
-      }
-    }
-
-    const censusedAt = tiles.map((t) => new Date(t.censused_at).getTime()).sort((a, b) => a - b);
-    const saturatedTiles = tiles.filter((t) => Number(t.saturated) > 0).length;
-    const complete = tiles.every((t) => t.state === 'done');
+    const censusedAt = own.map((t) => new Date(t.censused_at).getTime()).sort((x, y) => x - y);
+    const saturatedTiles = own.filter((t) => Number(t.saturated) > 0).length;
+    const complete = own.every((t) => t.state === 'done');
     for (const [key, { category, subcategory }] of drawer) {
-      const refs = counted.get(key) ?? new Set();
+      const refs = b.counted.get(key) ?? new Set();
       const { rows: [scored] } = refs.size
         ? await query('select count(*)::int n from epic_scores where venue_ref = any($1)', [[...refs]])
         : { rows: [{ n: 0 }] };
-      const kinds = [...(sourcedBy.get(key) ?? ['type'])];
+      const kinds = [...(b.sourcedBy.get(key) ?? ['type'])];
       await query(
         `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, scored_count,
                                   saturated, censused_at, complete, tiles, tiles_saturated, unresolved,
@@ -1088,15 +1148,17 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
           // The oldest tile, not the newest: a count is only as fresh as the
           // stalest ground it is drawn from.
           new Date(censusedAt[0]), complete,
-          tiles.length, saturatedTiles, unresolved.get(key)?.size ?? 0,
+          own.length, saturatedTiles, b.unresolved.get(key)?.size ?? 0,
           // One word where a drawer was answered one way, "mixed" where it was
           // not — and how many of the places came from a text query either way,
           // because that is the number a person is being asked to trust.
-          kinds.length === 1 ? kinds[0] : 'mixed', fromText.get(key)?.size ?? 0]);
+          kinds.length === 1 ? kinds[0] : 'mixed', b.fromText.get(key)?.size ?? 0]);
       written += 1;
     }
   }
-  return { outcodes: codes.length, rows: written };
+  // Places that fell in a district their tile was never tagged with: counted
+  // there all the same, and reported so the tagging can be judged.
+  return { outcodes: codes.length, rows: written, unattributed: unattributed.size };
 }
 
 /** `51.4000,-0.7000,51.4800,-0.5800` back into a box. */
