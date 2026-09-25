@@ -447,7 +447,7 @@ taxonomyRoutes.get('/drawer', requires('view_library'), async (req, res, next) =
     const mine = lands ? all
       .map((a) => ({ a, ref: refOf(a), words: labelsOfAtlas({ category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [] }) }))
       .filter(({ a, ref }) => ref && shelvesForAtlas({
-        ref, category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [],
+        ref, category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [], pinned: Boolean(a.pinned),
       }, rules, tax.vocab).subcategory === lands) : [];
     const own = await placeAttributes.valuesForMany(mine.map((x) => x.ref));
     // A label that is not a question for this kind of day out is not offered
@@ -560,7 +560,10 @@ taxonomyRoutes.get('/would', requires('view_library'), async (req, res, next) =>
     for (const a of all) {
       const ref = refOf(a);
       if (!ref) continue;
-      const at = { ref, category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [] };
+      // The pin travels too, or a pinned attraction whose types were all
+      // refused drops out of its drawer and the movement preview here while
+      // every household reader keeps it (Codex via epic-83, 25 Sep 2026).
+      const at = { ref, category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [], pinned: Boolean(a.pinned) };
       const words = labelsOfAtlas({ category: a.category, kinds: a.kinds ?? [], labels: a.labels ?? [] });
       if (couldSpeakTo(a, words)) carriers += 1;
       const was = shelvesForAtlas(at, rules, tax.vocab).subcategory;
