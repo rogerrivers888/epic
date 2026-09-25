@@ -259,6 +259,39 @@ test('a place asked again after a deploy is costed from its first attempt', asyn
   assert.equal(Math.round(Number(p.cost_usd) * 1000) / 1000, 0.064, 'both attempts are the sweep’s spend');
 });
 
+test('a place that throws after its deadline still has its spend booked', async () => {
+  // The rejection path did nothing, so a request ledgered after the deadline
+  // read at the deadline was never booked to the place (Codex, 25 Sep 2026).
+  await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
+  const row = await sweep.start({ subcategories: [SUB], confirm: 36, householdId: HH });
+  let lateRef = null;
+  let settled;
+  const settledLate = new Promise((r) => { settled = r; });
+  const done = await sweep.work(row.id, {
+    deadlineMs: 30,
+    research: async (ref) => {
+      if (!lateRef) {
+        lateRef = ref;
+        return new Promise((_, reject) => setTimeout(async () => {
+          await query(`insert into provider_calls (household_id, provider, purpose, estimated_cost_usd, venue_ref) values ($1, 'google', 'own.seed', 0.032, $2)`, [HH, ref]);
+          reject(new Error('their website did not answer'));
+          setTimeout(settled, 100);
+        }, 120));
+      }
+      return { state: 'done', matched: {}, fields: {}, problems: [] };
+    },
+    room: async () => ({ ok: true, reservation: 'r', leftPence: 10000 }),
+    release: async () => {},
+  });
+  assert.equal(done.state, 'done');
+  await settledLate;
+  const { rows: [p] } = await query(`select state, outcome, cost_usd from research_sweep_places where sweep_id = $1 and venue_ref = $2`, [row.id, lateRef]);
+  assert.equal(p.state, 'failed');
+  assert.equal(p.outcome.late, true);
+  assert.match(p.outcome.problems.join(' '), /gave up after.*did not answer/);
+  assert.equal(Math.round(Number(p.cost_usd) * 1000) / 1000, 0.032, 'spent after the deadline, and still the sweep’s');
+});
+
 test('a sweep whose process died is picked up, and its in-air places asked again', async () => {
   await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
   const hh = HH;

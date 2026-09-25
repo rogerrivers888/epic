@@ -291,7 +291,10 @@ async function seedFor(venueRef, given = {}, { householdId = null, paid = true }
       // successful branch let failed attempts vanish once the batch's
       // reservation was released (Codex, 25 Sep 2026). Attributed to the
       // place as well as the household, so one place's cost can be read back.
-      await providerCalls.record(householdId, 'google', 'own.seed', JSON.stringify(meter), null, venueRef).catch(() => null);
+      // The meter itself, not its JSON: the faults live under Symbol keys
+      // that stringifying drops, so a billed request that failed was reaching
+      // the ledger as one nobody had observed (Codex, 25 Sep 2026).
+      await providerCalls.record(householdId, 'google', 'own.seed', meter, null, venueRef).catch(() => null);
     }
     if (brief?.lat != null) {
       return { ...seed, name: seed.name ?? brief.name, lat: brief.lat, lng: brief.lng, website: seed.website ?? brief.website };
@@ -415,12 +418,12 @@ async function websiteLead(venueRef, householdId) {
   try {
     const meter = {};
     const brief = await googleSource.brief(rest.join(':'), { meter });
-    await providerCalls.record(householdId, 'google', 'own.lead', JSON.stringify(meter), null, venueRef).catch(() => null);
+    await providerCalls.record(householdId, 'google', 'own.lead', meter, null, venueRef).catch(() => null);
     if (!brief?.website) return { website: null, name: brief?.name ?? null };
     return { website: brief.website, name: brief.name ?? null };
   } catch (err) {
     // Attributed whether or not it answered, the same as the open map above.
-    await providerCalls.record(householdId, 'google', 'own.lead', JSON.stringify({ google: 1 }), null, venueRef).catch(() => null);
+    await providerCalls.record(householdId, 'google', 'own.lead', { google: 1 }, null, venueRef).catch(() => null);
     return { problem: `where their page is: ${String(err?.message || err).slice(0, 120)}` };
   }
 }

@@ -22,6 +22,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { googleSource } from '../src/sources/google.js';
+import { noteFault } from '../src/sources/meter.js';
 import { pool, query } from '../src/db.js';
 
 const own = await import('../src/sources/own.js');
@@ -123,11 +124,18 @@ test('an identification that fails is still on the ledger, against the place', a
   const wasFetch = globalThis.fetch;
   process.env.GOOGLE_MAPS_API_KEY = 'test-key-never-sent';
   globalThis.fetch = async () => { throw new Error('no network in this test'); };
-  googleSource.brief = async (_id, { meter }) => { meter.google = 1; meter['google-pro'] = 1; throw new Error('Google Places 503'); };
+  googleSource.brief = async (_id, { meter }) => { meter.google = 1; meter['google-pro'] = 1; noteFault(meter, 'http_503'); throw new Error('Google Places 503'); };
   try {
     await own.enrich(r, { force: true, paid: true });
-    const { rows } = await query(`select purpose from provider_calls where venue_ref = $1 and purpose = 'own.seed'`, [r]);
+    const { rows } = await query(`select purpose, ok, failed, fault from provider_calls where venue_ref = $1 and purpose = 'own.seed'`, [r]);
     assert.equal(rows.length, 1, 'the attempt is recorded, with the place on it');
+    // And recorded as the failure it was. The meter's faults live under
+    // Symbol keys; stringified on the way to the ledger they were lost, and
+    // a billed failure arrived as a call nobody had observed (Codex, 25 Sep
+    // 2026). `brief` in this test notes the fault the way `call()` does.
+    assert.equal(rows[0].ok, false);
+    assert.equal(rows[0].failed, 1);
+    assert.equal(rows[0].fault, 'http_503');
   } finally {
     googleSource.brief = wasBrief;
     globalThis.fetch = wasFetch;

@@ -425,17 +425,21 @@ export async function work(id, { research = own.enrich, room = roomToSpend, rele
               // gap between releasing this batch's reservation and that late
               // request landing: at most two requests, a few pence (Codex,
               // 25 Sep 2026).
+              // Either way it settles — answered or thrown — what it cost
+              // by then is read again and written, because the read at the
+              // deadline may have run before the request landed (Codex,
+              // 25 Sep 2026).
+              const settle = async (late) => {
+                const usd = await spentOn(p.venue_ref, since, household);
+                await query(
+                  `update research_sweep_places set outcome = $3::jsonb, cost_usd = $4
+                    where sweep_id = $1 and venue_ref = $2`,
+                  [id, p.venue_ref, JSON.stringify({ ...late, late: true, problems: [...outcome.problems, ...(late.problems ?? [])] }), usd]);
+                await writeProgress(id).catch(() => null);
+              };
               asking.then(
-                async (out) => {
-                  const late = outcomeOf(out);
-                  const usd = await spentOn(p.venue_ref, since, household);
-                  await query(
-                    `update research_sweep_places set outcome = $3::jsonb, cost_usd = $4
-                      where sweep_id = $1 and venue_ref = $2`,
-                    [id, p.venue_ref, JSON.stringify({ ...late, late: true, problems: [...outcome.problems, ...late.problems] }), usd]);
-                  await writeProgress(id).catch(() => null);
-                },
-                () => null,
+                (out) => settle(outcomeOf(out)),
+                (err) => settle({ state: 'failed', problems: [String(err?.message ?? err).slice(0, 160)] }),
               ).catch(() => null);
             }
           }
