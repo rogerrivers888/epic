@@ -111,7 +111,13 @@ test('a ledger row that metered three requests counts as three', async () => {
     // A search over several sources is one row whose provider names them all
     // and whose units carry the Google requests it made (Codex, 25 Sep 2026).
     await query(`insert into provider_calls (household_id, provider, purpose, units, estimated_cost_usd) values ($1, 'fixtures+osm+google', 'search', '{"osm-overpass": 1, "google": 4, "google-search": 4}'::jsonb, 0.16)`, [HH3]);
-    assert.equal(await countThisMonth(HH3), 7, 'three and four requests, and the free open map not counted at all');
+    // A census slice: hundreds of IDs Only requests, all free, and not one of
+    // them a call that can cost money (found 25 Sep 2026, when one day's
+    // census put the founding household past its bound).
+    await query(`insert into provider_calls (household_id, provider, purpose, units, estimated_cost_usd) values ($1, 'google', 'census.slice', '{"google": 600, "google-essentials": 600}'::jsonb, 0)`, [HH3]);
+    // A Place Details request on a Pro mask, priced, counts.
+    await query(`insert into provider_calls (household_id, provider, purpose, units, estimated_cost_usd) values ($1, 'google', 'own.seed', '{"google": 1, "google-pro": 1}'::jsonb, 0.032)`, [HH3]);
+    assert.equal(await countThisMonth(HH3), 8, 'three and four priced requests and one Pro detail; the free open map and the free census not counted at all');
   } finally {
     await query('delete from provider_calls where household_id = $1', [HH3]);
     await query('delete from households where id = $1', [HH3]);

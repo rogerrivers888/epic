@@ -119,8 +119,22 @@ const billable = (rows) => rows.reduce((n, r) => n + (canBill(r.provider) ? r.n 
  * search over several sources is recorded as `fixtures+osm+google` with the
  * Google requests in its units (Codex, same day) — and every other row
  * counts one.
+ *
+ * Only the requests that can cost money. A census slice on the IDs Only mask
+ * is free — that is the whole point of the census — and its row carries
+ * thousands of requests under `google` and `google-essentials`. Counted as
+ * calls, one day's census put the founding household past its bound and
+ * every Claude and Google call it made was refused (found within the hour,
+ * 25 Sep 2026). So a row that says which tier its requests were priced at is
+ * counted by the priced tiers alone; a row from before the tiers were
+ * recorded counts its Google requests; anything else counts one.
  */
-const CALLS_IN_ROW = `greatest(1, coalesce((units->>'google')::int, 1))`;
+const PRICED_TIERS = ['google-pro', 'google-search', 'google-details', 'google-photos', 'google-routes'];
+const CALLS_IN_ROW = `case
+    when units ?| array['google-essentials', ${PRICED_TIERS.map((t) => `'${t}'`).join(', ')}]
+      then ${PRICED_TIERS.map((t) => `coalesce((units->>'${t}')::int, 0)`).join(' + ')}
+    else greatest(1, coalesce((units->>'google')::int, 1))
+  end`;
 
 export async function countForSession(sessionId) {
   const { rows } = await query(
