@@ -230,12 +230,26 @@ test('a place kept between rebuilds is placed, and turns up on the board', async
   // score. Every board in Places reads through `place_areas`, so until this
   // runs a newly swept or claimed place is in the index and on no screen, and
   // it stayed that way until somebody pressed Rebuild (Codex, 17 Sep 2026).
+  // Its own rows only, so a second run against the same database starts where
+  // the first did.
+  for (const table of ['place_areas', 'place_cells', 'place_index']) {
+    await query(`delete from ${table} where venue_ref = 'osm:node/settle-me'`);
+  }
   await index.noteMany([{ ref: 'osm:node/settle-me', lat: 51.48, lng: -0.61 }], { source: 'osm', countryCode: 'GB' });
   const before = await index.breakdown('gb', { by: 'county' });
   const inGb = async () => (await query(
     `select count(*)::int as n from place_areas where venue_ref = $1 and area_slug = 'gb'`,
     ['osm:node/settle-me'])).rows[0].n;
   assert.equal(await inGb(), 0, 'nothing has placed it yet');
+  // Stamped, as the reach build would have stamped it: a place is only placed
+  // once there is a stamp about its position. While the sector table held no
+  // real sectors this fell out of "outside the postcode coverage", which is a
+  // stamp of its own; with every sector in the country there (migration 248)
+  // the point is inside coverage and waits for the stamper, so the fixture
+  // supplies the stamp the test was silently relying on.
+  await query(
+    `insert into place_cells (venue_ref, cell, lat, lng) values ('osm:node/settle-me', null, 51.48, -0.61)
+     on conflict (venue_ref) do update set lat = excluded.lat, lng = excluded.lng`);
 
   const out = await index.settleNew();
   assert.ok(out.settled >= 1);
@@ -243,8 +257,13 @@ test('a place kept between rebuilds is placed, and turns up on the board', async
   const { rows: [row] } = await query('select placed_at, indexed_at from place_index where venue_ref = $1', ['osm:node/settle-me']);
   assert.ok(row.placed_at, 'placed, which is what takes it out of the waiting set');
 
-  // And it is safe to run again when there is nothing left to do.
-  assert.equal((await index.settleNew()).settled, 0);
+  // And it is safe to run again: nothing about this place changes. Other
+  // fixtures in this file sit inside real sector coverage now (migration 248)
+  // and wait for a stamp, so the pass may well find work — it is this place
+  // that must not be touched twice.
+  const again = await index.settleNew();
+  assert.ok(again.settled >= 0);
+  assert.equal(await inGb(), 1, 'placed once, and still placed');
   assert.ok(before !== null);
 });
 
@@ -328,8 +347,10 @@ test('a search outside the cells we hold is written down as outside them', async
   // 2026).
   await query(
     `insert into geo_cells (code, scheme, label, lat, lng, source, outcode)
-     values ('TESTCELL', 'outcode', 'Test cell', 51.48, -0.61, 'test', 'sl4')
+     values ('TESTCELL', 'outcode', 'Test cell', 51.49, -0.62, 'test', 'sl4')
      on conflict (code) do update set lat = excluded.lat, lng = excluded.lng`);
+  // Exactly on the cell: the sector table holds every real sector now
+  // (migration 248), so a point a kilometre off would find SL4 6 first.
   const near = await log.whereOf({ lat: 51.49, lng: -0.62 });
   assert.equal(near.cell, 'TESTCELL', 'a cell that is actually near is used');
 
