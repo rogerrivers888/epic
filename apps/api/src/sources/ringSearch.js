@@ -109,7 +109,7 @@ export const THEN = {
   fun: ['theme parks and rides', 'zoos and farm parks', 'soft play and trampolines'],
   outdoors: ['country parks', 'nature reserves and woodland', 'gardens open to the public'],
   sport: ['swimming pools', 'golf courses', 'climbing walls', 'tennis and racquets'],
-  active: ['cycling and bike hire', 'watersports centres', 'adventure playgrounds'],
+  activity: ['cycling and bike hire', 'watersports centres', 'adventure playgrounds'],
   adrenaline: ['go karting', 'high ropes and zip lines', 'skydiving and indoor skydiving',
     // "quad biking and off-road driving" brought back motorcycle dealers and
     // Halfords: the words a shop uses about itself and the words an afternoon
