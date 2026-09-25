@@ -347,6 +347,16 @@ Rules:
 
 const NOT_THEIR_SITE = /(tripadvisor|yelp|facebook|instagram|twitter|x\.com|google\.|opentable|resy|deliveroo|just-?eat|ubereats|yell\.com|foursquare|zomato|thefork|bookatable|linkedin|wikipedia|tiktok)/i;
 
+/**
+ * The one road from the research to Claude, held on an object rather than
+ * called by name, so a test can close it the way it closes `googleSource.brief`
+ * and `fetch`. A stubbed `fetch` did not reach it: the SDK keeps its own copy
+ * of the global, so the paid-pass test's "no network" was never seen by the
+ * search, and what the test measured depended on whether a key happened to be
+ * in the environment (owner, 25 Sep 2026: stub the call).
+ */
+export const web = { search: searchWeb };
+
 async function findTheirPage({ venueRef, name, locality, address, category, householdId }) {
   if (!name) return null;
   if (!process.env.ANTHROPIC_API_KEY?.trim() && !process.env.ANTHROPIC_AUTH_TOKEN?.trim()) return null;
@@ -356,7 +366,7 @@ async function findTheirPage({ venueRef, name, locality, address, category, hous
   const meta = {};
   // A ceiling of ours or a budget of the owner's is not an answer about this
   // place: nothing is written down and it is asked again another day.
-  const { text } = await searchWeb({
+  const { text } = await web.search({
     system: FIND_PAGE_SYSTEM,
     prompt: [name, category ? `a ${category}` : null, address, locality].filter(Boolean).join('\n'),
     householdId, sessionId: null, purpose: 'own.findPage',

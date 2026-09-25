@@ -102,18 +102,37 @@ test('a paid pass may be told to identify a place and still never go searching t
   // place with no website anywhere is the one case `enrich` would go further
   // — a Claude web search, neither in the estimate nor under the ceiling —
   // so the sweep switches that off separately (Codex, 25 Sep 2026).
+  //
+  // The search itself is stubbed at `own.web.search`, not left to the stubbed
+  // `fetch`: the SDK never saw that stub, so this test used to measure whether
+  // a Claude key happened to be in the environment, and read a gate that had
+  // silently said no as "no network" (owner, 25 Sep 2026: stub the call).
+  // Counting the stub is what makes the assertion name the right thing when
+  // it fails — the gate, not the weather.
   const wasKey = process.env.ANTHROPIC_API_KEY;
+  const wasSearch = own.web.search;
   process.env.ANTHROPIC_API_KEY = 'test-key-never-sent';
+  let searches = 0;
+  own.web.search = async () => { searches += 1; throw new Error('no network in this test'); };
   try {
     const r = ref('claimed_no_search');
     await query(`insert into households (id, name) values ('00000000-0000-4000-8000-0000000c1a1d', 'Test claimants') on conflict (id) do nothing`);
     await query(`insert into place_claims (household_id, venue_ref, reason) values ('00000000-0000-4000-8000-0000000c1a1d', $1, 'test') on conflict do nothing`, [r]);
     let out;
     await countingBriefs(async () => { out = await own.enrich(r, { force: true, paid: true, search: false, seed: { name: 'Nowhere Cafe', lat: 51.5, lng: -0.1 } }); });
-    assert.equal((out.problems ?? []).some((p) => /looking for their page/.test(p)), false, 'the search was never attempted');
+    assert.equal(searches, 0, 'the search was never attempted');
+    assert.equal((out.problems ?? []).some((p) => /looking for their page/.test(p)), false, 'and nothing says it was');
     await countingBriefs(async () => { out = await own.enrich(r, { force: true, paid: true, seed: { name: 'Nowhere Cafe', lat: 51.5, lng: -0.1 } }); });
-    assert.equal((out.problems ?? []).some((p) => /looking for their page|could not go looking/.test(p)), true, 'with search allowed it goes, and with no network it says so');
+    assert.equal(searches, 1, 'with search allowed it goes, once');
+    assert.equal((out.problems ?? []).some((p) => /looking for their page: no network in this test/.test(p)), true, 'and with no network it says so, in those words');
+    // Answered NONE: written down as looked-and-nothing, which is what stops
+    // the next pass paying to look again.
+    own.web.search = async () => { searches += 1; return { text: 'NONE', searches: 1, stopReason: 'end_turn' }; };
+    await countingBriefs(async () => { out = await own.enrich(r, { force: true, paid: true, seed: { name: 'Nowhere Cafe', lat: 51.5, lng: -0.1 } }); });
+    assert.equal(searches, 2);
+    assert.ok((out.problems ?? []).some((p) => /no website found for it anywhere/.test(p)), 'nothing found is an answer');
   } finally {
+    own.web.search = wasSearch;
     if (wasKey === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = wasKey;
     await query(`delete from place_claims where venue_ref like $1`, [`${PREFIX}%`]).catch(() => null);
   }

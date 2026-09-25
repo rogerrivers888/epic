@@ -77,15 +77,38 @@ async function migrationFiles(dir) {
 }
 
 /**
- * One database per test file.
+ * One database per test file, per process.
  *
  * `node --test` runs files in parallel, and two of them dropping and rebuilding
  * the same database is a race that fails in a different place every time. The
- * name comes from the file being run, so the suites cannot collide and a
- * leftover from a crashed run is reused rather than accumulating.
+ * name comes from the file being run, so the files in one suite cannot
+ * collide — and from the process id, so two *sessions* cannot either. This
+ * machine runs several at once, and a file named from itself alone was being
+ * dropped and rebuilt under a peer's run of the same file: the paid-pass test
+ * in ownFreeSweep failed whenever another session's copy of that file deleted
+ * its claim row mid-test, and read as "the network" (owner, 25 Sep 2026).
+ * Leftovers are bounded: a run drops, on the way in, every database of this
+ * file's whose process is no longer alive.
  */
 const suite = (process.argv[1] || 'suite').split('/').pop().replace(/\.test\.js$/, '').replace(/[^a-z0-9]/gi, '_').toLowerCase();
-const TEST_DB = process.env.EPIC_TEST_DB || `epic_test_${suite}`;
+const TEST_DB = process.env.EPIC_TEST_DB || `epic_test_${suite}_${process.pid}`;
+
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (err) { return err.code === 'EPERM'; } };
+
+/** The databases an earlier run of this file left behind, whose process has gone. */
+async function dropDeadSiblings(admin) {
+  const { rows } = await admin.query(
+    `select datname from pg_database where datname like $1`, [`epic_test_${suite}_%`]);
+  for (const { datname } of rows) {
+    const pid = Number(datname.slice(`epic_test_${suite}_`.length));
+    if (!Number.isInteger(pid) || pid === process.pid || alive(pid)) continue;
+    await admin.query(`drop database if exists ${datname} with (force)`).catch(() => null);
+  }
+  // And the old un-suffixed name, once, so the machine does not keep it for
+  // ever — without force, so a session still on the old helper is not cut off
+  // mid-run; it goes the first time nobody is in it.
+  await admin.query(`drop database if exists epic_test_${suite}`).catch(() => null);
+}
 
 const urlFor = (database) => {
   const u = new URL(BASE);
@@ -113,6 +136,7 @@ export function testDatabase() {
     // queries in sequence.
     const admin = new pg.Pool({ connectionString: urlFor('postgres'), max: 2 });
     try {
+      await dropDeadSiblings(admin);
       await admin.query(`drop database if exists ${TEST_DB} with (force)`);
       await admin.query(`create database ${TEST_DB}`);
     } finally {

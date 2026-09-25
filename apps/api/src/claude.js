@@ -37,9 +37,15 @@ const WEB_SEARCH_RATE = 10 / 1000;
 // Identity-linked API keys (the default kind the Console issues now) must name
 // the workspace each request acts in; a legacy workspace key needs nothing.
 const workspaceId = process.env.ANTHROPIC_WORKSPACE_ID?.trim();
-const client = new Anthropic(
-  workspaceId ? { defaultHeaders: { 'anthropic-workspace-id': workspaceId } } : {},
-);
+// `fetch` is read at call time, not captured when the client is made. The SDK
+// takes its own copy of the global otherwise, so a test that stubs
+// `globalThis.fetch` to close the network would still have a Claude call go
+// out for real if a key were in the environment (25 Sep 2026). One road out of
+// the process, for Claude as for everything else.
+const client = new Anthropic({
+  fetch: (...args) => globalThis.fetch(...args),
+  ...(workspaceId ? { defaultHeaders: { 'anthropic-workspace-id': workspaceId } } : {}),
+});
 
 export class SpendBoundError extends Error {
   constructor(scope, bound) {
