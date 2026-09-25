@@ -21,6 +21,7 @@
  */
 
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -34,7 +35,26 @@ import { fileURLToPath } from 'node:url';
  * sessions cannot see is not a lock"). The one thing every session demonstrably
  * shares is this checkout, so the lock lives at its root, git-ignored.
  */
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
+const HERE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
+/**
+ * The main checkout's root, whichever worktree this runs in.
+ *
+ * A worktree's own root is its own directory, so a suite run there — the
+ * pre-push hook in a worktree, for one — took a lock of its own beside the
+ * shared one, and two suites built the same test databases at once:
+ * "relation households already exists" in the middle of migration 001
+ * (25 Sep 2026). `git rev-parse --git-common-dir` is the one .git every
+ * worktree of a repository shares, and the lock lives beside it.
+ */
+const mainRoot = () => {
+  try {
+    const common = execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd: HERE, encoding: 'utf8' }).trim();
+    return path.dirname(path.resolve(HERE, common));
+  } catch {
+    return HERE;
+  }
+};
+const ROOT = mainRoot();
 const LOCK = path.join(ROOT, '.epic-suite.lock');
 const STALE_MS = 20 * 60_000;
 const WAIT_MS = 5_000;
