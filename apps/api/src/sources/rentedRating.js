@@ -26,6 +26,7 @@
 
 import * as providerCalls from '../repositories/providerCalls.js';
 import { googleSource } from './google.js';
+import { sourceOff } from './switches.js';
 import { venueFromKept } from './cache.js';
 
 // A week, like taxonomy.js. A crowd rating moves in the third decimal place
@@ -84,6 +85,11 @@ export async function ratingFor(venueRef, { householdId = null } = {}) {
 
   const [source, ...rest] = String(venueRef).split(':');
   if (source !== 'google') return null;
+  // Switched off is not an empty answer. The adapter answers null at its
+  // door, and null here was a rating nobody had — kept for twelve hours and
+  // put on the ledger as a call that cost money, while the owner had Google
+  // off (Codex, 25 Sep 2026). Nothing is asked, kept or billed.
+  if (sourceOff('google')) return null;
   const found = await googleSource.rating(rest.join(':'));
   // Remembered either way — see ratingKept. A place nobody has rated is a fact
   // about that place, and one worth not re-buying every read.

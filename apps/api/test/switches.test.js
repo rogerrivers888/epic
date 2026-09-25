@@ -26,6 +26,8 @@ const { setOffKeys, sourceOff } = await import('../src/sources/switches.js');
 const { enabledSources, sourceOff: viaIndex } = await import('../src/sources/index.js');
 const { healthOf } = await import('../src/sources/meter.js');
 const { googleMatchFor } = await import('../src/sources/providerMatch.js');
+const { ratingFor } = await import('../src/sources/rentedRating.js');
+const { photosFor } = await import('../src/sources/rentedPhoto.js');
 
 test.after(() => pool.end());
 
@@ -98,6 +100,25 @@ test('a match attempted with Google switched off is not remembered as a miss', a
     assert.equal(left(), 0);
     const { rows } = await query('select missing from provider_matches where venue_ref = $1', [venueRef]);
     assert.equal(rows.length, 0, 'nothing was written down');
+  });
+});
+
+test('a rented rating or photo asked for with Google switched off is neither kept nor billed', async () => {
+  // Null from the door read as "no rating": kept for twelve hours, and put on
+  // the ledger as a call that cost money (Codex, 25 Sep 2026).
+  await withKeys({ GOOGLE_MAPS_API_KEY: 'test-key-never-sent' }, async (left) => {
+    setOffKeys(['google']);
+    const ref = `google:ChIJ_rented_off_${Date.now()}`;
+    assert.equal(await ratingFor(ref, { householdId: null }), null);
+    assert.equal(await photosFor(ref, { householdId: null }), null);
+    assert.equal(left(), 0);
+    const { rows } = await query('select purpose from provider_calls where venue_ref = $1', [ref]);
+    assert.equal(rows.length, 0, 'no fictitious call on the ledger');
+    // Switched back on, it is asked for real rather than answered from a
+    // cached nothing.
+    setOffKeys([]);
+    await ratingFor(ref, { householdId: null }).catch(() => null);
+    assert.equal(left(), 1, 'not hidden behind a cached empty answer');
   });
 });
 
