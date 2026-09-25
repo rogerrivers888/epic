@@ -335,8 +335,13 @@ export function Filing({ canManage }: { canManage: boolean }) {
   // From the frame, never the window: the shell's Mobile toggle tells the
   // desk it is 390 wide through this hook, and a screen reading the window
   // would draw the desktop inside the phone.
+  //
+  // Only while Overview is the tab shown: it is the one screen here with a
+  // phone layout, and the other tabs' tables have fixed columns that clip
+  // inside a 390 canvas worse than they scroll inside an 1180 one (Codex,
+  // 25 Sep 2026). Each tab that gains a phone layout joins this condition.
   const { width } = useViewport();
-  const narrow = width < PHONE;
+  const narrow = width < PHONE && tab === 'overview';
   const gutter = narrow ? 16 : 28;
 
   return (
