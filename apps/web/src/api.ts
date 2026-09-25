@@ -1483,13 +1483,16 @@ export type PlaceCensusRow = {
   censused_at: string | null; complete: boolean;
   /**
    * The ground the count is drawn from: tiles planned for the board's
-   * districts, and how many have answered. While `sweeping` is true a tile is
-   * still to do or being done, and no count on the row may be drawn as a bare
-   * number, sorted or compared as if it were final — it is drawn with its own
-   * caveat, inseparably: "at least 340, sweeping, 4 of 11 tiles" (owner, 25
-   * Sep 2026). Rows in flight come after finished ones in the API's order.
+   * districts in the latest run over them, and how many have answered.
+   * `partial` is the row's own flag — its count was written with a tile still
+   * unanswered — and while it is true no count on the row may be drawn as a
+   * bare number, sorted or compared as if it were final: it is drawn with its
+   * own caveat, inseparably, "at least 340, sweeping, 4 of 11 tiles" (owner,
+   * 25 Sep 2026). `sweeping` is whether a tile is still to do or being done
+   * right now, which adds the word. Partial rows come after whole ones in the
+   * API's order.
    */
-  tiles: number; tiles_done: number; sweeping: boolean;
+  partial: boolean; tiles: number; tiles_done: number; sweeping: boolean;
 };
 
 export type PlaceCoverageRow = {

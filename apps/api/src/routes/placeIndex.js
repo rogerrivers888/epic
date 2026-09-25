@@ -715,19 +715,40 @@ export async function censusBoardRows(slugs) {
             case when count(a.residual) = 0 then null else sum(coalesce(a.residual, 0))::int end     as residual,
             max(a.censused_at)                           as censused_at,
             bool_and(a.complete)                         as complete,
-            -- The ground the count is drawn from: how many tiles are planned
-            -- for these districts and how many of them have answered. A count
-            -- from four tiles of eleven is a different number from one out of
-            -- eleven clean ones, and the row has to carry that inseparably
-            -- (owner, 25 Sep 2026: "at least 340, sweeping, 4 of 11 tiles").
-            (select count(*)::int from census_tiles t
-              where t.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)) as tiles,
-            (select count(*)::int from census_tiles t
-              where t.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)
+            -- Whether this row's own count is whole. A drawer's row is written
+            -- by the roll-up with complete = false while a tile planned for the
+            -- district has not answered it, and a standing row kept during a
+            -- sweep keeps its complete = true — so the caveat is the row's own
+            -- flag, never the district's state (Codex, 25 Sep 2026).
+            not bool_and(a.complete)                     as partial,
+            -- The ground the count is drawn from: the tiles of the latest run
+            -- over these districts, and how many of them have answered. The
+            -- latest run, not every tile that ever named the district — tiles
+            -- outlive runs and a finer grid uses different keys, so an eleven-
+            -- tile sweep after an eleven-tile old one read 4 of 22 (Codex, 25
+            -- Sep 2026). A count from four tiles of eleven is a different
+            -- number from one out of eleven clean ones, and the row carries
+            -- that inseparably (owner, 25 Sep 2026: "at least 340, sweeping,
+            -- 4 of 11 tiles").
+            (select count(*)::int from census_run_tiles rt
+               join census_tiles t on t.grid_key = rt.grid_key
+              where rt.run_id = (select r.id from census_runs r
+                                   join census_run_tiles m on m.run_id = r.id
+                                   join census_tiles mt on mt.grid_key = m.grid_key
+                                  where mt.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)
+                                  order by r.started_at desc limit 1)
+                and t.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)) as tiles,
+            (select count(*)::int from census_run_tiles rt
+               join census_tiles t on t.grid_key = rt.grid_key
+              where rt.run_id = (select r.id from census_runs r
+                                   join census_run_tiles m on m.run_id = r.id
+                                   join census_tiles mt on mt.grid_key = m.grid_key
+                                  where mt.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)
+                                  order by r.started_at desc limit 1)
+                and t.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)
                 and t.state = 'done')                     as tiles_done,
             -- In flight: a tile naming one of these districts is still to do or
-            -- being done. While this is true no count here may be read, sorted
-            -- or compared as if it were final.
+            -- being done. Adds the word; the caveat itself is the partial flag above.
             exists (select 1 from census_tiles t
                      where t.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)
                        and t.state in ('todo', 'doing')) as sweeping

@@ -70,6 +70,7 @@ test('a row drawn while a sweep is in flight says so, carries its tiles, and sor
   // complete = false must never sort or compare as if it were final."
   await clean();
   t.after(async () => {
+    await query(`delete from census_run_tiles where grid_key like 'test/board-%'`);
     await query(`delete from census_tiles where grid_key like 'test/board-%'`);
     await clean();
   });
@@ -79,24 +80,44 @@ test('a row drawn while a sweep is in flight says so, carries its tiles, and sor
      values ('zz7a', 'culture', 'museums', 340, 340, 0, 0, now(), false, 0, 'type', 0),
             ('zz7a', 'culture', 'galleries', 12, 12, 0, 0, now(), true, 0, 'type', 0)
      on conflict (area_slug, category, subcategory) do update set census_count = excluded.census_count, surfaced_count = excluded.surfaced_count, complete = excluded.complete`);
-  // Eleven tiles planned for the district, four of them answered.
+  // An old run over the same ground on another grid, all done — its tiles
+  // must not be counted into this sweep's progress (Codex, 25 Sep 2026) —
+  // then the latest run: eleven tiles planned for the district, four answered.
+  const { rows: [old] } = await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, started_by, tiles_total, daily_cap, day, day_requests, started_at)
+     values ('test board old', '{}', 0.08, 0.12, 100, 5, 30, 'test', 11, 75000, current_date, 0, now() - interval '2 days') returning id`);
+  const { rows: [latest] } = await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, started_by, tiles_total, daily_cap, day, day_requests, started_at)
+     values ('test board latest', '{}', 0.01, 0.015, 100, 5, 30, 'test', 11, 75000, current_date, 0, now() - interval '1 hour') returning id`);
+  t.after(async () => { await query('delete from census_runs where id = any($1)', [[old.id, latest.id]]); });
   for (let i = 0; i < 11; i += 1) {
+    await query(
+      `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at)
+       values ($1, 51.4, -0.7, 51.48, -0.58, array['ZZ7A'], 'done', now() - interval '2 days')
+       on conflict (grid_key) do update set state = excluded.state, outcodes = excluded.outcodes`, [`test/board-old-${i}`]);
+    await query('insert into census_run_tiles (run_id, grid_key) values ($1, $2) on conflict do nothing', [old.id, `test/board-old-${i}`]);
     await query(
       `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at)
        values ($1, 51.4, -0.7, 51.41, -0.69, array['ZZ7A'], $2, case when $2 = 'done' then now() else null end)
        on conflict (grid_key) do update set state = excluded.state, outcodes = excluded.outcodes`,
       [`test/board-${i}`, i < 4 ? 'done' : (i === 4 ? 'doing' : 'todo')]);
+    await query('insert into census_run_tiles (run_id, grid_key) values ($1, $2) on conflict do nothing', [latest.id, `test/board-${i}`]);
   }
   const rows = await censusBoardRows(['zz7a']);
   const museums = rows.find((r) => r.subcategory === 'museums');
-  assert.equal(museums.sweeping, true, 'a tile is still to do, so the row is in flight');
-  assert.equal(museums.tiles, 11); assert.equal(museums.tiles_done, 4);
-  assert.equal(museums.complete, false);
+  const galleries = rows.find((r) => r.subcategory === 'galleries');
+  assert.equal(museums.partial, true, 'the row was written with a tile unanswered');
+  assert.equal(museums.sweeping, true, 'and a tile is still to do, so it is in flight');
+  assert.equal(museums.tiles, 11, 'the latest run\'s tiles, not the old grid\'s as well');
+  assert.equal(museums.tiles_done, 4);
+  // A standing row kept whole during the sweep is not mislabelled partial.
+  assert.equal(galleries.partial, false, 'a finished row keeps its word while the district sweeps');
   assert.deepEqual(rows.map((r) => r.subcategory), ['galleries', 'museums'],
-    'the finished twelve comes before the in-flight three hundred and forty, whatever the size');
+    'the finished twelve comes before the partial three hundred and forty, whatever the size');
 
-  // Every tile answered: the row reads as the others do.
+  // Every tile answered and the row written whole: it reads as the others do.
   await query(`update census_tiles set state = 'done', censused_at = now() where grid_key like 'test/board-%'`);
+  await query(`update area_counts set complete = true where area_slug = 'zz7a' and subcategory = 'museums'`);
   const [after] = (await censusBoardRows(['zz7a'])).filter((r) => r.subcategory === 'museums');
-  assert.equal(after.sweeping, false); assert.equal(after.tiles_done, 11);
+  assert.equal(after.partial, false); assert.equal(after.sweeping, false); assert.equal(after.tiles_done, 11);
 });

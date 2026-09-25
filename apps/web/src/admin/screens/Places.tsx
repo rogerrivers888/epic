@@ -1551,17 +1551,17 @@ function CensusBoard({ where }: { where: string }) {
     // not speak has spoken anyway"). The API orders these rows after the
     // finished ones, and the board keeps that order.
     { key: 'found', label: 'Found', tip: 'censusFound', width: 150, align: 'right',
-      cell: (r) => (r.sweeping
-        ? <Explain tip="censusSweeping"><Text style={styles.rowNote}>{`at least ${r.surfaced ?? 0}, sweeping, ${r.tiles_done ?? 0} of ${r.tiles ?? 0} tiles`}</Text></Explain>
+      cell: (r) => (r.partial
+        ? <Explain tip="censusSweeping"><Text style={styles.rowNote}>{`at least ${r.surfaced ?? 0}, ${r.sweeping ? 'sweeping, ' : ''}${r.tiles_done ?? 0} of ${r.tiles ?? 0} tiles`}</Text></Explain>
         : (r.saturated ?? 0) > 0
           ? <Explain tip="censusFloor"><Text style={styles.rowName}>{`at least ${r.surfaced ?? 0}`}</Text></Explain>
           : <Num n={r.surfaced || null} />) },
     { key: 'filed', label: 'Filed', tip: 'censusFiled', width: 150, align: 'right',
       cell: (r) => {
-        if (r.sweeping) {
+        if (r.partial) {
           return (
             <Explain tip="censusSweeping">
-              <Text style={styles.rowNote}>{`at least ${r.filed ?? 0}, sweeping, ${r.tiles_done ?? 0} of ${r.tiles ?? 0} tiles`}</Text>
+              <Text style={styles.rowNote}>{`at least ${r.filed ?? 0}, ${r.sweeping ? 'sweeping, ' : ''}${r.tiles_done ?? 0} of ${r.tiles ?? 0} tiles`}</Text>
             </Explain>
           );
         }
