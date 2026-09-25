@@ -552,3 +552,21 @@ test('reopening a sweep that stopped short prices what it never reached as well 
   assert.deepEqual(states, [{ state: 'done', n: 2 }, { state: 'pending', n }], 'nothing left in the air');
   await query(`update research_sweeps set state = 'done' where id = $1`, [row.id]);
 });
+
+test('a retry prices a held sample place at nothing, since the worker will skip it', async () => {
+  await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
+  const need = (await sweep.estimate({ subcategories: [SUB] })).requests;
+  const row = await sweep.start({ subcategories: [SUB], confirm: need, householdId: HH });
+  await query(`update research_sweep_places set state = 'done', outcome = '{"state":"done"}'::jsonb where sweep_id = $1`, [row.id]);
+  // Given up on, then its late answer landed and identified it — fresh,
+  // identified, no website: `enrich` skips it, so the retry must not price
+  // the page lead the record would otherwise imply.
+  const [held] = refs(1);
+  await query(`update research_sweep_places set state = 'failed', outcome = '{"state":"failed","late":true,"problems":["gave up after 120s"]}'::jsonb where sweep_id = $1 and venue_ref = $2`, [row.id, held]);
+  await query(`update place_records set website = null, enrich_state = 'done', provenance = '{"name":"osm"}'::jsonb, enriched_at = now(), research_version = 3 where venue_ref = $1`, [held]);
+  await query(`update research_sweeps set state = 'done', finished_at = now() where id = $1`, [row.id]);
+  const e = await sweep.retryEstimate(row.id);
+  assert.deepEqual(e.refs, [held]);
+  assert.equal(e.requests, 0);
+  await query(`update research_sweeps set state = 'done' where id = $1`, [row.id]);
+});

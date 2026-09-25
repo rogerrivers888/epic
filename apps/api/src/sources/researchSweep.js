@@ -709,9 +709,17 @@ const RETRYABLE = `(state in ('pending', 'asking')
  * identified buys two. The same gate as the sweep itself: nothing paid
  * starts on a number the caller has not seen (Codex, 25 Sep 2026).
  */
-export async function retryEstimate(id) {
-  const { rows } = await query(`select venue_ref from research_sweep_places where sweep_id = $1 and ${RETRYABLE}`, [id]);
+export async function retryEstimate(id, run = null) {
+  const sweepRow = run ?? await one(id);
+  const { rows } = await query(`select venue_ref from research_sweep_places where sweep_id = $1 and ${RETRYABLE} order by venue_ref`, [id]);
   const cost = await requestsStillNeeded(rows.map((r) => r.venue_ref));
+  // In sample mode a held place is skipped by `enrich` and costs nothing on
+  // top — a place whose late answer landed after it was given up on is one
+  // (Codex, 25 Sep 2026). Reference mode asks everything again.
+  if (sweepRow?.params?.mode !== 'reference') {
+    const held = await alreadyHeld(rows.map((r) => r.venue_ref));
+    for (const ref of held) cost.set(ref, 0);
+  }
   const counts = [...cost.values()];
   const requests = counts.reduce((n, c) => n + c, 0);
   const pence = pencePerRequest();
@@ -721,6 +729,7 @@ export async function retryEstimate(id) {
     toFindPage: counts.filter((c) => c === 1).length,
     toIdentify: counts.filter((c) => c === 2).length,
     requests,
+    refs: rows.map((r) => r.venue_ref),
     pencePerRequest: pence,
     costGbpHigh: Math.round(requests * pence) / 100,
     basis: `${rows.length} places to ask again or for the first time · ${counts.filter((c) => c === 0).length} seeded from their record and free · `
@@ -729,12 +738,6 @@ export async function retryEstimate(id) {
 }
 
 export async function retryFailed(id, { confirm = null } = {}) {
-  const plan = await retryEstimate(id);
-  if (Number(confirm) !== plan.requests) {
-    const err = new Error(`This retry is ${plan.places} places, up to ${plan.requests} Google requests at £${plan.costGbpHigh.toFixed(2)}. Confirm with ${plan.requests} to run it.`);
-    err.code = 'confirm_required'; err.status = 409; err.plan = plan;
-    throw err;
-  }
   return withTransaction(async (client) => {
     // The same lock `start` takes, and both updates inside it: two retries,
     // or a retry racing a start, could each see no running sweep and both
@@ -746,6 +749,16 @@ export async function retryFailed(id, { confirm = null } = {}) {
     if (run.state === 'running') throw Object.assign(new Error('That sweep is still running.'), { code: 'already_running', status: 409 });
     const { rows: going } = await client.query(`select id from research_sweeps where state = 'running' limit 1`);
     if (going.length) throw Object.assign(new Error('A sweep is already running.'), { code: 'already_running', status: 409, sweep: going[0].id });
+    // The plan is made under the lock and the update touches exactly its
+    // rows: a late answer landing between an estimate and the reopening
+    // could otherwise make one more place retryable — perhaps one costing
+    // two requests — than the number confirmed (Codex, 25 Sep 2026).
+    const plan = await retryEstimate(id, run);
+    if (Number(confirm) !== plan.requests) {
+      const err = new Error(`This retry is ${plan.places} places, up to ${plan.requests} Google requests at £${plan.costGbpHigh.toFixed(2)}. Confirm with ${plan.requests} to run it.`);
+      err.code = 'confirm_required'; err.status = 409; err.plan = plan;
+      throw err;
+    }
     // A place given up on at its deadline may still be in flight — its
     // research cannot be cancelled — and asking again now would run two at
     // once and could pay twice. It is left as it is until its late answer
@@ -757,8 +770,8 @@ export async function retryFailed(id, { confirm = null } = {}) {
       `update research_sweep_places
           set state = 'pending',
               outcome = case when state = 'failed' then coalesce(outcome, '{}'::jsonb) || '{"retried": true}'::jsonb else outcome end
-        where sweep_id = $1 and ${RETRYABLE}`,
-      [id]);
+        where sweep_id = $1 and venue_ref = any($2) and ${RETRYABLE}`,
+      [id, plan.refs]);
     if (!rowCount) return { ...run, retried: 0 };
     const { rows: [reopened] } = await client.query(
       `update research_sweeps set state = 'running', finished_at = null, problem = null, touched_at = now() where id = $1 returning *`, [id]);
