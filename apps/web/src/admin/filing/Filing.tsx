@@ -21,7 +21,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, Text, View, type ViewStyle } from 'react-native';
 import { Press } from '../../components/press';
 import { desk, fonts, LIME } from '../../theme';
 import { asOneOf, asText, useQueryState, useRouter } from '../../router';
@@ -343,9 +343,15 @@ export function Filing({ canManage }: { canManage: boolean }) {
   const { width } = useViewport();
   const narrow = width < PHONE && tab === 'overview';
   const gutter = narrow ? 16 : 28;
+  // A desktop canvas inside a phone frame has to be able to scroll sideways,
+  // or the frame shows its left 390px and nothing else. react-native-web's
+  // vertical ScrollView hides horizontal overflow, so it is switched back on
+  // here for exactly that case (Codex, 25 Sep 2026). The style key is the
+  // web's, which the native types do not know about.
+  const sideways = width < PHONE && !narrow ? ({ overflowX: 'auto' } as unknown as ViewStyle) : null;
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: desk.ground }}
+    <ScrollView style={[{ flex: 1, backgroundColor: desk.ground }, sideways]}
                 contentContainerStyle={{ minWidth: narrow ? undefined : MIN_WIDTH }}>
       <View style={{ flex: 1 }}>
         {/* The tab row, and the two things that live to the right of it. On
