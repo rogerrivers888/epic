@@ -740,7 +740,11 @@ export async function censusBoardRows(slugs) {
                                    join census_run_tiles m on m.run_id = r.id
                                    join census_tiles mt on mt.grid_key = m.grid_key
                                   where mt.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)
-                                  order by r.started_at desc limit 1)
+                                  -- The run that is sweeping, if one is; else
+                                  -- the latest. The same run the sweeping flag
+                                  -- reads, so the tiles beside "sweeping" are
+                                  -- that run's (Codex, 25 Sep 2026).
+                                  order by (r.state in ('running', 'waiting')) desc, r.started_at desc limit 1)
                 and t.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)) else null end as tiles,
             case when $2 then (select count(*)::int from census_run_tiles rt
                join census_tiles t on t.grid_key = rt.grid_key
@@ -748,7 +752,11 @@ export async function censusBoardRows(slugs) {
                                    join census_run_tiles m on m.run_id = r.id
                                    join census_tiles mt on mt.grid_key = m.grid_key
                                   where mt.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)
-                                  order by r.started_at desc limit 1)
+                                  -- The run that is sweeping, if one is; else
+                                  -- the latest. The same run the sweeping flag
+                                  -- reads, so the tiles beside "sweeping" are
+                                  -- that run's (Codex, 25 Sep 2026).
+                                  order by (r.state in ('running', 'waiting')) desc, r.started_at desc limit 1)
                 and t.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)
                 and t.state = 'done') else null end       as tiles_done,
             -- In flight: a tile naming one of these districts is still to do or
