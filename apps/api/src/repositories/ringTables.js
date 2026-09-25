@@ -69,16 +69,21 @@ const MARKER = '';
  * it directly rather than from a point, so the row is about exactly the ring
  * its key names.
  */
-export async function refreshRing({ cell, mode = 'driving', minutes = 30 } = {}) {
+export async function refreshRing({ cell, mode = 'driving', minutes = 30, force = false } = {}) {
   const kind = travelMode(mode);
-  // One count of a ring at a time, in this process: a walk after a matrix or
-  // census refresh that reaches a ring still being counted from the old
-  // shape waits for that count and then counts again, rather than racing it
-  // and losing (Codex, 25 Sep 2026). Queued behind whatever is in flight for
-  // the same key; a count that failed does not block the next.
+  // One count of a ring at a time, in this process (Codex, 25 Sep 2026).
+  //
+  // A plain refresh — a page load finding the ring uncounted or stale — joins
+  // the count already in flight for the same key rather than queueing another
+  // behind it: a burst of N looks is one count, not N. A *forced* refresh —
+  // the walk after a matrix or census refresh, which exists to replace what
+  // an in-flight count may be reading — queues behind it and counts again
+  // once it has written, rather than racing it and losing. A count that
+  // failed does not block the next.
   const key = ringKey({ cell, mode: kind, minutes });
-  const prev = inFlight.get(key) ?? Promise.resolve();
-  const run = prev.catch(() => null).then(() => countRing({ cell, kind, minutes }));
+  const going = inFlight.get(key);
+  if (going && !force) return going;
+  const run = (going ?? Promise.resolve()).catch(() => null).then(() => countRing({ cell, kind, minutes }));
   inFlight.set(key, run);
   try { return await run; }
   finally { if (inFlight.get(key) === run) inFlight.delete(key); }
@@ -264,7 +269,8 @@ export async function refreshDue({ olderThanDays = CYCLE_DAYS, before = null, li
   for (const r of rows) {
     const key = { cell: r.cell, mode: r.mode, minutes: r.minutes };
     // Every ring tried is handed back, counted or not, so a walk can skip it.
-    try { done.push((await refreshRing(key)) ?? { ...key, ring: null }); }
+    // Forced: a due ring is counted again even if a count of it is in flight.
+    try { done.push((await refreshRing({ ...key, force: true })) ?? { ...key, ring: null }); }
     catch (err) { done.push({ ...key, error: String(err.message).slice(0, 120) }); }
   }
   return done;
@@ -279,17 +285,21 @@ export async function refreshDue({ olderThanDays = CYCLE_DAYS, before = null, li
  * tried is handed back as one to skip: a page of failures does not hide the
  * rings behind it, and nothing is tried twice in a pass.
  *
- * Two passes, because a ring counted for the first time while the walk was
+ * Two passes, with a wait between them for every count in flight in this
+ * process, because a ring counted for the first time while the walk was
  * going — from the old shape, dated before the cutoff — has no row for the
- * first pass to find and would keep that shape for a cycle (Codex, 25 Sep
- * 2026). The second pass sees it; `refreshRing` queues behind any count
- * still in flight, so it is counted again after that count and not beside
- * it. A ring the first pass counted is dated after the cutoff and is not
- * touched again; only a ring that failed is tried once more.
+ * first pass to find, and the walk cannot end before that count has written
+ * or the row lands after it and keeps the old shape for a cycle (Codex, 25
+ * Sep 2026, twice). The wait lets every in-flight count write; the second
+ * pass then finds any row dated before the cutoff and counts it again,
+ * forced, behind anything still going. A ring the first pass counted is
+ * dated after the cutoff and is not touched again; only a ring that failed
+ * is tried once more.
  */
 export async function refreshAllBefore({ before, pageSize = 200, maxPages = 10_000, passes = 2 } = {}) {
   const out = [];
   for (let pass = 0; pass < passes; pass += 1) {
+    if (pass > 0) await Promise.allSettled([...inFlight.values()]);
     const tried = new Set();
     for (let pages = 0; pages < maxPages; pages += 1) {
       const page = await refreshDue({ before, limit: pageSize, skip: [...tried] });

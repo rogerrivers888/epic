@@ -125,18 +125,37 @@ test('a ring is dated from when its count began, so a refresh that overlaps it s
   assert.ok((await tables.refreshDue({ before: during })).some((d) => d.cell === CELL), 'counted before the cutoff: counted again');
 });
 
-test('two counts of one ring run one after the other, never beside each other', async () => {
+test('a burst of looks at one ring is one count; a forced count queues behind it', async () => {
   await seed();
-  const [first, second] = await Promise.all([
+  const [a, b, c] = await Promise.all([
     tables.refreshRing({ cell: CELL, mode: 'drive', minutes: 30 }),
     tables.refreshRing({ cell: CELL, mode: 'drive', minutes: 30 }),
+    tables.refreshRing({ cell: CELL, mode: 'drive', minutes: 30, force: true }),
   ]);
-  assert.ok(first && second);
-  // The second began reading only once the first had written: its date is
-  // later, and it is the one the table holds.
-  assert.ok(new Date(second.computedAt) > new Date(first.computedAt), 'queued behind, not raced');
+  assert.ok(a && b && c);
+  // Two plain looks joined the same count: one date. The forced one began
+  // reading only once that count had written: a later date, and the one the
+  // table holds.
+  assert.equal(new Date(a.computedAt).getTime(), new Date(b.computedAt).getTime(), 'joined, not queued');
+  assert.ok(new Date(c.computedAt) > new Date(a.computedAt), 'queued behind, not raced');
   const { rows: [{ at }] } = await query('select distinct computed_at as at from ring_counts where cell = $1', [CELL]);
-  assert.equal(new Date(at).getTime(), new Date(second.computedAt).getTime());
+  assert.equal(new Date(at).getTime(), new Date(c.computedAt).getTime());
+});
+
+test('a walk does not end while a first-time count is still in flight; it waits, then counts it again', async () => {
+  await seed();
+  await query('delete from ring_counts where cell = $1', [CELL]);
+  // A first-time count begins, reading the old shape; the walk starts at
+  // once with a cutoff after that count's start. No row exists yet for its
+  // first pass; it must wait for the count and take it again, forced.
+  const first = tables.refreshRing({ cell: CELL, mode: 'drive', minutes: 30 });
+  await new Promise((r) => setTimeout(r, 5));
+  const { rows: [{ at: cutoff }] } = await query(`select now() + interval '1 second' as at`);
+  const walked = await tables.refreshAllBefore({ before: cutoff, pageSize: 10 });
+  const started = await first;
+  assert.ok(walked.some((d) => d.cell === CELL), 'the walk counted the ring it could not see at first');
+  const { rows: [{ at }] } = await query('select distinct computed_at as at from ring_counts where cell = $1', [CELL]);
+  assert.ok(new Date(at) > new Date(started.computedAt), 'and the row the table holds is the later count');
 });
 
 test('the walk after a census takes every ring, however many pages that is', async () => {
