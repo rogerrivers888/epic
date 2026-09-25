@@ -810,7 +810,12 @@ function provenanceOf(c) {
   return bits.join(' · ');
 }
 
-const candidateRow = (c) => ({
+/**
+ * Exported for its test: the mapping is the one place the stored quote
+ * becomes something a reviewer can read, and it was left at `quotes: []`
+ * after the quote started being stored (Codex, 25 Sep 2026).
+ */
+export const candidateRow = (c) => ({
   id: Number(c.id),
   word: c.raw_forms?.[0] ?? c.norm,
   seen: c.places_seen,
@@ -822,7 +827,11 @@ const candidateRow = (c) => ({
   // Null where the harvest predates polarity, which is not the same as nought
   // denials (migration 210).
   denies: (c.asserts + c.denies + c.asks) > 0 ? c.denies : null,
-  quotes: [],
+  // The quote the feature pass kept, from owned text (migration 247). Rented
+  // text never reaches the column, so anything here may be shown.
+  quotes: c.evidence
+    ? [{ text: c.evidence, place: c.evidence_ref ?? '', source: Object.keys(c.sources ?? {}).find((k) => k !== 'google') ?? 'features' }]
+    : [],
   snippet: null,
   places: (c.examples ?? []).slice(0, 4),
   why: c.kind === 'unclear' ? 'nobody can call it — a feature, a condition or an opinion'

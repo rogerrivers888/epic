@@ -473,7 +473,7 @@ const unavailable = (meter = null) => {
     // and left the ledger's health column unobserved (Codex, 25 Sep 2026).
     // Called once per refusal — asked twice, once for the branch and once
     // for the words, one refusal counted as two failures (Codex, same day).
-    noteFault(meter, 'switched_off');
+    refused(meter);
     return 'Google is switched off in Settings';
   }
   return null;
@@ -481,8 +481,24 @@ const unavailable = (meter = null) => {
 
 const off = (meter) => {
   if (!KEY()) return true;
-  if (sourceOff('google')) { noteFault(meter, 'switched_off'); return true; }
+  if (sourceOff('google')) { refused(meter); return true; }
   return false;
+};
+
+/**
+ * A refusal, written on the meter two ways.
+ *
+ * As a fault, for `healthOf` and the ledger's health columns. And as a unit,
+ * `switched_off: 1`, because the faults live under Symbol keys and the
+ * callers that already exist do not all hand the meter over whole:
+ * `/api/places/suggest` stringifies it, and Compare and Lookup record
+ * nothing when it has no keys. Either way the refusal was lost before it
+ * reached the ledger (Codex, 25 Sep 2026). A unit with no price costs
+ * nothing and survives both.
+ */
+const refused = (meter) => {
+  noteFault(meter, 'switched_off');
+  bump(meter, 'switched_off');
 };
 
 /** `movie_theater` -> "movie theater", which is what a text query wants. */

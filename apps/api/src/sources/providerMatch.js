@@ -254,6 +254,11 @@ export async function reviewsFor({ venueRef, name, lat, lng, householdId = null 
   const hit = kept.get(venueRef);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.value;
 
+  // Switched off is not "no reviews", and not "no match" either: asked here
+  // it would have come back unmatched and been kept for six hours as such.
+  // Nothing is asked, billed or kept (Codex, 25 Sep 2026).
+  if (sourceOff('google')) return null;
+
   const id = await googleRefFor({ venueRef, name, lat, lng, householdId });
   if (!id) {
     const value = { rating: null, ratingCount: null, reviews: [], attribution: null, matched: false };

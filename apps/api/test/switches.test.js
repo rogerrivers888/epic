@@ -27,6 +27,7 @@ const { enabledSources, sourceOff: viaIndex } = await import('../src/sources/ind
 const { healthOf } = await import('../src/sources/meter.js');
 const { googleMatchFor } = await import('../src/sources/providerMatch.js');
 const { ratingFor } = await import('../src/sources/rentedRating.js');
+const { reviewsFor } = await import('../src/sources/providerMatch.js');
 const { photosFor } = await import('../src/sources/rentedPhoto.js');
 
 test.after(() => pool.end());
@@ -56,6 +57,10 @@ test('Google switched off answers as it does with no key, and the meter says why
     assert.deepEqual(await googleSource.suggest('cafe', { meter }), []);
     assert.equal(left(), 0, 'nothing left the process');
     assert.match(JSON.stringify(healthOf(meter)), /switched_off/, 'the refusal is on the meter, for the ledger');
+    // And survives the callers that stringify the meter or record nothing
+    // when it has no keys (Codex, 25 Sep 2026).
+    assert.match(JSON.stringify(meter), /switched_off/);
+    assert.ok(Object.keys(meter).length > 0);
   });
 });
 
@@ -119,6 +124,20 @@ test('a rented rating or photo asked for with Google switched off is neither kep
     setOffKeys([]);
     await ratingFor(ref, { householdId: null }).catch(() => null);
     assert.equal(left(), 1, 'not hidden behind a cached empty answer');
+  });
+});
+
+test('reviews asked for with Google switched off are neither billed nor cached as none', async () => {
+  await withKeys({ GOOGLE_MAPS_API_KEY: 'test-key-never-sent' }, async (left) => {
+    setOffKeys(['google']);
+    const ref = `google:ChIJ_reviews_off_${Date.now()}`;
+    assert.equal(await reviewsFor({ venueRef: ref, name: 'The Bull', lat: 51.5, lng: -0.1 }), null);
+    assert.equal(left(), 0);
+    const { rows } = await query('select purpose from provider_calls where venue_ref = $1', [ref]);
+    assert.equal(rows.length, 0);
+    setOffKeys([]);
+    await reviewsFor({ venueRef: ref, name: 'The Bull', lat: 51.5, lng: -0.1 }).catch(() => null);
+    assert.ok(left() >= 1, 'switched on, asked for real rather than answered from a cached nothing');
   });
 });
 

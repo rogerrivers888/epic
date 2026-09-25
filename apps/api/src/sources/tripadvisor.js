@@ -37,7 +37,7 @@ const REVIEWS_PER_VENUE = 3;
 /** No key, or switched off in Settings: the empty answer, with the refusal on the meter. See google.js `off`. */
 const off = (meter) => {
   if (!KEY()) return true;
-  if (sourceOff('tripadvisor')) { noteFault(meter, 'switched_off'); return true; }
+  if (sourceOff('tripadvisor')) { noteFault(meter, 'switched_off'); bump(meter, 'switched_off'); return true; }
   return false;
 };
 
