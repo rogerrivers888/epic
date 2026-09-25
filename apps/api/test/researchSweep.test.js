@@ -175,6 +175,40 @@ test('a place that never answers is given up on, and the sweep moves on', async 
   assert.match(hung.outcome.problems[0], /gave up after/);
 });
 
+test('a place that answers after its deadline still has its spend booked', async () => {
+  // The research cannot be cancelled from the sweep, so a call that outlives
+  // its deadline may go on to spend. What it cost is written to the place
+  // when it finally settles (Codex, 25 Sep 2026).
+  await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
+  const row = await sweep.start({ subcategories: [SUB], confirm: 36, householdId: HH });
+  let lateRef = null;
+  let settled;
+  const settledLate = new Promise((r) => { settled = r; });
+  const done = await sweep.work(row.id, {
+    deadlineMs: 30,
+    research: async (ref) => {
+      if (!lateRef) {
+        lateRef = ref;
+        // Answers well after the deadline, having spent on the way.
+        return new Promise((resolve) => setTimeout(async () => {
+          await query(`insert into provider_calls (household_id, provider, purpose, estimated_cost_usd, venue_ref) values ($1, 'google', 'own.seed', 0.032, $2)`, [HH, ref]);
+          resolve({ state: 'done', matched: { osm: {} }, fields: {}, problems: [] });
+          setTimeout(settled, 100);
+        }, 120));
+      }
+      return { state: 'done', matched: {}, fields: {}, problems: [] };
+    },
+    room: async () => ({ ok: true, reservation: 'r', leftPence: 10000 }),
+    release: async () => {},
+  });
+  assert.equal(done.state, 'done');
+  await settledLate;
+  const { rows: [p] } = await query(`select state, outcome, cost_usd from research_sweep_places where sweep_id = $1 and venue_ref = $2`, [row.id, lateRef]);
+  assert.equal(p.state, 'failed', 'it was given up on at the time');
+  assert.equal(p.outcome.late, true, 'and its answer was written when it came');
+  assert.equal(Math.round(Number(p.cost_usd) * 1000) / 1000, 0.032, 'the money it spent afterwards is on the sweep');
+});
+
 test('over the ceiling stops with the rest left pending, and does not pretend', async () => {
   await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
   const hh = HH;

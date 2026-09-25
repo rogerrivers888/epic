@@ -278,17 +278,23 @@ async function seedFor(venueRef, given = {}, { householdId = null, paid = true }
   // place or a display search gives us its point for free.
   const [source, ...rest] = String(venueRef).split(':');
   if (paid && source === 'google' && sourceHasKey('google') && !sourceOff('google')) {
+    const meter = {};
+    let brief = null;
     try {
-      const meter = {};
-      const brief = await googleSource.brief(rest.join(':'), { meter });
-      if (brief?.lat != null) {
-        // Attributed to the place as well as the household, so a sweep can
-        // read what one place cost off the ledger rather than guess it.
-        await providerCalls.record(householdId, 'google', 'own.seed', JSON.stringify(meter), null, venueRef).catch(() => null);
-        return { ...seed, name: seed.name ?? brief.name, lat: brief.lat, lng: brief.lng, website: seed.website ?? brief.website };
-      }
+      brief = await googleSource.brief(rest.join(':'), { meter });
     } catch (err) {
       console.warn(`own: could not ask what ${venueRef} is: ${err.message}`);
+    } finally {
+      // Recorded whether or not it answered: a request that went out and came
+      // back empty, or threw, was still billed, and the sweep's cost and the
+      // ceiling's headroom are both read off this ledger. Recording only the
+      // successful branch let failed attempts vanish once the batch's
+      // reservation was released (Codex, 25 Sep 2026). Attributed to the
+      // place as well as the household, so one place's cost can be read back.
+      await providerCalls.record(householdId, 'google', 'own.seed', JSON.stringify(meter), null, venueRef).catch(() => null);
+    }
+    if (brief?.lat != null) {
+      return { ...seed, name: seed.name ?? brief.name, lat: brief.lat, lng: brief.lng, website: seed.website ?? brief.website };
     }
   }
   return seed;

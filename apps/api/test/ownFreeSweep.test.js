@@ -112,6 +112,30 @@ test('a paid pass may be told to identify a place and still never go searching t
   }
 });
 
+test('an identification that fails is still on the ledger, against the place', async () => {
+  // The sweep reads its cost and the ceiling its headroom from provider_calls.
+  // A request that went out and threw, or came back with no point, was billed
+  // and used to vanish because only the successful branch recorded it
+  // (Codex, 25 Sep 2026).
+  const r = ref('brief_threw');
+  const wasBrief = googleSource.brief;
+  const wasKey = process.env.GOOGLE_MAPS_API_KEY;
+  const wasFetch = globalThis.fetch;
+  process.env.GOOGLE_MAPS_API_KEY = 'test-key-never-sent';
+  globalThis.fetch = async () => { throw new Error('no network in this test'); };
+  googleSource.brief = async (_id, { meter }) => { meter.google = 1; meter['google-pro'] = 1; throw new Error('Google Places 503'); };
+  try {
+    await own.enrich(r, { force: true, paid: true });
+    const { rows } = await query(`select purpose from provider_calls where venue_ref = $1 and purpose = 'own.seed'`, [r]);
+    assert.equal(rows.length, 1, 'the attempt is recorded, with the place on it');
+  } finally {
+    googleSource.brief = wasBrief;
+    globalThis.fetch = wasFetch;
+    if (wasKey === undefined) delete process.env.GOOGLE_MAPS_API_KEY; else process.env.GOOGLE_MAPS_API_KEY = wasKey;
+    await query('delete from provider_calls where venue_ref like $1', [`${PREFIX}%`]).catch(() => null);
+  }
+});
+
 test('a seeded place costs nothing to research for free, and one request to research paid', async () => {
   // How the sweep is meant to be scoped: take the places the atlas or
   // `place_records` already names, hand them over as the seed, and `seedFor`

@@ -394,15 +394,38 @@ export async function work(id, { research = own.enrich, room = roomToSpend, rele
           const since = p.attempted_at;
           let outcome;
           let state = 'done';
+          // Two Google requests at most, and never the web search: that is
+          // what the estimate priced and what the ceiling was asked for.
+          const asking = research(p.venue_ref, { householdId: household, paid: true, search: false, force: false });
           try {
-            // Two Google requests at most, and never the web search: that is
-            // what the estimate priced and what the ceiling was asked for.
-            const out = await withDeadline(research(p.venue_ref, { householdId: household, paid: true, search: false, force: false }), deadlineMs);
+            const out = await withDeadline(asking, deadlineMs);
             outcome = outcomeOf(out);
             if (outcome.state === 'failed') state = 'failed';
           } catch (err) {
             state = 'failed';
             outcome = { state: 'failed', problems: [String(err?.message ?? err).slice(0, 160)] };
+            if (err?.code === 'deadline') {
+              // The research cannot be cancelled from here — `own.js` has no
+              // abort — so a call that outlives its deadline may still go on
+              // to spend. When it finally settles, whatever it cost is booked
+              // to this place after the fact, so the sweep's spend stays
+              // true; the ceiling reads the same ledger. What is left is the
+              // gap between releasing this batch's reservation and that late
+              // request landing: at most two requests, a few pence (Codex,
+              // 25 Sep 2026).
+              asking.then(
+                async (out) => {
+                  const late = outcomeOf(out);
+                  const usd = await spentOn(p.venue_ref, since, household);
+                  await query(
+                    `update research_sweep_places set outcome = $3::jsonb, cost_usd = $4
+                      where sweep_id = $1 and venue_ref = $2`,
+                    [id, p.venue_ref, JSON.stringify({ ...late, late: true, problems: [...outcome.problems, ...late.problems] }), usd]);
+                  await writeProgress(id).catch(() => null);
+                },
+                () => null,
+              ).catch(() => null);
+            }
           }
           const usd = await spentOn(p.venue_ref, since, household);
           await query(
