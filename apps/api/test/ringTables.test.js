@@ -110,6 +110,21 @@ test('a finished census counts again every ring computed before it ended', async
   assert.ok((await tables.refreshDue({ before: later })).some((d) => d.cell === CELL), 'counted before the run ended: counted again');
 });
 
+test('a ring is dated from when its count began, so a refresh that overlaps it still catches it', async () => {
+  await seed();
+  const { rows: [{ at: before }] } = await query('select now() as at');
+  const out = await tables.refreshRing({ cell: CELL, mode: 'drive', minutes: 30 });
+  const { rows: [{ at: after }] } = await query('select now() as at');
+  const { rows } = await query('select distinct computed_at from ring_counts where cell = $1', [CELL]);
+  assert.equal(rows.length, 1, 'one date for the whole ring');
+  assert.equal(new Date(rows[0].computed_at).getTime(), new Date(out.computedAt).getTime());
+  assert.ok(new Date(out.computedAt) >= new Date(before) && new Date(out.computedAt) <= new Date(after));
+  // A cutoff taken any time after the count began — a matrix or census
+  // refresh that finished while this count was still reading — finds it.
+  const during = new Date(new Date(out.computedAt).getTime() + 1);
+  assert.ok((await tables.refreshDue({ before: during })).some((d) => d.cell === CELL), 'counted before the cutoff: counted again');
+});
+
 test('the walk after a census takes every ring, however many pages that is', async () => {
   await seed();
   await tables.refreshBands({ cell: CELL, mode: 'drive', bands: [20, 30, 60] });

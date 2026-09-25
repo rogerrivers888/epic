@@ -71,6 +71,12 @@ const MARKER = '';
  */
 export async function refreshRing({ cell, mode = 'driving', minutes = 30 } = {}) {
   const kind = travelMode(mode);
+  // The row is dated from the moment the count began reading, not the moment
+  // it wrote: a count that read the matrix or the census before a refresh and
+  // wrote after it would otherwise carry a date newer than the refresh's
+  // cutoff and be skipped by the walk that follows, while holding the old
+  // shape (Codex, 25 Sep 2026). Dated from the start, it is inside the walk.
+  const { rows: [{ at: startedAt }] } = await query('select now() as at');
   const ring = await ringFor({ cell, minutes, mode: kind });
   if (!ring) return null;
   const band = ring.band ?? ring.cells;
@@ -146,21 +152,22 @@ export async function refreshRing({ cell, mode = 'driving', minutes = 30 } = {})
     await client.query('delete from ring_rankings where cell = $1 and mode = $2 and minutes = $3', [cell, kind, minutes]);
     await client.query(
       `insert into ring_counts (cell, mode, minutes, category, places, unresolved, floor, computed_at)
-       select $1, $2, $3, c.category, c.places, c.unresolved, c.floor, now()
+       select $1, $2, $3, c.category, c.places, c.unresolved, c.floor, $8::timestamptz
          from unnest($4::text[], $5::int[], $6::int[], $7::boolean[]) as c(category, places, unresolved, floor)`,
       [cell, kind, minutes, counts.map((c) => c.category), counts.map((c) => c.places),
-        counts.map((c) => c.unresolved), counts.map((c) => c.floor)]);
+        counts.map((c) => c.unresolved), counts.map((c) => c.floor), startedAt]);
     if (rankings.length) {
       await client.query(
         `insert into ring_rankings (cell, mode, minutes, category, venue_ref, epic_score, rank, computed_at)
-         select $1, $2, $3, r.category, r.venue_ref, r.epic_score, r.rank, now()
+         select $1, $2, $3, r.category, r.venue_ref, r.epic_score, r.rank, $8::timestamptz
            from unnest($4::text[], $5::text[], $6::real[], $7::int[]) as r(category, venue_ref, epic_score, rank)`,
         [cell, kind, minutes, rankings.map((r) => r.category), rankings.map((r) => r.venueRef),
-          rankings.map((r) => r.epicScore), rankings.map((r) => r.rank)]);
+          rankings.map((r) => r.epicScore), rankings.map((r) => r.rank), startedAt]);
     }
   });
   return {
     cell, mode: kind, minutes, counts: counts.filter((c) => c.category !== MARKER), ranked: rankings.length, notCensused,
+    computedAt: startedAt,
     // Named, so the caller can ask the census to look at them.
     notCensusedOutcodes: ring.outcodes.filter((o) => !censused.has(o.toLowerCase())),
   };
