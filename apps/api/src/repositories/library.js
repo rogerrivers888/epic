@@ -599,7 +599,7 @@ export async function publishedNear({ lat, lng, km = 25, limit = 60, illustrated
   const dLng = km / Math.max(1, 111 * Math.cos((lat * Math.PI) / 180));
   const { rows } = await query(
     `with candidates as (
-       select a.id, a.name, a.slug, a.summary, a.category, a.kinds, a.lat, a.lng, a.rank, a.region_slug,
+       select a.id, a.name, a.slug, a.summary, a.category, a.kinds, a.lat, a.lng, a.rank, a.region_slug, a.pinned,
               a.outcode,
               a.website, a.wikipedia_url, a.wikidata_id, a.osm_ref, a.heritage, a.venue_ref,
               a.attribution, a.score, r.name as region_name,

@@ -426,7 +426,7 @@ function place(chain, rules, vocab, fallback) {
  * once, or a provider's own word — sits between the place rule and the type
  * rules, so "castle and museum" can say something neither type says alone.
  */
-export function shelvesForAtlas({ ref, category, kinds = [], labels = [] } = {}, rules = NO_RULES, vocab = NO_VOCAB) {
+export function shelvesForAtlas({ ref, category, kinds = [], labels = [], pinned = false } = {}, rules = NO_RULES, vocab = NO_VOCAB) {
   const weights = BY_ATLAS_CATEGORY[category] ?? ATLAS_UNKNOWN;
   // The owner's label rules first, Epic's only where none fires — the same
   // precedence as a live venue (Codex, 13 Sep 2026).
@@ -442,8 +442,9 @@ export function shelvesForAtlas({ ref, category, kinds = [], labels = [] } = {},
   // The same fence as a live venue: an attraction whose every type the atlas
   // no longer admits — a railway station answered Travel — is not somewhere
   // to go, however it was published (Codex, 25 Sep 2026). A rule about the
-  // one place still wins.
-  const fence = (ref && rules?.place?.get(ref)) ? null : fencedBy({ category: null, experiences: [] }, all, vocab);
+  // one place still wins, and so does a pin: retireDeniedAttractions keeps a
+  // pinned attraction on purpose, and the fence must not undo that.
+  const fence = (ref && rules?.place?.get(ref)) ? null : fencedBy({ category: null, experiences: [], pinned }, all, vocab);
   if (fence) return NO_SHELF(fence);
   return place(
     [['place', [ref]], ['labels', hits], ['ours', ourHits], ['kind', kinds], ['category', [category]]],
@@ -534,19 +535,25 @@ export const INFRASTRUCTURE_NAME = /\b(?:railway station|train station|bus stati
  * is a museum; a station is a station.
  */
 export function fencedBy(venue, labels, vocab = NO_VOCAB) {
+  if (venue?.pinned) return null;
   if (labels.some((l) => vocab?.pointsAt?.get(String(l)))) return null;
   if (venue?.experiences?.length) return null;
   if (EATING.has(venue?.category)) return null;
-  const said = (set) => labels.find((l) => set?.has(String(l)) && !NEUTRAL_WORDS.has(String(l)));
-  const travel = said(vocab?.travel);
-  if (travel) return { kind: 'travel', word: travel };
-  const aside = said(vocab?.aside);
-  if (aside) return { kind: 'aside', word: aside };
-  // Untyped: every provider word it carries is one that says nothing.
-  const typed = labels.some((l) => /^(google|osm|wikidata|tripadvisor):/.test(String(l)) && !NEUTRAL_WORDS.has(String(l)));
-  if (typed) return null;
-  const m = INFRASTRUCTURE_NAME.exec(String(venue?.name ?? ''));
-  return m ? { kind: 'name', word: m[0] } : null;
+  // The provider words that say something: not the buckets every place carries.
+  const meaningful = labels.map(String).filter((l) => /^(google|osm|wikidata|tripadvisor):/.test(l) && !NEUTRAL_WORDS.has(l));
+  if (!meaningful.length) {
+    // Untyped: the name is all there is to read.
+    const m = INFRASTRUCTURE_NAME.exec(String(venue?.name ?? ''));
+    return m ? { kind: 'name', word: m[0] } : null;
+  }
+  // Fenced only when *every* word that says something says not a place. One
+  // word that is neither — an admitted Wikidata type with no drawer yet, a
+  // Google word nobody has answered — is a claim that it is something, and
+  // the fence stands aside (Codex, 25 Sep 2026).
+  const notAPlace = (l) => vocab?.travel?.has(l) || vocab?.aside?.has(l);
+  if (!meaningful.every(notAPlace)) return null;
+  const travel = meaningful.find((l) => vocab?.travel?.has(l));
+  return travel ? { kind: 'travel', word: travel } : { kind: 'aside', word: meaningful[0] };
 }
 
 /** Kept for the tests and the bench: the Travel reason alone. */

@@ -1411,7 +1411,7 @@ export async function shelveAll({ refs = null } = {}) {
   const live = new Set(tax.subcategories?.map?.((s) => s.key) ?? []);
   const { rows } = await query(`
     select pi.venue_ref, pi.derived_by,
-           a.category as atlas_category, a.kinds as atlas_kinds, a.id as atlas_id,
+           a.category as atlas_category, a.kinds as atlas_kinds, a.id as atlas_id, a.pinned as atlas_pinned,
            sp.category as sweep_category, sp.cuisine_group,
            r.category as own_category, r.experiences
       from place_index pi
@@ -1465,7 +1465,7 @@ export async function shelveAll({ refs = null } = {}) {
     let said = [];
     let by = r.derived_by ?? null;
     if (r.atlas_category != null || r.atlas_id) {
-      filed = shelvesForAtlas({ ref: r.venue_ref, category: r.atlas_category, kinds: r.atlas_kinds ?? [] }, taught, tax.vocab);
+      filed = shelvesForAtlas({ ref: r.venue_ref, category: r.atlas_category, kinds: r.atlas_kinds ?? [], pinned: Boolean(r.atlas_pinned) }, taught, tax.vocab);
       said = labelsOfAtlas({ category: r.atlas_category, kinds: r.atlas_kinds ?? [] });
       by = 'harvest';
     } else if (r.own_category || r.sweep_category) {

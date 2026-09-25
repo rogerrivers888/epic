@@ -327,7 +327,7 @@ const TRAVEL_VOCAB = vocabularyOf(
   [{ key: 'fun' }, { key: 'food' }, { key: 'culture' }],
   [{ key: 'museums', category_key: 'culture' }],
   new Map([['google:museum', 'museums']]),
-  new Set(['google:train_station', 'google:parking', 'google:bus_station']),
+  new Set(['google:train_station', 'google:transit_station', 'google:parking', 'google:bus_station']),
 );
 
 test('a place that is nothing but Travel words gets no shelf at all', () => {
@@ -373,7 +373,7 @@ const FENCE_VOCAB = vocabularyOf(
   [{ key: 'fun' }, { key: 'food' }, { key: 'culture' }],
   [{ key: 'museums', category_key: 'culture' }],
   new Map([['google:museum', 'museums']]),
-  new Set(['google:train_station', 'google:parking']),
+  new Set(['google:train_station', 'google:transit_station', 'google:parking']),
   new Set(['google:dentist', 'google:community_center', 'google:establishment', 'google:point_of_interest', 'google:premise']),
 );
 const untyped = (name, labels = ['google:point_of_interest', 'google:establishment']) =>
@@ -442,4 +442,17 @@ test('an atlas attraction whose every type the atlas no longer admits is fenced;
   assert.equal(castleStation.fenced, undefined);
   const plain = shelvesForAtlas({ ref: 'wikidata:Q3', category: 'outdoors', kinds: [] }, NO_RULES, vocab);
   assert.equal(plain.fenced, undefined, 'no type at all is not a fence: the atlas category still files it');
+  // An admitted type with no drawer yet is still a claim that it is something.
+  const mixed = shelvesForAtlas({ ref: 'wikidata:Q4', category: 'heritage', kinds: ['Q55488', 'Q999'] }, NO_RULES, vocab);
+  assert.equal(mixed.fenced, undefined, 'one admitted, unmapped type keeps it');
+  // A pin is a person's decision to keep it, whatever its types say now.
+  const pinned = shelvesForAtlas({ ref: 'wikidata:Q5', category: 'landmark', kinds: ['Q55488'], pinned: true }, NO_RULES, vocab);
+  assert.equal(pinned.fenced, undefined);
+});
+
+test('a live venue with one word that is neither Travel nor Not in Epic is not fenced', () => {
+  const stPancras = untyped('St Pancras International', ['google:train_station', 'google:tourist_attraction', 'google:point_of_interest']);
+  assert.equal(shelvesForVenue(stPancras, NO_RULES, FENCE_VOCAB).fenced, undefined, 'tourist_attraction is a claim');
+  const plainStation = untyped('Slough', ['google:train_station', 'google:transit_station', 'google:point_of_interest']);
+  assert.equal(shelvesForVenue(plainStation, NO_RULES, FENCE_VOCAB).fenced, 'travel');
 });

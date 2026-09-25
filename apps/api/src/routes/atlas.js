@@ -340,7 +340,7 @@ atlas.get('/places', async (req, res, next) => {
           // experiences a search returned and the research wrote down.
           const a = atlasRows.get(p.venueRef);
           const shelf = a
-            ? shelvesForAtlas({ ref: p.venueRef, category: a.category, kinds: a.kinds ?? [] }, rules, tax.vocab)
+            ? shelvesForAtlas({ ref: p.venueRef, category: a.category, kinds: a.kinds ?? [], pinned: Boolean(a.pinned) }, rules, tax.vocab)
             : shelvesForVenue({
               source: p.venueRef.split(':')[0], sourcePlaceId: p.venueRef.split(':').slice(1).join(':'),
               category: p.category ?? p.venue?.category ?? null, experiences: p.venue?.experiences ?? [],
