@@ -1,5 +1,8 @@
 import { bump, noteCall, noteFault } from './meter.js';
 import { sourceOff } from './switches.js';
+import { currentSpender } from '../context.js';
+import { monthlyBoundFor, SpendBoundError } from '../claude.js';
+import * as providerCalls from '../repositories/providerCalls.js';
 import { crowdBand, countBand } from '../domain/scoring.js';
 import { stampPhotos } from './photoLinks.js';
 // Google Places API (New) — the primary licensed source (Technical Constraints §3.1).
@@ -409,6 +412,17 @@ async function call(path, { method = 'POST', body, fieldMask, meter }) {
   // on the meter as `switched_off`, so the ledger shows the request that was
   // not made rather than a log line nobody reads (25 Sep 2026).
   if (sourceOff('google')) { noteFault(meter, 'switched_off'); throw Object.assign(new Error('Google is switched off in Settings › Providers'), { code: 'switched_off' }); }
+  // The household's cap on calls that can cost money, asked here as it is
+  // asked before every Claude call. It counted Google all along and was
+  // never asserted before a Google call — which is how a month's spending
+  // ran to its ceiling with nothing refusing (owner, 25 Sep 2026). A call
+  // on nobody's behalf — no request, no spender — is not capped here; the
+  // collection ceiling holds those.
+  const { householdId } = currentSpender();
+  if (householdId) {
+    const [made, bound] = await Promise.all([providerCalls.countThisMonth(householdId), monthlyBoundFor(householdId)]);
+    if (made >= bound) { noteFault(meter, 'household_cap'); throw new SpendBoundError('household', bound); }
+  }
   // One billable request, at the tier the mask puts it in. `google` stays as
   // the count of Google requests however they were priced, because Settings ›
   // Usage and the free-allowance lines are counted in requests.

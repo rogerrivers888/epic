@@ -40,3 +40,24 @@ export const currentAccount = () => storage.getStore()?.account ?? null;
  * happened to trigger it.
  */
 export const runOutsideRequest = (fn) => storage.run({ account: null }, fn);
+
+/**
+ * Who is spending, for the calls that ask before they cost.
+ *
+ * A request's spender is its account's household; that is already in the
+ * store. Background research has no request — the research sweep, the
+ * catch-up loop, a place opened and researched later — and its calls to a
+ * paid provider need a household to be held to just the same. So it enters
+ * the store with one (owner, 25 Sep 2026: "a cap asserted before Claude but
+ * never before Google is exactly how today's ceiling surprise happens
+ * again"). Google's `call()` reads it; nothing else has to be threaded.
+ */
+export const runAsSpender = ({ householdId = null, sessionId = null } = {}, fn) =>
+  storage.run({ ...(storage.getStore() ?? { account: null }), spender: { householdId, sessionId } }, fn);
+
+/** The household (and session) a paid call is on behalf of, or nulls. */
+export function currentSpender() {
+  const store = storage.getStore();
+  if (store?.spender) return store.spender;
+  return { householdId: store?.account?.household_id ?? null, sessionId: null };
+}

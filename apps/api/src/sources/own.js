@@ -47,6 +47,7 @@ import { sweepPictures } from './placePicture.js';
 // The last resort when no open source and no licensed one can say where a
 // claimed place's own page is (owner, 5 Sep 2026).
 import { searchWeb } from '../claude.js';
+import { runAsSpender } from '../context.js';
 import * as fsa from './fsa.js';
 import { FSA_ATTRIBUTION } from './fsa.js';
 
@@ -460,6 +461,13 @@ async function websiteLead(venueRef, householdId) {
  * (Codex, 25 Sep 2026).
  */
 export async function enrich(venueRef, { householdId = null, seed: given = {}, force = false, replace = force, paid = true, search = paid, hygiene = true } = {}) {
+  // Every paid call below is on this household's behalf, and the cap on its
+  // calls that can cost money is asked at Google's door — which reads the
+  // spender from the context rather than from thirty call sites.
+  return runAsSpender({ householdId }, () => research(venueRef, { householdId, given, force, replace, paid, search, hygiene }));
+}
+
+async function research(venueRef, { householdId, given, force, replace, paid, search, hygiene }) {
   await owned.ensureRecord(venueRef);
   const before = await owned.enrichStateOf(venueRef);
   if (!force && alreadyResearched(before)) return { state: 'done', skipped: 'already researched' };
