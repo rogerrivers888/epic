@@ -1037,11 +1037,11 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
   }), { minLat: 90, maxLat: -90, minLng: 180, maxLng: -180 });
   const { rows: tiles } = runId
     ? await query(
-      `select t.grid_key, t.min_lat, t.min_lng, t.max_lat, t.max_lng, t.outcodes, t.saturated, t.censused_at, t.state
+      `select t.grid_key, t.min_lat, t.min_lng, t.max_lat, t.max_lng, t.outcodes, t.saturated, t.censused_at, t.state, t.done_subcategories
          from census_tiles t join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1
         where t.censused_at is not null`, [runId])
     : await query(
-      `select t.grid_key, t.min_lat, t.min_lng, t.max_lat, t.max_lng, t.outcodes, t.saturated, t.censused_at, t.state
+      `select t.grid_key, t.min_lat, t.min_lng, t.max_lat, t.max_lng, t.outcodes, t.saturated, t.censused_at, t.state, t.done_subcategories
          from census_tiles t
         where t.censused_at is not null
           and t.max_lat >= $1 and t.min_lat <= $2 and t.max_lng >= $3 and t.min_lng <= $4`,
@@ -1155,6 +1155,10 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
     }
   }
 
+  // What is asked today, so a drawer that is no longer asked can be told from
+  // one this sweep has not reached yet.
+  const planned = new Set((await slicePlan()).map((p) => p.subcategory));
+
   let written = 0;
   for (const code of codes) {
     // The coverage on the row — how many tiles, how many cut off, when — is
@@ -1174,11 +1178,23 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
     // row, inflated or not, stood for ever (Codex P1 on the day's range,
     // 25 Sep 2026). Written again at nought, like any other drawer the ground
     // was asked about and answered nothing.
+    //
+    // Only where the ground has actually answered, though. A roll-up runs
+    // while tiles are still in flight and after tiles have failed for good,
+    // and a drawer this sweep never reached is not empty, it is unasked —
+    // zeroing it would be the data loss censusOneTile's checkpoint exists to
+    // prevent (Codex, 25 Sep 2026). So a standing row is written again only
+    // when the drawer is no longer asked at all — retired, and nought is the
+    // truth — or when every tile planned for the district has checkpointed
+    // it. Otherwise the row it has stands until the ground answers.
     const { rows: standing } = await query(
       'select category, subcategory from area_counts where area_slug = $1', [code.toLowerCase()]);
     for (const r of standing) {
       const key = `${r.category}/${r.subcategory}`;
-      if (!drawer.has(key)) drawer.set(key, { category: r.category, subcategory: r.subcategory });
+      if (drawer.has(key)) continue;
+      const answered = !planned.has(r.subcategory)
+        || own.every((t) => (t.done_subcategories ?? []).includes(r.subcategory));
+      if (answered) drawer.set(key, { category: r.category, subcategory: r.subcategory });
     }
 
     const censusedAt = own.map((t) => new Date(t.censused_at).getTime()).sort((x, y) => x - y);

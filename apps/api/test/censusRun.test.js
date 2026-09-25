@@ -1287,10 +1287,24 @@ test('a drawer the ground was asked about and answered nothing is written again,
      values ('zz7a', 'adrenaline', 'ski-resort', 125, 125, 0, 0, now() - interval '8 days', true, 1, 0, 0, 'text', 125)
      on conflict (area_slug, category, subcategory) do update set census_count = 125, text_count = 125`);
 
+  // And a drawer still asked, on a tile this sweep has not reached it on: the
+  // tile is part way through, with the drawer not yet checkpointed.
+  await query(`update census_tiles set state = 'doing', done_subcategories = array['museums'] where grid_key = 'test/gone'`);
+  await query(
+    `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, scored_count, saturated, censused_at, complete, tiles, tiles_saturated, unresolved, sourced, text_count)
+     values ('zz7a', 'sport', 'golf', 44, 44, 0, 0, now() - interval '8 days', true, 1, 0, 0, 'type', 0)
+     on conflict (area_slug, category, subcategory) do update set census_count = 44`);
+
   await rollUpOutcodes({ outcodes: ['ZZ7A'] });
   const { rows: [row] } = await query(
     `select census_count, text_count, censused_at > now() - interval '1 hour' as fresh from area_counts where area_slug = 'zz7a' and subcategory = 'ski-resort'`);
-  assert.equal(row.census_count, 0, 'the drawer is written again at nought, not left at last week\'s number');
+  assert.equal(row.census_count, 0, 'a drawer no longer asked is written again at nought, not left at last week\'s number');
   assert.equal(row.text_count, 0);
   assert.ok(row.fresh, 'and dated by this census');
+  const { rows: [golf] } = await query(
+    `select census_count from area_counts where area_slug = 'zz7a' and subcategory = 'golf'`);
+  const stillAsked = (await slicePlan()).some((p) => p.subcategory === 'golf');
+  if (stillAsked) {
+    assert.equal(golf.census_count, 44, 'a drawer still asked, on a tile that has not answered it yet, keeps the number it had (Codex, 25 Sep 2026)');
+  }
 });
