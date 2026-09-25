@@ -189,7 +189,14 @@ export function agreed({ have = new Set(), words = new Set(), kinds = new Map() 
 
   // ---- the new drawers ---------------------------------------------------
   for (const n of NEW_SUBCATEGORIES) {
-    if (have.has(n.key)) continue;
+    if (have.has(n.key)) {
+      // A drawer this database already made, before the list stated a default
+      // for it, gets the default as a settle rather than never (Codex, 25 Sep
+      // 2026): the create will not run again and neither will migration 246.
+      // The audit leaves it out once the default is there and agreed.
+      if (n.defaults) out.push(sub(n.key, 'settle', null, n.because, { defaults: n.defaults }));
+      continue;
+    }
     out.push(sub(n.key, 'create', n.label, n.because,
       { category: n.category, ...(n.defaults ? { defaults: n.defaults } : {}) }));
   }
