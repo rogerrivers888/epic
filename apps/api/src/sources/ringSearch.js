@@ -124,7 +124,13 @@ export const ASKED = {
   fun: { includedType: 'tourist_attraction', words: 'family days out' },
   outdoors: { includedType: 'park', words: 'parks and gardens' },
   sport: { includedType: null, words: 'sports centre' },
-  active: { includedType: null, words: 'activity centre' },
+  // `activity`, as moods.js and the census file it — not `active`. Keyed
+  // `active`, the Active shelf asked Google for its five and read a census
+  // count of nought beside them, because censusInRing counts by the category
+  // the places are filed under and nothing is filed under `active`: five
+  // shown, 0 counted, 0 unresolved — the page-length-as-count look the owner
+  // banned (epic-f0 on the deployed site, 25 Sep 2026).
+  activity: { includedType: null, words: 'activity centre' },
   adrenaline: { includedType: null, words: 'go karting and high ropes' },
   relaxing: { includedType: null, words: 'spa' },
 };
