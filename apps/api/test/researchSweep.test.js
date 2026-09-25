@@ -532,3 +532,23 @@ test('a retry that could spend is confirmed with its number, like the sweep it r
   assert.equal(reopened.retried, 1);
   await query(`update research_sweeps set state = 'done' where id = $1`, [row.id]);
 });
+
+test('reopening a sweep that stopped short prices what it never reached as well as what failed', async () => {
+  await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
+  const need = (await sweep.estimate({ subcategories: [SUB] })).requests;
+  const row = await sweep.start({ subcategories: [SUB], confirm: need, householdId: HH });
+  const { rows: refsHere } = await query(`select venue_ref from research_sweep_places where sweep_id = $1 and venue_ref like 'google:%' order by venue_ref`, [row.id]);
+  // Stopped at the ceiling: two done, one failed, one still in the air, the rest never reached.
+  await query(`update research_sweep_places set state = 'done', outcome = '{"state":"done"}'::jsonb where sweep_id = $1 and venue_ref = any($2)`, [row.id, refsHere.slice(0, 2).map((r) => r.venue_ref)]);
+  await query(`update research_sweep_places set state = 'failed', outcome = '{"state":"failed","problems":["OpenStreetMap: timeout"]}'::jsonb where sweep_id = $1 and venue_ref = $2`, [row.id, refsHere[2].venue_ref]);
+  await query(`update research_sweep_places set state = 'asking' where sweep_id = $1 and venue_ref = $2`, [row.id, refsHere[3].venue_ref]);
+  await query(`update research_sweeps set state = 'failed', problem = 'over this month\u2019s ceiling', finished_at = now() where id = $1`, [row.id]);
+  const e = await sweep.retryEstimate(row.id);
+  const { rows: [{ n }] } = await query(`select count(*)::int n from research_sweep_places where sweep_id = $1 and state <> 'done'`, [row.id]);
+  assert.equal(e.places, n, 'every row the sweep would work is in the plan');
+  const reopened = await sweep.retryFailed(row.id, { confirm: e.requests });
+  assert.equal(reopened.retried, n);
+  const { rows: states } = await query(`select state, count(*)::int n from research_sweep_places where sweep_id = $1 group by state order by state`, [row.id]);
+  assert.deepEqual(states, [{ state: 'done', n: 2 }, { state: 'pending', n }], 'nothing left in the air');
+  await query(`update research_sweeps set state = 'done' where id = $1`, [row.id]);
+});

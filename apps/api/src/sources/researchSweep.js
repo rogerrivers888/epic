@@ -681,9 +681,16 @@ export async function places(id) {
  * place cost across both goes is still its cost; nothing is bought twice
  * because the research is seeded from the record it already has.
  */
-/** The failed rows a retry would take: not a place still in flight at its deadline. */
-const RETRYABLE = `state = 'failed'
-          and not (coalesce(outcome->'problems'->>0, '') like 'gave up after%' and not coalesce((outcome->>'late')::boolean, false))`;
+/**
+ * The rows a retry would work: the failures, and anything the sweep never
+ * got to — a sweep that stopped at the ceiling, or lost Google, still holds
+ * pending rows, and reopening it drains them too, so they are priced and
+ * confirmed with the rest (Codex, 25 Sep 2026). Not a place still in flight
+ * at its deadline.
+ */
+const RETRYABLE = `(state in ('pending', 'asking')
+          or (state = 'failed'
+          and not (coalesce(outcome->'problems'->>0, '') like 'gave up after%' and not coalesce((outcome->>'late')::boolean, false))))`;
 
 /**
  * What a retry would cost, and the number it has to be confirmed with.
@@ -707,7 +714,7 @@ export async function retryEstimate(id) {
     requests,
     pencePerRequest: pence,
     costGbpHigh: Math.round(requests * pence) / 100,
-    basis: `${rows.length} failed places · ${counts.filter((c) => c === 0).length} seeded from their record and free · `
+    basis: `${rows.length} places to ask again or for the first time · ${counts.filter((c) => c === 0).length} seeded from their record and free · `
       + `${counts.filter((c) => c === 1).length} without a website (one request) · ${counts.filter((c) => c === 2).length} never identified (two) · ${pence}p a request`,
   };
 }
@@ -734,8 +741,13 @@ export async function retryFailed(id, { confirm = null } = {}) {
     // research cannot be cancelled — and asking again now would run two at
     // once and could pay twice. It is left as it is until its late answer
     // lands, which marks it `late`; a retry after that takes it.
+    // A failure is marked as asked twice; a row the sweep never reached is
+    // simply asked, and one left in the air by a dead process goes back
+    // to pending as a resume would put it.
     const { rowCount } = await client.query(
-      `update research_sweep_places set state = 'pending', outcome = coalesce(outcome, '{}'::jsonb) || '{"retried": true}'::jsonb
+      `update research_sweep_places
+          set state = 'pending',
+              outcome = case when state = 'failed' then coalesce(outcome, '{}'::jsonb) || '{"retried": true}'::jsonb else outcome end
         where sweep_id = $1 and ${RETRYABLE}`,
       [id]);
     if (!rowCount) return { ...run, retried: 0 };
