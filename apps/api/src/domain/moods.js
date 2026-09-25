@@ -511,7 +511,11 @@ export const NEUTRAL_WORDS = new Set([
  * exclusion just quietly removes things"). Only ever on an untyped place: a
  * pub called The Station House has a type, and keeps its shelf.
  */
-export const INFRASTRUCTURE_NAME = /\b(?:railway station|train station|bus station|coach station|tube station|underground station|metro station|tram stop|bus stop|coach stop|taxi rank|park (?:and|&) ride|car park|parking|multi-?storey|airport|airfield|heliport|ferry terminal|ferry port|cruise terminal|motorway services|service station|petrol station|filling station|charging station|station)\b/i;
+// Never bare "station": fire station, radio station, Station Road, and a
+// Legoland ride called Duplo Valley Airport's neighbour The Hill Train Top
+// Station — it was the loosest word in the list and caught a ride in a sample
+// of twenty-four (owner, 25 Sep 2026). The multi-word forms only.
+export const INFRASTRUCTURE_NAME = /\b(?:railway station|train station|bus station|coach station|tube station|underground station|metro station|tram stop|bus stop|coach stop|taxi rank|park (?:and|&) ride|car park|parking|multi-?storey|airport|airfield|heliport|ferry terminal|ferry port|cruise terminal|motorway services|service station|petrol station|filling station|charging station)\b/i;
 
 /**
  * Whether a place is not somewhere to go, and why.

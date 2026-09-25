@@ -17,7 +17,7 @@ import { agreed, DELIVERY_OUT, STRUCTURAL } from '../src/domain/taxonomyCleanup.
 import { testDatabase } from './helpers/db.js';
 const { query, pool } = await testDatabase();
 const { effectOf, apply, consequence, run, undo } = await import('../src/repositories/taxonomyAudit.js');
-const { drawersUnjudged, drawersWithoutABar, inheritBar, rescore, seedBars, checkBars } = await import('../src/repositories/placeIndex.js');
+const { drawersUnjudged, drawersWithoutABar, inheritBar, rescore, seedBars, checkBars, orphanedRules } = await import('../src/repositories/placeIndex.js');
 const { invariantRuns, noteInvariantRun } = await import('../src/repositories/settings.js');
 
 test.after(() => pool.end());
@@ -835,4 +835,47 @@ test('a rule touched by a fold and then a repoint is kept once, so undo puts it 
   assert.equal(back.subcategory, 'husk');
   const { rows: [husk] } = await query(`select active from shelf_subcategories where key = 'husk'`);
   assert.equal(husk.active, true);
+});
+
+// --- the third invariant: no rule left pointing at a drawer that is gone ------
+
+test('a rule on a retired drawer, or on nothing with nothing to say, is an orphan; the drawer\u2019s own rule is not', async (t) => {
+  await query(`insert into shelf_categories (key, label) values ('fun', 'Fun') on conflict (key) do nothing`);
+  await query(`insert into shelf_subcategories (category_key, key, label, active) values ('fun', 'gone-drawer', 'Gone', false)
+               on conflict (key) do update set active = false`);
+  await query(`insert into shelf_rules (scope, subject, subject_label, subcategory, weights) values
+               ('ours', 'gone-drawer', 'Gone', 'gone-drawer', '{}'),
+               ('experience', 'test-orphan', 'an orphan', 'gone-drawer', '{}'),
+               ('place', 'test:says-nothing', 'Says nothing', null, '{}'),
+               ('place', 'test:weighted', 'Weighted', null, '{"fun": 1}')
+               on conflict (scope, subject) do update set subcategory = excluded.subcategory, weights = excluded.weights`);
+  t.after(async () => {
+    await query(`delete from shelf_rules where subject in ('gone-drawer', 'test-orphan', 'test:says-nothing', 'test:weighted')`);
+    await query(`delete from shelf_subcategories where key = 'gone-drawer'`);
+  });
+  const found = await orphanedRules();
+  const keys = found.map((r) => `${r.scope}:${r.subject}`);
+  assert.ok(keys.includes('experience:test-orphan'), 'a rule on a retired drawer');
+  assert.ok(keys.includes('place:test:says-nothing'), 'a rule on nothing, saying nothing');
+  assert.ok(!keys.includes('ours:gone-drawer'), 'the retired drawer\u2019s own rule is not an orphan');
+  assert.ok(!keys.includes('place:test:weighted'), 'a place rule that only sets weights is a decision, not an orphan');
+  const run = await checkBars({ repair: true, trigger: 'manual' });
+  assert.ok(run.orphans.some((o) => o.subject === 'test-orphan'), 'the check reports it');
+  assert.ok(run.orphans.every((o) => o.id), 'with the id the back office deletes by');
+});
+
+test('the audit flags an orphaned rule as advice, never as something it applies', async () => {
+  const { orphanedRules: signal } = await import('../src/domain/taxonomyAudit.js');
+  const out = signal({
+    subs: [{ key: 'off', label: 'Off', active: false }, { key: 'on', label: 'On', active: true }],
+    rules: [
+      { id: '1', scope: 'labels', subject: 'google:x', subcategory: 'off', weights: {} },
+      { id: '2', scope: 'ours', subject: 'off', subcategory: 'off', weights: {} },
+      { id: '3', scope: 'labels', subject: 'google:y', subcategory: 'on', weights: {} },
+      { id: '4', scope: 'place', subject: 'g:z', subcategory: null, weights: {} },
+    ],
+  });
+  assert.deepEqual(out.map((p) => p.subject).sort(), ['labels:google:x', 'place:g:z']);
+  assert.ok(out.every((p) => p.flag === 'orphaned_rule' && p.action === 'repoint' && p.proposed === null));
+  assert.match(out[0].because, /retired/);
 });

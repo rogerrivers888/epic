@@ -5211,6 +5211,8 @@ export type InvariantRun = {
   rescored: number;
   /** Still unjudged after the repair. */
   left: string[];
+  /** Rules pointing at a retired drawer, or at nothing. Reported, never repaired. */
+  orphans?: { id: string; scope: string; subject: string; subcategory: string | null }[];
   error: string | null;
 };
 

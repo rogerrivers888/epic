@@ -56,6 +56,29 @@ export function singletons({ subs, rulesBySub, placesBySub, near }) {
     });
 }
 
+/**
+ * Rules pointing at a drawer that is gone, or at nothing at all.
+ *
+ * A retirement is meant to move a drawer's rules first (the sign-off, 24 Sep
+ * 2026); one that did not leaves a rule firing into a drawer nobody can see.
+ * Advice, never applied: a repoint with nothing proposed is the flag the apply
+ * already knows, and where the rule goes is a person's decision.
+ */
+export function orphanedRules({ subs = [], rules = [] }) {
+  const off = new Map(subs.filter((s) => s.active === false).map((s) => [s.key, s.label]));
+  return rules
+    .filter((r) => (r.subcategory && off.has(r.subcategory) && !(r.scope === 'ours' && r.subject === r.subcategory))
+      || (!r.subcategory && !Object.keys(r.weights ?? {}).length))
+    .map((r) => say('orphaned_rule', {
+      subject_kind: 'word', subject: `${r.scope}:${r.subject}`, subject_label: r.subject_label ?? r.subject,
+      action: 'repoint', now_value: r.subcategory ?? null, proposed: null,
+      because: r.subcategory
+        ? `Points at ${off.get(r.subcategory)}, which is retired. Say where it goes, or delete it.`
+        : 'Names no drawer and carries no weights, so it says nothing. Say where it goes, or delete it.',
+      numbers: { id: r.id, scope: r.scope },
+    }));
+}
+
 /** Subcategories with no rules and no places — a mapping gap, not an absence. */
 export function orphans({ subs, rulesBySub, placesBySub, unmapped }) {
   return subs
@@ -260,6 +283,7 @@ export function auditAll(input) {
   const proposals = [
     ...singletons(input),
     ...orphans(input),
+    ...orphanedRules(input),
     ...goes.proposals,
     ...notVisitable(input),
     ...mix.proposals,

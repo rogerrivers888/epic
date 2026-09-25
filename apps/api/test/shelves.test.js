@@ -397,6 +397,13 @@ test('the words that say nothing never fence, even though they are answered Not 
 
 test('an untyped place is read by its name: a station is fenced, a hall is not, and a typed pub called The Station House keeps its shelf', () => {
   assert.equal(shelvesForVenue(untyped('Ascot (Berks) Railway Station - South Western Railway'), NO_RULES, FENCE_VOCAB).fenced, 'name');
+  // Bare "station" is not read (owner, 25 Sep 2026): the multi-word forms only.
+  assert.equal(shelvesForVenue(untyped('Slough Station'), NO_RULES, FENCE_VOCAB).fenced, undefined);
+  assert.equal(shelvesForVenue(untyped('Windsor Fire Station'), NO_RULES, FENCE_VOCAB).fenced, undefined);
+  assert.equal(shelvesForVenue(untyped('Station Road Garage'), NO_RULES, FENCE_VOCAB).fenced, undefined);
+  assert.equal(shelvesForVenue(untyped('The Hill Train Top Station'), NO_RULES, FENCE_VOCAB).fenced, undefined);
+  assert.equal(shelvesForVenue(untyped('Slough Train Station'), NO_RULES, FENCE_VOCAB).fenced, 'name');
+  assert.equal(shelvesForVenue(untyped('Bracknell Coach Station'), NO_RULES, FENCE_VOCAB).fenced, 'name');
   assert.equal(shelvesForVenue(untyped('Englemere Pond car park'), NO_RULES, FENCE_VOCAB).fenced, 'name');
   assert.equal(shelvesForVenue(untyped('Windsor Castle Parking Lots'), NO_RULES, FENCE_VOCAB).fenced, 'name');
   assert.equal(shelvesForVenue(untyped('Heathrow Airport Terminal 5'), NO_RULES, FENCE_VOCAB).fenced, 'name');
@@ -414,7 +421,8 @@ test('an untyped place is read by its name: a station is fenced, a hall is not, 
 test('fencedBy names its reason and its word, and the name pattern is a word match', () => {
   assert.deepEqual(fencedBy(untyped('x', ['google:train_station']), ['google:train_station'], FENCE_VOCAB), { kind: 'travel', word: 'google:train_station' });
   assert.equal(fencedBy(untyped('Stationers Hall'), ['google:point_of_interest'], FENCE_VOCAB), null, '"Stationers" is not "station"');
-  assert.ok(INFRASTRUCTURE_NAME.test('Reading Station'));
+  assert.ok(!INFRASTRUCTURE_NAME.test('Reading Station'), 'bare "station" is out');
+  assert.ok(INFRASTRUCTURE_NAME.test('Reading Railway Station'));
   assert.ok(INFRASTRUCTURE_NAME.test('Park & Ride Winnersh'));
   assert.ok(!INFRASTRUCTURE_NAME.test('Parkland Walk'));
 });

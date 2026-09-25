@@ -232,16 +232,18 @@ function Checks({ data }: { data: FilingOverview }) {
     return (
       <Line colour={WARN} mark={(
         <Mark label="WHY" tone="warn"
-              title={'Two invariants run at every deploy and once a day: no active drawer without a bar, and no drawer '
-                + 'whose places were never judged against its bar. Until the first run there is no record, and no '
-                + 'record is not the same as a clean one.'} />
+              title={'Three invariants run at every deploy and once a day: no active drawer without a bar, no drawer '
+                + 'whose places were never judged against its bar, and no rule left pointing at a retired drawer. '
+                + 'Until the first run there is no record, and no record is not the same as a clean one.'} />
       )}>
         The bar checks have never run
       </Line>
     );
   }
-  const found = r.bare.length + r.unjudged.length;
-  const tone: 'warn' | 'lime' | 'dim' = r.error || r.left.length || (r.stillBare ?? []).length ? 'warn' : found ? 'lime' : 'dim';
+  const orphans = r.orphans ?? [];
+  const found = r.bare.length + r.unjudged.length + orphans.length;
+  // An orphaned rule is never repaired by the check, so it is a warning until somebody decides where it goes.
+  const tone: 'warn' | 'lime' | 'dim' = r.error || r.left.length || (r.stillBare ?? []).length || orphans.length ? 'warn' : found ? 'lime' : 'dim';
   const colour = tone === 'warn' ? WARN : tone === 'lime' ? LIME : desk.inkDim;
   const said = r.error
     ? `failed — ${r.error}`
@@ -252,19 +254,21 @@ function Checks({ data }: { data: FilingOverview }) {
         r.unjudged.length ? `${r.unjudged.length} unjudged, ${r.rescored.toLocaleString()} places rescored` : null,
         (r.stillBare ?? []).length ? `${r.stillBare.length} still with no bar` : null,
         r.left.length ? `${r.left.length} still unjudged` : null,
+        orphans.length ? `${orphans.length} orphaned rule${orphans.length === 1 ? '' : 's'}` : null,
       ].filter(Boolean).join(' · ');
   const detail = [
     ...r.bare.map((k) => `${(r.inherited ?? []).includes(k) ? 'given a bar' : 'no bar'}: ${k}`),
     ...r.unjudged.map((d) => `unjudged: ${d.key} (${d.places} places)`),
     ...r.left.map((k) => `still unjudged: ${k}`),
+    ...orphans.map((o) => `orphaned rule: ${o.scope}:${o.subject} → ${o.subcategory ?? 'nothing'}`),
   ];
   return (
     <Line colour={colour} mark={(
       <Mark label={detail.length ? 'WHAT' : 'WHY'} tone={tone === 'dim' ? 'dim' : tone}
             title={detail.length
               ? detail.join('\n')
-              : 'Every active drawer has a bar, and every drawer with places has at least one judged against it. '
-                + 'This is a pass, not an absence: the check ran and looked.'} />
+              : 'Every active drawer has a bar, every drawer with places has at least one judged against it, and no '
+                + 'rule points at a retired drawer. This is a pass, not an absence: the check ran and looked.'} />
     )}>
       Bar checks ran {when(r.ranAt)} ({r.trigger}) — {said}
     </Line>
