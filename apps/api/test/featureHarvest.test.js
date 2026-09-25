@@ -238,3 +238,23 @@ test('the sweep path reads accessibility the same way', () => {
   assert.deepEqual(asserted(null), []);
   assert.deepEqual(asserted({}), []);
 });
+
+// --- the quote, and where it came from ------------------------------------
+
+const { quotedFrom } = await import('../src/sources/featureHarvest.js');
+
+test('the quote is traced to the place it was read from', () => {
+  const places = [
+    { ref: 'a', text: 'There is a wave machine and a flume.' },
+    { ref: 'b', text: 'A quiet pool with lane swimming.' },
+  ];
+  assert.equal(quotedFrom({ evidence: 'a wave machine and a flume' }, places), 'a');
+  assert.equal(quotedFrom({ evidence: 'pool' }, places), null, 'too short to be a quote');
+  assert.equal(quotedFrom({ evidence: 'lane   swimming' }, places), 'b', 'reflowed whitespace still finds it');
+  assert.equal(quotedFrom({ evidence: 'quiet pool with lane swimming' }, places), 'b');
+});
+
+test('a quote nobody holds is nobody’s, not the first place’s', () => {
+  const places = [{ ref: 'a', text: 'A boathouse on the lake.' }];
+  assert.equal(quotedFrom({ evidence: 'the hearing loop covers the pool' }, places), null);
+});

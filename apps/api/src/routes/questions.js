@@ -40,6 +40,7 @@ import { query } from '../db.js';
 import * as sets from '../repositories/questionSets.js';
 import * as harvest from '../sources/vocabulary.js';
 import * as features from '../sources/featureHarvest.js';
+import * as sweep from '../sources/researchSweep.js';
 import { ENRICH_AFTER, KINDS, REGIONS, SAMPLE, enrichmentOn, settle } from '../domain/questions.js';
 import * as placeAttributes from '../repositories/placeAttributes.js';
 import { currentHousehold } from './household.js';
@@ -410,6 +411,59 @@ questionRoutes.post('/harvest/features', requires('manage_questions'), async (re
 });
 
 /** What the feature pass would cost, without running it. */
+/**
+ * The research sweep — the owner's one paid exception (25 Sep 2026).
+ *
+ *   GET  /sweep/estimate   what it would cost, and the request count to confirm with
+ *   POST /sweep            start it; refuses without that count
+ *   GET  /sweep            the last few, with their funnels
+ *   GET  /sweep/:id        one, with its funnel and per-drawer breakdown
+ *
+ * It runs off the request: the row is written, the worker is kicked, and the
+ * answer comes back at once. A deploy in the middle is picked up at boot.
+ */
+const subsOf = (v) => (Array.isArray(v) ? v : typeof v === 'string' && v ? v.split(',') : null);
+questionRoutes.get('/sweep/estimate', requires('view_library'), async (req, res, next) => {
+  try {
+    res.json(await sweep.estimate({
+      subcategories: subsOf(req.query.subcategories),
+      floor: Number(req.query.floor ?? 0) || undefined,
+    }));
+  } catch (err) { next(err); }
+});
+questionRoutes.post('/sweep', requires('manage_questions'), async (req, res, next) => {
+  try {
+    const household = await currentHousehold().catch(() => null);
+    const row = await sweep.start({
+      subcategories: subsOf(req.body?.subcategories),
+      floor: Number(req.body?.floor ?? 0) || undefined,
+      confirm: req.body?.confirm ?? null,
+      householdId: household?.id ?? null,
+      startedBy: actorOf(req),
+    });
+    void sweep.work(row.id).catch((err) => console.warn(`sweep ${row.id}: ${err.message}`));
+    res.status(202).json({ sweep: row });
+  } catch (err) {
+    if (err?.code === 'confirm_required' || err?.code === 'already_running' || err?.code === 'no_household') {
+      return res.status(409).json({ error: err.code, message: err.message, plan: err.plan ?? null, sweep: err.sweep ?? null });
+    }
+    return next(err);
+  }
+});
+questionRoutes.get('/sweep', requires('view_library'), async (_req, res, next) => {
+  try {
+    const rows = await sweep.recent();
+    res.json({ sweeps: await Promise.all(rows.map(async (r) => ({ ...r, funnel: await sweep.funnelOf(r.id) }))) });
+  } catch (err) { next(err); }
+});
+questionRoutes.get('/sweep/:id', requires('view_library'), async (req, res, next) => {
+  try {
+    const row = await sweep.one(String(req.params.id));
+    if (!row) return res.status(404).json({ error: 'not_found', message: 'No sweep by that id.' });
+    res.json({ sweep: row, funnel: await sweep.funnelOf(row.id), drawers: await sweep.byDrawer(row.id) });
+  } catch (err) { next(err); }
+});
+
 questionRoutes.get('/harvest/features/estimate', requires('view_library'), async (req, res, next) => {
   try {
     res.json(await features.estimate({

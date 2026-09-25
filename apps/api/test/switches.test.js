@@ -1,0 +1,72 @@
+/**
+ * The owner's off-switch is asked at the door, not by whoever is calling.
+ *
+ * Settings › Providers can switch Google or Tripadvisor off. That switch was
+ * honoured by `enabledSources()` — the search path — and by four of the
+ * fourteen callers that reach an adapter directly. The other ten went on
+ * spending with the source switched off. A flag read at the caller is a flag
+ * most callers do not read (25 Sep 2026; the same fault as `paid: false` not
+ * reaching `seedFor` four days earlier).
+ *
+ * `fetch` is stubbed to count: a refusal at the door means nothing leaves the
+ * process, and the meter says why.
+ */
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { googleSource } from '../src/sources/google.js';
+import { tripadvisorSource } from '../src/sources/tripadvisor.js';
+import { setOffKeys, sourceOff } from '../src/sources/switches.js';
+import { enabledSources, sourceOff as viaIndex } from '../src/sources/index.js';
+import { healthOf } from '../src/sources/meter.js';
+
+const withKeys = async (env, run) => {
+  const was = {};
+  for (const [k, v] of Object.entries(env)) { was[k] = process.env[k]; process.env[k] = v; }
+  const wasFetch = globalThis.fetch;
+  let left = 0;
+  globalThis.fetch = async () => { left += 1; return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }); };
+  try { return await run(() => left); } finally {
+    globalThis.fetch = wasFetch;
+    for (const [k, v] of Object.entries(was)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    setOffKeys([]);
+  }
+};
+
+test('Google switched off refuses at the door, and the meter says so', async () => {
+  await withKeys({ GOOGLE_MAPS_API_KEY: 'test-key-never-sent' }, async (left) => {
+    setOffKeys(['google']);
+    const meter = {};
+    // `brief` is a direct caller that never asked the switch itself.
+    await assert.rejects(() => googleSource.brief('ChIJ_off', { meter }), /switched off/);
+    assert.equal(left(), 0, 'nothing left the process');
+    assert.match(JSON.stringify(healthOf(meter)), /switched_off/, 'the refusal is on the meter, for the ledger');
+  });
+});
+
+test('Google switched on goes out as before', async () => {
+  await withKeys({ GOOGLE_MAPS_API_KEY: 'test-key-never-sent' }, async (left) => {
+    setOffKeys([]);
+    await googleSource.brief('ChIJ_on', { meter: {} }).catch(() => null);
+    assert.equal(left(), 1);
+  });
+});
+
+test('Tripadvisor has the same door', async () => {
+  await withKeys({ TRIPADVISOR_API_KEY: 'test-key-never-sent' }, async (left) => {
+    setOffKeys(['tripadvisor']);
+    const meter = {};
+    await assert.rejects(() => tripadvisorSource.get('123', { meter }), /switched off/);
+    assert.match(JSON.stringify(healthOf(meter)), /switched_off/);
+    assert.equal(left(), 0);
+  });
+});
+
+test('the search path and the door read the same switch', () => {
+  setOffKeys(['google']);
+  assert.equal(sourceOff('google'), true);
+  assert.equal(viaIndex('google'), true, 'index.js re-exports the one switch rather than keeping its own');
+  assert.equal(enabledSources().some((s) => s.key === 'google'), false);
+  setOffKeys([]);
+  assert.equal(sourceOff('google'), false);
+});

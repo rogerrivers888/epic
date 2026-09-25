@@ -1,4 +1,5 @@
 import { bump, noteCall, noteFault } from './meter.js';
+import { sourceOff } from './switches.js';
 import { crowdBand, countBand } from '../domain/scoring.js';
 import { stampPhotos } from './photoLinks.js';
 // Google Places API (New) — the primary licensed source (Technical Constraints §3.1).
@@ -402,6 +403,12 @@ export function skuFor(fieldMask, path = '') {
 async function call(path, { method = 'POST', body, fieldMask, meter }) {
   const key = KEY();
   if (!key) { noteFault(meter, 'no_key'); throw new Error('GOOGLE_MAPS_API_KEY not set'); }
+  // The owner's switch, asked here rather than by whoever is calling. Fourteen
+  // paths reach this function and four of them checked `sourceOff` first; the
+  // other ten went on spending with Google switched off in Settings. Refused
+  // on the meter as `switched_off`, so the ledger shows the request that was
+  // not made rather than a log line nobody reads (25 Sep 2026).
+  if (sourceOff('google')) { noteFault(meter, 'switched_off'); throw Object.assign(new Error('Google is switched off in Settings › Providers'), { code: 'switched_off' }); }
   // One billable request, at the tier the mask puts it in. `google` stays as
   // the count of Google requests however they were priced, because Settings ›
   // Usage and the free-allowance lines are counted in requests.

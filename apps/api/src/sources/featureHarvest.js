@@ -217,6 +217,23 @@ export function evidenced(feature, pooled) {
 }
 
 /**
+ * Which place the quote was taken from.
+ *
+ * The quote is stored now (migration 247, owner 25 Sep 2026: "a candidate I
+ * can certify but not read is one I cannot approve"), and a quote is worth
+ * more with the place it came from beside it. The pooled text is the places'
+ * text joined, so the first kept place whose own text holds the quote is the
+ * one — and null, honestly, if the quote crossed a boundary and belongs to
+ * nobody, which `evidenced` allows and this does not pretend about.
+ */
+export function quotedFrom(feature, kept) {
+  const quote = String(feature.evidence ?? '').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 60);
+  if (quote.length < 8) return null;
+  const hit = kept.find((k) => String(k.text ?? '').toLowerCase().replace(/\s+/g, ' ').includes(quote));
+  return hit?.ref ?? null;
+}
+
+/**
  * What the run would cost, before it runs.
  *
  * Estimated from the pooled text rather than guessed: characters over a
@@ -365,7 +382,7 @@ export async function featuresIn(subcategory, { size = SAMPLE_SIZE, householdId 
     // The corpus decides. A feature on one place cannot tell two places apart,
     // whatever the answer sounded like.
     if (seen < 2) continue;
-    features.push({ name: f.name.trim(), kind: f.kind, evidence: f.evidence, seen, of: kept.length, on });
+    features.push({ name: f.name.trim(), kind: f.kind, evidence: f.evidence, from: quotedFrom(f, kept), seen, of: kept.length, on });
   }
 
   return {
@@ -440,6 +457,11 @@ export async function run({ subcategories = null, size = SAMPLE_SIZE, confirm = 
           rawForms: [f.name],
           sources: new Set(['features']),
           examples: f.on.slice(0, 5),
+          // The quote, and the place it was read from. Owned text, so it may
+          // be kept; `recordCandidates` refuses one that arrives with a rented
+          // source, which this path never carries.
+          evidence: f.evidence,
+          evidenceRef: f.from,
           placesSeen: f.seen,
           // Proposed and counted, never denied: this path reads descriptions
           // rather than reviews, and a description does not say a place has

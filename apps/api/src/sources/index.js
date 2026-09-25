@@ -19,6 +19,7 @@ import { openaiEnabled } from './openai.js';
 import { detectChain } from '../domain/chains.js';
 import { kmBetween } from '../domain/travel.js';
 import * as settings from '../repositories/settings.js';
+import { offKeysList, setOffKeys, sourceOff } from './switches.js';
 
 // Licensed sources register here and switch on when their key exists;
 // EPIC_SOURCES still narrows the set (Epic 2 C10: no code change to enable/disable).
@@ -61,25 +62,26 @@ export const eventSources = () => enabledSources().filter((s) => s.events);
 // Sources the owner has switched off in Settings › Providers (app_settings
 // 'sources.off'). Loaded once at start and kept in memory: enabledSources()
 // is synchronous and called on every search.
-let offKeys = new Set();
+// The Set itself lives in `switches.js`, so the adapters can read it at their
+// own door without importing this file back (see there for why).
 export async function loadSourceSettings() {
   try {
-    offKeys = new Set(await settings.sourcesOff());
+    setOffKeys(await settings.sourcesOff());
   } catch (err) {
     console.warn(`source settings not loaded: ${err.message}`);
   }
-  return [...offKeys];
+  return offKeysList();
 }
 export async function setSourceOff(key, off) {
-  const next = new Set(offKeys);
+  const next = new Set(offKeysList());
   if (off) next.add(key); else next.delete(key);
   await settings.setSourcesOff([...next]);
-  offKeys = next;
-  return [...offKeys];
+  setOffKeys(next);
+  return offKeysList();
 }
 /** Whether a source has what it needs to run (its key or flag), regardless of the owner's switch. */
 export const sourceHasKey = (key) => { const s = [...REGISTRY, ...ASIDE].find((x) => x.key === key); return Boolean(s && (typeof s.enabled !== 'function' || s.enabled())); };
-export const sourceOff = (key) => offKeys.has(key);
+export { sourceOff };
 export const sourceKeys = () => [...REGISTRY, ...ASIDE].map((s) => s.key);
 
 export function enabledSources({ only = null, includeOptIn = false } = {}) {
@@ -87,7 +89,7 @@ export function enabledSources({ only = null, includeOptIn = false } = {}) {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
-  const live = REGISTRY.filter((s) => configured.includes(s.key) && !offKeys.has(s.key) && (typeof s.enabled !== 'function' || s.enabled()));
+  const live = REGISTRY.filter((s) => configured.includes(s.key) && !sourceOff(s.key) && (typeof s.enabled !== 'function' || s.enabled()));
   if (Array.isArray(only) && only.length) return live.filter((s) => only.includes(s.key));
   if (includeOptIn) return live;
   return live.filter((s) => !s.optIn);

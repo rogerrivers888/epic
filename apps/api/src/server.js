@@ -79,6 +79,7 @@ import * as censusRun from './sources/censusRun.js';
 import * as ringTables from './repositories/ringTables.js';
 import * as ground from './sources/groundCounts.js';
 import { resumeCollections } from './routes/placeIndex.js';
+import { resume as resumeSweeps } from './sources/researchSweep.js';
 import * as providerCalls from './repositories/providerCalls.js';
 
 const app = express();
@@ -601,6 +602,13 @@ const sweep = async () => {
   // minutes are picked up, so a slow one is never started twice.
   const back = await resumeCollections().catch(() => null);
   if (back?.resumed) console.log(`epic-api: collect — picked up ${back.resumed} interrupted run(s)`);
+  // The research sweep, likewise — and again every few minutes, because a
+  // deploy can land inside the one attempt (see the harvest below).
+  const trySweeps = () => resumeSweeps()
+    .then((r) => { if (r?.resumed) console.log(`epic-api: research sweep — picked up ${r.resumed} interrupted sweep(s)`); })
+    .catch((err) => console.warn(`epic-api: sweep recovery: ${err.message}`));
+  void trySweeps();
+  setInterval(() => { void trySweeps(); }, 5 * 60_000).unref?.();
   // Coordinates past the thirty days a provider's terms allow.
   //
   // On the hour for the same reason the planning sessions are: the interval is

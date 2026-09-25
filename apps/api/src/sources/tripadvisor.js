@@ -1,4 +1,5 @@
-import { bump } from './meter.js';
+import { noteFault, bump } from './meter.js';
+import { sourceOff } from './switches.js';
 import { FENCE_M, metresBetween, namesAreSame } from '../domain/matchFence.js';
 // Tripadvisor Terra Content API, Discover plan (Technical Constraints §3.3).
 // Billing is per *entity*, not per call: every location ID returned by a
@@ -36,6 +37,9 @@ const REVIEWS_PER_VENUE = 3;
 async function get(path, params = {}, meter = null) {
   const key = KEY();
   if (!key) throw new Error('TRIPADVISOR_API_KEY not set');
+  // The owner's switch, at the door — see google.js `call()` for why it is
+  // asked here and not by the caller.
+  if (sourceOff('tripadvisor')) { noteFault(meter, 'switched_off'); throw Object.assign(new Error('Tripadvisor is switched off in Settings › Providers'), { code: 'switched_off' }); }
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
     if (v == null) continue;

@@ -452,3 +452,40 @@ test('a feature pass is readable behind the words a Google pass left', async () 
   // A source nothing was raised under is an empty list, not everything.
   assert.equal((await sets.candidates({ subcategory: 'trig-points', status: null, source: 'wikipedia' })).length, 0);
 });
+
+test('a quote is kept from an owned source and dropped from a rented one', async () => {
+  // Migration 247. The owner: "a candidate I can certify but not read is one
+  // I cannot approve". Owned text may be quoted; a Google review summary may
+  // not reach a column under any name, including this one.
+  await query("insert into shelf_subcategories (key, label, category_key) values ('quoted-drawer', 'Quoted', 'test-cat') on conflict do nothing");
+  // The test database outlives one run, and an ignored word stays ignored.
+  await query("delete from harvest_candidates where subcategory = 'quoted-drawer'");
+  await sets.recordCandidates('quoted-drawer', [
+    { norm: 'trig point', raw: 'Trig point', sources: ['features'], placesSeen: 4, asserts: 4,
+      evidence: 'A trig point marks the summit', evidenceRef: 'atlas:1' },
+    { norm: 'wave machine', raw: 'wave machine', sources: ['google'], placesSeen: 3, asserts: 3,
+      evidence: 'the wave machine runs on the hour' },
+  ], { placesTotal: 20 });
+  const rows = await sets.candidates({ subcategory: 'quoted-drawer', status: null, limit: 10 });
+  const trig = rows.find((c) => c.norm === 'trig point');
+  const wave = rows.find((c) => c.norm === 'wave machine');
+  assert.equal(trig.evidence, 'A trig point marks the summit');
+  assert.equal(trig.evidence_ref, 'atlas:1');
+  assert.ok(trig.evidence_at);
+  assert.equal(wave.evidence, null, 'rented text is never written down, whatever the caller sent');
+
+  // Raised again by the Google pass, the owned quote stays.
+  await sets.recordCandidates('quoted-drawer', [
+    { norm: 'trig point', raw: 'trig point', sources: ['google'], placesSeen: 2, asserts: 2, evidence: 'from a review' },
+  ], { placesTotal: 100 });
+  const again = (await sets.candidates({ subcategory: 'quoted-drawer', status: null, limit: 10 })).find((c) => c.norm === 'trig point');
+  assert.equal(again.evidence, 'A trig point marks the summit');
+
+  // Decided, the quote has done its job and goes with the examples. (A word
+  // is only ignorable once something has called it a feature.)
+  await sets.setKind(again.id, { kind: 'feature', by: 'test' });
+  await sets.ignoreCandidate(again.id, { actor: 'test' });
+  const [gone] = await sets.candidates({ subcategory: 'quoted-drawer', status: 'ignored', limit: 10 });
+  assert.equal(gone.evidence, null);
+  assert.equal(gone.evidence_ref, null);
+});

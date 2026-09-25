@@ -282,7 +282,9 @@ async function seedFor(venueRef, given = {}, { householdId = null, paid = true }
       const meter = {};
       const brief = await googleSource.brief(rest.join(':'), { meter });
       if (brief?.lat != null) {
-        await providerCalls.record(householdId, 'google', 'own.seed', JSON.stringify(meter)).catch(() => null);
+        // Attributed to the place as well as the household, so a sweep can
+        // read what one place cost off the ledger rather than guess it.
+        await providerCalls.record(householdId, 'google', 'own.seed', JSON.stringify(meter), null, venueRef).catch(() => null);
         return { ...seed, name: seed.name ?? brief.name, lat: brief.lat, lng: brief.lng, website: seed.website ?? brief.website };
       }
     } catch (err) {
@@ -385,12 +387,12 @@ async function websiteLead(venueRef, householdId) {
   try {
     const meter = {};
     const brief = await googleSource.brief(rest.join(':'), { meter });
-    await providerCalls.record(householdId, 'google', 'own.lead', JSON.stringify(meter)).catch(() => null);
+    await providerCalls.record(householdId, 'google', 'own.lead', JSON.stringify(meter), null, venueRef).catch(() => null);
     if (!brief?.website) return { website: null, name: brief?.name ?? null };
     return { website: brief.website, name: brief.name ?? null };
   } catch (err) {
     // Attributed whether or not it answered, the same as the open map above.
-    await providerCalls.record(householdId, 'google', 'own.lead', JSON.stringify({ google: 1 })).catch(() => null);
+    await providerCalls.record(householdId, 'google', 'own.lead', JSON.stringify({ google: 1 }), null, venueRef).catch(() => null);
     return { problem: `where their page is: ${String(err?.message || err).slice(0, 120)}` };
   }
 }

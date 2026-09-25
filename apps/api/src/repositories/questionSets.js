@@ -251,6 +251,20 @@ export async function removeQuestion(id) {
  *  · **The raw forms are kept.** The key is normalised so the spellings
  *    collapse, and an administrator still sees the words as people wrote them.
  */
+/**
+ * Sources whose text may be quoted.
+ *
+ * A quote is stored with a candidate so the person approving it can read why
+ * it was raised (migration 247). That is allowed of owned text and forbidden
+ * of rented: a Google review summary lives in memory for the length of a
+ * harvest and reaches no column, log or debug field. So a quote is written
+ * only when every source that raised the word is one of these — a word raised
+ * by the feature pass *and* the Google pass keeps the feature pass's quote,
+ * because the quote came from owned text; but a quote arriving on a row whose
+ * only sources are rented is dropped here, whatever the caller sent.
+ */
+export const QUOTABLE_SOURCES = new Set(['features', 'site', 'osm', 'wikipedia', 'wikidata']);
+
 export async function recordCandidates(subcategory, entries = [], { placesTotal = 0, client = null } = {}) {
   if (!entries.length) return { written: 0, skipped: 0, held: 0 };
   const run = on(client);
@@ -290,6 +304,10 @@ export async function recordCandidates(subcategory, entries = [], { placesTotal 
       entry.asserts ?? 0,
       entry.denies ?? 0,
       entry.asks ?? 0,
+      // The quote only travels with an owned source. See QUOTABLE_SOURCES.
+      ...(entry.evidence && sources.length && sources.every((x) => QUOTABLE_SOURCES.has(x))
+        ? [String(entry.evidence).slice(0, 240), entry.evidenceRef ?? null]
+        : [null, null]),
     ]);
   }
   // In batches, because a subcategory raises hundreds of words and a sweep of
@@ -310,21 +328,28 @@ export async function recordCandidates(subcategory, entries = [], { placesTotal 
     const values = batch.map((r) => {
       params.push(...r);
       const n = params.length;
-      return `($${n - 11}, $${n - 10}, $${n - 9}, $${n - 8}, $${n - 7}, $${n - 6}::jsonb, $${n - 5}, $${n - 4}, $${n - 3}, $${n - 2}, $${n - 1}, $${n})`;
+      return `($${n - 13}, $${n - 12}, $${n - 11}, $${n - 10}, $${n - 9}, $${n - 8}::jsonb, $${n - 7}, $${n - 6}, $${n - 5}, $${n - 4}, $${n - 3}, $${n - 2}, $${n - 1}, $${n}, case when $${n - 1}::text is not null then now() end)`;
     });
     const res = await run(
       `insert into harvest_candidates
-         (norm, raw_forms, subcategory, places_seen, places_total, sources, examples, kind, status, asserts, denies, asks)
+         (norm, raw_forms, subcategory, places_seen, places_total, sources, examples, kind, status, asserts, denies, asks, evidence, evidence_ref, evidence_at)
        values ${values.join(', ')}
        on conflict (subcategory, norm) do update set
          raw_forms    = (select array_agg(distinct f) from unnest(harvest_candidates.raw_forms || excluded.raw_forms) f),
          places_seen  = greatest(harvest_candidates.places_seen, excluded.places_seen),
          places_total = greatest(harvest_candidates.places_total, excluded.places_total),
          sources      = harvest_candidates.sources || excluded.sources,
-         examples     = (select array_agg(distinct e) from unnest((harvest_candidates.examples || excluded.examples)[1:5]) e),
+         -- array_agg over nothing is null, not '{}', and the column is not
+         -- null: two rows with no examples merged into a row that could not
+         -- be written (found 25 Sep 2026).
+         examples     = coalesce((select array_agg(distinct e) from unnest((harvest_candidates.examples || excluded.examples)[1:5]) e), '{}'),
          asserts      = greatest(harvest_candidates.asserts, excluded.asserts),
          denies       = greatest(harvest_candidates.denies, excluded.denies),
          asks         = greatest(harvest_candidates.asks, excluded.asks),
+         -- A newer quote replaces an older one; a run with none leaves it.
+         evidence     = coalesce(excluded.evidence, harvest_candidates.evidence),
+         evidence_ref = case when excluded.evidence is not null then excluded.evidence_ref else harvest_candidates.evidence_ref end,
+         evidence_at  = case when excluded.evidence is not null then now() else harvest_candidates.evidence_at end,
          -- A kind already decided stands: the classifier's verdict, or a
          -- person's, is not overwritten by the code's first pass on a later
          -- run. Only the holding pen is open to being called.
@@ -535,7 +560,7 @@ export async function promote(id, { gate = false, kind = 'yesno', label = null, 
     );
     await client.query(
       `update harvest_candidates
-          set status = 'promoted', question_id = $2, decided_by = $3, decided_at = now(), examples = '{}'
+          set status = 'promoted', question_id = $2, decided_by = $3, decided_at = now(), examples = '{}', evidence = null, evidence_ref = null
         where id = $1`, [id, question?.id ?? null, actor],
     );
     attrs.forget();
@@ -546,7 +571,7 @@ export async function promote(id, { gate = false, kind = 'yesno', label = null, 
 /** Never ask about this word here again. The examples go with the decision. */
 export async function ignoreCandidate(id, { actor = null } = {}) {
   const { rows } = await query(
-    `update harvest_candidates set status = 'ignored', decided_by = $2, decided_at = now(), examples = '{}'
+    `update harvest_candidates set status = 'ignored', decided_by = $2, decided_at = now(), examples = '{}', evidence = null, evidence_ref = null
       where id = $1 and status = 'new' returning *`, [id, actor],
   );
   if (!rows[0]) throw bad('That word has already been decided.');
