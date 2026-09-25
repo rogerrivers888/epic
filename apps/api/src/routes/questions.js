@@ -41,6 +41,7 @@ import * as sets from '../repositories/questionSets.js';
 import * as harvest from '../sources/vocabulary.js';
 import * as features from '../sources/featureHarvest.js';
 import * as sweep from '../sources/researchSweep.js';
+import * as reference from '../sources/referenceSet.js';
 import { ENRICH_AFTER, KINDS, REGIONS, SAMPLE, enrichmentOn, settle } from '../domain/questions.js';
 import * as placeAttributes from '../repositories/placeAttributes.js';
 import { currentHousehold } from './household.js';
@@ -450,6 +451,37 @@ questionRoutes.post('/sweep', requires('manage_questions'), async (req, res, nex
     return next(err);
   }
 });
+/**
+ * The deep reference set (owner, 25 Sep 2026).
+ *
+ *   GET  /reference/propose   the twenty a category and why each is there
+ *   GET  /reference/estimate  what it would cost, and the number to confirm with
+ *   POST /reference           start it — a research sweep in reference mode
+ *   GET  /reference/:id/held  what every place in it now holds, and from where
+ */
+questionRoutes.get('/reference/propose', requires('view_library'), async (_req, res, next) => {
+  try { res.json({ categories: await reference.propose() }); } catch (err) { next(err); }
+});
+questionRoutes.get('/reference/estimate', requires('view_library'), async (_req, res, next) => {
+  try { res.json(await reference.estimate()); } catch (err) { next(err); }
+});
+questionRoutes.post('/reference', requires('manage_questions'), async (req, res, next) => {
+  try {
+    const household = await currentHousehold().catch(() => null);
+    const row = await reference.start({ confirm: req.body?.confirm ?? null, householdId: household?.id ?? null, startedBy: actorOf(req) });
+    void sweep.work(row.id).catch((err) => console.warn(`reference set ${row.id}: ${err.message}`));
+    res.status(202).json({ sweep: row });
+  } catch (err) {
+    if (err?.code === 'confirm_required' || err?.code === 'already_running' || err?.code === 'no_household') {
+      return res.status(409).json({ error: err.code, message: err.message, plan: err.plan ?? null });
+    }
+    return next(err);
+  }
+});
+questionRoutes.get('/reference/:id/held', requires('view_library'), async (req, res, next) => {
+  try { res.json({ places: await reference.held(String(req.params.id)) }); } catch (err) { next(err); }
+});
+
 questionRoutes.get('/sweep', requires('view_library'), async (_req, res, next) => {
   try {
     const rows = await sweep.recent();

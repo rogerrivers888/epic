@@ -47,6 +47,8 @@ import { sweepPictures } from './placePicture.js';
 // The last resort when no open source and no licensed one can say where a
 // claimed place's own page is (owner, 5 Sep 2026).
 import { searchWeb } from '../claude.js';
+import * as fsa from './fsa.js';
+import { FSA_ATTRIBUTION } from './fsa.js';
 
 // How long a failed attempt waits before it is tried again. Overpass rate-limits
 // by IP and a restaurant's website goes down for an afternoon; neither is a
@@ -111,6 +113,8 @@ const LICENCE = {
   // for a place whatever else fails: everything else needs the place to be
   // *findable*, and this only needs it to be somewhere.
   nominatim: { licence: 'ODbL 1.0', retention: 'indefinite', attribution: OSM_ATTRIBUTION },
+  // The hygiene register: open government data, ours to keep (25 Sep 2026).
+  fsa: { licence: 'OGL v3.0', retention: 'indefinite', attribution: FSA_ATTRIBUTION },
 };
 
 /** When a fact under these terms must be gone. Null means never (§4). */
@@ -177,6 +181,7 @@ const PRECEDENCE = {
   osm_ref: ['osm'],
   wikidata_id: ['wikipedia'],
   wikipedia_url: ['wikipedia'],
+  fsa_rating: ['fsa'], fsa_rated_at: ['fsa'], fsa_id: ['fsa'],
 };
 // These columns are `not null` with a default, because a record with no cuisines
 // means "none known", not "unknown shape": callers iterate them without checking.
@@ -444,7 +449,7 @@ async function websiteLead(venueRef, householdId) {
  * that, and a Claude search is neither in the estimate nor under the ceiling
  * (Codex, 25 Sep 2026).
  */
-export async function enrich(venueRef, { householdId = null, seed: given = {}, force = false, replace = force, paid = true, search = paid } = {}) {
+export async function enrich(venueRef, { householdId = null, seed: given = {}, force = false, replace = force, paid = true, search = paid, hygiene = true } = {}) {
   await owned.ensureRecord(venueRef);
   const before = await owned.enrichStateOf(venueRef);
   if (!force && alreadyResearched(before)) return { state: 'done', skipped: 'already researched' };
@@ -681,6 +686,34 @@ export async function enrich(venueRef, { householdId = null, seed: given = {}, f
     }
   } catch (err) {
     problems.push(`Wikipedia: ${String(err?.message || err).slice(0, 120)}`);
+  }
+
+  // 5. The hygiene register, once there is a postcode to ask with — from
+  //    their page, the open map or the address lookup above. Free, open
+  //    government data, kept for good; and an honest nothing for a place the
+  //    register does not know (owner, 25 Sep 2026, the reference set).
+  if (hygiene) {
+    try {
+      const held = await owned.liveFacts(venueRef, { keepableOnly: true });
+      const pc = held.find((f) => f.field === 'postcode' && !empty(f.value))?.value ?? seed.postcode ?? null;
+      const nm = held.find((f) => f.field === 'name' && !empty(f.value))?.value ?? seed.name ?? null;
+      if (pc) {
+        const got = await fsa.lookup({ name: nm, postcode: pc, householdId, venueRef });
+        if (got.facts || replace) await forgetSource(venueRef, ['fsa']);
+        if (got.facts) {
+          matched.fsa = { id: got.facts.id, scheme: got.facts.scheme };
+          await Promise.all([
+            putFact(venueRef, 'fsa_rating', 'fsa', got.facts.rating, 1),
+            putFact(venueRef, 'fsa_rated_at', 'fsa', got.facts.ratedAt, 1),
+            putFact(venueRef, 'fsa_id', 'fsa', got.facts.id, 1),
+          ]);
+        } else if (got.problem && !/nothing at that postcode/.test(got.problem)) {
+          problems.push(`the hygiene register: ${got.problem}`);
+        }
+      }
+    } catch (err) {
+      problems.push(`the hygiene register: ${String(err?.message || err).slice(0, 120)}`);
+    }
   }
 
   const { fields, provenance } = await compose(venueRef);

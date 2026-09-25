@@ -21,10 +21,16 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { googleSource } from '../src/sources/google.js';
-import { noteFault } from '../src/sources/meter.js';
-import { pool, query } from '../src/db.js';
+import { testDatabase } from './helpers/db.js';
 
+// Its own database, built from the migrations, before anything that opens a
+// pool is imported. The first version of this file imported `db.js` directly
+// and ran — for four days — against the development database, which is what
+// the helper exists to prevent, and which showed the moment a migration
+// added a column the development database did not have (25 Sep 2026).
+const { query, pool } = await testDatabase();
+const { googleSource } = await import('../src/sources/google.js');
+const { noteFault } = await import('../src/sources/meter.js');
 const own = await import('../src/sources/own.js');
 
 /**
@@ -160,4 +166,32 @@ test('a seeded place costs nothing to research for free, and one request to rese
 
   const paid = await countingBriefs(() => own.enrich(ref('seeded_paid'), { force: true, paid: true, seed }));
   assert.equal(paid, 1, 'the website lead, not a second identification');
+});
+
+test('the hygiene register is asked once there is a postcode, and what it says is kept for good', async () => {
+  // Owner, 25 Sep 2026: the reference set keeps every fact the owned sources
+  // hold, FSA included. Open government data, retention indefinite.
+  const r = ref('hygiene');
+  const wasFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (/api\.ratings\.food\.gov\.uk/.test(String(url))) {
+      return new Response(JSON.stringify({ establishments: [{ FHRSID: 4242, BusinessName: 'Nowhere Cafe', PostCode: 'SL5 9JH', RatingValue: '4', RatingDate: '2025-01-02T00:00:00', SchemeType: 'FHRS' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error('no network in this test');
+  };
+  try {
+    await own.enrich(r, { force: true, paid: false, seed: { name: 'Nowhere Cafe', lat: 51.5, lng: -0.1, postcode: 'SL5 9JH' } });
+    const { rows } = await query(`select field, value, retention, expires_at from place_facts where venue_ref = $1 and source = 'fsa' order by field`, [r]);
+    assert.deepEqual(rows.map((x) => [x.field, x.value, x.retention, x.expires_at]), [
+      ['fsa_id', '4242', 'indefinite', null],
+      ['fsa_rated_at', '2025-01-02', 'indefinite', null],
+      ['fsa_rating', '4', 'indefinite', null],
+    ]);
+    const { rows: [rec] } = await query('select fsa_rating, fsa_id, provenance from place_records where venue_ref = $1', [r]);
+    assert.equal(rec.fsa_rating, '4');
+    assert.equal(rec.provenance.fsa_rating, 'fsa', 'the record says where it came from');
+  } finally {
+    globalThis.fetch = wasFetch;
+    await query('delete from place_facts where venue_ref like $1', [`${PREFIX}%`]).catch(() => null);
+  }
 });

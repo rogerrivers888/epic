@@ -48,6 +48,8 @@ export const TAKES = ['loved', 'fine', 'not_for_me'];
  * This is only about which of them the money guard counts.
  */
 export const FREE_SOURCES = new Set([
+  // The Food Standards Agency's register: open data, no bill (25 Sep 2026).
+  'fsa',
   'osm', 'overpass', 'osm-overpass', 'nominatim', 'osm-nominatim', 'photon',
   'wikipedia', 'wikidata', 'wikimedia', 'commons',
   'tfl', 'postcodes', 'fixtures',

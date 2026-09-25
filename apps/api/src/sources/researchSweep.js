@@ -399,9 +399,28 @@ async function writeProgress(id, { problem = null, state = null } = {}) {
  * and the venue's own server are somebody else's, and `own.js` runs its own
  * queue at one for the same reason.
  */
-export async function work(id, { research = own.enrich, room = roomToSpend, release = releaseSpend, householdId = null, deadlineMs = PLACE_DEADLINE_MS } = {}) {
+/**
+ * The reference set's research: everything, again, and kept.
+ *
+ * `force` asks every source whatever the record already holds; `replace`
+ * clears a source's facts before taking what it says now, so a wrong match
+ * cannot survive; the seed is the record's own name and point, so a place we
+ * already know is not bought back from Google. The sample sweep leaves a
+ * fresh identified record alone; the reference set does not.
+ */
+export async function referenceResearch(venueRef, opts = {}) {
+  const r = await query('select name, lat, lng, website, postcode from place_records where venue_ref = $1', [venueRef]);
+  const rec = r.rows[0];
+  const seed = rec?.name && rec?.lat != null ? { name: rec.name, lat: rec.lat, lng: rec.lng, website: rec.website ?? undefined, postcode: rec.postcode ?? undefined } : {};
+  return own.enrich(venueRef, { ...opts, seed, force: true, replace: true, hygiene: true });
+}
+
+export async function work(id, { research = null, room = roomToSpend, release = releaseSpend, householdId = null, deadlineMs = PLACE_DEADLINE_MS } = {}) {
   const run = await one(id);
   if (!run || run.state !== 'running') return run;
+  // The kind of research is the run's, so a resume after a deploy does the
+  // same work the start did.
+  const ask = research ?? (run.params?.mode === 'reference' ? referenceResearch : own.enrich);
   const household = householdId ?? run.household_id;
   const pulse = setInterval(() => { void beat(id); }, STRANDED_AFTER_MS / 4);
   pulse.unref?.();
@@ -464,7 +483,7 @@ export async function work(id, { research = own.enrich, room = roomToSpend, rele
           let state = 'done';
           // Two Google requests at most, and never the web search: that is
           // what the estimate priced and what the ceiling was asked for.
-          const asking = research(p.venue_ref, { householdId: household, paid: true, search: false, force: false });
+          const asking = ask(p.venue_ref, { householdId: household, paid: true, search: false, force: false });
           try {
             const out = await withDeadline(asking, deadlineMs);
             outcome = outcomeOf(out);
