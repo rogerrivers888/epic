@@ -136,3 +136,28 @@ test('a box under a kilometre is placed by its centre, and a wide one is not', a
   // nowhere is a missing place" — but a box that wide really can be either).
   assert.equal(whereBoxSits({ minLat: 51.505, minLng: -0.15, maxLat: 51.535, maxLng: -0.10 }, { cells: ['A'], universe }), 'across');
 });
+
+test('a district is drawn as every sector the ONS holds, not as the places we happened to know', async () => {
+  // Migration 248. A sector was only ever made when a place was stamped inside
+  // it, and its centre was the mean of the places Epic knew there: WC1H was
+  // two sectors forty-five metres apart at Euston, and 145 places within three
+  // hundred metres of them were nearer an NW1 or WC1E sector. Owner, 25 Sep
+  // 2026: "A district drawn as one point is a structural fault, not a London
+  // one." Every live sector in Great Britain, from the ONS Postcode Directory
+  // (August 2026, OGL), with its centre the mean of its live postcodes.
+  const { rows } = await query(
+    `select label, lat, lng, points, source from geo_cells where scheme = 'sector' and outcode = 'WC1H' order by label`);
+  assert.deepEqual(rows.map((r) => r.label), ['WC1H 0', 'WC1H 8', 'WC1H 9'], 'the three sectors WC1H is made of');
+  assert.ok(rows.every((r) => r.source === 'onspd-2026-08'), 'each from the ONS, and it says so');
+  assert.ok(rows.every((r) => r.points > 50), 'each the mean of dozens of postcodes, not of one or two places');
+  // The two the places had drawn sat on top of each other; the real three are
+  // hundreds of metres apart.
+  const [a, , c] = rows;
+  const metres = Math.hypot((a.lat - c.lat) * 111320, (a.lng - c.lng) * 70000);
+  assert.ok(metres > 200, `WC1H 0 and WC1H 9 are ${Math.round(metres)} m apart`);
+
+  const { rows: [whole] } = await query(
+    `select count(*)::int sectors, count(distinct outcode)::int outcodes from geo_cells where scheme = 'sector' and source = 'onspd-2026-08'`);
+  assert.ok(whole.sectors >= 11000, `the whole country: ${whole.sectors} sectors`);
+  assert.ok(whole.outcodes >= 2900, `across ${whole.outcodes} districts`);
+});
