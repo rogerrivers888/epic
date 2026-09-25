@@ -136,7 +136,7 @@ export async function setForSubcategory(subcategoryKey) {
  */
 export async function everyQuestion() {
   const { rows } = await query(
-    `select q.*, a.label, a.kind, a.blurb, a.options, a.unit,
+    `select q.*, a.label, a.kind, a.blurb, a.options, a.unit, a.range_min, a.range_max,
             (select count(*) from place_answers pa where pa.question_id = q.id and pa.state = 'answered') as answered,
             (select count(*) from place_answers pa where pa.question_id = q.id and pa.state = 'answered' and pa.yesno) as said_yes,
             (select count(*) from place_answers pa where pa.question_id = q.id and pa.state = 'asked_nothing_found') as nothing_found
@@ -152,7 +152,7 @@ export async function everyQuestion() {
 
 export async function questionsFor(setKey = null) {
   const { rows } = await query(
-    `select q.*, a.label, a.kind, a.blurb, a.options, a.unit,
+    `select q.*, a.label, a.kind, a.blurb, a.options, a.unit, a.range_min, a.range_max,
             (select count(*) from place_answers pa where pa.question_id = q.id and pa.state = 'answered') as answered,
             (select count(*) from place_answers pa where pa.question_id = q.id and pa.state = 'answered' and pa.yesno) as said_yes,
             (select count(*) from place_answers pa where pa.question_id = q.id and pa.state = 'asked_nothing_found') as nothing_found
