@@ -99,15 +99,16 @@ export async function sampleFor(subcategory) {
  */
 async function alreadyHeld(refs) {
   if (!refs.length) return new Set();
+  // The same predicate `enrich` skips on — not a copy of it. A copy counted
+  // any recent row with any provenance as free, and rows an older researcher
+  // wrote were subtracted from the confirmed count and then paid for
+  // (Codex, 25 Sep 2026).
   const { rows } = await query(
-    `select venue_ref from place_records
-      where venue_ref = any($1)
-        and enrich_state = 'done'
-        and provenance <> '{}'::jsonb
-        and enriched_at > now() - interval '180 days'`,
+    `select venue_ref, enrich_state, enriched_at, research_version, provenance
+       from place_records where venue_ref = any($1)`,
     [refs],
   );
-  return new Set(rows.map((r) => r.venue_ref));
+  return new Set(rows.filter((r) => own.alreadyResearched(r)).map((r) => r.venue_ref));
 }
 
 // ---------------------------------------------------------------------------
@@ -207,10 +208,18 @@ export async function one(id) {
 
 const beat = (id) => query(`update research_sweeps set touched_at = now() where id = $1 and state = 'running'`, [id]).catch(() => null);
 
-/** Take the next few pending places, marking them as in the air. */
+/**
+ * Take the next few pending places, marking them as in the air.
+ *
+ * `attempted_at` is set once and kept: it is the start of the window the
+ * ledger is read over, and a place asked again after a deploy must be costed
+ * from its *first* attempt, or the request the dead process made is left out
+ * of the sweep's spend — in exactly the case the recovery exists for (Codex,
+ * 25 Sep 2026).
+ */
 async function claimBatch(id, n = BATCH) {
   const { rows } = await query(
-    `update research_sweep_places set state = 'asking', attempted_at = now()
+    `update research_sweep_places set state = 'asking', attempted_at = coalesce(attempted_at, now())
       where (sweep_id, venue_ref) in (
         select sweep_id, venue_ref from research_sweep_places
          where sweep_id = $1 and state = 'pending'
@@ -333,7 +342,7 @@ export async function work(id, { research = own.enrich, room = roomToSpend, rele
         // The ceiling is monthly and the sweep is not going to get under it by
         // waiting a minute. Stopped, with the places it never asked left
         // pending, so starting it again next month picks up here.
-        await query(`update research_sweep_places set state = 'pending', attempted_at = null where sweep_id = $1 and state = 'asking'`, [id]);
+        await query(`update research_sweep_places set state = 'pending' where sweep_id = $1 and state = 'asking'`, [id]);
         await writeProgress(id, { state: 'failed', problem: `over this month's ceiling with £${(got.leftPence / 100).toFixed(2)} left` });
         return one(id);
       }
@@ -403,7 +412,7 @@ export async function resume({ work: doWork = work } = {}) {
       await writeProgress(run.id, { state: 'failed', problem: 'it was interrupted and we cannot tell whose sweep it was' });
       continue;
     }
-    await query(`update research_sweep_places set state = 'pending', attempted_at = null where sweep_id = $1 and state = 'asking'`, [run.id]);
+    await query(`update research_sweep_places set state = 'pending' where sweep_id = $1 and state = 'asking'`, [run.id]);
     void doWork(run.id).catch((err) => console.warn(`sweep ${run.id}: ${err.message}`));
     resumed += 1;
   }

@@ -35,11 +35,20 @@ test.before(async () => {
   for (const [i, ref] of refs(30, 'google:ChIJ_thin_').entries()) {
     await query(`insert into place_index (venue_ref, subcategory, found_rank) values ($1, $2, $3)`, [ref, THIN, i + 1]);
   }
-  // Two at the top already researched and identified: they cost nothing.
+  // Two at the top already researched and identified by the current
+  // researcher: they cost nothing, and `enrich` will skip them.
   for (const ref of refs(2)) {
-    await query(`insert into place_records (venue_ref, enrich_state, provenance, enriched_at) values ($1, 'done', '{"name":"osm"}'::jsonb, now())
-                 on conflict (venue_ref) do update set enrich_state = 'done', provenance = '{"name":"osm"}'::jsonb, enriched_at = now()`, [ref]);
+    await query(`insert into place_records (venue_ref, enrich_state, provenance, enriched_at, research_version) values ($1, 'done', '{"name":"osm"}'::jsonb, now(), 3)
+                 on conflict (venue_ref) do update set enrich_state = 'done', provenance = '{"name":"osm"}'::jsonb, enriched_at = now(), research_version = 3`, [ref]);
   }
+  // Two more that *look* researched and are not: one by an older researcher,
+  // one identified by nothing but a street address. `enrich` asks both again,
+  // so the estimate must count both — a copy of the test counted them as free
+  // and the sweep then paid for them (Codex, 25 Sep 2026).
+  await query(`insert into place_records (venue_ref, enrich_state, provenance, enriched_at, research_version) values ($1, 'done', '{"name":"osm"}'::jsonb, now(), 1)
+               on conflict (venue_ref) do update set enrich_state = 'done', provenance = '{"name":"osm"}'::jsonb, enriched_at = now(), research_version = 1`, [refs(3)[2]]);
+  await query(`insert into place_records (venue_ref, enrich_state, provenance, enriched_at, research_version) values ($1, 'done', '{"address":"nominatim"}'::jsonb, now(), 3)
+               on conflict (venue_ref) do update set enrich_state = 'done', provenance = '{"address":"nominatim"}'::jsonb, enriched_at = now(), research_version = 3`, [refs(4)[3]]);
 });
 
 test.after(async () => {
@@ -144,6 +153,34 @@ test('over the ceiling stops with the rest left pending, and does not pretend', 
   const f = await sweep.funnelOf(row.id);
   assert.equal(f.pending, 20, 'nothing was asked and nothing is in the air');
   assert.equal(f.asking, 0);
+});
+
+test('a place asked again after a deploy is costed from its first attempt', async () => {
+  await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
+  const hh = '00000000-0000-4000-8000-00000000c0de';
+  const row = await sweep.start({ subcategories: [SUB], confirm: 36, householdId: hh });
+  // The process died after the first place's request was on the ledger and
+  // before its row was written. Everything else is done already.
+  const [first] = refs(1, 'google:ChIJ_sweep_1');
+  const hit = refs(20).includes(first) ? first : (await query(`select venue_ref from research_sweep_places where sweep_id = $1 limit 1`, [row.id])).rows[0].venue_ref;
+  await query(`update research_sweep_places set state = 'done', outcome = '{"state":"done"}'::jsonb where sweep_id = $1 and venue_ref <> $2`, [row.id, hit]);
+  await query(`update research_sweep_places set state = 'asking', attempted_at = now() - interval '2 minutes' where sweep_id = $1 and venue_ref = $2`, [row.id, hit]);
+  await query(`insert into provider_calls (provider, purpose, estimated_cost_usd, venue_ref, created_at) values ('google', 'own.seed', 0.032, $1, now() - interval '1 minute')`, [hit]);
+  await query(`update research_sweeps set touched_at = now() - interval '1 hour' where id = $1`, [row.id]);
+
+  await sweep.resume({ work: async () => {} });
+  const done = await sweep.work(row.id, {
+    research: async (ref) => {
+      // The second attempt buys its request again.
+      await query(`insert into provider_calls (provider, purpose, estimated_cost_usd, venue_ref) values ('google', 'own.seed', 0.032, $1)`, [ref]);
+      return { state: 'done', matched: {}, fields: {}, problems: [] };
+    },
+    room: async () => ({ ok: true, reservation: 'r', leftPence: 10000 }),
+    release: async () => {},
+  });
+  assert.equal(done.state, 'done');
+  const { rows: [p] } = await query(`select cost_usd from research_sweep_places where sweep_id = $1 and venue_ref = $2`, [row.id, hit]);
+  assert.equal(Math.round(Number(p.cost_usd) * 1000) / 1000, 0.064, 'both attempts are the sweep’s spend');
 });
 
 test('a sweep whose process died is picked up, and its in-air places asked again', async () => {

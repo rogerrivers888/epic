@@ -364,6 +364,28 @@ async function findTheirPage({ venueRef, name, locality, address, category, hous
  * mean somebody found *this place*; an address and a postcode come from a point
  * on the map and would be there for a field in the middle of nowhere.
  */
+/**
+ * Whether a record is done with, so that asking again would spend for nothing.
+ *
+ * Fresh — researched within the refresh window by the current researcher — and
+ * *identified*: "already researched" has to mean we found out which place
+ * this is. A record that came back empty is not done with, and this guard was
+ * quietly cancelling the catch-up that had just queued it (found 4 Sep 2026);
+ * a street address is not an identification either — that let a
+ * reverse-geocode stand in for the research (owner, 5 Sep 2026).
+ *
+ * One predicate, exported, because the research sweep's estimate has to count
+ * as free exactly the rows `enrich` will skip. Its own copy counted any recent
+ * row with any provenance, so a row an older researcher wrote was subtracted
+ * from the confirmed request count and then paid for (Codex, 25 Sep 2026).
+ */
+export function alreadyResearched(row) {
+  if (!row || row.enrich_state !== 'done') return false;
+  const fresh = row.enriched_at && Date.now() - new Date(row.enriched_at).getTime() < REFRESH_AFTER_DAYS * 86_400_000
+    && (row.research_version ?? 0) >= RESEARCH_VERSION;
+  return Boolean(fresh && isIdentified(row.provenance));
+}
+
 export function isIdentified(provenance) {
   return ['name', 'osm_ref', 'website'].some((f) => provenance?.[f]);
 }
@@ -406,19 +428,7 @@ async function websiteLead(venueRef, householdId) {
 export async function enrich(venueRef, { householdId = null, seed: given = {}, force = false, replace = force, paid = true } = {}) {
   await owned.ensureRecord(venueRef);
   const before = await owned.enrichStateOf(venueRef);
-  if (!force) {
-    const row = before;
-    const fresh = row?.enriched_at && Date.now() - new Date(row.enriched_at).getTime() < REFRESH_AFTER_DAYS * 86_400_000
-      // A record made by an older researcher is not fresh, however recent it is.
-      && (row?.research_version ?? 0) >= RESEARCH_VERSION;
-    // "Already researched" has to mean we found out which place this is. A
-    // record that came back empty is not done with, and this guard was quietly
-    // cancelling the catch-up that had just queued it: one said ask again, the
-    // other said we asked recently, and the empty record stayed empty (found
-    // 4 Sep 2026). A street address is not an identification either — that let
-    // a reverse-geocode stand in for the research (owner, 5 Sep 2026).
-    if (row?.enrich_state === 'done' && fresh && isIdentified(row?.provenance)) return { state: 'done', skipped: 'already researched' };
-  }
+  if (!force && alreadyResearched(before)) return { state: 'done', skipped: 'already researched' };
 
   const seed = await seedFor(venueRef, given, { householdId, paid });
   // Whether we can ask a well-formed question at all. Without a name and a
