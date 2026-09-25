@@ -274,6 +274,8 @@ export async function save({ namespace, key, label, note, active, decision }) {
       `update place_kinds set label = coalesce($2, label), admit = coalesce($3, admit), updated_at = now()
         where qid = $1 returning 'wikidata' as namespace, qid as key, label, category as note, seen_count, admit as active`,
       [key, label ?? null, admit]);
+    // The classifier reads decisions through the taxonomy cache; a decision written here must reach the next search (Codex, 25 Sep 2026).
+    forgetTaxonomy();
     return rows[0] ?? null;
   }
   const { rows } = await query(
@@ -293,6 +295,7 @@ export async function save({ namespace, key, label, note, active, decision }) {
             updated_at = now()
      returning *`,
     [namespace, key, label ?? null, note ?? null, a, d]);
+  forgetTaxonomy();
   return rows[0];
 }
 
@@ -339,5 +342,6 @@ export async function decideMany(items) {
        from (select unnest($1::text[]) as key, unnest($2::text[]) as decision) c
       where l.namespace = 'google' and l.key = c.key and l.decision is null`,
     [items.map((i) => i.key), items.map((i) => i.decision)]);
+  forgetTaxonomy();
   return rowCount;
 }
