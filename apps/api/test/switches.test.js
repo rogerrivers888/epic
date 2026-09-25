@@ -14,11 +14,20 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { googleSource, photoFor, displaySlice } from '../src/sources/google.js';
-import { tripadvisorSource } from '../src/sources/tripadvisor.js';
-import { setOffKeys, sourceOff } from '../src/sources/switches.js';
-import { enabledSources, sourceOff as viaIndex } from '../src/sources/index.js';
-import { healthOf } from '../src/sources/meter.js';
+import { testDatabase } from './helpers/db.js';
+
+// The database first, then anything that opens a pool — the convention every
+// database-backed test here follows. Imported statically ahead of it, the
+// matcher's pool raced the helper's build of the schema.
+const { query, pool } = await testDatabase();
+const { googleSource, photoFor, displaySlice } = await import('../src/sources/google.js');
+const { tripadvisorSource } = await import('../src/sources/tripadvisor.js');
+const { setOffKeys, sourceOff } = await import('../src/sources/switches.js');
+const { enabledSources, sourceOff: viaIndex } = await import('../src/sources/index.js');
+const { healthOf } = await import('../src/sources/meter.js');
+const { googleMatchFor } = await import('../src/sources/providerMatch.js');
+
+test.after(() => pool.end());
 
 const withKeys = async (env, run) => {
   const was = {};
@@ -73,6 +82,22 @@ test('a display search with Google switched off is not counted as sent', async (
     assert.match(out.problem, /switched off/);
     assert.equal(left(), 0);
     assert.match(JSON.stringify(healthOf(meter)), /switched_off/, 'and the ledger sees the refusal');
+    assert.equal(healthOf(meter).failed, 1, 'once — not once for the branch and once for the words');
+  });
+});
+
+test('a match attempted with Google switched off is not remembered as a miss', async () => {
+  // Empty from the door looked like "no match", and no match is persisted:
+  // every venue tried while Google was off would have stayed "not on
+  // Google" for good after it was switched back on (Codex, 25 Sep 2026).
+  await withKeys({ GOOGLE_MAPS_API_KEY: 'test-key-never-sent' }, async (left) => {
+    setOffKeys(['google']);
+    const venueRef = `osm:node/switched_off_${Date.now()}`;
+    const out = await googleMatchFor({ venueRef, name: 'The Bull', lat: 51.5, lng: -0.1 });
+    assert.equal(out, null);
+    assert.equal(left(), 0);
+    const { rows } = await query('select missing from provider_matches where venue_ref = $1', [venueRef]);
+    assert.equal(rows.length, 0, 'nothing was written down');
   });
 });
 

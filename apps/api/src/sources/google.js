@@ -471,6 +471,8 @@ const unavailable = (meter = null) => {
   if (sourceOff('google')) {
     // On the meter as well as in words: these paths answered zero requests
     // and left the ledger's health column unobserved (Codex, 25 Sep 2026).
+    // Called once per refusal — asked twice, once for the branch and once
+    // for the words, one refusal counted as two failures (Codex, same day).
     noteFault(meter, 'switched_off');
     return 'Google is switched off in Settings';
   }
@@ -799,7 +801,8 @@ export async function examplesOfType({ center, radiusKm = 40, type, words = null
   // ever *returns* — `establishment`, `point_of_interest`, `food` — is a 400,
   // not a filter. Those are asked for in words instead (Codex, 13 Sep 2026).
   const searchable = SEARCHABLE_TYPES.has(String(type));
-  if (unavailable(meter)) return { places: [], calls: 0, problem: unavailable(meter) };
+  const why = unavailable(meter);
+  if (why) return { places: [], calls: 0, problem: why };
   if (!type || !center || center.lat == null) return { places: [], calls: 0, problem: 'no type or no area' };
   const km = Math.min(radiusKm, 50);
   const dLat = km / 111.32;
@@ -877,7 +880,8 @@ export async function examplesOfType({ center, radiusKm = 40, type, words = null
  * asks for one when somebody has scrolled far enough to need it.
  */
 export async function displaySlice({ box, includedType, query, pageToken = null, pageSize = 20, meter = null } = {}) {
-  if (unavailable(meter) || !box) return { venues: [], nextPageToken: null, requests: 0, problem: unavailable(meter) };
+  const why = unavailable(meter);
+  if (why || !box) return { venues: [], nextPageToken: null, requests: 0, problem: why };
   const body = {
     textQuery: query || googleTypeWords(includedType) || 'things to do',
     pageSize: Math.min(20, Math.max(1, pageSize)),
@@ -913,7 +917,8 @@ export async function displaySlice({ box, includedType, query, pageToken = null,
 }
 
 async function censusSlice({ box, includedType, query, pages = 3, meter = null } = {}) {
-  if (unavailable(meter) || !box) return { places: [], requests: 0, saturated: false, problem: unavailable(meter) };
+  const why = unavailable(meter);
+  if (why || !box) return { places: [], requests: 0, saturated: false, problem: why };
   const rectangle = {
     low: { latitude: box.minLat, longitude: box.minLng },
     high: { latitude: box.maxLat, longitude: box.maxLng },
@@ -1017,7 +1022,8 @@ async function censusSlice({ box, includedType, query, pages = 3, meter = null }
 const SUMMARY_FIELDS = 'places.id,places.reviewSummary';
 
 async function reviewSummaries({ textQuery, box = null, includedType = null, count = 20, meter = null } = {}) {
-  if (unavailable(meter)) return { places: [], requests: 0, problem: unavailable(meter) };
+  const why = unavailable(meter);
+  if (why) return { places: [], requests: 0, problem: why };
   if (!textQuery) return { places: [], requests: 0, problem: 'no query' };
   const body = {
     textQuery,
@@ -1056,7 +1062,8 @@ async function reviewSummaries({ textQuery, box = null, includedType = null, cou
 }
 
 export async function sweepArea({ center, radiusKm = 2.5, queries = [], pages = 2, meter = null, includedType = 'restaurant', keepLodging = false } = {}) {
-  if (unavailable(meter) || !center || center.lat == null) return { places: [], calls: 0, problems: [unavailable(meter)] };
+  const why = unavailable(meter);
+  if (why || !center || center.lat == null) return { places: [], calls: 0, problems: [why].filter(Boolean) };
   // Text Search fences with a rectangle, not a circle: `locationRestriction`
   // rejects a circle outright, which is why the first Windsor sweep came back
   // with nothing from every one of its eight queries (4 Sep 2026). A box round
@@ -1155,7 +1162,8 @@ export async function sweepArea({ center, radiusKm = 2.5, queries = [], pages = 
  * default that drifted.
  */
 export async function benchArea({ center, radiusKm = 2.5, queries = [], pages = 2, meter = null } = {}) {
-  if (unavailable(meter) || !center || center.lat == null) return { places: [], calls: 0, problems: [unavailable(meter)] };
+  const why = unavailable(meter);
+  if (why || !center || center.lat == null) return { places: [], calls: 0, problems: [why].filter(Boolean) };
   const km = Math.min(radiusKm, 50);
   const dLat = km / 111.32;
   const dLng = km / (111.32 * Math.cos((center.lat * Math.PI) / 180) || 1);

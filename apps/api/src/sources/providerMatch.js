@@ -1,5 +1,6 @@
 import { query } from '../db.js';
 import { googleSource } from './google.js';
+import { sourceOff } from './switches.js';
 import { tripadvisorSource } from './tripadvisor.js';
 import { googleSaysPublic } from '../domain/visiting.js';
 import * as providerCalls from '../repositories/providerCalls.js';
@@ -163,7 +164,12 @@ export async function googleMatchFor({ venueRef, name, lat, lng, householdId = n
 
   const kept = await matchKept(venueRef);
   if (kept) return kept.missing ? null : { id: kept.source_ref, rating: null, ratingCount: null, held: true };
-  if (!googleSource.enabled()) return null;
+  // Switched off is not "not on Google". A search refused at the door comes
+  // back empty, and empty here was remembered as a miss — every venue tried
+  // while the owner had Google off would have stayed "not on Google" for
+  // good after it was switched back on (Codex, 25 Sep 2026). Nothing is
+  // asked and nothing is remembered.
+  if (!googleSource.enabled() || sourceOff('google')) return null;
 
   let failure = null;
   const found = await googleSource.search({
@@ -203,7 +209,7 @@ export async function tripadvisorMatchFor({ venueRef, name, lat, lng, category =
   if (String(venueRef).startsWith('tripadvisor:')) return { id: String(venueRef).slice('tripadvisor:'.length), held: true };
   const kept = await matchKept(venueRef, 'tripadvisor');
   if (kept) return kept.missing ? null : { id: kept.source_ref, rating: null, ratingCount: null, held: true };
-  if (!tripadvisorSource.enabled()) return null;
+  if (!tripadvisorSource.enabled() || sourceOff('tripadvisor')) return null;
   let found;
   try {
     // With the point, so Tripadvisor fences the search rather than answering
