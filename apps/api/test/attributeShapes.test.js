@@ -1,13 +1,17 @@
 /**
- * Every value is the shape its label is — including the fourth shape.
+ * Every value is the shape its label is.
  *
  * Migration 132 put that rule in the database rather than in whoever happened
  * to be writing, and 135 added a row lock so a value write and a definition
- * change could not each commit against the other's "before". Migration 216 then
- * added the `scale` kind by rewriting the trigger *from 132's text* — and
+ * change could not each commit against the other's "before". Migration 216
+ * then added the `scale` kind by rewriting the trigger *from 132's text* — and
  * silently reverted 135's lock, because a `create or replace` of a function
  * somebody else has amended is a revert wearing the clothes of an addition
  * (Codex, 20 Sep 2026). 218 put it back.
+ *
+ * Migration 246 then retired the scale kind's only members — the eight graded
+ * axes — without touching the trigger: deactivated, never deleted, so a row
+ * that exists stays valid and nothing new can be written under it.
  *
  * So this pins both halves against the live definition, not against a
  * migration file: the shapes it enforces, and the lock it takes to enforce
@@ -53,41 +57,47 @@ test('the trigger reads the label with a lock, so a shape cannot change under a 
   // definition because that is the only place the truth is.
   assert.match(rows[0].src, /for share/i,
     'the definition read must take the row for share (migration 135)');
-  // And it still knows about all four shapes, so nobody can restore the lock
-  // by putting 135's body back and losing the scale.
+  // And it still knows about all four shapes — the fourth for the rows the
+  // retired axes left behind, which stay valid rather than being deleted.
   for (const kind of ['yesno', 'range', 'oneof', 'scale']) {
     assert.match(rows[0].src, new RegExp(`'${kind}'`), `the trigger still knows ${kind}`);
   }
 });
 
-test('the eight are a scale, nought to four, and the ends are the database’s to keep', async () => {
+test('the eight graded axes are retired: switched off, their rows kept, nothing new written', async () => {
   const sub = await aDrawer();
   const { rows } = await query(
-    "select key, range_min, range_max from place_attributes where kind = 'scale' order by position");
-  assert.equal(rows.length, 8, 'there are eight of them');
-  for (const a of rows) {
-    assert.equal(a.range_min, 0);
-    assert.equal(a.range_max, 4);
-  }
+    "select key, active from place_attributes where kind = 'scale' order by position");
+  assert.equal(rows.length, 8, 'the eight are still in the vocabulary, so what was written against them can be read');
+  for (const a of rows) assert.equal(a.active, false, `${a.key} is off`);
 
-  // Nought is a value, and the one most likely to be dropped by a falsy check.
+  // The database still accepts a row of that shape — a retirement that broke a
+  // place would not be a retirement — but the API refuses to write one.
   await query(
     `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, level) values ($1, 'how-thrilling', 0)
      on conflict (subcategory_key, attribute_key) do update set level = excluded.level`, [sub]);
-  const { rows: zero } = await query(
-    'select level from shelf_subcategory_attributes where subcategory_key = $1 and attribute_key = $2',
-    [sub, 'how-thrilling']);
-  assert.equal(zero[0].level, 0);
+  await assert.rejects(
+    () => placeAttributes.setDefault(sub, 'how-thrilling', { level: 2 }),
+    /was one of the graded axes, which are gone/);
+  await assert.rejects(
+    () => placeAttributes.setValue('atlas:1', 'how-thrilling', { level: 2 }),
+    /was one of the graded axes, which are gone/);
+  // And a level on a live label is not a shape any more, whatever the label.
+  await assert.rejects(
+    () => placeAttributes.setDefault(sub, 'parking', { level: 2 }),
+    /is not a graded scale. Nothing is/);
+  // A row under a retired label reads as nothing said: the vocabulary does not
+  // hand back a value nobody may be shown.
+  const { bySubcategory } = await placeAttributes.attributes();
+  assert.equal(bySubcategory.get(sub)?.get('how-thrilling'), undefined);
+});
 
-  await fails(
-    `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, level) values ($1, 'how-smart', 5)`,
-    [sub], /runs up to 4/);
-  await fails(
-    `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, level) values ($1, 'how-smart', -1)`,
-    [sub], /runs from 0 upwards/);
-  await fails(
-    `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, yesno) values ($1, 'how-smart', true)`,
-    [sub], /is a scale/);
+test('no new graded scale can be made, by any name', async () => {
+  await assert.rejects(
+    () => placeAttributes.saveAttribute({ label: 'How exciting', kind: 'scale', rangeMin: 0, rangeMax: 4 }),
+    /A graded scale is not a kind of label any more/);
+  const { rows } = await query("select 1 from place_attributes where key = 'how-exciting'");
+  assert.equal(rows.length, 0);
 });
 
 test('a shape cannot be worn by a label that is not it, in either direction', async () => {
@@ -100,16 +110,20 @@ test('a shape cannot be worn by a label that is not it, in either direction', as
   await fails(
     `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, yesno) values ($1, 'suits-ages', true)`,
     [sub], /is a range/);
+  // A choice off the list, on the cost band.
+  await fails(
+    `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, choice) values ($1, 'cost-band', 'ruinous')`,
+    [sub], /is not one of Cost band/);
 });
 
 test('a default arrives proposed, and everything written before the column existed is settled', async () => {
   const sub = await aDrawer();
   await query(
-    `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, level) values ($1, 'how-new', 2)
-     on conflict (subcategory_key, attribute_key) do update set level = excluded.level, settled = false`, [sub]);
+    `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, choice) values ($1, 'cost-band', 'cheap')
+     on conflict (subcategory_key, attribute_key) do update set choice = excluded.choice, settled = false`, [sub]);
   const { rows } = await query(
     'select settled from shelf_subcategory_attributes where subcategory_key = $1 and attribute_key = $2',
-    [sub, 'how-new']);
+    [sub, 'cost-band']);
   // The screen draws this as an outline rather than a fill: nobody has agreed
   // to it yet.
   assert.equal(rows[0].settled, false);

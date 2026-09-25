@@ -550,11 +550,38 @@ test('the signed-off set only proposes what this database can carry, and address
   assert.equal(by('kind', 'Q1').proposed, 'breweries-distilleries');
   assert.equal(by('word', 'library').action, 'exclude');
   assert.equal(by('word', 'ours:rainy-day').action, 'retire', 'one of our labels is addressed as ours:');
-  assert.deepEqual(by('subcategory', 'museums').numbers, { defaults: { 'kid-friendly': null } });
+  // Section 6's default change and the axes brief's second cabinet ride in
+  // one settle: a subject takes one proposal per run, and two would collide.
+  assert.deepEqual(by('subcategory', 'museums').numbers, { also_in: ['educational'], defaults: { 'kid-friendly': null } });
   assert.equal(by('subcategory', 'indoor-snow'), undefined, 'settling a drawer this database lacks is not proposed');
+  assert.equal(by('subcategory', 'nature'), undefined, 'a second cabinet on a drawer this database lacks is not proposed');
   const created = out.filter((p) => p.action === 'create').map((p) => p.subject);
-  assert.deepEqual(created.sort(), ['factory-tours', 'have-a-go']);
+  assert.deepEqual(created.sort(), ['factory-tours', 'have-a-go', 'planetariums', 'science-centres']);
   assert.deepEqual(by('subcategory', 'have-a-go').numbers.also_in, ['adrenaline', 'outdoors']);
+  // The Educational drawers arrive with the cabinet, a second cabinet, and the
+  // defaults the brief lets them state — and no cost band, which is the
+  // sweep's to read off the venue's page.
+  const science = by('subcategory', 'science-centres');
+  assert.equal(science.numbers.category, 'educational');
+  assert.deepEqual(science.numbers.also_in, ['fun']);
+  assert.deepEqual(science.numbers.defaults, { indoor: { yesno: true }, duration: { from: 120, to: 180 } });
+  assert.equal(by('word', 'science_museum'), undefined, 'a word this database has not seen is not repointed');
+});
+
+test('the Educational second cabinet is proposed for the drawers that carry the learning', () => {
+  const out = signedOff({ have: new Set(['museums', 'zoos-wildlife', 'nature', 'castles']) });
+  const by = (subject) => out.find((p) => p.subject_kind === 'subcategory' && p.subject === subject);
+  for (const key of ['museums', 'zoos-wildlife', 'nature']) {
+    assert.equal(by(key).action, 'settle');
+    assert.deepEqual(by(key).numbers.also_in, ['educational'], `${key} lists Educational second`);
+  }
+  // A castle is Culture, and stays Culture (the axes brief, section 2).
+  assert.equal(by('castles').numbers.also_in, undefined);
+  // And once the cabinet is listed, the settle is already true and not offered again.
+  assert.equal(alreadyTrue(by('zoos-wildlife'), {
+    subs: [{ key: 'zoos-wildlife', active: true }], rules: [], allWords: [],
+    alsoBySub: new Map([['zoos-wildlife', ['educational']]]), defaultsBySub: new Map(),
+  }), true);
 });
 
 test('a signed-off change that is already true is not proposed again', () => {

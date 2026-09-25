@@ -219,7 +219,33 @@ export const SIGNED_OFF_SUBCATEGORIES = [
   // makers, with Food & drink as a secondary category."
   { key: 'factory-tours', label: 'Factory tours & makers', category: 'fun', alsoIn: ['food'],
     because: 'Section 4: chocolate factory had nowhere to go. Brewery and distillery tours may carry it later.' },
+  /**
+   * The ninth category's own drawers ("The axes are dropped", 25 Sep 2026,
+   * section 2). Educational is distinct from Culture: a castle is Culture, a
+   * science centre is Educational, a farm with a learning barn is Educational
+   * and not Culture at all. The cabinet itself is seeded by migration 246;
+   * its drawers come through here so they are grouped, reversible and
+   * recorded with the rest of the signed-off cleanup, as the brief asks.
+   *
+   * Defaults are stated where the document lets them be: a science centre is
+   * indoors and two to three hours; a planetarium is indoors and roughly an
+   * hour. Cost band is left for the sweep to read off the venue's page.
+   */
+  { key: 'science-centres', label: 'Science & discovery centres', category: 'educational', alsoIn: ['fun'],
+    defaults: { indoor: { yesno: true }, duration: { from: 120, to: 180 } },
+    because: 'The axes brief, section 2: a science centre is Educational, not Culture.' },
+  { key: 'planetariums', label: 'Planetariums & observatories', category: 'educational', alsoIn: ['culture'],
+    defaults: { indoor: { yesno: true }, duration: { from: 45, to: 90 } },
+    because: 'The axes brief, section 2: you come away knowing something.' },
 ];
+
+/**
+ * Existing drawers that list Educational as a second cabinet (the axes brief,
+ * section 2: "Places carry both where both apply — Museums as Culture primary,
+ * Educational secondary"). Museums is settled with section 6's default change
+ * in the same proposal, because one subject takes one proposal per run.
+ */
+export const EDUCATIONAL_SECONDARY = ['museums', 'zoos-wildlife', 'nature'];
 
 export function signedOff({ have = new Set(), words = new Set(), kinds = new Map(), rules = new Set() } = {}) {
   const out = [];
@@ -267,8 +293,16 @@ export function signedOff({ have = new Set(), words = new Set(), kinds = new Map
   // ---- 2. Create one subcategory; 4. one more ---------------------------
   for (const n of SIGNED_OFF_SUBCATEGORIES) {
     if (have.has(n.key)) continue;
-    out.push(so(sub(n.key, 'create', n.label, n.because, { category: n.category, also_in: n.alsoIn })));
+    out.push(so(sub(n.key, 'create', n.label, n.because,
+      { category: n.category, also_in: n.alsoIn, ...(n.defaults ? { defaults: n.defaults } : {}) })));
   }
+  // The words that belong in the new Educational drawers, where this database
+  // has them. A science museum is a science centre; a planetarium or an
+  // observatory is the other drawer. Guarded like every word here: a type
+  // nobody has seen is not proposed.
+  ifWord('science_museum', 'repoint', 'science-centres', 'The axes brief, section 2: a science centre is Educational.');
+  ifWord('planetarium', 'repoint', 'planetariums', 'The axes brief, section 2: Educational.');
+  ifWord('observatory', 'repoint', 'planetariums', 'The axes brief, section 2: Educational.');
   // "Rules: Archery, and any of axe throwing, clay shooting or fencing that
   // exist as Google words." None of the three is a Google word; shooting is an
   // OSM tag, unmapped, and goes here for the cross-check.
@@ -301,7 +335,17 @@ export function signedOff({ have = new Set(), words = new Set(), kinds = new Map
   // Water parks drawer." The rule is the Wikidata type; sent to that drawer
   // rather than deleted, so a water park still lands somewhere.
   ifKind('water park', 'repoint', 'water-park', 'Section 6: it has its own Water parks drawer.');
-  settle('museums', { defaults: { 'kid-friendly': null } }, 'Section 6: remove the for kids default from Museums.');
+  settle('museums', { also_in: ['educational'], defaults: { 'kid-friendly': null } },
+    'Section 6: remove the for kids default from Museums. And Educational as its second cabinet: Culture primary, Educational secondary (the axes brief, 25 Sep 2026).');
   settle('castles', { defaults: { 'kid-friendly': { yesno: true } } }, 'Section 6: add the for kids default to Castles & forts.');
+
+  // ---- Educational as a second cabinet (the axes brief, 25 Sep 2026) -----
+  // Museums is above, folded into its section-6 settle. The others carry the
+  // learning without being Culture: a zoo, a farm, a nature reserve.
+  for (const key of EDUCATIONAL_SECONDARY) {
+    if (key === 'museums') continue;
+    settle(key, { also_in: ['educational'] },
+      'The axes brief, section 2: Educational as a second cabinet, where the learning is real and the place is not Culture.');
+  }
   return out;
 }

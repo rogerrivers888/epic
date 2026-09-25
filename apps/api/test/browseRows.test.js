@@ -7,20 +7,27 @@
  * module exists to prevent, and these pin the three things that prevent it:
  * a rule that cannot be run is refused before it is saved, the shorthand is
  * derived rather than stored, and nothing known is never read as a no.
+ *
+ * A rule is over categories, labels, ranges and the cost band, and nothing
+ * else (the axes brief, 25 Sep 2026). The graded clauses the grammar used to
+ * have are refused, and a rule written against a retired label says so.
  */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const { attributesIn, checkPredicate, evaluate, matches, shorthand } =
+const { attributesIn, checkPredicate, evaluate, matches, retiredIn, shorthand } =
   await import('../src/domain/browseRows.js');
 
 const ATTRS = new Map([
-  ['how-much-walking', { key: 'how-much-walking', label: 'How much walking', kind: 'scale' }],
-  ['how-smart', { key: 'how-smart', label: 'How smart', kind: 'scale' }],
-  ['indoor', { key: 'indoor', label: 'Indoors', kind: 'yesno' }],
-  ['suits-ages', { key: 'suits-ages', label: 'Suits ages', kind: 'range' }],
-  ['cuisine', { key: 'cuisine', label: 'Cuisine', kind: 'oneof' }],
+  ['indoor', { key: 'indoor', label: 'Indoors', kind: 'yesno', active: true }],
+  ['step-free', { key: 'step-free', label: 'Step free', kind: 'yesno', active: true }],
+  ['suits-ages', { key: 'suits-ages', label: 'Suits ages', kind: 'range', active: true, range_min: 0, range_max: 99 }],
+  ['duration', { key: 'duration', label: 'Duration', kind: 'range', active: true, range_min: 0, range_max: 720 }],
+  ['cost-band', { key: 'cost-band', label: 'Cost band', kind: 'oneof', active: true, options: ['free', 'cheap', 'moderate', 'expensive'] }],
+  // The two kinds of gone: a graded axis, and a label somebody switched off.
+  ['how-much-walking', { key: 'how-much-walking', label: 'How much walking', kind: 'scale', active: false }],
+  ['rainy-day', { key: 'rainy-day', label: 'Rainy day', kind: 'yesno', active: false }],
 ]);
 const CONTEXT = {
   attributes: ATTRS,
@@ -41,11 +48,11 @@ const valueOf = (p, key) => p.values[key] ?? null;
 
 test('a rule names the attributes it asks about, so only those need fetching', () => {
   const p = { all: [
-    { attribute: 'how-much-walking', atLeast: 3 },
+    { attribute: 'duration', to: 120 },
     { any: [{ attribute: 'indoor', yes: true }, { subcategory: ['coast'] }] },
-    { not: { attribute: 'how-smart', atMost: 1 } },
+    { not: { attribute: 'cost-band', choice: 'expensive' } },
   ] };
-  assert.deepEqual(attributesIn(p).sort(), ['how-much-walking', 'how-smart', 'indoor']);
+  assert.deepEqual(attributesIn(p).sort(), ['cost-band', 'duration', 'indoor']);
 });
 
 test('a rule that cannot be run is refused before it is saved', () => {
@@ -55,28 +62,45 @@ test('a rule that cannot be run is refused before it is saved', () => {
 
   refuses({}, /has to say something/);
   refuses({ all: [] }, /has to say something/);
-  refuses({ attribute: 'how-tall', atLeast: 2 }, /not one of our labels/);
+  refuses({ attribute: 'how-tall', from: 2 }, /not one of our labels/);
   refuses({ subcategory: ['bowling'] }, /not one of our subcategories/);
   refuses({ category: ['nonsense'] }, /not one of our categories/);
-  // A scale is not a yes or no, and a yes or no is not a scale.
-  refuses({ attribute: 'how-much-walking', yes: true }, /is a scale/);
-  refuses({ attribute: 'indoor', atLeast: 2 }, /is a yes or no/);
-  refuses({ attribute: 'suits-ages', atLeast: 2 }, /is a range/);
+  // A yes or no is not a range, and a range is not a yes or no.
+  refuses({ attribute: 'indoor', from: 2 }, /is a yes or no/);
+  refuses({ attribute: 'suits-ages', yes: true }, /is a range/);
   // One thing at a time, or the row means two things and matches neither.
-  refuses({ attribute: 'how-much-walking', atLeast: 2, atMost: 3 }, /Say one thing/);
+  refuses({ attribute: 'duration', from: 2, to: 3 }, /Say one thing/);
   // A number is a number.
-  refuses({ attribute: 'how-much-walking', atLeast: 'three' }, /wants a number/);
+  refuses({ attribute: 'duration', to: 'three' }, /wants a number/);
   refuses({ attribute: 'suits-ages', overlaps: [4] }, /overlaps two numbers/);
-  // And the one shape a row genuinely cannot ask about yet says so plainly.
-  refuses({ attribute: 'cuisine', is: 1 }, /one of a list/);
+  // One of a list is asked by naming which, and only from the list.
+  refuses({ attribute: 'cost-band', yes: true }, /is one of a list/);
+  refuses({ attribute: 'cost-band', choice: [] }, /Say which/);
+  refuses({ attribute: 'cost-band', choice: 'ruinous' }, /not one of Cost band's choices/);
+  // The graded clauses are gone, and so are the labels they were written for.
+  refuses({ attribute: 'how-much-walking', atLeast: 3 }, /graded axes, which are gone/);
+  refuses({ attribute: 'rainy-day', yes: true }, /is retired/);
+  // A clause in a shape the grammar no longer has is not "one thing said".
+  refuses({ attribute: 'duration', atLeast: 3 }, /Say one thing about Duration, not 0/);
 
   // The good ones go through.
   checkPredicate({ all: [
-    { attribute: 'how-much-walking', atLeast: 3 },
+    { attribute: 'duration', to: 120 },
     { attribute: 'indoor', yes: false },
     { attribute: 'suits-ages', overlaps: [0, 3] },
+    { attribute: 'cost-band', choice: ['free', 'cheap'] },
     { not: { subcategory: ['coast'] } },
   ] }, CONTEXT);
+});
+
+test('a rule written against a retired label is named, so the rewrite knows what it meant', () => {
+  const p = { all: [{ attribute: 'indoor', yes: true }, { attribute: 'how-much-walking', atLeast: 3 }] };
+  assert.deepEqual(retiredIn(p, ATTRS), ['how-much-walking']);
+  assert.deepEqual(retiredIn({ attribute: 'rainy-day', yes: true }, ATTRS), ['rainy-day']);
+  assert.deepEqual(retiredIn({ attribute: 'indoor', yes: true }, ATTRS), []);
+  // And it never answers: a value still in the table under it is not read.
+  const walked = place('golf', { indoor: { yesno: true }, 'how-much-walking': { level: 4 } });
+  assert.equal(evaluate(p, walked, valueOf), 'unknown');
 });
 
 test('nothing known is not a no', () => {
@@ -109,17 +133,17 @@ test('unknown survives nesting, however deep somebody buries it', () => {
   // the negation turned that into a yes for a place nobody had asked.
   const p = place('golf', { indoor: { yesno: false } });
   const rule = { not: { any: [
-    { attribute: 'indoor', yes: true },          // known, and false
-    { attribute: 'how-much-walking', atLeast: 3 }, // nobody has said
+    { attribute: 'indoor', yes: true },      // known, and false
+    { attribute: 'duration', to: 120 },      // nobody has said
   ] } };
   assert.equal(evaluate(rule.not, p, valueOf), 'unknown');
   assert.equal(matches(rule, p, valueOf), false);
 
   // Once the unknown is answered it settles, both ways.
-  const walked = place('golf', { indoor: { yesno: false }, 'how-much-walking': { level: 1 } });
-  assert.equal(matches(rule, walked, valueOf), true);
-  const strode = place('golf', { indoor: { yesno: false }, 'how-much-walking': { level: 4 } });
-  assert.equal(matches(rule, strode, valueOf), false);
+  const quick = place('golf', { indoor: { yesno: false }, duration: { from: 45, to: 90 } });
+  assert.equal(matches(rule, quick, valueOf), false);
+  const long = place('golf', { indoor: { yesno: false }, duration: { from: 300, to: 480 } });
+  assert.equal(matches(rule, long, valueOf), true);
 });
 
 test('an "all" with one unknown in it is unknown, not false', () => {
@@ -139,13 +163,14 @@ test('an empty list of drawers is a rule that can never match, and is refused', 
   assert.throws(() => checkPredicate({ category: [] }, CONTEXT), /at least one category/);
 });
 
-test('a scale is compared as a number, and nought is a value', () => {
-  const p = place('golf', { 'how-much-walking': { level: 0 } });
-  assert.equal(matches({ attribute: 'how-much-walking', atMost: 1 }, p, valueOf), true);
-  assert.equal(matches({ attribute: 'how-much-walking', is: 0 }, p, valueOf), true);
-  assert.equal(matches({ attribute: 'how-much-walking', atLeast: 1 }, p, valueOf), false);
-  // The falsy trap: nought must not read as "nothing said".
-  assert.equal(matches({ attribute: 'how-much-walking', atLeast: 0 }, p, valueOf), true);
+test('the cost band is one of a list, and a rule may name several of it', () => {
+  const free = place('coast', { 'cost-band': { choice: 'free' } });
+  const dear = place('golf', { 'cost-band': { choice: 'expensive' } });
+  assert.equal(matches({ attribute: 'cost-band', choice: 'free' }, free, valueOf), true);
+  assert.equal(matches({ attribute: 'cost-band', choice: ['free', 'cheap'] }, free, valueOf), true);
+  assert.equal(matches({ attribute: 'cost-band', choice: ['free', 'cheap'] }, dear, valueOf), false);
+  // Unasked is unasked, not "not free".
+  assert.equal(evaluate({ attribute: 'cost-band', choice: 'free' }, place('golf', {}), valueOf), 'unknown');
 });
 
 test('a range overlaps rather than contains, because that is how ages are asked', () => {
@@ -157,13 +182,29 @@ test('a range overlaps rather than contains, because that is how ages are asked'
   assert.equal(matches(toddlers, place('golf', { 'suits-ages': { from: null, to: 6 } }), valueOf), true);
 });
 
+test('one end of a range reads the label’s own end where the value is open, and is unknown otherwise', () => {
+  const adults = { attribute: 'suits-ages', from: 16 };
+  const twoHours = { attribute: 'duration', to: 120 };
+  // "Suits ages to 6" is from nought, because Suits ages runs from nought —
+  // with the vocabulary to hand. Without it, an open end is not a number.
+  assert.equal(matches(adults, place('golf', { 'suits-ages': { from: null, to: 6 } }), valueOf, ATTRS), false);
+  assert.equal(evaluate(adults, place('golf', { 'suits-ages': { from: null, to: 6 } }), valueOf), 'unknown');
+  assert.equal(matches(adults, place('golf', { 'suits-ages': { from: 18, to: null } }), valueOf), true);
+  // Two hours, tops: a place worth 45 to 90 minutes answers; one worth all day does not.
+  assert.equal(matches(twoHours, place('golf', { duration: { from: 45, to: 90 } }), valueOf), true);
+  assert.equal(matches(twoHours, place('golf', { duration: { from: 300, to: 480 } }), valueOf), false);
+  // The trap the old grammar had: an open upper end read as 99, which is a
+  // number of years and not of minutes. Now it is the label's own end.
+  assert.equal(matches(twoHours, place('golf', { duration: { from: 30, to: null } }), valueOf, ATTRS), false);
+});
+
 test('all and any are what they say', () => {
-  const p = place('water', { indoor: { yesno: false }, 'how-much-walking': { level: 3 } });
+  const p = place('water', { indoor: { yesno: false }, 'cost-band': { choice: 'free' } });
   assert.equal(matches({ all: [
-    { attribute: 'indoor', yes: false }, { attribute: 'how-much-walking', atLeast: 3 },
+    { attribute: 'indoor', yes: false }, { attribute: 'cost-band', choice: 'free' },
   ] }, p, valueOf), true);
   assert.equal(matches({ all: [
-    { attribute: 'indoor', yes: true }, { attribute: 'how-much-walking', atLeast: 3 },
+    { attribute: 'indoor', yes: true }, { attribute: 'cost-band', choice: 'free' },
   ] }, p, valueOf), false);
   assert.equal(matches({ any: [
     { attribute: 'indoor', yes: true }, { subcategory: ['water'] },
@@ -173,10 +214,10 @@ test('all and any are what they say', () => {
 test('the shorthand is rendered from the rule, so the two cannot come apart', () => {
   assert.equal(
     shorthand({ all: [
-      { attribute: 'how-much-walking', atLeast: 3 },
+      { attribute: 'duration', to: 120 },
       { attribute: 'indoor', yes: true },
     ] }, LABELS),
-    'how much walking ≥ 3 · indoors');
+    'duration to 120 · indoors');
   assert.equal(
     shorthand({ any: [{ subcategory: ['water', 'coast'] }] }, LABELS),
     'Lakes & rivers or Beaches & coast');
@@ -186,8 +227,14 @@ test('the shorthand is rendered from the rule, so the two cannot come apart', ()
   assert.equal(
     shorthand({ attribute: 'suits-ages', overlaps: [0, 3] }, LABELS),
     'suits ages overlaps 0–3');
+  assert.equal(
+    shorthand({ attribute: 'cost-band', choice: ['free', 'cheap'] }, LABELS),
+    'cost band free or cheap');
   // A yes/no said as "no" reads as the negative rather than as "indoors false".
   assert.equal(shorthand({ attribute: 'indoor', yes: false }, LABELS), 'not indoors');
+  // A rule written before the axes went is shown as what it was, not hidden:
+  // the rewrite has to be able to read it.
+  assert.equal(shorthand({ attribute: 'how-much-walking', atLeast: 3 }, LABELS), 'how much walking ≥ 3');
 });
 
 test('there is no clause for how far away somewhere is, and that is deliberate', () => {
@@ -195,5 +242,5 @@ test('there is no clause for how far away somewhere is, and that is deliberate',
   // asking. A row holding its own idea of "near" would be a second fence, and
   // the first thing it would do is disagree with the first one.
   assert.throws(() => checkPredicate({ within: 30 }, CONTEXT), /has to say something/);
-  assert.throws(() => checkPredicate({ attribute: 'minutes', atMost: 30 }, CONTEXT), /not one of our labels/);
+  assert.throws(() => checkPredicate({ attribute: 'minutes', to: 30 }, CONTEXT), /not one of our labels/);
 });

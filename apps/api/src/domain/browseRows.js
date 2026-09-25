@@ -18,15 +18,22 @@
  *
  * A clause is one of:
  *
- *   { attribute, atLeast | atMost | is }   a scale, nought to four
  *   { attribute, yes: true | false }       a yes or no
  *   { attribute, overlaps: [lo, hi] }      a range, against a range
  *   { attribute, from | to }               one end of a range
+ *   { attribute, choice: key | [key, …] }  one of a list — the cost band
  *   { subcategory: [key, …] }              the drawer it is in
  *   { category: [key, …] }                 the cabinet
  *   { not: clause }                        the opposite
  *   { any: [clause, …] }                   one of these
  *   { all: [clause, …] }                   all of these
+ *
+ * A rule is over categories, labels, ranges and the cost band, and nothing
+ * else (the axes brief, 25 Sep 2026). There is no graded clause: the eight
+ * 0–4 scales were cancelled because a judgement no person makes twice the
+ * same way cannot be extracted from text, and a rule written against one
+ * would return nothing for ever. Everything a row can ask is a fact sitting
+ * in a sentence on a website.
  *
  * There is deliberately no clause for *where* a place is. How far away
  * somewhere is belongs to one fence (`domain/band.js`) and depends on the
@@ -34,7 +41,7 @@
  * second fence, and the first thing it would do is disagree with the first one.
  */
 
-const KINDS = new Set(['atLeast', 'atMost', 'is', 'yes', 'overlaps', 'from', 'to']);
+const KINDS = new Set(['yes', 'overlaps', 'from', 'to', 'choice']);
 
 /** Every attribute a predicate names, so a caller can fetch only those. */
 export function attributesIn(predicate) {
@@ -49,6 +56,21 @@ function walk(clause, fn) {
   if (Array.isArray(clause.any)) { clause.any.forEach((c) => walk(c, fn)); return; }
   if (clause.not) { walk(clause.not, fn); return; }
   fn(clause);
+}
+
+/**
+ * The labels a predicate names that nothing can answer any more.
+ *
+ * A retired label — the eight, or anything switched off since — is still in
+ * the vocabulary so that what was written against it can be read, but a rule
+ * over it cannot run. Named rather than counted, because the row's reason line
+ * says which one and the rewrite needs to know what the row meant.
+ */
+export function retiredIn(predicate, attributes) {
+  return attributesIn(predicate).filter((k) => {
+    const a = attributes.get(k);
+    return a && (a.active === false || a.kind === 'scale');
+  });
 }
 
 /**
@@ -88,25 +110,33 @@ export function checkPredicate(clause, { attributes, subcategories, categories }
   if (clause.attribute == null) throw bad('A rule has to say something.');
   const a = attributes.get(clause.attribute);
   if (!a) throw bad(`${clause.attribute} is not one of our labels.`);
+  // A graded score is not a thing a row can ask about, and neither is a label
+  // that has been switched off: the rule would be saved and never answered.
+  if (a.kind === 'scale') throw bad(`${a.label} was one of the graded axes, which are gone. A rule is over labels, ranges and the cost band.`);
+  if (a.active === false) throw bad(`${a.label} is retired, so a row cannot ask about it.`);
   const said = Object.keys(clause).filter((k) => KINDS.has(k));
   if (said.length !== 1) throw bad(`Say one thing about ${a.label}, not ${said.length}.`);
   const [how] = said;
 
-  if (a.kind === 'scale' && !['atLeast', 'atMost', 'is'].includes(how)) {
-    throw bad(`${a.label} is a scale — say at least, at most, or exactly.`);
-  }
   if (a.kind === 'yesno' && how !== 'yes') throw bad(`${a.label} is a yes or no.`);
   if (a.kind === 'range' && !['overlaps', 'from', 'to'].includes(how)) {
     throw bad(`${a.label} is a range — say overlaps, from, or to.`);
   }
-  if (a.kind === 'oneof') throw bad(`${a.label} is one of a list, which a row cannot ask about yet.`);
+  if (a.kind === 'oneof' && how !== 'choice') throw bad(`${a.label} is one of a list — say which.`);
+  if (how === 'choice') {
+    const picks = [clause.choice].flat().filter((c) => c != null);
+    if (!picks.length) throw bad(`Say which of ${a.label}'s choices.`);
+    for (const c of picks) {
+      if (!(a.options ?? []).includes(c)) throw bad(`${c} is not one of ${a.label}'s choices.`);
+    }
+  }
   if (how === 'overlaps') {
     const v = clause.overlaps;
     if (!Array.isArray(v) || v.length !== 2 || v.some((n) => !Number.isFinite(Number(n)))) {
       throw bad(`${a.label} overlaps two numbers.`);
     }
   }
-  if (['atLeast', 'atMost', 'is', 'from', 'to'].includes(how) && !Number.isFinite(Number(clause[how]))) {
+  if (['from', 'to'].includes(how) && !Number.isFinite(Number(clause[how]))) {
     throw bad(`${a.label} wants a number.`);
   }
 }
@@ -127,11 +157,17 @@ const YES = 'yes';
 const NO = 'no';
 const UNKNOWN = 'unknown';
 
-export function evaluate(clause, place, valueOf) {
+/**
+ * @param labels  The vocabulary, keyed by attribute, so an open end of a range
+ *   reads as the label's own end: "suits ages to 6" is from nought because
+ *   Suits ages runs from nought. Without it an open end is unbounded, which is
+ *   the honest reading of a range whose label nobody handed over.
+ */
+export function evaluate(clause, place, valueOf, labels = null) {
   if (!clause) return UNKNOWN;
 
   if (Array.isArray(clause.all)) {
-    const seen = clause.all.map((c) => evaluate(c, place, valueOf));
+    const seen = clause.all.map((c) => evaluate(c, place, valueOf, labels));
     // One no settles it. Otherwise an unknown leaves the whole thing unknown:
     // "indoors and step free" is not answered by a place we know is indoors
     // and have never asked about steps.
@@ -139,12 +175,12 @@ export function evaluate(clause, place, valueOf) {
     return seen.includes(UNKNOWN) ? UNKNOWN : YES;
   }
   if (Array.isArray(clause.any)) {
-    const seen = clause.any.map((c) => evaluate(c, place, valueOf));
+    const seen = clause.any.map((c) => evaluate(c, place, valueOf, labels));
     if (seen.includes(YES)) return YES;
     return seen.includes(UNKNOWN) ? UNKNOWN : NO;
   }
   if (clause.not) {
-    const inner = evaluate(clause.not, place, valueOf);
+    const inner = evaluate(clause.not, place, valueOf, labels);
     return inner === UNKNOWN ? UNKNOWN : inner === YES ? NO : YES;
   }
 
@@ -155,16 +191,22 @@ export function evaluate(clause, place, valueOf) {
   const v = valueOf(place, clause.attribute);
   if (!v) return UNKNOWN;
   const said = (b) => (b ? YES : NO);
-  if (clause.atLeast != null) return v.level == null ? UNKNOWN : said(v.level >= Number(clause.atLeast));
-  if (clause.atMost != null) return v.level == null ? UNKNOWN : said(v.level <= Number(clause.atMost));
-  if (clause.is != null) return v.level == null ? UNKNOWN : said(v.level === Number(clause.is));
+  const label = labels?.get?.(clause.attribute) ?? null;
+  const lo = v.from ?? label?.range_min ?? null;
+  const hi = v.to ?? label?.range_max ?? null;
   if (clause.yes != null) return v.yesno == null ? UNKNOWN : said(v.yesno === Boolean(clause.yes));
-  if (clause.overlaps) {
-    const [lo, hi] = clause.overlaps.map(Number);
-    return said((v.from ?? 0) <= hi && (v.to ?? 99) >= lo);
+  if (clause.choice != null) {
+    return v.choice == null ? UNKNOWN : said([clause.choice].flat().includes(v.choice));
   }
-  if (clause.from != null) return said((v.from ?? 0) >= Number(clause.from));
-  if (clause.to != null) return said((v.to ?? 99) <= Number(clause.to));
+  if (clause.overlaps) {
+    const [a, b] = clause.overlaps.map(Number);
+    if (lo == null && hi == null) return UNKNOWN;
+    return said((lo ?? -Infinity) <= b && (hi ?? Infinity) >= a);
+  }
+  // One end of a range on its own. An open end with no label to read it from
+  // is not nought or ninety-nine, it is not known.
+  if (clause.from != null) return lo == null ? UNKNOWN : said(lo >= Number(clause.from));
+  if (clause.to != null) return hi == null ? UNKNOWN : said(hi <= Number(clause.to));
   return UNKNOWN;
 }
 
@@ -180,12 +222,12 @@ export function evaluate(clause, place, valueOf) {
  * indoors" either; it simply is not in either row. Treating an absent value as
  * false is how a row fills up with places nobody has checked.
  */
-export function matches(clause, place, valueOf) {
-  return evaluate(clause, place, valueOf) === YES;
+export function matches(clause, place, valueOf, labels = null) {
+  return evaluate(clause, place, valueOf, labels) === YES;
 }
 
 /**
- * The rule in shorthand: "how much walking ≥ 3 · indoors".
+ * The rule in shorthand: "indoors · suits ages overlaps 0–3".
  *
  * Rendered from the structure every time and never stored, so it cannot come
  * to describe a rule the row no longer has.
@@ -198,13 +240,16 @@ export function shorthand(clause, labels) {
     if (c.not) return `not ${one(c.not)}`;
     if (c.subcategory) return [c.subcategory].flat().map((k) => labels.get(k)?.label ?? k).join(' or ');
     if (c.category) return [c.category].flat().map((k) => labels.get(k)?.label ?? k).join(' or ');
-    if (c.atLeast != null) return `${name(c.attribute)} ≥ ${c.atLeast}`;
-    if (c.atMost != null) return `${name(c.attribute)} ≤ ${c.atMost}`;
-    if (c.is != null) return `${name(c.attribute)} ${c.is}`;
     if (c.yes != null) return c.yes ? name(c.attribute) : `not ${name(c.attribute)}`;
+    if (c.choice != null) return `${name(c.attribute)} ${[c.choice].flat().join(' or ')}`;
     if (c.overlaps) return `${name(c.attribute)} overlaps ${c.overlaps[0]}–${c.overlaps[1]}`;
     if (c.from != null) return `${name(c.attribute)} from ${c.from}`;
     if (c.to != null) return `${name(c.attribute)} to ${c.to}`;
+    // A clause in a shape the grammar no longer has — an axis rule written
+    // before the eight were retired — is shown as what it was, not hidden.
+    if (c.atLeast != null) return `${name(c.attribute)} ≥ ${c.atLeast}`;
+    if (c.atMost != null) return `${name(c.attribute)} ≤ ${c.atMost}`;
+    if (c.is != null) return `${name(c.attribute)} ${c.is}`;
     return '?';
   };
   return one(clause);

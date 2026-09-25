@@ -25,7 +25,7 @@ import assert from 'node:assert/strict';
 const { drawerAnswer, disagreeingIn, fits, sameValue, said } = await import('../src/repositories/filing.js');
 
 const YESNO = { key: 'parking', label: 'Parking', kind: 'yesno', unit: null };
-const SCALE = { key: 'how-thrilling', label: 'How thrilling', kind: 'scale', unit: '0 calm · 4 a parachute jump', range_min: 0, range_max: 4 };
+const ONEOF = { key: 'cost-band', label: 'Cost band', kind: 'oneof', unit: null, options: ['free', 'cheap', 'moderate', 'expensive'] };
 const RANGE = { key: 'suits-ages', label: 'Suits ages', kind: 'range', unit: 'years', range_min: 0, range_max: 99 };
 
 /** A `valuesByRef` map from a plain object of ref → attribute → value. */
@@ -37,9 +37,10 @@ const answer = (opts) => drawerAnswer({ spreadLimit: 0.35, defaults: new Map(), 
 test('a value is compared by its shape, not by the order its keys were written', () => {
   assert.equal(sameValue({ yesno: true }, { yesno: true }), true);
   assert.equal(sameValue({ yesno: true }, { yesno: false }), false);
-  assert.equal(sameValue({ level: 3 }, { level: 3 }), true);
-  // A level arriving as text from a form is the same level.
-  assert.equal(sameValue({ level: 3 }, { level: '3' }), true);
+  assert.equal(sameValue({ choice: 'free' }, { choice: 'free' }), true);
+  assert.equal(sameValue({ choice: 'free' }, { choice: 'cheap' }), false);
+  // A level is not a shape any more: the graded axes are gone (migration 246).
+  assert.equal(sameValue({ level: 3 }, { level: 3 }), false);
   assert.equal(sameValue({ from: 4, to: 12 }, { to: 12, from: 4 }), true);
   assert.equal(sameValue({ from: 4, to: 12 }, { from: 4, to: 14 }), false);
   // Nothing said is never the same as something said, in either direction.
@@ -52,8 +53,9 @@ test('a value reads as its own shape and never as a yes it is not', () => {
   assert.equal(said({ yesno: false }, YESNO), 'No');
   // The bug this exists to stop: a scale rendered by a yes/no formatter says
   // "yes" for every number, including nought.
-  assert.equal(said({ level: 0 }, SCALE), '0');
-  assert.equal(said({ level: 3 }, SCALE), '3');
+  assert.equal(said({ choice: 'free' }, ONEOF), 'free');
+  // A level under any label reads as nothing said, never as a yes.
+  assert.equal(said({ level: 3 }, YESNO), '—');
   assert.equal(said({ from: 4, to: 12 }, RANGE), '4 to 12');
   assert.equal(said(null, YESNO), '—');
 });
@@ -172,8 +174,10 @@ test('a value of the wrong shape is no answer, not a quiet one', () => {
   // under a yes/no label. Read straight out that draws "Indoors · 0 to 7".
   assert.equal(fits(YESNO, { from: 0, to: 7 }), false);
   assert.equal(fits(YESNO, { yesno: false }), true);
-  assert.equal(fits(SCALE, { level: 0 }), true);
-  assert.equal(fits(SCALE, { yesno: true }), false);
+  assert.equal(fits(ONEOF, { choice: 'free' }), true);
+  assert.equal(fits(ONEOF, { yesno: true }), false);
+  // A level fits nothing: the graded axes are gone (migration 246).
+  assert.equal(fits(RANGE, { level: 2 }), false);
   assert.equal(fits(YESNO, null), false);
 
   const a = answer({
@@ -189,35 +193,32 @@ test('a value of the wrong shape is no answer, not a quiet one', () => {
   assert.equal(a.heard, 1);
 });
 
-test('the eight are proposed the same way, and a nought is a value like any other', () => {
+test('the cost band is proposed the way a yes/no is, from what the places say', () => {
   const a = answer({
-    attribute: SCALE,
+    attribute: ONEOF,
     refs: ['a', 'b', 'c'],
     valuesByRef: valuesOf({
-      a: { 'how-thrilling': { level: 0 } },
-      b: { 'how-thrilling': { level: 0 } },
-      c: { 'how-thrilling': { level: 0 } },
+      a: { 'cost-band': { choice: 'free' } },
+      b: { 'cost-band': { choice: 'free' } },
+      c: { 'cost-band': { choice: 'cheap' } },
     }),
   });
-  // The trap: nought is falsy, and a drawer that is genuinely nought-thrilling
-  // must not read as one nobody has answered.
-  assert.deepEqual(a.value, { level: 0 });
+  assert.deepEqual(a.value, { choice: 'free' });
   assert.equal(a.proposed, true);
-  assert.equal(a.said, '0');
-  assert.equal(a.why, '3 of 3 agree');
-  assert.equal(a.anchor, '0 calm · 4 a parachute jump');
+  assert.equal(a.said, 'free');
+  assert.equal(a.why, '2 of 3 agree');
 });
 
 test('what disagrees names the difference in words, and says when a person set it', () => {
   const answers = [
     { key: 'parking', label: 'Parking', kind: 'yesno', value: { yesno: true }, mixed: false },
-    { key: 'how-thrilling', label: 'How thrilling', kind: 'scale', value: { level: 1 }, mixed: false },
+    { key: 'cost-band', label: 'Cost band', kind: 'oneof', value: { choice: 'free' }, mixed: false },
   ];
   const out = disagreeingIn({
     refs: ['a', 'b', 'c'],
     valuesByRef: valuesOf({
       a: { parking: { yesno: false } },
-      b: { 'how-thrilling': { level: 3, by: 'roger@deliverplus.co.uk' } },
+      b: { 'cost-band': { choice: 'cheap', by: 'roger@deliverplus.co.uk' } },
       c: { parking: { yesno: true } },
     }),
     answers,
@@ -229,9 +230,7 @@ test('what disagrees names the difference in words, and says when a person set i
   assert.equal(a.name, 'The Berkshire');
   assert.equal(a.diff, 'parking no');
   assert.equal(a.human, false);
-  // A scale says what it is and what was expected, because "how thrilling 3"
-  // alone does not tell you it is an argument.
-  assert.equal(b.diff, 'how thrilling 3, not 1');
+  assert.equal(b.diff, 'cost band cheap');
   assert.equal(b.human, true);
   // c agrees, so it is not in the list at all.
   assert.equal(out.some((r) => r.ref === 'c'), false);
@@ -271,7 +270,7 @@ const RULES_IN = ({ refs = ['a', 'b', 'c', 'd'], values = {}, defaults = { parki
   valuesByRef: valuesOf(values),
   // `active` is on every row `attributes()` returns; a fixture without it
   // would be testing a shape the repository never sees.
-  byKey: new Map([['parking', { ...YESNO, active: true }], ['how-thrilling', { ...SCALE, active: true }]]),
+  byKey: new Map([['parking', { ...YESNO, active: true }], ['cost-band', { ...ONEOF, active: true }]]),
 });
 
 test('a place that says nothing is not contradicting the drawer', () => {
@@ -349,8 +348,8 @@ test('the id is the pair, so a retire cannot be aimed at the wrong drawer', () =
 test('the row says what it sets, in the value’s own words', () => {
   assert.equal(rulesFrom(RULES_IN()).rows[0].what, 'Parking · Yes');
   assert.equal(
-    rulesFrom(RULES_IN({ defaults: { 'how-thrilling': { level: 3 } } })).rows[0].what,
-    'How thrilling · 3');
+    rulesFrom(RULES_IN({ defaults: { 'cost-band': { choice: 'free' } } })).rows[0].what,
+    'Cost band · free');
 });
 
 test('a human correction outranks a quiet disagreement in the ordering', () => {

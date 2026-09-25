@@ -1,31 +1,29 @@
 /**
- * Train — teaching one place at a time.
+ * Train — a drawer, a screenful at a time.
  *
- * Three ways of doing the same job, because the job has three shapes. **Sweep**
- * is one place and one question at a time, which is what you want when the
- * answer needs looking at. **Grid** is twelve at once with the wrong ones
- * tapped out, which is faster when most are right. **Inspect** is everything
- * about one place, which is where you go when a place is odd rather than when
- * the drawer is.
+ * Two ways of doing the same job. **Grid** is twelve at once with the wrong
+ * ones tapped out, which is fast when most are right. **Inspect** is
+ * everything about one place, which is where you go when a place is odd
+ * rather than when the drawer is.
  *
- * The panel beside a sweep matters more than it looks. "A human set this"
- * means somebody has already been here and the drawer disagrees — worth
- * reading before overruling. "No rule matched" means the value is the
- * drawer's and nobody has ever checked it, and that one is drawn in red,
- * because a number nobody has looked at is the thing this screen exists to
- * find.
+ * There used to be a third, **Sweep**: one place and one of the eight graded
+ * axes at a time, "we think 3". It went with the eight (the axes brief,
+ * 25 Sep 2026). A number a person puts on how thrilling somewhere is cannot be
+ * extracted from text and is not a fact about the place, so there is nothing
+ * left for a sweep to ask. What a place says for itself is now read off its
+ * question set, on the right of Inspect.
  */
 
 import React, { useState } from 'react';
 import { Text, View } from 'react-native';
 import { Press } from '../../components/press';
-import { desk, fonts, LIME, ON_LIME } from '../../theme';
-import { Act, Band, DeskButton, DeskSection, Kicker, Nothing, SegStrip, Steps, Value, WARN } from './desk';
+import { desk, fonts } from '../../theme';
+import { Act, Band, DeskButton, DeskSection, Nothing, SegStrip, Value, WARN } from './desk';
 import type { FilingTrain, FilingPlace } from '../../api';
 
-type Mode = 'sweep' | 'grid' | 'inspect';
+type Mode = 'grid' | 'inspect';
 
-export function Train({ data, place, mode, onMode, busy, canManage, onSet, onNotSure, onOpen, onHousehold }: {
+export function Train({ data, place, mode, onMode, busy, canManage, onNotSure, onOpen, onHousehold }: {
   data: FilingTrain;
   /** The place Inspect is showing, fetched separately because it is a page of its own. */
   place: FilingPlace | null;
@@ -33,7 +31,6 @@ export function Train({ data, place, mode, onMode, busy, canManage, onSet, onNot
   onMode: (m: Mode) => void;
   busy: string | null;
   canManage: boolean;
-  onSet: (ref: string, attribute: string, level: number) => void;
   /**
    * The ones a person says do not belong here, off to the not-sure list.
    *
@@ -45,54 +42,18 @@ export function Train({ data, place, mode, onMode, busy, canManage, onSet, onNot
   onOpen: (ref: string) => void;
   onHousehold: () => void;
 }) {
-  /**
-   * Where the sweep is, as a place *and* a question.
-   *
-   * A place usually has several axes worth asking about, and holding only a
-   * place index showed the first one for ever: answering it moved to the next
-   * place and the rest could never be taught, while the panel beside it said
-   * "3 more questions about this place" (Codex, 21 Sep 2026).
-   *
-   * Held as the ref rather than as an index, so that a save reloading the
-   * queue — which removes whatever was just settled — does not slide the
-   * cursor onto a different place than the one the screen was showing.
-   */
-  const [at, setAt] = useState<{ ref: string; ask: number } | null>(null);
   const [wrong, setWrong] = useState<Set<string>>(new Set());
   const [sent, setSent] = useState<string | null>(null);
-
-  const queue = data.queue;
-  const current = (at && queue.find((q) => q.ref === at.ref)) ?? queue[0] ?? null;
-  const askAt = current && at?.ref === current.ref ? at.ask : 0;
-  const ask = current?.asks[Math.min(askAt, current.asks.length - 1)] ?? null;
-  const place_ = current;
-
-  /** The next question on this place, or the next place when it is done. */
-  const advance = () => {
-    if (!place_) return;
-    if (askAt + 1 < place_.asks.length) { setAt({ ref: place_.ref, ask: askAt + 1 }); return; }
-    const i = queue.findIndex((q) => q.ref === place_.ref);
-    const next = queue[i + 1] ?? null;
-    setAt(next ? { ref: next.ref, ask: 0 } : null);
-  };
-  const back = () => {
-    if (!place_) return;
-    if (askAt > 0) { setAt({ ref: place_.ref, ask: askAt - 1 }); return; }
-    const i = queue.findIndex((q) => q.ref === place_.ref);
-    const prev = queue[i - 1] ?? null;
-    if (prev) setAt({ ref: prev.ref, ask: Math.max(0, prev.asks.length - 1) });
-  };
 
   return (
     <>
       <Band
         title={`Train · ${data.subcategory.label}`}
-        sub={`${queue.length} of ${data.subcategory.places.toLocaleString()} places have something worth looking at`}
+        sub={`${data.subcategory.places.toLocaleString()} places filed here`}
         right={(
           <SegStrip
             value={mode}
             options={[
-              { key: 'sweep' as Mode, label: 'Sweep' },
               { key: 'grid' as Mode, label: 'Grid' },
               { key: 'inspect' as Mode, label: 'Inspect' },
             ]}
@@ -100,100 +61,6 @@ export function Train({ data, place, mode, onMode, busy, canManage, onSet, onNot
           />
         )}
       />
-
-      {mode === 'sweep' ? (
-        queue.length === 0 || !current || !ask ? (
-          <Nothing>Nothing here argues with the drawer. There is nothing to teach.</Nothing>
-        ) : (
-          <View style={{ flexDirection: 'row', gap: 36, alignItems: 'flex-start' }}>
-            <View style={{ flex: 1, minWidth: 0, gap: 18 }}>
-              <View style={{ flexDirection: 'row', gap: 18, alignItems: 'flex-start' }}>
-                <View style={{ width: 180, height: 126, backgroundColor: desk.picked, flexGrow: 0, flexShrink: 0 }} />
-                <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
-                  <Text style={{ fontFamily: fonts.heading, fontSize: 22, fontWeight: '800', letterSpacing: -0.44, color: desk.ink }}>
-                    {current.name ?? 'not researched yet'}
-                  </Text>
-                  <Value tone="dim" size={12.5}>{current.town ?? 'we do not hold where it is'}</Value>
-                  {current.facts.length ? (
-                    <View style={{ marginTop: 4 }}>
-                      <Value tone="muted" size={12.5}>{current.facts.join(' · ')}</Value>
-                    </View>
-                  ) : null}
-                </View>
-              </View>
-
-              <DeskSection kicker={ask.label.toUpperCase()}>
-                <Value tone="dim" size={12}>{ask.anchor ?? ''}</Value>
-                <View style={{ marginTop: 10 }}>
-                  <Text style={{ fontFamily: fonts.body, fontSize: 13.5, fontWeight: '700', color: desk.ink }}>
-                    {ask.level == null ? 'We have no idea.' : `We think ${ask.level}.`}
-                  </Text>
-                </View>
-                <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
-                  {[0, 1, 2, 3, 4].map((n) => (
-                    <Press key={n} effect="sink" accessibilityRole="button"
-                           // Saving does not advance. A save that succeeds
-                           // takes this question out of the queue, and the
-                           // reload moves the cursor by itself; advancing here
-                           // as well skipped a place every time, and advanced
-                           // even when the save had failed (Codex, 21 Sep).
-                           onPress={canManage && !busy ? () => onSet(current.ref, ask.key, n) : undefined}>
-                      <View style={{
-                        width: 86,
-                        paddingVertical: 16,
-                        alignItems: 'center',
-                        borderWidth: 1.5,
-                        borderColor: n === ask.level ? LIME : desk.ruleStrong,
-                        backgroundColor: n === ask.level ? LIME : 'transparent',
-                      }}>
-                        <Text style={{
-                          fontFamily: fonts.heading,
-                          fontSize: 20,
-                          fontWeight: '800',
-                          color: n === ask.level ? ON_LIME : desk.ink,
-                        }}>
-                          {n}
-                        </Text>
-                      </View>
-                    </Press>
-                  ))}
-                </View>
-                <View style={{ flexDirection: 'row', gap: 20, marginTop: 16, alignItems: 'center' }}>
-                  <Act label="Skip" tone="dim" ruled={false} onPress={advance} />
-                  <Act label="Back" tone="dim" ruled={false} onPress={back} />
-                  <Value tone="dim" size={12}>
-                    {queue.findIndex((q) => q.ref === current.ref) + 1} of {queue.length}
-                    {current.asks.length > 1 ? ` · question ${askAt + 1} of ${current.asks.length}` : ''}
-                  </Value>
-                </View>
-              </DeskSection>
-            </View>
-
-            <View style={{
-              width: 380, flexGrow: 0, flexShrink: 0, gap: 12,
-              borderLeftWidth: 1, borderLeftColor: desk.rule, paddingLeft: 30,
-            }}>
-              <Kicker>WHAT WE THOUGHT, AND WHY</Kicker>
-              <Text style={{
-                fontFamily: fonts.body, fontSize: 13, lineHeight: 20,
-                color: ask.tone === 'warn' ? WARN : LIME,
-              }}>
-                {ask.why}
-              </Text>
-              {current.asks.length > 1 ? (
-                <Value tone="dim" size={12}>
-                  {current.asks.length - 1 - askAt > 0
-                    ? `${current.asks.length - 1 - askAt} more about this place`
-                    : 'the last question about this place'}
-                </Value>
-              ) : null}
-              <View style={{ marginTop: 8 }}>
-                <Act label="Everything about this place" onPress={() => { onOpen(current.ref); onMode('inspect'); }} />
-              </View>
-            </View>
-          </View>
-        )
-      ) : null}
 
       {mode === 'grid' ? (
         <>
@@ -247,24 +114,25 @@ export function Train({ data, place, mode, onMode, busy, canManage, onSet, onNot
                 ? `${wrong.size} will go to Not sure, where where-they-belong is decided`
                 : 'tap the ones that are not this, and they go to Not sure')}
             </Value>
+            {data.grid.length ? (
+              <Act label="Look at one" tone="dim" ruled={false}
+                   onPress={() => { onOpen(data.grid[0].ref); onMode('inspect'); }} />
+            ) : null}
           </View>
         </>
       ) : null}
 
       {mode === 'inspect' ? (
-        place ? <Inspect place={place} busy={busy} canManage={canManage} onSet={onSet} onHousehold={onHousehold} />
-          : <Nothing>Pick a place from Sweep or the drawer&rsquo;s list to look at it.</Nothing>
+        place ? <Inspect place={place} onHousehold={onHousehold} />
+          : <Nothing>Pick a place from the grid or the drawer&rsquo;s list to look at it.</Nothing>
       ) : null}
     </>
   );
 }
 
-/** Everything about one place, and the three states an answer can be in. */
-function Inspect({ place, busy, canManage, onSet, onHousehold }: {
+/** Everything about one place: what it inherits, and what it has been asked. */
+function Inspect({ place, onHousehold }: {
   place: FilingPlace;
-  busy: string | null;
-  canManage: boolean;
-  onSet: (ref: string, attribute: string, level: number) => void;
   onHousehold: () => void;
 }) {
   return (
@@ -282,24 +150,22 @@ function Inspect({ place, busy, canManage, onSet, onHousehold }: {
           </View>
         </View>
 
-        <DeskSection kicker="THE EIGHT · FILLED IS SOMEBODY&rsquo;S OWN ANSWER">
-          {place.axes.map((a) => (
+        {/* What the place carries, and where each answer came from: a person,
+            what we hold, or the drawer it is filed in. */}
+        <DeskSection kicker="WHAT IT CARRIES · FROM THE PLACE, WHAT WE HOLD, OR THE DRAWER">
+          {place.facets.length === 0 ? (
+            <Nothing>Nothing is set on this place or its drawer yet.</Nothing>
+          ) : place.facets.map((a) => (
             <View key={a.key} style={{
-              flexDirection: 'row', alignItems: 'center', gap: 16,
+              flexDirection: 'row', alignItems: 'baseline', gap: 16,
               paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: desk.rule,
             }}>
               <View style={{ width: 200, flexGrow: 0, flexShrink: 0 }}>
                 <Value weight="600" size={13}>{a.label}</Value>
-                {a.anchor ? (
-                  <Text style={{ fontFamily: fonts.body, fontSize: 11, color: desk.inkDim, marginTop: 2 }}>{a.anchor}</Text>
-                ) : null}
               </View>
-              <Steps
-                value={a.value?.level ?? null}
-                settled={a.mine}
-                human={a.from === 'a person'}
-                onPick={canManage && !busy ? (n) => onSet(place.place.ref, a.key, n) : undefined}
-              />
+              <View style={{ width: 120, flexGrow: 0, flexShrink: 0 }}>
+                <Value weight="700" size={13} tone={a.value ? 'ink' : 'dim'}>{a.said}</Value>
+              </View>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Value tone={a.from === 'a person' ? 'ink' : 'dim'} size={11.5}>
                   {a.from ? `from ${a.from}` : 'nobody has said'}

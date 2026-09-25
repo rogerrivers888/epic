@@ -438,7 +438,7 @@ filingRoutes.get('/subcategories/:key', requires('view_library'), async (req, re
       };
     });
 
-    const answers = [...drawer.facets, ...drawer.excluded, ...drawer.axes];
+    const answers = [...drawer.facets, ...drawer.excluded];
     const disagreeing = filing.disagreeingIn({
       refs: drawer.refs, valuesByRef: d.valuesByRef, answers, recordsByRef: d.recordsByRef,
     });
@@ -458,7 +458,6 @@ filingRoutes.get('/subcategories/:key', requires('view_library'), async (req, re
       rules,
       facets: drawer.facets,
       excluded: drawer.excluded,
-      axes: drawer.axes,
       disagreeing,
       // Where nothing fills the drawer, the words that look like they belong.
       // An empty list is a real answer — "nothing unanswered looks like it
@@ -512,7 +511,7 @@ filingRoutes.get('/subcategories/:key/places', requires('view_library'), async (
     const d = await filing.drawers();
     if (!d.subcategories.some((s) => s.key === key)) throw bad(`${key} is not one of our subcategories.`);
     const drawer = await filing.drawerOf(key, d);
-    const answers = [...drawer.facets, ...drawer.axes];
+    const answers = drawer.facets;
 
     const places = drawer.refs.map((ref) => {
       const rec = d.recordsByRef.get(ref) ?? null;
@@ -570,7 +569,7 @@ filingRoutes.put('/subcategories/:key/defaults', requires('manage_library'), asy
       const stored = d.defaultsBySub.get(key)?.get(attribute) ?? null;
       if (stored) return { value: stored, stored: true };
       const drawer = await filing.drawerOf(key, d);
-      const shown = [...drawer.facets, ...drawer.axes].find((a) => a.key === attribute) ?? null;
+      const shown = drawer.facets.find((a) => a.key === attribute) ?? null;
       return { value: shown?.value ?? null, stored: false, mixed: Boolean(shown?.mixed) };
     };
 
@@ -611,7 +610,7 @@ filingRoutes.post('/subcategories/:key/accept', requires('manage_library'), asyn
     const d = await filing.drawers();
     if (!d.subcategories.some((s) => s.key === key)) throw bad(`${key} is not one of our subcategories.`);
     const drawer = await filing.drawerOf(key, d);
-    const proposed = [...drawer.facets, ...drawer.axes].filter((a) => a.proposed && !a.mixed);
+    const proposed = drawer.facets.filter((a) => a.proposed && !a.mixed);
 
     let accepted = 0;
     for (const a of proposed) {
@@ -876,8 +875,7 @@ filingRoutes.get('/labels', requires('view_library'), async (_req, res, next) =>
 /** A label's kind, said in words rather than in the table's own. */
 const shapeWord = (q) => (q.kind === 'yesno' ? 'Yes or no'
   : q.kind === 'range' ? 'A range'
-    : q.kind === 'scale' ? 'A scale, 0 to 4'
-      : 'One of a list');
+    : 'One of a list');
 
 /** GET /labels/sets/:key — one set: its questions, and the words waiting on it. */
 filingRoutes.get('/labels/sets/:key', requires('view_library'), async (req, res, next) => {
@@ -943,17 +941,10 @@ filingRoutes.get('/labels/vocabulary', requires('view_library'), async (_req, re
       placeAttributes.attributes(), questionSets.everyQuestion(), questionSets.sets(), filing.drawers(),
     ]);
     const setName = new Map(sets.map((s) => [s.key, s.name]));
-    /**
-     * The eight are not on this list, and must not be.
-     *
-     * This screen is our own vocabulary and where each word is *asked*. A
-     * scale is never asked: it is judged on the drawer and corrected on the
-     * place, and no question can carry one (`neverCarried`). Listed here they
-     * were eight red rows reading "asked nowhere", each offered "Ask it in…"
-     * and "Retire" — a screen inviting somebody to retire the taxonomy (the
-     * side-by-side audit, 21 Sep 2026).
-     */
-    const rows = attrs.filter((a) => a.active && a.kind !== 'scale').map((a) => {
+    // This screen is our own vocabulary and where each word is *asked*. Only
+    // the live labels: a retired one — the eight graded axes, since migration
+    // 246 — is not a word anybody can be offered "Ask it in…" for.
+    const rows = attrs.filter((a) => a.active).map((a) => {
       const asked = all.filter((q) => q.attribute_key === a.key);
       const global = asked.some((q) => q.scope === 'global');
       const inSets = [...new Set(asked.filter((q) => q.set_key).map((q) => q.set_key))];
@@ -1626,17 +1617,14 @@ filingRoutes.get('/decisions/:word/trail', requires('view_library'), async (req,
 // ---------------------------------------------------------------------------
 
 /**
- * GET /subcategories/:key/train — the places worth looking at, and why.
+ * GET /subcategories/:key/train — a screenful of the drawer, to tap the wrong
+ * ones out of.
  *
- * The queue is ordered by how much a place argues with its drawer, because
- * that is where a human's attention is worth most: a place agreeing with every
- * default teaches nothing by being confirmed.
- *
- * **What we thought, and why** is the point of the panel beside each place, and
- * it is two different sentences. "A human set this" means somebody has already
- * looked and the drawer disagrees — worth reading before overruling. "No rule
- * matched" means the value is inherited and nobody has ever checked it, which
- * is the one the screen draws in red.
+ * The sweep this route used to feed — one place, one graded axis at a time,
+ * "we think 3" — went with the eight (the axes brief, 25 Sep 2026): a number a
+ * person puts on how thrilling somewhere is cannot be extracted from text and
+ * is not a fact about the place. What is left is the grid, which is a filing
+ * question and not a judgement: is this place one of these, or not.
  */
 filingRoutes.get('/subcategories/:key/train', requires('view_library'), async (req, res, next) => {
   try {
@@ -1644,62 +1632,16 @@ filingRoutes.get('/subcategories/:key/train', requires('view_library'), async (r
     const d = await filing.drawers();
     const sub = d.subcategories.find((s) => s.key === key);
     if (!sub) throw bad(`${key} is not one of our subcategories.`);
-    const drawer = await filing.drawerOf(key, d);
-    const answers = [...drawer.facets, ...drawer.axes];
-    const byKey = new Map(answers.map((a) => [a.key, a]));
-
-    const queue = [];
-    for (const ref of drawer.refs) {
-      const mine = d.valuesByRef.get(ref) ?? new Map();
-      const rec = d.recordsByRef.get(ref) ?? null;
-      const asks = [];
-      for (const a of drawer.axes) {
-        const own = mine.get(a.key);
-        // Nothing to ask where the place already answers and agrees.
-        if (own && a.value && filing.sameValue(own, a.value)) continue;
-        asks.push({
-          key: a.key,
-          label: a.label,
-          anchor: a.anchor,
-          // What we think, which is the place's own answer if it has one and
-          // the drawer's otherwise.
-          level: own?.level ?? a.value?.level ?? null,
-          drawer: a.value?.level ?? null,
-          why: own?.by
-            ? `a human set this · the drawer says ${a.value?.level ?? 'nothing'}`
-            : own
-              ? `read from what we hold · the drawer says ${a.value?.level ?? 'nothing'}`
-              : 'no rule matched — this is the drawer’s, and nobody has checked it',
-          // Red where nobody has ever looked at this place, lime where
-          // somebody has and the drawer disagrees.
-          tone: own?.by ? 'lime' : 'warn',
-        });
-      }
-      if (!asks.length) continue;
-      queue.push({
-        ref,
-        name: rec?.name ?? null,
-        town: townOf(rec),
-        photo: rec?.image_url ?? null,
-        facts: answers.filter((a) => a.kind === 'yesno' && (mine.get(a.key)?.yesno ?? a.value?.yesno) === true)
-          .map((a) => a.label).slice(0, 4),
-        human: [...mine.values()].some((v) => v.by),
-        asks,
-      });
-    }
-    // Most argued-with first: the places where a person's judgement buys most.
-    queue.sort((a, b) => b.asks.length - a.asks.length);
+    const refs = d.refsBySub.get(key) ?? [];
 
     res.json({
-      subcategory: { key: sub.key, label: sub.label, places: drawer.refs.length },
-      queue,
+      subcategory: { key: sub.key, label: sub.label, places: refs.length },
       // Twelve for the grid — a screenful, and enough that being wrong about
       // one is obvious beside eleven that are right.
-      grid: drawer.refs.slice(0, 12).map((ref) => {
+      grid: refs.slice(0, 12).map((ref) => {
         const rec = d.recordsByRef.get(ref) ?? null;
         return { ref, name: rec?.name ?? null, town: townOf(rec), photo: rec?.image_url ?? null };
       }),
-      axes: drawer.axes.map((a) => ({ key: a.key, label: a.label, anchor: a.anchor })),
     });
   } catch (err) { next(err); }
 });
@@ -1842,7 +1784,6 @@ filingRoutes.get('/places/:ref', requires('view_library'), async (req, res, next
         photo: rec?.image_url ?? null,
         subcategory: sub ? { key: sub.key, label: sub.label } : null,
       },
-      axes: drawer.axes.map(say),
       facets: drawer.facets.map(say),
       questions,
       set: setKey ? { key: setKey, name: d.setByKey.get(setKey)?.name ?? setKey } : null,
@@ -1945,7 +1886,7 @@ filingRoutes.get('/mapping/:word/destinations', requires('view_library'), async 
       opened,
       categories,
       subcategories,
-      labels: attrs.filter((a) => a.active && a.kind !== 'scale').map((a) => ({
+      labels: attrs.filter((a) => a.active).map((a) => ({
         key: a.key,
         name: a.label,
         kind: 'label',
@@ -1994,7 +1935,7 @@ filingRoutes.get('/pending', requires('view_library'), async (_req, res, next) =
     const setName = new Map(sets.map((s) => [s.key, s.name]));
 
     const orphans = attrs
-      .filter((a) => a.active && a.kind !== 'scale' && !asked.has(a.key))
+      .filter((a) => a.active && !asked.has(a.key))
       .map((a) => ({
         id: a.key,
         word: a.label,

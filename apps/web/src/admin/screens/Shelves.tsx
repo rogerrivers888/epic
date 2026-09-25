@@ -67,6 +67,7 @@ const SHELF_ICON: Record<MoodKey, IconName> = {
   fun: 'festival', food: 'restaurant', culture: 'museum',
   sport: 'bowling', activity: 'sport',
   adrenaline: 'climbing', relaxing: 'walk', outdoors: 'park',
+  educational: 'learn',
 };
 
 /** What a rule is about, said in words rather than in the column name. */

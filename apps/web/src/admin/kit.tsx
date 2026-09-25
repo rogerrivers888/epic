@@ -1090,7 +1090,7 @@ export function DrillDropdown({ label, value, groups, extra = [], onPick, width 
               ) : found ? (
                 /* Ours first, searched across every one of them (the handoff,
                    BO1d). Drilling category by category is fine when you know
-                   which of the eight it is in; typing is what you do when you
+                   which cabinet it is in; typing is what you do when you
                    know the drawer's name and not its cabinet. */
                 <>
                   {found.length === 0 ? (

@@ -193,7 +193,7 @@ export const BY_ATLAS_CATEGORY = {
   active: { sport: 0.9, fun: 0.4, adrenaline: 0.2 },
 };
 
-/** What an atlas place falls back to when its category is not one of the eight. */
+/** What an atlas place falls back to when its category is not one of ours. */
 const ATLAS_UNKNOWN = { culture: 0.9 };
 
 /**

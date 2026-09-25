@@ -457,43 +457,9 @@ export function Act({ label, onPress, tone = 'lime', ruled = true }: {
   return <Press effect="none" onPress={onPress} accessibilityRole="button">{body}</Press>;
 }
 
-/**
- * The five steps of one of the eight.
- *
- * Outline is proposed, filled is set — and a value a person put on one *place*
- * is drawn in ink rather than lime, because it is theirs and not the drawer's.
- */
-export function Steps({ value, settled, human, onPick }: {
-  value: number | null;
-  settled?: boolean;
-  human?: boolean;
-  onPick?: (n: number) => void;
-}) {
-  return (
-    <View style={{ flexDirection: 'row', gap: 4, flexGrow: 0, flexShrink: 0 }}>
-      {[0, 1, 2, 3, 4].map((i) => {
-        const on = i === value;
-        const fill = on && (settled || human) ? (human ? desk.ink : LIME) : 'transparent';
-        const box = (
-          <View style={{
-            width: 26,
-            height: 18,
-            backgroundColor: fill,
-            borderWidth: on ? 1.5 : 1,
-            borderColor: on ? LIME : desk.ruleStrong,
-          }} />
-        );
-        if (!onPick) return <View key={i}>{box}</View>;
-        return (
-          <Press key={i} effect="none" onPress={() => onPick(i)} accessibilityRole="button"
-            accessibilityLabel={`Set to ${i}`} accessibilityState={{ selected: on }}>
-            {box}
-          </Press>
-        );
-      })}
-    </View>
-  );
-}
+// The five-step control the eight graded axes were drawn with lived here.
+// It went with them (the axes brief, 25 Sep 2026): a judgement nobody makes
+// twice the same way is not a fact a control should offer to set.
 
 /** A tick box on a row: lime when ticked, an outline when not. */
 export function TickBox({ on, onPress }: { on: boolean; onPress: () => void }) {

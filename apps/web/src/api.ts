@@ -4293,26 +4293,17 @@ export type PlaceAttribute = {
   brings: { key: string; value: AttributeValue }[];
 };
 
-/** A value one carries: a yes or no, a range, or one of a list. */
 /**
- * The four shapes a label's answer can take.
- *
- * `scale` is the eight — how thrilling, how much walking — and is the one a
- * provider may never answer (`neverCarried` on the API): a word can raise a
- * question about a place, it can never answer one.
+ * The three shapes a label's answer can take: a yes or no, a range, or one of
+ * a list. There is no graded scale. The eight 0–4 axes were cancelled (the
+ * axes brief, 25 Sep 2026): if a value cannot be extracted from text it
+ * cannot exist at Epic's scale, and a graded judgement score is not to be
+ * proposed again.
  */
-export type AttributeKind = 'yesno' | 'range' | 'oneof' | 'scale';
+export type AttributeKind = 'yesno' | 'range' | 'oneof';
 
 export type AttributeValue = {
   yesno?: boolean; from?: number | null; to?: number | null; choice?: string;
-  /**
-   * One number on a nought-to-four run — the eight (migration 216). Separate
-   * from `from`/`to` because a range is two facts and a scale is one, and a
-   * scale wearing a range would make every reader decide what `from !== to`
-   * meant. Anything rendering a value must handle it: a `level` read by a
-   * yes/no formatter says "Yes" for every number, nought included.
-   */
-  level?: number | null;
   /**
    * Where the answer came from. `came` means another label brought it and
    * `word` means one of the place's own provider words said it, so both are
@@ -5283,7 +5274,6 @@ export type FilingSubcategory = {
   facets: FilingAnswer[];
   /** Facets the places disagree about, collapsed into one line. */
   excluded: FilingAnswer[];
-  axes: FilingAnswer[];
   disagreeing: {
     ref: string; name: string | null; postcode: string | null; photo: string | null;
     diff: string; more: number; human: boolean;
@@ -5372,27 +5362,14 @@ export type FilingSet = {
   readNote: string;
 };
 
-/** A place worth looking at, and what it is worth asking about it. */
-export type FilingTrainRow = {
-  ref: string; name: string | null; town: string | null; photo: string | null;
-  facts: string[]; human: boolean;
-  asks: {
-    key: string; label: string; anchor: string | null;
-    /** What we think, which is the place's own answer if it has one. */
-    level: number | null;
-    /** What the drawer says, for the panel beside it. */
-    drawer: number | null;
-    why: string;
-    /** Red where nobody has ever checked this place; lime where somebody has. */
-    tone: 'lime' | 'warn';
-  }[];
-};
-
+/**
+ * A screenful of a drawer, to tap the wrong ones out of. The sweep that used
+ * to sit beside it asked a person to grade each place on the eight, and went
+ * with them (the axes brief, 25 Sep 2026).
+ */
 export type FilingTrain = {
   subcategory: { key: string; label: string; places: number };
-  queue: FilingTrainRow[];
   grid: { ref: string; name: string | null; town: string | null; photo: string | null }[];
-  axes: { key: string; label: string; anchor: string | null }[];
 };
 
 export type FilingPlace = {
@@ -5400,7 +5377,6 @@ export type FilingPlace = {
     ref: string; name: string | null; town: string | null; photo: string | null;
     subcategory: { key: string; label: string } | null;
   };
-  axes: FilingPlaceAnswer[];
   facets: FilingPlaceAnswer[];
   /**
    * Three states and not two. **Nothing found** is a real answer — sources were

@@ -90,7 +90,7 @@ export function Filing({ canManage }: { canManage: boolean }) {
   const [district, setDistrict] = useState<string>('');
   const [train, setTrain] = useState<Awaited<ReturnType<typeof api.filingTrain>> | null>(null);
   const [onePlace, setOnePlace] = useState<Awaited<ReturnType<typeof api.filingPlace>> | null>(null);
-  const [mode, setMode] = useState<'sweep' | 'grid' | 'inspect'>('sweep');
+  const [mode, setMode] = useState<'grid' | 'inspect'>('grid');
   const [rules, setRules] = useState<Awaited<ReturnType<typeof api.adminFilingRules>> | null>(null);
   const [runs, setRuns] = useState<Awaited<ReturnType<typeof api.adminFilingRuns>> | null>(null);
   const [decisions, setDecisions] = useState<Awaited<ReturnType<typeof api.adminFilingDecisions>> | null>(null);
@@ -189,7 +189,7 @@ export function Filing({ canManage }: { canManage: boolean }) {
    * the place, so the new drawer opened showing — and offering to edit — a
    * place from the old one, under the new one's heading (Codex, 21 Sep 2026).
    */
-  useEffect(() => { setOnePlace(null); setMode('sweep'); }, [sub]);
+  useEffect(() => { setOnePlace(null); setMode('grid'); }, [sub]);
 
   /** Every write goes through here, so one of them cannot forget to reload. */
   const run = useCallback(async (key: string, what: () => Promise<string>) => {
@@ -504,11 +504,6 @@ export function Filing({ canManage }: { canManage: boolean }) {
               // household sees" landing on a table of rules was the button
               // saying one thing and doing another.
               onHousehold={() => go({ tab: 'rows', cat: '', sub: '', set: '', view: 'household' })}
-              onSet={(ref, attribute, level) => void run(`${ref}:${attribute}`, async () => {
-                const out = await api.filingSetPlace(ref, { attribute, value: { level } });
-                if (onePlace?.place.ref === ref) setOnePlace(await api.filingPlace(ref));
-                return out.said;
-              })}
             />
           ) : null}
 
@@ -953,7 +948,7 @@ function filterOptionsFor(m: { words: { decision: string; flags: { key: string; 
 }
 
 const labelOf = (d: FilingSubcategory, key: string) =>
-  [...d.facets, ...d.axes, ...d.excluded].find((a) => a.key === key)?.label ?? key;
+  [...d.facets, ...d.excluded].find((a) => a.key === key)?.label ?? key;
 
 /**
  * The set as its own screen wants it.

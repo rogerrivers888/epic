@@ -29,10 +29,9 @@ const valueOf = (row) => {
   if (row.yesno != null) return { yesno: row.yesno };
   if (row.from_value != null || row.to_value != null) return { from: row.from_value, to: row.to_value };
   if (row.choice != null) return { choice: row.choice };
-  // A scale is one number on a nought-to-four run — the eight (migration 216).
-  // It is read last only because it is the newest; nothing else can produce a
-  // `level`, so the order does not matter to the answer.
-  if (row.level != null) return { level: row.level };
+  // `level` is not read. It was the eight graded scales' column (migration
+  // 216), and the eight were cancelled (migration 246): a value still sitting
+  // there belongs to a retired label and is a value nobody is shown.
   return null;
 };
 
@@ -94,7 +93,11 @@ export async function saveAttribute({ key, label, kind, blurb, options, rangeMin
   // (Codex, 14 Sep 2026).
   const { rows: clash } = await query('select label from shelf_subcategories where key = $1', [k]);
   if (clash[0]) throw bad(`${clash[0].label} is already one of our labels. Pick another name.`);
-  if (kind && !['yesno', 'range', 'oneof', 'scale'].includes(kind)) throw bad(`${kind} is not a kind of attribute.`);
+  // No `scale`: the eight graded axes were cancelled (migration 246) and a
+  // graded judgement score is not to be proposed again. If a value cannot be
+  // extracted from text it cannot exist at Epic's scale (CLAUDE.md).
+  if (kind === 'scale') throw bad('A graded scale is not a kind of label any more. A label is a yes or no, a range, or one of a list.');
+  if (kind && !['yesno', 'range', 'oneof'].includes(kind)) throw bad(`${kind} is not a kind of attribute.`);
   // Changing the kind would leave every value already set in the old shape — a
   // yes/no answer under an attribute that now wants a range. Refuse rather than
   // hand a screen data its controls cannot draw (Codex, 14 Sep 2026).
@@ -148,7 +151,6 @@ export async function saveAttribute({ key, label, kind, blurb, options, rangeMin
 export async function setBrings(attributeKey, bringsKey, value) {
   if (!attributeKey || !bringsKey) throw bad('Which label, and what does it bring?');
   if (attributeKey === bringsKey) throw bad('A label cannot bring itself.');
-  await neverCarried(bringsKey);
   if (value == null) {
     await query('delete from attribute_brings where attribute_key = $1 and brings_key = $2', [attributeKey, bringsKey]);
     forget();
@@ -178,7 +180,6 @@ export async function setCarries(label, attributeKey, value) {
   const [namespace, ...rest] = String(label ?? '').split(':');
   const key = rest.join(':');
   if (!namespace || !key || !attributeKey) throw bad('Which word, and which label?');
-  await neverCarried(attributeKey);
   if (value == null) {
     await query('delete from taxonomy_label_carries where namespace = $1 and key = $2 and attribute_key = $3',
       [namespace, key, attributeKey]);
@@ -224,54 +225,27 @@ export async function carriedByWord() {
  * triggers do this for a brought value; a drawer's default and a place's own
  * answer had no equivalent.
  */
-/**
- * The eight are judged, never carried.
- *
- * A provider's word may bring a fact with it — `italian_restaurant` says
- * Italian, and that is a fact about the place Google is entitled to state. It
- * may not say how thrilling somewhere is. That is a judgement, it is ours, and
- * CLAUDE.md is explicit: Google may raise a candidate word, but Google may
- * never answer a question about a place. The eight are answered on the drawer
- * and corrected on the place, by a person or by a model reading what we own.
- *
- * So a scale is refused here rather than plumbed through, and refused with the
- * reason rather than with a shape error — "is not a scale" would read as a bug
- * in the caller when it is a rule about what a source is allowed to say.
- */
-async function neverCarried(attributeKey) {
-  const { byKey } = await attributes();
-  const a = byKey.get(attributeKey);
-  if (a?.kind === 'scale') {
-    throw bad(`${a.label} is one of the eight. A word can raise a question about a place; it can never answer one.`);
-  }
-}
-
 export async function mustFit(attributeKey, value) {
   const { byKey } = await attributes();
   const a = byKey.get(attributeKey);
   if (!a) throw bad(`${attributeKey} is not one of our secondary labels.`);
+  // A retired label takes no new value. The eight graded axes are the standing
+  // case (migration 246): their rows are kept, and nothing is added to them.
+  if (a.kind === 'scale') throw bad(`${a.label} was one of the graded axes, which are gone.`);
+  if (a.active === false) throw bad(`${a.label} is retired.`);
   const has = (k) => value?.[k] != null;
+  if (has('level')) throw bad(`${a.label} is not a graded scale. Nothing is.`);
   if (a.kind === 'yesno' && !has('yesno')) throw bad(`${a.label} is a yes or no.`);
   if (a.kind === 'range' && !has('from') && !has('to')) throw bad(`${a.label} is a range \u2014 it needs a number at one end at least.`);
   if (a.kind === 'oneof') {
     if (!has('choice')) throw bad(`${a.label} is one of a list.`);
     if (!(a.options ?? []).includes(value.choice)) throw bad(`${value.choice} is not one of ${a.label}'s choices.`);
   }
-  if (a.kind === 'scale' && !has('level')) throw bad(`${a.label} is a scale \u2014 it needs a number on it.`);
   if (a.kind !== 'yesno' && has('yesno')) throw bad(`${a.label} is not a yes or no.`);
   if (a.kind !== 'range' && (has('from') || has('to'))) throw bad(`${a.label} is not a range.`);
   if (a.kind !== 'oneof' && has('choice')) throw bad(`${a.label} is not one of a list.`);
-  if (a.kind !== 'scale' && has('level')) throw bad(`${a.label} is not a scale.`);
   if (a.kind === 'range' && has('from') && has('to') && Number(value.from) > Number(value.to)) {
     throw bad(`${a.label} runs from the smaller number to the larger one.`);
-  }
-  // A scale's ends are the label's own. The trigger says this too; saying it
-  // here as well is what turns a 22023 into a sentence a screen can print.
-  if (a.kind === 'scale' && has('level')) {
-    const n = Number(value.level);
-    if (!Number.isInteger(n)) throw bad(`${a.label} is a whole number.`);
-    if (a.range_min != null && n < a.range_min) throw bad(`${a.label} runs from ${a.range_min} upwards.`);
-    if (a.range_max != null && n > a.range_max) throw bad(`${a.label} runs up to ${a.range_max}.`);
   }
 }
 
@@ -296,15 +270,15 @@ export async function setDefault(subcategoryKey, attributeKey, value, { settled 
   }
   await mustFit(attributeKey, value);
   const { rows } = await query(
-    `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, yesno, from_value, to_value, choice, level, settled)
-     values ($1, $2, $3, $4, $5, $6, $7, coalesce($8, false))
+    `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, yesno, from_value, to_value, choice, settled)
+     values ($1, $2, $3, $4, $5, $6, coalesce($7, false))
      on conflict (subcategory_key, attribute_key) do update
         set yesno = excluded.yesno, from_value = excluded.from_value,
-            to_value = excluded.to_value, choice = excluded.choice, level = excluded.level,
-            settled = coalesce($8, shelf_subcategory_attributes.settled), updated_at = now()
+            to_value = excluded.to_value, choice = excluded.choice, level = null,
+            settled = coalesce($7, shelf_subcategory_attributes.settled), updated_at = now()
      returning *`,
     [subcategoryKey, attributeKey, value.yesno ?? null, value.from ?? null, value.to ?? null, value.choice ?? null,
-     value.level ?? null, settled == null ? null : Boolean(settled)]);
+     settled == null ? null : Boolean(settled)]);
   forget();
   return valueOf(rows[0]);
 }
@@ -317,12 +291,11 @@ export async function setDefault(subcategoryKey, attributeKey, value, { settled 
  * *is* bound (`$8`); nothing here is interpolated from anything a caller
  * supplies.
  */
-const READABLE = `case $8::text
+const READABLE = `case $7::text
         when 'yesno' then shelf_subcategory_attributes.yesno is not null
         when 'range' then (shelf_subcategory_attributes.from_value is not null
                            or shelf_subcategory_attributes.to_value is not null)
         when 'oneof' then shelf_subcategory_attributes.choice is not null
-        when 'scale' then shelf_subcategory_attributes.level is not null
         else false end`;
 
 /**
@@ -365,19 +338,19 @@ export async function acceptDefault(subcategoryKey, attributeKey, value) {
    * has already read the vocabulary a line above.
    */
   const { rows } = await query(
-    `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, yesno, from_value, to_value, choice, level, settled)
-     values ($1, $2, $3, $4, $5, $6, $7, true)
+    `insert into shelf_subcategory_attributes (subcategory_key, attribute_key, yesno, from_value, to_value, choice, settled)
+     values ($1, $2, $3, $4, $5, $6, true)
      on conflict (subcategory_key, attribute_key) do update set
        yesno      = case when ${READABLE} then shelf_subcategory_attributes.yesno      else excluded.yesno      end,
        from_value = case when ${READABLE} then shelf_subcategory_attributes.from_value else excluded.from_value end,
        to_value   = case when ${READABLE} then shelf_subcategory_attributes.to_value   else excluded.to_value   end,
        choice     = case when ${READABLE} then shelf_subcategory_attributes.choice     else excluded.choice     end,
-       level      = case when ${READABLE} then shelf_subcategory_attributes.level      else excluded.level      end,
+       level      = null,
        settled    = true,
        updated_at = now()
      returning *`,
     [subcategoryKey, attributeKey, value.yesno ?? null, value.from ?? null, value.to ?? null,
-     value.choice ?? null, value.level ?? null, kind]);
+     value.choice ?? null, kind]);
   forget();
   return valueOf(rows[0]);
 }
@@ -422,24 +395,25 @@ export async function settleDefault(subcategoryKey, attributeKey) {
 export async function setValue(venueRef, attributeKey, value, { reason = null, by = null, client = null } = {}) {
   const run = client ? (t, a) => client.query(t, a) : query;
   if (!venueRef || !attributeKey) throw bad('Which place, and which attribute?');
-  // An empty object says nothing, and saying nothing is clearing it.
-  const empty = value != null && value.yesno == null && value.from == null && value.to == null
-    && value.choice == null && value.level == null;
+  // An empty object says nothing, and saying nothing is clearing it. An object
+  // that says something in a shape nothing has — a `level` — is not empty; it
+  // is wrong, and `mustFit` says so rather than this quietly clearing the row.
+  const empty = value != null && typeof value === 'object' && Object.values(value).every((v) => v == null);
   if (value == null || empty) {
     await run('delete from place_attribute_values where venue_ref = $1 and attribute_key = $2', [venueRef, attributeKey]);
     return null;
   }
   if (!client) await mustFit(attributeKey, value);
   const { rows } = await run(
-    `insert into place_attribute_values (venue_ref, attribute_key, yesno, from_value, to_value, choice, level, reason, set_by)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `insert into place_attribute_values (venue_ref, attribute_key, yesno, from_value, to_value, choice, reason, set_by)
+     values ($1, $2, $3, $4, $5, $6, $7, $8)
      on conflict (venue_ref, attribute_key) do update
         set yesno = excluded.yesno, from_value = excluded.from_value, to_value = excluded.to_value,
-            choice = excluded.choice, level = excluded.level,
+            choice = excluded.choice, level = null,
             reason = excluded.reason, set_by = excluded.set_by, updated_at = now()
      returning *`,
     [venueRef, attributeKey, value.yesno ?? null, value.from ?? null, value.to ?? null, value.choice ?? null,
-     value.level ?? null, reason, by]);
+     reason, by]);
   return rows[0];
 }
 

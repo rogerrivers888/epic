@@ -637,8 +637,10 @@ export async function apply({ auditId, by = null }) {
           // no test could see them (owner, 21 Sep 2026).
           await inheritBar(p.subject, client);
           // A second cabinet, where the proposal names one: Have a go is Sport
-          // first and Adrenaline too (section 2, 24 Sep 2026).
-          await settle(p.subject, { also_in: p.numbers?.also_in ?? [] });
+          // first and Adrenaline too (section 2, 24 Sep 2026). And its
+          // defaults, where the document states them: a science centre is
+          // indoors and two to three hours (the axes brief, 25 Sep 2026).
+          await settle(p.subject, { also_in: p.numbers?.also_in ?? [], defaults: p.numbers?.defaults ?? {} });
           // Undoing a create means removing it, which the snapshot cannot say
           // by holding a row that did not exist. It is recorded as a birth.
           snapshot.created = [...(snapshot.created ?? []), p.subject];

@@ -10,7 +10,7 @@
 import { query } from '../db.js';
 import * as filing from './filing.js';
 import * as placeAttributes from './placeAttributes.js';
-import { attributesIn, checkPredicate, matches, shorthand } from '../domain/browseRows.js';
+import { attributesIn, checkPredicate, matches, retiredIn, shorthand } from '../domain/browseRows.js';
 
 const bad = (message) => Object.assign(new Error(message), { status: 400, code: 'bad_request' });
 
@@ -49,7 +49,10 @@ export async function pool() {
 
   const valueOf = (place, key) => {
     const attr = byKey.get(key);
-    if (!attr) return null;
+    // A retired label answers nothing, whatever is still in the table under
+    // it. The eight were switched off rather than deleted (migration 246), so
+    // their values may exist; a row must not be filled from them.
+    if (!attr || !attr.active || attr.kind === 'scale') return null;
     const own = d.valuesByRef.get(place.ref)?.get(key);
     if (filing.fits(attr, own)) return own;
     const inherited = d.defaultsBySub.get(place.subcategory)?.get(key);
@@ -109,12 +112,20 @@ export function districts(ctx) {
  * different problems and want different fixes — the first is a gap in what we
  * have asked, the second is a gap in what exists. A row showing a bare nought
  * makes them look identical, and the first is by far the commoner one on a
- * young estate: most of the eight have never been answered for any drawer, so
+ * young estate: most labels have never been answered for most drawers, so
  * most rows are empty for a reason that has nothing to do with the places.
+ *
+ * A third reason outranks both: the rule names a label that has been retired
+ * — the eight graded axes, since migration 246 — and cannot run until it is
+ * rewritten. Said by name, because the rewrite needs to know what was meant.
  */
 export function emptyBecause(row, { places, valueOf, attributes }) {
   const asked = attributesIn(row.predicate);
   if (!asked.length) return 'nothing it asks about is set on any place';
+  const gone = retiredIn(row.predicate, attributes).map((k) => (attributes.get(k)?.label ?? k).toLowerCase());
+  if (gone.length) {
+    return `${gone.join(', ')} ${gone.length === 1 ? 'is' : 'are'} retired, so this rule cannot run until it is rewritten`;
+  }
   const silent = asked.filter((k) => !places.some((p) => valueOf(p, k)));
   if (!silent.length) return null;
   const names = silent.map((k) => (attributes.get(k)?.label ?? k).toLowerCase());
@@ -124,8 +135,10 @@ export function emptyBecause(row, { places, valueOf, attributes }) {
 }
 
 /** What a rule returns, per district, with the names behind each count. */
-export function fillFor(row, { places, valueOf }, dists) {
-  const hit = places.filter((p) => matches(row.predicate, p, valueOf));
+export function fillFor(row, { places, valueOf, attributes }, dists) {
+  // The vocabulary rides along so an open end of a range reads as the label's
+  // own end: "suits ages to 6" is from nought because Suits ages is.
+  const hit = places.filter((p) => matches(row.predicate, p, valueOf, attributes));
   const fill = {};
   for (const d of dists) {
     const here = hit.filter((p) => outcodeOf(p) === d.code);

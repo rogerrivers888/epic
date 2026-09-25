@@ -113,6 +113,8 @@ const ICONS = {
   playground: Blocks, arcade: Gamepad2, escapeRoom: Puzzle, themePark: FerrisWheel, bowling: Trophy, sport: Dumbbell,
   swimming: Droplets, climbing: Mountain, iceSkating: Snowflake, cycling: Bike, boat: Ship, festival: PartyPopper,
   market: Store, shopping: ShoppingBag, bookshop: BookOpen, castle: Castle, history: Castle, cinemaSnack: Popcorn,
+  // The ninth category (the axes brief, 25 Sep 2026): you come away knowing something.
+  learn: GraduationCap,
 } as const;
 
 export type IconName = keyof typeof ICONS;

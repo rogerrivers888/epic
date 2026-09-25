@@ -30,22 +30,11 @@ import * as placeAttributes from './placeAttributes.js';
 import * as shelfTaxonomy from './shelfTaxonomy.js';
 import { thresholdValues } from './settings.js';
 
-/**
- * The eight, in the order the screen draws them.
- *
- * Read from the vocabulary rather than listed here, so adding a ninth is a
- * migration and not a migration plus an edit to this constant. `kind` is what
- * separates them from the facets: a scale is the eight, everything else is a
- * facet (migration 216).
- */
-export const isAxis = (a) => a.kind === 'scale';
-
 /** One value, compared by its shape rather than by JSON, which orders keys. */
 export function sameValue(a, b) {
   if (!a || !b) return false;
   if (a.yesno != null || b.yesno != null) return a.yesno === b.yesno;
   if (a.choice != null || b.choice != null) return a.choice === b.choice;
-  if (a.level != null || b.level != null) return Number(a.level) === Number(b.level);
   if (a.from != null || a.to != null || b.from != null || b.to != null) {
     return (a.from ?? null) === (b.from ?? null) && (a.to ?? null) === (b.to ?? null);
   }
@@ -57,7 +46,6 @@ export function said(value, attribute = null) {
   if (!value) return '—';
   if (value.yesno != null) return value.yesno ? 'Yes' : 'No';
   if (value.choice != null) return String(value.choice);
-  if (value.level != null) return String(value.level);
   if (value.from != null || value.to != null) {
     const lo = value.from ?? attribute?.range_min ?? '';
     const hi = value.to ?? attribute?.range_max ?? '';
@@ -71,7 +59,6 @@ const valueKey = (v) => {
   if (!v) return null;
   if (v.yesno != null) return `y:${v.yesno}`;
   if (v.choice != null) return `c:${v.choice}`;
-  if (v.level != null) return `l:${Number(v.level)}`;
   if (v.from != null || v.to != null) return `r:${v.from ?? ''}-${v.to ?? ''}`;
   return null;
 };
@@ -89,17 +76,17 @@ const bare = (v) => {
   if (!v) return null;
   if (v.yesno != null) return { yesno: v.yesno };
   if (v.choice != null) return { choice: v.choice };
-  if (v.level != null) return { level: v.level };
   if (v.from != null || v.to != null) return { from: v.from ?? null, to: v.to ?? null };
   return null;
 };
 
+// `level` is not read: it was the eight graded scales' column, and the eight
+// were cancelled (migration 246). A value still there belongs to a retired label.
 const valueOfRow = (row) => {
   if (!row) return null;
   if (row.yesno != null) return { yesno: row.yesno };
   if (row.from_value != null || row.to_value != null) return { from: row.from_value, to: row.to_value };
   if (row.choice != null) return { choice: row.choice };
-  if (row.level != null) return { level: row.level };
   return null;
 };
 
@@ -231,7 +218,6 @@ export function fits(attribute, value) {
     case 'yesno': return value.yesno != null;
     case 'range': return value.from != null || value.to != null;
     case 'oneof': return value.choice != null;
-    case 'scale': return value.level != null;
     default: return false;
   }
 }
@@ -328,9 +314,8 @@ export async function drawerOf(subcategoryKey, loaded = null) {
     }));
   return {
     refs,
-    facets: answers.filter((a) => a.kind !== 'scale' && !a.mixed),
-    excluded: answers.filter((a) => a.kind !== 'scale' && a.mixed),
-    axes: answers.filter((a) => a.kind === 'scale'),
+    facets: answers.filter((a) => !a.mixed),
+    excluded: answers.filter((a) => a.mixed),
     // What is proposed but not yet agreed to — the "PROPOSED" number in the
     // band, and what "Accept all" would accept.
     proposed: answers.filter((a) => a.proposed && !a.mixed).length,
@@ -356,9 +341,7 @@ export function disagreeingIn({ refs, valuesByRef, answers, recordsByRef }) {
       const v = mine.get(a.key);
       if (!v || sameValue(v, a.value)) continue;
       if (v.by) human = true;
-      diffs.push(a.kind === 'scale'
-        ? `${a.label.toLowerCase()} ${v.level}, not ${a.value.level}`
-        : `${a.label.toLowerCase()} ${said(v, a).toLowerCase()}`);
+      diffs.push(`${a.label.toLowerCase()} ${said(v, a).toLowerCase()}`);
     }
     if (!diffs.length) continue;
     const rec = recordsByRef.get(ref) ?? null;

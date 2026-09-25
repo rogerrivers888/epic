@@ -1953,8 +1953,7 @@ function DrawerPlaces({ sc, word, feeds, title, canManage, wide, onChanged }: {
   const reads = (v?: AttributeValue) => (!v ? '\u2014'
     : v.choice ? v.choice
       : v.from != null || v.to != null ? `${v.from ?? ''}\u2013${v.to ?? ''}`
-        : v.level != null ? String(v.level)
-          : v.yesno === false ? 'No' : 'Yes');
+        : v.yesno === false ? 'No' : 'Yes');
 
   const setMany = async (a: PlaceAttribute, value: AttributeValue | null) => {
     const refs = [...ticked];
@@ -2821,7 +2820,6 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
   }, [tax.rules]);
 
   const kindOf = (a: PlaceAttribute) => (a.kind === 'yesno' ? 'Yes or no'
-    : a.kind === 'scale' ? `A scale · ${a.range_min ?? 0} to ${a.range_max ?? 4}`
     : a.kind === 'range' ? `A range · ${a.range_min ?? 0} to ${a.range_max ?? 99}`
       : `One of ${a.options.length}`);
   const setIn = (key: string) => Object.values(data?.defaults ?? {}).filter((m) => m[key]).length;
@@ -2869,17 +2867,7 @@ function OurLabels({ tax, wide, canManage, onChanged }: {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameTo, setRenameTo] = useState('');
 
-  /**
-   * The eight are not drawn here.
-   *
-   * Every control on this screen resolves to a yes/no unless the kind is
-   * `range` or `oneof`, so a scale would be offered as Yes and No, render a
-   * stored nought as "Yes", and be refused by `mustFit` on save (Codex,
-   * 20 Sep 2026). They have a control of their own — five steps, outline
-   * proposed and filled set — on the filing desk, and half-drawing them here
-   * would be worse than not drawing them at all.
-   */
-  const secondary = (data?.attributes ?? []).filter((a) => a.active && a.kind !== 'scale');
+  const secondary = (data?.attributes ?? []).filter((a) => a.active);
   const nameOf = (k: string) => (data?.attributes ?? []).find((o) => o.key === k)?.label ?? k;
   const [openKey, setOpenKey] = useState<string | null>(null);
   /** Which brought label is waiting for its value to be said. */
@@ -3962,9 +3950,6 @@ function PartsOfPlaces({ canManage, tax, onChanged }: {
 function said_(v: AttributeValue): string {
   if (v.choice) return v.choice;
   if (v.from != null || v.to != null) return `${v.from ?? ''}\u2013${v.to ?? ''}`;
-  // Before `yesno`, and explicitly: a scale read by the fallback says "yes" for
-  // every number including nought (Codex, 20 Sep 2026).
-  if (v.level != null) return String(v.level);
   return v.yesno === false ? 'no' : 'yes';
 }
 

@@ -26,7 +26,7 @@ import { Icon } from '../../components/Icon';
 import { desk, fonts, LIME } from '../../theme';
 import {
   Act, Alarm, Band, Cell, DeskButton, DeskPill, DeskSection, Head, Kicker,
-  LimeOutline, Link, Mark, Nothing, Row, Steps, TickBox, Value, WARN, tabular, type Col,
+  LimeOutline, Link, Mark, Nothing, Row, TickBox, Value, WARN, tabular, type Col,
 } from './desk';
 import { Picker, type Destination, type PickCategory } from './Picker';
 import { TextInput } from 'react-native';
@@ -471,14 +471,6 @@ export function SubcategoryBoard({ data, busy, canManage, onAccept, onFlip, onAc
             </View>
           </View>
 
-          <DeskSection kicker="THE EIGHT · OUTLINE IS PROPOSED, FILLED IS SET">
-            <View>
-              {data.axes.map((a) => (
-                <AxisRow key={a.key} a={a} busy={busy === a.key} canManage={canManage} onAccept={onAccept} />
-              ))}
-            </View>
-          </DeskSection>
-
           <View style={{
             flexDirection: 'row',
             alignItems: 'center',
@@ -612,40 +604,6 @@ function FacetRow({ a, busy, canManage, onAccept, onFlip }: {
               <Act label="flip it" tone="dim" ruled={false} onPress={busy ? undefined : () => onFlip(a.key)} />
             ) : null}
           </>
-        )}
-      </View>
-    </View>
-  );
-}
-
-function AxisRow({ a, busy, canManage, onAccept }: {
-  a: FilingAnswer; busy: boolean; canManage: boolean; onAccept: (k: string) => void;
-}) {
-  const level = a.value?.level ?? null;
-  return (
-    <View style={{
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 16,
-      paddingVertical: 9,
-      borderBottomWidth: 1,
-      borderBottomColor: desk.rule,
-    }}>
-      <View style={{ width: 200, flexGrow: 0, flexShrink: 0 }}>
-        <Value weight="600" size={13}>{a.label}</Value>
-        {a.anchor ? (
-          <Text style={{ fontFamily: fonts.body, fontSize: 11, color: desk.inkDim, marginTop: 2 }}>{a.anchor}</Text>
-        ) : null}
-      </View>
-      <Steps value={level} settled={a.settled} />
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Value tone={a.settled || !a.value ? 'dim' : 'lime'} size={11.5}>{a.why}</Value>
-      </View>
-      <View style={{ flexGrow: 0, flexShrink: 0 }}>
-        {a.value && !a.settled && canManage ? (
-          <Act label={busy ? 'accepting…' : 'Accept'} onPress={busy ? undefined : () => onAccept(a.key)} />
-        ) : (
-          <Value tone="dim" size={12.5}>{a.settled ? 'set' : a.proposed ? 'proposed' : ''}</Value>
         )}
       </View>
     </View>
