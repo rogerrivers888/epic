@@ -44,13 +44,21 @@ test('a merely late source still gets its grace', async () => {
   // Not marked slow — an events API having a bad second. It must not be cut off
   // the instant Google answers, which is the thing a shorter global grace broke.
   const sources = [{ key: 'google' }, { key: 'ticketmaster' }];
-  const started = [answers(20, [venue('Dishoom')]), answers(400, [venue('A gig')])];
+  // Whether the late source had spoken is read off the source, not off the
+  // clock. This used to assert at least 400ms had passed after a 400ms timer,
+  // and under load it saw 399: a timer and Date.now() do not share a tick, so
+  // that assertion fails for ever at exactly the moment a red run needs an
+  // excuse (owner, 25 Sep 2026). A fulfilled value from the late source is the
+  // fact the test is about, and it cannot be fulfilled before it has spoken.
+  let spoke = false;
+  const late = answers(400, [venue('A gig')]).then((v) => { spoke = true; return v; });
+  const started = [answers(20, [venue('Dishoom')]), late];
 
-  const { out, ms } = await took(() => settleBy(sources, started, 6000, useful));
+  const out = await settleBy(sources, started, 6000, useful);
 
+  assert.equal(spoke, true, 'answered before the late source had spoken');
   assert.equal(out[1].status, 'fulfilled', 'a late source that is not slow by nature is waited for');
   assert.deepEqual(out[1].value, [venue('A gig')]);
-  assert.ok(ms >= 400, `answered in ${ms}ms, before the late source had spoken`);
 });
 
 test('when only the slow source has anything, it is waited for properly', async () => {
