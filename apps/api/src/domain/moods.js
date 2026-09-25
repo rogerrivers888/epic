@@ -264,8 +264,8 @@ function combine(matches, rank = RANK) {
  * Defaults to the eight in this file, so every pure caller — the tests, a
  * script, anything that has not read the table — still works without one.
  */
-export const NO_VOCAB = { parentOf: new Map(), alsoIn: new Map(), pointsAt: new Map(), travel: new Set(), rank: RANK };
-export const vocabularyOf = (categories, subcategories, pointsAt = new Map(), travel = new Set()) => ({
+export const NO_VOCAB = { parentOf: new Map(), alsoIn: new Map(), pointsAt: new Map(), travel: new Set(), aside: new Set(), rank: RANK };
+export const vocabularyOf = (categories, subcategories, pointsAt = new Map(), travel = new Set(), aside = new Set()) => ({
   /**
    * The provider words answered *Travel — getting there, parking* in the back
    * office: a station, a car park, an airport. Infrastructure, held as an
@@ -273,6 +273,13 @@ export const vocabularyOf = (categories, subcategories, pointsAt = new Map(), tr
    * 2026, §7). A place that is nothing but these gets no shelf at all.
    */
   travel,
+  /**
+   * The words answered *Not in Epic*: a dentist, a gym, a hall for hire. The
+   * same fence, the same code path (owner, 25 Sep 2026): "a word answered Not
+   * in Epic is a decision that it is not somewhere to go, and if those places
+   * still surface the answer means nothing."
+   */
+  aside,
   /**
    * Which of our labels each provider's word means (migration 107). The owner,
    * 14 Sep 2026: "we don't use Google words; we use our own words." A rule
@@ -479,32 +486,83 @@ export function ourLabelsOf(labels, vocab = NO_VOCAB) {
 }
 
 /**
- * Whether a place is nothing but infrastructure: at least one of its words was
- * answered Travel, none of them points at a drawer, and nothing else — an
- * experience the source read, somewhere to eat — says it is a visit. A station
- * with a museum in it is a museum; a station is a station.
+ * Google's buckets that say nothing about what a place is. They are answered
+ * Not in Epic in the back office because they carry nothing, and they must
+ * not be read as a decision that the place is not somewhere to go: every
+ * place carries `establishment`, and an untyped car park and an untyped
+ * village hall both arrive as `premise` (owner, 25 Sep 2026: "they carry
+ * genuine places too, so fencing them would silently hide real venues").
  */
-export function travelOnly(venue, labels, vocab = NO_VOCAB) {
-  const travel = vocab?.travel;
-  if (!travel?.size) return false;
-  if (!labels.some((l) => travel.has(String(l)))) return false;
-  if (labels.some((l) => vocab?.pointsAt?.get(String(l)))) return false;
-  if (venue?.experiences?.length) return false;
-  return !EATING.has(venue?.category);
+export const NEUTRAL_WORDS = new Set([
+  'establishment', 'point_of_interest', 'food', 'health', 'premise', 'street_address', 'geocode',
+  'plus_code', 'route', 'intersection', 'political', 'locality', 'sublocality', 'sublocality_level_1',
+  'neighborhood', 'postal_code', 'postal_town', 'administrative_area_level_1', 'administrative_area_level_2',
+  'administrative_area_level_3', 'country', 'natural_feature', 'colloquial_area',
+].map((k) => `google:${k}`));
+
+/**
+ * The name of a place with no usable type, read for infrastructure.
+ *
+ * Google leaves a good many stations and car parks untyped — "Ascot Railway
+ * Station" arrives as `point_of_interest` and nothing else — and a type
+ * exclusion cannot see them. So on a place whose words say nothing, the name
+ * is read for station, car park, parking, bus stop, airport and the like
+ * (owner, 25 Sep 2026: "a name check is testable against the census; a type
+ * exclusion just quietly removes things"). Only ever on an untyped place: a
+ * pub called The Station House has a type, and keeps its shelf.
+ */
+export const INFRASTRUCTURE_NAME = /\b(?:railway station|train station|bus station|coach station|tube station|underground station|metro station|tram stop|bus stop|coach stop|taxi rank|park (?:and|&) ride|car park|parking|multi-?storey|airport|airfield|heliport|ferry terminal|ferry port|cruise terminal|motorway services|service station|petrol station|filling station|charging station|station)\b/i;
+
+/**
+ * Whether a place is not somewhere to go, and why.
+ *
+ * Three reasons, one fence: a word answered Travel (a station, a car park),
+ * a word answered Not in Epic (a dentist, a hall for hire), or — where the
+ * words say nothing at all — a name that says infrastructure. In every case
+ * nothing else may be claiming the place: no word pointing at a drawer, no
+ * experience the source read, nowhere to eat. A station with a museum in it
+ * is a museum; a station is a station.
+ */
+export function fencedBy(venue, labels, vocab = NO_VOCAB) {
+  if (labels.some((l) => vocab?.pointsAt?.get(String(l)))) return null;
+  if (venue?.experiences?.length) return null;
+  if (EATING.has(venue?.category)) return null;
+  const said = (set) => labels.find((l) => set?.has(String(l)) && !NEUTRAL_WORDS.has(String(l)));
+  const travel = said(vocab?.travel);
+  if (travel) return { kind: 'travel', word: travel };
+  const aside = said(vocab?.aside);
+  if (aside) return { kind: 'aside', word: aside };
+  // Untyped: every provider word it carries is one that says nothing.
+  const typed = labels.some((l) => /^(google|osm|wikidata|tripadvisor):/.test(String(l)) && !NEUTRAL_WORDS.has(String(l)));
+  if (typed) return null;
+  const m = INFRASTRUCTURE_NAME.exec(String(venue?.name ?? ''));
+  return m ? { kind: 'name', word: m[0] } : null;
 }
 
-/** The verdict for a place that is infrastructure: no cabinet, no drawer, no shelf. */
-const NO_SHELF = (word) => ({
+/** Kept for the tests and the bench: the Travel reason alone. */
+export const travelOnly = (venue, labels, vocab = NO_VOCAB) => fencedBy(venue, labels, vocab)?.kind === 'travel';
+
+const FENCE_REASON = {
+  travel: 'Getting there, or parking when you do. Infrastructure is held for reachability and is never a thing to visit, so it goes on no shelf at all.',
+  aside: 'A word answered Not in Epic is a decision that this is not somewhere to go, so it goes on no shelf at all.',
+  name: 'Its words say nothing and its name says infrastructure, so it goes on no shelf at all.',
+};
+
+/** The verdict for a place that is not somewhere to go: no cabinet, no drawer, no shelf. */
+const NO_SHELF = ({ kind, word }) => ({
   category: null,
   subcategory: null,
   weights: {},
   because: [{
-    scope: 'default', subject: word ?? null, subject_label: 'travel',
+    scope: 'default', subject: word ?? null, subject_label: kind,
     weights: {}, subcategory: null,
-    reason: 'Getting there, or parking when you do. Infrastructure is held for reachability and is never a thing to visit, so it goes on no shelf at all.',
+    reason: FENCE_REASON[kind],
   }],
   confident: true,
   shelves: [],
+  // Why it is kept off every shelf. `travel` stays true for every reason, so
+  // the four lists that obey the verdict need know nothing about which.
+  fenced: kind,
   travel: true,
 });
 
@@ -517,9 +575,8 @@ export function shelvesForVenue(venue, rules = NO_RULES, vocab = NO_VOCAB) {
   // each read path (owner, 25 Sep 2026: "fixing five read paths today means
   // missing the sixth next month"). A rule about this one place still wins:
   // somebody who filed a station by hand meant it.
-  if (!(ref && rules?.place?.get(ref)) && travelOnly(venue, labels, vocab)) {
-    return NO_SHELF(labels.find((l) => vocab.travel.has(String(l))));
-  }
+  const fence = (ref && rules?.place?.get(ref)) ? null : fencedBy(venue, labels, vocab);
+  if (fence) return NO_SHELF(fence);
   // A rule the owner wrote beats every rule Epic wrote for itself: the
   // owner's rules are matched on their own first, and only where none fires
   // do Epic's get a say — so neither the primary type nor a longer rule of

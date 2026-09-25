@@ -365,3 +365,56 @@ test('without a vocabulary the fence is off, so every pure caller still files a 
   const station = { source: 'google', sourcePlaceId: 'st', category: 'attraction', experiences: [], labels: ['google:train_station'] };
   assert.equal(shelvesForVenue(station).category, 'fun');
 });
+
+// --- the same fence, three reasons (owner, 25 Sep 2026) ---------------------
+
+const { fencedBy, INFRASTRUCTURE_NAME } = await import('../src/domain/moods.js');
+const FENCE_VOCAB = vocabularyOf(
+  [{ key: 'fun' }, { key: 'food' }, { key: 'culture' }],
+  [{ key: 'museums', category_key: 'culture' }],
+  new Map([['google:museum', 'museums']]),
+  new Set(['google:train_station', 'google:parking']),
+  new Set(['google:dentist', 'google:community_center', 'google:establishment', 'google:point_of_interest', 'google:premise']),
+);
+const untyped = (name, labels = ['google:point_of_interest', 'google:establishment']) =>
+  ({ source: 'google', sourcePlaceId: name, name, category: 'attraction', experiences: [], labels });
+
+test('a place whose only meaningful word was answered Not in Epic gets no shelf, by the same path', () => {
+  const dentist = untyped('Smile Dental', ['google:dentist', 'google:point_of_interest', 'google:establishment']);
+  const out = shelvesForVenue(dentist, NO_RULES, FENCE_VOCAB);
+  assert.equal(out.fenced, 'aside');
+  assert.equal(out.travel, true, 'the four lists read one flag whatever the reason');
+  assert.deepEqual(out.shelves, []);
+  assert.equal(out.because[0].subject, 'google:dentist');
+});
+
+test('the words that say nothing never fence, even though they are answered Not in Epic', () => {
+  const hall = untyped('Sunninghill Village Hall', ['google:premise', 'google:point_of_interest', 'google:establishment']);
+  const out = shelvesForVenue(hall, NO_RULES, FENCE_VOCAB);
+  assert.equal(out.fenced, undefined);
+  assert.notEqual(out.category, null);
+});
+
+test('an untyped place is read by its name: a station is fenced, a hall is not, and a typed pub called The Station House keeps its shelf', () => {
+  assert.equal(shelvesForVenue(untyped('Ascot (Berks) Railway Station - South Western Railway'), NO_RULES, FENCE_VOCAB).fenced, 'name');
+  assert.equal(shelvesForVenue(untyped('Englemere Pond car park'), NO_RULES, FENCE_VOCAB).fenced, 'name');
+  assert.equal(shelvesForVenue(untyped('Windsor Castle Parking Lots'), NO_RULES, FENCE_VOCAB).fenced, 'name');
+  assert.equal(shelvesForVenue(untyped('Heathrow Airport Terminal 5'), NO_RULES, FENCE_VOCAB).fenced, 'name');
+  assert.equal(shelvesForVenue(untyped('Bracknell Bus Stop C'), NO_RULES, FENCE_VOCAB).fenced, 'name');
+  assert.equal(shelvesForVenue(untyped('Sunninghill Village Hall'), NO_RULES, FENCE_VOCAB).fenced, undefined);
+  // Typed: the name is not read at all.
+  const pub = { ...untyped('The Station House'), category: 'pub', labels: ['google:pub', 'google:bar'] };
+  assert.equal(shelvesForVenue(pub, NO_RULES, FENCE_VOCAB).fenced, undefined);
+  const heritage = untyped('Alresford Station', ['google:tourist_attraction', 'google:point_of_interest']);
+  assert.equal(shelvesForVenue(heritage, NO_RULES, FENCE_VOCAB).fenced, undefined, 'a real word, even a weak one, is a type');
+  const museum = untyped('Didcot Railway Centre Station', ['google:museum', 'google:point_of_interest']);
+  assert.equal(shelvesForVenue(museum, NO_RULES, FENCE_VOCAB).fenced, undefined);
+});
+
+test('fencedBy names its reason and its word, and the name pattern is a word match', () => {
+  assert.deepEqual(fencedBy(untyped('x', ['google:train_station']), ['google:train_station'], FENCE_VOCAB), { kind: 'travel', word: 'google:train_station' });
+  assert.equal(fencedBy(untyped('Stationers Hall'), ['google:point_of_interest'], FENCE_VOCAB), null, '"Stationers" is not "station"');
+  assert.ok(INFRASTRUCTURE_NAME.test('Reading Station'));
+  assert.ok(INFRASTRUCTURE_NAME.test('Park & Ride Winnersh'));
+  assert.ok(!INFRASTRUCTURE_NAME.test('Parkland Walk'));
+});
