@@ -19,6 +19,10 @@ const { setOffKeys } = await import('../src/sources/switches.js');
 process.env.GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || 'test-key-never-sent';
 
 const HH = '00000000-0000-4000-8000-0000000000ef';
+
+// package.json says Node 20 or later, and Object.groupBy arrived in 21 (Codex
+// via epic-00, 25 Sep 2026).
+const groupBy = (list, key) => list.reduce((out, x) => { (out[key(x)] ??= []).push(x); return out; }, {});
 const CAT = 'test-ref-cat';
 const SUB = 'test-ref-drawer';
 
@@ -72,7 +76,7 @@ test('twenty a category, bucket by bucket, each once, with the reason written be
   const [c] = (await ref.propose({ categories: [CAT] })).filter((x) => x.category === CAT);
   assert.equal(c.picks.length, 20);
   assert.equal(new Set(c.picks.map((p) => p.venue_ref)).size, 20, 'each place once');
-  const by = Object.groupBy(c.picks, (p) => p.picked_for);
+  const by = groupBy(c.picks, (p) => p.picked_for);
   assert.equal(by.dense.length, 6);
   assert.ok(by.dense.every((p) => Number(p.venue_ref.slice(-3)) <= 30), 'dense picks come from the biggest area');
   assert.equal(by.thin.length, 4);
@@ -103,7 +107,7 @@ test('a place sits in the smallest of its areas, not in all of them', async () =
   // there, every one of them is dense (Codex, 25 Sep 2026).
   for (const r of rows) await query(`insert into place_areas (venue_ref, area_slug) values ($1, 'test-country') on conflict do nothing`, [r.venue_ref]);
   const [c] = (await ref.propose({ categories: [CAT] })).filter((x) => x.category === CAT);
-  const by = Object.groupBy(c.picks, (p) => p.picked_for);
+  const by = groupBy(c.picks, (p) => p.picked_for);
   assert.ok(by.thin.every((p) => Number(p.venue_ref.slice(-3)) > 50), 'thin still means the small areas');
   assert.ok(by.dense.every((p) => Number(p.venue_ref.slice(-3)) <= 30), 'dense still means the biggest town');
 });
