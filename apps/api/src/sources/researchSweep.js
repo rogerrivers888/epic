@@ -87,10 +87,10 @@ export const needsGoogle = (venueRef) => String(venueRef).startsWith('google:');
  * forces research whatever the record holds — was reserving nothing for the
  * lead it would then buy (Codex, 25 Sep 2026).
  */
-export async function requestsStillNeeded(refs) {
+export async function requestsStillNeeded(refs, q = query) {
   const out = new Map(refs.map((r) => [r, needsGoogle(r) ? REQUESTS_PER_PLACE : 0]));
   if (!refs.length) return out;
-  const { rows } = await query('select venue_ref, name, lat, website from place_records where venue_ref = any($1)', [refs]);
+  const { rows } = await q('select venue_ref, name, lat, website from place_records where venue_ref = any($1)', [refs]);
   for (const r of rows) {
     if (!needsGoogle(r.venue_ref)) continue;
     if (r.name && r.lat != null) out.set(r.venue_ref, r.website ? 0 : 1);
@@ -155,13 +155,13 @@ export async function sampleFor(subcategory) {
  * fresh, identified record before asking anybody anything. The estimate
  * counts them apart so the price is for what will actually go out.
  */
-async function alreadyHeld(refs) {
+async function alreadyHeld(refs, q = query) {
   if (!refs.length) return new Set();
   // The same predicate `enrich` skips on — not a copy of it. A copy counted
   // any recent row with any provenance as free, and rows an older researcher
   // wrote were subtracted from the confirmed count and then paid for
   // (Codex, 25 Sep 2026).
-  const { rows } = await query(
+  const { rows } = await q(
     `select venue_ref, enrich_state, enriched_at, research_version, provenance
        from place_records where venue_ref = any($1)`,
     [refs],
@@ -440,15 +440,20 @@ async function seedFromRecord(venueRef) {
   // for, and the address tells two branches of one chain apart (Codex, 25
   // Sep 2026).
   if (!(rec?.name && rec?.lat != null)) return {};
-  // The town is on the household's row, not the record, and it is what tells
-  // two branches of one chain apart when they share a name and a site
-  // (Codex, 25 Sep 2026).
+  // Everything `seedFor` would have merged, because a complete seed makes it
+  // return at once: the household's row or the shortlist's supplies the
+  // town — what tells two branches of one chain apart — and may hold a
+  // category or a website the record lacks, either of which saves a paid
+  // page lead or decides whether a menu is looked for (Codex, 25 Sep 2026).
   const household = await owned.seedFromHousehold(venueRef).catch(() => null);
+  const base = household ?? await owned.seedFromShortlist(venueRef).catch(() => null) ?? {};
   return {
     name: rec.name, lat: rec.lat, lng: rec.lng,
-    website: rec.website ?? undefined, postcode: rec.postcode ?? undefined,
-    category: rec.category ?? undefined, address: rec.address ?? undefined,
-    locality: household?.locality ?? undefined,
+    website: rec.website ?? base.venue?.website ?? undefined,
+    postcode: rec.postcode ?? undefined,
+    category: rec.category ?? base.category ?? undefined,
+    address: rec.address ?? undefined,
+    locality: base.locality ?? undefined,
   };
 }
 
@@ -697,9 +702,19 @@ export async function places(id) {
  * confirmed with the rest (Codex, 25 Sep 2026). Not a place still in flight
  * at its deadline.
  */
+/**
+ * How long a place given up on at its deadline is left alone. Its research
+ * may still be in flight, so it is not asked again at once; but a process
+ * that died, or a promise that never settles, would otherwise strand it for
+ * ever (Codex, 25 Sep 2026). Past this its reservation has long expired and
+ * nothing can still be holding it.
+ */
+export const STRAY_SETTLES_WITHIN_MS = 45 * 60_000;
 const RETRYABLE = `(state in ('pending', 'asking')
           or (state = 'failed'
-          and not (coalesce(outcome->'problems'->>0, '') like 'gave up after%' and not coalesce((outcome->>'late')::boolean, false))))`;
+          and not (coalesce(outcome->'problems'->>0, '') like 'gave up after%'
+                   and not coalesce((outcome->>'late')::boolean, false)
+                   and coalesce(attempted_at, now()) > now() - (${STRAY_SETTLES_WITHIN_MS} || ' milliseconds')::interval)))`;
 
 /**
  * What a retry would cost, and the number it has to be confirmed with.
@@ -709,15 +724,18 @@ const RETRYABLE = `(state in ('pending', 'asking')
  * identified buys two. The same gate as the sweep itself: nothing paid
  * starts on a number the caller has not seen (Codex, 25 Sep 2026).
  */
-export async function retryEstimate(id, run = null) {
-  const sweepRow = run ?? await one(id);
-  const { rows } = await query(`select venue_ref from research_sweep_places where sweep_id = $1 and ${RETRYABLE} order by venue_ref`, [id]);
-  const cost = await requestsStillNeeded(rows.map((r) => r.venue_ref));
+export async function retryEstimate(id, run = null, q = query) {
+  // `q` is the caller's connection when there is one: made under the
+  // advisory lock on the pool's other connections, the plan could wait on a
+  // connection held by a retry waiting on the lock (Codex, 25 Sep 2026).
+  const sweepRow = run ?? (await q('select * from research_sweeps where id = $1', [id])).rows[0];
+  const { rows } = await q(`select venue_ref from research_sweep_places where sweep_id = $1 and ${RETRYABLE} order by venue_ref`, [id]);
+  const cost = await requestsStillNeeded(rows.map((r) => r.venue_ref), q);
   // In sample mode a held place is skipped by `enrich` and costs nothing on
   // top — a place whose late answer landed after it was given up on is one
   // (Codex, 25 Sep 2026). Reference mode asks everything again.
   if (sweepRow?.params?.mode !== 'reference') {
-    const held = await alreadyHeld(rows.map((r) => r.venue_ref));
+    const held = await alreadyHeld(rows.map((r) => r.venue_ref), q);
     for (const ref of held) cost.set(ref, 0);
   }
   const counts = [...cost.values()];
@@ -753,7 +771,7 @@ export async function retryFailed(id, { confirm = null } = {}) {
     // rows: a late answer landing between an estimate and the reopening
     // could otherwise make one more place retryable — perhaps one costing
     // two requests — than the number confirmed (Codex, 25 Sep 2026).
-    const plan = await retryEstimate(id, run);
+    const plan = await retryEstimate(id, run, (text, params) => client.query(text, params));
     if (Number(confirm) !== plan.requests) {
       const err = new Error(`This retry is ${plan.places} places, up to ${plan.requests} Google requests at £${plan.costGbpHigh.toFixed(2)}. Confirm with ${plan.requests} to run it.`);
       err.code = 'confirm_required'; err.status = 409; err.plan = plan;

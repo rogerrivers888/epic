@@ -484,6 +484,14 @@ test('a place still in flight at its deadline is not asked again until its answe
   assert.equal(reopened.retried, 1, 'only the settled one');
   const { rows } = await query(`select venue_ref, state from research_sweep_places where sweep_id = $1 and venue_ref = any($2) order by venue_ref`, [row.id, two.map((r) => r.venue_ref)]);
   assert.deepEqual(rows.map((r) => r.state), ['failed', 'pending']);
+  // An hour on, nothing can still be holding the other one — its process is
+  // gone or its promise never settled — and it is not stranded for ever
+  // (Codex, 25 Sep 2026).
+  await query(`update research_sweeps set state = 'done', finished_at = now() where id = $1`, [row.id]);
+  await query(`update research_sweep_places set state = 'failed' where sweep_id = $1 and venue_ref = $2`, [row.id, two[1].venue_ref]);
+  await query(`update research_sweep_places set attempted_at = now() - interval '1 hour' where sweep_id = $1 and venue_ref = $2`, [row.id, two[0].venue_ref]);
+  const later = await sweep.retryEstimate(row.id);
+  assert.ok(later.refs.includes(two[0].venue_ref), 'an orphaned stray is retryable once its reservation has long expired');
   await query(`update research_sweeps set state = 'done' where id = $1`, [row.id]);
 });
 
