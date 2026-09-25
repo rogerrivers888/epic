@@ -81,12 +81,33 @@ const SLICE_MS = Number(process.env.EPIC_CENSUS_SLICE_MS || 55_000);
  */
 export const DAILY_CAP = Number(process.env.EPIC_CENSUS_DAILY_CAP || 75_000);
 
-/** The next 00:00 UTC, which is when Google's daily quota starts again. */
-export const nextUtcMidnight = (from = new Date()) => {
-  const d = new Date(from);
-  d.setUTCHours(24, 0, 0, 0);
-  return d;
+/**
+ * The next moment Google's daily quota starts again.
+ *
+ * Midnight **Pacific**, not UTC. The London re-census stopped on a 429 at
+ * 12:11 UTC, woke at 00:00:30 UTC, asked once, was refused again, and went
+ * back to sleep until the following midnight — a whole day of quota lost,
+ * because Google Cloud's daily quotas reset at midnight America/Los_Angeles,
+ * which is 07:00 UTC in summer and 08:00 in winter (25 Sep 2026). Worked out
+ * from the calendar rather than a fixed offset, so the clocks changing does
+ * not cost another day.
+ */
+export const nextQuotaReset = (from = new Date()) => {
+  // The date it is in Los Angeles right now, then midnight of the day after.
+  const la = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(from);
+  const [y, m, d] = la.split('-').map(Number);
+  // Try the two possible UTC offsets and keep the one that reads as 00:00 in LA.
+  for (const utcHour of [7, 8]) {
+    const candidate = new Date(Date.UTC(y, m - 1, d + 1, utcHour, 0, 0));
+    const hourInLa = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Los_Angeles', hour: '2-digit', hour12: false }).format(candidate));
+    if (hourInLa === 0 && candidate > from) return candidate;
+  }
+  return new Date(Date.UTC(y, m - 1, d + 1, 8, 0, 0));
 };
+/** Kept as a name for a while: callers and tests said midnight UTC, which it never should have been. */
+export const nextUtcMidnight = nextQuotaReset;
 
 /** How many goes a tile gets before the run is allowed to finish without it. */
 export const MAX_TILE_TRIES = Number(process.env.EPIC_CENSUS_TILE_TRIES || 3);
@@ -251,7 +272,7 @@ export async function startRun({
 
   const { rows: [run] } = await query(
     `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, started_by, tiles_total, daily_cap, day, day_requests)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, (now() at time zone 'utc')::date, 0) returning *`,
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, (now() at time zone 'America/Los_Angeles')::date, 0) returning *`,
     [label ?? [...areas, ...outcodes].join(', '),
       [...areas.map((a) => a.toUpperCase()), ...outcodes.map((o) => o.toUpperCase())], dLat, dLng,
       maxRequests, ratePerSec, freshDays, startedBy, tiles.length, dailyCap]);
@@ -337,7 +358,7 @@ export async function resume(id) {
 async function rollDay(runId) {
   const { rows: [row] } = await query(
     `update census_runs r
-        set day = (now() at time zone 'utc')::date,
+        set day = (now() at time zone 'America/Los_Angeles')::date,
             -- Every census slice asked today, by any run. The quota belongs to
             -- the project, so the budget has to as well.
             day_requests = coalesce((select sum((pc.units->>'google')::int) from provider_calls pc
@@ -347,7 +368,7 @@ async function rollDay(runId) {
                                       -- count in units.google, and a predicate on the label
                                       -- missed every one of those (Codex, 24 Sep 2026).
                                       where pc.units ? 'google'
-                                        and pc.created_at >= date_trunc('day', now() at time zone 'utc')), 0)
+                                        and pc.created_at >= date_trunc('day', now() at time zone 'America/Los_Angeles') at time zone 'America/Los_Angeles'), 0)
       where r.id = $1
       returning day_requests, coalesce(daily_cap, $2) as daily_cap`, [runId, DAILY_CAP]);
   return { dayRequests: Number(row?.day_requests ?? 0), dailyCap: Number(row?.daily_cap ?? DAILY_CAP) };
@@ -398,7 +419,7 @@ async function refreshProgress(runId) {
                                       -- count in units.google, and a predicate on the label
                                       -- missed every one of those (Codex, 24 Sep 2026).
                                       where pc.units ? 'google'
-                                        and pc.created_at >= date_trunc('day', now() at time zone 'utc')), 0),
+                                        and pc.created_at >= date_trunc('day', now() at time zone 'America/Los_Angeles') at time zone 'America/Los_Angeles'), 0),
             last_seen_at = now()
        from (select started_at as began from census_runs where id = $1) r0,
             (select count(*)::int total,
@@ -641,7 +662,7 @@ export async function advance({ runId = null, budgetMs = SLICE_MS, now = () => D
     // reset (owner, 21 Sep 2026).
     const today = await rollDay(run.id);
     if (today.dayRequests >= today.dailyCap) {
-      const back = nextUtcMidnight();
+      const back = nextQuotaReset();
       await waitUntil(run.id, back,
         `${today.dayRequests.toLocaleString('en-GB')} requests today, which is the ${today.dailyCap.toLocaleString('en-GB')} assumed daily cap; back at ${back.toISOString().slice(11, 16)} UTC`);
       return { working: false, reason: 'daily cap', resumeAfter: back, tiles };
@@ -711,7 +732,7 @@ export async function advance({ runId = null, budgetMs = SLICE_MS, now = () => D
       // that retries against a refusal spends the whole of the next day's
       // allowance proving the same point. So: stop, keep what it said word for
       // word, and come back after the reset (owner, 21 Sep 2026).
-      const back = nextUtcMidnight();
+      const back = nextQuotaReset();
       await query(
         `update census_runs set refusal = $2, refused_at = now() where id = $1`,
         [run.id, String(out.refused).slice(0, 600)]);
@@ -885,7 +906,7 @@ export async function resumeInterrupted() {
   const { rows: woken } = await query(
     `update census_runs
         set state = 'running', resume_after = null, problem = null,
-            day = (now() at time zone 'utc')::date, day_requests = 0, last_seen_at = now()
+            day = (now() at time zone 'America/Los_Angeles')::date, day_requests = 0, last_seen_at = now()
       where state = 'waiting' and resume_after is not null and resume_after <= now()
         -- Never into a region somebody else is working. Starting refuses while
         -- a run waits, so this should not arise — but a clock that wakes a run

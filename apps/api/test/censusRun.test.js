@@ -197,11 +197,13 @@ test('a provider refusal stops the whole run, not one tile', async (t) => {
     `select state, problem, refusal, refused_at, resume_after from census_runs where id = $1`, [run.id]);
   // Waiting, not refused-and-finished: "stop cleanly on the first 429, never
   // retry against it, resume automatically after the 00:00 UTC reset" (owner,
-  // 21 Sep 2026). Paused waits for a person; waiting waits for a clock.
+  // 21 Sep 2026). Paused waits for a person; waiting waits for a clock. The
+  // clock is Google's, and Google's day turns at midnight in Los Angeles —
+  // 07:00 or 08:00 UTC — not at 00:00 UTC (25 Sep 2026, a day's quota lost).
   assert.equal(after.state, 'waiting');
   assert.ok(after.resume_after, 'and it says when it will try again');
   assert.ok(new Date(after.resume_after) > new Date(), 'which is in the future');
-  assert.equal(new Date(after.resume_after).getUTCHours(), 0, 'at the quota reset, which is 00:00 UTC');
+  assert.ok([7, 8].includes(new Date(after.resume_after).getUTCHours()), 'at the quota reset, which is midnight Pacific');
   // Word for word, because the number in it is the only authority on what the
   // daily cap really is.
   assert.match(after.refusal ?? '', /Quota exceeded/);
@@ -579,7 +581,7 @@ test('a run stops itself at the day\'s allowance and comes back at the reset', a
     `select state, resume_after, problem, day_requests from census_runs where id = $1`, [run.id]);
   assert.equal(after.state, 'waiting', 'it stopped itself rather than being refused');
   assert.ok(after.day_requests >= 3, 'having spent the day\'s allowance');
-  assert.equal(new Date(after.resume_after).getUTCHours(), 0, 'and comes back at 00:00 UTC');
+  assert.ok([7, 8].includes(new Date(after.resume_after).getUTCHours()), 'and comes back at midnight Pacific');
   assert.match(after.problem ?? '', /daily cap/);
 
   // The clock comes round, and nobody had to be awake for it.
@@ -753,18 +755,20 @@ test('a plan that has not changed re-opens nothing', async (t) => {
 test('a tile may not spend more than the day has left', async (t) => {
   await clean();
   t.after(async () => {
-    await query(`delete from census_slices where area_slug = 'test/yesterday-spend'`);
+    await query(`delete from provider_calls where ms = -4244`);
     await clean();
   });
   // 39 of a 40 cap already spent today, and a run ceiling far above it. Handing
   // the tile the run's allowance let it ask its way through a whole drawer
   // before the daily check came round again, so the client met the 429 the
   // budget exists to avoid (Codex, 21 Sep 2026).
+  // Thirty-nine already spent today, on the ledger — which is what the day's
+  // budget reads since 2b8e78c: every Google request on the project, whatever
+  // asked it. A fixture that wrote census_slices instead was seeding a table the
+  // budget no longer looks at (25 Sep 2026).
   await query(
-    `insert into census_slices (area_slug, min_lat, min_lng, max_lat, max_lng, category, subcategory,
-                                google_type, query, returned, new_ids, saturated, depth, requests, ran_at)
-     values ('test/yesterday-spend', 51.4, -0.7, 51.5, -0.6, 'sport', 'golf', 'golf_course', 'golf course',
-             20, 20, false, 0, 39, now())`);
+    `insert into provider_calls (provider, purpose, units, ms, created_at)
+     values ('google', 'census.slice', '{"google": 39, "google-essentials": 39}'::jsonb, -4244, now())`);
   const { rows: [run] } = await query(
     `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, daily_cap, day, day_requests)
      values ('test tile budget', array['ZZ'], 0.08, 0.12, 100000, 0, 30, 40, (now() at time zone 'utc')::date, 0)
@@ -1044,4 +1048,75 @@ test('padding a broad region on a fine grid does not take the request thread hos
   const took = Date.now() - began;
   assert.ok(tiles.length > 300, `it padded (${tiles.length} tiles)`);
   assert.ok(took < 3000, `and did so in ${took} ms, not minutes`);
+});
+
+
+test('the quota day turns over at midnight in Los Angeles, whatever the clocks are doing', async () => {
+  // The re-census woke at 00:00:30 UTC, asked once, was refused again and slept
+  // until the following midnight: a day of quota lost, because Google's day
+  // resets at midnight Pacific (25 Sep 2026).
+  const { nextQuotaReset } = await import('../src/sources/censusRun.js');
+  const inLa = (d) => new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Los_Angeles', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+  for (const from of [new Date('2026-09-25T00:00:30Z'), new Date('2026-09-25T12:11:04Z'), new Date('2026-12-15T12:00:00Z'), new Date('2026-07-01T06:59:00Z')]) {
+    const reset = nextQuotaReset(from);
+    assert.ok(reset > from, `after ${from.toISOString()}`);
+    assert.equal(inLa(reset), '00:00', `reads midnight in Los Angeles (${reset.toISOString()})`);
+    assert.ok([7, 8].includes(reset.getUTCHours()), 'which is 07:00 or 08:00 UTC');
+    assert.ok(reset - from <= 24 * 3600 * 1000, 'and never more than a day away');
+  }
+  // From 00:00:30 UTC on the 25th the next reset is 07:00 UTC the same day, not
+  // midnight the day after.
+  assert.equal(nextQuotaReset(new Date('2026-09-25T00:00:30Z')).toISOString(), '2026-09-25T07:00:00.000Z');
+});
+
+test('a boundary place is counted in exactly one neighbour, never two and never none', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from area_counts where area_slug in ('zz4a', 'zz4b')`);
+    await query(`delete from geo_cells where code like 'ZZ4%'`);
+    await query(`delete from place_index where venue_ref like 'google:boundary_%'`);
+    await clean();
+  });
+  // Two districts side by side, a few hundred metres across each — the size at
+  // which every census box straddles the line.
+  await query(
+    `insert into geo_cells (code, scheme, label, outcode, lat, lng, source) values
+       ('ZZ4A 1', 'sector', 'ZZ4A 1', 'ZZ4A', 51.5200, -0.1300, 'test'),
+       ('ZZ4B 1', 'sector', 'ZZ4B 1', 'ZZ4B', 51.5200, -0.1200, 'test')
+     on conflict (code) do update set outcode = excluded.outcode, lat = excluded.lat, lng = excluded.lng`);
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, started_at)
+     values ('test/boundary', 51.51, -0.14, 51.53, -0.11, array['ZZ4A','ZZ4B'], 'done', now(), now() - interval '1 minute')
+     on conflict (grid_key) do update set outcodes = excluded.outcodes, state = 'done', censused_at = now()`);
+  // Six places, all in boxes about four hundred metres wide that sit on the
+  // line between the two — some just west of it, some just east, one dead on.
+  const boxes = [
+    ['google:boundary_w1', '51.5180,-0.1290,51.5220,-0.1250'], // centre -0.1270: nearer A
+    ['google:boundary_w2', '51.5170,-0.1300,51.5210,-0.1260'], // -0.1280: A
+    ['google:boundary_e1', '51.5180,-0.1240,51.5220,-0.1200'], // -0.1220: B
+    ['google:boundary_e2', '51.5190,-0.1230,51.5230,-0.1190'], // -0.1210: B
+    ['google:boundary_mid', '51.5180,-0.1270,51.5220,-0.1230'], // -0.1250: dead centre, one of them
+    ['google:boundary_wide', '51.5100,-0.1400,51.5300,-0.1100'], // 2 km wide: still unresolved
+  ];
+  for (const [ref, slice] of boxes) {
+    await query(
+      `insert into place_index (venue_ref, country_code, slice, category, subcategory)
+       values ($1, 'GB', $2::text, 'culture', 'museums') on conflict (venue_ref) do update set slice = excluded.slice`, [ref, slice]);
+    await query(
+      `insert into place_subcategories (venue_ref, category, subcategory, found_by, area_slug, first_seen, last_seen)
+       values ($1, 'culture', 'museums', 'museum', 'test/boundary', now(), now())
+       on conflict (venue_ref, subcategory, coalesce(area_slug, '')) do nothing`, [ref]);
+  }
+
+  await rollUpOutcodes({ outcodes: ['ZZ4A', 'ZZ4B'] });
+  const { rows } = await query(
+    `select area_slug, census_count, unresolved from area_counts where area_slug in ('zz4a','zz4b') and subcategory = 'museums' order by 1`);
+  const a = rows.find((r) => r.area_slug === 'zz4a'); const b = rows.find((r) => r.area_slug === 'zz4b');
+  // Five small boxes are placed by their centres — each in exactly one district.
+  assert.equal(a.census_count + b.census_count, 5, 'the union across the two is the five distinct places, not more and not fewer');
+  // The dead-centre box is a tie, and a tie goes to the lower sector code.
+  assert.equal(a.census_count, 3, 'two sit west of the line, and the one exactly on it goes to ZZ4A');
+  assert.equal(b.census_count, 2, 'two east of it');
+  // The two-kilometre box is on neither side, and stays neither in nor out.
+  assert.equal(a.unresolved, 1); assert.equal(b.unresolved, 1);
 });

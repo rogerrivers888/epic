@@ -77,6 +77,29 @@ export const widthOf = (box) => (box
 export function whereBoxSits(box, { cells, universe }) {
   if (!box) return 'nowhere';
   const inRing = cells instanceof Set ? cells : new Set(cells);
+  // The rule at the top of this file, built at last. A box under a kilometre is
+  // placed by its centre: the nearest sector to the middle of a four-hundred-
+  // metre box is where the place is, near enough, and a boundary place is
+  // arbitrary either way — counted in the wrong one of two neighbours is a
+  // small error, counted nowhere is a missing place (owner, 25 Sep 2026).
+  // Every box, whatever its width, went through the corner test below, so a
+  // district a few streets wide — smaller than any box — could never resolve a
+  // single place: Bloomsbury counted 3 with hundreds unresolved, and the
+  // one-kilometre re-census made it worse. Wider boxes keep the corner test,
+  // because a box that big really can be on either side of the line.
+  if (widthOf(box) <= FINE_M) {
+    const centre = { lat: (box.minLat + box.maxLat) / 2, lng: (box.minLng + box.maxLng) / 2 };
+    let best = null; let bestD = Infinity;
+    for (const u of universe) {
+      const d = (u.lat - centre.lat) ** 2 + (u.lng - centre.lng) ** 2;
+      // A dead heat goes to the lower sector code, whatever order the universe
+      // was read in: two roll-ups over two neighbours read two universes, and
+      // "counted once globally" (owner, 25 Sep 2026) needs both to agree on
+      // which side a box exactly between them is on.
+      if (d < bestD || (d === bestD && best && u.code < best.code)) { bestD = d; best = u; }
+    }
+    return best && inRing.has(best.code) ? 'inside' : 'outside';
+  }
   let ins = 0;
   for (const p of cornersOf(box)) {
     let best = null; let bestD = Infinity;

@@ -121,3 +121,18 @@ test('a box across the edge is unresolved, and never dropped', async () => {
   assert.equal(out.unresolved.fun, 1);
   assert.equal(out.boxes.across, 1);
 });
+
+
+test('a box under a kilometre is placed by its centre, and a wide one is not', async () => {
+  const { whereBoxSits } = await import('../src/repositories/censusRing.js');
+  const universe = [{ code: 'A', lat: 51.52, lng: -0.13 }, { code: 'B', lat: 51.52, lng: -0.12 }];
+  // A four-hundred-metre box straddling the midline, centre nearer A.
+  assert.equal(whereBoxSits({ minLat: 51.518, minLng: -0.129, maxLat: 51.522, maxLng: -0.125 }, { cells: ['A'], universe }), 'inside');
+  assert.equal(whereBoxSits({ minLat: 51.518, minLng: -0.129, maxLat: 51.522, maxLng: -0.125 }, { cells: ['B'], universe }), 'outside');
+  // The same box with its centre nearer B.
+  assert.equal(whereBoxSits({ minLat: 51.518, minLng: -0.124, maxLat: 51.522, maxLng: -0.120 }, { cells: ['A'], universe }), 'outside');
+  // A three-kilometre box across both is still on neither side (owner, 25 Sep
+  // 2026: "counted in the wrong one of two neighbours is small, counted
+  // nowhere is a missing place" — but a box that wide really can be either).
+  assert.equal(whereBoxSits({ minLat: 51.505, minLng: -0.15, maxLat: 51.535, maxLng: -0.10 }, { cells: ['A'], universe }), 'across');
+});
