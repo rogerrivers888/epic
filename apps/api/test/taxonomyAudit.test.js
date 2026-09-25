@@ -127,6 +127,13 @@ test('primary mismatch needs to know enough primaries to judge', () => {
 test('the agreed cleanup only proposes what this database can carry', () => {
   const none = agreed({ have: new Set(), words: new Set() });
   assert.ok(none.every((p) => p.action === 'create'), 'nothing to change, only drawers to make');
+  // The two gate-free drawers arrive with the free cost band migration 246
+  // gives the open country, so a database that makes them after that
+  // migration ran ends up as production did; the rest state no cost band.
+  const made = Object.fromEntries(none.map((p) => [p.subject, p.numbers]));
+  assert.deepEqual(made['splash-pads'].defaults, { 'cost-band': { choice: 'free' } });
+  assert.deepEqual(made['monuments-memorials'].defaults, { 'cost-band': { choice: 'free' } });
+  assert.equal(made['heritage-railways'].defaults, undefined, 'a drawer with a gate is left for the sweep');
 
   const all = agreed({ have: new Set(['fast-food', 'landmarks']), words: new Set([...STRUCTURAL, ...DELIVERY_OUT]) });
   const rename = all.find((p) => p.subject === 'fast-food');

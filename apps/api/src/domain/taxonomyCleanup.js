@@ -85,7 +85,12 @@ export const NEW_SUBCATEGORIES = [
   // lifeless, and it was also wrong of me to put lighthouses and piers under
   // memorials — a lighthouse isn't a memorial… 'Landmarks' is what a household
   // would actually say."
+  // Free to walk up to, like the open country migration 246 names: a war
+  // memorial and a splash pad have no gate. Stated here as well as there so a
+  // database that makes these drawers after that migration ran gets the same
+  // default production got.
   { key: 'monuments-memorials', label: 'Monuments & memorials', category: 'culture',
+    defaults: { 'cost-band': { choice: 'free' } },
     because: 'Landmarks split, the things raised to remember somebody: monument, memorial, statue, war memorial.' },
   { key: 'landmarks-you-can-see', label: 'Landmarks', category: 'culture',
     because: 'Landmarks split, the things you go and look at: lighthouse, pier, tower, viaduct, notable bridges, observation wheels.' },
@@ -102,7 +107,8 @@ export const NEW_SUBCATEGORIES = [
   { key: 'pick-your-own', label: 'Pick-your-own farms', category: 'fun', because: 'Asked for in section 4.' },
   { key: 'model-villages', label: 'Model villages', category: 'fun', because: 'Asked for in section 4.' },
   { key: 'mazes', label: 'Mazes & adventure golf', category: 'fun', because: 'Asked for in section 4.' },
-  { key: 'splash-pads', label: 'Splash pads', category: 'fun', because: 'Asked for in section 4.' },
+  { key: 'splash-pads', label: 'Splash pads', category: 'fun', defaults: { 'cost-band': { choice: 'free' } },
+    because: 'Asked for in section 4.' },
   { key: 'county-shows', label: 'County shows & country fairs', category: 'fun', because: 'Asked for in section 4.' },
 ];
 
@@ -184,7 +190,8 @@ export function agreed({ have = new Set(), words = new Set(), kinds = new Map() 
   // ---- the new drawers ---------------------------------------------------
   for (const n of NEW_SUBCATEGORIES) {
     if (have.has(n.key)) continue;
-    out.push(sub(n.key, 'create', n.label, n.because, { category: n.category }));
+    out.push(sub(n.key, 'create', n.label, n.because,
+      { category: n.category, ...(n.defaults ? { defaults: n.defaults } : {}) }));
   }
   return out;
 }
