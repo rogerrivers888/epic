@@ -261,8 +261,15 @@ test('a place kept between rebuilds is placed, and turns up on the board', async
   // fixtures in this file sit inside real sector coverage now (migration 248)
   // and wait for a stamp, so the pass may well find work — it is this place
   // that must not be touched twice.
-  const again = await index.settleNew();
-  assert.ok(again.settled >= 0);
+  const { rows: [first] } = await query(
+    'select placed_at, settle_tried_at from place_index where venue_ref = $1', ['osm:node/settle-me']);
+  await index.settleNew();
+  const { rows: [second] } = await query(
+    'select placed_at, settle_tried_at from place_index where venue_ref = $1', ['osm:node/settle-me']);
+  // Its own markers, not a count: `place_areas` is deduplicated, so "still in
+  // GB" would read true even if the place had been taken through the pass
+  // again (Codex, 25 Sep 2026).
+  assert.deepEqual(second, first, 'a placed place is not taken through the pass a second time');
   assert.equal(await inGb(), 1, 'placed once, and still placed');
   assert.ok(before !== null);
 });
