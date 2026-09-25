@@ -757,8 +757,14 @@ export async function censusBoardRows(slugs) {
             -- run's leftover tiles — on an obsolete grid, even — kept a district
             -- reading as sweeping long after the latest run had finished
             -- (Codex, via epic-83, 25 Sep 2026).
+            -- Through the run's membership, not the tile's last claimant: a
+            -- later run claims a tile and overwrites its run_id, and if that
+            -- run stops and the earlier one resumes, the earlier one is
+            -- sweeping the tile while its run_id still names the stopped one
+            -- (Codex, 25 Sep 2026).
             exists (select 1 from census_tiles t
-                      join census_runs r on r.id = t.run_id
+                      join census_run_tiles rt on rt.grid_key = t.grid_key
+                      join census_runs r on r.id = rt.run_id
                      where t.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)
                        and t.state in ('todo', 'doing')
                        and r.state in ('running', 'waiting')) as sweeping
