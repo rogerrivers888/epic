@@ -25,6 +25,7 @@ import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
 import { Press } from '../../components/press';
 import { desk, fonts, LIME } from '../../theme';
 import { asOneOf, asText, useQueryState, useRouter } from '../../router';
+import { useViewport } from '../../hooks/useViewport';
 import { api } from '../../api';
 import type {
   FilingCategories, FilingCategory, FilingExcluded, FilingLabels, FilingOverview,
@@ -64,8 +65,16 @@ const TAB_LABEL: Record<Tab, string> = {
   runs: 'Runs',
 };
 
-/** The minimum this surface is drawn at. It is a desktop back office. */
+/**
+ * The minimum this surface is drawn at on a desktop. It is a desktop back
+ * office, and its tables have columns — but below the shell's phone breakpoint
+ * the minimum comes off, because a fixed 1180 inside a 390 frame is a page
+ * that cannot be read at all (owner, 25 Sep 2026: "the Overview overflowing
+ * the frame at 390px is not yours but it is not done either"). Each screen
+ * then owes its own phone layout; Overview has one.
+ */
 const MIN_WIDTH = 1180;
+const PHONE = 900;
 
 export function Filing({ canManage }: { canManage: boolean }) {
   const { setQuery } = useRouter();
@@ -323,23 +332,34 @@ export function Filing({ canManage }: { canManage: boolean }) {
   };
 
   const trail = crumbs({ tab, cat, sub, set, view, category, drawer, oneSet, go });
+  // From the frame, never the window: the shell's Mobile toggle tells the
+  // desk it is 390 wide through this hook, and a screen reading the window
+  // would draw the desktop inside the phone.
+  const { width } = useViewport();
+  const narrow = width < PHONE;
+  const gutter = narrow ? 16 : 28;
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: desk.ground }} contentContainerStyle={{ minWidth: MIN_WIDTH }}>
+    <ScrollView style={{ flex: 1, backgroundColor: desk.ground }}
+                contentContainerStyle={{ minWidth: narrow ? undefined : MIN_WIDTH }}>
       <View style={{ flex: 1 }}>
-        {/* The tab row, and the two things that live to the right of it. */}
+        {/* The tab row, and the two things that live to the right of it. On
+            a phone the tabs wrap onto a second line rather than run off the
+            frame, and Runs sits under them. */}
         <View style={{
-          flexDirection: 'row',
-          alignItems: 'center',
+          flexDirection: narrow ? 'column' : 'row',
+          alignItems: narrow ? 'stretch' : 'center',
           justifyContent: 'space-between',
-          gap: 24,
-          paddingHorizontal: 28,
+          gap: narrow ? 8 : 24,
+          paddingHorizontal: gutter,
           paddingTop: 18,
         }}>
           <View style={{
             flexDirection: 'row',
-            gap: 30,
-            flex: 1,
+            flexWrap: narrow ? 'wrap' : 'nowrap',
+            gap: narrow ? 18 : 30,
+            rowGap: 0,
+            flex: narrow ? undefined : 1,
             borderBottomWidth: 2,
             borderBottomColor: desk.ruleStrong,
           }}>
@@ -347,14 +367,14 @@ export function Filing({ canManage }: { canManage: boolean }) {
               <Press key={t} effect="none" onPress={() => root(t)} accessibilityRole="tab"
                      accessibilityState={{ selected: tab === t }}>
                 <View style={{
-                  paddingBottom: 13,
+                  paddingBottom: narrow ? 9 : 13,
                   marginBottom: -2,
                   borderBottomWidth: 2,
                   borderBottomColor: tab === t ? LIME : 'transparent',
                 }}>
                   <Text style={{
                     fontFamily: fonts.heading,
-                    fontSize: 17,
+                    fontSize: narrow ? 15 : 17,
                     fontWeight: '800',
                     letterSpacing: -0.34,
                     color: tab === t ? desk.ink : desk.inkDim,
@@ -365,7 +385,10 @@ export function Filing({ canManage }: { canManage: boolean }) {
               </Press>
             ))}
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, flexGrow: 0, flexShrink: 0, paddingBottom: 11 }}>
+          <View style={{
+            flexDirection: 'row', alignItems: 'center', gap: 16, flexGrow: 0, flexShrink: 0,
+            paddingBottom: narrow ? 0 : 11, justifyContent: narrow ? 'flex-end' : 'flex-start',
+          }}>
             {toast ? (
               <Text style={{ fontFamily: fonts.body, fontSize: 12, fontWeight: '700', color: LIME }}>{toast}</Text>
             ) : null}
@@ -380,9 +403,9 @@ export function Filing({ canManage }: { canManage: boolean }) {
           </View>
         </View>
 
-        <View style={{ flex: 1, paddingHorizontal: 28, paddingTop: 20, paddingBottom: 60, gap: 20 }}>
+        <View style={{ flex: 1, paddingHorizontal: gutter, paddingTop: 20, paddingBottom: 60, gap: 20 }}>
           {trail.length > 1 ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 16 }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, minHeight: 16 }}>
               {trail.map((c, i) => (
                 <React.Fragment key={`${c.label}-${i}`}>
                   {i ? (

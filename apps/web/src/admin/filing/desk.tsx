@@ -23,6 +23,7 @@ import { Text, View } from 'react-native';
 
 import { Icon } from '../../components/Icon';
 import { Press } from '../../components/press';
+import { useViewport } from '../../hooks/useViewport';
 import { LIME, ON_LIME, desk, fonts } from '../../theme';
 
 /** The one red on this surface: danger, never decoration. */
@@ -94,21 +95,28 @@ export function Band({ title, sub, stats, right }: {
   stats?: { label: string; value: React.ReactNode; strong?: boolean }[];
   right?: React.ReactNode;
 }) {
+  // On a phone the facts go under the title rather than beside it: a 31px
+  // title and a row of stats do not share 390px, and a title that cannot
+  // wrap is a title cut off (owner, 25 Sep 2026). One tree either way.
+  const narrow = useViewport().width < 900;
   return (
     <View style={{
-      flexDirection: 'row',
-      alignItems: 'flex-end',
+      flexDirection: narrow ? 'column' : 'row',
+      alignItems: narrow ? 'stretch' : 'flex-end',
       justifyContent: 'space-between',
-      gap: 24,
+      gap: narrow ? 12 : 24,
       borderBottomWidth: 2,
       borderBottomColor: desk.ruleStrong,
       paddingBottom: 18,
     }}>
-      <View style={{ gap: 6, flexShrink: 1 }}>
+      <View style={{ gap: 6, flexShrink: 1, minWidth: 0 }}>
         <Title>{title}</Title>
         {sub ? <Text style={{ fontFamily: fonts.body, fontSize: 11.5, color: desk.inkDim }}>{sub}</Text> : null}
       </View>
-      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 30, flexShrink: 0 }}>
+      <View style={{
+        flexDirection: 'row', flexWrap: narrow ? 'wrap' : 'nowrap', alignItems: 'flex-end',
+        gap: narrow ? 18 : 30, flexShrink: narrow ? 1 : 0,
+      }}>
         {(stats ?? []).map((s) => (
           <View key={s.label} style={{ gap: 2 }}>
             <Kicker>{s.label}</Kicker>

@@ -18,14 +18,24 @@
  *     all until the corpus has opens. Where that is why a number is nought,
  *     the screen says it in words rather than letting the nought read as good
  *     news.
+ *
+ * **It has a phone layout** (owner, 25 Sep 2026: at 390px "the whole
+ * Overview overflows the frame"). The four queues go two by two, the runs
+ * wrap onto two lines each, the thresholds drop under the runs, and the two
+ * check lines wrap their sentence with the mark still on the end. One tree in
+ * both layouts: the width decides style, never which children render.
  */
 
 import React from 'react';
 import { Text, View } from 'react-native';
 import { Press } from '../../components/press';
+import { useViewport } from '../../hooks/useViewport';
 import { desk, fonts, LIME } from '../../theme';
-import { Act, Band, DeskSection, Kicker, Mark, Value, WARN, tabular } from './desk';
+import { Act, Band, Kicker, Mark, Value, WARN, tabular } from './desk';
 import type { FilingOverview, Threshold } from '../../api';
+
+/** The shell's phone breakpoint, the same one the desk's Band uses. */
+const PHONE = 900;
 
 /** A time said the way a person would say it. */
 function when(iso: string | null): string {
@@ -50,21 +60,24 @@ export function Overview({ data, onGo, canManage, onThreshold }: {
   canManage: boolean;
   onThreshold: (key: string, value: number) => void;
 }) {
+  const narrow = useViewport().width < PHONE;
   return (
     <>
       <Band
         title={`${data.waiting.toLocaleString()} ${data.waiting === 1 ? 'thing waits' : 'things wait'} on a human`}
         right={(
-          <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>
+          <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim, flexShrink: 1 }}>
             {scope(data)}
           </Text>
         )}
       />
 
       {/* Four up, hairline gaps, no radius and no box — the grid's own
-          background shows through as the rule between the cards. */}
+          background shows through as the rule between the cards. Two by two
+          on a phone: four across at 390 is four columns of nothing. */}
       <View style={{
         flexDirection: 'row',
+        flexWrap: narrow ? 'wrap' : 'nowrap',
         gap: 1,
         backgroundColor: desk.rule,
         borderWidth: 1,
@@ -72,23 +85,24 @@ export function Overview({ data, onGo, canManage, onThreshold }: {
       }}>
         {data.queues.map((q) => (
           <Press key={`${q.kicker}-${q.what}`} effect="none" onPress={() => onGo(q.go)}
-                 accessibilityRole="button" style={{ flex: 1 }}>
+                 accessibilityRole="button"
+                 style={narrow ? { flexGrow: 1, flexBasis: '48%' } : { flex: 1 }}>
             <View style={{
               flex: 1,
               backgroundColor: desk.ground,
-              paddingHorizontal: 20,
-              paddingTop: 18,
-              paddingBottom: 20,
-              gap: 9,
-              minHeight: 172,
+              paddingHorizontal: narrow ? 14 : 20,
+              paddingTop: narrow ? 14 : 18,
+              paddingBottom: narrow ? 16 : 20,
+              gap: narrow ? 6 : 9,
+              minHeight: narrow ? 150 : 172,
             }}>
               <Kicker>{q.kicker}</Kicker>
               <Text style={{
                 fontFamily: fonts.heading,
-                fontSize: 44,
+                fontSize: narrow ? 34 : 44,
                 fontWeight: '800',
-                letterSpacing: -1.76,
-                lineHeight: 44,
+                letterSpacing: narrow ? -1.36 : -1.76,
+                lineHeight: narrow ? 34 : 44,
                 color: q.count === 0 ? desk.inkDim : q.tone === 'warn' ? WARN : LIME,
                 ...tabular,
               }}>
@@ -110,14 +124,14 @@ export function Overview({ data, onGo, canManage, onThreshold }: {
       <Checks data={data} />
 
       <View style={{
-        flexDirection: 'row',
-        gap: 40,
-        alignItems: 'flex-start',
+        flexDirection: narrow ? 'column' : 'row',
+        gap: narrow ? 28 : 40,
+        alignItems: narrow ? 'stretch' : 'flex-start',
         borderTopWidth: 2,
         borderTopColor: desk.ruleStrong,
         paddingTop: 20,
       }}>
-        <View style={{ flex: 1, minWidth: 0, gap: 12 }}>
+        <View style={{ flex: narrow ? undefined : 1, minWidth: 0, gap: 12 }}>
           <Kicker>WHAT THE MACHINE DID WHILE YOU WERE OUT</Kicker>
           <View>
             {data.runs.length === 0 ? (
@@ -125,24 +139,28 @@ export function Overview({ data, onGo, canManage, onThreshold }: {
                 Nothing has run yet.
               </Text>
             ) : data.runs.map((r) => (
+              /* Four columns on a desk; two lines on a phone — the name and
+                 when it ran, then what it did and what it cost. */
               <View key={r.id} style={{
                 flexDirection: 'row',
+                flexWrap: narrow ? 'wrap' : 'nowrap',
                 alignItems: 'center',
-                gap: 16,
+                gap: narrow ? 10 : 16,
+                rowGap: narrow ? 3 : 0,
                 paddingVertical: 11,
                 borderBottomWidth: 1,
                 borderBottomColor: desk.rule,
               }}>
-                <View style={{ width: 220, flexGrow: 0, flexShrink: 0 }}>
+                <View style={narrow ? { flexGrow: 1, flexBasis: '55%', minWidth: 0 } : { width: 220, flexGrow: 0, flexShrink: 0 }}>
                   <Value weight="700">{r.name}</Value>
                 </View>
-                <View style={{ width: 120, flexGrow: 0, flexShrink: 0 }}>
+                <View style={narrow ? { flexGrow: 0, flexShrink: 0 } : { width: 120, flexGrow: 0, flexShrink: 0 }}>
                   <Value tone="dim" size={12.5}>{when(r.at)}</Value>
                 </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
+                <View style={narrow ? { flexGrow: 1, flexBasis: '70%', minWidth: 0 } : { flex: 1, minWidth: 0 }}>
                   <Value tone="muted" size={12.5}>{line(r)}</Value>
                 </View>
-                <View style={{ width: 80, flexGrow: 0, flexShrink: 0, alignItems: 'flex-end' }}>
+                <View style={{ width: narrow ? undefined : 80, flexGrow: narrow ? 1 : 0, flexShrink: 0, alignItems: 'flex-end' }}>
                   <Value weight="700" numeric>{money(r.cost)}</Value>
                 </View>
               </View>
@@ -151,17 +169,20 @@ export function Overview({ data, onGo, canManage, onThreshold }: {
         </View>
 
         <View style={{
-          width: 520,
+          width: narrow ? undefined : 520,
           flexGrow: 0,
           flexShrink: 0,
           gap: 12,
-          borderLeftWidth: 1,
+          borderLeftWidth: narrow ? 0 : 1,
           borderLeftColor: desk.rule,
-          paddingLeft: 30,
+          borderTopWidth: narrow ? 1 : 0,
+          borderTopColor: desk.rule,
+          paddingLeft: narrow ? 0 : 30,
+          paddingTop: narrow ? 20 : 0,
         }}>
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
             <Kicker>THRESHOLDS</Kicker>
-            <Text style={{ fontFamily: fonts.body, fontSize: 11.5, fontWeight: '700', color: WARN }}>
+            <Text style={{ fontFamily: fonts.body, fontSize: 11.5, fontWeight: '700', color: WARN, flexShrink: 1 }}>
               provisional · set on one district, revisit after the census
             </Text>
           </View>
@@ -177,6 +198,27 @@ export function Overview({ data, onGo, canManage, onThreshold }: {
 }
 
 /**
+ * One line with a rule down its left and a mark on its end.
+ *
+ * Both check lines are this, so they wrap the same way: the sentence shrinks
+ * and wraps inside the frame and the mark stays on the end of it, rather
+ * than the sentence running under the mark and off the edge.
+ */
+function Line({ colour, children, mark }: { colour: string; children: React.ReactNode; mark: React.ReactNode }) {
+  return (
+    <View style={{
+      flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, rowGap: 4,
+      borderLeftWidth: 2, borderLeftColor: colour, paddingLeft: 14, paddingVertical: 2,
+    }}>
+      <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: colour, flexShrink: 1 }}>
+        {children}
+      </Text>
+      {mark}
+    </View>
+  );
+}
+
+/**
  * The bar invariants: when they last ran, and what they found.
  *
  * One line. Three states, and the first two must not look alike: never run,
@@ -188,15 +230,14 @@ function Checks({ data }: { data: FilingOverview }) {
   const r = data.invariants?.last ?? null;
   if (!r) {
     return (
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, borderLeftWidth: 2, borderLeftColor: WARN, paddingLeft: 14, paddingVertical: 2 }}>
-        <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: WARN }}>
-          The bar checks have never run
-        </Text>
+      <Line colour={WARN} mark={(
         <Mark label="WHY" tone="warn"
               title={'Two invariants run at every deploy and once a day: no active drawer without a bar, and no drawer '
                 + 'whose places were never judged against its bar. Until the first run there is no record, and no '
                 + 'record is not the same as a clean one.'} />
-      </View>
+      )}>
+        The bar checks have never run
+      </Line>
     );
   }
   const found = r.bare.length + r.unjudged.length;
@@ -218,16 +259,15 @@ function Checks({ data }: { data: FilingOverview }) {
     ...r.left.map((k) => `still unjudged: ${k}`),
   ];
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, borderLeftWidth: 2, borderLeftColor: colour, paddingLeft: 14, paddingVertical: 2 }}>
-      <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: colour }}>
-        Bar checks ran {when(r.ranAt)} ({r.trigger}) — {said}
-      </Text>
+    <Line colour={colour} mark={(
       <Mark label={detail.length ? 'WHAT' : 'WHY'} tone={tone === 'dim' ? 'dim' : tone}
             title={detail.length
               ? detail.join('\n')
               : 'Every active drawer has a bar, and every drawer with places has at least one judged against it. '
                 + 'This is a pass, not an absence: the check ran and looked.'} />
-    </View>
+    )}>
+      Bar checks ran {when(r.ranAt)} ({r.trigger}) — {said}
+    </Line>
   );
 }
 
@@ -270,10 +310,7 @@ function BlindNote({ data }: { data: FilingOverview }) {
    * numbers it qualifies, and the reasoning is behind the icon.
    */
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, borderLeftWidth: 2, borderLeftColor: WARN, paddingLeft: 14, paddingVertical: 2 }}>
-      <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: WARN }}>
-        Demand cannot be read yet — {u.why}
-      </Text>
+    <Line colour={WARN} mark={(
       <Mark
         label="WHY"
         tone="warn"
@@ -281,7 +318,9 @@ function BlindNote({ data }: { data: FilingOverview }) {
           + 'bringing in places that have never been opened is not yet evidence of anything. The same floor '
           + "governs the audit's nobody-goes signal, the Mapping table's never-opened colour and this number."}
       />
-    </View>
+    )}>
+      Demand cannot be read yet — {u.why}
+    </Line>
   );
 }
 
