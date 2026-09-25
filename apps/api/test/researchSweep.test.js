@@ -23,7 +23,10 @@ const SUB = 'test-sweep-drawer';
 const THIN = 'test-sweep-thin';
 const refs = (n, prefix = 'google:ChIJ_sweep_') => Array.from({ length: n }, (_, i) => `${prefix}${String(i).padStart(3, '0')}`);
 
+const HH = '00000000-0000-4000-8000-00000000c0de';
+
 test.before(async () => {
+  await query(`insert into households (id, name) values ($1, 'Sweep test household') on conflict (id) do nothing`, [HH]);
   await query("insert into shelf_categories (key, label) values ('test-cat', 'Test') on conflict do nothing");
   await query(`insert into shelf_subcategories (key, label, category_key) values ($1, 'Sweep drawer', 'test-cat'), ($2, 'Thin drawer', 'test-cat') on conflict do nothing`, [SUB, THIN]);
   await query(`delete from place_index where venue_ref like 'google:ChIJ_sweep_%' or venue_ref like 'google:ChIJ_thin_%'`);
@@ -56,6 +59,7 @@ test.after(async () => {
   await query(`delete from place_index where venue_ref like 'google:ChIJ_sweep_%' or venue_ref like 'google:ChIJ_thin_%'`);
   await query(`delete from place_records where venue_ref like 'google:ChIJ_sweep_%'`);
   await query(`delete from provider_calls where venue_ref like 'google:ChIJ_sweep_%'`);
+  await query(`delete from spend_reservations where holder like 'sweep:%'`);
   await pool.end();
 });
 
@@ -93,7 +97,7 @@ test('nothing starts without the request count, or without a household', async (
 });
 
 test('the work writes each place as it goes, reads its cost off the ledger, and finishes', async () => {
-  const hh = '00000000-0000-4000-8000-00000000c0de';
+  const hh = HH;
   const row = await sweep.start({ subcategories: [SUB], confirm: 36, householdId: hh, startedBy: 'test' });
   assert.equal(row.state, 'running');
   assert.equal(row.places, 20);
@@ -111,7 +115,10 @@ test('the work writes each place as it goes, reads its cost off the ledger, and 
     // No household on the ledger row: this test's household is a made-up id
     // and the ledger keys households for real. What is under test is that the
     // cost is read back by the place.
-    await query(`insert into provider_calls (provider, purpose, estimated_cost_usd, venue_ref) values ('google', 'own.seed', 0.032, $1)`, [ref]);
+    await query(`insert into provider_calls (household_id, provider, purpose, estimated_cost_usd, venue_ref) values ($1, 'google', 'own.seed', 0.032, $2)`, [hh, ref]);
+    // Somebody else's display search on the same place, in the same window,
+    // is not the sweep's to book (Codex, 25 Sep 2026).
+    await query(`insert into provider_calls (provider, purpose, estimated_cost_usd, venue_ref) values ('google', 'display', 0.04, $1)`, [ref]);
     return { state: 'done', matched: { osm: {}, wikipedia: {} }, fields: { summary: 'A lake with a boathouse.' }, problems: [] };
   };
   const reservations = [];
@@ -141,7 +148,7 @@ test('the work writes each place as it goes, reads its cost off the ledger, and 
 
 test('over the ceiling stops with the rest left pending, and does not pretend', async () => {
   await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
-  const hh = '00000000-0000-4000-8000-00000000c0de';
+  const hh = HH;
   const row = await sweep.start({ subcategories: [SUB], confirm: 36, householdId: hh });
   const done = await sweep.work(row.id, {
     research: async () => { throw new Error('should not be asked'); },
@@ -157,7 +164,7 @@ test('over the ceiling stops with the rest left pending, and does not pretend', 
 
 test('a place asked again after a deploy is costed from its first attempt', async () => {
   await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
-  const hh = '00000000-0000-4000-8000-00000000c0de';
+  const hh = HH;
   const row = await sweep.start({ subcategories: [SUB], confirm: 36, householdId: hh });
   // The process died after the first place's request was on the ledger and
   // before its row was written. Everything else is done already.
@@ -165,14 +172,14 @@ test('a place asked again after a deploy is costed from its first attempt', asyn
   const hit = refs(20).includes(first) ? first : (await query(`select venue_ref from research_sweep_places where sweep_id = $1 limit 1`, [row.id])).rows[0].venue_ref;
   await query(`update research_sweep_places set state = 'done', outcome = '{"state":"done"}'::jsonb where sweep_id = $1 and venue_ref <> $2`, [row.id, hit]);
   await query(`update research_sweep_places set state = 'asking', attempted_at = now() - interval '2 minutes' where sweep_id = $1 and venue_ref = $2`, [row.id, hit]);
-  await query(`insert into provider_calls (provider, purpose, estimated_cost_usd, venue_ref, created_at) values ('google', 'own.seed', 0.032, $1, now() - interval '1 minute')`, [hit]);
+  await query(`insert into provider_calls (household_id, provider, purpose, estimated_cost_usd, venue_ref, created_at) values ($1, 'google', 'own.seed', 0.032, $2, now() - interval '1 minute')`, [hh, hit]);
   await query(`update research_sweeps set touched_at = now() - interval '1 hour' where id = $1`, [row.id]);
 
   await sweep.resume({ work: async () => {} });
   const done = await sweep.work(row.id, {
     research: async (ref) => {
       // The second attempt buys its request again.
-      await query(`insert into provider_calls (provider, purpose, estimated_cost_usd, venue_ref) values ('google', 'own.seed', 0.032, $1)`, [ref]);
+      await query(`insert into provider_calls (household_id, provider, purpose, estimated_cost_usd, venue_ref) values ($1, 'google', 'own.seed', 0.032, $2)`, [hh, ref]);
       return { state: 'done', matched: {}, fields: {}, problems: [] };
     },
     room: async () => ({ ok: true, reservation: 'r', leftPence: 10000 }),
@@ -185,14 +192,18 @@ test('a place asked again after a deploy is costed from its first attempt', asyn
 
 test('a sweep whose process died is picked up, and its in-air places asked again', async () => {
   await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
-  const hh = '00000000-0000-4000-8000-00000000c0de';
+  const hh = HH;
   const row = await sweep.start({ subcategories: [SUB], confirm: 36, householdId: hh });
   // Two were in the air, and nobody has heard from the sweep for a while.
   await query(`update research_sweep_places set state = 'asking' where sweep_id = $1 and venue_ref = any($2)`, [row.id, refs(2)]);
   await query(`update research_sweeps set touched_at = now() - interval '1 hour' where id = $1`, [row.id]);
 
+  // And the reservation the dead process held.
+  await query(`insert into spend_reservations (pence, holder) values (20, $1)`, [`sweep:${row.id}`]);
   const picked = [];
   const r = await sweep.resume({ work: async (id) => { picked.push(id); } });
+  const { rows: held } = await query('select 1 from spend_reservations where holder = $1', [`sweep:${row.id}`]);
+  assert.equal(held.length, 0, 'the stale reservation is given back before the work restarts');
   assert.equal(r.resumed, 1);
   assert.deepEqual(picked, [row.id]);
   const f = await sweep.funnelOf(row.id);

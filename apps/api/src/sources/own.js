@@ -425,7 +425,17 @@ async function websiteLead(venueRef, householdId) {
  * Returns `{ state, fields, matched }`. Never throws — a place that cannot be
  * researched today is left for the next attempt with the reason on the row.
  */
-export async function enrich(venueRef, { householdId = null, seed: given = {}, force = false, replace = force, paid = true } = {}) {
+/**
+ * `paid` allows the two Google requests — identify the place, find its page.
+ * `search` allows the third paid thing, the web search that goes looking for
+ * a claimed place's page when nothing else has found it, and defaults to
+ * `paid` so nothing that passed `paid: true` before behaves differently. The
+ * research sweep passes `paid: true, search: false`: its estimate promises at
+ * most two Google requests a place and the collection ceiling holds it to
+ * that, and a Claude search is neither in the estimate nor under the ceiling
+ * (Codex, 25 Sep 2026).
+ */
+export async function enrich(venueRef, { householdId = null, seed: given = {}, force = false, replace = force, paid = true, search = paid } = {}) {
   await owned.ensureRecord(venueRef);
   const before = await owned.enrichStateOf(venueRef);
   if (!force && alreadyResearched(before)) return { state: 'done', skipped: 'already researched' };
@@ -554,7 +564,7 @@ export async function enrich(venueRef, { householdId = null, seed: given = {}, f
     if (lead?.problem) problems.push(lead.problem);
   }
   // Still nothing, and somebody asked for this place by name: go and find it.
-  if (!seed.website && !osm && askAgain && paid) {
+  if (!seed.website && !osm && askAgain && paid && search) {
     try {
       const asked = await findTheirPage({
         venueRef, name: seed.name, category: seed.category,

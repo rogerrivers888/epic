@@ -251,13 +251,24 @@ function outcomeOf(out) {
   };
 }
 
-/** What this place's research cost, from the ledger rather than from a guess. */
-async function spentOn(venueRef, since) {
+/**
+ * What this place's research cost, from the ledger rather than from a guess.
+ *
+ * Narrowed to this sweep's household and to the two purposes the research
+ * spends under, so a display search or a drawer somebody else opened on the
+ * same place in the same minutes is not booked to the sweep (Codex, 25 Sep
+ * 2026). What is left is the same household opening the same place at the
+ * same moment, which is narrow enough to live with rather than worth a run
+ * id on every ledger row.
+ */
+async function spentOn(venueRef, since, householdId) {
   const { rows: [r] } = await query(
     `select coalesce(sum(estimated_cost_usd), 0)::numeric as usd
        from provider_calls
-      where venue_ref = $1 and created_at >= $2 and provider = 'google'`,
-    [venueRef, since]);
+      where venue_ref = $1 and created_at >= $2 and provider = 'google'
+        and purpose in ('own.seed', 'own.lead')
+        and household_id is not distinct from $3`,
+    [venueRef, since, householdId]);
   return Number(r?.usd ?? 0);
 }
 
@@ -355,14 +366,16 @@ export async function work(id, { research = own.enrich, room = roomToSpend, rele
           let outcome;
           let state = 'done';
           try {
-            const out = await research(p.venue_ref, { householdId: household, paid: true, force: false });
+            // Two Google requests at most, and never the web search: that is
+            // what the estimate priced and what the ceiling was asked for.
+            const out = await research(p.venue_ref, { householdId: household, paid: true, search: false, force: false });
             outcome = outcomeOf(out);
             if (outcome.state === 'failed') state = 'failed';
           } catch (err) {
             state = 'failed';
             outcome = { state: 'failed', problems: [String(err?.message ?? err).slice(0, 160)] };
           }
-          const usd = await spentOn(p.venue_ref, since);
+          const usd = await spentOn(p.venue_ref, since, household);
           await query(
             `update research_sweep_places set state = $3, outcome = $4::jsonb, cost_usd = $5
               where sweep_id = $1 and venue_ref = $2`,
@@ -413,6 +426,11 @@ export async function resume({ work: doWork = work } = {}) {
       continue;
     }
     await query(`update research_sweep_places set state = 'pending' where sweep_id = $1 and state = 'asking'`, [run.id]);
+    // The reservation the dead process held outlives it by half an hour, and
+    // near the ceiling the resumed worker would count it against itself and
+    // give up for good (Codex, 25 Sep 2026). Whatever it covered is on the
+    // ledger by now.
+    await query('delete from spend_reservations where holder = $1', [`sweep:${run.id}`]).catch(() => null);
     void doWork(run.id).catch((err) => console.warn(`sweep ${run.id}: ${err.message}`));
     resumed += 1;
   }

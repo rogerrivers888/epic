@@ -90,6 +90,28 @@ test('a paid pass still identifies a place it has nothing of its own on', async 
   assert.ok(asked >= 1, 'a paid pass may still ask what the place is');
 });
 
+test('a paid pass may be told to identify a place and still never go searching the web for it', async () => {
+  // The research sweep's promise is two Google requests at most. A claimed
+  // place with no website anywhere is the one case `enrich` would go further
+  // — a Claude web search, neither in the estimate nor under the ceiling —
+  // so the sweep switches that off separately (Codex, 25 Sep 2026).
+  const wasKey = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = 'test-key-never-sent';
+  try {
+    const r = ref('claimed_no_search');
+    await query(`insert into households (id, name) values ('00000000-0000-4000-8000-0000000c1a1d', 'Test claimants') on conflict (id) do nothing`);
+    await query(`insert into place_claims (household_id, venue_ref, reason) values ('00000000-0000-4000-8000-0000000c1a1d', $1, 'test') on conflict do nothing`, [r]);
+    let out;
+    await countingBriefs(async () => { out = await own.enrich(r, { force: true, paid: true, search: false, seed: { name: 'Nowhere Cafe', lat: 51.5, lng: -0.1 } }); });
+    assert.equal((out.problems ?? []).some((p) => /looking for their page/.test(p)), false, 'the search was never attempted');
+    await countingBriefs(async () => { out = await own.enrich(r, { force: true, paid: true, seed: { name: 'Nowhere Cafe', lat: 51.5, lng: -0.1 } }); });
+    assert.equal((out.problems ?? []).some((p) => /looking for their page|could not go looking/.test(p)), true, 'with search allowed it goes, and with no network it says so');
+  } finally {
+    if (wasKey === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = wasKey;
+    await query(`delete from place_claims where venue_ref like $1`, [`${PREFIX}%`]).catch(() => null);
+  }
+});
+
 test('a seeded place costs nothing to research for free, and one request to research paid', async () => {
   // How the sweep is meant to be scoped: take the places the atlas or
   // `place_records` already names, hand them over as the seed, and `seedFor`
