@@ -428,10 +428,24 @@ export async function dropGlued(subcategory, run = query) {
  * on one in a hundred, so reading a drawer's feature pass off a limited list
  * silently returned nothing for the drawers with the most in them.
  */
-export async function candidates({ subcategory = null, subcategories = null, status = 'new', kind = null, source = null, limit = 500 } = {}) {
+export async function candidates({
+  subcategory = null, subcategories = null, status = 'new', kind = null, source = null, limit = 500,
+  sort = 'rare', minSeen = null,
+} = {}) {
   // A set's screen asks for *its* subcategories, not for the first four hundred
   // words in the estate filtered afterwards — which returned an empty list for
   // a set whose words happened to sort below the limit.
+  //
+  // `sort` is which end of the list the caller wants. `rare` is the design
+  // brief's order — a 4% find near the top, a 96% word near the bottom — and
+  // is the default. `common` is the other end, and it exists because a list
+  // capped at a thousand rows and sorted rarest-first can never show the
+  // words seen on the most places in a drawer whose pen holds more than that;
+  // with thirty-seven thousand words in the pen, that was every rich drawer.
+  // `minSeen` is the sightings floor as a filter: a word seen on one place
+  // cannot tell two places apart, and a reader sizing a classifier run or
+  // proposing a set needs the rows above the floor, not the pile.
+  const commonFirst = sort === 'common';
   const { rows } = await query(
     `select c.*, a.key as known_key, a.label as known_label, a.kind as known_kind
        from harvest_candidates c
@@ -442,9 +456,12 @@ export async function candidates({ subcategory = null, subcategories = null, sta
         and ($3::text is null or c.status = $3)
         and ($4::text is null or c.kind = $4)
         and ($5::text is null or c.sources ? $5)
-      order by c.places_seen::float / greatest(c.places_total, 1) asc, c.places_seen desc
+        and ($7::int is null or c.places_seen >= $7)
+      order by ${commonFirst
+        ? 'c.places_seen desc, c.places_seen::float / greatest(c.places_total, 1) desc'
+        : 'c.places_seen::float / greatest(c.places_total, 1) asc, c.places_seen desc'}, c.norm
       limit $6`,
-    [subcategory, subcategories?.length ? subcategories : null, status, kind, source, limit],
+    [subcategory, subcategories?.length ? subcategories : null, status, kind, source, limit, minSeen],
   );
   return rows.map((r) => {
     // **Seen on**, which is how much of the harvest text mentioned it — not

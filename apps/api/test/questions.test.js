@@ -489,3 +489,26 @@ test('a quote is kept from an owned source and dropped from a rented one', async
   assert.equal(gone.evidence, null);
   assert.equal(gone.evidence_ref, null);
 });
+
+test('the pen can be read from its common end, above a sightings floor', async () => {
+  // Rarest-first is the design brief's order and stays the default. But a
+  // list capped at a thousand rows and sorted that way can never show the
+  // words seen on the most places in a drawer whose pen holds more than that —
+  // with thirty-seven thousand words in the pen, that was every rich drawer.
+  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+  const rows = [['zz once', 1], ['zz twice', 2], ['zz thrice', 3]];
+  for (const [norm, seen] of rows) {
+    await query(
+      `insert into harvest_candidates (norm, raw_forms, subcategory, places_seen, places_total, kind, status)
+       values ($1, array[$1], $2, $3, 20, 'unclear', 'unresolved')`, [norm, sub, seen],
+    );
+  }
+  const rare = await sets.candidates({ subcategory: sub, status: 'unresolved', kind: 'unclear', limit: 3 });
+  assert.equal(rare[0].norm, 'zz once', 'the default is still rarest-first');
+  const common = await sets.candidates({ subcategory: sub, status: 'unresolved', kind: 'unclear', sort: 'common', limit: 3 });
+  assert.deepEqual(common.map((c) => c.norm), ['zz thrice', 'zz twice', 'zz once']);
+  const floored = await sets.candidates({ subcategory: sub, status: 'unresolved', kind: 'unclear', sort: 'common', minSeen: 2, limit: 10 });
+  assert.deepEqual(floored.map((c) => c.norm), ['zz thrice', 'zz twice'], 'a word seen once is below the floor');
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+});

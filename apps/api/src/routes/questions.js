@@ -178,6 +178,13 @@ questionRoutes.get('/candidates', requires('view_questions'), async (req, res, n
         // Which run raised it. Without this a drawer's feature pass is
         // unreadable behind forty thousand words from the Google pass.
         source: req.query.source ? String(req.query.source) : null,
+        kind: req.query.kind ? String(req.query.kind) : null,
+        // Which end of the list, and the sightings floor. The default is the
+        // design brief's rarest-first; `common` with `minSeen` is how a reader
+        // gets at the words seen on the most places without paging through
+        // the pile (see `candidates` in the repository for why that mattered).
+        sort: req.query.sort === 'common' ? 'common' : 'rare',
+        minSeen: req.query.minSeen ? Math.max(1, Number(req.query.minSeen) || 1) : null,
         limit: Math.min(1000, Number(req.query.limit ?? 500) || 500),
       }),
     });
