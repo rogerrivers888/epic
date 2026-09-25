@@ -1481,6 +1481,15 @@ export type PlaceCensusRow = {
   text_count: number;
   osm: number | null; fhrs: number | null; residual: number | null;
   censused_at: string | null; complete: boolean;
+  /**
+   * The ground the count is drawn from: tiles planned for the board's
+   * districts, and how many have answered. While `sweeping` is true a tile is
+   * still to do or being done, and no count on the row may be drawn as a bare
+   * number, sorted or compared as if it were final — it is drawn with its own
+   * caveat, inseparably: "at least 340, sweeping, 4 of 11 tiles" (owner, 25
+   * Sep 2026). Rows in flight come after finished ones in the API's order.
+   */
+  tiles: number; tiles_done: number; sweeping: boolean;
 };
 
 export type PlaceCoverageRow = {

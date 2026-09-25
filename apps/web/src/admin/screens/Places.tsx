@@ -1544,12 +1544,27 @@ function CensusBoard({ where }: { where: string }) {
     // A count built from a slice Google truncated is a floor, and must never
     // be drawn as a total (owner, 20 Sep 2026). The "at least" is the whole
     // point: the number is true as a minimum and false as an answer.
-    { key: 'found', label: 'Found', tip: 'censusFound', width: 96, align: 'right',
-      cell: (r) => ((r.saturated ?? 0) > 0
-        ? <Explain tip="censusFloor"><Text style={styles.rowName}>{`at least ${r.surfaced ?? 0}`}</Text></Explain>
-        : <Num n={r.surfaced || null} />) },
+    // A count drawn while a sweep is in flight is never a bare number. It is
+    // drawn with its own caveat, inseparably — "at least 340, sweeping, 4 of
+    // 11 tiles" — in the note face, not the count face, because readers miss
+    // flags (owner, 25 Sep 2026: "the sixth time this week a number that could
+    // not speak has spoken anyway"). The API orders these rows after the
+    // finished ones, and the board keeps that order.
+    { key: 'found', label: 'Found', tip: 'censusFound', width: 150, align: 'right',
+      cell: (r) => (r.sweeping
+        ? <Explain tip="censusSweeping"><Text style={styles.rowNote}>{`at least ${r.surfaced ?? 0}, sweeping, ${r.tiles_done ?? 0} of ${r.tiles ?? 0} tiles`}</Text></Explain>
+        : (r.saturated ?? 0) > 0
+          ? <Explain tip="censusFloor"><Text style={styles.rowName}>{`at least ${r.surfaced ?? 0}`}</Text></Explain>
+          : <Num n={r.surfaced || null} />) },
     { key: 'filed', label: 'Filed', tip: 'censusFiled', width: 150, align: 'right',
       cell: (r) => {
+        if (r.sweeping) {
+          return (
+            <Explain tip="censusSweeping">
+              <Text style={styles.rowNote}>{`at least ${r.filed ?? 0}, sweeping, ${r.tiles_done ?? 0} of ${r.tiles ?? 0} tiles`}</Text>
+            </Explain>
+          );
+        }
         const gap = (r.surfaced ?? 0) - (r.filed ?? 0);
         // Whose shelf the surplus went to. The gap on its own says a place
         // lives somewhere else; this says where, which is what the owner came

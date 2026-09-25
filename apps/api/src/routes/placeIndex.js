@@ -714,11 +714,31 @@ export async function censusBoardRows(slugs) {
             case when count(a.fhrs_count) = 0 then null else sum(coalesce(a.fhrs_count, 0))::int end as fhrs,
             case when count(a.residual) = 0 then null else sum(coalesce(a.residual, 0))::int end     as residual,
             max(a.censused_at)                           as censused_at,
-            bool_and(a.complete)                         as complete
+            bool_and(a.complete)                         as complete,
+            -- The ground the count is drawn from: how many tiles are planned
+            -- for these districts and how many of them have answered. A count
+            -- from four tiles of eleven is a different number from one out of
+            -- eleven clean ones, and the row has to carry that inseparably
+            -- (owner, 25 Sep 2026: "at least 340, sweeping, 4 of 11 tiles").
+            (select count(*)::int from census_tiles t
+              where t.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)) as tiles,
+            (select count(*)::int from census_tiles t
+              where t.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)
+                and t.state = 'done')                     as tiles_done,
+            -- In flight: a tile naming one of these districts is still to do or
+            -- being done. While this is true no count here may be read, sorted
+            -- or compared as if it were final.
+            exists (select 1 from census_tiles t
+                     where t.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)
+                       and t.state in ('todo', 'doing')) as sweeping
        from area_counts a
       where a.area_slug = any($1)
       group by 1, 2
-      order by 1, sum(coalesce(a.surfaced_count, 0)) desc, 2`,
+      -- Finished rows first, by size; rows drawn while a sweep is in flight
+      -- after them, whatever their number. A half-answered district ranked
+      -- among the finished ones by count is how a taxonomy decision gets made
+      -- against the wrong denominator (owner, 25 Sep 2026).
+      order by 1, bool_and(a.complete) desc, sum(coalesce(a.surfaced_count, 0)) desc, 2`,
     [slugs, single]);
   return rows;
 }
