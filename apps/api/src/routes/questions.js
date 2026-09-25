@@ -59,10 +59,13 @@ const bad = (message) => Object.assign(new Error(message), { status: 400, code: 
  * the one thing it must never do is reach the integer cast as something the
  * database cannot hold (Codex, 25 Sep 2026).
  */
+const INT4_MAX = 2147483647;
 const wholeFloor = (raw) => {
   if (raw == null || raw === '') return null;
   const n = Math.floor(Number(raw));
-  return Number.isFinite(n) && n >= 1 ? n : null;
+  // Above int4 is "no floor" too: `?minSeen=9999999999` is finite and whole
+  // and still cannot be held by the cast (Codex, 25 Sep 2026).
+  return Number.isFinite(n) && n >= 1 && n <= INT4_MAX ? n : null;
 };
 
 /**

@@ -523,10 +523,13 @@ test('a floor that is not a whole number is no floor, not a 500', async () => {
     `insert into harvest_candidates (norm, raw_forms, subcategory, places_seen, places_total, kind, status)
      values ('zz once', array['zz once'], $1, 1, 20, 'unclear', 'unresolved')`, [sub],
   );
-  for (const floor of [1.5, Infinity, 'many', -3, '']) {
+  for (const floor of [1.5, Infinity, 'many', -3, '', 9999999999]) {
     const rows = await sets.candidates({ subcategory: sub, status: 'unresolved', kind: 'unclear', minSeen: floor, limit: 5 });
     assert.ok(Array.isArray(rows), `a floor of ${String(floor)} must not throw`);
   }
+  // A whole number above int4 is finite and still not a floor the cast can
+  // hold: it is read as no floor and keeps the singleton (Codex, 25 Sep 2026).
+  assert.equal((await sets.candidates({ subcategory: sub, status: 'unresolved', kind: 'unclear', minSeen: 9999999999, limit: 5 })).length, 1);
   // 1.5 floors to 1 and keeps the singleton; 2.9 floors to 2 and drops it.
   assert.equal((await sets.candidates({ subcategory: sub, status: 'unresolved', kind: 'unclear', minSeen: 1.5, limit: 5 })).length, 1);
   assert.equal((await sets.candidates({ subcategory: sub, status: 'unresolved', kind: 'unclear', minSeen: 2.9, limit: 5 })).length, 0);

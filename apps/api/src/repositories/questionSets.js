@@ -450,7 +450,8 @@ export async function candidates({
   // fraction or `Infinity` handed straight to the cast was a 500 on a GET
   // (Codex, 25 Sep 2026), and the repository should not depend on every
   // caller remembering that.
-  const floor = Number.isFinite(Number(minSeen)) && Math.floor(Number(minSeen)) >= 1 ? Math.floor(Number(minSeen)) : null;
+  const whole = Math.floor(Number(minSeen));
+  const floor = Number.isFinite(whole) && whole >= 1 && whole <= 2147483647 ? whole : null;
   const { rows } = await query(
     `select c.*, a.key as known_key, a.label as known_label, a.kind as known_kind
        from harvest_candidates c
