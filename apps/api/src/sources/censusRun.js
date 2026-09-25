@@ -1167,6 +1167,19 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
     const b = bucketFor(code);
     const drawer = new Map(b.drawer);
     for (const t of own) for (const [key, d] of drawersOfTile.get(t.grid_key) ?? []) drawer.set(key, d);
+    // And every drawer the board already has a row for. A drawer with no
+    // current surfacing at all — a tile censused afresh that found nothing for
+    // it, or a question retired outright, as Ski resort and Scenic were — is
+    // not in the rows read above, so it never reached this map and its old
+    // row, inflated or not, stood for ever (Codex P1 on the day's range,
+    // 25 Sep 2026). Written again at nought, like any other drawer the ground
+    // was asked about and answered nothing.
+    const { rows: standing } = await query(
+      'select category, subcategory from area_counts where area_slug = $1', [code.toLowerCase()]);
+    for (const r of standing) {
+      const key = `${r.category}/${r.subcategory}`;
+      if (!drawer.has(key)) drawer.set(key, { category: r.category, subcategory: r.subcategory });
+    }
 
     const censusedAt = own.map((t) => new Date(t.censused_at).getTime()).sort((x, y) => x - y);
     const saturatedTiles = own.filter((t) => Number(t.saturated) > 0).length;

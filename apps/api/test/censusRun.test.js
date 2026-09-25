@@ -1251,3 +1251,46 @@ test('a roll-up a finished run still owes is tried again from the runner\'s tick
     await query(`delete from census_runs where id = $1`, [run.id]);
   }
 });
+
+test('a drawer the ground was asked about and answered nothing is written again, at nought', async (t) => {
+  // Codex, 25 Sep 2026, on the day's range: a re-census that no longer finds
+  // any place for a drawer reads no row for it, so the drawer never reached
+  // the roll-up and its old count stood for ever — the retired bare-text
+  // questions (Ski resort, Scenic) especially.
+  await clean();
+  t.after(async () => {
+    await query(`delete from area_counts where area_slug = 'zz7a'`);
+    await query(`delete from geo_cells where code like 'ZZ7%'`);
+    await query(`delete from place_index where venue_ref like 'google:gone_%'`);
+    await clean();
+  });
+  await query(
+    `insert into geo_cells (code, scheme, label, outcode, lat, lng, source) values
+       ('ZZ7A 1', 'sector', 'ZZ7A 1', 'ZZ7A', 51.5200, -0.1300, 'test')
+     on conflict (code) do update set outcode = excluded.outcode, lat = excluded.lat, lng = excluded.lng`);
+  // Censused afresh a minute ago: its start moved, so last week's surfacing
+  // is not this census's.
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, started_at)
+     values ('test/gone', 51.51, -0.14, 51.53, -0.12, array['ZZ7A'], 'done', now(), now() - interval '1 minute')
+     on conflict (grid_key) do update set outcodes = excluded.outcodes, state = 'done', censused_at = now(), started_at = excluded.started_at`);
+  await query(
+    `insert into place_index (venue_ref, country_code, slice, category, subcategory)
+     values ('google:gone_dry_slope', 'GB', '51.5180,-0.1320,51.5220,-0.1280', 'adrenaline', 'ski-resort') on conflict (venue_ref) do nothing`);
+  await query(
+    `insert into place_subcategories (venue_ref, category, subcategory, found_by, sourced, area_slug, first_seen, last_seen)
+     values ('google:gone_dry_slope', 'adrenaline', 'ski-resort', 'text', 'text', 'test/gone', now() - interval '8 days', now() - interval '8 days')
+     on conflict (venue_ref, subcategory, coalesce(area_slug, '')) do update set last_seen = excluded.last_seen`);
+  // What the board said last week.
+  await query(
+    `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, scored_count, saturated, censused_at, complete, tiles, tiles_saturated, unresolved, sourced, text_count)
+     values ('zz7a', 'adrenaline', 'ski-resort', 125, 125, 0, 0, now() - interval '8 days', true, 1, 0, 0, 'text', 125)
+     on conflict (area_slug, category, subcategory) do update set census_count = 125, text_count = 125`);
+
+  await rollUpOutcodes({ outcodes: ['ZZ7A'] });
+  const { rows: [row] } = await query(
+    `select census_count, text_count, censused_at > now() - interval '1 hour' as fresh from area_counts where area_slug = 'zz7a' and subcategory = 'ski-resort'`);
+  assert.equal(row.census_count, 0, 'the drawer is written again at nought, not left at last week\'s number');
+  assert.equal(row.text_count, 0);
+  assert.ok(row.fresh, 'and dated by this census');
+});
