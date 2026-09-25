@@ -24,6 +24,7 @@ import { query, withTransaction } from '../db.js';
 import { pickSample, SAMPLE } from '../domain/questions.js';
 import { PRICE_PER_UNIT_USD, USD_TO_GBP } from '../domain/providerPrices.js';
 import * as own from './own.js';
+import { sourceHasKey, sourceOff } from './index.js';
 import { roomToSpend, releaseSpend } from '../routes/placeIndex.js';
 
 /** A drawer with fewer census places than this is not worth a question set. */
@@ -192,6 +193,14 @@ export async function start({ subcategories = null, floor = FLOOR, confirm = nul
     // No household means nothing to attribute the calls to, and a run whose
     // spend is on nobody's account is a run the ledger cannot explain.
     throw Object.assign(new Error('A sweep is run by a signed-in household.'), { code: 'no_household', status: 409 });
+  }
+  if (plan.asked > 0 && (!sourceHasKey('google') || sourceOff('google'))) {
+    // A census place is an ID and nothing else, and the one way to learn what
+    // it is costs a Google request. Without Google every asked place would be
+    // "could not ask", and the sweep would finish having done none of the
+    // research it was confirmed for (Codex, 25 Sep 2026).
+    throw Object.assign(new Error(`${plan.asked} of these places can only be identified through Google, which is ${sourceOff('google') ? 'switched off in Settings' : 'not configured'}.`),
+      { code: 'google_unavailable', status: 409, plan });
   }
   return withTransaction(async (client) => {
     // One at a time. Two sweeps would share Overpass's patience and the
@@ -398,8 +407,12 @@ export async function work(id, { research = own.enrich, room = roomToSpend, rele
         await writeProgress(id, { state: 'failed', problem: `over this month's ceiling with £${(got.leftPence / 100).toFixed(2)} left` });
         return one(id);
       }
-      // Set when a place outlives its deadline and the ceiling has no room
-      // left to cover what it may still spend: nothing more may start.
+      // Places that outlived their deadline and may still spend. Their hold
+      // is taken *after* the batch's reservation is released — the batch
+      // already covered them, and reserving again while it stood counted the
+      // same work twice and failed a sweep near the ceiling for nothing
+      // (Codex, 25 Sep 2026).
+      const strays = [];
       let noRoomForStray = null;
       try {
         for (const p of batch) {
@@ -422,32 +435,26 @@ export async function work(id, { research = own.enrich, room = roomToSpend, rele
             if (err?.code === 'deadline') {
               // The research cannot be cancelled from here — `own.js` has no
               // abort — so a call that outlives its deadline may still go on
-              // to spend after this batch's reservation is given back. So it
-              // is given a reservation of its own, held until it settles, and
-              // if the ceiling has no room even for that, nothing more starts:
-              // booking the cost afterwards keeps the ledger true but does
-              // not hold the cap (Codex, 25 Sep 2026).
-              const hold = await room(Math.ceil(REQUESTS_PER_PLACE * pencePerRequest()), { holder: `sweep:${id}:late` });
-              if (!hold.ok) noRoomForStray = hold;
-              // Either way it settles — answered or thrown — what it cost by
-              // then is read again and written, because the read at the
-              // deadline may have run before the request landed.
-              const settle = async (late) => {
-                try {
+              // to spend after this batch's reservation is given back. It is
+              // remembered, and covered by a hold taken when the batch's own
+              // is released (below). Either way it settles — answered or
+              // thrown — what it cost by then is read again and written,
+              // because the read at the deadline may have run before the
+              // request landed.
+              strays.push({
+                place: p,
+                settled: asking.then(
+                  (out) => outcomeOf(out),
+                  (err) => ({ state: 'failed', problems: [String(err?.message ?? err).slice(0, 160)] }),
+                ).then(async (late) => {
                   const usd = await spentOn(p.venue_ref, since, household);
                   await query(
                     `update research_sweep_places set outcome = $3::jsonb, cost_usd = $4
                       where sweep_id = $1 and venue_ref = $2`,
                     [id, p.venue_ref, JSON.stringify({ ...late, late: true, problems: [...outcome.problems, ...(late.problems ?? [])] }), usd]);
                   await writeProgress(id).catch(() => null);
-                } finally {
-                  if (hold.ok) await release(hold.reservation);
-                }
-              };
-              asking.then(
-                (out) => settle(outcomeOf(out)),
-                (err) => settle({ state: 'failed', problems: [String(err?.message ?? err).slice(0, 160)] }),
-              ).catch(() => null);
+                }).catch(() => null),
+              });
             }
           }
           const usd = await spentOn(p.venue_ref, since, household);
@@ -458,6 +465,15 @@ export async function work(id, { research = own.enrich, room = roomToSpend, rele
         }
       } finally {
         await release(got.reservation);
+        if (strays.length) {
+          // The batch no longer stands, so this does not count it twice. Held
+          // until the last stray settles; if the ceiling has no room even for
+          // this, nothing more starts — booking the cost afterwards keeps the
+          // ledger true but does not hold the cap.
+          const hold = await room(Math.ceil(strays.length * REQUESTS_PER_PLACE * pencePerRequest()), { holder: `sweep:${id}:late` });
+          if (!hold.ok) noRoomForStray = hold;
+          void Promise.all(strays.map((s) => s.settled)).then(() => (hold.ok ? release(hold.reservation) : null)).catch(() => null);
+        }
       }
       await writeProgress(id);
       if (noRoomForStray) {
