@@ -1754,7 +1754,11 @@ filingRoutes.get('/places/:ref', requires('view_library'), async (req, res, next
           || (keep.state === 'answered' && other.state === 'answered' && said(keep) !== said(other));
         byQ.set(id, keep);
       }
-      questions = qs.filter((q) => q.set_key === setKey).map((q) => {
+      // The set's own questions and the ones asked of everything: Duration
+      // and Cost band are global (migration 246), and an answer to a global
+      // question is as much a fact about this place as one to the set's
+      // (Codex, 25 Sep 2026).
+      questions = qs.filter((q) => q.set_key === setKey || q.scope === 'global').map((q) => {
         const a = byQ.get(String(q.id));
         if (!a) {
           return { id: Number(q.id), name: q.label, state: 'notasked',

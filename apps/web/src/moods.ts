@@ -10,7 +10,7 @@ import { MOODS } from './routes';
 import type { LaneVocab } from './screens/tripLanes';
 
 export const MOOD_LABEL: Record<string, string> = {
-  fun: 'Fun', food: 'Food', culture: 'Culture',
+  fun: 'Fun', food: 'Food', culture: 'Culture', educational: 'Educational',
   // Sport is the ticket and the membership; Active is what you turn up and do
   // (owner, 5 Sep 2026). The key is `activity` because the atlas already has a
   // category called `active` that means something else.

@@ -60,6 +60,12 @@ export const MOODS = [
   { key: 'adrenaline', label: 'Adrenaline' },
   { key: 'relaxing', label: 'Relaxing' },
   { key: 'outdoors', label: 'Outdoors' },
+  // The ninth (the axes brief, 25 Sep 2026): distinct from Culture. A castle
+  // is Culture; a science centre is Educational; a farm with a learning barn
+  // is Educational and not Culture at all. Last here because the order of
+  // this list is the fallback rank, and the table (migration 246, position
+  // 35) is what the screens actually read.
+  { key: 'educational', label: 'Educational' },
 ];
 
 export const MOOD_KEYS = MOODS.map((m) => m.key);

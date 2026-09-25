@@ -156,6 +156,10 @@ export async function setBrings(attributeKey, bringsKey, value) {
     forget();
     return null;
   }
+  // The brought value is the brought label's shape, and the brought label is
+  // one that is still live: a retired axis cannot be handed out by another
+  // label any more than it can be set directly (Codex, 25 Sep 2026).
+  await mustFit(bringsKey, value);
   const { rows } = await query(
     `insert into attribute_brings (attribute_key, brings_key, yesno, from_value, to_value, choice)
      values ($1, $2, $3, $4, $5, $6)

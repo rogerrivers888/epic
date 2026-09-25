@@ -164,7 +164,9 @@ export function chatLayerOf(segment: string | undefined): ChatLayer {
 const chatSegment = (layer: ChatLayer | null | undefined): string | null =>
   (!layer || layer.page === 'list' ? null : layer.page === 'topic' ? layer.topicId : layer.page);
 
-export const MOODS: MoodKey[] = ['fun', 'food', 'culture', 'sport', 'activity', 'adrenaline', 'relaxing', 'outdoors'];
+// Educational is the ninth (the axes brief, 25 Sep 2026): distinct from
+// Culture, and an address of its own so a strip item for it can be opened.
+export const MOODS: MoodKey[] = ['fun', 'food', 'culture', 'educational', 'sport', 'activity', 'adrenaline', 'relaxing', 'outdoors'];
 
 /**
  * Inspire has two halves now (Inspire rework, 7 Sep 2026): what there is to do,

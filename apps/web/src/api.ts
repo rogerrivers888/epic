@@ -1121,7 +1121,7 @@ export type IdeaHeadline = { venueRef: string; name: string; category: string; e
  * `(string & {})` keeps the union open — the categories live in a table now
  * (migration 053) and the back office may add one without a deploy.
  */
-export type MoodKey = 'fun' | 'food' | 'culture' | 'sport' | 'activity' | 'adrenaline' | 'relaxing' | 'outdoors' | (string & {});
+export type MoodKey = 'fun' | 'food' | 'culture' | 'educational' | 'sport' | 'activity' | 'adrenaline' | 'relaxing' | 'outdoors' | (string & {});
 export type Mood = {
   key: MoodKey; label: string;
   /** What the census found in the reach — free, ours, and not what is on screen. Counted once per place; a floor. */

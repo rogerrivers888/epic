@@ -32,6 +32,8 @@ test('the home screen', () => {
 test('one layer into Inspire: the search, and a category opened out', () => {
   assert.deepEqual(roundTrip('/inspire/search'), { name: 'inspire', searching: true, mode: 'activities', pick: null });
   assert.deepEqual(roundTrip('/inspire/culture'), { name: 'inspire', searching: false, mode: 'activities', pick: 'culture' });
+  // The ninth category has an address too (the axes brief, 25 Sep 2026).
+  assert.deepEqual(roundTrip('/inspire/educational'), { name: 'inspire', searching: false, mode: 'activities', pick: 'educational' });
   assert.equal(paths.inspireShelf('adrenaline'), '/inspire/adrenaline');
   // Every mood but Food is a page here. Which of them the strip *offers* is
   // decided by what is actually near you, not by this list — hardcoding the
