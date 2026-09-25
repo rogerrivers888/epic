@@ -195,3 +195,20 @@ test('the hygiene register is asked once there is a postcode, and what it says i
     await query('delete from place_facts where venue_ref like $1', [`${PREFIX}%`]).catch(() => null);
   }
 });
+
+test('a hygiene register that cannot be reached has not withdrawn what it said', async () => {
+  // Reference research replaces every source's facts — but only with an
+  // answer. A timeout is not one (Codex, 25 Sep 2026).
+  const r = ref('hygiene_kept');
+  await query(`insert into place_facts (venue_ref, field, source, value, licence, retention, confidence, expires_at) values ($1, 'fsa_rating', 'fsa', '"5"', 'OGL v3.0', 'indefinite', 1, null) on conflict do nothing`, [r]);
+  const wasFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('no network in this test'); };
+  try {
+    await own.enrich(r, { force: true, replace: true, paid: false, seed: { name: 'Nowhere Cafe', lat: 51.5, lng: -0.1, postcode: 'SL5 9JH' } });
+    const { rows } = await query(`select value from place_facts where venue_ref = $1 and source = 'fsa' and field = 'fsa_rating'`, [r]);
+    assert.deepEqual(rows.map((x) => x.value), ['5'], 'still held');
+  } finally {
+    globalThis.fetch = wasFetch;
+    await query('delete from place_facts where venue_ref like $1', [`${PREFIX}%`]).catch(() => null);
+  }
+});

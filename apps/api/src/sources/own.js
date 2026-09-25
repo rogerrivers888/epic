@@ -699,7 +699,11 @@ export async function enrich(venueRef, { householdId = null, seed: given = {}, f
       const nm = held.find((f) => f.field === 'name' && !empty(f.value))?.value ?? seed.name ?? null;
       if (pc) {
         const got = await fsa.lookup({ name: nm, postcode: pc, householdId, venueRef });
-        if (got.facts || replace) await forgetSource(venueRef, ['fsa']);
+        // Replaced only by an answer: a match, or the register's own "nothing
+        // here". A register that could not be reached has not withdrawn what
+        // it said last time — the same rule as every source above (Codex,
+        // 25 Sep 2026).
+        if (got.facts || (replace && got.answered)) await forgetSource(venueRef, ['fsa']);
         if (got.facts) {
           matched.fsa = { id: got.facts.id, scheme: got.facts.scheme };
           await Promise.all([

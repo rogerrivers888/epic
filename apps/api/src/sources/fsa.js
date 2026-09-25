@@ -68,7 +68,9 @@ const factsOf = (e) => ({
  * Look one place up. Free, attributed like everything else, and never a guess.
  */
 export async function lookup({ name, postcode, householdId = null, venueRef = null } = {}) {
-  if (!postcode) return { facts: null, problem: 'no postcode to ask with' };
+  // `answered` says whether the register was actually consulted: a no-match
+  // from it is an answer and may replace what we held; a timeout is not.
+  if (!postcode) return { facts: null, answered: false, problem: 'no postcode to ask with' };
   const qs = new URLSearchParams({ address: String(postcode), pageSize: '10' });
   if (name) qs.set('name', String(name).slice(0, 60));
   let json;
@@ -78,11 +80,11 @@ export async function lookup({ name, postcode, householdId = null, venueRef = nu
     json = await res.json();
   } catch (err) {
     await providerCalls.record(householdId, 'fsa', 'own.hygiene', { fsa: 1 }, null, venueRef).catch(() => null);
-    return { facts: null, problem: `the hygiene register: ${String(err?.message ?? err).slice(0, 80)}` };
+    return { facts: null, answered: false, problem: `the hygiene register: ${String(err?.message ?? err).slice(0, 80)}` };
   } finally {
     // recorded above on failure; on success below, once
   }
   await providerCalls.record(householdId, 'fsa', 'own.hygiene', { fsa: 1 }, null, venueRef).catch(() => null);
   const { match, problem } = pick(json?.establishments ?? [], { name, postcode });
-  return { facts: match ? factsOf(match) : null, problem };
+  return { facts: match ? factsOf(match) : null, answered: true, problem };
 }

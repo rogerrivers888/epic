@@ -84,13 +84,35 @@ test('twenty a category, bucket by bucket, each once, with the reason written be
   assert.deepEqual(by['disagree?'].map((p) => p.venue_ref), ['google:ChIJ_ref_007'], 'and the one likeliest to, to make the two');
 });
 
-test('the price is for Google places we cannot seed, and everything else is free', async () => {
+test('the price is what each place may still cost: two to identify, one for a page lead, nought with a website', async () => {
+  // Place 2 has a name and a point but no website: forced research buys the
+  // website lead, one request, which the first estimate called free (Codex,
+  // 25 Sep 2026).
+  await query(`update place_records set website = null where venue_ref = 'google:ChIJ_ref_002'`);
   const e = await ref.estimate();
   const mine = e.categories.find((c) => c.category === CAT);
   assert.equal(mine.picks.length, 20);
-  // Every synthetic place has a name and a point, so none of these costs a request.
-  assert.ok(e.seeded >= 20);
-  assert.match(e.basis, /free/);
+  assert.ok(mine.picks.some((p) => p.venue_ref === 'google:ChIJ_ref_002'), 'place 2 is near the top of the busiest area');
+  assert.ok(e.toFindPage >= 1);
+  assert.ok(e.requests >= 1);
+  assert.match(e.basis, /without a website \(one, the page lead\)/);
+});
+
+test('a place sits in the smallest of its areas, not in all of them', async () => {
+  // Every synthetic place is also in a "country" that holds them all. Counted
+  // there, every one of them is dense (Codex, 25 Sep 2026).
+  for (const r of rows) await query(`insert into place_areas (venue_ref, area_slug) values ($1, 'test-country') on conflict do nothing`, [r.venue_ref]);
+  const [c] = (await ref.propose()).filter((x) => x.category === CAT);
+  const by = Object.groupBy(c.picks, (p) => p.picked_for);
+  assert.ok(by.thin.every((p) => Number(p.venue_ref.slice(-3)) > 50), 'thin still means the small areas');
+  assert.ok(by.dense.every((p) => Number(p.venue_ref.slice(-3)) <= 30), 'dense still means the biggest town');
+});
+
+test('a second sweep does not start while one is running', async () => {
+  const e = await ref.estimate();
+  const row = await ref.start({ confirm: e.requests, householdId: HH });
+  await assert.rejects(() => ref.start({ confirm: e.requests, householdId: HH }), (x) => x.code === 'already_running');
+  await query(`update research_sweeps set state = 'done' where id = $1`, [row.id]);
 });
 
 test('the run is a research sweep in reference mode: everything again, seeded from the record, hygiene included', async () => {

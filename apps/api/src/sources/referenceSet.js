@@ -20,8 +20,8 @@
  * again, and kept — and that the places were chosen rather than sampled.
  */
 
-import { query } from '../db.js';
-import { pencePerRequest, needsGoogle, REQUESTS_PER_PLACE } from './researchSweep.js';
+import { query, withTransaction } from '../db.js';
+import { pencePerRequest, requestsStillNeeded } from './researchSweep.js';
 import * as sweep from './researchSweep.js';
 
 export const PER_CATEGORY = 20;
@@ -51,15 +51,24 @@ export const BUCKETS = [
  */
 async function candidates() {
   const { rows } = await query(`
-    with cand as (
+    with sized as (
+      select area_slug, count(*) as n from place_areas group by area_slug
+    ), finest as (
+      -- A place sits in several areas at once — country, county, town,
+      -- outcode — and counting it in all of them made every place dense by
+      -- its country and thin by its outcode (Codex, 25 Sep 2026). Each place
+      -- is put in the smallest area it belongs to, and density is that.
+      select distinct on (a.venue_ref) a.venue_ref, a.area_slug, z.n as area_places
+        from place_areas a join sized z on z.area_slug = a.area_slug
+       order by a.venue_ref, z.n asc, a.area_slug
+    ), cand as (
       select p.venue_ref, s.category_key as category, p.subcategory,
              r.name, r.lat, r.epic_score, r.website, r.summary, r.matched,
-             a.area_slug,
-             count(*) over (partition by a.area_slug) as area_places
+             f.area_slug, f.area_places
         from place_index p
         join shelf_subcategories s on s.key = p.subcategory and s.active
         left join place_records r on r.venue_ref = p.venue_ref
-        left join place_areas a on a.venue_ref = p.venue_ref
+        left join finest f on f.venue_ref = p.venue_ref
     ), hosts as (
       select venue_ref, regexp_replace(lower(website), '^https?://(www\\.)?([^/]+).*$', '\\2') as host
         from place_records where website is not null
@@ -147,24 +156,29 @@ export async function estimate({ perCategory = PER_CATEGORY } = {}) {
   const categories = await propose({ perCategory });
   const all = categories.flatMap((c) => c.picks.map((p) => ({ ...p, category: c.category })));
   const refs = all.map((p) => p.venue_ref);
-  const { rows } = refs.length
-    ? await query('select venue_ref from place_records where venue_ref = any($1) and name is not null and lat is not null', [refs])
-    : { rows: [] };
-  const seeded = new Set(rows.map((r) => r.venue_ref));
-  const toIdentify = all.filter((p) => !seeded.has(p.venue_ref) && needsGoogle(p.venue_ref));
+  // What each may still cost from what we hold: two to identify an id, one
+  // for the website lead where we have a name and point but no site, nought
+  // otherwise (Codex, 25 Sep 2026).
+  const still = await requestsStillNeeded(refs);
+  const counts = [...still.values()];
+  const requests = counts.reduce((n, c) => n + c, 0);
+  const toIdentify = counts.filter((c) => c === 2).length;
+  const toFindPage = counts.filter((c) => c === 1).length;
+  const free = counts.filter((c) => c === 0).length;
   const pence = pencePerRequest();
-  const requests = toIdentify.length * REQUESTS_PER_PLACE;
   return {
     categories,
     places: all.length,
-    seeded: seeded.size,
-    toIdentify: toIdentify.length,
+    free,
+    toIdentify,
+    toFindPage,
     requests,
     pencePerRequest: pence,
-    costGbpLow: Math.round(toIdentify.length * pence) / 100,
+    costGbpLow: Math.round((toIdentify + toFindPage) * pence) / 100,
     costGbpHigh: Math.round(requests * pence) / 100,
-    basis: `${categories.length} categories × ${perCategory} · ${seeded.size} already identified and free · `
-      + `${toIdentify.length} Google places to identify at up to ${REQUESTS_PER_PLACE} requests (${pence}p) · everything else — the venue's page, OSM, Wikipedia, Wikidata, FSA — is free`,
+    basis: `${categories.length} categories × ${perCategory} · ${free} cost nothing · `
+      + `${toIdentify} Google places to identify (two requests) · ${toFindPage} known but without a website (one, the page lead) · `
+      + `${pence}p a request · everything else — the venue's page, OSM, Wikipedia, Wikidata, FSA — is free`,
     byBucket: Object.fromEntries(BUCKETS.map(([b]) => [b, all.filter((p) => p.picked_for === b).length])),
   };
 }
@@ -179,19 +193,30 @@ export async function start({ perCategory = PER_CATEGORY, confirm = null, househ
   }
   if (!householdId) throw Object.assign(new Error('A reference set is run by a signed-in household.'), { code: 'no_household', status: 409 });
   const all = plan.categories.flatMap((c) => c.picks.map((p) => ({ ...p, category: c.category })));
-  const { rows: [row] } = await query(
-    `insert into research_sweeps (subcategories, params, household_id, started_by, places)
-     values ($1, $2, $3, $4, $5) returning *`,
-    [JSON.stringify([...new Set(all.map((p) => p.subcategory))]),
-      JSON.stringify({ mode: 'reference', perCategory, requests: plan.requests, estimateGbp: plan.costGbpHigh, byBucket: plan.byBucket }),
-      householdId, startedBy, all.length]);
-  for (const p of all) {
-    await query(
-      `insert into research_sweep_places (sweep_id, venue_ref, subcategory, tier, picked_for)
-       values ($1, $2, $3, 'top', $4) on conflict do nothing`,
-      [row.id, p.venue_ref, p.subcategory, p.picked_for]);
-  }
-  return row;
+  return withTransaction(async (client) => {
+    // One sweep at a time, of either kind — the same lock and the same check
+    // as the sample sweep, because they share Overpass's patience and the
+    // ceiling (Codex, 25 Sep 2026).
+    await client.query('select pg_advisory_xact_lock(hashtext($1))', ['epic.research_sweep.start']);
+    const { rows: going } = await client.query(`select id from research_sweeps where state = 'running' limit 1`);
+    if (going.length) {
+      throw Object.assign(new Error('A sweep is already running. Wait for it, or it will be picked up if it has stalled.'),
+        { code: 'already_running', status: 409, sweep: going[0].id });
+    }
+    const { rows: [row] } = await client.query(
+      `insert into research_sweeps (subcategories, params, household_id, started_by, places)
+       values ($1, $2, $3, $4, $5) returning *`,
+      [JSON.stringify([...new Set(all.map((p) => p.subcategory))]),
+        JSON.stringify({ mode: 'reference', perCategory, requests: plan.requests, estimateGbp: plan.costGbpHigh, byBucket: plan.byBucket }),
+        householdId, startedBy, all.length]);
+    for (const p of all) {
+      await client.query(
+        `insert into research_sweep_places (sweep_id, venue_ref, subcategory, tier, picked_for)
+         values ($1, $2, $3, 'top', $4) on conflict do nothing`,
+        [row.id, p.venue_ref, p.subcategory, p.picked_for]);
+    }
+    return row;
+  });
 }
 
 /** Everything a place in the set now holds, with where each fact came from — for reading the set, not the screen. */

@@ -75,6 +75,28 @@ export const pencePerRequest = () => Math.round(PRICE_PER_UNIT_USD['google-pro']
  */
 export const needsGoogle = (venueRef) => String(venueRef).startsWith('google:');
 
+/**
+ * How many Google requests each place may still cost, from what we hold.
+ *
+ * Two for a Google place we know only as an id — identify it, then find its
+ * page. One for a Google place we have a name and point for but no website:
+ * `enrich` with `paid` still buys the website lead. Nought for anything with
+ * a website, or for a place that is not Google's at all. The sample sweep
+ * counted a fresh identified record as free, and the reference set — which
+ * forces research whatever the record holds — was reserving nothing for the
+ * lead it would then buy (Codex, 25 Sep 2026).
+ */
+export async function requestsStillNeeded(refs) {
+  const out = new Map(refs.map((r) => [r, needsGoogle(r) ? REQUESTS_PER_PLACE : 0]));
+  if (!refs.length) return out;
+  const { rows } = await query('select venue_ref, name, lat, website from place_records where venue_ref = any($1)', [refs]);
+  for (const r of rows) {
+    if (!needsGoogle(r.venue_ref)) continue;
+    if (r.name && r.lat != null) out.set(r.venue_ref, r.website ? 0 : 1);
+  }
+  return out;
+}
+
 const gbp = (usd) => Math.round(usd * USD_TO_GBP * 100) / 100;
 
 // ---------------------------------------------------------------------------
@@ -451,8 +473,13 @@ export async function work(id, { research = null, room = roomToSpend, release = 
       // is one `enrich` will skip, and reserving for it near the ceiling
       // failed a sweep whose real work still fitted (Codex, 25 Sep 2026).
       const held = await alreadyHeld(batch.map((p) => p.venue_ref));
-      const chargeable = batch.filter((p) => !held.has(p.venue_ref) && needsGoogle(p.venue_ref)).length;
-      const want = chargeable * REQUESTS_PER_PLACE * pencePerRequest();
+      // In reference mode nothing is held — everything is asked again — so
+      // the reservation is what each place may still cost from what it holds.
+      const remaining = run.params?.mode === 'reference' ? await requestsStillNeeded(batch.map((p) => p.venue_ref)) : null;
+      const chargeableRequests = remaining
+        ? batch.reduce((n, p) => n + (remaining.get(p.venue_ref) ?? 0), 0)
+        : batch.filter((p) => !held.has(p.venue_ref) && needsGoogle(p.venue_ref)).length * REQUESTS_PER_PLACE;
+      const want = chargeableRequests * pencePerRequest();
       const got = await room(Math.ceil(want), { holder: `sweep:${id}` });
       if (!got.ok) {
         // The ceiling is monthly and the sweep is not going to get under it by
