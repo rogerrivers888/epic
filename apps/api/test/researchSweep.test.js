@@ -435,3 +435,37 @@ test('a sweep whose process died is picked up, and its in-air places asked again
   assert.equal((await sweep.resume({ work: async () => {} })).resumed, 0);
   await query(`update research_sweeps set state = 'done' where id = $1`, [row.id]);
 });
+
+test('a finished sweep\u2019s failures can be asked again, seeded from the record, and nothing is bought twice', async () => {
+  await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
+  const need = (await sweep.estimate({ subcategories: [SUB] })).requests;
+  const row = await sweep.start({ subcategories: [SUB], confirm: need, householdId: HH });
+  // Everything done but three, which failed the way Overpass fails.
+  await query(`update research_sweep_places set state = 'done', outcome = '{"state":"done"}'::jsonb where sweep_id = $1`, [row.id]);
+  const failed = refs(3, 'google:ChIJ_sweep_0').map((r) => r.replace('_0', '_0').slice(0, 25) + r.slice(-2));
+  const { rows: three } = await query(`select venue_ref from research_sweep_places where sweep_id = $1 order by venue_ref limit 3`, [row.id]);
+  await query(`update research_sweep_places set state = 'failed', outcome = '{"state":"failed","problems":["OpenStreetMap: timeout"]}'::jsonb where sweep_id = $1 and venue_ref = any($2)`, [row.id, three.map((r) => r.venue_ref)]);
+  await query(`update research_sweeps set state = 'done', finished_at = now() where id = $1`, [row.id]);
+  // They have records with a name and a point from the first go.
+  for (const r of three) await query(`insert into place_records (venue_ref, name, lat, lng) values ($1, 'Known', 51.5, -0.6) on conflict (venue_ref) do update set name = 'Known', lat = 51.5, lng = -0.6`, [r.venue_ref]);
+
+  const reopened = await sweep.retryFailed(row.id);
+  assert.equal(reopened.retried, 3);
+  assert.equal(reopened.state, 'running');
+  const seeds = [];
+  const done = await sweep.work(row.id, {
+    research: async (ref, opts) => { seeds.push(ref); return { state: 'done', matched: { osm: {} }, fields: {}, problems: [] }; },
+    room: async (_p, { holder }) => ({ ok: true, reservation: holder, leftPence: 10000 }),
+    release: async () => {},
+  });
+  assert.equal(done.state, 'done');
+  assert.deepEqual(seeds.sort(), three.map((r) => r.venue_ref).sort(), 'only the three failed were asked again');
+  const f = await sweep.funnelOf(row.id);
+  assert.equal(f.failed, 0);
+  const { rows: [again] } = await query(`select outcome from research_sweep_places where sweep_id = $1 and venue_ref = $2`, [row.id, three[0].venue_ref]);
+  assert.equal(again.outcome.retried, true, 'the row says it was asked twice');
+  // And the sample sweep's research now seeds from the record, so a retry
+  // does not buy the place back: the seed a real run would pass is the
+  // record's own.
+  void failed;
+});

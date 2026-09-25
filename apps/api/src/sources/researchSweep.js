@@ -430,10 +430,29 @@ async function writeProgress(id, { problem = null, state = null } = {}) {
  * already know is not bought back from Google. The sample sweep leaves a
  * fresh identified record alone; the reference set does not.
  */
-export async function referenceResearch(venueRef, opts = {}) {
+/** What the record already knows about a place, as the seed `enrich` takes — or nothing. */
+async function seedFromRecord(venueRef) {
   const r = await query('select name, lat, lng, website, postcode from place_records where venue_ref = $1', [venueRef]);
   const rec = r.rows[0];
-  let seed = rec?.name && rec?.lat != null ? { name: rec.name, lat: rec.lat, lng: rec.lng, website: rec.website ?? undefined, postcode: rec.postcode ?? undefined } : {};
+  return rec?.name && rec?.lat != null ? { name: rec.name, lat: rec.lat, lng: rec.lng, website: rec.website ?? undefined, postcode: rec.postcode ?? undefined } : {};
+}
+
+/**
+ * The sample sweep's research: `enrich` as it stands, seeded from the record
+ * where there is one.
+ *
+ * `seedFor` reads a household's own row and the shortlist, not place_records,
+ * so a place this sweep had already identified and then failed on — an
+ * Overpass timeout, 119 times over — would have been bought back from Google
+ * on the retry. The record's own name and point go in first; a place with no
+ * record is unchanged (owner via epic-ed, 25 Sep 2026: retry the failures).
+ */
+export async function sampleResearch(venueRef, opts = {}) {
+  return own.enrich(venueRef, { ...opts, seed: await seedFromRecord(venueRef) });
+}
+
+export async function referenceResearch(venueRef, opts = {}) {
+  let seed = await seedFromRecord(venueRef);
   // An atlas place may have no record of its own yet; the atlas holds its
   // name and point, and without them the research could not ask — eight of
   // the sport picks were atlas places (found in the first proposal, 25 Sep
@@ -450,7 +469,7 @@ export async function work(id, { research = null, room = roomToSpend, release = 
   if (!run || run.state !== 'running') return run;
   // The kind of research is the run's, so a resume after a deploy does the
   // same work the start did.
-  const ask = research ?? (run.params?.mode === 'reference' ? referenceResearch : own.enrich);
+  const ask = research ?? (run.params?.mode === 'reference' ? referenceResearch : sampleResearch);
   const household = householdId ?? run.household_id;
   const pulse = setInterval(() => { void beat(id); }, STRANDED_AFTER_MS / 4);
   pulse.unref?.();
@@ -549,7 +568,9 @@ export async function work(id, { research = null, room = roomToSpend, release = 
                 ).then(async (late) => {
                   const usd = await spentOn(p.venue_ref, since, household);
                   await query(
-                    `update research_sweep_places set outcome = $3::jsonb, cost_usd = $4
+                    `update research_sweep_places
+                          set cost_usd = $4,
+                              outcome = jsonb_strip_nulls(jsonb_build_object('retried', outcome->'retried')) || $3::jsonb
                       where sweep_id = $1 and venue_ref = $2`,
                     [id, p.venue_ref, JSON.stringify({ ...late, late: true, problems: [...outcome.problems, ...(late.problems ?? [])] }), usd]);
                   await writeProgress(id).catch(() => null);
@@ -559,7 +580,9 @@ export async function work(id, { research = null, room = roomToSpend, release = 
           }
           const usd = await spentOn(p.venue_ref, since, household);
           await query(
-            `update research_sweep_places set state = $3, outcome = $4::jsonb, cost_usd = $5
+            `update research_sweep_places
+                  set state = $3, cost_usd = $5,
+                      outcome = jsonb_strip_nulls(jsonb_build_object('retried', outcome->'retried')) || $4::jsonb
               where sweep_id = $1 and venue_ref = $2`,
             [id, p.venue_ref, state, JSON.stringify(outcome), usd]);
         }
@@ -634,6 +657,31 @@ export async function places(id) {
       order by p.subcategory, case p.tier when 'top' then 0 else 1 end, p.venue_ref`,
     [id]);
   return rows;
+}
+
+/**
+ * Ask again about the places a finished sweep failed on.
+ *
+ * Owner, 25 Sep 2026: seventeen per cent of the sample failed, almost all
+ * Overpass timeouts, and those cluster on the biggest places — "if the thin
+ * drawers and the failed places overlap, the corpus is thin for a fixable
+ * reason." The failed rows go back to pending, the sweep back to running,
+ * and the worker takes it from there. `attempted_at` is kept, so what a
+ * place cost across both goes is still its cost; nothing is bought twice
+ * because the research is seeded from the record it already has.
+ */
+export async function retryFailed(id) {
+  const run = await one(id);
+  if (!run) return null;
+  if (run.state === 'running') throw Object.assign(new Error('That sweep is still running.'), { code: 'already_running', status: 409 });
+  const { rows: going } = await query(`select id from research_sweeps where state = 'running' limit 1`);
+  if (going.length) throw Object.assign(new Error('A sweep is already running.'), { code: 'already_running', status: 409, sweep: going[0].id });
+  const { rowCount } = await query(
+    `update research_sweep_places set state = 'pending', outcome = outcome || '{"retried": true}'::jsonb
+      where sweep_id = $1 and state = 'failed'`, [id]);
+  if (!rowCount) return { ...run, retried: 0 };
+  await query(`update research_sweeps set state = 'running', finished_at = null, problem = null, touched_at = now() where id = $1`, [id]);
+  return { ...(await one(id)), retried: rowCount };
 }
 
 /** The last few sweeps, with their funnels, for a report. */

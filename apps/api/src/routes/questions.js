@@ -488,6 +488,18 @@ questionRoutes.get('/sweep', requires('view_library'), async (_req, res, next) =
     res.json({ sweeps: await Promise.all(rows.map(async (r) => ({ ...r, funnel: await sweep.funnelOf(r.id) }))) });
   } catch (err) { next(err); }
 });
+/** POST /sweep/:id/retry — ask again about the places a finished sweep failed on. Free where the record is seeded. */
+questionRoutes.post('/sweep/:id/retry', requires('manage_questions'), async (req, res, next) => {
+  try {
+    const row = await sweep.retryFailed(String(req.params.id));
+    if (!row) return res.status(404).json({ error: 'not_found', message: 'No sweep by that id.' });
+    if (row.retried) void sweep.work(row.id).catch((err) => console.warn(`sweep ${row.id}: ${err.message}`));
+    res.status(202).json({ sweep: row, retried: row.retried });
+  } catch (err) {
+    if (err?.code === 'already_running') return res.status(409).json({ error: err.code, message: err.message, sweep: err.sweep ?? null });
+    return next(err);
+  }
+});
 questionRoutes.get('/sweep/:id', requires('view_library'), async (req, res, next) => {
   try {
     const row = await sweep.one(String(req.params.id));
