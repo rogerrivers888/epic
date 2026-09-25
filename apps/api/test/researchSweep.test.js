@@ -578,3 +578,42 @@ test('a retry prices a held sample place at nothing, since the worker will skip 
   assert.equal(e.requests, 0);
   await query(`update research_sweeps set state = 'done' where id = $1`, [row.id]);
 });
+
+test('a late answer from an earlier go does not overwrite the retry\u2019s', async () => {
+  // The stray's promise cannot be cancelled; retried while it is still slow,
+  // its answer must land on nothing (Codex, 25 Sep 2026).
+  await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
+  const need = (await sweep.estimate({ subcategories: [SUB] })).requests;
+  const row = await sweep.start({ subcategories: [SUB], confirm: need, householdId: HH });
+  let lateRef = null;
+  let settleLate;
+  const done = await sweep.work(row.id, {
+    deadlineMs: 30,
+    research: async (ref) => {
+      if (!lateRef) { lateRef = ref; return new Promise((resolve) => { settleLate = resolve; }); }
+      return { state: 'done', matched: {}, fields: {}, problems: [] };
+    },
+    room: async (_p, { holder }) => ({ ok: true, reservation: holder, leftPence: 10000 }),
+    release: async () => {},
+  });
+  assert.equal(done.state, 'done');
+  const { rows: [first] } = await query(`select outcome from research_sweep_places where sweep_id = $1 and venue_ref = $2`, [row.id, lateRef]);
+  assert.equal(first.outcome.attempt, 1);
+  // Retried (an hour on, so it counts as orphaned), and the second go answers.
+  await query(`update research_sweep_places set attempted_at = now() - interval '1 hour' where sweep_id = $1 and venue_ref = $2`, [row.id, lateRef]);
+  await sweep.retryFailed(row.id, { confirm: (await sweep.retryEstimate(row.id)).requests });
+  const again = await sweep.work(row.id, {
+    research: async () => ({ state: 'done', matched: { osm: {} }, fields: {}, problems: ['second go'] }),
+    room: async (_p, { holder }) => ({ ok: true, reservation: holder, leftPence: 10000 }),
+    release: async () => {},
+  });
+  assert.equal(again.state, 'done');
+  // Now the first go's slow answer arrives.
+  settleLate({ state: 'done', matched: { wikipedia: {} }, fields: {}, problems: ['first go, late'] });
+  await new Promise((r) => setTimeout(r, 150));
+  const { rows: [after] } = await query(`select state, outcome from research_sweep_places where sweep_id = $1 and venue_ref = $2`, [row.id, lateRef]);
+  assert.equal(after.outcome.attempt, 2);
+  assert.equal(after.state, 'done');
+  assert.deepEqual(after.outcome.problems, ['second go'], 'the retry\u2019s answer stands');
+  assert.equal(after.outcome.late, undefined);
+});

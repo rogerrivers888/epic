@@ -294,7 +294,11 @@ const beat = (id) => query(`update research_sweeps set touched_at = now() where 
  */
 async function claimBatch(id, n = BATCH) {
   const { rows } = await query(
-    `update research_sweep_places set state = 'asking', attempted_at = coalesce(attempted_at, now())
+    `update research_sweep_places
+        set state = 'asking', attempted_at = coalesce(attempted_at, now()),
+            -- Which go this is. A late answer from an earlier go may only
+            -- write while the row is still that go's (Codex, 25 Sep 2026).
+            outcome = coalesce(outcome, '{}'::jsonb) || jsonb_build_object('attempt', coalesce((outcome->>'attempt')::int, 0) + 1)
       where (sweep_id, venue_ref) in (
         select sweep_id, venue_ref from research_sweep_places
          where sweep_id = $1 and state = 'pending'
@@ -303,7 +307,7 @@ async function claimBatch(id, n = BATCH) {
          order by subcategory, case tier when 'top' then 0 else 1 end, venue_ref
          for update skip locked
          limit $2)
-      returning venue_ref, subcategory, tier, attempted_at`,
+      returning venue_ref, subcategory, tier, attempted_at, (outcome->>'attempt')::int as attempt`,
     [id, n]);
   return rows;
 }
@@ -595,9 +599,9 @@ export async function work(id, { research = null, room = roomToSpend, release = 
                   await query(
                     `update research_sweep_places
                           set cost_usd = $4,
-                              outcome = jsonb_strip_nulls(jsonb_build_object('retried', outcome->'retried')) || $3::jsonb
-                      where sweep_id = $1 and venue_ref = $2`,
-                    [id, p.venue_ref, JSON.stringify({ ...late, late: true, problems: [...outcome.problems, ...(late.problems ?? [])] }), usd]);
+                              outcome = jsonb_strip_nulls(jsonb_build_object('retried', outcome->'retried', 'attempt', outcome->'attempt')) || $3::jsonb
+                      where sweep_id = $1 and venue_ref = $2 and (outcome->>'attempt')::int = $5`,
+                      [id, p.venue_ref, JSON.stringify({ ...late, late: true, problems: [...outcome.problems, ...(late.problems ?? [])] }), usd, p.attempt]);
                   await writeProgress(id).catch(() => null);
                 }).catch(() => null),
               });
@@ -607,7 +611,7 @@ export async function work(id, { research = null, room = roomToSpend, release = 
           await query(
             `update research_sweep_places
                   set state = $3, cost_usd = $5,
-                      outcome = jsonb_strip_nulls(jsonb_build_object('retried', outcome->'retried')) || $4::jsonb
+                      outcome = jsonb_strip_nulls(jsonb_build_object('retried', outcome->'retried', 'attempt', outcome->'attempt')) || $4::jsonb
               where sweep_id = $1 and venue_ref = $2`,
             [id, p.venue_ref, state, JSON.stringify(outcome), usd]);
         }
