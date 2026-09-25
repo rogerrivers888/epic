@@ -134,34 +134,17 @@ router.post('/stamp', requires('manage_library'), async (req, res, next) => {
 router.post('/refresh', requires('manage_library'), async (req, res, next) => {
   try {
     const mode = travelMode(req.body?.mode ?? 'driving');
-    if (req.body?.wait === true) return res.json(await reach.refresh({ mode }).then(recountRingsIfMoved));
+    if (req.body?.wait === true) return res.json(await reach.refresh({ mode }));
     res.json({ started: true, mode });
-    void reach.refresh({ mode }).then(recountRingsIfMoved).catch(() => null);
+    void reach.refresh({ mode }).catch(() => null);
   } catch (err) { next(err); }
 });
 
 /**
- * A ring is drawn from the matrix as much as from the census, so a matrix
- * that has just gained cells is a ring that may have changed shape: every
- * ring counted before this refresh is counted again, behind the response
- * (25 Sep 2026: 248 brought in every ONS sector, the matrix knew 1,057 of
- * 11,088, and a thirty-minute ring resolved to the old sample — 368 inside,
- * 2,937 across — until the matrix was rebuilt; the rings then had to follow).
- * Only when cells were built: a refresh that found nothing to do moves no
- * ring, and the sweep calls this after every pass.
- */
-async function recountRingsIfMoved(out) {
-  if (out?.cells > 0) {
-    const { rows: [{ at }] } = await query('select now() as at');
-    void recountRingsBefore({ before: at }).catch(() => null);
-  }
-  return out;
-}
-
-/**
  * POST /rings/refresh — count every ring again, by hand. What the matrix
- * refresh does by itself when it builds cells; here for when the census or
- * the sector table has moved by another door.
+ * refresh does by itself when it builds cells (repositories/reach.js), and
+ * what the census does when a run finishes; here for when the census or the
+ * sector table has moved by another door.
  */
 router.post('/rings/refresh', requires('manage_library'), async (req, res, next) => {
   try {

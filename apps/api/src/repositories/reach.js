@@ -425,6 +425,16 @@ async function refreshWhileLocked({ canonical, stampLimit, cellLimit }) {
        from (select from_cell, mode, count(*)::int as n from reach group by from_cell, mode) c
       where c.from_cell = b.from_cell and c.mode = b.mode and c.n <> b.pairs`,
   );
+  // A ring is drawn from this matrix as much as from the census, so a matrix
+  // that has just gained cells is a ring that may have changed shape: every
+  // ring counted before now is counted again, behind the caller, whoever the
+  // caller is — the sweep, the boot, or the route (Codex, 25 Sep 2026: hung
+  // on the route alone, the sweep's own refreshes left the rings stale). Here
+  // and not earlier, because a refresh that found nothing to do moves no ring.
+  // Imported on the spot: ringTables draws its rings from this file.
+  const { rows: [{ at }] } = await query('select now() as at');
+  const { refreshAllBefore } = await import('./ringTables.js');
+  void refreshAllBefore({ before: at }).catch(() => null);
   return { stamped, cells: todo.length, pairs, mode: canonical };
 }
 
