@@ -1492,7 +1492,9 @@ export type PlaceCensusRow = {
    * right now, which adds the word. Partial rows come after whole ones in the
    * API's order.
    */
-  partial: boolean; tiles: number; tiles_done: number; sweeping: boolean;
+  partial: boolean; sweeping: boolean;
+  /** Exact on one district; `null` on a ring, where districts last censused by different runs have no one denominator. */
+  tiles: number | null; tiles_done: number | null;
 };
 
 export type PlaceCoverageRow = {

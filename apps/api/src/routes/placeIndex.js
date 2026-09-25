@@ -729,16 +729,20 @@ export async function censusBoardRows(slugs) {
             -- Sep 2026). A count from four tiles of eleven is a different
             -- number from one out of eleven clean ones, and the row carries
             -- that inseparably (owner, 25 Sep 2026: "at least 340, sweeping,
-            -- 4 of 11 tiles").
-            (select count(*)::int from census_run_tiles rt
+            -- 4 of 11 tiles"). Exact on one district; null on several, as
+            -- unresolved is: districts last censused by different runs have
+            -- no one denominator, and a figure from one run's tiles beside
+            -- counts summed over all of them would overstate the very thing
+            -- it exists to expose (Codex, 25 Sep 2026).
+            case when $2 then (select count(*)::int from census_run_tiles rt
                join census_tiles t on t.grid_key = rt.grid_key
               where rt.run_id = (select r.id from census_runs r
                                    join census_run_tiles m on m.run_id = r.id
                                    join census_tiles mt on mt.grid_key = m.grid_key
                                   where mt.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)
                                   order by r.started_at desc limit 1)
-                and t.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)) as tiles,
-            (select count(*)::int from census_run_tiles rt
+                and t.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)) else null end as tiles,
+            case when $2 then (select count(*)::int from census_run_tiles rt
                join census_tiles t on t.grid_key = rt.grid_key
               where rt.run_id = (select r.id from census_runs r
                                    join census_run_tiles m on m.run_id = r.id
@@ -746,7 +750,7 @@ export async function censusBoardRows(slugs) {
                                   where mt.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)
                                   order by r.started_at desc limit 1)
                 and t.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)
-                and t.state = 'done')                     as tiles_done,
+                and t.state = 'done') else null end       as tiles_done,
             -- In flight: a tile naming one of these districts is still to do or
             -- being done. Adds the word; the caveat itself is the partial flag above.
             exists (select 1 from census_tiles t

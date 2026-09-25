@@ -1552,7 +1552,7 @@ function CensusBoard({ where }: { where: string }) {
     // finished ones, and the board keeps that order.
     { key: 'found', label: 'Found', tip: 'censusFound', width: 150, align: 'right',
       cell: (r) => (r.partial
-        ? <Explain tip="censusSweeping"><Text style={styles.rowNote}>{`at least ${r.surfaced ?? 0}, ${r.sweeping ? 'sweeping, ' : ''}${r.tiles_done ?? 0} of ${r.tiles ?? 0} tiles`}</Text></Explain>
+        ? <Explain tip="censusSweeping"><Text style={styles.rowNote}>{`at least ${r.surfaced ?? 0}, ${r.sweeping ? 'sweeping' : 'unfinished'}${r.tiles != null ? `, ${r.tiles_done ?? 0} of ${r.tiles} tiles` : ''}`}</Text></Explain>
         : (r.saturated ?? 0) > 0
           ? <Explain tip="censusFloor"><Text style={styles.rowName}>{`at least ${r.surfaced ?? 0}`}</Text></Explain>
           : <Num n={r.surfaced || null} />) },
@@ -1561,7 +1561,7 @@ function CensusBoard({ where }: { where: string }) {
         if (r.partial) {
           return (
             <Explain tip="censusSweeping">
-              <Text style={styles.rowNote}>{`at least ${r.filed ?? 0}, ${r.sweeping ? 'sweeping, ' : ''}${r.tiles_done ?? 0} of ${r.tiles ?? 0} tiles`}</Text>
+              <Text style={styles.rowNote}>{`at least ${r.filed ?? 0}, ${r.sweeping ? 'sweeping' : 'unfinished'}${r.tiles != null ? `, ${r.tiles_done ?? 0} of ${r.tiles} tiles` : ''}`}</Text>
             </Explain>
           );
         }

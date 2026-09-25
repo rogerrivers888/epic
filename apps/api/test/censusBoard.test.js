@@ -115,6 +115,13 @@ test('a row drawn while a sweep is in flight says so, carries its tiles, and sor
   assert.deepEqual(rows.map((r) => r.subcategory), ['galleries', 'museums'],
     'the finished twelve comes before the partial three hundred and forty, whatever the size');
 
+  // On a ring the tiles are withheld, as unresolved is: two districts last
+  // censused by different runs have no one denominator (Codex, 25 Sep 2026).
+  await row('zz7b');
+  const ring = (await censusBoardRows(['zz7a', 'zz7b'])).find((r) => r.subcategory === 'museums');
+  assert.equal(ring.partial, true, 'the caveat still travels');
+  assert.equal(ring.tiles, null); assert.equal(ring.tiles_done, null);
+
   // Every tile answered and the row written whole: it reads as the others do.
   await query(`update census_tiles set state = 'done', censused_at = now() where grid_key like 'test/board-%'`);
   await query(`update area_counts set complete = true where area_slug = 'zz7a' and subcategory = 'museums'`);
