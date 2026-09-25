@@ -107,9 +107,21 @@ export async function recordMetered({ householdId, sessionId = null, provider, p
 // `canBill` holds the list; everything is still recorded either way.
 const billable = (rows) => rows.reduce((n, r) => n + (canBill(r.provider) ? r.n : 0), 0);
 
+/**
+ * Calls, counted as the provider counts them.
+ *
+ * One ledger row is often several requests: a search hands one meter to the
+ * adapter and writes a single row with `{google: 3}` in it. Counted as one
+ * row, the cap on calls that can cost money let a household make three
+ * requests for one — and the in-process count that closed that gap while the
+ * process lived was empty after a restart (Codex, 25 Sep 2026). A Google row
+ * counts its metered requests; every other row counts one.
+ */
+const CALLS_IN_ROW = `case when provider = 'google' then greatest(1, coalesce((units->>'google')::int, 1)) else 1 end`;
+
 export async function countForSession(sessionId) {
   const { rows } = await query(
-    'select provider, count(*)::int as n from provider_calls where session_id = $1 group by provider',
+    `select provider, sum(${CALLS_IN_ROW})::int as n from provider_calls where session_id = $1 group by provider`,
     [sessionId],
   );
   return billable(rows);
@@ -117,7 +129,7 @@ export async function countForSession(sessionId) {
 
 export async function countThisMonth(householdId) {
   const { rows } = await query(
-    `select provider, count(*)::int as n from provider_calls
+    `select provider, sum(${CALLS_IN_ROW})::int as n from provider_calls
       where household_id = $1 and created_at >= date_trunc('month', now())
       group by provider`,
     [householdId],

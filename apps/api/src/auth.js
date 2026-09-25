@@ -327,7 +327,10 @@ export async function requireSession(req, res, next) {
     // own traffic — the one whose spending the cap most needs to see. Left
     // with no spender it read as background work and every Google call it
     // made went uncapped (Codex, 25 Sep 2026).
-    const founding = await firstHousehold().catch(() => null);
+    // Fails closed: a lookup that could not reach the database is an error
+    // for this request, not a request that spends uncapped (Codex, 25 Sep
+    // 2026) — the same as an account whose cap queries cannot be read.
+    const founding = await firstHousehold();
     return runAsAccount(null, () => runAsSpender({ householdId: founding?.id ?? null, sessionId: session.id }, next));
   } catch (err) {
     return next(err);

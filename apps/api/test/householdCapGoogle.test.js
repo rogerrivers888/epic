@@ -99,3 +99,27 @@ test('a burst inside one operation is counted as it is admitted, not only once t
     assert.equal(left(), 2);
   });
 });
+
+test('a ledger row that metered three requests counts as three', async () => {
+  // The cap's own arithmetic, durable across a restart (Codex, 25 Sep 2026).
+  const { countThisMonth } = await import('../src/repositories/providerCalls.js');
+  const HH3 = '00000000-0000-4000-8000-00000000ca92';
+  await query(`insert into households (id, name) values ($1, 'Metered household') on conflict (id) do nothing`, [HH3]);
+  try {
+    await query(`insert into provider_calls (household_id, provider, purpose, units, estimated_cost_usd) values ($1, 'google', 'search', '{"google": 3, "google-search": 3}'::jsonb, 0.12)`, [HH3]);
+    await query(`insert into provider_calls (household_id, provider, purpose, units) values ($1, 'osm-overpass', 'own.match', '{"osm-overpass": 1}'::jsonb)`, [HH3]);
+    assert.equal(await countThisMonth(HH3), 3, 'three requests, and the free open map not counted at all');
+  } finally {
+    await query('delete from provider_calls where household_id = $1', [HH3]);
+    await query('delete from households where id = $1', [HH3]);
+  }
+});
+
+test('the catch-up loop knows whose place it is researching', async () => {
+  const owned = await import('../src/repositories/ownedPlaces.js');
+  const ref = 'google:ChIJ_claimed_by_capped';
+  await query(`insert into place_claims (household_id, venue_ref, reason) values ($1, $2, 'test') on conflict do nothing`, [HH, ref]);
+  try {
+    assert.deepEqual(await owned.claimantsFor([ref, 'google:ChIJ_nobody_claimed']), { [ref]: HH });
+  } finally { await query('delete from place_claims where venue_ref = $1', [ref]); }
+});

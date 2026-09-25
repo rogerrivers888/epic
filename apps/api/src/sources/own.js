@@ -30,6 +30,7 @@
 // place_records goes to the device.
 
 import * as owned from '../repositories/ownedPlaces.js';
+import * as households from '../repositories/households.js';
 import { phoneOf } from '../domain/contact.js';
 import * as providerCalls from '../repositories/providerCalls.js';
 import { matchOsm } from './openMatch.js';
@@ -1007,7 +1008,14 @@ export async function catchUp({ limit = 8 } = {}) {
    * The sweep has held the name and the point all along.
    */
   const seeds = await owned.sweepSeeds(refs).catch(() => ({}));
-  for (const ref of refs) queueEnrichment(ref, seeds[ref] ? { seed: seeds[ref] } : {});
+  // On the claiming household's behalf, so the calls are attributed and held
+  // to that household's cap; a place nobody claimed is researched for the
+  // founding household, whose estate it is (Codex, 25 Sep 2026).
+  const claimants = await owned.claimantsFor(refs).catch(() => ({}));
+  const founding = refs.some((r) => !claimants[r]) ? await households.firstHousehold().catch(() => null) : null;
+  for (const ref of refs) {
+    queueEnrichment(ref, { ...(seeds[ref] ? { seed: seeds[ref] } : {}), householdId: claimants[ref] ?? founding?.id ?? null });
+  }
   return refs.length;
 }
 

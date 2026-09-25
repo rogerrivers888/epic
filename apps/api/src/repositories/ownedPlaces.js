@@ -514,3 +514,20 @@ export async function recordsNear(lat, lng, radiusKm, limit = 500) {
   );
   return rows;
 }
+
+/**
+ * Which household claimed each of these places — the latest claim wins.
+ *
+ * The catch-up loop researches claimed places on nobody's behalf, so its
+ * paid calls landed on the ledger unattributed and outside the household
+ * cap (Codex, 25 Sep 2026). A claimed place has a claimant, and the research
+ * is theirs.
+ */
+export async function claimantsFor(refs) {
+  if (!refs?.length) return {};
+  const { rows } = await query(
+    `select distinct on (venue_ref) venue_ref, household_id from place_claims
+      where venue_ref = any($1) order by venue_ref, claimed_at desc`,
+    [refs]);
+  return Object.fromEntries(rows.map((r) => [r.venue_ref, r.household_id]));
+}
