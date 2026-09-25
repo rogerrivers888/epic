@@ -1214,7 +1214,12 @@ export async function benchArea({ center, radiusKm = 2.5, queries = [], pages = 
 /** Stream a Google photo through the server so the key stays server-side. */
 export async function fetchPhoto(name, maxWidthPx = 480) {
   const key = KEY();
-  if (!key) return null;
+  // A photograph is fetched straight from Google's media endpoint and never
+  // passes through `call()`, so the door there did not cover it: with Google
+  // switched off, every cache miss on a tile went out and was billed (Codex,
+  // 25 Sep 2026). Null is what a miss already means to the screen — the
+  // category icon — so nothing else has to change.
+  if (!key || sourceOff('google')) return null;
   const res = await fetch(`${PLACES}/${name}/media?maxWidthPx=${maxWidthPx}&key=${key}`, { redirect: 'follow', signal: AbortSignal.timeout(15_000) });
   if (!res.ok) {
     // Say why. A picture that never arrives used to be an empty green box on

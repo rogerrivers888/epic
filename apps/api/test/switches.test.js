@@ -14,7 +14,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { googleSource } from '../src/sources/google.js';
+import { googleSource, photoFor } from '../src/sources/google.js';
 import { tripadvisorSource } from '../src/sources/tripadvisor.js';
 import { setOffKeys, sourceOff } from '../src/sources/switches.js';
 import { enabledSources, sourceOff as viaIndex } from '../src/sources/index.js';
@@ -45,6 +45,19 @@ test('Google switched off answers as it does with no key, and the meter says why
     assert.deepEqual(await googleSource.suggest('cafe', { meter }), []);
     assert.equal(left(), 0, 'nothing left the process');
     assert.match(JSON.stringify(healthOf(meter)), /switched_off/, 'the refusal is on the meter, for the ledger');
+  });
+});
+
+test('a photograph does not go out for a switched-off Google either', async () => {
+  // The photo proxy fetches Google's media endpoint directly, not through
+  // `call()`, so the door there never saw it (Codex, 25 Sep 2026).
+  await withKeys({ GOOGLE_MAPS_API_KEY: 'test-key-never-sent' }, async (left) => {
+    setOffKeys(['google']);
+    assert.equal(await photoFor(`places/x/photos/off_${Date.now()}`, 200), null);
+    assert.equal(left(), 0, 'no request was made for the picture');
+    setOffKeys([]);
+    await photoFor(`places/x/photos/on_${Date.now()}`, 200).catch(() => null);
+    assert.equal(left(), 1, 'switched on, the same picture is fetched');
   });
 });
 
