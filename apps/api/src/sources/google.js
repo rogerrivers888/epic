@@ -1,8 +1,19 @@
 import { bump, noteCall, noteFault } from './meter.js';
 import { sourceOff } from './switches.js';
 import { currentSpender } from '../context.js';
-import { monthlyBoundFor, SpendBoundError } from '../claude.js';
-import * as providerCalls from '../repositories/providerCalls.js';
+
+/**
+ * The cap's two dependencies, loaded on first use rather than at import.
+ *
+ * `claude.js` and the ledger both open the database pool when imported, and
+ * this file has always been importable without one — a test that imports it
+ * before building its own database was suddenly opening the development
+ * database, and the helper then ran every migration into it (found 25 Sep
+ * 2026, the same afternoon the cap was added).
+ */
+let capDeps = null;
+const cap = () => (capDeps ??= Promise.all([import('../claude.js'), import('../repositories/providerCalls.js')])
+  .then(([claude, ledger]) => ({ monthlyBoundFor: claude.monthlyBoundFor, SpendBoundError: claude.SpendBoundError, countThisMonth: ledger.countThisMonth })));
 import { crowdBand, countBand } from '../domain/scoring.js';
 import { stampPhotos } from './photoLinks.js';
 // Google Places API (New) — the primary licensed source (Technical Constraints §3.1).
@@ -420,7 +431,8 @@ async function call(path, { method = 'POST', body, fieldMask, meter }) {
   // collection ceiling holds those.
   const { householdId } = currentSpender();
   if (householdId) {
-    const [made, bound] = await Promise.all([providerCalls.countThisMonth(householdId), monthlyBoundFor(householdId)]);
+    const { countThisMonth, monthlyBoundFor, SpendBoundError } = await cap();
+    const [made, bound] = await Promise.all([countThisMonth(householdId), monthlyBoundFor(householdId)]);
     if (made >= bound) { noteFault(meter, 'household_cap'); throw new SpendBoundError('household', bound); }
   }
   // One billable request, at the tier the mask puts it in. `google` stays as
