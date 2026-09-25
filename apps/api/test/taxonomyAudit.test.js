@@ -857,7 +857,7 @@ test('a rule on a retired drawer, or on nothing with nothing to say, is an orpha
   const keys = found.map((r) => `${r.scope}:${r.subject}`);
   assert.ok(keys.includes('experience:test-orphan'), 'a rule on a retired drawer');
   assert.ok(keys.includes('place:test:says-nothing'), 'a rule on nothing, saying nothing');
-  assert.ok(!keys.includes('ours:gone-drawer'), 'the retired drawer\u2019s own rule is not an orphan');
+  assert.ok(keys.includes('ours:gone-drawer'), 'the retired drawer\u2019s own rule is an orphan too: the rules load whether or not the drawer does');
   assert.ok(!keys.includes('place:test:weighted'), 'a place rule that only sets weights is a decision, not an orphan');
   const run = await checkBars({ repair: true, trigger: 'manual' });
   assert.ok(run.orphans.some((o) => o.subject === 'test-orphan'), 'the check reports it');
@@ -875,7 +875,37 @@ test('the audit flags an orphaned rule as advice, never as something it applies'
       { id: '4', scope: 'place', subject: 'g:z', subcategory: null, weights: {} },
     ],
   });
-  assert.deepEqual(out.map((p) => p.subject).sort(), ['labels:google:x', 'place:g:z']);
+  assert.deepEqual(out.map((p) => p.subject).sort(), ['labels:google:x', 'ours:off', 'place:g:z']);
   assert.ok(out.every((p) => p.flag === 'orphaned_rule' && p.action === 'repoint' && p.proposed === null));
   assert.match(out[0].because, /retired/);
+});
+
+test('a retirement through the audit takes the drawer\u2019s own rule with it, and undo brings both back', async (t) => {
+  await query(`insert into shelf_categories (key, label) values ('fun', 'Fun') on conflict (key) do nothing`);
+  await query(`insert into shelf_subcategories (category_key, key, label, active) values ('fun', 'retire-me', 'Retire me', true)
+               on conflict (key) do update set active = true`);
+  await query(`insert into shelf_rules (scope, subject, subject_label, subcategory) values ('ours', 'retire-me', 'Retire me', 'retire-me')
+               on conflict (scope, subject) do update set subcategory = 'retire-me'`);
+  t.after(async () => {
+    await query(`delete from taxonomy_proposals where subject = 'retire-me'`);
+    await query(`delete from shelf_rules where subject = 'retire-me'`);
+    await query(`delete from shelf_subcategories where key = 'retire-me'`);
+  });
+  const audit = await run({ by: 'test', extra: [{ flag: 'test-retire', subject_kind: 'subcategory', subject: 'retire-me', action: 'retire', proposed: null, because: 'test', moves: 0, numbers: {} }] });
+  await query(`update taxonomy_proposals set state = 'accepted' where audit_id = $1`, [audit.id]);
+  await apply({ auditId: audit.id, by: 'test' });
+  const { rows: gone } = await query(`select count(*)::int n from shelf_rules where subject = 'retire-me'`);
+  assert.equal(gone[0].n, 0, 'the own rule went with the drawer');
+  assert.ok(!(await orphanedRules()).some((r) => r.subject === 'retire-me'), 'so the invariant has nothing to say');
+  await undo({ auditId: audit.id, by: 'test' });
+  const { rows: back } = await query(`select subcategory from shelf_rules where subject = 'retire-me'`);
+  assert.equal(back[0]?.subcategory, 'retire-me');
+  const { rows: [sub] } = await query(`select active from shelf_subcategories where key = 'retire-me'`);
+  assert.equal(sub.active, true);
+});
+
+test('the evidence carries each rule\u2019s weights, so a weight-only rule is not called empty', async () => {
+  const { evidence } = await import('../src/repositories/taxonomyAudit.js');
+  const input = await evidence();
+  assert.ok(input.rules.every((r) => 'weights' in r));
 });

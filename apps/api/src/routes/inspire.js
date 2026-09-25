@@ -937,6 +937,9 @@ inspire.get('/near', async (req, res, next) => {
       if (seen(a)) continue;
       const ref = a.osm_ref ? `osm:${a.osm_ref}` : `wikidata:${a.wikidata_id}`;
       const shelf = shelvesForAtlas({ ref, category: a.category, kinds: a.kinds ?? [] }, taught, tax.vocab);
+      // Infrastructure gets no shelf and is not shown: the classifier's
+      // verdict (domain/moods.js, fencedBy) is the fence, and this only obeys it.
+      if (shelf.travel) continue;
       items.push({
         // Wikidata's own identifier where there is no OpenStreetMap one, which
         // is most of the time. It is CC0, it outlives every provider we might

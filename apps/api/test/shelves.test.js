@@ -426,3 +426,20 @@ test('fencedBy names its reason and its word, and the name pattern is a word mat
   assert.ok(INFRASTRUCTURE_NAME.test('Park & Ride Winnersh'));
   assert.ok(!INFRASTRUCTURE_NAME.test('Parkland Walk'));
 });
+
+test('an atlas attraction whose every type the atlas no longer admits is fenced; one with an admitted type is not', () => {
+  const vocab = vocabularyOf(
+    [{ key: 'fun' }, { key: 'culture' }],
+    [{ key: 'castles', category_key: 'culture' }],
+    new Map([['wikidata:Q23413', 'castles']]),
+    new Set(),
+    new Set(['wikidata:Q55488']), // railway station, answered Travel: admit off
+  );
+  const station = shelvesForAtlas({ ref: 'wikidata:Q1', category: 'landmark', kinds: ['Q55488'] }, NO_RULES, vocab);
+  assert.equal(station.fenced, 'aside');
+  assert.deepEqual(station.shelves, []);
+  const castleStation = shelvesForAtlas({ ref: 'wikidata:Q2', category: 'heritage', kinds: ['Q55488', 'Q23413'] }, NO_RULES, vocab);
+  assert.equal(castleStation.fenced, undefined);
+  const plain = shelvesForAtlas({ ref: 'wikidata:Q3', category: 'outdoors', kinds: [] }, NO_RULES, vocab);
+  assert.equal(plain.fenced, undefined, 'no type at all is not a fence: the atlas category still files it');
+});

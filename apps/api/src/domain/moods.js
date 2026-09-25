@@ -439,6 +439,12 @@ export function shelvesForAtlas({ ref, category, kinds = [], labels = [] } = {},
   const ours = ourLabelsOf(all, vocab);
   const ourOwned = labelHits(ownerOnly(rules?.ours), ours);
   const ourHits = ourOwned.length ? ourOwned : labelHits(rules?.ours, ours);
+  // The same fence as a live venue: an attraction whose every type the atlas
+  // no longer admits — a railway station answered Travel — is not somewhere
+  // to go, however it was published (Codex, 25 Sep 2026). A rule about the
+  // one place still wins.
+  const fence = (ref && rules?.place?.get(ref)) ? null : fencedBy({ category: null, experiences: [] }, all, vocab);
+  if (fence) return NO_SHELF(fence);
   return place(
     [['place', [ref]], ['labels', hits], ['ours', ourHits], ['kind', kinds], ['category', [category]]],
     rules,

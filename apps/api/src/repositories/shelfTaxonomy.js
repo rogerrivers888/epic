@@ -45,7 +45,12 @@ export async function taxonomy() {
     // shelf (domain/moods.js, travelOnly).
     query(`select namespace || ':' || key as word from taxonomy_labels where decision = 'travel'`),
     // And the words answered Not in Epic: the same fence (owner, 25 Sep 2026).
-    query(`select namespace || ':' || key as word from taxonomy_labels where decision = 'aside'`),
+    // A Wikidata type has one switch, admit, and one answered Travel or aside
+    // has it off — so a type the atlas no longer admits fences an attraction
+    // it already published, rather than only the next harvest (Codex, 25 Sep 2026).
+    query(`select namespace || ':' || key as word from taxonomy_labels where decision = 'aside'
+           union all
+           select 'wikidata:' || qid as word from place_kinds where admit = false`),
   ]);
   const categories = cats.rows;
   // Every listing, live or not. Switching a category off must not quietly

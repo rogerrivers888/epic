@@ -275,17 +275,21 @@ export async function drawersUnjudged() {
  * Retiring a subcategory means moving its rules first, then the drawer — in
  * that order, or the rules are orphaned (the sign-off, 24 Sep 2026). Two were
  * found by hand on 25 Sep and nothing had flagged them, so this reads them
- * back: a rule whose drawer is switched off, other than the drawer's own
- * `ours:` rule, or a rule that names no drawer and carries no weights either,
- * so it says nothing at all. Reported, never repaired: where a rule goes is a
- * person's decision, and the back office deletes or repoints it.
+ * back: a rule whose drawer is switched off — the drawer's own `ours:` rule
+ * included, because the rules are loaded whether or not the drawer is, and a
+ * word still pointing at a retired drawer resolves through that rule to a
+ * cabinet that is not there (Codex, 25 Sep 2026) — or a rule that names no
+ * drawer and carries no weights either, so it says nothing at all. Reported,
+ * never repaired: where a rule goes is a person's decision, and the back
+ * office deletes or repoints it. A retirement through the audit takes the
+ * drawer's own rule with it, so this only ever names what was left by hand.
  */
 export async function orphanedRules() {
   const { rows } = await query(
     `select r.id, r.scope, r.subject, r.subject_label, r.subcategory
        from shelf_rules r
        left join shelf_subcategories s on s.key = r.subcategory
-      where (r.subcategory is not null and s.active = false and not (r.scope = 'ours' and r.subject = r.subcategory))
+      where (r.subcategory is not null and s.active = false)
          or (r.subcategory is null and (r.weights is null or r.weights = '{}'::jsonb))
       order by r.subcategory nulls last, r.scope, r.subject`);
   return rows;

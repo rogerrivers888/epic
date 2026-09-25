@@ -67,7 +67,7 @@ export function singletons({ subs, rulesBySub, placesBySub, near }) {
 export function orphanedRules({ subs = [], rules = [] }) {
   const off = new Map(subs.filter((s) => s.active === false).map((s) => [s.key, s.label]));
   return rules
-    .filter((r) => (r.subcategory && off.has(r.subcategory) && !(r.scope === 'ours' && r.subject === r.subcategory))
+    .filter((r) => (r.subcategory && off.has(r.subcategory))
       || (!r.subcategory && !Object.keys(r.weights ?? {}).length))
     .map((r) => say('orphaned_rule', {
       subject_kind: 'word', subject: `${r.scope}:${r.subject}`, subject_label: r.subject_label ?? r.subject,

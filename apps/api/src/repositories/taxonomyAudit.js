@@ -17,7 +17,7 @@ import { forget as forgetAttributes } from './placeAttributes.js';
 export async function evidence() {
   const [subs, rules, places, words, shown, opened, owned, types, pairs, labels, alsoIn, defaults] = await Promise.all([
     query('select key, label, category_key, active from shelf_subcategories'),
-    query('select id, scope, subject, subject_label, subcategory, labels from shelf_rules'),
+    query('select id, scope, subject, subject_label, subcategory, labels, weights from shelf_rules'),
     query('select subcategory, count(*) n from place_index where subcategory is not null group by 1'),
     query(`select l.namespace, l.key, l.label, l.decision, l.points_at, l.active,
                   s.label as sub_label
@@ -567,7 +567,12 @@ export async function apply({ auditId, by = null }) {
             [p.subject, p.proposed]);
         } else if (p.action === 'retire') {
           // Switched off rather than deleted: a place already filed there keeps
-          // its row and switching it back on is one tap.
+          // its row and switching it back on is one tap. The drawer's own rule
+          // goes, though (kept above, so undo brings it back): the rules are
+          // loaded whether or not the drawer is, and a word still pointing at a
+          // retired drawer would resolve through it to a cabinet that is not
+          // there (Codex, 25 Sep 2026).
+          await client.query("delete from shelf_rules where scope = 'ours' and subject = $1 and subcategory = $1", [p.subject]);
           await client.query('update shelf_subcategories set active = false, updated_at = now() where key = $1', [p.subject]);
         } else if (p.action === 'fold') {
           const { rows: [target] } = await client.query(
