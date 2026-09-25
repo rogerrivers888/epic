@@ -38,6 +38,9 @@ const Proposal = z.object({
   adrenaline: Weight,
   relaxing: Weight,
   outdoors: Weight,
+  // The ninth category (the axes brief, 25 Sep 2026): a science centre, a
+  // planetarium, a farm with a learning barn. Distinct from Culture.
+  educational: Weight,
   // Whether this is really about this one place or about everything of its
   // type. The owner's own example is the second kind: a football ground is not
   // a special case, every football ground is the same case.
@@ -45,15 +48,16 @@ const Proposal = z.object({
   reason: z.string(),
 });
 
-const SYSTEM = `You are helping the owner of Epic, a family trip planner, correct how it sorts places onto the six shelves its home screen shows.
+const SYSTEM = `You are helping the owner of Epic, a family trip planner, correct how it sorts places onto the seven shelves its home screen shows.
 
-The six shelves and what each means to this household:
+The seven shelves and what each means to this household:
 - Fun — a good day out. Somewhere you go and enjoy yourself. Watching sport is here: a stadium, a racecourse, an arena.
 - Food — somewhere you eat or drink. Nothing on the home screen's other shelves is ever food.
 - Culture — museums, galleries, castles, cathedrals, theatres, historic institutions.
 - Adrenaline — something you *do* that gets your heart going. The owner's own words: "Adrenaline might be an activity like a flying lesson… if there are any water skiing-type activities or anything like that around, that would be adrenaline… parachuting, anything like that: those are adrenaline-type activities. Go-karting, etc." Watching other people do something is never adrenaline.
 - Relaxing — a gentle day. A garden, a walk, a browse, a spa.
 - Outdoors — the point of it is being outside.
+- Educational — you come away knowing something: a science centre, a planetarium, a farm with a learning barn. A castle is Culture, not this; a museum is Culture first and Educational too.
 
 You answer with a weight from 0 to 1 for each shelf.
 - 1.0 — this is what the place is for.

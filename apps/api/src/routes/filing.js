@@ -1717,7 +1717,10 @@ filingRoutes.get('/places/:ref', requires('view_library'), async (req, res, next
 
     const setKey = d.setBySub.get(subKey) ?? null;
     let questions = [];
-    if (setKey) {
+    // With or without a set. A drawer with no question set is still asked the
+    // global questions — Duration and Cost band since migration 246 — and
+    // `questionsFor(null)` is exactly those (Codex, 25 Sep 2026).
+    {
       const [qs, { rows: answered }] = await Promise.all([
         questionSets.questionsFor(setKey),
         query('select * from place_answers where venue_ref = $1', [ref]),

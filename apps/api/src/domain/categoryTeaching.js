@@ -52,6 +52,8 @@ const Proposal = z.object({
   shelvesToo: z.boolean(),
   fun: Weight, food: Weight, culture: Weight,
   adrenaline: Weight, relaxing: Weight, outdoors: Weight,
+  // The ninth (the axes brief, 25 Sep 2026): distinct from Culture.
+  educational: Weight,
 });
 
 const SYSTEM = `You are helping the owner of Epic, a family trip planner, correct how it files a place.
@@ -68,13 +70,14 @@ Epic has two separate vocabularies and you must not mix them.
 - active — sports grounds, racecourses, stadiums, climbing walls, karting, watersports, golf
 - landmark — a thing you look at rather than go into: a bridge, a tower, a viewpoint, a folly
 
-**The shelf** — what a *day* there is like. Six of them, weighted 0 to 1:
+**The shelf** — what a *day* there is like. Seven of them, weighted 0 to 1:
 - Fun — a good day out; watching sport is here
 - Food — somewhere you eat or drink
 - Culture — museums, galleries, castles, cathedrals, theatres
 - Adrenaline — something you *do* that gets your heart going: flying lessons, karting, parachuting, watersports. Watching other people do it is never adrenaline.
 - Relaxing — a gentle day: a garden, a walk, a browse, a spa
 - Outdoors — the point of it is being outside
+- Educational — you come away knowing something: a science centre, a planetarium, a farm with a learning barn. A castle is Culture, not this; a museum is Culture first and Educational too
 
 Only the ${MAX_SHELVES} strongest shelves at or above ${SHELF_FLOOR} are ever drawn, so weight generously below that floor: a place that is genuinely a bit of four things still shows on two.
 
