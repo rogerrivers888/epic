@@ -64,6 +64,17 @@ function withDeadline(promise, ms) {
 /** One Place Details request on the narrowest mask, in pence. */
 export const pencePerRequest = () => Math.round(PRICE_PER_UNIT_USD['google-pro'] * 100 * USD_TO_GBP * 100) / 100;
 
+/**
+ * Whether identifying this place costs a Google request.
+ *
+ * Only a `google:` ref is an ID and nothing else. An `osm:` or `atlas:` place
+ * carries its own name and point and is researched from the open map and
+ * the encyclopedias for nothing — `seedFor` never asks Google about it. So
+ * it is neither priced, reserved for, nor a reason to stop when Google is
+ * off (Codex, 25 Sep 2026).
+ */
+export const needsGoogle = (venueRef) => String(venueRef).startsWith('google:');
+
 const gbp = (usd) => Math.round(usd * USD_TO_GBP * 100) / 100;
 
 // ---------------------------------------------------------------------------
@@ -151,14 +162,21 @@ export async function estimate({ subcategories = null, floor = FLOOR } = {}) {
   const perDrawer = [];
   let sampled = 0;
   let held = 0;
+  let free = 0;
   for (const d of list) {
     const sample = await sampleFor(d.key);
     const have = await alreadyHeld(sample.map((s) => s.venue_ref));
-    perDrawer.push({ subcategory: d.key, places: d.places, sampled: sample.length, held: have.size });
+    const unheld = sample.filter((s) => !have.has(s.venue_ref));
+    const freeHere = unheld.filter((s) => !needsGoogle(s.venue_ref)).length;
+    // The sample travels with the estimate, so what `start` writes down is
+    // exactly what was priced — not a second sample taken after the census
+    // moved (Codex, 25 Sep 2026).
+    perDrawer.push({ subcategory: d.key, places: d.places, sampled: sample.length, held: have.size, free: freeHere, sample });
     sampled += sample.length;
     held += have.size;
+    free += freeHere;
   }
-  const asked = sampled - held;
+  const asked = sampled - held - free;
   const pence = pencePerRequest();
   const requests = asked * REQUESTS_PER_PLACE;
   return {
@@ -166,13 +184,15 @@ export async function estimate({ subcategories = null, floor = FLOOR } = {}) {
     floor,
     sampled,
     held,
+    free,
     asked,
     requests,
     pencePerRequest: pence,
     costGbpLow: Math.round(asked * pence) / 100,
     costGbpHigh: Math.round(requests * pence) / 100,
     basis: `${list.length} drawers at ${floor}+ census places · ${SAMPLE.top} top and ${SAMPLE.mid} mid-tail each · `
-      + `${asked} to ask at up to ${REQUESTS_PER_PLACE} Place Details requests (${pence}p) apiece · the rest already held`,
+      + `${asked} to ask Google at up to ${REQUESTS_PER_PLACE} Place Details requests (${pence}p) apiece · `
+      + `${free} researched free from the open map · ${held} already held`,
   };
 }
 
@@ -217,8 +237,8 @@ export async function start({ subcategories = null, floor = FLOOR, confirm = nul
       [JSON.stringify(plan.drawers.map((d) => d.subcategory)), JSON.stringify({ floor, requests: plan.requests, estimateGbp: plan.costGbpHigh }),
         householdId, startedBy, plan.sampled]);
     for (const d of plan.drawers) {
-      const sample = await sampleFor(d.subcategory);
-      for (const s of sample) {
+      // The estimate's own sample, not a fresh one.
+      for (const s of d.sample) {
         await client.query(
           `insert into research_sweep_places (sweep_id, venue_ref, subcategory, tier)
            values ($1, $2, $3, $4) on conflict do nothing`,
@@ -399,8 +419,8 @@ export async function work(id, { research = own.enrich, room = roomToSpend, rele
       // finish with Google off (Codex, 25 Sep 2026).
       const { rows: pendingRows } = await query(`select venue_ref from research_sweep_places where sweep_id = $1 and state = 'pending'`, [id]);
       const pendingHeld = pendingRows.length ? await alreadyHeld(pendingRows.map((r) => r.venue_ref)) : new Set();
-      const needsGoogle = pendingRows.some((r) => !pendingHeld.has(r.venue_ref));
-      if (needsGoogle && (!sourceHasKey('google') || sourceOff('google'))) {
+      const stillNeedsGoogle = pendingRows.some((r) => !pendingHeld.has(r.venue_ref) && needsGoogle(r.venue_ref));
+      if (stillNeedsGoogle && (!sourceHasKey('google') || sourceOff('google'))) {
         await writeProgress(id, { state: 'failed', problem: `Google is ${sourceOff('google') ? 'switched off in Settings' : 'not configured'}; the places not yet asked are left as they were` });
         return one(id);
       }
@@ -412,7 +432,8 @@ export async function work(id, { research = own.enrich, room = roomToSpend, rele
       // is one `enrich` will skip, and reserving for it near the ceiling
       // failed a sweep whose real work still fitted (Codex, 25 Sep 2026).
       const held = await alreadyHeld(batch.map((p) => p.venue_ref));
-      const want = (batch.length - held.size) * REQUESTS_PER_PLACE * pencePerRequest();
+      const chargeable = batch.filter((p) => !held.has(p.venue_ref) && needsGoogle(p.venue_ref)).length;
+      const want = chargeable * REQUESTS_PER_PLACE * pencePerRequest();
       const got = await room(Math.ceil(want), { holder: `sweep:${id}` });
       if (!got.ok) {
         // The ceiling is monthly and the sweep is not going to get under it by

@@ -40,6 +40,19 @@ test.before(async () => {
   for (const [i, ref] of refs(120).entries()) {
     await query(`insert into place_index (venue_ref, subcategory, found_rank, first_seen) values ($1, $2, $3, now() - ($4 || ' minutes')::interval)`, [ref, SUB, i + 1, String(120 - i)]);
   }
+  // Three open-map places in the mid-tail: no Google request to identify
+  // them, so they are researched free and are no reason to stop when Google
+  // is off (Codex, 25 Sep 2026).
+  await query(`delete from place_index where venue_ref like 'osm:node/sweep_%'`);
+  //
+  // Placed where the sampler's mid-tail picks fall: with 123 places the
+  // window is indices 49–98 and the eight picks are every 6.125 from 49, so
+  // ranks 56, 73 and 90 — each sorted ahead of the Google place sharing its
+  // rank by an earlier first_seen, and each shifted by the open-map rows
+  // before it — land on picks 55, 73 and 91.
+  for (const [ref, rank] of [['osm:node/sweep_a', 56], ['osm:node/sweep_b', 73], ['osm:node/sweep_c', 90]]) {
+    await query(`insert into place_index (venue_ref, subcategory, found_rank, first_seen) values ($1, $2, $3, now() - interval '400 minutes')`, [ref, SUB, rank]);
+  }
   for (const [i, ref] of refs(30, 'google:ChIJ_thin_').entries()) {
     await query(`insert into place_index (venue_ref, subcategory, found_rank) values ($1, $2, $3)`, [ref, THIN, i + 1]);
   }
@@ -61,7 +74,7 @@ test.before(async () => {
 
 test.after(async () => {
   await query(`delete from research_sweeps where subcategories ? $1`, [SUB]);
-  await query(`delete from place_index where venue_ref like 'google:ChIJ_sweep_%' or venue_ref like 'google:ChIJ_thin_%'`);
+  await query(`delete from place_index where venue_ref like 'google:ChIJ_sweep_%' or venue_ref like 'google:ChIJ_thin_%' or venue_ref like 'osm:node/sweep_%'`);
   await query(`delete from place_records where venue_ref like 'google:ChIJ_sweep_%'`);
   await query(`delete from provider_calls where venue_ref like 'google:ChIJ_sweep_%'`);
   await query(`delete from spend_reservations where holder like 'sweep:%'`);
@@ -71,7 +84,7 @@ test.after(async () => {
 test('a drawer under the floor is not worth a set, and is not sampled', async () => {
   const d = await sweep.drawers({ subcategories: [SUB, THIN] });
   assert.deepEqual(d.map((x) => x.key), [SUB]);
-  assert.equal(d[0].places, 120);
+  assert.equal(d[0].places, 123, '120 from Google and three from the open map');
 });
 
 test('twelve from the top and eight from the mid-tail, by rank', async () => {
@@ -79,21 +92,32 @@ test('twelve from the top and eight from the mid-tail, by rank', async () => {
   assert.equal(s.length, 20);
   assert.equal(s.filter((x) => x.tier === 'top').length, 12);
   assert.deepEqual(s.slice(0, 12).map((x) => x.venue_ref), refs(12), 'the top twelve are the twelve best ranked');
-  // The mid-tail comes from the 40th–80th percentile: ranks 49–96 of 120.
+  // The mid-tail comes from the 40th–80th percentile: indices 49–98 of 123,
+  // which is Google ranks 49–96 and the three open-map places set among them.
   for (const x of s.slice(12)) {
+    if (x.venue_ref.startsWith('osm:')) continue;
     const rank = Number(x.venue_ref.slice(-3)) + 1;
     assert.ok(rank >= 48 && rank <= 96, `${x.venue_ref} is mid-tail`);
   }
+  assert.equal(s.filter((x) => x.venue_ref.startsWith('osm:')).length, 3);
 });
 
-test('the price is for what will go out, at two requests a place, and says so', async () => {
+test('the price is for what will go out, at two requests a Google place, and says so', async () => {
   const e = await sweep.estimate({ subcategories: [SUB] });
   assert.equal(e.sampled, 20);
   assert.equal(e.held, 2, 'the two already researched cost nothing');
-  assert.equal(e.asked, 18);
-  assert.equal(e.requests, 36, 'the number to confirm with is the most it can cost');
+  // The open-map places in the sample are researched free: not priced, not
+  // reserved for, and not a reason to need Google.
+  const osmInSample = e.drawers[0].sample.filter((s) => s.venue_ref.startsWith('osm:')).length;
+  assert.equal(osmInSample, 3, 'the mid-tail reaches all three open-map places');
+  assert.equal(e.free, osmInSample);
+  assert.equal(e.asked, 18 - osmInSample);
+  assert.equal(e.requests, e.asked * 2, 'the number to confirm with is the most it can cost');
   assert.ok(e.costGbpHigh > e.costGbpLow && e.costGbpLow > 0);
-  assert.match(e.basis, /18 to ask/);
+  assert.match(e.basis, new RegExp(`${e.asked} to ask Google`));
+  assert.match(e.basis, new RegExp(`${e.free} researched free`));
+  // And the sample it priced is the one `start` will write down.
+  assert.equal(e.drawers[0].sample.length, 20);
 });
 
 test('a sweep with places to ask does not start without Google', async () => {
@@ -102,23 +126,26 @@ test('a sweep with places to ask does not start without Google', async () => {
   // what it was confirmed for (Codex, 25 Sep 2026).
   setOffKeys(['google']);
   try {
-    await assert.rejects(() => sweep.start({ subcategories: [SUB], confirm: 36, householdId: HH }), (e) => e.code === 'google_unavailable' && /switched off/.test(e.message));
+    const need = (await sweep.estimate({ subcategories: [SUB] })).requests;
+    await assert.rejects(() => sweep.start({ subcategories: [SUB], confirm: need, householdId: HH }), (e) => e.code === 'google_unavailable' && /switched off/.test(e.message));
   } finally { setOffKeys([]); }
 });
 
 test('nothing starts without the request count, or without a household', async () => {
-  await assert.rejects(() => sweep.start({ subcategories: [SUB], confirm: 35, householdId: 'h' }), (e) => e.code === 'confirm_required' && e.plan?.requests === 36);
-  await assert.rejects(() => sweep.start({ subcategories: [SUB], confirm: 36, householdId: null }), (e) => e.code === 'no_household');
+  await assert.rejects(() => sweep.start({ subcategories: [SUB], confirm: 1, householdId: 'h' }), (e) => e.code === 'confirm_required' && e.plan?.requests > 1);
+  const need = (await sweep.estimate({ subcategories: [SUB] })).requests;
+  await assert.rejects(() => sweep.start({ subcategories: [SUB], confirm: need, householdId: null }), (e) => e.code === 'no_household');
 });
 
 test('the work writes each place as it goes, reads its cost off the ledger, and finishes', async () => {
   const hh = HH;
-  const row = await sweep.start({ subcategories: [SUB], confirm: 36, householdId: hh, startedBy: 'test' });
+  const row = await sweep.start({ subcategories: [SUB], confirm: (await sweep.estimate({ subcategories: [SUB] })).requests, householdId: hh, startedBy: 'test' });
   assert.equal(row.state, 'running');
   assert.equal(row.places, 20);
 
   // A second one may not start while this is running.
-  await assert.rejects(() => sweep.start({ subcategories: [SUB], confirm: 36, householdId: hh }), (e) => e.code === 'already_running');
+  const need = (await sweep.estimate({ subcategories: [SUB] })).requests;
+  await assert.rejects(() => sweep.start({ subcategories: [SUB], confirm: need, householdId: hh }), (e) => e.code === 'already_running');
 
   const asked = [];
   const research = async (ref, opts) => {
@@ -149,15 +176,19 @@ test('the work writes each place as it goes, reads its cost off the ledger, and 
   assert.equal(released.length, 5, 'every reservation given back');
   assert.ok(reservations.every((r) => r.holder === `sweep:${row.id}`));
   // The first batch holds the two already-researched places, which cannot
-  // spend, so it reserves for two rather than four (Codex, 25 Sep 2026).
+  // spend, so it reserves for two rather than four (Codex, 25 Sep 2026); and
+  // an open-map place in a later batch is not reserved for either. Over the
+  // sweep the reservations add up to exactly the Google places asked.
   const perPlace = 2 * sweep.pencePerRequest();
   assert.equal(reservations[0].pence, Math.ceil(2 * perPlace));
-  assert.ok(reservations.slice(1).every((r) => r.pence === Math.ceil(4 * perPlace)));
+  const plan = await sweep.estimate({ subcategories: [SUB] });
+  const reservedFor = reservations.reduce((n, r) => n + r.pence, 0);
+  assert.ok(Math.abs(reservedFor - plan.asked * perPlace) < 5, `reserved ${reservedFor}p for ${plan.asked} Google places`);
 
   const f = await sweep.funnelOf(row.id);
   assert.equal(f.sampled, 20);
   assert.equal(f.held, 2);
-  assert.equal(f.asked, 18);
+  assert.equal(f.asked, 18, 'asked of somebody — the open-map ones of the open map');
   assert.equal(f.identified, 20);
   assert.equal(f.described, 18, 'counted from the record, not the outcome');
   assert.equal(f.openMap, 18);
@@ -176,7 +207,7 @@ test('a place that never answers is given up on, and the sweep moves on', async 
   // Awaited directly, a research call that never settled held the whole
   // sweep — and the heartbeat kept saying it was fine (Codex, 25 Sep 2026).
   await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
-  const row = await sweep.start({ subcategories: [SUB], confirm: 36, householdId: HH });
+  const row = await sweep.start({ subcategories: [SUB], confirm: (await sweep.estimate({ subcategories: [SUB] })).requests, householdId: HH });
   let calls = 0;
   const holders = [];
   const done = await sweep.work(row.id, {
@@ -207,7 +238,7 @@ test('a place that answers after its deadline still has its spend booked', async
   // its deadline may go on to spend. What it cost is written to the place
   // when it finally settles (Codex, 25 Sep 2026).
   await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
-  const row = await sweep.start({ subcategories: [SUB], confirm: 36, householdId: HH });
+  const row = await sweep.start({ subcategories: [SUB], confirm: (await sweep.estimate({ subcategories: [SUB] })).requests, householdId: HH });
   const released = [];
   let lateRef = null;
   let settled;
@@ -242,7 +273,7 @@ test('a place that answers after its deadline still has its spend booked', async
 test('over the ceiling stops with the rest left pending, and does not pretend', async () => {
   await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
   const hh = HH;
-  const row = await sweep.start({ subcategories: [SUB], confirm: 36, householdId: hh });
+  const row = await sweep.start({ subcategories: [SUB], confirm: (await sweep.estimate({ subcategories: [SUB] })).requests, householdId: hh });
   const done = await sweep.work(row.id, {
     research: async () => { throw new Error('should not be asked'); },
     room: async () => ({ ok: false, reservation: null, leftPence: 120 }),
@@ -258,7 +289,7 @@ test('over the ceiling stops with the rest left pending, and does not pretend', 
 test('a place asked again after a deploy is costed from its first attempt', async () => {
   await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
   const hh = HH;
-  const row = await sweep.start({ subcategories: [SUB], confirm: 36, householdId: hh });
+  const row = await sweep.start({ subcategories: [SUB], confirm: (await sweep.estimate({ subcategories: [SUB] })).requests, householdId: hh });
   // The process died after the first place's request was on the ledger and
   // before its row was written. Everything else is done already.
   //
@@ -293,7 +324,7 @@ test('Google switched off mid-sweep stops it before the next batch, with the res
   // identify a bare census ID and the worker would have drained the sample
   // marking rows done that were never researched (Codex, 25 Sep 2026).
   await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
-  const row = await sweep.start({ subcategories: [SUB], confirm: 36, householdId: HH });
+  const row = await sweep.start({ subcategories: [SUB], confirm: (await sweep.estimate({ subcategories: [SUB] })).requests, householdId: HH });
   let calls = 0;
   const done = await sweep.work(row.id, {
     research: async () => { calls += 1; if (calls === 4) setOffKeys(['google']); return { state: 'done', matched: {}, fields: {}, problems: [] }; },
@@ -311,7 +342,7 @@ test('Google switched off mid-sweep stops it before the next batch, with the res
 
 test('a sweep with only held places left finishes without Google', async () => {
   await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
-  const row = await sweep.start({ subcategories: [SUB], confirm: 36, householdId: HH });
+  const row = await sweep.start({ subcategories: [SUB], confirm: (await sweep.estimate({ subcategories: [SUB] })).requests, householdId: HH });
   // Everything but the two held places is done already; the two need no
   // request, so a switched-off Google is no reason to stop.
   await query(`update research_sweep_places set state = 'done', outcome = '{"state":"done"}'::jsonb where sweep_id = $1 and venue_ref <> all($2)`, [row.id, refs(2)]);
@@ -326,11 +357,31 @@ test('a sweep with only held places left finishes without Google', async () => {
   } finally { setOffKeys([]); }
 });
 
+test('open-map places left in a sweep are researched with Google off', async () => {
+  await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
+  const row = await sweep.start({ subcategories: [SUB], confirm: (await sweep.estimate({ subcategories: [SUB] })).requests, householdId: HH });
+  // Everything Google-backed is done; only the open-map places remain.
+  await query(`update research_sweep_places set state = 'done', outcome = '{"state":"done"}'::jsonb where sweep_id = $1 and venue_ref like 'google:%'`, [row.id]);
+  const { rows: left } = await query(`select venue_ref from research_sweep_places where sweep_id = $1 and state = 'pending'`, [row.id]);
+  assert.ok(left.length >= 1 && left.every((r) => r.venue_ref.startsWith('osm:')));
+  setOffKeys(['google']);
+  const asked = [];
+  try {
+    const done = await sweep.work(row.id, {
+      research: async (ref) => { asked.push(ref); return { state: 'done', matched: { osm: {} }, fields: {}, problems: [] }; },
+      room: async (pence, { holder }) => { assert.equal(pence, 0, 'nothing to reserve for the open map'); return { ok: true, reservation: holder, leftPence: 0 }; },
+      release: async () => {},
+    });
+    assert.equal(done.state, 'done');
+    assert.equal(asked.length, left.length);
+  } finally { setOffKeys([]); }
+});
+
 test('a place that throws after its deadline still has its spend booked', async () => {
   // The rejection path did nothing, so a request ledgered after the deadline
   // read at the deadline was never booked to the place (Codex, 25 Sep 2026).
   await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
-  const row = await sweep.start({ subcategories: [SUB], confirm: 36, householdId: HH });
+  const row = await sweep.start({ subcategories: [SUB], confirm: (await sweep.estimate({ subcategories: [SUB] })).requests, householdId: HH });
   let lateRef = null;
   let settled;
   const settledLate = new Promise((r) => { settled = r; });
@@ -362,7 +413,7 @@ test('a place that throws after its deadline still has its spend booked', async 
 test('a sweep whose process died is picked up, and its in-air places asked again', async () => {
   await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
   const hh = HH;
-  const row = await sweep.start({ subcategories: [SUB], confirm: 36, householdId: hh });
+  const row = await sweep.start({ subcategories: [SUB], confirm: (await sweep.estimate({ subcategories: [SUB] })).requests, householdId: hh });
   // Two were in the air, and nobody has heard from the sweep for a while.
   await query(`update research_sweep_places set state = 'asking' where sweep_id = $1 and venue_ref = any($2)`, [row.id, refs(2)]);
   await query(`update research_sweeps set touched_at = now() - interval '1 hour' where id = $1`, [row.id]);
