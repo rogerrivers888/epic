@@ -24,6 +24,7 @@ import { query, withTransaction } from '../db.js';
 import { pickSample, SAMPLE } from '../domain/questions.js';
 import { PRICE_PER_UNIT_USD, USD_TO_GBP } from '../domain/providerPrices.js';
 import * as own from './own.js';
+import * as owned from '../repositories/ownedPlaces.js';
 import { sourceHasKey, sourceOff } from './index.js';
 import { roomToSpend, releaseSpend } from '../routes/placeIndex.js';
 
@@ -438,9 +439,17 @@ async function seedFromRecord(venueRef) {
   // merged has to be here: the category decides whether a menu is looked
   // for, and the address tells two branches of one chain apart (Codex, 25
   // Sep 2026).
-  return rec?.name && rec?.lat != null
-    ? { name: rec.name, lat: rec.lat, lng: rec.lng, website: rec.website ?? undefined, postcode: rec.postcode ?? undefined, category: rec.category ?? undefined, address: rec.address ?? undefined }
-    : {};
+  if (!(rec?.name && rec?.lat != null)) return {};
+  // The town is on the household's row, not the record, and it is what tells
+  // two branches of one chain apart when they share a name and a site
+  // (Codex, 25 Sep 2026).
+  const household = await owned.seedFromHousehold(venueRef).catch(() => null);
+  return {
+    name: rec.name, lat: rec.lat, lng: rec.lng,
+    website: rec.website ?? undefined, postcode: rec.postcode ?? undefined,
+    category: rec.category ?? undefined, address: rec.address ?? undefined,
+    locality: household?.locality ?? undefined,
+  };
 }
 
 /**
