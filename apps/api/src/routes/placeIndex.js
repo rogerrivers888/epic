@@ -748,7 +748,7 @@ export async function censusBoardRows(slugs) {
                                   order by (r.state in ('running', 'waiting') and exists (
                                               select 1 from census_run_tiles m2
                                                 join census_tiles t2 on t2.grid_key = m2.grid_key
-                                               where m2.run_id = r.id and (t2.state in ('todo', 'doing') or (t2.state = 'failed' and t2.failures < 3))
+                                               where m2.run_id = r.id and (t2.state in ('todo', 'doing') or (t2.state = 'failed' and t2.failures < $3))
                                                  and t2.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s))) desc,
                                            r.started_at desc limit 1)
                 and t.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)) else null end as tiles,
@@ -766,7 +766,7 @@ export async function censusBoardRows(slugs) {
                                   order by (r.state in ('running', 'waiting') and exists (
                                               select 1 from census_run_tiles m2
                                                 join census_tiles t2 on t2.grid_key = m2.grid_key
-                                               where m2.run_id = r.id and (t2.state in ('todo', 'doing') or (t2.state = 'failed' and t2.failures < 3))
+                                               where m2.run_id = r.id and (t2.state in ('todo', 'doing') or (t2.state = 'failed' and t2.failures < $3))
                                                  and t2.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s))) desc,
                                            r.started_at desc limit 1)
                 and t.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)
@@ -787,9 +787,9 @@ export async function censusBoardRows(slugs) {
                       join census_runs r on r.id = rt.run_id
                      where t.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)
                        -- Still work: to do, being done, or failed with tries
-                       -- left, which claimTile takes again (MAX_TILE_TRIES is
-                       -- three; Codex, 25 Sep 2026).
-                       and (t.state in ('todo', 'doing') or (t.state = 'failed' and t.failures < 3))
+                       -- left, which claimTile takes again (MAX_TILE_TRIES, the
+                       -- same number the worker reads; Codex, 25 Sep 2026).
+                       and (t.state in ('todo', 'doing') or (t.state = 'failed' and t.failures < $3))
                        and r.state in ('running', 'waiting')) as sweeping
        from area_counts a
       where a.area_slug = any($1)
@@ -799,7 +799,7 @@ export async function censusBoardRows(slugs) {
       -- among the finished ones by count is how a taxonomy decision gets made
       -- against the wrong denominator (owner, 25 Sep 2026).
       order by 1, bool_and(a.complete) desc, sum(coalesce(a.surfaced_count, 0)) desc, 2`,
-    [slugs, single]);
+    [slugs, single, censusRun.MAX_TILE_TRIES]);
   return rows;
 }
 
