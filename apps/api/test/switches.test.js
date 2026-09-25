@@ -33,12 +33,16 @@ const withKeys = async (env, run) => {
   }
 };
 
-test('Google switched off refuses at the door, and the meter says so', async () => {
+test('Google switched off answers as it does with no key, and the meter says why', async () => {
   await withKeys({ GOOGLE_MAPS_API_KEY: 'test-key-never-sent' }, async (left) => {
     setOffKeys(['google']);
     const meter = {};
-    // `brief` is a direct caller that never asked the switch itself.
-    await assert.rejects(() => googleSource.brief('ChIJ_off', { meter }), /switched off/);
+    // `brief` is a direct caller that never asked the switch itself. It gets
+    // the empty answer its callers already handle — not an exception: a
+    // household screen awaiting `suggest()` answered 500 with the throw
+    // (Codex, 25 Sep 2026).
+    assert.equal(await googleSource.brief('ChIJ_off', { meter }), null);
+    assert.deepEqual(await googleSource.suggest('cafe', { meter }), []);
     assert.equal(left(), 0, 'nothing left the process');
     assert.match(JSON.stringify(healthOf(meter)), /switched_off/, 'the refusal is on the meter, for the ledger');
   });
@@ -56,7 +60,7 @@ test('Tripadvisor has the same door', async () => {
   await withKeys({ TRIPADVISOR_API_KEY: 'test-key-never-sent' }, async (left) => {
     setOffKeys(['tripadvisor']);
     const meter = {};
-    await assert.rejects(() => tripadvisorSource.get('123', { meter }), /switched off/);
+    assert.equal(await tripadvisorSource.get('123', { meter }), null);
     assert.match(JSON.stringify(healthOf(meter)), /switched_off/);
     assert.equal(left(), 0);
   });

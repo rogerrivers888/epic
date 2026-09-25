@@ -445,6 +445,23 @@ async function call(path, { method = 'POST', body, fieldMask, meter }) {
   return res.json();
 }
 
+/**
+ * Whether this adapter may go out at all: no key, or switched off in Settings.
+ *
+ * The switch is read at the door (`call()`), where it throws — right for a
+ * back-office run, which should stop loudly. A household screen must degrade
+ * instead: `/api/places/suggest` awaited `suggest()` without a catch and
+ * answered 500 before it could offer the places it already knew (Codex,
+ * 25 Sep 2026). So every method here treats "switched off" exactly as it
+ * treats "no key" — the empty answer its callers already handle — and puts
+ * the refusal on the meter so the ledger still shows it.
+ */
+const off = (meter) => {
+  if (!KEY()) return true;
+  if (sourceOff('google')) { noteFault(meter, 'switched_off'); return true; }
+  return false;
+};
+
 /** `movie_theater` -> "movie theater", which is what a text query wants. */
 const googleTypeWords = (t) => String(t ?? '').replace(/_/g, ' ');
 
@@ -466,7 +483,7 @@ export const googleSource = {
    * name) so the justification comes back with each match.
    */
   async search({ center, radiusKm = 3, categories = [], query = '', limit = 60, meter = null } = {}) {
-    if (!KEY() || !center || center.lat == null) return [];
+    if (off(meter) || !center || center.lat == null) return [];
     const groups = new Set();
     for (const c of categories || []) {
       if (['restaurant', 'cafe', 'pub', 'bar', 'takeaway', 'food'].includes(c)) groups.add('food');
@@ -526,7 +543,7 @@ export const googleSource = {
 
   /** Full detail including up to 5 reviews (Pro/Enterprise fields). */
   async get(id, { meter = null } = {}) {
-    if (!KEY()) return null;
+    if (off(meter)) return null;
     const p = await call(`/places/${id}`, { method: 'GET', fieldMask: DETAIL_FIELDS, meter });
     const v = toVenue(p);
     v.reviews = (p.reviews || []).slice(0, 5).map((r) => ({
@@ -544,7 +561,7 @@ export const googleSource = {
 
   /** The rating and the count for a known id, at the cheap tier. Rented: band it or hold it, never write it. */
   async rating(id, { meter = null } = {}) {
-    if (!KEY()) return null;
+    if (off(meter)) return null;
     const p = await call(`/places/${id}`, { method: 'GET', fieldMask: RATING_FIELDS, meter });
     return { rating: p.rating ?? null, ratingCount: p.userRatingCount ?? null };
   },
@@ -573,7 +590,7 @@ export const googleSource = {
       if (types.includes('locality') || types.includes('postal_town')) return 'Town';
       return null;
     };
-    if (!KEY() || !String(query || '').trim()) return [];
+    if (off(meter) || !String(query || '').trim()) return [];
     const body = { input: String(query).trim(), languageCode: 'en-GB' };
     // Asking for places rather than everything: a town's name brings back the
     // town, its roads and its two golf clubs, and the restaurant of the same
@@ -609,7 +626,7 @@ export const googleSource = {
    * not the rented content (reviews, photos, hours) that Pro and Enterprise bill for.
    */
   async types(id, { meter = null } = {}) {
-    if (!KEY()) return null;
+    if (off(meter)) return null;
     const p = await call(`/places/${id}`, { method: 'GET', fieldMask: 'id,types,primaryType', meter });
     const types = p.types || [];
     const primary = p.primaryType || types[0] || '';
@@ -635,7 +652,7 @@ export const googleSource = {
    * picture without the credit is the licence broken, not a missing nicety.
    */
   async photos(id, { meter = null } = {}) {
-    if (!KEY()) return null;
+    if (off(meter)) return null;
     const p = await call(`/places/${id}`, { method: 'GET', fieldMask: 'id,photos.name,photos.authorAttributions', meter });
     const found = stampPhotos((p?.photos || []).slice(0, 3).map((ph) => ({
       ref: ph.name,
@@ -656,7 +673,7 @@ export const googleSource = {
    * Nothing it returns is written down (sources/rentedRating.js).
    */
   async rating(id, { meter = null } = {}) {
-    if (!KEY()) return null;
+    if (off(meter)) return null;
     // `types` and `primaryType` ride along free. Places bills a request once, at
     // the highest tier any of its fields belong to: a rating is Enterprise and a
     // type is Essentials, so asking for both costs exactly what asking for the
@@ -691,7 +708,7 @@ export const googleSource = {
    * down — it is read, used to search OpenStreetMap and Wikipedia, and dropped.
    */
   async brief(id, { meter = null } = {}) {
-    if (!KEY()) return null;
+    if (off(meter)) return null;
     const p = await call(`/places/${id}`, { method: 'GET', fieldMask: 'id,displayName,location,websiteUri', meter });
     if (!p?.location) return null;
     return {
@@ -704,7 +721,7 @@ export const googleSource = {
 
   /** Search along an encoded polyline; results ranked by detour (Technical Constraints §3.1). */
   async searchAlongRoute({ encodedPolyline, query, limit = 20, meter = null }) {
-    if (!KEY() || !encodedPolyline) return [];
+    if (off(meter) || !encodedPolyline) return [];
     const data = await call('/places:searchText', {
       fieldMask: `${TEXT_SEARCH_FIELDS},routingSummaries`, meter,
       body: { textQuery: query || 'places to stop', pageSize: Math.min(limit, 20), searchAlongRouteParameters: { polyline: { encodedPolyline } } },

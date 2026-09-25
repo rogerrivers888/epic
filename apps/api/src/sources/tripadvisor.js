@@ -34,6 +34,13 @@ export const TRIPADVISOR_ATTRIBUTION = 'Reviews and photos © Tripadvisor';
 const NEARBY_PAGE = Math.min(20, Math.max(1, Number(process.env.EPIC_TRIPADVISOR_PAGE) || 10));
 const REVIEWS_PER_VENUE = 3;
 
+/** No key, or switched off in Settings: the empty answer, with the refusal on the meter. See google.js `off`. */
+const off = (meter) => {
+  if (!KEY()) return true;
+  if (sourceOff('tripadvisor')) { noteFault(meter, 'switched_off'); return true; }
+  return false;
+};
+
 async function get(path, params = {}, meter = null) {
   const key = KEY();
   if (!key) throw new Error('TRIPADVISOR_API_KEY not set');
@@ -178,7 +185,7 @@ export const tripadvisorSource = {
    * the "just Tripadvisor" testing view; it is not a good browse on its own.
    */
   async search({ center, radiusKm = 3, categories = [], query = '', limit = 30, sources = [], meter = null } = {}) {
-    if (!KEY() || !center || center.lat == null) return [];
+    if (off(meter) || !center || center.lat == null) return [];
     // With other sources in the mix the page is a waste; `enrich` does the work.
     if (Array.isArray(sources) && sources.length > 1) return [];
     const wantsFood = !categories.length || categories.some((c) => ['restaurant', 'cafe', 'pub', 'bar', 'takeaway', 'food'].includes(c));
@@ -206,7 +213,7 @@ export const tripadvisorSource = {
    * go first, then the nearest, up to ENRICH_LIMIT lookups.
    */
   async enrich(venues, { center, locality = null, meter = null } = {}) {
-    if (!KEY() || !ENRICH_LIMIT) return [];
+    if (off(meter) || !ENRICH_LIMIT) return [];
     const candidates = venues
       .filter((v) => v.source !== 'tripadvisor' && v.name && Number.isFinite(v.lat))
       .map((v) => ({ v, d: center ? kmBetween(center, v) : 0 }))
@@ -244,7 +251,7 @@ export const tripadvisorSource = {
    * (sources/providerMatch.js applies the atlas's two guards).
    */
   async candidates({ name, category = 'attraction', lat = null, lng = null }, { locality = null, meter = null, fenceM = FENCE_M } = {}) {
-    if (!KEY() || !name) return [];
+    if (off(meter) || !name) return [];
     const params = { query: String(name).slice(0, 200), size: ENRICH_SIZE };
     // A point beats a place name. `geo_name: 'Ascot'` asks Tripadvisor to
     // resolve a locality first and match inside whatever it decides that is,
@@ -270,7 +277,7 @@ export const tripadvisorSource = {
 
   /** Full detail plus up to 3 reviews (Discover). Two billable entities per view. */
   async get(id, { meter = null } = {}) {
-    if (!KEY()) return null;
+    if (off(meter)) return null;
     const details = await get(`/locations/${id}`, {}, meter);
     const v = toVenue(details);
     try {
