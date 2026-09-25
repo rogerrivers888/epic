@@ -1761,7 +1761,8 @@ filingRoutes.get('/places/:ref', requires('view_library'), async (req, res, next
         const other = keep === a ? had : a;
         // Two sources that both answered and do not agree is a fact about the
         // place, not a tie to break quietly.
-        const said = (r) => (r.yesno != null ? String(r.yesno) : r.choice ?? String(r.number ?? ''));
+        const said = (r) => (r.yesno != null ? String(r.yesno)
+          : r.choice ?? (r.from_value != null || r.to_value != null ? `${r.from_value ?? ''}-${r.to_value ?? ''}` : String(r.number ?? '')));
         keep.unresolved = keep.unresolved
           || (keep.state === 'answered' && other.state === 'answered' && said(keep) !== said(other));
         byQ.set(id, keep);
@@ -1769,8 +1770,11 @@ filingRoutes.get('/places/:ref', requires('view_library'), async (req, res, next
       // The set's own questions and the ones asked of everything: Duration
       // and Cost band are global (migration 246), and an answer to a global
       // question is as much a fact about this place as one to the set's
-      // (Codex, 25 Sep 2026).
-      questions = qs.filter((q) => q.set_key === setKey || q.scope === 'global').map((q) => {
+      // (Codex, 25 Sep 2026). Only the ones still asked: `questionsFor`
+      // serves the administrative views and keeps a switched-off question,
+      // and a fact nobody asks any more is not a fact about this place
+      // (Codex via epic-83, 25 Sep 2026).
+      questions = qs.filter((q) => (q.set_key === setKey || q.scope === 'global') && q.active !== false).map((q) => {
         const a = byQ.get(String(q.id));
         if (!a) {
           return { id: Number(q.id), name: q.label, state: 'notasked',
@@ -1783,8 +1787,12 @@ filingRoutes.get('/places/:ref', requires('view_library'), async (req, res, next
         }
         return {
           id: Number(q.id), name: q.label, state: 'answered',
+          // In the answer's own shape: a yes or no, one of a list, a range —
+          // Duration is minutes from and to — or a number.
           said: a.yesno != null ? (a.yesno ? 'Yes' : 'No')
-            : a.choice ?? (a.number != null ? String(a.number) : '—'),
+            : a.choice ?? (a.from_value != null || a.to_value != null
+              ? `${a.from_value ?? q.range_min ?? ''} to ${a.to_value ?? q.range_max ?? ''}${q.unit ? ` ${q.unit}` : ''}`
+              : a.number != null ? String(a.number) : '—'),
           source: `${a.source}${a.checked_at ? ` · checked ${new Date(a.checked_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}`,
           url: a.source_url ?? null,
           unresolved: a.unresolved,
