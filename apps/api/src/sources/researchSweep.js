@@ -398,6 +398,9 @@ export async function work(id, { research = own.enrich, room = roomToSpend, rele
         await writeProgress(id, { state: 'failed', problem: `over this month's ceiling with £${(got.leftPence / 100).toFixed(2)} left` });
         return one(id);
       }
+      // Set when a place outlives its deadline and the ceiling has no room
+      // left to cover what it may still spend: nothing more may start.
+      let noRoomForStray = null;
       try {
         for (const p of batch) {
           // The window the ledger is read over starts at the claim, on the
@@ -419,23 +422,27 @@ export async function work(id, { research = own.enrich, room = roomToSpend, rele
             if (err?.code === 'deadline') {
               // The research cannot be cancelled from here — `own.js` has no
               // abort — so a call that outlives its deadline may still go on
-              // to spend. When it finally settles, whatever it cost is booked
-              // to this place after the fact, so the sweep's spend stays
-              // true; the ceiling reads the same ledger. What is left is the
-              // gap between releasing this batch's reservation and that late
-              // request landing: at most two requests, a few pence (Codex,
-              // 25 Sep 2026).
-              // Either way it settles — answered or thrown — what it cost
-              // by then is read again and written, because the read at the
-              // deadline may have run before the request landed (Codex,
-              // 25 Sep 2026).
+              // to spend after this batch's reservation is given back. So it
+              // is given a reservation of its own, held until it settles, and
+              // if the ceiling has no room even for that, nothing more starts:
+              // booking the cost afterwards keeps the ledger true but does
+              // not hold the cap (Codex, 25 Sep 2026).
+              const hold = await room(Math.ceil(REQUESTS_PER_PLACE * pencePerRequest()), { holder: `sweep:${id}:late` });
+              if (!hold.ok) noRoomForStray = hold;
+              // Either way it settles — answered or thrown — what it cost by
+              // then is read again and written, because the read at the
+              // deadline may have run before the request landed.
               const settle = async (late) => {
-                const usd = await spentOn(p.venue_ref, since, household);
-                await query(
-                  `update research_sweep_places set outcome = $3::jsonb, cost_usd = $4
-                    where sweep_id = $1 and venue_ref = $2`,
-                  [id, p.venue_ref, JSON.stringify({ ...late, late: true, problems: [...outcome.problems, ...(late.problems ?? [])] }), usd]);
-                await writeProgress(id).catch(() => null);
+                try {
+                  const usd = await spentOn(p.venue_ref, since, household);
+                  await query(
+                    `update research_sweep_places set outcome = $3::jsonb, cost_usd = $4
+                      where sweep_id = $1 and venue_ref = $2`,
+                    [id, p.venue_ref, JSON.stringify({ ...late, late: true, problems: [...outcome.problems, ...(late.problems ?? [])] }), usd]);
+                  await writeProgress(id).catch(() => null);
+                } finally {
+                  if (hold.ok) await release(hold.reservation);
+                }
               };
               asking.then(
                 (out) => settle(outcomeOf(out)),
@@ -453,6 +460,10 @@ export async function work(id, { research = own.enrich, room = roomToSpend, rele
         await release(got.reservation);
       }
       await writeProgress(id);
+      if (noRoomForStray) {
+        await writeProgress(id, { state: 'failed', problem: `over this month's ceiling with £${(noRoomForStray.leftPence / 100).toFixed(2)} left, with a slow place still to settle` });
+        return one(id);
+      }
     }
     await writeProgress(id, { state: 'done' });
     return one(id);
@@ -498,7 +509,7 @@ export async function resume({ work: doWork = work } = {}) {
     // near the ceiling the resumed worker would count it against itself and
     // give up for good (Codex, 25 Sep 2026). Whatever it covered is on the
     // ledger by now.
-    await query('delete from spend_reservations where holder = $1', [`sweep:${run.id}`]).catch(() => null);
+    await query('delete from spend_reservations where holder = $1 or holder = $2', [`sweep:${run.id}`, `sweep:${run.id}:late`]).catch(() => null);
     void doWork(run.id).catch((err) => console.warn(`sweep ${run.id}: ${err.message}`));
     resumed += 1;
   }
