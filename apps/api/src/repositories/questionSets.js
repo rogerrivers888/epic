@@ -306,7 +306,7 @@ export async function recordCandidates(subcategory, entries = [], { placesTotal 
       entry.asks ?? 0,
       // The quote only travels with an owned source. See QUOTABLE_SOURCES.
       ...(entry.evidence && sources.length && sources.every((x) => QUOTABLE_SOURCES.has(x))
-        ? [String(entry.evidence).slice(0, 240), entry.evidenceRef ?? null]
+        ? [String(entry.evidence).slice(0, 240), entry.evidenceRef ?? null] // 240 is QUOTE_MAX; the harvest refuses longer, so nothing is trimmed here
         : [null, null]),
     ]);
   }

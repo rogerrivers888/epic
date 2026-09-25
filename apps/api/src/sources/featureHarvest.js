@@ -210,10 +210,20 @@ export function countAcross(feature, kept) {
 export const ENOUGH_TO_ASK = 2;
 
 /** Is the evidence quote actually in the text we sent? */
+/** The most a quote may run to. Longer is not a "short evidence quote". */
+export const QUOTE_MAX = 240;
+
+const normalised = (text) => String(text ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+
 export function evidenced(feature, pooled) {
-  const quote = String(feature.evidence ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
-  if (quote.length < 8) return false;
-  return pooled.toLowerCase().replace(/\s+/g, ' ').includes(quote.slice(0, 60));
+  const quote = normalised(feature.evidence);
+  // The whole quote, not its opening. Checking the first sixty characters
+  // let a genuine opening carry an invented ending into the table, where it
+  // would be shown as an owned-source quote (Codex, 25 Sep 2026). Over the
+  // stored length it is refused rather than trimmed, because a trimmed quote
+  // is not the one that was checked either.
+  if (quote.length < 8 || quote.length > QUOTE_MAX) return false;
+  return normalised(pooled).includes(quote);
 }
 
 /**
@@ -227,9 +237,9 @@ export function evidenced(feature, pooled) {
  * nobody, which `evidenced` allows and this does not pretend about.
  */
 export function quotedFrom(feature, kept) {
-  const quote = String(feature.evidence ?? '').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 60);
-  if (quote.length < 8) return null;
-  const hit = kept.find((k) => String(k.text ?? '').toLowerCase().replace(/\s+/g, ' ').includes(quote));
+  const quote = normalised(feature.evidence);
+  if (quote.length < 8 || quote.length > QUOTE_MAX) return null;
+  const hit = kept.find((k) => normalised(k.text).includes(quote));
   return hit?.ref ?? null;
 }
 

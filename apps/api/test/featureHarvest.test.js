@@ -258,3 +258,18 @@ test('a quote nobody holds is nobody’s, not the first place’s', () => {
   const places = [{ ref: 'a', text: 'A boathouse on the lake.' }];
   assert.equal(quotedFrom({ evidence: 'the hearing loop covers the pool' }, places), null);
 });
+
+test('a real opening does not carry an invented ending into the table', () => {
+  // Only the first sixty characters used to be checked, so a quote that began
+  // truthfully and went on to say something nobody wrote would have been
+  // stored in full as an owned-source quote (Codex, 25 Sep 2026).
+  const pooled = 'There is a wave machine and a flume beside the main pool, open on Saturdays.';
+  const honest = 'There is a wave machine and a flume beside the main pool';
+  const embroidered = `${honest} with a hearing loop at the desk`;
+  assert.equal(evidenced({ evidence: honest }, pooled), true);
+  assert.equal(evidenced({ evidence: embroidered }, pooled), false);
+  assert.equal(quotedFrom({ evidence: embroidered }, [{ ref: 'a', text: pooled }]), null);
+  // Longer than a short quote is refused, not trimmed to something that was
+  // never checked.
+  assert.equal(evidenced({ evidence: pooled.repeat(5) }, pooled.repeat(5)), false);
+});
