@@ -752,10 +752,16 @@ export async function censusBoardRows(slugs) {
                 and t.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)
                 and t.state = 'done') else null end       as tiles_done,
             -- In flight: a tile naming one of these districts is still to do or
-            -- being done. Adds the word; the caveat itself is the partial flag above.
+            -- being done *by a run that is still going*. Adds the word; the
+            -- caveat itself is the partial flag above. Unscoped, a stopped
+            -- run's leftover tiles — on an obsolete grid, even — kept a district
+            -- reading as sweeping long after the latest run had finished
+            -- (Codex, via epic-83, 25 Sep 2026).
             exists (select 1 from census_tiles t
+                      join census_runs r on r.id = t.run_id
                      where t.outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)
-                       and t.state in ('todo', 'doing')) as sweeping
+                       and t.state in ('todo', 'doing')
+                       and r.state in ('running', 'waiting')) as sweeping
        from area_counts a
       where a.area_slug = any($1)
       group by 1, 2
