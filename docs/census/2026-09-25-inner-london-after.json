@@ -1,0 +1,273 @@
+[
+{"code": "E1", "counted": 927, "unresolved": 2494, "drawers": 62}
+,
+{"code": "E10", "counted": 9, "unresolved": 1181, "drawers": 55}
+,
+{"code": "E13", "counted": 320, "unresolved": 674, "drawers": 51}
+,
+{"code": "E14", "counted": 585, "unresolved": 1612, "drawers": 60}
+,
+{"code": "E15", "counted": 69, "unresolved": 378, "drawers": 55}
+,
+{"code": "E16", "counted": 67, "unresolved": 412, "drawers": 56}
+,
+{"code": "E17", "counted": 368, "unresolved": 5369, "drawers": 59}
+,
+{"code": "E1W", "counted": 8, "unresolved": 812, "drawers": 60}
+,
+{"code": "E2", "counted": 328, "unresolved": 1708, "drawers": 56}
+,
+{"code": "E20", "counted": 134, "unresolved": 1125, "drawers": 55}
+,
+{"code": "E3", "counted": 0, "unresolved": 1044, "drawers": 57}
+,
+{"code": "E5", "counted": 76, "unresolved": 2303, "drawers": 55}
+,
+{"code": "E8", "counted": 409, "unresolved": 1613, "drawers": 55}
+,
+{"code": "E9", "counted": 0, "unresolved": 1482, "drawers": 55}
+,
+{"code": "EC1M", "counted": 216, "unresolved": 0, "drawers": 56}
+,
+{"code": "EC1N", "counted": 126, "unresolved": 983, "drawers": 59}
+,
+{"code": "EC1R", "counted": 221, "unresolved": 3, "drawers": 55}
+,
+{"code": "EC1V", "counted": 159, "unresolved": 1406, "drawers": 56}
+,
+{"code": "EC1Y", "counted": 369, "unresolved": 1369, "drawers": 59}
+,
+{"code": "EC2A", "counted": 399, "unresolved": 349, "drawers": 56}
+,
+{"code": "EC2V", "counted": 247, "unresolved": 2, "drawers": 60}
+,
+{"code": "EC3N", "counted": 338, "unresolved": 1197, "drawers": 60}
+,
+{"code": "EC4M", "counted": 35, "unresolved": 294, "drawers": 59}
+,
+{"code": "EC4R", "counted": 203, "unresolved": 1218, "drawers": 60}
+,
+{"code": "EC4V", "counted": 350, "unresolved": 0, "drawers": 59}
+,
+{"code": "GU1", "counted": 299, "unresolved": 602, "drawers": 47}
+,
+{"code": "GU2", "counted": 198, "unresolved": 340, "drawers": 48}
+,
+{"code": "N1", "counted": 495, "unresolved": 1484, "drawers": 56}
+,
+{"code": "N12", "counted": 209, "unresolved": 486, "drawers": 44}
+,
+{"code": "N15", "counted": 10, "unresolved": 1089, "drawers": 55}
+,
+{"code": "N16", "counted": 135, "unresolved": 1468, "drawers": 55}
+,
+{"code": "N17", "counted": 404, "unresolved": 1015, "drawers": 51}
+,
+{"code": "N19", "counted": 29, "unresolved": 440, "drawers": 53}
+,
+{"code": "N1P", "counted": 2, "unresolved": 720, "drawers": 56}
+,
+{"code": "N20", "counted": 0, "unresolved": 268, "drawers": 43}
+,
+{"code": "N22", "counted": 165, "unresolved": 4471, "drawers": 57}
+,
+{"code": "N4", "counted": 164, "unresolved": 1550, "drawers": 55}
+,
+{"code": "N5", "counted": 0, "unresolved": 536, "drawers": 55}
+,
+{"code": "N6", "counted": 2, "unresolved": 869, "drawers": 53}
+,
+{"code": "N7", "counted": 150, "unresolved": 559, "drawers": 56}
+,
+{"code": "N8", "counted": 66, "unresolved": 812, "drawers": 53}
+,
+{"code": "NW1", "counted": 978, "unresolved": 2175, "drawers": 53}
+,
+{"code": "NW10", "counted": 308, "unresolved": 1487, "drawers": 54}
+,
+{"code": "NW11", "counted": 59, "unresolved": 221, "drawers": 53}
+,
+{"code": "NW2", "counted": 96, "unresolved": 724, "drawers": 54}
+,
+{"code": "NW3", "counted": 278, "unresolved": 2098, "drawers": 54}
+,
+{"code": "NW4", "counted": 29, "unresolved": 157, "drawers": 43}
+,
+{"code": "NW5", "counted": 96, "unresolved": 827, "drawers": 53}
+,
+{"code": "NW6", "counted": 111, "unresolved": 1065, "drawers": 54}
+,
+{"code": "NW7", "counted": 83, "unresolved": 269, "drawers": 47}
+,
+{"code": "NW8", "counted": 33, "unresolved": 1006, "drawers": 54}
+,
+{"code": "NW9", "counted": 76, "unresolved": 4663, "drawers": 55}
+,
+{"code": "SE1", "counted": 1181, "unresolved": 2906, "drawers": 65}
+,
+{"code": "SE10", "counted": 855, "unresolved": 5112, "drawers": 62}
+,
+{"code": "SE11", "counted": 88, "unresolved": 1480, "drawers": 60}
+,
+{"code": "SE14", "counted": 1, "unresolved": 592, "drawers": 59}
+,
+{"code": "SE15", "counted": 178, "unresolved": 1000, "drawers": 60}
+,
+{"code": "SE16", "counted": 3, "unresolved": 2120, "drawers": 60}
+,
+{"code": "SE18", "counted": 307, "unresolved": 2053, "drawers": 56}
+,
+{"code": "SE19", "counted": 5, "unresolved": 513, "drawers": 51}
+,
+{"code": "SE20", "counted": 164, "unresolved": 1822, "drawers": 51}
+,
+{"code": "SE21", "counted": 69, "unresolved": 760, "drawers": 63}
+,
+{"code": "SE22", "counted": 6, "unresolved": 1029, "drawers": 60}
+,
+{"code": "SE23", "counted": 125, "unresolved": 692, "drawers": 60}
+,
+{"code": "SE24", "counted": 0, "unresolved": 802, "drawers": 59}
+,
+{"code": "SE25", "counted": 108, "unresolved": 444, "drawers": 51}
+,
+{"code": "SE27", "counted": 0, "unresolved": 379, "drawers": 52}
+,
+{"code": "SE28", "counted": 0, "unresolved": 5826, "drawers": 59}
+,
+{"code": "SE5", "counted": 226, "unresolved": 1850, "drawers": 60}
+,
+{"code": "SE7", "counted": 155, "unresolved": 257, "drawers": 56}
+,
+{"code": "SE8", "counted": 119, "unresolved": 920, "drawers": 59}
+,
+{"code": "SE9", "counted": 136, "unresolved": 611, "drawers": 56}
+,
+{"code": "SW10", "counted": 59, "unresolved": 812, "drawers": 56}
+,
+{"code": "SW11", "counted": 275, "unresolved": 1821, "drawers": 56}
+,
+{"code": "SW12", "counted": 1, "unresolved": 582, "drawers": 57}
+,
+{"code": "SW13", "counted": 2, "unresolved": 810, "drawers": 60}
+,
+{"code": "SW14", "counted": 0, "unresolved": 478, "drawers": 55}
+,
+{"code": "SW15", "counted": 137, "unresolved": 4381, "drawers": 60}
+,
+{"code": "SW16", "counted": 247, "unresolved": 1254, "drawers": 58}
+,
+{"code": "SW17", "counted": 345, "unresolved": 1105, "drawers": 56}
+,
+{"code": "SW18", "counted": 5, "unresolved": 1032, "drawers": 57}
+,
+{"code": "SW19", "counted": 517, "unresolved": 930, "drawers": 59}
+,
+{"code": "SW1A", "counted": 52, "unresolved": 554, "drawers": 56}
+,
+{"code": "SW1E", "counted": 78, "unresolved": 0, "drawers": 56}
+,
+{"code": "SW1H", "counted": 117, "unresolved": 961, "drawers": 57}
+,
+{"code": "SW1P", "counted": 247, "unresolved": 232, "drawers": 57}
+,
+{"code": "SW1V", "counted": 116, "unresolved": 1163, "drawers": 57}
+,
+{"code": "SW1W", "counted": 81, "unresolved": 0, "drawers": 56}
+,
+{"code": "SW1X", "counted": 82, "unresolved": 939, "drawers": 57}
+,
+{"code": "SW1Y", "counted": 210, "unresolved": 0, "drawers": 56}
+,
+{"code": "SW2", "counted": 68, "unresolved": 3211, "drawers": 63}
+,
+{"code": "SW20", "counted": 57, "unresolved": 457, "drawers": 58}
+,
+{"code": "SW3", "counted": 223, "unresolved": 1107, "drawers": 57}
+,
+{"code": "SW4", "counted": 104, "unresolved": 1373, "drawers": 56}
+,
+{"code": "SW5", "counted": 112, "unresolved": 657, "drawers": 56}
+,
+{"code": "SW6", "counted": 473, "unresolved": 1224, "drawers": 57}
+,
+{"code": "SW7", "counted": 258, "unresolved": 1143, "drawers": 56}
+,
+{"code": "SW8", "counted": 91, "unresolved": 1962, "drawers": 58}
+,
+{"code": "SW9", "counted": 160, "unresolved": 1356, "drawers": 60}
+,
+{"code": "W10", "counted": 10, "unresolved": 881, "drawers": 54}
+,
+{"code": "W11", "counted": 201, "unresolved": 1111, "drawers": 56}
+,
+{"code": "W12", "counted": 260, "unresolved": 4805, "drawers": 60}
+,
+{"code": "W13", "counted": 2, "unresolved": 559, "drawers": 55}
+,
+{"code": "W14", "counted": 58, "unresolved": 1017, "drawers": 56}
+,
+{"code": "W1B", "counted": 324, "unresolved": 258, "drawers": 57}
+,
+{"code": "W1C", "counted": 26, "unresolved": 0, "drawers": 56}
+,
+{"code": "W1D", "counted": 829, "unresolved": 0, "drawers": 56}
+,
+{"code": "W1F", "counted": 188, "unresolved": 0, "drawers": 56}
+,
+{"code": "W1G", "counted": 245, "unresolved": 0, "drawers": 56}
+,
+{"code": "W1H", "counted": 190, "unresolved": 955, "drawers": 56}
+,
+{"code": "W1J", "counted": 315, "unresolved": 1711, "drawers": 57}
+,
+{"code": "W1K", "counted": 385, "unresolved": 0, "drawers": 57}
+,
+{"code": "W1S", "counted": 158, "unresolved": 247, "drawers": 56}
+,
+{"code": "W1T", "counted": 672, "unresolved": 1198, "drawers": 57}
+,
+{"code": "W1U", "counted": 269, "unresolved": 1057, "drawers": 57}
+,
+{"code": "W1W", "counted": 106, "unresolved": 0, "drawers": 56}
+,
+{"code": "W2", "counted": 539, "unresolved": 2127, "drawers": 58}
+,
+{"code": "W3", "counted": 188, "unresolved": 746, "drawers": 55}
+,
+{"code": "W4", "counted": 319, "unresolved": 914, "drawers": 55}
+,
+{"code": "W5", "counted": 211, "unresolved": 1144, "drawers": 57}
+,
+{"code": "W6", "counted": 199, "unresolved": 978, "drawers": 56}
+,
+{"code": "W7", "counted": 72, "unresolved": 6073, "drawers": 59}
+,
+{"code": "W8", "counted": 177, "unresolved": 1164, "drawers": 56}
+,
+{"code": "W9", "counted": 17, "unresolved": 140, "drawers": 53}
+,
+{"code": "WC1A", "counted": 236, "unresolved": 0, "drawers": 56}
+,
+{"code": "WC1B", "counted": 51, "unresolved": 2848, "drawers": 59}
+,
+{"code": "WC1E", "counted": 64, "unresolved": 0, "drawers": 53}
+,
+{"code": "WC1H", "counted": 0, "unresolved": 0, "drawers": 53}
+,
+{"code": "WC1N", "counted": 318, "unresolved": 947, "drawers": 55}
+,
+{"code": "WC1X", "counted": 2, "unresolved": 240, "drawers": 55}
+,
+{"code": "WC2A", "counted": 315, "unresolved": 221, "drawers": 59}
+,
+{"code": "WC2B", "counted": 108, "unresolved": 0, "drawers": 61}
+,
+{"code": "WC2E", "counted": 372, "unresolved": 0, "drawers": 56}
+,
+{"code": "WC2H", "counted": 305, "unresolved": 442, "drawers": 56}
+,
+{"code": "WC2N", "counted": 363, "unresolved": 2, "drawers": 56}
+,
+{"code": "WC2R", "counted": 231, "unresolved": 1237, "drawers": 61}
+]
