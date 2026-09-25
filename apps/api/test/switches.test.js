@@ -14,7 +14,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { googleSource, photoFor } from '../src/sources/google.js';
+import { googleSource, photoFor, displaySlice } from '../src/sources/google.js';
 import { tripadvisorSource } from '../src/sources/tripadvisor.js';
 import { setOffKeys, sourceOff } from '../src/sources/switches.js';
 import { enabledSources, sourceOff as viaIndex } from '../src/sources/index.js';
@@ -58,6 +58,19 @@ test('a photograph does not go out for a switched-off Google either', async () =
     setOffKeys([]);
     await photoFor(`places/x/photos/on_${Date.now()}`, 200).catch(() => null);
     assert.equal(left(), 1, 'switched on, the same picture is fetched');
+  });
+});
+
+test('a display search with Google switched off is not counted as sent', async () => {
+  // Its error path counted a thrown `switched_off` as a request that went
+  // out, and the Inspire routes recorded a search that never left (Codex,
+  // 25 Sep 2026). The switch is the same kind of answer as no key.
+  await withKeys({ GOOGLE_MAPS_API_KEY: 'test-key-never-sent' }, async (left) => {
+    setOffKeys(['google']);
+    const out = await displaySlice({ box: { south: 51, west: -1, north: 52, east: 0 }, query: 'cafe' });
+    assert.equal(out.requests, 0);
+    assert.match(out.problem, /switched off/);
+    assert.equal(left(), 0);
   });
 });
 

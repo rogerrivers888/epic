@@ -191,14 +191,11 @@ test('a place that never answers is given up on, and the sweep moves on', async 
   });
   assert.equal(done.state, 'done');
   assert.equal(calls, 20, 'every place was still asked');
-  // The stray call is covered by a hold taken after its batch's reservation
-  // is released — not alongside it, which counted the same work twice — and
-  // kept until it settles (Codex, 25 Sep 2026).
-  const late = holders.filter((h) => h.holder === `sweep:${row.id}:late`);
-  assert.equal(late.length, 1);
-  assert.equal(late[0].pence, Math.ceil(2 * sweep.pencePerRequest()));
-  const order = holders.map((h) => h.holder);
-  assert.ok(order.indexOf(`sweep:${row.id}:late`) > order.indexOf(`sweep:${row.id}`), 'after the batch, not during it');
+  // The stray call is covered by its batch's own reservation, which is kept
+  // until it settles rather than released and taken again (Codex, 25 Sep
+  // 2026, twice): no second hold, and no gap.
+  assert.equal(holders.filter((h) => h.holder !== `sweep:${row.id}`).length, 0, 'no separate late hold');
+  assert.equal(holders.length, 5, 'one reservation a batch, as before');
   const f = await sweep.funnelOf(row.id);
   assert.equal(f.failed, 1);
   const { rows: [hung] } = await query(`select outcome from research_sweep_places where sweep_id = $1 and state = 'failed'`, [row.id]);
@@ -234,7 +231,8 @@ test('a place that answers after its deadline still has its spend booked', async
   });
   assert.equal(done.state, 'done');
   await settledLate;
-  assert.ok(released.includes(`sweep:${row.id}:late`), 'the stray’s reservation is given back once it settles');
+  await new Promise((r) => setTimeout(r, 50));
+  assert.ok(released.includes(`sweep:${row.id}`), 'the batch’s reservation is given back once its stray settles');
   const { rows: [p] } = await query(`select state, outcome, cost_usd from research_sweep_places where sweep_id = $1 and venue_ref = $2`, [row.id, lateRef]);
   assert.equal(p.state, 'failed', 'it was given up on at the time');
   assert.equal(p.outcome.late, true, 'and its answer was written when it came');
@@ -290,22 +288,25 @@ test('a place asked again after a deploy is costed from its first attempt', asyn
   assert.equal(Math.round(Number(p.cost_usd) * 1000) / 1000, 0.064, 'both attempts are the sweep’s spend');
 });
 
-test('when the ceiling cannot cover a stray call, nothing more starts', async () => {
+test('Google switched off mid-sweep stops it before the next batch, with the rest left as they were', async () => {
+  // `start` checks Google once. Switched off afterwards, `enrich` cannot
+  // identify a bare census ID and the worker would have drained the sample
+  // marking rows done that were never researched (Codex, 25 Sep 2026).
   await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
   const row = await sweep.start({ subcategories: [SUB], confirm: 36, householdId: HH });
   let calls = 0;
   const done = await sweep.work(row.id, {
-    deadlineMs: 30,
-    research: async () => { calls += 1; if (calls === 1) return new Promise(() => {}); return { state: 'done', matched: {}, fields: {}, problems: [] }; },
-    // Room for the batches, none for a stray.
-    room: async (_pence, { holder }) => (holder.endsWith(':late') ? { ok: false, reservation: null, leftPence: 3 } : { ok: true, reservation: holder, leftPence: 10000 }),
+    research: async () => { calls += 1; if (calls === 4) setOffKeys(['google']); return { state: 'done', matched: {}, fields: {}, problems: [] }; },
+    room: async (_p, { holder }) => ({ ok: true, reservation: holder, leftPence: 10000 }),
     release: async () => {},
   });
+  setOffKeys([]);
   assert.equal(done.state, 'failed');
-  assert.match(done.problem, /ceiling.*slow place/);
-  assert.equal(calls, 4, 'the batch it was in finished; no further batch began');
+  assert.match(done.problem, /switched off/);
+  assert.equal(calls, 4, 'the batch in hand finished; no new batch was claimed');
   const f = await sweep.funnelOf(row.id);
   assert.equal(f.pending, 16);
+  assert.equal(f.asking, 0);
 });
 
 test('a place that throws after its deadline still has its spend booked', async () => {

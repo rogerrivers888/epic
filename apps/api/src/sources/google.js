@@ -456,6 +456,18 @@ async function call(path, { method = 'POST', body, fieldMask, meter }) {
  * treats "no key" — the empty answer its callers already handle — and puts
  * the refusal on the meter so the ledger still shows it.
  */
+/**
+ * Why a standalone search cannot go out, in words — or null if it can.
+ *
+ * The census, the display search and the ring search each answered "no
+ * Google key" with `requests: 0` and nothing else; with Google switched off
+ * they went on to `call()`, which threw, and their error path counted that as
+ * a request sent (`requests: 1`) — a search the Inspire routes then recorded
+ * as made (Codex, 25 Sep 2026). The switch is the same kind of answer as no
+ * key, so it is given the same way.
+ */
+const unavailable = () => (!KEY() ? 'no Google key' : sourceOff('google') ? 'Google is switched off in Settings' : null);
+
 const off = (meter) => {
   if (!KEY()) return true;
   if (sourceOff('google')) { noteFault(meter, 'switched_off'); return true; }
@@ -778,7 +790,7 @@ export async function examplesOfType({ center, radiusKm = 40, type, words = null
   // ever *returns* — `establishment`, `point_of_interest`, `food` — is a 400,
   // not a filter. Those are asked for in words instead (Codex, 13 Sep 2026).
   const searchable = SEARCHABLE_TYPES.has(String(type));
-  if (!KEY()) return { places: [], calls: 0, problem: 'no Google key' };
+  if (unavailable()) return { places: [], calls: 0, problem: unavailable() };
   if (!type || !center || center.lat == null) return { places: [], calls: 0, problem: 'no type or no area' };
   const km = Math.min(radiusKm, 50);
   const dLat = km / 111.32;
@@ -856,7 +868,7 @@ export async function examplesOfType({ center, radiusKm = 40, type, words = null
  * asks for one when somebody has scrolled far enough to need it.
  */
 export async function displaySlice({ box, includedType, query, pageToken = null, pageSize = 20, meter = null } = {}) {
-  if (!KEY() || !box) return { venues: [], nextPageToken: null, requests: 0, problem: 'no Google key' };
+  if (unavailable() || !box) return { venues: [], nextPageToken: null, requests: 0, problem: unavailable() };
   const body = {
     textQuery: query || googleTypeWords(includedType) || 'things to do',
     pageSize: Math.min(20, Math.max(1, pageSize)),
@@ -892,7 +904,7 @@ export async function displaySlice({ box, includedType, query, pageToken = null,
 }
 
 async function censusSlice({ box, includedType, query, pages = 3, meter = null } = {}) {
-  if (!KEY() || !box) return { places: [], requests: 0, saturated: false, problem: 'no Google key' };
+  if (unavailable() || !box) return { places: [], requests: 0, saturated: false, problem: unavailable() };
   const rectangle = {
     low: { latitude: box.minLat, longitude: box.minLng },
     high: { latitude: box.maxLat, longitude: box.maxLng },
@@ -996,7 +1008,7 @@ async function censusSlice({ box, includedType, query, pages = 3, meter = null }
 const SUMMARY_FIELDS = 'places.id,places.reviewSummary';
 
 async function reviewSummaries({ textQuery, box = null, includedType = null, count = 20, meter = null } = {}) {
-  if (!KEY()) return { places: [], requests: 0, problem: 'no Google key' };
+  if (unavailable()) return { places: [], requests: 0, problem: unavailable() };
   if (!textQuery) return { places: [], requests: 0, problem: 'no query' };
   const body = {
     textQuery,
@@ -1035,7 +1047,7 @@ async function reviewSummaries({ textQuery, box = null, includedType = null, cou
 }
 
 export async function sweepArea({ center, radiusKm = 2.5, queries = [], pages = 2, meter = null, includedType = 'restaurant', keepLodging = false } = {}) {
-  if (!KEY() || !center || center.lat == null) return { places: [], calls: 0, problems: ['no Google key'] };
+  if (unavailable() || !center || center.lat == null) return { places: [], calls: 0, problems: [unavailable()] };
   // Text Search fences with a rectangle, not a circle: `locationRestriction`
   // rejects a circle outright, which is why the first Windsor sweep came back
   // with nothing from every one of its eight queries (4 Sep 2026). A box round
@@ -1134,7 +1146,7 @@ export async function sweepArea({ center, radiusKm = 2.5, queries = [], pages = 
  * default that drifted.
  */
 export async function benchArea({ center, radiusKm = 2.5, queries = [], pages = 2, meter = null } = {}) {
-  if (!KEY() || !center || center.lat == null) return { places: [], calls: 0, problems: ['no Google key'] };
+  if (unavailable() || !center || center.lat == null) return { places: [], calls: 0, problems: [unavailable()] };
   const km = Math.min(radiusKm, 50);
   const dLat = km / 111.32;
   const dLng = km / (111.32 * Math.cos((center.lat * Math.PI) / 180) || 1);

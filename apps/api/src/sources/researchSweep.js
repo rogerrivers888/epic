@@ -389,6 +389,16 @@ export async function work(id, { research = own.enrich, room = roomToSpend, rele
     for (;;) {
       const still = await one(id);
       if (!still || still.state !== 'running') return still;
+      // Google may have been switched off, or lost its key, since `start`
+      // checked. Without it every asked place is "could not ask", and the
+      // worker would drain the sample marking rows done that were never
+      // researched (Codex, 25 Sep 2026). Stopped instead, before claiming,
+      // with the rest left pending.
+      const pendingAsk = await query(`select 1 from research_sweep_places where sweep_id = $1 and state = 'pending' limit 1`, [id]);
+      if (pendingAsk.rows.length && (!sourceHasKey('google') || sourceOff('google'))) {
+        await writeProgress(id, { state: 'failed', problem: `Google is ${sourceOff('google') ? 'switched off in Settings' : 'not configured'}; the places not yet asked are left as they were` });
+        return one(id);
+      }
       const batch = await claimBatch(id);
       if (!batch.length) break;
 
@@ -401,19 +411,23 @@ export async function work(id, { research = own.enrich, room = roomToSpend, rele
       const got = await room(Math.ceil(want), { holder: `sweep:${id}` });
       if (!got.ok) {
         // The ceiling is monthly and the sweep is not going to get under it by
-        // waiting a minute. Stopped, with the places it never asked left
-        // pending, so starting it again next month picks up here.
+        // waiting a minute. Stopped, with the places it never asked left as
+        // they were; a new sweep next month samples afresh, and the ones done
+        // here are held and cost it nothing.
         await query(`update research_sweep_places set state = 'pending' where sweep_id = $1 and state = 'asking'`, [id]);
         await writeProgress(id, { state: 'failed', problem: `over this month's ceiling with £${(got.leftPence / 100).toFixed(2)} left` });
         return one(id);
       }
-      // Places that outlived their deadline and may still spend. Their hold
-      // is taken *after* the batch's reservation is released — the batch
-      // already covered them, and reserving again while it stood counted the
-      // same work twice and failed a sweep near the ceiling for nothing
-      // (Codex, 25 Sep 2026).
+      // Places that outlived their deadline and may still spend. The batch's
+      // own reservation already covers them, so it is simply kept until the
+      // last of them settles rather than released and taken again: a second
+      // hold taken while the batch's stood counted the same work twice, and
+      // releasing first left a gap another run could take (Codex, 25 Sep
+      // 2026, twice). It over-holds by what the settled places in the batch
+      // already spent, which errs the safe way and lasts only as long as the
+      // stray does; a stray that never settles is let go by the reservation's
+      // own half-hour expiry.
       const strays = [];
-      let noRoomForStray = null;
       try {
         for (const p of batch) {
           // The window the ledger is read over starts at the claim, on the
@@ -435,10 +449,9 @@ export async function work(id, { research = own.enrich, room = roomToSpend, rele
             if (err?.code === 'deadline') {
               // The research cannot be cancelled from here — `own.js` has no
               // abort — so a call that outlives its deadline may still go on
-              // to spend after this batch's reservation is given back. It is
-              // remembered, and covered by a hold taken when the batch's own
-              // is released (below). Either way it settles — answered or
-              // thrown — what it cost by then is read again and written,
+              // to spend. It is remembered, and the batch's reservation stays
+              // until it settles (below). Either way it settles — answered
+              // or thrown — what it cost by then is read again and written,
               // because the read at the deadline may have run before the
               // request landed.
               strays.push({
@@ -464,22 +477,13 @@ export async function work(id, { research = own.enrich, room = roomToSpend, rele
             [id, p.venue_ref, state, JSON.stringify(outcome), usd]);
         }
       } finally {
-        await release(got.reservation);
         if (strays.length) {
-          // The batch no longer stands, so this does not count it twice. Held
-          // until the last stray settles; if the ceiling has no room even for
-          // this, nothing more starts — booking the cost afterwards keeps the
-          // ledger true but does not hold the cap.
-          const hold = await room(Math.ceil(strays.length * REQUESTS_PER_PLACE * pencePerRequest()), { holder: `sweep:${id}:late` });
-          if (!hold.ok) noRoomForStray = hold;
-          void Promise.all(strays.map((s) => s.settled)).then(() => (hold.ok ? release(hold.reservation) : null)).catch(() => null);
+          void Promise.all(strays.map((s) => s.settled)).then(() => release(got.reservation)).catch(() => null);
+        } else {
+          await release(got.reservation);
         }
       }
       await writeProgress(id);
-      if (noRoomForStray) {
-        await writeProgress(id, { state: 'failed', problem: `over this month's ceiling with £${(noRoomForStray.leftPence / 100).toFixed(2)} left, with a slow place still to settle` });
-        return one(id);
-      }
     }
     await writeProgress(id, { state: 'done' });
     return one(id);
@@ -525,7 +529,7 @@ export async function resume({ work: doWork = work } = {}) {
     // near the ceiling the resumed worker would count it against itself and
     // give up for good (Codex, 25 Sep 2026). Whatever it covered is on the
     // ledger by now.
-    await query('delete from spend_reservations where holder = $1 or holder = $2', [`sweep:${run.id}`, `sweep:${run.id}:late`]).catch(() => null);
+    await query('delete from spend_reservations where holder = $1', [`sweep:${run.id}`]).catch(() => null);
     void doWork(run.id).catch((err) => console.warn(`sweep ${run.id}: ${err.message}`));
     resumed += 1;
   }
