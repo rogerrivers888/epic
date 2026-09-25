@@ -74,7 +74,7 @@ async function decidingRule(ref, rules) {
   const tax = await taxonomy.taxonomy();
   // Whatever we know about the place, from wherever we hold it.
   const { rows: [atlas] } = await query(
-    `select category, kinds, coalesce(venue_ref, 'wikidata:' || wikidata_id) as ref
+    `select category, kinds, pinned, coalesce(venue_ref, 'wikidata:' || wikidata_id) as ref
        from attractions
       where venue_ref = $1 or ('wikidata:' || wikidata_id) = $1 or ('osm:' || osm_ref) = $1
       limit 1`, [ref]);
@@ -83,7 +83,7 @@ async function decidingRule(ref, rules) {
   if (!atlas && !indexed) return null;
 
   const filed = atlas
-    ? shelvesForAtlas({ ref, category: atlas.category, kinds: atlas.kinds ?? [] }, rules, tax.vocab)
+    ? shelvesForAtlas({ ref, category: atlas.category, kinds: atlas.kinds ?? [], pinned: Boolean(atlas.pinned) }, rules, tax.vocab)
     : shelvesForVenue({ ref, types: indexed.google_types ?? [] }, rules, tax.vocab);
   // `because` is the chain that fired, narrowest first. A default has no rule.
   const top = (filed.because ?? []).find((b) => b && b.scope && b.scope !== 'default') ?? null;
@@ -107,7 +107,7 @@ async function decidingRule(ref, rules) {
 function explain(row, rules, kindNames, vocab) {
   const ref = row.osm_ref ? `osm:${row.osm_ref}` : `wikidata:${row.wikidata_id}`;
   const { weights, shelves: on, because, category, subcategory, confident } = shelvesForAtlas(
-    { ref, category: row.category, kinds: row.kinds ?? [] }, rules, vocab,
+    { ref, category: row.category, kinds: row.kinds ?? [], pinned: Boolean(row.pinned) }, rules, vocab,
   );
   return {
     ref,

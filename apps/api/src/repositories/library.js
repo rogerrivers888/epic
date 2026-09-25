@@ -344,7 +344,7 @@ export async function atlasRowsFor(refs) {
   if (!qids.length && !refs.length) return new Map();
   const { rows } = await query(
     `select distinct on (coalesce(venue_ref, 'wikidata:' || wikidata_id))
-            coalesce(venue_ref, 'wikidata:' || wikidata_id) as ref, category, kinds, epic_score
+            coalesce(venue_ref, 'wikidata:' || wikidata_id) as ref, category, kinds, pinned, epic_score
        from attractions
       where (wikidata_id = any($1) or venue_ref = any($2))
       order by coalesce(venue_ref, 'wikidata:' || wikidata_id), epic_score desc`,

@@ -181,7 +181,7 @@ function itemOfVenue(v, taught, tax) {
 
 function itemOfAtlas(a, taught, tax) {
   const ref = a.osm_ref ? `osm:${a.osm_ref}` : `wikidata:${a.wikidata_id}`;
-  const shelf = shelvesForAtlas({ ref, category: a.category, kinds: a.kinds ?? [] }, taught, tax.vocab);
+  const shelf = shelvesForAtlas({ ref, category: a.category, kinds: a.kinds ?? [], pinned: Boolean(a.pinned) }, taught, tax.vocab);
   return {
     ref, name: a.name, kind: 'activities', category: 'attraction',
     shelf: shelf.category ?? shelf.shelves?.[0] ?? null, subcategory: shelf.subcategory ?? null,

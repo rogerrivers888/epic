@@ -1420,7 +1420,7 @@ export async function shelveAll({ refs = null } = {}) {
       -- update took whichever it reached last — two different categories meant
       -- a shelf that changed between rebuilds (Codex, 18 Sep 2026).
       left join lateral (
-        select a2.category, a2.kinds, a2.id from attractions a2
+        select a2.category, a2.kinds, a2.id, a2.pinned from attractions a2
          where (a2.venue_ref = pi.venue_ref or 'atlas:' || a2.id::text = pi.venue_ref)
            and a2.state <> 'hidden'
          order by a2.last_seen desc, a2.id limit 1) a on true
