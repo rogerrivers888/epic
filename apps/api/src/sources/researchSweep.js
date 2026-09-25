@@ -432,9 +432,15 @@ async function writeProgress(id, { problem = null, state = null } = {}) {
  */
 /** What the record already knows about a place, as the seed `enrich` takes — or nothing. */
 async function seedFromRecord(venueRef) {
-  const r = await query('select name, lat, lng, website, postcode from place_records where venue_ref = $1', [venueRef]);
+  const r = await query('select name, lat, lng, website, postcode, category, address from place_records where venue_ref = $1', [venueRef]);
   const rec = r.rows[0];
-  return rec?.name && rec?.lat != null ? { name: rec.name, lat: rec.lat, lng: rec.lng, website: rec.website ?? undefined, postcode: rec.postcode ?? undefined } : {};
+  // A complete seed short-circuits `seedFor`, so everything it would have
+  // merged has to be here: the category decides whether a menu is looked
+  // for, and the address tells two branches of one chain apart (Codex, 25
+  // Sep 2026).
+  return rec?.name && rec?.lat != null
+    ? { name: rec.name, lat: rec.lat, lng: rec.lng, website: rec.website ?? undefined, postcode: rec.postcode ?? undefined, category: rec.category ?? undefined, address: rec.address ?? undefined }
+    : {};
 }
 
 /**
@@ -489,12 +495,16 @@ export async function work(id, { research = null, room = roomToSpend, release = 
       // The same arithmetic the reservation uses: in reference mode a known
       // place without a website still buys its page lead, so Google is still
       // needed for it (Codex, 25 Sep 2026).
-      const stillNeedsGoogle = run.params?.mode === 'reference'
-        ? [...(await requestsStillNeeded(pendingRows.map((r) => r.venue_ref))).values()].some((c) => c > 0)
-        : await (async () => {
-          const pendingHeld = pendingRows.length ? await alreadyHeld(pendingRows.map((r) => r.venue_ref)) : new Set();
-          return pendingRows.some((r) => !pendingHeld.has(r.venue_ref) && needsGoogle(r.venue_ref));
-        })();
+      // What each pending place may still cost from what it holds — in sample
+      // mode a held place costs nothing on top of that, since `enrich` skips
+      // it. A retried place seeded from its record needs no identification,
+      // and the older test required Google for it anyway (Codex, 25 Sep 2026).
+      const pendingCost = await requestsStillNeeded(pendingRows.map((r) => r.venue_ref));
+      if (run.params?.mode !== 'reference') {
+        const pendingHeld = pendingRows.length ? await alreadyHeld(pendingRows.map((r) => r.venue_ref)) : new Set();
+        for (const ref of pendingHeld) pendingCost.set(ref, 0);
+      }
+      const stillNeedsGoogle = [...pendingCost.values()].some((c) => c > 0);
       if (stillNeedsGoogle && (!sourceHasKey('google') || sourceOff('google'))) {
         await writeProgress(id, { state: 'failed', problem: `Google is ${sourceOff('google') ? 'switched off in Settings' : 'not configured'}; the places not yet asked are left as they were` });
         return one(id);
@@ -506,13 +516,14 @@ export async function work(id, { research = null, room = roomToSpend, release = 
       // Only for the places that can spend: a place the estimate called held
       // is one `enrich` will skip, and reserving for it near the ceiling
       // failed a sweep whose real work still fitted (Codex, 25 Sep 2026).
-      const held = await alreadyHeld(batch.map((p) => p.venue_ref));
-      // In reference mode nothing is held — everything is asked again — so
-      // the reservation is what each place may still cost from what it holds.
-      const remaining = run.params?.mode === 'reference' ? await requestsStillNeeded(batch.map((p) => p.venue_ref)) : null;
-      const chargeableRequests = remaining
-        ? batch.reduce((n, p) => n + (remaining.get(p.venue_ref) ?? 0), 0)
-        : batch.filter((p) => !held.has(p.venue_ref) && needsGoogle(p.venue_ref)).length * REQUESTS_PER_PLACE;
+      // What each place may still cost from what it holds; in sample mode a
+      // held place is skipped by `enrich` and costs nothing on top.
+      const remaining = await requestsStillNeeded(batch.map((p) => p.venue_ref));
+      if (run.params?.mode !== 'reference') {
+        const held = await alreadyHeld(batch.map((p) => p.venue_ref));
+        for (const ref of held) remaining.set(ref, 0);
+      }
+      const chargeableRequests = batch.reduce((n, p) => n + (remaining.get(p.venue_ref) ?? 0), 0);
       const want = chargeableRequests * pencePerRequest();
       const got = await room(Math.ceil(want), { holder: `sweep:${id}` });
       if (!got.ok) {
@@ -671,17 +682,31 @@ export async function places(id) {
  * because the research is seeded from the record it already has.
  */
 export async function retryFailed(id) {
-  const run = await one(id);
-  if (!run) return null;
-  if (run.state === 'running') throw Object.assign(new Error('That sweep is still running.'), { code: 'already_running', status: 409 });
-  const { rows: going } = await query(`select id from research_sweeps where state = 'running' limit 1`);
-  if (going.length) throw Object.assign(new Error('A sweep is already running.'), { code: 'already_running', status: 409, sweep: going[0].id });
-  const { rowCount } = await query(
-    `update research_sweep_places set state = 'pending', outcome = outcome || '{"retried": true}'::jsonb
-      where sweep_id = $1 and state = 'failed'`, [id]);
-  if (!rowCount) return { ...run, retried: 0 };
-  await query(`update research_sweeps set state = 'running', finished_at = null, problem = null, touched_at = now() where id = $1`, [id]);
-  return { ...(await one(id)), retried: rowCount };
+  return withTransaction(async (client) => {
+    // The same lock `start` takes, and both updates inside it: two retries,
+    // or a retry racing a start, could each see no running sweep and both
+    // go; and rows put back to pending under a sweep that then failed to
+    // reopen would be lost to every later retry (Codex, 25 Sep 2026).
+    await client.query('select pg_advisory_xact_lock(hashtext($1))', ['epic.research_sweep.start']);
+    const { rows: [run] } = await client.query('select * from research_sweeps where id = $1', [id]);
+    if (!run) return null;
+    if (run.state === 'running') throw Object.assign(new Error('That sweep is still running.'), { code: 'already_running', status: 409 });
+    const { rows: going } = await client.query(`select id from research_sweeps where state = 'running' limit 1`);
+    if (going.length) throw Object.assign(new Error('A sweep is already running.'), { code: 'already_running', status: 409, sweep: going[0].id });
+    // A place given up on at its deadline may still be in flight — its
+    // research cannot be cancelled — and asking again now would run two at
+    // once and could pay twice. It is left as it is until its late answer
+    // lands, which marks it `late`; a retry after that takes it.
+    const { rowCount } = await client.query(
+      `update research_sweep_places set state = 'pending', outcome = coalesce(outcome, '{}'::jsonb) || '{"retried": true}'::jsonb
+        where sweep_id = $1 and state = 'failed'
+          and not (coalesce(outcome->'problems'->>0, '') like 'gave up after%' and not coalesce((outcome->>'late')::boolean, false))`,
+      [id]);
+    if (!rowCount) return { ...run, retried: 0 };
+    const { rows: [reopened] } = await client.query(
+      `update research_sweeps set state = 'running', finished_at = null, problem = null, touched_at = now() where id = $1 returning *`, [id]);
+    return { ...reopened, retried: rowCount };
+  });
 }
 
 /** The last few sweeps, with their funnels, for a report. */

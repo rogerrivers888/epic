@@ -469,3 +469,46 @@ test('a finished sweep\u2019s failures can be asked again, seeded from the recor
   // record's own.
   void failed;
 });
+
+test('a place still in flight at its deadline is not asked again until its answer lands', async () => {
+  await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
+  const need = (await sweep.estimate({ subcategories: [SUB] })).requests;
+  const row = await sweep.start({ subcategories: [SUB], confirm: need, householdId: HH });
+  const { rows: two } = await query(`select venue_ref from research_sweep_places where sweep_id = $1 order by venue_ref limit 2`, [row.id]);
+  await query(`update research_sweep_places set state = 'done', outcome = '{"state":"done"}'::jsonb where sweep_id = $1`, [row.id]);
+  // One gave up at its deadline and has not settled; one gave up and then did.
+  await query(`update research_sweep_places set state = 'failed', outcome = '{"state":"failed","problems":["gave up after 120s"]}'::jsonb where sweep_id = $1 and venue_ref = $2`, [row.id, two[0].venue_ref]);
+  await query(`update research_sweep_places set state = 'failed', outcome = '{"state":"failed","late":true,"problems":["gave up after 120s","their website did not answer"]}'::jsonb where sweep_id = $1 and venue_ref = $2`, [row.id, two[1].venue_ref]);
+  await query(`update research_sweeps set state = 'done', finished_at = now() where id = $1`, [row.id]);
+  const reopened = await sweep.retryFailed(row.id);
+  assert.equal(reopened.retried, 1, 'only the settled one');
+  const { rows } = await query(`select venue_ref, state from research_sweep_places where sweep_id = $1 and venue_ref = any($2) order by venue_ref`, [row.id, two.map((r) => r.venue_ref)]);
+  assert.deepEqual(rows.map((r) => r.state), ['failed', 'pending']);
+  await query(`update research_sweeps set state = 'done' where id = $1`, [row.id]);
+});
+
+test('a retry of a seeded place needs no Google and reserves nothing', async () => {
+  // The retried place has a name, a point and a website on its record, so a
+  // switched-off Google is no reason to stop, and nothing is reserved for it
+  // (Codex, 25 Sep 2026).
+  await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
+  const need = (await sweep.estimate({ subcategories: [SUB] })).requests;
+  const row = await sweep.start({ subcategories: [SUB], confirm: need, householdId: HH });
+  const { rows: [one] } = await query(`select venue_ref from research_sweep_places where sweep_id = $1 and venue_ref like 'google:%' order by venue_ref limit 1`, [row.id]);
+  await query(`update research_sweep_places set state = 'done', outcome = '{"state":"done"}'::jsonb where sweep_id = $1 and venue_ref <> $2`, [row.id, one.venue_ref]);
+  await query(`update research_sweep_places set state = 'failed', outcome = '{"state":"failed","problems":["OpenStreetMap: timeout"]}'::jsonb where sweep_id = $1 and venue_ref = $2`, [row.id, one.venue_ref]);
+  await query(`insert into place_records (venue_ref, name, lat, lng, website) values ($1, 'Known', 51.5, -0.6, 'https://known.example') on conflict (venue_ref) do update set name = 'Known', lat = 51.5, lng = -0.6, website = 'https://known.example', enrich_state = 'failed'`, [one.venue_ref]);
+  await query(`update research_sweeps set state = 'done', finished_at = now() where id = $1`, [row.id]);
+  await sweep.retryFailed(row.id);
+  setOffKeys(['google']);
+  const holds = [];
+  try {
+    const done = await sweep.work(row.id, {
+      research: async () => ({ state: 'done', matched: { osm: {} }, fields: {}, problems: [] }),
+      room: async (pence, { holder }) => { holds.push(pence); return { ok: true, reservation: holder, leftPence: 0 }; },
+      release: async () => {},
+    });
+    assert.equal(done.state, 'done');
+    assert.deepEqual(holds, [0], 'nothing reserved for a place we can seed');
+  } finally { setOffKeys([]); }
+});
