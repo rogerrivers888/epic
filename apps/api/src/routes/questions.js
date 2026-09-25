@@ -52,6 +52,20 @@ const actorOf = (req) => req.account?.email ?? 'the owner (passcode)';
 const bad = (message) => Object.assign(new Error(message), { status: 400, code: 'bad_request' });
 
 /**
+ * A sightings floor is a whole number of places, or it is not set.
+ *
+ * Anything else — a fraction, `Infinity`, a word — is read as "no floor"
+ * rather than refused, because a floor is a reading aid and not a decision;
+ * the one thing it must never do is reach the integer cast as something the
+ * database cannot hold (Codex, 25 Sep 2026).
+ */
+const wholeFloor = (raw) => {
+  if (raw == null || raw === '') return null;
+  const n = Math.floor(Number(raw));
+  return Number.isFinite(n) && n >= 1 ? n : null;
+};
+
+/**
  * The Labels tab, as the design brief restructures it: question sets are the
  * work, the pending count sits on the tab, and the dictionary is behind a
  * control.
@@ -184,7 +198,10 @@ questionRoutes.get('/candidates', requires('view_questions'), async (req, res, n
         // gets at the words seen on the most places without paging through
         // the pile (see `candidates` in the repository for why that mattered).
         sort: req.query.sort === 'common' ? 'common' : 'rare',
-        minSeen: req.query.minSeen ? Math.max(1, Number(req.query.minSeen) || 1) : null,
+        // A whole number or nothing: the repository binds it as an integer,
+        // and `1.5` or `Infinity` reaching that cast was a 500 on a GET
+        // (Codex, 25 Sep 2026).
+        minSeen: wholeFloor(req.query.minSeen),
         limit: Math.min(1000, Number(req.query.limit ?? 500) || 500),
       }),
     });

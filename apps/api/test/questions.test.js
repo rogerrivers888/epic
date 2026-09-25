@@ -512,3 +512,23 @@ test('the pen can be read from its common end, above a sightings floor', async (
   assert.deepEqual(floored.map((c) => c.norm), ['zz thrice', 'zz twice'], 'a word seen once is below the floor');
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
 });
+
+test('a floor that is not a whole number is no floor, not a 500', async () => {
+  // Codex, 25 Sep 2026: `minSeen=1.5` or `Infinity` reached `$7::int` and the
+  // GET answered 500. A floor is a reading aid; anything the database cannot
+  // hold as one is read as "no floor" rather than refused.
+  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+  await query(
+    `insert into harvest_candidates (norm, raw_forms, subcategory, places_seen, places_total, kind, status)
+     values ('zz once', array['zz once'], $1, 1, 20, 'unclear', 'unresolved')`, [sub],
+  );
+  for (const floor of [1.5, Infinity, 'many', -3, '']) {
+    const rows = await sets.candidates({ subcategory: sub, status: 'unresolved', kind: 'unclear', minSeen: floor, limit: 5 });
+    assert.ok(Array.isArray(rows), `a floor of ${String(floor)} must not throw`);
+  }
+  // 1.5 floors to 1 and keeps the singleton; 2.9 floors to 2 and drops it.
+  assert.equal((await sets.candidates({ subcategory: sub, status: 'unresolved', kind: 'unclear', minSeen: 1.5, limit: 5 })).length, 1);
+  assert.equal((await sets.candidates({ subcategory: sub, status: 'unresolved', kind: 'unclear', minSeen: 2.9, limit: 5 })).length, 0);
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+});

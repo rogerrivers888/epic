@@ -446,6 +446,11 @@ export async function candidates({
   // cannot tell two places apart, and a reader sizing a classifier run or
   // proposing a set needs the rows above the floor, not the pile.
   const commonFirst = sort === 'common';
+  // Bound as `int`, so it is made one here as well as at the route: a
+  // fraction or `Infinity` handed straight to the cast was a 500 on a GET
+  // (Codex, 25 Sep 2026), and the repository should not depend on every
+  // caller remembering that.
+  const floor = Number.isFinite(Number(minSeen)) && Math.floor(Number(minSeen)) >= 1 ? Math.floor(Number(minSeen)) : null;
   const { rows } = await query(
     `select c.*, a.key as known_key, a.label as known_label, a.kind as known_kind
        from harvest_candidates c
@@ -461,7 +466,7 @@ export async function candidates({
         ? 'c.places_seen desc, c.places_seen::float / greatest(c.places_total, 1) desc'
         : 'c.places_seen::float / greatest(c.places_total, 1) asc, c.places_seen desc'}, c.norm
       limit $6`,
-    [subcategory, subcategories?.length ? subcategories : null, status, kind, source, limit, minSeen],
+    [subcategory, subcategories?.length ? subcategories : null, status, kind, source, limit, floor],
   );
   return rows.map((r) => {
     // **Seen on**, which is how much of the harvest text mentioned it — not
