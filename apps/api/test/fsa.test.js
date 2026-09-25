@@ -28,6 +28,8 @@ test('a name is the same business loosely, and not by a shared word', () => {
   assert.equal(sameName('The Ivy', 'The Ivy Asia'), false);
   assert.equal(sameName('Sunningdale Cafe', 'Sunningdale Golf Club'), false);
   assert.equal(sameName('Cafe', 'Cafe Rouge'), false);
+  assert.equal(sameName('Royal Bengal Indian Kitchen', 'Royal Bengal Thai Kitchen'), false, 'every significant word, not the first two');
+  assert.equal(sameName('Royal Bengal Indian Kitchen', 'The Royal Bengal Indian Kitchen Ascot'), true);
 });
 
 test('the postcode is the first gate, the name the second, and two matches is no match', () => {

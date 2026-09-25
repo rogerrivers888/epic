@@ -459,10 +459,10 @@ questionRoutes.post('/sweep', requires('manage_questions'), async (req, res, nex
  *   POST /reference           start it — a research sweep in reference mode
  *   GET  /reference/:id/held  what every place in it now holds, and from where
  */
-questionRoutes.get('/reference/propose', requires('view_library'), async (_req, res, next) => {
+questionRoutes.get('/reference/propose', requires('view_library'), async (req, res, next) => {
   try { res.json({ categories: await reference.propose({ categories: subsOf(req.query.categories) }) }); } catch (err) { next(err); }
 });
-questionRoutes.get('/reference/estimate', requires('view_library'), async (_req, res, next) => {
+questionRoutes.get('/reference/estimate', requires('view_library'), async (req, res, next) => {
   try { res.json(await reference.estimate({ categories: subsOf(req.query.categories) })); } catch (err) { next(err); }
 });
 questionRoutes.post('/reference', requires('manage_questions'), async (req, res, next) => {
@@ -472,7 +472,7 @@ questionRoutes.post('/reference', requires('manage_questions'), async (req, res,
     void sweep.work(row.id).catch((err) => console.warn(`reference set ${row.id}: ${err.message}`));
     res.status(202).json({ sweep: row });
   } catch (err) {
-    if (['confirm_required', 'already_running', 'no_household', 'short_category'].includes(err?.code)) {
+    if (['confirm_required', 'already_running', 'no_household', 'short_category', 'unknown_category', 'google_unavailable'].includes(err?.code)) {
       return res.status(409).json({ error: err.code, message: err.message, plan: err.plan ?? null });
     }
     return next(err);

@@ -123,6 +123,20 @@ test('a category the census has not reached does not start a smaller set', async
   }
 });
 
+test('a category that is not one is refused, not skipped', async () => {
+  await assert.rejects(() => ref.propose({ categories: [CAT, 'not-a-category'] }), (x) => x.code === 'unknown_category' && /not-a-category/.test(x.message));
+});
+
+test('a set that needs Google does not start without it', async () => {
+  await query(`update place_records set website = null where venue_ref = 'google:ChIJ_ref_002'`);
+  const e = await ref.estimate({ categories: [CAT] });
+  assert.ok(e.requests > 0);
+  setOffKeys(['google']);
+  try {
+    await assert.rejects(() => ref.start({ categories: [CAT], confirm: e.requests, householdId: HH }), (x) => x.code === 'google_unavailable');
+  } finally { setOffKeys([]); }
+});
+
 test('a second sweep does not start while one is running', async () => {
   const e = await ref.estimate({ categories: [CAT] });
   const row = await ref.start({ categories: [CAT], confirm: e.requests, householdId: HH });

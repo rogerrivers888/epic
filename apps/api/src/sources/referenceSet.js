@@ -22,6 +22,7 @@
 
 import { query, withTransaction } from '../db.js';
 import { pencePerRequest, requestsStillNeeded } from './researchSweep.js';
+import { sourceHasKey, sourceOff } from './index.js';
 import * as sweep from './researchSweep.js';
 
 export const PER_CATEGORY = 20;
@@ -140,6 +141,13 @@ export async function propose({ perCategory = PER_CATEGORY, categories = null } 
   const { rows: cats } = await query(
     `select key, label from shelf_categories where active ${categories?.length ? 'and key = any($1)' : ''} order by position, key`,
     categories?.length ? [categories] : []);
+  // A key that is not a live category is refused, not skipped: a typo beside
+  // a real key would otherwise start a set short of the category asked for
+  // (Codex, 25 Sep 2026).
+  const missing = (categories ?? []).filter((k) => !cats.some((c) => c.key === k));
+  if (missing.length) {
+    throw Object.assign(new Error(`Not a category, or not active: ${missing.join(', ')}.`), { code: 'unknown_category', status: 409 });
+  }
   const out = [];
   for (const c of cats) {
     const mine = rows.filter((r) => r.category === c.key);
@@ -202,6 +210,12 @@ export async function start({ perCategory = PER_CATEGORY, categories = null, con
     throw Object.assign(
       new Error(`Not every category has ${perCategory} places to choose from yet: ${short.map((c) => `${c.category} (${c.picks.length})`).join(', ')}.`),
       { code: 'short_category', status: 409, plan });
+  }
+  if (plan.requests > 0 && (!sourceHasKey('google') || sourceOff('google'))) {
+    // Refused at the door rather than accepted and failed by the worker, the
+    // same as the sample sweep (Codex, 25 Sep 2026).
+    throw Object.assign(new Error(`${plan.toIdentify + plan.toFindPage} of these places need Google, which is ${sourceOff('google') ? 'switched off in Settings' : 'not configured'}.`),
+      { code: 'google_unavailable', status: 409, plan });
   }
   const all = plan.categories.flatMap((c) => c.picks.map((p) => ({ ...p, category: c.category })));
   return withTransaction(async (client) => {

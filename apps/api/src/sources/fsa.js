@@ -43,7 +43,10 @@ export function sameName(a, b) {
   // One word is only the same as one word — "The Ivy" is not "The Ivy Asia"
   // even though the one sits inside the other.
   if (short.length === 1) return long.length === 1 && long[0] === short[0];
-  return short.slice(0, 2).every((w) => long.includes(w));
+  // Every significant word of the shorter name, not the first two: "Royal
+  // Bengal Indian Kitchen" is not "Royal Bengal Thai Kitchen" (Codex, 25 Sep
+  // 2026).
+  return short.every((w) => long.includes(w));
 }
 
 /**
