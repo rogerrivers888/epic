@@ -394,8 +394,13 @@ export async function work(id, { research = own.enrich, room = roomToSpend, rele
       // worker would drain the sample marking rows done that were never
       // researched (Codex, 25 Sep 2026). Stopped instead, before claiming,
       // with the rest left pending.
-      const pendingAsk = await query(`select 1 from research_sweep_places where sweep_id = $1 and state = 'pending' limit 1`, [id]);
-      if (pendingAsk.rows.length && (!sourceHasKey('google') || sourceOff('google'))) {
+      // Only the places that would actually need it: a sweep of nothing but
+      // places already held passes through `enrich`'s free path and may
+      // finish with Google off (Codex, 25 Sep 2026).
+      const { rows: pendingRows } = await query(`select venue_ref from research_sweep_places where sweep_id = $1 and state = 'pending'`, [id]);
+      const pendingHeld = pendingRows.length ? await alreadyHeld(pendingRows.map((r) => r.venue_ref)) : new Set();
+      const needsGoogle = pendingRows.some((r) => !pendingHeld.has(r.venue_ref));
+      if (needsGoogle && (!sourceHasKey('google') || sourceOff('google'))) {
         await writeProgress(id, { state: 'failed', problem: `Google is ${sourceOff('google') ? 'switched off in Settings' : 'not configured'}; the places not yet asked are left as they were` });
         return one(id);
       }

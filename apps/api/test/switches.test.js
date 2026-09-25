@@ -67,10 +67,12 @@ test('a display search with Google switched off is not counted as sent', async (
   // 25 Sep 2026). The switch is the same kind of answer as no key.
   await withKeys({ GOOGLE_MAPS_API_KEY: 'test-key-never-sent' }, async (left) => {
     setOffKeys(['google']);
-    const out = await displaySlice({ box: { south: 51, west: -1, north: 52, east: 0 }, query: 'cafe' });
+    const meter = {};
+    const out = await displaySlice({ box: { south: 51, west: -1, north: 52, east: 0 }, query: 'cafe', meter });
     assert.equal(out.requests, 0);
     assert.match(out.problem, /switched off/);
     assert.equal(left(), 0);
+    assert.match(JSON.stringify(healthOf(meter)), /switched_off/, 'and the ledger sees the refusal');
   });
 });
 

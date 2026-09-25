@@ -309,6 +309,23 @@ test('Google switched off mid-sweep stops it before the next batch, with the res
   assert.equal(f.asking, 0);
 });
 
+test('a sweep with only held places left finishes without Google', async () => {
+  await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
+  const row = await sweep.start({ subcategories: [SUB], confirm: 36, householdId: HH });
+  // Everything but the two held places is done already; the two need no
+  // request, so a switched-off Google is no reason to stop.
+  await query(`update research_sweep_places set state = 'done', outcome = '{"state":"done"}'::jsonb where sweep_id = $1 and venue_ref <> all($2)`, [row.id, refs(2)]);
+  setOffKeys(['google']);
+  try {
+    const done = await sweep.work(row.id, {
+      research: async () => ({ state: 'done', skipped: 'already researched', matched: {}, fields: {}, problems: [] }),
+      room: async (_p, { holder }) => ({ ok: true, reservation: holder, leftPence: 10000 }),
+      release: async () => {},
+    });
+    assert.equal(done.state, 'done');
+  } finally { setOffKeys([]); }
+});
+
 test('a place that throws after its deadline still has its spend booked', async () => {
   // The rejection path did nothing, so a request ledgered after the deadline
   // read at the deadline was never booked to the place (Codex, 25 Sep 2026).
