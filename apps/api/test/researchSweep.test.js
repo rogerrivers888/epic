@@ -151,6 +151,30 @@ test('the work writes each place as it goes, reads its cost off the ledger, and 
   assert.equal(by[0].described, 18);
 });
 
+test('a place that never answers is given up on, and the sweep moves on', async () => {
+  // Awaited directly, a research call that never settled held the whole
+  // sweep — and the heartbeat kept saying it was fine (Codex, 25 Sep 2026).
+  await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
+  const row = await sweep.start({ subcategories: [SUB], confirm: 36, householdId: HH });
+  let calls = 0;
+  const done = await sweep.work(row.id, {
+    deadlineMs: 50,
+    research: async (ref) => {
+      calls += 1;
+      if (calls === 3) return new Promise(() => {}); // never
+      return { state: 'done', matched: {}, fields: {}, problems: [] };
+    },
+    room: async () => ({ ok: true, reservation: 'r', leftPence: 10000 }),
+    release: async () => {},
+  });
+  assert.equal(done.state, 'done');
+  assert.equal(calls, 20, 'every place was still asked');
+  const f = await sweep.funnelOf(row.id);
+  assert.equal(f.failed, 1);
+  const { rows: [hung] } = await query(`select outcome from research_sweep_places where sweep_id = $1 and state = 'failed'`, [row.id]);
+  assert.match(hung.outcome.problems[0], /gave up after/);
+});
+
 test('over the ceiling stops with the rest left pending, and does not pretend', async () => {
   await query(`update research_sweeps set state = 'done' where subcategories ? $1 and state = 'running'`, [SUB]);
   const hh = HH;

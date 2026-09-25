@@ -37,6 +37,29 @@ export const BATCH = 4;
 /** A sweep nobody has heard from for this long is stranded, whatever its row says. */
 export const STRANDED_AFTER_MS = 10 * 60_000;
 
+/**
+ * How long one place may hold the sweep.
+ *
+ * `enrich` awaits the open map, the venue's own page and the encyclopedias,
+ * and not all of those have a timeout of their own. Awaited directly it
+ * bypassed the deadline `own.js`'s queue puts round the same call — and the
+ * sweep's heartbeat kept `touched_at` fresh, so a place that never settled
+ * held the sweep for the life of the process while recovery saw nothing
+ * wrong (Codex, 25 Sep 2026). Generous, because a real pass takes the better
+ * part of a minute; it is a deadlock guard, not a performance budget.
+ */
+export const PLACE_DEADLINE_MS = Number(process.env.EPIC_ENRICH_TIMEOUT_MS || 120_000);
+
+/** Whichever comes first: the answer, or giving up on this place. */
+function withDeadline(promise, ms) {
+  let timer = null;
+  const bell = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(Object.assign(new Error(`gave up after ${Math.round(ms / 1000)}s`), { code: 'deadline' })), ms);
+    timer.unref?.();
+  });
+  return Promise.race([promise, bell]).finally(() => { if (timer) clearTimeout(timer); });
+}
+
 /** One Place Details request on the narrowest mask, in pence. */
 export const pencePerRequest = () => Math.round(PRICE_PER_UNIT_USD['google-pro'] * 100 * USD_TO_GBP * 100) / 100;
 
@@ -335,7 +358,7 @@ async function writeProgress(id, { problem = null, state = null } = {}) {
  * and the venue's own server are somebody else's, and `own.js` runs its own
  * queue at one for the same reason.
  */
-export async function work(id, { research = own.enrich, room = roomToSpend, release = releaseSpend, householdId = null } = {}) {
+export async function work(id, { research = own.enrich, room = roomToSpend, release = releaseSpend, householdId = null, deadlineMs = PLACE_DEADLINE_MS } = {}) {
   const run = await one(id);
   if (!run || run.state !== 'running') return run;
   const household = householdId ?? run.household_id;
@@ -374,7 +397,7 @@ export async function work(id, { research = own.enrich, room = roomToSpend, rele
           try {
             // Two Google requests at most, and never the web search: that is
             // what the estimate priced and what the ceiling was asked for.
-            const out = await research(p.venue_ref, { householdId: household, paid: true, search: false, force: false });
+            const out = await withDeadline(research(p.venue_ref, { householdId: household, paid: true, search: false, force: false }), deadlineMs);
             outcome = outcomeOf(out);
             if (outcome.state === 'failed') state = 'failed';
           } catch (err) {
