@@ -108,7 +108,10 @@ test('a ledger row that metered three requests counts as three', async () => {
   try {
     await query(`insert into provider_calls (household_id, provider, purpose, units, estimated_cost_usd) values ($1, 'google', 'search', '{"google": 3, "google-search": 3}'::jsonb, 0.12)`, [HH3]);
     await query(`insert into provider_calls (household_id, provider, purpose, units) values ($1, 'osm-overpass', 'own.match', '{"osm-overpass": 1}'::jsonb)`, [HH3]);
-    assert.equal(await countThisMonth(HH3), 3, 'three requests, and the free open map not counted at all');
+    // A search over several sources is one row whose provider names them all
+    // and whose units carry the Google requests it made (Codex, 25 Sep 2026).
+    await query(`insert into provider_calls (household_id, provider, purpose, units, estimated_cost_usd) values ($1, 'fixtures+osm+google', 'search', '{"osm-overpass": 1, "google": 4, "google-search": 4}'::jsonb, 0.16)`, [HH3]);
+    assert.equal(await countThisMonth(HH3), 7, 'three and four requests, and the free open map not counted at all');
   } finally {
     await query('delete from provider_calls where household_id = $1', [HH3]);
     await query('delete from households where id = $1', [HH3]);

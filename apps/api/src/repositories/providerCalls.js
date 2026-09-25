@@ -114,10 +114,13 @@ const billable = (rows) => rows.reduce((n, r) => n + (canBill(r.provider) ? r.n 
  * adapter and writes a single row with `{google: 3}` in it. Counted as one
  * row, the cap on calls that can cost money let a household make three
  * requests for one — and the in-process count that closed that gap while the
- * process lived was empty after a restart (Codex, 25 Sep 2026). A Google row
- * counts its metered requests; every other row counts one.
+ * process lived was empty after a restart (Codex, 25 Sep 2026). A row that
+ * metered Google requests counts them — whatever its provider says, since a
+ * search over several sources is recorded as `fixtures+osm+google` with the
+ * Google requests in its units (Codex, same day) — and every other row
+ * counts one.
  */
-const CALLS_IN_ROW = `case when provider = 'google' then greatest(1, coalesce((units->>'google')::int, 1)) else 1 end`;
+const CALLS_IN_ROW = `greatest(1, coalesce((units->>'google')::int, 1))`;
 
 export async function countForSession(sessionId) {
   const { rows } = await query(
