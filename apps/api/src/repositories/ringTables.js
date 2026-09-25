@@ -225,17 +225,23 @@ export async function rankingFor({ cell, mode = 'driving', minutes = 30, categor
  * finished passes the moment it started, and every ring counted before it
  * is counted again from what the run found.
  */
-export async function refreshDue({ olderThanDays = CYCLE_DAYS, before = null, limit = 200 } = {}) {
+export const ringKey = ({ cell, mode, minutes }) => `${cell}|${mode}|${minutes}`;
+
+export async function refreshDue({ olderThanDays = CYCLE_DAYS, before = null, limit = 200, skip = [] } = {}) {
   const cutoff = before ? new Date(before) : new Date(Date.now() - olderThanDays * 86_400_000);
   const { rows } = await query(
     `select cell, mode, minutes, min(computed_at) as at
-       from ring_counts group by cell, mode, minutes
+       from ring_counts
+      where cell || '|' || mode || '|' || minutes::text <> all($3::text[])
+      group by cell, mode, minutes
      having min(computed_at) < $1::timestamptz
-      order by at limit $2`, [cutoff.toISOString(), limit]);
+      order by at limit $2`, [cutoff.toISOString(), limit, skip]);
   const done = [];
   for (const r of rows) {
-    try { done.push(await refreshRing({ cell: r.cell, mode: r.mode, minutes: r.minutes })); }
-    catch (err) { done.push({ cell: r.cell, mode: r.mode, minutes: r.minutes, error: String(err.message).slice(0, 120) }); }
+    const key = { cell: r.cell, mode: r.mode, minutes: r.minutes };
+    // Every ring tried is handed back, counted or not, so a walk can skip it.
+    try { done.push((await refreshRing(key)) ?? { ...key, ring: null }); }
+    catch (err) { done.push({ ...key, error: String(err.message).slice(0, 120) }); }
   }
   return done;
 }
@@ -245,19 +251,18 @@ export async function refreshDue({ olderThanDays = CYCLE_DAYS, before = null, li
  * takes a page, and a counted ring leaves the page, so asking again with the
  * same moment walks the rest (Codex, 24 Sep 2026: one page of a thousand left
  * the rings beyond it on their pre-census snapshot). A ring that fails to
- * count stays before the cutoff, so a page that brings back nothing new ends
- * the walk rather than repeating it.
+ * count — or resolves to nothing — stays before the cutoff, so every ring
+ * tried is handed back as one to skip: a page of failures does not hide the
+ * rings behind it, and nothing is tried twice.
  */
-export async function refreshAllBefore({ before, pageSize = 200 } = {}) {
-  const seen = new Set();
+export async function refreshAllBefore({ before, pageSize = 200, maxPages = 10_000 } = {}) {
+  const tried = new Set();
   const out = [];
-  for (;;) {
-    const page = await refreshDue({ before, limit: pageSize });
-    const fresh = page.filter((r) => r && !seen.has(`${r.cell}|${r.mode}|${r.minutes}`));
-    if (!fresh.length) break;
-    for (const r of fresh) seen.add(`${r.cell}|${r.mode}|${r.minutes}`);
+  for (let pages = 0; pages < maxPages; pages += 1) {
+    const page = await refreshDue({ before, limit: pageSize, skip: [...tried] });
+    if (!page.length) break;
+    for (const r of page) tried.add(ringKey(r));
     out.push(...page);
-    if (page.length < pageSize) break;
   }
   return out;
 }

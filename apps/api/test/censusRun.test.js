@@ -15,7 +15,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { googleSource } from '../src/sources/google.js';
-import { tileOf, planTiles, startRun, advance, requestStop, resume, resumeInterrupted, rollUpOutcodes, nextUtcMidnight, report } from '../src/sources/censusRun.js';
+import { tileOf, planTiles, startRun, advance, requestStop, resume, resumeInterrupted, rollUpOutcodes, retryRollUps, nextUtcMidnight, report } from '../src/sources/censusRun.js';
 import { slicePlan } from '../src/sources/census.js';
 import { query, pool } from '../src/db.js';
 
@@ -1209,8 +1209,25 @@ test('a text-sourced surfacing stops counting once its drawer is no longer asked
   await place('google:refence_manor_pub', 'text', 'text');             // "The Manor", found by the old bare query
   await place('google:refence_stately', 'words', 'historical_place');  // found by the fenced question
   await place('google:refence_typed', 'type', 'historical_place');     // found by a typed rule
+  // And a drawer whose only find was text, with the inflated number it used
+  // to have already on the board.
+  await query(
+    `insert into place_index (venue_ref, country_code, slice, category, subcategory)
+     values ('google:refence_lido_estate_agent', 'GB', '51.5180,-0.1320,51.5220,-0.1280', 'fun', 'lidos') on conflict (venue_ref) do nothing`);
+  await query(
+    `insert into place_subcategories (venue_ref, category, subcategory, found_by, sourced, area_slug, first_seen, last_seen)
+     values ('google:refence_lido_estate_agent', 'fun', 'lidos', 'text', 'text', 'test/refence', now(), now())
+     on conflict (venue_ref, subcategory, coalesce(area_slug, '')) do update set sourced = excluded.sourced`);
+  await query(
+    `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, scored_count, saturated, censused_at, complete, tiles, tiles_saturated, unresolved, sourced, text_count)
+     values ('zz6a', 'fun', 'lidos', 1987, 1987, 0, 0, now(), true, 1, 0, 0, 'text', 1987)
+     on conflict (area_slug, category, subcategory) do update set census_count = 1987, text_count = 1987, sourced = 'text'`);
 
   await rollUpOutcodes({ outcodes: ['ZZ6A'] });
+  const { rows: [lidos] } = await query(
+    `select census_count, text_count from area_counts where area_slug = 'zz6a' and subcategory = 'lidos'`);
+  assert.equal(lidos.census_count, 0, 'a drawer whose only find was text is written again, at nought — not left at the number it had (Codex, 25 Sep 2026)');
+  assert.equal(lidos.text_count, 0);
   const { rows: [row] } = await query(
     `select census_count, text_count, sourced from area_counts where area_slug = 'zz6a' and subcategory = 'historic-houses'`);
   assert.equal(row.census_count, 2, 'the two fenced finds are the number');
@@ -1218,4 +1235,19 @@ test('a text-sourced surfacing stops counting once its drawer is no longer asked
   assert.notEqual(row.sourced, 'text', 'nor on its label, which reads the fenced and typed finds only');
   const { rows: kept } = await query(`select found_by from place_subcategories where venue_ref = 'google:refence_manor_pub'`);
   assert.equal(kept[0]?.found_by, 'text', 'but the place still says how it was found, for judging');
+});
+
+test('a roll-up a finished run still owes is tried again from the runner\'s tick, and cleared when it lands', async () => {
+  const { rows: [run] } = await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, state, problem, started_at, finished_at)
+     values ('test/owed', array['ZZ9Z'], 0.08, 0.12, 'done', 'roll-up pending: the database went away', now() - interval '1 hour', now())
+     returning id`);
+  try {
+    const out = await retryRollUps();
+    assert.ok(out.some((r) => r.id === run.id && r.rolled), 'the owed roll-up was tried and landed');
+    const { rows: [after] } = await query(`select problem from census_runs where id = $1`, [run.id]);
+    assert.equal(after.problem, null, 'and the run no longer says it is owed');
+  } finally {
+    await query(`delete from census_runs where id = $1`, [run.id]);
+  }
 });

@@ -114,10 +114,24 @@ test('the walk after a census takes every ring, however many pages that is', asy
   await seed();
   await tables.refreshBands({ cell: CELL, mode: 'drive', bands: [20, 30, 60] });
   await query(`update ring_counts set computed_at = now() - interval '1 hour' where cell = $1`, [CELL]);
-  // One ring a page, three rings: three pages, none repeated.
-  const done = await tables.refreshAllBefore({ before: new Date(), pageSize: 1 });
+  // And a ring that cannot be counted — a cell nothing resolves — older than
+  // all of them, so it heads every page. It must not stop the walk (Codex,
+  // 24 Sep 2026: a page of failures hid the rings behind it).
+  const NOWHERE = 'sector:NOWHERE 0';
+  await query(`delete from ring_counts where cell = $1`, [NOWHERE]);
+  await query(
+    `insert into ring_counts (cell, mode, minutes, category, places, unresolved, floor, computed_at)
+     values ($1, 'drive', 30, '', 0, 0, false, now() - interval '2 hours')`, [NOWHERE]);
+  let done;
+  try {
+    // One ring a page, four rings: four pages, none repeated, the dud skipped.
+    done = await tables.refreshAllBefore({ before: new Date(), pageSize: 1 });
+  } finally {
+    await query(`delete from ring_counts where cell = $1`, [NOWHERE]);
+  }
   const mine = done.filter((d) => d?.cell === CELL).map((d) => d.minutes).sort((a, b) => a - b);
   assert.deepEqual(mine, [20, 30, 60]);
+  assert.equal(done.filter((d) => d?.cell === NOWHERE).length, 1, 'the dud was tried once, not on every page');
   const { rows: [{ stale }] } = await query(
     `select count(*)::int as stale from ring_counts where cell = $1 and computed_at < now() - interval '30 minutes'`, [CELL]);
   assert.equal(stale, 0, 'and every row now carries the new date');

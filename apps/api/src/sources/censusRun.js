@@ -883,12 +883,46 @@ async function finish(id, state, problem) {
   // floor with a fresh date, and nothing would look at it again for thirty
   // days — left alone, the cycle is its retry. Recounted behind the finish,
   // never awaited: a ring is a few reads of our own tables.
-  if (state === 'done' && run?.finished_at) {
-    let rolled = false;
-    try { await rollUpOutcodes({ runId: id }); rolled = true; }
-    catch (err) { console.warn(`epic-api: census — could not roll up run ${id}, so its rings keep their date: ${err.message}`); }
-    if (rolled) void refreshRingsBefore({ before: run.finished_at }).catch(() => {});
+  if (state === 'done' && run?.finished_at) await rollUpAndRecount(id);
+}
+
+/** What a done run's `problem` says while its roll-up is still owed. */
+const ROLL_UP_PENDING = 'roll-up pending';
+
+/**
+ * The board, then the rings — in that order, and the rings only after the
+ * board succeeded. A roll-up that fails is not forgotten: the run keeps
+ * 'done' and its `problem` says the roll-up is owed, and `retryRollUps` (from
+ * the runner's own tick, at boot and on every pass) tries it again until it
+ * lands (Codex, 24 Sep 2026: swallowed once, the census's results stayed
+ * unpublished until an operator pressed the button).
+ *
+ * The rings' cutoff is taken from the database clock *after* the roll-up, so
+ * a ring a home counted while the roll-up was still writing — stamped later
+ * than the run's finish but reading a half-rolled board — is inside the walk
+ * rather than left for thirty days.
+ */
+async function rollUpAndRecount(id) {
+  try { await rollUpOutcodes({ runId: id }); }
+  catch (err) {
+    console.warn(`epic-api: census — could not roll up run ${id}; will try again: ${err.message}`);
+    await query(`update census_runs set problem = $2 where id = $1`,
+      [id, `${ROLL_UP_PENDING}: ${String(err.message).slice(0, 200)}`]).catch(() => {});
+    return false;
   }
+  await query(`update census_runs set problem = null where id = $1 and problem like $2`, [id, `${ROLL_UP_PENDING}%`]).catch(() => {});
+  const { rows: [{ at }] } = await query('select now() as at');
+  void refreshRingsBefore({ before: at }).catch(() => {});
+  return true;
+}
+
+/** Every done run still owing its roll-up, tried again. Bounded by runs, which are few. */
+export async function retryRollUps() {
+  const { rows } = await query(
+    `select id from census_runs where state = 'done' and problem like $1 order by finished_at limit 10`, [`${ROLL_UP_PENDING}%`]);
+  const out = [];
+  for (const r of rows) out.push({ id: r.id, rolled: await rollUpAndRecount(r.id) });
+  return out;
 }
 
 /**
@@ -900,6 +934,10 @@ async function finish(id, state, problem) {
  * run is still meant to be going.
  */
 export async function resumeInterrupted() {
+  // A roll-up still owed by a run that finished: tried again on the same tick
+  // that resumes runs, so a board that failed to roll up once is not a board
+  // that waits for a person.
+  void retryRollUps().catch(() => {});
   // A run waiting for the quota day to turn over, whose clock has come round.
   // Automatic, because the owner asked for it to be — "resume automatically
   // after the 00:00 UTC reset" — and because a run that needs a person at
@@ -1073,12 +1111,15 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
   for (const r of rows) {
     const tile = tileByKey.get(r.area_slug);
     if (!tile) continue;
-    // An answer to a question the drawer no longer asks. Kept on the place,
-    // not in the count (25 Sep 2026, the re-fencing).
-    if (r.sourced === 'text' && !textStillAsked(r.subcategory)) continue;
     const key = `${r.category}/${r.subcategory}`;
     if (!drawersOfTile.has(tile.grid_key)) drawersOfTile.set(tile.grid_key, new Map());
     drawersOfTile.get(tile.grid_key).set(key, { category: r.category, subcategory: r.subcategory });
+    // An answer to a question the drawer no longer asks. Kept on the place,
+    // not in the count (25 Sep 2026, the re-fencing) — and the drawer is still
+    // a drawer the tile answered, so its row is written again, at nought if
+    // nothing else is there: skipping it before that line left the inflated
+    // count it used to have standing (Codex, 25 Sep 2026).
+    if (r.sourced === 'text' && !textStillAsked(r.subcategory)) continue;
     // Its own point beats any box: that is exact, and a display search will
     // have bought one for anything a household has actually looked at.
     let v;
