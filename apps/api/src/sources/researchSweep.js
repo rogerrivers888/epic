@@ -270,7 +270,11 @@ function outcomeOf(out) {
     openMap: Boolean(matched.osm),
     theirPage: Boolean(matched.site),
     encyclopedia: Boolean(matched.wikipedia),
-    described: Boolean(out?.fields?.summary),
+    // `fields` is a count; the record's provenance says whether a summary
+    // landed. Read off `fields.summary` this was always false, and the one
+    // number the sweep exists to move read nought while pages and
+    // encyclopedia entries were landing (found live, 25 Sep 2026).
+    described: Boolean(out?.provenance?.summary),
     couldNotAsk: (out?.problems ?? []).some((p) => /could not ask|no name|nothing to go on/i.test(p)),
     problems: (out?.problems ?? []).slice(0, 3),
   };
@@ -301,19 +305,25 @@ async function spentOn(venueRef, since, householdId) {
 export async function funnelOf(id) {
   const { rows: [f] } = await query(
     `select count(*)::int as sampled,
-            count(*) filter (where state = 'done' and outcome->>'skipped' is not null)::int as held,
-            count(*) filter (where state in ('done', 'failed') and outcome->>'skipped' is null)::int as asked,
-            count(*) filter (where state = 'done' and outcome->>'state' = 'done')::int as identified,
+            count(*) filter (where p.state = 'done' and outcome->>'skipped' is not null)::int as held,
+            count(*) filter (where p.state in ('done', 'failed') and outcome->>'skipped' is null)::int as asked,
+            count(*) filter (where p.state = 'done' and outcome->>'state' = 'done')::int as identified,
             count(*) filter (where (outcome->>'openMap')::boolean)::int as open_map,
             count(*) filter (where (outcome->>'theirPage')::boolean)::int as their_page,
             count(*) filter (where (outcome->>'encyclopedia')::boolean)::int as encyclopedia,
-            count(*) filter (where (outcome->>'described')::boolean)::int as described,
+            -- Whether there is a description to read is the record's fact,
+            -- not the outcome's: counted from place_records so it is true
+            -- whenever it is asked, including for rows written before the
+            -- outcome recorded it properly.
+            count(*) filter (where p.state <> 'pending' and length(coalesce(r.summary, '')) > 80)::int as described,
             count(*) filter (where (outcome->>'couldNotAsk')::boolean)::int as could_not_ask,
-            count(*) filter (where state = 'failed')::int as failed,
-            count(*) filter (where state = 'pending')::int as pending,
-            count(*) filter (where state = 'asking')::int as asking,
+            count(*) filter (where p.state = 'failed')::int as failed,
+            count(*) filter (where p.state = 'pending')::int as pending,
+            count(*) filter (where p.state = 'asking')::int as asking,
             coalesce(sum(cost_usd), 0)::numeric as usd
-       from research_sweep_places where sweep_id = $1`,
+       from research_sweep_places p
+       left join place_records r on r.venue_ref = p.venue_ref
+      where p.sweep_id = $1`,
     [id]);
   return {
     sampled: f.sampled, held: f.held, asked: f.asked, identified: f.identified,
@@ -326,13 +336,15 @@ export async function funnelOf(id) {
 /** Per drawer: how many were asked and how many now have something to read. */
 export async function byDrawer(id) {
   const { rows } = await query(
-    `select subcategory,
+    `select p.subcategory,
             count(*)::int as sampled,
-            count(*) filter (where state = 'done' and outcome->>'state' = 'done')::int as identified,
-            count(*) filter (where (outcome->>'described')::boolean)::int as described,
-            count(*) filter (where state = 'failed')::int as failed,
+            count(*) filter (where p.state = 'done' and outcome->>'state' = 'done')::int as identified,
+            count(*) filter (where p.state <> 'pending' and length(coalesce(r.summary, '')) > 80)::int as described,
+            count(*) filter (where p.state = 'failed')::int as failed,
             coalesce(sum(cost_usd), 0)::numeric as usd
-       from research_sweep_places where sweep_id = $1
+       from research_sweep_places p
+       left join place_records r on r.venue_ref = p.venue_ref
+      where p.sweep_id = $1
       group by 1 order by 1`,
     [id]);
   return rows.map((r) => ({ ...r, gbp: gbp(Number(r.usd)) }));
@@ -487,6 +499,19 @@ export async function resume({ work: doWork = work } = {}) {
     resumed += 1;
   }
   return { resumed, stranded: rows.length };
+}
+
+/** Every place in a sweep, with what happened to it — for reading the problems, not the text. */
+export async function places(id) {
+  const { rows } = await query(
+    `select p.venue_ref, p.subcategory, p.tier, p.state, p.outcome, p.cost_usd, p.attempted_at,
+            length(coalesce(r.summary, '')) > 80 as described
+       from research_sweep_places p
+       left join place_records r on r.venue_ref = p.venue_ref
+      where p.sweep_id = $1
+      order by p.subcategory, case p.tier when 'top' then 0 else 1 end, p.venue_ref`,
+    [id]);
+  return rows;
 }
 
 /** The last few sweeps, with their funnels, for a report. */

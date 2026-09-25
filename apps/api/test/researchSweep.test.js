@@ -119,7 +119,9 @@ test('the work writes each place as it goes, reads its cost off the ledger, and 
     // Somebody else's display search on the same place, in the same window,
     // is not the sweep's to book (Codex, 25 Sep 2026).
     await query(`insert into provider_calls (provider, purpose, estimated_cost_usd, venue_ref) values ('google', 'display', 0.04, $1)`, [ref]);
-    return { state: 'done', matched: { osm: {}, wikipedia: {} }, fields: { summary: 'A lake with a boathouse.' }, problems: [] };
+    // A description landed, and the record says so.
+    await query(`insert into place_records (venue_ref, summary) values ($1, $2) on conflict (venue_ref) do update set summary = excluded.summary`, [ref, 'A lake with a boathouse and a jetty, and a tearoom open at weekends through the summer months.']);
+    return { state: 'done', matched: { osm: {}, wikipedia: {} }, provenance: { summary: 'wikipedia' }, problems: [] };
   };
   const reservations = [];
   const room = async (pence, { holder }) => { reservations.push({ pence, holder }); return { ok: true, reservation: `r${reservations.length}`, leftPence: 10000 }; };
@@ -142,13 +144,17 @@ test('the work writes each place as it goes, reads its cost off the ledger, and 
   assert.equal(f.held, 2);
   assert.equal(f.asked, 18);
   assert.equal(f.identified, 20);
-  assert.equal(f.described, 18);
+  assert.equal(f.described, 18, 'counted from the record, not the outcome');
   assert.equal(f.openMap, 18);
   assert.equal(f.pending, 0);
   assert.equal(Math.round(f.spentUsd * 1000) / 1000, Math.round(18 * 0.032 * 1000) / 1000, 'the cost is the ledger’s, not a guess');
   const by = await sweep.byDrawer(row.id);
   assert.equal(by[0].subcategory, SUB);
   assert.equal(by[0].described, 18);
+  const listed = await sweep.places(row.id);
+  assert.equal(listed.length, 20);
+  assert.equal(listed.filter((p) => p.described).length, 18);
+  assert.equal(listed[0].tier, 'top', 'top of the drawer first');
 });
 
 test('a place that never answers is given up on, and the sweep moves on', async () => {

@@ -680,7 +680,7 @@ export async function enrich(venueRef, { householdId = null, seed: given = {}, f
     problems.push(`Wikipedia: ${String(err?.message || err).slice(0, 120)}`);
   }
 
-  const { fields } = await compose(venueRef);
+  const { fields, provenance } = await compose(venueRef);
   // Three outcomes, not two. Something was found: done, and left alone until the
   // next refresh. A source refused: failed, and tried again soon. Every source
   // answered and none of them knew this place: partial — probably true, possibly
@@ -701,7 +701,9 @@ export async function enrich(venueRef, { householdId = null, seed: given = {}, f
   await owned.scheduleRetry(venueRef, schedule && attempts < giveUpAfter
     ? new Date(Date.now() + schedule[Math.min(attempts - 1, schedule.length - 1)] * 60_000)
     : null);
-  return { state, fields, matched, problems };
+  // `provenance` is which field came from which source, so a caller can tell
+  // whether there is now a description to read without re-reading the record.
+  return { state, fields, provenance, matched, problems };
 }
 
 // ---------------------------------------------------------------------------

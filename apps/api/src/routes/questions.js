@@ -460,7 +460,8 @@ questionRoutes.get('/sweep/:id', requires('view_library'), async (req, res, next
   try {
     const row = await sweep.one(String(req.params.id));
     if (!row) return res.status(404).json({ error: 'not_found', message: 'No sweep by that id.' });
-    res.json({ sweep: row, funnel: await sweep.funnelOf(row.id), drawers: await sweep.byDrawer(row.id) });
+    res.json({ sweep: row, funnel: await sweep.funnelOf(row.id), drawers: await sweep.byDrawer(row.id),
+      places: req.query.places ? await sweep.places(row.id) : undefined });
   } catch (err) { next(err); }
 });
 
