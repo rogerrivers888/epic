@@ -71,6 +71,23 @@ const MARKER = '';
  */
 export async function refreshRing({ cell, mode = 'driving', minutes = 30 } = {}) {
   const kind = travelMode(mode);
+  // One count of a ring at a time, in this process: a walk after a matrix or
+  // census refresh that reaches a ring still being counted from the old
+  // shape waits for that count and then counts again, rather than racing it
+  // and losing (Codex, 25 Sep 2026). Queued behind whatever is in flight for
+  // the same key; a count that failed does not block the next.
+  const key = ringKey({ cell, mode: kind, minutes });
+  const prev = inFlight.get(key) ?? Promise.resolve();
+  const run = prev.catch(() => null).then(() => countRing({ cell, kind, minutes }));
+  inFlight.set(key, run);
+  try { return await run; }
+  finally { if (inFlight.get(key) === run) inFlight.delete(key); }
+}
+
+/** Counts in flight, by ring key — what serialises `refreshRing`. */
+const inFlight = new Map();
+
+async function countRing({ cell, kind, minutes }) {
   // The row is dated from the moment the count began reading, not the moment
   // it wrote: a count that read the matrix or the census before a refresh and
   // wrote after it would otherwise carry a date newer than the refresh's
@@ -260,16 +277,26 @@ export async function refreshDue({ olderThanDays = CYCLE_DAYS, before = null, li
  * the rings beyond it on their pre-census snapshot). A ring that fails to
  * count — or resolves to nothing — stays before the cutoff, so every ring
  * tried is handed back as one to skip: a page of failures does not hide the
- * rings behind it, and nothing is tried twice.
+ * rings behind it, and nothing is tried twice in a pass.
+ *
+ * Two passes, because a ring counted for the first time while the walk was
+ * going — from the old shape, dated before the cutoff — has no row for the
+ * first pass to find and would keep that shape for a cycle (Codex, 25 Sep
+ * 2026). The second pass sees it; `refreshRing` queues behind any count
+ * still in flight, so it is counted again after that count and not beside
+ * it. A ring the first pass counted is dated after the cutoff and is not
+ * touched again; only a ring that failed is tried once more.
  */
-export async function refreshAllBefore({ before, pageSize = 200, maxPages = 10_000 } = {}) {
-  const tried = new Set();
+export async function refreshAllBefore({ before, pageSize = 200, maxPages = 10_000, passes = 2 } = {}) {
   const out = [];
-  for (let pages = 0; pages < maxPages; pages += 1) {
-    const page = await refreshDue({ before, limit: pageSize, skip: [...tried] });
-    if (!page.length) break;
-    for (const r of page) tried.add(ringKey(r));
-    out.push(...page);
+  for (let pass = 0; pass < passes; pass += 1) {
+    const tried = new Set();
+    for (let pages = 0; pages < maxPages; pages += 1) {
+      const page = await refreshDue({ before, limit: pageSize, skip: [...tried] });
+      if (!page.length) break;
+      for (const r of page) tried.add(ringKey(r));
+      out.push(...page);
+    }
   }
   return out;
 }

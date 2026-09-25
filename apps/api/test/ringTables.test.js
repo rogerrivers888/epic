@@ -125,6 +125,20 @@ test('a ring is dated from when its count began, so a refresh that overlaps it s
   assert.ok((await tables.refreshDue({ before: during })).some((d) => d.cell === CELL), 'counted before the cutoff: counted again');
 });
 
+test('two counts of one ring run one after the other, never beside each other', async () => {
+  await seed();
+  const [first, second] = await Promise.all([
+    tables.refreshRing({ cell: CELL, mode: 'drive', minutes: 30 }),
+    tables.refreshRing({ cell: CELL, mode: 'drive', minutes: 30 }),
+  ]);
+  assert.ok(first && second);
+  // The second began reading only once the first had written: its date is
+  // later, and it is the one the table holds.
+  assert.ok(new Date(second.computedAt) > new Date(first.computedAt), 'queued behind, not raced');
+  const { rows: [{ at }] } = await query('select distinct computed_at as at from ring_counts where cell = $1', [CELL]);
+  assert.equal(new Date(at).getTime(), new Date(second.computedAt).getTime());
+});
+
 test('the walk after a census takes every ring, however many pages that is', async () => {
   await seed();
   await tables.refreshBands({ cell: CELL, mode: 'drive', bands: [20, 30, 60] });
@@ -140,7 +154,8 @@ test('the walk after a census takes every ring, however many pages that is', asy
   let done;
   try {
     // One ring a page, four rings: four pages, none repeated, the dud skipped.
-    done = await tables.refreshAllBefore({ before: new Date(), pageSize: 1 });
+    // One pass, so the count of tries is the count of pages.
+    done = await tables.refreshAllBefore({ before: new Date(), pageSize: 1, passes: 1 });
   } finally {
     await query(`delete from ring_counts where cell = $1`, [NOWHERE]);
   }
