@@ -134,18 +134,6 @@ test('the agreed cleanup only proposes what this database can carry', () => {
   assert.deepEqual(made['splash-pads'].defaults, { 'cost-band': { choice: 'free' } });
   assert.deepEqual(made['monuments-memorials'].defaults, { 'cost-band': { choice: 'free' } });
   assert.equal(made['heritage-railways'].defaults, undefined, 'a drawer with a gate is left for the sweep');
-  // A database that made the drawer before the list stated the default is
-  // offered it as a settle, and one that made a drawer with no default stated
-  // is offered nothing about it.
-  const later = agreed({ have: new Set(['splash-pads', 'heritage-railways']), words: new Set() });
-  const settle = later.find((p) => p.subject === 'splash-pads');
-  assert.equal(settle.action, 'settle');
-  assert.deepEqual(settle.numbers, { defaults: { 'cost-band': { choice: 'free' } } });
-  assert.equal(later.find((p) => p.subject === 'heritage-railways'), undefined);
-  assert.equal(alreadyTrue(settle, {
-    subs: [{ key: 'splash-pads', active: true }], rules: [], allWords: [], alsoBySub: new Map(),
-    defaultsBySub: new Map([['splash-pads', new Map([['cost-band', { yesno: null, from: null, to: null, choice: 'free', level: null, settled: true }]])]]),
-  }), true, 'once the default is there and agreed it is not offered again');
 
   const all = agreed({ have: new Set(['fast-food', 'landmarks']), words: new Set([...STRUCTURAL, ...DELIVERY_OUT]) });
   const rename = all.find((p) => p.subject === 'fast-food');
@@ -552,6 +540,21 @@ test('the daily check gives a bare drawer a bar and judges its places in the sam
 
 const { signedOff, SIGNED_OFF } = await import('../src/domain/taxonomyCleanup.js');
 const { alreadyTrue } = await import('../src/repositories/taxonomyAudit.js');
+
+test('a drawer made before the list stated its default is offered it as a settle, once', () => {
+  // The create will not run again and neither will migration 246, so the
+  // agreed set proposes the default as a settle; a drawer with no default
+  // stated gets nothing about it.
+  const later = agreed({ have: new Set(['splash-pads', 'heritage-railways']), words: new Set() });
+  const settle = later.find((p) => p.subject === 'splash-pads');
+  assert.equal(settle.action, 'settle');
+  assert.deepEqual(settle.numbers, { defaults: { 'cost-band': { choice: 'free' } } });
+  assert.equal(later.find((p) => p.subject === 'heritage-railways'), undefined);
+  assert.equal(alreadyTrue(settle, {
+    subs: [{ key: 'splash-pads', active: true }], rules: [], allWords: [], alsoBySub: new Map(),
+    defaultsBySub: new Map([['splash-pads', new Map([['cost-band', { yesno: null, from: null, to: null, choice: 'free', level: null, settled: true }]])]]),
+  }), true, 'once the default is there and agreed it is not offered again');
+});
 
 test('the signed-off set only proposes what this database can carry, and addresses rules as the rules do', () => {
   const out = signedOff({
