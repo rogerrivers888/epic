@@ -237,8 +237,13 @@ test('a place asked again after a deploy is costed from its first attempt', asyn
   const row = await sweep.start({ subcategories: [SUB], confirm: 36, householdId: hh });
   // The process died after the first place's request was on the ledger and
   // before its row was written. Everything else is done already.
-  const [first] = refs(1, 'google:ChIJ_sweep_1');
-  const hit = refs(20).includes(first) ? first : (await query(`select venue_ref from research_sweep_places where sweep_id = $1 limit 1`, [row.id])).rows[0].venue_ref;
+  //
+  // Chosen deterministically, and its ledger cleared first: picked with a
+  // bare `limit 1` this sometimes landed on a place an earlier test had
+  // already costed, and the assertion below counted that row too — green
+  // alone, red in the suite (25 Sep 2026).
+  const hit = refs(1)[0];
+  await query('delete from provider_calls where venue_ref = $1', [hit]);
   await query(`update research_sweep_places set state = 'done', outcome = '{"state":"done"}'::jsonb where sweep_id = $1 and venue_ref <> $2`, [row.id, hit]);
   await query(`update research_sweep_places set state = 'asking', attempted_at = now() - interval '2 minutes' where sweep_id = $1 and venue_ref = $2`, [row.id, hit]);
   await query(`insert into provider_calls (household_id, provider, purpose, estimated_cost_usd, venue_ref, created_at) values ($1, 'google', 'own.seed', 0.032, $2, now() - interval '1 minute')`, [hh, hit]);
