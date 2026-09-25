@@ -460,19 +460,19 @@ questionRoutes.post('/sweep', requires('manage_questions'), async (req, res, nex
  *   GET  /reference/:id/held  what every place in it now holds, and from where
  */
 questionRoutes.get('/reference/propose', requires('view_library'), async (_req, res, next) => {
-  try { res.json({ categories: await reference.propose() }); } catch (err) { next(err); }
+  try { res.json({ categories: await reference.propose({ categories: subsOf(req.query.categories) }) }); } catch (err) { next(err); }
 });
 questionRoutes.get('/reference/estimate', requires('view_library'), async (_req, res, next) => {
-  try { res.json(await reference.estimate()); } catch (err) { next(err); }
+  try { res.json(await reference.estimate({ categories: subsOf(req.query.categories) })); } catch (err) { next(err); }
 });
 questionRoutes.post('/reference', requires('manage_questions'), async (req, res, next) => {
   try {
     const household = await currentHousehold().catch(() => null);
-    const row = await reference.start({ confirm: req.body?.confirm ?? null, householdId: household?.id ?? null, startedBy: actorOf(req) });
+    const row = await reference.start({ categories: subsOf(req.body?.categories), confirm: req.body?.confirm ?? null, householdId: household?.id ?? null, startedBy: actorOf(req) });
     void sweep.work(row.id).catch((err) => console.warn(`reference set ${row.id}: ${err.message}`));
     res.status(202).json({ sweep: row });
   } catch (err) {
-    if (err?.code === 'confirm_required' || err?.code === 'already_running' || err?.code === 'no_household') {
+    if (['confirm_required', 'already_running', 'no_household', 'short_category'].includes(err?.code)) {
       return res.status(409).json({ error: err.code, message: err.message, plan: err.plan ?? null });
     }
     return next(err);

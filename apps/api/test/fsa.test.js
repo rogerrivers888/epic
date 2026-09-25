@@ -21,8 +21,13 @@ const est = (name, pc, rating = '5', id = 1) => ({ FHRSID: id, BusinessName: nam
 test('a name is the same business loosely, and not by a shared word', () => {
   assert.equal(sameName('The Bull', 'Bull Inn'), true);
   assert.equal(sameName('Bella Italia', 'Bella Italia Windsor'), true);
-  assert.equal(sameName('The Crown', 'Crown & Anchor'), true);
   assert.equal(sameName('Sunningdale Golf Club', 'Sunningdale Bakery'), false);
+  // One word is only the same as one word: a shared token at a shared
+  // postcode would keep somebody else's rating for good (Codex, 25 Sep 2026).
+  assert.equal(sameName('The Crown', 'Crown & Anchor'), false);
+  assert.equal(sameName('The Ivy', 'The Ivy Asia'), false);
+  assert.equal(sameName('Sunningdale Cafe', 'Sunningdale Golf Club'), false);
+  assert.equal(sameName('Cafe', 'Cafe Rouge'), false);
 });
 
 test('the postcode is the first gate, the name the second, and two matches is no match', () => {

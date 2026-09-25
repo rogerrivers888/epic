@@ -135,9 +135,11 @@ export function chooseFor(rows, { perCategory = PER_CATEGORY } = {}) {
 }
 
 /** The whole set, category by category, with the reasons. */
-export async function propose({ perCategory = PER_CATEGORY } = {}) {
+export async function propose({ perCategory = PER_CATEGORY, categories = null } = {}) {
   const rows = await candidates();
-  const { rows: cats } = await query('select key, label from shelf_categories where active order by position, key');
+  const { rows: cats } = await query(
+    `select key, label from shelf_categories where active ${categories?.length ? 'and key = any($1)' : ''} order by position, key`,
+    categories?.length ? [categories] : []);
   const out = [];
   for (const c of cats) {
     const mine = rows.filter((r) => r.category === c.key);
@@ -152,8 +154,8 @@ export async function propose({ perCategory = PER_CATEGORY } = {}) {
  * for — the seed goes in and Google is never asked — and up to two Place
  * Details requests for a Google place we know only as an id.
  */
-export async function estimate({ perCategory = PER_CATEGORY } = {}) {
-  const categories = await propose({ perCategory });
+export async function estimate({ perCategory = PER_CATEGORY, categories: only = null } = {}) {
+  const categories = await propose({ perCategory, categories: only });
   const all = categories.flatMap((c) => c.picks.map((p) => ({ ...p, category: c.category })));
   const refs = all.map((p) => p.venue_ref);
   // What each may still cost from what we hold: two to identify an id, one
@@ -184,14 +186,23 @@ export async function estimate({ perCategory = PER_CATEGORY } = {}) {
 }
 
 /** Start it: a research sweep in reference mode, with the chosen places written down and why. */
-export async function start({ perCategory = PER_CATEGORY, confirm = null, householdId = null, startedBy = null } = {}) {
-  const plan = await estimate({ perCategory });
+export async function start({ perCategory = PER_CATEGORY, categories = null, confirm = null, householdId = null, startedBy = null } = {}) {
+  const plan = await estimate({ perCategory, categories });
   if (Number(confirm) !== plan.requests) {
     const err = new Error(`This set is ${plan.places} places, up to ${plan.requests} Google requests at £${plan.costGbpLow.toFixed(2)}–£${plan.costGbpHigh.toFixed(2)}. Confirm with ${plan.requests} to run it.`);
     err.code = 'confirm_required'; err.status = 409; err.plan = plan;
     throw err;
   }
   if (!householdId) throw Object.assign(new Error('A reference set is run by a signed-in household.'), { code: 'no_household', status: 409 });
+  // Twenty a category is the set's shape, not a ceiling. A category the
+  // census has not reached yet would have started a smaller set that still
+  // called itself the reference set (Codex, 25 Sep 2026).
+  const short = plan.categories.filter((c) => c.picks.length < perCategory);
+  if (short.length) {
+    throw Object.assign(
+      new Error(`Not every category has ${perCategory} places to choose from yet: ${short.map((c) => `${c.category} (${c.picks.length})`).join(', ')}.`),
+      { code: 'short_category', status: 409, plan });
+  }
   const all = plan.categories.flatMap((c) => c.picks.map((p) => ({ ...p, category: c.category })));
   return withTransaction(async (client) => {
     // One sweep at a time, of either kind — the same lock and the same check

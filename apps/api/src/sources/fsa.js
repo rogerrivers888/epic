@@ -30,14 +30,20 @@ const postcodeOf = (s) => String(s ?? '').toUpperCase().replace(/\s+/g, '');
 export function sameName(a, b) {
   const x = squash(a); const y = squash(b);
   if (!x || !y) return false;
-  if (x === y || x.includes(y) || y.includes(x)) return true;
-  // The shorter name's words — up to two, ignoring the furniture — all in the
-  // longer: "The Bull" is "Bull Inn", "The Crown" is "Crown & Anchor", and
-  // "Sunningdale Bakery" is not "Sunningdale Golf Club".
+  if (x === y) return true;
+  // Ignoring the furniture, the shorter name's words all in the longer — and
+  // a name that is one word is only the same as another one-word name:
+  // "The Bull" is "Bull Inn", but "The Ivy" is not "The Ivy Asia" and
+  // "Sunningdale Cafe" is not "Sunningdale Golf Club". One shared word at a
+  // shared postcode is how somebody else's rating gets kept for good, so it
+  // fails closed (Codex, 25 Sep 2026).
   const words = (s) => s.split(' ').filter((w) => w && !['the', 'a', 'and', 'at', 'of', 'inn', 'restaurant', 'cafe', 'bar', 'pub'].includes(w));
   const [short, long] = [words(x), words(y)].sort((p, q) => p.length - q.length);
-  const need = short.slice(0, 2);
-  return need.length > 0 && need.every((w) => long.includes(w));
+  if (!short.length) return false;
+  // One word is only the same as one word — "The Ivy" is not "The Ivy Asia"
+  // even though the one sits inside the other.
+  if (short.length === 1) return long.length === 1 && long[0] === short[0];
+  return short.slice(0, 2).every((w) => long.includes(w));
 }
 
 /**

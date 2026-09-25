@@ -695,8 +695,19 @@ export async function enrich(venueRef, { householdId = null, seed: given = {}, f
   if (hygiene) {
     try {
       const held = await owned.liveFacts(venueRef, { keepableOnly: true });
-      const pc = held.find((f) => f.field === 'postcode' && !empty(f.value))?.value ?? seed.postcode ?? null;
-      const nm = held.find((f) => f.field === 'name' && !empty(f.value))?.value ?? seed.name ?? null;
+      // In the record's own order of preference, not whichever source the
+      // facts happen to come back in: the venue's published postcode before
+      // a reverse-geocoded one, or the register is asked about the wrong
+      // street (Codex, 25 Sep 2026).
+      const firstBy = (field) => {
+        for (const source of PRECEDENCE[field] ?? []) {
+          const f = held.find((x) => x.field === field && x.source === source && !empty(x.value));
+          if (f) return f.value;
+        }
+        return null;
+      };
+      const pc = firstBy('postcode') ?? seed.postcode ?? null;
+      const nm = firstBy('name') ?? seed.name ?? null;
       if (pc) {
         const got = await fsa.lookup({ name: nm, postcode: pc, householdId, venueRef });
         // Replaced only by an answer: a match, or the register's own "nothing

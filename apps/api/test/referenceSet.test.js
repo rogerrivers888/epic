@@ -69,7 +69,7 @@ test.before(async () => {
 });
 
 test('twenty a category, bucket by bucket, each once, with the reason written beside it', async () => {
-  const [c] = (await ref.propose()).filter((x) => x.category === CAT);
+  const [c] = (await ref.propose({ categories: [CAT] })).filter((x) => x.category === CAT);
   assert.equal(c.picks.length, 20);
   assert.equal(new Set(c.picks.map((p) => p.venue_ref)).size, 20, 'each place once');
   const by = Object.groupBy(c.picks, (p) => p.picked_for);
@@ -89,7 +89,7 @@ test('the price is what each place may still cost: two to identify, one for a pa
   // website lead, one request, which the first estimate called free (Codex,
   // 25 Sep 2026).
   await query(`update place_records set website = null where venue_ref = 'google:ChIJ_ref_002'`);
-  const e = await ref.estimate();
+  const e = await ref.estimate({ categories: [CAT] });
   const mine = e.categories.find((c) => c.category === CAT);
   assert.equal(mine.picks.length, 20);
   assert.ok(mine.picks.some((p) => p.venue_ref === 'google:ChIJ_ref_002'), 'place 2 is near the top of the busiest area');
@@ -102,23 +102,38 @@ test('a place sits in the smallest of its areas, not in all of them', async () =
   // Every synthetic place is also in a "country" that holds them all. Counted
   // there, every one of them is dense (Codex, 25 Sep 2026).
   for (const r of rows) await query(`insert into place_areas (venue_ref, area_slug) values ($1, 'test-country') on conflict do nothing`, [r.venue_ref]);
-  const [c] = (await ref.propose()).filter((x) => x.category === CAT);
+  const [c] = (await ref.propose({ categories: [CAT] })).filter((x) => x.category === CAT);
   const by = Object.groupBy(c.picks, (p) => p.picked_for);
   assert.ok(by.thin.every((p) => Number(p.venue_ref.slice(-3)) > 50), 'thin still means the small areas');
   assert.ok(by.dense.every((p) => Number(p.venue_ref.slice(-3)) <= 30), 'dense still means the biggest town');
 });
 
+test('a category the census has not reached does not start a smaller set', async () => {
+  // A second, thin category alongside the full one.
+  await query(`insert into shelf_categories (key, label, active) values ('test-ref-thin-cat', 'Thin', true) on conflict (key) do update set active = true`);
+  await query(`insert into shelf_subcategories (key, label, category_key) values ('test-ref-thin-drawer', 'Thin drawer', 'test-ref-thin-cat') on conflict do nothing`);
+  await query(`insert into place_index (venue_ref, subcategory, found_rank) values ('google:ChIJ_ref_thin_1', 'test-ref-thin-drawer', 1) on conflict (venue_ref) do update set subcategory = excluded.subcategory`);
+  try {
+    const e = await ref.estimate({ categories: [CAT, 'test-ref-thin-cat'] });
+    await assert.rejects(() => ref.start({ categories: [CAT, 'test-ref-thin-cat'], confirm: e.requests, householdId: HH }), (x) => x.code === 'short_category' && /test-ref-thin-cat \(1\)/.test(x.message));
+  } finally {
+    await query(`delete from place_index where venue_ref = 'google:ChIJ_ref_thin_1'`);
+    await query(`delete from shelf_subcategories where key = 'test-ref-thin-drawer'`);
+    await query(`delete from shelf_categories where key = 'test-ref-thin-cat'`);
+  }
+});
+
 test('a second sweep does not start while one is running', async () => {
-  const e = await ref.estimate();
-  const row = await ref.start({ confirm: e.requests, householdId: HH });
-  await assert.rejects(() => ref.start({ confirm: e.requests, householdId: HH }), (x) => x.code === 'already_running');
+  const e = await ref.estimate({ categories: [CAT] });
+  const row = await ref.start({ categories: [CAT], confirm: e.requests, householdId: HH });
+  await assert.rejects(() => ref.start({ categories: [CAT], confirm: e.requests, householdId: HH }), (x) => x.code === 'already_running');
   await query(`update research_sweeps set state = 'done' where id = $1`, [row.id]);
 });
 
 test('the run is a research sweep in reference mode: everything again, seeded from the record, hygiene included', async () => {
-  const e = await ref.estimate();
-  await assert.rejects(() => ref.start({ confirm: e.requests + 1, householdId: HH }), (x) => x.code === 'confirm_required');
-  const row = await ref.start({ confirm: e.requests, householdId: HH, startedBy: 'test' });
+  const e = await ref.estimate({ categories: [CAT] });
+  await assert.rejects(() => ref.start({ categories: [CAT], confirm: e.requests + 1, householdId: HH }), (x) => x.code === 'confirm_required');
+  const row = await ref.start({ categories: [CAT], confirm: e.requests, householdId: HH, startedBy: 'test' });
   assert.equal(row.params.mode, 'reference');
   const { rows: picked } = await query('select picked_for from research_sweep_places where sweep_id = $1', [row.id]);
   assert.ok(picked.length >= 20 && picked.every((p) => p.picked_for));
