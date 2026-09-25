@@ -13,6 +13,17 @@
 # Never `--no-verify`. If the suite is wrong, fix the suite.
 set -e
 
+# Git exports GIT_DIR into every hook it runs. In the main checkout that is
+# harmless; in a linked worktree — which is where CLAUDE.md says to run the
+# suite from — GIT_DIR points at `.git/worktrees/<name>`, and `git ls-files`
+# run under it from `apps/api` lists nothing at all. The test helper builds
+# each database from `git ls-files migrations/`, so the hook then applied no
+# migrations and 358 tests failed with "relation does not exist" on a commit
+# whose suite was green a minute earlier in the same worktree (25 Sep 2026:
+# 249 files without GIT_DIR, 0 with it). Twice, identically. The hook must
+# see the worktree the way a shell in it does.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+
 root=$(git rev-parse --show-toplevel)
 cd "$root/apps/api"
 

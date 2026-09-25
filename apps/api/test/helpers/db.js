@@ -66,6 +66,19 @@ async function migrationFiles(dir) {
     return listed;
   }
   const onDisk = (await fs.readdir(dir)).filter((f) => f.endsWith('.sql'));
+  // Two hundred migrations on disk and git naming none of them is not "all
+  // uncommitted" — it is git looking at the wrong tree. That is what a hook's
+  // exported GIT_DIR does inside a linked worktree (25 Sep 2026: 249 listed
+  // without it, 0 with it), and the result was a suite run against an empty
+  // database, failing 358 tests with "relation does not exist" and blaming
+  // each of them. An empty database is never the right thing to build; say
+  // what happened instead.
+  if (onDisk.length && !tracked.size) {
+    throw new Error(
+      `git listed no migrations under ${path.resolve(dir, '..')} though ${onDisk.length} are on disk — ` +
+      'is GIT_DIR set to another checkout (a hook running in a worktree)? The suite refuses to build an empty database.',
+    );
+  }
   const skipped = onDisk.filter((f) => !tracked.has(f)).sort();
   if (skipped.length) {
     // One line, once, naming them: whoever wrote them needs to know their work
