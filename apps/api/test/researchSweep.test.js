@@ -130,7 +130,12 @@ test('the work writes each place as it goes, reads its cost off the ledger, and 
   assert.equal(asked.length, 20);
   assert.equal(reservations.length, 5, 'four at a time');
   assert.equal(released.length, 5, 'every reservation given back');
-  assert.ok(reservations.every((r) => r.holder === `sweep:${row.id}` && r.pence === Math.ceil(4 * 2 * sweep.pencePerRequest())));
+  assert.ok(reservations.every((r) => r.holder === `sweep:${row.id}`));
+  // The first batch holds the two already-researched places, which cannot
+  // spend, so it reserves for two rather than four (Codex, 25 Sep 2026).
+  const perPlace = 2 * sweep.pencePerRequest();
+  assert.equal(reservations[0].pence, Math.ceil(2 * perPlace));
+  assert.ok(reservations.slice(1).every((r) => r.pence === Math.ceil(4 * perPlace)));
 
   const f = await sweep.funnelOf(row.id);
   assert.equal(f.sampled, 20);

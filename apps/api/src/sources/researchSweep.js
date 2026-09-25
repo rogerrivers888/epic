@@ -223,7 +223,9 @@ async function claimBatch(id, n = BATCH) {
       where (sweep_id, venue_ref) in (
         select sweep_id, venue_ref from research_sweep_places
          where sweep_id = $1 and state = 'pending'
-         order by subcategory, tier, venue_ref
+         -- The top of each drawer first: if the ceiling runs out, the
+         -- places a household is likeliest to open are the ones done.
+         order by subcategory, case tier when 'top' then 0 else 1 end, venue_ref
          for update skip locked
          limit $2)
       returning venue_ref, subcategory, tier, attempted_at`,
@@ -347,7 +349,11 @@ export async function work(id, { research = own.enrich, room = roomToSpend, rele
       if (!batch.length) break;
 
       // Reserve the most this batch could cost; give back what it did not.
-      const want = batch.length * REQUESTS_PER_PLACE * pencePerRequest();
+      // Only for the places that can spend: a place the estimate called held
+      // is one `enrich` will skip, and reserving for it near the ceiling
+      // failed a sweep whose real work still fitted (Codex, 25 Sep 2026).
+      const held = await alreadyHeld(batch.map((p) => p.venue_ref));
+      const want = (batch.length - held.size) * REQUESTS_PER_PLACE * pencePerRequest();
       const got = await room(Math.ceil(want), { holder: `sweep:${id}` });
       if (!got.ok) {
         // The ceiling is monthly and the sweep is not going to get under it by
