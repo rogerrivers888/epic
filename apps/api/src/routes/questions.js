@@ -489,14 +489,17 @@ questionRoutes.get('/sweep', requires('view_library'), async (_req, res, next) =
   } catch (err) { next(err); }
 });
 /** POST /sweep/:id/retry — ask again about the places a finished sweep failed on. Free where the record is seeded. */
+questionRoutes.get('/sweep/:id/retry/estimate', requires('view_library'), async (req, res, next) => {
+  try { res.json(await sweep.retryEstimate(String(req.params.id))); } catch (err) { next(err); }
+});
 questionRoutes.post('/sweep/:id/retry', requires('manage_questions'), async (req, res, next) => {
   try {
-    const row = await sweep.retryFailed(String(req.params.id));
+    const row = await sweep.retryFailed(String(req.params.id), { confirm: req.body?.confirm ?? null });
     if (!row) return res.status(404).json({ error: 'not_found', message: 'No sweep by that id.' });
     if (row.retried) void sweep.work(row.id).catch((err) => console.warn(`sweep ${row.id}: ${err.message}`));
     res.status(202).json({ sweep: row, retried: row.retried });
   } catch (err) {
-    if (err?.code === 'already_running') return res.status(409).json({ error: err.code, message: err.message, sweep: err.sweep ?? null });
+    if (err?.code === 'already_running' || err?.code === 'confirm_required') return res.status(409).json({ error: err.code, message: err.message, plan: err.plan ?? null, sweep: err.sweep ?? null });
     return next(err);
   }
 });

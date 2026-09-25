@@ -681,7 +681,44 @@ export async function places(id) {
  * place cost across both goes is still its cost; nothing is bought twice
  * because the research is seeded from the record it already has.
  */
-export async function retryFailed(id) {
+/** The failed rows a retry would take: not a place still in flight at its deadline. */
+const RETRYABLE = `state = 'failed'
+          and not (coalesce(outcome->'problems'->>0, '') like 'gave up after%' and not coalesce((outcome->>'late')::boolean, false))`;
+
+/**
+ * What a retry would cost, and the number it has to be confirmed with.
+ *
+ * Most retried places are seeded from their record and cost nothing; one
+ * without a website still buys its page lead, and one that was never
+ * identified buys two. The same gate as the sweep itself: nothing paid
+ * starts on a number the caller has not seen (Codex, 25 Sep 2026).
+ */
+export async function retryEstimate(id) {
+  const { rows } = await query(`select venue_ref from research_sweep_places where sweep_id = $1 and ${RETRYABLE}`, [id]);
+  const cost = await requestsStillNeeded(rows.map((r) => r.venue_ref));
+  const counts = [...cost.values()];
+  const requests = counts.reduce((n, c) => n + c, 0);
+  const pence = pencePerRequest();
+  return {
+    places: rows.length,
+    free: counts.filter((c) => c === 0).length,
+    toFindPage: counts.filter((c) => c === 1).length,
+    toIdentify: counts.filter((c) => c === 2).length,
+    requests,
+    pencePerRequest: pence,
+    costGbpHigh: Math.round(requests * pence) / 100,
+    basis: `${rows.length} failed places · ${counts.filter((c) => c === 0).length} seeded from their record and free · `
+      + `${counts.filter((c) => c === 1).length} without a website (one request) · ${counts.filter((c) => c === 2).length} never identified (two) · ${pence}p a request`,
+  };
+}
+
+export async function retryFailed(id, { confirm = null } = {}) {
+  const plan = await retryEstimate(id);
+  if (Number(confirm) !== plan.requests) {
+    const err = new Error(`This retry is ${plan.places} places, up to ${plan.requests} Google requests at £${plan.costGbpHigh.toFixed(2)}. Confirm with ${plan.requests} to run it.`);
+    err.code = 'confirm_required'; err.status = 409; err.plan = plan;
+    throw err;
+  }
   return withTransaction(async (client) => {
     // The same lock `start` takes, and both updates inside it: two retries,
     // or a retry racing a start, could each see no running sweep and both
@@ -699,8 +736,7 @@ export async function retryFailed(id) {
     // lands, which marks it `late`; a retry after that takes it.
     const { rowCount } = await client.query(
       `update research_sweep_places set state = 'pending', outcome = coalesce(outcome, '{}'::jsonb) || '{"retried": true}'::jsonb
-        where sweep_id = $1 and state = 'failed'
-          and not (coalesce(outcome->'problems'->>0, '') like 'gave up after%' and not coalesce((outcome->>'late')::boolean, false))`,
+        where sweep_id = $1 and ${RETRYABLE}`,
       [id]);
     if (!rowCount) return { ...run, retried: 0 };
     const { rows: [reopened] } = await client.query(
