@@ -39,7 +39,7 @@ export const BUCKETS = [
   ['disagree', 2, 'two owned sources already say different things about it'],
   ['chain', 4, 'a big commercial venue — a website shared by three or more places'],
   ['thin', 4, 'a thin area, the best it has'],
-  ['small', 4, 'a small venue — identified, low in the ranking'],
+  ['small', 4, 'a small venue — few reviews on its owned band, or an independent deep in Google\u2019s own ranking'],
   ['dense', 6, 'a busy area, near the top of its drawer'],
 ];
 
@@ -63,8 +63,8 @@ async function candidates() {
         from place_areas a join sized z on z.area_slug = a.area_slug
        order by a.venue_ref, z.n asc, a.area_slug
     ), cand as (
-      select p.venue_ref, s.category_key as category, p.subcategory,
-             r.name, r.lat, r.epic_score, r.website, r.summary, r.matched,
+      select p.venue_ref, s.category_key as category, p.subcategory, p.found_rank,
+             r.name, r.lat, r.epic_score, r.website, r.summary, r.matched, r.count_band,
              f.area_slug, f.area_places
         from place_index p
         join shelf_subcategories s on s.key = p.subcategory and s.active
@@ -82,6 +82,7 @@ async function candidates() {
       having count(distinct source) > 1 and count(distinct value::text) > 1
     )
     select c.venue_ref, c.category, c.subcategory, c.name, c.lat, c.epic_score, c.website, c.area_slug,
+           c.found_rank, c.count_band,
            c.area_places::int as area_places,
            (ch.host is not null) as chain,
            (d.venue_ref is not null) as disagrees,
@@ -122,7 +123,22 @@ export function chooseFor(rows, { perCategory = PER_CATEGORY } = {}) {
     if (bucket === 'dense') take(rows.filter((r) => r.area_places >= dense).sort(byScore), n, bucket);
     if (bucket === 'thin') take(rows.filter((r) => r.area_slug && r.area_places <= thin).sort(byScore), n, bucket);
     if (bucket === 'chain') take(rows.filter((r) => r.chain).sort(byScore), n, bucket);
-    if (bucket === 'small') take(identified.filter((r) => r.epic_score != null).sort((a, b) => a.epic_score - b.epic_score || a.venue_ref.localeCompare(b.venue_ref)), n, bucket);
+    if (bucket === 'small') {
+      // Small means small — a modest venue — never the lowest score, which
+      // selects for the badly described (owner, 25 Sep 2026). The owned
+      // band of the review count says it directly where we hold one ('few');
+      // failing that, an independent — no shared website host — deep in
+      // Google's own ranking of its drawer.
+      const few = identified.filter((r) => r.count_band === 'few').sort(byScore);
+      take(few, n, bucket);
+      const still = n - picks.filter((p) => p.picked_for === bucket).length;
+      if (still > 0) {
+        const independentDeep = identified
+          .filter((r) => !r.chain && r.found_rank != null)
+          .sort((a, b) => b.found_rank - a.found_rank || a.venue_ref.localeCompare(b.venue_ref));
+        take(independentDeep, still, bucket);
+      }
+    }
     if (bucket === 'disagree') {
       // Where two sources already differ; failing that, where two sources
       // both matched, which is where a disagreement is likeliest to turn up.

@@ -62,6 +62,8 @@ test.before(async () => {
                  on conflict (venue_ref) do update set name = excluded.name, lat = excluded.lat, epic_score = excluded.epic_score, website = excluded.website`,
       [r.venue_ref, r.name, r.lat, r.score, r.website]);
   }
+  // Place 20 is well scored but has few reviews on its owned band: small.
+  await query(`update place_records set count_band = 'few' where venue_ref = 'google:ChIJ_ref_020'`);
   // Place 7 was matched by both the open map and Wikipedia: not a
   // disagreement yet, but where one is likeliest, which is the fallback.
   await query(`update place_records set matched = '{"osm":{"ref":"node/7"},"wikipedia":{"title":"Place 7"}}'::jsonb where venue_ref = 'google:ChIJ_ref_007'`);
@@ -83,7 +85,11 @@ test('twenty a category, bucket by bucket, each once, with the reason written be
   assert.ok(by.thin.every((p) => Number(p.venue_ref.slice(-3)) > 50), 'thin picks come from the small areas');
   assert.equal(by.chain.length, 4);
   assert.equal(by.small.length, 4);
-  assert.ok(by.small.every((p) => Number(p.venue_ref.slice(-3)) > 40), 'small is the low end of the ranking');
+  // Small means small: the two with few reviews on their owned band come
+  // first, then independents deep in Google's own ranking — never the
+  // lowest score (owner, 25 Sep 2026).
+  assert.ok(by.small.some((p) => p.venue_ref === 'google:ChIJ_ref_020'), 'few reviews, though highly scored');
+  assert.ok(!by.small.some((p) => Number(p.venue_ref.slice(-3)) % 9 === 0), 'never a chain');
   assert.deepEqual(by.disagree.map((p) => p.venue_ref), ['google:ChIJ_ref_005'], 'the one that really does');
   assert.deepEqual(by['disagree?'].map((p) => p.venue_ref), ['google:ChIJ_ref_007'], 'and the one likeliest to, to make the two');
 });
