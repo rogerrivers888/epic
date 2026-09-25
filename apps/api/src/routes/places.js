@@ -417,6 +417,9 @@ places.get('/search', async (req, res, next) => {
     const shown = withinPage.map((v) => {
       const ref = `${v.source}:${v.sourcePlaceId}`;
       const filed = shelvesForVenue(v, taught, tax.vocab);
+      // Infrastructure gets no shelf and is not shown: the classifier's
+      // verdict (domain/moods.js, travelOnly) is the fence, and this only obeys it.
+      if (filed.travel) return null;
       return {
         ...v,
         venueRef: ref,
@@ -425,7 +428,7 @@ places.get('/search', async (req, res, next) => {
         subcategoryLabel: filed.subcategory ? tax.subByKey.get(filed.subcategory)?.label ?? null : null,
         household: status[ref] ?? null,
       };
-    });
+    }).filter(Boolean);
     // A ride belongs to its park, not to the list beside it.
     markContained(shown);
 

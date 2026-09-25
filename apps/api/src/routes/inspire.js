@@ -381,6 +381,9 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
     .map((v, i) => {
       const ref = `${v.source}:${v.sourcePlaceId}`;
       const p = shelvesForVenue(v, taught, tax.vocab);
+      // Infrastructure gets no shelf and is not shown: the classifier's
+      // verdict (domain/moods.js, travelOnly) is the fence, and this only obeys it.
+      if (p.travel) return null;
       return {
         venueRef: ref, name: v.name, category: v.category,
         subcategory: p?.subcategory ?? null,
@@ -411,6 +414,7 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
         website: v.website ?? null,
       };
     })
+    .filter(Boolean)
     .sort((a, b) => {
       if (a.epicScore != null && b.epicScore != null) return b.epicScore - a.epicScore;
       if (a.epicScore != null) return -1;
@@ -763,17 +767,19 @@ inspire.get('/near', async (req, res, next) => {
       placeAttributes.valuesForMany(everyRef),
     ]);
 
-    let items = around.map((v) => ({
-      venueRef: `${v.source}:${v.sourcePlaceId}`,
+    let items = around.map((v) => {
+      const p = shelvesForVenue(v, taught, tax.vocab);
+      // Infrastructure gets no shelf and is not shown: the classifier's
+      // verdict (domain/moods.js, travelOnly) is the fence, and this only obeys it.
+      if (p.travel) return null;
+      const ref = `${v.source}:${v.sourcePlaceId}`;
+      return {
+      venueRef: ref,
       source: v.source,
       name: v.name,
       category: v.category,
-      ...(() => {
-        const p = shelvesForVenue(v, taught, tax.vocab);
-        const ref = `${v.source}:${v.sourcePlaceId}`;
-        return { moods: p.shelves, subcategory: p.subcategory,
-                 ...marks(p.subcategory, v.goodForChildren, own.get(ref), attrVocab, labelsOf(v)) };
-      })(),
+      moods: p.shelves, subcategory: p.subcategory,
+      ...marks(p.subcategory, v.goodForChildren, own.get(ref), attrVocab, labelsOf(v)),
       experiences: v.experiences ?? [],
       cuisines: v.cuisines ?? [],
       rating: v.rating ?? null,
@@ -798,7 +804,8 @@ inspire.get('/near', async (req, res, next) => {
       estimated: true,
       dwellMinutes: dwellFor(v, household, attendees).minutes,
       household: null,
-    }));
+      };
+    }).filter(Boolean);
 
     // --- the second pool: what the county is actually known for -------------
     // Deduped against the first by name and nearness, not by identifier: the

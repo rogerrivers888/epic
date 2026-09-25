@@ -1103,6 +1103,9 @@ router.get('/:id/along', async (req, res, next) => {
     const rows = venues.map((v) => {
       const venueRef = `${v.source}:${v.sourcePlaceId}`;
       const shelf = shelvesForVenue(v, taught ?? undefined, tax?.vocab ?? undefined);
+      // Infrastructure gets no shelf and is not shown: the classifier's
+      // verdict (domain/moods.js, travelOnly) is the fence, and this only obeys it.
+      if (shelf.travel) return null;
       // Straight-line arithmetic, ours, free and instant. Never a routing call.
       // Anchored, the number is simply how far it is from the place you tapped.
       // Unanchored, it is what the stop adds to the day.
@@ -1147,7 +1150,7 @@ router.get('/:id/along', async (req, res, next) => {
         onShortlist: have.has(venueRef),
         onDay: onDay.has(venueRef),
       };
-    });
+    }).filter(Boolean);
 
     /**
      * The corridor is a fence here, not a bias.

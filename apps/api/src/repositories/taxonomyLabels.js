@@ -266,7 +266,10 @@ export async function save({ namespace, key, label, note, active, decision }) {
   const a = active == null ? null : Boolean(active);
   if (namespace === 'wikidata') {
     // A Wikidata type has one switch, `admit`; a decision is the same switch.
-    const admit = d === 'aside' ? false : d === 'nearby' || d === 'travel' || d === 'generic' || d === 'none' ? true : a;
+    // Travel closes it too: a railway station as a Wikidata type is
+    // infrastructure, and the atlas never harvests infrastructure, so the
+    // classifier's fence (domain/moods.js) has nothing to catch (Codex, 25 Sep 2026).
+    const admit = d === 'aside' || d === 'travel' ? false : d === 'nearby' || d === 'generic' || d === 'none' ? true : a;
     const { rows } = await query(
       `update place_kinds set label = coalesce($2, label), admit = coalesce($3, admit), updated_at = now()
         where qid = $1 returning 'wikidata' as namespace, qid as key, label, category as note, seen_count, admit as active`,
