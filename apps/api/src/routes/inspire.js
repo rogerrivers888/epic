@@ -427,7 +427,7 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
     // What the search returned, what survived the ring, and what survived the
     // shelves — three numbers, because a board that shows two of twenty should
     // be able to say which fence took the other eighteen.
-    returned: got.returned ?? got.venues.length, inRing: got.venues.length, onShelf: mine.length,
+    returned: got.returned ?? got.venues.length, inRing: got.venues.length, onShelf: items.length,
     // How many the matrix offered that the exact pass then put back: the price
     // of a finder that errs wide, and the number to watch if it ever looks
     // like the band is doing nothing.

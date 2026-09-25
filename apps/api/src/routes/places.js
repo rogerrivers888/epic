@@ -386,10 +386,29 @@ places.get('/search', async (req, res, next) => {
       return false;
     };
 
+    // Which drawer of the taxonomy each one lands in — the same answer the home
+    // screen and the back office give, worked out once here rather than three
+    // times differently. It is what makes a correction made on the Shelves page
+    // visible in the list where the problem was noticed: move a chicken shop
+    // out of Restaurants and this is the field that changes.
+    const [taught, tax] = await Promise.all([shelfRules(), taxonomy()]);
+    const filedOf = new Map();
     const inRange = venues
       .map((v) => ({ ...v, distanceKm: Number(kmBetween(near, v).toFixed(2)) }))
       .filter((v) => v.distanceKm <= fence && isWanted(v))
       .sort((a, b) => a.distanceKm - b.distanceKm);
+    // Infrastructure gets no shelf and is not shown: the classifier's verdict
+    // (domain/moods.js, travelOnly) is the fence, and this only obeys it. Read
+    // before the cap, or a rated car park could take a place on the page from
+    // somewhere a household could go (Codex, 25 Sep 2026). What the sources
+    // returned is still remembered below, so the index knows it was seen.
+    const infrastructure = [];
+    const visitable = inRange.filter((v) => {
+      const filed = shelvesForVenue(v, taught, tax.vocab);
+      filedOf.set(v, filed);
+      if (filed.travel) { infrastructure.push(v); return false; }
+      return true;
+    });
     // The cap is a cap on the page, not a judgement about which places matter,
     // and taking the nearest 120 made it into one. OpenStreetMap knows about a
     // hundred and twenty restaurants within four kilometres of central
@@ -403,23 +422,14 @@ places.get('/search', async (req, res, next) => {
     // know nothing about. Within the page the order is still distance: this
     // decides *which* hundred and twenty, not what order they read in.
     const KEEP = 120;
-    const withinPage = inRange.length <= KEEP ? inRange : [
-      ...inRange.filter((v) => v.rating != null),
-      ...inRange.filter((v) => v.rating == null),
+    const withinPage = visitable.length <= KEEP ? visitable : [
+      ...visitable.filter((v) => v.rating != null),
+      ...visitable.filter((v) => v.rating == null),
     ].slice(0, KEEP).sort((a, b) => a.distanceKm - b.distanceKm);
     const status = await householdStatus(household.id, withinPage.map((v) => `${v.source}:${v.sourcePlaceId}`));
-    // Which drawer of the taxonomy each one lands in — the same answer the home
-    // screen and the back office give, worked out once here rather than three
-    // times differently. It is what makes a correction made on the Shelves page
-    // visible in the list where the problem was noticed: move a chicken shop
-    // out of Restaurants and this is the field that changes.
-    const [taught, tax] = await Promise.all([shelfRules(), taxonomy()]);
     const shown = withinPage.map((v) => {
       const ref = `${v.source}:${v.sourcePlaceId}`;
-      const filed = shelvesForVenue(v, taught, tax.vocab);
-      // Infrastructure gets no shelf and is not shown: the classifier's
-      // verdict (domain/moods.js, travelOnly) is the fence, and this only obeys it.
-      if (filed.travel) return null;
+      const filed = filedOf.get(v);
       return {
         ...v,
         venueRef: ref,
@@ -428,7 +438,7 @@ places.get('/search', async (req, res, next) => {
         subcategoryLabel: filed.subcategory ? tax.subByKey.get(filed.subcategory)?.label ?? null : null,
         household: status[ref] ?? null,
       };
-    }).filter(Boolean);
+    });
     // A ride belongs to its park, not to the list beside it.
     markContained(shown);
 
@@ -462,7 +472,10 @@ places.get('/search', async (req, res, next) => {
     // returned, and a place we were told about is one we have seen whether or
     // not it fitted on the page. Indexing the slice alone left the rest out of
     // coverage and open to being bought again by Collect (Codex, 18 Sep 2026).
-    await placeIndex.noteSeen(shown);
+    // The index takes the infrastructure too: it was returned, and a place the
+    // index has seen is one the collection need not buy again. No shelf, no
+    // drawer — it simply is not shown.
+    await placeIndex.noteSeen([...shown, ...infrastructure.map((v) => ({ ...v, venueRef: `${v.source}:${v.sourcePlaceId}` }))]);
     // And what the ratings we just paid for are worth, as our own number.
     //
     // A display search carries a rating and a review count for every place in
