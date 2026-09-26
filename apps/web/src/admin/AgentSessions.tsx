@@ -14,7 +14,7 @@
  * to sessions seen in the last 24 hours, with a link to show all").
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
 import { Press } from '../components/press';
 import { AgentSession, api, ApiError } from '../api';
@@ -29,9 +29,21 @@ export function AgentSessions() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
+  // Only the latest ask may draw: a slow "all" answer arriving after a switch
+  // back to the last 24 hours, or after a grant's reload, would otherwise
+  // replace the list with the wrong one (Codex, 26 Sep 2026). `mode` is read
+  // through a ref so a grant's reload asks for the view on screen now.
+  const asked = useRef(0);
+  const mode = useRef(all);
+  mode.current = all;
   const load = useCallback(async () => {
-    try { const out = await api.agentSessions(all); setRows(out.sessions); setTotal(out.total); } catch { setRows(null); }
-  }, [all]);
+    const n = ++asked.current;
+    try {
+      const out = await api.agentSessions(mode.current);
+      if (n === asked.current) { setRows(out.sessions); setTotal(out.total); }
+    } catch { if (n === asked.current) setRows(null); }
+  }, []);
+  useEffect(() => { void load(); }, [load, all]);
   useEffect(() => { void load(); }, [load]);
 
   const grant = async (id: string, hours: number) => {
