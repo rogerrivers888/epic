@@ -44,3 +44,12 @@ test('a version bump that only adds free facts is caught up for free, and a firs
   assert.ok(PAID_RESEARCH_VERSION < RESEARCH_VERSION);
   assert.equal(alreadyResearched({ enrich_state: 'done', enriched_at: new Date(), research_version: PAID_RESEARCH_VERSION, provenance: { name: 'osm' } }), true);
 });
+
+test('a free top-up that finds nothing leaves a record that still knows the place done, so no paid retry follows (Codex, 26 Sep 2026)', async () => {
+  const { outcomeState } = await import('../src/sources/own.js');
+  assert.equal(outcomeState({ identified: 0, refused: true, topUp: true, provenance: { name: 'osm' } }), 'done');
+  assert.equal(outcomeState({ identified: 0, refused: true, topUp: true, provenance: {} }), 'failed', 'a top-up of a record that knows nothing is not done');
+  assert.equal(outcomeState({ identified: 0, refused: true, topUp: false, provenance: { name: 'osm' } }), 'failed', 'a paid pass keeps its old rule');
+  assert.equal(outcomeState({ identified: 0, refused: false }), 'partial');
+  assert.equal(outcomeState({ identified: 1, refused: true }), 'done');
+});

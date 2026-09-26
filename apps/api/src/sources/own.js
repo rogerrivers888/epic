@@ -431,6 +431,18 @@ export function alreadyResearched(row) {
   return Boolean(fresh && isIdentified(row.provenance));
 }
 
+/**
+ * How a research pass ends. Found this time: done. A free top-up of a record
+ * whose kept facts still say which place it is: done, because nothing it held
+ * was lost and no retry should buy what it did not need. Otherwise a refusal
+ * is failed and an empty answer partial, as before.
+ */
+export function outcomeState({ identified, refused, topUp = false, provenance = {} }) {
+  if (identified) return 'done';
+  if (topUp && isIdentified(provenance)) return 'done';
+  return refused ? 'failed' : 'partial';
+}
+
 export function isIdentified(provenance) {
   return ['name', 'osm_ref', 'website'].some((f) => provenance?.[f]);
 }
@@ -814,10 +826,17 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
   // consolation prize, not an answer, so a record that got no further is left
   // as partial and comes back round rather than being written off on the
   // strength of a postcode.
-  const state = identified ? 'done' : refused ? 'failed' : 'partial';
+  // A free top-up (paid off, nothing replaced) of a record that already knows
+  // the place leaves it done, whatever the afternoon's free services said: a
+  // failed top-up downgraded to partial went on to a paid retry, which is the
+  // spend a free version bump promised not to cause (Codex, 26 Sep 2026).
+  const topUp = !paid && !replace;
+  const state = outcomeState({ identified, refused, topUp, provenance });
 
   const attempts = await owned.recordAttempt(venueRef, {
-    state, error: problems.length ? problems.join('; ') : null, matched, researchVersion: RESEARCH_VERSION,
+    state, error: problems.length ? problems.join('; ') : null,
+    matched: topUp ? { ...(before?.matched ?? {}), ...matched } : matched,
+    researchVersion: RESEARCH_VERSION,
   });
   const schedule = state === 'failed' ? BACKOFF_MIN : state === 'partial' ? EMPTY_BACKOFF_MIN : null;
   const giveUpAfter = state === 'failed' ? MAX_ATTEMPTS : EMPTY_BACKOFF_MIN.length + 1;
