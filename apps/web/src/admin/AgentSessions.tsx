@@ -44,7 +44,6 @@ export function AgentSessions() {
     } catch { if (n === asked.current) setRows(null); }
   }, []);
   useEffect(() => { void load(); }, [load, all]);
-  useEffect(() => { void load(); }, [load]);
 
   const grant = async (id: string, hours: number) => {
     setBusy(id); setError(null);
