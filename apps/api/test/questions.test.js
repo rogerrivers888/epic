@@ -535,3 +535,33 @@ test('a floor that is not a whole number is no floor, not a 500', async () => {
   assert.equal((await sets.candidates({ subcategory: sub, status: 'unresolved', kind: 'unclear', minSeen: 2.9, limit: 5 })).length, 0);
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
 });
+
+// ---------------------------------------------------------------------------
+// the verdict on the Google pass
+// ---------------------------------------------------------------------------
+
+test('the Google pass is decided against, and the code refuses before it quotes a price', async () => {
+  // The owner, 26 Sep 2026: "No second Google pass. The 21 Sep run is
+  // conclusive — 41,816 words, nought promotable… Record that verdict so
+  // nobody proposes it a third time." Migration 251 records it; this pins
+  // that the recording is read, so the door cannot be reopened by deleting a
+  // line — only by a later verdict row with evidence of its own.
+  const { rows: [verdict] } = await query("select * from data_verdicts where key = 'harvest.google-pass'");
+  assert.ok(verdict, 'migration 251 must have written the verdict');
+  assert.equal(verdict.evidence.words_raised, 41816);
+  assert.equal(verdict.evidence.promotable, 0);
+  const harvest = await import('../src/sources/vocabulary.js');
+  assert.equal((await harvest.verdictAgainst('harvest.google-pass'))?.key, 'harvest.google-pass');
+  await assert.rejects(
+    () => harvest.googleHarvest({ confirm: 295 }),
+    (err) => err.code === 'decided_against' && /decided against on/.test(err.message) && !('plan' in err),
+    'the refusal names the verdict and quotes no price',
+  );
+  // A later row that supersedes it reopens the door — and only that.
+  await query(
+    `insert into data_verdicts (key, question, verdict, supersedes, decided_by)
+     values ('harvest.google-pass.test-reopen', 'test', 'test', 'harvest.google-pass', 'test')`,
+  );
+  assert.equal(await harvest.verdictAgainst('harvest.google-pass'), null, 'a superseded verdict no longer stands');
+  await query("delete from data_verdicts where key = 'harvest.google-pass.test-reopen'");
+});

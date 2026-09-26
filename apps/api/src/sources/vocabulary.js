@@ -56,6 +56,25 @@ export const MAX_GOOGLE_REQUESTS = Number(process.env.EPIC_HARVEST_MAX_REQUESTS 
 /** What one Text Search with a review summary costs at list price, in pounds. */
 export const COST_PER_REQUEST_GBP = PRICE_PER_UNIT_USD['google-search'] * USD_TO_GBP;
 
+/**
+ * A decision that still stands.
+ *
+ * `data_verdicts` is where an experiment's answer is written down with its
+ * evidence and the trigger that would reopen it (migration 187). A verdict is
+ * standing while no later row names it in `supersedes` — so reversing one is a
+ * new row with new evidence, never an edit, and code that reads this cannot be
+ * argued past by deleting a line.
+ */
+export async function verdictAgainst(key) {
+  const { rows } = await query(
+    `select v.* from data_verdicts v
+      where v.key = $1
+        and not exists (select 1 from data_verdicts later where later.supersedes = v.key)`,
+    [key],
+  );
+  return rows[0] ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // the sample
 // ---------------------------------------------------------------------------
@@ -405,6 +424,20 @@ export async function googleHarvest({
   subcategories = null, regionsPer = REGIONS.length, confirm = null,
   householdId = null, sessionId = null, onProgress = null,
 } = {}) {
+  // The verdict comes before the estimate, so nobody is quoted a price for a
+  // run that has been decided against. The 21 Sep 2026 pass bought 41,816
+  // words and nought of them were promotable — the commonest were *staff*,
+  // *delicious*, *friendly* — and the owner's verdict (26 Sep) is that it is
+  // conclusive: no second pass, "record that verdict so nobody proposes it a
+  // third time" (migration 251, `data_verdicts.harvest.google-pass`). A later
+  // verdict row that supersedes it reopens the door; nothing else does.
+  const standing = await verdictAgainst('harvest.google-pass');
+  if (standing) {
+    throw Object.assign(
+      new Error(`The Google pass was decided against on ${standing.decided_on}: ${standing.verdict} Revisit only if: ${standing.revisit_when}`),
+      { status: 409, code: 'decided_against', verdict: standing },
+    );
+  }
   const plan = await estimate({ subcategories, regionsPer });
   if (confirm !== plan.requests) {
     throw Object.assign(
