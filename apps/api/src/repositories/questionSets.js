@@ -790,10 +790,10 @@ export async function globalFromCandidate(id, { label = null, kind = 'yesno', re
     // over) — converting a set fact to a global one is its own decision, with
     // its answers moved, and not a side effect of promoting a word.
     const { rows: local } = await client.query(
-      // Active, or switched off with answers still attached to it — either way
-      // a new global id would leave them behind (Codex, 26 Sep 2026).
-      `select q.set_key from questions q where q.attribute_key = $1 and q.scope = 'set'
-          and (q.active or exists (select 1 from place_answers pa where pa.question_id = q.id))`, [key],
+      // Any set question on the label, on or off: an active one would ask the
+      // fact twice, a switched-off one strands its answers or can be switched
+      // back on beside the global (Codex, 26 Sep 2026, three rounds).
+      "select set_key from questions where attribute_key = $1 and scope = 'set'", [key],
     );
     if (local.length) throw bad(`${key} is already asked by ${local.map((r) => r.set_key).join(', ')}. Making it global is a separate decision — the answers it holds have to move with it.`);
     let question = await addQuestion({ attributeKey: key, scope: 'global', refreshDays, fromCandidate: id }, client);
