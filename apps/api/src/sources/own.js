@@ -722,6 +722,9 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
     }
   } catch (err) {
     problems.push(`Wikipedia: ${String(err?.message || err).slice(0, 120)}`);
+    // The facts were kept, so the match they came from is kept with them
+    // (Codex, 26 Sep 2026).
+    if (before?.matched?.wikipedia) matched.wikipedia = before.matched.wikipedia;
   }
 
   // 5. The hygiene register, once there is a postcode to ask with — from
