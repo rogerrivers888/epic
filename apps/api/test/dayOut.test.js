@@ -55,7 +55,8 @@ test('the same test, in each drawer named for a thing', () => {
   assert.deepEqual(pick(dayOutVerdict('climbing', { tags: { leisure: 'sports_centre', sport: 'climbing' }, name: 'x' })), ['kept', 'tag']);
   assert.deepEqual(pick(dayOutVerdict('climbing', { tags: { leisure: 'sports_centre' }, text: 'a 12 m climbing wall', name: 'x' })), ['kept', 'text']);
   assert.deepEqual(pick(dayOutVerdict('racquet-clubs', { tags: { leisure: 'sports_centre', sport: 'tennis' }, name: 'x' })), ['kept', 'tag']);
-  assert.deepEqual(pick(dayOutVerdict('racquet-clubs', { tags: { leisure: 'sports_centre' }, name: 'Royal Ascot Tennis Club' })), ['provisional', 'name']);
+  // A tennis club with no pay-and-play on the map is a members' club (owner, 26 Sep 2026), not a provisional keep.
+  assert.deepEqual(pick(dayOutVerdict('racquet-clubs', { tags: { leisure: 'sports_centre' }, name: 'Royal Ascot Tennis Club' })), ['out', 'members']);
   // Padel is a court, so a padel place is in racquet-clubs even though it is out of Pools.
   assert.deepEqual(pick(dayOutVerdict('racquet-clubs', { tags: { leisure: 'sports_centre', sport: 'padel' }, name: 'We Are Padel' })), ['kept', 'tag']);
 });
@@ -255,4 +256,30 @@ test('a dry run with nothing out never opens the database', async () => {
   // No `land` handed in: if the landing were loaded eagerly this would reach for Postgres.
   const d = await dryRun({ drawer: 'pools', box: boxOf('51.39,-0.70,51.44,-0.60'), fetch: fake(elements), textFor: async () => '' });
   assert.deepEqual([d.rows[0].verdict, d.rows[0].staysIn], ['kept', 'pools']);
+});
+
+// ---------------------------------------------------------------------------
+// the owner's four, before the switch (26 Sep 2026)
+// ---------------------------------------------------------------------------
+
+test('an object just over the box edge still speaks for the centre inside it; a candidate outside the box does not', async () => {
+  const box = boxOf('51.40,-0.70,51.45,-0.60');
+  const elements = [
+    el(1, { leisure: 'sports_centre', name: 'Easton Leisure Centre' }, 51.4002, -0.6003),   // inside, near the south-west corner
+    el(2, { leisure: 'swimming_pool', name: 'Easton pool' }, 51.3998, -0.6003),             // 45 m south: in the margin, outside the box
+    el(3, { leisure: 'sports_centre', name: 'Over The Edge SC', swimming_pool: 'yes' }, 51.3995, -0.65), // outside the box: not a candidate
+  ];
+  const d = await dryRun({ drawer: 'pools', box, fetch: fake(elements), textFor: async () => '' });
+  const by = Object.fromEntries(d.rows.map((r) => [r.name, [r.verdict, r.by]]));
+  assert.deepEqual(by['Easton Leisure Centre'], ['kept', 'object'], 'Easton comes back kept');
+  assert.equal(by['Over The Edge SC'], undefined, 'the margin brings objects, not candidates');
+});
+
+test('a tennis club with no pay-and-play on the map is members only; a padel hall that charges is not', () => {
+  assert.deepEqual(pick(dayOutVerdict('racquet-clubs', { tags: { leisure: 'sports_centre', sport: 'tennis', start_date: '1905' }, name: 'Royal Ascot Tennis Club' })), ['out', 'members']);
+  assert.deepEqual(pick(dayOutVerdict('racquet-clubs', { tags: { leisure: 'sports_centre', sport: 'tennis' }, name: 'Clifton Lawn Tennis Club' })), ['out', 'members']);
+  assert.deepEqual(pick(dayOutVerdict('racquet-clubs', { tags: { leisure: 'sports_centre', sport: 'padel', fee: 'yes' }, name: 'Rocket Padel' })), ['kept', 'tag']);
+  assert.deepEqual(pick(dayOutVerdict('racquet-clubs', { tags: { leisure: 'sports_centre', sport: 'padel', fee: 'yes' }, name: 'We Are Padel' })), ['kept', 'tag']);
+  // A club that says it sells a session is not a members' club for this test.
+  assert.deepEqual(pick(dayOutVerdict('racquet-clubs', { tags: { leisure: 'sports_centre', sport: 'tennis', fee: 'yes' }, name: 'Riverside Tennis Club' })), ['kept', 'tag']);
 });

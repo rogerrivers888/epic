@@ -119,6 +119,19 @@ export const DRAWERS = Object.keys(NAMED_FOR);
 export const MEMBERS_ONLY_BRANDS = ['david lloyd', 'nuffield health', 'virgin active', 'bannatyne'];
 const MEMBERS_TEXT = /\bmembers[’']?\s*only\b|\bmembership (is )?required\b|\bmembers[’']? club\b|\bprivate members\b/i;
 
+/**
+ * A racquet club is a members' club unless the map says it sells a session.
+ *
+ * The owner, 26 Sep 2026: "padel and tennis → racquet-clubs: only pay-and-play
+ * or open to the public. Members' clubs (Royal Ascot Tennis Club, Clifton
+ * Lawn) fail the members-only rule like David Lloyd." On the map both clubs
+ * carry `sport=tennis` and nothing else; Rocket Padel and We Are Padel carry
+ * `fee=yes`. So a "… Tennis Club" with no `fee=yes` or public `access` is
+ * members only, and a padel hall that charges is not.
+ */
+const RACQUET_CLUB_NAME = /\b(tennis|squash|racquet|racket|padel|badminton)\s+club\b|\blawn tennis\b/i;
+const saysPayAndPlay = (t) => has(t, 'fee', 'yes') || has(t, 'access', 'yes', 'public', 'customers', 'permissive');
+
 export function membersOnly({ tags = null, text = '', name = '' } = {}) {
   const t = tags ?? {};
   if (has(t, 'access', 'private', 'members', 'membership')) return 'access=private';
@@ -126,6 +139,7 @@ export function membersOnly({ tags = null, text = '', name = '' } = {}) {
   const brand = String(t.brand ?? t.operator ?? name ?? '').toLowerCase();
   const chain = MEMBERS_ONLY_BRANDS.find((b) => brand.includes(b));
   if (chain) return `a members-only chain (${t.brand ?? t.operator ?? name})`;
+  if (name && RACQUET_CLUB_NAME.test(String(name)) && !saysPayAndPlay(t)) return 'a racquet club with no pay-and-play on the map';
   if (text && MEMBERS_TEXT.test(String(text))) return 'its own page says members only';
   return null;
 }

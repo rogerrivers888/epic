@@ -3348,6 +3348,24 @@ router.get('/day-out-test', requires('view_library'), async (req, res, next) => 
   } catch (err) { next(err); }
 });
 
+/**
+ * "Not in Epic" is a list, never a delete (A5). What the day-out test took off
+ * every shelf, with the drawer it held and why — and the way back.
+ */
+router.get('/not-in-epic', requires('view_library'), async (req, res, next) => {
+  try { res.json({ places: await dayOut.notInEpic({ limit: Math.min(1000, Number(req.query.limit ?? 200) || 200) }) }); } catch (err) { next(err); }
+});
+
+router.post('/not-in-epic/restore', requires('manage_library'), async (req, res, next) => {
+  try {
+    const ref = String(req.body?.ref ?? '').trim();
+    if (!ref) throw bad('Name the place to put back.');
+    const row = await dayOut.restoreToEpic(ref);
+    if (!row) return res.status(404).json({ error: 'not_found', message: 'That place is not on the Not in Epic list.' });
+    return res.json({ restored: row });
+  } catch (err) { return next(err); }
+});
+
 router.get('/postcodes', requires('view_library'), async (_req, res, next) => {
   try {
     const [state, { rows: [count] }] = await Promise.all([

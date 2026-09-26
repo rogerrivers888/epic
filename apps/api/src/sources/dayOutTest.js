@@ -100,10 +100,24 @@ async function heldFor(venueRef) {
 // the dry run
 // ---------------------------------------------------------------------------
 
+/**
+ * About a hundred metres of latitude and longitude at British latitudes, so
+ * the objects a candidate is judged by are fetched a little beyond the box
+ * the candidates come from. Splitting Bristol into quarters put Easton
+ * Leisure Centre's pool, twenty-nine metres away, just over its quarter's
+ * edge, and the centre went from kept to provisional for it (owner, 26 Sep
+ * 2026: "fetch named-for objects with a ~100 m margin").
+ */
+export const MARGIN = { lat: 0.001, lng: 0.0016 };
+
 function queryFor(drawer, box) {
   const b = `(${box.s},${box.w},${box.n},${box.e})`;
-  return `[out:json][timeout:120];(nwr${NAMED_FOR[drawer].selector}${b};nwr${OBJECTS[drawer]}${b};);out center tags;`;
+  const wider = `(${box.s - MARGIN.lat},${box.w - MARGIN.lng},${box.n + MARGIN.lat},${box.e + MARGIN.lng})`;
+  return `[out:json][timeout:120];(nwr${NAMED_FOR[drawer].selector}${b};nwr${OBJECTS[drawer]}${wider};);out center tags;`;
 }
+
+/** Whether a point lies inside the box the candidates came from, rather than the margin. */
+const inBox = (box, p) => p.lat != null && p.lat >= box.s && p.lat <= box.n && p.lng >= box.w && p.lng <= box.e;
 
 /**
  * The dry run: every place the drawer would be fed from inside the box, with
@@ -188,7 +202,9 @@ export async function dryRun({ drawer, box, textFor = null, fetch = overpassQuer
   const spec = NAMED_FOR[drawer];
   const data = await fetch(queryFor(drawer, box), { timeoutMs: 130_000 });
   const els = (data.elements ?? []).map(withPoint);
-  const candidates = els.filter((el) => isCandidate(drawer, el));
+  // Candidates come from the box; objects from the box and its margin, so a
+  // pool just over a quarter's edge still speaks for the centre inside it.
+  const candidates = els.filter((el) => isCandidate(drawer, el) && inBox(box, el));
   const objects = els.filter((el) => spec.object(el.tags));
   const readText = textFor ?? (async (c) => (await heldFor(`osm:${c.type}/${c.id}`)).text);
   // The taxonomy's landing is loaded the first time an out row needs it, so
@@ -275,7 +291,7 @@ async function objectsAround(drawer, { lat, lng }, fetch = overpassQuery) {
  * The write is allowed to fail loudly: a verdict that could not be stored is
  * a place to come back to, not a place done (Codex, 26 Sep 2026).
  */
-export async function judge(venueRef, { drawer, name = '', lat = null, lng = null, tags = null, text = '', fetch = overpassQuery, write = true } = {}) {
+export async function judge(venueRef, { drawer, name = '', lat = null, lng = null, tags = null, text = '', fetch = overpassQuery, write = true, land = null } = {}) {
   if (!dayOutTestOn() || !DRAWERS.includes(drawer)) return null;
   const nearby = tags && NAMED_FOR[drawer].tag(tags) ? [] : await objectsAround(drawer, { lat, lng }, fetch);
   const v = dayOutVerdict(drawer, { tags, nearby, text, name });
@@ -285,8 +301,78 @@ export async function judge(venueRef, { drawer, name = '', lat = null, lng = nul
       field: 'day_out_test', source: 'own', value: { drawer, ...v, checkedAt: new Date().toISOString() },
       licence: 'ours', retention: 'indefinite', confidence: v.verdict === 'provisional' ? 0.5 : 1,
     });
+    await applyVerdict(venueRef, { drawer, verdict: v, tags, land });
   }
   return v;
+}
+
+// ---------------------------------------------------------------------------
+// what a verdict does to the filing
+// ---------------------------------------------------------------------------
+
+/**
+ * Out of Pools is not out of Epic; and "not in Epic" is a list, never a
+ * delete (owner, 26 Sep 2026, A5).
+ *
+ * A kept or provisional place is left where it is. An out place is refiled
+ * under the drawer its own labels land in with the failed drawer's feeder
+ * taken away; a place with nowhere left keeps its row and everything on it,
+ * has its subcategory set aside into `not_in_epic_before` so every list that
+ * keys on a subcategory drops it, and carries the reason and the moment
+ * (migration 262). `restoreToEpic` puts it back exactly as it was.
+ */
+export async function applyVerdict(venueRef, { drawer, verdict, tags = null, land = null }) {
+  if (!verdict || verdict.verdict !== 'out') return { effect: 'kept' };
+  const labels = labelsOf(tags ?? {}).filter((l) => !FEEDER[drawer]?.includes(l));
+  const landing = land ?? (labels.length ? await landingFor() : null);
+  const filed = labels.length && landing ? landing(labels) : null;
+  let other = filed?.subcategory ?? null;
+  if (other === drawer || (verdict.by === 'members' && DRAWERS.includes(other))) other = null;
+  if (other) {
+    const { rows } = await query(
+      `update place_index p
+          set subcategory = $2, category = coalesce((select category_key from shelf_subcategories where key = $2), p.category),
+              derived_by = 'day-out-test', indexed_at = now()
+        where p.venue_ref = $1 and p.subcategory = $3
+        returning venue_ref`,
+      [venueRef, other, drawer],
+    );
+    return { effect: rows.length ? 'refiled' : 'unchanged', to: other };
+  }
+  const { rows } = await query(
+    `update place_index p
+        set not_in_epic_before = coalesce(p.not_in_epic_before, p.subcategory), subcategory = null,
+            not_in_epic_at = now(), not_in_epic_reason = $2, indexed_at = now()
+      where p.venue_ref = $1 and p.subcategory = $3
+      returning venue_ref`,
+    [venueRef, `${drawer}: ${verdict.reason}`, drawer],
+  );
+  return { effect: rows.length ? 'not-in-epic' : 'unchanged' };
+}
+
+/** The reversible list: what the test took off every shelf, and why. */
+export async function notInEpic({ limit = 200 } = {}) {
+  const { rows } = await query(
+    `select p.venue_ref, r.name, p.not_in_epic_before as was, p.not_in_epic_reason as reason, p.not_in_epic_at as at
+       from place_index p left join place_records r on r.venue_ref = p.venue_ref
+      where p.not_in_epic_at is not null
+      order by p.not_in_epic_at desc limit $1`,
+    [limit],
+  );
+  return rows;
+}
+
+/** Back exactly as it was: the drawer it held, the row it never lost. */
+export async function restoreToEpic(venueRef) {
+  const { rows } = await query(
+    `update place_index p
+        set subcategory = p.not_in_epic_before, not_in_epic_before = null, not_in_epic_at = null, not_in_epic_reason = null,
+            derived_by = 'hand', indexed_at = now()
+      where p.venue_ref = $1 and p.not_in_epic_at is not null
+      returning venue_ref, subcategory`,
+    [venueRef],
+  );
+  return rows[0] ?? null;
 }
 
 /**
