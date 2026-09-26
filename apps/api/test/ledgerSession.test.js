@@ -120,3 +120,24 @@ test('a session the ledger names survives the sweep of dead sessions', async (t)
   const { rows } = await query(`select token_hash from api_sessions where token_hash like 'test:ledger-dead-%' order by 1`);
   assert.deepEqual(rows.map((r) => r.token_hash), ['test:ledger-dead-spent'], 'the idle one goes, the one with spend on it stays');
 });
+
+test('a "plan" that is not a plan session is written as no plan, not refused after the paid call', async (t) => {
+  // Callers had handed the plan argument an api session id for years, and the
+  // voice route falls back to one; a foreign-key refusal there would land
+  // after Claude or OpenAI had already been paid (Codex, 26 Sep 2026).
+  const { rows: [s] } = await query(
+    `insert into api_sessions (token_hash, label) values ('test:ledger-notplan', 'device') on conflict (token_hash) do update set label = excluded.label returning id`);
+  t.after(async () => {
+    await query(`delete from provider_calls where purpose like 'test.ledger.notplan%'`);
+    await query(`delete from api_sessions where token_hash = 'test:ledger-notplan'`);
+  });
+  await providerCalls.recordTokens({ householdId: null, sessionId: s.id, planSessionId: s.id, provider: 'anthropic', purpose: 'test.ledger.notplan.tokens', costUsd: 0.001 });
+  await providerCalls.recordMetered({ householdId: null, sessionId: s.id, planSessionId: s.id, provider: 'openai', purpose: 'test.ledger.notplan.metered', units: { 'openai-audio-seconds': 3 }, costUsd: 0 });
+  await providerCalls.record(null, 'google', 'test.ledger.notplan.record', { google: 1 }, s.id, null, { planSessionId: s.id });
+  const { rows } = await query(`select purpose, session_id, plan_session_id from provider_calls where purpose like 'test.ledger.notplan%' order by purpose`);
+  assert.equal(rows.length, 3, 'all three reached the ledger');
+  assert.ok(rows.every((r) => r.session_id === s.id && r.plan_session_id === null), 'each on the session, none pretending to be a plan');
+  // And the receipt no longer throws on its renamed argument.
+  const summary = await providerCalls.summary(null, '00000000-0000-4000-8000-000000000000');
+  assert.equal(typeof summary.session_calls, 'number');
+});

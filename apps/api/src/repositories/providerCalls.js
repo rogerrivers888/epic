@@ -71,6 +71,13 @@ export async function sessionFor(sessionId = null) {
  * the run's receipt, a trip's spend and the per-plan call bound read by it.
  * A plan is not a session — session_id is always the api session — and the
  * two are separate columns (migration 261, 26 Sep 2026).
+ *
+ * Written through `select id from plan_sessions where id = …`, so a value
+ * that is not a plan session — callers had been handing the same argument an
+ * api session id for years, and the voice route falls back to one — lands as
+ * no plan rather than as a foreign-key refusal after the paid call has been
+ * made (Codex, 26 Sep 2026). The session itself still comes from the caller
+ * or the context either way.
  */
 export async function record(householdId, provider, purpose, units = null, sessionId = null, venueRef = null, { planSessionId = null } = {}) {
   // The money as well as the meter. The monthly ceiling is a sum of
@@ -90,7 +97,7 @@ export async function record(householdId, provider, purpose, units = null, sessi
   const session = await sessionFor(sessionId);
   await query(
     `insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd, venue_ref, ok, ms, failed, fault, watched, plan_session_id)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, (select id from plan_sessions where id = $13))`,
     [householdId, session, provider, purpose, units, costOf(units, provider) || null, venueRef,
       health.ok, health.ms, health.failed, health.fault, health.watched, planSessionId],
   );
@@ -104,7 +111,7 @@ export async function recordTokens(c) {
     `insert into provider_calls
        (household_id, session_id, provider, purpose, input_tokens, output_tokens,
         cache_read_tokens, cache_write_tokens, estimated_cost_usd, ok, ms, failed, fault, watched, plan_session_id)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, (select id from plan_sessions where id = $15))`,
     [c.householdId, session, c.provider, c.purpose, c.inputTokens ?? null, c.outputTokens ?? null,
       c.cacheReadTokens ?? null, c.cacheWriteTokens ?? null, c.costUsd,
       c.ok ?? null, c.ms ?? null, c.ok === false ? 1 : 0, c.fault ?? null,
@@ -128,7 +135,7 @@ export async function recordFailure({ householdId = null, sessionId = null, plan
   if (!session) return;
   await query(
     `insert into provider_calls (household_id, session_id, provider, purpose, estimated_cost_usd, ok, ms, failed, fault, watched, plan_session_id)
-     values ($1, $2, $3, $4, 0, false, $5, 1, $6, 1, $7)`,
+     values ($1, $2, $3, $4, 0, false, $5, 1, $6, 1, (select id from plan_sessions where id = $7))`,
     [householdId, session, provider, purpose, ms, String(fault ?? 'error').slice(0, 40), planSessionId],
   ).catch(() => null);
 }
@@ -142,7 +149,7 @@ export async function recordMetered({ householdId, sessionId = null, planSession
   const session = await sessionFor(sessionId);
   await query(
     `insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd, ok, ms, failed, fault, watched, plan_session_id)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, (select id from plan_sessions where id = $12))`,
     [householdId, session, provider, purpose, units, costUsd, ok, ms, ok === false ? 1 : 0, fault,
       ok == null ? null : 1, planSessionId],
   );
@@ -252,7 +259,7 @@ export async function summary(householdId, planSessionId) {
        count(*) filter (where created_at >= date_trunc('month', now()))::int          as month_calls,
        coalesce(sum(estimated_cost_usd) filter (where created_at >= date_trunc('month', now())), 0)::float as month_cost_usd
      from provider_calls where household_id = $1`,
-    [householdId, sessionId],
+    [householdId, planSessionId],
   );
   return rows[0];
 }
