@@ -108,14 +108,23 @@ export function beyondTheLead(extract) {
  * refused unless the place is the kind of thing a landform is.
  */
 export const SETTLEMENT_OR_AREA = new Set([
+  // Each id beside Wikidata's own English label, checked against Wikidata on
+  // 26 Sep 2026: the first list carried a label from memory, and "district
+  // (UK)" was in fact Q179049, nature reserve — so every nature reserve's own
+  // article was refused for the nature reserve.
   'Q486972', // human settlement
-  'Q515', 'Q3957', 'Q532', 'Q5084', 'Q1549591', 'Q7930989', 'Q702492', // city, town, village, hamlet, big city, city/town, urban area
-  'Q56061', 'Q1115575', 'Q211690', 'Q1187811', 'Q3624078', // administrative territorial entity, civil parish, London borough, metropolitan borough, sovereign state
-  'Q179049', 'Q3455524', 'Q1637706', 'Q123705', 'Q188509', 'Q15303838', // district (UK), county, city with millions, neighbourhood, suburb, London district
-  'Q1907114', 'Q2983893', 'Q5119', 'Q1093829', 'Q1500350', // metropolitan area, quarter, capital, city (US), township
+  'Q515', 'Q3957', 'Q532', 'Q5084', // city, town, village, hamlet
+  'Q1549591', 'Q1637706', 'Q7930989', 'Q702492', 'Q18511725', 'Q1187811', // big city, million city, city or town, urban area, market town, college town
+  'Q5119', 'Q1093829', 'Q1500350', 'Q15303838', // capital city, city in the United States, township of China, municipality seat
+  'Q123705', 'Q188509', 'Q2983893', 'Q1907114', // neighborhood, suburb, quarter, metropolitan area
+  'Q56061', 'Q3455524', 'Q3624078', 'Q1115575', // administrative territorial entity, administrative region, sovereign state, civil parish
+  'Q211690', 'Q1002812', 'Q349084', 'Q1187580', 'Q1136601', // London borough, metropolitan borough, district of England, non-metropolitan district, unitary authority area
+  'Q180673', 'Q769603', // ceremonial county of England, non-metropolitan county
 ]);
 export const LANDFORM = new Set([
-  'Q8502', 'Q54050', 'Q4022', 'Q23397', 'Q39816', 'Q23442', 'Q39594', 'Q2143825', 'Q473972', 'Q4421', 'Q188055', // mountain, hill, river, lake, valley, island, moor, hillside, protected area, forest, common land
+  'Q8502', 'Q54050', 'Q740445', 'Q4022', 'Q23397', 'Q39816', // mountain, hill, mountain ridge, river, lake, valley
+  'Q23442', 'Q162602', 'Q39594', 'Q4421', // island, river island, bay, forest
+  'Q473972', 'Q179049', 'Q2143825', // protected area, nature reserve, hiking trail
 ]);
 const LANDFORM_KIND = /hill|mountain|park|wood|forest|nature|reserve|beach|coast|lake|river|water|garden|trail|common|heath|moor|fell|valley|view|cave|fall|island|outdoor|walk|countryside/i;
 

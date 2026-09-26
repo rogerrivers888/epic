@@ -383,12 +383,22 @@ export async function wikipediaAudit() {
        left join place_index p on p.venue_ref = f.venue_ref
       where f.field = 'wikidata_id' and f.source = 'wikipedia' and f.expires_at is null`);
   const classes = await classesOf(rows.map((r) => r.qid));
-  const flagged = rows
+  const judged = rows
     // Both what the record calls it and which drawer it is in: a hill filed
     // as "attraction" in the hills drawer is a hill (Codex, 26 Sep 2026).
     .map((r) => ({ ...r, why: refused(classes[r.qid] ?? [], [r.category, r.subcategory].filter(Boolean).join(' ')) }))
     .filter((r) => r.why);
-  return { checked: rows.length, flagged: flagged.length, places: flagged.map((r) => ({ venue_ref: r.venue_ref, name: r.name, subcategory: r.subcategory, qid: r.qid, why: r.why, attached: r.attached ?? [] })) };
+  // A place with no drawer and no category may be the town itself — a trip's
+  // base is a town — and then the town's article is the right one. Nothing
+  // says which, so it is listed and held back, never forgotten (26 Sep 2026).
+  const canJudge = (r) => Boolean(r.category || r.subcategory);
+  const shape = (r) => ({ venue_ref: r.venue_ref, name: r.name, category: r.category ?? null, subcategory: r.subcategory, qid: r.qid, why: r.why, attached: r.attached ?? [] });
+  const flagged = judged.filter(canJudge);
+  const heldBack = judged.filter((r) => !canJudge(r));
+  return {
+    checked: rows.length, flagged: flagged.length, places: flagged.map(shape),
+    heldBack: heldBack.length, unjudged: heldBack.map((r) => ({ ...shape(r), reason: 'no drawer or category to judge the article against' })),
+  };
 }
 
 export { sweep };

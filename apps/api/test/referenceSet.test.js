@@ -301,3 +301,26 @@ test('forgetting a wrong article takes the record’s ownership down with it, an
   await own.forgetEncyclopedia(nine);
   assert.equal((await query(`select ownership from place_index where venue_ref = $1`, [nine])).rows[0].ownership, 'owned');
 });
+
+test('the audit flags a filed place paired with a town, and holds back a place it has nothing to judge against (26 Sep 2026)', async (t) => {
+  const filed = 'google:ChIJ_ref_011';
+  const unfiled = 'google:ChIJ_ref_unfiled';
+  await query(`insert into place_records (venue_ref, name, enrich_state) values ($1, 'Clevedon', 'done') on conflict (venue_ref) do update set category = null`, [unfiled]);
+  for (const [ref, qid] of [[filed, 'Q783210'], [unfiled, 'Q670079']]) {
+    await query(`insert into place_facts (venue_ref, field, source, value, licence, retention, confidence, expires_at) values ($1, 'wikidata_id', 'wikipedia', $2, 'x', 'indefinite', 1, null) on conflict do nothing`, [ref, JSON.stringify(qid)]);
+  }
+  const real = globalThis.fetch;
+  t.after(async () => {
+    globalThis.fetch = real;
+    await query(`delete from place_facts where venue_ref = any($1) and field = 'wikidata_id'`, [[filed, unfiled]]);
+    await query(`delete from place_records where venue_ref = $1`, [unfiled]);
+  });
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ entities: {
+    Q783210: { claims: { P31: [{ mainsnak: { datavalue: { value: { id: 'Q3957' } } } }] } },
+    Q670079: { claims: { P31: [{ mainsnak: { datavalue: { value: { id: 'Q3957' } } } }] } },
+  } }) });
+  const audit = await ref.wikipediaAudit();
+  assert.deepEqual(audit.places.map((p) => p.venue_ref), [filed], 'a place in a drawer paired with a town is flagged');
+  assert.deepEqual(audit.unjudged.map((p) => p.venue_ref), [unfiled], 'a record with no drawer and no category may be the town itself');
+  assert.equal(audit.heldBack, 1);
+});

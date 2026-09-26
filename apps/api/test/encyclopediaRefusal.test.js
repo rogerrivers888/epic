@@ -85,3 +85,13 @@ test('a failed body request is thrown too, so a replacing run keeps the body it 
   };
   await assert.rejects(encyclopediaFor({ name: 'Birdworld', lat: 51.17, lng: -0.84, category: 'zoo' }), /504/);
 });
+
+test('a nature reserve is not a district: its own article is kept for a nature drawer and refused for a restaurant (26 Sep 2026)', () => {
+  // Q179049 is Wikidata's "nature reserve"; the first list called it a UK
+  // district, and the audit refused Rowhill Nature Reserve its own article.
+  assert.equal(refused(['Q179049'], 'trails'), null);
+  assert.equal(refused(['Q179049'], 'attraction parks'), null);
+  assert.equal(refused(['Q179049'], 'restaurants'), 'a landform');
+  // The real UK district and borough classes are areas.
+  for (const q of ['Q349084', 'Q1187580', 'Q1002812', 'Q1136601', 'Q180673']) assert.equal(refused([q], 'museums'), 'a settlement or an area', q);
+});
