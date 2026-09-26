@@ -83,8 +83,18 @@ const MIN_WIDTH = 1180;
 const PHONE = 900;
 
 export function Filing({ canManage }: { canManage: boolean }) {
-  const { setQuery } = useRouter();
+  const { setQuery, query } = useRouter();
   const [tab] = useQueryState<Tab>('tab', 'overview', asTab);
+  /**
+   * An old spelling is read across and then written over, as a correction
+   * rather than a step. Reading it only in memory left `?tab=labels` in the
+   * address, so every tap inside the tab kept writing the old word and a
+   * copied link never moved to the new one (Codex, 26 Sep 2026).
+   */
+  const rawTab = query.get('tab');
+  useEffect(() => {
+    if (rawTab != null && rawTab !== asTab.write(tab)) setQuery({ tab: asTab.write(tab) }, { replace: true });
+  }, [rawTab, tab, setQuery]);
   const [cat] = useQueryState<string>('cat', '', asText);
   const [sub] = useQueryState<string>('sub', '', asText);
   const [set] = useQueryState<string>('set', '', asText);
