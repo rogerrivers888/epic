@@ -99,8 +99,8 @@ async function loadEntry(zip, entry, stats, source) {
 
 const LOCK = 'epic.postcodes.load';
 
-export async function loadPostcodes(file, { source = SOURCE } = {}) {
-  const stats = { files: 0, rows: 0, loaded: 0, terminated: 0, unplaced: 0, retired: 0, source };
+export async function loadPostcodes(file, { source = null } = {}) {
+  const stats = { files: 0, rows: 0, loaded: 0, terminated: 0, unplaced: 0, retired: 0, source, release: null, swapped: false };
   // One load at a time: two sharing the staging table would each truncate
   // the other's rows and swap in a snapshot of half a country (Codex, 26 Sep
   // 2026). The lock lives on one connection for the life of the load.
@@ -127,7 +127,15 @@ async function loadWhileLocked(file, stats, source) {
     zip.on('entry', (entry) => {
       const wanted = /^Data\/multi_csv\/.*\.csv$/i.test(entry.fileName);
       if (!wanted) { zip.readEntry(); return; }
-      loadEntry(zip, entry, stats, source)
+      // The release is in the archive's own file names — ONSPD_AUG_2026_UK_AB
+      // — so an archive handed in by hand is recorded as what it is, not as
+      // whatever the default happened to say (Codex, 26 Sep 2026).
+      if (!stats.release) {
+        const m = /ONSPD_([A-Z]{3})_(\d{4})/i.exec(entry.fileName);
+        const month = m ? { JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6, JUL: 7, AUG: 8, SEP: 9, OCT: 10, NOV: 11, DEC: 12 }[m[1].toUpperCase()] : null;
+        if (month) { stats.release = `${m[2]}-${String(month).padStart(2, '0')}`; if (!stats.source) stats.source = `onspd-${stats.release}`; }
+      }
+      loadEntry(zip, entry, stats, stats.source ?? source ?? SOURCE)
         .then(() => { stats.files += 1; console.log(`${entry.fileName}: ${stats.loaded.toLocaleString('en-GB')} loaded so far`); zip.readEntry(); })
         .catch(reject);
     });
@@ -156,6 +164,7 @@ async function loadWhileLocked(file, stats, source) {
       client.release();
     }
     stats.retired = Math.max(0, before.n - stats.loaded);
+    stats.swapped = true;
     await query('truncate postcodes_staging');
   }
   return stats;
@@ -170,8 +179,10 @@ if (isMain) {
     const stats = await loadPostcodes(file);
     const { rows: [n] } = await query('select count(*)::int as n, count(distinct outcode)::int as outcodes, count(distinct sector)::int as sectors from postcodes');
     // The by-hand load is a load like any other, and the monthly check reads
-    // this to know what is in.
-    await query('update postcode_releases set loaded_release = $1, loaded_at = now() where one', [SOURCE.replace(/^onspd-/, '')]).catch(() => null);
+    // this to know what is in — the release the archive itself named.
+    if (stats.swapped && stats.release) {
+      await query('update postcode_releases set loaded_release = $1, loaded_at = now() where one', [stats.release]).catch(() => null);
+    }
     console.log({ ...stats, table: n });
     if (!given) fs.rmSync(file, { force: true });
     await pool.end();

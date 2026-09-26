@@ -86,13 +86,24 @@ export async function refreshIfDue({ force = false, fetchImpl = fetch, load = lo
   if (current?.loaded_release && latest.release <= current.loaded_release) {
     return { checked: true, loaded: false, latest: latest.release, why: 'already loaded' };
   }
-  await query('update postcode_releases set loading_since = now() where one');
-  const file = path.join(os.tmpdir(), `onspd-${latest.release}.zip`);
+  // One claim, atomically: the boot check and a hand-pressed refresh arriving
+  // together both read no load in progress and both downloaded to one path
+  // (Codex, 26 Sep 2026). Whoever's update finds the slot free does the load;
+  // a claim older than six hours is a load that died and is taken over.
+  const { rows: claimed } = await query(
+    `update postcode_releases set loading_since = now()
+      where one and (loading_since is null or loading_since < now() - interval '6 hours') returning one`);
+  if (!claimed.length) return { checked: true, loaded: false, why: 'a load is in progress' };
+  const file = path.join(os.tmpdir(), `onspd-${latest.release}-${process.pid}-${Date.now()}.zip`);
   try {
     const res = await fetchImpl(`https://www.arcgis.com/sharing/rest/content/items/${latest.item}/data`, { redirect: 'follow' });
     if (!res.ok || !res.body) throw new Error(`ONSPD download failed: ${res.status}`);
     await pipeline(res.body, fs.createWriteStream(file));
     const stats = await load(file, { source: `onspd-${latest.release}` });
+    // Only a swapped snapshot is a load. An archive with nothing usable in it
+    // resolves with nought and no swap, and recording it would leave the old
+    // snapshot in use with the new release marked done (Codex, 26 Sep 2026).
+    if (!stats?.swapped) throw new Error(`the ${latest.release} archive yielded no snapshot: ${JSON.stringify(stats)}`);
     await query('update postcode_releases set loaded_release = $1, loaded_at = now(), loading_since = null, last_error = null where one', [latest.release]);
     return { checked: true, loaded: true, release: latest.release, stats };
   } catch (err) {

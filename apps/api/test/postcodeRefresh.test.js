@@ -34,7 +34,7 @@ test('a check is owed monthly, and a load only for a newer release', async (t) =
 
   const listing = (title) => ({ ok: true, json: async () => ({ results: [{ id: 'item-1', type: 'CSV Collection', title }] }) });
   const loads = [];
-  const load = async (file, { source }) => { loads.push(source); return { loaded: 1 }; };
+  const load = async (file, { source }) => { loads.push(source); return { loaded: 1, swapped: true }; };
 
   // The same release the table holds: checked, nothing loaded.
   let out = await refresh.refreshIfDue({ fetchImpl: async () => listing('ONS Postcode Directory (August 2026)'), load });
@@ -60,4 +60,18 @@ test('a check is owed monthly, and a load only for a newer release', async (t) =
   // A check that fails says so, and is not silent.
   out = await refresh.refreshIfDue({ force: true, fetchImpl: async () => ({ ok: false, status: 503 }), load });
   assert.equal(out.loaded, false); assert.match((await refresh.state()).last_error, /503/);
+
+  // An archive that yields no snapshot is not a load: the release is not
+  // recorded, and the error says so (Codex, 26 Sep 2026).
+  const empty = async () => ({ loaded: 0, files: 0, swapped: false });
+  const newer = async (url) => (url.includes('/content/items/') ? { ok: true, body: (await import('node:stream')).Readable.from(['zip']) } : listing('ONS Postcode Directory (February 2027)'));
+  out = await refresh.refreshIfDue({ force: true, fetchImpl: newer, load: empty });
+  assert.equal(out.loaded, false);
+  assert.equal((await refresh.state()).loaded_release, '2026-11', 'still the last real load');
+  assert.match((await refresh.state()).last_error, /no snapshot/);
+
+  // Two refreshes at once: one claims, the other is told a load is in progress.
+  await query(`update postcode_releases set loading_since = now() where one`);
+  out = await refresh.refreshIfDue({ force: true, fetchImpl: newer, load });
+  assert.equal(out.checked, true); assert.equal(out.why, 'a load is in progress');
 });
