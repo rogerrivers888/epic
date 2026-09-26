@@ -553,9 +553,11 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
   // A record that already holds its open-map reference is not matched again
   // on a pass that replaces nothing (owner, C19, 26 Sep 2026): the backfill of
   // four thousand places was asking Overpass to find places we had already
-  // found. A deliberate "look again" or refresh (`replace`) still matches, so
-  // a wrong match stays removable.
-  const held = replace ? null : await heldOpenMap(venueRef);
+  // found. Only the free top-up skips it — nothing paid, nothing replaced: the
+  // six-monthly refresh and a deliberate "look again" still match, so the
+  // open map's changes still arrive and a wrong match stays removable (Codex,
+  // 26 Sep 2026).
+  const held = replace || paid ? null : await heldOpenMap(venueRef);
   if (held) {
     osm = held;
     matched.osm = before?.matched?.osm ?? { ref: held.ref, how: 'held' };

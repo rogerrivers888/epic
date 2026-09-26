@@ -234,21 +234,28 @@ test('a hygiene register that cannot be reached has not withdrawn what it said',
 
 test('a pass that replaces nothing does not ask the open map again for a place whose reference it holds (C19, 26 Sep 2026)', async () => {
   const r = ref('held_osm');
-  await query(`insert into place_records (venue_ref, name, enrich_state, research_version) values ($1, 'Held Place', 'done', 3) on conflict (venue_ref) do nothing`, [r]);
+  await query(`insert into place_records (venue_ref, name, lat, lng, enrich_state, research_version) values ($1, 'Held Place', 51.4, -0.6, 'done', 3) on conflict (venue_ref) do nothing`, [r]);
   for (const [field, value] of [['osm_ref', 'node/424242'], ['lat', 51.4], ['lng', -0.6], ['name', 'Held Place']]) {
     await query(`insert into place_facts (venue_ref, field, source, value, licence, retention, confidence, expires_at) values ($1, $2, 'osm', $3, 'ODbL 1.0', 'indefinite', 0.9, null) on conflict do nothing`, [r, field, JSON.stringify(value)]);
   }
   const wasFetch = globalThis.fetch;
   const asked = [];
   globalThis.fetch = async (url) => { asked.push(String(url)); throw new Error('no network in this test'); };
+  // The open-map line on the ledger names no place, so it is counted by time.
+  const since = (await query('select now() as t')).rows[0].t;
+  const openMapCalls = async () => (await query(`select count(*)::int as n from provider_calls where provider = 'osm-overpass' and purpose = 'own.match' and created_at >= $1`, [since])).rows[0].n;
   try {
     const out = await own.enrich(r, { force: true, replace: false, paid: false });
     assert.ok(!asked.some((u) => /overpass|interpreter/i.test(u)), 'Overpass is not asked');
     assert.equal(out.state, 'done', 'the held reference still identifies the place');
     const [row] = (await query(`select matched from place_records where venue_ref = $1`, [r])).rows;
     assert.equal(row.matched.osm.ref, 'node/424242');
-    const { rows: calls } = await query(`select 1 from provider_calls where venue_ref = $1 and provider = 'osm-overpass'`, [r]);
-    assert.equal(calls.length, 0, 'and no Overpass call is on the ledger');
+    assert.equal(await openMapCalls(), 0, 'and no Overpass call is on the ledger');
+    // The ordinary refresh, which may spend, still asks the open map.
+    asked.length = 0;
+    await own.enrich(r, { force: true, replace: false, paid: true, search: false });
+    // Read from the ledger, which records the attempt whether or not a mirror answered.
+    assert.ok(await openMapCalls() > 0, 'a refresh still matches again');
   } finally {
     globalThis.fetch = wasFetch;
     await query('delete from place_facts where venue_ref = $1', [r]);
