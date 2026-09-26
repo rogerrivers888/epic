@@ -319,7 +319,7 @@ const SECTIONS: Section[] = [
         why: 'A high contradiction count can mean the default is too broad or that the drawer wants splitting — nobody has said anything; the data disagrees with itself. Every override is a person who looked at a place and said no, which makes it the stronger signal of the two.',
         state: 'live',
         where: 'apps/web/src/admin/filing/Defaults.tsx · rule_overrides',
-        said: { who: 'Roger', on: '20 Sep 2026', words: '“this rule has been called wrong 41 times” is the single most useful number in the system.' },
+        said: { who: 'Roger', on: '20 Sep 2026', words: 'this rule has been called wrong 41 times — that is the single most useful number in the system.' },
       },
       {
         title: 'Retiring a default never touches a place',
