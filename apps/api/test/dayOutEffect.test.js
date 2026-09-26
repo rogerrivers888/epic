@@ -98,3 +98,22 @@ test('the effect comes before the fact: a filing that fails writes no verdict, s
     if (was == null) delete process.env.EPIC_DAY_OUT_TEST; else process.env.EPIC_DAY_OUT_TEST = was;
   }
 });
+
+test('the filing and the fact commit together', async () => {
+  const { judge } = await import('../src/sources/dayOutTest.js');
+  const was = process.env.EPIC_DAY_OUT_TEST;
+  try {
+    process.env.EPIC_DAY_OUT_TEST = 'on';
+    await seed('osm:node/9007', 'pools');
+    await query('delete from place_facts where venue_ref = $1', ['osm:node/9007']);
+    const v = await judge('osm:node/9007', { drawer: 'pools', name: 'Absolutely Karting', lat: 51.46, lng: -2.56, tags: { leisure: 'sports_centre', sport: 'karting' }, fetch: async () => ({ elements: [] }), land });
+    assert.equal(v.verdict, 'out');
+    const { rows: [row] } = await query('select subcategory, derived_by from place_index where venue_ref = $1', ['osm:node/9007']);
+    assert.deepEqual(row, { subcategory: 'karting', derived_by: 'day-out-test' }, 'refiled');
+    const { rows: [fact] } = await query("select value from place_facts where venue_ref = $1 and field = 'day_out_test'", ['osm:node/9007']);
+    assert.equal(fact.value.effect, 'refiled');
+    assert.equal(fact.value.to, 'karting');
+  } finally {
+    if (was == null) delete process.env.EPIC_DAY_OUT_TEST; else process.env.EPIC_DAY_OUT_TEST = was;
+  }
+});

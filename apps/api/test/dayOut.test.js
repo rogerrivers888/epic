@@ -274,10 +274,16 @@ test('an object just over the box edge still speaks for the centre inside it; a 
   // A centre is a candidate wherever the box query found it (by any node of
   // its outline). An object-type candidate — a mapped lido — is held to the
   // box, because the margin fetched those a little wider on purpose.
-  const lidos = await dryRun({ drawer: 'lidos', box, fetch: fake([
-    el(4, { leisure: 'swimming_pool', name: 'Inside Lido', location: 'outdoor' }, 51.42, -0.65),
-    el(5, { leisure: 'swimming_pool', name: 'Margin Lido', location: 'outdoor' }, 51.3995, -0.65),
-  ]), textFor: async () => '' });
+  // The open map answers the box question with what is in the box, and the
+  // object question with the box and its margin; the margin's pool is
+  // evidence for a candidate, never a candidate itself.
+  let asks = 0;
+  const lidos = await dryRun({ drawer: 'lidos', box, fetch: async () => {
+    asks += 1;
+    const inside = el(4, { leisure: 'swimming_pool', name: 'Inside Lido', location: 'outdoor' }, 51.42, -0.65);
+    const margin = el(5, { leisure: 'swimming_pool', name: 'Margin Lido', location: 'outdoor' }, 51.3995, -0.65);
+    return { elements: asks === 1 ? [inside] : [inside, margin] };
+  }, textFor: async () => '' });
   assert.deepEqual(lidos.rows.map((r) => r.name), ['Inside Lido'], 'the margin brings objects, not candidates');
 });
 
@@ -300,5 +306,25 @@ test('a taxonomy that does not answer is a can\'t-say on the row, and an open ma
     () => dryRun({ drawer: 'pools', box: boxOf('51.39,-0.70,51.44,-0.60'), fetch: async () => { calls += 1; throw new Error('Overpass 504'); }, textFor: async () => '' }),
     (err) => err.status === 503 && /open map did not answer/.test(err.message),
   );
-  assert.equal(calls, 2, 'asked twice, then said so');
+  assert.equal(calls, 1, 'asked once — the mirrors are walked inside the one call — then said so');
+});
+
+test('the dry run asks the open map twice — candidates from the box, objects with the margin — and a centre found only by the object question is not a candidate', async () => {
+  const box = boxOf('51.40,-0.70,51.45,-0.60');
+  const asked = [];
+  const fetch = async (q) => {
+    asked.push(q);
+    if (asked.length === 1) return { elements: [el(1, { leisure: 'sports_centre', name: 'Inside Sports Centre' }, 51.42, -0.65)] };
+    // The object question, with its margin, also returns a climbing-tagged sports centre just outside the box.
+    return { elements: [
+      el(2, { leisure: 'sports_centre', sport: 'climbing', name: 'Margin Climbing Centre' }, 51.3995, -0.65),
+      el(3, { sport: 'climbing', name: 'Inside Wall' }, 51.4201, -0.6501),
+    ] };
+  };
+  const d = await dryRun({ drawer: 'climbing', box, fetch, textFor: async () => '' });
+  assert.equal(asked.length, 2);
+  assert.match(asked[0], /leisure"="sports_centre"\]\(51\.4000,-0\.7000,51\.4500,-0\.6000\)/, 'the first question is the box, by the drawer\'s selector');
+  assert.match(asked[1], /sport"~"climbing\|bouldering"\]\(51\.3990,-0\.7016,51\.4510,-0\.5984\)/, 'the second is the objects, with the margin');
+  assert.deepEqual(d.rows.map((r) => r.name), ['Inside Sports Centre'], 'the margin centre is evidence, never a candidate');
+  assert.deepEqual([d.rows[0].verdict, d.rows[0].by], ['kept', 'object'], 'and the wall inside the box speaks for the centre');
 });

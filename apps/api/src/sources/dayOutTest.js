@@ -21,7 +21,7 @@
  *                   judged the same way, a few at a time from the own loop
  */
 
-import { query } from '../db.js';
+import { query, withTransaction } from '../db.js';
 import { overpassQuery } from './overpass.js';
 import { refreshStats } from '../repositories/placeIndex.js';
 import * as owned from '../repositories/ownedPlaces.js';
@@ -111,14 +111,18 @@ async function heldFor(venueRef) {
  */
 export const MARGIN = { lat: 0.001, lng: 0.0016 };
 
-function queryFor(drawer, box) {
-  const b = `(${box.s},${box.w},${box.n},${box.e})`;
-  const wider = `(${box.s - MARGIN.lat},${box.w - MARGIN.lng},${box.n + MARGIN.lat},${box.e + MARGIN.lng})`;
-  return `[out:json][timeout:120];(nwr${NAMED_FOR[drawer].selector}${b};nwr${OBJECTS[drawer]}${wider};);out center tags;`;
-}
-
-/** Whether a point lies inside the box the candidates came from, rather than the margin. */
-const inBox = (box, p) => p.lat != null && p.lat >= box.s && p.lat <= box.n && p.lng >= box.w && p.lng <= box.e;
+/**
+ * Two questions to the open map, not one. The candidates come from the box
+ * by the drawer's own selector; the objects they are judged by come from the
+ * box plus its margin. Asked together, a sports centre tagged for climbing
+ * in the margin came back through the object clause and could not be told
+ * from a candidate (Codex, 26 Sep 2026) — so the answers are kept apart.
+ */
+const fix = (n) => Number(n).toFixed(4);
+const candidatesQuery = (drawer, box) =>
+  `[out:json][timeout:120];nwr${NAMED_FOR[drawer].selector}(${fix(box.s)},${fix(box.w)},${fix(box.n)},${fix(box.e)});out center tags;`;
+const objectsQuery = (drawer, box) =>
+  `[out:json][timeout:120];nwr${OBJECTS[drawer]}(${fix(box.s - MARGIN.lat)},${fix(box.w - MARGIN.lng)},${fix(box.n + MARGIN.lat)},${fix(box.e + MARGIN.lng)});out center tags;`;
 
 /**
  * The dry run: every place the drawer would be fed from inside the box, with
@@ -201,24 +205,22 @@ async function landingFor() {
 export async function dryRun({ drawer, box, textFor = null, fetch = overpassQuery, land = null }) {
   if (!DRAWERS.includes(drawer)) throw Object.assign(new Error(`The day-out test does not know a drawer called ${drawer}.`), { status: 400 });
   const spec = NAMED_FOR[drawer];
-  // Overpass is somebody else's machine: one mirror hangs, the next answers.
-  // Asked twice, then the failure is the caller's to say in plain words.
-  let data;
-  try { data = await fetch(queryFor(drawer, box), { timeoutMs: 130_000 }); }
-  catch (first) {
-    try { data = await fetch(queryFor(drawer, box), { timeoutMs: 130_000 }); }
-    catch (second) { throw Object.assign(new Error(`The open map did not answer for this box: ${String(second?.message ?? first?.message ?? '').slice(0, 80)}`), { status: 503, code: 'open_map_unavailable' }); }
-  }
-  const els = (data.elements ?? []).map(withPoint);
-  // Candidates come from the box; objects from the box and its margin, so a
-  // pool just over a quarter's edge still speaks for the centre inside it.
-  // A centre is a candidate wherever Overpass found it — the box query
-  // already fenced it, by any node of its outline — and judging it by its
-  // centre point dropped Easton and Lightwater, whose outlines cross a box
-  // edge (26 Sep 2026). Only an object-type candidate (a mapped pool, a
-  // track) is held to the box, since the margin fetched those a little wider.
-  const candidates = els.filter((el) => isCandidate(drawer, el) && (el.tags.leisure === 'sports_centre' || el.tags.leisure === 'stadium' || inBox(box, el)));
-  const objects = els.filter((el) => spec.object(el.tags));
+  // Overpass is somebody else's machine, and `overpassQuery` already walks
+  // every mirror before it gives up; asking again would double an outage's
+  // wait (Codex, 26 Sep 2026). One ask each, then the failure is said in
+  // plain words.
+  const ask = async (q) => {
+    try { return await fetch(q, { timeoutMs: 130_000 }); }
+    catch (err) { throw Object.assign(new Error(`The open map did not answer for this box: ${String(err?.message ?? '').slice(0, 80)}`), { status: 503, code: 'open_map_unavailable' }); }
+  };
+  // A candidate is whatever the box question found by the drawer's own
+  // selector — fenced by any node of its outline, which is why Easton and
+  // Lightwater, whose outlines cross a box edge, count. The objects come from
+  // the second question and its margin, so a pool just over a quarter's edge
+  // still speaks for the centre inside it — and never become candidates.
+  const found = (await ask(candidatesQuery(drawer, box))).elements ?? [];
+  const candidates = found.map(withPoint).filter((el) => isCandidate(drawer, el));
+  const objects = ((await ask(objectsQuery(drawer, box))).elements ?? []).map(withPoint).filter((el) => spec.object(el.tags));
   const readText = textFor ?? (async (c) => (await heldFor(`osm:${c.type}/${c.id}`)).text);
   // The taxonomy's landing is loaded the first time an out row needs it, so
   // a dry run with nothing out — and a test with a stubbed map — never opens
@@ -316,15 +318,20 @@ export async function judge(venueRef, { drawer, name = '', lat = null, lng = nul
   const v = dayOutVerdict(drawer, { tags, nearby, text, name });
   if (!v) return null;
   if (write) {
-    // The effect first, the fact second. The catch-up skips a place that
-    // carries the fact, so a fact written before a filing that then failed
-    // would have left the place judged on paper and unmoved for ever (Codex,
-    // 26 Sep 2026). A failed effect throws, no fact is written, and the
-    // catch-up comes back to it.
-    const effect = await applyVerdict(venueRef, { drawer, verdict: v, tags, land });
-    await owned.putFact(venueRef, {
-      field: 'day_out_test', source: 'own', value: { drawer, ...v, effect: effect?.effect ?? null, to: effect?.to ?? null, checkedAt: new Date().toISOString() },
-      licence: 'ours', retention: 'indefinite', confidence: v.verdict === 'provisional' ? 0.5 : 1,
+    // The filing and the fact in one transaction (Codex, 26 Sep 2026, twice
+    // over): a fact before a failed filing left a place judged on paper and
+    // unmoved for ever, since the catch-up skips a place carrying the fact;
+    // a filing before a failed fact moved the place out of the tested drawer
+    // where the catch-up would have found it again. Together, or neither.
+    await withTransaction(async (client) => {
+      const effect = await applyVerdict(venueRef, { drawer, verdict: v, tags, land, client });
+      await client.query(
+        `insert into place_facts (venue_ref, field, source, value, licence, retention, confidence, fetched_at, expires_at)
+         values ($1, 'day_out_test', 'own', $2, 'ours', 'indefinite', $3, now(), null)
+         on conflict (venue_ref, field, source) do update set
+           value = excluded.value, confidence = excluded.confidence, fetched_at = now(), expires_at = null`,
+        [venueRef, JSON.stringify({ drawer, ...v, effect: effect?.effect ?? null, to: effect?.to ?? null, checkedAt: new Date().toISOString() }), v.verdict === 'provisional' ? 0.5 : 1],
+      );
     });
   }
   return v;
@@ -345,7 +352,10 @@ export async function judge(venueRef, { drawer, name = '', lat = null, lng = nul
  * keys on a subcategory drops it, and carries the reason and the moment
  * (migration 262). `restoreToEpic` puts it back exactly as it was.
  */
-export async function applyVerdict(venueRef, { drawer, verdict, tags = null, land = null }) {
+export async function applyVerdict(venueRef, { drawer, verdict, tags = null, land = null, client = null }) {
+  // Inside a transaction when the caller hands one in, so the filing and the
+  // verdict fact commit together or not at all.
+  const run = client ? (t, p) => client.query(t, p) : query;
   if (!verdict || verdict.verdict !== 'out') return { effect: 'kept' };
   const labels = labelsOf(tags ?? {}).filter((l) => !FEEDER[drawer]?.includes(l));
   const landing = land ?? (labels.length ? await landingFor() : null);
@@ -353,7 +363,7 @@ export async function applyVerdict(venueRef, { drawer, verdict, tags = null, lan
   let other = filed?.subcategory ?? null;
   if (other === drawer || (verdict.by === 'members' && DRAWERS.includes(other))) other = null;
   if (other) {
-    const { rows } = await query(
+    const { rows } = await run(
       `update place_index p
           set subcategory = $2, category = coalesce((select category_key from shelf_subcategories where key = $2), p.category),
               derived_by = 'day-out-test', indexed_at = now()
@@ -366,7 +376,7 @@ export async function applyVerdict(venueRef, { drawer, verdict, tags = null, lan
     if (rows.length) await refreshStats().catch(() => null);
     return { effect: rows.length ? 'refiled' : 'unchanged', to: other };
   }
-  const { rows } = await query(
+  const { rows } = await run(
     `update place_index p
         set not_in_epic_before = coalesce(p.not_in_epic_before, p.subcategory), subcategory = null,
             not_in_epic_at = now(), not_in_epic_reason = $2, indexed_at = now()
