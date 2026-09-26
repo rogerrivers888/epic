@@ -133,10 +133,11 @@ export async function recordFailure({ householdId = null, sessionId = null, prov
  * spend table can add it up by key, and the cost is the list price for it.
  */
 export async function recordMetered({ householdId, sessionId = null, provider, purpose, units, costUsd = null, ok = null, ms = null, fault = null }) {
+  const session = await sessionFor(sessionId);
   await query(
     `insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd, ok, ms, failed, fault, watched)
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-    [householdId, sessionId, provider, purpose, units, costUsd, ok, ms, ok === false ? 1 : 0, fault,
+    [householdId, session, provider, purpose, units, costUsd, ok, ms, ok === false ? 1 : 0, fault,
       ok == null ? null : 1],
   );
 }

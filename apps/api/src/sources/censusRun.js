@@ -41,7 +41,7 @@ import { censusArea, slicePlan, CENSUS_FRESH_DAYS, CENSUS_MAX_DEPTH } from './ce
 // this box inside this area", not two that can disagree (repositories/censusRing.js).
 import { sectorsOfBox, nearestSector, placingPoints } from '../repositories/censusRing.js';
 import { textStillAsked } from './censusQuestions.js';
-import { runAsSpender } from '../context.js';
+import { runAsSpender, currentSpender } from '../context.js';
 import { refreshAllBefore as refreshRingsBefore } from '../repositories/ringTables.js';
 import { USD_TO_GBP } from '../domain/providerPrices.js';
 
@@ -271,13 +271,17 @@ export async function startRun({
   }
   const tiles = await planTiles({ areas, outcodes, dLat, dLng, padKm });
   if (!tiles.length) throw Object.assign(new Error('no postcode sectors in those areas'), { status: 400 });
+  // Whose decision the run is: the caller's word, else the request that is
+  // starting it — a census begun from Settings when a home moves is that
+  // person's, not the server's (Codex, 26 Sep 2026).
+  const starterSession = startedSessionId ?? currentSpender().sessionId ?? null;
 
   const { rows: [run] } = await query(
     `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, started_by, tiles_total, daily_cap, day, day_requests, started_session_id)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, (now() at time zone 'America/Los_Angeles')::date, 0, $11) returning *`,
     [label ?? [...areas, ...outcodes].join(', '),
       [...areas.map((a) => a.toUpperCase()), ...outcodes.map((o) => o.toUpperCase())], dLat, dLng,
-      maxRequests, ratePerSec, freshDays, startedBy, tiles.length, dailyCap, startedSessionId]);
+      maxRequests, ratePerSec, freshDays, startedBy, tiles.length, dailyCap, starterSession]);
 
   // Tiles outlive runs: the same square keeps its row and its history, and this
   // run simply claims the ones that are not fresh. `do update` on the outcodes
