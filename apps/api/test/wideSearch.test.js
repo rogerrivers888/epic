@@ -5,6 +5,7 @@ import { estimateTravelMinutes, reachRadiusKm, searchRadiusKm } from '../src/dom
 import { searchPlan, mergeWide, alternate, googleId, NEAR_KM } from '../src/domain/wideSearch.js';
 import * as wideSearch from '../src/domain/wideSearch.js';
 import { bump, noteFault, healthOf } from '../src/sources/meter.js';
+import { categoryPage, forgetPool } from '../src/sources/ringSearch.js';
 
 const at = { lat: 51.4, lng: -0.6 };
 const north = (km) => ({ lat: at.lat + km / 111.32, lng: at.lng });
@@ -126,4 +127,15 @@ test("a place's Google id is read the same way from either kind of result", () =
   assert.equal(googleId({ sourceIds: { google: 'g1' } }), 'g1');
   assert.equal(googleId({ source: 'google', sourcePlaceId: 'g2' }), 'g2');
   assert.equal(googleId({ source: 'osm', sourcePlaceId: 'way/1' }), null);
+});
+
+test('a half page is asked for as a half page, and pooled apart from a whole one', async () => {
+  forgetPool();
+  const asked = [];
+  const search = async ({ pageSize }) => { asked.push(pageSize); return { venues: [], nextPageToken: null, requests: 1 }; };
+  const cellAt = async () => null;
+  await categoryPage({ ringKey: 'r|wide', box: {}, cells: null, category: 'fun', page: 1, pageSize: 10, cellAt, search });
+  await categoryPage({ ringKey: 'r', box: {}, cells: null, category: 'fun', page: 1, cellAt, search });
+  assert.deepEqual(asked, [10, 20], 'ten when asked near and wide, twenty otherwise — and not one answered from the other');
+  forgetPool();
 });

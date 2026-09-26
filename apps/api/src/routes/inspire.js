@@ -308,13 +308,22 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
   // from Winchester, things to do within the hour came back at a median of
   // 31.5km, only five of seventeen within 22km, and Marwell Zoo — 7.9km — was
   // eighth. So when the fence reaches past the near radius, and this is not
-  // food, page one also asks a box of `NEAR_KM` round the household and the two
-  // are merged. A short trip's fence never reaches past it and costs nothing
-  // extra; food's popular places are in the centre anyway, so food asks once.
-  // Later pages follow the wide search's own chain, as before.
+  // food, every page also asks a box of `NEAR_KM` round the household and the
+  // two are merged. A short trip's fence never reaches past it and costs
+  // nothing extra; food's popular places are in the centre anyway, so food
+  // asks once.
   const plan = searchPlan({ searchKm: searchRadiusKm(mode, minutes), categories: [category] });
-  const nearToo = Boolean(start && plan.wideKm && page === 1);
+  // Every page, not only the first, and ten of each rather than twenty: a
+  // merged page is then twenty, the size of the page the screen keeps, and
+  // there is never an overflow to carry forward or lose. Google bills a
+  // request, not a result, so ten costs what twenty did (Codex, 26 Sep 2026,
+  // twice: a page cut to twenty threw bought places away, and carrying them
+  // to page two only moved the loss to page three).
+  const nearToo = Boolean(start && plan.wideKm);
   const nearBox = nearToo ? boxAround([start], { marginKm: NEAR_KM }) : null;
+  const size = nearToo ? PAGE / 2 : PAGE;
+  // A half-size page is a different page, so it is pooled under its own key.
+  const wideKey = nearToo ? `${ringKey}|wide` : ringKey;
 
   const widePage = categoryPage({
     /**
@@ -327,7 +336,7 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
      * places that were in reach and offering places that were not (Codex, 20
      * Sep 2026). The cells themselves are what the page is about.
      */
-    ringKey,
+    ringKey: wideKey, pageSize: size,
     /**
      * A box the size of the journey, not the shape of the sectors.
      *
@@ -356,16 +365,23 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
   const [wideGot, nearGot] = await Promise.all([
     widePage,
     nearToo
-      ? categoryPage({ ringKey: nearKey, box: nearBox, cells: null, category, page: 1, meter, householdId, cellAt: reach.cellAt })
+      ? categoryPage({ ringKey: nearKey, box: nearBox, cells: null, category, page, pageSize: size, meter, householdId, cellAt: reach.cellAt })
       : null,
   ]);
-  // A later page of the wide search can hand back a place the near search
-  // already showed on page one, and the screen appends pages without looking
-  // (Codex, 26 Sep 2026). Read from the pool, never bought again.
-  const shownNear = page > 1 ? peek(pageKey(nearKey, category, 1)) : null;
-  if (shownNear) {
-    const seen = new Set(shownNear.venues.map(googleId).filter(Boolean));
-    wideGot.venues = wideGot.venues.filter((v) => !seen.has(googleId(v)));
+  // A later page of either search can hand back a place an earlier page of
+  // the other already showed — the near box sits inside the wide one — and the
+  // screen appends pages without looking (Codex, 26 Sep 2026). Checked against
+  // every earlier page of both, read from the pool and never bought again.
+  if (nearToo && page > 1) {
+    const seen = new Set();
+    for (let k = 1; k < page; k += 1) {
+      for (const key of [wideKey, nearKey]) for (const v of peek(pageKey(key, category, k))?.venues ?? []) {
+        const id = googleId(v); if (id) seen.add(id);
+      }
+    }
+    const fresh = (v) => !seen.has(googleId(v));
+    wideGot.venues = wideGot.venues.filter(fresh);
+    nearGot.venues = nearGot.venues.filter(fresh);
   }
   const got = nearGot
     ? {
@@ -376,6 +392,9 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
       returned: (wideGot.returned ?? wideGot.venues.length) + (nearGot.returned ?? nearGot.venues.length),
       scored: (wideGot.scored ?? 0) + (nearGot.scored ?? 0),
       problem: wideGot.problem ?? nearGot.problem ?? null,
+      // More while either search has more.
+      nextPageToken: wideGot.nextPageToken ?? nearGot.nextPageToken ?? null,
+      end: Boolean(wideGot.end && nearGot.end),
     }
     : wideGot;
   /**
@@ -481,27 +500,9 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
   };
   const isNear = (it) => kmBetween(start, it) <= NEAR_KM;
   const { mine, items } = await rank(got.venues);
-  let shown = items;
-  if (nearGot) {
-    // Cut to one page after taking turns, not before: two searches can merge to
-    // forty, and a screen that re-sorts the whole pool by rating would undo the
-    // turns and let the far places crowd the near ones out again (Codex, 26 Sep
-    // 2026). Cut here, the twenty it re-sorts are already half near.
-    shown = alternate(items, isNear).slice(0, PAGE);
-  } else if (page === 2 && plan.wideKm && start) {
-    // What page one had to leave out when it was cut to twenty is already paid
-    // for, and page two leads with it rather than losing it (Codex, 26 Sep
-    // 2026). Page one is rebuilt from the two pooled pages exactly as it was
-    // drawn — nothing is bought — and whatever fell past the cut goes first.
-    const wide1 = peek(pageKey(ringKey, category, 1));
-    const near1 = peek(pageKey(nearKey, category, 1));
-    if (wide1 && near1) {
-      const first = alternate((await rank(mergeWide(near1.venues, wide1.venues))).items, isNear);
-      const overflow = first.slice(PAGE);
-      const already = new Set(overflow.map((it) => it.venueRef));
-      shown = [...overflow, ...items.filter((it) => !already.has(it.venueRef))];
-    }
-  }
+  // Ten and ten, merged: already one page, so nothing is cut and nothing
+  // left over. The page only takes turns — see `alternate`.
+  const shown = nearGot ? alternate(items, isNear) : items;
   return {
     items: shown, nextPageToken: got.nextPageToken, requests: got.requests, cached: got.cached,
     problem: got.problem ?? null,

@@ -248,6 +248,9 @@ export async function censusCounts(outcodes = []) {
  */
 export async function categoryPage({
   ringKey, box, cells, category, page = 1, meter = null, householdId = null, cellAt, force = false,
+  // Twenty is one Google page. A category asked near and wide asks ten of each
+  // (E13), so a merged page is still twenty and nothing is left over to lose.
+  pageSize = 20,
   // The one seam: the tests drive the pool without reaching for Google, and
   // nothing else ever passes this.
   search = displaySlice,
@@ -263,7 +266,7 @@ export async function categoryPage({
   if (usable(hit)) {
     if (!inFlight.has(key)) {
       inFlight.set(key, Promise.resolve()
-        .then(() => categoryPage({ ringKey, box, cells, category, page, meter: null, householdId, cellAt, search, force: true }))
+        .then(() => categoryPage({ ringKey, box, cells, category, page, meter: null, householdId, cellAt, search, pageSize, force: true }))
         .catch(() => null)
         .finally(() => inFlight.delete(key)));
     }
@@ -290,7 +293,7 @@ export async function categoryPage({
     }
   }
   const asking = askedAt === 0 ? lead : { includedType: null, words: rest[askedAt - 1] };
-  const out = await search({ box, includedType: asking.includedType, query: asking.words, pageToken, meter });
+  const out = await search({ box, includedType: asking.includedType, query: asking.words, pageToken, pageSize, meter });
 
   // Inside the ring, not merely inside the box. `cellAt` is our own table — a
   // point to its nearest sector — so this costs no money; it does cost a round
