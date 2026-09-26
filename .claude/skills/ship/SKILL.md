@@ -31,9 +31,10 @@ git status --short
   index** (owner, 26 Sep 2026; CLAUDE.md has the commands). A check followed by a
   separate commit races every other session: on 26 Sep a `git diff --cached` showing
   only this session's files was followed, a test run later, by a commit that also
-  carried another session's staged migration. So cut `git diff --binary origin/main --
-  <your files>` to your hunks, apply it in `git worktree add --detach
-  /tmp/epic-wt-<name> origin/main`, and run every step below **there**. Never `git
+  carried another session's staged migration. So pin one base (`BASE=$(git rev-parse
+  origin/main)` after fetching — another session's fetch moves the ref), cut `git diff
+  --binary $BASE -- <your files>` to your hunks, apply it in `git worktree add --detach
+  /tmp/epic-wt-<name> $BASE`, and run every step below **there**. Never `git
   add`, `git commit`, amend or push `main` in the shared tree.
 - **Every edit, review fixes included, is made in the shared tree first** and carried to
   the worktree as a patch against the worktree's `HEAD`. The shared tree is the copy that
