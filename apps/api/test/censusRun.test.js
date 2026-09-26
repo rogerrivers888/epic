@@ -1363,3 +1363,33 @@ test('a district drawn as one centroid among a neighbour\'s many is still found 
   assert.deepEqual(rows.map((r) => [r.area_slug, r.census_count]), [['zz8x', 1], ['zz8y', 0]],
     'the place is in the district whose streets it stands on, not the one whose centroids ring it');
 });
+
+test('a census run spends on the session that started it, and a resume moves that to the resumer', async (t) => {
+  // Owner, 26 Sep 2026: every provider call names its session. A run is
+  // started from a request and worked by the loop hours later, at boot even;
+  // its ledger rows still say whose decision the spend was.
+  await clean();
+  const { rows: [starter] } = await query(
+    `insert into api_sessions (token_hash, label) values ('test:census-starter', 'starter') on conflict (token_hash) do update set label = excluded.label returning id`);
+  const { rows: [resumer] } = await query(
+    `insert into api_sessions (token_hash, label) values ('test:census-resumer', 'resumer') on conflict (token_hash) do update set label = excluded.label returning id`);
+  t.after(async () => {
+    await query(`delete from provider_calls where purpose = 'census.slice' and session_id in ($1, $2)`, [starter.id, resumer.id]);
+    await clean();
+    await query(`delete from api_sessions where token_hash in ('test:census-starter', 'test:census-resumer')`);
+  });
+  const run = await startTestRun({ label: 'test session' });
+  await query('update census_runs set started_session_id = $2 where id = $1', [run.id, starter.id]);
+  await seedTile(run, 'test/session');
+  await withCensus(answers(1), () => advance({ runId: run.id, budgetMs: 10_000 }));
+  const { rows: [ledger] } = await query(
+    `select count(*)::int n, count(*) filter (where session_id = $1)::int mine from provider_calls
+      where purpose = 'census.slice' and session_id in ($1, $2)`, [starter.id, resumer.id]);
+  assert.ok(ledger.n > 0, 'the census wrote to the ledger');
+  assert.equal(ledger.mine, ledger.n, 'every row on the starter\'s session');
+
+  await requestStop(run.id);
+  await query(`update census_runs set state = 'stopped' where id = $1`, [run.id]);
+  const resumed = await resume(run.id, { sessionId: resumer.id });
+  assert.equal(resumed.started_session_id, resumer.id, 'a resume is the decision to spend today\'s quota, and the run says whose');
+});

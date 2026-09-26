@@ -11,8 +11,10 @@
  * count and a cost.
  */
 
+import os from 'node:os';
 import { query } from '../db.js';
 import { canBill } from '../constants.js';
+import { currentSpender } from '../context.js';
 import { costOf } from '../domain/providerPrices.js';
 import { healthOf } from '../sources/meter.js';
 
@@ -28,6 +30,36 @@ import { healthOf } from '../sources/meter.js';
  * the meter is priced by adding up its keys, and a reference is not a unit of
  * anything (Codex, 18 Sep 2026).
  */
+/**
+ * The session a row is written against when nobody said.
+ *
+ * Owner, 26 Sep 2026: "Add a session id to every provider call … With five
+ * agents on a shared tree, spend nobody can attribute is spend nobody can
+ * stop, and yesterday four sessions spent an afternoon chasing £16.39 that
+ * turned out to be this. Make it required rather than optional on the
+ * ledger." A request's session is in the store (auth.js puts it there); a
+ * census run or a research sweep carries the session that started it; and
+ * work nobody started — the boot loops — is the server's own, which is a
+ * session too: one row in api_sessions per process, labelled with the host
+ * and the commit, expired at birth so it can never sign anybody in. Nothing
+ * reaches the ledger without one of the three.
+ */
+let service = null;
+export async function serviceSessionId() {
+  if (service) return service;
+  const label = `service: ${os.hostname()} ${process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? 'local'} pid ${process.pid}`;
+  const { rows: [row] } = await query(
+    `insert into api_sessions (token_hash, label, expires_at, revoked_at)
+     values ('service:' || gen_random_uuid()::text, $1, now(), now()) returning id`, [label]);
+  service = row.id;
+  return service;
+}
+
+/** Who a row is written against: the caller's word, the request's or job's session, else the server's own. */
+export async function sessionFor(sessionId = null) {
+  return sessionId ?? currentSpender().sessionId ?? await serviceSessionId();
+}
+
 export async function record(householdId, provider, purpose, units = null, sessionId = null, venueRef = null) {
   // The money as well as the meter. The monthly ceiling is a sum of
   // `estimated_cost_usd`, so a row with a meter and no price is a call the
@@ -43,10 +75,11 @@ export async function record(householdId, provider, purpose, units = null, sessi
    * the reason this is not defaulted to true.
    */
   const health = healthOf(typeof units === 'string' ? null : units);
+  const session = await sessionFor(sessionId);
   await query(
     `insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd, venue_ref, ok, ms, failed, fault, watched)
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-    [householdId, sessionId, provider, purpose, units, costOf(units, provider) || null, venueRef,
+    [householdId, session, provider, purpose, units, costOf(units, provider) || null, venueRef,
       health.ok, health.ms, health.failed, health.fault, health.watched],
   );
   void meter;
@@ -54,12 +87,13 @@ export async function record(householdId, provider, purpose, units = null, sessi
 
 /** One Claude call, billed in tokens rather than requests. */
 export async function recordTokens(c) {
+  const session = await sessionFor(c.sessionId ?? null);
   await query(
     `insert into provider_calls
        (household_id, session_id, provider, purpose, input_tokens, output_tokens,
         cache_read_tokens, cache_write_tokens, estimated_cost_usd, ok, ms, failed, fault, watched)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-    [c.householdId, c.sessionId, c.provider, c.purpose, c.inputTokens ?? null, c.outputTokens ?? null,
+    [c.householdId, session, c.provider, c.purpose, c.inputTokens ?? null, c.outputTokens ?? null,
       c.cacheReadTokens ?? null, c.cacheWriteTokens ?? null, c.costUsd,
       c.ok ?? null, c.ms ?? null, c.ok === false ? 1 : 0, c.fault ?? null,
       // One request, which is what a token-billed call always is.

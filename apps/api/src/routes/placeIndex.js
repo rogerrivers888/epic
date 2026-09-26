@@ -3444,6 +3444,7 @@ router.post('/census/run', requires('manage_library'), async (req, res, next) =>
       dLng: within(req.body?.tileLng, 0.0075, censusRun.TILE_LNG),
       padKm: within(req.body?.padKm, 0, censusRun.PAD_KM),
       startedBy: actor(req).actorLabel,
+      startedSessionId: req.session?.id ?? null,
     });
     await writeAudit({
       ...actor(req), action: 'census.run', subjectType: 'region', subjectId: run.id,
@@ -3513,7 +3514,7 @@ router.post('/census/run/:id/resume', requires('manage_library'), async (req, re
       });
     }
 
-    const resumed = await censusRun.resume(run.id);
+    const resumed = await censusRun.resume(run.id, { sessionId: req.session?.id ?? null });
     if (!resumed) throw bad('that run is not stopped, paused or waiting');
     await writeAudit({
       ...actor(req), action: 'census.resume', subjectType: 'region', subjectId: resumed.id,

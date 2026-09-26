@@ -41,6 +41,7 @@ import { censusArea, slicePlan, CENSUS_FRESH_DAYS, CENSUS_MAX_DEPTH } from './ce
 // this box inside this area", not two that can disagree (repositories/censusRing.js).
 import { sectorsOfBox, nearestSector, placingPoints } from '../repositories/censusRing.js';
 import { textStillAsked } from './censusQuestions.js';
+import { runAsSpender } from '../context.js';
 import { refreshAllBefore as refreshRingsBefore } from '../repositories/ringTables.js';
 import { USD_TO_GBP } from '../domain/providerPrices.js';
 
@@ -249,7 +250,7 @@ export async function planTiles({ areas = [], outcodes = [], dLat = TILE_LAT, dL
  */
 export async function startRun({
   label, areas = [], outcodes = [], maxRequests = 250_000, ratePerSec = 5, freshDays = CENSUS_FRESH_DAYS,
-  dLat = TILE_LAT, dLng = TILE_LNG, padKm = PAD_KM, dailyCap = DAILY_CAP, startedBy = null,
+  dLat = TILE_LAT, dLng = TILE_LNG, padKm = PAD_KM, dailyCap = DAILY_CAP, startedBy = null, startedSessionId = null,
 } = {}) {
   if (!areas?.length && !outcodes?.length) {
     throw Object.assign(new Error('a run needs postcode areas or districts'), { status: 400 });
@@ -272,11 +273,11 @@ export async function startRun({
   if (!tiles.length) throw Object.assign(new Error('no postcode sectors in those areas'), { status: 400 });
 
   const { rows: [run] } = await query(
-    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, started_by, tiles_total, daily_cap, day, day_requests)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, (now() at time zone 'America/Los_Angeles')::date, 0) returning *`,
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, started_by, tiles_total, daily_cap, day, day_requests, started_session_id)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, (now() at time zone 'America/Los_Angeles')::date, 0, $11) returning *`,
     [label ?? [...areas, ...outcodes].join(', '),
       [...areas.map((a) => a.toUpperCase()), ...outcodes.map((o) => o.toUpperCase())], dLat, dLng,
-      maxRequests, ratePerSec, freshDays, startedBy, tiles.length, dailyCap]);
+      maxRequests, ratePerSec, freshDays, startedBy, tiles.length, dailyCap, startedSessionId]);
 
   // Tiles outlive runs: the same square keeps its row and its history, and this
   // run simply claims the ones that are not fresh. `do update` on the outcodes
@@ -331,7 +332,7 @@ export async function requestStop(id) {
 }
 
 /** Start again where it left off. Nothing is re-asked; the tiles remember. */
-export async function resume(id) {
+export async function resume(id, { sessionId = null } = {}) {
   // The same rule as starting. Without it, resuming an older paused run while a
   // newer one is going left two rows saying "running" — and since the loop
   // advances the earliest, the other one sat there looking active and being
@@ -344,8 +345,11 @@ export async function resume(id) {
   const { rows } = await query(
     `update census_runs
         set state = 'running', stop_requested = false, problem = null,
-            resume_after = null, finished_at = null, last_seen_at = now()
-      where id = $1 and state in ('paused', 'stopped', 'refused', 'waiting') returning *`, [id]);
+            resume_after = null, finished_at = null, last_seen_at = now(),
+            -- Whoever resumed it is spending from here on: a resume is the
+            -- decision to use today's quota, and the ledger says whose.
+            started_session_id = coalesce($2, started_session_id)
+      where id = $1 and state in ('paused', 'stopped', 'refused', 'waiting') returning *`, [id, sessionId]);
   return rows[0] ?? null;
 }
 
@@ -783,7 +787,10 @@ async function censusOneTile({ run, tile, pace, remaining, until = Infinity, sto
 
     let out;
     try {
-      out = await censusArea({
+      // On the account of whoever started or resumed the run: the census's
+      // ledger rows carry that session, and a run woken at boot still knows
+      // whose it is (owner, 26 Sep 2026).
+      out = await runAsSpender({ householdId: null, sessionId: run.started_session_id ?? null }, () => censusArea({
         // The tile is the area of record. Its counts are not written to the
         // board — an outcode is what a person browses, and `rollUpOutcodes`
         // derives those from the tiles afterwards.
@@ -795,7 +802,7 @@ async function censusOneTile({ run, tile, pace, remaining, until = Infinity, sto
         pace,
         rollUpCounts: false,
         censusRunId: run.id,
-      });
+      }));
     } catch (err) {
       await query(
         `update census_tiles

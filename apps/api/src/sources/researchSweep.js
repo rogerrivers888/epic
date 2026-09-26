@@ -223,7 +223,7 @@ export async function estimate({ subcategories = null, floor = FLOOR } = {}) {
 // starting one
 // ---------------------------------------------------------------------------
 
-export async function start({ subcategories = null, floor = FLOOR, confirm = null, householdId = null, startedBy = null } = {}) {
+export async function start({ subcategories = null, floor = FLOOR, confirm = null, householdId = null, startedBy = null, startedSessionId = null } = {}) {
   const plan = await estimate({ subcategories, floor });
   if (Number(confirm) !== plan.requests) {
     const err = new Error(`This sweep is up to ${plan.requests} requests at £${plan.costGbpLow.toFixed(2)}–£${plan.costGbpHigh.toFixed(2)}. Confirm with ${plan.requests} to run it.`);
@@ -255,10 +255,10 @@ export async function start({ subcategories = null, floor = FLOOR, confirm = nul
         { code: 'already_running', status: 409, sweep: going[0].id });
     }
     const { rows: [row] } = await client.query(
-      `insert into research_sweeps (subcategories, params, household_id, started_by, places)
-       values ($1, $2, $3, $4, $5) returning *`,
+      `insert into research_sweeps (subcategories, params, household_id, started_by, places, started_session_id)
+       values ($1, $2, $3, $4, $5, $6) returning *`,
       [JSON.stringify(plan.drawers.map((d) => d.subcategory)), JSON.stringify({ floor, requests: plan.requests, estimateGbp: plan.costGbpHigh }),
-        householdId, startedBy, plan.sampled]);
+        householdId, startedBy, plan.sampled, startedSessionId]);
     for (const d of plan.drawers) {
       // The estimate's own sample, not a fresh one.
       for (const s of d.sample) {
@@ -573,7 +573,9 @@ export async function work(id, { research = null, room = roomToSpend, release = 
           let state = 'done';
           // Two Google requests at most, and never the web search: that is
           // what the estimate priced and what the ceiling was asked for.
-          const asking = ask(p.venue_ref, { householdId: household, paid: true, search: false, force: false });
+          // On the session that started the sweep, so its ledger rows say whose
+          // decision the spend was (owner, 26 Sep 2026).
+          const asking = ask(p.venue_ref, { householdId: household, sessionId: run.started_session_id ?? null, paid: true, search: false, force: false });
           try {
             const out = await withDeadline(asking, deadlineMs);
             outcome = outcomeOf(out);

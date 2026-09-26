@@ -468,6 +468,7 @@ questionRoutes.post('/sweep', requires('manage_questions'), async (req, res, nex
       confirm: req.body?.confirm ?? null,
       householdId: household?.id ?? null,
       startedBy: actorOf(req),
+      startedSessionId: req.session?.id ?? null,
     });
     void sweep.work(row.id).catch((err) => console.warn(`sweep ${row.id}: ${err.message}`));
     res.status(202).json({ sweep: row });
