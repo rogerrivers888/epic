@@ -39,6 +39,8 @@ import { encyclopediaFor } from './encyclopedia.js';
 import { siteFacts } from './site.js';
 import { reverseGeocode } from './geocode.js';
 import { googleSource } from './google.js';
+import { dayOutTestOn } from '../domain/dayOut.js';
+import { recordVerdict } from './dayOutTest.js';
 // Whether the owner has a key for it, and has not switched it off in Settings:
 // asking a source the owner has turned off is not ours to do.
 import { sourceHasKey, sourceOff } from './index.js';
@@ -750,6 +752,23 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
       }
     } catch (err) {
       problems.push(`the hygiene register: ${String(err?.message || err).slice(0, 120)}`);
+    }
+  }
+
+  // The day-out test (C26), from what the owned record now holds: the open
+  // map's tags, the venue's page, the encyclopedia, the name. Written as a
+  // fact of ours and nothing more — the verdict changes no filing until the
+  // switch is on, and `recordVerdict` is inert while it is off.
+  if (dayOutTestOn()) {
+    try {
+      const held = await owned.liveFacts(venueRef, { keepableOnly: true });
+      const tags = held.find((x) => x.field === 'tags' && x.source === 'osm')?.value ?? null;
+      const text = held.filter((x) => ['site', 'wikipedia', 'wikidata'].includes(x.source) && typeof x.value === 'string').map((x) => x.value).join(' ');
+      const name = held.find((x) => x.field === 'name' && !empty(x.value))?.value ?? seed.name ?? '';
+      const filedUnder = (await query('select subcategory from place_index where venue_ref = $1', [venueRef]).catch(() => ({ rows: [] }))).rows[0]?.subcategory ?? null;
+      await recordVerdict(venueRef, { drawer: filedUnder, tags, text, name });
+    } catch (err) {
+      problems.push(`the day-out test: ${String(err?.message || err).slice(0, 120)}`);
     }
   }
 

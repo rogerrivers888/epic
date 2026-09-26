@@ -51,6 +51,7 @@ import { currentHousehold } from './household.js';
 import { enrich } from '../sources/own.js';
 import { crowdBand, countBand } from '../domain/scoring.js';
 import { pictureFor } from '../sources/placePicture.js';
+import * as dayOut from '../sources/dayOutTest.js';
 
 /** Who did it, said the same way every other back-office route says it. */
 const actor = (req) => ({ actorId: req.account?.id ?? null, actorLabel: req.account?.email ?? 'the owner (passcode)' });
@@ -3331,6 +3332,22 @@ router.get('/search', requires('view_library'), async (req, res, next) => {
  * was last checked, and a way to check now. The check is free; a load is a
  * download inside the container and a swap, and costs nothing either.
  */
+/**
+ * The day-out test, dry-run (C26): every place a drawer is fed from inside a
+ * box, kept, provisional or out, with the evidence beside its name. Owned data
+ * only — Overpass — and nothing is filed or unfiled by looking.
+ *
+ *   GET /day-out-test?drawer=pools&box=51.35,-0.72,51.44,-0.60
+ */
+router.get('/day-out-test', requires('view_library'), async (req, res, next) => {
+  try {
+    const drawer = String(req.query.drawer ?? 'pools');
+    const box = dayOut.boxOf(req.query.box);
+    if (!box) throw bad('A box is south,west,north,east in degrees, no more than about 30 km a side.');
+    res.json(await dayOut.dryRun({ drawer, box }));
+  } catch (err) { next(err); }
+});
+
 router.get('/postcodes', requires('view_library'), async (_req, res, next) => {
   try {
     const [state, { rows: [count] }] = await Promise.all([
