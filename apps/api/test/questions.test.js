@@ -900,6 +900,11 @@ test('Codex on C27: a fact a set already asks is not made global as a side effec
   await assert.rejects(() => sets.globalFromCandidate(w.id, { actor: 'test' }), /already asked by zz-set/);
   assert.equal((await query('select active from questions where id = $1', [local.id])).rows[0].active, true, 'the set question and its answers are untouched');
   assert.equal((await query("select count(*)::int n from questions where attribute_key = 'zz-vegan' and scope = 'global'")).rows[0].n, 0, 'and nothing global was made');
+  // Switched off but holding answers: still refused, or the answers are stranded.
+  await query('update questions set active = false where id = $1', [local.id]);
+  await query("insert into place_answers (venue_ref, question_id, source, state, yesno) values ('osm:node/77', $1, 'site', 'answered', true)", [local.id]);
+  await assert.rejects(() => sets.globalFromCandidate(w.id, { actor: 'test' }), /already asked by zz-set/);
+  await query('delete from place_answers where question_id = $1', [local.id]);
   await query("delete from questions where attribute_key = 'zz-vegan'");
   await query("delete from question_sets where key = 'zz-set'");
   await query("delete from attribute_aliases where norm like 'zz %'");
