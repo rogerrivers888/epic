@@ -759,3 +759,29 @@ test('Codex: a filing needs its drawer, a merge names a real label, and a wordin
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
   await query("delete from place_attributes where key like 'zz-%'");
 });
+
+test('migration 260 turns a promoted soft play on Water into a filing under Play', async () => {
+  // The owner, 26 Sep 2026: "Soft play: make it a filing under Play, not a
+  // Water question (C24)." The test database holds no production rows, so
+  // the shape is seeded and the migration's own statements are run over it.
+  const fs = await import('node:fs/promises');
+  const sql = await fs.readFile(new URL('../migrations/260_soft_play_is_a_filing_under_play.sql', import.meta.url), 'utf8');
+  await query("insert into shelf_subcategories (key, label, category_key) values ('lidos', 'Lidos', 'test-cat'), ('play', 'Play', 'test-cat') on conflict do nothing");
+  await query("insert into question_sets (key, name) values ('water', 'Water') on conflict do nothing");
+  await query("insert into place_attributes (key, label, kind, position) values ('soft-play', 'Soft play', 'yesno', 200) on conflict do nothing");
+  await query("delete from questions where attribute_key = 'soft-play'");
+  const { rows: [q] } = await query("insert into questions (attribute_key, scope, set_key) values ('soft-play', 'set', 'water') returning id");
+  await query("delete from harvest_candidates where subcategory = 'lidos' and norm = 'soft play'");
+  await query(
+    `insert into harvest_candidates (norm, raw_forms, subcategory, places_seen, places_total, kind, status, question_id, evidence, sources)
+     values ('soft play', '{Soft play}', 'lidos', 3, 20, 'feature', 'promoted', $1, 'soft play & fitness studio', '{"features": 3}')`, [q.id],
+  );
+  await query(sql);
+  const { rows: [question] } = await query('select active from questions where id = $1', [q.id]);
+  assert.equal(question.active, false, 'the Water question is switched off, not deleted');
+  const { rows: [row] } = await query("select kind, status, files_under, question_id, evidence from harvest_candidates where subcategory = 'lidos' and norm = 'soft play'");
+  assert.deepEqual({ kind: row.kind, status: row.status, files_under: row.files_under, question_id: row.question_id }, { kind: 'filing', status: 'unresolved', files_under: 'play', question_id: null });
+  assert.ok(row.evidence, 'the quote stays with the decision');
+  await query("delete from harvest_candidates where subcategory = 'lidos' and norm = 'soft play'");
+  await query('delete from questions where id = $1', [q.id]);
+});
