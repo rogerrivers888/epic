@@ -233,3 +233,26 @@ test('the dry run says where every out place stays, and counts the ones that lea
   assert.deepEqual(by['Henbury Leisure Centre'], ['kept', 'pools']);
   assert.equal(d.counts.leavesEpic, 2);
 });
+
+// ---------------------------------------------------------------------------
+// Codex on the refinements (26 Sep 2026)
+// ---------------------------------------------------------------------------
+
+test('a members-only pool next door proves nothing, and a members-only place stays in no tested drawer', async () => {
+  // The neighbour's pool is members only: the centre is not kept by it.
+  assert.deepEqual(pick(dayOutVerdict('pools', { tags: { leisure: 'sports_centre' }, nearby: [{ tags: { leisure: 'swimming_pool', access: 'members' } }], name: 'Generic Sports Centre' })), ['out', null]);
+  assert.deepEqual(pick(dayOutVerdict('pools', { tags: { leisure: 'sports_centre' }, nearby: [{ tags: { leisure: 'swimming_pool', brand: 'David Lloyd Clubs' } }], name: 'x' })), ['out', null]);
+  // A members-only centre tagged for climbing fails Pools and is not said to stay in Climbing.
+  const elements = [el(1, { leisure: 'sports_centre', sport: 'climbing', brand: 'Nuffield Health', name: 'Nuffield Health Club' }, 51.40, -0.65)];
+  const land = (labels) => ({ subcategory: labels.includes('osm:sport=climbing') ? 'climbing' : null });
+  const d = await dryRun({ drawer: 'pools', box: boxOf('51.39,-0.70,51.44,-0.60'), fetch: fake(elements), textFor: async () => '', land });
+  assert.deepEqual([d.rows[0].verdict, d.rows[0].by, d.rows[0].staysIn], ['out', 'members', 'none — leaves Epic']);
+  assert.equal(d.counts.leavesEpic, 1);
+});
+
+test('a dry run with nothing out never opens the database', async () => {
+  const elements = [el(1, { leisure: 'sports_centre', sport: 'swimming', name: 'Henbury Leisure Centre' }, 51.43, -0.68)];
+  // No `land` handed in: if the landing were loaded eagerly this would reach for Postgres.
+  const d = await dryRun({ drawer: 'pools', box: boxOf('51.39,-0.70,51.44,-0.60'), fetch: fake(elements), textFor: async () => '' });
+  assert.deepEqual([d.rows[0].verdict, d.rows[0].staysIn], ['kept', 'pools']);
+});

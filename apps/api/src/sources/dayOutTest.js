@@ -191,7 +191,11 @@ export async function dryRun({ drawer, box, textFor = null, fetch = overpassQuer
   const candidates = els.filter((el) => isCandidate(drawer, el));
   const objects = els.filter((el) => spec.object(el.tags));
   const readText = textFor ?? (async (c) => (await heldFor(`osm:${c.type}/${c.id}`)).text);
-  const landing = land ?? await landingFor();
+  // The taxonomy's landing is loaded the first time an out row needs it, so
+  // a dry run with nothing out — and a test with a stubbed map — never opens
+  // the database (Codex, 26 Sep 2026).
+  let landing = land;
+  const landAt = async (labels) => { landing ??= await landingFor(); return landing(labels); };
   const rows = [];
   for (const c of candidates) {
     const nearby = c.lat == null ? [] : objects
@@ -200,9 +204,16 @@ export async function dryRun({ drawer, box, textFor = null, fetch = overpassQuer
     const text = await readText(c);
     const v = dayOutVerdict(drawer, { tags: c.tags, nearby, text, name: c.tags.name ?? '' });
     // Where an out place still belongs, by its own labels. A members-only
-    // place is out wherever the test runs; its other drawers are named all
-    // the same, since the owner's rule for those is a separate decision.
-    const elsewhere = v.verdict === 'out' ? otherDrawerFor({ tags: c.tags, failed: drawer, land: landing }) : { drawer: null, via: null };
+    // place fails every drawer the test runs in, so it is never said to stay
+    // in one of those (Codex, 26 Sep 2026); a drawer the test does not run
+    // in is named, since the owner's rule for those is a separate decision.
+    let elsewhere = { drawer: null, via: null };
+    if (v.verdict === 'out') {
+      const labels = labelsOf(c.tags).filter((l) => !FEEDER[drawer]?.includes(l));
+      const filed = labels.length ? await landAt(labels) : null;
+      const other = filed?.subcategory ?? null;
+      if (other && other !== drawer && !(v.by === 'members' && DRAWERS.includes(other))) elsewhere = { drawer: other, via: labels.join(' ') };
+    }
     rows.push({
       ref: `osm:${c.type}/${c.id}`,
       name: c.tags.name ?? '(unnamed)',

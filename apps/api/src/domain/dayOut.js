@@ -155,7 +155,12 @@ export function dayOutVerdict(drawer, { tags = null, nearby = [], text = '', nam
   const members = membersOnly({ tags, text, name });
   if (members) return { verdict: OUT, by: 'members', reason: `members only — ${members}` };
   if (tags && spec.tag(tags)) return { verdict: KEPT, by: 'tag', reason: `its own tags say it has ${spec.thing}` };
-  const near = mayBorrowAdjacent(drawer, tags) ? (nearby ?? []).find((n) => spec.object(n?.tags ?? n)) : null;
+  // A members-only pool next door proves nothing for the public (Codex,
+  // 26 Sep 2026): the same rule that fails a members-only place fails a
+  // members-only object as evidence.
+  const near = mayBorrowAdjacent(drawer, tags)
+    ? (nearby ?? []).find((n) => spec.object(n?.tags ?? n) && !membersOnly({ tags: n?.tags ?? n, name: n?.name ?? '' }))
+    : null;
   if (near) return { verdict: KEPT, by: 'object', reason: `${spec.thing} is mapped within ${ADJACENT_M} m`, object: near?.name ?? near?.tags?.name ?? null };
   if (text && spec.text.test(String(text))) return { verdict: KEPT, by: 'text', reason: `its own page or the encyclopedia says it has ${spec.thing}` };
   // The name is borrowed evidence as an adjacent object is: a candidate whose
