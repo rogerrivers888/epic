@@ -122,3 +122,29 @@ test('a venue page that redirects to a host whose robots.txt refuses us is never
   assert.ok(!asked.includes('https://elsewhere.example/venue'), 'the refused host’s page is never fetched');
   assert.equal(got?.body ?? null, null);
 });
+
+test('the menu lookup asks robots.txt before its first request and at every redirect (C11, 26 Sep 2026)', async (t) => {
+  const { findMenuUrl } = await import('../src/sources/menuLink.js');
+  const real = globalThis.fetch;
+  const asked = [];
+  t.after(() => { globalThis.fetch = real; });
+  globalThis.fetch = async function stub(url, opts = {}) {
+    const u = String(url);
+    asked.push(u);
+    const page = (status, body = '', headers = {}) => ({
+      ok: status >= 200 && status < 300, status, url: u,
+      headers: { get: (k) => ({ 'content-type': 'text/html', ...headers })[k.toLowerCase()] ?? null },
+      text: async () => body, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0),
+    });
+    if (u === 'https://bistro.example/' && (opts.redirect ?? 'follow') === 'follow') return stub('https://refuses.example/menu', opts);
+    if (u === 'https://bistro.example/robots.txt') return page(200, 'User-agent: *\nAllow: /');
+    if (u === 'https://refuses.example/robots.txt') return page(200, 'User-agent: *\nDisallow: /');
+    if (u === 'https://bistro.example/') return page(301, '', { location: 'https://refuses.example/menu' });
+    if (u === 'https://closed.example/robots.txt') return page(200, 'User-agent: *\nDisallow: /');
+    return page(404);
+  };
+  await findMenuUrl({ website: 'https://bistro.example/', name: 'Bistro' }).catch(() => null);
+  assert.ok(!asked.includes('https://refuses.example/menu'), 'the refused host’s page is never fetched');
+  await findMenuUrl({ website: 'https://closed.example/', name: 'Closed' }).catch(() => null);
+  assert.ok(!asked.includes('https://closed.example/'), 'a site that disallows us is not fetched at all');
+});

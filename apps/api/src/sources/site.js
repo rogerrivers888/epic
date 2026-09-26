@@ -28,6 +28,7 @@ import { findMenuUrl } from './menuLink.js';
 import { phoneOf } from '../domain/contact.js';
 import { userAgent } from '../origins.js';
 import { beforeFetching } from './politeness.js';
+import { fetchFollowing } from './follow.js';
 
 const TIMEOUT_MS = 6000;
 const MAX_BYTES = 1_500_000;
@@ -168,33 +169,16 @@ export function printedPhone(html) {
  * search engines may lose us a phone number. It is the cost of being able to
  * say, honestly, that Epic asks before it reads.
  */
-const MAX_HOPS = 5;
-
 async function fetchPage(url) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  // Every hop asks first, and each hop's timeout starts after the politeness
+  // wait (C11 and Codex, 26 Sep 2026): see sources/follow.js.
+  const forbids = async (at) => !(await beforeFetching(at)).ok;
   try {
-    // Redirects are followed by hand, and every hop asks first: a venue's
-    // page that redirects to another host must not be read without asking
-    // that host's robots.txt (C11, 26 Sep 2026). Followed automatically, the
-    // check covered only the first address.
-    let at = url;
-    for (let hop = 0; hop <= MAX_HOPS; hop += 1) {
-      const polite = await beforeFetching(at);
-      if (!polite.ok) return null;
-      const res = await fetch(at, { redirect: 'manual', signal: controller.signal, headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml' } });
-      if (res.status >= 300 && res.status < 400) {
-        const next = res.headers.get('location');
-        if (!next) return null;
-        at = new URL(next, at).toString();
-        continue;
-      }
-      if (!res.ok) return null;
-      if (!/text\/html|xhtml/i.test(res.headers.get('content-type') || '')) return null;
-      return { url: at, html: (await res.text()).slice(0, MAX_BYTES) };
-    }
-    return null;
-  } catch { return null; } finally { clearTimeout(timer); }
+    const { res, url: at } = await fetchFollowing(url, { headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml' } }, { forbids, timeoutMs: TIMEOUT_MS });
+    if (!res || !res.ok) return null;
+    if (!/text\/html|xhtml/i.test(res.headers.get('content-type') || '')) return null;
+    return { url: at, html: (await res.text()).slice(0, MAX_BYTES) };
+  } catch { return null; }
 }
 
 // ---------------------------------------------------------------------------

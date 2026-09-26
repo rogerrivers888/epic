@@ -24,6 +24,7 @@
 // Five seconds was enough from a desk and not from the server: a branch's home
 // page can be a third of a megabyte from a small host (owner, 4 Sep 2026 — the
 // Windsor menu was there and we still missed it).
+import { fetchFollowing } from './follow.js';
 import { userAgent } from '../origins.js';
 const FETCH_TIMEOUT_MS = Number(process.env.EPIC_MENU_TIMEOUT_MS || 9000);
 const MAX_BYTES = 1_000_000;
@@ -71,22 +72,20 @@ async function robotsForbids(url) {
 }
 
 async function get(url, { method = 'GET', as = UA } = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { method, redirect: 'follow', signal: controller.signal, headers: { 'user-agent': as, accept: 'text/html,application/xhtml+xml,application/pdf' } });
-    const type = res.headers.get('content-type') || '';
-    if (!res.ok && (res.status === 403 || res.status === 406) && as === UA && !(await robotsForbids(url))) {
-      clearTimeout(timer);
-      return get(url, { method, as: BROWSER_UA });
-    }
-    if (method === 'HEAD' || !res.ok) return { ok: res.ok, url: res.url || url, type, html: '' };
-    if (!/text\/html|xhtml/i.test(type)) return { ok: true, url: res.url || url, type, html: '' };
-    const html = (await res.text()).slice(0, MAX_BYTES);
-    return { ok: true, url: res.url || url, type, html };
-  } finally {
-    clearTimeout(timer);
+  // robots.txt is asked before the first request and at every redirect, not
+  // only before the browser retry (C11, 26 Sep 2026): sources/follow.js.
+  const { res, url: at, refused } = await fetchFollowing(url,
+    { method, headers: { 'user-agent': as, accept: 'text/html,application/xhtml+xml,application/pdf' } },
+    { forbids: robotsForbids, timeoutMs: FETCH_TIMEOUT_MS });
+  if (refused || !res) return { ok: false, url: at, type: '', html: '', refused: Boolean(refused) };
+  const type = res.headers.get('content-type') || '';
+  if (!res.ok && (res.status === 403 || res.status === 406) && as === UA) {
+    return get(url, { method, as: BROWSER_UA });
   }
+  if (method === 'HEAD' || !res.ok) return { ok: res.ok, url: at, type, html: '' };
+  if (!/text\/html|xhtml/i.test(type)) return { ok: true, url: at, type, html: '' };
+  const html = (await res.text()).slice(0, MAX_BYTES);
+  return { ok: true, url: at, type, html };
 }
 
 /**
@@ -414,8 +413,8 @@ export async function siteIndex(website, { maxSitemaps = 5, maxUrls = 3000 } = {
 
   const xml = async (url) => {
     try {
-      const res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), headers: { 'user-agent': UA, accept: 'application/xml,text/xml' } });
-      if (!res.ok) return '';
+      const { res } = await fetchFollowing(url, { headers: { 'user-agent': UA, accept: 'application/xml,text/xml' } }, { forbids: robotsForbids, timeoutMs: FETCH_TIMEOUT_MS });
+      if (!res || !res.ok) return '';
       const type = res.headers.get('content-type') || '';
       if (!/xml/i.test(type)) return '';
       return (await res.text()).slice(0, 4_000_000);

@@ -35,6 +35,7 @@
 //   • Prices are recorded as printed, with the date they were printed, so the
 //     screen can mark them indicative once they are old (Epic 6 C8).
 
+import { fetchFollowing } from './follow.js';
 import { parseStructured } from '../claude.js';
 import { userAgent } from '../origins.js';
 import { searchWeb } from '../claude.js';
@@ -109,22 +110,21 @@ async function robotsForbids(url) {
 }
 
 async function grab(url, { as = UA } = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      redirect: 'follow',
-      signal: controller.signal,
-      headers: { 'user-agent': as, accept: 'text/html,application/xhtml+xml,application/pdf,*/*' },
-    });
+  // robots.txt is asked before the first request and at every redirect, not
+  // only before the browser retry (C11, 26 Sep 2026): sources/follow.js.
+  const { res, url: at, refused } = await fetchFollowing(url,
+    { headers: { 'user-agent': as, accept: 'text/html,application/xhtml+xml,application/pdf,*/*' } },
+    { forbids: robotsForbids, timeoutMs: FETCH_TIMEOUT_MS });
+  if (refused || !res) return { ok: false, url: at, type: '', status: refused ? 'robots' : 0 };
+  {
     const type = (res.headers.get('content-type') || '').toLowerCase();
     if (!res.ok) {
       // Refused for being a robot rather than for asking for this page. Try
-      // once as an ordinary browser, and only where robots does not object.
-      if ((res.status === 403 || res.status === 406 || res.status === 429) && as === UA && !(await robotsForbids(url))) {
+      // once as an ordinary browser; robots was already asked above.
+      if ((res.status === 403 || res.status === 406 || res.status === 429) && as === UA) {
         return grab(url, { as: BROWSER_UA });
       }
-      return { ok: false, url: res.url || url, type, status: res.status };
+      return { ok: false, url: at, type, status: res.status };
     }
     const buffer = Buffer.from(await res.arrayBuffer());
     // Answered, and with nothing in it. Some sites do not refuse a robot, they
@@ -132,13 +132,11 @@ async function grab(url, { as = UA } = {}) {
     // characters and gives a browser a hundred and forty kilobytes with five
     // photographs of the menu in it (found 6 Sep 2026). One more request, and
     // only where robots does not object.
-    if (as === UA && /html/i.test(type) && buffer.length < THIN_HTML && !(await robotsForbids(url))) {
+    if (as === UA && /html/i.test(type) && buffer.length < THIN_HTML) {
       const again = await grab(url, { as: BROWSER_UA });
       if (again.ok && (again.buffer?.length ?? 0) > buffer.length) return again;
     }
-    return { ok: true, url: res.url || url, type, buffer: buffer.subarray(0, MAX_BYTES), as };
-  } finally {
-    clearTimeout(timer);
+    return { ok: true, url: at, type, buffer: buffer.subarray(0, MAX_BYTES), as };
   }
 }
 
