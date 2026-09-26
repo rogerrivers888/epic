@@ -69,7 +69,7 @@ export function searchPlan({ searchKm, categories = [], query = '', todayKm = 0 
  * it is the list the nearer places were being pushed out of.
  */
 /** Google's id for a place, resolved (`sourceIds`) or straight from a display search. */
-const googleId = (v) => v?.sourceIds?.google ?? (v?.source === 'google' ? v?.sourcePlaceId ?? null : null);
+export const googleId = (v) => v?.sourceIds?.google ?? (v?.source === 'google' ? v?.sourcePlaceId ?? null : null);
 
 export function mergeWide(near = [], wide = []) {
   const ids = new Set(near.map(googleId).filter(Boolean));
@@ -122,4 +122,3 @@ export function alternate(items = [], isNear) {
   }
   return out;
 }
-

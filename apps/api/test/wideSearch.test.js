@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { estimateTravelMinutes, reachRadiusKm, searchRadiusKm } from '../src/domain/travel.js';
-import { searchPlan, mergeWide, alternate, NEAR_KM } from '../src/domain/wideSearch.js';
+import { searchPlan, mergeWide, alternate, googleId, NEAR_KM } from '../src/domain/wideSearch.js';
 import * as wideSearch from '../src/domain/wideSearch.js';
 import { bump, noteFault, healthOf } from '../src/sources/meter.js';
 
@@ -111,4 +111,19 @@ test('the shown list alternates near and far, each in its own order', () => {
   assert.equal(out.slice(0, 4).filter((id) => id.startsWith('n')).length, 2);
   assert.deepEqual(alternate([], () => true), []);
   assert.deepEqual(alternate(items, () => false).map((v) => v.id), ['f1', 'f2', 'f3', 'n1', 'f4', 'n2'], 'one side only keeps its order');
+});
+
+test('cut to one page after taking turns, the page is still half near', () => {
+  const items = [
+    ...Array.from({ length: 30 }, (_, i) => ({ id: `f${i}`, near: false })),
+    ...Array.from({ length: 10 }, (_, i) => ({ id: `n${i}`, near: true })),
+  ];
+  const page = alternate(items, (v) => v.near).slice(0, 20);
+  assert.equal(page.filter((v) => v.near).length, 10, 'a re-sort of this page can reorder it, but cannot push the near half out');
+});
+
+test("a place's Google id is read the same way from either kind of result", () => {
+  assert.equal(googleId({ sourceIds: { google: 'g1' } }), 'g1');
+  assert.equal(googleId({ source: 'google', sourcePlaceId: 'g2' }), 'g2');
+  assert.equal(googleId({ source: 'osm', sourcePlaceId: 'way/1' }), null);
 });

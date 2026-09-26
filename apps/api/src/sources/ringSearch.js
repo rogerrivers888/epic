@@ -70,6 +70,13 @@ export const poolSize = () => [...kept.values()].filter(fresh).length;
 export const forgetPool = () => { kept.clear(); inFlight.clear(); };
 /** For the tests alone: make a page as old as it needs to be. */
 export const age = (key, byMs) => { const hit = kept.get(key); if (hit) hit.at -= byMs; };
+/**
+ * A page from the pool, if it is still usable, without buying it again. A later
+ * page of the wide search reads the near page this way so it can leave out
+ * what the near search already showed (E13); asking `categoryPage` would buy
+ * the page again once it had aged out.
+ */
+export const peek = (key) => { const hit = kept.get(key); return usable(hit) ? hit.value : null; };
 
 /**
  * One text query per Epic category, and the type to fence it with where Google

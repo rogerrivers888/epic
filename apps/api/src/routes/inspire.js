@@ -59,7 +59,7 @@ import { currentHousehold, loadMembers, toAttendees } from './household.js';
 import { householdStatus } from './places.js';
 import { thingsAround, THINGS_RADIUS_KM } from './plan.js';
 import { estimateTravelMinutes, kmBetween, searchRadiusKm, travelMode } from '../domain/travel.js';
-import { searchPlan, mergeWide, alternate, NEAR_KM } from '../domain/wideSearch.js';
+import { searchPlan, mergeWide, alternate, googleId, NEAR_KM } from '../domain/wideSearch.js';
 import { fenceToBand, minutesTo } from '../domain/band.js';
 import { boundKm } from '../domain/reach.js';
 import { dwellFor } from '../domain/options.js';
@@ -74,7 +74,7 @@ import { publishedNear, heroesForPlaces } from '../repositories/library.js';
 import { foodNear } from '../repositories/scout.js';
 import { enabledSources } from '../sources/index.js';
 import { needsLookAround, lookAroundOutcome } from '../domain/lookAround.js';
-import { censusForRing, categoryPage, ASKED } from '../sources/ringSearch.js';
+import { censusForRing, categoryPage, peek, pageKey, ASKED } from '../sources/ringSearch.js';
 import { boxAround, boxKm, outcodeOfCell } from '../domain/ring.js';
 import * as reach from '../repositories/reach.js';
 import { sectorOf } from '../domain/reach.js';
@@ -287,6 +287,9 @@ const ringFrom = (q, { minutes, mode }) => reach.ringFor({
  * the other way round: their order is a fact about their index, ours is a
  * judgement about the place (data policy, 19 Sep 2026).
  */
+/** One page of a category: the twenty a single display search returns. */
+const PAGE = 20;
+
 async function placesFor({ ring, category, page, meter, taught, tax, householdId, minutes = 30, mode = 'driving', from = null }) {
   const start = from ?? ring.at ?? null;
   const reachKm = boundKm(minutes, mode);
@@ -313,7 +316,7 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
   const nearToo = Boolean(start && plan.wideKm && page === 1);
   const nearBox = nearToo ? boxAround([start], { marginKm: NEAR_KM }) : null;
 
-  const wideGot = await categoryPage({
+  const widePage = categoryPage({
     /**
      * The ring, not its size.
      *
@@ -345,11 +348,25 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
     box: searchBox, cells: null,
     category, page, meter, householdId, cellAt: reach.cellAt,
   });
-  // Billed through the same meter as the wide one, never added up afterwards:
-  // the meter's health lives on keys a copy leaves behind (Codex, 26 Sep 2026).
-  const nearGot = nearToo
-    ? await categoryPage({ ringKey: `${ringKey}|near`, box: nearBox, cells: null, category, page: 1, meter, householdId, cellAt: reach.cellAt })
-    : null;
+  // Asked together, not one after the other: the two are independent, and in
+  // turn they put a second provider round trip on every cold first page
+  // (Codex, 26 Sep 2026). Billed through the same meter as the wide one, never
+  // added up afterwards — the meter's health lives on keys a copy leaves behind.
+  const nearKey = `${ringKey}|near`;
+  const [wideGot, nearGot] = await Promise.all([
+    widePage,
+    nearToo
+      ? categoryPage({ ringKey: nearKey, box: nearBox, cells: null, category, page: 1, meter, householdId, cellAt: reach.cellAt })
+      : null,
+  ]);
+  // A later page of the wide search can hand back a place the near search
+  // already showed on page one, and the screen appends pages without looking
+  // (Codex, 26 Sep 2026). Read from the pool, never bought again.
+  const shownNear = page > 1 ? peek(pageKey(nearKey, category, 1)) : null;
+  if (shownNear) {
+    const seen = new Set(shownNear.venues.map(googleId).filter(Boolean));
+    wideGot.venues = wideGot.venues.filter((v) => !seen.has(googleId(v)));
+  }
   const got = nearGot
     ? {
       ...wideGot,
@@ -454,7 +471,11 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
     });
   // Sorted as one list, the score would put the famous far places first again
   // and the cut would take the near ones back out; see `alternate`.
-  const shown = nearGot ? alternate(items, (it) => kmBetween(start, it) <= NEAR_KM) : items;
+  // Cut to one page after taking turns, not before: two searches can merge to
+  // forty, and a screen that re-sorts the whole pool by rating would undo the
+  // turns and let the far places crowd the near ones out again (Codex, 26 Sep
+  // 2026). Cut here, the twenty it re-sorts are already half near.
+  const shown = nearGot ? alternate(items, (it) => kmBetween(start, it) <= NEAR_KM).slice(0, PAGE) : items;
   return {
     items: shown, nextPageToken: got.nextPageToken, requests: got.requests, cached: got.cached,
     problem: got.problem ?? null,
