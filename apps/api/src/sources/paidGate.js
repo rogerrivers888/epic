@@ -102,9 +102,29 @@ export async function admitPaid({ meter = null, requests = 1 } = {}) {
     noteFault(meter, 'unattributed');
     throw new UnattributedCallError(sessionId ? 'the server’s own session, not a sign-in' : 'no session');
   }
-  const { countGoogleThisMonth, monthlyBoundFor, SpendBoundError } = await load();
-  const [onLedger, bound] = await Promise.all([countGoogleThisMonth(householdId), monthlyBoundFor(householdId)]);
-  const made = Math.max(onLedger, admittedFor(householdId));
-  if (made + requests > bound) { noteFault(meter, 'household_cap'); throw new SpendBoundError('household', bound); }
-  admitted.set(householdId, made + requests);
+  // One admission at a time per household. Two requests arriving together —
+  // the corridor's two matrices under one Promise.all — each read the same
+  // count and were both admitted past the bound, and the second write took
+  // the first's place rather than adding to it (Codex, 26 Sep 2026).
+  await inTurn(householdId, async () => {
+    const { countGoogleThisMonth, monthlyBoundFor, SpendBoundError } = await load();
+    const [onLedger, bound] = await Promise.all([countGoogleThisMonth(householdId), monthlyBoundFor(householdId)]);
+    const made = Math.max(onLedger, admittedFor(householdId));
+    if (made + requests > bound) { noteFault(meter, 'household_cap'); throw new SpendBoundError('household', bound); }
+    admitted.set(householdId, made + requests);
+  });
+}
+
+const turns = new Map();
+async function inTurn(key, fn) {
+  const before = turns.get(key) ?? Promise.resolve();
+  let done;
+  const mine = new Promise((resolve) => { done = resolve; });
+  const tail = before.then(() => mine);
+  turns.set(key, tail);
+  await before;
+  try { return await fn(); } finally {
+    done();
+    if (turns.get(key) === tail) turns.delete(key);
+  }
 }

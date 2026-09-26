@@ -237,3 +237,26 @@ test('a revoked or expired session stops spending, even through a link it signed
     assert.equal(out(), 0);
   });
 });
+
+test('two paid requests arriving together cannot both take the last of the allowance', async () => {
+  // Codex, 26 Sep 2026: the corridor's two matrices under one Promise.all.
+  const TIGHT = '00000000-0000-4000-8000-0000000a7e05';
+  await query(`insert into households (id, name) values ($1, 'Tight household') on conflict (id) do nothing`, [TIGHT]);
+  await query(`insert into accounts (household_id, email, role, status, plan, monthly_call_bound) values ($1, 'tight@test', 'member', 'active', 'family', 3)`, [TIGHT]);
+  try {
+    await withGoogle(async (out) => {
+      const one = [{ lat: 51.4, lng: -0.6 }];
+      const two = [{ lat: 51.41, lng: -0.61 }, { lat: 51.42, lng: -0.62 }];
+      const results = await runAsSpender({ householdId: TIGHT, sessionId: SIGNED_IN }, () => Promise.allSettled([
+        routeMatrixMinutes({ origins: one, destinations: two, purpose: 'test.race' }),
+        routeMatrixMinutes({ origins: one, destinations: two, purpose: 'test.race' }),
+      ]));
+      assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1, 'two elements each against a bound of three: one fits');
+      assert.equal(out(), 1);
+    });
+  } finally {
+    await query('delete from provider_calls where household_id = $1', [TIGHT]);
+    await query('delete from accounts where household_id = $1', [TIGHT]);
+    await query('delete from households where id = $1', [TIGHT]);
+  }
+});
