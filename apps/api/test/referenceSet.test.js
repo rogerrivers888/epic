@@ -239,6 +239,9 @@ test('the facts behind a disagreement can be read, field by field and source by 
   await put('summary', 'wikipedia', 'Birdworld is the United Kingdom\u2019s largest bird park.');
   await put('phone', 'osm', '+44 20 7416 5000');
   await put('phone', 'site', '020 7416 5000');
+  await put('phone', 'wikipedia', '+44 (0)20 7416 5000');
+  await put('name', 'osm', 'Birdworld!');
+  await put('name', 'wikipedia', 'The Birdworld');
   const heldSeven = (await ref.held(row.id)).find((p) => p.venue_ref === seven);
   assert.equal(heldSeven.disagreements, 0, 'none of those is two answers to one question');
   // And a real one still is.

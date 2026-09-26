@@ -51,9 +51,10 @@ const SAME_VALUE = `case
     when f.field = 'website'
       then regexp_replace(regexp_replace(regexp_replace(lower(f.value #>> '{}'), '^https?://(www\\.)?', ''), '[?#].*$', ''), '/+$', '')
     when f.field = 'phone'
-      then regexp_replace(regexp_replace(f.value #>> '{}', '[^0-9]', '', 'g'), '^(44|0)', '')
+      -- "+44 (0)20…", "+44 20…" and "020…" are one number (Codex, 26 Sep 2026).
+      then regexp_replace(regexp_replace(f.value #>> '{}', '[^0-9]', '', 'g'), '^(440?|0)', '')
     when f.field = 'name'
-      then regexp_replace(regexp_replace(lower(f.value #>> '{}'), '^the ', ''), '[^a-z0-9]+', ' ', 'g')
+      then btrim(regexp_replace(regexp_replace(lower(f.value #>> '{}'), '^the ', ''), '[^a-z0-9]+', ' ', 'g'))
     when f.field = 'postcode'
       then upper(regexp_replace(f.value #>> '{}', '\\s+', '', 'g'))
     else f.value::text end`;
