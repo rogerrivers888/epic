@@ -145,7 +145,9 @@ export async function classesOf(qids) {
 async function entity(qid) {
   const p = new URLSearchParams({ action: 'wbgetentities', ids: qid, props: 'claims', format: 'json', origin: '*' });
   const data = await get(`${WIKIDATA}?${p}`);
-  const claims = data?.entities?.[qid]?.claims ?? {};
+  // An item that is not there is not an item with no classes (Codex, 26 Sep 2026).
+  if (!data?.entities?.[qid]?.claims) throw new Error(`wikidata: no entity ${qid}`);
+  const claims = data.entities[qid].claims;
   const first = (prop) => claims[prop]?.[0]?.mainsnak?.datavalue?.value ?? null;
   const inception = first('P571');
   return {
@@ -198,8 +200,11 @@ export async function encyclopediaFor({ name, lat, lng, locality = null, address
   let facts = { classes: [], officialWebsite: null, openedYear: null, commonsImage: null };
   // With no answer from Wikidata there is nothing to refuse on, and an article
   // that cannot be checked is not stored on the strength of its title: the
-  // match is left for the next pass rather than taken (Codex, 26 Sep 2026).
-  if (page.wikidataId) { try { facts = await entity(page.wikidataId); } catch { return null; } }
+  // match is left for the next pass rather than taken, and an article with no
+  // item at all is not taken either (Codex, 26 Sep 2026). Nearly every article
+  // has one, so that costs almost nothing.
+  if (!page.wikidataId) return null;
+  try { facts = await entity(page.wikidataId); } catch { return null; }
   // An article about the town, the hill or the borough is not an article
   // about the place, however well the name scores.
   if (refused(facts.classes, category)) return null;
