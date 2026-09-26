@@ -257,12 +257,14 @@ test('forgetting a wrong article takes the record’s ownership down with it, an
   const own = await import('../src/sources/own.js');
   // Place 8's only owned fact was the article's lead: a wrong pairing.
   const eight = 'google:ChIJ_ref_008';
-  await query(`update place_records set website = null where venue_ref = $1`, [eight]);
+  await query(`update place_records set website = null, matched = '{"wikipedia":{"title":"Woking"}}'::jsonb where venue_ref = $1`, [eight]);
   await query(`insert into place_facts (venue_ref, field, source, value, licence, retention, confidence, expires_at) values ($1, 'summary', 'wikipedia', $2, 'x', 'indefinite', 1, null) on conflict do nothing`, [eight, JSON.stringify('Woking is a town in Surrey.')]);
   await query(`update place_index set ownership = 'owned' where venue_ref = $1`, [eight]);
   await own.forgetEncyclopedia(eight);
-  const [rec] = (await query(`select summary, website from place_records where venue_ref = $1`, [eight])).rows;
+  const [rec] = (await query(`select summary, website, matched, enrich_state from place_records where venue_ref = $1`, [eight])).rows;
   assert.equal(rec.summary, null);
+  assert.equal(rec.matched.wikipedia, undefined, 'the record no longer says the article matched (Codex, 26 Sep 2026)');
+  assert.equal(rec.enrich_state, 'pending', 'nothing of its own left: a research job again');
   const [idx] = (await query(`select ownership from place_index where venue_ref = $1`, [eight])).rows;
   assert.notEqual(idx.ownership, 'owned', 'nothing of ours is left on the record, so it is not owned (Codex, 26 Sep 2026)');
   // Place 9 keeps its own website, so it stays owned after the article goes.

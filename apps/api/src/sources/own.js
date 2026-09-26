@@ -985,6 +985,14 @@ export async function forgetEncyclopedia(venueRef) {
   // and coverage and the paid paths must not go on treating it as researched
   // (Codex, 26 Sep 2026) — the same settling the administrative edit does.
   await owned.settleOwnership(venueRef).catch(() => null);
+  // The record must not go on saying the article matched, and a record left
+  // with nothing of its own is a research job again, not a finished one
+  // (Codex, 26 Sep 2026).
+  await query(
+    `update place_records
+        set matched = coalesce(matched, '{}'::jsonb) - 'wikipedia' - 'wikidata',
+            enrich_state = case when provenance = '{}'::jsonb and enrich_state = 'done' then 'pending' else enrich_state end
+      where venue_ref = $1`, [venueRef]);
   return out;
 }
 
