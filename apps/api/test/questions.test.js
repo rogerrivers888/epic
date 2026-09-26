@@ -477,7 +477,7 @@ test('a quote is kept from an owned source and dropped from a rented one', async
     { norm: 'wave machine', raw: 'wave machine', sources: ['google'], placesSeen: 3, asserts: 3,
       evidence: 'the wave machine runs on the hour' },
   ], { placesTotal: 20 });
-  const rows = await sets.candidates({ subcategory: 'quoted-drawer', status: null, limit: 10 });
+  const rows = await sets.candidates({ subcategory: 'quoted-drawer', status: null, limit: 10, withEvidence: true });
   const trig = rows.find((c) => c.norm === 'trig point');
   const wave = rows.find((c) => c.norm === 'wave machine');
   assert.equal(trig.evidence, 'A trig point marks the summit');
@@ -489,7 +489,7 @@ test('a quote is kept from an owned source and dropped from a rented one', async
   await sets.recordCandidates('quoted-drawer', [
     { norm: 'trig point', raw: 'trig point', sources: ['google'], placesSeen: 2, asserts: 2, evidence: 'from a review' },
   ], { placesTotal: 100 });
-  const again = (await sets.candidates({ subcategory: 'quoted-drawer', status: null, limit: 10 })).find((c) => c.norm === 'trig point');
+  const again = (await sets.candidates({ subcategory: 'quoted-drawer', status: null, limit: 10, withEvidence: true })).find((c) => c.norm === 'trig point');
   assert.equal(again.evidence, 'A trig point marks the summit');
 
   // Decided, the examples go with the decision — and the quote stays. It is
@@ -499,7 +499,7 @@ test('a quote is kept from an owned source and dropped from a rented one', async
   // up (Codex, 26 Sep 2026).
   await sets.setKind(again.id, { kind: 'feature', by: 'test' });
   await sets.ignoreCandidate(again.id, { actor: 'test' });
-  const [gone] = await sets.candidates({ subcategory: 'quoted-drawer', status: 'ignored', limit: 10 });
+  const [gone] = await sets.candidates({ subcategory: 'quoted-drawer', status: 'ignored', limit: 10, withEvidence: true });
   assert.deepEqual(gone.examples, []);
   assert.equal(gone.evidence, 'A trig point marks the summit');
   assert.equal(gone.evidence_ref, 'atlas:1');
@@ -784,4 +784,23 @@ test('migration 260 turns a promoted soft play on Water into a filing under Play
   assert.ok(row.evidence, 'the quote stays with the decision');
   await query("delete from harvest_candidates where subcategory = 'lidos' and norm = 'soft play'");
   await query('delete from questions where id = $1', [q.id]);
+});
+
+test('an evidence quote goes to the approver only; everybody else is told there is one (E11b, 26 Sep 2026)', async () => {
+  const qs = await import('../src/repositories/questionSets.js');
+  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  await query("delete from harvest_candidates where subcategory = $1 and norm = 'zz wave machine'", [sub]);
+  await query(
+    `insert into harvest_candidates (norm, raw_forms, subcategory, places_seen, places_total, kind, status, sources, evidence, evidence_ref)
+     values ('zz wave machine', array['zz wave machine'], $1, 3, 20, 'feature', 'new', '{"features": 3}'::jsonb, 'The pool has a zz wave machine every hour.', 'google:x')`, [sub]);
+  try {
+    const plain = (await qs.candidates({ subcategory: sub, status: 'new' })).find((c) => c.norm === 'zz wave machine');
+    assert.equal(plain.evidence, null);
+    assert.equal(plain.evidence_ref, null);
+    assert.equal(plain.quoted, true);
+    const approver = (await qs.candidates({ subcategory: sub, status: 'new', withEvidence: true })).find((c) => c.norm === 'zz wave machine');
+    assert.match(approver.evidence, /wave machine/);
+  } finally {
+    await query("delete from harvest_candidates where subcategory = $1 and norm = 'zz wave machine'", [sub]);
+  }
 });

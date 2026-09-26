@@ -204,6 +204,31 @@ export async function countForSession(planSessionId) {
   return billable(rows);
 }
 
+/**
+ * This month's calls for one household, split the way the cap splits them.
+ *
+ * `priced` is exactly what the household cap counts (`countThisMonth`); `free`
+ * is every other row — the IDs Only census, the open sources, anything that
+ * cannot bill. The accounts screen drew the whole ledger against the cap, and
+ * 47,638 of 50,000 read as nearly full when the cap had counted 22,491 (owner,
+ * 26 Sep 2026).
+ */
+export async function monthSplit(householdId) {
+  const { rows } = await query(
+    `select provider, sum(${CALLS_IN_ROW})::int as n, count(*)::int as rows,
+            count(*) filter (where (${CALLS_IN_ROW}) = 0)::int as zero_rows
+       from provider_calls
+      where household_id = $1 and created_at >= date_trunc('month', now())
+      group by provider`,
+    [householdId],
+  );
+  let priced = 0; let free = 0;
+  for (const r of rows) {
+    if (canBill(r.provider)) { priced += r.n; free += r.zero_rows; } else free += r.rows;
+  }
+  return { priced, free };
+}
+
 export async function countThisMonth(householdId) {
   const { rows } = await query(
     `select provider, sum(${CALLS_IN_ROW})::int as n from provider_calls

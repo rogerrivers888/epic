@@ -118,6 +118,10 @@ test('a ledger row that metered three requests counts as three', async () => {
     // A Place Details request on a Pro mask, priced, counts.
     await query(`insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd) values ($1, (select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'google', 'own.seed', '{"google": 1, "google-pro": 1}'::jsonb, 0.032)`, [HH3]);
     assert.equal(await countThisMonth(HH3), 8, 'three and four priced requests and one Pro detail; the free open map and the free census not counted at all');
+    // The accounts screen draws the same priced figure against the cap, and
+    // the free rows beside it (owner, 26 Sep 2026).
+    const { monthSplit } = await import('../src/repositories/providerCalls.js');
+    assert.deepEqual(await monthSplit(HH3), { priced: 8, free: 2 }, 'the open-map row and the census slice are the free two');
   } finally {
     await query('delete from provider_calls where household_id = $1', [HH3]);
     await query('delete from households where id = $1', [HH3]);

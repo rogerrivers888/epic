@@ -306,10 +306,14 @@ function AccountRow({ account: a, wide, open, onOpen, busy, plans, defaultBound,
           </View>
 
           <View style={wide ? { flex: 3 } : { width: '100%' }}>
+            {/* Priced calls against the cap — the number the cap counts —
+                and free ones beside it, never inside the bar (owner, 26 Sep 2026). */}
             <Meter
-              used={a.usage.callsMonth}
+              used={a.usage.pricedMonth ?? a.usage.callsMonth}
               limit={a.usage.bound}
-              label={`${a.usage.callsMonth.toLocaleString()} of ${a.usage.bound.toLocaleString()} calls · ${money(a.usage.costMonth)}`}
+              label={a.usage.pricedMonth != null
+                ? `${a.usage.pricedMonth.toLocaleString()} of ${a.usage.bound.toLocaleString()} priced · ${(a.usage.freeMonth ?? 0).toLocaleString()} free · ${money(a.usage.costMonth)}`
+                : `${a.usage.callsMonth.toLocaleString()} of ${a.usage.bound.toLocaleString()} calls · ${money(a.usage.costMonth)}`}
             />
           </View>
 

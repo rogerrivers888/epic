@@ -35,7 +35,7 @@
  */
 
 import { Router } from 'express';
-import { requires } from '../access.js';
+import { requires, can } from '../access.js';
 import { query } from '../db.js';
 import * as sets from '../repositories/questionSets.js';
 import * as harvest from '../sources/vocabulary.js';
@@ -118,7 +118,7 @@ questionRoutes.get('/sets/:key', requires('view_questions'), async (req, res, ne
     );
     const questions = await sets.questionsFor(req.params.key);
     const words = await sets.candidates({
-      subcategories: subs.rows.map((s) => s.key), status: 'new', limit: 400,
+      subcategories: subs.rows.map((s) => s.key), status: 'new', limit: 400, withEvidence: can(req, 'manage_questions'),
     });
     return res.json({
       set: rows[0],
@@ -206,6 +206,7 @@ questionRoutes.get('/candidates', requires('view_questions'), async (req, res, n
         // (Codex, 25 Sep 2026).
         minSeen: wholeFloor(req.query.minSeen),
         limit: Math.min(1000, Number(req.query.limit ?? 500) || 500),
+        withEvidence: can(req, 'manage_questions'),
       }),
     });
   } catch (err) { next(err); }
@@ -223,8 +224,8 @@ questionRoutes.get('/candidates/pen', requires('view_questions'), async (req, re
   try {
     const subcategory = req.query.subcategory ? String(req.query.subcategory) : null;
     const [unclear, resolved] = await Promise.all([
-      sets.candidates({ subcategory, status: 'unresolved', kind: 'unclear', limit: 500 }),
-      sets.candidates({ subcategory, status: 'unresolved', limit: 500 }),
+      sets.candidates({ subcategory, status: 'unresolved', kind: 'unclear', limit: 500, withEvidence: can(req, 'manage_questions') }),
+      sets.candidates({ subcategory, status: 'unresolved', limit: 500, withEvidence: can(req, 'manage_questions') }),
     ]);
     res.json({
       // What nobody has called yet, and what has been called something that is
@@ -540,13 +541,19 @@ questionRoutes.get('/reference/wikipedia-audit', requires('view_library'), async
   try { res.json(await reference.wikipediaAudit()); } catch (err) { next(err); }
 });
 /** Forget what those wrong matches attached, and recompose each record. Owned data, corrected. */
-questionRoutes.post('/reference/wikipedia-audit/forget', requires('manage_questions'), async (_req, res, next) => {
+questionRoutes.post('/reference/wikipedia-audit/forget', requires('manage_questions'), async (req, res, next) => {
   try {
     const own = await import('../sources/own.js');
     const audit = await reference.wikipediaAudit();
+    // Named places only, when names are given: the owner decides the held-back
+    // list one place at a time, and a place he has not decided yet is left
+    // exactly as it is (26 Sep 2026). Only a flagged place is ever forgotten.
+    const only = Array.isArray(req.body?.refs) ? new Set(req.body.refs.map(String)) : null;
+    const chosen = audit.places.filter((p) => !only || only.has(p.venue_ref));
     let forgotten = 0;
-    for (const p of audit.places) { await own.forgetEncyclopedia(p.venue_ref); forgotten += 1; }
-    res.json({ checked: audit.checked, flagged: audit.flagged, forgotten });
+    for (const p of chosen) { await own.forgetEncyclopedia(p.venue_ref); forgotten += 1; }
+    const notFlagged = only ? [...only].filter((r) => !audit.places.some((p) => p.venue_ref === r)) : [];
+    res.json({ checked: audit.checked, flagged: audit.flagged, forgotten, notFlagged });
   } catch (err) { next(err); }
 });
 

@@ -411,8 +411,19 @@ export async function bodyProgress() {
             count(distinct venue_ref) filter (where source = 'site')::int as from_site,
             count(distinct venue_ref) filter (where source = 'wikipedia')::int as from_wikipedia
        from place_facts where field = 'body' and expires_at is null`);
+  // The harvest sample on its own: the re-extract runs when every place in it
+  // that was researched before the body existed has been brought up.
+  const { sampleRefs } = await import('./featureHarvest.js');
+  const sample = await sampleRefs();
+  const { rows: [h] } = await query(
+    `select count(*)::int as places,
+            count(*) filter (where r.research_version >= 1 and r.enrich_state not in ('pending', 'scored'))::int as researched,
+            count(*) filter (where r.research_version >= $2 and r.enrich_state not in ('pending', 'scored'))::int as brought_up,
+            count(*) filter (where exists (select 1 from place_facts b where b.venue_ref = x.ref and b.field = 'body' and b.expires_at is null))::int as with_body
+       from unnest($1::text[]) x(ref) left join place_records r on r.venue_ref = x.ref`, [sample, RESEARCH_VERSION]);
   return {
     version: RESEARCH_VERSION,
+    harvest: { places: h.places, done: h.brought_up, of: h.researched, withBody: h.with_body, ready: h.brought_up >= h.researched },
     backfill: { done: b.brought_up, of: b.researched },
     withBody: { places: w.places, fromSite: w.from_site, fromWikipedia: w.from_wikipedia },
   };
@@ -430,7 +441,8 @@ export async function wikipediaAudit() {
   const { classesOf, refused } = await import('./encyclopedia.js');
   const { rows } = await query(
     `select f.venue_ref, f.value #>> '{}' as qid, r.name, r.category, p.subcategory,
-            p.google_types, r.address, r.postcode,
+            p.google_types, r.address, r.postcode, p.found_by, p.slice, p.derived_by,
+            (select jsonb_agg(distinct ps.subcategory) from place_subcategories ps where ps.venue_ref = f.venue_ref) as found_under,
             (select jsonb_agg(jsonb_build_object('name', l.name, 'kind', l.kind) order by l.kind)
                from place_areas pa join localities l on l.slug = pa.area_slug where pa.venue_ref = f.venue_ref) as areas,
             (select u.value #>> '{}' from place_facts u where u.venue_ref = f.venue_ref and u.field = 'wikipedia_url' and u.source = 'wikipedia' and u.expires_at is null limit 1) as article_url,
@@ -452,7 +464,12 @@ export async function wikipediaAudit() {
   // Back were each filed under nothing more than that, and a town or a ridge
   // can be the attraction (production audit, 26 Sep 2026).
   const canJudge = (r) => Boolean(r.subcategory || (r.category && r.category !== 'attraction'));
-  const shape = (r) => ({ venue_ref: r.venue_ref, name: r.name, category: r.category ?? null, subcategory: r.subcategory, qid: r.qid, why: r.why, attached: r.attached ?? [] });
+  // Which census query found it and how its drawer was decided: how a post
+  // office came to sit under restaurants is read here, not guessed.
+  const shape = (r) => ({
+    venue_ref: r.venue_ref, name: r.name, category: r.category ?? null, subcategory: r.subcategory, qid: r.qid, why: r.why, attached: r.attached ?? [],
+    foundBy: r.found_by ?? null, foundUnder: r.found_under ?? [], slice: r.slice ?? null, filedBy: r.derived_by ?? null,
+  });
   const flagged = judged.filter(canJudge);
   const heldBack = judged.filter((r) => !canJudge(r));
   return {

@@ -328,7 +328,7 @@ export async function isClaimed(venueRef) {
  * whose backoff has come round, and one made by an older researcher than the
  * one running now.
  */
-export async function dueForResearch(limit, maxAttempts, researchVersion) {
+export async function dueForResearch(limit, maxAttempts, researchVersion, { first = [] } = {}) {
   const { rows } = await query(
     `select venue_ref from place_records
       -- A row written only to hold a score is not a research job, whatever
@@ -341,8 +341,11 @@ export async function dueForResearch(limit, maxAttempts, researchVersion) {
          or (enrich_state in ('failed', 'partial') and next_attempt_at is not null and next_attempt_at <= now())
          or (enrich_state = 'done' and provenance = '{}'::jsonb and enrich_attempts < $2)
          or research_version < $3)
-      order by research_version, enrich_attempts, first_owned limit $1`,
-    [limit, maxAttempts, researchVersion],
+      -- A place never researched keeps its place at the front; then the
+      -- places named first (the harvest sample, owner 26 Sep 2026), then the
+      -- rest in the order they always had. Same pace, a different order.
+      order by (research_version = 0) desc, (venue_ref = any($4::text[])) desc, research_version, enrich_attempts, first_owned limit $1`,
+    [limit, maxAttempts, researchVersion, first],
   );
   return rows.map((r) => r.venue_ref);
 }

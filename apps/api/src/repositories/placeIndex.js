@@ -3013,3 +3013,23 @@ export default {
   statsFor, statsForRefs, countries, areaBySlug, demandScope, breakdown, coverage, categories, shelveAll, settleClaims,
   sources, quality, places, household, namesFor, labels, noteSeen, noteScores,
 };
+
+
+/**
+ * Take a place out of Epic by hand (owner, A5, 26 Sep 2026: a settlement, a
+ * club or a community hall). The same reversible list the day-out test
+ * writes: the drawer it held is kept in `not_in_epic_before`, the reason and
+ * the moment beside it, and `restoreToEpic` puts it back. Marked as a hand
+ * decision so a rebuild leaves it where the owner put it.
+ */
+export async function setAsideByHand(venueRef, reason) {
+  const { rows } = await query(
+    `update place_index p
+        set not_in_epic_before = coalesce(p.not_in_epic_before, p.subcategory), subcategory = null,
+            not_in_epic_at = now(), not_in_epic_reason = $2, derived_by = 'hand', indexed_at = now()
+      where p.venue_ref = $1 and p.not_in_epic_at is null
+      returning venue_ref, not_in_epic_before as was`,
+    [venueRef, reason],
+  );
+  return rows[0] ?? null;
+}

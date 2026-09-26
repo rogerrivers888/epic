@@ -4527,7 +4527,7 @@ export type Account = {
   liveDevices: number;
   members: number;
   trips: number;
-  usage: { callsMonth: number; costMonth: number; callsEver: number; costEver: number; bound: number; boundIsOwn: boolean };
+  usage: { callsMonth: number; costMonth: number; callsEver: number; costEver: number; bound: number; boundIsOwn: boolean; pricedMonth?: number | null; freeMonth?: number | null };
   lastInvite?: AccountInvite | null;
 };
 export type Invitation = { url: string; expiresAt: string; delivery: string; message: string | null };

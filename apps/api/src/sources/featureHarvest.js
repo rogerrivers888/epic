@@ -427,6 +427,37 @@ export async function estimate({ subcategories = null, size = SAMPLE_SIZE } = {}
   };
 }
 
+/**
+ * The places the next run would read: the same twenty a drawer, by the same
+ * measure, as `estimate` counts (owner, 26 Sep 2026: "the 645 harvest places
+ * first"). The body backfill does these before the rest. As bodies arrive a
+ * place can only enter this list by having grown, so the places still
+ * waiting for the backfill here only ever shrink.
+ */
+export async function sampleRefs({ size = SAMPLE_SIZE } = {}) {
+  const { rows } = await query(
+    `with said as (
+       select p.venue_ref, p.subcategory,
+              row_number() over (partition by p.subcategory order by length(${SAID_SQL}) desc) as rank
+         from place_index p
+         left join place_records r on r.venue_ref = p.venue_ref
+         left join lateral (
+           select at.summary from attractions at
+            where at.venue_ref = p.venue_ref or ('atlas:' || at.id::text) = p.venue_ref
+            order by length(at.summary) desc nulls last limit 1
+         ) a on true
+         join shelf_subcategories s on s.key = p.subcategory and s.active
+        where length(${SAID_SQL}) > 80
+     ), kept as (
+       select * from said where rank <= $1
+     )
+     select venue_ref from kept
+      where subcategory in (select subcategory from kept group by 1 having count(*) >= ${ENOUGH_TO_ASK})`,
+    [size],
+  );
+  return rows.map((r) => r.venue_ref);
+}
+
 /** Drawers worth asking about: active, and with places that have text. */
 export async function harvestable({ subcategories = null } = {}) {
   const { rows } = await query(

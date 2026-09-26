@@ -41,7 +41,7 @@
  */
 
 import { Router } from 'express';
-import { requires } from '../access.js';
+import { requires, can } from '../access.js';
 import { query } from '../db.js';
 import * as filing from '../repositories/filing.js';
 import * as placeAttributes from '../repositories/placeAttributes.js';
@@ -828,7 +828,10 @@ export const candidateRow = (c) => ({
   // denials (migration 210).
   denies: (c.asserts + c.denies + c.asks) > 0 ? c.denies : null,
   // The quote the feature pass kept, from owned text (migration 247). Rented
-  // text never reaches the column, so anything here may be shown.
+  // text never reaches the column. It is handed over to the approver only
+  // (E11b, 26 Sep 2026) — `candidates({ withEvidence })` — and everybody else
+  // is told only that there is one.
+  quoted: Boolean(c.quoted ?? c.evidence),
   quotes: c.evidence
     ? [{ text: c.evidence, place: c.evidence_ref ?? '', source: Object.keys(c.sources ?? {}).find((k) => k !== 'google') ?? 'features' }]
     : [],
@@ -900,8 +903,8 @@ filingRoutes.get('/labels/sets/:key', requires('view_library'), async (req, res,
     const places = subs.reduce((n, x) => n + (d.refsBySub.get(x.key)?.length ?? 0), 0);
 
     const [fresh, held] = await Promise.all([
-      questionSets.candidates({ subcategories: subKeys, status: 'new', limit: 1000 }),
-      questionSets.candidates({ subcategories: subKeys, status: 'unresolved', limit: 1000 }),
+      questionSets.candidates({ subcategories: subKeys, status: 'new', limit: 1000, withEvidence: can(req, 'manage_questions') }),
+      questionSets.candidates({ subcategories: subKeys, status: 'unresolved', limit: 1000, withEvidence: can(req, 'manage_questions') }),
     ]);
     const rows = fresh.map(candidateRow);
     const floor = limits.sightingFloor;

@@ -30,6 +30,7 @@
  *    estate's engineering standard).
  */
 
+import { monthSplit } from '../repositories/providerCalls.js';
 import express from 'express';
 import {
   accountByEmail, accountById, createAccount, createAccountOnHousehold, createSignInLink, deleteAccount,
@@ -193,6 +194,12 @@ router.get('/', requires('view_accounts'), async (req, res, next) => {
   try {
     const rows = await listAccounts();
     const accounts = rows.map(view);
+    // Priced calls against the cap, free ones beside it (owner, 26 Sep 2026).
+    await Promise.all(accounts.map(async (a) => {
+      const split = await monthSplit(a.householdId).catch(() => null);
+      a.usage.pricedMonth = split?.priced ?? null;
+      a.usage.freeMonth = split?.free ?? null;
+    }));
     // The most recent link per account, so the owner can see an invitation that
     // was never opened without opening each one.
     const links = await Promise.all(accounts.map((a) => lastLinkFor(a.id)));

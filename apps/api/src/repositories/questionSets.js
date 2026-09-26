@@ -464,7 +464,7 @@ export async function dropGlued(subcategory, run = query) {
  */
 export async function candidates({
   subcategory = null, subcategories = null, status = 'new', kind = null, source = null, limit = 500,
-  sort = 'rare', minSeen = null,
+  sort = 'rare', minSeen = null, withEvidence = false,
 } = {}) {
   // A set's screen asks for *its* subcategories, not for the first four hundred
   // words in the estate filtered afterwards — which returned an empty list for
@@ -512,6 +512,12 @@ export async function candidates({
     const mentions = r.asserts + r.denies + r.asks;
     return {
       ...r,
+      // The quote goes to the approver only: back office, never a device or a
+      // public page, and never to a reader who cannot promote (owner, E11b,
+      // 26 Sep 2026). Everybody sees whether there is one.
+      quoted: r.evidence != null,
+      evidence: withEvidence ? r.evidence : null,
+      evidence_ref: withEvidence ? r.evidence_ref : null,
       seenOn,
       // Kept under the old name too, so nothing reading `share` breaks while
       // the screens are drawn.

@@ -3354,6 +3354,19 @@ router.get('/not-in-epic', requires('view_library'), async (req, res, next) => {
   try { res.json({ places: await dayOut.notInEpic({ limit: Math.min(1000, Number(req.query.limit ?? 200) || 200) }) }); } catch (err) { next(err); }
 });
 
+/** POST /not-in-epic — take one place out of Epic by hand, with the reason. Reversible. */
+router.post('/not-in-epic', requires('manage_library'), async (req, res, next) => {
+  try {
+    const ref = String(req.body?.ref ?? '').trim();
+    const reason = String(req.body?.reason ?? '').trim();
+    if (!ref) throw bad('Name the place to take out.');
+    if (!reason) throw bad('Say why: the list is read by whoever puts it back.');
+    const row = await index.setAsideByHand(ref, reason);
+    if (!row) return res.status(404).json({ error: 'not_found', message: 'That place is not in the index, or is already on the Not in Epic list.' });
+    return res.json({ setAside: row });
+  } catch (err) { return next(err); }
+});
+
 router.post('/not-in-epic/restore', requires('manage_library'), async (req, res, next) => {
   try {
     const ref = String(req.body?.ref ?? '').trim();

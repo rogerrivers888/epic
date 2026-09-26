@@ -371,3 +371,27 @@ test('body progress counts the places brought up to the current version, and the
   assert.equal(after.backfill.done, before.backfill.done + 1);
   assert.equal(after.withBody.fromWikipedia, before.withBody.fromWikipedia + 1);
 });
+
+test('the catch-up brings the named places up first, behind anything never researched (owner, 26 Sep 2026)', async () => {
+  const owned = await import('../src/repositories/ownedPlaces.js');
+  const { RESEARCH_VERSION } = await import('../src/sources/own.js');
+  const late = 'google:ChIJ_ref_040';
+  await query(`update place_records set research_version = 3, enrich_state = 'done' where venue_ref like 'google:ChIJ_ref_%' and research_version < 4`);
+  const plain = await owned.dueForResearch(3, 6, RESEARCH_VERSION);
+  assert.ok(!plain.includes(late) || plain.length < 3, 'without a list the last-owned place is not first');
+  const first = await owned.dueForResearch(1, 6, RESEARCH_VERSION, { first: [late] });
+  assert.deepEqual(first, [late], 'a named place comes first');
+});
+
+test('a place taken out by hand keeps its drawer beside it and comes back exactly as it was (A5, 26 Sep 2026)', async () => {
+  const index = await import('../src/repositories/placeIndex.js');
+  const dayOut = await import('../src/sources/dayOutTest.js');
+  const ref31 = 'google:ChIJ_ref_031';
+  const out = await index.setAsideByHand(ref31, 'a settlement: the town itself');
+  assert.equal(out.was, SUB);
+  const [row] = (await query(`select subcategory, not_in_epic_before, not_in_epic_reason, derived_by from place_index where venue_ref = $1`, [ref31])).rows;
+  assert.deepEqual(row, { subcategory: null, not_in_epic_before: SUB, not_in_epic_reason: 'a settlement: the town itself', derived_by: 'hand' });
+  assert.equal(await index.setAsideByHand(ref31, 'again'), null, 'already out is not taken out twice');
+  const back = await dayOut.restoreToEpic(ref31);
+  assert.equal(back.subcategory, SUB);
+});

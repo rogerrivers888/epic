@@ -1101,8 +1101,24 @@ export async function identifyKinds({ limit = 25, householdId = null } = {}) {
 }
 
 /** Places claimed but never researched, or due to be tried again. */
-export async function catchUp({ limit = 8 } = {}) {
-  const refs = await owned.dueForResearch(limit, MAX_ATTEMPTS, RESEARCH_VERSION);
+// The harvest sample, remembered for a quarter of an hour: working it out is
+// one heavy query and the loop ticks every five minutes.
+let sampleCache = { at: 0, refs: [] };
+const SAMPLE_TTL_MS = 15 * 60_000;
+async function harvestSampleFirst() {
+  if (Date.now() - sampleCache.at < SAMPLE_TTL_MS) return sampleCache.refs;
+  const { sampleRefs } = await import('./featureHarvest.js');
+  const refs = await sampleRefs().catch(() => sampleCache.refs);
+  sampleCache = { at: Date.now(), refs };
+  return refs;
+}
+
+export async function catchUp({ limit = 8, first = null } = {}) {
+  // The places the next feature harvest reads are brought up first, at the
+  // same pace and with the same per-domain delays; the rest follow (owner,
+  // 26 Sep 2026).
+  const priority = first ?? await harvestSampleFirst();
+  const refs = await owned.dueForResearch(limit, MAX_ATTEMPTS, RESEARCH_VERSION, { first: priority });
   /**
    * Seeded, which this was not.
    *
