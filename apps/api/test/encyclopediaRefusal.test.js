@@ -169,3 +169,9 @@ test('the menu lookup reads robots.txt the standard way: an Allow inside a Disal
   await findMenuUrl({ website: 'https://inn.example/menu', name: 'Inn' }).catch(() => null);
   assert.ok(asked.includes('https://inn.example/menu'), 'the allowed menu page is fetched');
 });
+
+test('a robots.txt group written for RoamBot still binds this crawler (Codex, 26 Sep 2026)', async () => {
+  const { parse, allowedBy } = await import('../src/sources/politeness.js');
+  const { rules } = parse('User-agent: *\nAllow: /\n\nUser-agent: RoamBot\nDisallow: /');
+  assert.equal(allowedBy(rules, '/menu'), false);
+});

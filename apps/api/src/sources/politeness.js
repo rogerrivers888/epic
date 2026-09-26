@@ -100,7 +100,9 @@ export function parse(text) {
       if (Number.isFinite(seconds) && seconds > 0) current.delayMs = Math.min(seconds * 1000, MAX_DELAY_MS);
     }
   }
-  const mine = groups.find((g) => g.agents.some((a) => a.includes(ME)))
+  // Our own name, or the one we answered to before the rebrand: a site that
+  // wrote a rule for RoamBot meant this crawler (Codex, 26 Sep 2026).
+  const mine = groups.find((g) => g.agents.some((a) => a.includes(ME) || a.includes('roambot')))
     ?? groups.find((g) => g.agents.includes('*'));
   return { rules: mine?.rules ?? [], delayMs: mine?.delayMs ?? DEFAULT_DELAY_MS };
 }
