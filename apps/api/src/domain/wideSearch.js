@@ -80,9 +80,12 @@ export function mergeWide(near = [], wide = []) {
   return out;
 }
 
-/** Two meters as one, so the call is billed once with both searches in it. */
-export function addUnits(a = {}, b = {}) {
-  const out = { ...a };
-  for (const [k, n] of Object.entries(b || {})) if (typeof n === 'number') out[k] = (out[k] ?? 0) + n;
-  return out;
-}
+/**
+ * Both searches are billed through **one meter**, passed to each
+ * `searchAllSources` call — never two meters added together afterwards. The
+ * meter carries its health (faults, latency, calls observed) on Symbol keys
+ * that copying the numbers leaves behind, so a merged meter recorded every
+ * near-and-wide call as unobserved, including a failure in either search
+ * (Codex, 26 Sep 2026). There is deliberately no helper here for combining
+ * them.
+ */

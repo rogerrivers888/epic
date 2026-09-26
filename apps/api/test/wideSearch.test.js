@@ -2,7 +2,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { estimateTravelMinutes, reachRadiusKm, searchRadiusKm } from '../src/domain/travel.js';
-import { searchPlan, mergeWide, addUnits, NEAR_KM } from '../src/domain/wideSearch.js';
+import { searchPlan, mergeWide, NEAR_KM } from '../src/domain/wideSearch.js';
+import * as wideSearch from '../src/domain/wideSearch.js';
+import { bump, noteFault, healthOf } from '../src/sources/meter.js';
 
 const at = { lat: 51.4, lng: -0.6 };
 const north = (km) => ({ lat: at.lat + km / 111.32, lng: at.lng });
@@ -67,7 +69,18 @@ test('the merge keeps the near list first, and adds only what it did not have', 
   assert.deepEqual(mergeWide(near, []), near);
 });
 
-test('both searches are billed as one call', () => {
-  assert.deepEqual(addUnits({ google: 2, osm: 1 }, { google: 1 }), { google: 3, osm: 1 });
-  assert.deepEqual(addUnits({ google: 1 }, undefined), { google: 1 });
+test('both searches share one meter, so its health survives', () => {
+  // The combining helper is gone on purpose: adding two meters' numbers drops
+  // the Symbol-keyed health, and every call read as unobserved.
+  assert.equal(wideSearch.addUnits, undefined);
+  const meter = {};
+  bump(meter, 'google');            // the near search
+  bump(meter, 'google');            // the wide search, same meter
+  noteFault(meter, 'wide search timed out');
+  assert.equal(meter.google, 2);
+  const health = healthOf(meter);
+  assert.equal(health.failed, 1, 'a fault in either search is still visible on the one meter');
+  assert.equal(health.ok, false);
+  // And the thing that broke it: a meter rebuilt from its numbers has no health.
+  assert.equal(healthOf({ ...meter }).ok, null);
 });
