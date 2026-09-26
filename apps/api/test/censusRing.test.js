@@ -27,26 +27,30 @@ const OUT = 'sector:ZR2 2';
 const OUTCODES = ['ZR1', 'ZR2'];
 const REFS = ['google:RING-OWN', 'google:RING-SLICE', 'google:RING-WIDE', 'google:RING-OUTSIDE', 'google:RING-BOTH', 'google:RING-ACROSS'];
 
+// Out in the Channel, where no real sector or postcode is within reach: since
+// every sector (248) and every postcode is in the table, a box is judged
+// against the real neighbours as well as the fixtures, and a fixture ring
+// drawn over Windsor lost its wide box to SL4 6 (26 Sep 2026).
 const seed = async () => {
   await query('delete from place_subcategories where venue_ref = any($1)', [REFS]);
   await query('delete from place_index where venue_ref = any($1)', [REFS]);
   await query('delete from geo_cells where code = any($1)', [[IN, OUT]]);
   await query(
     `insert into geo_cells (code, scheme, label, country_code, outcode, lat, lng, source)
-     values ($1,'sector','ZR1 1','GB','ZR1', 51.400, -0.630, 'test'),
-            ($2,'sector','ZR2 2','GB','ZR2', 51.600, -0.300, 'test')`, [IN, OUT]);
+     values ($1,'sector','ZR1 1','GB','ZR1', 50.150, -1.700, 'test'),
+            ($2,'sector','ZR2 2','GB','ZR2', 50.350, -1.370, 'test')`, [IN, OUT]);
   // Four places: one with its own point, one placed only by a small slice, one
   // whose slice is six kilometres across, and one plainly outside the ring.
   await query(
     `insert into place_index (venue_ref, category, subcategory, lat, lng, slice, country_code)
-     values ('google:RING-OWN','fun','theme-parks', 51.401, -0.631, null, 'GB'),
-            ('google:RING-SLICE','fun','zoos-wildlife', null, null, '51.3990,-0.6320,51.4030,-0.6280', 'GB'),
-            ('google:RING-WIDE','fun','days-out', null, null, '51.3800,-0.7000,51.4400,-0.6200', 'GB'),
-            ('google:RING-OUTSIDE','fun','theme-parks', null, null, '51.5980,-0.3020,51.6020,-0.2980', 'GB'),
-            ('google:RING-BOTH','sport','swimming', 51.401, -0.631, null, 'GB'),
+     values ('google:RING-OWN','fun','theme-parks', 50.151, -1.701, null, 'GB'),
+            ('google:RING-SLICE','fun','zoos-wildlife', null, null, '50.1490,-1.7020,50.1530,-1.6980', 'GB'),
+            ('google:RING-WIDE','fun','days-out', null, null, '50.1300,-1.7700,50.1900,-1.6900', 'GB'),
+            ('google:RING-OUTSIDE','fun','theme-parks', null, null, '50.3480,-1.3720,50.3520,-1.3680', 'GB'),
+            ('google:RING-BOTH','sport','swimming', 50.151, -1.701, null, 'GB'),
             -- A box with one corner by each sector: in the ring or not, and the
             -- row cannot say which.
-            ('google:RING-ACROSS','fun','days-out', null, null, '51.3900,-0.7000,51.6100,-0.2900', 'GB')`);
+            ('google:RING-ACROSS','fun','days-out', null, null, '50.1400,-1.7700,50.3600,-1.3600', 'GB')`);
   // The census files a place under every drawer whose question found it.
   await query(
     `insert into place_subcategories (venue_ref, category, subcategory, area_slug, found_by, found_rank)
@@ -160,4 +164,21 @@ test('a district is drawn as every sector the ONS holds, not as the places we ha
     `select count(*)::int sectors, count(distinct outcode)::int outcodes from geo_cells where scheme = 'sector' and source = 'onspd-2026-08'`);
   assert.ok(whole.sectors >= 11000, `the whole country: ${whole.sectors} sectors`);
   assert.ok(whole.outcodes >= 2900, `across ${whole.outcodes} districts`);
+});
+
+test('the point index finds the same nearest point as a scan, over thousands of points', async () => {
+  const { PointIndex, nearestSector } = await import('../src/repositories/censusRing.js');
+  // Deterministic pseudo-random points over a patch of London-sized ground.
+  let seed = 42; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const points = Array.from({ length: 3000 }, (_, i) => ({ code: `sector:P${i % 700}`, outcode: `P${i % 70}`, lat: 51.4 + rnd() * 0.3, lng: -0.3 + rnd() * 0.5 }));
+  const index = new PointIndex(points);
+  for (let q = 0; q < 300; q += 1) {
+    const point = { lat: 51.35 + rnd() * 0.4, lng: -0.4 + rnd() * 0.7 };
+    const scanned = nearestSector(point, points);
+    const indexed = index.nearest(point);
+    assert.equal(indexed.code, scanned.code, `query ${q}: the index agrees with the scan`);
+    const d = (u) => (u.lat - point.lat) ** 2 + (u.lng - point.lng) ** 2;
+    assert.equal(d(indexed), d(scanned));
+  }
+  assert.equal(new PointIndex([]).nearest({ lat: 51.5, lng: -0.1 }), null, 'and an empty index finds nothing');
 });

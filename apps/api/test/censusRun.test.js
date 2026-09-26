@@ -1308,3 +1308,58 @@ test('a drawer the ground was asked about and answered nothing is written again,
     assert.equal(golf.census_count, 44, 'a drawer still asked, on a tile that has not answered it yet, keeps the number it had (Codex, 25 Sep 2026)');
   }
 });
+
+test('a district drawn as one centroid among a neighbour\'s many is still found by its postcodes', async (t) => {
+  // Owner, 26 Sep 2026: EC2V, SE20 and SE25 reading 0 with correct sectors
+  // "is the same failure fixed twice already — a district drawn as one point
+  // losing to one drawn as eight — and in the City a sector centroid is the
+  // worst approximation in Britain." Placed by the nearest postcode instead.
+  await clean();
+  t.after(async () => {
+    await query(`delete from area_counts where area_slug in ('zz8x', 'zz8y')`);
+    await query(`delete from geo_cells where code like 'sector:ZZ8%'`);
+    await query(`delete from postcodes where outcode in ('ZZ8X', 'ZZ8Y')`);
+    await query(`delete from place_index where venue_ref like 'google:shadow_%'`);
+    await clean();
+  });
+  // ZZ8X: one sector, its centroid a little east. ZZ8Y: four sectors whose
+  // centroids ring the ground ZZ8X's places actually stand on.
+  await query(
+    `insert into geo_cells (code, scheme, label, outcode, lat, lng, source) values
+       ('sector:ZZ8X 1', 'sector', 'ZZ8X 1', 'ZZ8X', 51.5160, -0.0925, 'test'),
+       ('sector:ZZ8Y 1', 'sector', 'ZZ8Y 1', 'ZZ8Y', 51.5175, -0.0960, 'test'),
+       ('sector:ZZ8Y 2', 'sector', 'ZZ8Y 2', 'ZZ8Y', 51.5145, -0.0960, 'test'),
+       ('sector:ZZ8Y 3', 'sector', 'ZZ8Y 3', 'ZZ8Y', 51.5175, -0.0940, 'test'),
+       ('sector:ZZ8Y 4', 'sector', 'ZZ8Y 4', 'ZZ8Y', 51.5145, -0.0940, 'test')
+     on conflict (code) do update set outcode = excluded.outcode, lat = excluded.lat, lng = excluded.lng`);
+  // The postcodes say otherwise: ZZ8X's streets are exactly where the box is.
+  const pcs = [];
+  for (let i = 0; i < 12; i += 1) pcs.push(['ZZ8X', `ZZ8X 1${String.fromCharCode(65 + i)}A`, 51.5155 + (i % 4) * 0.0003, -0.0955 + Math.floor(i / 4) * 0.0004]);
+  for (let i = 0; i < 12; i += 1) pcs.push(['ZZ8Y', `ZZ8Y ${1 + (i % 4)}${String.fromCharCode(65 + i)}A`, 51.5140 + (i % 2) * 0.0040, -0.0975 + Math.floor(i / 2) * 0.0008]);
+  for (const [out, pcds, lat, lng] of pcs) {
+    await query(
+      `insert into postcodes (pcds, sector, outcode, lat, lng, source) values ($1, $2, $3, $4, $5, 'test')
+       on conflict (pcds) do update set lat = excluded.lat, lng = excluded.lng`,
+      [pcds, pcds.slice(0, -2), out, lat, lng]);
+  }
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, started_at)
+     values ('test/shadow', 51.510, -0.100, 51.520, -0.090, array['ZZ8X','ZZ8Y'], 'done', now(), now() - interval '1 minute')
+     on conflict (grid_key) do update set outcodes = excluded.outcodes, state = 'done', censused_at = now(), started_at = excluded.started_at`);
+  // A four-hundred-metre box on ZZ8X's streets: its centre (51.5160, -0.0950)
+  // is nearer ZZ8Y 1 and ZZ8Y 3's centroids than ZZ8X's own.
+  await query(
+    `insert into place_index (venue_ref, country_code, slice, category, subcategory)
+     values ('google:shadow_guildhall', 'GB', '51.5140,-0.0970,51.5180,-0.0930', 'culture', 'museums') on conflict (venue_ref) do nothing`);
+  await query(
+    `insert into place_subcategories (venue_ref, category, subcategory, found_by, area_slug, first_seen, last_seen)
+     values ('google:shadow_guildhall', 'culture', 'museums', 'museum', 'test/shadow', now(), now())
+     on conflict (venue_ref, subcategory, coalesce(area_slug, '')) do nothing`);
+
+  const out = await rollUpOutcodes({ outcodes: ['ZZ8X', 'ZZ8Y'] });
+  assert.equal(out.placedBy, 'postcodes', 'placed by postcodes, and the roll-up says so');
+  const { rows } = await query(
+    `select area_slug, census_count from area_counts where area_slug in ('zz8x','zz8y') and subcategory = 'museums' order by 1`);
+  assert.deepEqual(rows.map((r) => [r.area_slug, r.census_count]), [['zz8x', 1], ['zz8y', 0]],
+    'the place is in the district whose streets it stands on, not the one whose centroids ring it');
+});

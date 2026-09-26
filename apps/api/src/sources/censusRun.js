@@ -39,7 +39,7 @@ import { query } from '../db.js';
 import { censusArea, slicePlan, CENSUS_FRESH_DAYS, CENSUS_MAX_DEPTH } from './census.js';
 // The same corner test the ring count uses. One piece of arithmetic for "is
 // this box inside this area", not two that can disagree (repositories/censusRing.js).
-import { sectorsOfBox, nearestSector } from '../repositories/censusRing.js';
+import { sectorsOfBox, nearestSector, placingPoints } from '../repositories/censusRing.js';
 import { textStillAsked } from './censusQuestions.js';
 import { refreshAllBefore as refreshRingsBefore } from '../repositories/ringTables.js';
 import { USD_TO_GBP } from '../domain/providerPrices.js';
@@ -1061,15 +1061,18 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
       where ps.area_slug = any($1)
         and ps.last_seen >= coalesce(t.started_at, t.censused_at)`, [tiles.map((t) => t.grid_key)]);
 
-  // The sectors within reach of each tile, so a box is judged against a few
-  // hundred points rather than all six thousand; the whole table if a tile is
-  // somehow out of reach of every sector.
-  const nearby = new Map();
-  const sectorsNear = (tile) => {
+  // The points each tile's boxes are judged against: every postcode on and
+  // around the tile (26 Sep 2026), the sector centroids where none are
+  // loaded. Read once per tile; a box's centre is inside its tile and the
+  // nearest postcode to it is never far.
+  const nearby = new Map(); const placedBy = new Set();
+  const sectorsNear = async (tile) => {
     if (!nearby.has(tile.grid_key)) {
-      const near = universe.filter((u) => u.lat >= Number(tile.min_lat) - REACH_LAT && u.lat <= Number(tile.max_lat) + REACH_LAT
-        && u.lng >= Number(tile.min_lng) - REACH_LNG && u.lng <= Number(tile.max_lng) + REACH_LNG);
-      nearby.set(tile.grid_key, near.length ? near : universe);
+      const got = await placingPoints({
+        minLat: Number(tile.min_lat), minLng: Number(tile.min_lng), maxLat: Number(tile.max_lat), maxLng: Number(tile.max_lng),
+      });
+      placedBy.add(got.placedBy);
+      nearby.set(tile.grid_key, got.index.size ? got.index : universe);
     }
     return nearby.get(tile.grid_key);
   };
@@ -1079,14 +1082,14 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
   // corners fall nearest. A box across two sectors of the same district is
   // inside that district.
   const verdicts = new Map();
-  const verdictOf = (tile, slice) => {
+  const verdictOf = async (tile, slice) => {
     const k = `${tile.grid_key}|${slice}`;
     if (!verdicts.has(k)) {
-      const v = sectorsOfBox(boxFromSlice(slice), sectorsNear(tile));
+      const v = sectorsOfBox(boxFromSlice(slice), await sectorsNear(tile));
       if (v.kind === 'nowhere') verdicts.set(k, { kind: 'nowhere' });
-      else if (v.kind === 'inside') verdicts.set(k, { kind: 'inside', outcode: outcodeOf.get(v.code) });
+      else if (v.kind === 'inside') verdicts.set(k, { kind: 'inside', outcode: v.outcode ?? outcodeOf.get(v.code) });
       else {
-        const outs = new Set([...v.codes].map((c) => outcodeOf.get(c)));
+        const outs = v.outcodes?.size ? v.outcodes : new Set([...v.codes].map((c) => outcodeOf.get(c)));
         verdicts.set(k, outs.size === 1 ? { kind: 'inside', outcode: [...outs][0] } : { kind: 'across', outcodes: outs });
       }
     }
@@ -1124,10 +1127,10 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
     // have bought one for anything a household has actually looked at.
     let v;
     if (r.lat != null && r.lng != null) {
-      const best = nearestSector({ lat: Number(r.lat), lng: Number(r.lng) }, sectorsNear(tile));
-      v = best ? { kind: 'inside', outcode: outcodeOf.get(best.code) } : { kind: 'nowhere' };
+      const best = nearestSector({ lat: Number(r.lat), lng: Number(r.lng) }, await sectorsNear(tile));
+      v = best ? { kind: 'inside', outcode: best.outcode ?? outcodeOf.get(best.code) } : { kind: 'nowhere' };
     } else {
-      v = r.slice ? verdictOf(tile, r.slice) : { kind: 'nowhere' };
+      v = r.slice ? await verdictOf(tile, r.slice) : { kind: 'nowhere' };
     }
     if (v.kind === 'inside') {
       if (!codes.includes(v.outcode)) continue;
@@ -1231,8 +1234,13 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
     }
   }
   // Places that fell in a district their tile was never tagged with: counted
-  // there all the same, and reported so the tagging can be judged.
-  return { outcodes: codes.length, rows: written, unattributed: unattributed.size };
+  // there all the same, and reported so the tagging can be judged. And what
+  // the boxes were placed against — postcodes, or the cruder sector centroids
+  // where none were loaded — because the two are different facts.
+  return {
+    outcodes: codes.length, rows: written, unattributed: unattributed.size,
+    placedBy: placedBy.size === 0 ? null : placedBy.size === 1 ? [...placedBy][0] : 'mixed',
+  };
 }
 
 /** `51.4000,-0.7000,51.4800,-0.5800` back into a box. */

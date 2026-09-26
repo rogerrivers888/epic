@@ -94,12 +94,94 @@ export function whereBoxSits(box, { cells, universe }) {
  * both to agree on which side a box exactly between them is on.
  */
 export function nearestSector(point, universe) {
+  if (universe && typeof universe.nearest === 'function') return universe.nearest(point);
   let best = null; let bestD = Infinity;
   for (const u of universe) {
     const d = (u.lat - point.lat) ** 2 + (u.lng - point.lng) ** 2;
     if (d < bestD || (d === bestD && best && u.code < best.code)) { bestD = d; best = u; }
   }
   return best;
+}
+
+/**
+ * A set of points bucketed on a grid, for nearest lookups over a great many.
+ *
+ * Every live postcode in the country is 1.7 million points, and a ring over
+ * London holds tens of thousands of them; a linear scan per box would be
+ * billions of comparisons. Buckets a hundredth of a degree square, searched
+ * in rings outward from the point's own bucket until the best so far is
+ * nearer than any bucket not yet looked in. Same answer as the scan, same
+ * tie: the lower code.
+ */
+export class PointIndex {
+  constructor(points, cell = 0.01) {
+    this.cell = cell; this.size = points.length; this.buckets = new Map();
+    for (const p of points) {
+      const k = this.keyOf(p.lat, p.lng);
+      let b = this.buckets.get(k);
+      if (!b) { b = []; this.buckets.set(k, b); }
+      b.push(p);
+    }
+  }
+  keyOf(lat, lng) { return `${Math.floor(lat / this.cell)}:${Math.floor(lng / this.cell)}`; }
+  nearest(point) {
+    if (!this.size) return null;
+    const bi = Math.floor(point.lat / this.cell); const bj = Math.floor(point.lng / this.cell);
+    let best = null; let bestD = Infinity;
+    // Never more rings than it takes to cross the widest gap between two
+    // postcodes anywhere in Britain, which is well under a degree.
+    for (let r = 0; r <= 120; r += 1) {
+      for (let i = bi - r; i <= bi + r; i += 1) {
+        for (let j = bj - r; j <= bj + r; j += 1) {
+          if (Math.max(Math.abs(i - bi), Math.abs(j - bj)) !== r) continue;
+          const b = this.buckets.get(`${i}:${j}`);
+          if (!b) continue;
+          for (const u of b) {
+            const d = (u.lat - point.lat) ** 2 + (u.lng - point.lng) ** 2;
+            if (d < bestD || (d === bestD && best && u.code < best.code)) { bestD = d; best = u; }
+          }
+        }
+      }
+      // Anything in a ring not yet searched is at least r whole buckets away
+      // in latitude or longitude, so at least r cells in distance.
+      if (best && bestD <= (r * this.cell) ** 2) break;
+    }
+    return best;
+  }
+}
+
+/**
+ * The points a box is placed against, for a stretch of ground.
+ *
+ * Every live postcode inside the box, padded, as points that carry their
+ * sector code and district — so the nearest one says at once which sector
+ * and which district a place is in. Owner, 26 Sep 2026: "in the City a sector
+ * centroid is the worst approximation in Britain … 1.7 million ONS points is a
+ * small, free, OGL table and it retires the class rather than the instance."
+ * EC2V had four correct sectors and read nought, because 177 places within
+ * three hundred metres of them were nearer a neighbour's centroid.
+ *
+ * Where the postcode table has not been loaded (a fresh installation, a test
+ * database) the sector centroids stand in, and the answer says which it used:
+ * a count placed by centroids is a different, cruder fact, and the roll-up
+ * carries the word.
+ */
+export async function placingPoints({ minLat, minLng, maxLat, maxLng }, { padLat = 0.05, padLng = 0.08 } = {}) {
+  const bounds = [minLat - padLat, maxLat + padLat, minLng - padLng, maxLng + padLng];
+  const { rows: postcodes } = await query(
+    `select 'sector:' || sector as code, outcode, lat, lng from postcodes
+      where lat between $1 and $2 and lng between $3 and $4`, bounds);
+  // Postcodes alone where there are any: a centroid mixed in can sit nearer a
+  // point than every real postcode — a sector wrapped round a park — and then
+  // the answer is not nearest-postcode placement while saying it is (Codex,
+  // 26 Sep 2026). The centroids are the fallback for ground with no postcodes
+  // loaded, and the answer says so.
+  if (postcodes.length) return { index: new PointIndex(postcodes), placedBy: 'postcodes', points: postcodes.length };
+  const { rows: sectors } = await query(
+    `select code, upper(outcode) as outcode, lat, lng from geo_cells
+      where scheme = 'sector' and outcode is not null
+        and lat between $1 and $2 and lng between $3 and $4`, bounds);
+  return { index: new PointIndex(sectors), placedBy: 'sectors', points: sectors.length };
 }
 
 /**
@@ -125,16 +207,16 @@ export function sectorsOfBox(box, universe) {
   if (!box) return { kind: 'nowhere' };
   if (widthOf(box) <= FINE_M) {
     const best = nearestSector({ lat: (box.minLat + box.maxLat) / 2, lng: (box.minLng + box.maxLng) / 2 }, universe);
-    return best ? { kind: 'inside', code: best.code } : { kind: 'nowhere' };
+    return best ? { kind: 'inside', code: best.code, outcode: best.outcode ?? null } : { kind: 'nowhere' };
   }
-  const codes = new Set();
+  const codes = new Set(); const outcodes = new Set(); let one = null;
   for (const p of cornersOf(box)) {
     const best = nearestSector(p, universe);
-    if (best) codes.add(best.code);
+    if (best) { codes.add(best.code); if (best.outcode != null) outcodes.add(best.outcode); one = best; }
   }
   if (!codes.size) return { kind: 'nowhere' };
-  if (codes.size === 1) return { kind: 'inside', code: [...codes][0] };
-  return { kind: 'across', codes };
+  if (codes.size === 1) return { kind: 'inside', code: one.code, outcode: one.outcode ?? null };
+  return { kind: 'across', codes, outcodes };
 }
 
 /**
@@ -142,15 +224,21 @@ export function sectorsOfBox(box, universe) {
  * @param outcodes the districts those sectors sit in — the candidate universe
  */
 export async function censusInRing({ cells = [], outcodes = [] } = {}) {
-  const empty = { counts: {}, unresolved: {}, placed: { own: 0, slice: 0 }, unplaceable: 0, boxes: { inside: 0, outside: 0, across: 0 } };
+  const empty = { counts: {}, unresolved: {}, placed: { own: 0, slice: 0 }, unplaceable: 0, boxes: { inside: 0, outside: 0, across: 0 }, placedBy: null };
   if (!cells.length || !outcodes.length) return empty;
   const slugs = outcodes.map((o) => String(o).toLowerCase());
 
-  // Every sector these districts are made of, once. The corner test runs in
-  // memory against this: a few hundred points, five comparisons per box.
-  const { rows: universe } = await query(
+  // Every sector these districts are made of, once — for the ground they
+  // cover; the points a box is judged against are every postcode on that
+  // ground (26 Sep 2026), the sector centroids where none are loaded.
+  const { rows: sectors } = await query(
     'select code, lat, lng from geo_cells where lower(outcode) = any($1)', [slugs]);
-  if (!universe.length) return empty;
+  if (!sectors.length) return empty;
+  const box = sectors.reduce((b, u) => ({
+    minLat: Math.min(b.minLat, u.lat), maxLat: Math.max(b.maxLat, u.lat),
+    minLng: Math.min(b.minLng, u.lng), maxLng: Math.max(b.maxLng, u.lng),
+  }), { minLat: 90, maxLat: -90, minLng: 180, maxLng: -180 });
+  const { index: universe, placedBy } = await placingPoints(box);
   const inRing = new Set(cells);
 
   // Both ways a surfacing is filed. The ring census wrote one row per outcode,
@@ -184,14 +272,7 @@ export async function censusInRing({ cells = [], outcodes = [] } = {}) {
     verdicts.set(slice, v);
     return v;
   };
-  const cellFor = (lat, lng) => {
-    let best = null; let bestD = Infinity;
-    for (const u of universe) {
-      const d = (u.lat - lat) ** 2 + (u.lng - lng) ** 2;
-      if (d < bestD) { bestD = d; best = u; }
-    }
-    return best?.code ?? null;
-  };
+  const cellFor = (lat, lng) => nearestSector({ lat, lng }, universe)?.code ?? null;
 
   const counted = new Map();
   const unresolved = new Map();
@@ -219,6 +300,7 @@ export async function censusInRing({ cells = [], outcodes = [] } = {}) {
   for (const v of verdicts.values()) if (boxes[v] != null) boxes[v] += 1;
 
   return {
+    placedBy,
     counts: Object.fromEntries([...counted].map(([k, set]) => [k, set.size])),
     // The places behind each count, so a ranking can be built from exactly the
     // set that was counted and never from a second, drifting idea of the ring.

@@ -9,6 +9,7 @@
     "dev": "node --watch src/server.js",
     "migrate": "node src/migrate.js",
     "seed": "node src/seed.js",
+    "postcodes": "node src/loadPostcodes.js",
     "test": "node test/helpers/runSuite.mjs",
     "test:files": "node --test"
   },
