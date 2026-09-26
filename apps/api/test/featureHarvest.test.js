@@ -273,3 +273,41 @@ test('a real opening does not carry an invented ending into the table', () => {
   // never checked.
   assert.equal(evidenced({ evidence: pooled.repeat(5) }, pooled.repeat(5)), false);
 });
+
+// --- the structured facts, said in words --------------------------------------
+
+const { factsSaid, hoursSaid } = await import('../src/sources/featureHarvest.js');
+
+test('the structured facts reach the extractor as sentences', () => {
+  // The 2,382 facts the sweeps added were invisible to the extractor, which
+  // read the summary alone (owner, 26 Sep 2026).
+  const said = factsSaid({
+    cuisines: ['italian', 'pizza'], dietary_options: ['vegan', 'gluten free'], price_range: '££',
+    good_for_children: true, fsa_rating: '5', booking_url: 'https://x', opening_hours: 'Mo-Su 12:00-23:00',
+  });
+  assert.match(said, /Serves italian, pizza food\./);
+  assert.match(said, /Has vegan, gluten free options\./);
+  assert.match(said, /Price range ££\./);
+  assert.match(said, /Good for children\./);
+  assert.match(said, /Food hygiene rating 5\./);
+  assert.match(said, /Takes bookings online\./);
+  assert.match(said, /Open every day, open late\./);
+});
+
+test('what identifies a place is never said as a feature', () => {
+  const { text } = textOf({ name: 'A', postcode: 'RG1', summary: 'A pub with a garden and a big screen for the football, and a quiz on Thursdays.', accessibility: {}, experiences: [], phone: '01234', website: 'https://x', address: '1 High St' });
+  assert.doesNotMatch(text, /01234|High St|https/);
+});
+
+test('opening hours are read for what they say, not fed as syntax', () => {
+  assert.equal(hoursSaid('Mo-Fr 09:00-17:00'), 'Open on Monday, Tuesday, Wednesday, Thursday, Friday.');
+  assert.equal(hoursSaid('Sa-Su 10:00-16:00'), 'Open on Saturday, Sunday.');
+  assert.equal(hoursSaid('Fr-Sa 18:00-01:00'), 'Open on Friday, Saturday, open late.');
+  assert.equal(hoursSaid('24/7'), 'Open all day, every day.');
+  assert.equal(hoursSaid(''), '');
+  // And through `textOf`, the syntax is gone and the words are there.
+  const { text } = textOf({ name: 'A', postcode: 'RG1', summary: 'A cafe by the river with a terrace and a wood-fired oven.', accessibility: {}, experiences: [], opening_hours: 'Mo-Su 08:00-22:30', cuisines: ['pizza'] });
+  assert.doesNotMatch(text, /Mo-Su|08:00/);
+  assert.match(text, /Open every day, open late/);
+  assert.match(text, /Serves pizza food/);
+});

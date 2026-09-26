@@ -208,3 +208,11 @@ test('an atlas place with no record of its own is seeded from the atlas', async 
     await query('delete from attractions where id = $1', [at.id]);
   }
 });
+
+test('the facts behind a disagreement can be read, field by field and source by source', async () => {
+  const [row] = (await query(`select id from research_sweeps where subcategories ? $1 order by started_at desc limit 1`, [SUB])).rows;
+  const out = await ref.disagreements(row.id);
+  const five = out.find((p) => p.venue_ref === 'google:ChIJ_ref_005');
+  assert.ok(five, 'place 5 is known by two names');
+  assert.deepEqual(five.fields.name, { osm: 'The Old Bull', wikipedia: 'Bull Inn, Dense Town' });
+});

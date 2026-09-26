@@ -278,4 +278,37 @@ export async function held(id) {
   return rows;
 }
 
+/**
+ * The facts behind the disagreements, for reading twenty of them.
+ *
+ * Owner, 26 Sep 2026: "73 of 160 is 46%, which is far too high to be real
+ * conflict between a venue's own page and OSM. Sample twenty and tell me
+ * whether the matcher is pairing the wrong records or two sources are being
+ * compared on fields that are not the same question." Every field two owned
+ * sources hold different values for, with both values and the record's
+ * matched refs beside them.
+ */
+export async function disagreements(id, { limit = 20 } = {}) {
+  const { rows } = await query(
+    `with mine as (
+       select p.venue_ref, p.subcategory, p.picked_for, r.name, r.matched
+         from research_sweep_places p left join place_records r on r.venue_ref = p.venue_ref
+        where p.sweep_id = $1
+     ), differing as (
+       select f.venue_ref, f.field, jsonb_object_agg(f.source, f.value) as values
+         from place_facts f join mine m on m.venue_ref = f.venue_ref
+        where f.expires_at is null
+        group by f.venue_ref, f.field
+       having count(distinct f.source) > 1 and count(distinct f.value::text) > 1
+     )
+     select m.venue_ref, m.subcategory, m.picked_for, m.name, m.matched,
+            jsonb_object_agg(d.field, d.values) as fields
+       from differing d join mine m on m.venue_ref = d.venue_ref
+      group by 1, 2, 3, 4, 5
+      order by m.venue_ref
+      limit $2`,
+    [id, limit]);
+  return rows;
+}
+
 export { sweep };

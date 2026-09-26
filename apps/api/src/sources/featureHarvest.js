@@ -102,6 +102,21 @@ Rules:
  * Places with nothing written about them anywhere are not sampled: they
  * contribute no evidence and would only flatter the drawer's denominator.
  */
+/**
+ * Everything a place says about itself, as SQL, for measuring and ranking.
+ *
+ * The prose — its summary — and the structured facts said in words. Kept in
+ * step with `textOf` by construction: what the estimate measures is what the
+ * run reads. Before this the estimate and the ranking saw the summary alone,
+ * and the 2,382 facts the sweeps had just added were invisible to both — the
+ * corpus read 159 tokens a place against 174 the day before (owner, 26 Sep
+ * 2026).
+ */
+const SAID_SQL = `concat_ws(' ', r.summary, a.summary, r.opening_hours, r.price_range, r.fsa_rating,
+   array_to_string(array(select jsonb_array_elements_text(coalesce(r.cuisines, '[]'::jsonb))), ' '),
+   array_to_string(array(select jsonb_array_elements_text(coalesce(r.dietary_options, '[]'::jsonb))), ' '),
+   array_to_string(array(select jsonb_array_elements_text(coalesce(r.experiences, '[]'::jsonb))), ' '))`;
+
 async function placesFor(subcategory, { size = SAMPLE_SIZE } = {}) {
   const { rows } = await query(
     `select p.venue_ref,
@@ -109,6 +124,8 @@ async function placesFor(subcategory, { size = SAMPLE_SIZE } = {}) {
             r.postcode,
             r.accessibility,
             r.experiences,
+            r.opening_hours, r.cuisines, r.dietary_options, r.price_range,
+            r.good_for_children, r.fsa_rating, r.booking_url,
             concat_ws(' ', r.summary, a.summary) as summary
        from place_index p
        left join place_records r on r.venue_ref = p.venue_ref
@@ -121,8 +138,8 @@ async function placesFor(subcategory, { size = SAMPLE_SIZE } = {}) {
           limit 1
        ) a on true
       where p.subcategory = $1
-        and length(concat_ws(' ', r.summary, a.summary)) > 80
-      order by length(concat_ws(' ', r.summary, a.summary)) desc
+        and length(${SAID_SQL}) > 80
+      order by length(${SAID_SQL}) desc
       limit $2`,
     [subcategory, size],
   );
@@ -131,6 +148,55 @@ async function placesFor(subcategory, { size = SAMPLE_SIZE } = {}) {
 
 /** A list column, however the record happens to hold it. */
 const listOf = (v) => (Array.isArray(v) ? v : []).map((x) => String(x)).filter(Boolean);
+
+/**
+ * The structured facts as a sentence or two.
+ *
+ * Plain, declarative, and the same words every time, so the extractor sees
+ * "open on Sundays" and "serves vegan food" as the recurring features they
+ * are rather than as twenty spellings of a JSON field. Opening hours are the
+ * open map's grammar, which `strip` would take out; they are read for what
+ * they say — the days, late opening — and said back in words.
+ */
+export function factsSaid(place) {
+  const out = [];
+  const cuisines = listOf(place.cuisines);
+  if (cuisines.length) out.push(`Serves ${cuisines.join(', ')} food.`);
+  const dietary = listOf(place.dietary_options);
+  if (dietary.length) out.push(`Has ${dietary.join(', ')} options.`);
+  if (place.price_range) out.push(`Price range ${String(place.price_range)}.`);
+  if (place.good_for_children === true) out.push('Good for children.');
+  if (place.fsa_rating != null && String(place.fsa_rating).trim()) out.push(`Food hygiene rating ${String(place.fsa_rating).trim()}.`);
+  if (place.booking_url) out.push('Takes bookings online.');
+  const hours = hoursSaid(place.opening_hours);
+  if (hours) out.push(hours);
+  return out.join(' ');
+}
+
+const DAYS = { mo: 'Monday', tu: 'Tuesday', we: 'Wednesday', th: 'Thursday', fr: 'Friday', sa: 'Saturday', su: 'Sunday' };
+
+/** What opening hours say, in words: which days, and whether it opens late. */
+export function hoursSaid(raw) {
+  const text = String(raw ?? '').trim();
+  if (!text) return '';
+  const lower = text.toLowerCase();
+  if (/24\/7/.test(lower)) return 'Open all day, every day.';
+  const days = new Set();
+  const allDays = Object.keys(DAYS);
+  for (const m of lower.matchAll(/\b(mo|tu|we|th|fr|sa|su)\b(?:\s*-\s*(mo|tu|we|th|fr|sa|su)\b)?/g)) {
+    const from = allDays.indexOf(m[1]);
+    const to = m[2] ? allDays.indexOf(m[2]) : from;
+    if (from < 0) continue;
+    for (let i = from; i <= (to < from ? to + 7 : to); i += 1) days.add(allDays[i % 7]);
+  }
+  const closes = [...lower.matchAll(/-\s*(\d{1,2}):(\d{2})/g)].map((m) => Number(m[1]) + Number(m[2]) / 60);
+  const late = closes.some((h) => h >= 22 || (h > 0 && h < 6));
+  const parts = [];
+  if (days.size === 7) parts.push('Open every day');
+  else if (days.size) parts.push(`Open on ${[...days].map((d) => DAYS[d]).join(', ')}`);
+  if (late) parts.push('open late');
+  return parts.length ? `${parts.join(', ')}.` : '';
+}
 
 
 /** One place's text, cleaned, with menus routed away from the feature path. */
@@ -146,6 +212,13 @@ export function textOf(place) {
     place.summary,
     listOf(place.experiences).join(', '),
     asserted(place.accessibility).join(', '),
+    // The structured facts, said in words. Hours, cuisines, price, dietary
+    // options, the hygiene rating, whether children are welcome, whether
+    // there is somewhere to book: each is a fact about the place that the
+    // summary rarely repeats, and each was invisible to the extractor until
+    // now (owner, 26 Sep 2026). Never a phone number, an address or a
+    // website — those identify, they do not describe.
+    factsSaid(place),
   ];
   for (const raw of said) {
     if (!raw) continue;
@@ -277,10 +350,10 @@ export async function estimate({ subcategories = null, size = SAMPLE_SIZE } = {}
   const { rows } = await query(
     `with said as (
        select p.subcategory,
-              length(concat_ws(' ', r.summary, a.summary)) as len,
+              length(${SAID_SQL}) as len,
               row_number() over (
                 partition by p.subcategory
-                order by length(concat_ws(' ', r.summary, a.summary)) desc
+                order by length(${SAID_SQL}) desc
               ) as rank
          from place_index p
          left join place_records r on r.venue_ref = p.venue_ref
@@ -293,7 +366,7 @@ export async function estimate({ subcategories = null, size = SAMPLE_SIZE } = {}
             limit 1
          ) a on true
          join shelf_subcategories s on s.key = p.subcategory and s.active
-        where length(concat_ws(' ', r.summary, a.summary)) > 80
+        where length(${SAID_SQL}) > 80
           ${subcategories?.length ? 'and p.subcategory = any($2)' : ''}
      )
      select subcategory, count(*)::int as places, sum(len)::bigint as chars
@@ -345,7 +418,7 @@ export async function harvestable({ subcategories = null } = {}) {
           limit 1
        ) a on true
       where s.active
-        and length(concat_ws(' ', r.summary, a.summary)) > 80
+        and length(${SAID_SQL}) > 80
         ${subcategories?.length ? 'and s.key = any($1)' : ''}
       group by 1, 2
       having count(*) >= ${ENOUGH_TO_ASK}

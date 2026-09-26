@@ -508,6 +508,10 @@ questionRoutes.post('/reference', requires('manage_questions'), async (req, res,
 questionRoutes.get('/reference/:id/held', requires('view_library'), async (req, res, next) => {
   try { res.json({ places: await reference.held(String(req.params.id)) }); } catch (err) { next(err); }
 });
+/** The facts behind a set's disagreements — which field, which sources, which values. */
+questionRoutes.get('/reference/:id/disagreements', requires('view_library'), async (req, res, next) => {
+  try { res.json({ places: await reference.disagreements(String(req.params.id), { limit: Math.min(200, Number(req.query.limit ?? 20) || 20) }) }); } catch (err) { next(err); }
+});
 
 questionRoutes.get('/sweep', requires('view_library'), async (_req, res, next) => {
   try {
