@@ -14,13 +14,15 @@
  * delay the politeness rule waits out does not eat the request's own time.
  */
 export const MAX_HOPS = 5;
+/** The statuses fetch itself follows; a 300 or a 304 with a Location is not a redirect (Codex, 26 Sep 2026). */
+const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 
 export async function fetchFollowing(url, init, { forbids, timeoutMs, maxHops = MAX_HOPS }) {
   let at = String(url);
   for (let hop = 0; hop <= maxHops; hop += 1) {
     if (await forbids(at)) return { refused: true, url: at, res: null };
     const res = await fetch(at, { ...init, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
-    if (res.status >= 300 && res.status < 400) {
+    if (REDIRECTS.has(res.status)) {
       const next = res.headers.get('location');
       if (!next) return { refused: false, url: at, res };
       try { at = new URL(next, at).toString(); } catch { return { refused: false, url: at, res: null }; }
