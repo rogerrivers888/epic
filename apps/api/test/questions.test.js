@@ -923,3 +923,9 @@ test('Codex on C27: a word already filed is not aliased over its filing', async 
   await assert.rejects(() => sets.aliasToGlobal(w.id, { attributeKey: 'parking' }), /already been decided/);
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
 });
+
+test('Codex on C27: a fact asked everywhere is not added to a set as well', async () => {
+  await query("insert into question_sets (key, name) values ('zz-set2', 'Zz') on conflict do nothing");
+  await assert.rejects(() => sets.addQuestion({ attributeKey: 'parking', setKey: 'zz-set2', scope: 'set' }), /asked everywhere already/);
+  await query("delete from question_sets where key = 'zz-set2'");
+});

@@ -180,6 +180,13 @@ export async function addQuestion({ attributeKey, setKey = null, scope = 'set', 
   if (scope === 'set' && !setKey) throw bad('A question has to belong to a set, or be asked everywhere.');
   const { rows: known } = await run('select key from place_attributes where key = $1', [attributeKey]);
   if (!known.length) throw bad(`${attributeKey} is not one of our facts. Name the fact first, then check for it.`);
+  // A fact is asked everywhere or by sets, never both: a set question beside a
+  // global one splits its answers across two ids (Codex, 26 Sep 2026). Held at
+  // the one door every question comes through.
+  if (scope === 'set') {
+    const { rows: g } = await run("select 1 from questions where attribute_key = $1 and scope = 'global'", [attributeKey]);
+    if (g.length) throw bad(`${attributeKey} is asked everywhere already, so no set asks it as well.`);
+  }
   const { rows } = await run(
     `insert into questions (attribute_key, scope, set_key, gate, refresh_days, position, from_candidate)
      values ($1, $2, $3, $4, $5, $6, $7)
