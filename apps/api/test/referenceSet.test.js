@@ -285,6 +285,16 @@ test('forgetting a wrong article takes the record’s ownership down with it, an
   assert.equal(rec.enrich_state, 'pending', 'nothing of its own left: a research job again');
   const [idx] = (await query(`select ownership from place_index where venue_ref = $1`, [eight])).rows;
   assert.notEqual(idx.ownership, 'owned', 'nothing of ours is left on the record, so it is not owned (Codex, 26 Sep 2026)');
+  // Place 10 keeps an address from the point, which is not knowing the place:
+  // a research job again (Codex, 26 Sep 2026).
+  const ten = 'google:ChIJ_ref_010';
+  await query(`update place_records set website = null, enrich_state = 'done' where venue_ref = $1`, [ten]);
+  await query(`delete from place_facts where venue_ref = $1`, [ten]);
+  for (const [field, source, value] of [['address', 'nominatim', '1 High Street, Woking'], ['name', 'wikipedia', 'Woking']]) {
+    await query(`insert into place_facts (venue_ref, field, source, value, licence, retention, confidence, expires_at) values ($1, $2, $3, $4, 'x', 'indefinite', 1, null) on conflict do nothing`, [ten, field, source, JSON.stringify(value)]);
+  }
+  await own.forgetEncyclopedia(ten);
+  assert.equal((await query(`select enrich_state from place_records where venue_ref = $1`, [ten])).rows[0].enrich_state, 'pending');
   // Place 9 keeps its own website, so it stays owned after the article goes.
   const nine = 'google:ChIJ_ref_009';
   await query(`insert into place_facts (venue_ref, field, source, value, licence, retention, confidence, expires_at) values ($1, 'website', 'site', $2, 'x', 'indefinite', 1, null) on conflict do nothing`, [nine, JSON.stringify(rows[8].website)]);

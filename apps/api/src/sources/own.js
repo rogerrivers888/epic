@@ -1028,13 +1028,14 @@ export async function forgetEncyclopedia(venueRef) {
   const ENC = ['wikipedia', 'wikidata'];
   const out = await compose(venueRef, { without: ENC });
   await owned.settleOwnership(venueRef);
-  // The record must not go on saying the article matched, and a record left
-  // with nothing of its own is a research job again, not a finished one.
+  // The record must not go on saying the article matched, and a record that
+  // no longer knows which place it is — an address alone is not knowing — is
+  // a research job again, not a finished one (Codex, 26 Sep 2026).
   await query(
     `update place_records
         set matched = coalesce(matched, '{}'::jsonb) - 'wikipedia' - 'wikidata',
-            enrich_state = case when provenance = '{}'::jsonb and enrich_state = 'done' then 'pending' else enrich_state end
-      where venue_ref = $1`, [venueRef]);
+            enrich_state = case when $2 and enrich_state = 'done' then 'pending' else enrich_state end
+      where venue_ref = $1`, [venueRef, !isIdentified(out.provenance)]);
   await owned.forgetSourceFacts(venueRef, ENC);
   return out;
 }
