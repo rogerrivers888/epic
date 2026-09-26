@@ -275,6 +275,8 @@ test('the facts behind a disagreement can be read, field by field and source by 
   await put12('osm', 'https://www.zizzi.co.uk');
   await put12('site', 'https://zizzi.co.uk/restaurants/woking/?utm_source=gmb');
   assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === twelve).disagreements, 0, 'root against a branch page is one site');
+  await put12('fsa', 'HTTPS://WWW.Zizzi.co.uk/restaurants/woking');
+  assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === twelve).disagreements, 0, 'the scheme and the host are case-blind');
   await put12('wikidata', 'https://www.zizzi.co.uk/restaurants/bracknell');
   assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === twelve).disagreements, 1, 'two branch pages on one host disagree');
   const listed = (await ref.disagreements(row.id, { limit: 200 })).find((p) => p.venue_ref === twelve);

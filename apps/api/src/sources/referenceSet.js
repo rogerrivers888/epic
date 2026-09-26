@@ -57,8 +57,10 @@ const COMPARABLE = `f.field <> all(array[${NEVER_A_DISAGREEMENT.map((x) => `'${x
  * one value, so it is asked of pairs; a set of paths agrees exactly when every
  * pair is a path and its parent.
  */
-const URL_OF = (a) => `regexp_replace(lower(btrim(${a}.value #>> '{}')), '^https?://(www\\.)?', '')`;
-const HOST_OF = (a) => `substring(${URL_OF(a)} from '^[^/?#:]+')`;
+// Only the scheme and the host are case-blind; a path keeps its case, so
+// /locations/ABC and /locations/abc are two pages (Codex, 26 Sep 2026).
+const URL_OF = (a) => `regexp_replace(btrim(${a}.value #>> '{}'), '^https?://(www\\.)?', '', 'i')`;
+const HOST_OF = (a) => `lower(substring(${URL_OF(a)} from '^[^/?#:]+'))`;
 const PATH_OF = (a) => `rtrim(coalesce(substring(${URL_OF(a)} from '^[^/?#]*(/[^?#]*)'), ''), '/')`;
 const UNDER = (p, q) => `(${p} = '' or ${q} = ${p} or left(${q}, length(${p}) + 1) = ${p} || '/')`;
 const WEBSITE_CLASH = (ref) => `exists (

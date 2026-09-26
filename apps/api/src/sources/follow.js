@@ -25,6 +25,9 @@ export async function fetchFollowing(url, init, { forbids, timeoutMs, maxHops = 
     if (REDIRECTS.has(res.status)) {
       const next = res.headers.get('location');
       if (!next) return { refused: false, url: at, res };
+      // A redirect's own body is never read, and left unread it holds the
+      // connection (Codex, 26 Sep 2026).
+      await res.body?.cancel?.().catch(() => {});
       try { at = new URL(next, at).toString(); } catch { return { refused: false, url: at, res: null }; }
       continue;
     }
