@@ -341,3 +341,28 @@ test('the daily ceiling refuses at 100%, and raises each alarm once', async () =
     await t({ fresh: true });
   }
 });
+
+test('the call that crosses the line raises the alarm itself', async () => {
+  // Codex, 26 Sep 2026: the alarm was looked for only before the next paid call.
+  const { record } = await import('../src/repositories/providerCalls.js');
+  const { todayStatus } = await import('../src/sources/dailyCeiling.js');
+  const was = process.env.EPIC_DAILY_SPEND_CEILING_GBP;
+  await query(`delete from spend_alarms where day = (now() at time zone 'Europe/London')::date`);
+  try {
+    const spent = (await todayStatus({ fresh: true })).spentGbp;
+    // One Enterprise search (4 cents) takes the day past the ceiling.
+    process.env.EPIC_DAILY_SPEND_CEILING_GBP = String(spent + 0.01);
+    await runAsSpender({ householdId: HH, sessionId: SIGNED_IN }, () => record(HH, 'google', 'test.crossing', { google: 1, 'google-search': 1 }));
+    let levels = [];
+    for (let i = 0; i < 40 && !levels.includes('stop'); i += 1) {
+      await new Promise((r) => setTimeout(r, 25));
+      levels = (await query(`select level from spend_alarms where day = (now() at time zone 'Europe/London')::date`)).rows.map((r) => r.level);
+    }
+    assert.ok(levels.includes('stop'), 'raised by the write, with no further call');
+  } finally {
+    if (was === undefined) delete process.env.EPIC_DAILY_SPEND_CEILING_GBP; else process.env.EPIC_DAILY_SPEND_CEILING_GBP = was;
+    await query(`delete from spend_alarms where day = (now() at time zone 'Europe/London')::date`);
+    await query(`delete from provider_calls where purpose = 'test.crossing'`);
+    await todayStatus({ fresh: true });
+  }
+});

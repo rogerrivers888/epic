@@ -11,9 +11,11 @@
 --
 -- Existing sessions are sorted by what the app has always written: a device
 -- label is "<Phone|Tablet|Computer> · <browser>" (apps/web/src/session.ts
--- `deviceLabel`), and a session on somebody's own account was opened by a
--- link or an invitation. Everything else is an agent — 274 unlabelled
--- passcode sessions and labels like "epic-f0 edge census" among them.
+-- `deviceLabel`), and an invitation names itself "<name> · invited to …".
+-- Having an account is not enough on its own: the passcode opens a session on
+-- the owner's account once one is claimed, whoever holds it (Codex, 26 Sep
+-- 2026). Everything else is an agent — 274 unlabelled passcode sessions and
+-- labels like "epic-f0 edge census" among them.
 alter table api_sessions add column if not exists kind text not null default 'agent';
 alter table api_sessions add column if not exists paid_grant_until timestamptz;
 alter table api_sessions drop constraint if exists api_sessions_kind_check;
@@ -22,9 +24,9 @@ alter table api_sessions add constraint api_sessions_kind_check check (kind in (
 update api_sessions set kind = 'service' where token_hash like 'service:%';
 update api_sessions set kind = 'device'
  where kind = 'agent'
-   and (account_id is not null
-        or label ~ '^(Phone|Tablet|Computer) · (Edge|Chrome|Safari|Firefox|Browser)$'
-        or label in ('ios', 'android'));
+   and (label ~ '^(Phone|Tablet|Computer) · (Edge|Chrome|Safari|Firefox|Browser)$'
+        or label in ('ios', 'android')
+        or (account_id is not null and label like '% · invited to %'));
 
 -- "Daily £ ceiling across the estate from estimated_cost_usd: alarm at 80%
 -- (email and back-office banner), refuse at 100%." One row per day and level,

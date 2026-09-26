@@ -17,6 +17,7 @@ import { canBill } from '../constants.js';
 import { currentSpender } from '../context.js';
 import { costOf } from '../domain/providerPrices.js';
 import { healthOf } from '../sources/meter.js';
+import { noteSpend } from '../sources/dailyCeiling.js';
 
 // ---------------------------------------------------------------------------
 // writing
@@ -101,6 +102,8 @@ export async function record(householdId, provider, purpose, units = null, sessi
     [householdId, session, provider, purpose, units, costOf(units, provider) || null, venueRef,
       health.ok, health.ms, health.failed, health.fault, health.watched, planSessionId],
   );
+  // The estate's day, looked at again now that it has moved (sources/dailyCeiling.js).
+  noteSpend(costOf(units, provider));
   void meter;
 }
 
@@ -118,6 +121,7 @@ export async function recordTokens(c) {
       // One request, which is what a token-billed call always is.
       c.ok == null ? null : 1, c.planSessionId ?? null],
   );
+  noteSpend(c.costUsd);
 }
 
 /**
@@ -153,6 +157,7 @@ export async function recordMetered({ householdId, sessionId = null, planSession
     [householdId, session, provider, purpose, units, costUsd, ok, ms, ok === false ? 1 : 0, fault,
       ok == null ? null : 1, planSessionId],
   );
+  noteSpend(costUsd);
 }
 
 // ---------------------------------------------------------------------------

@@ -70,6 +70,19 @@ export async function todayStatus({ fresh = false } = {}) {
   return { spentGbp, ceilingGbp, ratio, level };
 }
 
+/**
+ * A paid row has just been written: look again, so a call that crosses 80% or
+ * 100% raises its alarm now rather than on the next paid call, which may not
+ * come today (Codex, 26 Sep 2026). Never throws — the call has been made.
+ */
+export function noteSpend(usd) {
+  if (!(usd > 0)) return;
+  held = null;
+  void todayStatus({ fresh: true })
+    .then((s) => (s.level ? raiseAlarm(s) : null))
+    .catch((err) => console.warn(`spend alarm: ${err.message}`));
+}
+
 /** Refuse at the ceiling; raise the alarm at 80% and at 100%, once a day each. */
 export async function assertUnderDailyCeiling() {
   const s = await todayStatus();
