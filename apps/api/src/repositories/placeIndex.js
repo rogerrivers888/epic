@@ -3031,5 +3031,8 @@ export async function setAsideByHand(venueRef, reason) {
       returning venue_ref, not_in_epic_before as was`,
     [venueRef, reason],
   );
+  // The boards count from the rollups, so they are refreshed as the day-out
+  // test and the way back refresh them (Codex, 26 Sep 2026).
+  if (rows[0]) await refreshStats().catch(() => null);
   return rows[0] ?? null;
 }
