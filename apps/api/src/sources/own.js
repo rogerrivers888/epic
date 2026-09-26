@@ -41,7 +41,7 @@ import { siteFacts } from './site.js';
 import { reverseGeocode } from './geocode.js';
 import { googleSource } from './google.js';
 import { dayOutTestOn } from '../domain/dayOut.js';
-import { recordVerdict } from './dayOutTest.js';
+import { dayOutCatchUp, judge, proseOf } from './dayOutTest.js';
 // Whether the owner has a key for it, and has not switched it off in Settings:
 // asking a source the owner has turned off is not ours to do.
 import { sourceHasKey, sourceOff } from './index.js';
@@ -805,11 +805,16 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
   if (dayOutTestOn()) {
     try {
       const held = await owned.liveFacts(venueRef, { keepableOnly: true });
-      const tags = held.find((x) => x.field === 'tags' && x.source === 'osm')?.value ?? null;
-      const text = held.filter((x) => ['site', 'wikipedia', 'wikidata'].includes(x.source) && typeof x.value === 'string').map((x) => x.value).join(' ');
       const name = held.find((x) => x.field === 'name' && !empty(x.value))?.value ?? seed.name ?? '';
       const filedUnder = (await query('select subcategory from place_index where venue_ref = $1', [venueRef]).catch(() => ({ rows: [] }))).rows[0]?.subcategory ?? null;
-      await recordVerdict(venueRef, { drawer: filedUnder, tags, text, name });
+      // The matched open-map tags go in as matched: the fields read off them
+      // are stored, the tags themselves are not, so nothing else could hand
+      // them over (Codex, 26 Sep 2026). The prose is the page's and the
+      // encyclopedia's, never an address or a title.
+      await judge(venueRef, {
+        drawer: filedUnder, name, lat: osm?.lat ?? seed.lat ?? null, lng: osm?.lng ?? seed.lng ?? null,
+        tags: osm?.tags ?? null, text: proseOf(held),
+      });
     } catch (err) {
       problems.push(`the day-out test: ${String(err?.message || err).slice(0, 120)}`);
     }
@@ -1200,6 +1205,12 @@ export function startOwnLoop({ everyMs = 5 * 60_000, pictures = PICTURE_BATCH, k
     // rather than waiting for somebody to press something.
     if (kinds > 0) {
       try { await identifyKinds({ limit: kinds }); } catch (err) { console.warn(`own: identify failed: ${err.message}`); }
+    }
+    // The day-out test over the places researched before the switch existed
+    // (C26). A few a tick, from what their records hold; the open map is asked
+    // only for the objects around each point. Inert while the switch is off.
+    if (dayOutTestOn()) {
+      try { await dayOutCatchUp({ limit: 10 }); } catch (err) { console.warn(`own: day-out catch-up failed: ${err.message}`); }
     }
     if (pictures > 0) {
       try { await sweepPictures({ limit: pictures }); } catch (err) { console.warn(`own: picture sweep failed: ${err.message}`); }
