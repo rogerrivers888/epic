@@ -119,7 +119,7 @@ export async function loadPostcodes(file) {
 }
 
 async function loadWhileLocked(file, stats) {
-  await query('create table if not exists postcodes_staging (like postcodes including all)');
+  // postcodes_staging is migration 255's: schema is made by migrations only.
   await query('truncate postcodes_staging');
   const zip = await openZip(file);
   await new Promise((resolve, reject) => {
