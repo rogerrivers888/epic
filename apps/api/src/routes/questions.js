@@ -532,6 +532,10 @@ questionRoutes.get('/reference/:id/disagreements', requires('view_library'), asy
 });
 
 /** The audit of encyclopedia matches that are about a town, an area or a landform the place is not. */
+/** How far the free body backfill has got, and how many places hold a body. Read-only. */
+questionRoutes.get('/reference/body-progress', requires('view_library'), async (_req, res, next) => {
+  try { res.json(await reference.bodyProgress()); } catch (err) { next(err); }
+});
 questionRoutes.get('/reference/wikipedia-audit', requires('view_library'), async (_req, res, next) => {
   try { res.json(await reference.wikipediaAudit()); } catch (err) { next(err); }
 });

@@ -580,7 +580,7 @@ export async function one(id) {
     // not evidence, because it is not ours to show (Codex, 18 Sep 2026).
     const { rows } = await query(
       `select source, value, fetched_at from place_facts
-        where venue_ref = $1 and field = $2 and (expires_at is null or expires_at > now())`, [ref, field]);
+        where venue_ref = $1 and field = $2 and field <> 'body' and (expires_at is null or expires_at > now())`, [ref, field]);
     out.detail = { field, disagree: rows };
   }
   if (q.household_id) {

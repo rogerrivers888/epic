@@ -370,6 +370,7 @@ export async function estimate({ subcategories = null, size = SAMPLE_SIZE } = {}
     `with said as (
        select p.subcategory,
               length(${SAID_SQL}) as len,
+              exists (select 1 from place_facts b where b.venue_ref = p.venue_ref and b.field = 'body' and b.expires_at is null) as has_body,
               row_number() over (
                 partition by p.subcategory
                 order by length(${SAID_SQL}) desc
@@ -388,7 +389,8 @@ export async function estimate({ subcategories = null, size = SAMPLE_SIZE } = {}
         where length(${SAID_SQL}) > 80
           ${subcategories?.length ? 'and p.subcategory = any($2)' : ''}
      )
-     select subcategory, count(*)::int as places, sum(len)::bigint as chars
+     select subcategory, count(*)::int as places, sum(len)::bigint as chars,
+            count(*) filter (where has_body)::int as with_body
        from said
       where rank <= $1
       group by 1
@@ -400,6 +402,7 @@ export async function estimate({ subcategories = null, size = SAMPLE_SIZE } = {}
   const drawers = rows.map((r) => ({
     subcategory: r.subcategory,
     places: r.places,
+    withBody: r.with_body ?? 0,
     // This drawer's own estimate, not the running total.
     inputTokens: SYSTEM_TOKENS + Math.ceil(Number(r.chars) / CHARS_PER_TOKEN),
   }));
@@ -411,6 +414,9 @@ export async function estimate({ subcategories = null, size = SAMPLE_SIZE } = {}
     calls,
     model: MODEL,
     places: drawers.reduce((n, d) => n + d.places, 0),
+    // How many of the places the run would read have a body yet: the second
+    // run waits for the body backfill (owner, 26 Sep 2026).
+    placesWithBody: drawers.reduce((n, d) => n + d.withBody, 0),
     inputTokens,
     outputTokens,
     costUsd: Number(usd.toFixed(2)),

@@ -95,3 +95,30 @@ test('a nature reserve is not a district: its own article is kept for a nature d
   // The real UK district and borough classes are areas.
   for (const q of ['Q349084', 'Q1187580', 'Q1002812', 'Q1136601', 'Q180673']) assert.equal(refused([q], 'museums'), 'a settlement or an area', q);
 });
+
+test('a venue page that redirects to a host whose robots.txt refuses us is never read (C11, 26 Sep 2026)', async (t) => {
+  const { siteFacts } = await import('../src/sources/site.js');
+  const polite = await import('../src/sources/politeness.js');
+  polite.forget();
+  const real = globalThis.fetch;
+  const asked = [];
+  t.after(() => { globalThis.fetch = real; polite.forget(); });
+  globalThis.fetch = async function stub(url, opts = {}) {
+    const u = String(url);
+    asked.push(u);
+    // A real fetch follows a redirect by itself unless told not to.
+    if (u === 'https://venue-a.example/' && (opts.redirect ?? 'follow') === 'follow') return stub('https://elsewhere.example/venue', opts);
+    const page = (status, body = '', headers = {}) => ({
+      ok: status >= 200 && status < 300, status, url: u,
+      headers: { get: (k) => ({ 'content-type': 'text/html', ...headers })[k.toLowerCase()] ?? null },
+      text: async () => body, json: async () => ({}),
+    });
+    if (u === 'https://venue-a.example/robots.txt') return page(200, 'User-agent: *\nAllow: /');
+    if (u === 'https://elsewhere.example/robots.txt') return page(200, 'User-agent: *\nDisallow: /');
+    if (u === 'https://venue-a.example/') return page(301, '', { location: 'https://elsewhere.example/venue' });
+    return page(404);
+  };
+  const got = await siteFacts({ website: 'https://venue-a.example/', name: 'Venue A' });
+  assert.ok(!asked.includes('https://elsewhere.example/venue'), 'the refused host’s page is never fetched');
+  assert.equal(got?.body ?? null, null);
+});

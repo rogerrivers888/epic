@@ -47,24 +47,31 @@ const NEVER_A_DISAGREEMENT = ['summary', 'summary_source', 'body', 'address', 'i
 const DERIVED_SOURCES = ['nominatim'];
 const COMPARABLE = `f.field <> all(array[${NEVER_A_DISAGREEMENT.map((x) => `'${x}'`).join(', ')}]) and not (f.field = 'postcode' and f.source = any(array[${DERIVED_SOURCES.map((x) => `'${x}'`).join(', ')}]))`;
 
-/** A fact's value as text: a list sorted; a site, a number or a name reduced to what it names. */
+/**
+ * Two websites are the same site when they name one host and one path is the
+ * other's or a parent of it (owner, E11a, 26 Sep 2026): protocol, www, a
+ * trailing slash, a query string, a tracking tag and root-against-page on one
+ * host are one site. Two different deep pages on one host — two Everyone
+ * Active centres, two Zizzis — are a disagreement: one source has probably
+ * matched the wrong branch. That makes it a question about a pair, not about
+ * one value, so it is asked of pairs; a set of paths agrees exactly when every
+ * pair is a path and its parent.
+ */
+const URL_OF = (a) => `regexp_replace(lower(btrim(${a}.value #>> '{}')), '^https?://(www\\.)?', '')`;
+const HOST_OF = (a) => `substring(${URL_OF(a)} from '^[^/?#:]+')`;
+const PATH_OF = (a) => `rtrim(coalesce(substring(${URL_OF(a)} from '^[^/?#]*(/[^?#]*)'), ''), '/')`;
+const UNDER = (p, q) => `(${p} = '' or ${q} = ${p} or left(${q}, length(${p}) + 1) = ${p} || '/')`;
+const WEBSITE_CLASH = (ref) => `exists (
+    select 1 from place_facts a
+      join place_facts b on b.venue_ref = a.venue_ref and b.field = 'website' and b.expires_at is null and b.source > a.source
+     where a.venue_ref = ${ref} and a.field = 'website' and a.expires_at is null
+       and (${HOST_OF('a')} is distinct from ${HOST_OF('b')}
+            or not (${UNDER(PATH_OF('a'), PATH_OF('b'))} or ${UNDER(PATH_OF('b'), PATH_OF('a'))})))`;
+
+/** A fact's value as text: a list sorted; a number or a name reduced to what it names. Websites are compared in pairs, above. */
 const SAME_VALUE = `case
     when jsonb_typeof(f.value) = 'array'
       then (select coalesce(jsonb_agg(e order by e::text), '[]'::jsonb) from jsonb_array_elements(f.value) e)::text
-    when f.field = 'website'
-      -- The host alone: a visit page against a root is not a disagreement
-      -- (owner, 26 Sep 2026); a different host is. A query, a fragment or a
-      -- port on a root is still the same host (Codex, 26 Sep 2026).
-      -- On a host many venues share, the page is the venue, so the first
-      -- path segment is kept: two Facebook pages are two sites (Codex, 26 Sep 2026).
-      -- Google Sites names the venue in the second segment, after /view/ or /site/.
-      then (select case when h.host = 'sites.google.com'
-                        then h.host || coalesce(substring(h.rest from '^(/[^/?#]+/[^/?#]+)'), substring(h.rest from '^(/[^/?#]+)'), '')
-                        when h.host = any(array['facebook.com', 'm.facebook.com', 'instagram.com', 'linktr.ee', 'twitter.com', 'x.com', 'tiktok.com'])
-                        then h.host || '/' || coalesce(substring(h.rest from '^/([^/?#]+)'), '')
-                        else h.host end
-              from (select substring(u from '^[^/?#:]+') as host, substring(u from '^[^/?#]*(.*)$') as rest
-                      from (select regexp_replace(lower(btrim(f.value #>> '{}')), '^https?://(www\\.)?', '') as u) x) h)
     when f.field = 'phone'
       -- "+44 (0)20…", "+44 20…" and "020…" are one number (Codex, 26 Sep 2026).
       then regexp_replace(regexp_replace(f.value #>> '{}', '[^0-9]', '', 'g'), '^(440?|0)', '')
@@ -318,9 +325,10 @@ export async function held(id) {
             r.name, r.website, r.fsa_rating, r.provenance,
             (select count(*) from place_facts f where f.venue_ref = p.venue_ref and f.expires_at is null)::int as facts,
             (select count(distinct source) from place_facts f where f.venue_ref = p.venue_ref and f.expires_at is null)::int as sources,
-            (select count(*) from (
-               select field from place_facts f where f.venue_ref = p.venue_ref and f.expires_at is null and ${COMPARABLE}
-               group by field having count(distinct source) > 1 and count(distinct ${SAME_VALUE}) > 1) x)::int as disagreements
+            ((select count(*) from (
+               select field from place_facts f where f.venue_ref = p.venue_ref and f.expires_at is null and ${COMPARABLE} and f.field <> 'website'
+               group by field having count(distinct source) > 1 and count(distinct ${SAME_VALUE}) > 1) x)
+             + (case when ${WEBSITE_CLASH('p.venue_ref')} then 1 else 0 end))::int as disagreements
        from research_sweep_places p
        left join place_records r on r.venue_ref = p.venue_ref
       where p.sweep_id = $1
@@ -348,12 +356,17 @@ export async function disagreements(id, { limit = 20 } = {}) {
      ), differing as (
        select f.venue_ref, f.field, jsonb_object_agg(f.source, f.value) as values
          from place_facts f join mine m on m.venue_ref = f.venue_ref
-        where f.expires_at is null and ${COMPARABLE}
+        where f.expires_at is null and ${COMPARABLE} and f.field <> 'website'
         group by f.venue_ref, f.field
        -- A list is the same list in any order: two sources agreeing on
        -- "italian, pizza" and "pizza, italian" are not disagreeing
        -- (Codex, 26 Sep 2026).
        having count(distinct f.source) > 1 and count(distinct ${SAME_VALUE}) > 1
+       union all
+       select f.venue_ref, f.field, jsonb_object_agg(f.source, f.value) as values
+         from place_facts f join mine m on m.venue_ref = f.venue_ref
+        where f.expires_at is null and f.field = 'website' and ${WEBSITE_CLASH('f.venue_ref')}
+        group by f.venue_ref, f.field
      )
      select m.venue_ref, m.subcategory, m.picked_for, m.name, m.matched,
             jsonb_object_agg(d.field, d.values) as fields
@@ -373,10 +386,52 @@ export async function disagreements(id, { limit = 20 } = {}) {
  * with a sports centre did not only get the name wrong, it attached that
  * article's facts to the place").
  */
+/**
+ * How far the body backfill has got (owner, 26 Sep 2026: "report progress as
+ * N of M places have bodies").
+ *
+ * Two counts, because they answer different questions. `backfill` is every
+ * place researched before the body existed, and how many of those the free
+ * catch-up has since been through: when the two meet, the backfill is done,
+ * whatever each place turned out to hold. `withBody` is how many places hold
+ * a body at all — never all of them, because a place with no website and no
+ * article has no prose to keep.
+ */
+export async function bodyProgress() {
+  const { RESEARCH_VERSION } = await import('./own.js');
+  const { rows: [b] } = await query(
+    `select count(*)::int as researched,
+            count(*) filter (where research_version >= $1)::int as brought_up
+       from place_records
+      where research_version >= 1 and enrich_state not in ('pending', 'scored')`, [RESEARCH_VERSION]);
+  const { rows: [w] } = await query(
+    `select count(distinct venue_ref)::int as places,
+            count(distinct venue_ref) filter (where source = 'site')::int as from_site,
+            count(distinct venue_ref) filter (where source = 'wikipedia')::int as from_wikipedia
+       from place_facts where field = 'body' and expires_at is null`);
+  return {
+    version: RESEARCH_VERSION,
+    backfill: { done: b.brought_up, of: b.researched },
+    withBody: { places: w.places, fromSite: w.from_site, fromWikipedia: w.from_wikipedia },
+  };
+}
+
+/** "https://en.wikipedia.org/wiki/Weston-super-Mare" → "Weston-super-Mare"; a malformed link as itself. */
+export function articleTitle(url) {
+  if (!url) return null;
+  const tail = String(url).split('/wiki/')[1];
+  if (!tail) return String(url);
+  try { return decodeURIComponent(tail).replace(/_/g, ' '); } catch { return tail.replace(/_/g, ' '); }
+}
+
 export async function wikipediaAudit() {
   const { classesOf, refused } = await import('./encyclopedia.js');
   const { rows } = await query(
     `select f.venue_ref, f.value #>> '{}' as qid, r.name, r.category, p.subcategory,
+            p.google_types, r.address, r.postcode,
+            (select jsonb_agg(jsonb_build_object('name', l.name, 'kind', l.kind) order by l.kind)
+               from place_areas pa join localities l on l.slug = pa.area_slug where pa.venue_ref = f.venue_ref) as areas,
+            (select u.value #>> '{}' from place_facts u where u.venue_ref = f.venue_ref and u.field = 'wikipedia_url' and u.source = 'wikipedia' and u.expires_at is null limit 1) as article_url,
             (select jsonb_agg(field) from place_facts g where g.venue_ref = f.venue_ref and g.source in ('wikipedia', 'wikidata') and g.expires_at is null) as attached
        from place_facts f
        left join place_records r on r.venue_ref = f.venue_ref
@@ -400,7 +455,14 @@ export async function wikipediaAudit() {
   const heldBack = judged.filter((r) => !canJudge(r));
   return {
     checked: rows.length, flagged: flagged.length, places: flagged.map(shape),
-    heldBack: heldBack.length, unjudged: heldBack.map((r) => ({ ...shape(r), reason: 'no drawer, and no category more specific than attraction, to judge the article against' })),
+    // What the owner decides by hand from: the Google type, where it is, and
+    // the article it would have taken (owner, 26 Sep 2026).
+    heldBack: heldBack.length, unjudged: heldBack.map((r) => ({
+      ...shape(r),
+      googleTypes: r.google_types ?? [], address: r.address ?? null, postcode: r.postcode ?? null, areas: r.areas ?? [],
+      article: articleTitle(r.article_url),
+      articleUrl: r.article_url ?? null,
+      reason: 'no drawer, and no category more specific than attraction, to judge the article against' })),
   };
 }
 

@@ -267,6 +267,18 @@ test('the facts behind a disagreement can be read, field by field and source by 
   assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === four).disagreements, 0, 'one Google Site, two pages of it');
   await put4('wikidata', 'https://sites.google.com/view/venue-b');
   assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === four).disagreements, 1, 'two Google Sites are two sites');
+  // Two deep pages on one host are two branches: one source matched the
+  // wrong one (owner, E11a, 26 Sep 2026). Root against either still agrees.
+  const used = ['google:ChIJ_ref_004', 'google:ChIJ_ref_005', 'google:ChIJ_ref_006', 'google:ChIJ_ref_007'];
+  const twelve = (await ref.held(row.id)).map((p) => p.venue_ref).find((r) => !used.includes(r));
+  const put12 = (source, value) => query(`insert into place_facts (venue_ref, field, source, value, licence, retention, confidence, expires_at) values ($1, 'website', $2, $3, 'x', 'indefinite', 1, null) on conflict do nothing`, [twelve, source, JSON.stringify(value)]);
+  await put12('osm', 'https://www.zizzi.co.uk');
+  await put12('site', 'https://zizzi.co.uk/restaurants/woking/?utm_source=gmb');
+  assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === twelve).disagreements, 0, 'root against a branch page is one site');
+  await put12('wikidata', 'https://www.zizzi.co.uk/restaurants/bracknell');
+  assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === twelve).disagreements, 1, 'two branch pages on one host disagree');
+  const listed = (await ref.disagreements(row.id, { limit: 200 })).find((p) => p.venue_ref === twelve);
+  assert.ok(listed?.fields?.website, 'and the disagreement shows every source’s address');
   await put('website', 'nominatim', 'https://www.everyoneactive.com/centre/x');
   assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === seven).disagreements, 1, 'another operator\u2019s site is a disagreement');
 });
@@ -309,10 +321,11 @@ test('the audit flags a filed place paired with a town, and holds back a place i
   for (const [ref, qid] of [[filed, 'Q783210'], [unfiled, 'Q670079']]) {
     await query(`insert into place_facts (venue_ref, field, source, value, licence, retention, confidence, expires_at) values ($1, 'wikidata_id', 'wikipedia', $2, 'x', 'indefinite', 1, null) on conflict do nothing`, [ref, JSON.stringify(qid)]);
   }
+  await query(`insert into place_facts (venue_ref, field, source, value, licence, retention, confidence, expires_at) values ($1, 'wikipedia_url', 'wikipedia', $2, 'x', 'indefinite', 1, null) on conflict do nothing`, [unfiled, JSON.stringify('https://en.wikipedia.org/wiki/Clevedon%2C_Somerset')]);
   const real = globalThis.fetch;
   t.after(async () => {
     globalThis.fetch = real;
-    await query(`delete from place_facts where venue_ref = any($1) and field = 'wikidata_id'`, [[filed, unfiled]]);
+    await query(`delete from place_facts where venue_ref = any($1) and field in ('wikidata_id', 'wikipedia_url')`, [[filed, unfiled]]);
     await query(`delete from place_records where venue_ref = $1`, [unfiled]);
   });
   globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ entities: {
@@ -323,8 +336,36 @@ test('the audit flags a filed place paired with a town, and holds back a place i
   assert.deepEqual(audit.places.map((p) => p.venue_ref), [filed], 'a place in a drawer paired with a town is flagged');
   assert.deepEqual(audit.unjudged.map((p) => p.venue_ref), [unfiled], 'a record with no drawer and no category may be the town itself');
   assert.equal(audit.heldBack, 1);
+  assert.equal(audit.unjudged[0].article, 'Clevedon, Somerset', 'the article it would have taken, by title');
+  assert.ok(Array.isArray(audit.unjudged[0].googleTypes) && Array.isArray(audit.unjudged[0].areas));
+  assert.equal(ref.articleTitle('https://en.wikipedia.org/wiki/%E0%A4%A'), '%E0%A4%A', 'a malformed link is itself, not a 500');
   // Nor is "attraction" with no drawer enough to judge on: a town can be the attraction.
   await query(`update place_records set category = 'attraction' where venue_ref = $1`, [unfiled]);
   const again = await ref.wikipediaAudit();
   assert.deepEqual(again.unjudged.map((p) => p.venue_ref), [unfiled]);
+});
+
+test('a screen is never handed the body: it is for the extractor only (E11b, 26 Sep 2026)', async () => {
+  const owned = await import('../src/repositories/ownedPlaces.js');
+  const three = 'google:ChIJ_ref_003';
+  for (const [field, value] of [['body', 'We have a wave machine and a play barn.'], ['phone', '01234 567890']]) {
+    await query(`insert into place_facts (venue_ref, field, source, value, licence, retention, confidence, expires_at) values ($1, $2, 'site', $3, 'x', 'indefinite', 1, null) on conflict do nothing`, [three, field, JSON.stringify(value)]);
+  }
+  const shown = await owned.displayFacts(three);
+  assert.ok(shown.some((f) => f.field === 'phone'));
+  assert.ok(!shown.some((f) => f.field === 'body'), 'the body never reaches a screen');
+  const bySource = await owned.displayFacts(three, { orderBy: 'source' });
+  assert.ok(!bySource.some((f) => f.field === 'body'));
+});
+
+test('body progress counts the places brought up to the current version, and the places that hold a body (26 Sep 2026)', async () => {
+  const { RESEARCH_VERSION } = await import('../src/sources/own.js');
+  const before = await ref.bodyProgress();
+  assert.equal(before.version, RESEARCH_VERSION);
+  await query(`update place_records set research_version = $1 where venue_ref = 'google:ChIJ_ref_013'`, [RESEARCH_VERSION]);
+  await query(`insert into place_facts (venue_ref, field, source, value, licence, retention, confidence, expires_at) values ('google:ChIJ_ref_013', 'body', 'wikipedia', $1, 'x', 'indefinite', 1, null) on conflict do nothing`, [JSON.stringify('A long history of the place.')]);
+  const after = await ref.bodyProgress();
+  assert.equal(after.backfill.of, before.backfill.of, 'the places to bring up do not change');
+  assert.equal(after.backfill.done, before.backfill.done + 1);
+  assert.equal(after.withBody.fromWikipedia, before.withBody.fromWikipedia + 1);
 });

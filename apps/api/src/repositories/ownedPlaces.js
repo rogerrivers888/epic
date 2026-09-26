@@ -42,6 +42,29 @@ export function forgetSourceFacts(venueRef, sources) {
   return query('delete from place_facts where venue_ref = $1 and source = any($2)', [venueRef, sources]);
 }
 
+/**
+ * Fields a person is never shown.
+ *
+ * The body — a venue's own paragraphs, an article beyond its lead — is kept
+ * for the extractor to read and for nothing else (owner, 26 Sep 2026, E11b:
+ * "make sure the body is never displayed, logged or exported", pending a
+ * legal check on keeping venue prose before launch). It is not a column of
+ * place_records, so it never reaches a device; this keeps it off the back
+ * office's screens too.
+ */
+export const NEVER_SHOWN = ['body'];
+
+/** The facts a screen may show for one place: live, and never the body. */
+export async function displayFacts(venueRef, { orderBy = 'field' } = {}) {
+  const { rows } = await query(
+    `select field, source, value, licence, retention, fetched_at, expires_at
+       from place_facts
+      where venue_ref = $1 and (expires_at is null or expires_at > now()) and field <> all($2)
+      order by ${orderBy === 'source' ? 'source, field' : 'field'}`,
+    [venueRef, NEVER_SHOWN]);
+  return rows;
+}
+
 export async function liveFacts(venueRef, { keepableOnly = false } = {}) {
   const { rows } = await query(
     // `expires_at is null` is "ours for good"; a licensed fact that has not yet

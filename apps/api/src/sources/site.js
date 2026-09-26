@@ -168,16 +168,32 @@ export function printedPhone(html) {
  * search engines may lose us a phone number. It is the cost of being able to
  * say, honestly, that Epic asks before it reads.
  */
+const MAX_HOPS = 5;
+
 async function fetchPage(url) {
-  const polite = await beforeFetching(url);
-  if (!polite.ok) return null;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(url, { redirect: 'follow', signal: controller.signal, headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml' } });
-    if (!res.ok) return null;
-    if (!/text\/html|xhtml/i.test(res.headers.get('content-type') || '')) return null;
-    return { url: res.url || url, html: (await res.text()).slice(0, MAX_BYTES) };
+    // Redirects are followed by hand, and every hop asks first: a venue's
+    // page that redirects to another host must not be read without asking
+    // that host's robots.txt (C11, 26 Sep 2026). Followed automatically, the
+    // check covered only the first address.
+    let at = url;
+    for (let hop = 0; hop <= MAX_HOPS; hop += 1) {
+      const polite = await beforeFetching(at);
+      if (!polite.ok) return null;
+      const res = await fetch(at, { redirect: 'manual', signal: controller.signal, headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml' } });
+      if (res.status >= 300 && res.status < 400) {
+        const next = res.headers.get('location');
+        if (!next) return null;
+        at = new URL(next, at).toString();
+        continue;
+      }
+      if (!res.ok) return null;
+      if (!/text\/html|xhtml/i.test(res.headers.get('content-type') || '')) return null;
+      return { url: at, html: (await res.text()).slice(0, MAX_BYTES) };
+    }
+    return null;
   } catch { return null; } finally { clearTimeout(timer); }
 }
 
