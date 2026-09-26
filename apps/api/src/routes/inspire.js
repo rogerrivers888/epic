@@ -58,7 +58,8 @@ import * as visitsRepo from '../repositories/visits.js';
 import { currentHousehold, loadMembers, toAttendees } from './household.js';
 import { householdStatus } from './places.js';
 import { thingsAround, THINGS_RADIUS_KM } from './plan.js';
-import { estimateTravelMinutes, kmBetween, travelMode } from '../domain/travel.js';
+import { estimateTravelMinutes, kmBetween, searchRadiusKm, travelMode } from '../domain/travel.js';
+import { searchPlan, mergeWide, alternate, NEAR_KM } from '../domain/wideSearch.js';
 import { fenceToBand, minutesTo } from '../domain/band.js';
 import { boundKm } from '../domain/reach.js';
 import { dwellFor } from '../domain/options.js';
@@ -298,7 +299,21 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
     }
     : ring.bandBox ?? ring.box;
 
-  const got = await categoryPage({
+  const ringKey = `${ring.cell}|${mode}|${minutes}|${start?.lat?.toFixed?.(3)},${start?.lng?.toFixed?.(3)}`;
+  // Near and wide (owner, 26 Sep 2026, E13; domain/wideSearch.js). One box the
+  // size of the journey hands its twenty to whatever is most famous inside it:
+  // from Winchester, things to do within the hour came back at a median of
+  // 31.5km, only five of seventeen within 22km, and Marwell Zoo — 7.9km — was
+  // eighth. So when the fence reaches past the near radius, and this is not
+  // food, page one also asks a box of `NEAR_KM` round the household and the two
+  // are merged. A short trip's fence never reaches past it and costs nothing
+  // extra; food's popular places are in the centre anyway, so food asks once.
+  // Later pages follow the wide search's own chain, as before.
+  const plan = searchPlan({ searchKm: searchRadiusKm(mode, minutes), categories: [category] });
+  const nearToo = Boolean(start && plan.wideKm && page === 1);
+  const nearBox = nearToo ? boxAround([start], { marginKm: NEAR_KM }) : null;
+
+  const wideGot = await categoryPage({
     /**
      * The ring, not its size.
      *
@@ -309,7 +324,7 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
      * places that were in reach and offering places that were not (Codex, 20
      * Sep 2026). The cells themselves are what the page is about.
      */
-    ringKey: `${ring.cell}|${mode}|${minutes}|${start?.lat?.toFixed?.(3)},${start?.lng?.toFixed?.(3)}`,
+    ringKey,
     /**
      * A box the size of the journey, not the shape of the sectors.
      *
@@ -330,6 +345,22 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
     box: searchBox, cells: null,
     category, page, meter, householdId, cellAt: reach.cellAt,
   });
+  // Billed through the same meter as the wide one, never added up afterwards:
+  // the meter's health lives on keys a copy leaves behind (Codex, 26 Sep 2026).
+  const nearGot = nearToo
+    ? await categoryPage({ ringKey: `${ringKey}|near`, box: nearBox, cells: null, category, page: 1, meter, householdId, cellAt: reach.cellAt })
+    : null;
+  const got = nearGot
+    ? {
+      ...wideGot,
+      venues: mergeWide(nearGot.venues, wideGot.venues),
+      requests: (wideGot.requests ?? 0) + (nearGot.requests ?? 0),
+      cached: Boolean(wideGot.cached && nearGot.cached),
+      returned: (wideGot.returned ?? wideGot.venues.length) + (nearGot.returned ?? nearGot.venues.length),
+      scored: (wideGot.scored ?? 0) + (nearGot.scored ?? 0),
+      problem: wideGot.problem ?? nearGot.problem ?? null,
+    }
+    : wideGot;
   /**
    * The exact pass, which the browsing screens have never had.
    *
@@ -421,13 +452,16 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
       if (b.epicScore != null) return 1;
       return a.theirRank - b.theirRank;
     });
+  // Sorted as one list, the score would put the famous far places first again
+  // and the cut would take the near ones back out; see `alternate`.
+  const shown = nearGot ? alternate(items, (it) => kmBetween(start, it) <= NEAR_KM) : items;
   return {
-    items, nextPageToken: got.nextPageToken, requests: got.requests, cached: got.cached,
+    items: shown, nextPageToken: got.nextPageToken, requests: got.requests, cached: got.cached,
     problem: got.problem ?? null,
     // What the search returned, what survived the ring, and what survived the
     // shelves — three numbers, because a board that shows two of twenty should
     // be able to say which fence took the other eighteen.
-    returned: got.returned ?? got.venues.length, inRing: got.venues.length, onShelf: items.length,
+    returned: got.returned ?? got.venues.length, inRing: got.venues.length, onShelf: shown.length,
     // How many the matrix offered that the exact pass then put back: the price
     // of a finder that errs wide, and the number to watch if it ever looks
     // like the band is doing nothing.

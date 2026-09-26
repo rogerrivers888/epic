@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { estimateTravelMinutes, reachRadiusKm, searchRadiusKm } from '../src/domain/travel.js';
-import { searchPlan, mergeWide, NEAR_KM } from '../src/domain/wideSearch.js';
+import { searchPlan, mergeWide, alternate, NEAR_KM } from '../src/domain/wideSearch.js';
 import * as wideSearch from '../src/domain/wideSearch.js';
 import { bump, noteFault, healthOf } from '../src/sources/meter.js';
 
@@ -83,4 +83,32 @@ test('both searches share one meter, so its health survives', () => {
   assert.equal(health.ok, false);
   // And the thing that broke it: a meter rebuilt from its numbers has no health.
   assert.equal(healthOf({ ...meter }).ok, null);
+});
+
+test("Inspire's categories: everything but food is a thing to do", () => {
+  for (const c of ['fun', 'culture', 'outdoors', 'sport', 'activity', 'adrenaline', 'relaxing']) {
+    assert.equal(searchPlan({ searchKm: 50, categories: [c] }).wideKm, 50, `${c} did not get the near search beside it`);
+  }
+  assert.equal(searchPlan({ searchKm: 50, categories: ['food'] }).wideKm, null, 'food asks once');
+});
+
+test('a display search result is matched on its own Google id', () => {
+  // Straight from a display search there is no `sourceIds`, only source and id.
+  const near = [{ name: 'Marwell Zoo', lat: 50.99, lng: -1.28, source: 'google', sourcePlaceId: 'gM' }];
+  const wide = [
+    { name: 'Marwell Wildlife', lat: 50.99, lng: -1.28, source: 'google', sourcePlaceId: 'gM' }, // same id, different name
+    { name: 'Paultons Park', lat: 50.94, lng: -1.55, source: 'google', sourcePlaceId: 'gP' },
+  ];
+  assert.deepEqual(mergeWide(near, wide).map((v) => v.sourcePlaceId), ['gM', 'gP']);
+});
+
+test('the shown list alternates near and far, each in its own order', () => {
+  const at = (id, near) => ({ id, near });
+  const items = [at('f1', false), at('f2', false), at('f3', false), at('n1', true), at('f4', false), at('n2', true)];
+  const out = alternate(items, (v) => v.near).map((v) => v.id);
+  assert.deepEqual(out, ['n1', 'f1', 'n2', 'f2', 'f3', 'f4'], 'near first, then far, and the longer side fills the rest');
+  // Cut to four, the near ones are no longer crowded out by a score sort.
+  assert.equal(out.slice(0, 4).filter((id) => id.startsWith('n')).length, 2);
+  assert.deepEqual(alternate([], () => true), []);
+  assert.deepEqual(alternate(items, () => false).map((v) => v.id), ['f1', 'f2', 'f3', 'n1', 'f4', 'n2'], 'one side only keeps its order');
 });

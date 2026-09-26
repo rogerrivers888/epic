@@ -31,8 +31,12 @@ import { nameKey, SAME_PLACE_KM } from './lookup.js';
  */
 export const NEAR_KM = 22;
 
-/** The categories that mean "things to do" to the display search. */
-const THINGS = new Set(['attraction', 'event', 'things']);
+/**
+ * The categories that mean food. Everything else — `attraction` on the
+ * sources' side, `culture`, `fun`, `outdoors` and the rest on Inspire's — is a
+ * thing to do, and a thing to do is what gets the second search.
+ */
+const FOOD = new Set(['food', 'restaurant', 'cafe', 'pub', 'bar', 'takeaway']);
 
 /**
  * Which searches to run.
@@ -51,7 +55,7 @@ export function searchPlan({ searchKm, categories = [], query = '', todayKm = 0 
   // it shipped, 26 Sep 2026).
   const nearKm = Math.min(searchKm, Math.max(NEAR_KM, todayKm));
   const cats = Array.isArray(categories) ? categories : [];
-  const wantsThings = cats.length === 0 || cats.some((c) => THINGS.has(c));
+  const wantsThings = cats.length === 0 || cats.some((c) => !FOOD.has(c));
   const wide = searchKm > nearKm && wantsThings && !String(query || '').trim();
   return { nearKm, wideKm: wide ? searchKm : null };
 }
@@ -64,11 +68,14 @@ export function searchPlan({ searchKm, categories = [], query = '', todayKm = 0 
  * the Lookup screen folds by. The near list keeps its order and comes first:
  * it is the list the nearer places were being pushed out of.
  */
+/** Google's id for a place, resolved (`sourceIds`) or straight from a display search. */
+const googleId = (v) => v?.sourceIds?.google ?? (v?.source === 'google' ? v?.sourcePlaceId ?? null : null);
+
 export function mergeWide(near = [], wide = []) {
-  const ids = new Set(near.map((v) => v?.sourceIds?.google).filter(Boolean));
+  const ids = new Set(near.map(googleId).filter(Boolean));
   const out = [...near];
   for (const v of wide) {
-    const id = v?.sourceIds?.google;
+    const id = googleId(v);
     if (id && ids.has(id)) continue;
     const key = nameKey(v?.name);
     const same = key && v?.lat != null && out.some((n) => n?.lat != null
@@ -89,3 +96,30 @@ export function mergeWide(near = [], wide = []) {
  * (Codex, 26 Sep 2026). There is deliberately no helper here for combining
  * them.
  */
+
+/**
+ * The shown list, near and far in turn.
+ *
+ * Two searches put the nearer places back in the pool, but the page is then
+ * ranked by Epic score and cut, and for a place we own nothing about that score
+ * is mostly Google's own rating and review count — popularity again, by
+ * another road. Sorted as one list, the famous places an hour away would crowd
+ * the near ones out a second time. So the page alternates: the best near place,
+ * then the best further one, each side keeping its own order, and whichever
+ * side runs out first leaves the rest to the other. Half of what a household
+ * sees is what is near; the other half is what the hour genuinely reaches.
+ *
+ * `isNear` decides the side from each place's own point, not from which search
+ * happened to return it, so a nearby place the wide search found is still near.
+ */
+export function alternate(items = [], isNear) {
+  const near = items.filter((v) => isNear(v));
+  const far = items.filter((v) => !isNear(v));
+  const out = [];
+  for (let i = 0; i < Math.max(near.length, far.length); i += 1) {
+    if (i < near.length) out.push(near[i]);
+    if (i < far.length) out.push(far[i]);
+  }
+  return out;
+}
+
