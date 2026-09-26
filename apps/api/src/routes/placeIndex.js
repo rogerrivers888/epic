@@ -29,6 +29,7 @@ import { ownSite } from '../sources/logo.js';
 import * as reach from '../repositories/reach.js';
 import { OURS_TO_KEEP, slicePlan } from '../sources/census.js';
 import * as censusRun from '../sources/censusRun.js';
+import * as censusEdge from '../sources/censusEdge.js';
 import * as postcodeRefresh from '../sources/postcodeRefresh.js';
 import { LIVE_ROW, FOLDED_MONTH } from '../repositories/searches.js';
 import { sectorOf, labelOf, CAP_MINUTES, EDGE_MINUTES } from '../domain/reach.js';
@@ -3487,6 +3488,54 @@ router.get('/census/quote', requires('view_library'), async (req, res, next) => 
       // Nought, and the run stops itself on the first penny if it ever is not.
       costGbp: 0,
     });
+  } catch (err) { next(err); }
+});
+
+/**
+ * A finer census of one ring's edge (sources/censusEdge.js). Owner, 25 Sep
+ * 2026: "re-ask only the straddling boxes at one kilometre." Quote first —
+ * the squares under the across boxes, the requests, the hours — then start
+ * with the number the quote reported. IDs Only, so free; the number is a
+ * rate and a day.
+ */
+const edgeArgs = (q) => ({
+  lat: q.lat != null ? Number(q.lat) : null,
+  lng: q.lng != null ? Number(q.lng) : null,
+  cell: q.cell ? String(q.cell) : null,
+  minutes: Math.min(90, Math.max(5, Math.trunc(Number(q.minutes)) || 30)),
+  mode: travelMode(q.mode ?? 'driving'),
+});
+
+router.get('/census/edge/quote', requires('view_library'), async (req, res, next) => {
+  try {
+    const args = edgeArgs(req.query);
+    if (args.lat == null && !args.cell) throw bad('a ring needs a point (lat, lng) or a cell');
+    const plan = await censusEdge.planEdge(args);
+    if (!plan) throw bad('no ring there');
+    const quote = await censusEdge.quoteEdge(plan);
+    res.json({ ring: plan.ring, boxes: plan.boxes, across: plan.across, outcodes: plan.outcodes, ...quote });
+  } catch (err) { next(err); }
+});
+
+router.post('/census/edge/run', requires('manage_library'), async (req, res, next) => {
+  try {
+    const args = edgeArgs(req.body ?? {});
+    if (args.lat == null && !args.cell) throw bad('a ring needs a point (lat, lng) or a cell');
+    const plan = await censusEdge.planEdge(args);
+    if (!plan) throw bad('no ring there');
+    const run = await censusEdge.startEdgeRun({
+      plan,
+      maxRequests: req.body?.maxRequests,
+      ratePerSec: Math.min(10, Math.max(1, Number(req.body?.ratePerSec) || 5)),
+      label: req.body?.label ? String(req.body.label) : null,
+      startedBy: actor(req)?.actorLabel ?? null,
+      startedSessionId: req.session?.id ?? null,
+    });
+    await writeAudit({
+      ...actor(req), action: 'census.edge.run', subjectType: 'region', subjectId: run.id,
+      subjectLabel: run.label, after: { squares: plan.squares.length, outcodes: plan.outcodes.length, maxRequests: run.max_requests },
+    });
+    res.json({ started: true, id: run.id, label: run.label, squares: plan.squares.length, outcodes: plan.outcodes.length });
   } catch (err) { next(err); }
 });
 

@@ -321,6 +321,11 @@ export async function censusInRing({ cells = [], outcodes = [] } = {}) {
     placed: { own, slice: bySlice },
     unplaceable,
     boxes,
+    // The boxes themselves that fell across the edge, as rectangles: what a
+    // finer census of the edge re-asks (sources/censusEdge.js). One per
+    // distinct slice, whatever it held.
+    acrossBoxes: [...verdicts].filter(([, v]) => v === 'across').map(([slice]) => boxFrom(slice)).filter(Boolean),
+    placedBy,
   };
 }
 

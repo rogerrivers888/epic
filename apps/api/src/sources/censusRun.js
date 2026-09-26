@@ -281,6 +281,10 @@ export async function startRun({
   // whether it is built waiting for a person to start it (owner, 26 Sep
   // 2026: "Build it paused; I press start").
   nightShare = null, windowFrom = null, windowTo = null, paused = false,
+  // Tiles already planned by the caller — a ring's edge squares
+  // (sources/censusEdge.js) — in place of a region planned from districts.
+  // Each carries gridKey, min/max lat/lng and the outcodes it reports to.
+  tiles: given = null,
 } = {}) {
   // Whole hours on the clock, and a share that is a number of requests: a
   // fraction or a 24 would reach the database or Date.UTC and mean something
@@ -293,7 +297,7 @@ export async function startRun({
   windowFrom = hour(windowFrom, 'windowFrom'); windowTo = hour(windowTo, 'windowTo');
   if ((windowFrom == null) !== (windowTo == null)) throw Object.assign(new Error('a window needs both windowFrom and windowTo'), { status: 400 });
   if (nightShare != null && (!Number.isInteger(nightShare) || nightShare <= 0)) throw Object.assign(new Error('nightShare must be a whole number of requests'), { status: 400 });
-  if (!areas?.length && !outcodes?.length) {
+  if (!areas?.length && !outcodes?.length && !given?.length) {
     throw Object.assign(new Error('a run needs postcode areas or districts'), { status: 400 });
   }
   // A run waiting for the quota day to turn over is still a run, and still owns
@@ -310,7 +314,7 @@ export async function startRun({
         : `“${going[0].label}” is already running; stop it before starting another`),
       { status: 409 });
   }
-  const tiles = await planTiles({ areas, outcodes, dLat, dLng, padKm });
+  const tiles = given?.length ? given : await planTiles({ areas, outcodes, dLat, dLng, padKm });
   if (!tiles.length) throw Object.assign(new Error('no postcode sectors in those areas'), { status: 400 });
   // Whose decision the run is: the caller's word, else the request that is
   // starting it — a census begun from Settings when a home moves is that
@@ -1001,7 +1005,7 @@ async function spentSince(startedAt) {
 async function finish(id, state, problem) {
   const { rows: [run] } = await query(
     `update census_runs set state = $2, problem = $3, finished_at = now(), last_seen_at = now(), stop_requested = false
-      where id = $1 returning finished_at`, [id, state, problem]);
+      where id = $1 returning finished_at, started_by, areas`, [id, state, problem]);
   await refreshProgress(id);
   // A run that got to the end is rolled onto the board and into every ring
   // counted before it ended (Codex, 24 Sep 2026: a home that asked for its
@@ -1013,7 +1017,29 @@ async function finish(id, state, problem) {
   // floor with a fresh date, and nothing would look at it again for thirty
   // days — left alone, the cycle is its retry. Recounted behind the finish,
   // never awaited: a ring is a few reads of our own tables.
-  if (state === 'done' && run?.finished_at) await rollUpAndRecount(id);
+  if (state === 'done' && run?.finished_at) await rollUpAndRecount(id, rollUpScope(run));
+}
+
+/** How a ring-edge run says what it is (sources/censusEdge.js). */
+export const RING_EDGE = 'ring-edge:';
+
+/**
+ * What a finished run rolls up. An area run rolls its own tiles: they cover
+ * their districts whole, and another run's tiles in an overlapping district
+ * must not be counted into this one's result (Codex, 21 Sep 2026). A ring-edge
+ * run rolls up no district at all: its tiles are slivers along a ring's edge,
+ * and for a district whose ground was censused by outcode rather than by tile
+ * those slivers would be the only tiles it has, so any roll-up — its own
+ * tiles or every tile on that ground — would publish the sliver as the
+ * district's count (Codex, 26 Sep 2026). The ring counts it exists for read
+ * the narrowed boxes straight from the index and need no roll-up; the board's
+ * district counts stay what a whole-district run made them, and the board's
+ * own button remains for a person who wants them rolled again.
+ */
+export function rollUpScope(run) {
+  return String(run?.started_by ?? '').startsWith(RING_EDGE)
+    ? { skip: true, outcodes: null, runId: null }
+    : { skip: false, outcodes: null, runId: run?.id ?? null };
 }
 
 /** What a done run's `problem` says while its roll-up is still owed. */
@@ -1032,15 +1058,17 @@ const ROLL_UP_PENDING = 'roll-up pending';
  * than the run's finish but reading a half-rolled board — is inside the walk
  * rather than left for thirty days.
  */
-async function rollUpAndRecount(id) {
-  try { await rollUpOutcodes({ runId: id }); }
-  catch (err) {
-    console.warn(`epic-api: census — could not roll up run ${id}; will try again: ${err.message}`);
-    await query(`update census_runs set problem = $2 where id = $1`,
-      [id, `${ROLL_UP_PENDING}: ${String(err.message).slice(0, 200)}`]).catch(() => {});
-    return false;
+async function rollUpAndRecount(id, scope = { skip: false, outcodes: null, runId: id }) {
+  if (!scope.skip) {
+    try { await rollUpOutcodes(scope.outcodes?.length ? { outcodes: scope.outcodes } : { runId: scope.runId ?? id }); }
+    catch (err) {
+      console.warn(`epic-api: census — could not roll up run ${id}; will try again: ${err.message}`);
+      await query(`update census_runs set problem = $2 where id = $1`,
+        [id, `${ROLL_UP_PENDING}: ${String(err.message).slice(0, 200)}`]).catch(() => {});
+      return false;
+    }
+    await query(`update census_runs set problem = null where id = $1 and problem like $2`, [id, `${ROLL_UP_PENDING}%`]).catch(() => {});
   }
-  await query(`update census_runs set problem = null where id = $1 and problem like $2`, [id, `${ROLL_UP_PENDING}%`]).catch(() => {});
   const { rows: [{ at }] } = await query('select now() as at');
   void refreshRingsBefore({ before: at }).catch(() => {});
   return true;
@@ -1049,9 +1077,9 @@ async function rollUpAndRecount(id) {
 /** Every done run still owing its roll-up, tried again. Bounded by runs, which are few. */
 export async function retryRollUps() {
   const { rows } = await query(
-    `select id from census_runs where state = 'done' and problem like $1 order by finished_at limit 10`, [`${ROLL_UP_PENDING}%`]);
+    `select id, started_by, areas from census_runs where state = 'done' and problem like $1 order by finished_at limit 10`, [`${ROLL_UP_PENDING}%`]);
   const out = [];
-  for (const r of rows) out.push({ id: r.id, rolled: await rollUpAndRecount(r.id) });
+  for (const r of rows) out.push({ id: r.id, rolled: await rollUpAndRecount(r.id, rollUpScope(r)) });
   return out;
 }
 
