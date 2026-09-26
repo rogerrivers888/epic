@@ -223,4 +223,25 @@ test('the facts behind a disagreement can be read, field by field and source by 
   assert.equal(again.find((p) => p.venue_ref === 'google:ChIJ_ref_006'), undefined, 'order alone is no difference');
   const held = await ref.held(row.id);
   assert.equal(held.find((p) => p.venue_ref === 'google:ChIJ_ref_006').disagreements, 0);
+
+  // What twenty of the first set's disagreements turned out to be, and must
+  // not count (owner, 26 Sep 2026): the same website written four ways; the
+  // venue's postal postcode beside the one Nominatim derives for its point;
+  // two summaries, which differ by design; a name with and without "The".
+  const seven = 'google:ChIJ_ref_007';
+  const put = (field, source, value) => query(`insert into place_facts (venue_ref, field, source, value, licence, retention, confidence, expires_at) values ($1, $2, $3, $4, 'x', 'indefinite', 1, null) on conflict do nothing`, [seven, field, source, JSON.stringify(value)]);
+  await put('website', 'osm', 'https://www.birdworld.co.uk/');
+  await put('website', 'site', 'https://birdworld.co.uk');
+  await put('website', 'wikidata', 'http://www.birdworld.co.uk/?utm_source=x');
+  await put('postcode', 'site', 'SO51 6AL');
+  await put('postcode', 'nominatim', 'SO51 6GQ');
+  await put('summary', 'site', 'Visit Birdworld, the UK\u2019s only dedicated bird park.');
+  await put('summary', 'wikipedia', 'Birdworld is the United Kingdom\u2019s largest bird park.');
+  await put('phone', 'osm', '+44 20 7416 5000');
+  await put('phone', 'site', '020 7416 5000');
+  const heldSeven = (await ref.held(row.id)).find((p) => p.venue_ref === seven);
+  assert.equal(heldSeven.disagreements, 0, 'none of those is two answers to one question');
+  // And a real one still is.
+  await put('phone', 'wikidata', '020 7091 3067');
+  assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === seven).disagreements, 1, 'a different number is a disagreement');
 });

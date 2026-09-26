@@ -27,9 +27,35 @@ import * as sweep from './researchSweep.js';
 
 export const PER_CATEGORY = 20;
 
-/** A fact's value as text, with a list sorted so that order alone is not a difference. */
-const SAME_VALUE = `case when jsonb_typeof(f.value) = 'array'
-    then (select coalesce(jsonb_agg(e order by e::text), '[]'::jsonb) from jsonb_array_elements(f.value) e)::text
+/**
+ * Which facts can disagree at all, and what "the same value" means.
+ *
+ * Twenty of the first set's seventy-three "disagreements" read (owner, 26 Sep
+ * 2026): fourteen were Nominatim's formatted street address beside the
+ * venue's own postal address — not the same question, since one answers
+ * "what is at this point" and the other "where do I say I am"; seven were
+ * the two summaries, which differ by design; seven the same website written
+ * four ways; three phone formats; and two genuinely wrong pairings. So the
+ * fields that are several answers by nature are not counted, a postcode is
+ * only compared between sources that state one rather than derive it, and
+ * a website, a phone number and a name are compared as what they name.
+ */
+const NEVER_A_DISAGREEMENT = ['summary', 'summary_source', 'address', 'image_url', 'attribution'];
+const DERIVED_SOURCES = ['nominatim'];
+const COMPARABLE = `f.field <> all(array[${NEVER_A_DISAGREEMENT.map((x) => `'${x}'`).join(', ')}]) and not (f.field = 'postcode' and f.source = any(array[${DERIVED_SOURCES.map((x) => `'${x}'`).join(', ')}]))`;
+
+/** A fact's value as text: a list sorted; a site, a number or a name reduced to what it names. */
+const SAME_VALUE = `case
+    when jsonb_typeof(f.value) = 'array'
+      then (select coalesce(jsonb_agg(e order by e::text), '[]'::jsonb) from jsonb_array_elements(f.value) e)::text
+    when f.field = 'website'
+      then regexp_replace(regexp_replace(regexp_replace(lower(f.value #>> '{}'), '^https?://(www\\.)?', ''), '[?#].*$', ''), '/+$', '')
+    when f.field = 'phone'
+      then regexp_replace(regexp_replace(f.value #>> '{}', '[^0-9]', '', 'g'), '^(44|0)', '')
+    when f.field = 'name'
+      then regexp_replace(regexp_replace(lower(f.value #>> '{}'), '^the ', ''), '[^a-z0-9]+', ' ', 'g')
+    when f.field = 'postcode'
+      then upper(regexp_replace(f.value #>> '{}', '\\s+', '', 'g'))
     else f.value::text end`;
 
 /**
@@ -273,7 +299,7 @@ export async function held(id) {
             (select count(*) from place_facts f where f.venue_ref = p.venue_ref and f.expires_at is null)::int as facts,
             (select count(distinct source) from place_facts f where f.venue_ref = p.venue_ref and f.expires_at is null)::int as sources,
             (select count(*) from (
-               select field from place_facts f where f.venue_ref = p.venue_ref and f.expires_at is null
+               select field from place_facts f where f.venue_ref = p.venue_ref and f.expires_at is null and ${COMPARABLE}
                group by field having count(distinct source) > 1 and count(distinct ${SAME_VALUE}) > 1) x)::int as disagreements
        from research_sweep_places p
        left join place_records r on r.venue_ref = p.venue_ref
@@ -302,7 +328,7 @@ export async function disagreements(id, { limit = 20 } = {}) {
      ), differing as (
        select f.venue_ref, f.field, jsonb_object_agg(f.source, f.value) as values
          from place_facts f join mine m on m.venue_ref = f.venue_ref
-        where f.expires_at is null
+        where f.expires_at is null and ${COMPARABLE}
         group by f.venue_ref, f.field
        -- A list is the same list in any order: two sources agreeing on
        -- "italian, pizza" and "pizza, italian" are not disagreeing
