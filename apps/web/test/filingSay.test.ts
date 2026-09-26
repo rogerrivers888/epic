@@ -2,7 +2,7 @@
  * The filing desk's judgements — src/admin/filing/say.ts.
  *
  * These are the places where a wrong answer is *silent*. A screenshot cannot
- * tell you that a word reads "kept as a label" when somebody answered parking,
+ * tell you that a word reads "kept as a fact" when somebody answered parking,
  * or that a row nobody has hearted reads "0%" as though households had looked
  * and declined. So each one is pinned here, including the cases that only
  * happen on an empty or a very young database — which is exactly the state the
@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 
 import {
   FADES_AFTER_DAYS, appliedSays, heartAge, pointsAt, rung, setMarks, shareSays, sortLabel,
-  startsDescending, thinSomewhere, tooManyQuestions, waiting,
+  startsDescending, thinSomewhere, tooManyChecks, waiting,
 } from '../src/admin/filing/say.ts';
 
 // --- where a word points ---------------------------------------------------
@@ -32,14 +32,14 @@ test('a word pointing at a drawer says the drawer, whatever else it carries', ()
 
 test('the two answers that are not a drawer keep their own words', () => {
   // These are real decisions somebody made — parking, and the chemist beside
-  // the museum — and both vanish into "kept as a label" if only the screen's
+  // the museum — and both vanish into "kept as a fact" if only the screen's
   // four states survive.
   assert.equal(pointsAt({ pointsAt: null, decision: 'secondary', answer: 'travel' }),
-    'Kept as a label · how you get there');
+    'Kept as a fact · how you get there');
   assert.equal(pointsAt({ pointsAt: null, decision: 'secondary', answer: 'nearby' }),
-    'Kept as a label · what is nearby');
-  assert.equal(pointsAt({ pointsAt: null, decision: 'secondary', answer: 'generic' }), 'Kept as a label');
-  assert.equal(pointsAt({ pointsAt: null, decision: 'secondary', answer: null }), 'Kept as a label');
+    'Kept as a fact · what is nearby');
+  assert.equal(pointsAt({ pointsAt: null, decision: 'secondary', answer: 'generic' }), 'Kept as a fact');
+  assert.equal(pointsAt({ pointsAt: null, decision: 'secondary', answer: null }), 'Kept as a fact');
 });
 
 test('excluded and unanswered are different things', () => {
@@ -110,8 +110,8 @@ test('a set can be settled and still spread too thin', () => {
 });
 
 test('eight questions is where a set is asking too much of every place', () => {
-  assert.equal(tooManyQuestions(7), false);
-  assert.equal(tooManyQuestions(8), true);
+  assert.equal(tooManyChecks(7), false);
+  assert.equal(tooManyChecks(8), true);
 });
 
 // --- rows ------------------------------------------------------------------

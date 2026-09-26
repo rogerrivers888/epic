@@ -269,13 +269,47 @@ export type AdminScreen =
   | 'places' | 'demand' | 'runs' | 'queue'
   /**
    * The filing desk (the Places redesign, 20 Sep 2026): six tabs over one
-   * taxonomy — Overview, Categories, Labels, Mapping, Rules, Rows. One address
-   * with the tab and everything inside it as query state, so
+   * taxonomy — Overview, Categories, Facts, Mapping, Defaults, Ideas. One
+   * address with the tab and everything inside it as query state, so
    * `/admin/filing?tab=categories&sub=golf` opens on that drawer for whoever
-   * it is sent to.
+   * it is sent to. The tab's spellings are `FILING_TABS` below.
    */
   | 'filing'
   | 'lookup' | 'coverage' | 'library' | 'shelves' | 'scout' | 'sources' | 'categories' | 'voice' | 'hosting' | 'skills' | 'mail' | 'roles' | 'plans' | 'audit' | 'how';
+/**
+ * The filing desk's tabs, as the address spells them.
+ *
+ * The rename (owner's brief, 26 Sep 2026): Labels became Facts, Rules became
+ * Defaults and Rows became Ideas, because each old word was doing several
+ * jobs. Runs is a place you can be without being a tab. The old spellings
+ * still open the right screen — a link somebody was sent last week is still a
+ * link — but nothing writes them any more.
+ */
+export const FILING_TABS = ['overview', 'categories', 'facts', 'mapping', 'defaults', 'ideas', 'runs'] as const;
+export type FilingTab = typeof FILING_TABS[number];
+const FILING_TAB_WAS: Record<string, FilingTab> = { labels: 'facts', rules: 'defaults', rows: 'ideas' };
+/** `?tab=` read: the new spelling, an old one mapped across, or null. */
+export const filingTabOf = (raw: string | null | undefined): FilingTab | null => {
+  if (raw == null) return null;
+  if ((FILING_TABS as readonly string[]).includes(raw)) return raw as FilingTab;
+  return FILING_TAB_WAS[raw] ?? null;
+};
+
+/**
+ * Where a link into How it works lands.
+ *
+ * Every screen on the filing desk carries a small info icon beside its
+ * heading that opens the Business mechanics page at the section explaining
+ * that screen (owner's brief, 26 Sep 2026: "deep-link to the relevant section
+ * rather than the top of the page"). `?at=` is the section; the page scrolls
+ * to it. `mechanics` is the glossary at the top; `sheets` is the fact sheets,
+ * kept apart from `facts` because a sheet is the thing people misread most.
+ */
+export const HOW_ANCHORS = ['mechanics', 'categories', 'facts', 'sheets', 'mapping', 'defaults', 'ideas'] as const;
+export type HowAnchor = typeof HOW_ANCHORS[number];
+export const howAnchorOf = (raw: string | null | undefined): HowAnchor | null =>
+  raw != null && (HOW_ANCHORS as readonly string[]).includes(raw) ? (raw as HowAnchor) : null;
+
 export const ADMIN_SCREENS: AdminScreen[] = [
   'overview', 'accounts', 'households', 'activity', 'reporting',
   'money', 'subscriptions', 'customers', 'suppliers', 'behaviour', 'engagement',
@@ -767,6 +801,11 @@ export const paths = {
   settings: (section?: SettingsSection) => (section && section !== 'preferences' ? buildHref(['settings', section]) : '/settings'),
   prototypes: (section?: PrototypeSection | null) => buildHref(['prototypes', section]),
   admin: (screen: AdminScreen) => buildHref(['admin', screen]),
+  /** How it works, at one section — or the top when none is named. */
+  how: (at?: HowAnchor | null) => buildHref(['admin', 'how'], at ? { at } : undefined),
+  /** The filing desk on one tab. Overview is the default and is not written down. */
+  filing: (tab?: FilingTab | null, query?: Record<string, string | null | undefined>) =>
+    buildHref(['admin', 'filing'], { ...(query ?? {}), tab: tab && tab !== 'overview' ? tab : null }),
   join: (token: string) => buildHref(['join', token]),
   /** Somebody else's door into one trip. */
   shared: (token: string) => buildHref(['shared', token]),

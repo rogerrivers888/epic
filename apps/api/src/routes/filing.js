@@ -126,9 +126,9 @@ filingRoutes.get('/overview', requires('view_library'), async (_req, res, next) 
 
     const open = audit?.groups?.reduce((n, g) => n + (g.open ?? 0), 0) ?? 0;
     const queues = [
-      { kicker: 'LABELS', count: cands.rows[0].n, what: 'candidates to judge',
-        where: 'a feature, raised often enough to ask', go: 'labels' },
-      { kicker: 'LABELS', count: pen.rows[0].n, what: 'words nobody can call',
+      { kicker: 'FACTS', count: cands.rows[0].n, what: 'candidates to judge',
+        where: 'a feature, raised often enough to check', go: 'facts' },
+      { kicker: 'FACTS', count: pen.rows[0].n, what: 'words nobody can call',
         where: 'the holding pen · reconsidered at the next harvest', go: 'pen' },
       { kicker: 'MAPPING', count: open, what: 'audit proposals waiting',
         where: 'grouped · accept a whole group at once', go: 'audit' },
@@ -149,7 +149,7 @@ filingRoutes.get('/overview', requires('view_library'), async (_req, res, next) 
         name: r.kind === 'google' ? 'Vocabulary harvest' : r.kind === 'free' ? 'Free sweep' : r.kind,
         at: r.finished_at ?? r.started_at,
         state: r.status,
-        scope: r.subcategories?.length ? `${r.subcategories.length} subcategories` : 'every question set',
+        scope: r.subcategories?.length ? `${r.subcategories.length} subcategories` : 'every fact sheet',
         places: r.places,
         words: r.candidates,
         cost: Number(r.cost_usd ?? 0),
@@ -552,7 +552,7 @@ filingRoutes.put('/subcategories/:key/defaults', requires('manage_library'), asy
     if (!attribute) throw bad('Which answer?');
     const { byKey } = await placeAttributes.attributes();
     const attr = byKey.get(attribute);
-    if (!attr) throw bad(`${attribute} is not one of our labels.`);
+    if (!attr) throw bad(`${attribute} is not one of our facts.`);
 
     /**
      * What the drawer answers *now*, stored or merely proposed.
@@ -841,7 +841,7 @@ export const candidateRow = (c) => ({
   subcategory: c.subcategory,
 });
 
-/** GET /labels — every question set, and the labels asked of everything. */
+/** GET /labels — every fact sheet, and the standard checks made on everything. The path keeps its old name; see the rename brief, 26 Sep 2026. */
 filingRoutes.get('/labels', requires('view_library'), async (_req, res, next) => {
   try {
     const [sets, all, d, limits] = await Promise.all([
@@ -894,7 +894,7 @@ filingRoutes.get('/labels/sets/:key', requires('view_library'), async (req, res,
       questionSets.sets(), questionSets.questionsFor(key), filing.drawers(), thresholdValues(),
     ]);
     const set = sets.find((s) => s.key === key);
-    if (!set) throw bad(`${key} is not one of our question sets.`);
+    if (!set) throw bad(`${key} is not one of our fact sheets.`);
     const subs = (set.subcategories ?? []).map((k) => d.subcategories.find((x) => x.key === k)).filter(Boolean);
     const subKeys = subs.map((x) => x.key);
     const places = subs.reduce((n, x) => n + (d.refsBySub.get(x.key)?.length ?? 0), 0);
@@ -936,7 +936,7 @@ filingRoutes.get('/labels/sets/:key', requires('view_library'), async (req, res,
       // Visible, and deliberately not promotable.
       thin: rows.filter((c) => c.state !== 'held' && c.seen < floor),
       readNote: `${rows.reduce((n, c) => Math.max(n, c.of), 0)} places were read to find these words`
-        + ` · ${places} are asked them`,
+        + ` · ${places} are checked against them`,
     });
   } catch (err) { next(err); }
 });
@@ -1055,7 +1055,7 @@ filingRoutes.put('/mapping/:word', requires('manage_library'), async (req, res, 
       if (rule) await shelfRules.forgetRule(rule.id);
       await labelRepo.pointAt('google', word, null);
       await labelRepo.save({ namespace: 'google', key: word, decision });
-      said = decision === 'aside' ? `${word} → Not in Epic` : `${word} → kept as a label`;
+      said = decision === 'aside' ? `${word} → Not in Epic` : `${word} → kept as a fact`;
     }
 
     placeAttributes.forget();
@@ -1076,10 +1076,10 @@ filingRoutes.put('/mapping/:word/carries', requires('manage_library'), async (re
   try {
     const word = String(req.params.word);
     const attribute = String(req.body?.label ?? '');
-    if (!attribute) throw bad('Which label?');
+    if (!attribute) throw bad('Which fact?');
     const { byKey } = await placeAttributes.attributes();
     const attr = byKey.get(attribute);
-    if (!attr) throw bad(`${attribute} is not one of our labels.`);
+    if (!attr) throw bad(`${attribute} is not one of our facts.`);
     const on = req.body?.on !== false;
 
     // What "on" means is the label's own shape. A yes/no carried by a word is
@@ -1203,7 +1203,7 @@ filingRoutes.put('/rows/:id', requires('manage_library'), async (req, res, next)
     // precisely the prototype's own failure — an editable field that changes
     // nothing — reappearing on the other side of the wire (Codex, 21 Sep 2026).
     if (req.body?.rule !== undefined) {
-      throw bad('A row\u2019s rule is set as structure, not as its shorthand. Send `predicate`.');
+      throw bad('An idea\u2019s rule is set as structure, not as its shorthand. Send `predicate`.');
     }
     const ctx = await browseRows.pool();
     const row = await browseRows.save(String(req.params.id), {
@@ -1447,7 +1447,7 @@ filingRoutes.get('/runs', requires('view_library'), async (_req, res, next) => {
     const weeks = await weeksOf(counted.rows);
     res.json({
       headline: headlineOf(weeks),
-      scope: `${sets.length} question sets · ${counted.rows.length} words raised in all`,
+      scope: `${sets.length} fact sheets · ${counted.rows.length} words raised in all`,
       triggers: TRIGGERS,
       // A run in flight is the one thing this screen cannot be missing: runs
       // take hours, and a screen with no live state looks like a screen where
@@ -1612,9 +1612,9 @@ filingRoutes.get('/decisions/:word/trail', requires('view_library'), async (req,
     if (c.question_id) {
       const asked = await query(
         `select count(*)::int n from place_answers where question_id = $1`, [c.question_id]);
-      steps.push({ when: '—', what: `asked of ${asked.rows[0].n} places` });
+      steps.push({ when: '—', what: `checked on ${asked.rows[0].n} places` });
     } else if (c.status === 'promoted') {
-      steps.push({ when: '—', what: 'approved · not attached to a set, so nothing asks it' });
+      steps.push({ when: '—', what: 'approved · not attached to a sheet, so never checked anywhere' });
     }
 
     res.json({ trail: { word: c.raw_forms?.[0] ?? c.norm, steps } });
@@ -1669,7 +1669,7 @@ filingRoutes.put('/places/:ref', requires('manage_library'), async (req, res, ne
     if (!attribute) throw bad('Which answer?');
     const { byKey } = await placeAttributes.attributes();
     const attr = byKey.get(attribute);
-    if (!attr) throw bad(`${attribute} is not one of our labels.`);
+    if (!attr) throw bad(`${attribute} is not one of our facts.`);
     const value = req.body?.value ?? null;
     const saved = await placeAttributes.setValue(ref, attribute, value, {
       reason: req.body?.reason ? String(req.body.reason).slice(0, 300) : null,
@@ -1778,7 +1778,7 @@ filingRoutes.get('/places/:ref', requires('view_library'), async (req, res, next
         const a = byQ.get(String(q.id));
         if (!a) {
           return { id: Number(q.id), name: q.label, state: 'notasked',
-            said: 'Not asked yet', source: 'added after this place was last read' };
+            said: 'Not checked yet', source: 'added after this place was last read' };
         }
         if (a.state !== 'answered') {
           return { id: Number(q.id), name: q.label, state: 'nothing',
@@ -1986,9 +1986,9 @@ filingRoutes.get('/pending', requires('view_library'), async (_req, res, next) =
       sets: sets.map((s) => ({ key: s.key, name: setName.get(s.key) ?? s.key })),
       counts: { typed: human.length, orphans: orphans.length },
       why: human.length + orphans.length === 0
-        ? 'nothing is waiting: every label we have is asked somewhere, and nobody has typed a new word on a place yet'
+        ? 'nothing is waiting: every fact we have is checked somewhere, and nobody has typed a new word on a place yet'
         : human.length === 0
-          ? 'nobody has typed a word on a place yet — these are labels approved into the vocabulary that nothing asks'
+          ? 'nobody has typed a word on a place yet — these are facts approved into the vocabulary that are never checked anywhere'
           : null,
     });
   } catch (err) { next(err); }
@@ -2113,7 +2113,7 @@ filingRoutes.get('/runs/:id/stages/:stage', requires('view_library'), async (req
       listNote: stageOf({ stage, funnel: run.funnel, places: run.places, items: out.items }).exact
         ? null
         : 'the words this run raised for the first time; the count above includes ones it saw again',
-      subs: subs.length ? `${subs.length} subcategories · ${subs.slice(0, 6).join(', ')}${subs.length > 6 ? '…' : ''}` : 'every question set',
+      subs: subs.length ? `${subs.length} subcategories · ${subs.slice(0, 6).join(', ')}${subs.length > 6 ? '…' : ''}` : 'every fact sheet',
     });
   } catch (err) { next(err); }
 });
@@ -2195,7 +2195,7 @@ filingRoutes.post('/categories/:key/apply', requires('manage_library'), async (r
       const key = String(pick?.key ?? '');
       if (kind === 'label') {
         const attr = byKey.get(key);
-        if (!attr) throw bad(`${key} is not one of our labels.`);
+        if (!attr) throw bad(`${key} is not one of our facts.`);
         if (attr.kind !== 'yesno') {
           // A yes/no can be applied to many drawers at once and mean the same
           // thing on each. A range or a one-of cannot, and guessing a value
@@ -2220,7 +2220,7 @@ filingRoutes.post('/categories/:key/apply', requires('manage_library'), async (r
         }
         did.push(`${subs.length} also in ${cat?.label ?? cabinet}`);
       } else {
-        throw bad('A pick is a label or a subcategory.');
+        throw bad('A pick is a fact or a subcategory.');
       }
     }
     shelfTaxonomy.forget();

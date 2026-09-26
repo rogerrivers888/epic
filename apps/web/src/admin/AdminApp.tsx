@@ -151,7 +151,7 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
    * taxonomy. It sits beside Categories rather than replacing it, because the
    * screens it supersedes are live and retiring one is the owner's call.
    */
-  { key: 'filing', label: 'Filing desk', icon: 'filters', needs: 'view_library', sub: 'Overview, categories, labels, mapping, rules and the rows a household browses', group: 'Data' },
+  { key: 'filing', label: 'Filing desk', icon: 'filters', needs: 'view_library', sub: 'Overview, categories, facts, mapping, defaults and the ideas a household browses', group: 'Data' },
   { key: 'voice', label: 'Voice lab', icon: 'mic', needs: 'manage_settings', sub: 'The ways of hearing, compared on the same sentences', group: 'Data' },
   { key: 'hosting', label: 'Hosting', icon: 'host', needs: 'view_hosting', sub: 'First pitches to read within 48 hours, the trust ladder, and reports', group: 'Data' },
   { key: 'skills', label: 'Skills', icon: 'credential', needs: 'view_skills', sub: 'What hosts say they are expert in, the sixteen buckets it is browsed by, and the words Epic has not heard before', group: 'Data' },

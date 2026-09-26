@@ -20,10 +20,10 @@
  */
 
 // ---------------------------------------------------------------------------
-// Labels — question sets
+// Facts — fact sheets
 // ---------------------------------------------------------------------------
 
-/** One question set, as the Question sets table draws it. */
+/** One fact sheet, as the Fact sheets table draws it. */
 export type SetRow = {
   key: string;
   name: string;
@@ -34,7 +34,7 @@ export type SetRow = {
    * queue is not finished, and that used to look identical to finished".
    */
   state: 'settled' | 'settling' | null;
-  /** Four or more subcategories sharing fewer than six questions. */
+  /** Four or more subcategories sharing fewer than six checks. */
   tooFewForTooMany: boolean;
   /** The subcategories it covers, by their own labels. */
   usedBy: string[];
@@ -60,7 +60,7 @@ export type SetDetail = {
   places: number;
 };
 
-/** A question being asked of every place in a set. */
+/** A check made on every place a sheet covers. */
 export type SetQuestion = {
   id: number;
   name: string;
@@ -73,7 +73,7 @@ export type SetQuestion = {
   thin: boolean;
 };
 
-/** A label asked of everything, inherited by every set. */
+/** A standard check — a fact established for everything, inherited by every sheet. */
 export type GlobalLabel = { key: string; name: string; shape: string };
 
 export type CandidateState = 'confirmed' | 'notconfirmed' | 'validating' | 'seen' | 'held';
@@ -128,7 +128,7 @@ export type PendingWord = {
   repoint: string;
 };
 
-/** One of Epic's own labels, and where it is asked. */
+/** One of Epic's own facts, and where it is checked. */
 export type VocabRow = {
   key: string;
   name: string;
@@ -245,7 +245,7 @@ export type RuleRow = {
 /** A district the rows are previewed in. */
 export type District = { code: string; town: string; density: string };
 
-/** A browse row: a title, a copy line and a rule. Never a drawer. */
+/** An idea: a title, a copy line and a rule over facts. Never a drawer. */
 export type BrowseRow = {
   id: string;
   group: string;

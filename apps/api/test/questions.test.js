@@ -330,7 +330,7 @@ test('a global question is not a set\'s to switch off', async () => {
 test('a question cannot invent a word', async () => {
   await assert.rejects(
     () => sets.addQuestion({ attributeKey: 'not-one-of-ours', setKey: 'water' }),
-    /not one of our labels/,
+    /not one of our facts/,
   );
 });
 

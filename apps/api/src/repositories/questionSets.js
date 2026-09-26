@@ -179,7 +179,7 @@ export async function addQuestion({ attributeKey, setKey = null, scope = 'set', 
   const run = on(client);
   if (scope === 'set' && !setKey) throw bad('A question has to belong to a set, or be asked everywhere.');
   const { rows: known } = await run('select key from place_attributes where key = $1', [attributeKey]);
-  if (!known.length) throw bad(`${attributeKey} is not one of our labels. Name the label first, then ask about it.`);
+  if (!known.length) throw bad(`${attributeKey} is not one of our facts. Name the fact first, then check for it.`);
   const { rows } = await run(
     `insert into questions (attribute_key, scope, set_key, gate, refresh_days, position, from_candidate)
      values ($1, $2, $3, $4, $5, $6, $7)

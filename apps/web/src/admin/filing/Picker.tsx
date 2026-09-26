@@ -33,7 +33,7 @@ import { Act, Kicker, Value } from './desk';
 export type Destination = {
   key: string;
   name: string;
-  /** 'subcategory' or 'label' — what kind of thing it is, said in words. */
+  /** 'subcategory' or 'label' — what kind of thing it is; a label is drawn as a fact. */
   kind: string;
   /** The consequence, written server-side. Required, never optional. */
   note: string;
@@ -117,7 +117,7 @@ export function Picker({
         <TextInput
           value={query}
           onChangeText={onQuery}
-          placeholder="Search every subcategory and label"
+          placeholder="Search every subcategory and fact"
           placeholderTextColor={desk.inkDim}
           style={FIELD}
         />
@@ -144,7 +144,7 @@ export function Picker({
         <>
           <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: desk.rule }}>
             <Tab label="Category" on={tab === 'cat'} onPress={() => setTab('cat')} />
-            <Tab label="Label" on={tab === 'label'} onPress={() => setTab('label')} bordered />
+            <Tab label="Fact" on={tab === 'label'} onPress={() => setTab('label')} bordered />
             {/*
               The two answers that are not a drawer. They sit on the tab strip
               rather than in the list because they are a different kind of

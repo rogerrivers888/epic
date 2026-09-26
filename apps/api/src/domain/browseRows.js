@@ -109,10 +109,10 @@ export function checkPredicate(clause, { attributes, subcategories, categories }
   // it looking for a label that was never named.
   if (clause.attribute == null) throw bad('A rule has to say something.');
   const a = attributes.get(clause.attribute);
-  if (!a) throw bad(`${clause.attribute} is not one of our labels.`);
+  if (!a) throw bad(`${clause.attribute} is not one of our facts.`);
   // A graded score is not a thing a row can ask about, and neither is a label
   // that has been switched off: the rule would be saved and never answered.
-  if (a.kind === 'scale') throw bad(`${a.label} was one of the graded axes, which are gone. A rule is over labels, ranges and the cost band.`);
+  if (a.kind === 'scale') throw bad(`${a.label} was one of the graded axes, which are gone. A rule is over facts, ranges and the cost band.`);
   if (a.active === false) throw bad(`${a.label} is retired, so a row cannot ask about it.`);
   const said = Object.keys(clause).filter((k) => KINDS.has(k));
   if (said.length !== 1) throw bad(`Say one thing about ${a.label}, not ${said.length}.`);

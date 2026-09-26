@@ -25,6 +25,8 @@ import { Icon } from '../../components/Icon';
 import { Press } from '../../components/press';
 import { useViewport } from '../../hooks/useViewport';
 import { LIME, ON_LIME, desk, fonts } from '../../theme';
+import { HowIcon } from '../HowIcon';
+import type { HowAnchor } from '../../routes';
 
 /** The one red on this surface: danger, never decoration. */
 export const WARN = desk.warn;
@@ -89,11 +91,18 @@ export const tabular = { fontVariant: ['tabular-nums' as const] };
  * Right-aligned stats are a kicker over a value, never a tile — a tile would be
  * a box, and this surface has none.
  */
-export function Band({ title, sub, stats, right }: {
+export function Band({ title, sub, stats, right, how }: {
   title: React.ReactNode;
   sub?: string | null;
   stats?: { label: string; value: React.ReactNode; strong?: boolean }[];
   right?: React.ReactNode;
+  /**
+   * Which section of How it works explains this screen. Named, the band
+   * draws the small info icon beside its title (owner's brief, 26 Sep 2026:
+   * every screen in the filing workflow carries one, and the Facts sub-tabs
+   * too, because a sheet is the thing people misread most).
+   */
+  how?: HowAnchor;
 }) {
   // On a phone the facts go under the title rather than beside it: a 31px
   // title and a row of stats do not share 390px, and a title that cannot
@@ -110,7 +119,12 @@ export function Band({ title, sub, stats, right }: {
       paddingBottom: 18,
     }}>
       <View style={{ gap: 6, flexShrink: 1, minWidth: 0 }}>
-        <Title>{title}</Title>
+        {how ? (
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+            <View style={{ flexShrink: 1, minWidth: 0 }}><Title>{title}</Title></View>
+            <HowIcon at={how} />
+          </View>
+        ) : <Title>{title}</Title>}
         {sub ? <Text style={{ fontFamily: fonts.body, fontSize: 11.5, color: desk.inkDim }}>{sub}</Text> : null}
       </View>
       <View style={{

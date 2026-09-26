@@ -65,7 +65,7 @@ export function Words({
   /** The filters in play. They combine with AND and show as removable pills. */
   filters: { key: string; name: string }[];
   onFilters: (next: { key: string; name: string }[]) => void;
-  /** Everything filterable: states, flags, categories, subcategories, labels. */
+  /** Everything filterable: states, flags, categories, subcategories, facts. */
   filterOptions: { key: string; name: string; kind: string; note: string }[];
   /** How the row's picker is fed and what it does. */
   picker: {
@@ -101,10 +101,11 @@ export function Words({
     <>
       <Band
         title="Where each of Google’s words points"
+        how="mapping"
         stats={[
           { label: 'Answered', value: counts.answered },
           { label: 'Not sure', value: counts.notSure },
-          { label: 'Kept as a label', value: counts.secondary },
+          { label: 'Kept as a fact', value: counts.secondary },
           { label: 'Flagged', value: counts.flagged, strong: true },
         ]}
         right={
@@ -308,14 +309,14 @@ export function Words({
                     </View>
                     {/*
                       Which of the two things a pick did. A subcategory files
-                      the places; a label rides along on every place the word
+                      the places; a fact rides along on every place the word
                       brings — a default, not evidence, and the difference
                       matters when somebody later asks why a place says it has
                       parking.
                     */}
                     <Text style={{ fontFamily: fonts.body, fontSize: 12, color: desk.inkDim, lineHeight: 19.2 }}>
                       {w.pointsAt
-                        ? 'The subcategory files the places. Labels ride along on every place this word brings — a default, not evidence.'
+                        ? 'The subcategory files the places. Facts ride along on every place this word brings — a default, not evidence.'
                         : w.decision === 'notinepic'
                           ? `Not in Epic. ${w.brings.toLocaleString()} places stay out, reversible from the excluded list.`
                           : 'Nothing said yet.'}
@@ -446,7 +447,7 @@ function FilterField({ value, onChange }: { value: string; onChange: (v: string)
     <TextInput
       value={value}
       onChangeText={onChange}
-      placeholder="Filter by a category, subcategory, label, state or flag"
+      placeholder="Filter by a category, subcategory, fact, state or flag"
       placeholderTextColor={desk.inkDim}
       style={FIELD}
     />
@@ -480,6 +481,7 @@ export function NotInEpic({ rows, placesKeptOut, onRestore }: {
     <>
       <Band
         title={`${rows.length} ${rows.length === 1 ? 'word is' : 'words are'} not in Epic`}
+        how="mapping"
         stats={[{ label: 'Places kept out', value: placesKeptOut.toLocaleString() }]}
       />
       <View>

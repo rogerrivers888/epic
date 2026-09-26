@@ -1,16 +1,19 @@
 /**
- * Rows — the long scrollable list a household actually browses.
+ * Ideas — the long scrollable list a household actually browses.
  *
- * A row is a **title, a copy line and a rule**, and never a drawer anything is
- * filed into. Nothing is ever put in a row; a row asks a question of every
+ * Called Rows until the rename (26 Sep 2026): "rows" was a UI shape, not a
+ * concept, and "it's raining again" is an idea for a day out.
+ *
+ * An idea is a **title, a copy line and a rule over facts**, and never a drawer anything is
+ * filed into. Nothing is ever put in an idea; an idea asks a question of every
  * place and shows what answers. That is why the three fields edit separately —
  * the first real test of "Sneakily educational" is a household reading it, and
  * the title has to be changeable without touching what it returns.
  *
- * Hearting a row is the highest-signal tap in the product, which is why the
+ * Hearting an idea is the highest-signal tap in the product, which is why the
  * back office shows the fill per district beside it. A rule returning fourteen
- * places in Ascot returns two in Hungerford, and a row nobody can fill is not
- * a bad row — it is a row waiting for a district to get denser.
+ * places in Ascot returns two in Hungerford, and an idea nobody can fill is not
+ * a bad idea — it is an idea waiting for a district to get denser.
  */
 
 import React, { useState } from 'react';
@@ -36,7 +39,7 @@ const FILTERS: { key: RowFilter; name: string }[] = [
   { key: 'cold', name: 'Nobody hearts it' },
 ];
 
-export function Rows({
+export function Ideas({
   rows, districts, minFill, filter, onFilter, onHeart, onEdit, household,
 }: {
   rows: BrowseRow[];
@@ -68,7 +71,8 @@ export function Rows({
   return (
     <>
       <Band
-        title={`${rows.length} rows · ${household}`}
+        title={`${rows.length} ideas · ${household}`}
+        how="ideas"
         stats={[
           { label: 'Hearted here', value: hearted, strong: true },
           { label: 'Below minimum fill', value: thin, strong: true },
@@ -98,7 +102,7 @@ export function Rows({
         }}>
           <View style={{ width: 44, flexGrow: 0, flexShrink: 0 }} />
           <View style={{ width: 280, flexGrow: 0, flexShrink: 0 }}>
-            <Value size={12.5} weight="600" tone="dim">Row</Value>
+            <Value size={12.5} weight="600" tone="dim">Idea</Value>
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Value size={12.5} weight="600" tone="dim">The rule</Value>
@@ -115,7 +119,7 @@ export function Rows({
           </View>
         </View>
 
-        {shown.length === 0 ? <Nothing>No rows match that.</Nothing> : null}
+        {shown.length === 0 ? <Nothing>No ideas match that.</Nothing> : null}
         {shown.map((r) => {
           const isOpen = open === r.id;
           const ed = (f: 'title' | 'copy' | 'rule') => editing?.id === r.id && editing.field === f;
@@ -295,15 +299,15 @@ const STATES: { key: HouseState; name: string }[] = [
   { key: 'list', name: 'The list' },
   { key: 'first', name: 'First heart' },
   { key: 'inspire', name: 'Inspire' },
-  { key: 'thin', name: 'Waiting row' },
-  { key: 'named', name: 'Named rows' },
+  { key: 'thin', name: 'Waiting idea' },
+  { key: 'named', name: 'Named ideas' },
 ];
 
 const SAYS: Record<HouseState, string> = {
-  list: 'Forty rows, scrollable, hearts inline. A row is a title and a rule — nothing is ever filed into one.',
+  list: 'Forty ideas, scrollable, hearts inline. An idea is a title and a rule over facts — nothing is ever filed into one.',
   first: 'The first heart asks whose list this is. One tap, sticky, never asked again in the session.',
-  inspire: 'Hearted rows rise to the top, and two or three unhearted ones stay mixed in so discovery does not stop.',
-  thin: 'A hearted row below minimum fill waits quietly rather than showing an empty shelf.',
+  inspire: 'Hearted ideas rise to the top, and two or three unhearted ones stay mixed in so discovery does not stop.',
+  thin: 'A hearted idea below minimum fill waits quietly rather than showing an empty shelf.',
   named: 'Personalised naming as a pattern: the adult’s own day, and a child’s name only ever attached to something positive.',
 };
 
@@ -388,7 +392,7 @@ export function HouseholdView({
               fontFamily: fonts.heading, fontSize: 19, fontWeight: '800',
               letterSpacing: -0.57, color: house.ink,
             }}>
-              {state === 'inspire' ? 'Inspire' : 'Rows'}
+              {state === 'inspire' ? 'Inspire' : 'Ideas'}
             </Text>
             {owner ? (
               <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: house.inkMuted }}>

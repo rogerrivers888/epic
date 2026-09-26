@@ -3,7 +3,7 @@
  *
  * Every one of these decides what a screen *says* rather than what it looks
  * like, and each has a wrong answer that would be silent: a word reading "kept
- * as a label" when somebody answered "parking"; a row reading "0%" when nobody
+ * as a fact" when somebody answered "parking"; a row reading "0%" when nobody
  * has ever hearted it; a candidate drawn as distinctive when it is on every
  * place. None of that shows up in a screenshot, so it is here rather than
  * inline in the `.tsx`, where `node --test` can reach it.
@@ -21,7 +21,7 @@ import type { BrowseRow, SetRow, WordRow } from './types';
 /**
  * Where a word points, said the way the person who answered would recognise.
  *
- * "Kept as a label" covers three of our five stored answers, and flattening
+ * "Kept as a fact" covers three of our five stored answers, and flattening
  * them loses two real decisions: `travel` is how you get there (parking, the
  * bus station) and `nearby` is what happens to be next to the place you came
  * for (the chemist by the museum). Somebody who answered one of those has to
@@ -34,9 +34,9 @@ export function pointsAt(w: Pick<WordRow, 'pointsAt' | 'decision' | 'answer'>): 
   if (w.pointsAt) return w.pointsAt.label;
   if (w.decision === 'notinepic') return 'Not in Epic';
   if (w.decision === 'secondary') {
-    if (w.answer === 'travel') return 'Kept as a label · how you get there';
-    if (w.answer === 'nearby') return 'Kept as a label · what is nearby';
-    return 'Kept as a label';
+    if (w.answer === 'travel') return 'Kept as a fact · how you get there';
+    if (w.answer === 'nearby') return 'Kept as a fact · what is nearby';
+    return 'Kept as a fact';
   }
   return 'not answered';
 }
@@ -101,7 +101,7 @@ export function rung(seen: number, of: number, low: number, high: number): Rung 
 }
 
 /**
- * The marks a question set wears.
+ * The marks a fact sheet wears.
  *
  * `settled` only when the judgeable queue is empty. A set that has stopped
  * producing words but still has candidates waiting is *settling*, and the two
@@ -117,11 +117,11 @@ export function setMarks(s: Pick<SetRow, 'state' | 'tooFewForTooMany' | 'questio
 }
 
 /**
- * Every question is asked of every place in every subcategory the set covers,
+ * Every check is made on every place in every subcategory the sheet covers,
  * so the cost of one more is the whole population, not one row.
  */
 export const TOO_MANY_QUESTIONS = 8;
-export const tooManyQuestions = (n: number) => n >= TOO_MANY_QUESTIONS;
+export const tooManyChecks = (n: number) => n >= TOO_MANY_QUESTIONS;
 
 // ---------------------------------------------------------------------------
 // Rows

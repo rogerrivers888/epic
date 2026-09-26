@@ -12,7 +12,10 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { hrefOf, isFullBleed, isImmersive, isTabHome, legacyHref, ownsHeader, parseRoute, paths, parentOf, splitHref, tabOf, titleOf, withQuery } from '../src/routes.ts';
+import {
+  FILING_TABS, HOW_ANCHORS, filingTabOf, howAnchorOf, hrefOf, isFullBleed, isImmersive, isTabHome, legacyHref,
+  ownsHeader, parseRoute, paths, parentOf, splitHref, tabOf, titleOf, withQuery,
+} from '../src/routes.ts';
 
 /** Read it, write it back, and get the same address. */
 const roundTrip = (href: string, expected?: string) => {
@@ -233,6 +236,42 @@ test('Household, Settings, Prototypes and the back office', () => {
    */
   assert.deepEqual(roundTrip('/admin/filing'), { name: 'admin', screen: 'filing' });
   assert.deepEqual(parseRoute('/admin/filing?tab=categories&sub=golf'), { name: 'admin', screen: 'filing' });
+  /**
+   * The rename (26 Sep 2026): the tabs are Facts, Defaults and Ideas now, and
+   * the address spells them that way. A link sent before the rename still
+   * opens the right screen, because an old spelling reads across rather than
+   * falling back to the Overview — and nothing writes the old spelling again.
+   */
+  assert.equal(paths.filing('facts'), '/admin/filing?tab=facts');
+  assert.equal(paths.filing('facts', { set: 'water' }), '/admin/filing?set=water&tab=facts');
+  assert.equal(paths.filing('overview'), '/admin/filing');
+  assert.equal(paths.filing(null), '/admin/filing');
+  assert.deepEqual(FILING_TABS, ['overview', 'categories', 'facts', 'mapping', 'defaults', 'ideas', 'runs']);
+  assert.equal(filingTabOf('facts'), 'facts');
+  assert.equal(filingTabOf('labels'), 'facts');
+  assert.equal(filingTabOf('rules'), 'defaults');
+  assert.equal(filingTabOf('rows'), 'ideas');
+  assert.equal(filingTabOf('runs'), 'runs');
+  assert.equal(filingTabOf('questions'), null);
+  assert.equal(filingTabOf(null), null);
+  assert.equal(splitHref(paths.filing('ideas', { view: 'household' })).query.get('tab'), 'ideas');
+
+  /**
+   * The info icon beside every filing heading opens How it works at the
+   * section explaining that screen, never the top of the page. `?at=` is the
+   * section, and only a section that exists is one.
+   */
+  assert.deepEqual(roundTrip('/admin/how'), { name: 'admin', screen: 'how' });
+  assert.equal(paths.how(), '/admin/how');
+  assert.equal(paths.how(null), '/admin/how');
+  assert.equal(paths.how('facts'), '/admin/how?at=facts');
+  assert.deepEqual(parseRoute('/admin/how?at=sheets'), { name: 'admin', screen: 'how' });
+  assert.equal(splitHref(paths.how('defaults')).query.get('at'), 'defaults');
+  assert.deepEqual(HOW_ANCHORS, ['mechanics', 'categories', 'facts', 'sheets', 'mapping', 'defaults', 'ideas']);
+  for (const at of HOW_ANCHORS) assert.equal(howAnchorOf(at), at);
+  assert.equal(howAnchorOf('labels'), null);
+  assert.equal(howAnchorOf(''), null);
+  assert.equal(howAnchorOf(undefined), null);
 
   /**
    * Every layer inside a suite screen is in the query, so a figure somebody is

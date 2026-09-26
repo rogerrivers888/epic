@@ -29,6 +29,8 @@ import { colors, fonts, spacing, type, BORDER } from '../../theme';
 import { Icon, IconName } from '../../components/Icon';
 import { AdminPage, Banner, PageHead, Panel, Pill } from '../kit';
 import { Explain } from '../explain';
+import { useQueryState } from '../../router';
+import { howAnchorOf, type HowAnchor } from '../../routes';
 
 /**
  * `live` — Epic does this today.
@@ -50,12 +52,314 @@ type Decision = {
   said?: { who: string; on: string; words: string };
 };
 
-type Section = { key: string; title: string; blurb: string; icon: IconName; decisions: Decision[] };
+/**
+ * `at` is the section's address inside the page — `/admin/how?at=facts` — and
+ * the id the info icons on the filing desk deep-link to. Only the Business
+ * mechanics sections carry one; the rest are read top to bottom.
+ */
+type Section = { key: string; title: string; blurb: string; icon: IconName; decisions: Decision[]; at?: HowAnchor };
 
 /** A path is a path: it reads as one, and it is meant to be copied into an editor. */
 const MONO = Platform.OS === 'web' ? 'ui-monospace, SFMono-Regular, Menlo, monospace' : undefined;
 
 const SECTIONS: Section[] = [
+  /**
+   * Business mechanics — the five objects the filing desk is made of, and one
+   * section per screen, in the words of the rename (owner's brief, 26 Sep
+   * 2026). Each carries an `at` so the info icon beside that screen's heading
+   * lands on it. The owner is supplying a rewritten page; these sections are
+   * the anchors it will fill, written in the new words rather than left in
+   * the old ones until then.
+   */
+  {
+    key: 'mechanics',
+    at: 'mechanics',
+    title: 'Business mechanics — what each thing is',
+    blurb: 'Three words were each doing several jobs and the back office was unreadable because of it. These are the five objects the filing desk is made of, and the one sentence each one is.',
+    icon: 'owned',
+    decisions: [
+      {
+        title: 'A category is where a place is filed',
+        rule: 'Fun › Water parks. A place has exactly one home subcategory, which is what stops it drawing twice on Inspire or in a trip’s Activities lanes. A subcategory can be shown in other categories as well, but the place keeps one home.',
+        why: 'The owner, on seeing a drawer in two categories: once something is duplicated, if the user sees it in Fun, they don’t need to see it again in Sport. One home is the only rule that makes that true everywhere at once.',
+        state: 'live',
+        where: 'apps/api/src/domain/moods.js · MAX_SHELVES, shelvesOf() · migration 103',
+      },
+      {
+        title: 'A fact is something we find out about a place',
+        rule: 'Indoors, step free, wave machine. Any shape — a yes or no, a range such as Suits ages or Duration, a band such as cost. A fact is read from the place first, then from its drawer’s default, then nowhere. A fact can bring another fact with a value: splash pad brings suits ages 0 to 7.',
+        why: 'The owner: there’s a very big difference between what a 5-year-old can do and what a 12-year-old can do. Ages are the clearest case, but the same machinery answers rainy day and step free without a column being added for each. Facts were called labels until 26 Sep 2026, when one word was holding facts, sheets and checks at once.',
+        state: 'live',
+        where: 'apps/api/src/repositories/placeAttributes.js · resolveFor() · migrations 105, 114–116, 118',
+      },
+      {
+        title: 'A check is one thing we go and find out; a standard check is made on everything',
+        rule: 'A check names a fact and goes looking for it on one place. A standard check — step free, parking, toilets, booking required, food on site, duration, cost band — is made on every place, everywhere. A set check is made only on the places a fact sheet covers.',
+        why: 'The question a check answers is closed, so two places can be compared: this one has a toddler pool and that one does not. An open question produces prose, and two places described freely cannot be compared.',
+        state: 'live',
+        where: 'apps/api/src/repositories/questionSets.js · migration 207',
+      },
+      {
+        title: 'A fact sheet is a bundle of checks for one kind of place',
+        rule: '“Water parks & pools” is a sheet name, not a subcategory — it covers two. A sheet is attached to one or more subcategories and never owned by one, so water parks, lidos and leisure pools share one sheet rather than three copies of nearly the same thing. What a sheet covers is said on its row, because a sheet is named like a place but is a checklist.',
+        why: 'A sheet is the thing people misread most. It looks like a place and it is a list of things to find out — which is why every sheet row says what it covers and how many checks it carries.',
+        state: 'live',
+        where: 'apps/api/src/repositories/questionSets.js · question_sets, question_set_subcategories',
+      },
+      {
+        title: 'An idea is a rule over facts, which is what a family browses',
+        rule: '“It’s raining again” is an idea for a day out: a title, a copy line and a rule over facts — indoors, suits the ages in this household, within reach today. Nothing is ever filed into an idea; it fills itself from whatever the facts say. Ideas were called rows until 26 Sep 2026, and a row is a shape, not a concept.',
+        why: 'An idea that is a rule can fill differently in Ascot and in Hungerford without anybody curating either. An idea that is a list has to be kept by hand in every district, and it goes stale in all of them.',
+        state: 'live',
+        where: 'apps/api/src/domain/browseRows.js · migration 208',
+      },
+      {
+        title: 'What we found is one of four things, and “nothing found” is one of them',
+        rule: 'A check on a place has found yes, found no, found nothing, or has not been made yet. Nothing found is stored rather than inferred: we looked, and no owned source mentioned it. Not checked yet means the check was added after this place was last looked at, and is the absence of a row.',
+        why: 'A place where nothing anywhere mentioned a toddler pool probably has not got one, and that is worth knowing. If it were drawn the same as a check nobody has got round to yet, the two would be indistinguishable and neither could be trusted.',
+        state: 'live',
+        where: 'apps/api/src/domain/questions.js · settle()',
+      },
+    ],
+  },
+  {
+    key: 'categories',
+    at: 'categories',
+    title: 'Categories — where a place is filed',
+    blurb: 'How a place comes to sit in one drawer, what a drawer assumes about everything in it, and what happens when the places disagree.',
+    icon: 'shortlist',
+    decisions: [
+      {
+        title: 'A primary fact is a subcategory, and a place has exactly one',
+        rule: 'The subcategories are the primary facts about a place. A place gets one and only one, which is its home. A subcategory can be shown in other categories as well, but the place keeps one home and each carousel gives it to one lane.',
+        why: 'The owner, on seeing a drawer in two categories: once something is duplicated, if the user sees it in Fun, they don’t need to see it again in Sport.',
+        state: 'live',
+        where: 'apps/api/src/domain/moods.js · MAX_SHELVES, shelvesOf() · migration 103',
+      },
+      {
+        title: 'Something inside a bigger place is not its own day out',
+        rule: 'Amity Beach is part of Thorpe Park. A child is recorded against its parent, one step only, and is dropped from every list: the parent is shown, and it inherits what the child carried — the moods, the experiences, and any fact the parent had nothing to say about.',
+        why: 'The owner had seen rides inside Thorpe Park listed on Inspire as separate days out. A family cannot go to Amity Beach; they can go to Thorpe Park, and the beach is a reason to.',
+        state: 'live',
+        where: 'apps/api/src/repositories/placeParts.js · withoutParts(), rollUp() · migration 106',
+        said: {
+          who: 'Roger', on: '13 Sep 2026',
+          words: 'I’ve seen multiple times activities that actually exist in Thorpe Park being listed as separate activities on the Inspire tab, and we absolutely have to stop that happening… we should only ever display Thorpe Park, not Amity Beach.',
+        },
+      },
+      {
+        title: 'Not sure is a list, and a research run fills it in',
+        rule: 'Where the mapping cannot settle a place, it goes on a list with its address, its words and the reason it could not be settled — never filed by a guess. A run then asks Claude, with web search, what it is and whether it is part of somewhere bigger. An answer is refused unless it names one of the subcategories offered, gives a sentence saying why, and cites a link. The answer is a proposal; a person settles it, and settling it can write the mapping at the same time.',
+        why: 'The owner: I don’t want to have to determine whether Amity Beach is part of Thorpe Park. You should use the Anthropic API to confirm and fill in those blanks. The refusals matter more than the answers — a model that cannot cite a page has not looked anything up.',
+        state: 'live',
+        where: 'apps/api/src/domain/research.js · apps/api/src/repositories/notSure.js · migrations 117, 119',
+      },
+      {
+        title: 'Twelve real places, before a mapping is saved',
+        rule: 'A word can be opened to see twelve real places that carry it, fetched once from Google with a small field mask and nothing stored. The screen groups them by the other words they carry, because the shape they share is the mapping worth writing, and says of each one where the mapping puts it today. Places nothing settles can be sent to the not-sure list from there.',
+        why: 'The owner, on adventure sports centre: I don’t know what that is. Twelve gym results shared one shape and twelve water parks had ten different ones — which is the difference between a mapping worth writing and a word that needs looking at one place at a time.',
+        state: 'live',
+        where: 'apps/api/src/sources/google.js · examplesOfType() · metered as admin.taxonomy.examples',
+      },
+    ],
+  },
+  {
+    key: 'facts',
+    at: 'facts',
+    title: 'Facts — what we find out about a place',
+    blurb: 'Where facts come from, why a water park and a country walk are checked for different things, and who is allowed to say what a place has.',
+    icon: 'question',
+    decisions: [
+      {
+        title: 'The checks come from the places, and a person promotes them',
+        rule: 'Epic reads what is written about places of a kind — the open map’s tags, the venue’s own page, Wikipedia — counts which words keep appearing, and offers them as candidates with the share of places each appeared for. Somebody promotes the ones worth checking. A word rejected here is never offered again.',
+        why: 'Nobody can sit down and list what matters about fifty-two kinds of place, and a list written from an armchair misses what the places themselves keep saying. The share is the point: wave machine at 10% tells you more than lockers at 95%, which is true of everywhere and separates nothing.',
+        state: 'live',
+        where: 'apps/api/src/sources/vocabulary.js · freeSweep()',
+      },
+      {
+        title: 'Google may raise a word; it may never answer a check',
+        rule: 'Google’s review summaries can be read to find out which words matter for a kind of place. The text is read in memory, turned into counted words, and thrown away — none of it is written to a row, a log or a debug field, and none of it becomes a fact about the place it came from. A check on a place is answered from what Epic owns or may freely read: the venue’s own page, OpenStreetMap, Wikipedia, Wikidata, the hygiene register.',
+        why: 'Two reasons and they point the same way. A fact we keep has to be one we are allowed to keep, and a stored copy of somebody else’s writing is not. And a wrong claim about a real business carries real risk — what we found on the venue’s own page can be shown with a link and a date beside it.',
+        state: 'live',
+        where: 'apps/api/src/domain/questions.js · OWNED_SOURCES · place_answers source check',
+      },
+      {
+        title: 'Everything we found says where it came from, and two sources may disagree',
+        rule: 'What we found carries its source, the page it came from and the day it was checked — “Wave machine · from coralreef.co.uk · checked 12 Sep”. Where the venue’s page and the open map say different things, both are kept and the pair is marked unresolved for a person to settle. Nothing resolves it quietly.',
+        why: 'A provenance line is what makes a fact checkable a year later. And silently picking a winner between two sources is how a confident wrong answer gets built — the disagreement is itself information.',
+        state: 'live',
+        where: 'apps/api/src/repositories/questionSets.js · markDisagreement()',
+      },
+      {
+        title: 'A word can be mentioned and denied in the same breath',
+        rule: 'When a word is noticed, Epic also records what the sentence did to it: asserted it, denied it, or merely asked about it. “Does it have a wave machine? We couldn’t find one” counts as a question, not as evidence. A candidate whose mentions are mostly denials says so on the row.',
+        why: 'It cannot be worked out later. The rented text is discarded within milliseconds of arriving, so if the polarity is not read at that moment there is nothing left to read it from — and a feature nobody has would look exactly like one everybody has.',
+        state: 'live',
+        where: 'apps/api/src/domain/questions.js · polarityOf()',
+      },
+      {
+        title: 'Only a feature becomes a check, and an unclear word simply waits',
+        rule: 'A harvested word is a feature (a wave machine), a condition (busy at weekends) or an opinion (rude staff). Only features can become checks. A word nothing can call sits in a holding pen — not pending, not rejected, not waiting on anybody — and is looked at again when a later harvest raises its count.',
+        why: 'A wrong “feature” becomes a check made on thousands of places; an unclear word costs nothing while it waits. And opinions are the Epic score’s job, not a check’s — checking every place for rude staff would be a rating system with extra steps.',
+        state: 'live',
+        where: 'apps/api/src/sources/vocabulary.js · classifyCandidates()',
+      },
+      {
+        title: 'A fact never checked anywhere is an orphan, and All facts says so in red',
+        rule: 'A fact approved into the vocabulary and attached to no sheet is never checked on any place. It is a real fact with nothing behind it, and it sits on the All facts list marked never checked anywhere until somebody attaches it to a sheet or retires it.',
+        why: 'Approving a word with no sheet is what creates orphans, so parking one is an explicit act rather than the quiet result of forgetting the second step.',
+        state: 'live',
+        where: 'apps/api/src/routes/filing.js · GET /labels/vocabulary',
+      },
+      {
+        title: 'Epic asks a venue’s website before it reads it',
+        rule: 'Every fetch of a business’s own page checks their robots.txt first, waits the crawl delay they ask for, and identifies itself as EpicBot with a contact address. A site that says no is not read, and yields nothing — the same as a site that is down.',
+        why: 'Enrichment reads venue pages on behalf of a household looking at that venue, which is a reasonable thing to do and stops being reasonable the moment it ignores what the site owner asked for. The cost is real: a venue whose robots.txt was written for search engines may lose us a phone number.',
+        state: 'live',
+        where: 'apps/api/src/sources/politeness.js',
+      },
+      {
+        title: 'Checking a place waits for somebody to want it',
+        rule: 'Checks are raised in bulk; they are made one place at a time. A place has its checks made once it crosses a threshold of appearances in search or drawer opens — never by sweeping everywhere. It is triggered by the search rather than by the tap, so by the time somebody opens a place it is usually already checked, and a place never checked still shows what its drawer assumes about places of that kind rather than nothing. The hook is built and switched off.',
+        why: 'A small share of places carries most of the searching. Checking all of them up front spends effort on places nobody opens, and it would go stale before anybody read it.',
+        state: 'partial',
+        where: 'apps/api/src/sources/vocabulary.js · enrichmentQueue() · EPIC_ENRICHMENT',
+      },
+    ],
+  },
+  {
+    key: 'sheets',
+    at: 'sheets',
+    title: 'Fact sheets — what we find out, about what kind of place',
+    blurb: 'A sheet is named like a place but is a checklist. Why every water park is checked for the same things, why the list is short, and when a kind of place stops costing money.',
+    icon: 'question',
+    decisions: [
+      {
+        title: 'A kind of place has a fixed, short list of checks',
+        rule: 'Every water park is checked for the same eight things — wave machine, toddler pool, splash area, step free. The list belongs to a fact sheet, and a sheet is shared: water parks, lidos and leisure pools use one between them rather than three copies of nearly the same thing. On top of it, the standard checks are made on everything.',
+        why: 'An open question about a place produces prose, and two places described freely cannot be compared. Eight closed checks can be: this one has a toddler pool and that one does not. It is also the only way a filter can ever be honest — “somewhere with a splash area” needs a check, not a paragraph that mentions one.',
+        state: 'partial',
+        where: 'apps/api/src/repositories/questionSets.js · migration 207',
+      },
+      {
+        title: 'A sheet says what it covers, because its name does not',
+        rule: 'Every sheet row reads name · covers these subcategories · so many checks · so many places. A sheet whose name does not say which subcategories it covers is renamed by a person, never silently.',
+        why: 'A sheet name that does not tell you which subcategories it covers defeats the point of having one.',
+        state: 'live',
+        where: 'apps/web/src/admin/filing/Facts.tsx · FactSheets',
+      },
+      {
+        title: 'Once a kind of place has its checks, Google leaves that category',
+        rule: 'When a fact sheet stops learning new words, it is settled: the Google pass skips it from then on, and every future place of that kind is checked from the venue’s own page, the open map and the encyclopedias. Attaching a new subcategory to the sheet unsettles it, because it brings vocabulary nobody has harvested.',
+        why: 'It is the moment a category stops costing money. Epic buys the vocabulary once and owns it; the alternative is paying to be told about wave machines again every time a new water park opens.',
+        state: 'live',
+        where: 'apps/api/src/sources/vocabulary.js · settleFromSaturation()',
+      },
+    ],
+  },
+  {
+    key: 'mapping',
+    at: 'mapping',
+    title: 'Mapping — where a provider’s word points',
+    blurb: 'How a word a provider uses becomes a drawer on the home screen — and why the mappings are written in Epic’s own words rather than a provider’s.',
+    icon: 'shortlist',
+    decisions: [
+      {
+        title: 'Providers’ words are mapped to our facts; the mappings are written in our facts',
+        rule: 'Every word a provider uses — google:water_park, wikidata:Q1 — points at one of Epic’s own facts. A mapping is then written over Epic’s facts, not over Google’s: when a place carries these facts, it goes in this drawer. A mapping written in our words is stored with scope “ours” and its facts bare; the same mapping reads a word from OpenStreetMap or Wikidata the day that source is added, without being rewritten.',
+        why: 'Mappings written over one provider’s vocabulary have to be written again for every other provider, and they break when that provider renames a word. 353 mappings were backfilled from the single-word rules that already existed, and 46 in our own words were written from them.',
+        state: 'live',
+        where: 'apps/api/src/domain/labels.js · scopeFor() · migrations 107–109',
+        said: {
+          who: 'Roger', on: '14 Sep 2026',
+          words: 'we don’t use Google words; we use our own words. The first exercise is to map Google words to our labels, and then we can add labels. We create rules using our own internal labels, which will change over time because we have other providers other than Google.',
+        },
+      },
+      {
+        title: 'A word that describes a place without saying what it is',
+        rule: 'Some of a provider’s words — tourist attraction, establishment, point of interest — describe a place without saying what it is. They are kept as a fact rather than mapped to a drawer, and they never settle a place on their own. A place carrying nothing else goes on the not-sure list instead of being filed by one of them.',
+        why: 'Filing by tourist attraction would put a castle, a cave and a garden centre in the same drawer. Throwing the word away instead loses real information about the place, so it is kept where it is true: as something the place is, not somewhere it lives.',
+        state: 'live',
+        where: 'apps/api/src/domain/googleSuggest.js · GENERIC_TYPES · migration 092',
+      },
+      {
+        title: 'The order the mappings are read in',
+        rule: 'This place → a mapping over a provider’s words → a mapping over ours → the kind of place → its category → what it was tagged with. A mapping somebody wrote by hand beats one Epic wrote for itself at every level. Mappings in our words sit below mappings over a provider’s, because ours name one fact each and a hand-written combination is more specific than any of them.',
+        why: 'Without the ordering, a single word could out-vote a longer mapping that was written precisely because the single word was wrong. It is also why a place taught by hand can never be moved by a later mapping.',
+        state: 'live',
+        where: 'apps/api/src/domain/moods.js · shelvesForVenue()',
+      },
+      {
+        title: 'Identifiers are proposed, never written unattended',
+        rule: 'A skill tag or a fact can carry an outside identifier — a Wikidata QID. A run proposes one for every tag nobody has looked up, with the description that tells the senses apart, and writes nothing. A person accepts. Only where exactly one thing in Wikidata carries that name is it offered for acceptance in a batch; saying no is written down, so no later run proposes the same thing again.',
+        why: 'A plain search puts fossil collector above fossil collecting, and foraging has a human sense and an animal one. Accepting four hundred first results would bed in mistakes that nothing downstream would ever surface.',
+        state: 'live',
+        where: 'apps/api/src/routes/hostSkills.js · /identifiers · migrations 120–121',
+      },
+    ],
+  },
+  {
+    key: 'defaults',
+    at: 'defaults',
+    title: 'Defaults — what a drawer assumes',
+    blurb: 'A default is assumed for every place in a drawer unless a place says otherwise. Why they are worth having, and the two different ways one can be wrong.',
+    icon: 'filters',
+    decisions: [
+      {
+        title: 'A default is read after the place and before nothing',
+        rule: 'A fact is read from the place first, then from its drawer’s default, then nowhere. A place that says otherwise wins; a place that says nothing takes what its drawer assumes. A default is a rule over a drawer, never a fact recorded against a place.',
+        why: 'Most places never say whether they are indoors, and most drawers can. Answering “indoors?” for every soft play centre at once is what lets a rule over facts fill an idea before any place has been checked.',
+        state: 'live',
+        where: 'apps/api/src/repositories/placeAttributes.js · resolveFor()',
+      },
+      {
+        title: 'Two columns, because there are two different ways a default can be wrong',
+        rule: 'Places contradict it is computed: of the places the default files, how many hold a different value. People called it wrong is human: how many times somebody overrode it by hand. They are never collapsed into one number. Three corrections is where a default stops being a rounding error, and it is drawn loud from there.',
+        why: 'A high contradiction count can mean the default is too broad or that the drawer wants splitting — nobody has said anything; the data disagrees with itself. Every override is a person who looked at a place and said no, which makes it the stronger signal of the two.',
+        state: 'live',
+        where: 'apps/web/src/admin/filing/Defaults.tsx · rule_overrides',
+        said: { who: 'Roger', on: '20 Sep 2026', words: '“this rule has been called wrong 41 times” is the single most useful number in the system.' },
+      },
+      {
+        title: 'Retiring a default never touches a place',
+        rule: 'When a default is retired the drawer stops saying it. Every place keeps what it says for itself.',
+        why: 'A default was never a fact about any one place, so taking it away cannot remove one.',
+        state: 'live',
+        where: 'apps/api/src/routes/filing.js · POST /rules/:id/retire',
+      },
+    ],
+  },
+  {
+    key: 'ideas',
+    at: 'ideas',
+    title: 'Ideas — what a family browses',
+    blurb: 'An idea is a title, a copy line and a rule over facts. Nothing is ever filed into one. How they fill, why hearting one matters, and what a thin district does to the list.',
+    icon: 'keep',
+    decisions: [
+      {
+        title: 'An idea is a rule over facts, and it fills itself',
+        rule: '“It’s raining again” is indoors, within reach today, suits the ages in this household. Nothing is put into an idea by hand; it fills from whatever the facts say about the places within reach, so the same idea reads differently in Ascot and in Hungerford.',
+        why: 'An idea that is a list has to be curated in every district and goes stale in all of them. A rule over facts is written once and is right wherever the facts are.',
+        state: 'live',
+        where: 'apps/api/src/domain/browseRows.js',
+      },
+      {
+        title: 'A hearted idea rises, and unhearted ones stay mixed in',
+        rule: 'Hearting an idea is the highest-signal tap in the product. On Inspire, hearted ideas rise to the top and two or three unhearted ones stay mixed in among them, never only at the bottom. A heart belongs to a member, and the first heart asks whose list this is.',
+        why: 'A list that only ever shows you what you have already said yes to has stopped being a way of finding anything.',
+        state: 'live',
+        where: 'apps/web/src/admin/filing/Ideas.tsx · householdRows()',
+      },
+      {
+        title: 'A hearted idea with too little near you waits quietly',
+        rule: 'An idea below its minimum fill in a district shows no shelf at all rather than an empty one. Only a hearted idea waits: an unhearted one below the fill is simply an idea nobody asked for.',
+        why: 'An empty shelf reads as “there is nothing good here”; no shelf reads as “not this week”. An idea that fills with twelve places in Ascot returns two in Hungerford, and an idea nobody can fill is not a bad idea — it is one waiting for a district to get denser.',
+        state: 'live',
+        where: 'apps/web/src/admin/filing/say.ts · waiting(), thinSomewhere()',
+      },
+    ],
+  },
   {
     key: 'money',
     title: 'What things cost, and where we cut',
@@ -509,167 +813,6 @@ const SECTIONS: Section[] = [
     ],
   },
   {
-    key: 'labels',
-    title: 'Words, labels and where a place lands',
-    blurb: 'How a word a provider uses becomes a drawer on the home screen — and why the rules are written in Epic’s own words rather than a provider’s.',
-    icon: 'shortlist',
-    decisions: [
-      {
-        title: 'Providers’ words are mapped to our labels; the rules are written in our labels',
-        rule: 'Every word a provider uses — google:water_park, wikidata:Q1 — points at one of Epic’s own labels. A rule is then written over Epic’s labels, not over Google’s: when a place carries these labels, it goes in this drawer. A rule written in our words is stored with scope “ours” and its labels bare; the same rule reads a word from OpenStreetMap or Wikidata the day that source is added, without being rewritten.',
-        why: 'Rules written over one provider’s vocabulary have to be written again for every other provider, and they break when that provider renames a word. 353 mappings were backfilled from the single-word rules that already existed, and 46 rules in our own words were written from them.',
-        state: 'live',
-        where: 'apps/api/src/domain/labels.js · scopeFor() · migrations 107–109',
-        said: {
-          who: 'Roger', on: '14 Sep 2026',
-          words: 'we don’t use Google words; we use our own words. The first exercise is to map Google words to our labels, and then we can add labels. We create rules using our own internal labels, which will change over time because we have other providers other than Google.',
-        },
-      },
-      {
-        title: 'A primary label is a subcategory, and a place has exactly one',
-        rule: 'The 59 subcategories are the primary labels. A place gets one and only one, which is its home — that is what stops it drawing twice on Inspire or in a trip’s Activities lanes. A subcategory can be shown in other categories as well, but the place keeps one home and each carousel gives it to one lane.',
-        why: 'The owner, on seeing a drawer in two categories: once something is duplicated, if the user sees it in Fun, they don’t need to see it again in Sport. One home is the only rule that makes that true everywhere at once.',
-        state: 'live',
-        where: 'apps/api/src/domain/moods.js · MAX_SHELVES, shelvesOf() · migration 103',
-      },
-      {
-        title: 'A secondary label is an attribute, and one label can bring another',
-        rule: 'Everything else true about a place is an attribute: rainy day, step free, suits ages 3 to 14. Three shapes — yes/no, a range, one of a list. A value is read from the place first, then from its subcategory’s default, then nowhere. A label can also bring another label with a value: splash pad brings suits ages 0 to 7. Only an affirmative label brings anything, a retired label brings nothing, and a ring of them terminates.',
-        why: 'The owner: there’s a very big difference between what a 5-year-old can do and what a 12-year-old can do. Ages are the clearest case, but the same machinery answers rainy day and step free without a column being added for each.',
-        state: 'live',
-        where: 'apps/api/src/repositories/placeAttributes.js · resolveFor() · migrations 105, 114–116, 118',
-        said: {
-          who: 'Roger', on: '13 Sep 2026',
-          words: 'let us add labels that are always added when one label is added… Maybe they should be coloured so I can see when I add splash pad, for example, and suddenly outdoors appears.',
-        },
-      },
-      {
-        title: 'A word that describes a place without saying what it is',
-        rule: 'Some of a provider’s words — tourist attraction, establishment, point of interest — describe a place without saying what it is. They are kept as an attribute rather than mapped to a drawer, and they never settle a place on their own. A place carrying nothing else goes on the not-sure list instead of being filed by one of them.',
-        why: 'Filing by tourist attraction would put a castle, a cave and a garden centre in the same drawer. Throwing the word away instead loses real information about the place, so it is kept where it is true: as something the place is, not somewhere it lives.',
-        state: 'live',
-        where: 'apps/api/src/domain/googleSuggest.js · GENERIC_TYPES · migration 092',
-      },
-      {
-        title: 'Something inside a bigger place is not its own day out',
-        rule: 'Amity Beach is part of Thorpe Park. A child is recorded against its parent, one step only, and is dropped from every list: the parent is shown, and it inherits what the child carried — the moods, the experiences, and any attribute the parent had nothing to say about.',
-        why: 'The owner had seen rides inside Thorpe Park listed on Inspire as separate days out. A family cannot go to Amity Beach; they can go to Thorpe Park, and the beach is a reason to.',
-        state: 'live',
-        where: 'apps/api/src/repositories/placeParts.js · withoutParts(), rollUp() · migration 106',
-        said: {
-          who: 'Roger', on: '13 Sep 2026',
-          words: 'I’ve seen multiple times activities that actually exist in Thorpe Park being listed as separate activities on the Inspire tab, and we absolutely have to stop that happening… we should only ever display Thorpe Park, not Amity Beach.',
-        },
-      },
-      {
-        title: 'Not sure is a list, and a research run fills it in',
-        rule: 'Where the labels cannot settle a place, it goes on a list with its address, its words and the reason it could not be settled — never filed by a guess. A run then asks Claude, with web search, what it is and whether it is part of somewhere bigger. An answer is refused unless it names one of the subcategories offered, gives a sentence saying why, and cites a link. The answer is a proposal; a person settles it, and settling it can write the rule at the same time.',
-        why: 'The owner: I don’t want to have to determine whether Amity Beach is part of Thorpe Park. You should use the Anthropic API to confirm and fill in those blanks. The refusals matter more than the answers — a model that cannot cite a page has not looked anything up.',
-        state: 'live',
-        where: 'apps/api/src/domain/research.js · apps/api/src/repositories/notSure.js · migrations 117, 119',
-      },
-      {
-        title: 'Twelve real places, before a rule is saved',
-        rule: 'A word can be opened to see twelve real places that carry it, fetched once from Google with a small field mask and nothing stored. The screen groups them by the other words they carry, because the shape they share is the rule worth writing, and says of each one where the labels put it today. Places nothing settles can be sent to the not-sure list from there.',
-        why: 'The owner, on adventure sports centre: I don’t know what that is. Twelve gym results shared one shape and twelve water parks had ten different ones — which is the difference between a rule worth writing and a word that needs looking at one place at a time.',
-        state: 'live',
-        where: 'apps/api/src/sources/google.js · examplesOfType() · metered as admin.taxonomy.examples',
-      },
-      {
-        title: 'The order the rules are read in',
-        rule: 'This place → a rule over a provider’s labels → a rule over ours → the kind of place → its category → what it was tagged with. A rule somebody wrote by hand beats one Epic wrote for itself at every level. Rules in our words sit below rules over a provider’s, because ours name one label each and a hand-written combination is more specific than any of them.',
-        why: 'Without the ordering, a single word could out-vote a longer rule that was written precisely because the single word was wrong. It is also why a place taught by hand can never be moved by a later rule.',
-        state: 'live',
-        where: 'apps/api/src/domain/moods.js · shelvesForVenue()',
-      },
-      {
-        title: 'Identifiers are proposed, never written unattended',
-        rule: 'A skill tag or a label can carry an outside identifier — a Wikidata QID. A run proposes one for every tag nobody has looked up, with the description that tells the senses apart, and writes nothing. A person accepts. Only where exactly one thing in Wikidata carries that name is it offered for acceptance in a batch; saying no is written down, so no later run proposes the same thing again.',
-        why: 'A plain search puts fossil collector above fossil collecting, and foraging has a human sense and an animal one. Accepting four hundred first results would bed in mistakes that nothing downstream would ever surface.',
-        state: 'live',
-        where: 'apps/api/src/routes/hostSkills.js · /identifiers · migrations 120–121',
-      },
-    ],
-  },
-  {
-    key: 'questions',
-    title: 'The questions asked of a place',
-    blurb: 'Why a water park and a country walk are asked different things, where the questions come from, and what it means when a place has no answer.',
-    icon: 'question',
-    decisions: [
-      {
-        title: 'A kind of place has a fixed, short list of questions',
-        rule: 'Every water park is asked the same eight questions — wave machine, toddler pool, splash area, step free. The list belongs to a question set, and a set is shared: water parks, lidos and leisure pools use one between them rather than three copies of nearly the same thing. On top of it, five questions are asked of everything: step free, parking, toilets, booking required, food on site.',
-        why: 'An open question about a place produces prose, and two places described freely cannot be compared. Eight closed questions can be: this one has a toddler pool and that one does not. It is also the only way a filter can ever be honest — “somewhere with a splash area” needs an answer, not a paragraph that mentions one.',
-        state: 'partial',
-        where: 'apps/api/src/repositories/questionSets.js · migration 207',
-      },
-      {
-        title: 'The questions come from the places, and a person promotes them',
-        rule: 'Epic reads what is written about places of a kind — the open map’s tags, the venue’s own page, Wikipedia — counts which words keep appearing, and offers them as candidates with the share of places each appeared for. Somebody promotes the ones worth asking about. A word rejected here is never offered again.',
-        why: 'Nobody can sit down and list what matters about fifty-two kinds of place, and a list written from an armchair misses what the places themselves keep saying. The share is the point: wave machine at 10% tells you more than lockers at 95%, which is true of everywhere and separates nothing.',
-        state: 'live',
-        where: 'apps/api/src/sources/vocabulary.js · freeSweep()',
-      },
-      {
-        title: 'Google may raise a word; it may never answer a question',
-        rule: 'Google’s review summaries can be read to find out which words matter for a kind of place. The text is read in memory, turned into counted words, and thrown away — none of it is written to a row, a log or a debug field, and none of it becomes a fact about the place it came from. Answering a question about a place is done from what Epic owns or may freely read: the venue’s own page, OpenStreetMap, Wikipedia, Wikidata, the hygiene register.',
-        why: 'Two reasons and they point the same way. A fact we keep has to be one we are allowed to keep, and a stored copy of somebody else’s writing is not. And a wrong claim about a real business carries real risk — an answer taken from the venue’s own page can be shown with a link and a date beside it.',
-        state: 'live',
-        where: 'apps/api/src/domain/questions.js · OWNED_SOURCES · place_answers source check',
-      },
-      {
-        title: 'Three answers, and “we looked and found nothing” is one of them',
-        rule: 'A question about a place is in one of three states: answered, asked and nothing found, or never asked. The middle one is stored rather than inferred. Never asked means the question was added after this place was last looked at.',
-        why: 'A place where nothing anywhere mentioned a toddler pool probably has not got one, and that is worth knowing. If it were drawn the same as a question nobody has got round to yet, the two would be indistinguishable and neither could be trusted.',
-        state: 'live',
-        where: 'apps/api/src/domain/questions.js · settle()',
-      },
-      {
-        title: 'Every answer says where it came from, and two sources may disagree',
-        rule: 'An answer carries its source, the page it came from and the day it was checked — “Wave machine · from coralreef.co.uk · checked 12 Sep”. Where the venue’s page and the open map say different things, both are kept and the pair is marked unresolved for a person to settle. Nothing resolves it quietly.',
-        why: 'A provenance line is what makes a fact checkable a year later. And silently picking a winner between two sources is how a confident wrong answer gets built — the disagreement is itself information.',
-        state: 'live',
-        where: 'apps/api/src/repositories/questionSets.js · markDisagreement()',
-      },
-      {
-        title: 'A word can be mentioned and denied in the same breath',
-        rule: 'When a word is noticed, Epic also records what the sentence did to it: asserted it, denied it, or merely asked about it. “Does it have a wave machine? We couldn’t find one” counts as a question, not as evidence. A candidate whose mentions are mostly denials says so on the row.',
-        why: 'It cannot be worked out later. The rented text is discarded within milliseconds of arriving, so if the polarity is not read at that moment there is nothing left to read it from — and a feature nobody has would look exactly like one everybody has.',
-        state: 'live',
-        where: 'apps/api/src/domain/questions.js · polarityOf()',
-      },
-      {
-        title: 'Only a feature becomes a question, and an unclear word simply waits',
-        rule: 'A harvested word is a feature (a wave machine), a condition (busy at weekends) or an opinion (rude staff). Only features can become questions. A word nothing can call sits in a holding pen — not pending, not rejected, not waiting on anybody — and is looked at again when a later harvest raises its count.',
-        why: 'A wrong “feature” becomes a question asked of thousands of places; an unclear word costs nothing while it waits. And opinions are the Epic score’s job, not a question’s — asking every place whether its staff are rude would be a rating system with extra steps.',
-        state: 'live',
-        where: 'apps/api/src/sources/vocabulary.js · classifyCandidates()',
-      },
-      {
-        title: 'Once a kind of place has its questions, Google leaves that category',
-        rule: 'When a question set stops learning new words, it is settled: the Google pass skips it from then on, and every future place of that kind is answered from the venue’s own page, the open map and the encyclopedias. Attaching a new subcategory to the set unsettles it, because it brings vocabulary nobody has harvested.',
-        why: 'It is the moment a category stops costing money. Epic buys the vocabulary once and owns it; the alternative is paying to be told about wave machines again every time a new water park opens.',
-        state: 'live',
-        where: 'apps/api/src/sources/vocabulary.js · settleFromSaturation()',
-      },
-      {
-        title: 'Epic asks a venue’s website before it reads it',
-        rule: 'Every fetch of a business’s own page checks their robots.txt first, waits the crawl delay they ask for, and identifies itself as EpicBot with a contact address. A site that says no is not read, and yields nothing — the same as a site that is down.',
-        why: 'Enrichment reads venue pages on behalf of a household looking at that venue, which is a reasonable thing to do and stops being reasonable the moment it ignores what the site owner asked for. The cost is real: a venue whose robots.txt was written for search engines may lose us a phone number.',
-        state: 'live',
-        where: 'apps/api/src/sources/politeness.js',
-      },
-      {
-        title: 'Answering a place waits for somebody to want it',
-        rule: 'Questions are raised in bulk; answers are not. A place has its questions answered once it crosses a threshold of appearances in search or drawer opens — never by sweeping everywhere. It is triggered by the search rather than by the tap, so by the time somebody opens a place it is usually already answered, and a place that has never been answered still shows what its drawer says about places of that kind rather than nothing. The hook is built and switched off.',
-        why: 'A small share of places carries most of the searching. Answering all of them up front spends effort on places nobody opens, and it would go stale before anybody read it.',
-        state: 'partial',
-        where: 'apps/api/src/sources/vocabulary.js · enrichmentQueue() · EPIC_ENRICHMENT',
-      },
-    ],
-  },
-  {
     key: 'pictures',
     title: 'Pictures',
     blurb: 'Why some places have a photograph, some have a logo, and some have neither — and why there is no bank of stock food photography.',
@@ -915,6 +1058,23 @@ export function HowItWorks() {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { api.sources().then(setSources).catch((e) => setError(e.message)); }, []);
 
+  /**
+   * Where a link into the page lands. The info icon beside every filing
+   * heading arrives with `?at=<section>`, and the page scrolls to it rather
+   * than to the top. Each anchored section is a DOM node with a known id on
+   * the web, which is the one thing a screen may reach for by name here;
+   * the address itself is only ever read through the router.
+   */
+  const [at] = useQueryState<HowAnchor | null>('at', null, { read: howAnchorOf, write: (v) => v });
+  useEffect(() => {
+    if (!at || Platform.OS !== 'web') return;
+    // After the paint: the section has to exist before it can be scrolled to.
+    const id = requestAnimationFrame(() => {
+      document.getElementById(anchorId(at))?.scrollIntoView({ block: 'start' });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [at]);
+
   const now = sources?.routingNow ?? null;
   const paused = now ? now.matrix ?? now.route ?? null : null;
 
@@ -936,7 +1096,11 @@ export function HowItWorks() {
       <WhatWeOwe />
 
       {SECTIONS.map((s) => (
-        <Panel key={s.key} title={s.title} sub={s.blurb} padded={false}>
+        // `nativeID` is the DOM id on the web, so `?at=facts` can find the
+        // section. A section with no anchor is an ordinary panel.
+        <View key={s.key} nativeID={s.at ? anchorId(s.at) : undefined}
+              style={s.at && s.at === at ? styles.landed : undefined}>
+        <Panel title={s.title} sub={s.blurb} padded={false}>
           {s.decisions.map((d, i) => (
             <View key={d.title} style={[styles.row, i > 0 && styles.rowLine]}>
               <View style={styles.head}>
@@ -956,6 +1120,7 @@ export function HowItWorks() {
             </View>
           ))}
         </Panel>
+        </View>
       ))}
 
       <Panel title="Keeping this page honest" sub="What it is for, and how it is meant to be maintained.">
@@ -975,7 +1140,13 @@ export function HowItWorks() {
   );
 }
 
+/** The DOM id a section is reached by: `how-facts`. */
+const anchorId = (at: HowAnchor) => `how-${at}`;
+
 const styles = StyleSheet.create({
+  // The section a link landed on, marked with a moss rule so the eye finds
+  // it after the scroll. A rule, not a fill: this surface has no boxes.
+  landed: { borderLeftWidth: 3, borderLeftColor: colors.accent, paddingLeft: 12, marginLeft: -15 },
   row: { paddingVertical: 13, gap: 6 },
   rowLine: { borderTopWidth: 1, borderTopColor: colors.lineSoft },
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },

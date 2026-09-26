@@ -182,14 +182,14 @@ function Inspect({ place, onHousehold }: {
       }}>
         <DeskSection
           kicker={place.set
-            ? `ASKED OF EVERY ${place.place.subcategory?.label.toUpperCase() ?? 'PLACE'}`
-            : place.questions.length ? 'ASKED OF EVERY PLACE' : 'NOTHING IS ASKED HERE'}
-          right={place.set ? <Value tone="dim" size={11.5}>{place.set.name}</Value>
-            : place.questions.length ? <Value tone="dim" size={11.5}>the global questions only</Value> : undefined}
+            ? `CHECKED ON EVERY ${place.place.subcategory?.label.toUpperCase() ?? 'PLACE'}`
+            : place.questions.length ? 'CHECKED ON EVERY PLACE' : 'NOTHING IS CHECKED HERE'}
+          right={place.set ? <Value tone="dim" size={11.5}>{`${place.set.name} · a fact sheet`}</Value>
+            : place.questions.length ? <Value tone="dim" size={11.5}>the standard checks only</Value> : undefined}
         >
           {place.questions.length === 0 ? (
             <Nothing>
-              No question set is attached to this drawer, so only the global questions are asked of the places in it — and there are none yet.
+              No fact sheet is attached to this drawer, so only the standard checks are made on the places in it — and there are none yet.
             </Nothing>
           ) : place.questions.map((q) => (
             <View key={q.id} style={{

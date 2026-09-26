@@ -1,10 +1,13 @@
 /**
- * Rules — the defaults, ordered by how wrong they are.
+ * Defaults — ordered by how wrong they are.
  *
- * A default says something about every place in a drawer at once, which is
- * what makes it worth having and what makes a bad one expensive. This screen
- * is the list of the ones that are not holding, so somebody can retire a rule
- * rather than keep correcting what it files.
+ * A default is assumed for every place in a drawer unless a place says
+ * otherwise, which is what makes it worth having and what makes a bad one
+ * expensive. This screen is the list of the ones that are not holding, so
+ * somebody can retire a default rather than keep correcting what it files.
+ *
+ * It was called Rules until the rename (26 Sep 2026), when "rules" meant both
+ * this and the Google-word mappings; those stay on Mapping.
  *
  * **Two columns, because there are two different ways to be wrong**, and Roger
  * asked for both on 20 Sep 2026. They are not the same fact and must not be
@@ -35,7 +38,7 @@ const RULE_COLS: Col[] = [
   { w: 'auto', label: 'Where' },
   { w: 90, label: 'Places', align: 'right' },
   { w: 150, label: 'Places contradict it', align: 'right',
-    title: 'Computed. Of the places this default files, how many hold a different value. A high count can mean the rule is too broad, or that the drawer wants splitting — nobody has said anything, the data disagrees with itself.' },
+    title: 'Computed. Of the places this default files, how many hold a different value. A high count can mean the default is too broad, or that the drawer wants splitting — nobody has said anything, the data disagrees with itself.' },
   { w: 150, label: 'People called it wrong', align: 'right',
     title: 'Human. Of those, how many were set by a person. Every one is somebody who looked at a place and said no, which makes it the stronger signal of the two and the reason it is counted separately.' },
   { w: 130, label: '' },
@@ -49,7 +52,7 @@ const RULE_COLS: Col[] = [
  */
 const ARGUED = 3;
 
-export function Rules({ rows, total, onRetire, onEdit }: {
+export function Defaults({ rows, total, onRetire, onEdit }: {
   rows: RuleRow[];
   /** Every default, not just the arguable ones. */
   total: number;
@@ -62,6 +65,7 @@ export function Rules({ rows, total, onRetire, onEdit }: {
     <>
       <Band
         title={`${dead} ${dead === 1 ? 'default is' : 'defaults are'} being argued with`}
+        how="defaults"
         stats={[{ label: 'Defaults', value: total }]}
       />
       <View>
@@ -93,7 +97,7 @@ export function Rules({ rows, total, onRetire, onEdit }: {
               </Cell>
               <Cell col={RULE_COLS[5]} style={{ paddingVertical: 12 }}>
                 {/*
-                  A person correcting a rule is worth more than a place
+                  A person correcting a default is worth more than a place
                   disagreeing with it, so nought here is drawn plainly rather
                   than as good news: nobody has corrected it *yet*.
                 */}

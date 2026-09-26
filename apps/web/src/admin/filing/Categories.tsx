@@ -42,7 +42,7 @@ const CAT_COLS: Col[] = [
   { w: 260, label: 'Category' },
   { w: 130, label: 'Subcats', align: 'right' },
   { w: 110, label: 'Places', align: 'right' },
-  { w: 'auto', label: 'Question sets' },
+  { w: 'auto', label: 'Fact sheets', title: 'The fact sheets attached to drawers in this category. A sheet is a bundle of checks, and it can cover drawers in more than one category.' },
   { w: 150, label: 'To review', align: 'right' },
 ];
 
@@ -54,6 +54,7 @@ export function CategoryList({ data, onOpen }: {
     <>
       <Band
         title="Categories"
+        how="categories"
         stats={[
           { label: 'CATEGORIES', value: data.counts.categories },
           { label: 'SUBCATEGORIES', value: data.counts.subcategories },
@@ -93,7 +94,7 @@ const SUB_COLS: Col[] = [
   { w: 250, label: 'Subcategory' },
   { w: 270, label: 'Also in' },
   { w: 90, label: 'Places', align: 'right' },
-  { w: 'auto', label: 'Labels' },
+  { w: 'auto', label: 'Facts', title: 'The facts this drawer assumes about every place in it — its defaults — unless a place says otherwise.' },
   { w: 130, label: 'To review', align: 'right' },
 ];
 
@@ -128,6 +129,7 @@ export function CategoryBoard({ data, canManage, busy, picker, onOpen, onAdd, on
     <>
       <Band
         title={data.category.label}
+        how="categories"
         stats={[
           { label: 'SUBCATEGORIES', value: data.counts.subcategories },
           { label: 'PLACES', value: data.counts.places.toLocaleString() },
@@ -323,6 +325,7 @@ export function SubcategoryBoard({ data, busy, canManage, onAccept, onFlip, onAc
     <>
       <Band
         title={s.label}
+        how="categories"
         sub={ruleSummary(data)}
         stats={[
           { label: 'PLACES', value: s.places.toLocaleString() },
@@ -336,12 +339,12 @@ export function SubcategoryBoard({ data, busy, canManage, onAccept, onFlip, onAc
           </Press>
         ) : (
           <Text style={{ fontFamily: fonts.body, fontSize: 15, fontWeight: '600', color: desk.inkDim }}>
-            no question set
+            no fact sheet
           </Text>
         )}
       />
 
-      <DeskSection kicker={`WHAT FILLS IT · ${data.rules.length} ${data.rules.length === 1 ? 'RULE' : 'RULES'}`}>
+      <DeskSection kicker={`WHAT FILLS IT · ${data.rules.length} ${data.rules.length === 1 ? 'MAPPING' : 'MAPPINGS'}`}>
         {s.places === 0 ? (
           <Alarm title="Nothing fills it — that is a mapping gap, not a fact about Britain">
             {data.likely.length ? (
@@ -429,7 +432,7 @@ export function SubcategoryBoard({ data, busy, canManage, onAccept, onFlip, onAc
             </View>
           ))}
           {data.rules.length === 0 && s.places > 0 ? (
-            <Nothing>No rule points here, yet places are filed here — they arrived another way.</Nothing>
+            <Nothing>No mapping points here, yet places are filed here — they arrived another way.</Nothing>
           ) : null}
         </View>
       </DeskSection>
@@ -566,8 +569,8 @@ function ruleSummary(data: FilingSubcategory): string {
     return `from Google: ${shown}${google.length > 3 ? `, and ${google.length - 3} more` : ''}`;
   }
   const rules = data.rules.length;
-  if (!rules) return 'no rule points here';
-  return `${rules} ${rules === 1 ? 'rule fills it' : 'rules fill it'}, none of them a Google type`;
+  if (!rules) return 'no mapping points here';
+  return `${rules} ${rules === 1 ? 'mapping fills it' : 'mappings fill it'}, none of them a Google type`;
 }
 
 function FacetRow({ a, busy, canManage, onAccept, onFlip }: {
@@ -642,7 +645,7 @@ export function PlacesBoard({ data, label }: { data: FilingPlaces; label: string
             </Cell>
             <Cell col={PLACE_COLS[4]}>
               <Value tone={p.human ? 'lime' : 'dim'} weight="700" size={12}>
-                {p.human ? 'a human answered' : p.answered ? 'defaults' : 'never asked'}
+                {p.human ? 'a human answered' : p.answered ? 'defaults' : 'not checked yet'}
               </Value>
             </Cell>
           </Row>

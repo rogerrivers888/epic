@@ -1,11 +1,17 @@
 /**
- * Labels — what we ask, of what kind of place.
+ * Facts — what we find out, about what kind of place.
  *
- * Three screens behind one segmented control: the question sets, one set, the
- * words a human typed that nothing asks yet, and Epic's whole vocabulary.
+ * Three screens behind one segmented control: the fact sheets, one sheet, the
+ * words a human typed that nothing checks yet, and every fact Epic has.
+ *
+ * The words (the rename, 26 Sep 2026): a **fact** is what a place has, in any
+ * shape; a **fact sheet** is a named bundle of checks attached to one or more
+ * subcategories; a **check** is one thing we go and find out; a **standard
+ * check** is asked of every place everywhere; and what we found is yes, no,
+ * nothing found, or not checked yet.
  *
  * The rule the whole tab exists to enforce (brief, 20 Sep 2026): **Google may
- * raise a candidate word, but Google may never answer a question about a
+ * raise a candidate word, but Google may never answer a check about a
  * place.** A candidate is a word read out of rented text and then thrown away;
  * what confirms it is the venue's own page, OSM, Wikipedia, Wikidata or the
  * FSA. That is why the evidence under a candidate is drawn in two registers —
@@ -21,28 +27,28 @@ import { LIME, ON_LIME, desk, fonts } from '../../theme';
 import {
   Act, Alarm, Band, Cell, Col, DeskPill, Head, Kicker, Link, Mark, Nothing, Row, Value, WARN, tabular,
 } from './desk';
-import { rung, tooManyQuestions } from './say';
+import { rung, tooManyChecks } from './say';
 import type { Candidate, GlobalLabel, PendingWord, SetDetail, SetQuestion, SetRow, Threshold, VocabRow } from './types';
 
 // ---------------------------------------------------------------------------
-// The question sets
+// The fact sheets
 // ---------------------------------------------------------------------------
 
 const SET_COLS: Col[] = [
-  { w: 300, label: 'Question set' },
-  { w: 'auto', label: 'Used by' },
-  { w: 100, label: 'Questions', align: 'right' },
+  { w: 300, label: 'Fact sheet', title: 'A named bundle of checks. A sheet is named like a place but is a checklist, and it covers one or more subcategories — so the row says which.' },
+  { w: 'auto', label: 'Covers', title: 'The subcategories every check on this sheet is made against.' },
+  { w: 100, label: 'Checks', align: 'right', title: 'How many things this sheet goes and finds out about each place it covers, on top of the standard checks.' },
   { w: 100, label: 'Places', align: 'right' },
   { w: 140, label: 'Candidates', align: 'right' },
 ];
 
-export function QuestionSets({ sets, onOpen }: { sets: SetRow[]; onOpen: (key: string) => void }) {
+export function FactSheets({ sets, onOpen }: { sets: SetRow[]; onOpen: (key: string) => void }) {
   return (
     <>
-      <Band title="What we ask, of what kind of place" />
+      <Band title="Fact sheets — what we find out, about what kind of place" how="sheets" />
       <View>
         <Head cols={SET_COLS} />
-        {sets.length === 0 ? <Nothing>No question sets yet.</Nothing> : null}
+        {sets.length === 0 ? <Nothing>No fact sheets yet.</Nothing> : null}
         {sets.map((s) => (
           <Row key={s.key} onPress={() => onOpen(s.key)}>
             <Cell col={SET_COLS[0]}>
@@ -52,17 +58,21 @@ export function QuestionSets({ sets, onOpen }: { sets: SetRow[]; onOpen: (key: s
                 {s.state === 'settling' ? <Mark label="SETTLING" tone="dim" /> : null}
                 {s.tooFewForTooMany ? (
                   <Mark label="TOO FEW FOR TOO MANY" tone="warn"
-                    title="Four or more subcategories share fewer than six questions between them." />
+                    title="Four or more subcategories share fewer than six checks between them." />
                 ) : null}
               </View>
             </Cell>
             <Cell col={SET_COLS[1]}>
-              <Value tone="muted" size={12.5}>{s.usedBy.join(' · ') || 'not attached to anything'}</Value>
+              {/* A sheet is named like a place but is a checklist, so the row
+                  says what it covers rather than leaving the name to imply it. */}
+              <Value tone="muted" size={12.5}>
+                {s.usedBy.length ? `covers ${s.usedBy.join(', ')}` : 'covers nothing yet'}
+              </Value>
             </Cell>
             <Cell col={SET_COLS[2]}>
-              <Value numeric weight={tooManyQuestions(s.questions) ? '800' : '400'}
-                tone={tooManyQuestions(s.questions) ? 'warn' : 'ink'}>
-                {s.questions}
+              <Value numeric weight={tooManyChecks(s.questions) ? '800' : '400'}
+                tone={tooManyChecks(s.questions) ? 'warn' : 'ink'}>
+                {`${s.questions} ${s.questions === 1 ? 'check' : 'checks'}`}
               </Value>
             </Cell>
             <Cell col={SET_COLS[3]}><Value numeric>{s.places}</Value></Cell>
@@ -79,10 +89,10 @@ export function QuestionSets({ sets, onOpen }: { sets: SetRow[]; onOpen: (key: s
 }
 
 // ---------------------------------------------------------------------------
-// One set
+// One sheet
 // ---------------------------------------------------------------------------
 
-export function QuestionSet({
+export function FactSheet({
   set, questions, globals, candidates, pen, inFlight, thin, thresholds, readNote,
   onRemoveQuestion, onDetach, onPromote, onIgnore,
 }: {
@@ -98,7 +108,7 @@ export function QuestionSet({
   /** Below the sightings floor: visible, not promotable. */
   thin: Candidate[];
   thresholds: Record<string, Threshold>;
-  /** "620 places were read to find these words · 31 in Berkshire are asked them". */
+  /** "620 places were read to find these words · 31 in Berkshire are checked against them". */
   readNote: string;
   onRemoveQuestion: (id: number) => void;
   onDetach: (subcategory: string) => void;
@@ -114,24 +124,29 @@ export function QuestionSet({
     <>
       <Band
         title={set.name}
+        how="sheets"
+        sub={set.usedBy.length
+          ? `a fact sheet · covers ${set.usedBy.map((s2) => s2.label).join(', ')}`
+          : 'a fact sheet · covers nothing yet'}
         stats={[
-          { label: 'Questions here', value: questions.length, strong: true },
+          { label: 'Checks here', value: questions.length, strong: true },
           { label: 'Places', value: set.places },
           { label: 'Candidates', value: candidates.length },
         ]}
       />
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <Kicker>Covers</Kicker>
         {set.usedBy.map((s2) => (
           <DeskPill key={s2.key} name={s2.label} onRemove={() => onDetach(s2.key)} />
         ))}
       </View>
 
       <View style={{ flexDirection: 'row', gap: 40, alignItems: 'flex-start' }}>
-        {/* Asked here, and what every place is asked anyway. */}
+        {/* Checked here, and what every place is checked for anyway. */}
         <View style={{ width: 620, flexGrow: 0, flexShrink: 0, gap: 12 }}>
-          <Kicker>{`Asked here · ${questions.length}`}</Kicker>
+          <Kicker>{`Checked here · ${questions.length}`}</Kicker>
           <View>
-            {questions.length === 0 ? <Nothing>Nothing is asked here yet.</Nothing> : null}
+            {questions.length === 0 ? <Nothing>Nothing is checked here yet.</Nothing> : null}
             {questions.map((q) => (
               <View key={q.id} style={{
                 flexDirection: 'row', alignItems: 'center', gap: 16,
@@ -139,7 +154,7 @@ export function QuestionSet({
               }}>
                 <View style={{ width: 220, flexGrow: 0, flexShrink: 0, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <Value weight="600">{q.name}</Value>
-                  {q.gate ? <Mark label="GATE" tone="lime" title="A gate keeps a place out of a row rather than describing it." /> : null}
+                  {q.gate ? <Mark label="GATE" tone="lime" title="A gate keeps a place out of an idea rather than describing it." /> : null}
                 </View>
                 <View style={{ width: 120, flexGrow: 0, flexShrink: 0 }}>
                   <Value tone="dim" size={12.5}>{q.shape}</Value>
@@ -156,7 +171,7 @@ export function QuestionSet({
           </View>
 
           <View style={{ gap: 11, borderTopWidth: 1, borderTopColor: desk.rule, paddingTop: 14 }}>
-            <Kicker>Asked everywhere · inherited</Kicker>
+            <Kicker>Standard checks · inherited</Kicker>
             <View>
               {globals.map((g) => (
                 <View key={g.key} style={{
@@ -181,7 +196,7 @@ export function QuestionSet({
           </View>
           <View style={{ borderLeftWidth: 2, borderLeftColor: desk.ruleStrong, paddingLeft: 11, paddingVertical: 2 }}>
             <Value tone="dim" size={11.5}>
-              {`${readNote} · a word needs ${floor} ${floor === 1 ? 'sighting' : 'sightings'} before it can be asked`}
+              {`${readNote} · a word needs ${floor} ${floor === 1 ? 'sighting' : 'sightings'} before it can be checked`}
             </Value>
           </View>
 
@@ -238,7 +253,7 @@ export function QuestionSet({
                   <Value tone="dim" size={12}>{c.why ?? 'nobody could call it'}</Value>
                 </View>
                 <View style={{ width: 130, flexGrow: 0, flexShrink: 0, alignItems: 'flex-end' }}>
-                  <Act label="Ask it anyway" ruled={false}
+                  <Act label="Check it anyway" ruled={false}
                     onPress={() => setPromoting({ id: c.id, word: c.word, gate: false })} />
                 </View>
               </View>
@@ -369,7 +384,7 @@ function CandidateRow({ c, thresholds, open, onToggle, onAsk, onIgnore }: {
             width: 200, flexGrow: 0, flexShrink: 0, flexDirection: 'row',
             alignItems: 'center', gap: 14, justifyContent: 'flex-end',
           }}>
-            <Act label={confirmed ? 'Ask this' : 'Ask it anyway'} onPress={onAsk}
+            <Act label={confirmed ? 'Check this' : 'Check it anyway'} onPress={onAsk}
               tone={confirmed ? 'lime' : 'dim'} ruled={confirmed} />
             {/* Ignoring is permanent, and the row says so when it happens. */}
             <Act label="Ignore" tone={c.state === 'notconfirmed' ? 'ink' : 'dim'} ruled={false} onPress={onIgnore} />
@@ -439,12 +454,12 @@ const STATE_WORD: Record<Candidate['state'], string> = {
 };
 
 /**
- * Promoting a candidate: an ordinary question, or a gate.
+ * Promoting a candidate: an ordinary check, or a gate.
  *
- * The distinction matters downstream. An ordinary question describes a place;
- * a gate keeps it out of a row it would otherwise appear in. Asking the
- * question once, here, is cheaper than discovering later that "hearing loop"
- * was filed as decoration.
+ * The distinction matters downstream. An ordinary check describes a place;
+ * a gate keeps it out of an idea it would otherwise appear in. Settling it
+ * once, here, is cheaper than discovering later that "hearing loop" was
+ * filed as decoration.
  */
 function Promote({ word, gate, onGate, onCancel, onConfirm }: {
   word: string;
@@ -460,14 +475,14 @@ function Promote({ word, gate, onGate, onCancel, onConfirm }: {
         <Act label="cancel" tone="dim" ruled={false} onPress={onCancel} />
       </View>
       <View style={{ flexDirection: 'row', gap: 12 }}>
-        <Radio label="An ordinary question" on={!gate} onPress={() => onGate(false)} />
+        <Radio label="An ordinary check" on={!gate} onPress={() => onGate(false)} />
         <Radio label="A gate" on={gate} onPress={() => onGate(true)} />
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
         <Press effect="sink" onPress={onConfirm} accessibilityRole="button">
           <View style={{ backgroundColor: LIME, paddingVertical: 10, paddingHorizontal: 18 }}>
             <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: ON_LIME }}>
-              Ask it as places turn up
+              Check it as places turn up
             </Text>
           </View>
         </Press>
@@ -506,7 +521,7 @@ function Radio({ label, on, onPress }: { label: string; on: boolean; onPress: ()
 const PENDING_COLS: Col[] = [
   { w: 240, label: 'Typed' },
   { w: 80, label: 'Times', align: 'right' },
-  { w: 'auto', label: 'Closest we have' },
+  { w: 'auto', label: 'Closest fact we have' },
   { w: 200, label: 'A merge repoints' },
   { w: 260, label: '' },
 ];
@@ -514,9 +529,9 @@ const PENDING_COLS: Col[] = [
 /** What is waiting, said as what it is. */
 function pendingTitle({ typed, orphans }: { typed: number; orphans: number }): string {
   const n = (k: number, one: string, many = `${one}s`) => `${k} ${k === 1 ? one : many}`;
-  if (typed && orphans) return `${n(typed, 'word')} typed, and ${n(orphans, 'label')} nothing asks`;
+  if (typed && orphans) return `${n(typed, 'word')} typed, and ${n(orphans, 'fact')} never checked anywhere`;
   if (typed) return `${n(typed, 'word')} a human typed`;
-  if (orphans) return `${n(orphans, 'label')} nothing asks`;
+  if (orphans) return `${n(orphans, 'fact')} never checked anywhere`;
   return 'Nothing waiting';
 }
 
@@ -539,12 +554,13 @@ export function Pending({ words, sets, why, counts, onApprove, onMerge, onReject
     <>
       {/*
         The title is what is actually in the list. Two different things arrive
-        here — a word somebody typed on a place, and a label approved into the
-        vocabulary and never attached — and calling seven orphan labels "words
+        here — a word somebody typed on a place, and a fact approved into the
+        vocabulary and never attached — and calling seven orphan facts "words
         a human typed" is a sentence nobody wrote (21 Sep 2026).
       */}
       <Band title={pendingTitle(counts ?? { typed: words.length, orphans: 0 })}
-        sub="approve into a set, merge into something we already ask, or reject" />
+        how="facts"
+        sub="approve into a sheet, merge into something we already check, or reject" />
       <View>
         <Head cols={PENDING_COLS} />
         {/*
@@ -615,17 +631,17 @@ export function Pending({ words, sets, why, counts, onApprove, onMerge, onReject
                           color: chosen.length ? ON_LIME : desk.inkDim,
                         }}>
                           {chosen.length
-                            ? `Approve into ${chosen.length} ${chosen.length === 1 ? 'set' : 'sets'}`
-                            : 'Pick a set'}
+                            ? `Approve into ${chosen.length} ${chosen.length === 1 ? 'sheet' : 'sheets'}`
+                            : 'Pick a sheet'}
                         </Text>
                       </View>
                     </Press>
                     {/*
-                      Parking is explicit because approving with no set is what
-                      creates orphans: a label in the vocabulary that nothing
-                      ever asks. All labels then says so in red.
+                      Parking is explicit because approving with no sheet is
+                      what creates orphans: a fact in the vocabulary that is
+                      never checked anywhere. All facts then says so in red.
                     */}
-                    <Act label="Park it · nothing asks it yet" tone="dim" ruled={false}
+                    <Act label="Park it · nothing checks it yet" tone="dim" ruled={false}
                       onPress={() => { onPark(w.id); setOpen(null); }} />
                   </View>
                 </View>
@@ -639,18 +655,18 @@ export function Pending({ words, sets, why, counts, onApprove, onMerge, onReject
 }
 
 // ---------------------------------------------------------------------------
-// All labels
+// All facts
 // ---------------------------------------------------------------------------
 
 const VOCAB_COLS: Col[] = [
-  { w: 240, label: 'Label' },
-  { w: 150, label: 'Asked' },
-  { w: 'auto', label: 'Where it is asked', title: 'Everywhere means a global question asks it of every place. In n sets means only the drawers those sets cover. Nowhere is the orphan case \u2014 approved into the vocabulary and never attached, so nothing ever asks it of a place.' },
+  { w: 240, label: 'Fact', title: 'Something we find out about a place \u2014 indoors, step free, wave machine. Any shape: yes/no, a range, a band.' },
+  { w: 150, label: 'Checked' },
+  { w: 'auto', label: 'Where it is checked', title: 'A standard check is made on every place, everywhere. In n sheets means only the drawers those sheets cover. Never checked anywhere is the orphan case \u2014 approved into the vocabulary and never attached, so no place is ever checked for it.' },
   { w: 100, label: 'Places', align: 'right' },
   { w: 200, label: '' },
 ];
 
-export function AllLabels({ rows, onAskIn, onRetire, onOpenSet }: {
+export function AllFacts({ rows, onAskIn, onRetire, onOpenSet }: {
   rows: VocabRow[];
   onAskIn: (key: string) => void;
   onRetire: (key: string) => void;
@@ -662,10 +678,11 @@ export function AllLabels({ rows, onAskIn, onRetire, onOpenSet }: {
   return (
     <>
       <Band
-        title="The words"
+        title="All facts"
+        how="facts"
         stats={[
-          { label: 'Asked everywhere', value: everywhere },
-          { label: 'Used nowhere', value: nowhere, strong: nowhere > 0 },
+          { label: 'Standard checks', value: everywhere },
+          { label: 'Never checked anywhere', value: nowhere, strong: nowhere > 0 },
         ]}
       />
       {/*
@@ -687,15 +704,15 @@ export function AllLabels({ rows, onAskIn, onRetire, onOpenSet }: {
               <Cell col={VOCAB_COLS[1]}>
                 <Value size={12.5} weight="600"
                   tone={r.scope === 'everywhere' ? 'muted' : orphan ? 'warn' : 'lime'}>
-                  {r.scope === 'everywhere' ? 'everywhere'
-                    : orphan ? 'nowhere'
-                    : `in ${r.sets.length} ${r.sets.length === 1 ? 'set' : 'sets'}`}
+                  {r.scope === 'everywhere' ? 'standard check'
+                    : orphan ? 'never checked'
+                    : `in ${r.sets.length} ${r.sets.length === 1 ? 'sheet' : 'sheets'}`}
                 </Value>
               </Cell>
               <Cell col={VOCAB_COLS[2]}>
                 <Value tone="muted" size={12.5}>
                   {r.scope === 'everywhere' ? 'every place, every subcategory'
-                    : r.sets.join(' · ') || 'approved but never asked'}
+                    : r.sets.join(' · ') || 'never checked anywhere'}
                 </Value>
               </Cell>
               <Cell col={VOCAB_COLS[3]}>
@@ -703,11 +720,11 @@ export function AllLabels({ rows, onAskIn, onRetire, onOpenSet }: {
               </Cell>
               <Cell col={VOCAB_COLS[4]}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, justifyContent: 'flex-end' }}>
-                  {orphan ? <Act label="Ask it in…" onPress={() => onAskIn(r.key)} /> : null}
-                  {/* Retiring takes it out of the vocabulary and out of every set. */}
+                  {orphan ? <Act label="Check it in…" onPress={() => onAskIn(r.key)} /> : null}
+                  {/* Retiring takes it out of the vocabulary and out of every sheet. */}
                   {/* Red, like every other irreversible thing on this surface.
-                      Retiring a label stops it being asked anywhere and drops
-                      it from every set that had it — the prototype draws it
+                      Retiring a fact stops it being checked anywhere and drops
+                      it from every sheet that had it — the prototype draws it
                       red with a red rule and it was grey. */}
                   <Act label="Retire" tone="warn" onPress={() => onRetire(r.key)} />
                 </View>

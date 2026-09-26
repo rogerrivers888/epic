@@ -1,10 +1,12 @@
 /**
  * The filing desk: six tabs over one taxonomy.
  *
- * Overview · Categories · Labels · Mapping · Rules · Rows — the Places
- * redesign (Claude Design, 20 Sep 2026). One screen, because the six are one
- * job: a person sits down at it and works the taxonomy until the queues are
- * empty.
+ * Overview · Categories · Facts · Mapping · Defaults · Ideas — the Places
+ * redesign (Claude Design, 20 Sep 2026), in the words of the rename (owner's
+ * brief, 26 Sep 2026): Labels became Facts, Rules became Defaults and Rows
+ * became Ideas, because each old word was doing several jobs. One screen,
+ * because the six are one job: a person sits down at it and works the
+ * taxonomy until the queues are empty.
  *
  * **Every layer has an address.** The tab and everything inside it are query
  * state, so `/admin/filing?tab=categories&sub=golf` opens on that drawer for
@@ -24,7 +26,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, View, type ViewStyle } from 'react-native';
 import { Press } from '../../components/press';
 import { desk, fonts, LIME } from '../../theme';
-import { asOneOf, asText, useQueryState, useRouter } from '../../router';
+import { asText, useQueryState, useRouter } from '../../router';
+import { FILING_TABS, filingTabOf, type FilingTab } from '../../routes';
 import { useViewport } from '../../hooks/useViewport';
 import { api } from '../../api';
 import type {
@@ -34,34 +37,37 @@ import type {
 import { SegStrip } from './desk';
 import { Overview } from './Overview';
 import { CategoryBoard, CategoryList, PlacesBoard, SubcategoryBoard } from './Categories';
-import { AllLabels, Pending, QuestionSet, QuestionSets } from './Labels';
+import { AllFacts, FactSheet, FactSheets, Pending } from './Facts';
 import { NotInEpic, Words } from './Mapping';
-import { HouseholdView, Rows, type HouseState, type RowFilter } from './Rows';
+import { HouseholdView, Ideas, type HouseState, type RowFilter } from './Ideas';
 import { Train } from './Train';
-import { Rules } from './Rules';
+import { Defaults } from './Defaults';
 import { DecisionLog, Runs } from './Runs';
 import type { Decision, HouseMember, Trail, WordRow } from './types';
 import type { SortKey } from './say';
 
-/** The six the strip draws. */
-const TABS = ['overview', 'categories', 'labels', 'mapping', 'rules', 'rows'] as const;
 /**
- * Runs is a place you can be without being a tab.
+ * The six the strip draws. Spelled in `routes.ts`, because the tab is part of
+ * the address; the old spellings (`labels`, `rules`, `rows`) still open the
+ * right screen through `filingTabOf`, so a link sent before the rename still
+ * lands.
  *
- * The handoff puts it behind the corner link and the left nav rather than in
- * the strip — it is where you go to ask "is this working?", not one of the six
- * things you work on. It still has an address, because everything here does.
+ * Runs is a place you can be without being a tab. The handoff puts it behind
+ * the corner link and the left nav rather than in the strip — it is where you
+ * go to ask "is this working?", not one of the six things you work on. It
+ * still has an address, because everything here does.
  */
-const PLACES = [...TABS, 'runs'] as const;
-type Tab = typeof PLACES[number];
+const TABS = FILING_TABS.filter((t) => t !== 'runs');
+type Tab = FilingTab;
+const asTab = { read: filingTabOf, write: (v: Tab | null) => (v == null || v === 'overview' ? null : v) };
 
 const TAB_LABEL: Record<Tab, string> = {
   overview: 'Overview',
   categories: 'Categories',
-  labels: 'Labels',
+  facts: 'Facts',
   mapping: 'Mapping',
-  rules: 'Rules',
-  rows: 'Rows',
+  defaults: 'Defaults',
+  ideas: 'Ideas',
   runs: 'Runs',
 };
 
@@ -78,7 +84,7 @@ const PHONE = 900;
 
 export function Filing({ canManage }: { canManage: boolean }) {
   const { setQuery } = useRouter();
-  const [tab] = useQueryState<Tab>('tab', 'overview', asOneOf(PLACES, 'overview'));
+  const [tab] = useQueryState<Tab>('tab', 'overview', asTab);
   const [cat] = useQueryState<string>('cat', '', asText);
   const [sub] = useQueryState<string>('sub', '', asText);
   const [set] = useQueryState<string>('set', '', asText);
@@ -156,22 +162,22 @@ export function Filing({ canManage }: { canManage: boolean }) {
         }
         else setCategories(await api.filingCategories());
       }
-      if (tab === 'labels') {
+      if (tab === 'facts') {
         if (view === 'pending') setPending(await api.adminFilingPending());
         else if (view === 'vocabulary') setVocabulary(await api.filingVocabulary());
         else if (set) {
-          // Both, always. The set screen draws the global labels and its own
-          // row from the list, so fetching only the set left a shared link
-          // like `?tab=labels&set=water` rendering nothing at all — which is
-          // the one promise the addresses here exist to keep (Codex, 20 Sep).
+          // Both, always. The sheet screen draws the standard checks and its
+          // own row from the list, so fetching only the sheet left a shared
+          // link like `?tab=facts&set=water` rendering nothing at all — which
+          // is the one promise the addresses here exist to keep (Codex, 20 Sep).
           const [one, list] = await Promise.all([api.filingSet(set), api.filingLabels()]);
           setOneSet(one); setLabels(list);
         } else setLabels(await api.filingLabels());
       }
       if (tab === 'mapping' && view === 'excluded') setExcluded(await api.filingExcluded());
       if (tab === 'mapping' && view !== 'excluded') setMapping(await api.filingMapping());
-      if (tab === 'rows') setRows(await api.adminFilingRows());
-      if (tab === 'rules') setRules(await api.adminFilingRules());
+      if (tab === 'ideas') setRows(await api.adminFilingRows());
+      if (tab === 'defaults') setRules(await api.adminFilingRules());
       if (tab === 'runs') {
         if (view === 'decisions') {
           setDecisions(await api.adminFilingDecisions({
@@ -321,13 +327,13 @@ export function Filing({ canManage }: { canManage: boolean }) {
 
   /** Where a queue card on the Overview lands. */
   const goQueue = (where: string) => {
-    if (where === 'labels') return root('labels');
-    // The holding pen is the words nobody can call, which live on a set's own
-    // screen. Until a set exists to open, Pending is the nearest true thing —
-    // and it says so rather than landing on an empty list.
-    if (where === 'pen') return go({ tab: 'labels', cat: '', sub: '', set: '', view: 'pending' });
+    if (where === 'facts' || where === 'labels') return root('facts');
+    // The holding pen is the words nobody can call, which live on a sheet's
+    // own screen. Until a sheet exists to open, Pending is the nearest true
+    // thing — and it says so rather than landing on an empty list.
+    if (where === 'pen') return go({ tab: 'facts', cat: '', sub: '', set: '', view: 'pending' });
     if (where === 'audit') return go({ tab: 'mapping', cat: '', sub: '', set: '', view: 'audit' });
-    if (where === 'arguing') return root('rules');
+    if (where === 'arguing') return root('defaults');
     return root('overview');
   };
 
@@ -537,7 +543,7 @@ export function Filing({ canManage }: { canManage: boolean }) {
               // The household *view*, not the back-office list. "See what a
               // household sees" landing on a table of rules was the button
               // saying one thing and doing another.
-              onHousehold={() => go({ tab: 'rows', cat: '', sub: '', set: '', view: 'household' })}
+              onHousehold={() => go({ tab: 'ideas', cat: '', sub: '', set: '', view: 'household' })}
             />
           ) : null}
 
@@ -548,9 +554,9 @@ export function Filing({ canManage }: { canManage: boolean }) {
               canManage={canManage}
               onPlaces={() => go({ view: 'places' })}
               onTrain={() => go({ view: 'train' })}
-              onSet={(key) => go({ tab: 'labels', set: key, cat: '', sub: '', view: '' })}
+              onSet={(key) => go({ tab: 'facts', set: key, cat: '', sub: '', view: '' })}
               onMap={() => go({ tab: 'mapping', cat: '', sub: '', set: '', view: '' })}
-              onStrike={(word) => void run(word, async () => `${word} — striking a rule is not wired yet`)}
+              onStrike={(word) => void run(word, async () => `${word} — striking a mapping is not wired yet`)}
               onAccept={(attribute) => void run(attribute, async () => {
                 const out = await api.filingSetDefault(sub, { attribute, accept: true });
                 return `${labelOf(drawer, attribute)} set on ${drawer.subcategory.label}`;
@@ -566,46 +572,46 @@ export function Filing({ canManage }: { canManage: boolean }) {
             />
           ) : null}
 
-          {tab === 'labels' && !set ? (
+          {tab === 'facts' && !set ? (
             <View style={{ flexDirection: 'row' }}>
               {/*
-                Persistent across all three Labels screens, as §6 specifies.
-                Without it All labels was reachable only by typing the address
+                Persistent across all three Facts screens, as §6 specifies.
+                Without it All facts was reachable only by typing the address
                 and Pending had no entry point at all — which also left the
                 front door's biggest number, the holding pen, landing on an
-                empty Question sets list (the side-by-side audit, 21 Sep 2026).
+                empty Fact sheets list (the side-by-side audit, 21 Sep 2026).
               */}
               <SegStrip
                 value={view === 'pending' ? 'pending' : view === 'vocabulary' ? 'vocabulary' : 'sets'}
                 options={[
-                  { key: 'sets', label: 'Question sets' },
+                  { key: 'sets', label: 'Fact sheets' },
                   { key: 'pending', label: `Pending${pending ? ` · ${pending.pending.length}` : ''}` },
-                  { key: 'vocabulary', label: `All labels${vocabulary ? ` · ${vocabulary.counts.labels}` : ''}` },
+                  { key: 'vocabulary', label: `All facts${vocabulary ? ` · ${vocabulary.counts.labels}` : ''}` },
                 ]}
                 onChange={(k) => go({ view: k === 'sets' ? '' : k })}
               />
             </View>
           ) : null}
 
-          {tab === 'labels' && view === 'pending' && pending ? (
+          {tab === 'facts' && view === 'pending' && pending ? (
             <Pending
               words={pending.pending}
               sets={pending.sets}
               why={pending.why}
               counts={pending.counts}
-              onApprove={() => said('Approving a word into a set is not wired yet.')}
+              onApprove={() => said('Approving a word into a sheet is not wired yet.')}
               onMerge={() => said('Merging a word is not wired yet.')}
               onReject={() => said('Rejecting a word is not wired yet.')}
               onPark={() => said('Parking a word is not wired yet.')}
             />
           ) : null}
 
-          {tab === 'labels' && !set && view !== 'vocabulary' && view !== 'pending' && labels ? (
-            <QuestionSets sets={labels.sets} onOpen={(key) => go({ set: key, view: '' })} />
+          {tab === 'facts' && !set && view !== 'vocabulary' && view !== 'pending' && labels ? (
+            <FactSheets sets={labels.sets} onOpen={(key) => go({ set: key, view: '' })} />
           ) : null}
 
-          {tab === 'labels' && set && oneSet && labels ? (
-            <QuestionSet
+          {tab === 'facts' && set && oneSet && labels ? (
+            <FactSheet
               set={setRowFor(labels, set, oneSet)}
               questions={oneSet.questions}
               globals={labels.globals}
@@ -615,18 +621,18 @@ export function Filing({ canManage }: { canManage: boolean }) {
               thin={oneSet.thin}
               thresholds={thresholdsOf(overview)}
               readNote={oneSet.readNote}
-              onRemoveQuestion={() => said('Removing a question is not wired yet')}
+              onRemoveQuestion={() => said('Removing a check is not wired yet')}
               onDetach={() => said('Detaching a subcategory is not wired yet')}
               onPromote={() => said('Promoting a candidate is not wired yet')}
               onIgnore={() => said('Ignoring a candidate is not wired yet')}
             />
           ) : null}
 
-          {tab === 'labels' && view === 'vocabulary' && vocabulary ? (
-            <AllLabels
+          {tab === 'facts' && view === 'vocabulary' && vocabulary ? (
+            <AllFacts
               rows={vocabulary.vocabulary}
-              onAskIn={() => said('Asking an orphan label somewhere is not wired yet')}
-              onRetire={() => said('Retiring a label is not wired yet')}
+              onAskIn={() => said('Checking an orphan fact somewhere is not wired yet')}
+              onRetire={() => said('Retiring a fact is not wired yet')}
               onOpenSet={(key) => go({ set: key, view: '' })}
             />
           ) : null}
@@ -686,18 +692,18 @@ export function Filing({ canManage }: { canManage: boolean }) {
             />
           ) : null}
 
-          {tab === 'rows' && rows ? (
+          {tab === 'ideas' && rows ? (
             <View style={{ flexDirection: 'row' }}>
               {/*
                 §17's household view was built in full — district switch, the
-                first-heart question, Inspire with unhearted rows mixed in, the
-                waiting row — and imported by nothing. One control turns dead
-                code into the screen (the side-by-side audit, 21 Sep 2026).
+                first-heart question, Inspire with unhearted ideas mixed in,
+                the waiting idea — and imported by nothing. One control turns
+                dead code into the screen (the side-by-side audit, 21 Sep 2026).
               */}
               <SegStrip
                 value={view === 'household' ? 'household' : 'rows'}
                 options={[
-                  { key: 'rows', label: `The rows · ${rows.rows.length}` },
+                  { key: 'rows', label: `The ideas · ${rows.rows.length}` },
                   { key: 'household', label: 'The household view' },
                 ]}
                 onChange={(k) => go({ view: k === 'household' ? 'household' : '' })}
@@ -705,7 +711,7 @@ export function Filing({ canManage }: { canManage: boolean }) {
             </View>
           ) : null}
 
-          {tab === 'rows' && view === 'household' && rows ? (
+          {tab === 'ideas' && view === 'household' && rows ? (
             <HouseholdView
               state={houseState}
               onState={setHouseState}
@@ -724,8 +730,8 @@ export function Filing({ canManage }: { canManage: boolean }) {
             />
           ) : null}
 
-          {tab === 'rows' && view !== 'household' && rows ? (
-            <Rows
+          {tab === 'ideas' && view !== 'household' && rows ? (
+            <Ideas
               rows={rows.rows}
               districts={rows.districts}
               minFill={rows.minFill ?? 4}
@@ -738,7 +744,7 @@ export function Filing({ canManage }: { canManage: boolean }) {
                   // The shorthand is rendered from the rule; typing over it
                   // cannot set one. Saying so beats saving nothing and
                   // reporting success, which is the prototype's own failure.
-                  said('A row\u2019s rule is set as structure, not by typing over its shorthand.');
+                  said('An idea\u2019s rule is set as structure, not by typing over its shorthand.');
                   return;
                 }
                 void run(id, async () => {
@@ -749,8 +755,8 @@ export function Filing({ canManage }: { canManage: boolean }) {
             />
           ) : null}
 
-          {tab === 'rules' && rules ? (
-            <Rules
+          {tab === 'defaults' && rules ? (
+            <Defaults
               rows={rules.rules}
               total={rules.counts.rules}
               onRetire={(id) => void run(String(id), async () => {
@@ -760,7 +766,7 @@ export function Filing({ canManage }: { canManage: boolean }) {
               onEdit={(rule) => {
                 // A default is edited where it lives, which is the drawer — and
                 // the drawer is read off the row rather than parsed out of the
-                // id, so a rule that has no drawer says so instead of
+                // id, so a default that has no drawer says so instead of
                 // navigating to a subcategory called "123".
                 if (!rule.subcategory) {
                   said('That default is not attached to a drawer, so there is nowhere to edit it.');
@@ -910,7 +916,7 @@ function householdRows(
   return data.rows.slice(0, 14).map(shelf);
 }
 
-type BrowseRowWithFill = Parameters<typeof Rows>[0]['rows'][number];
+type BrowseRowWithFill = Parameters<typeof Ideas>[0]['rows'][number];
 
 /** Whose hearts these are — nobody, until the first-heart question is answered. */
 function owner(data: { rows: { hearted: boolean; heartedById: string | null }[]; members: HouseMember[] }, state: HouseState) {
@@ -959,7 +965,7 @@ function filterOptionsFor(m: { words: { decision: string; flags: { key: string; 
   const states: { key: string; name: string; kind: string; note: string }[] = [
     { key: 'state:mapped', name: 'Answered', kind: 'STATE', note: 'points at a drawer' },
     { key: 'state:notsure', name: 'Not sure', kind: 'STATE', note: 'nobody has said' },
-    { key: 'state:secondary', name: 'Kept as a label', kind: 'STATE', note: 'a fact, not a drawer' },
+    { key: 'state:secondary', name: 'Kept as a fact', kind: 'STATE', note: 'a fact, not a drawer' },
     { key: 'state:notinepic', name: 'Not in Epic', kind: 'STATE', note: 'kept out on purpose' },
   ].filter((s) => m.words.some((w) => `state:${w.decision}` === s.key
     || (s.key === 'state:mapped' && w.decision === 'mapped')));
@@ -1050,9 +1056,9 @@ function crumbs({ tab, cat, sub, set, view, category, drawer, oneSet, go }: {
   if (tab === 'runs') {
     if (view === 'decisions') out.push({ label: 'Decision log' });
   }
-  if (tab === 'labels') {
+  if (tab === 'facts') {
     if (set) out.push({ label: oneSet?.set.name ?? set });
-    if (view === 'vocabulary') out.push({ label: 'All labels' });
+    if (view === 'vocabulary') out.push({ label: 'All facts' });
     if (view === 'pending') out.push({ label: 'Pending' });
   }
   if (tab === 'mapping' && view === 'excluded') out.push({ label: 'Not in Epic' });

@@ -62,7 +62,7 @@ test('a rule that cannot be run is refused before it is saved', () => {
 
   refuses({}, /has to say something/);
   refuses({ all: [] }, /has to say something/);
-  refuses({ attribute: 'how-tall', from: 2 }, /not one of our labels/);
+  refuses({ attribute: 'how-tall', from: 2 }, /not one of our facts/);
   refuses({ subcategory: ['bowling'] }, /not one of our subcategories/);
   refuses({ category: ['nonsense'] }, /not one of our categories/);
   // A yes or no is not a range, and a range is not a yes or no.
@@ -242,5 +242,5 @@ test('there is no clause for how far away somewhere is, and that is deliberate',
   // asking. A row holding its own idea of "near" would be a second fence, and
   // the first thing it would do is disagree with the first one.
   assert.throws(() => checkPredicate({ within: 30 }, CONTEXT), /has to say something/);
-  assert.throws(() => checkPredicate({ attribute: 'minutes', to: 30 }, CONTEXT), /not one of our labels/);
+  assert.throws(() => checkPredicate({ attribute: 'minutes', to: 30 }, CONTEXT), /not one of our facts/);
 });
