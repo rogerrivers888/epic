@@ -9,8 +9,13 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { censusBoardRows } from '../src/routes/placeIndex.js';
-import { query, pool } from '../src/db.js';
+import { testDatabase } from './helpers/db.js';
+
+// A test database of its own: read from src/db.js this file ran against the
+// shared development database, and two sessions running the suite at once
+// wrote the same fixture rows over each other (26 Sep 2026).
+const { query, pool } = await testDatabase();
+const { censusBoardRows } = await import('../src/routes/placeIndex.js');
 
 test.after(() => pool.end());
 
