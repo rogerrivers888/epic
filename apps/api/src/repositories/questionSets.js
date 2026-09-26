@@ -592,7 +592,7 @@ export async function unclassified({ subcategory = null, limit = 200 } = {}) {
  * The examples go here. They were scaffolding for the review and the brief is
  * explicit that the association has no reason to outlive the decision.
  */
-export async function promote(id, { gate = false, kind = 'yesno', label = null, attributeKey = null, refreshDays = null, actor = null } = {}) {
+export async function promote(id, { gate = false, kind = 'yesno', label = null, attributeKey = null, refreshDays = null, actor = null, setKey: toSet = null } = {}) {
   return withTransaction(async (client) => {
     const { rows } = await client.query("select * from harvest_candidates where id = $1 and status = 'new' for update", [id]);
     const candidate = rows[0];
@@ -606,7 +606,14 @@ export async function promote(id, { gate = false, kind = 'yesno', label = null, 
     const set = await client.query(
       'select set_key from question_set_subcategories where subcategory_key = $1', [candidate.subcategory],
     );
-    const setKey = set.rows[0]?.set_key ?? null;
+    // The owner may put a word on another sheet than its drawer's — a moat
+    // raised under museums belongs to Historic (26 Sep 2026). The override
+    // must name a sheet that exists; it is never invented on the way through.
+    if (toSet) {
+      const named = await client.query('select key from question_sets where key = $1', [toSet]);
+      if (!named.rows[0]) throw bad(`There is no question set called ${toSet}.`);
+    }
+    const setKey = toSet ?? set.rows[0]?.set_key ?? null;
     if (!setKey) throw bad(`${candidate.subcategory} does not use a question set yet. Attach it to one, then promote the word.`);
 
     // Reuse a label we already have before making one. The alias table is the
@@ -633,6 +640,15 @@ export async function promote(id, { gate = false, kind = 'yesno', label = null, 
          on conflict (norm) do nothing`, [candidate.norm, key, candidate.raw_forms?.[0] ?? null],
       );
     }
+    // Whatever label the word landed on — one it made, or one it was merged
+    // onto by name — its own wording resolves there from now on, so the next
+    // harvest meets "riverside" and answers `river` rather than raising it
+    // again (C18, 26 Sep 2026). `do nothing`: a wording already pointed
+    // somewhere on purpose is not repointed by a later merge.
+    await client.query(
+      `insert into attribute_aliases (norm, target_key, raw) values ($1, $2, $3)
+       on conflict (norm) do nothing`, [candidate.norm, key, candidate.raw_forms?.[0] ?? null],
+    );
     const question = await addQuestion(
       { attributeKey: key, setKey, scope: 'set', gate, refreshDays, fromCandidate: id }, client,
     );
@@ -672,6 +688,30 @@ export async function unignore(id) {
       where id = $1 and status = 'ignored' returning *`, [id],
   );
   return rows[0] ?? null;
+}
+
+/**
+ * A drawer name is a filing, not a question (C24, owner 26 Sep 2026).
+ *
+ * "Lake" raised under parks is not a question a park answers yes to; a place
+ * that has a lake is *also in* Water. So the word is decided as a filing under
+ * that drawer — resolved, like a condition or an opinion, and never promotable
+ * — and the place-level filing is enrichment's to make when it reads a place.
+ * The decision is kept where the word is, with its quote, so the next harvest
+ * meets the same word and finds it already called.
+ */
+export async function fileUnder(id, { under, by = null } = {}) {
+  const drawer = await query('select key from shelf_subcategories where key = $1', [under]);
+  if (!drawer.rows[0]) throw bad(`There is no drawer called ${under}.`);
+  const { rows } = await query(
+    `update harvest_candidates
+        set kind = 'filing', files_under = $2, status = 'unresolved',
+            decided_by = $3, decided_at = now(), examples = '{}'
+      where id = $1 and status in ('new', 'unresolved') returning *`,
+    [id, under, by],
+  );
+  if (!rows[0]) throw bad('That word has already been decided.');
+  return rows[0];
 }
 
 const sentence = (s) => {

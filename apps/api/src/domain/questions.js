@@ -253,7 +253,11 @@ export function polarityOf(text, phrase) {
 // Kind: a feature, a condition, an opinion, or not yet known
 // ---------------------------------------------------------------------------
 
-export const KINDS = ['feature', 'condition', 'opinion', 'unclear'];
+// `filing` (C24, owner 26 Sep 2026): a word that names another drawer — lake,
+// woodland, viewpoint — is not a question a place answers yes to; a place that
+// has a lake is *also in* Water. Decided, like a condition or an opinion, and
+// never promotable.
+export const KINDS = ['feature', 'condition', 'opinion', 'unclear', 'filing'];
 
 /**
  * Words that are plainly not a question about a place, without asking anybody.

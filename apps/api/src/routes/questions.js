@@ -268,8 +268,25 @@ questionRoutes.post('/candidates/:id/kind', requires('manage_questions'), async 
 
 questionRoutes.post('/candidates/:id/promote', requires('manage_questions'), async (req, res, next) => {
   try {
-    const { gate = false, kind = 'yesno', label = null, attributeKey = null, refreshDays = null } = req.body ?? {};
-    res.json(await sets.promote(Number(req.params.id), { gate, kind, label, attributeKey, refreshDays, actor: actorOf(req) }));
+    const { gate = false, kind = 'yesno', label = null, attributeKey = null, refreshDays = null, setKey = null } = req.body ?? {};
+    res.json(await sets.promote(Number(req.params.id), {
+      gate, kind, label, attributeKey, refreshDays, actor: actorOf(req),
+      // Onto another sheet than the drawer's own, by name (C18: a moat raised
+      // under museums belongs to Historic).
+      setKey: setKey ? String(setKey) : null,
+    }));
+  } catch (err) { next(err); }
+});
+
+/**
+ * Decide a word as a filing (C24): it names another drawer, and a place that
+ * has one is *also in* that drawer rather than answering a question about it.
+ */
+questionRoutes.post('/candidates/:id/file', requires('manage_questions'), async (req, res, next) => {
+  try {
+    const under = String(req.body?.under ?? '').trim();
+    if (!under) throw bad('Name the drawer this word files a place under.');
+    res.json(await sets.fileUnder(Number(req.params.id), { under, by: actorOf(req) }));
   } catch (err) { next(err); }
 });
 

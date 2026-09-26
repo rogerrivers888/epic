@@ -669,3 +669,56 @@ test('an ignored word keeps its quote, so the way back leads somewhere', async (
   assert.equal(back.status, 'new', 'restored, and promotable again because it is still quoted');
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
 });
+
+// ---------------------------------------------------------------------------
+// the alias plan: merges, another sheet, filings (C18, C24)
+// ---------------------------------------------------------------------------
+
+test('a word promoted onto an existing label becomes its alias, and may land on another sheet', async () => {
+  // Riverside is river said another way (a merge), and a moat raised under
+  // museums belongs to Historic (the owner, 26 Sep 2026).
+  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+  await query("insert into question_sets (key, name) values ('zz-other', 'Other') on conflict do nothing");
+  await sets.recordCandidates(sub, [
+    { norm: 'zz river', raw: 'zz river', kind: 'feature', sources: ['features'], placesSeen: 4, examples: ['osm:r'], asserts: 4, evidence: 'found on the River Dulais', evidenceRef: 'osm:r' },
+    { norm: 'zz riverside', raw: 'zz riverside', kind: 'feature', sources: ['features'], placesSeen: 4, examples: ['osm:r2'], asserts: 4, evidence: 'located next to the River Thames', evidenceRef: 'osm:r2' },
+  ], { placesTotal: 20 });
+  const rows = await sets.candidates({ subcategory: sub, status: 'new', limit: 50 });
+  const river = rows.find((c) => c.norm === 'zz river');
+  const riverside = rows.find((c) => c.norm === 'zz riverside');
+  const first = await sets.promote(river.id, { actor: 'test', setKey: 'zz-other' });
+  assert.equal(first.setKey, 'zz-other', 'the override names the sheet');
+  const merged = await sets.promote(riverside.id, { actor: 'test', attributeKey: first.attributeKey, setKey: 'zz-other' });
+  assert.equal(merged.attributeKey, first.attributeKey, 'merged onto the same label');
+  assert.equal((await sets.resolveAttribute('zz riverside'))?.key, first.attributeKey, 'the merged wording resolves there from now on');
+  await assert.rejects(() => sets.promote(river.id, { actor: 'test', setKey: 'zz-nowhere' }), /already been decided|no question set called/);
+  await query("delete from questions where set_key = 'zz-other'");
+  await query("delete from question_sets where key = 'zz-other'");
+  await query("delete from attribute_aliases where norm like 'zz %'");
+  await query("delete from place_attributes where key like 'zz-%'");
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+});
+
+test('a drawer name is decided as a filing, never a question', async () => {
+  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+  await sets.recordCandidates(sub, [
+    { norm: 'zz lake', raw: 'zz lake', kind: 'feature', sources: ['features'], placesSeen: 10, examples: ['osm:l'], asserts: 10, evidence: 'a boating lake', evidenceRef: 'osm:l' },
+  ], { placesTotal: 83 });
+  const [lake] = (await sets.candidates({ subcategory: sub, status: 'new', limit: 50 })).filter((c) => c.norm === 'zz lake');
+  const filed = await sets.fileUnder(lake.id, { under: sub, by: 'test' });
+  assert.equal(filed.kind, 'filing');
+  assert.equal(filed.files_under, sub);
+  assert.equal(filed.status, 'unresolved', 'decided, and not promotable');
+  assert.ok(filed.evidence, 'the quote stays with the decision');
+  assert.equal((await sets.candidates({ subcategory: sub, status: 'new', limit: 50 })).filter((c) => c.norm === 'zz lake').length, 0);
+  await assert.rejects(() => sets.fileUnder(lake.id, { under: 'zz-no-such-drawer' }), /no drawer called/);
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+});
+
+test('dining area is food-on-site said another way', async () => {
+  // Migration 259: the wording is an alias of the global label, so the
+  // resolver answers the question already asked of everything.
+  assert.equal((await sets.resolveAttribute('Dining area'))?.key, 'food-on-site');
+});
