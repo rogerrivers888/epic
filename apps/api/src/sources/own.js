@@ -831,7 +831,10 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
   // map's tags, the venue's page, the encyclopedia, the name. Written as a
   // fact of ours and nothing more — the verdict changes no filing until the
   // switch is on, and `recordVerdict` is inert while it is off.
-  if (dayOutTestOn()) {
+  // Not on a pass that skipped the open-map match: its tags are not stored, so
+  // the test would judge without them and write a verdict on thin evidence
+  // (Codex, 26 Sep 2026). The place is left unjudged for a pass that matched.
+  if (dayOutTestOn() && osm?.how !== 'held') {
     try {
       const held = await owned.liveFacts(venueRef, { keepableOnly: true });
       const name = held.find((x) => x.field === 'name' && !empty(x.value))?.value ?? seed.name ?? '';
