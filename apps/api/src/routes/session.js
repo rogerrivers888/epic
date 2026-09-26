@@ -7,7 +7,7 @@
 
 import express from 'express';
 import {
-  authConfigured, clearSessionCookie, closeSession, openSession, passcodeMatches, sessionCookie,
+  authConfigured, clearSessionCookie, closeSession, openSession, passcodeMatches, sessionKindFor, sessionCookie,
 } from '../auth.js';
 import { findLiveSession, liveSessions, revokeAllSessions } from '../repositories/sessions.js';
 import { accountByContact, accountById, consumeSignInLink, ownerAccount, recordSignIn } from '../repositories/accounts.js';
@@ -94,7 +94,7 @@ router.post('/session', async (req, res, next) => {
     // way everybody else's are. Until then it opens a session with no account,
     // which resolves to the founding household exactly as it always has.
     const owner = await ownerAccount();
-    const { token, session } = await openSession(label, owner?.id ?? null);
+    const { token, session } = await openSession(label, owner?.id ?? null, sessionKindFor(req, label));
     if (owner) await recordSignIn(owner.id, { method: 'passcode', label });
     sessionCookie(res, token);
     res.status(201).json({
@@ -153,7 +153,7 @@ router.post('/session/link', async (req, res, next) => {
     }
     const label = String(req.body?.label || '').slice(0, 80) || null;
     const account = await recordSignIn(spent.account_id, { method: 'link', label });
-    const { token: sessionToken, session } = await openSession(label, spent.account_id);
+    const { token: sessionToken, session } = await openSession(label, spent.account_id, sessionKindFor(req, label, { onAccount: true }));
     sessionCookie(res, sessionToken);
     res.status(201).json({
       token: sessionToken,

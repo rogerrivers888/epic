@@ -9,6 +9,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import * as providerCalls from './repositories/providerCalls.js';
 import { callBoundFor } from './repositories/accounts.js';
+import { currentSpender } from './context.js';
+import { assertUnderDailyCeiling } from './sources/dailyCeiling.js';
 
 export const MODEL = 'claude-opus-5';
 
@@ -88,6 +90,20 @@ export async function claudeBoundFor(householdId) {
 }
 
 export async function assertWithinBounds({ householdId, sessionId }) {
+  // An agent's sign-in spends nothing paid unless the owner granted it hours
+  // (G8, migration 264). Asked of the request's own session — `sessionId`
+  // here is the plan's. Background work (no session, or the server's own) is
+  // not refused here: the owner's rule for that was Google's, not Claude's,
+  // and the daily ceiling below holds it.
+  const apiSession = currentSpender().sessionId;
+  if (apiSession) {
+    const { sessionStanding, UnattributedCallError } = await import('./sources/paidGate.js');
+    const standing = await sessionStanding(apiSession).catch(() => 'no_session');
+    if (standing === 'agent' || standing === 'not_live') {
+      throw new UnattributedCallError(standing === 'agent' ? 'an agent session with no paid budget granted' : 'a session that has been signed out or has expired');
+    }
+  }
+  await assertUnderDailyCeiling();
   const [sessionCalls, monthCalls, bound] = await Promise.all([
     providerCalls.countForSession(sessionId),
     providerCalls.countClaudeThisMonth(householdId),

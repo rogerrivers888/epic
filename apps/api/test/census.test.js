@@ -16,10 +16,15 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { googleSource, skuFor } from '../src/sources/google.js';
-import { costOf } from '../src/domain/providerPrices.js';
-import { censusArea, slicePlan, noteFromDisplay, expireRentedCoordinates } from '../src/sources/census.js';
-import { query, pool } from '../src/db.js';
+import { testDatabase } from './helpers/db.js';
+
+// The test database, built from the committed migrations — never the shared
+// development database, which a migration not yet applied there would break
+// for every session at once (26 Sep 2026, migration 264).
+const { query, pool } = await testDatabase();
+const { googleSource, skuFor } = await import('../src/sources/google.js');
+const { costOf } = await import('../src/domain/providerPrices.js');
+const { censusArea, slicePlan, noteFromDisplay, expireRentedCoordinates } = await import('../src/sources/census.js');
 
 test.after(() => pool.end());
 

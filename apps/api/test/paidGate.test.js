@@ -35,8 +35,8 @@ test.before(async () => {
   await query(`insert into households (id, name) values ($1, 'Gate household') on conflict (id) do nothing`, [HH]);
   await query(`insert into accounts (household_id, email, role, status, plan, monthly_call_bound) values ($1, 'gate@test', 'owner', 'active', 'family', 1234)`, [HH]);
   ({ rows: [{ id: SIGNED_IN }] } = await query(
-    `insert into api_sessions (token_hash, label, expires_at) values ('test:paid-gate', 'a phone', now() + interval '1 day')
-     on conflict (token_hash) do update set label = excluded.label returning id`));
+    `insert into api_sessions (token_hash, label, expires_at, kind) values ('test:paid-gate', 'a phone', now() + interval '1 day', 'device')
+     on conflict (token_hash) do update set label = excluded.label, kind = 'device' returning id`));
   SERVICE = await serviceSessionId();
 });
 test.after(async () => {
@@ -258,5 +258,86 @@ test('two paid requests arriving together cannot both take the last of the allow
     await query('delete from provider_calls where household_id = $1', [TIGHT]);
     await query('delete from accounts where household_id = $1', [TIGHT]);
     await query('delete from households where id = $1', [TIGHT]);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// G8: agent sessions spend nothing unless granted; the estate's daily ceiling.
+// ---------------------------------------------------------------------------
+
+const agentSession = async (tok, grantHours = 0) => (await query(
+  `insert into api_sessions (token_hash, label, expires_at, kind, paid_grant_until)
+   values ($1, 'epic-xx some agent', now() + interval '1 day', 'agent', case when $2::int > 0 then now() + make_interval(hours => $2::int) end)
+   on conflict (token_hash) do update set kind = 'agent', paid_grant_until = excluded.paid_grant_until returning id`, [tok, grantHours])).rows[0].id;
+
+test('an agent session is refused paid Google and Claude calls until it is granted hours', async () => {
+  const { forgetSession } = await import('../src/sources/paidGate.js');
+  const { assertWithinBounds } = await import('../src/claude.js');
+  const agent = await agentSession('test:paid-gate-agent');
+  await withGoogle(async (out) => {
+    const meter = {};
+    await assert.rejects(() => runAsSpender({ householdId: HH, sessionId: agent }, () => googleSource.brief('ChIJ_agent', { meter })), refused);
+    assert.match(JSON.stringify(healthOf(meter)), /agent_session/);
+    await assert.rejects(() => runAsSpender({ householdId: HH, sessionId: agent }, () => assertWithinBounds({ householdId: HH, sessionId: null })), refused);
+    assert.equal(out(), 0);
+
+    await query(`update api_sessions set paid_grant_until = now() + interval '1 hour' where id = $1`, [agent]);
+    forgetSession(agent);
+    await runAsSpender({ householdId: HH, sessionId: agent }, () => googleSource.brief('ChIJ_agent_granted', { meter: {} }));
+    assert.equal(out(), 1, 'granted, it goes out');
+  });
+});
+
+test('a session is a device only from a real browser naming itself the way the app does', async () => {
+  const { sessionKindFor } = await import('../src/auth.js');
+  const chrome = { headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36' } };
+  const headless = { headers: { 'user-agent': 'Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/129.0 Safari/537.36' } };
+  const curl = { headers: { 'user-agent': 'curl/8.7.1' } };
+  assert.equal(sessionKindFor(chrome, 'Computer · Chrome'), 'device');
+  assert.equal(sessionKindFor(chrome, 'epic-f0 edge census'), 'agent', 'a label the app never writes');
+  assert.equal(sessionKindFor(chrome, null), 'agent');
+  assert.equal(sessionKindFor(headless, 'Computer · Chrome'), 'agent', 'a headless browser copying the label');
+  assert.equal(sessionKindFor(curl, 'Computer · Chrome'), 'agent');
+  assert.equal(sessionKindFor({ headers: {} }, 'Phone · Safari'), 'agent', 'no user agent at all');
+  assert.equal(sessionKindFor(chrome, 'Sam · invited to Cornwall', { onAccount: true }), 'device', 'a person on their own account');
+  assert.equal(sessionKindFor(curl, null, { onAccount: true }), 'agent');
+});
+
+test('the daily ceiling refuses at 100%, and raises each alarm once', async () => {
+  const { assertUnderDailyCeiling, raiseAlarm, todayStatus } = await import('../src/sources/dailyCeiling.js');
+  const was = process.env.EPIC_DAILY_SPEND_CEILING_GBP;
+  await query(`delete from spend_alarms where day = (now() at time zone 'Europe/London')::date`);
+  try {
+    const spent = (await todayStatus({ fresh: true })).spentGbp;
+    // Just above today's spend: under the ceiling, past 80% of it.
+    process.env.EPIC_DAILY_SPEND_CEILING_GBP = String(spent / 0.9 + 0.0001);
+    await query(`insert into provider_calls (household_id, session_id, provider, purpose, estimated_cost_usd) values ($1, $2, 'google', 'test.ceiling', 0)`, [HH, SIGNED_IN]);
+    const warn = await todayStatus({ fresh: true });
+    if (spent > 0) assert.equal(warn.level, 'warn');
+    const sent = [];
+    const send = async (m) => { sent.push(m); return { sent: true }; };
+    process.env.EPIC_ALARM_EMAIL = 'alarm@test';
+    assert.equal((await raiseAlarm({ level: 'warn', spentGbp: 8, ceilingGbp: 10 }, { send })).raised, true);
+    assert.equal((await raiseAlarm({ level: 'warn', spentGbp: 9, ceilingGbp: 10 }, { send })).raised, false, 'once a day');
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].subject, /80% of the daily ceiling/);
+
+    // At the ceiling: refused, at the door and before Claude.
+    process.env.EPIC_DAILY_SPEND_CEILING_GBP = '0.0000001';
+    await todayStatus({ fresh: true });
+    await query(`insert into provider_calls (household_id, session_id, provider, purpose, estimated_cost_usd) values ($1, $2, 'google', 'test.ceiling', 0.01)`, [HH, SIGNED_IN]);
+    await todayStatus({ fresh: true });
+    await assert.rejects(() => assertUnderDailyCeiling(), (e) => e.code === 'daily_ceiling_reached');
+    await withGoogle(async (out) => {
+      await assert.rejects(() => runAsSpender({ householdId: HH, sessionId: SIGNED_IN }, () => googleSource.brief('ChIJ_ceiling', { meter: {} })), (e) => e.code === 'daily_ceiling_reached');
+      assert.equal(out(), 0);
+    });
+  } finally {
+    if (was === undefined) delete process.env.EPIC_DAILY_SPEND_CEILING_GBP; else process.env.EPIC_DAILY_SPEND_CEILING_GBP = was;
+    delete process.env.EPIC_ALARM_EMAIL;
+    await query(`delete from spend_alarms where day = (now() at time zone 'Europe/London')::date`);
+    await query(`delete from provider_calls where purpose = 'test.ceiling'`);
+    const { todayStatus: t } = await import('../src/sources/dailyCeiling.js');
+    await t({ fresh: true });
   }
 });

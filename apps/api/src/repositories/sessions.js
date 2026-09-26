@@ -16,11 +16,11 @@ const digest = (token) => crypto.createHash('sha256').update(String(token)).dige
 /** How stale `last_seen_at` may get before a read is worth a write. */
 const SEEN_EVERY = '5 minutes';
 
-export async function insertSession(token, label, accountId = null) {
+export async function insertSession(token, label, accountId = null, kind = 'agent') {
   const { rows } = await query(
-    `insert into api_sessions (token_hash, label, account_id) values ($1, $2, $3)
-     returning id, label, account_id, created_at, expires_at`,
-    [digest(token), label || null, accountId],
+    `insert into api_sessions (token_hash, label, account_id, kind) values ($1, $2, $3, $4)
+     returning id, label, account_id, kind, created_at, expires_at`,
+    [digest(token), label || null, accountId, kind],
   );
   return rows[0];
 }
@@ -28,10 +28,40 @@ export async function insertSession(token, label, accountId = null) {
 /** The live session this token opens, or null. Never says which of the two it failed. */
 export async function findLiveSession(token) {
   const { rows } = await query(
-    `select id, label, account_id, created_at, last_seen_at, expires_at
+    `select id, label, account_id, kind, created_at, last_seen_at, expires_at
        from api_sessions
       where token_hash = $1 and revoked_at is null and expires_at > now()`,
     [digest(token)],
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * The live agent sessions, newest first, with what each has spent today and
+ * whether the owner has granted it hours (migration 264). For the back office.
+ */
+export async function liveAgentSessions() {
+  const { rows } = await query(
+    `select s.id, s.label, s.created_at, s.last_seen_at, s.paid_grant_until,
+            coalesce(sum(pc.estimated_cost_usd) filter (where pc.created_at >= now() - interval '24 hours'), 0)::float as spent_24h_usd
+       from api_sessions s
+       left join provider_calls pc on pc.session_id = s.id
+      where s.kind = 'agent' and s.revoked_at is null and s.expires_at > now()
+      group by s.id
+      order by coalesce(s.last_seen_at, s.created_at) desc
+      limit 100`,
+  );
+  return rows;
+}
+
+/** Give an agent session hours of paid budget, or take them away (hours = 0). */
+export async function grantPaid(sessionId, hours) {
+  const { rows } = await query(
+    `update api_sessions
+        set paid_grant_until = case when $2::int > 0 then now() + make_interval(hours => $2::int) else null end
+      where id = $1 and kind = 'agent'
+      returning id, label, paid_grant_until`,
+    [sessionId, hours],
   );
   return rows[0] ?? null;
 }

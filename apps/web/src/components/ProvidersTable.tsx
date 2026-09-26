@@ -224,6 +224,13 @@ function KeyWiring() {
 
 type RowModel = { line: SpendLine; s: ReturnType<typeof split>; hasKey: boolean; off: boolean; switchable: boolean; on: boolean };
 
+/**
+ * What the price column says when nothing was paid. A cap line carries no cost
+ * of its own — "free" beside "Google paid requests" read as a claim about
+ * Google (26 Sep 2026) — so it says nothing there.
+ */
+const priceWord = (line: SpendLine) => (line.cap?.enforced && !line.allowance ? '—' : 'free');
+
 function allowanceText(line: SpendLine) {
   const a = line.allowance ?? line.cap;
   if (!a) return { text: '—', ratio: 0 };
@@ -256,7 +263,7 @@ function ProviderRow({ r, wide, busy, onOpen, onToggle }: { r: RowModel; wide: b
         </View>
         <Text style={[styles.td, { flex: 1 }]}>{line.allowance ? count(s.paidUnits) : '—'}</Text>
         <Text style={[styles.td, { flex: 0.8 }]}>{count(s.calls)}</Text>
-        <Text style={[styles.td, { flex: 1, fontWeight: '700', color: s.paidUsd > 0 ? colors.ink : colors.inkMuted }]}>{s.paidUsd > 0 ? money(s.paidUsd) : 'free'}</Text>
+        <Text style={[styles.td, { flex: 1, fontWeight: '700', color: s.paidUsd > 0 ? colors.ink : colors.inkMuted }]}>{s.paidUsd > 0 ? money(s.paidUsd) : priceWord(line)}</Text>
         <Text style={[styles.td, { flex: 1 }]}>{line.perSearchUsd ? `$${line.perSearchUsd.toFixed(2)}` : line.key === 'claude' ? 'by tokens' : 'free'}</Text>
         <Text style={[styles.td, { flex: 1 }]}>{resetText(line)}</Text>
         <View style={{ flex: 0.8, alignItems: 'flex-end' }}>{line.console ? <Text style={[type.tiny, { color: colors.accent, textDecorationLine: 'underline' }]} onPress={() => Linking.openURL(line.console!.url)}>Open ↗</Text> : <Text style={type.tiny}>—</Text>}</View>
@@ -267,7 +274,7 @@ function ProviderRow({ r, wide, busy, onOpen, onToggle }: { r: RowModel; wide: b
     <Press onPress={onOpen} style={styles.stack} accessibilityRole="button" accessibilityLabel={`Open ${line.label}`}>
       <Row style={{ justifyContent: 'space-between' }}>
         <Text style={[type.h3, { flex: 1 }]}>{line.label}</Text>
-        <Text style={[type.h3, { color: s.paidUsd > 0 ? colors.ink : colors.inkMuted }]}>{s.paidUsd > 0 ? money(s.paidUsd) : 'free'}</Text>
+        <Text style={[type.h3, { color: s.paidUsd > 0 ? colors.ink : colors.inkMuted }]}>{s.paidUsd > 0 ? money(s.paidUsd) : priceWord(line)}</Text>
         {sw}
       </Row>
       <Text style={type.small}>{count(s.calls)} {plural(s.calls, 'call', 'calls')}{line.allowance ? ` · free ${al.text} · paid ${count(s.paidUnits)}` : line.cap ? ` · ${al.text}` : ''}{resetText(line) !== '—' ? ` · resets ${resetText(line)}` : ''}</Text>
@@ -334,7 +341,7 @@ function ProviderDrawer({ line, period, spend, series, initialMonth, source, onC
                         <Text style={[styles.td, { flex: 1.4, textAlign: 'left', color: colors.ink }]}>{PERIOD_LABEL[p]}</Text>
                         <Text style={styles.td}>{count(s.calls)}</Text>
                         <Text style={styles.td}>{line.unit === 'call' || line.unit === 'run' ? '—' : `${count(s.units)}${s.estimated ? '*' : ''}`}</Text>
-                        <Text style={[styles.td, { fontWeight: '700', color: colors.ink }]}>{s.paidUsd > 0 ? money(s.paidUsd) : 'free'}</Text>
+                        <Text style={[styles.td, { fontWeight: '700', color: colors.ink }]}>{s.paidUsd > 0 ? money(s.paidUsd) : priceWord(line)}</Text>
                       </View>
                     ); })}
                   </View>

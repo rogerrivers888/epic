@@ -29,7 +29,7 @@ import * as groupsRepo from '../repositories/groups.js';
 import * as tripsRepo from '../repositories/trips.js';
 import * as accountsRepo from '../repositories/accounts.js';
 import * as householdsRepo from '../repositories/households.js';
-import { openSession } from '../auth.js';
+import { openSession, sessionKindFor } from '../auth.js';
 import { currentHousehold, householdOf } from './household.js';
 import { currentAccount } from '../context.js';
 import { CADENCES, DEFAULT_CADENCE, QUIET_HOURS, dueRuns, nextRun, reminderBody, schedule } from '../domain/reminders.js';
@@ -1224,7 +1224,7 @@ router.post('/join/:token/account', async (req, res, next) => {
       });
     }
 
-    const { token: sessionToken } = await openSession(`${name} · invited to ${group.name ?? 'a trip'}`, account.id);
+    const { token: sessionToken } = await openSession(`${name} · invited to ${group.name ?? 'a trip'}`, account.id, sessionKindFor(req, null, { onAccount: true }));
     await accountsRepo.recordSignIn(account.id, { method: 'invite', label: group.name ?? null });
 
     res.status(201).json({
@@ -1279,7 +1279,7 @@ router.post('/join/:token/code', async (req, res, next) => {
     await hostingRepo.useSignInCode(live.id);
     const account = await accountsRepo.accountById(me.account_id);
     if (!account || account.status === 'suspended') return res.status(403).json({ error: 'suspended', message: 'This account cannot sign in.' });
-    const { token: sessionToken } = await openSession(`${me.name} · invited to ${group.name ?? 'a trip'}`, account.id);
+    const { token: sessionToken } = await openSession(`${me.name} · invited to ${group.name ?? 'a trip'}`, account.id, sessionKindFor(req, null, { onAccount: true }));
     await accountsRepo.recordSignIn(account.id, { method: 'code', label: group.name ?? null });
     res.json({
       participantToken: me.token,

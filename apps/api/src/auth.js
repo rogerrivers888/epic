@@ -89,10 +89,41 @@ export const passcodeMatches = (given) => authConfigured() && sameSecret(given, 
  * which keeps working so that adding accounts does not sign the owner out of
  * his own app.
  */
-export async function openSession(label, accountId = null) {
+export async function openSession(label, accountId = null, kind = 'agent') {
   const token = crypto.randomBytes(32).toString('base64url');
-  const session = await insertSession(token, label, accountId);
+  const session = await insertSession(token, label, accountId, kind);
   return { token, session };
+}
+
+/**
+ * Whether a new session is somebody's device or an agent (migration 264).
+ *
+ * Owner, 26 Sep 2026 (G8): "Agent sessions get a zero paid budget unless I
+ * grant one." The passcode is one secret shared by the owner and every coding
+ * session on the machine, so the secret cannot tell them apart — what can is
+ * how they arrive. The app signs in from a real browser and names the device
+ * the way `deviceLabel()` does ("Computer · Chrome"); a script, a curl, a
+ * headless browser or a coding session names itself anything else, or
+ * nothing, and says so in its user agent. A device may spend; an agent may
+ * not until the owner grants it hours in the back office.
+ *
+ * `onAccount` is for a sign-in on somebody's own account — a link or an
+ * invitation — where the account is the person; the passcode path never
+ * passes it, because the passcode opens the owner's account for anybody who
+ * holds it.
+ *
+ * A heuristic against a shared secret, and named as one: an agent that
+ * copies the app's label and a real browser's user agent is indistinguishable
+ * from the owner. Closing that is a credential per agent, which is the
+ * owner's to issue.
+ */
+const DEVICE_LABEL = /^(Phone|Tablet|Computer) · (Edge|Chrome|Safari|Firefox|Browser)$|^(ios|android)$/;
+const AUTOMATED = /HeadlessChrome|puppeteer|playwright|selenium|webdriver|curl\/|wget|node|undici|axios|python|go-http|okhttp|postman|insomnia/i;
+export function sessionKindFor(req, label, { onAccount = false } = {}) {
+  const ua = String(req?.headers?.['user-agent'] ?? '');
+  if (!ua || AUTOMATED.test(ua)) return 'agent';
+  if (onAccount) return 'device';
+  return DEVICE_LABEL.test(String(label ?? '')) ? 'device' : 'agent';
 }
 
 export const closeSession = (token) => revokeSession(token);

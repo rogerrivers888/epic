@@ -29,6 +29,7 @@ import { useViewport } from '../hooks/useViewport';
 import { useActivity } from '../hooks/useActivity';
 import { useAdminTheme } from '../hooks/useAdminTheme';
 import { Explain, Explains } from './explain';
+import { SpendAlarm } from './SpendAlarm';
 import { AccountsScreen } from '../screens/AccountsScreen';
 import { Overview } from './screens/Overview';
 import { People } from './screens/People';
@@ -354,7 +355,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
       {/* One tooltip panel for the whole back office, positioned in the page's
           own coordinate space so it lands where it should inside the shell's
           phone frame as well (explain.tsx). */}
-      <View style={styles.content}>{body}</View>
+      <View style={styles.content}><SpendAlarm />{body}</View>
     </View>
     </Explains>
   );

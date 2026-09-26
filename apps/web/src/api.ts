@@ -1306,7 +1306,18 @@ export type SpendPeriod = 'month' | 'last-month' | 'all' | 'custom';
 export type SpendAllowance = {
   kind: 'monthly' | 'lifetime' | 'daily'; limit: number; used: number; estimated: boolean; resetsAt: string | null;
   beyondUsd?: number | null; basis?: string; label?: string; env?: string;
+  /** Which guard's own number this cap shows, where it is one (api sources/usage.js). */
+  enforced?: 'google' | 'claude';
 };
+/** Today against the estate's daily ceiling (api sources/dailyCeiling.js). */
+export type SpendToday = {
+  spentGbp: number; ceilingGbp: number; ratio: number; level: 'warn' | 'stop' | null;
+  alarms: { level: 'warn' | 'stop'; raised_at: string; mailed: boolean; mail_note: string | null }[];
+  mailTo: boolean;
+};
+/** An agent session: anything holding the passcode that is not the app on a device (migration 264). */
+export type AgentSession = { id: string; label: string | null; created_at: string; last_seen_at: string | null; paid_grant_until: string | null; spent_24h_usd: number };
+
 export type SpendLine = {
   key: string; label: string; source: string; on: boolean; unit: string; unitPlural: string; what: string; hardStop: string | null;
   console: { label: string; url: string } | null;
@@ -3014,6 +3025,11 @@ export const api = {
   // app drawing them at all is a courtesy rather than the security boundary.
 
   adminOverview: (days = 30) => request<AdminOverview>(`/api/admin/overview?days=${days}`),
+  /** The estate's day against its ceiling, for the banner over every back-office page. */
+  spendToday: () => request<SpendToday>('/api/admin/spend/today'),
+  /** The agent sessions, and the owner's grant of paid hours (0 takes it away). */
+  agentSessions: () => request<{ sessions: AgentSession[] }>('/api/admin/sessions/agents'),
+  grantAgent: (id: string, hours: number) => post<{ session: AgentSession }>(`/api/admin/sessions/${id}/grant`, { hours }),
   /** Data › Sources: the catalogue of providers and fields, joined to what we hold. */
   adminSources: () => request<SourcesReport>('/api/admin/data/sources'),
   /** The correctness bench: runs so far, and what one can ask. */

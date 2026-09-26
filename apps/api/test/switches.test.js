@@ -40,8 +40,8 @@ let SESSION = null;
 test.before(async () => {
   await query(`insert into households (id, name) values ($1, 'Switch household') on conflict (id) do nothing`, [HH]);
   ({ rows: [{ id: SESSION }] } = await query(
-    `insert into api_sessions (token_hash, label, expires_at) values ('test:switches', 'a phone', now() + interval '1 day')
-     on conflict (token_hash) do update set label = excluded.label returning id`));
+    `insert into api_sessions (token_hash, label, expires_at, kind) values ('test:switches', 'a phone', now() + interval '1 day', 'device')
+     on conflict (token_hash) do update set label = excluded.label, kind = 'device' returning id`));
 });
 const asSomebody = (fn) => runAsSpender({ householdId: HH, sessionId: SESSION }, fn);
 

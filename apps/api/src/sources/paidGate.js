@@ -31,6 +31,7 @@
 
 import { currentSpender } from '../context.js';
 import { noteFault } from './meter.js';
+import { assertUnderDailyCeiling } from './dailyCeiling.js';
 
 export class UnattributedCallError extends Error {
   constructor(why) {
@@ -60,20 +61,47 @@ const load = () => (deps ??= Promise.all([import('../claude.js'), import('../rep
 const LIVE_FOR_MS = 60_000;
 const kinds = new Map();
 export async function isRealSession(sessionId) {
-  if (!sessionId) return false;
+  return (await sessionStanding(sessionId)) === 'may_spend';
+}
+
+/**
+ * What a session may do with money: `may_spend`, or why not.
+ *
+ * A device may spend. An agent may not unless the owner has granted it hours
+ * (owner, 26 Sep 2026, G8: "Agent sessions get a zero paid budget unless I
+ * grant one"; migration 264). The server's own session never may. Remembered
+ * for a minute, so a grant or a revocation takes effect within one.
+ */
+export async function sessionStanding(sessionId) {
+  if (!sessionId) return 'no_session';
   const hit = kinds.get(sessionId);
-  if (hit && Date.now() - hit.at < LIVE_FOR_MS) return hit.real;
+  if (hit && Date.now() - hit.at < LIVE_FOR_MS) return hit.standing;
   const { query } = await load();
   const { rows: [row] } = await query(
-    `select token_hash not like 'service:%' and revoked_at is null and expires_at > now() as real
+    `select kind, revoked_at is null and expires_at > now() as live,
+            coalesce(paid_grant_until > now(), false) as granted
        from api_sessions where id = $1`,
     [sessionId],
   );
-  const real = Boolean(row?.real);
+  const standing = !row ? 'no_session'
+    : row.kind === 'service' ? 'service'
+    : !row.live ? 'not_live'
+    : row.kind === 'device' || row.granted ? 'may_spend'
+    : 'agent';
   if (kinds.size > 5000) kinds.clear();
-  kinds.set(sessionId, { real, at: Date.now() });
-  return real;
+  kinds.set(sessionId, { standing, at: Date.now() });
+  return standing;
 }
+
+/** Forget what was remembered about a session, so a grant takes effect now. */
+export const forgetSession = (sessionId) => kinds.delete(sessionId);
+
+const WHY = {
+  no_session: 'no session',
+  service: 'the server’s own session, not a sign-in',
+  not_live: 'a session that has been signed out or has expired',
+  agent: 'an agent session with no paid budget granted',
+};
 
 /**
  * Requests this process has admitted this month that the ledger may not show
@@ -98,10 +126,13 @@ const admittedFor = (householdId) => {
 export async function admitPaid({ meter = null, requests = 1 } = {}) {
   const { householdId, sessionId } = currentSpender();
   if (!householdId) { noteFault(meter, 'unattributed'); throw new UnattributedCallError('no household'); }
-  if (!(await isRealSession(sessionId).catch(() => false))) {
-    noteFault(meter, 'unattributed');
-    throw new UnattributedCallError(sessionId ? 'the server’s own session, not a sign-in' : 'no session');
+  const standing = await sessionStanding(sessionId).catch(() => 'no_session');
+  if (standing !== 'may_spend') {
+    noteFault(meter, standing === 'agent' ? 'agent_session' : 'unattributed');
+    throw new UnattributedCallError(WHY[standing] ?? standing);
   }
+  // The estate's day, across every household and provider (sources/dailyCeiling.js).
+  try { await assertUnderDailyCeiling(); } catch (err) { noteFault(meter, 'daily_ceiling'); throw err; }
   // One admission at a time per household. Two requests arriving together —
   // the corridor's two matrices under one Promise.all — each read the same
   // count and were both admitted past the bound, and the second write took

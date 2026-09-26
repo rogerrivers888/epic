@@ -21,7 +21,9 @@ import * as insights from '../repositories/insights.js';
 import * as rolesRepo from '../repositories/roles.js';
 import { accountById, listAccounts, signInsFor } from '../repositories/accounts.js';
 import { householdById, membersWithConstraints } from '../repositories/households.js';
-import { liveSessions } from '../repositories/sessions.js';
+import { liveSessions, liveAgentSessions, grantPaid } from '../repositories/sessions.js';
+import { todayStatus, alarmsToday } from '../sources/dailyCeiling.js';
+import { forgetSession } from '../sources/paidGate.js';
 import { CHECKED_ON, DOMAINS, PROVIDERS, SERVICES, cellsOf, matrix } from '../sources/catalogue.js';
 import { callVolume, ownedFacts, ownedLibrary } from '../repositories/sourceStats.js';
 import { sourceHasKey, sourceOff } from '../sources/index.js';
@@ -664,6 +666,45 @@ router.patch('/data/sources/bench/:id', requires('manage_settings'), async (req,
     );
     if (!saved) return res.status(404).json({ error: 'not_found', message: 'No such run, or no such row in it.' });
     res.json({ run: shapeRun(saved) });
+  } catch (err) { next(err); }
+});
+
+/**
+ * Today's spend against the estate's daily ceiling, and the alarms raised —
+ * what the back-office banner draws (sources/dailyCeiling.js; owner, 26 Sep
+ * 2026, G8). Every door may see it: a ceiling somebody cannot see is one they
+ * cannot explain.
+ */
+router.get('/spend/today', async (_req, res, next) => {
+  try {
+    const [status, alarms] = await Promise.all([todayStatus({ fresh: true }), alarmsToday()]);
+    res.json({ ...status, alarms, mailTo: Boolean(String(process.env.EPIC_ALARM_EMAIL || '').trim()) });
+  } catch (err) { next(err); }
+});
+
+/**
+ * The agent sessions, and the owner's grant (G8: "Agent sessions get a zero
+ * paid budget unless I grant one").
+ *
+ * The grant spends money, so it is refused *from* an agent session whatever
+ * door it holds: the passcode opens the owner's back office for anybody who
+ * has it, and an agent that could grant itself hours would have no zero
+ * budget at all.
+ */
+router.get('/sessions/agents', requires('manage_settings'), async (_req, res, next) => {
+  try { res.json({ sessions: await liveAgentSessions() }); } catch (err) { next(err); }
+});
+
+router.post('/sessions/:id/grant', requires('manage_settings'), async (req, res, next) => {
+  try {
+    if (req.session?.kind !== 'device') {
+      return res.status(403).json({ error: 'device_only', message: 'Only a signed-in device can grant paid calls — not an agent.' });
+    }
+    const hours = Math.max(0, Math.min(72, Math.round(Number(req.body?.hours ?? 0))));
+    const row = await grantPaid(String(req.params.id), hours);
+    if (!row) return res.status(404).json({ error: 'not_an_agent', message: 'No live agent session by that id.' });
+    forgetSession(row.id);
+    res.json({ session: row });
   } catch (err) { next(err); }
 });
 

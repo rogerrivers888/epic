@@ -27,8 +27,8 @@ const HH2 = '00000000-0000-4000-8000-00000000ca91';
 let SESSION = null;
 test.before(async () => {
   ({ rows: [{ id: SESSION }] } = await query(
-    `insert into api_sessions (token_hash, label, expires_at) values ('test:household-cap', 'a phone', now() + interval '1 day')
-     on conflict (token_hash) do update set label = excluded.label returning id`));
+    `insert into api_sessions (token_hash, label, expires_at, kind) values ('test:household-cap', 'a phone', now() + interval '1 day', 'device')
+     on conflict (token_hash) do update set label = excluded.label, kind = 'device' returning id`));
   await query(`insert into households (id, name) values ($1, 'Capped household') on conflict (id) do nothing`, [HH]);
   // Its lead's cap is one call a month.
   await query(`insert into accounts (household_id, email, role, status, plan, monthly_call_bound) values ($1, 'cap@test', 'owner', 'active', 'family', 1) on conflict do nothing`, [HH]).catch(async () => {

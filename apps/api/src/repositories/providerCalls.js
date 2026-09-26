@@ -53,8 +53,8 @@ export function serviceSessionId() {
   if (!service) {
     const label = `service: ${os.hostname()} ${process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? 'local'} pid ${process.pid}`;
     service = query(
-      `insert into api_sessions (token_hash, label, expires_at, revoked_at)
-       values ('service:' || gen_random_uuid()::text, $1, now(), now()) returning id`, [label])
+      `insert into api_sessions (token_hash, label, expires_at, revoked_at, kind)
+       values ('service:' || gen_random_uuid()::text, $1, now(), now(), 'service') returning id`, [label])
       .then(({ rows: [row] }) => row.id)
       .catch((err) => { service = null; throw err; });
   }
