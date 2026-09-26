@@ -46,8 +46,9 @@ test('the rating itself is never written down', async () => {
   await query('delete from place_records where venue_ref = $1', [REF]);
   await index.noteScores([{ venueRef: REF, rating: 4.6, ratingCount: 2400 }]);
   const { rows: [row] } = await query('select * from place_records where venue_ref = $1', [REF]);
+  // A timestamp is not a rating: 07:52:24.600Z contains "4.6" (26 Sep 2026).
   const said = Object.entries(row)
-    .filter(([, v]) => v != null)
+    .filter(([, v]) => v != null && !(v instanceof Date))
     .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`)
     .join(' ');
   assert.ok(!said.includes('4.6'), `a provider's rating is rented and must not be stored: ${said}`);
