@@ -310,8 +310,8 @@ test('a free run that starts costing money stops on the first penny', async (t) 
   // between Essentials and Pro is the gap between nothing and thousands of
   // pounds, so this is not a warning to log.
   await query(
-    `insert into provider_calls (provider, purpose, estimated_cost_usd, ms, created_at)
-     values ('google', 'census.slice', 0.032, -4242, now())`);
+    `insert into provider_calls (session_id, provider, purpose, estimated_cost_usd, ms, created_at)
+     values ((select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'google', 'census.slice', 0.032, -4242, now())`);
 
   const out = await withCensus(answers(1), () => advance({ runId: run.id, budgetMs: 10_000 }));
   assert.equal(out.reason, 'billed');
@@ -671,8 +671,8 @@ test('the day\'s budget is the project\'s, not the region\'s', async (t) => {
   // Forty requests spent by *something else* on the project today — a display
   // search, a research pass — which the quota counts and the census must too.
   await query(
-    `insert into provider_calls (provider, purpose, units, ms, created_at)
-     values ('fixtures+osm+google+tripadvisor', 'inspire.ring', '{"google": 40, "google-search": 40, "osm": 3}'::jsonb, -4243, now())`);
+    `insert into provider_calls (session_id, provider, purpose, units, ms, created_at)
+     values ((select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'fixtures+osm+google+tripadvisor', 'inspire.ring', '{"google": 40, "google-search": 40, "osm": 3}'::jsonb, -4243, now())`);
 
   const { rows: [run] } = await query(
     `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, daily_cap, day, day_requests)
@@ -767,8 +767,8 @@ test('a tile may not spend more than the day has left', async (t) => {
   // asked it. A fixture that wrote census_slices instead was seeding a table the
   // budget no longer looks at (25 Sep 2026).
   await query(
-    `insert into provider_calls (provider, purpose, units, ms, created_at)
-     values ('google', 'census.slice', '{"google": 39, "google-essentials": 39}'::jsonb, -4244, now())`);
+    `insert into provider_calls (session_id, provider, purpose, units, ms, created_at)
+     values ((select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'google', 'census.slice', '{"google": 39, "google-essentials": 39}'::jsonb, -4244, now())`);
   const { rows: [run] } = await query(
     `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, daily_cap, day, day_requests)
      values ('test tile budget', array['ZZ'], 0.08, 0.12, 100000, 0, 30, 40, (now() at time zone 'utc')::date, 0)
@@ -1381,7 +1381,13 @@ test('a census run spends on the session that started it, and a resume moves tha
   const run = await startTestRun({ label: 'test session' });
   await query('update census_runs set started_session_id = $2 where id = $1', [run.id, starter.id]);
   await seedTile(run, 'test/session');
-  await withCensus(answers(1), () => advance({ runId: run.id, budgetMs: 10_000 }));
+  // An answer that moves the meter, as Google's does: the ledger writes what
+  // the meter says was asked, and the plain stub leaves it at nought.
+  const metered = async ({ meter }) => {
+    if (meter) meter.google = (meter.google ?? 0) + 1;
+    return answers(1)();
+  };
+  await withCensus(metered, () => advance({ runId: run.id, budgetMs: 10_000 }));
   const { rows: [ledger] } = await query(
     `select count(*)::int n, count(*) filter (where session_id = $1)::int mine from provider_calls
       where purpose = 'census.slice' and session_id in ($1, $2)`, [starter.id, resumer.id]);

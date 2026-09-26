@@ -28,7 +28,7 @@ test.before(async () => {
   await query(`insert into accounts (household_id, email, role, status, plan, monthly_call_bound) values ($1, 'cap@test', 'owner', 'active', 'family', 1) on conflict do nothing`, [HH]).catch(async () => {
     await query(`insert into accounts (household_id, role, status, plan, monthly_call_bound) values ($1, 'owner', 'active', 'family', 1)`, [HH]);
   });
-  await query(`insert into provider_calls (household_id, provider, purpose, estimated_cost_usd) values ($1, 'google', 'test', 0.032)`, [HH]);
+  await query(`insert into provider_calls (household_id, session_id, provider, purpose, estimated_cost_usd) values ($1, (select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'google', 'test', 0.032)`, [HH]);
   // A second household with two calls a month and nothing on the ledger yet.
   await query(`insert into households (id, name) values ($1, 'Bursting household') on conflict (id) do nothing`, [HH2]);
   await query(`insert into accounts (household_id, email, role, status, plan, monthly_call_bound) values ($1, 'burst@test', 'member', 'active', 'family', 2)`, [HH2]);
@@ -106,17 +106,17 @@ test('a ledger row that metered three requests counts as three', async () => {
   const HH3 = '00000000-0000-4000-8000-00000000ca92';
   await query(`insert into households (id, name) values ($1, 'Metered household') on conflict (id) do nothing`, [HH3]);
   try {
-    await query(`insert into provider_calls (household_id, provider, purpose, units, estimated_cost_usd) values ($1, 'google', 'search', '{"google": 3, "google-search": 3}'::jsonb, 0.12)`, [HH3]);
-    await query(`insert into provider_calls (household_id, provider, purpose, units) values ($1, 'osm-overpass', 'own.match', '{"osm-overpass": 1}'::jsonb)`, [HH3]);
+    await query(`insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd) values ($1, (select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'google', 'search', '{"google": 3, "google-search": 3}'::jsonb, 0.12)`, [HH3]);
+    await query(`insert into provider_calls (household_id, session_id, provider, purpose, units) values ($1, (select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'osm-overpass', 'own.match', '{"osm-overpass": 1}'::jsonb)`, [HH3]);
     // A search over several sources is one row whose provider names them all
     // and whose units carry the Google requests it made (Codex, 25 Sep 2026).
-    await query(`insert into provider_calls (household_id, provider, purpose, units, estimated_cost_usd) values ($1, 'fixtures+osm+google', 'search', '{"osm-overpass": 1, "google": 4, "google-search": 4}'::jsonb, 0.16)`, [HH3]);
+    await query(`insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd) values ($1, (select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'fixtures+osm+google', 'search', '{"osm-overpass": 1, "google": 4, "google-search": 4}'::jsonb, 0.16)`, [HH3]);
     // A census slice: hundreds of IDs Only requests, all free, and not one of
     // them a call that can cost money (found 25 Sep 2026, when one day's
     // census put the founding household past its bound).
-    await query(`insert into provider_calls (household_id, provider, purpose, units, estimated_cost_usd) values ($1, 'google', 'census.slice', '{"google": 600, "google-essentials": 600}'::jsonb, 0)`, [HH3]);
+    await query(`insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd) values ($1, (select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'google', 'census.slice', '{"google": 600, "google-essentials": 600}'::jsonb, 0)`, [HH3]);
     // A Place Details request on a Pro mask, priced, counts.
-    await query(`insert into provider_calls (household_id, provider, purpose, units, estimated_cost_usd) values ($1, 'google', 'own.seed', '{"google": 1, "google-pro": 1}'::jsonb, 0.032)`, [HH3]);
+    await query(`insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd) values ($1, (select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'google', 'own.seed', '{"google": 1, "google-pro": 1}'::jsonb, 0.032)`, [HH3]);
     assert.equal(await countThisMonth(HH3), 8, 'three and four priced requests and one Pro detail; the free open map and the free census not counted at all');
   } finally {
     await query('delete from provider_calls where household_id = $1', [HH3]);

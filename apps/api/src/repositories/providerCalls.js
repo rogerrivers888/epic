@@ -45,13 +45,19 @@ import { healthOf } from '../sources/meter.js';
  * reaches the ledger without one of the three.
  */
 let service = null;
-export async function serviceSessionId() {
-  if (service) return service;
-  const label = `service: ${os.hostname()} ${process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? 'local'} pid ${process.pid}`;
-  const { rows: [row] } = await query(
-    `insert into api_sessions (token_hash, label, expires_at, revoked_at)
-     values ('service:' || gen_random_uuid()::text, $1, now(), now()) returning id`, [label]);
-  service = row.id;
+export function serviceSessionId() {
+  // The promise, not the id: two unattributed calls arriving together before
+  // the row existed each made one, and the last to finish won the cache while
+  // the other's rows sat on a session nothing else would name (Codex, 26 Sep
+  // 2026). A creation that fails is forgotten, so the next call tries again.
+  if (!service) {
+    const label = `service: ${os.hostname()} ${process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? 'local'} pid ${process.pid}`;
+    service = query(
+      `insert into api_sessions (token_hash, label, expires_at, revoked_at)
+       values ('service:' || gen_random_uuid()::text, $1, now(), now()) returning id`, [label])
+      .then(({ rows: [row] }) => row.id)
+      .catch((err) => { service = null; throw err; });
+  }
   return service;
 }
 
@@ -109,10 +115,15 @@ export async function recordTokens(c) {
  * numerator, so the failure gets a row of its own with a cost of nought.
  */
 export async function recordFailure({ householdId = null, sessionId = null, provider, purpose, ms = null, fault }) {
+  // Named like every other row: with the column required, a failure written
+  // with no session was refused and the refusal swallowed, so the failure
+  // never reached the supplier's numbers (Codex, 26 Sep 2026).
+  const session = await sessionFor(sessionId).catch(() => null);
+  if (!session) return;
   await query(
     `insert into provider_calls (household_id, session_id, provider, purpose, estimated_cost_usd, ok, ms, failed, fault, watched)
      values ($1, $2, $3, $4, 0, false, $5, 1, $6, 1)`,
-    [householdId, sessionId, provider, purpose, ms, String(fault ?? 'error').slice(0, 40)],
+    [householdId, session, provider, purpose, ms, String(fault ?? 'error').slice(0, 40)],
   ).catch(() => null);
 }
 

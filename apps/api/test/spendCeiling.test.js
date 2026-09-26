@@ -107,16 +107,16 @@ test('Claude planning and speech come out of a different purse', async () => {
   // A month of ordinary planning and voice. Neither path asks this ceiling
   // before it runs, so neither may close collection down (Codex, 18 Sep 2026).
   await query(
-    `insert into provider_calls (provider, purpose, estimated_cost_usd)
-     values ('anthropic', 'a-test-of-the-purse', 40), ('openai', 'a-test-of-the-purse', 40)`);
+    `insert into provider_calls (session_id, provider, purpose, estimated_cost_usd)
+     values ((select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'anthropic', 'a-test-of-the-purse', 40), ((select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'openai', 'a-test-of-the-purse', 40)`);
   assert.equal((await roomToSpend(900, { reserve: false })).spentPence, 0);
   assert.equal((await roomToSpend(900, { reserve: false })).ok, true);
 
   // Buying a place still counts, and so does a source nobody has classified:
   // the safe fallback for a money guard is to count it.
   await query(
-    `insert into provider_calls (provider, purpose, estimated_cost_usd)
-     values ('google', 'a-test-of-the-purse', 8), ('some-new-provider', 'a-test-of-the-purse', 8)`);
+    `insert into provider_calls (session_id, provider, purpose, estimated_cost_usd)
+     values ((select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'google', 'a-test-of-the-purse', 8), ((select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'some-new-provider', 'a-test-of-the-purse', 8)`);
   const after = await roomToSpend(0, { reserve: false });
   assert.equal(after.spentPence, Math.round(16 * 100 * 0.79));
   await query("delete from provider_calls where purpose = 'a-test-of-the-purse'");

@@ -48,12 +48,22 @@ const openEntry = (zip, entry) => new Promise((resolve, reject) => {
   zip.openReadStream(entry, (err, stream) => (err ? reject(err) : resolve(stream)));
 });
 
+/**
+ * Into a staging table, and only a complete load is swapped into `postcodes`.
+ *
+ * The census places every box by the nearest postcode wherever there is one,
+ * so a run that stopped half way — half the country loaded — would have had
+ * the roll-up placing boxes against a partial cloud, with whole districts
+ * absent and their places falling to the nearest loaded neighbour (Codex, 26
+ * Sep 2026). Nothing reaches the table the census reads until every file
+ * has been read; the swap is one transaction.
+ */
 async function insert(rows) {
   if (!rows.length) return;
   const pcds = [], sector = [], outcode = [], lat = [], lng = [];
   for (const r of rows) { pcds.push(r.pcds); sector.push(r.sector); outcode.push(r.outcode); lat.push(r.lat); lng.push(r.lng); }
   await query(
-    `insert into postcodes (pcds, sector, outcode, lat, lng, source)
+    `insert into postcodes_staging (pcds, sector, outcode, lat, lng, source)
      select p, s, o, la, ln, $6 from unnest($1::text[], $2::text[], $3::text[], $4::float8[], $5::float8[]) as u(p, s, o, la, ln)
      on conflict (pcds) do update set sector = excluded.sector, outcode = excluded.outcode,
        lat = excluded.lat, lng = excluded.lng, source = excluded.source, loaded_at = now()`,
@@ -89,7 +99,8 @@ async function loadEntry(zip, entry, stats) {
 
 export async function loadPostcodes(file) {
   const stats = { files: 0, rows: 0, loaded: 0, terminated: 0, unplaced: 0, retired: 0 };
-  const startedAt = new Date();
+  await query('create table if not exists postcodes_staging (like postcodes including all)');
+  await query('truncate postcodes_staging');
   const zip = await openZip(file);
   await new Promise((resolve, reject) => {
     zip.readEntry();
@@ -103,14 +114,29 @@ export async function loadPostcodes(file) {
     zip.on('end', resolve);
     zip.on('error', reject);
   });
-  // A postcode this release no longer lists as live — terminated since the
-  // last load, or gone — was skipped above and would otherwise stay in the
-  // table for ever, placing boxes by a street that no longer answers (Codex,
-  // 26 Sep 2026). Only after every file has been read, so a run that stopped
-  // half way retires nothing.
-  if (stats.files > 0) {
-    const { rowCount } = await query('delete from postcodes where loaded_at < $1', [startedAt]);
-    stats.retired = rowCount ?? 0;
+  // Every file read: the staging table is the new snapshot, whole. Swapped in
+  // as one transaction, and a postcode this release no longer lists — terminated
+  // since the last load, or gone — is not in it, so it does not stay on
+  // placing boxes by a street that no longer answers (Codex, 26 Sep 2026). A
+  // run that stopped half way swaps nothing and leaves the last snapshot.
+  if (stats.files > 0 && stats.loaded > 0) {
+    const { rows: [before] } = await query('select count(*)::int n from postcodes');
+    // One connection for the transaction: the pool would hand `begin` and
+    // `commit` to different clients.
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      await client.query('delete from postcodes');
+      await client.query('insert into postcodes select * from postcodes_staging');
+      await client.query('commit');
+    } catch (err) {
+      await client.query('rollback').catch(() => null);
+      throw err;
+    } finally {
+      client.release();
+    }
+    stats.retired = Math.max(0, before.n - stats.loaded);
+    await query('truncate postcodes_staging');
   }
   return stats;
 }

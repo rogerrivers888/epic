@@ -55,7 +55,7 @@ test('deleting the household takes everything of theirs and nobody else’s', as
     const { rows: [visit] } = await query(
       `insert into visits (household_id, venue_ref, venue_label, visited_on) values ($1, 'osm:node/2', 'A place', current_date) returning *`, [h.household.id]);
     await query(`insert into ratings (visit_id, member_id, subject, take) values ($1, $2, 'visit', 'loved')`, [visit.id, h.member.id]);
-    await query(`insert into provider_calls (household_id, provider, purpose) values ($1, 'google-places', 'test')`, [h.household.id]);
+    await query(`insert into provider_calls (household_id, session_id, provider, purpose) values ($1, (select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'google-places', 'test')`, [h.household.id]);
   }
 
   await withTransaction(async (client) => {

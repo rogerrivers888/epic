@@ -157,10 +157,10 @@ test('the work writes each place as it goes, reads its cost off the ledger, and 
     // No household on the ledger row: this test's household is a made-up id
     // and the ledger keys households for real. What is under test is that the
     // cost is read back by the place.
-    await query(`insert into provider_calls (household_id, provider, purpose, estimated_cost_usd, venue_ref) values ($1, 'google', 'own.seed', 0.032, $2)`, [hh, ref]);
+    await query(`insert into provider_calls (household_id, session_id, provider, purpose, estimated_cost_usd, venue_ref) values ($1, (select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'google', 'own.seed', 0.032, $2)`, [hh, ref]);
     // Somebody else's display search on the same place, in the same window,
     // is not the sweep's to book (Codex, 25 Sep 2026).
-    await query(`insert into provider_calls (provider, purpose, estimated_cost_usd, venue_ref) values ('google', 'display', 0.04, $1)`, [ref]);
+    await query(`insert into provider_calls (session_id, provider, purpose, estimated_cost_usd, venue_ref) values ((select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'google', 'display', 0.04, $1)`, [ref]);
     // A description landed, and the record says so.
     await query(`insert into place_records (venue_ref, summary) values ($1, $2) on conflict (venue_ref) do update set summary = excluded.summary`, [ref, 'A lake with a boathouse and a jetty, and a tearoom open at weekends through the summer months.']);
     return { state: 'done', matched: { osm: {}, wikipedia: {} }, provenance: { summary: 'wikipedia' }, problems: [] };
@@ -250,7 +250,7 @@ test('a place that answers after its deadline still has its spend booked', async
         lateRef = ref;
         // Answers well after the deadline, having spent on the way.
         return new Promise((resolve) => setTimeout(async () => {
-          await query(`insert into provider_calls (household_id, provider, purpose, estimated_cost_usd, venue_ref) values ($1, 'google', 'own.seed', 0.032, $2)`, [HH, ref]);
+          await query(`insert into provider_calls (household_id, session_id, provider, purpose, estimated_cost_usd, venue_ref) values ($1, (select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'google', 'own.seed', 0.032, $2)`, [HH, ref]);
           resolve({ state: 'done', matched: { osm: {} }, fields: {}, problems: [] });
           setTimeout(settled, 100);
         }, 120));
@@ -301,14 +301,14 @@ test('a place asked again after a deploy is costed from its first attempt', asyn
   await query('delete from provider_calls where venue_ref = $1', [hit]);
   await query(`update research_sweep_places set state = 'done', outcome = '{"state":"done"}'::jsonb where sweep_id = $1 and venue_ref <> $2`, [row.id, hit]);
   await query(`update research_sweep_places set state = 'asking', attempted_at = now() - interval '2 minutes' where sweep_id = $1 and venue_ref = $2`, [row.id, hit]);
-  await query(`insert into provider_calls (household_id, provider, purpose, estimated_cost_usd, venue_ref, created_at) values ($1, 'google', 'own.seed', 0.032, $2, now() - interval '1 minute')`, [hh, hit]);
+  await query(`insert into provider_calls (household_id, session_id, provider, purpose, estimated_cost_usd, venue_ref, created_at) values ($1, (select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'google', 'own.seed', 0.032, $2, now() - interval '1 minute')`, [hh, hit]);
   await query(`update research_sweeps set touched_at = now() - interval '1 hour' where id = $1`, [row.id]);
 
   await sweep.resume({ work: async () => {} });
   const done = await sweep.work(row.id, {
     research: async (ref) => {
       // The second attempt buys its request again.
-      await query(`insert into provider_calls (household_id, provider, purpose, estimated_cost_usd, venue_ref) values ($1, 'google', 'own.seed', 0.032, $2)`, [hh, ref]);
+      await query(`insert into provider_calls (household_id, session_id, provider, purpose, estimated_cost_usd, venue_ref) values ($1, (select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'google', 'own.seed', 0.032, $2)`, [hh, ref]);
       return { state: 'done', matched: {}, fields: {}, problems: [] };
     },
     room: async () => ({ ok: true, reservation: 'r', leftPence: 10000 }),
@@ -391,7 +391,7 @@ test('a place that throws after its deadline still has its spend booked', async 
       if (!lateRef) {
         lateRef = ref;
         return new Promise((_, reject) => setTimeout(async () => {
-          await query(`insert into provider_calls (household_id, provider, purpose, estimated_cost_usd, venue_ref) values ($1, 'google', 'own.seed', 0.032, $2)`, [HH, ref]);
+          await query(`insert into provider_calls (household_id, session_id, provider, purpose, estimated_cost_usd, venue_ref) values ($1, (select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'google', 'own.seed', 0.032, $2)`, [HH, ref]);
           reject(new Error('their website did not answer'));
           setTimeout(settled, 100);
         }, 120));

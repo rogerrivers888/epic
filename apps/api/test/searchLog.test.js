@@ -927,8 +927,8 @@ test('a Tripadvisor location billed inside a mixed call still counts against the
   const room = await import('../src/routes/placeIndex.js');
   const before = await room.tripadvisorRoom(0);
   await query(
-    `insert into provider_calls (household_id, provider, purpose, units, estimated_cost_usd)
-     values ($1, 'fixtures+osm+google+tripadvisor', 'places.search', '{"google":1,"tripadvisor":4}'::jsonb, 0.075)`,
+    `insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd)
+     values ($1, (select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'fixtures+osm+google+tripadvisor', 'places.search', '{"google":1,"tripadvisor":4}'::jsonb, 0.075)`,
     [household.id]);
   const after = await room.tripadvisorRoom(0);
   assert.equal(before.left - after.left, 4, 'four locations, whatever the row was called');
@@ -936,8 +936,8 @@ test('a Tripadvisor location billed inside a mixed call still counts against the
   // And a search that found nothing bills nothing: the meter says nought
   // because the billing is per location returned (Codex, 18 Sep 2026).
   await query(
-    `insert into provider_calls (household_id, provider, purpose, units, estimated_cost_usd)
-     values ($1, 'tripadvisor', 'places.search', '{"tripadvisor":0}'::jsonb, 0)`, [household.id]);
+    `insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd)
+     values ($1, (select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'tripadvisor', 'places.search', '{"tripadvisor":0}'::jsonb, 0)`, [household.id]);
   const empty = await room.tripadvisorRoom(0);
   assert.equal(empty.left, after.left, 'an empty answer does not eat the allowance');
 });
@@ -1971,10 +1971,10 @@ test('both shapes of Tripadvisor meter count against the contractual cap', async
   // older rows carry — migration 179 recognises and prices that shape, and the
   // `?` operator only matches objects, so the cap counted less than was spent.
   await query(
-    `insert into provider_calls (provider, purpose, units, created_at) values
-       ('fixtures+osm+tripadvisor', 'search', '{"tripadvisor": 3}'::jsonb, now()),
-       ('tripadvisor', 'search', '2'::jsonb, now()),
-       ('google', 'search', '5'::jsonb, now())`);
+    `insert into provider_calls (session_id, provider, purpose, units, created_at) values
+       ((select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'fixtures+osm+tripadvisor', 'search', '{"tripadvisor": 3}'::jsonb, now()),
+       ((select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'tripadvisor', 'search', '2'::jsonb, now()),
+       ((select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'google', 'search', '5'::jsonb, now())`);
   const board = await runs.summary?.() ?? null;
   const counted = board?.tripadvisor?.calls ?? board?.ta?.calls ?? null;
   if (counted != null) assert.equal(counted, 5, 'three from the object meter and two from the bare one');

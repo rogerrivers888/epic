@@ -167,7 +167,7 @@ test('a family with two people signed in is one household, counted once', async 
     memberId: member.id, email: 'partner@example.com', name: 'Partner', role: 'customer', plan: 'household',
   });
   await query(
-    `insert into provider_calls (household_id, provider, purpose, estimated_cost_usd) values ($1, 'google', 'discover.search', 0.03)`,
+    `insert into provider_calls (household_id, session_id, provider, purpose, estimated_cost_usd) values ($1, (select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'google', 'discover.search', 0.03)`,
     [account.household_id],
   );
 

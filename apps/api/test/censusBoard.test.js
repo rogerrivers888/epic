@@ -70,8 +70,8 @@ test('a row drawn while a sweep is in flight says so, carries its tiles, and sor
   // complete = false must never sort or compare as if it were final."
   await clean();
   t.after(async () => {
-    await query(`delete from census_run_tiles where grid_key like 'test/board-%'`);
-    await query(`delete from census_tiles where grid_key like 'test/board-%'`);
+    await query(`delete from census_run_tiles where grid_key like 'board-fixture/%'`);
+    await query(`delete from census_tiles where grid_key like 'board-fixture/%'`);
     await clean();
   });
   // Two drawers on one district: a big one part way through, a small one done.
@@ -99,14 +99,14 @@ test('a row drawn while a sweep is in flight says so, carries its tiles, and sor
       `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, run_id)
        values ($1, 51.4, -0.7, 51.48, -0.58, array['ZZ7A'], $3, case when $3 = 'done' then now() - interval '2 days' else null end, $2)
        on conflict (grid_key) do update set state = excluded.state, outcodes = excluded.outcodes, run_id = excluded.run_id`,
-      [`test/board-old-${i}`, old.id, i === 10 ? 'todo' : 'done']);
-    await query('insert into census_run_tiles (run_id, grid_key) values ($1, $2) on conflict do nothing', [old.id, `test/board-old-${i}`]);
+      [`board-fixture/old-${i}`, old.id, i === 10 ? 'todo' : 'done']);
+    await query('insert into census_run_tiles (run_id, grid_key) values ($1, $2) on conflict do nothing', [old.id, `board-fixture/old-${i}`]);
     await query(
       `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, run_id)
        values ($1, 51.4, -0.7, 51.41, -0.69, array['ZZ7A'], $2, case when $2 = 'done' then now() else null end, $3)
        on conflict (grid_key) do update set state = excluded.state, outcodes = excluded.outcodes, run_id = excluded.run_id`,
-      [`test/board-${i}`, i < 4 ? 'done' : (i === 4 ? 'doing' : 'todo'), latest.id]);
-    await query('insert into census_run_tiles (run_id, grid_key) values ($1, $2) on conflict do nothing', [latest.id, `test/board-${i}`]);
+      [`board-fixture/${i}`, i < 4 ? 'done' : (i === 4 ? 'doing' : 'todo'), latest.id]);
+    await query('insert into census_run_tiles (run_id, grid_key) values ($1, $2) on conflict do nothing', [latest.id, `board-fixture/${i}`]);
   }
   const rows = await censusBoardRows(['zz7a']);
   const museums = rows.find((r) => r.subcategory === 'museums');
@@ -129,7 +129,7 @@ test('a row drawn while a sweep is in flight says so, carries its tiles, and sor
 
   // Every tile of the latest run answered and the run finished: the old run's
   // leftover todo tile does not keep the district sweeping.
-  await query(`update census_tiles set state = 'done', censused_at = now() where grid_key like 'test/board-%' and grid_key not like 'test/board-old-%'`);
+  await query(`update census_tiles set state = 'done', censused_at = now() where grid_key like 'board-fixture/%' and grid_key not like 'board-fixture/old-%'`);
   await query(`update census_runs set state = 'done' where id = $1`, [latest.id]);
   await query(`update area_counts set complete = true where area_slug = 'zz7a' and subcategory = 'museums'`);
   const [after] = (await censusBoardRows(['zz7a'])).filter((r) => r.subcategory === 'museums');
