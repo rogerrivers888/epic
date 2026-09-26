@@ -391,13 +391,16 @@ export async function wikipediaAudit() {
   // A place with no drawer and no category may be the town itself — a trip's
   // base is a town — and then the town's article is the right one. Nothing
   // says which, so it is listed and held back, never forgotten (26 Sep 2026).
-  const canJudge = (r) => Boolean(r.category || r.subcategory);
+  // "attraction" alone is not enough either: Clevedon, Keynsham and Hog's
+  // Back were each filed under nothing more than that, and a town or a ridge
+  // can be the attraction (production audit, 26 Sep 2026).
+  const canJudge = (r) => Boolean(r.subcategory || (r.category && r.category !== 'attraction'));
   const shape = (r) => ({ venue_ref: r.venue_ref, name: r.name, category: r.category ?? null, subcategory: r.subcategory, qid: r.qid, why: r.why, attached: r.attached ?? [] });
   const flagged = judged.filter(canJudge);
   const heldBack = judged.filter((r) => !canJudge(r));
   return {
     checked: rows.length, flagged: flagged.length, places: flagged.map(shape),
-    heldBack: heldBack.length, unjudged: heldBack.map((r) => ({ ...shape(r), reason: 'no drawer or category to judge the article against' })),
+    heldBack: heldBack.length, unjudged: heldBack.map((r) => ({ ...shape(r), reason: 'no drawer, and no category more specific than attraction, to judge the article against' })),
   };
 }
 

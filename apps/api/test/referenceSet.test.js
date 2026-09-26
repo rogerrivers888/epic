@@ -323,4 +323,8 @@ test('the audit flags a filed place paired with a town, and holds back a place i
   assert.deepEqual(audit.places.map((p) => p.venue_ref), [filed], 'a place in a drawer paired with a town is flagged');
   assert.deepEqual(audit.unjudged.map((p) => p.venue_ref), [unfiled], 'a record with no drawer and no category may be the town itself');
   assert.equal(audit.heldBack, 1);
+  // Nor is "attraction" with no drawer enough to judge on: a town can be the attraction.
+  await query(`update place_records set category = 'attraction' where venue_ref = $1`, [unfiled]);
+  const again = await ref.wikipediaAudit();
+  assert.deepEqual(again.unjudged.map((p) => p.venue_ref), [unfiled]);
 });
