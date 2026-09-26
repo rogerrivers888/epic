@@ -294,7 +294,9 @@ questionRoutes.post('/candidates/:id/file', requires('manage_questions'), async 
 questionRoutes.post('/candidates/:id/ignore', requires('manage_questions'), async (req, res, next) => {
   try {
     res.json(await sets.ignoreCandidate(Number(req.params.id), {
-      actor: actorOf(req), reason: req.body?.reason ? String(req.body.reason) : null,
+      // Optional on purpose: the back-office screens set words aside without
+      // one, and requiring it would break them. A blank reason is no reason.
+      actor: actorOf(req), reason: typeof req.body?.reason === 'string' && req.body.reason.trim() ? req.body.reason.trim() : null,
     }));
   } catch (err) { next(err); }
 });
