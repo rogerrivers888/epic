@@ -1447,7 +1447,11 @@ export async function shelveAll({ refs = null } = {}) {
       await query(
         `update place_index pi set category = v.cat, subcategory = v.sub, derived_by = v.by
            from (values ${values}) as v(ref, cat, sub, by)
-          where pi.venue_ref = v.ref`, chunk.flat());
+          -- A place the day-out test took off every shelf stays off it through
+          -- a rebuild (A5, migration 262): re-deriving its drawer from the atlas
+          -- or the open map would put it on a shelf and on the Not in Epic list
+          -- at once (Codex, 26 Sep 2026). Restoring it is a hand's job.
+          where pi.venue_ref = v.ref and pi.not_in_epic_at is null`, chunk.flat());
       chunk.length = 0;
     }
     if (words.length) {

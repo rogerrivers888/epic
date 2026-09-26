@@ -67,3 +67,34 @@ test('a members-only out place never lands in a tested drawer', async () => {
   const out = await applyVerdict('osm:node/9004', { drawer: 'pools', verdict: { verdict: 'out', by: 'members', reason: 'members only' }, tags: { leisure: 'sports_centre', sport: 'climbing' }, land: climbing });
   assert.equal(out.effect, 'not-in-epic');
 });
+
+// ---------------------------------------------------------------------------
+// Codex on the effect (26 Sep 2026)
+// ---------------------------------------------------------------------------
+
+test('a rebuild leaves a Not in Epic place off its shelf', async () => {
+  const { shelveAll } = await import('../src/repositories/placeIndex.js');
+  await seed('osm:node/9005', 'pools');
+  await applyVerdict('osm:node/9005', { drawer: 'pools', verdict: { verdict: 'out', by: null, reason: 'nothing says it has a pool' }, tags: { leisure: 'sports_centre' }, land });
+  await shelveAll({ refs: ['osm:node/9005'] });
+  const { rows: [row] } = await query('select subcategory, not_in_epic_before, not_in_epic_at from place_index where venue_ref = $1', ['osm:node/9005']);
+  assert.equal(row.subcategory, null, 'the rebuild did not put it back on a shelf');
+  assert.equal(row.not_in_epic_before, 'pools');
+  assert.ok(row.not_in_epic_at);
+});
+
+test('the effect comes before the fact: a filing that fails writes no verdict, so the catch-up returns to it', async () => {
+  const { judge } = await import('../src/sources/dayOutTest.js');
+  const was = process.env.EPIC_DAY_OUT_TEST;
+  try {
+    process.env.EPIC_DAY_OUT_TEST = 'on';
+    await seed('osm:node/9006', 'pools');
+    await query('delete from place_facts where venue_ref = $1', ['osm:node/9006']);
+    const boom = () => { throw new Error('taxonomy down'); };
+    await assert.rejects(() => judge('osm:node/9006', { drawer: 'pools', name: 'Bristol Zen Dojo', lat: 51.46, lng: -2.56, tags: { leisure: 'sports_centre', sport: 'karate' }, fetch: async () => ({ elements: [] }), land: boom }), /taxonomy down/);
+    const { rows } = await query("select 1 from place_facts where venue_ref = $1 and field = 'day_out_test'", ['osm:node/9006']);
+    assert.equal(rows.length, 0, 'no fact was written, so the place is still to be judged');
+  } finally {
+    if (was == null) delete process.env.EPIC_DAY_OUT_TEST; else process.env.EPIC_DAY_OUT_TEST = was;
+  }
+});

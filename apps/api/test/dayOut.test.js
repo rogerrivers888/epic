@@ -267,12 +267,18 @@ test('an object just over the box edge still speaks for the centre inside it; a 
   const elements = [
     el(1, { leisure: 'sports_centre', name: 'Easton Leisure Centre' }, 51.4002, -0.6003),   // inside, near the south-west corner
     el(2, { leisure: 'swimming_pool', name: 'Easton pool' }, 51.3998, -0.6003),             // 45 m south: in the margin, outside the box
-    el(3, { leisure: 'sports_centre', name: 'Over The Edge SC', swimming_pool: 'yes' }, 51.3995, -0.65), // outside the box: not a candidate
   ];
   const d = await dryRun({ drawer: 'pools', box, fetch: fake(elements), textFor: async () => '' });
   const by = Object.fromEntries(d.rows.map((r) => [r.name, [r.verdict, r.by]]));
   assert.deepEqual(by['Easton Leisure Centre'], ['kept', 'object'], 'Easton comes back kept');
-  assert.equal(by['Over The Edge SC'], undefined, 'the margin brings objects, not candidates');
+  // A centre is a candidate wherever the box query found it (by any node of
+  // its outline). An object-type candidate — a mapped lido — is held to the
+  // box, because the margin fetched those a little wider on purpose.
+  const lidos = await dryRun({ drawer: 'lidos', box, fetch: fake([
+    el(4, { leisure: 'swimming_pool', name: 'Inside Lido', location: 'outdoor' }, 51.42, -0.65),
+    el(5, { leisure: 'swimming_pool', name: 'Margin Lido', location: 'outdoor' }, 51.3995, -0.65),
+  ]), textFor: async () => '' });
+  assert.deepEqual(lidos.rows.map((r) => r.name), ['Inside Lido'], 'the margin brings objects, not candidates');
 });
 
 test('a tennis club with no pay-and-play on the map is members only; a padel hall that charges is not', () => {
@@ -282,4 +288,17 @@ test('a tennis club with no pay-and-play on the map is members only; a padel hal
   assert.deepEqual(pick(dayOutVerdict('racquet-clubs', { tags: { leisure: 'sports_centre', sport: 'padel', fee: 'yes' }, name: 'We Are Padel' })), ['kept', 'tag']);
   // A club that says it sells a session is not a members' club for this test.
   assert.deepEqual(pick(dayOutVerdict('racquet-clubs', { tags: { leisure: 'sports_centre', sport: 'tennis', fee: 'yes' }, name: 'Riverside Tennis Club' })), ['kept', 'tag']);
+});
+
+test('a taxonomy that does not answer is a can\'t-say on the row, and an open map that fails twice is a plain 503', async () => {
+  const elements = [el(1, { leisure: 'sports_centre', name: 'Bristol Yoga Centre', sport: 'yoga' }, 51.41, -0.66)];
+  const d = await dryRun({ drawer: 'pools', box: boxOf('51.39,-0.70,51.44,-0.60'), fetch: fake(elements), textFor: async () => '', land: () => { throw new Error('rules table locked'); } });
+  assert.match(d.rows[0].staysIn, /can't say/);
+  assert.equal(d.counts.leavesEpic, 0, 'a can\'t-say is not counted as leaving');
+  let calls = 0;
+  await assert.rejects(
+    () => dryRun({ drawer: 'pools', box: boxOf('51.39,-0.70,51.44,-0.60'), fetch: async () => { calls += 1; throw new Error('Overpass 504'); }, textFor: async () => '' }),
+    (err) => err.status === 503 && /open map did not answer/.test(err.message),
+  );
+  assert.equal(calls, 2, 'asked twice, then said so');
 });

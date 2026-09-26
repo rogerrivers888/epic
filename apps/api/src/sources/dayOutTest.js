@@ -23,6 +23,7 @@
 
 import { query } from '../db.js';
 import { overpassQuery } from './overpass.js';
+import { refreshStats } from '../repositories/placeIndex.js';
 import * as owned from '../repositories/ownedPlaces.js';
 import { ADJACENT_M, DRAWERS, NAMED_FOR, dayOutTestOn, dayOutVerdict } from '../domain/dayOut.js';
 
@@ -200,18 +201,35 @@ async function landingFor() {
 export async function dryRun({ drawer, box, textFor = null, fetch = overpassQuery, land = null }) {
   if (!DRAWERS.includes(drawer)) throw Object.assign(new Error(`The day-out test does not know a drawer called ${drawer}.`), { status: 400 });
   const spec = NAMED_FOR[drawer];
-  const data = await fetch(queryFor(drawer, box), { timeoutMs: 130_000 });
+  // Overpass is somebody else's machine: one mirror hangs, the next answers.
+  // Asked twice, then the failure is the caller's to say in plain words.
+  let data;
+  try { data = await fetch(queryFor(drawer, box), { timeoutMs: 130_000 }); }
+  catch (first) {
+    try { data = await fetch(queryFor(drawer, box), { timeoutMs: 130_000 }); }
+    catch (second) { throw Object.assign(new Error(`The open map did not answer for this box: ${String(second?.message ?? first?.message ?? '').slice(0, 80)}`), { status: 503, code: 'open_map_unavailable' }); }
+  }
   const els = (data.elements ?? []).map(withPoint);
   // Candidates come from the box; objects from the box and its margin, so a
   // pool just over a quarter's edge still speaks for the centre inside it.
-  const candidates = els.filter((el) => isCandidate(drawer, el) && inBox(box, el));
+  // A centre is a candidate wherever Overpass found it — the box query
+  // already fenced it, by any node of its outline — and judging it by its
+  // centre point dropped Easton and Lightwater, whose outlines cross a box
+  // edge (26 Sep 2026). Only an object-type candidate (a mapped pool, a
+  // track) is held to the box, since the margin fetched those a little wider.
+  const candidates = els.filter((el) => isCandidate(drawer, el) && (el.tags.leisure === 'sports_centre' || el.tags.leisure === 'stadium' || inBox(box, el)));
   const objects = els.filter((el) => spec.object(el.tags));
   const readText = textFor ?? (async (c) => (await heldFor(`osm:${c.type}/${c.id}`)).text);
   // The taxonomy's landing is loaded the first time an out row needs it, so
   // a dry run with nothing out — and a test with a stubbed map — never opens
   // the database (Codex, 26 Sep 2026).
   let landing = land;
-  const landAt = async (labels) => { landing ??= await landingFor(); return landing(labels); };
+  // A landing that fails is a can't-speak, not a 500: the row says the
+  // taxonomy could not be asked, and the dry run still answers for every
+  // other place (26 Sep 2026, a quarter box answered 500 as a whole).
+  const landAt = async (labels) => {
+    try { landing ??= await landingFor(); return landing(labels); } catch (err) { return { subcategory: null, failed: String(err?.message ?? err).slice(0, 80) }; }
+  };
   const rows = [];
   for (const c of candidates) {
     const nearby = c.lat == null ? [] : objects
@@ -228,7 +246,8 @@ export async function dryRun({ drawer, box, textFor = null, fetch = overpassQuer
       const labels = labelsOf(c.tags).filter((l) => !FEEDER[drawer]?.includes(l));
       const filed = labels.length ? await landAt(labels) : null;
       const other = filed?.subcategory ?? null;
-      if (other && other !== drawer && !(v.by === 'members' && DRAWERS.includes(other))) elsewhere = { drawer: other, via: labels.join(' ') };
+      if (filed?.failed) elsewhere = { drawer: "can't say — the taxonomy did not answer", via: filed.failed };
+      else if (other && other !== drawer && !(v.by === 'members' && DRAWERS.includes(other))) elsewhere = { drawer: other, via: labels.join(' ') };
     }
     rows.push({
       ref: `osm:${c.type}/${c.id}`,
@@ -297,11 +316,16 @@ export async function judge(venueRef, { drawer, name = '', lat = null, lng = nul
   const v = dayOutVerdict(drawer, { tags, nearby, text, name });
   if (!v) return null;
   if (write) {
+    // The effect first, the fact second. The catch-up skips a place that
+    // carries the fact, so a fact written before a filing that then failed
+    // would have left the place judged on paper and unmoved for ever (Codex,
+    // 26 Sep 2026). A failed effect throws, no fact is written, and the
+    // catch-up comes back to it.
+    const effect = await applyVerdict(venueRef, { drawer, verdict: v, tags, land });
     await owned.putFact(venueRef, {
-      field: 'day_out_test', source: 'own', value: { drawer, ...v, checkedAt: new Date().toISOString() },
+      field: 'day_out_test', source: 'own', value: { drawer, ...v, effect: effect?.effect ?? null, to: effect?.to ?? null, checkedAt: new Date().toISOString() },
       licence: 'ours', retention: 'indefinite', confidence: v.verdict === 'provisional' ? 0.5 : 1,
     });
-    await applyVerdict(venueRef, { drawer, verdict: v, tags, land });
   }
   return v;
 }
@@ -337,6 +361,9 @@ export async function applyVerdict(venueRef, { drawer, verdict, tags = null, lan
         returning venue_ref`,
       [venueRef, other, drawer],
     );
+    // The shelf and area counts read a cache; a place that moved drawer is
+    // counted under the old one until it is refreshed (Codex, 26 Sep 2026).
+    if (rows.length) await refreshStats().catch(() => null);
     return { effect: rows.length ? 'refiled' : 'unchanged', to: other };
   }
   const { rows } = await query(
@@ -347,6 +374,7 @@ export async function applyVerdict(venueRef, { drawer, verdict, tags = null, lan
       returning venue_ref`,
     [venueRef, `${drawer}: ${verdict.reason}`, drawer],
   );
+  if (rows.length) await refreshStats().catch(() => null);
   return { effect: rows.length ? 'not-in-epic' : 'unchanged' };
 }
 
@@ -372,6 +400,7 @@ export async function restoreToEpic(venueRef) {
       returning venue_ref, subcategory`,
     [venueRef],
   );
+  if (rows[0]) await refreshStats().catch(() => null);
   return rows[0] ?? null;
 }
 
