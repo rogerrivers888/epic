@@ -424,6 +424,23 @@ async function findTheirPage({ venueRef, name, locality, address, category, hous
  * row with any provenance, so a row an older researcher wrote was subtracted
  * from the confirmed request count and then paid for (Codex, 25 Sep 2026).
  */
+/**
+ * What the record already holds from the open map, when it holds a reference:
+ * enough for the steps after the match — the point, the website, the kind.
+ * The tags themselves are never stored, so `tags` is null.
+ */
+async function heldOpenMap(venueRef) {
+  const facts = await owned.liveFacts(venueRef, { keepableOnly: true }).catch(() => []);
+  const fact = (f) => facts.find((x) => x.source === 'osm' && x.field === f);
+  const ref = fact('osm_ref')?.value ?? null;
+  if (!ref) return null;
+  return {
+    ref, lat: fact('lat')?.value ?? null, lng: fact('lng')?.value ?? null, tags: null,
+    website: fact('website')?.value ?? null, category: fact('category')?.value ?? null,
+    confidence: fact('osm_ref')?.confidence ?? null, how: 'held',
+  };
+}
+
 export function alreadyResearched(row) {
   if (!row || row.enrich_state !== 'done') return false;
   const fresh = row.enriched_at && Date.now() - new Date(row.enriched_at).getTime() < REFRESH_AFTER_DAYS * 86_400_000
@@ -533,7 +550,19 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
   // 1. The same place in the open map. Everything else is easier once this
   //    lands, because OSM carries the website the other two need.
   let osm = null;
-  try {
+  // A record that already holds its open-map reference is not matched again
+  // on a pass that replaces nothing (owner, C19, 26 Sep 2026): the backfill of
+  // four thousand places was asking Overpass to find places we had already
+  // found. A deliberate "look again" or refresh (`replace`) still matches, so
+  // a wrong match stays removable.
+  const held = replace ? null : await heldOpenMap(venueRef);
+  if (held) {
+    osm = held;
+    matched.osm = before?.matched?.osm ?? { ref: held.ref, how: 'held' };
+    identified += 1;
+    if (!seed.website) seed.website = held.website ?? null;
+    if (held.category) seed.category = held.category;
+  } else try {
     // Attributed whether or not it answers: a refused request still went out,
     // and provider_calls is the record of what we asked of whom, not of what we
     // got back (Technical Constraints §2).
