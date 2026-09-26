@@ -175,8 +175,14 @@ export async function questionsFor(setKey = null) {
  * naming a label that does not exist is a caller inventing a second
  * vocabulary, which is the thing this module exists to prevent.
  */
-export async function addQuestion({ attributeKey, setKey = null, scope = 'set', gate = false, refreshDays = null, position = 100, fromCandidate = null }, client) {
+export async function addQuestion(args, client) {
+  // Always inside a transaction, serialised on the label, so a global and a
+  // set question on the same fact cannot both pass their checks at once
+  // (Codex, 26 Sep 2026). A caller with a transaction shares it.
+  if (!client) return withTransaction((c) => addQuestion(args, c));
+  const { attributeKey, setKey = null, scope = 'set', gate = false, refreshDays = null, position = 100, fromCandidate = null } = args;
   const run = on(client);
+  await run('select pg_advisory_xact_lock(hashtext($1))', [`question:${attributeKey}`]);
   if (scope === 'set' && !setKey) throw bad('A question has to belong to a set, or be asked everywhere.');
   const { rows: known } = await run('select key from place_attributes where key = $1', [attributeKey]);
   if (!known.length) throw bad(`${attributeKey} is not one of our facts. Name the fact first, then check for it.`);
