@@ -1445,10 +1445,27 @@ test('a run kept to the night waits for its window, and stops at its own share o
   await query(`update census_runs set night_share = 3, window_from = $2, window_to = $3 where id = $1`, [run.id, h, (h + 2) % 24]);
   await seedTile(run, 'test/share');
   await withCensus(answers(1), () => advance({ runId: run.id, budgetMs: 10_000 }));
-  const { rows: [after] } = await query('select state, problem, resume_after from census_runs where id = $1', [run.id]);
+  const { rows: [after] } = await query('select state, problem, resume_after, requests from census_runs where id = $1', [run.id]);
   assert.equal(after.state, 'waiting', 'it stopped itself at its share');
   assert.match(after.problem ?? '', /this run's share of 3/);
   assert.ok([7, 8].includes(new Date(after.resume_after).getUTCHours()), 'and comes back at the quota reset');
+  assert.ok(Number(after.requests) <= 3, `the tile was budgeted by the share too, not run past it (${after.requests})`);
+
+  // Another run over the same tile on the same day does not spend this run's
+  // share: the share counts the run's own slices (Codex, 26 Sep 2026).
+  const other = await startTestRun({ label: 'test share other' });
+  await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'test/share') on conflict do nothing`, [other.id]);
+  await query(
+    `insert into census_slices (area_slug, min_lat, min_lng, max_lat, max_lng, category, subcategory, google_type, query, returned, new_ids, saturated, depth, requests, ran_at, census_run_id)
+     values ('test/share', 51.4, -0.7, 51.5, -0.6, 'sport', 'golf', 'golf_course', 'golf course', 1, 1, false, 0, 500, now(), $1)`, [other.id]);
+  await query(`update census_runs set night_share = 1000, window_from = $2, window_to = $3 where id = $1`, [other.id, h, (h + 2) % 24]);
+  const { rows: [mine] } = await query(
+    `select coalesce(sum(requests), 0)::int n from census_slices where census_run_id = $1 and ran_at >= date_trunc('day', now() at time zone 'America/Los_Angeles') at time zone 'America/Los_Angeles'`, [run.id]);
+  assert.ok(mine.n <= 3, 'this run\'s own count is untouched by the other run\'s five hundred');
+
+  // Hours are whole and on the clock.
+  await assert.rejects(startRun({ label: 'test bad hour', outcodes: ['ZZ'], windowFrom: 24, windowTo: 7 }), /whole hour/);
+  await assert.rejects(startRun({ label: 'test half window', outcodes: ['ZZ'], windowFrom: 22 }), /both windowFrom and windowTo/);
 
   // A run whose window is closed does not work at all, and says when it will.
   const later = await startTestRun({ label: 'test window' });

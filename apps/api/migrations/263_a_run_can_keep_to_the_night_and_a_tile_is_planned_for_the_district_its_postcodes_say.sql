@@ -18,6 +18,11 @@
 -- sea, a park) keeps the tags it had.
 
 alter table census_runs add column if not exists night_share integer;
+-- Which census run asked a slice, so a run's share of the day counts its own
+-- requests and not another run's on the same tiles (census_slices.run_id is
+-- the id of one pass over one tile, not of the run).
+alter table census_slices add column if not exists census_run_id uuid;
+create index if not exists census_slices_census_run_idx on census_slices (census_run_id, ran_at) where census_run_id is not null;
 alter table census_runs add column if not exists window_from smallint;
 alter table census_runs add column if not exists window_to   smallint;
 

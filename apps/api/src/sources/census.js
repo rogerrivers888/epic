@@ -183,7 +183,7 @@ const widthOfLabel = (label) => {
  * thing to look at when a count reads wrong, and a tree that quietly replaced
  * the parent with its tiles would hide it.
  */
-async function sliceDown({ box, type, words = null, sourced = SOURCED.TYPE, category, subcategory, areaSlug, outcode, householdId, runId, depth = 0, parentId = null, found, surfaced, meter, stats, pace = null }) {
+async function sliceDown({ box, type, words = null, sourced = SOURCED.TYPE, category, subcategory, areaSlug, outcode, householdId, runId, censusRunId = null, depth = 0, parentId = null, found, surfaced, meter, stats, pace = null }) {
   if (stats.requests >= stats.maxRequests) { stats.stopped = true; return; }
   // A long run is paced rather than budgeted: Essentials is free and the only
   // thing that can go wrong is asking Google faster than the project's quota
@@ -259,11 +259,11 @@ async function sliceDown({ box, type, words = null, sourced = SOURCED.TYPE, cate
   const { rows: [row] } = await query(
     `insert into census_slices
        (area_slug, outcode, min_lat, min_lng, max_lat, max_lng, category, subcategory,
-        google_type, query, returned, new_ids, saturated, parent_id, depth, requests, problem, run_id, sourced)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+        google_type, query, returned, new_ids, saturated, parent_id, depth, requests, problem, run_id, sourced, census_run_id)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
      returning id`,
     [areaSlug, outcode, box.minLat, box.minLng, box.maxLat, box.maxLng, category, subcategory,
-      type, words ?? type, res.places.length, fresh, res.saturated, parentId, depth, attempted, res.problem, runId, sourced],
+      type, words ?? type, res.places.length, fresh, res.saturated, parentId, depth, attempted, res.problem, runId, sourced, censusRunId],
   );
   stats.slices += 1;
   if (res.problem) {
@@ -291,7 +291,7 @@ async function sliceDown({ box, type, words = null, sourced = SOURCED.TYPE, cate
   if (!saturated) return;
   for (const q of quarters(box)) {
     await sliceDown({
-      box: q, type, words, sourced, category, subcategory, areaSlug, outcode, householdId, runId,
+      box: q, type, words, sourced, category, subcategory, areaSlug, outcode, householdId, runId, censusRunId,
       depth: depth + 1, parentId: row.id, found, surfaced, meter, stats, pace,
     });
   }
@@ -347,7 +347,7 @@ export async function censusArea({
   try {
   for (const { category, subcategory, questions } of plan) {
     for (const { type, words, sourced } of questions) {
-      await sliceDown({ box, type, words, sourced, category, subcategory, areaSlug, outcode, householdId, runId, found, surfaced, meter, stats, pace });
+      await sliceDown({ box, type, words, sourced, category, subcategory, areaSlug, outcode, householdId, runId, censusRunId, found, surfaced, meter, stats, pace });
       if (stats.stopped || stats.refused) break;
     }
     if (stats.refused) { stats.problems.push(`the provider refused: ${stats.refused}`); break; }

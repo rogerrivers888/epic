@@ -282,6 +282,17 @@ export async function startRun({
   // 2026: "Build it paused; I press start").
   nightShare = null, windowFrom = null, windowTo = null, paused = false,
 } = {}) {
+  // Whole hours on the clock, and a share that is a number of requests: a
+  // fraction or a 24 would reach the database or Date.UTC and mean something
+  // else (Codex, 26 Sep 2026).
+  const hour = (h, name) => {
+    if (h == null) return null;
+    if (!Number.isInteger(h) || h < 0 || h > 23) throw Object.assign(new Error(`${name} must be a whole hour from 0 to 23`), { status: 400 });
+    return h;
+  };
+  windowFrom = hour(windowFrom, 'windowFrom'); windowTo = hour(windowTo, 'windowTo');
+  if ((windowFrom == null) !== (windowTo == null)) throw Object.assign(new Error('a window needs both windowFrom and windowTo'), { status: 400 });
+  if (nightShare != null && (!Number.isInteger(nightShare) || nightShare <= 0)) throw Object.assign(new Error('nightShare must be a whole number of requests'), { status: 400 });
   if (!areas?.length && !outcodes?.length) {
     throw Object.assign(new Error('a run needs postcode areas or districts'), { status: 400 });
   }
@@ -438,11 +449,15 @@ export function nextWindowOpening(run, now = new Date()) {
 
 /** What this run alone has asked since the quota day began: its own slices, on its own tiles. */
 async function ownRequestsToday(runId) {
+  // By the census run that asked the slice (census_run_id, migration 263),
+  // not by tile membership: a tile can belong to two runs on one quota day,
+  // and the other run's slices are not this one's share (Codex, 26 Sep 2026).
+  // census_slices.run_id is the pass's own id, not the census run's.
   const { rows: [row] } = await query(
     `select coalesce(sum(s.requests), 0)::int as n
        from census_slices s
-       join census_run_tiles m on m.grid_key = s.area_slug and m.run_id = $1
-      where s.ran_at >= date_trunc('day', now() at time zone 'America/Los_Angeles') at time zone 'America/Los_Angeles'`, [runId]);
+      where s.census_run_id = $1
+        and s.ran_at >= date_trunc('day', now() at time zone 'America/Los_Angeles') at time zone 'America/Los_Angeles'`, [runId]);
   return Number(row?.n ?? 0);
 }
 
@@ -745,9 +760,11 @@ export async function advance({ runId = null, budgetMs = SLICE_MS, now = () => D
     // what stops the census when households need the quota; the share is what
     // leaves them headroom whether they need it or not ("never take the whole
     // 75,000 daily cap — households' own searches share it").
+    let shareLeft = Infinity;
     if (run.night_share != null) {
       const own = await ownRequestsToday(run.id);
-      if (own >= Number(run.night_share)) {
+      shareLeft = Math.max(0, Number(run.night_share) - own);
+      if (!shareLeft) {
         const back = nextQuotaReset();
         await waitUntil(run.id, back,
           `${own.toLocaleString('en-GB')} requests today, which is this run's share of ${Number(run.night_share).toLocaleString('en-GB')}; back at ${back.toISOString().slice(11, 16)} UTC`);
@@ -780,6 +797,10 @@ export async function advance({ runId = null, budgetMs = SLICE_MS, now = () => D
       remaining: Math.min(
         Math.max(0, (fresh?.max_requests ?? run.max_requests) - (fresh?.requests ?? 0)),
         Math.max(0, today.dailyCap - today.dayRequests),
+        // And what is left of the run's own share: checked at the loop is
+        // not enforced on the tile, and a tile just under the share could
+        // run hundreds past it (Codex, 26 Sep 2026).
+        shareLeft,
       ),
       // The deadline goes *into* the tile, not around it. A tile of central
       // London is twenty minutes of asking, and a budget checked only between
