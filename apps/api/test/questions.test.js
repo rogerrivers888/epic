@@ -804,3 +804,58 @@ test('an evidence quote goes to the approver only; everybody else is told there 
     await query("delete from harvest_candidates where subcategory = $1 and norm = 'zz wave machine'", [sub]);
   }
 });
+
+// ---------------------------------------------------------------------------
+// C27 (owner, 26 Sep 2026): an alias of a global, a new global fact, and a reason
+// ---------------------------------------------------------------------------
+
+test('a word that means a global question becomes its alias, never a second question', async () => {
+  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+  await sets.recordCandidates(sub, [{ norm: 'zz car park', raw: 'zz car park', kind: 'feature', sources: ['features'], placesSeen: 3, examples: ['osm:c'], asserts: 3, evidence: 'There is a car park behind the pub', evidenceRef: 'osm:c' }], { placesTotal: 20 });
+  const [w] = (await sets.candidates({ subcategory: sub, status: 'new', limit: 50 })).filter((c) => c.norm === 'zz car park');
+  const before = (await query("select count(*)::int as n from questions where attribute_key = 'parking'")).rows[0].n;
+  const row = await sets.aliasToGlobal(w.id, { attributeKey: 'parking', actor: 'test' });
+  assert.equal(row.status, 'promoted');
+  assert.match(row.decision_reason, /alias of the global parking/);
+  assert.equal((await sets.resolveAttribute('zz car park'))?.key, 'parking', 'the resolver now meets the wording and answers parking');
+  assert.equal((await query("select count(*)::int as n from questions where attribute_key = 'parking'")).rows[0].n, before, 'no second parking question');
+  await assert.rejects(() => sets.aliasToGlobal(w.id, { attributeKey: 'parking' }), /already been decided/);
+  await query("delete from attribute_aliases where norm like 'zz %'");
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+});
+
+test('an alias names a global question, or it is refused', async () => {
+  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+  await sets.recordCandidates(sub, [{ norm: 'zz thing', raw: 'zz thing', kind: 'feature', sources: ['features'], placesSeen: 2, asserts: 2, evidence: 'a thing', evidenceRef: 'osm:t' }], { placesTotal: 20 });
+  const [w] = (await sets.candidates({ subcategory: sub, status: 'new', limit: 50 })).filter((c) => c.norm === 'zz thing');
+  await assert.rejects(() => sets.aliasToGlobal(w.id, { attributeKey: 'wave-machine' }), /not asked everywhere/);
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+});
+
+test('a quoted word can become a global fact with its own re-check cadence', async () => {
+  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+  await sets.recordCandidates(sub, [{ norm: 'zz halal', raw: 'zz halal', kind: 'feature', sources: ['features'], placesSeen: 3, asserts: 3, evidence: 'our meat is Halal', evidenceRef: 'osm:h' }], { placesTotal: 20 });
+  const [w] = (await sets.candidates({ subcategory: sub, status: 'new', limit: 50 })).filter((c) => c.norm === 'zz halal');
+  const out = await sets.globalFromCandidate(w.id, { label: 'Zz halal food', refreshDays: 90, actor: 'test' });
+  assert.equal(out.question.scope, 'global');
+  assert.equal(out.question.refresh_days, 90);
+  assert.equal(out.question.set_key, null);
+  await query('delete from questions where id = $1', [out.question.id]);
+  await query("delete from attribute_aliases where norm like 'zz %'");
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+  await query("delete from place_attributes where key like 'zz-%'");
+});
+
+test('a word set aside says why', async () => {
+  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+  await sets.recordCandidates(sub, [{ norm: 'zz gift voucher', raw: 'zz gift voucher', kind: 'feature', sources: ['features'], placesSeen: 8, asserts: 8, evidence: 'gift vouchers are available', evidenceRef: 'osm:g' }], { placesTotal: 20 });
+  const [w] = (await sets.candidates({ subcategory: sub, status: 'new', limit: 50 })).filter((c) => c.norm === 'zz gift voucher');
+  const row = await sets.ignoreCandidate(w.id, { actor: 'test', reason: 'boilerplate: sold everywhere, chosen on by nobody' });
+  assert.equal(row.status, 'ignored');
+  assert.match(row.decision_reason, /boilerplate/);
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+});

@@ -292,7 +292,30 @@ questionRoutes.post('/candidates/:id/file', requires('manage_questions'), async 
 });
 
 questionRoutes.post('/candidates/:id/ignore', requires('manage_questions'), async (req, res, next) => {
-  try { res.json(await sets.ignoreCandidate(Number(req.params.id), { actor: actorOf(req) })); } catch (err) { next(err); }
+  try {
+    res.json(await sets.ignoreCandidate(Number(req.params.id), {
+      actor: actorOf(req), reason: req.body?.reason ? String(req.body.reason) : null,
+    }));
+  } catch (err) { next(err); }
+});
+
+/** A global question said another way: an alias, never a second question (C18). */
+questionRoutes.post('/candidates/:id/alias', requires('manage_questions'), async (req, res, next) => {
+  try {
+    const attributeKey = String(req.body?.attributeKey ?? '').trim();
+    if (!attributeKey) throw bad('Name the global question this word means.');
+    res.json(await sets.aliasToGlobal(Number(req.params.id), { attributeKey, actor: actorOf(req) }));
+  } catch (err) { next(err); }
+});
+
+/** A quoted word that is a fact about every place: a new global question (C20). */
+questionRoutes.post('/candidates/:id/global', requires('manage_questions'), async (req, res, next) => {
+  try {
+    const { label = null, kind = 'yesno', refreshDays = null } = req.body ?? {};
+    const days = refreshDays == null ? null : Math.floor(Number(refreshDays));
+    if (days != null && !(Number.isFinite(days) && days >= 1 && days <= 3650)) throw bad('A re-check cadence is a whole number of days, 1 to 3650.');
+    res.json(await sets.globalFromCandidate(Number(req.params.id), { label, kind, refreshDays: days, actor: actorOf(req) }));
+  } catch (err) { next(err); }
 });
 
 questionRoutes.post('/candidates/:id/restore', requires('manage_questions'), async (req, res, next) => {

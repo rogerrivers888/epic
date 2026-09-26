@@ -686,18 +686,88 @@ export async function promote(id, { gate = false, kind = 'yesno', label = null, 
 }
 
 /** Never ask about this word here again. The examples go with the decision. */
-export async function ignoreCandidate(id, { actor = null } = {}) {
+export async function ignoreCandidate(id, { actor = null, reason = null } = {}) {
   const { rows } = await query(
     // The examples go — they are the word-to-place scaffolding the brief says
     // to drop on a decision. The quote stays: it is owned text, and under C21
     // it is the only thing that can make a restored word promotable again.
     // Clearing it here left an ignored-then-restored word an unresolved
     // feature nothing could ever pick up (Codex, 26 Sep 2026).
-    `update harvest_candidates set status = 'ignored', decided_by = $2, decided_at = now(), examples = '{}'
-      where id = $1 and status in ('new', 'unresolved') returning *`, [id, actor],
+    // The reason is the owner's sentence for why (migration 265, C27).
+    `update harvest_candidates set status = 'ignored', decided_by = $2, decided_at = now(), examples = '{}',
+            decision_reason = coalesce($3, decision_reason)
+      where id = $1 and status in ('new', 'unresolved') returning *`, [id, actor, reason ? String(reason).slice(0, 300) : null],
   );
   if (!rows[0]) throw bad('That word has already been decided.');
   return rows[0];
+}
+
+/**
+ * A word that is a global question said another way (C18, owner 26 Sep 2026:
+ * "anything that duplicates a global check — car park → parking, wheelchair
+ * access → step free, online booking → booking required — becomes an alias,
+ * not a candidate").
+ *
+ * The wording is written as an alias of the global question's label, so the
+ * resolver meets "car park" and answers parking, and the candidate is
+ * recorded as promoted to that global question. No second question is ever
+ * made: a set question on a label already asked everywhere is the duplicate
+ * this exists to stop. A wording already pointed at another label is refused
+ * by name, as a merge is.
+ */
+export async function aliasToGlobal(id, { attributeKey, actor = null } = {}) {
+  return withTransaction(async (client) => {
+    const { rows: [c] } = await client.query("select * from harvest_candidates where id = $1 and status in ('new', 'unresolved') for update", [id]);
+    if (!c) throw bad('That word has already been decided.');
+    const { rows: [q] } = await client.query("select id from questions where attribute_key = $1 and scope = 'global' and active", [attributeKey]);
+    if (!q) throw bad(`${attributeKey} is not asked everywhere. An alias to a global question names one that is.`);
+    const { rows: [pointed] } = await client.query('select target_key from attribute_aliases where norm = $1', [c.norm]);
+    if (pointed && pointed.target_key !== attributeKey) throw bad(`"${c.norm}" already means ${pointed.target_key}. It cannot mean ${attributeKey} as well.`);
+    await client.query(
+      'insert into attribute_aliases (norm, target_key, raw) values ($1, $2, $3) on conflict (norm) do nothing',
+      [c.norm, attributeKey, c.raw_forms?.[0] ?? null],
+    );
+    const { rows: [row] } = await client.query(
+      `update harvest_candidates set status = 'promoted', question_id = $2, decided_by = $3, decided_at = now(), examples = '{}',
+              decision_reason = $4
+        where id = $1 returning *`,
+      [id, q.id, actor, `alias of the global ${attributeKey} (C18)`],
+    );
+    attrs.forget();
+    return row;
+  });
+}
+
+/**
+ * A quoted word that is a fact about every place, not one kind (owner, 26 Sep
+ * 2026: "Halal food → a global dietary fact, shortest re-check cadence").
+ *
+ * The same doors as `promote`: it must be quoted (C21), the label is made or
+ * reused through the alias table, and the question is global. `refreshDays`
+ * is the re-check cadence (C12).
+ */
+export async function globalFromCandidate(id, { label = null, kind = 'yesno', refreshDays = null, actor = null } = {}) {
+  return withTransaction(async (client) => {
+    const { rows: [c] } = await client.query("select * from harvest_candidates where id = $1 and status = 'new' for update", [id]);
+    if (!c) throw bad('That word has already been decided, or is not promotable.');
+    if (!c.evidence || !(c.sources ?? {}).features) throw bad(`"${c.norm}" carries no evidence quote from an owned page.`);
+    const { rows: [pointed] } = await client.query('select target_key from attribute_aliases where norm = $1', [c.norm]);
+    let key = pointed?.target_key ?? null;
+    if (!key) {
+      const text = label ?? c.raw_forms?.[0] ?? c.norm;
+      key = slug(text);
+      await client.query("insert into place_attributes (key, label, kind, position) values ($1, $2, $3, 200) on conflict (key) do nothing", [key, sentence(text), kind]);
+      await client.query('insert into attribute_aliases (norm, target_key, raw) values ($1, $2, $3) on conflict (norm) do nothing', [c.norm, key, c.raw_forms?.[0] ?? null]);
+    }
+    const question = await addQuestion({ attributeKey: key, scope: 'global', refreshDays, fromCandidate: id }, client);
+    await client.query(
+      `update harvest_candidates set status = 'promoted', question_id = $2, decided_by = $3, decided_at = now(), examples = '{}',
+              decision_reason = 'a global fact (C20)'
+        where id = $1`, [id, question?.id ?? null, actor],
+    );
+    attrs.forget();
+    return { candidate: c.norm, question, attributeKey: key };
+  });
 }
 
 /** Put an ignored word back in the queue — the way back the design brief asks for. */
