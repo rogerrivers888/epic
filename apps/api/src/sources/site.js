@@ -9,9 +9,17 @@
 // menu lookup (sources/menuLink.js) it is free and is not a provider call.
 //
 // What is taken is facts a business publishes to be republished: how to reach
-// them, where they are, when they open, how to book. Their prose is not taken,
-// with the single exception of the meta description, which exists solely to be
-// quoted by other people's software and is stored with their own URL beside it.
+// them, where they are, when they open, how to book; and the meta description,
+// which exists solely to be quoted by other people's software and is stored
+// with their own URL beside it — the lead a place page shows.
+//
+// Their paragraphs are kept too, as the body, by the owner's decision (26 Sep
+// 2026: "Yes, store fuller prose. Owned text, allowed … keep the lead
+// separately from the body rather than replacing it. The lead is what a place
+// page shows; the body is what the extractor reads"). The body is capped, sits
+// in place_facts with its source URL, is never a place_records column, and so
+// never reaches a device or a page; it is read to find features and to quote
+// the sentence that evidences one.
 //
 // Same manners as the menu lookup: identify ourselves, one page, five seconds,
 // one megabyte, and never follow the site into a crawl.
