@@ -105,12 +105,15 @@ export async function loadPostcodes(file) {
   // the other's rows and swap in a snapshot of half a country (Codex, 26 Sep
   // 2026). The lock lives on one connection for the life of the load.
   const holder = await pool.connect();
-  const { rows: [lock] } = await holder.query('select pg_try_advisory_lock(hashtext($1)) as got', [LOCK]);
-  if (!lock.got) { holder.release(); throw new Error('another postcode load is running'); }
+  let got = false;
   try {
+    ({ rows: [{ got }] } = await holder.query('select pg_try_advisory_lock(hashtext($1)) as got', [LOCK]));
+    if (!got) throw new Error('another postcode load is running');
     return await loadWhileLocked(file, stats);
   } finally {
-    await holder.query('select pg_advisory_unlock(hashtext($1))', [LOCK]).catch(() => null);
+    // Whatever happened — the lock refused, the lock query itself failing, the
+    // load throwing — the client goes back (Codex, 26 Sep 2026).
+    if (got) await holder.query('select pg_advisory_unlock(hashtext($1))', [LOCK]).catch(() => null);
     holder.release();
   }
 }
