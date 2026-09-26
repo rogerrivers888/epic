@@ -8,10 +8,15 @@
  * last day; one tap gives it 24 hours of paid calls, one takes them away. The
  * API refuses the grant from an agent's own session, so an agent cannot give
  * itself a budget. Hidden for a session without `manage_settings`.
+ *
+ * Only the sessions seen in the last 24 hours, and any still holding a grant,
+ * with a link to the rest (owner, 26 Sep 2026: "Trim the Agent sessions panel
+ * to sessions seen in the last 24 hours, with a link to show all").
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
+import { Press } from '../components/press';
 import { AgentSession, api, ApiError } from '../api';
 import { colors, spacing, type } from '../theme';
 import { Button } from '../components/ui';
@@ -19,12 +24,14 @@ import { Panel, ago, money } from './kit';
 
 export function AgentSessions() {
   const [rows, setRows] = useState<AgentSession[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [all, setAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    try { setRows((await api.agentSessions()).sessions); } catch { setRows(null); }
-  }, []);
+    try { const out = await api.agentSessions(all); setRows(out.sessions); setTotal(out.total); } catch { setRows(null); }
+  }, [all]);
   useEffect(() => { void load(); }, [load]);
 
   const grant = async (id: string, hours: number) => {
@@ -52,7 +59,14 @@ export function AgentSessions() {
             ? <Button kind="secondary" label="Stop paid calls" loading={busy === r.id} onPress={() => void grant(r.id, 0)} />
             : <Button kind="secondary" label="Allow 24 hours" loading={busy === r.id} onPress={() => void grant(r.id, 24)} />}
         </View>
-      )) : <Text style={type.small}>None signed in.</Text>}
+      )) : <Text style={type.small}>{all ? 'None signed in.' : 'None seen in the last 24 hours.'}</Text>}
+      {total > rows.length || all ? (
+        <Press onPress={() => setAll((a) => !a)} accessibilityRole="link" style={{ paddingTop: spacing.sm }}>
+          <Text style={[type.small, { color: colors.ink, textDecorationLine: 'underline' }]}>
+            {all ? 'Show the last 24 hours only' : `Show all ${total}`}
+          </Text>
+        </Press>
+      ) : null}
     </Panel>
   );
 }

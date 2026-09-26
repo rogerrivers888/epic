@@ -366,3 +366,30 @@ test('the call that crosses the line raises the alarm itself', async () => {
     await todayStatus({ fresh: true });
   }
 });
+
+test('the agent list holds the last 24 hours and any live grant, and says how many there are in all', async () => {
+  // Owner, 26 Sep 2026: "Trim the Agent sessions panel to sessions seen in the
+  // last 24 hours, with a link to show all."
+  const { liveAgentSessions } = await import('../src/repositories/sessions.js');
+  const make = (tok, seen, grant = false) => query(
+    `insert into api_sessions (token_hash, label, kind, expires_at, last_seen_at, created_at, paid_grant_until)
+     values ($1, $1, 'agent', now() + interval '30 days', now() - $2::interval, now() - interval '40 days', case when $3 then now() + interval '1 hour' end)
+     on conflict (token_hash) do update set last_seen_at = excluded.last_seen_at, paid_grant_until = excluded.paid_grant_until`,
+    [tok, seen, grant]);
+  await make('test:agents-recent', '1 hour');
+  await make('test:agents-old', '5 days');
+  await make('test:agents-old-granted', '5 days', true);
+  try {
+    const labels = (out) => out.sessions.map((s) => s.label);
+    const recent = await liveAgentSessions();
+    assert.ok(labels(recent).includes('test:agents-recent'));
+    assert.ok(!labels(recent).includes('test:agents-old'), 'not seen for five days');
+    assert.ok(labels(recent).includes('test:agents-old-granted'), 'a live grant can always be taken away');
+    const every = await liveAgentSessions({ all: true });
+    assert.ok(labels(every).includes('test:agents-old'));
+    assert.equal(recent.total, every.total);
+    assert.equal(every.sessions.length, every.total);
+  } finally {
+    await query(`delete from api_sessions where token_hash like 'test:agents-%'`);
+  }
+});

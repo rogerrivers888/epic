@@ -119,6 +119,12 @@ disposition — shipping unattended is not the same as shipping silently.
 
 ## 6. The deployed site
 
+**A check that needs a paid call** (owner, 26 Sep 2026, G9): an agent session has
+no paid budget, so a search, a photo or a travel time on the live site is refused
+for you. Ask the owner for a 24-hour grant (back office › Overview › Agent
+sessions) before the check, or report that check as **not checked**, with the
+reason. Never skip it silently, and never read a refusal as an empty result.
+
 A push to `main` deploys to Railway. Done is not done until it has been opened on the
 real site with his real data — full `https://` links, never `file://` or `localhost`,
 and both views where a screen changed (the shell's Web/Mobile toggle at ≥900px).

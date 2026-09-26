@@ -691,8 +691,8 @@ router.get('/spend/today', async (_req, res, next) => {
  * has it, and an agent that could grant itself hours would have no zero
  * budget at all.
  */
-router.get('/sessions/agents', requires('manage_settings'), async (_req, res, next) => {
-  try { res.json({ sessions: await liveAgentSessions() }); } catch (err) { next(err); }
+router.get('/sessions/agents', requires('manage_settings'), async (req, res, next) => {
+  try { res.json(await liveAgentSessions({ all: req.query.all === '1' })); } catch (err) { next(err); }
 });
 
 router.post('/sessions/:id/grant', requires('manage_settings'), async (req, res, next) => {

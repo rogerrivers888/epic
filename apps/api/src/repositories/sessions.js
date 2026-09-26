@@ -39,19 +39,29 @@ export async function findLiveSession(token) {
 /**
  * The live agent sessions, newest first, with what each has spent today and
  * whether the owner has granted it hours (migration 264). For the back office.
+ *
+ * By default only the ones seen in the last 24 hours — hundreds of old
+ * passcode sign-ins stay live for ninety days, and the owner asked for the
+ * panel to hold the ones that matter now (26 Sep 2026) — plus any still
+ * holding a grant, so a budget can always be taken away. `all` is everything,
+ * and `total` says how many that is, so the link can say it.
  */
-export async function liveAgentSessions() {
-  const { rows } = await query(
-    `select s.id, s.label, s.created_at, s.last_seen_at, s.paid_grant_until,
-            coalesce(sum(pc.estimated_cost_usd) filter (where pc.created_at >= now() - interval '24 hours'), 0)::float as spent_24h_usd
-       from api_sessions s
-       left join provider_calls pc on pc.session_id = s.id
-      where s.kind = 'agent' and s.revoked_at is null and s.expires_at > now()
-      group by s.id
-      order by coalesce(s.last_seen_at, s.created_at) desc
-      limit 100`,
-  );
-  return rows;
+export async function liveAgentSessions({ all = false } = {}) {
+  const LIVE = `s.kind = 'agent' and s.revoked_at is null and s.expires_at > now()`;
+  const RECENT = `(coalesce(s.last_seen_at, s.created_at) >= now() - interval '24 hours' or s.paid_grant_until > now())`;
+  const [{ rows }, { rows: [{ total }] }] = await Promise.all([
+    query(
+      `select s.id, s.label, s.created_at, s.last_seen_at, s.paid_grant_until,
+              coalesce(sum(pc.estimated_cost_usd) filter (where pc.created_at >= now() - interval '24 hours'), 0)::float as spent_24h_usd
+         from api_sessions s
+         left join provider_calls pc on pc.session_id = s.id
+        where ${LIVE} ${all ? '' : `and ${RECENT}`}
+        group by s.id
+        order by coalesce(s.last_seen_at, s.created_at) desc`,
+    ),
+    query(`select count(*)::int as total from api_sessions s where ${LIVE}`),
+  ]);
+  return { sessions: rows, total };
 }
 
 /** Give an agent session hours of paid budget, or take them away (hours = 0). */

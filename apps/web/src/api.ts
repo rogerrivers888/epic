@@ -3028,7 +3028,7 @@ export const api = {
   /** The estate's day against its ceiling, for the banner over every back-office page. */
   spendToday: () => request<SpendToday>('/api/admin/spend/today'),
   /** The agent sessions, and the owner's grant of paid hours (0 takes it away). */
-  agentSessions: () => request<{ sessions: AgentSession[] }>('/api/admin/sessions/agents'),
+  agentSessions: (all = false) => request<{ sessions: AgentSession[]; total: number }>(`/api/admin/sessions/agents${all ? '?all=1' : ''}`),
   grantAgent: (id: string, hours: number) => post<{ session: AgentSession }>(`/api/admin/sessions/${id}/grant`, { hours }),
   /** Data › Sources: the catalogue of providers and fields, joined to what we hold. */
   adminSources: () => request<SourcesReport>('/api/admin/data/sources'),
