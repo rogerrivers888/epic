@@ -182,3 +182,16 @@ test('the point index finds the same nearest point as a scan, over thousands of 
   }
   assert.equal(new PointIndex([]).nearest({ lat: 51.5, lng: -0.1 }), null, 'and an empty index finds nothing');
 });
+
+test('a box the size of the fine tile is placed by its centre', async () => {
+  // 0.01° by 0.015° — the fine grid's tile, 1,113 m by 1,050 m at London's
+  // latitude, which is what an unsaturated question at that grid writes as a
+  // place's box. At a threshold of a round thousand metres these all read as
+  // straddling (26 Sep 2026).
+  const { whereBoxSits, widthOf } = await import('../src/repositories/censusRing.js');
+  const tile = { minLat: 51.55, minLng: -0.06, maxLat: 51.56, maxLng: -0.045 };
+  assert.ok(widthOf(tile) > 1000 && widthOf(tile) < 1200, `a fine tile is ${Math.round(widthOf(tile))} m wide`);
+  const universe = [{ code: 'sector:E5 8', lat: 51.5555, lng: -0.052 }, { code: 'sector:N16 7', lat: 51.556, lng: -0.075 }];
+  assert.equal(whereBoxSits(tile, { cells: ['sector:E5 8'], universe }), 'inside', 'placed by its centre, which is E5');
+  assert.equal(whereBoxSits(tile, { cells: ['sector:N16 7'], universe }), 'outside');
+});

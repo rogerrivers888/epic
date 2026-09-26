@@ -33,13 +33,20 @@ import { query } from '../db.js';
 import { TEXT_QUESTIONS, textStillAsked } from '../sources/censusQuestions.js';
 
 /**
- * How fine a box has to get before it is worth splitting further.
+ * The widest box that is placed by its centre.
  *
- * Not a test of whether a box may be counted — that is the corner test below —
- * but the floor a re-census stops at. A box this small sits inside one postcode
- * sector almost everywhere people live.
+ * The fine grid's tile is 0.01° by 0.015°, which is 1,113 m by 1,050 m at
+ * London's latitude — and an unsaturated question at that grid writes the
+ * whole tile as the place's box. With this at a round thousand metres every
+ * such box was a few metres too wide for the centre rule, went through the
+ * corner test, and read as straddling wherever the tile crossed a district
+ * line: E5 and SE11 counted nothing after a kilometre pass planned from the
+ * true sectors, with 249 places sitting in 1,113-metre boxes (26 Sep 2026).
+ * Only the dense districts, where questions saturated and split into
+ * quarters, ever resolved. The fine tile and anything narrower is placed by
+ * its centre; wider than that is genuinely either side of a line.
  */
-export const FINE_M = 1000;
+export const FINE_M = 1200;
 
 /** The four corners and the middle: five points that decide whether a box is in. */
 const cornersOf = (box) => [
