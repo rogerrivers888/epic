@@ -1399,3 +1399,76 @@ test('a census run spends on the session that started it, and a resume moves tha
   const resumed = await resume(run.id, { sessionId: resumer.id });
   assert.equal(resumed.started_session_id, resumer.id, 'a resume is the decision to spend today\'s quota, and the run says whose');
 });
+
+test('a tile is planned for the district its postcodes say, not the one whose sector reached it', async (t) => {
+  // Owner, 26 Sep 2026: loose tagging moved a district's "N of M tiles"; "fix
+  // the tagging so each tile is planned for the district its postcode says".
+  t.after(async () => {
+    await query(`delete from geo_cells where code like 'sector:ZT%'`);
+    await query(`delete from postcodes where outcode in ('ZT1', 'ZT2')`);
+  });
+  // ZT1's one sector sits in the tile 0.01x0.015 at 51.55/-0.06; the tile's
+  // streets are ZT2's.
+  await query(
+    `insert into geo_cells (code, scheme, label, outcode, lat, lng, source) values ('sector:ZT1 1', 'sector', 'ZT1 1', 'ZT1', 51.552, -0.058, 'test')
+     on conflict (code) do update set outcode = excluded.outcode, lat = excluded.lat, lng = excluded.lng`);
+  for (let i = 0; i < 6; i += 1) {
+    await query(`insert into postcodes (pcds, sector, outcode, lat, lng, source) values ($1, 'ZT2 1', 'ZT2', $2, $3, 'test') on conflict (pcds) do nothing`,
+      [`ZT2 1A${i}`, 51.551 + i * 0.001, -0.057 + i * 0.001]);
+  }
+  const tiles = await planTiles({ outcodes: ['ZT1'], dLat: 0.01, dLng: 0.015, padKm: 0 });
+  const home = tiles.find((x) => Math.abs(x.minLat - 51.55) < 1e-9 && Math.abs(x.minLng + 0.06) < 1e-9);
+  assert.ok(home, 'the sector put its tile on the plan');
+  assert.deepEqual(home.outcodes, ['ZT2'], 'and the tile is ZT2\'s, because its postcodes are');
+});
+
+test('a run kept to the night waits for its window, and stops at its own share of the day', async (t) => {
+  // Owner, 26 Sep 2026: "It must never take the whole 75,000 daily cap …
+  // run it overnight across as many nights as that takes … how it stops if
+  // household demand rises."
+  const { nextWindowOpening } = await import('../src/sources/censusRun.js');
+  const at = (h) => new Date(Date.UTC(2026, 8, 26, h, 30, 0));
+  const night = { window_from: 22, window_to: 7 };
+  assert.equal(nextWindowOpening(night, at(23)), null, 'open at 23:30');
+  assert.equal(nextWindowOpening(night, at(3)), null, 'open at 03:30');
+  assert.equal(nextWindowOpening(night, at(12))?.toISOString(), '2026-09-26T22:00:00.000Z', 'closed at noon: opens tonight');
+  assert.equal(nextWindowOpening(night, at(7))?.toISOString(), '2026-09-26T22:00:00.000Z', 'closed at 07:30: opens tonight');
+  assert.equal(nextWindowOpening({ window_from: 9, window_to: 17 }, at(18))?.toISOString(), '2026-09-27T09:00:00.000Z', 'a daytime window opens tomorrow');
+  assert.equal(nextWindowOpening({}, at(12)), null, 'no window, no waiting');
+
+  await clean();
+  t.after(clean);
+  // A run with a share of three, one tile, and a window that is open now.
+  const now = new Date();
+  const h = now.getUTCHours();
+  const run = await startTestRun({ label: 'test share' });
+  await query(`update census_runs set night_share = 3, window_from = $2, window_to = $3 where id = $1`, [run.id, h, (h + 2) % 24]);
+  await seedTile(run, 'test/share');
+  await withCensus(answers(1), () => advance({ runId: run.id, budgetMs: 10_000 }));
+  const { rows: [after] } = await query('select state, problem, resume_after from census_runs where id = $1', [run.id]);
+  assert.equal(after.state, 'waiting', 'it stopped itself at its share');
+  assert.match(after.problem ?? '', /this run's share of 3/);
+  assert.ok([7, 8].includes(new Date(after.resume_after).getUTCHours()), 'and comes back at the quota reset');
+
+  // A run whose window is closed does not work at all, and says when it will.
+  const later = await startTestRun({ label: 'test window' });
+  await query(`update census_runs set window_from = $2, window_to = $3 where id = $1`, [later.id, (h + 3) % 24, (h + 5) % 24]);
+  await seedTile(later, 'test/window');
+  const out = await withCensus(answers(1), () => advance({ runId: later.id, budgetMs: 5_000 }));
+  assert.equal(out.reason, 'window');
+  const { rows: [w] } = await query('select state, problem, requests from census_runs where id = $1', [later.id]);
+  assert.equal(w.state, 'waiting'); assert.match(w.problem ?? '', /outside its/); assert.equal(Number(w.requests), 0, 'nothing asked');
+});
+
+test('a run built paused does nothing until a person starts it', async (t) => {
+  await clean();
+  t.after(clean);
+  const { rows: cells } = await query(`select count(*)::int n from geo_cells where outcode = 'SL5'`);
+  if (!cells.n) return; // no ground to plan in this database
+  const run = await startRun({ label: 'test paused', outcodes: ['SL5'], paused: true, maxRequests: 10 });
+  assert.equal(run.state, 'paused');
+  assert.match(run.problem, /built paused/);
+  const out = await advance({ runId: run.id, budgetMs: 2_000 });
+  assert.equal(out.working, false);
+  assert.equal(Number((await query('select requests from census_runs where id = $1', [run.id])).rows[0].requests), 0, 'not a request until resumed');
+});

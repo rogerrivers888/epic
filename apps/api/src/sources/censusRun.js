@@ -160,6 +160,31 @@ export async function planTiles({ areas = [], outcodes = [], dLat = TILE_LAT, dL
     if (outcode) existing.outcodes.add(outcode);
     tiles.set(key, existing);
   };
+  /**
+   * Which districts a tile is planned for: the ones whose postcodes fall
+   * inside it. The sectors that put a tile on the plan, and the padding that
+   * reaches out from them, tag a tile with the district it is *near*; a
+   * district's "N of M tiles" and its coverage line count tiles by that tag,
+   * so a tile of E5's ground that a neighbour's sector planned was E5's in
+   * fact and the neighbour's on the board (owner, 26 Sep 2026: "fix the
+   * tagging so each tile is planned for the district its postcode says").
+   * A tile with no postcode inside it — the sea, a park — keeps the tags the
+   * planning gave it; a database with no postcodes loaded changes nothing.
+   */
+  const tagByPostcodes = async () => {
+    const list = [...tiles.values()];
+    if (!list.length) return;
+    const { rows } = await query(
+      `select t.k, array_agg(distinct p.outcode order by p.outcode) as outcodes
+         from unnest($1::text[], $2::float8[], $3::float8[], $4::float8[], $5::float8[]) as t(k, min_lat, min_lng, max_lat, max_lng)
+         join postcodes p on p.lat >= t.min_lat and p.lat < t.max_lat and p.lng >= t.min_lng and p.lng < t.max_lng
+        group by t.k`,
+      [list.map((t) => t.gridKey), list.map((t) => t.minLat), list.map((t) => t.minLng), list.map((t) => t.maxLat), list.map((t) => t.maxLng)]);
+    for (const r of rows) {
+      const t = tiles.get(r.k);
+      if (t && r.outcodes?.length) t.outcodes = new Set(r.outcodes.map((o) => String(o).toUpperCase()));
+    }
+  };
   for (const p of points) {
     const t = tileOf(p.lat, p.lng, dLat, dLng);
     put(t.gridKey, t, p.outcode);
@@ -238,6 +263,7 @@ export async function planTiles({ areas = [], outcodes = [], dLat = TILE_LAT, dL
       for (const q of near) put(n.gridKey, n, q.outcode);
     }
   }
+  await tagByPostcodes();
   return [...tiles.values()].map((t) => ({ ...t, outcodes: [...t.outcodes].sort() }));
 }
 
@@ -251,6 +277,10 @@ export async function planTiles({ areas = [], outcodes = [], dLat = TILE_LAT, dL
 export async function startRun({
   label, areas = [], outcodes = [], maxRequests = 250_000, ratePerSec = 5, freshDays = CENSUS_FRESH_DAYS,
   dLat = TILE_LAT, dLng = TILE_LNG, padKm = PAD_KM, dailyCap = DAILY_CAP, startedBy = null, startedSessionId = null,
+  // Its own share of a day's requests, the UTC hours it may work in, and
+  // whether it is built waiting for a person to start it (owner, 26 Sep
+  // 2026: "Build it paused; I press start").
+  nightShare = null, windowFrom = null, windowTo = null, paused = false,
 } = {}) {
   if (!areas?.length && !outcodes?.length) {
     throw Object.assign(new Error('a run needs postcode areas or districts'), { status: 400 });
@@ -277,11 +307,13 @@ export async function startRun({
   const starterSession = startedSessionId ?? currentSpender().sessionId ?? null;
 
   const { rows: [run] } = await query(
-    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, started_by, tiles_total, daily_cap, day, day_requests, started_session_id)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, (now() at time zone 'America/Los_Angeles')::date, 0, $11) returning *`,
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, started_by, tiles_total, daily_cap, day, day_requests, started_session_id,
+                              night_share, window_from, window_to, state, problem)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, (now() at time zone 'America/Los_Angeles')::date, 0, $11, $12, $13, $14, $15, $16) returning *`,
     [label ?? [...areas, ...outcodes].join(', '),
       [...areas.map((a) => a.toUpperCase()), ...outcodes.map((o) => o.toUpperCase())], dLat, dLng,
-      maxRequests, ratePerSec, freshDays, startedBy, tiles.length, dailyCap, starterSession]);
+      maxRequests, ratePerSec, freshDays, startedBy, tiles.length, dailyCap, starterSession,
+      nightShare, windowFrom, windowTo, paused ? 'paused' : 'running', paused ? 'built paused; resume to start' : null]);
 
   // Tiles outlive runs: the same square keeps its row and its history, and this
   // run simply claims the ones that are not fresh. `do update` on the outcodes
@@ -389,6 +421,31 @@ async function rollDay(runId) {
  * A separate state from paused, because the difference matters to whoever is
  * watching: paused is waiting for a person, waiting is waiting for a clock.
  */
+/**
+ * When a run's window next opens, or null if it is open now (or the run has
+ * no window). Hours are UTC; a window may cross midnight (22 to 7).
+ */
+export function nextWindowOpening(run, now = new Date()) {
+  const from = run?.window_from; const to = run?.window_to;
+  if (from == null || to == null || from === to) return null;
+  const h = now.getUTCHours();
+  const inside = from < to ? (h >= from && h < to) : (h >= from || h < to);
+  if (inside) return null;
+  const opens = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), from, 0, 0));
+  if (opens <= now) opens.setUTCDate(opens.getUTCDate() + 1);
+  return opens;
+}
+
+/** What this run alone has asked since the quota day began: its own slices, on its own tiles. */
+async function ownRequestsToday(runId) {
+  const { rows: [row] } = await query(
+    `select coalesce(sum(s.requests), 0)::int as n
+       from census_slices s
+       join census_run_tiles m on m.grid_key = s.area_slug and m.run_id = $1
+      where s.ran_at >= date_trunc('day', now() at time zone 'America/Los_Angeles') at time zone 'America/Los_Angeles'`, [runId]);
+  return Number(row?.n ?? 0);
+}
+
 async function waitUntil(id, when, why) {
   await query(
     `update census_runs
@@ -675,6 +732,27 @@ export async function advance({ runId = null, budgetMs = SLICE_MS, now = () => D
       await waitUntil(run.id, back,
         `${today.dayRequests.toLocaleString('en-GB')} requests today, which is the ${today.dailyCap.toLocaleString('en-GB')} assumed daily cap; back at ${back.toISOString().slice(11, 16)} UTC`);
       return { working: false, reason: 'daily cap', resumeAfter: back, tiles };
+    }
+    // Its hours. A run kept to the night works only inside its window, and
+    // outside it waits for the window to open (owner, 26 Sep 2026: "run it
+    // overnight across as many nights as that takes").
+    const opens = nextWindowOpening(run, new Date());
+    if (opens) {
+      await waitUntil(run.id, opens, `outside its ${String(run.window_from).padStart(2, '0')}:00–${String(run.window_to).padStart(2, '0')}:00 UTC window; back at ${opens.toISOString().slice(11, 16)} UTC`);
+      return { working: false, reason: 'window', resumeAfter: opens, tiles };
+    }
+    // Its own share of the day, beside the project-wide cap above. The cap is
+    // what stops the census when households need the quota; the share is what
+    // leaves them headroom whether they need it or not ("never take the whole
+    // 75,000 daily cap — households' own searches share it").
+    if (run.night_share != null) {
+      const own = await ownRequestsToday(run.id);
+      if (own >= Number(run.night_share)) {
+        const back = nextQuotaReset();
+        await waitUntil(run.id, back,
+          `${own.toLocaleString('en-GB')} requests today, which is this run's share of ${Number(run.night_share).toLocaleString('en-GB')}; back at ${back.toISOString().slice(11, 16)} UTC`);
+        return { working: false, reason: 'share', resumeAfter: back, tiles };
+      }
     }
 
     const tile = await claimTile(run);

@@ -3510,6 +3510,11 @@ router.post('/census/run', requires('manage_library'), async (req, res, next) =>
       dLat: within(req.body?.tileLat, 0.005, censusRun.TILE_LAT),
       dLng: within(req.body?.tileLng, 0.0075, censusRun.TILE_LNG),
       padKm: within(req.body?.padKm, 0, censusRun.PAD_KM),
+      dailyCap: Number(req.body?.dailyCap) || undefined,
+      nightShare: Number(req.body?.nightShare) || null,
+      windowFrom: req.body?.windowFrom == null ? null : Number(req.body.windowFrom),
+      windowTo: req.body?.windowTo == null ? null : Number(req.body.windowTo),
+      paused: req.body?.paused === true,
       startedBy: actor(req).actorLabel,
       startedSessionId: req.session?.id ?? null,
     });
