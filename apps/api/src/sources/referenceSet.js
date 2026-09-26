@@ -21,6 +21,7 @@
  */
 
 import { query, withTransaction } from '../db.js';
+import { currentSpender } from '../context.js';
 import { pencePerRequest, requestsStillNeeded } from './researchSweep.js';
 import { sourceHasKey, sourceOff } from './index.js';
 import * as sweep from './researchSweep.js';
@@ -242,7 +243,7 @@ export async function estimate({ perCategory = PER_CATEGORY, categories: only = 
 }
 
 /** Start it: a research sweep in reference mode, with the chosen places written down and why. */
-export async function start({ perCategory = PER_CATEGORY, categories = null, confirm = null, householdId = null, startedBy = null } = {}) {
+export async function start({ perCategory = PER_CATEGORY, categories = null, confirm = null, householdId = null, startedBy = null, startedSessionId = null } = {}) {
   const plan = await estimate({ perCategory, categories });
   if (Number(confirm) !== plan.requests) {
     const err = new Error(`This set is ${plan.places} places, up to ${plan.requests} Google requests at £${plan.costGbpLow.toFixed(2)}–£${plan.costGbpHigh.toFixed(2)}. Confirm with ${plan.requests} to run it.`);
@@ -277,11 +278,15 @@ export async function start({ perCategory = PER_CATEGORY, categories = null, con
         { code: 'already_running', status: 409, sweep: going[0].id });
     }
     const { rows: [row] } = await client.query(
-      `insert into research_sweeps (subcategories, params, household_id, started_by, places)
-       values ($1, $2, $3, $4, $5) returning *`,
+      `insert into research_sweeps (subcategories, params, household_id, started_by, places, started_session_id)
+       values ($1, $2, $3, $4, $5, $6) returning *`,
       [JSON.stringify([...new Set(all.map((p) => p.subcategory))]),
         JSON.stringify({ mode: 'reference', perCategory, requests: plan.requests, estimateGbp: plan.costGbpHigh, byBucket: plan.byBucket }),
-        householdId, startedBy, all.length]);
+        householdId, startedBy, all.length,
+        // Whose decision the spend is: the caller's word, else the request
+        // starting it, so a resume after a deploy still names the person
+        // rather than the server (Codex, 26 Sep 2026).
+        startedSessionId ?? currentSpender().sessionId ?? null]);
     for (const p of all) {
       await client.query(
         `insert into research_sweep_places (sweep_id, venue_ref, subcategory, tier, picked_for)

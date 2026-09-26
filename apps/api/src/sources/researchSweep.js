@@ -21,6 +21,7 @@
  */
 
 import { query, withTransaction } from '../db.js';
+import { currentSpender } from '../context.js';
 import { pickSample, SAMPLE } from '../domain/questions.js';
 import { PRICE_PER_UNIT_USD, USD_TO_GBP } from '../domain/providerPrices.js';
 import * as own from './own.js';
@@ -258,7 +259,7 @@ export async function start({ subcategories = null, floor = FLOOR, confirm = nul
       `insert into research_sweeps (subcategories, params, household_id, started_by, places, started_session_id)
        values ($1, $2, $3, $4, $5, $6) returning *`,
       [JSON.stringify(plan.drawers.map((d) => d.subcategory)), JSON.stringify({ floor, requests: plan.requests, estimateGbp: plan.costGbpHigh }),
-        householdId, startedBy, plan.sampled, startedSessionId]);
+        householdId, startedBy, plan.sampled, startedSessionId ?? currentSpender().sessionId ?? null]);
     for (const d of plan.drawers) {
       // The estimate's own sample, not a fresh one.
       for (const s of d.sample) {
@@ -798,7 +799,11 @@ export async function retryFailed(id, { confirm = null } = {}) {
       [id, plan.refs]);
     if (!rowCount) return { ...run, retried: 0 };
     const { rows: [reopened] } = await client.query(
-      `update research_sweeps set state = 'running', finished_at = null, problem = null, touched_at = now() where id = $1 returning *`, [id]);
+      // The retry is the decision to spend again, and the ledger names whoever
+      // approved it rather than the original starter (Codex, 26 Sep 2026).
+      `update research_sweeps set state = 'running', finished_at = null, problem = null, touched_at = now(),
+              started_session_id = coalesce($2, started_session_id)
+        where id = $1 returning *`, [id, currentSpender().sessionId ?? null]);
     return { ...reopened, retried: rowCount };
   });
 }

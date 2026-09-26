@@ -97,8 +97,25 @@ async function loadEntry(zip, entry, stats) {
   await insert(batch); stats.loaded += batch.length;
 }
 
+const LOCK = 'epic.postcodes.load';
+
 export async function loadPostcodes(file) {
   const stats = { files: 0, rows: 0, loaded: 0, terminated: 0, unplaced: 0, retired: 0 };
+  // One load at a time: two sharing the staging table would each truncate
+  // the other's rows and swap in a snapshot of half a country (Codex, 26 Sep
+  // 2026). The lock lives on one connection for the life of the load.
+  const holder = await pool.connect();
+  const { rows: [lock] } = await holder.query('select pg_try_advisory_lock(hashtext($1)) as got', [LOCK]);
+  if (!lock.got) { holder.release(); throw new Error('another postcode load is running'); }
+  try {
+    return await loadWhileLocked(file, stats);
+  } finally {
+    await holder.query('select pg_advisory_unlock(hashtext($1))', [LOCK]).catch(() => null);
+    holder.release();
+  }
+}
+
+async function loadWhileLocked(file, stats) {
   await query('create table if not exists postcodes_staging (like postcodes including all)');
   await query('truncate postcodes_staging');
   const zip = await openZip(file);
