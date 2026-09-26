@@ -906,3 +906,13 @@ test('Codex on C27: a fact a set already asks is not made global as a side effec
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
   await query("delete from place_attributes where key like 'zz-%'");
 });
+
+test('Codex on C27: a word already filed is not aliased over its filing', async () => {
+  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+  await sets.recordCandidates(sub, [{ norm: 'zz lot', raw: 'zz lot', kind: 'feature', sources: ['features'], placesSeen: 2, asserts: 2, evidence: 'a car lot', evidenceRef: 'osm:l' }], { placesTotal: 20 });
+  const [w] = (await sets.candidates({ subcategory: sub, status: 'new', limit: 50 })).filter((c) => c.norm === 'zz lot');
+  await sets.fileUnder(w.id, { under: sub, by: 'test' });
+  await assert.rejects(() => sets.aliasToGlobal(w.id, { attributeKey: 'parking' }), /already been decided/);
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+});

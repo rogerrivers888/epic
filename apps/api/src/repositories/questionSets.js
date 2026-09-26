@@ -702,6 +702,12 @@ export async function ignoreCandidate(id, { actor = null, reason = null } = {}) 
   return rows[0];
 }
 
+/** The alias table says this wording means `key`, or the decision is refused rather than recorded against another. */
+async function wordingMeans(client, norm, key) {
+  const { rows: [won] } = await client.query('select target_key from attribute_aliases where norm = $1', [norm]);
+  if (won?.target_key !== key) throw bad(`"${norm}" was just taken to mean ${won?.target_key ?? 'nothing'}. Look again before deciding it.`);
+}
+
 /**
  * A word that is a global question said another way (C18, owner 26 Sep 2026:
  * "anything that duplicates a global check — car park → parking, wheelchair
@@ -717,7 +723,9 @@ export async function ignoreCandidate(id, { actor = null, reason = null } = {}) 
  */
 export async function aliasToGlobal(id, { attributeKey, actor = null } = {}) {
   return withTransaction(async (client) => {
-    const { rows: [c] } = await client.query("select * from harvest_candidates where id = $1 and status in ('new', 'unresolved') for update", [id]);
+    // Undecided means no decision at all: a word filed under a drawer is
+    // 'unresolved' too, and must not be overwritten (Codex, 26 Sep 2026).
+    const { rows: [c] } = await client.query("select * from harvest_candidates where id = $1 and status in ('new', 'unresolved') and decided_at is null for update", [id]);
     if (!c) throw bad('That word has already been decided.');
     const { rows: [q] } = await client.query("select id from questions where attribute_key = $1 and scope = 'global' and active", [attributeKey]);
     if (!q) throw bad(`${attributeKey} is not asked everywhere. An alias to a global question names one that is.`);
@@ -727,6 +735,9 @@ export async function aliasToGlobal(id, { attributeKey, actor = null } = {}) {
       'insert into attribute_aliases (norm, target_key, raw) values ($1, $2, $3) on conflict (norm) do nothing',
       [c.norm, attributeKey, c.raw_forms?.[0] ?? null],
     );
+    // Read back the winner: two decisions on the same wording at once, and
+    // the loser's insert does nothing (Codex, 26 Sep 2026).
+    await wordingMeans(client, c.norm, attributeKey);
     const { rows: [row] } = await client.query(
       // Evidence is review scaffolding and goes with the decision, as it does
       // in promote() (migration 247; Codex, 26 Sep 2026).
@@ -771,6 +782,7 @@ export async function globalFromCandidate(id, { label = null, kind = 'yesno', re
         throw err;
       }
       await client.query('insert into attribute_aliases (norm, target_key, raw) values ($1, $2, $3) on conflict (norm) do nothing', [c.norm, key, c.raw_forms?.[0] ?? null]);
+      await wordingMeans(client, c.norm, key);
     }
     // A label a set already asks is not made global here. Switching the set's
     // question off would strand the answers it holds on the old id, and
