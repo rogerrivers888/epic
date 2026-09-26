@@ -1466,6 +1466,8 @@ test('a run kept to the night waits for its window, and stops at its own share o
   // Hours are whole and on the clock.
   await assert.rejects(startRun({ label: 'test bad hour', outcodes: ['ZZ'], windowFrom: 24, windowTo: 7 }), /whole hour/);
   await assert.rejects(startRun({ label: 'test half window', outcodes: ['ZZ'], windowFrom: 22 }), /both windowFrom and windowTo/);
+  await assert.rejects(startRun({ label: 'test zero share', outcodes: ['ZZ'], nightShare: 0 }), /whole number of requests/);
+  await assert.rejects(startRun({ label: 'test nan share', outcodes: ['ZZ'], nightShare: Number('lots') }), /whole number of requests/);
 
   // A run whose window is closed does not work at all, and says when it will.
   const later = await startTestRun({ label: 'test window' });

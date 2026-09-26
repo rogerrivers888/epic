@@ -3511,7 +3511,9 @@ router.post('/census/run', requires('manage_library'), async (req, res, next) =>
       dLng: within(req.body?.tileLng, 0.0075, censusRun.TILE_LNG),
       padKm: within(req.body?.padKm, 0, censusRun.PAD_KM),
       dailyCap: Number(req.body?.dailyCap) || undefined,
-      nightShare: Number(req.body?.nightShare) || null,
+      // As given, so an invalid share is refused by startRun rather than read
+      // as none — a 0 or a word must not quietly mean "no limit" (Codex).
+      nightShare: req.body?.nightShare == null ? null : Number(req.body.nightShare),
       windowFrom: req.body?.windowFrom == null ? null : Number(req.body.windowFrom),
       windowTo: req.body?.windowTo == null ? null : Number(req.body.windowTo),
       paused: req.body?.paused === true,

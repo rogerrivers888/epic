@@ -35,7 +35,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { query } from '../db.js';
+import { query, pool } from '../db.js';
 import { censusArea, slicePlan, CENSUS_FRESH_DAYS, CENSUS_MAX_DEPTH } from './census.js';
 // The same corner test the ring count uses. One piece of arithmetic for "is
 // this box inside this area", not two that can disagree (repositories/censusRing.js).
@@ -700,11 +700,31 @@ const paceAt = (perSec) => {
  * the most a restart can cost is the tile in flight, and even that resumes at
  * the drawer it reached.
  */
-export async function advance({ runId = null, budgetMs = SLICE_MS, now = () => Date.now() } = {}) {
+export async function advance(opts = {}) {
+  const { runId = null } = opts;
   const { rows: [run] } = runId
     ? await query(`select * from census_runs where id = $1`, [runId])
     : await query(`select * from census_runs where state = 'running' order by started_at limit 1`);
   if (!run || run.state !== 'running') return { working: false, reason: run ? run.state : 'nothing running' };
+  if (run.night_share == null) return advanceRun(run, opts);
+  // A run with its own share is advanced by one worker at a time. Two
+  // replicas reading the same count and each budgeting a tile with the whole
+  // of what was left would spend the share twice over (Codex, 26 Sep 2026);
+  // the lock is held on one connection for the pass, and a worker that does
+  // not get it leaves the run to the one that did.
+  const holder = await pool.connect();
+  let got = false;
+  try {
+    ({ rows: [{ got }] } = await holder.query('select pg_try_advisory_lock(hashtext($1)) as got', [`census-share:${run.id}`]));
+    if (!got) return { working: true, reason: 'another worker holds this run', tiles: 0 };
+    return await advanceRun(run, opts);
+  } finally {
+    if (got) await holder.query('select pg_advisory_unlock(hashtext($1))', [`census-share:${run.id}`]).catch(() => null);
+    holder.release();
+  }
+}
+
+async function advanceRun(run, { budgetMs = SLICE_MS, now = () => Date.now() } = {}) {
 
   const until = now() + budgetMs;
   const pace = paceAt(Number(run.rate_per_sec));
