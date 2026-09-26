@@ -71,3 +71,17 @@ test('a Wikidata outage is thrown, not read as no match, so a replacing run keep
   await assert.rejects(encyclopediaFor({ name: 'Birdworld', lat: 51.17, lng: -0.84, category: 'zoo', asked }), /503/);
   assert.equal(asked.wikidata, true, 'and the call that failed is still on the ledger');
 });
+
+test('a failed body request is thrown too, so a replacing run keeps the body it holds (Codex, 26 Sep 2026)', async (t) => {
+  const real = globalThis.fetch;
+  t.after(() => { globalThis.fetch = real; });
+  globalThis.fetch = async (url) => {
+    const u = decodeURIComponent(String(url));
+    const json = (body) => ({ ok: true, status: 200, json: async () => body });
+    if (u.includes('wikidata.org')) return json({ entities: { Q4916681: { claims: { P31: [{ mainsnak: { datavalue: { value: { id: 'Q43501' } } } }] } } } });
+    if (u.includes('list=geosearch')) return json({ query: { geosearch: [{ title: 'Birdworld', pageid: 1, dist: 40 }] } });
+    if (u.includes('prop=extracts&')) return { ok: false, status: 504, json: async () => ({}) };
+    return json({ query: { pages: { 1: { title: 'Birdworld', extract: 'Birdworld is a bird park.', pageprops: { wikibase_item: 'Q4916681' } } } } });
+  };
+  await assert.rejects(encyclopediaFor({ name: 'Birdworld', lat: 51.17, lng: -0.84, category: 'zoo' }), /504/);
+});

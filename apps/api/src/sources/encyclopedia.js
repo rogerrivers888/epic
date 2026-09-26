@@ -214,7 +214,9 @@ export async function encyclopediaFor({ name, lat, lng, locality = null, address
   // The drawer is asked beside the category, never joined to it: the food
   // threshold above reads the category whole (Codex, 26 Sep 2026).
   if (refused(facts.classes, [category, drawer].filter(Boolean).join(' ') || null)) return null;
-  const text = await body(best.title).catch(() => null);
+  // A failed body request is thrown too: read as "no body", a replacing run
+  // would forget the one it holds (Codex, 26 Sep 2026).
+  const text = await body(best.title);
 
   return {
     ...page,

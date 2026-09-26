@@ -112,9 +112,12 @@ Rules:
  * corpus read 159 tokens a place against 174 the day before (owner, 26 Sep
  * 2026).
  */
-const BODY_SQL = `(select f.value #>> '{}' from place_facts f
-     where f.venue_ref = p.venue_ref and f.field = 'body' and f.expires_at is null
-     order by case f.source when 'wikipedia' then 0 else 1 end limit 1)`;
+// Every body a place holds, the venue's own first: a facility described only
+// on the official site was invisible when the article's body won outright
+// (Codex, 26 Sep 2026).
+const BODY_SQL = `(select string_agg(f.value #>> '{}', ' ' order by case f.source when 'site' then 0 else 1 end, f.source)
+      from place_facts f
+     where f.venue_ref = p.venue_ref and f.field = 'body' and f.expires_at is null)`;
 const SAID_SQL = `concat_ws(' ', ${BODY_SQL}, r.summary, a.summary, r.opening_hours, r.price_range, r.fsa_rating,
    array_to_string(array(select jsonb_array_elements_text(coalesce(r.cuisines, '[]'::jsonb))), ' '),
    array_to_string(array(select jsonb_array_elements_text(coalesce(r.dietary_options, '[]'::jsonb))), ' '),
