@@ -148,3 +148,24 @@ test('the menu lookup asks robots.txt before its first request and at every redi
   await findMenuUrl({ website: 'https://closed.example/', name: 'Closed' }).catch(() => null);
   assert.ok(!asked.includes('https://closed.example/'), 'a site that disallows us is not fetched at all');
 });
+
+test('the menu lookup reads robots.txt the standard way: an Allow inside a Disallow lets the menu through (Codex, 26 Sep 2026)', async (t) => {
+  const { findMenuUrl } = await import('../src/sources/menuLink.js');
+  const real = globalThis.fetch;
+  const asked = [];
+  t.after(() => { globalThis.fetch = real; });
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    asked.push(u);
+    const page = (status, body = '') => ({
+      ok: status >= 200 && status < 300, status, url: u,
+      headers: { get: (k) => (k.toLowerCase() === 'content-type' ? 'text/html' : null) },
+      text: async () => body, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0),
+    });
+    if (u === 'https://inn.example/robots.txt') return page(200, 'User-agent: *\nDisallow: /\nAllow: /menu');
+    if (u === 'https://inn.example/menu') return page(200, '<html><body><h1>Menu</h1></body></html>');
+    return page(404);
+  };
+  await findMenuUrl({ website: 'https://inn.example/menu', name: 'Inn' }).catch(() => null);
+  assert.ok(asked.includes('https://inn.example/menu'), 'the allowed menu page is fetched');
+});

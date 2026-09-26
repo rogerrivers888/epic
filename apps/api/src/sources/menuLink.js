@@ -25,6 +25,7 @@
 // page can be a third of a megabyte from a small host (owner, 4 Sep 2026 — the
 // Windsor menu was there and we still missed it).
 import { fetchFollowing } from './follow.js';
+import { parse as parseRobots, allowedBy } from './politeness.js';
 import { userAgent } from '../origins.js';
 const FETCH_TIMEOUT_MS = Number(process.env.EPIC_MENU_TIMEOUT_MS || 9000);
 const MAX_BYTES = 1_000_000;
@@ -54,20 +55,14 @@ async function robotsForbids(url) {
     const res = await fetch(new URL('/robots.txt', target.origin).toString(), {
       redirect: 'follow', signal: AbortSignal.timeout(8000), headers: { 'user-agent': UA },
     });
+    // A robots.txt that cannot be read is silence, not a decision (owner,
+    // 5 Sep 2026). One that can is read the way every crawler reads it — our
+    // own group over the wildcard, the longest matching rule winning, so
+    // `Disallow: /` with `Allow: /menu` lets the menu through (Codex, 26 Sep
+    // 2026): the same parser sources/politeness.js uses.
     if (!res.ok) return false;
-    const text = (await res.text()).slice(0, 100_000);
-    for (const block of text.split(/^user-agent:/gim).slice(1)) {
-      const who = block.split(/\r?\n/)[0].trim().toLowerCase();
-      // Our own name, and the one we used to answer to: a site that wrote a
-      // rule for RoamBot meant this crawler, and the rebrand does not give us
-      // permission it withheld.
-      if (who !== '*' && !who.includes('epic') && !who.includes('roam')) continue;
-      for (const [, path] of block.matchAll(/^\s*disallow:\s*(\S+)/gim)) {
-        if (path === '/') return true;
-        if (path && target.pathname.startsWith(path)) return true;
-      }
-    }
-    return false;
+    const { rules } = parseRobots((await res.text()).slice(0, 100_000));
+    return !allowedBy(rules, `${target.pathname}${target.search}`);
   } catch { return false; }
 }
 
