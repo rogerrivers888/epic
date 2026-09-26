@@ -542,6 +542,10 @@ export async function candidates({
  * overwriting one somebody took by hand.
  */
 export async function setKind(id, { kind, by = null } = {}) {
+  // A filing names the drawer it files under, and only `fileUnder` takes one.
+  // Through here it would be a filing pointing nowhere, which enrichment could
+  // not act on (Codex, 26 Sep 2026).
+  if (kind === 'filing') throw bad('A filing names the drawer it files under — decide it with /file, not as a kind.');
   // `classified_seen` is written for every verdict, "unclear" included: it is
   // the count the word was called at, and the pen re-asks a word only once
   // that count has risen (migration 252).
@@ -620,6 +624,19 @@ export async function promote(id, { gate = false, kind = 'yesno', label = null, 
     // resolver, so "step free access" finds `step-free` rather than making
     // `step-free-access` beside it.
     const alias = await client.query('select target_key from attribute_aliases where norm = $1', [candidate.norm]);
+    // A merge names a label that exists, or it is a 400 here — not a foreign
+    // key failing under the alias insert and answering 500 (Codex, 26 Sep
+    // 2026). And a wording already pointed at one label is not quietly
+    // promoted to another: the alias would say A while the question said B,
+    // and the resolver and the promotion would disagree for ever after.
+    if (attributeKey) {
+      const named = await client.query('select key from place_attributes where key = $1', [attributeKey]);
+      if (!named.rows[0]) throw bad(`${attributeKey} is not one of our labels. Name the label first, then merge onto it.`);
+      const pointed = alias.rows[0]?.target_key ?? null;
+      if (pointed && pointed !== attributeKey) {
+        throw bad(`"${candidate.norm}" already means ${pointed}. Merge it there, or move the alias first — it cannot mean ${attributeKey} as well.`);
+      }
+    }
     let key = attributeKey ?? alias.rows[0]?.target_key ?? null;
     if (!key) {
       const text = label ?? candidate.raw_forms?.[0] ?? candidate.norm;

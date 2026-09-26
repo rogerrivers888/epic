@@ -722,3 +722,40 @@ test('dining area is food-on-site said another way', async () => {
   // resolver answers the question already asked of everything.
   assert.equal((await sets.resolveAttribute('Dining area'))?.key, 'food-on-site');
 });
+
+test('Codex: a filing needs its drawer, a merge names a real label, and a wording means one thing', async () => {
+  // Three doors the alias plan opened and did not guard (Codex, 26 Sep 2026).
+  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+  await query("insert into question_sets (key, name) values ('zz-other', 'Other') on conflict do nothing");
+  await sets.recordCandidates(sub, [
+    { norm: 'zz brook', raw: 'zz brook', kind: 'feature', sources: ['features'], placesSeen: 3, examples: ['osm:b'], asserts: 3, evidence: 'a brook runs through the meadow', evidenceRef: 'osm:b' },
+  ], { placesTotal: 20 });
+  const [brook] = (await sets.candidates({ subcategory: sub, status: 'new', limit: 50 })).filter((c) => c.norm === 'zz brook');
+
+  // 1. The generic kind endpoint cannot make a filing with no drawer.
+  await assert.rejects(() => sets.setKind(brook.id, { kind: 'filing', by: 'test' }), /decide it with \/file/);
+
+  // 2. Merging onto a label that does not exist is a 400 with a sentence, not a 500.
+  await assert.rejects(
+    () => sets.promote(brook.id, { actor: 'test', attributeKey: 'zz-no-such-label', setKey: 'zz-other' }),
+    (err) => err.status === 400 && /not one of our labels/.test(err.message),
+  );
+
+  // 3. A wording already pointed at one label is not promoted onto another.
+  await query("insert into place_attributes (key, label, kind, position) values ('zz-stream', 'Zz stream', 'yesno', 200), ('zz-water-feature', 'Zz water feature', 'yesno', 200) on conflict do nothing");
+  await query("insert into attribute_aliases (norm, target_key, raw) values ('zz brook', 'zz-stream', 'zz brook') on conflict (norm) do nothing");
+  await assert.rejects(
+    () => sets.promote(brook.id, { actor: 'test', attributeKey: 'zz-water-feature', setKey: 'zz-other' }),
+    /already means zz-stream/,
+  );
+  // Merged where it already points, it goes through.
+  const ok = await sets.promote(brook.id, { actor: 'test', attributeKey: 'zz-stream', setKey: 'zz-other' });
+  assert.equal(ok.attributeKey, 'zz-stream');
+
+  await query("delete from questions where set_key = 'zz-other'");
+  await query("delete from question_sets where key = 'zz-other'");
+  await query("delete from attribute_aliases where norm like 'zz %'");
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+  await query("delete from place_attributes where key like 'zz-%'");
+});
