@@ -66,3 +66,40 @@ test('the calls made before today carry the session that says they were not attr
   assert.ok(s, 'the backfill session exists');
   assert.match(s.label, /unattributed/);
 });
+
+test('nothing but an api session can be written, and a plan session is recorded as the request\'s session', async (t) => {
+  // Owner, 26 Sep 2026: "Unify the session ids." Migration 256.
+  await assert.rejects(
+    query(`insert into provider_calls (household_id, session_id, provider, purpose) values (null, gen_random_uuid(), 'google', 'test.stray')`),
+    /provider_calls_session_fk/, 'an id that is not an api session is refused');
+  const { rows: [plans] } = await query(`select id from api_sessions where token_hash = 'service:plan-sessions-before-2026-09-26'`);
+  assert.ok(plans, 'and the old plan-session rows have a named session of their own');
+
+  const { rows: [s] } = await query(
+    `insert into api_sessions (token_hash, label) values ('test:ledger-plan', 'planner') on conflict (token_hash) do update set label = excluded.label returning id`);
+  t.after(async () => {
+    await query(`delete from provider_calls where purpose = 'test.ledger.plan'`);
+    await query(`delete from api_sessions where token_hash = 'test:ledger-plan'`);
+  });
+  const planSessions = await import('../src/repositories/planSessions.js');
+  const planId = '00000000-0000-4000-8000-00000000abcd';
+  await runAsSpender({ householdId: null, sessionId: s.id }, () => planSessions.recordSessionCall(null, planId, 'google', 'test.ledger.plan', { google: 1 }));
+  const [row] = await rowsFor('test.ledger.plan');
+  assert.equal(row.session_id, s.id, 'the request\'s session, not the plan\'s id');
+});
+
+test('a session the ledger names survives the sweep of dead sessions', async (t) => {
+  const { sweepDeadSessions } = await import('../src/repositories/sessions.js');
+  const { rows: [spent] } = await query(
+    `insert into api_sessions (token_hash, label, expires_at, revoked_at) values ('test:ledger-dead-spent', 'spent', now() - interval '60 days', now() - interval '60 days') returning id`);
+  const { rows: [idle] } = await query(
+    `insert into api_sessions (token_hash, label, expires_at, revoked_at) values ('test:ledger-dead-idle', 'idle', now() - interval '60 days', now() - interval '60 days') returning id`);
+  t.after(async () => {
+    await query(`delete from provider_calls where purpose = 'test.ledger.dead'`);
+    await query(`delete from api_sessions where token_hash like 'test:ledger-dead-%'`);
+  });
+  await providerCalls.record(null, 'google', 'test.ledger.dead', { google: 1 }, spent.id);
+  await sweepDeadSessions();
+  const { rows } = await query(`select token_hash from api_sessions where token_hash like 'test:ledger-dead-%' order by 1`);
+  assert.deepEqual(rows.map((r) => r.token_hash), ['test:ledger-dead-spent'], 'the idle one goes, the one with spend on it stays');
+});

@@ -91,5 +91,13 @@ export async function liveSessions(accountId = null) {
  * date and holds nothing about anybody, but it is not needed either.
  */
 export function sweepDeadSessions() {
-  return query(`delete from api_sessions where (expires_at < now() - interval '30 days') or (revoked_at < now() - interval '30 days')`);
+  // A session the ledger names is kept: it is the answer to "which session
+  // spent this", the ledger's foreign key refuses the delete anyway, and one
+  // refused row would have stopped the whole sweep (migration 256, 26 Sep
+  // 2026). The service sessions are all born expired and would otherwise be
+  // swept a month later with a month of attribution hanging off them.
+  return query(
+    `delete from api_sessions s
+      where ((expires_at < now() - interval '30 days') or (revoked_at < now() - interval '30 days'))
+        and not exists (select 1 from provider_calls p where p.session_id = s.id)`);
 }

@@ -77,6 +77,7 @@ import { noteInvariantRun } from './repositories/settings.js';
 import { expireRentedCoordinates } from './sources/census.js';
 import * as censusRun from './sources/censusRun.js';
 import * as ringTables from './repositories/ringTables.js';
+import { refreshIfDue as refreshPostcodesIfDue } from './sources/postcodeRefresh.js';
 import * as ground from './sources/groundCounts.js';
 import { resumeCollections } from './routes/placeIndex.js';
 import { resume as resumeSweeps } from './sources/researchSweep.js';
@@ -674,6 +675,13 @@ setInterval(() => { void runBarChecks('daily').catch(() => {}); }, BAR_CHECK_EVE
 const refreshRingsDue = () => { void ringTables.refreshDue().catch(() => {}); };
 void indexBuilt.then(refreshRingsDue);
 setInterval(refreshRingsDue, BAR_CHECK_EVERY_MS).unref?.();
+// The postcode directory: asked about once a month, loaded when the ONS has
+// a newer release than the one every place in the country is placed by
+// (owner, 26 Sep 2026: "Monthly check, quarterly load"). The daily tick asks;
+// the module decides whether a month has passed.
+const checkPostcodes = () => { void refreshPostcodesIfDue().then((out) => { if (out.checked) console.log(`postcodes: ${out.loaded ? `loaded ${out.release}` : out.why}`); }).catch((err) => console.warn(`postcodes: ${err.message}`)); };
+void indexBuilt.then(checkPostcodes);
+setInterval(checkPostcodes, BAR_CHECK_EVERY_MS).unref?.();
 void indexBuilt.then(() => sweep());
 setInterval(() => { void sweep(); }, 3600_000).unref?.();
 

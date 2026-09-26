@@ -29,6 +29,7 @@ import { ownSite } from '../sources/logo.js';
 import * as reach from '../repositories/reach.js';
 import { OURS_TO_KEEP, slicePlan } from '../sources/census.js';
 import * as censusRun from '../sources/censusRun.js';
+import * as postcodeRefresh from '../sources/postcodeRefresh.js';
 import { LIVE_ROW, FOLDED_MONTH } from '../repositories/searches.js';
 import { sectorOf, labelOf, CAP_MINUTES, EDGE_MINUTES } from '../domain/reach.js';
 import { searchAreas } from '../sources/areas.js';
@@ -3325,6 +3326,26 @@ router.get('/search', requires('view_library'), async (req, res, next) => {
  * Only and therefore free, and the cost counter beside it is expected to read
  * nought: **a figure above nought is an alarm**, not an expense.
  */
+/**
+ * The postcode directory: which release the country is placed by, when it
+ * was last checked, and a way to check now. The check is free; a load is a
+ * download inside the container and a swap, and costs nothing either.
+ */
+router.get('/postcodes', requires('view_library'), async (_req, res, next) => {
+  try {
+    const [state, { rows: [count] }] = await Promise.all([
+      postcodeRefresh.state(),
+      query('select count(*)::int as postcodes, count(distinct outcode)::int as outcodes from postcodes'),
+    ]);
+    res.json({ ...state, ...count, checkEveryDays: postcodeRefresh.CHECK_EVERY_DAYS });
+  } catch (err) { next(err); }
+});
+router.post('/postcodes/refresh', requires('manage_library'), async (req, res, next) => {
+  try {
+    res.json(await postcodeRefresh.refreshIfDue({ force: true }));
+  } catch (err) { next(err); }
+});
+
 router.get('/census/runs', requires('view_library'), async (req, res, next) => {
   try {
     const runs = await censusRun.list({ limit: Number(req.query.limit) || 10 });

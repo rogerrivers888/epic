@@ -58,7 +58,7 @@ const openEntry = (zip, entry) => new Promise((resolve, reject) => {
  * Sep 2026). Nothing reaches the table the census reads until every file
  * has been read; the swap is one transaction.
  */
-async function insert(rows) {
+async function insert(rows, source = SOURCE) {
   if (!rows.length) return;
   const pcds = [], sector = [], outcode = [], lat = [], lng = [];
   for (const r of rows) { pcds.push(r.pcds); sector.push(r.sector); outcode.push(r.outcode); lat.push(r.lat); lng.push(r.lng); }
@@ -67,10 +67,10 @@ async function insert(rows) {
      select p, s, o, la, ln, $6 from unnest($1::text[], $2::text[], $3::text[], $4::float8[], $5::float8[]) as u(p, s, o, la, ln)
      on conflict (pcds) do update set sector = excluded.sector, outcode = excluded.outcode,
        lat = excluded.lat, lng = excluded.lng, source = excluded.source, loaded_at = now()`,
-    [pcds, sector, outcode, lat, lng, SOURCE]);
+    [pcds, sector, outcode, lat, lng, source]);
 }
 
-async function loadEntry(zip, entry, stats) {
+async function loadEntry(zip, entry, stats, source) {
   const stream = await openEntry(zip, entry);
   const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
   let header = null; let ix = null; let batch = [];
@@ -92,15 +92,15 @@ async function loadEntry(zip, entry, stats) {
     const [out, inw] = pcds.split(' ');
     if (!out || !inw) { stats.unplaced += 1; continue; }
     batch.push({ pcds, sector: `${out} ${inw[0]}`, outcode: out, lat: la, lng: ln });
-    if (batch.length >= BATCH) { await insert(batch); stats.loaded += batch.length; batch = []; }
+    if (batch.length >= BATCH) { await insert(batch, source); stats.loaded += batch.length; batch = []; }
   }
-  await insert(batch); stats.loaded += batch.length;
+  await insert(batch, source); stats.loaded += batch.length;
 }
 
 const LOCK = 'epic.postcodes.load';
 
-export async function loadPostcodes(file) {
-  const stats = { files: 0, rows: 0, loaded: 0, terminated: 0, unplaced: 0, retired: 0 };
+export async function loadPostcodes(file, { source = SOURCE } = {}) {
+  const stats = { files: 0, rows: 0, loaded: 0, terminated: 0, unplaced: 0, retired: 0, source };
   // One load at a time: two sharing the staging table would each truncate
   // the other's rows and swap in a snapshot of half a country (Codex, 26 Sep
   // 2026). The lock lives on one connection for the life of the load.
@@ -109,7 +109,7 @@ export async function loadPostcodes(file) {
   try {
     ({ rows: [{ got }] } = await holder.query('select pg_try_advisory_lock(hashtext($1)) as got', [LOCK]));
     if (!got) throw new Error('another postcode load is running');
-    return await loadWhileLocked(file, stats);
+    return await loadWhileLocked(file, stats, source);
   } finally {
     // Whatever happened — the lock refused, the lock query itself failing, the
     // load throwing — the client goes back (Codex, 26 Sep 2026).
@@ -118,7 +118,7 @@ export async function loadPostcodes(file) {
   }
 }
 
-async function loadWhileLocked(file, stats) {
+async function loadWhileLocked(file, stats, source) {
   // postcodes_staging is migration 255's: schema is made by migrations only.
   await query('truncate postcodes_staging');
   const zip = await openZip(file);
@@ -127,7 +127,7 @@ async function loadWhileLocked(file, stats) {
     zip.on('entry', (entry) => {
       const wanted = /^Data\/multi_csv\/.*\.csv$/i.test(entry.fileName);
       if (!wanted) { zip.readEntry(); return; }
-      loadEntry(zip, entry, stats)
+      loadEntry(zip, entry, stats, source)
         .then(() => { stats.files += 1; console.log(`${entry.fileName}: ${stats.loaded.toLocaleString('en-GB')} loaded so far`); zip.readEntry(); })
         .catch(reject);
     });
@@ -169,6 +169,9 @@ if (isMain) {
     console.log(`loading ${file}`);
     const stats = await loadPostcodes(file);
     const { rows: [n] } = await query('select count(*)::int as n, count(distinct outcode)::int as outcodes, count(distinct sector)::int as sectors from postcodes');
+    // The by-hand load is a load like any other, and the monthly check reads
+    // this to know what is in.
+    await query('update postcode_releases set loaded_release = $1, loaded_at = now() where one', [SOURCE.replace(/^onspd-/, '')]).catch(() => null);
     console.log({ ...stats, table: n });
     if (!given) fs.rmSync(file, { force: true });
     await pool.end();

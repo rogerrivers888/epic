@@ -68,8 +68,18 @@ export async function planSessionForDay(householdId, tripId, dayId) {
  * blind to whichever paths happened to use the others — a class of bug rather
  * than an instance of one (Codex, 17 Sep 2026).
  */
-export const recordSessionCall = (householdId, sessionId, provider, purpose, units = null) =>
-  providerCalls.record(householdId, provider, purpose, units, sessionId);
+/**
+ * A call made while planning, on the ledger.
+ *
+ * Against the request's own session — the api_sessions row auth.js put in
+ * the context — and not the plan session's id, which is a session of another
+ * kind that the cap and the spend reports never joined to (owner, 26 Sep
+ * 2026: "Two tables meaning 'which session did this' is how attribution
+ * erodes"). The plan session is still the second argument so the call sites
+ * read as they did; it is not what the ledger records.
+ */
+export const recordSessionCall = (householdId, _planSessionId, provider, purpose, units = null) =>
+  providerCalls.record(householdId, provider, purpose, units);
 
 /**
  * A session by its short reference — the eight characters a run is quoted by.
