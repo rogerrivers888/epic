@@ -414,68 +414,94 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
   // The shelves still travel on every item — they name the drawer and they
   // decide what the place page says — they simply no longer decide whether a
   // household may see it.
-  const mine = fenceToBand(got.venues, { from: start, minutes, mode });
-  const refs = mine.map((v) => `${v.source}:${v.sourcePlaceId}`);
-  const scores = refs.length
-    ? (await query(
-      `select t.venue_ref as venue_ref, coalesce(r.epic_score, s.epic_score) as epic
-         from unnest($1::text[]) as t(venue_ref)
-         left join place_records r on r.venue_ref = t.venue_ref
-         left join lateral (select s2.epic_score from scout_places s2 where s2.venue_ref = t.venue_ref order by s2.last_seen desc limit 1) s on true`,
-      [refs])).rows
-    : [];
-  const byRef = new Map(scores.map((r) => [r.venue_ref, r.epic == null ? null : Number(r.epic)]));
-  const items = mine
-    .map((v, i) => {
-      const ref = `${v.source}:${v.sourcePlaceId}`;
-      const p = shelvesForVenue(v, taught, tax.vocab);
-      // Infrastructure gets no shelf and is not shown: the classifier's
-      // verdict (domain/moods.js, travelOnly) is the fence, and this only obeys it.
-      if (p.travel) return null;
-      return {
-        venueRef: ref, name: v.name, category: v.category,
-        subcategory: p?.subcategory ?? null,
-        // The category that asked the question comes first.
-        //
-        // These carried our computed shelves alone, and a screen that filters a
-        // list by the category it is showing threw every one of them away the
-        // moment they were appended — the count stayed at three however many
-        // pages were bought (20 Sep 2026). The shelves still travel behind it:
-        // they name the drawer, and the categories genuinely overlap.
-        moods: [category, ...(p?.shelves ?? []).filter((m) => m !== category)],
-        epicScore: byRef.get(ref) ?? null,
-        // Their order, kept so a place nobody has scored still has somewhere to
-        // sit — and so the two can be compared on the bench.
-        theirRank: i + 1,
-        outcode: v.outcode ?? null,
-        lat: v.lat, lng: v.lng,
-        // Rented, shown, never written down: the card draws them and the
-        // database never sees them.
-        rating: v.rating ?? null, ratingCount: v.ratingCount ?? null,
-        priceLevel: v.priceLevel ?? null, openNow: v.openNow ?? null,
-        // The reference and its credit, signed the way every other photo on
-        // this screen is. The bytes are fetched for a tile in the viewport, a
-        // row at a time, and never for a list — that is the card's job, and it
-        // already knows how (data policy: "Photos only for tiles in the
-        // viewport, a row at a time").
-        photos: (v.photos ?? []).slice(0, 1),
-        website: v.website ?? null,
-      };
-    })
-    .filter(Boolean)
-    .sort((a, b) => {
-      if (a.epicScore != null && b.epicScore != null) return b.epicScore - a.epicScore;
-      if (a.epicScore != null) return -1;
-      if (b.epicScore != null) return 1;
-      return a.theirRank - b.theirRank;
-    });
-  // Sorted as one list, the score would put the famous far places first again
-  // and the cut would take the near ones back out; see `alternate`.
-  // Cut to one page after taking turns, not before: two searches can merge to
-  // forty, and a screen that re-sorts the whole pool by rating would undo the
-  // turns and let the far places crowd the near ones out again (Codex, 26 Sep
-  // 2026). Cut here, the twenty it re-sorts are already half near.
-  const shown = nearGot ? alternate(items, (it) => kmBetween(start, it) <= NEAR_KM).slice(0, PAGE) : items;
+  // The fence, the scores and the order, for whatever venues are handed in:
+  // one page's, or — for the page after it — the first page's again.
+  const rank = async (venues) => {
+    const mine = fenceToBand(venues, { from: start, minutes, mode });
+    const refs = mine.map((v) => `${v.source}:${v.sourcePlaceId}`);
+    const scores = refs.length
+      ? (await query(
+        `select t.venue_ref as venue_ref, coalesce(r.epic_score, s.epic_score) as epic
+           from unnest($1::text[]) as t(venue_ref)
+           left join place_records r on r.venue_ref = t.venue_ref
+           left join lateral (select s2.epic_score from scout_places s2 where s2.venue_ref = t.venue_ref order by s2.last_seen desc limit 1) s on true`,
+        [refs])).rows
+      : [];
+    const byRef = new Map(scores.map((r) => [r.venue_ref, r.epic == null ? null : Number(r.epic)]));
+    return { mine, items: mine
+      .map((v, i) => {
+        const ref = `${v.source}:${v.sourcePlaceId}`;
+        const p = shelvesForVenue(v, taught, tax.vocab);
+        // Infrastructure gets no shelf and is not shown: the classifier's
+        // verdict (domain/moods.js, travelOnly) is the fence, and this only obeys it.
+        if (p.travel) return null;
+        return {
+          venueRef: ref, name: v.name, category: v.category,
+          subcategory: p?.subcategory ?? null,
+          // The category that asked the question comes first.
+          //
+          // These carried our computed shelves alone, and a screen that filters a
+          // list by the category it is showing threw every one of them away the
+          // moment they were appended — the count stayed at three however many
+          // pages were bought (20 Sep 2026). The shelves still travel behind it:
+          // they name the drawer, and the categories genuinely overlap.
+          moods: [category, ...(p?.shelves ?? []).filter((m) => m !== category)],
+          epicScore: byRef.get(ref) ?? null,
+          // Their order, kept so a place nobody has scored still has somewhere to
+          // sit — and so the two can be compared on the bench.
+          theirRank: i + 1,
+          outcode: v.outcode ?? null,
+          lat: v.lat, lng: v.lng,
+          // Rented, shown, never written down: the card draws them and the
+          // database never sees them.
+          rating: v.rating ?? null, ratingCount: v.ratingCount ?? null,
+          priceLevel: v.priceLevel ?? null, openNow: v.openNow ?? null,
+          // The reference and its credit, signed the way every other photo on
+          // this screen is. The bytes are fetched for a tile in the viewport, a
+          // row at a time, and never for a list — that is the card's job, and it
+          // already knows how (data policy: "Photos only for tiles in the
+          // viewport, a row at a time").
+          photos: (v.photos ?? []).slice(0, 1),
+          website: v.website ?? null,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (a.epicScore != null && b.epicScore != null) return b.epicScore - a.epicScore;
+        if (a.epicScore != null) return -1;
+        if (b.epicScore != null) return 1;
+        return a.theirRank - b.theirRank;
+      }) };
+    // Sorted as one list, the score would put the famous far places first again
+    // and the cut would take the near ones back out; see `alternate`.
+    // Cut to one page after taking turns, not before: two searches can merge to
+    // forty, and a screen that re-sorts the whole pool by rating would undo the
+    // turns and let the far places crowd the near ones out again (Codex, 26 Sep
+    // 2026). Cut here, the twenty it re-sorts are already half near.
+  };
+  const isNear = (it) => kmBetween(start, it) <= NEAR_KM;
+  const { mine, items } = await rank(got.venues);
+  let shown = items;
+  if (nearGot) {
+    // Cut to one page after taking turns, not before: two searches can merge to
+    // forty, and a screen that re-sorts the whole pool by rating would undo the
+    // turns and let the far places crowd the near ones out again (Codex, 26 Sep
+    // 2026). Cut here, the twenty it re-sorts are already half near.
+    shown = alternate(items, isNear).slice(0, PAGE);
+  } else if (page === 2 && plan.wideKm && start) {
+    // What page one had to leave out when it was cut to twenty is already paid
+    // for, and page two leads with it rather than losing it (Codex, 26 Sep
+    // 2026). Page one is rebuilt from the two pooled pages exactly as it was
+    // drawn — nothing is bought — and whatever fell past the cut goes first.
+    const wide1 = peek(pageKey(ringKey, category, 1));
+    const near1 = peek(pageKey(nearKey, category, 1));
+    if (wide1 && near1) {
+      const first = alternate((await rank(mergeWide(near1.venues, wide1.venues))).items, isNear);
+      const overflow = first.slice(PAGE);
+      const already = new Set(overflow.map((it) => it.venueRef));
+      shown = [...overflow, ...items.filter((it) => !already.has(it.venueRef))];
+    }
+  }
   return {
     items: shown, nextPageToken: got.nextPageToken, requests: got.requests, cached: got.cached,
     problem: got.problem ?? null,
