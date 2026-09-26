@@ -26,7 +26,9 @@ Read `docs/requirements.md` (governing) and `docs/technical-constraints.md` befo
   cd /tmp/epic-wt-<name> && git apply /tmp/<name>.patch
   cp <repo>/.env . && ln -s <repo>/node_modules node_modules && ln -s <repo>/apps/api/node_modules apps/api/node_modules   # + apps/web/node_modules for web work
   git add <your files> && git diff --cached           # nothing else is here to sweep in
-  git commit -F - <<'MSG' … MSG
+  git commit -F - <<'MSG'
+  <the message>
+  MSG
   (cd apps/api && npm test)                            # the full suite, after the last commit, before the review
   CODEX_HOME=$HOME/.codex-epic codex exec review --base $BASE
   #   read every finding, and fix it in the SHARED tree — then carry it across the same way:
@@ -37,7 +39,8 @@ Read `docs/requirements.md` (governing) and `docs/technical-constraints.md` befo
   git push origin HEAD:main && cd <repo> && git worktree remove --force /tmp/epic-wt-<name>
   #   push only with nothing actionable left; the pre-push hook runs the suite once more.
   #   the worktree goes only once the push has succeeded — until then it is the only copy of the reviewed commit.
-  #   refused because main moved: git fetch && git rebase origin/main here, then the suite and the review again —
+  #   refused because main moved: git fetch && BASE=$(git rev-parse origin/main) && git rebase $BASE here — BASE re-pinned,
+  #   or the review widens to everything upstream — then the suite and the review again,
   #   if the rebase is clean. On a conflict, git rebase --abort, resolve it in the shared tree, and cut the patch again.
   ```
   **The patch is cut against `origin/main`, the base the worktree is made from — never against the shared tree's `HEAD` or index.** Local `main` often holds other sessions' unpushed commits and the index their staged hunks; a diff against either leaves out what is not in `origin/main`, and the patch then fails to apply or applies without what it depended on. A diff against `origin/main` shows everything that differs — yours, theirs, uncommitted or not — so every hunk that is not yours is visible and can be cut; and what you pushed earlier is already in `origin/main`, so it drops out by itself. `--binary` carries a changed image or other binary file, which a plain diff reduces to "Binary files differ". If a hunk of yours sits on top of somebody else's that is not in `origin/main`, do not carry theirs or cut around it: find its owner (`ListAgents`) and ask them to push first. If the patch does not apply, `origin/main` moved under your files: fetch, cut it again, and read what changed before re-applying — never force it. **The shared tree is the one copy of your work that outlives the worktree**, so nothing is ever edited only in the worktree: a fix made there alone is gone when the worktree is removed, and the next patch cut from the shared tree reverts it without a word. A follow-on fix is a new commit in a new worktree, never an amend. Whatever is yours stays edited in the shared tree too, so its working copy keeps your change; if someone else's hunk is in a file you are cutting a patch from, leave it out of the patch and leave it in the tree for its owner.
