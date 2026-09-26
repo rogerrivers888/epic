@@ -75,7 +75,7 @@ export const BODY_MAX = 8000;
  * request, plain text, capped.
  */
 async function body(title) {
-  const p = new URLSearchParams({ action: 'query', prop: 'extracts', titles: title, explaintext: '1', exlimit: '1', format: 'json', origin: '*', redirects: '1' });
+  const p = new URLSearchParams({ action: 'query', prop: 'extracts', titles: title, explaintext: '1', exsectionformat: 'wiki', exlimit: '1', format: 'json', origin: '*', redirects: '1' });
   const data = await get(`${WIKI}?${p}`);
   const page = Object.values(data?.query?.pages ?? {})[0];
   return beyondTheLead(page?.extract);
@@ -198,16 +198,17 @@ export async function encyclopediaFor({ name, lat, lng, locality = null, address
   if (!page?.summary) return null;
 
   let facts = { classes: [], officialWebsite: null, openedYear: null, commonsImage: null };
-  // With no answer from Wikidata there is nothing to refuse on, and an article
-  // that cannot be checked is not stored on the strength of its title: the
-  // match is left for the next pass rather than taken, and an article with no
-  // item at all is not taken either (Codex, 26 Sep 2026). Nearly every article
-  // has one, so that costs almost nothing.
+  // An article with no Wikidata item cannot be checked, so it is not stored on
+  // the strength of its title (Codex, 26 Sep 2026). Nearly every article has
+  // one, so that costs almost nothing.
   if (!page.wikidataId) return null;
   // Said before the request goes, so a refused or failed match still reaches
   // the ledger: the caller logs from this, not from a kept match (Codex, 26 Sep 2026).
   if (asked) asked.wikidata = true;
-  try { facts = await entity(page.wikidataId); } catch { return null; }
+  // A Wikidata outage is not a refusal. It is thrown, so a replacing run keeps
+  // the facts it already holds instead of reading "no match" and forgetting
+  // them (Codex, 26 Sep 2026).
+  facts = await entity(page.wikidataId);
   // An article about the town, the hill or the borough is not an article
   // about the place, however well the name scores.
   // The drawer is asked beside the category, never joined to it: the food

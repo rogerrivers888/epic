@@ -11,7 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { refused, beyondTheLead } from '../src/sources/encyclopedia.js';
+import { refused, beyondTheLead, encyclopediaFor } from '../src/sources/encyclopedia.js';
 import { paragraphsOf } from '../src/sources/site.js';
 
 test('a town, a borough or a parish is refused for any place', () => {
@@ -55,4 +55,19 @@ test('the body starts at the first heading, so the lead is never held twice (Cod
   assert.equal(beyondTheLead(extract), '== History ==\nIt opened in 1968 with a penguin beach.');
   assert.equal(beyondTheLead('Only a lead, nothing beyond it.'), null);
   assert.equal(beyondTheLead(null), null);
+});
+
+test('a Wikidata outage is thrown, not read as no match, so a replacing run keeps what it holds (Codex, 26 Sep 2026)', async (t) => {
+  const real = globalThis.fetch;
+  t.after(() => { globalThis.fetch = real; });
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    const json = (body) => ({ ok: true, status: 200, json: async () => body });
+    if (u.includes('wikidata.org')) return { ok: false, status: 503, json: async () => ({}) };
+    if (u.includes('list=geosearch')) return json({ query: { geosearch: [{ title: 'Birdworld', pageid: 1, dist: 40 }] } });
+    return json({ query: { pages: { 1: { title: 'Birdworld', extract: 'Birdworld is a bird park.', pageprops: { wikibase_item: 'Q4916681' } } } } });
+  };
+  const asked = {};
+  await assert.rejects(encyclopediaFor({ name: 'Birdworld', lat: 51.17, lng: -0.84, category: 'zoo', asked }), /503/);
+  assert.equal(asked.wikidata, true, 'and the call that failed is still on the ledger');
 });
