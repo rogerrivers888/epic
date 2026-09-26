@@ -59,6 +59,8 @@ import { ensureAttributeAliases } from './repositories/questionSets.js';
 import voiceRoutes, { adminRouter as voiceLabRoutes } from './routes/voice.js';
 import { startScoutLoop } from './sources/scoutArea.js';
 import { photoFor } from './sources/google.js';
+import { spenderForLink } from './sources/photoLinks.js';
+import { currentSpender, runAsSpender } from './context.js';
 import { currentHousehold } from './routes/household.js';
 import { SCOUT_MONTHLY_RUNS } from './sources/localscout.js';
 import { enabledSources, defaultSourceKeys, loadSourceSettings, setSourceOff, sourceHasKey, sourceOff, sourceKeys, bedRatesOn } from './sources/index.js';
@@ -505,11 +507,15 @@ app.get('/api/photos/google', async (req, res) => {
   try {
     const name = String(req.query.name || '');
     if (!/^places\/[^/]+\/photos\/[^/]+$/.test(name)) return res.status(400).end();
-    const household = await currentHousehold();
-    const photo = await photoFor(name, Math.min(1200, Number(req.query.w) || 480));
+    // Spent on behalf of whoever the link was signed for when it came in
+    // without a session, which is how every `<img>` arrives; a signed-in
+    // request is its own spender. Neither, and the picture is refused at
+    // Google's door (sources/paidGate.js) — the tile keeps its icon.
+    const spender = currentSpender().sessionId ? currentSpender() : (spenderForLink(req.query) ?? currentSpender());
+    const photo = await runAsSpender(spender, () => photoFor(name, Math.min(1200, Number(req.query.w) || 480)));
     if (!photo) return res.status(404).json({ error: 'no_photo', message: 'The provider has no photo by that name.' });
     if (!photo.cached) {
-      await providerCalls.record(household.id, 'google-places', 'photo', { 'google-photos': 1 }).catch(() => null);
+      await providerCalls.record(spender.householdId, 'google-places', 'photo', { 'google-photos': 1 }, spender.sessionId).catch(() => null);
     }
     res.setHeader('content-type', photo.contentType);
     // Ten hours, the owner's decision (4 Sep 2026: "you can persist them for 10
@@ -521,6 +527,7 @@ app.get('/api/photos/google', async (req, res) => {
   } catch (err) {
     // The status the provider gave, so a quota that has run out reads as one.
     console.error('photo', err.message);
+    if (err.code === 'unattributed_paid_call' || err.code === 'spend_bound_reached') return res.status(429).json({ error: err.code, message: 'No picture just now.' });
     res.status(err.status === 403 || err.status === 429 ? 429 : 502).json({ error: 'photo_unavailable', message: err.message });
   }
 });

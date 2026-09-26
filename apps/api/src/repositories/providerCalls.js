@@ -222,11 +222,55 @@ export async function monthSplit(householdId) {
       group by provider`,
     [householdId],
   );
-  let priced = 0; let free = 0;
+  let free = 0;
   for (const r of rows) {
-    if (canBill(r.provider)) { priced += r.n; free += r.zero_rows; } else free += r.rows;
+    if (canBill(r.provider)) free += r.zero_rows; else free += r.rows;
   }
-  return { priced, free };
+  // Priced is the figure the cap is judged on, which is Google's paid
+  // requests alone since the bound was split (owner, 26 Sep 2026); Claude is
+  // beside it with its own budget.
+  const [priced, claude] = await Promise.all([countGoogleThisMonth(householdId), countClaudeThisMonth(householdId)]);
+  return { priced, claude, free };
+}
+
+/**
+ * Google's paid requests this month: what the household cap is judged on.
+ *
+ * Owner, 26 Sep 2026: "Split the bound: Google paid requests per household;
+ * Claude has its own budget." The one bound had counted every call that could
+ * cost money, whoever it went to, so eight thousand Claude calls sat inside a
+ * number the screen called a Google figure. This counts Google alone: the
+ * priced tiers where a row says which tier it bought (photos and Routes
+ * elements included, both of which Google bills), the request count on a row
+ * from before the tiers were recorded, and never the IDs Only census.
+ */
+const GOOGLE_PAID_IN_ROW = `case
+    when jsonb_typeof(units) = 'object' and units ?| array['google-essentials', ${PRICED_TIERS.map((t) => `'${t}'`).join(', ')}]
+      then ${PRICED_TIERS.map((t) => `coalesce((units->>'${t}')::int, 0)`).join(' + ')}
+    when jsonb_typeof(units) = 'object' and units ? 'google' then coalesce((units->>'google')::int, 0)
+    when jsonb_typeof(units) = 'number' and provider ~ 'google' then round((units #>> '{}')::numeric)::int
+    when units is null and provider ~ 'google' then 1
+    else 0
+  end`;
+
+export async function countGoogleThisMonth(householdId) {
+  const { rows: [row] } = await query(
+    `select coalesce(sum(${GOOGLE_PAID_IN_ROW}), 0)::int as n from provider_calls
+      where household_id = $1 and created_at >= date_trunc('month', now())`,
+    [householdId],
+  );
+  return row.n;
+}
+
+/** Claude's calls this month — the planner and the local scout — for Claude's own budget. */
+export async function countClaudeThisMonth(householdId) {
+  const { rows: [row] } = await query(
+    `select count(*)::int as n from provider_calls
+      where household_id = $1 and created_at >= date_trunc('month', now())
+        and provider in ('anthropic', 'scout')`,
+    [householdId],
+  );
+  return row.n;
 }
 
 export async function countThisMonth(householdId) {

@@ -36,6 +36,7 @@
  */
 
 import crypto from 'node:crypto';
+import { currentSpender } from '../context.js';
 
 /** One process, one key, never persisted. */
 const KEY = crypto.randomBytes(32);
@@ -54,7 +55,40 @@ const sign = (name, expiry) =>
 export function stampPhoto(photo) {
   if (!photo?.ref) return photo;
   const expiry = Date.now() + LIFETIME_MS;
-  return { ...photo, exp: expiry, sig: sign(photo.ref, expiry) };
+  const sig = sign(photo.ref, expiry);
+  remember(sig, expiry);
+  return { ...photo, exp: expiry, sig };
+}
+
+/**
+ * Who a link was signed for, so the picture it fetches is spent on their behalf.
+ *
+ * A photograph is a paid Google request, and every paid request needs a
+ * household and a signed-in session (sources/paidGate.js; owner, 26 Sep 2026).
+ * An `<img>` carries neither — which is the whole reason these links exist —
+ * so the spender the page was drawn for is remembered against the signature,
+ * in this process only, for as long as the link is good. The key dies with the
+ * process and so do the links, so nothing here needs to outlive it either. A
+ * link signed on nobody's behalf remembers nobody, and its picture is refused.
+ */
+const signedFor = new Map();
+const SIGNED_MAX = 200_000;
+function remember(sig, expiry) {
+  const { householdId, sessionId } = currentSpender();
+  if (!householdId || !sessionId) return;
+  signedFor.set(sig, { householdId, sessionId, expiry });
+  if (signedFor.size > SIGNED_MAX) {
+    // Oldest first: a Map iterates in insertion order.
+    for (const [k, v] of signedFor) { if (signedFor.size <= SIGNED_MAX * 0.9 && v.expiry > Date.now()) break; signedFor.delete(k); }
+  }
+}
+
+/** The household and session a good link was signed for, or null. */
+export function spenderForLink(query) {
+  const sig = query?.s ?? query?.sig;
+  const hit = sig ? signedFor.get(String(sig)) : null;
+  if (!hit || hit.expiry < Date.now()) return null;
+  return { householdId: hit.householdId, sessionId: hit.sessionId };
 }
 
 export const stampPhotos = (photos) => (Array.isArray(photos) ? photos.map(stampPhoto) : photos);

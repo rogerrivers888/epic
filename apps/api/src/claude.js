@@ -15,7 +15,15 @@ export const MODEL = 'claude-opus-5';
 // Per-session and per-household bounds (Epic 3 C10). Overridable by env so
 // they can be tuned without a deploy; the numbers themselves are open (A5).
 export const SESSION_CALL_BOUND = Number(process.env.EPIC_SESSION_CALL_BOUND || 40);
+//
+// Two budgets since 26 Sep 2026 (owner: "Split the bound: Google paid requests
+// per household; Claude has its own budget"). EPIC_HOUSEHOLD_MONTHLY_CALL_BOUND
+// and an account's `monthly_call_bound` are Google's paid requests;
+// EPIC_HOUSEHOLD_MONTHLY_CLAUDE_BOUND is Claude's calls, and never more than
+// the account's own number, so a guest held to five thousand is held to it on
+// both.
 export const HOUSEHOLD_MONTHLY_CALL_BOUND = Number(process.env.EPIC_HOUSEHOLD_MONTHLY_CALL_BOUND || 3000);
+export const HOUSEHOLD_MONTHLY_CLAUDE_BOUND = Number(process.env.EPIC_HOUSEHOLD_MONTHLY_CLAUDE_BOUND || 12000);
 
 // Indicative list rates ($ per million tokens) for the cost instrumentation, per
 // model: the planner runs on Opus, while a mechanical read like a menu runs on
@@ -71,11 +79,16 @@ export async function monthlyBoundFor(householdId) {
   return own ?? HOUSEHOLD_MONTHLY_CALL_BOUND;
 }
 
+/** Claude's own ceiling for this household: the estate's Claude budget, never above the account's number. */
+export async function claudeBoundFor(householdId) {
+  return Math.min(await monthlyBoundFor(householdId), HOUSEHOLD_MONTHLY_CLAUDE_BOUND);
+}
+
 export async function assertWithinBounds({ householdId, sessionId }) {
   const [sessionCalls, monthCalls, bound] = await Promise.all([
     providerCalls.countForSession(sessionId),
-    providerCalls.countThisMonth(householdId),
-    monthlyBoundFor(householdId),
+    providerCalls.countClaudeThisMonth(householdId),
+    claudeBoundFor(householdId),
   ]);
   if (sessionCalls >= SESSION_CALL_BOUND) throw new SpendBoundError('session', SESSION_CALL_BOUND);
   if (monthCalls >= bound) throw new SpendBoundError('household', bound);
@@ -274,6 +287,6 @@ export async function spendSummary({ householdId, sessionId }) {
   return {
     ...rows[0],
     sessionBound: SESSION_CALL_BOUND,
-    householdMonthlyBound: await monthlyBoundFor(householdId),
+    householdMonthlyBound: await claudeBoundFor(householdId),
   };
 }

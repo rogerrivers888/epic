@@ -480,15 +480,17 @@ export function isIdentified(provenance) {
 async function websiteLead(venueRef, householdId) {
   const [source, ...rest] = String(venueRef).split(':');
   if (source !== 'google' || !sourceHasKey('google') || sourceOff('google')) return null;
+  const meter = {};
   try {
-    const meter = {};
     const brief = await googleSource.brief(rest.join(':'), { meter });
     await providerCalls.record(householdId, 'google', 'own.lead', meter, null, venueRef).catch(() => null);
     if (!brief?.website) return { website: null, name: brief?.name ?? null };
     return { website: brief.website, name: brief.name ?? null };
   } catch (err) {
     // Attributed whether or not it answered, the same as the open map above.
-    await providerCalls.record(householdId, 'google', 'own.lead', { google: 1 }, null, venueRef).catch(() => null);
+    // The meter, not a request assumed: a call refused at the door never
+    // went out and was never billed (sources/paidGate.js, 26 Sep 2026).
+    await providerCalls.record(householdId, 'google', 'own.lead', meter, null, venueRef).catch(() => null);
     return { problem: `where their page is: ${String(err?.message || err).slice(0, 120)}` };
   }
 }
@@ -500,6 +502,14 @@ async function websiteLead(venueRef, householdId) {
  * researched today is left for the next attempt with the reason on the row.
  */
 /**
+ * **Free unless somebody asked** (owner, 26 Sep 2026: "own.js catch-up: set it
+ * to free-only now — enrich defaults to paid: false. Paid research only on
+ * demand"). The catch-up loop ran paid on its default for three weeks and spent
+ * $182 identifying places nobody had in front of them. So the default is the
+ * open map, the venue's own page and the encyclopedias, and a paid pass is
+ * something a caller says out loud: a household opening the drawer, "look
+ * again", the back office curating a place, and the priced research sweep.
+ *
  * `paid` allows the two Google requests — identify the place, find its page.
  * `search` allows the third paid thing, the web search that goes looking for
  * a claimed place's page when nothing else has found it, and defaults to
@@ -509,7 +519,7 @@ async function websiteLead(venueRef, householdId) {
  * that, and a Claude search is neither in the estimate nor under the ceiling
  * (Codex, 25 Sep 2026).
  */
-export async function enrich(venueRef, { householdId = null, sessionId = null, seed: given = {}, force = false, replace = force, paid = true, search = paid, hygiene = true } = {}) {
+export async function enrich(venueRef, { householdId = null, sessionId = null, seed: given = {}, force = false, replace = force, paid = false, search = paid, hygiene = true } = {}) {
   // Every paid call below is on this household's behalf, and the cap on its
   // calls that can cost money is asked at Google's door — which reads the
   // spender from the context rather than from thirty call sites.
@@ -941,7 +951,11 @@ function pump() {
 export function queueEnrichment(venueRef, opts = {}) {
   if (!venueRef || queued.has(venueRef)) return;
   queued.add(venueRef);
-  waiting.push({ venueRef, ...opts });
+  // The session is taken now, from whoever queued it. The job runs later in
+  // whatever context kicked the pump — often the background loop's — and a
+  // drawer's paid research must be spent on the drawer's sign-in, not on the
+  // server's own session, or the door refuses it (sources/paidGate.js).
+  waiting.push({ venueRef, ...opts, sessionId: opts.sessionId ?? currentSpender().sessionId ?? null });
   pump();
 }
 
@@ -977,7 +991,9 @@ export async function researchOnOpen(venueRef, { householdId = null, seed = {} }
   if (Date.now() - last < OPEN_AGAIN_MS) return queued.has(venueRef) || running > 0;
   openedAt.set(venueRef, Date.now());
   await owned.ensureRecord(venueRef).catch(() => null);
-  queueEnrichment(venueRef, { householdId, seed, force: true, replace: false });
+  // On demand: somebody is standing in front of the drawer. The one queued
+  // job that may pay, and it pays on the drawer's own sign-in.
+  queueEnrichment(venueRef, { householdId, seed, force: true, replace: false, paid: true });
   return true;
 }
 

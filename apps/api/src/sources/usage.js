@@ -6,6 +6,11 @@
 import * as providerCalls from '../repositories/providerCalls.js';
 import { LINES, legacyLines } from './pricing.js';
 import { canBill } from '../constants.js';
+import { monthlyBoundFor, claudeBoundFor } from '../claude.js';
+
+// The meter keys Google bills for, which the Google paid-requests line adds up
+// for a period (the month's figure against the cap is the guard's own count).
+const GOOGLE_PAID_KEYS = new Set(['google-pro', 'google-search', 'google-details', 'google-photos', 'google-routes']);
 
 const EPOCH = new Date(0);
 const FAR = new Date('2100-01-01T00:00:00Z');
@@ -27,6 +32,7 @@ export async function usageBetween(householdId, from = EPOCH, to = FAR) {
     if (!lines[r.key]) lines[r.key] = empty();
     lines[r.key].calls += r.calls;
     lines[r.key].units += r.units;
+    if (GOOGLE_PAID_KEYS.has(r.key)) { lines['google-paid'].calls += r.calls; lines['google-paid'].units += r.units; }
   }
 
   // Every row for the total, and the unmetered ones (Claude calls, rows from
@@ -80,9 +86,20 @@ export async function allowanceUsage(householdId) {
     // count what the provider bills for. This has to be the same arithmetic the
     // guard does (`providerCalls.countThisMonth`) or the screen says one thing
     // while the app refuses on another.
-    const used = line.cap?.countsEveryBillableCall ? stats.total.billable : line.cap && !line.allowance ? s.calls : s.units;
+    //
+    // And the limit is the one the guard enforces for *this* household — the
+    // account's own number where it has one — never the estate default the
+    // line was declared with (owner, 26 Sep 2026: "Settings must show the
+    // bound the guard actually enforces, not the env default").
+    let used = line.cap && !line.allowance ? s.calls : s.units;
+    let { limit } = a;
+    if (line.cap?.enforced === 'google') {
+      [used, limit] = await Promise.all([providerCalls.countGoogleThisMonth(householdId), monthlyBoundFor(householdId)]);
+    } else if (line.cap?.enforced === 'claude') {
+      [used, limit] = await Promise.all([providerCalls.countClaudeThisMonth(householdId), claudeBoundFor(householdId)]);
+    }
     out[line.key] = {
-      kind: a.kind, limit: a.limit, used: Math.round(used), estimated: s.estimated,
+      kind: a.kind, limit, used: Math.round(used), estimated: s.estimated,
       resetsAt: a.kind === 'monthly' ? w.next_month_start : a.kind === 'daily' ? w.tomorrow_start : null,
     };
   }

@@ -1,38 +1,6 @@
 import { bump, noteCall, noteFault } from './meter.js';
 import { sourceOff } from './switches.js';
-import { currentSpender } from '../context.js';
-
-/**
- * The cap's two dependencies, loaded on first use rather than at import.
- *
- * `claude.js` and the ledger both open the database pool when imported, and
- * this file has always been importable without one — a test that imports it
- * before building its own database was suddenly opening the development
- * database, and the helper then ran every migration into it (found 25 Sep
- * 2026, the same afternoon the cap was added).
- */
-/**
- * Calls admitted by this process that the ledger may not show yet.
- *
- * The ledger row for a call is written by its caller once the whole
- * operation is done, so a burst — two Nearby requests inside one search,
- * or two requests arriving together — read the same count and were all
- * admitted past the bound (Codex, 25 Sep 2026). What this process has
- * admitted this month is counted as it goes, and the larger of the two
- * figures is what the bound is checked against. It resets with the process,
- * when the ledger has caught up.
- */
-const admitted = new Map();
-let admittedMonth = null;
-const admittedFor = (householdId) => {
-  const month = new Date().toISOString().slice(0, 7);
-  if (admittedMonth !== month) { admitted.clear(); admittedMonth = month; }
-  return admitted.get(householdId) ?? 0;
-};
-
-let capDeps = null;
-const cap = () => (capDeps ??= Promise.all([import('../claude.js'), import('../repositories/providerCalls.js')])
-  .then(([claude, ledger]) => ({ monthlyBoundFor: claude.monthlyBoundFor, SpendBoundError: claude.SpendBoundError, countThisMonth: ledger.countThisMonth })));
+import { admitPaid } from './paidGate.js';
 import { crowdBand, countBand } from '../domain/scoring.js';
 import { stampPhotos } from './photoLinks.js';
 // Google Places API (New) — the primary licensed source (Technical Constraints §3.1).
@@ -442,25 +410,17 @@ async function call(path, { method = 'POST', body, fieldMask, meter }) {
   // on the meter as `switched_off`, so the ledger shows the request that was
   // not made rather than a log line nobody reads (25 Sep 2026).
   if (sourceOff('google')) { noteFault(meter, 'switched_off'); throw Object.assign(new Error('Google is switched off in Settings › Providers'), { code: 'switched_off' }); }
-  // The household's cap on calls that can cost money, asked here as it is
-  // asked before every Claude call. It counted Google all along and was
-  // never asserted before a Google call — which is how a month's spending
-  // ran to its ceiling with nothing refusing (owner, 25 Sep 2026). A call
-  // on nobody's behalf — no request, no spender — is not capped here; the
-  // collection ceiling holds those.
-  const { householdId } = currentSpender();
-  if (householdId) {
-    const { countThisMonth, monthlyBoundFor, SpendBoundError } = await cap();
-    const [onLedger, bound] = await Promise.all([countThisMonth(householdId), monthlyBoundFor(householdId)]);
-    const made = Math.max(onLedger, admittedFor(householdId));
-    if (made >= bound) { noteFault(meter, 'household_cap'); throw new SpendBoundError('household', bound); }
-    admitted.set(householdId, made + 1);
-  }
+  // Every priced request is attributed or refused, and held to the
+  // household's Google bound (sources/paidGate.js; owner, 26 Sep 2026). The
+  // IDs Only census is free and is the one thing that goes out on nobody's
+  // behalf — it is the only tier that skips the door.
+  const sku = skuFor(fieldMask, path);
+  if (sku !== 'google-essentials') await admitPaid({ meter });
   // One billable request, at the tier the mask puts it in. `google` stays as
   // the count of Google requests however they were priced, because Settings ›
   // Usage and the free-allowance lines are counted in requests.
   bump(meter, 'google');
-  bump(meter, skuFor(fieldMask, path));
+  bump(meter, sku);
 
   const began = Date.now();
   let res;
@@ -1312,6 +1272,10 @@ export async function fetchPhoto(name, maxWidthPx = 480) {
   // 25 Sep 2026). Null is what a miss already means to the screen — the
   // category icon — so nothing else has to change.
   if (!key || sourceOff('google')) return null;
+  // A photograph is a priced request like any other, and the same door holds
+  // it: a household and a signed-in session, or no picture (owner, 26 Sep
+  // 2026). The route enters the context as whoever the link was signed for.
+  await admitPaid();
   const res = await fetch(`${PLACES}/${name}/media?maxWidthPx=${maxWidthPx}&key=${key}`, { redirect: 'follow', signal: AbortSignal.timeout(15_000) });
   if (!res.ok) {
     // Say why. A picture that never arrives used to be an empty green box on

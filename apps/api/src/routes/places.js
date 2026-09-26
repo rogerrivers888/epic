@@ -832,6 +832,8 @@ places.post('/record', async (req, res, next) => {
     if (!ref) return res.status(400).json({ error: 'ref_required' });
     const result = await enrich(ref, {
       householdId: household.id,
+      // Somebody pressed "look again": on demand, so it may pay.
+      paid: true,
       force: req.body?.force !== false,
       ...(typeof req.body?.replace === 'boolean' ? { replace: req.body.replace } : {}),
       seed: req.body?.seed ?? {},

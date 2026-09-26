@@ -30,7 +30,26 @@ const { ratingFor } = await import('../src/sources/rentedRating.js');
 const { reviewsFor } = await import('../src/sources/providerMatch.js');
 const { photosFor } = await import('../src/sources/rentedPhoto.js');
 
-test.after(() => pool.end());
+const { runAsSpender } = await import('../src/context.js');
+
+// Somebody signed in, on a household: since 26 Sep 2026 a paid Google request
+// needs both or it is refused at the door (sources/paidGate.js), so the
+// "switched back on" halves below are made on somebody's behalf.
+const HH = '00000000-0000-4000-8000-0000000a7e02';
+let SESSION = null;
+test.before(async () => {
+  await query(`insert into households (id, name) values ($1, 'Switch household') on conflict (id) do nothing`, [HH]);
+  ({ rows: [{ id: SESSION }] } = await query(
+    `insert into api_sessions (token_hash, label, expires_at) values ('test:switches', 'a phone', now() + interval '1 day')
+     on conflict (token_hash) do update set label = excluded.label returning id`));
+});
+const asSomebody = (fn) => runAsSpender({ householdId: HH, sessionId: SESSION }, fn);
+
+test.after(async () => {
+  await query('delete from provider_calls where household_id = $1', [HH]);
+  await query('delete from households where id = $1', [HH]);
+  await pool.end();
+});
 
 const withKeys = async (env, run) => {
   const was = {};
@@ -72,7 +91,7 @@ test('a photograph does not go out for a switched-off Google either', async () =
     assert.equal(await photoFor(`places/x/photos/off_${Date.now()}`, 200), null);
     assert.equal(left(), 0, 'no request was made for the picture');
     setOffKeys([]);
-    await photoFor(`places/x/photos/on_${Date.now()}`, 200).catch(() => null);
+    await asSomebody(() => photoFor(`places/x/photos/on_${Date.now()}`, 200)).catch(() => null);
     assert.equal(left(), 1, 'switched on, the same picture is fetched');
   });
 });
@@ -122,7 +141,7 @@ test('a rented rating or photo asked for with Google switched off is neither kep
     // Switched back on, it is asked for real rather than answered from a
     // cached nothing.
     setOffKeys([]);
-    await ratingFor(ref, { householdId: null }).catch(() => null);
+    await asSomebody(() => ratingFor(ref, { householdId: HH })).catch(() => null);
     assert.equal(left(), 1, 'not hidden behind a cached empty answer');
   });
 });
@@ -136,7 +155,7 @@ test('reviews asked for with Google switched off are neither billed nor cached a
     const { rows } = await query('select purpose from provider_calls where venue_ref = $1', [ref]);
     assert.equal(rows.length, 0);
     setOffKeys([]);
-    await reviewsFor({ venueRef: ref, name: 'The Bull', lat: 51.5, lng: -0.1 }).catch(() => null);
+    await asSomebody(() => reviewsFor({ venueRef: ref, name: 'The Bull', lat: 51.5, lng: -0.1 })).catch(() => null);
     assert.ok(left() >= 1, 'switched on, asked for real rather than answered from a cached nothing');
   });
 });
@@ -144,7 +163,7 @@ test('reviews asked for with Google switched off are neither billed nor cached a
 test('Google switched on goes out as before', async () => {
   await withKeys({ GOOGLE_MAPS_API_KEY: 'test-key-never-sent' }, async (left) => {
     setOffKeys([]);
-    await googleSource.brief('ChIJ_on', { meter: {} }).catch(() => null);
+    await asSomebody(() => googleSource.brief('ChIJ_on', { meter: {} })).catch(() => null);
     assert.equal(left(), 1);
   });
 });

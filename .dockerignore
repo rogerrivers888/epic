@@ -1,0 +1,19 @@
+# What the production image is built without (owner, 26 Sep 2026: "Scripts in
+# the production container: no exemption. Remove reach-*.mjs from the image.").
+#
+# A script left in /app can be run with `railway ssh … node x.mjs` against the
+# live key, and on 26 Sep one was: a bench spent a display search on nobody's
+# behalf. The scripts and the data they were fitted on stay in git as the
+# record; they are simply not shipped. The paid door refuses them anyway
+# (apps/api/src/sources/paidGate.js) — this is the second lock, not the first.
+#
+# Railway's builder reads this file; `.railwayignore` says the same for
+# `railway up`.
+/*.mjs
+/holdout.json
+/train.json
+/short-hold.json
+/short-train.json
+/Epic docs
+/Supporting docs
+/Claude outputs

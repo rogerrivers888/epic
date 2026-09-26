@@ -22,7 +22,13 @@ const own = await import('../src/sources/own.js');
 
 const HH = '00000000-0000-4000-8000-00000000ca90';
 const HH2 = '00000000-0000-4000-8000-00000000ca91';
+// A sign-in to spend on: since 26 Sep 2026 a paid request with a household and
+// no real session is refused before the cap is read (sources/paidGate.js).
+let SESSION = null;
 test.before(async () => {
+  ({ rows: [{ id: SESSION }] } = await query(
+    `insert into api_sessions (token_hash, label, expires_at) values ('test:household-cap', 'a phone', now() + interval '1 day')
+     on conflict (token_hash) do update set label = excluded.label returning id`));
   await query(`insert into households (id, name) values ($1, 'Capped household') on conflict (id) do nothing`, [HH]);
   // Its lead's cap is one call a month.
   await query(`insert into accounts (household_id, email, role, status, plan, monthly_call_bound) values ($1, 'cap@test', 'owner', 'active', 'family', 1) on conflict do nothing`, [HH]).catch(async () => {
@@ -55,7 +61,7 @@ test('a household at its cap is refused at Google\u2019s door, and the ledger se
   await withGoogle(async (left) => {
     const meter = {};
     await assert.rejects(
-      () => runAsSpender({ householdId: HH }, () => googleSource.brief('ChIJ_capped', { meter })),
+      () => runAsSpender({ householdId: HH, sessionId: SESSION }, () => googleSource.brief('ChIJ_capped', { meter })),
       (e) => e.code === 'spend_bound_reached' && /household/.test(e.message));
     assert.equal(left(), 0, 'nothing went out');
     assert.match(JSON.stringify(healthOf(meter)), /household_cap/);
@@ -64,18 +70,23 @@ test('a household at its cap is refused at Google\u2019s door, and the ledger se
 
 test('the request\u2019s own account is the spender when nothing else says', async () => {
   await withGoogle(async (left) => {
+    // The household comes from the account; with no session beside it the
+    // call is unattributed and refused before the cap is asked (26 Sep 2026).
     await assert.rejects(
       () => runAsAccount({ household_id: HH }, () => googleSource.brief('ChIJ_capped_req', { meter: {} })),
-      (e) => e.code === 'spend_bound_reached');
+      (e) => e.code === 'unattributed_paid_call');
     assert.equal(left(), 0);
     assert.deepEqual(runAsAccount({ household_id: HH }, () => currentSpender()), { householdId: HH, sessionId: null });
   });
 });
 
-test('a call on nobody\u2019s behalf is not capped here', async () => {
+test('a call on nobody\u2019s behalf is refused, not waved through uncapped', async () => {
+  // It used to go out, on the theory that the collection ceiling held those;
+  // $166.78 of them went out this month on no household at all (owner, 26 Sep
+  // 2026). Now the door refuses it (sources/paidGate.js).
   await withGoogle(async (left) => {
-    await googleSource.brief('ChIJ_nobody', { meter: {} }).catch(() => null);
-    assert.equal(left(), 1, 'the collection ceiling holds those, not the household cap');
+    await assert.rejects(() => googleSource.brief('ChIJ_nobody', { meter: {} }), (e) => e.code === 'unattributed_paid_call');
+    assert.equal(left(), 0);
   });
 });
 
@@ -91,7 +102,7 @@ test('a burst inside one operation is counted as it is admitted, not only once t
   // Bound two, nothing on the ledger: the third request in a row is refused
   // before anything has been recorded (Codex, 25 Sep 2026).
   await withGoogle(async (left) => {
-    await runAsSpender({ householdId: HH2 }, async () => {
+    await runAsSpender({ householdId: HH2, sessionId: SESSION }, async () => {
       await googleSource.brief('ChIJ_burst_1', { meter: {} }).catch(() => null);
       await googleSource.brief('ChIJ_burst_2', { meter: {} }).catch(() => null);
       await assert.rejects(() => googleSource.brief('ChIJ_burst_3', { meter: {} }), (e) => e.code === 'spend_bound_reached');
@@ -121,7 +132,7 @@ test('a ledger row that metered three requests counts as three', async () => {
     // The accounts screen draws the same priced figure against the cap, and
     // the free rows beside it (owner, 26 Sep 2026).
     const { monthSplit } = await import('../src/repositories/providerCalls.js');
-    assert.deepEqual(await monthSplit(HH3), { priced: 8, free: 2 }, 'the open-map row and the census slice are the free two');
+    assert.deepEqual(await monthSplit(HH3), { priced: 8, claude: 0, free: 2 }, 'the open-map row and the census slice are the free two');
   } finally {
     await query('delete from provider_calls where household_id = $1', [HH3]);
     await query('delete from households where id = $1', [HH3]);

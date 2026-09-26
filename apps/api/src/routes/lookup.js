@@ -900,7 +900,7 @@ router.post('/curate', requires('manage_library'), async (req, res, next) => {
     if (!item) return res.status(404).json({ error: 'not_found', message: 'That place is not in this search any more — the ring may have moved.' });
 
     await claimPlace(household.id, ref, 'curated', { name: item.name, lat: item.lat, lng: item.lng, website: item.website ?? null, category: item.category });
-    await enrich(ref, { householdId: household.id, seed: { name: item.name, lat: item.lat, lng: item.lng, website: item.website ?? null, category: item.category }, force: true, replace: false });
+    await enrich(ref, { householdId: household.id, seed: { name: item.name, lat: item.lat, lng: item.lng, website: item.website ?? null, category: item.category }, force: true, replace: false, paid: true });
     let record = await recordFor(ref);
     const website = record?.website ?? item.website ?? null;
 

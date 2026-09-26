@@ -11,7 +11,7 @@
 // (Places requests, photos, Routes elements) and Claude is two because the
 // local scout has its own purse.
 
-import { HOUSEHOLD_MONTHLY_CALL_BOUND } from '../claude.js';
+import { HOUSEHOLD_MONTHLY_CALL_BOUND, HOUSEHOLD_MONTHLY_CLAUDE_BOUND } from '../claude.js';
 import { PRICE_PER_UNIT_USD } from '../domain/providerPrices.js';
 import { SCOUT_MONTHLY_RUNS } from './localscout.js';
 import { VOICE_MINUTES_MONTHLY } from './openai.js';
@@ -22,12 +22,12 @@ export const LINES = [
   {
     key: 'claude', label: 'Claude planner', source: 'anthropic', unit: 'call', unitPlural: 'calls',
     what: 'Understands what you said and refines the plan. Billed by tokens at list rates.',
-    // Not a free allowance: Epic's own ceiling, so one household cannot run up
-    // an unbounded bill (§14). It counts every call that could cost something,
-    // whoever it went to — and only those, because the open map and the
-    // encyclopedias cannot bill and a guard they can fill is a guard against
-    // using Epic (owner, 6 Sep 2026).
-    cap: { kind: 'monthly', limit: HOUSEHOLD_MONTHLY_CALL_BOUND, label: 'household cap on calls that can cost money', env: 'EPIC_HOUSEHOLD_MONTHLY_CALL_BOUND', countsEveryBillableCall: true },
+    // Not a free allowance: Epic's own ceiling on Claude, so one household
+    // cannot run up an unbounded bill (§14). Claude's own budget since the
+    // bound was split (owner, 26 Sep 2026); Google's paid requests are the
+    // line below. `limit` here is the estate default — the screen shows the
+    // number the guard enforces for this household (usage.js).
+    cap: { kind: 'monthly', limit: HOUSEHOLD_MONTHLY_CLAUDE_BOUND, label: 'household cap on Claude calls', env: 'EPIC_HOUSEHOLD_MONTHLY_CLAUDE_BOUND', enforced: 'claude' },
     hardStop: 'The workspace spend limit in the Anthropic console is the hard stop.',
     console: ANTHROPIC_CONSOLE,
   },
@@ -37,6 +37,15 @@ export const LINES = [
     cap: { kind: 'monthly', limit: SCOUT_MONTHLY_RUNS, label: 'scout cap on runs', env: 'EPIC_SCOUT_MONTHLY_RUNS' },
     hardStop: 'Pauses at the cap; the Anthropic workspace limit is the hard stop.',
     console: ANTHROPIC_CONSOLE,
+  },
+  {
+    key: 'google-paid', label: 'Google paid requests', source: 'google', unit: 'request', unitPlural: 'requests',
+    what: 'Every Google request that can cost money — Places, photos and Routes elements — against the household\'s cap. The IDs Only census is free and is not counted.',
+    // The number the guard enforces is the account's own where it has one,
+    // else this default (usage.js reads `monthlyBoundFor`, the guard's own).
+    cap: { kind: 'monthly', limit: HOUSEHOLD_MONTHLY_CALL_BOUND, label: 'household cap on Google paid requests', env: 'EPIC_HOUSEHOLD_MONTHLY_CALL_BOUND, or the account\'s own number', enforced: 'google' },
+    hardStop: 'Refused at the cap. The quotas in Google Cloud Console are the hard stop.',
+    console: { label: 'Google Cloud billing', url: 'https://console.cloud.google.com/billing?project=epic-maps-509205' },
   },
   {
     key: 'google', label: 'Google Places', source: 'google', unit: 'request', unitPlural: 'requests',

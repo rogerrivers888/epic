@@ -1,4 +1,6 @@
-import { bump } from './meter.js';
+import { bump, noteFault } from './meter.js';
+import { sourceOff } from './switches.js';
+import { admitPaid } from './paidGate.js';
 import { wallClock, wallToUtc } from '../domain/time.js';
 // Real travel times via the Google Routes API, with the distance-based
 // estimate as the fallback when there is no key (domain/travel.js).
@@ -78,11 +80,27 @@ function pause(path) {
 /** A call that worked means the quota is back: the wait starts from nothing again. */
 const clearPause = (path) => { if (exhausted.has(path)) exhausted.delete(path); };
 
-/** Whether Routes is configured at all. Quota is a separate question: routingPaused(). */
-export const routingEnabled = () => Boolean(KEY());
+/**
+ * Whether Routes may be asked at all: a key, and Google not switched off in
+ * Settings › Providers. Routes is billed to the same Google account and sits
+ * under the same switch (owner, 26 Sep 2026: "Routes gets the same cap and
+ * Settings switch"); every caller already falls back to the distance estimate
+ * when this is false. Quota is a separate question: routingPaused().
+ */
+export const routingEnabled = () => Boolean(KEY()) && !sourceOff('google');
 
-async function post(path, body, fieldMask) {
+/**
+ * `elements` is what Google bills this request for — one a journey, one per
+ * origin × destination pair in a matrix — and what the household's Google
+ * bound is charged. Refused at the same door as Places (sources/paidGate.js):
+ * a household and a signed-in session, or nothing goes out.
+ */
+async function post(path, body, fieldMask, { elements = 1, meter = null } = {}) {
+  if (sourceOff('google')) { noteFault(meter, 'switched_off'); throw Object.assign(new Error('Google is switched off in Settings › Providers'), { code: 'switched_off' }); }
   if (routingPaused(path === ROUTE ? 'route' : 'matrix')) throw new Error('Google Routes has no quota left today — travel times are worked out from the distance until it resets.');
+  await admitPaid({ meter, requests: elements });
+  // On the meter once it is admitted, so a refused request is not counted as one Google billed.
+  bump(meter, 'google-routes', elements);
   const res = await fetch(`${ROUTES}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'X-Goog-Api-Key': KEY(), 'X-Goog-FieldMask': fieldMask },
@@ -113,13 +131,12 @@ const secondsToMinutes = (s) => Math.round(Number(String(s || '0s').replace('s',
  * element, so the caller keeps the two sides small.
  */
 export async function routeMatrixMinutes({ origins, destinations, mode = 'driving', departAt = null, meter = null }) {
-  if (!KEY() || routingPaused('matrix') || !origins.length || !destinations.length) return null;
+  if (!routingEnabled() || routingPaused('matrix') || !origins.length || !destinations.length) return null;
   const out = origins.map(() => new Array(destinations.length).fill(null));
   // The matrix allows up to 625 elements; keep batches small so one failure is cheap.
   const perBatch = Math.max(1, Math.floor(100 / origins.length));
   for (let i = 0; i < destinations.length; i += perBatch) {
     const batch = destinations.slice(i, i + perBatch);
-    bump(meter, 'google-routes', batch.length * origins.length); // billed per origin×destination element
     const body = {
       origins: origins.map((o) => ({ waypoint: wp(o) })),
       destinations: batch.map((d) => ({ waypoint: wp(d) })),
@@ -127,7 +144,8 @@ export async function routeMatrixMinutes({ origins, destinations, mode = 'drivin
       ...(mode === 'driving' ? { routingPreference: 'TRAFFIC_AWARE' } : {}),
       ...(departAt && new Date(departAt) > new Date() ? { departureTime: new Date(departAt).toISOString() } : {}),
     };
-    const rows = await post('/distanceMatrix/v2:computeRouteMatrix', body, 'originIndex,destinationIndex,duration,distanceMeters,condition');
+    // Billed per origin × destination element, and counted as it is admitted.
+    const rows = await post('/distanceMatrix/v2:computeRouteMatrix', body, 'originIndex,destinationIndex,duration,distanceMeters,condition', { elements: batch.length * origins.length, meter });
     for (const r of rows) {
       // A zero index is left out of the JSON, so both must be read as optional:
       // reading destinationIndex as undefined silently dropped every first column.
@@ -145,15 +163,14 @@ export async function travelMatrixMinutes({ origin, destinations, mode = 'drivin
 
 /** One journey: minutes, distance and the encoded polyline (for search-along-route). */
 export async function routeBetween({ from, to, mode = 'driving', departAt = null, meter = null }) {
-  if (!KEY() || routingPaused('route')) return null;
-  bump(meter, 'google-routes');
+  if (!routingEnabled() || routingPaused('route')) return null;
   const body = {
     origin: wp(from), destination: wp(to), travelMode: MODE[mode] || 'DRIVE',
     ...(mode === 'driving' ? { routingPreference: 'TRAFFIC_AWARE' } : {}),
     ...(departAt && new Date(departAt) > new Date() ? { departureTime: new Date(departAt).toISOString() } : {}),
     ...(mode === 'transit' ? { transitPreferences: { routingPreference: 'FEWER_TRANSFERS' } } : {}),
   };
-  const data = await post('/directions/v2:computeRoutes', body, 'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline');
+  const data = await post('/directions/v2:computeRoutes', body, 'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline', { meter });
   const r = data.routes?.[0];
   return r ? { minutes: secondsToMinutes(r.duration), meters: r.distanceMeters ?? null, encodedPolyline: r.polyline?.encodedPolyline ?? null, estimated: false } : null;
 }
@@ -164,7 +181,7 @@ export async function routeBetween({ from, to, mode = 'driving', departAt = null
  * and departure time. Fetched when the drawer opens, never stored.
  */
 export async function directions({ from, to, mode = 'walking', departAt = null }) {
-  if (!KEY() || routingPaused('route')) return null;
+  if (!routingEnabled() || routingPaused('route')) return null;
   const body = {
     origin: wp(from), destination: wp(to), travelMode: MODE[mode] || 'WALK',
     ...(mode === 'driving' ? { routingPreference: 'TRAFFIC_AWARE' } : {}),
