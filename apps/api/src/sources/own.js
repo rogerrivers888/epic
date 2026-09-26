@@ -697,11 +697,14 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
     // category, so a hill in the hills drawer may match the hill's article
     // and a sports centre may not (Codex, 26 Sep 2026).
     const drawer = (await query('select subcategory from place_index where venue_ref = $1', [venueRef]).catch(() => ({ rows: [] }))).rows[0]?.subcategory ?? null;
-    try { enc = await encyclopediaFor({ name: seed.name, lat: osm?.lat ?? seed.lat, lng: osm?.lng ?? seed.lng, locality: seed.locality ?? null, address: seed.address ?? null, category: seed.category ?? null, drawer }); }
-    finally { await logCall(householdId, 'wikipedia', 'own.encyclopedia'); }
-    // Wikidata is a second service and gets its own line, so the usage table
-    // says who was actually asked.
-    if (enc?.wikidataId) await logCall(householdId, 'wikidata', 'own.encyclopedia');
+    const asked = {};
+    try { enc = await encyclopediaFor({ name: seed.name, lat: osm?.lat ?? seed.lat, lng: osm?.lng ?? seed.lng, locality: seed.locality ?? null, address: seed.address ?? null, category: seed.category ?? null, drawer, asked }); }
+    finally {
+      await logCall(householdId, 'wikipedia', 'own.encyclopedia');
+      // Wikidata is a second service and gets its own line, so the usage table
+      // says who was actually asked — refused and failed matches included.
+      if (asked.wikidata) await logCall(householdId, 'wikidata', 'own.encyclopedia');
+    }
     if (enc || replace) await forgetSource(venueRef, ['wikipedia', 'wikidata']);
     if (enc) {
       matched.wikipedia = { title: enc.title, url: enc.url, distanceM: enc.distanceM, confidence: enc.confidence };

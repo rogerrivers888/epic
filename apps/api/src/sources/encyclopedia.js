@@ -167,7 +167,7 @@ async function entity(qid) {
  * there is an article, three when it also has a Wikidata entity; all free, all
  * keepable.
  */
-export async function encyclopediaFor({ name, lat, lng, locality = null, address = null, category = null, drawer = null } = {}) {
+export async function encyclopediaFor({ name, lat, lng, locality = null, address = null, category = null, drawer = null, asked = null } = {}) {
   if (lat == null || lng == null || !String(name || '').trim()) return null;
   const { nameScore, placeWords } = await import('./openMatch.js');
   // The village's name is in half the articles written about the village, so it
@@ -204,6 +204,9 @@ export async function encyclopediaFor({ name, lat, lng, locality = null, address
   // item at all is not taken either (Codex, 26 Sep 2026). Nearly every article
   // has one, so that costs almost nothing.
   if (!page.wikidataId) return null;
+  // Said before the request goes, so a refused or failed match still reaches
+  // the ledger: the caller logs from this, not from a kept match (Codex, 26 Sep 2026).
+  if (asked) asked.wikidata = true;
   try { facts = await entity(page.wikidataId); } catch { return null; }
   // An article about the town, the hill or the borough is not an article
   // about the place, however well the name scores.
