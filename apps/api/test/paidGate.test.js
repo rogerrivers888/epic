@@ -193,3 +193,31 @@ test('a paid request from the drawer upgrades a free job already waiting', () =>
   assert.equal(own.upgradeWaiting(line, 'google:a', { householdId: HH }, SIGNED_IN), false, 'a free ask changes nothing');
   assert.equal(line[0].paid, undefined);
 });
+
+test('a photo that fails after it was admitted is still on the ledger', async () => {
+  // Codex, 26 Sep 2026: the row was written only on success.
+  const wasKey = process.env.GOOGLE_MAPS_API_KEY; const wasFetch = globalThis.fetch;
+  process.env.GOOGLE_MAPS_API_KEY = 'test-key-never-sent';
+  globalThis.fetch = async () => new Response('slow', { status: 504 });
+  try {
+    const before = (await query(`select count(*)::int as n from provider_calls where household_id = $1 and purpose = 'photo'`, [HH])).rows[0].n;
+    await assert.rejects(() => runAsSpender({ householdId: HH, sessionId: SIGNED_IN }, () => fetchPhoto('places/x/photos/fails')));
+    const after = (await query(`select count(*)::int as n from provider_calls where household_id = $1 and purpose = 'photo'`, [HH])).rows[0].n;
+    assert.equal(after, before + 1);
+  } finally {
+    globalThis.fetch = wasFetch;
+    if (wasKey === undefined) delete process.env.GOOGLE_MAPS_API_KEY; else process.env.GOOGLE_MAPS_API_KEY = wasKey;
+  }
+});
+
+test('the Google paid line on Settings is the guard’s own count, for any period and by month', async () => {
+  // Codex, 26 Sep 2026: rows that say only {google: n} were counted by the
+  // guard and left off the screen, and the monthly series had nothing at all.
+  const { usageBetween, usageByMonth } = await import('../src/sources/usage.js');
+  const { countGoogleThisMonth } = await import('../src/repositories/providerCalls.js');
+  await query(`insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd) values ($1, $2, 'google', 'test.generic', '{"google": 3}'::jsonb, 0.096)`, [HH, SIGNED_IN]);
+  const { lines } = await usageBetween(HH, new Date(Date.now() - 86_400_000), new Date(Date.now() + 86_400_000));
+  assert.equal(lines['google-paid'].units, await countGoogleThisMonth(HH));
+  const series = await usageByMonth(HH, 3);
+  assert.equal(series.lines['google-paid'].at(-1).units, await countGoogleThisMonth(HH));
+});

@@ -523,9 +523,8 @@ app.get('/api/photos/google', async (req, res) => {
     const spender = currentSpender().sessionId ? currentSpender() : (spenderForLink(req.query) ?? currentSpender());
     const photo = await runAsSpender(spender, () => photoFor(name, Math.min(1200, Number(req.query.w) || 480)));
     if (!photo) return res.status(404).json({ error: 'no_photo', message: 'The provider has no photo by that name.' });
-    if (!photo.cached) {
-      await providerCalls.record(spender.householdId, 'google-places', 'photo', { 'google-photos': 1 }, spender.sessionId).catch(() => null);
-    }
+    // The ledger row is written by the photo door itself as the request is
+    // admitted (sources/google.js `fetchPhoto`), success or not.
     res.setHeader('content-type', photo.contentType);
     // Ten hours, the owner's decision (4 Sep 2026: "you can persist them for 10
     // hours"), so reopening the app shows the pictures it already had rather

@@ -8,10 +8,6 @@ import { LINES, legacyLines } from './pricing.js';
 import { canBill } from '../constants.js';
 import { monthlyBoundFor, claudeBoundFor } from '../claude.js';
 
-// The meter keys Google bills for, which the Google paid-requests line adds up
-// for a period (the month's figure against the cap is the guard's own count).
-const GOOGLE_PAID_KEYS = new Set(['google-pro', 'google-search', 'google-details', 'google-photos', 'google-routes']);
-
 const EPOCH = new Date(0);
 const FAR = new Date('2100-01-01T00:00:00Z');
 
@@ -32,8 +28,11 @@ export async function usageBetween(householdId, from = EPOCH, to = FAR) {
     if (!lines[r.key]) lines[r.key] = empty();
     lines[r.key].calls += r.calls;
     lines[r.key].units += r.units;
-    if (GOOGLE_PAID_KEYS.has(r.key)) { lines['google-paid'].calls += r.calls; lines['google-paid'].units += r.units; }
   }
+
+  // The Google paid-requests line, by the guard's own arithmetic.
+  const paid = await providerCalls.googlePaidBetween(householdId, from, to);
+  lines['google-paid'] = { ...empty(), calls: paid.calls, units: paid.units };
 
   // Every row for the total, and the unmetered ones (Claude calls, rows from
   // before the units column) placed by provider and purpose with estimated units.
@@ -124,6 +123,11 @@ export async function usageByMonth(householdId, months = 12) {
 
   const metered = await providerCalls.meteredUnitsByMonth(householdId, start);
   for (const r of metered) { if (!labels.includes(r.month)) continue; const b = bucket(r.key)[r.month]; b.calls += r.calls; b.units += r.units; }
+
+  for (const r of await providerCalls.googlePaidByMonth(householdId, start)) {
+    if (!labels.includes(r.month)) continue;
+    const b = bucket('google-paid')[r.month]; b.calls = r.calls; b.units = r.units;
+  }
 
   const rows = await providerCalls.callsByPurposeByMonth(householdId, start);
   for (const r of rows) {

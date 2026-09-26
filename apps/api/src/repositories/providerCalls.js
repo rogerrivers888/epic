@@ -262,6 +262,30 @@ export async function countGoogleThisMonth(householdId) {
   return row.n;
 }
 
+/**
+ * The same count for any window, and by month: what Settings shows on the
+ * Google paid-requests line. The guard's own arithmetic, so the screen cannot
+ * disagree with the refusal (Codex, 26 Sep 2026).
+ */
+export async function googlePaidBetween(householdId, from, to) {
+  const { rows: [row] } = await query(
+    `select count(*) filter (where (${GOOGLE_PAID_IN_ROW}) > 0)::int as calls, coalesce(sum(${GOOGLE_PAID_IN_ROW}), 0)::int as units
+       from provider_calls where household_id = $1 and created_at >= $2 and created_at < $3`,
+    [householdId, from, to],
+  );
+  return row;
+}
+
+export async function googlePaidByMonth(householdId, since) {
+  const { rows } = await query(
+    `select to_char(date_trunc('month', created_at), 'YYYY-MM') as month,
+            count(*) filter (where (${GOOGLE_PAID_IN_ROW}) > 0)::int as calls, coalesce(sum(${GOOGLE_PAID_IN_ROW}), 0)::int as units
+       from provider_calls where household_id = $1 and created_at >= $2 group by 1`,
+    [householdId, since],
+  );
+  return rows;
+}
+
 /** Claude's calls this month — the planner and the local scout — for Claude's own budget. */
 export async function countClaudeThisMonth(householdId) {
   const { rows: [row] } = await query(

@@ -1263,6 +1263,12 @@ export async function benchArea({ center, radiusKm = 2.5, queries = [], pages = 
   };
 }
 
+async function recordPhoto() {
+  const [{ record }, { currentSpender }] = await Promise.all([import('../repositories/providerCalls.js'), import('../context.js')]);
+  const { householdId, sessionId } = currentSpender();
+  await record(householdId, 'google-places', 'photo', { 'google-photos': 1 }, sessionId);
+}
+
 /** Stream a Google photo through the server so the key stays server-side. */
 export async function fetchPhoto(name, maxWidthPx = 480) {
   const key = KEY();
@@ -1276,6 +1282,11 @@ export async function fetchPhoto(name, maxWidthPx = 480) {
   // it: a household and a signed-in session, or no picture (owner, 26 Sep
   // 2026). The route enters the context as whoever the link was signed for.
   await admitPaid();
+  // Written down as it is admitted, like Routes: a picture that times out was
+  // still asked for, and a row only on success let a restart forget it
+  // (Codex, 26 Sep 2026). Not caught — a request that cannot be written down
+  // does not go out.
+  await recordPhoto();
   const res = await fetch(`${PLACES}/${name}/media?maxWidthPx=${maxWidthPx}&key=${key}`, { redirect: 'follow', signal: AbortSignal.timeout(15_000) });
   if (!res.ok) {
     // Say why. A picture that never arrives used to be an empty green box on
