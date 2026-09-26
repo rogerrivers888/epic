@@ -547,6 +547,10 @@ export async function run({ subcategories = null, size = SAMPLE_SIZE, confirm = 
           norm: f.name.toLowerCase(),
           raw: f.name,
           rawForms: [f.name],
+          // Proposed *as* a feature by the model and counted by us: the kind
+          // is known here, and with the quote below it is what makes the word
+          // promotable (C21). A Google-raised word never carries either.
+          kind: 'feature',
           sources: new Set(['features']),
           examples: f.on.slice(0, 5),
           // The quote, and the place it was read from. Owned text, so it may

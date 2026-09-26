@@ -259,17 +259,28 @@ test('a word nobody has classified waits in the holding pen', async () => {
   const opinions = await sets.candidates({ subcategory: 'water-parks', status: 'unresolved', kind: 'opinion' });
   assert.equal(opinions[0].norm, 'rude staff');
 
-  // The classifier calls the two it was given, and they become promotable.
+  // The classifier calls the two it was given features — and neither becomes
+  // promotable, because neither carries a quote (C21, owner 26 Sep 2026: "a
+  // Google-raised word is never promoted on a classifier verdict alone").
   const verdicts = { 'wave machine': 'feature', locker: 'feature' };
   for (const row of pen) await sets.setKind(row.id, { kind: verdicts[row.norm], by: 'test' });
-  const before = await sets.candidates({ subcategory: 'water-parks', status: 'new' });
-  assert.equal(before.length, 2);
-  // Seen-on is what the screen sorts by: a 10% find above a 95% word.
-  assert.equal(before[0].norm, 'wave machine', 'the rarest word comes back first');
-  assert.equal(before[0].discriminates, true);
-  assert.equal(before.find((c) => c.norm === 'locker').discriminates, false, '19 of 20 is the category');
+  assert.equal((await sets.candidates({ subcategory: 'water-parks', status: 'new' })).length, 0, 'a verdict alone promotes nothing');
+  const called = await sets.candidates({ subcategory: 'water-parks', status: 'unresolved', kind: 'feature' });
+  assert.deepEqual(called.map((c) => c.norm).sort(), ['locker', 'wave machine'], 'the verdicts are kept as facts about the words');
 
-  const lockers = before.find((c) => c.norm === 'locker');
+  // The feature harvest then finds one of them in owned text, with a sentence
+  // to show for it: that is what makes it promotable.
+  await sets.recordCandidates('water-parks', [
+    { norm: 'wave machine', raw: 'wave machine', kind: 'feature', sources: ['features'], placesSeen: 2, examples: ['osm:a'], asserts: 2, evidence: 'the wave machine runs on the hour', evidenceRef: 'osm:a' },
+  ], { placesTotal: 20 });
+  const before = await sets.candidates({ subcategory: 'water-parks', status: 'new' });
+  assert.equal(before.length, 1);
+  // Seen-on is what the screen sorts by: a 10% find above a 95% word.
+  assert.equal(before[0].norm, 'wave machine', 'the quoted word is the promotable one');
+  assert.equal(before[0].discriminates, true);
+  assert.equal(called.find((c) => c.norm === 'locker').discriminates, false, '19 of 20 is the category');
+
+  const lockers = called.find((c) => c.norm === 'locker');
   await sets.ignoreCandidate(lockers.id, { actor: 'test' });
   const written = await sets.recordCandidates('water-parks', [
     { norm: 'locker', raw: 'lockers', sources: ['osm'], placesSeen: 19 },
@@ -591,5 +602,48 @@ test('a word the classifier cannot call is not asked again until its count rises
   const third = await harvest.classifyCandidates({ subcategory: sub, limit: 10, ask: async (slice) => slice.map((w) => ({ word: w.norm, kind: 'feature' })) });
   assert.equal(third.looked, 1, 'a raised count earns another look');
   assert.equal(third.features, 1);
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+});
+
+// ---------------------------------------------------------------------------
+// no quote, no promotion
+// ---------------------------------------------------------------------------
+
+test('promotable means harvest-found and quoted; a classifier verdict alone never makes one', async () => {
+  // The owner, 26 Sep 2026 (C21): "A Google-raised word is never promoted on
+  // a classifier verdict alone." Four doors, one rule at each.
+  const harvest = await import('../src/sources/vocabulary.js');
+  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+
+  // 1. Written by a Google run as a feature: in the pen, not promotable.
+  await sets.recordCandidates(sub, [{ norm: 'zz wave machine', raw: 'zz wave machine', placesSeen: 5, sources: ['google'], asserts: 5 }], { placesTotal: 20 });
+  await query("update harvest_candidates set kind = 'feature' where subcategory = $1 and norm = 'zz wave machine'", [sub]);
+  // 2. Found by the feature harvest with a quote: promotable.
+  await sets.recordCandidates(sub, [{ norm: 'zz toddler pool', raw: 'zz toddler pool', kind: 'feature', placesSeen: 3, sources: ['features'], asserts: 3, evidence: 'a heated toddler pool beside the main pool', evidenceRef: 'osm:way/1' }], { placesTotal: 20 });
+  const [g] = await sets.candidates({ subcategory: sub, status: null, sort: 'common', limit: 10 }).then((r) => r.filter((c) => c.norm === 'zz wave machine'));
+  const [f] = await sets.candidates({ subcategory: sub, status: null, sort: 'common', limit: 10 }).then((r) => r.filter((c) => c.norm === 'zz toddler pool'));
+  assert.equal(g.status, 'unresolved', 'a Google feature is not promotable');
+  assert.equal(f.status, 'new', 'a quoted harvest feature is');
+
+  // 3. The classifier calling the Google word a feature changes its kind, not its status.
+  const verdict = await harvest.classifyCandidates({ subcategory: sub, limit: 10, ask: async (slice) => slice.map((w) => ({ word: w.norm, kind: 'feature' })) });
+  assert.ok(verdict.looked >= 0);
+  await query("update harvest_candidates set kind = 'unclear', status = 'unresolved', classified_seen = null where subcategory = $1 and norm = 'zz wave machine'", [sub]);
+  const called = await harvest.classifyCandidates({ subcategory: sub, limit: 10, ask: async (slice) => slice.map((w) => ({ word: w.norm, kind: 'feature' })) });
+  assert.equal(called.features, 1);
+  const { rows: [after] } = await query("select kind, status from harvest_candidates where subcategory = $1 and norm = 'zz wave machine'", [sub]);
+  assert.deepEqual(after, { kind: 'feature', status: 'unresolved' }, 'a verdict is a fact about the word, not a promotion');
+
+  // 4. Promotion refuses an unquoted word at the door, even if its status were forced.
+  await query("update harvest_candidates set status = 'new' where subcategory = $1 and norm = 'zz wave machine'", [sub]);
+  const { rows: [row] } = await query("select id from harvest_candidates where subcategory = $1 and norm = 'zz wave machine'", [sub]);
+  await assert.rejects(() => sets.promote(row.id, { actor: 'test' }), /no evidence quote/);
+
+  // 5. Migration 258's reset, applied to the same shapes.
+  await query("update harvest_candidates set kind = 'feature', status = 'new' where subcategory = $1 and norm = 'zz wave machine'", [sub]);
+  await query(`update harvest_candidates set kind = 'unclear', status = 'unresolved' where status = 'new' and not (sources ? 'features') and subcategory = $1`, [sub]);
+  const { rows: [reset] } = await query("select kind, status from harvest_candidates where subcategory = $1 and norm = 'zz wave machine'", [sub]);
+  assert.deepEqual(reset, { kind: 'unclear', status: 'unresolved' });
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
 });

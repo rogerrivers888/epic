@@ -24,7 +24,7 @@
 
 import { query, withTransaction } from '../db.js';
 import {
-  ageWord, discriminates, gateWord, mayAnswer, normalise, plainKindOf, OWNED_SOURCES,
+  ageWord, discriminates, gateWord, mayAnswer, normalise, plainKindOf, KINDS, OWNED_SOURCES,
 } from '../domain/questions.js';
 import * as attrs from './placeAttributes.js';
 
@@ -265,6 +265,24 @@ export async function removeQuestion(id) {
  */
 export const QUOTABLE_SOURCES = new Set(['features', 'site', 'osm', 'wikipedia', 'wikidata']);
 
+/**
+ * Promotable means harvest-found *and* quoted (C21, owner 26 Sep 2026).
+ *
+ * The sample that settled it: of twenty words the classifier had left
+ * unclear, sixteen were fragments and boilerplate — the material, not the
+ * prompt (C22). The same material had put 8,770 bare n-grams on the
+ * promotable list as "features", against 86 words the feature harvest had
+ * found with a sentence from an owned page to show for each. So a word is
+ * promotable only when it arrived through the feature harvest carrying an
+ * evidence quote; a classifier verdict alone never makes one promotable,
+ * however confident.
+ */
+export const quotedBy = (entry, sources = []) =>
+  Boolean(entry?.evidence) && sources.length > 0 && sources.every((x) => QUOTABLE_SOURCES.has(x));
+
+/** The same rule, in SQL, over a stored row. */
+const PROMOTABLE_SQL = `(kind = 'feature' and evidence is not null and sources ? 'features')`;
+
 export async function recordCandidates(subcategory, entries = [], { placesTotal = 0, client = null } = {}) {
   if (!entries.length) return { written: 0, skipped: 0, held: 0 };
   const run = on(client);
@@ -285,7 +303,11 @@ export async function recordCandidates(subcategory, entries = [], { placesTotal 
     // classifier moves it out — never a guess, and never a human's time spent
     // on "rude staff".
     const plain = plainKindOf(norm);
-    const kind = plain ?? 'unclear';
+    // The feature harvest arrives already knowing what it found — the model
+    // proposed each word *as* a feature and the corpus counted it — so its
+    // kind travels with the entry. Anything else starts from the code's own
+    // pass, and the pen from unclear.
+    const kind = (entry.kind && KINDS.includes(entry.kind)) ? entry.kind : (plain ?? 'unclear');
     if (kind === 'unclear') held += 1;
     rows.push([
       norm,
@@ -300,7 +322,13 @@ export async function recordCandidates(subcategory, entries = [], { placesTotal 
       // on a human. A condition or an opinion is resolved — it is simply not a
       // question — and sits as `unresolved` too rather than cluttering the
       // promotable list, with its kind saying which it is.
-      kind === 'feature' ? 'new' : 'unresolved',
+      //
+      // And a feature is promotable only when it arrives *quoted*: harvest-found,
+      // with an evidence sentence from owned text (C21, owner 26 Sep 2026: "a
+      // Google-raised word is never promoted on a classifier verdict alone").
+      // A feature without a quote is a feature we cannot show anybody a reason
+      // for, and it sits in the pen with its kind on it.
+      kind === 'feature' && quotedBy(entry, sources) ? 'new' : 'unresolved',
       entry.asserts ?? 0,
       entry.denies ?? 0,
       entry.asks ?? 0,
@@ -357,9 +385,15 @@ export async function recordCandidates(subcategory, entries = [], { placesTotal 
          -- The status follows the kind, always. Deriving it only on a *change*
          -- of kind left every row written before there was a kind sitting in
          -- the promotable list unclassified (migration 209).
+         -- And a feature is promotable only once it is quoted by the feature
+         -- harvest (C21): the merged row must carry a quote and the
+         -- 'features' source, whichever run brought which.
          status       = case
-                          when harvest_candidates.kind = 'feature' then harvest_candidates.status
-                          when excluded.kind = 'feature' then 'new'
+                          when harvest_candidates.status = 'new' and harvest_candidates.kind = 'feature' then 'new'
+                          when (case when harvest_candidates.kind = 'unclear' then excluded.kind else harvest_candidates.kind end) = 'feature'
+                               and coalesce(excluded.evidence, harvest_candidates.evidence) is not null
+                               and (harvest_candidates.sources || excluded.sources) ? 'features'
+                            then 'new'
                           else 'unresolved'
                         end,
          last_seen    = now()
@@ -512,8 +546,12 @@ export async function setKind(id, { kind, by = null } = {}) {
   // the count the word was called at, and the pen re-asks a word only once
   // that count has risen (migration 252).
   const { rows } = await query(
+    // A classifier's "feature" makes a word promotable only if the word is
+    // already quoted by the feature harvest (C21). Otherwise the kind is kept
+    // — it is a fact worth having — and the word stays in the pen.
     `update harvest_candidates
-        set kind = $2, status = case when $2 = 'feature' then 'new' else 'unresolved' end,
+        set kind = $2,
+            status = case when $2 = 'feature' and evidence is not null and sources ? 'features' then 'new' else 'unresolved' end,
             classified_at = now(), classified_by = $3, classified_seen = places_seen
       where id = $1 and status in ('new', 'unresolved') returning *`,
     [id, kind, by],
@@ -559,6 +597,12 @@ export async function promote(id, { gate = false, kind = 'yesno', label = null, 
     const { rows } = await client.query("select * from harvest_candidates where id = $1 and status = 'new' for update", [id]);
     const candidate = rows[0];
     if (!candidate) throw bad('That word has already been decided.');
+    // No quote, no promotion (C21). `status = 'new'` should already mean
+    // quoted, but a question asked of thousands of places deserves the check
+    // at the door as well as in the derivation.
+    if (!candidate.evidence || !(candidate.sources ?? {}).features) {
+      throw bad(`"${candidate.norm}" carries no evidence quote from an owned page. A word is promoted on what the feature harvest found and quoted, never on a classifier verdict alone.`);
+    }
     const set = await client.query(
       'select set_key from question_set_subcategories where subcategory_key = $1', [candidate.subcategory],
     );
@@ -606,7 +650,7 @@ export async function promote(id, { gate = false, kind = 'yesno', label = null, 
 export async function ignoreCandidate(id, { actor = null } = {}) {
   const { rows } = await query(
     `update harvest_candidates set status = 'ignored', decided_by = $2, decided_at = now(), examples = '{}', evidence = null, evidence_ref = null
-      where id = $1 and status = 'new' returning *`, [id, actor],
+      where id = $1 and status in ('new', 'unresolved') returning *`, [id, actor],
   );
   if (!rows[0]) throw bad('That word has already been decided.');
   return rows[0];
@@ -615,7 +659,11 @@ export async function ignoreCandidate(id, { actor = null } = {}) {
 /** Put an ignored word back in the queue — the way back the design brief asks for. */
 export async function unignore(id) {
   const { rows } = await query(
-    `update harvest_candidates set status = 'new', decided_by = null, decided_at = null
+    // Back to the queue only if it belongs there (C21): an ignored word that
+    // was never quoted comes back to the pen, not to the promotable list.
+    `update harvest_candidates
+        set status = case when ${PROMOTABLE_SQL} then 'new' else 'unresolved' end,
+            decided_by = null, decided_at = null
       where id = $1 and status = 'ignored' returning *`, [id],
   );
   return rows[0] ?? null;
