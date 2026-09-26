@@ -492,13 +492,17 @@ test('a quote is kept from an owned source and dropped from a rented one', async
   const again = (await sets.candidates({ subcategory: 'quoted-drawer', status: null, limit: 10 })).find((c) => c.norm === 'trig point');
   assert.equal(again.evidence, 'A trig point marks the summit');
 
-  // Decided, the quote has done its job and goes with the examples. (A word
-  // is only ignorable once something has called it a feature.)
+  // Decided, the examples go with the decision — and the quote stays. It is
+  // owned text, and under C21 (no quote, no promotion) it is the only thing
+  // that can make a restored word promotable again; clearing it here left an
+  // ignored-then-restored word an unresolved feature nothing could ever pick
+  // up (Codex, 26 Sep 2026).
   await sets.setKind(again.id, { kind: 'feature', by: 'test' });
   await sets.ignoreCandidate(again.id, { actor: 'test' });
   const [gone] = await sets.candidates({ subcategory: 'quoted-drawer', status: 'ignored', limit: 10 });
-  assert.equal(gone.evidence, null);
-  assert.equal(gone.evidence_ref, null);
+  assert.deepEqual(gone.examples, []);
+  assert.equal(gone.evidence, 'A trig point marks the summit');
+  assert.equal(gone.evidence_ref, 'atlas:1');
 });
 
 test('the pen can be read from its common end, above a sightings floor', async () => {
@@ -645,5 +649,23 @@ test('promotable means harvest-found and quoted; a classifier verdict alone neve
   await query(`update harvest_candidates set kind = 'unclear', status = 'unresolved' where status = 'new' and not (sources ? 'features') and subcategory = $1`, [sub]);
   const { rows: [reset] } = await query("select kind, status from harvest_candidates where subcategory = $1 and norm = 'zz wave machine'", [sub]);
   assert.deepEqual(reset, { kind: 'unclear', status: 'unresolved' });
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+});
+
+test('an ignored word keeps its quote, so the way back leads somewhere', async () => {
+  // Codex, 26 Sep 2026: ignoring cleared the evidence, so under C21 a restored
+  // word could never be promotable again — an unresolved feature nothing
+  // would ever pick up. The examples are scaffolding and go; the quote is
+  // owned text and stays.
+  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+  await sets.recordCandidates(sub, [{ norm: 'zz lazy river', raw: 'zz lazy river', kind: 'feature', sources: ['features'], placesSeen: 4, examples: ['osm:b'], asserts: 4, evidence: 'a lazy river winds round the outdoor pool', evidenceRef: 'osm:b' }], { placesTotal: 20 });
+  const [row] = (await sets.candidates({ subcategory: sub, status: 'new', limit: 50 })).filter((c) => c.norm === 'zz lazy river');
+  assert.equal(row.status, 'new');
+  const ignored = await sets.ignoreCandidate(row.id, { actor: 'test' });
+  assert.deepEqual(ignored.examples, [], 'the scaffolding goes with the decision');
+  assert.ok(ignored.evidence, 'the quote does not');
+  const back = await sets.unignore(row.id);
+  assert.equal(back.status, 'new', 'restored, and promotable again because it is still quoted');
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
 });

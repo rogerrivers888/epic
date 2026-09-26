@@ -649,7 +649,12 @@ export async function promote(id, { gate = false, kind = 'yesno', label = null, 
 /** Never ask about this word here again. The examples go with the decision. */
 export async function ignoreCandidate(id, { actor = null } = {}) {
   const { rows } = await query(
-    `update harvest_candidates set status = 'ignored', decided_by = $2, decided_at = now(), examples = '{}', evidence = null, evidence_ref = null
+    // The examples go — they are the word-to-place scaffolding the brief says
+    // to drop on a decision. The quote stays: it is owned text, and under C21
+    // it is the only thing that can make a restored word promotable again.
+    // Clearing it here left an ignored-then-restored word an unresolved
+    // feature nothing could ever pick up (Codex, 26 Sep 2026).
+    `update harvest_candidates set status = 'ignored', decided_by = $2, decided_at = now(), examples = '{}'
       where id = $1 and status in ('new', 'unresolved') returning *`, [id, actor],
   );
   if (!rows[0]) throw bad('That word has already been decided.');
