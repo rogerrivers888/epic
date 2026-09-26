@@ -91,7 +91,7 @@ test('nothing but an api session can be written, and a plan session is recorded 
   assert.equal(row.plan_session_id, plan.id, 'and the plan in its own column, which the receipt and the bound read (migration 261)');
   assert.deepEqual(await planSessions.callsOfSession(plan.id).then((r) => r.map((c) => c.purpose)), ['test.ledger.plan']);
   const counted = await providerCalls.countForSession(plan.id);
-  assert.ok(Object.values(counted).some((n) => n >= 1), `the per-plan bound counts it (${JSON.stringify(counted)})`);
+  assert.ok(Number(counted) >= 1, `the per-plan bound counts it (${JSON.stringify(counted)})`);
 });
 
 test('a deleted session leaves its spend on the ledger, on a session named for it', async (t) => {
