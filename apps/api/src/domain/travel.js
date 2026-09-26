@@ -180,6 +180,36 @@ export function detourMinutes({ origin, destination, venue, mode }) {
   return Math.max(0, viaVenue - direct - profile.fixedOverheadMinutes);
 }
 
+/**
+ * How far, in a straight line, the fence itself reaches in this many minutes.
+ *
+ * `reachRadiusKm` below works from the town speed alone, and the fence does
+ * not: at an hour by car the fence accepts places at 51km while that radius
+ * asked providers for 22, so everything between could never be fetched to be
+ * fenced — 58% of what is inside an hour of Ascot, 94% of Winchester's
+ * (measured 26 Sep 2026). This walks the same estimate the fence uses, so a
+ * search sized by it can find anything the fence would keep, up to `capKm`
+ * (Google's Nearby Search answers no wider than fifty).
+ *
+ * Deliberately a second function rather than a change to `reachRadiusKm`,
+ * which also sizes the trip corridor from its detour budget: widening that
+ * would widen every corridor by a third as a side effect.
+ */
+export function searchRadiusKm(mode, minutes, { capKm = 50 } = {}) {
+  const m = travelMode(mode);
+  const at = { lat: 51.4, lng: -0.6 };
+  const there = (km) => ({ lat: at.lat + km / 111.32, lng: at.lng });
+  if (estimateTravelMinutes(at, there(capKm), m) <= minutes) return capKm;
+  let lo = 0;
+  let hi = capKm;
+  for (let i = 0; i < 30; i += 1) {
+    const mid = (lo + hi) / 2;
+    if (estimateTravelMinutes(at, there(mid), m) <= minutes) lo = mid; else hi = mid;
+  }
+  // Rounded up: this bounds a search, and a bound a little short loses the edge.
+  return Math.max(0.5, Math.ceil(lo * 10) / 10);
+}
+
 /** How far, in km, the mode plausibly reaches in the given minutes — for bounding a source query. */
 export function reachRadiusKm(mode, minutes) {
   const profile = MODE_PROFILE[mode] || MODE_PROFILE.driving;
