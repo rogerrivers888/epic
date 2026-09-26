@@ -215,4 +215,12 @@ test('the facts behind a disagreement can be read, field by field and source by 
   const five = out.find((p) => p.venue_ref === 'google:ChIJ_ref_005');
   assert.ok(five, 'place 5 is known by two names');
   assert.deepEqual(five.fields.name, { osm: 'The Old Bull', wikipedia: 'Bull Inn, Dense Town' });
+  // The same list in a different order is not a disagreement (Codex, 26 Sep 2026).
+  for (const [source, value] of [['osm', ['italian', 'pizza']], ['site', ['pizza', 'italian']]]) {
+    await query(`insert into place_facts (venue_ref, field, source, value, licence, retention, confidence, expires_at) values ('google:ChIJ_ref_006', 'cuisines', $1, $2, 'x', 'indefinite', 1, null) on conflict do nothing`, [source, JSON.stringify(value)]);
+  }
+  const again = await ref.disagreements(row.id, { limit: 200 });
+  assert.equal(again.find((p) => p.venue_ref === 'google:ChIJ_ref_006'), undefined, 'order alone is no difference');
+  const held = await ref.held(row.id);
+  assert.equal(held.find((p) => p.venue_ref === 'google:ChIJ_ref_006').disagreements, 0);
 });

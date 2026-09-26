@@ -183,14 +183,23 @@ export function hoursSaid(raw) {
   if (/24\/7/.test(lower)) return 'Open all day, every day.';
   const days = new Set();
   const allDays = Object.keys(DAYS);
-  for (const m of lower.matchAll(/\b(mo|tu|we|th|fr|sa|su)\b(?:\s*-\s*(mo|tu|we|th|fr|sa|su)\b)?/g)) {
-    const from = allDays.indexOf(m[1]);
-    const to = m[2] ? allDays.indexOf(m[2]) : from;
-    if (from < 0) continue;
-    for (let i = from; i <= (to < from ? to + 7 : to); i += 1) days.add(allDays[i % 7]);
+  // Rule by rule, because "Mo-Fr 09:00-17:00; Sa-Su off" names every day and
+  // is open on five of them: a day range followed by `off` is a closure, and
+  // reading it as opening said "open every day" of a place shut at weekends
+  // (Codex, 26 Sep 2026).
+  for (const rule of lower.split(/\s*;\s*/)) {
+    if (/\boff\b|\bclosed\b/.test(rule)) continue;
+    for (const m of rule.matchAll(/\b(mo|tu|we|th|fr|sa|su)\b(?:\s*-\s*(mo|tu|we|th|fr|sa|su)\b)?/g)) {
+      const from = allDays.indexOf(m[1]);
+      const to = m[2] ? allDays.indexOf(m[2]) : from;
+      if (from < 0) continue;
+      for (let i = from; i <= (to < from ? to + 7 : to); i += 1) days.add(allDays[i % 7]);
+    }
   }
   const closes = [...lower.matchAll(/-\s*(\d{1,2}):(\d{2})/g)].map((m) => Number(m[1]) + Number(m[2]) / 60);
-  const late = closes.some((h) => h >= 22 || (h > 0 && h < 6));
+  // Closing at or after ten, or after midnight — and midnight itself, which
+  // parses as nought (Codex, 26 Sep 2026).
+  const late = closes.some((h) => h >= 22 || h < 6);
   const parts = [];
   if (days.size === 7) parts.push('Open every day');
   else if (days.size) parts.push(`Open on ${[...days].map((d) => DAYS[d]).join(', ')}`);

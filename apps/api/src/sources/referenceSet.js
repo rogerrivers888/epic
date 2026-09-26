@@ -27,6 +27,11 @@ import * as sweep from './researchSweep.js';
 
 export const PER_CATEGORY = 20;
 
+/** A fact's value as text, with a list sorted so that order alone is not a difference. */
+const SAME_VALUE = `case when jsonb_typeof(f.value) = 'array'
+    then (select coalesce(jsonb_agg(e order by e::text), '[]'::jsonb) from jsonb_array_elements(f.value) e)::text
+    else f.value::text end`;
+
 /**
  * The buckets, how many each takes, and the order they are filled in.
  *
@@ -268,8 +273,8 @@ export async function held(id) {
             (select count(*) from place_facts f where f.venue_ref = p.venue_ref and f.expires_at is null)::int as facts,
             (select count(distinct source) from place_facts f where f.venue_ref = p.venue_ref and f.expires_at is null)::int as sources,
             (select count(*) from (
-               select field from place_facts f where f.venue_ref = p.venue_ref and f.expires_at is null and f.field in ('name','website','phone','postcode','opening_hours')
-               group by field having count(distinct value::text) > 1) x)::int as disagreements
+               select field from place_facts f where f.venue_ref = p.venue_ref and f.expires_at is null
+               group by field having count(distinct source) > 1 and count(distinct ${SAME_VALUE}) > 1) x)::int as disagreements
        from research_sweep_places p
        left join place_records r on r.venue_ref = p.venue_ref
       where p.sweep_id = $1
@@ -299,7 +304,10 @@ export async function disagreements(id, { limit = 20 } = {}) {
          from place_facts f join mine m on m.venue_ref = f.venue_ref
         where f.expires_at is null
         group by f.venue_ref, f.field
-       having count(distinct f.source) > 1 and count(distinct f.value::text) > 1
+       -- A list is the same list in any order: two sources agreeing on
+       -- "italian, pizza" and "pizza, italian" are not disagreeing
+       -- (Codex, 26 Sep 2026).
+       having count(distinct f.source) > 1 and count(distinct ${SAME_VALUE}) > 1
      )
      select m.venue_ref, m.subcategory, m.picked_for, m.name, m.matched,
             jsonb_object_agg(d.field, d.values) as fields

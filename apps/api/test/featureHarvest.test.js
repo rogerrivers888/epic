@@ -304,6 +304,9 @@ test('opening hours are read for what they say, not fed as syntax', () => {
   assert.equal(hoursSaid('Sa-Su 10:00-16:00'), 'Open on Saturday, Sunday.');
   assert.equal(hoursSaid('Fr-Sa 18:00-01:00'), 'Open on Friday, Saturday, open late.');
   assert.equal(hoursSaid('24/7'), 'Open all day, every day.');
+  // A closure names days without opening them, and midnight is late (Codex, 26 Sep 2026).
+  assert.equal(hoursSaid('Mo-Fr 09:00-17:00; Sa-Su off'), 'Open on Monday, Tuesday, Wednesday, Thursday, Friday.');
+  assert.equal(hoursSaid('Mo-Su 11:00-00:00'), 'Open every day, open late.');
   assert.equal(hoursSaid(''), '');
   // And through `textOf`, the syntax is gone and the words are there.
   const { text } = textOf({ name: 'A', postcode: 'RG1', summary: 'A cafe by the river with a terrace and a wood-fired oven.', accessibility: {}, experiences: [], opening_hours: 'Mo-Su 08:00-22:30', cuisines: ['pizza'] });
