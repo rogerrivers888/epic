@@ -927,5 +927,11 @@ test('Codex on C27: a word already filed is not aliased over its filing', async 
 test('Codex on C27: a fact asked everywhere is not added to a set as well', async () => {
   await query("insert into question_sets (key, name) values ('zz-set2', 'Zz') on conflict do nothing");
   await assert.rejects(() => sets.addQuestion({ attributeKey: 'parking', setKey: 'zz-set2', scope: 'set' }), /asked everywhere already/);
+  // And the other way round: a label a set asks is not made global through the plain door either.
+  await query("insert into place_attributes (key, label, kind, position) values ('zz-local', 'Zz local', 'yesno', 200) on conflict do nothing");
+  await sets.addQuestion({ attributeKey: 'zz-local', setKey: 'zz-set2', scope: 'set' });
+  await assert.rejects(() => sets.addQuestion({ attributeKey: 'zz-local', scope: 'global' }), /already asked by zz-set2/);
+  await query("delete from questions where attribute_key = 'zz-local'");
+  await query("delete from place_attributes where key = 'zz-local'");
   await query("delete from question_sets where key = 'zz-set2'");
 });

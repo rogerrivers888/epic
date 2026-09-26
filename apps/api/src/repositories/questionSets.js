@@ -186,6 +186,9 @@ export async function addQuestion({ attributeKey, setKey = null, scope = 'set', 
   if (scope === 'set') {
     const { rows: g } = await run("select 1 from questions where attribute_key = $1 and scope = 'global'", [attributeKey]);
     if (g.length) throw bad(`${attributeKey} is asked everywhere already, so no set asks it as well.`);
+  } else {
+    const { rows: l } = await run("select set_key from questions where attribute_key = $1 and scope = 'set'", [attributeKey]);
+    if (l.length) throw bad(`${attributeKey} is already asked by ${l.map((r) => r.set_key).join(', ')}. Making it global is a separate decision — the answers it holds have to move with it.`);
   }
   const { rows } = await run(
     `insert into questions (attribute_key, scope, set_key, gate, refresh_days, position, from_candidate)
