@@ -101,6 +101,11 @@ async function post(path, body, fieldMask, { elements = 1, meter = null } = {}) 
   await admitPaid({ meter, requests: elements });
   // On the meter once it is admitted, so a refused request is not counted as one Google billed.
   bump(meter, 'google-routes', elements);
+  // A caller with no meter writes no ledger row, and a request admitted into
+  // this process's count alone is forgotten at the next deploy — the bound
+  // would then let the month run past it (Codex, 26 Sep 2026). So the door
+  // writes that row itself, against whoever it admitted.
+  if (!meter) await recordUnmetered(elements);
   const res = await fetch(`${ROUTES}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'X-Goog-Api-Key': KEY(), 'X-Goog-FieldMask': fieldMask },
@@ -120,6 +125,12 @@ async function post(path, body, fieldMask, { elements = 1, meter = null } = {}) 
   if (Array.isArray(data) && data.some((r) => r?.error) && isExhausted(null, JSON.stringify(data).slice(0, 4000))) throw pause(path);
   clearPause(path);
   return data;
+}
+
+async function recordUnmetered(elements) {
+  const [{ record }, { currentSpender }] = await Promise.all([import('../repositories/providerCalls.js'), import('../context.js')]);
+  const { householdId, sessionId } = currentSpender();
+  await record(householdId, 'google-routes', 'routes.unmetered', { 'google-routes': elements }, sessionId).catch(() => null);
 }
 
 const wp = (p) => ({ location: { latLng: { latitude: p.lat, longitude: p.lng } } });
@@ -180,7 +191,7 @@ export async function routeBetween({ from, to, mode = 'driving', departAt = null
  * walking turns, driving, or public transport with the line, headsign, stops
  * and departure time. Fetched when the drawer opens, never stored.
  */
-export async function directions({ from, to, mode = 'walking', departAt = null }) {
+export async function directions({ from, to, mode = 'walking', departAt = null, meter = null }) {
   if (!routingEnabled() || routingPaused('route')) return null;
   const body = {
     origin: wp(from), destination: wp(to), travelMode: MODE[mode] || 'WALK',
@@ -194,7 +205,7 @@ export async function directions({ from, to, mode = 'walking', departAt = null }
     'routes.legs.steps.transitDetails.stopDetails', 'routes.legs.steps.transitDetails.localizedValues', 'routes.legs.steps.transitDetails.headsign',
     'routes.legs.steps.transitDetails.transitLine', 'routes.legs.steps.transitDetails.stopCount',
   ].join(',');
-  const data = await post('/directions/v2:computeRoutes', body, mask);
+  const data = await post('/directions/v2:computeRoutes', body, mask, { meter });
   const r = data.routes?.[0];
   if (!r) return null;
   const steps = (r.legs || []).flatMap((leg) => leg.steps || []).map((s) => {

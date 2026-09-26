@@ -81,7 +81,10 @@ export async function monthlyBoundFor(householdId) {
 
 /** Claude's own ceiling for this household: the estate's Claude budget, never above the account's number. */
 export async function claudeBoundFor(householdId) {
-  return Math.min(await monthlyBoundFor(householdId), HOUSEHOLD_MONTHLY_CLAUDE_BOUND);
+  // The account's own number only where somebody set one: the Google default
+  // is not a ceiling on Claude (Codex, 26 Sep 2026).
+  const own = await callBoundFor(householdId).catch(() => null);
+  return own != null ? Math.min(own, HOUSEHOLD_MONTHLY_CLAUDE_BOUND) : HOUSEHOLD_MONTHLY_CLAUDE_BOUND;
 }
 
 export async function assertWithinBounds({ householdId, sessionId }) {

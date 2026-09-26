@@ -147,3 +147,26 @@ test('Settings shows the bound the guard enforces, not the estate default', asyn
   assert.equal(allowances['google-paid'].limit, 1234, 'the account’s own number');
   assert.ok(allowances.claude.limit <= 1234, 'Claude’s budget never above the account’s number');
 });
+
+test('Claude’s budget is its own default where no account has set a number', async () => {
+  // Codex, 26 Sep 2026: the Google default is not a ceiling on Claude.
+  const { claudeBoundFor, HOUSEHOLD_MONTHLY_CLAUDE_BOUND } = await import('../src/claude.js');
+  const bare = '00000000-0000-4000-8000-0000000a7e03';
+  await query(`insert into households (id, name) values ($1, 'No account') on conflict (id) do nothing`, [bare]);
+  try {
+    assert.equal(await claudeBoundFor(bare), HOUSEHOLD_MONTHLY_CLAUDE_BOUND);
+    assert.equal(await claudeBoundFor(HH), Math.min(1234, HOUSEHOLD_MONTHLY_CLAUDE_BOUND));
+  } finally { await query('delete from households where id = $1', [bare]); }
+});
+
+test('a Routes request with no meter still reaches the ledger, so a restart cannot forget it', async () => {
+  const { directions } = await import('../src/sources/routing.js');
+  await withGoogle(async (out) => {
+    await runAsSpender({ householdId: HH, sessionId: SIGNED_IN }, () => directions({ from: { lat: 51.4, lng: -0.6 }, to: { lat: 51.5, lng: -0.1 } }));
+    assert.equal(out(), 1);
+    const { rows: [row] } = await query(
+      `select units, session_id from provider_calls where household_id = $1 and purpose = 'routes.unmetered' order by created_at desc limit 1`, [HH]);
+    assert.deepEqual(row?.units, { 'google-routes': 1 });
+    assert.equal(row.session_id, SIGNED_IN);
+  });
+});
