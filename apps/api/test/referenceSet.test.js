@@ -248,6 +248,8 @@ test('the facts behind a disagreement can be read, field by field and source by 
   // the same site (owner, 26 Sep 2026); a different host is not.
   await put('phone', 'wikidata', '020 7091 3067');
   await put('website', 'fsa', 'https://www.birdworld.co.uk/visit/today');
+  // A root with a tracking query or a fragment is the same host (Codex, 26 Sep 2026).
+  await put('website', 'wikipedia', 'https://birdworld.co.uk?utm_source=x#top');
   assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === seven).disagreements, 0);
   await put('website', 'nominatim', 'https://www.everyoneactive.com/centre/x');
   assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === seven).disagreements, 1, 'another operator\u2019s site is a disagreement');

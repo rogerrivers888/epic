@@ -53,8 +53,9 @@ const SAME_VALUE = `case
       then (select coalesce(jsonb_agg(e order by e::text), '[]'::jsonb) from jsonb_array_elements(f.value) e)::text
     when f.field = 'website'
       -- The host alone: a visit page against a root is not a disagreement
-      -- (owner, 26 Sep 2026); a different host is.
-      then split_part(regexp_replace(lower(f.value #>> '{}'), '^https?://(www\\.)?', ''), '/', 1)
+      -- (owner, 26 Sep 2026); a different host is. A query, a fragment or a
+      -- port on a root is still the same host (Codex, 26 Sep 2026).
+      then substring(regexp_replace(lower(btrim(f.value #>> '{}')), '^https?://(www\\.)?', '') from '^[^/?#:]+')
     when f.field = 'phone'
       -- "+44 (0)20…", "+44 20…" and "020…" are one number (Codex, 26 Sep 2026).
       then regexp_replace(regexp_replace(f.value #>> '{}', '[^0-9]', '', 'g'), '^(440?|0)', '')
