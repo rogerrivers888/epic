@@ -818,6 +818,7 @@ test('a word that means a global question becomes its alias, never a second ques
   const row = await sets.aliasToGlobal(w.id, { attributeKey: 'parking', actor: 'test' });
   assert.equal(row.status, 'promoted');
   assert.match(row.decision_reason, /alias of the global parking/);
+  assert.equal(row.evidence, null, 'the quote is scaffolding and goes with the decision');
   assert.equal((await sets.resolveAttribute('zz car park'))?.key, 'parking', 'the resolver now meets the wording and answers parking');
   assert.equal((await query("select count(*)::int as n from questions where attribute_key = 'parking'")).rows[0].n, before, 'no second parking question');
   await assert.rejects(() => sets.aliasToGlobal(w.id, { attributeKey: 'parking' }), /already been decided/);

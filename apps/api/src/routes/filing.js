@@ -1539,7 +1539,7 @@ filingRoutes.get('/decisions', requires('view_library'), async (req, res, next) 
     const want = String(req.query.decision ?? '').trim();
     const inSet = String(req.query.set ?? '').trim();
     const [{ rows }, sets, d] = await Promise.all([
-      query(`select id, norm, raw_forms, subcategory, status, decided_by, decided_at, question_id
+      query(`select id, norm, raw_forms, subcategory, status, decided_by, decided_at, question_id, decision_reason
                from harvest_candidates
               where decided_at is not null
               order by decided_at desc limit 500`),
@@ -1566,6 +1566,8 @@ filingRoutes.get('/decisions', requires('view_library'), async (req, res, next) 
         said: spec.decision === 'merged' && drawer ? `merged into ${drawer.label}` : spec.word,
         at: r.decided_at,
         by: r.decided_by ?? null,
+        // Why, in the owner's words, where one was given (migration 265, C27).
+        why: r.decision_reason ?? null,
       };
     });
 
@@ -1618,6 +1620,7 @@ filingRoutes.get('/decisions/:word/trail', requires('view_library'), async (req,
       steps.push({
         when: when(c.decided_at),
         what: c.decided_by ? `${spec.word} by ${c.decided_by}` : spec.word,
+        ...(c.decision_reason ? { why: c.decision_reason } : {}),
       });
     }
     if (c.question_id) {

@@ -728,8 +728,10 @@ export async function aliasToGlobal(id, { attributeKey, actor = null } = {}) {
       [c.norm, attributeKey, c.raw_forms?.[0] ?? null],
     );
     const { rows: [row] } = await client.query(
+      // Evidence is review scaffolding and goes with the decision, as it does
+      // in promote() (migration 247; Codex, 26 Sep 2026).
       `update harvest_candidates set status = 'promoted', question_id = $2, decided_by = $3, decided_at = now(), examples = '{}',
-              decision_reason = $4
+              evidence = null, evidence_ref = null, decision_reason = $4
         where id = $1 returning *`,
       [id, q.id, actor, `alias of the global ${attributeKey} (C18)`],
     );
@@ -776,7 +778,7 @@ export async function globalFromCandidate(id, { label = null, kind = 'yesno', re
     }
     await client.query(
       `update harvest_candidates set status = 'promoted', question_id = $2, decided_by = $3, decided_at = now(), examples = '{}',
-              decision_reason = 'a global fact (C20)'
+              evidence = null, evidence_ref = null, decision_reason = 'a global fact (C20)'
         where id = $1`, [id, question?.id ?? null, actor],
     );
     attrs.forget();
