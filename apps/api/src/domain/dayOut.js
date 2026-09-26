@@ -105,14 +105,63 @@ export const DRAWERS = Object.keys(NAMED_FOR);
  * pool object 40 m away" rather than "kept". `can't speak` is a real state:
  * a drawer this test does not know is `null`, not `out`.
  */
+/**
+ * Members-only fails the day-out test, whatever the facilities (owner,
+ * 26 Sep 2026: "David Lloyd ×2 in Pools and racquet-clubs. Out").
+ *
+ * Read from the tags where the map says so (`access=private|members`,
+ * `membership=required|yes`), from owned text, and from the brand: the map
+ * carries no access tag on a David Lloyd — only `brand=David Lloyd Clubs` —
+ * so the chains whose business is a membership are named here. `club=sport`
+ * is not on the list on purpose: Absolutely Karting carries it and sells a
+ * session to anybody.
+ */
+export const MEMBERS_ONLY_BRANDS = ['david lloyd', 'nuffield health', 'virgin active', 'bannatyne'];
+const MEMBERS_TEXT = /\bmembers[’']?\s*only\b|\bmembership (is )?required\b|\bmembers[’']? club\b|\bprivate members\b/i;
+
+export function membersOnly({ tags = null, text = '', name = '' } = {}) {
+  const t = tags ?? {};
+  if (has(t, 'access', 'private', 'members', 'membership')) return 'access=private';
+  if (has(t, 'membership', 'required', 'yes', 'only')) return 'membership required';
+  const brand = String(t.brand ?? t.operator ?? name ?? '').toLowerCase();
+  const chain = MEMBERS_ONLY_BRANDS.find((b) => brand.includes(b));
+  if (chain) return `a members-only chain (${t.brand ?? t.operator ?? name})`;
+  if (text && MEMBERS_TEXT.test(String(text))) return 'its own page says members only';
+  return null;
+}
+
+/**
+ * Whether an adjacent object may speak for this place.
+ *
+ * Adjacency proves a pool for the sports centre only (owner, 26 Sep 2026):
+ * Hengrove's climbing wall, sixty-three metres from the pool, was being kept
+ * in Pools. A candidate whose own tags say it is something else — `sport=
+ * climbing` — cannot borrow a neighbour's pool; a centre with no sport tag,
+ * or one that names the drawer's own sport, can.
+ */
+const OWN_SPORT = {
+  pools: ['swimming', 'multi'], lidos: ['swimming', 'multi'], athletics: ['athletics', 'running', 'multi'],
+  climbing: ['climbing', 'bouldering', 'multi'], 'racquet-clubs': ['tennis', 'squash', 'badminton', 'padel', 'racquet', 'multi'],
+};
+export function mayBorrowAdjacent(drawer, tags = null) {
+  const sport = tags?.sport;
+  if (sport == null || sport === '') return true;
+  return String(sport).split(';').some((s) => OWN_SPORT[drawer]?.includes(s.trim()));
+}
+
 export function dayOutVerdict(drawer, { tags = null, nearby = [], text = '', name = '' } = {}) {
   const spec = NAMED_FOR[drawer];
   if (!spec) return null;
+  const members = membersOnly({ tags, text, name });
+  if (members) return { verdict: OUT, by: 'members', reason: `members only — ${members}` };
   if (tags && spec.tag(tags)) return { verdict: KEPT, by: 'tag', reason: `its own tags say it has ${spec.thing}` };
-  const near = (nearby ?? []).find((n) => spec.object(n?.tags ?? n));
+  const near = mayBorrowAdjacent(drawer, tags) ? (nearby ?? []).find((n) => spec.object(n?.tags ?? n)) : null;
   if (near) return { verdict: KEPT, by: 'object', reason: `${spec.thing} is mapped within ${ADJACENT_M} m`, object: near?.name ?? near?.tags?.name ?? null };
   if (text && spec.text.test(String(text))) return { verdict: KEPT, by: 'text', reason: `its own page or the encyclopedia says it has ${spec.thing}` };
-  if (name && spec.name.test(String(name))) {
+  // The name is borrowed evidence as an adjacent object is: a candidate whose
+  // own tags say it is something else — "…Leisure Centre Climbing Wall",
+  // sport=climbing — is what its tags say, not what its name borrows.
+  if (name && mayBorrowAdjacent(drawer, tags) && spec.name.test(String(name))) {
     return { verdict: PROVISIONAL, by: 'name', reason: `only the name says so — kept until its page is read` };
   }
   return { verdict: OUT, by: null, reason: `nothing says it has ${spec.thing}: not in this drawer` };

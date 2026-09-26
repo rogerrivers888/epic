@@ -114,15 +114,84 @@ function queryFor(drawer, box) {
  * `textFor` was an argument nobody supplied, so the page evidence the rule
  * advertised was never read (Codex, 26 Sep 2026).
  */
-export async function dryRun({ drawer, box, textFor = null, fetch = overpassQuery }) {
+/**
+ * Whether an element is a place the drawer would be fed from, rather than
+ * one of the objects it is judged by.
+ *
+ * Lidos and athletics are fed from the object type itself — a mapped pool,
+ * a mapped track — and the first dry run counted every one, unnamed garden
+ * pools among them (owner, 26 Sep 2026: "name present and access≠private").
+ * A centre keeps its place as a candidate whatever its name; an object-type
+ * candidate needs a name and must not be private.
+ */
+export function isCandidate(drawer, el) {
+  const spec = NAMED_FOR[drawer];
+  const { key, values } = selectorParts(spec.selector);
+  if (!values.includes(String(el.tags[key] ?? ''))) return false;
+  if (el.tags.leisure === 'sports_centre' || el.tags.leisure === 'stadium') return true;
+  return Boolean(el.tags.name) && el.tags.access !== 'private';
+}
+
+/**
+ * The open-map labels a place carries, in the taxonomy's own form, so the
+ * same rules that file a place can say where it goes.
+ */
+export function labelsOf(tags = {}) {
+  const out = [];
+  for (const k of ['leisure', 'sport', 'amenity', 'tourism', 'natural', 'historic', 'attraction', 'shop', 'club']) {
+    const v = tags[k];
+    if (v == null || v === '') continue;
+    for (const one of String(v).split(';')) if (one.trim()) out.push(`osm:${k}=${one.trim()}`);
+  }
+  return out;
+}
+
+/** What feeds each tested drawer; taken away when asking where else a place could go. */
+const FEEDER = {
+  pools: ['osm:leisure=sports_centre', 'osm:leisure=swimming_pool'],
+  lidos: ['osm:leisure=sports_centre', 'osm:leisure=swimming_pool'],
+  athletics: ['osm:leisure=sports_centre', 'osm:leisure=track', 'osm:leisure=stadium'],
+  climbing: ['osm:leisure=sports_centre'],
+  'racquet-clubs': ['osm:leisure=sports_centre'],
+};
+
+/**
+ * Out of Pools is not out of Epic (owner, 26 Sep 2026): "a place leaves Epic
+ * only if it passes no drawer at all." So a place that fails the tested
+ * drawer is asked where else its own labels would file it — the same rules,
+ * with the failed drawer's feeder taken away — and only a place with nowhere
+ * left leaves. `land` is the taxonomy's landing, injected so the rule can be
+ * tested without a database.
+ */
+export function otherDrawerFor({ tags, failed, land }) {
+  const all = labelsOf(tags);
+  const rest = all.filter((l) => !FEEDER[failed]?.includes(l));
+  if (!rest.length) return { drawer: null, via: null };
+  const filed = land(rest);
+  const drawer = filed?.subcategory ?? null;
+  if (!drawer || drawer === failed) return { drawer: null, via: null };
+  return { drawer, via: rest.join(' ') };
+}
+
+/** The taxonomy's landing, loaded once per dry run. */
+async function landingFor() {
+  const [{ rules }, tax] = await Promise.all([
+    import('../repositories/shelfRules.js').then(async (m) => ({ rules: await m.rules() })),
+    import('../repositories/shelfTaxonomy.js').then((m) => m.taxonomy()),
+  ]);
+  const { landingOfSet } = await import('../domain/landing.js');
+  return (labels) => landingOfSet(labels, {}, rules, tax.vocab);
+}
+
+export async function dryRun({ drawer, box, textFor = null, fetch = overpassQuery, land = null }) {
   if (!DRAWERS.includes(drawer)) throw Object.assign(new Error(`The day-out test does not know a drawer called ${drawer}.`), { status: 400 });
   const spec = NAMED_FOR[drawer];
   const data = await fetch(queryFor(drawer, box), { timeoutMs: 130_000 });
   const els = (data.elements ?? []).map(withPoint);
-  const { key, values } = selectorParts(spec.selector);
-  const candidates = els.filter((el) => values.includes(String(el.tags[key] ?? '')));
+  const candidates = els.filter((el) => isCandidate(drawer, el));
   const objects = els.filter((el) => spec.object(el.tags));
   const readText = textFor ?? (async (c) => (await heldFor(`osm:${c.type}/${c.id}`)).text);
+  const landing = land ?? await landingFor();
   const rows = [];
   for (const c of candidates) {
     const nearby = c.lat == null ? [] : objects
@@ -130,6 +199,10 @@ export async function dryRun({ drawer, box, textFor = null, fetch = overpassQuer
       .map((o) => ({ tags: o.tags, name: o.tags.name ?? null, m: Math.round(metres(c, o)) }));
     const text = await readText(c);
     const v = dayOutVerdict(drawer, { tags: c.tags, nearby, text, name: c.tags.name ?? '' });
+    // Where an out place still belongs, by its own labels. A members-only
+    // place is out wherever the test runs; its other drawers are named all
+    // the same, since the owner's rule for those is a separate decision.
+    const elsewhere = v.verdict === 'out' ? otherDrawerFor({ tags: c.tags, failed: drawer, land: landing }) : { drawer: null, via: null };
     rows.push({
       ref: `osm:${c.type}/${c.id}`,
       name: c.tags.name ?? '(unnamed)',
@@ -138,6 +211,9 @@ export async function dryRun({ drawer, box, textFor = null, fetch = overpassQuer
       reason: v.reason,
       nearest: nearby.length ? `${nearby[0].name ?? 'a pool'} ${nearby[0].m} m` : null,
       sport: c.tags.sport ?? null,
+      brand: c.tags.brand ?? null,
+      staysIn: v.verdict === 'out' ? (elsewhere.drawer ?? 'none — leaves Epic') : drawer,
+      staysVia: elsewhere.via,
     });
   }
   const order = { kept: 0, provisional: 1, out: 2 };
@@ -145,7 +221,14 @@ export async function dryRun({ drawer, box, textFor = null, fetch = overpassQuer
   return {
     drawer, thing: spec.thing, box, adjacentM: ADJACENT_M,
     on: dayOutTestOn(),
-    counts: { candidates: rows.length, kept: rows.filter((r) => r.verdict === 'kept').length, provisional: rows.filter((r) => r.verdict === 'provisional').length, out: rows.filter((r) => r.verdict === 'out').length, objects: objects.length },
+    counts: {
+      candidates: rows.length,
+      kept: rows.filter((r) => r.verdict === 'kept').length,
+      provisional: rows.filter((r) => r.verdict === 'provisional').length,
+      out: rows.filter((r) => r.verdict === 'out').length,
+      leavesEpic: rows.filter((r) => r.staysIn === 'none — leaves Epic').length,
+      objects: objects.length,
+    },
     rows,
   };
 }

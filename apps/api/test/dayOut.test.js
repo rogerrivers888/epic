@@ -160,3 +160,76 @@ test('the catch-up does nothing while the switch is off', async () => {
     if (was == null) delete process.env.EPIC_DAY_OUT_TEST; else process.env.EPIC_DAY_OUT_TEST = was;
   }
 });
+
+// ---------------------------------------------------------------------------
+// the four refinements (owner, 26 Sep 2026)
+// ---------------------------------------------------------------------------
+
+const { membersOnly, mayBorrowAdjacent } = await import('../src/domain/dayOut.js');
+const { isCandidate, labelsOf, otherDrawerFor } = await import('../src/sources/dayOutTest.js');
+
+test('members-only fails the day-out test whatever the facilities', () => {
+  assert.deepEqual(pick(dayOutVerdict('pools', { tags: { leisure: 'sports_centre', swimming_pool: 'yes', access: 'private' }, name: 'x' })), ['out', 'members']);
+  // David Lloyd carries no access tag on the map — only its brand.
+  assert.deepEqual(pick(dayOutVerdict('pools', { tags: { leisure: 'sports_centre', brand: 'David Lloyd Clubs' }, nearby: [{ tags: { leisure: 'swimming_pool' } }], name: 'David Lloyd Leisure Centre' })), ['out', 'members']);
+  assert.deepEqual(pick(dayOutVerdict('racquet-clubs', { tags: { leisure: 'sports_centre', sport: 'tennis', brand: 'David Lloyd Clubs' }, name: 'x' })), ['out', 'members']);
+  assert.match(membersOnly({ text: 'Facilities are for members only.' }) ?? '', /members only/);
+  // A club tag is not a membership: Absolutely Karting carries club=sport and sells a session to anybody.
+  assert.equal(membersOnly({ tags: { leisure: 'sports_centre', club: 'sport', sport: 'karting', fee: 'yes' }, name: 'Absolutely Karting' }), null);
+});
+
+test('adjacency proves a pool for the sports centre only', () => {
+  const pool = [{ tags: { leisure: 'swimming_pool', name: 'Main Pool' }, name: 'Main Pool', m: 63 }];
+  // Hengrove's climbing wall, tagged for climbing, cannot borrow the pool next door.
+  assert.deepEqual(pick(dayOutVerdict('pools', { tags: { leisure: 'sports_centre', sport: 'climbing' }, nearby: pool, name: 'Hengrove Park Leisure Centre Climbing Wall' })), ['out', null]);
+  // The centre itself can.
+  assert.deepEqual(pick(dayOutVerdict('pools', { tags: { leisure: 'sports_centre' }, nearby: pool, name: 'Hengrove Park Leisure Centre' })), ['kept', 'object']);
+  assert.equal(mayBorrowAdjacent('pools', { sport: 'swimming;fitness' }), true);
+  assert.equal(mayBorrowAdjacent('pools', { sport: 'karting' }), false);
+  assert.equal(mayBorrowAdjacent('athletics', {}), true);
+});
+
+test('a lido or track candidate needs a name and must not be private; a centre is always a candidate', () => {
+  assert.equal(isCandidate('lidos', { tags: { leisure: 'swimming_pool' } }), false, 'an unnamed pool object is a garden pool');
+  assert.equal(isCandidate('lidos', { tags: { leisure: 'swimming_pool', name: 'Clevedon Marine Lake', access: 'private' } }), false);
+  assert.equal(isCandidate('lidos', { tags: { leisure: 'swimming_pool', name: 'Sandford Parks Lido' } }), true);
+  assert.equal(isCandidate('athletics', { tags: { leisure: 'track' } }), false);
+  assert.equal(isCandidate('athletics', { tags: { leisure: 'sports_centre' } }), true, 'a centre is judged on its evidence, not filtered on its name');
+  assert.equal(isCandidate('pools', { tags: { leisure: 'swimming_pool', name: 'x' } }), false, 'Pools is fed from sports centres, not from pool objects');
+});
+
+test('out of Pools is not out of Epic: an out place is asked where else its labels file it', () => {
+  // A landing stub in the taxonomy's shape: karting lands in karting, laser tag in paintball-lasertag, climbing in climbing; a bare sports centre in pools.
+  const land = (labels) => {
+    if (labels.includes('osm:sport=karting')) return { subcategory: 'karting' };
+    if (labels.includes('osm:sport=laser_tag')) return { subcategory: 'paintball-lasertag' };
+    if (labels.includes('osm:sport=climbing')) return { subcategory: 'climbing' };
+    if (labels.includes('osm:leisure=sports_centre')) return { subcategory: 'pools' };
+    return { subcategory: null };
+  };
+  assert.deepEqual(labelsOf({ leisure: 'sports_centre', sport: 'karting;motor', club: 'sport' }), ['osm:leisure=sports_centre', 'osm:sport=karting', 'osm:sport=motor', 'osm:club=sport']);
+  assert.equal(otherDrawerFor({ tags: { leisure: 'sports_centre', sport: 'karting' }, failed: 'pools', land }).drawer, 'karting');
+  assert.equal(otherDrawerFor({ tags: { leisure: 'sports_centre', sport: 'laser_tag' }, failed: 'pools', land }).drawer, 'paintball-lasertag');
+  assert.equal(otherDrawerFor({ tags: { leisure: 'sports_centre', sport: 'climbing' }, failed: 'pools', land }).drawer, 'climbing');
+  // A yoga studio tagged only as a sports centre has nowhere else to go.
+  assert.equal(otherDrawerFor({ tags: { leisure: 'sports_centre' }, failed: 'pools', land }).drawer, null);
+  assert.equal(otherDrawerFor({ tags: { leisure: 'sports_centre', sport: 'yoga' }, failed: 'pools', land }).drawer, null);
+});
+
+test('the dry run says where every out place stays, and counts the ones that leave', async () => {
+  const elements = [
+    el(1, { leisure: 'sports_centre', name: 'Absolutely Karting', sport: 'karting' }, 51.40, -0.65),
+    el(2, { leisure: 'sports_centre', name: 'Bristol Yoga Centre' }, 51.41, -0.66),
+    el(3, { leisure: 'sports_centre', name: 'David Lloyd Leisure Centre', brand: 'David Lloyd Clubs' }, 51.42, -0.67),
+    el(4, { leisure: 'swimming_pool', name: 'Main Pool' }, 51.4203, -0.6702),
+    el(5, { leisure: 'sports_centre', name: 'Henbury Leisure Centre', sport: 'swimming' }, 51.43, -0.68),
+  ];
+  const land = (labels) => ({ subcategory: labels.includes('osm:sport=karting') ? 'karting' : (labels.includes('osm:leisure=sports_centre') ? 'pools' : null) });
+  const d = await dryRun({ drawer: 'pools', box: boxOf('51.39,-0.70,51.44,-0.60'), fetch: fake(elements), textFor: async () => '', land });
+  const by = Object.fromEntries(d.rows.map((r) => [r.name, [r.verdict, r.staysIn]]));
+  assert.deepEqual(by['Absolutely Karting'], ['out', 'karting']);
+  assert.deepEqual(by['Bristol Yoga Centre'], ['out', 'none — leaves Epic']);
+  assert.deepEqual(by['David Lloyd Leisure Centre'], ['out', 'none — leaves Epic'], 'members only, and no other drawer');
+  assert.deepEqual(by['Henbury Leisure Centre'], ['kept', 'pools']);
+  assert.equal(d.counts.leavesEpic, 2);
+});
