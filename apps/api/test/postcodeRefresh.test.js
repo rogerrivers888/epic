@@ -73,5 +73,5 @@ test('a check is owed monthly, and a load only for a newer release', async (t) =
   // Two refreshes at once: one claims, the other is told a load is in progress.
   await query(`update postcode_releases set loading_since = now() where one`);
   out = await refresh.refreshIfDue({ force: true, fetchImpl: newer, load });
-  assert.equal(out.checked, true); assert.equal(out.why, 'a load is in progress');
+  assert.equal(out.checked, false, 'the second does not even ask the geoportal'); assert.equal(out.why, 'a load is in progress');
 });
