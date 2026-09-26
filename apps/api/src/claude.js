@@ -146,7 +146,7 @@ const ask = async ({ householdId = null, sessionId = null, purpose = null } = {}
             : 'error';
     lastCall = { ok: false, ms: Date.now() - began, fault };
     if (purpose) {
-      await providerCalls.recordFailure({ householdId, sessionId, provider: 'anthropic', purpose, ms: lastCall.ms, fault });
+      await providerCalls.recordFailure({ householdId, planSessionId: sessionId, provider: 'anthropic', purpose, ms: lastCall.ms, fault });
     }
     throw budget ?? err;
   }
@@ -170,8 +170,10 @@ async function recordCall({ householdId, sessionId, provider, purpose, usage, mo
       (usage.cache_creation_input_tokens || 0) * RATE.cacheWrite +
       (usage.server_tool_use?.web_search_requests || 0) * WEB_SEARCH_RATE
     : null;
+  // `sessionId` here is the planning run; the api session comes from the
+  // request's context (migration 261).
   await providerCalls.recordTokens({
-    householdId, sessionId, provider, purpose,
+    householdId, planSessionId: sessionId, provider, purpose,
     inputTokens: usage?.input_tokens ?? null, outputTokens: usage?.output_tokens ?? null,
     cacheReadTokens: usage?.cache_read_input_tokens ?? null, cacheWriteTokens: usage?.cache_creation_input_tokens ?? null,
     costUsd: cost,

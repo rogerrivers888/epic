@@ -71,15 +71,13 @@ export async function planSessionForDay(householdId, tripId, dayId) {
 /**
  * A call made while planning, on the ledger.
  *
- * Against the request's own session — the api_sessions row auth.js put in
- * the context — and not the plan session's id, which is a session of another
- * kind that the cap and the spend reports never joined to (owner, 26 Sep
- * 2026: "Two tables meaning 'which session did this' is how attribution
- * erodes"). The plan session is still the second argument so the call sites
- * read as they did; it is not what the ledger records.
+ * The session is the request's own — the api_sessions row auth.js put in the
+ * context (owner, 26 Sep 2026: "Two tables meaning 'which session did this'
+ * is how attribution erodes") — and the plan is the plan: its own column,
+ * which the run's receipt and the trip's spend read (migration 261).
  */
-export const recordSessionCall = (householdId, _planSessionId, provider, purpose, units = null) =>
-  providerCalls.record(householdId, provider, purpose, units);
+export const recordSessionCall = (householdId, planSessionId, provider, purpose, units = null) =>
+  providerCalls.record(householdId, provider, purpose, units, null, null, { planSessionId });
 
 /**
  * A session by its short reference — the eight characters a run is quoted by.
@@ -119,7 +117,7 @@ export async function planSessionByRef(householdId, ref) {
 export async function callsOfSession(sessionId) {
   const { rows } = await query(
     `select provider, purpose, units, estimated_cost_usd, created_at from provider_calls
-      where session_id = $1 order by created_at`,
+      where plan_session_id = $1 order by created_at`,
     [sessionId],
   );
   return rows;
@@ -129,7 +127,7 @@ export async function callsOfSession(sessionId) {
 export async function spendOnTrip(tripId) {
   const { rows } = await query(
     `select count(pc.*)::int as trip_calls, coalesce(sum(pc.estimated_cost_usd), 0)::float as trip_cost_usd
-       from provider_calls pc join plan_sessions ps on ps.id = pc.session_id where ps.trip_id = $1`,
+       from provider_calls pc join plan_sessions ps on ps.id = pc.plan_session_id where ps.trip_id = $1`,
     [tripId],
   );
   return rows[0];

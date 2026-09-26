@@ -172,7 +172,7 @@ export async function deleteTrip(id) {
 export async function tripSpend(tripId) {
   const { rows } = await query(
     `select pc.provider, count(*)::int as calls, coalesce(sum(pc.estimated_cost_usd), 0)::float as cost_usd
-       from provider_calls pc join plan_sessions ps on ps.id = pc.session_id
+       from provider_calls pc join plan_sessions ps on ps.id = pc.plan_session_id
       where ps.trip_id = $1 group by pc.provider order by cost_usd desc, calls desc`,
     [tripId],
   );

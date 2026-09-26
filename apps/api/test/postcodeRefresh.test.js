@@ -57,9 +57,13 @@ test('a check is owed monthly, and a load only for a newer release', async (t) =
   const loaded = await refresh.state();
   assert.equal(loaded.loaded_release, '2026-11'); assert.equal(loaded.loading_since, null);
 
-  // A check that fails says so, and is not silent.
+  // A check that fails says so, and is not silent — and it is not a check:
+  // checked_at stands where it was, so tomorrow's tick tries again rather
+  // than a month on (Codex via epic-09, 26 Sep 2026).
+  const { rows: [before] } = await query('select checked_at from postcode_releases where one');
   out = await refresh.refreshIfDue({ force: true, fetchImpl: async () => ({ ok: false, status: 503 }), load });
   assert.equal(out.loaded, false); assert.match((await refresh.state()).last_error, /503/);
+  assert.equal(String((await refresh.state()).checked_at), String(before.checked_at), 'a failed check is not written down as one');
 
   // An archive that yields no snapshot is not a load: the release is not
   // recorded, and the error says so (Codex, 26 Sep 2026).

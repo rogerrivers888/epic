@@ -167,7 +167,7 @@ router.post('/transcribe', express.raw({ type: audioMimes, limit: '25mb' }), asy
 
     const finish = async (out) => {
       await providerCalls.recordMetered({
-        householdId: household.id, sessionId, provider: PROVIDER,
+        householdId: household.id, planSessionId: sessionId, provider: PROVIDER,
         purpose: stream ? 'speech.transcribe.stream' : 'speech.transcribe',
         units: { [UNIT]: Math.round((seconds / 60) * 1000) / 1000 },
         costUsd: minuteCost(out.model, seconds),
@@ -219,7 +219,7 @@ router.post('/live-token', async (req, res, next) => {
     if (opened >= VOICE_LIVE_SESSIONS_DAILY) throw refuse(429, 'voice_sessions_reached', 'That is a lot of listening for one day. Recording still works: Epic writes it down when you tap Done.', { used: opened, bound: VOICE_LIVE_SESSIONS_DAILY });
     const { hint, keywords } = await vocabularyFor(household);
     const token = await mintLiveToken({ language, hint, keywords, seconds: 120 });
-    await providerCalls.recordMetered({ householdId: household.id, sessionId, provider: PROVIDER, purpose: 'speech.live.start', units: { 'openai-live-sessions': 1 }, costUsd: 0 });
+    await providerCalls.recordMetered({ householdId: household.id, planSessionId: sessionId, provider: PROVIDER, purpose: 'speech.live.start', units: { 'openai-live-sessions': 1 }, costUsd: 0 });
     const { refusals: _refusals, ...safe } = token;
     res.json({ ...safe, language, maxSeconds: VOICE_MAX_SECONDS });
   } catch (err) { next(err); }
@@ -289,7 +289,7 @@ async function readIntent({ household, transcript, language, context, sessionId,
   const input = voiceIntentInput({ transcript, language, today, timezone, home: household.home_label, members: members.map((m) => m.name), context });
   const out = await extract({ system: VOICE_INTENT_SYSTEM, input, schema: VOICE_INTENT_SCHEMA, name: 'voice_intent', model: PLAN_MODEL });
   await providerCalls.recordTokens({
-    householdId: household.id, sessionId, provider: PROVIDER, purpose,
+    householdId: household.id, planSessionId: sessionId, provider: PROVIDER, purpose,
     inputTokens: out.usage?.input_tokens ?? null, outputTokens: out.usage?.output_tokens ?? null,
     costUsd: tokenCost(PLAN_MODEL, out.usage),
   });
@@ -336,12 +336,12 @@ adminRouter.get('/probe', requires('manage_settings'), async (req, res, next) =>
     await assertMinutes(household.id, 1);
     try {
       const t = await mintLiveToken({ language: 'en', seconds: 10 });
-      await providerCalls.recordMetered({ householdId: household.id, sessionId, provider: PROVIDER, purpose: 'speech.live.start.probe', units: { 'openai-live-sessions': 1 }, costUsd: 0 });
+      await providerCalls.recordMetered({ householdId: household.id, planSessionId: sessionId, provider: PROVIDER, purpose: 'speech.live.start.probe', units: { 'openai-live-sessions': 1 }, costUsd: 0 });
       out.live = { ok: true, model: t.model, url: t.url, fellBack: t.fellBack, dropped: t.dropped, refusals: t.refusals };
     } catch (err) { out.live = { ok: false, code: err.code, message: err.message, detail: err.detail ?? null }; }
     try {
       const o = await transcribe({ audio: silentWav(0.2), mime: 'audio/wav', language: 'en' });
-      await providerCalls.recordMetered({ householdId: household.id, sessionId, provider: PROVIDER, purpose: 'speech.transcribe.probe', units: { [UNIT]: 0.004 }, costUsd: minuteCost(o.model, 0.2) });
+      await providerCalls.recordMetered({ householdId: household.id, planSessionId: sessionId, provider: PROVIDER, purpose: 'speech.transcribe.probe', units: { [UNIT]: 0.004 }, costUsd: minuteCost(o.model, 0.2) });
       out.transcribe = { ok: true, model: o.model, fellBack: o.fellBack, dropped: o.dropped, refusals: o.refusals, ms: o.ms };
     } catch (err) { out.transcribe = { ok: false, code: err.code, message: err.message, detail: err.detail ?? null }; }
     res.json(out);
@@ -556,7 +556,7 @@ async function readTripFacts({ household, members, transcript, language, session
   const input = tripFactsInput({ transcript, today, timezone, home: household.home_label, members, page, previous });
   const out = await extract({ system: TRIP_FACTS_SYSTEM, input, schema: TRIP_FACTS_SCHEMA, name: 'trip_facts', model: PLAN_MODEL });
   await providerCalls.recordTokens({
-    householdId: household.id, sessionId, provider: PROVIDER, purpose,
+    householdId: household.id, planSessionId: sessionId, provider: PROVIDER, purpose,
     inputTokens: out.usage?.input_tokens ?? null, outputTokens: out.usage?.output_tokens ?? null, costUsd: tokenCost(PLAN_MODEL, out.usage),
   });
   const facts = normaliseTripFacts(out.parsed);
@@ -702,7 +702,7 @@ router.post('/intake/:id/remember', async (req, res, next) => {
 async function readStructured({ household, sessionId, system, input, schema, name, purpose }) {
   const out = await extract({ system, input, schema, name, model: PLAN_MODEL });
   await providerCalls.recordTokens({
-    householdId: household.id, sessionId, provider: PROVIDER, purpose,
+    householdId: household.id, planSessionId: sessionId, provider: PROVIDER, purpose,
     inputTokens: out.usage?.input_tokens ?? null, outputTokens: out.usage?.output_tokens ?? null, costUsd: tokenCost(PLAN_MODEL, out.usage),
   });
   return out.parsed;

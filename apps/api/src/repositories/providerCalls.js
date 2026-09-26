@@ -66,7 +66,13 @@ export async function sessionFor(sessionId = null) {
   return sessionId ?? currentSpender().sessionId ?? await serviceSessionId();
 }
 
-export async function record(householdId, provider, purpose, units = null, sessionId = null, venueRef = null) {
+/**
+ * `planSessionId` is which planning run a call belonged to, where it did:
+ * the run's receipt, a trip's spend and the per-plan call bound read by it.
+ * A plan is not a session — session_id is always the api session — and the
+ * two are separate columns (migration 261, 26 Sep 2026).
+ */
+export async function record(householdId, provider, purpose, units = null, sessionId = null, venueRef = null, { planSessionId = null } = {}) {
   // The money as well as the meter. The monthly ceiling is a sum of
   // `estimated_cost_usd`, so a row with a meter and no price is a call the
   // limit cannot see — and the matcher's Nearby Search was exactly that
@@ -83,10 +89,10 @@ export async function record(householdId, provider, purpose, units = null, sessi
   const health = healthOf(typeof units === 'string' ? null : units);
   const session = await sessionFor(sessionId);
   await query(
-    `insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd, venue_ref, ok, ms, failed, fault, watched)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+    `insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd, venue_ref, ok, ms, failed, fault, watched, plan_session_id)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
     [householdId, session, provider, purpose, units, costOf(units, provider) || null, venueRef,
-      health.ok, health.ms, health.failed, health.fault, health.watched],
+      health.ok, health.ms, health.failed, health.fault, health.watched, planSessionId],
   );
   void meter;
 }
@@ -97,13 +103,13 @@ export async function recordTokens(c) {
   await query(
     `insert into provider_calls
        (household_id, session_id, provider, purpose, input_tokens, output_tokens,
-        cache_read_tokens, cache_write_tokens, estimated_cost_usd, ok, ms, failed, fault, watched)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        cache_read_tokens, cache_write_tokens, estimated_cost_usd, ok, ms, failed, fault, watched, plan_session_id)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
     [c.householdId, session, c.provider, c.purpose, c.inputTokens ?? null, c.outputTokens ?? null,
       c.cacheReadTokens ?? null, c.cacheWriteTokens ?? null, c.costUsd,
       c.ok ?? null, c.ms ?? null, c.ok === false ? 1 : 0, c.fault ?? null,
       // One request, which is what a token-billed call always is.
-      c.ok == null ? null : 1],
+      c.ok == null ? null : 1, c.planSessionId ?? null],
   );
 }
 
@@ -114,16 +120,16 @@ export async function recordTokens(c) {
  * spent, and a request that fell over spent nothing. A failure rate needs a
  * numerator, so the failure gets a row of its own with a cost of nought.
  */
-export async function recordFailure({ householdId = null, sessionId = null, provider, purpose, ms = null, fault }) {
+export async function recordFailure({ householdId = null, sessionId = null, planSessionId = null, provider, purpose, ms = null, fault }) {
   // Named like every other row: with the column required, a failure written
   // with no session was refused and the refusal swallowed, so the failure
   // never reached the supplier's numbers (Codex, 26 Sep 2026).
   const session = await sessionFor(sessionId).catch(() => null);
   if (!session) return;
   await query(
-    `insert into provider_calls (household_id, session_id, provider, purpose, estimated_cost_usd, ok, ms, failed, fault, watched)
-     values ($1, $2, $3, $4, 0, false, $5, 1, $6, 1)`,
-    [householdId, session, provider, purpose, ms, String(fault ?? 'error').slice(0, 40)],
+    `insert into provider_calls (household_id, session_id, provider, purpose, estimated_cost_usd, ok, ms, failed, fault, watched, plan_session_id)
+     values ($1, $2, $3, $4, 0, false, $5, 1, $6, 1, $7)`,
+    [householdId, session, provider, purpose, ms, String(fault ?? 'error').slice(0, 40), planSessionId],
   ).catch(() => null);
 }
 
@@ -132,13 +138,13 @@ export async function recordFailure({ householdId = null, sessionId = null, prov
  * `units` is the object form (`{ 'openai-minutes': 0.4 }`) so the Settings
  * spend table can add it up by key, and the cost is the list price for it.
  */
-export async function recordMetered({ householdId, sessionId = null, provider, purpose, units, costUsd = null, ok = null, ms = null, fault = null }) {
+export async function recordMetered({ householdId, sessionId = null, planSessionId = null, provider, purpose, units, costUsd = null, ok = null, ms = null, fault = null }) {
   const session = await sessionFor(sessionId);
   await query(
-    `insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd, ok, ms, failed, fault, watched)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    `insert into provider_calls (household_id, session_id, provider, purpose, units, estimated_cost_usd, ok, ms, failed, fault, watched, plan_session_id)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
     [householdId, session, provider, purpose, units, costUsd, ok, ms, ok === false ? 1 : 0, fault,
-      ok == null ? null : 1],
+      ok == null ? null : 1, planSessionId],
   );
 }
 
@@ -182,10 +188,11 @@ const CALLS_IN_ROW = `case
     else greatest(1, coalesce((units->>'google')::int, 1))
   end`;
 
-export async function countForSession(sessionId) {
+/** The calls one planning run has made, by provider: the per-plan bound reads this. */
+export async function countForSession(planSessionId) {
   const { rows } = await query(
-    `select provider, sum(${CALLS_IN_ROW})::int as n from provider_calls where session_id = $1 group by provider`,
-    [sessionId],
+    `select provider, sum(${CALLS_IN_ROW})::int as n from provider_calls where plan_session_id = $1 group by provider`,
+    [planSessionId],
   );
   return billable(rows);
 }
@@ -237,11 +244,11 @@ export async function unitsOfPurpose(householdId, provider, purposeLike, unitKey
 // ---------------------------------------------------------------------------
 
 /** Cost and call counts for one session, and for the household this month. */
-export async function summary(householdId, sessionId) {
+export async function summary(householdId, planSessionId) {
   const { rows } = await query(
     `select
-       count(*) filter (where session_id = $2)::int                                   as session_calls,
-       coalesce(sum(estimated_cost_usd) filter (where session_id = $2), 0)::float      as session_cost_usd,
+       count(*) filter (where plan_session_id = $2)::int                              as session_calls,
+       coalesce(sum(estimated_cost_usd) filter (where plan_session_id = $2), 0)::float as session_cost_usd,
        count(*) filter (where created_at >= date_trunc('month', now()))::int          as month_calls,
        coalesce(sum(estimated_cost_usd) filter (where created_at >= date_trunc('month', now())), 0)::float as month_cost_usd
      from provider_calls where household_id = $1`,

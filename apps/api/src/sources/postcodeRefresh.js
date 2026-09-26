@@ -79,7 +79,10 @@ export async function refreshIfDue({ force = false, fetchImpl = fetch, load = lo
     await query('update postcode_releases set checked_at = $1, latest_release = $2, latest_item = $3, last_error = null where one',
       [now, latest?.release ?? null, latest?.item ?? null]);
   } catch (err) {
-    await query('update postcode_releases set checked_at = $1, last_error = $2 where one', [now, String(err.message).slice(0, 300)]);
+    // Not written down as a check: a failed one that counted would have put
+    // the next try a month off (Codex via epic-09, 26 Sep 2026). The error is
+    // written, and the daily tick tries again tomorrow.
+    await query('update postcode_releases set last_error = $1 where one', [String(err.message).slice(0, 300)]);
     return { checked: true, loaded: false, why: err.message };
   }
   if (!latest) return { checked: true, loaded: false, why: 'the geoportal lists no directory' };

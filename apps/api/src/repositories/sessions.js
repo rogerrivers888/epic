@@ -99,5 +99,6 @@ export function sweepDeadSessions() {
   return query(
     `delete from api_sessions s
       where ((expires_at < now() - interval '30 days') or (revoked_at < now() - interval '30 days'))
+        and token_hash not like 'service:%'
         and not exists (select 1 from provider_calls p where p.session_id = s.id)`);
 }

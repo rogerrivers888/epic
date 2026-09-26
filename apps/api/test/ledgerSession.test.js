@@ -82,10 +82,27 @@ test('nothing but an api session can be written, and a plan session is recorded 
     await query(`delete from api_sessions where token_hash = 'test:ledger-plan'`);
   });
   const planSessions = await import('../src/repositories/planSessions.js');
-  const planId = '00000000-0000-4000-8000-00000000abcd';
-  await runAsSpender({ householdId: null, sessionId: s.id }, () => planSessions.recordSessionCall(null, planId, 'google', 'test.ledger.plan', { google: 1 }));
-  const [row] = await rowsFor('test.ledger.plan');
+  const { rows: [hh] } = await query(`insert into households (name) values ('ledger plan household') returning id`);
+  const { rows: [plan] } = await query(`insert into plan_sessions (household_id) values ($1) returning id`, [hh.id]);
+  t.after(async () => { await query('delete from plan_sessions where id = $1', [plan.id]); await query('delete from households where id = $1', [hh.id]); });
+  await runAsSpender({ householdId: null, sessionId: s.id }, () => planSessions.recordSessionCall(null, plan.id, 'google', 'test.ledger.plan', { google: 1 }));
+  const { rows: [row] } = await query('select session_id, plan_session_id from provider_calls where purpose = $1', ['test.ledger.plan']);
   assert.equal(row.session_id, s.id, 'the request\'s session, not the plan\'s id');
+  assert.equal(row.plan_session_id, plan.id, 'and the plan in its own column, which the receipt and the bound read (migration 261)');
+  assert.deepEqual(await planSessions.callsOfSession(plan.id).then((r) => r.map((c) => c.purpose)), ['test.ledger.plan']);
+  const counted = await providerCalls.countForSession(plan.id);
+  assert.ok(Object.values(counted).some((n) => n >= 1), `the per-plan bound counts it (${JSON.stringify(counted)})`);
+});
+
+test('a deleted session leaves its spend on the ledger, on a session named for it', async (t) => {
+  const { rows: [gone] } = await query(
+    `insert into api_sessions (token_hash, label) values ('test:ledger-gone', 'to be deleted') on conflict (token_hash) do update set label = excluded.label returning id`);
+  t.after(() => query(`delete from provider_calls where purpose = 'test.ledger.gone'`));
+  await providerCalls.record(null, 'google', 'test.ledger.gone', { google: 1 }, gone.id);
+  await query('delete from api_sessions where id = $1', [gone.id]);
+  const { rows: [row] } = await query(
+    `select s.label from provider_calls p join api_sessions s on s.id = p.session_id where p.purpose = 'test.ledger.gone'`);
+  assert.equal(row.label, 'service: sessions of deleted accounts', 'the row survives and says whose it was');
 });
 
 test('a session the ledger names survives the sweep of dead sessions', async (t) => {
