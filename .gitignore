@@ -1,4 +1,6 @@
-node_modules/
+# No trailing slash: it must also match the symlinks a shipping worktree makes to the
+# shared tree's node_modules (CLAUDE.md), which `node_modules/` — directories only — does not.
+node_modules
 .env
 .env.local
 .expo/
