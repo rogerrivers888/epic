@@ -20,18 +20,21 @@ file is missing (a fresh clone — it is gitignored), prefix every codex command
 Work out what is being handed over and say it out loud before running anything:
 
 ```
-git log --oneline main..HEAD        # or origin/main..HEAD if already on main
+git log --oneline origin/main..HEAD   # in the worktree: exactly your commits
 git status --short
 ```
 
 - A **migration and the tests that depend on it are committed together, never
   separately.** An uncommitted migration is invisible to every other session on this
   machine. If `git status` shows one, stop and commit it with its tests before going on.
-- Stage hunks, never files. The tree is shared with other sessions and
-  `git commit -- <path>` takes the whole file, other sessions' lines included
-  (owner, 25 Sep 2026). `git add -p <path>` with its answers on stdin, or a
-  patch cut to your hunks and `git apply --cached`; then `git diff --cached`
-  must show only your lines. Never `git add -A`.
+- **Commit and push only from a worktree off `origin/main`, never from the shared
+  index** (owner, 26 Sep 2026; CLAUDE.md has the commands). A check followed by a
+  separate commit races every other session: on 26 Sep a `git diff --cached` showing
+  only this session's files was followed, a test run later, by a commit that also
+  carried another session's staged migration. So cut `git diff --binary origin/main --
+  <your files>` to your hunks, apply it in `git worktree add --detach
+  /tmp/epic-wt-<name> origin/main`, and run every step below **there**. Never `git
+  add`, `git commit`, amend or push `main` in the shared tree.
 
 ## 2. The suite, after the final commit
 
@@ -47,7 +50,7 @@ money and tells you nothing you needed.
 ## 3. Codex
 
 ```
-codex exec review --base main
+codex exec review --base origin/main
 ```
 
 Use `--commit <sha>` for one commit or `--uncommitted` for work not yet committed.
@@ -69,6 +72,7 @@ neither the tests nor the deployed site would.
 
 ## 5. Push
 
+From the worktree: `git push origin HEAD:main`, then `git worktree remove --force`.
 The `pre-push` hook runs the whole suite again and blocks the push if anything fails.
 **Never `--no-verify`** — it is the only thing between a broken commit and four other
 sessions pulling it.
