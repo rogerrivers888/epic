@@ -441,7 +441,7 @@ export function SubcategoryBoard({ data, busy, canManage, onAccept, onFlip, onAc
         <DeskButton label={`Train · ${data.disagreeing.length} to look at`} onPress={onTrain} />
         <DeskButton label={`All ${s.places.toLocaleString()} places`} tone="outline" onPress={onPlaces} />
         {s.set ? (
-          <DeskButton label={`Question set · ${s.set.name ?? s.set.key}`} tone="outline" onPress={() => onSet(s.set!.key)} />
+          <DeskButton label={`Fact sheet · ${s.set.name ?? s.set.key}`} tone="outline" onPress={() => onSet(s.set!.key)} />
         ) : null}
       </View>
 
