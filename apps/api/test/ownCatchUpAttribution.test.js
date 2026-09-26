@@ -24,3 +24,19 @@ test('with nobody to attribute it to, a place is left unresearched rather than r
   assert.deepEqual(queue, [['google:a', 'hh-1']], 'the claimed one still goes');
   assert.deepEqual(skipped, ['google:b'], 'the unclaimed one waits for a household to exist');
 });
+
+test('a version bump that only adds free facts is caught up for free, and a first research is not (26 Sep 2026)', async () => {
+  const { freeBackfill, RESEARCH_VERSION, PAID_RESEARCH_VERSION, alreadyResearched } = await import('../src/sources/own.js');
+  const free = freeBackfill([
+    { venue_ref: 'google:old-done', enrich_state: 'done', research_version: RESEARCH_VERSION - 1 },
+    { venue_ref: 'google:old-partial', enrich_state: 'partial', research_version: 1 },
+    { venue_ref: 'google:new', enrich_state: 'pending', research_version: 0 },
+    { venue_ref: 'google:never', enrich_state: 'failed', research_version: 0 },
+    { venue_ref: 'google:current', enrich_state: 'done', research_version: RESEARCH_VERSION },
+    { venue_ref: 'google:scored', enrich_state: 'scored', research_version: 2 },
+  ]);
+  assert.deepEqual([...free].sort(), ['google:old-done', 'google:old-partial']);
+  // And the paid sweep still counts a place researched at the paid version as held.
+  assert.ok(PAID_RESEARCH_VERSION < RESEARCH_VERSION);
+  assert.equal(alreadyResearched({ enrich_state: 'done', enriched_at: new Date(), research_version: PAID_RESEARCH_VERSION, provenance: { name: 'osm' } }), true);
+});

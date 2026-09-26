@@ -105,8 +105,24 @@ const KIND_BATCH = 5;
  *      without markup; lets what we already know decide if there is a menu
  *   3  replaces rather than erases: a source that comes back empty no longer
  *      throws away what it said last time
+ *   4  keeps the body beside the lead — the venue's paragraphs and the
+ *      article beyond its lead — and refuses a town's or a hill's article for
+ *      a business (26 Sep 2026). Nothing paid changed, so the places already
+ *      researched are brought up to it by the free sources alone: see
+ *      `PAID_RESEARCH_VERSION` and `freeBackfill`.
  */
-const RESEARCH_VERSION = 3;
+export const RESEARCH_VERSION = 4;
+
+/**
+ * The last version whose change needed a paid call to catch up with.
+ *
+ * A version that only adds what the free sources say — version 4's bodies —
+ * must not make the paid sweep treat every place it already holds as new, nor
+ * send the catch-up loop to Google and Claude for each of them (Codex asked
+ * for the bump, 26 Sep 2026; the price of a bare bump was a paid pass over the
+ * whole owned layer, which is the owner's to approve and not ours).
+ */
+export const PAID_RESEARCH_VERSION = 3;
 
 const LICENCE = {
   osm: { licence: 'ODbL 1.0', retention: 'indefinite', attribution: OSM_ATTRIBUTION },
@@ -200,10 +216,10 @@ const JSON_FIELDS = new Set(Object.keys(JSON_DEFAULTS));
  * record and the offline record must not hold anything that has to be thrown
  * away on a device we cannot reach.
  */
-async function compose(venueRef) {
+async function compose(venueRef, { without = [] } = {}) {
   // Only what we may keep for good: this builds `place_records`, which is the
   // offline record and goes out to devices we cannot reach again.
-  const rows = await owned.liveFacts(venueRef, { keepableOnly: true });
+  const rows = (await owned.liveFacts(venueRef, { keepableOnly: true })).filter((r) => !without.includes(r.source));
   const bySource = new Map();
   for (const r of rows) bySource.set(`${r.field}|${r.source}`, r.value);
 
@@ -411,7 +427,7 @@ async function findTheirPage({ venueRef, name, locality, address, category, hous
 export function alreadyResearched(row) {
   if (!row || row.enrich_state !== 'done') return false;
   const fresh = row.enriched_at && Date.now() - new Date(row.enriched_at).getTime() < REFRESH_AFTER_DAYS * 86_400_000
-    && (row.research_version ?? 0) >= RESEARCH_VERSION;
+    && (row.research_version ?? 0) >= PAID_RESEARCH_VERSION;
   return Boolean(fresh && isIdentified(row.provenance));
 }
 
@@ -985,23 +1001,22 @@ export async function ownedRecords(refs) {
  * leaves the record with what the open map and the venue's own page said.
  */
 export async function forgetEncyclopedia(venueRef) {
-  // Not the swallowing helper research uses: a delete that failed must fail
-  // the audit, not report a place forgotten while its facts remain (Codex,
-  // 26 Sep 2026).
-  await owned.forgetSourceFacts(venueRef, ['wikipedia', 'wikidata']);
-  const out = await compose(venueRef);
-  // A place whose only owned facts were the article's is not owned any more,
-  // and coverage and the paid paths must not go on treating it as researched
-  // (Codex, 26 Sep 2026) — the same settling the administrative edit does.
-  await owned.settleOwnership(venueRef).catch(() => null);
+  // The facts go last. Everything that depends on them — the record composed
+  // without them, its ownership, its matched list — is settled first, so a
+  // step that fails leaves the wikidata_id in place and the next audit finds
+  // the place again (Codex, 26 Sep 2026). The delete itself is the
+  // non-swallowing one: a delete that failed fails the audit.
+  const ENC = ['wikipedia', 'wikidata'];
+  const out = await compose(venueRef, { without: ENC });
+  await owned.settleOwnership(venueRef);
   // The record must not go on saying the article matched, and a record left
-  // with nothing of its own is a research job again, not a finished one
-  // (Codex, 26 Sep 2026).
+  // with nothing of its own is a research job again, not a finished one.
   await query(
     `update place_records
         set matched = coalesce(matched, '{}'::jsonb) - 'wikipedia' - 'wikidata',
             enrich_state = case when provenance = '{}'::jsonb and enrich_state = 'done' then 'pending' else enrich_state end
       where venue_ref = $1`, [venueRef]);
+  await owned.forgetSourceFacts(venueRef, ENC);
   return out;
 }
 
@@ -1074,6 +1089,12 @@ export async function catchUp({ limit = 8 } = {}) {
    * The sweep has held the name and the point all along.
    */
   const seeds = await owned.sweepSeeds(refs).catch(() => ({}));
+  // A place researched before, and due only because the version moved on, is
+  // brought up to date by the free sources and nothing else.
+  const versions = refs.length
+    ? (await query('select venue_ref, enrich_state, research_version from place_records where venue_ref = any($1)', [refs])).rows
+    : [];
+  const free = freeBackfill(versions);
   // On the claiming household's behalf, so the calls are attributed and held
   // to that household's cap; a place nobody claimed is researched for the
   // founding household, whose estate it is (Codex, 25 Sep 2026).
@@ -1081,10 +1102,24 @@ export async function catchUp({ limit = 8 } = {}) {
   const founding = refs.some((r) => !claimants[r]) ? await households.firstHousehold().catch(() => null) : null;
   const { queue, skipped } = attributeCatchUp(refs, claimants, founding?.id ?? null);
   for (const [ref, householdId] of queue) {
-    queueEnrichment(ref, { ...(seeds[ref] ? { seed: seeds[ref] } : {}), householdId });
+    queueEnrichment(ref, { ...(seeds[ref] ? { seed: seeds[ref] } : {}), householdId, ...(free.has(ref) ? { paid: false } : {}) });
   }
   if (skipped.length) console.warn(`own: catch-up left ${skipped.length} place(s) unresearched: nobody to attribute them to`);
   return queue.length;
+}
+
+/**
+ * Which due places are a free backfill: researched before (version 1 or
+ * later), behind the current version, and not waiting for their first
+ * research. Pure, so the rule that keeps a version bump from spending is
+ * tested on its own. Anything the query could not read is left paid-as-before
+ * rather than guessed free — the set only ever names a place it has seen.
+ */
+export function freeBackfill(rows, version = RESEARCH_VERSION) {
+  return new Set(rows
+    .filter((r) => r && r.enrich_state !== 'pending' && r.enrich_state !== 'scored'
+      && Number(r.research_version) >= 1 && Number(r.research_version) < version)
+    .map((r) => r.venue_ref));
 }
 
 /**
