@@ -17,12 +17,14 @@ Read `docs/requirements.md` (governing) and `docs/technical-constraints.md` befo
 - **Codex runs on the Epic account, not Parcelhero** (owner, 21 Sep 2026). There are two ChatGPT Business accounts on this machine and only Epic's may bill for Epic's reviews. The switch is `CODEX_HOME`: `.claude/settings.local.json` points this repo at `~/.codex-epic` (roger@epic.day), while the default `~/.codex` stays on Parcelhero. That settings file is gitignored, so **a fresh clone does not have it** — until it is restored, prefix codex commands with `CODEX_HOME=$HOME/.codex-epic`. Never `codex logout` to change account: two homes hold two logins side by side.
 - **Never commit from the shared index: write in the shared tree, commit and push only from a worktree off `origin/main`** (owner, 26 Sep 2026; supersedes hunk-staging in the shared tree, 25 Sep). The index is shared, and any check followed by a separate commit races every other session: on 24 Sep `git commit -- <path>` swept a peer's lines twice in a day, once between a `git diff` and the commit after it, and on 26 Sep a `git diff --cached --stat` that showed three files of one session's own was followed — after a test run of a few seconds — by a commit that also carried the harvest session's staged migration 260, because `git commit` takes the whole index as it is at that instant (F8, the third time). Hunk-staging cannot close a race; a tree nobody else writes to can. So in the shared tree only edit files, and never `git add`, `git commit`, `git commit --amend`, `git mv`, `git stash`, `git checkout -- <file>` or push `main` — its local `main` routinely holds other sessions' unpushed commits, and pushing it ships their unfinished batches. Every commit, every time:
   ```
-  git fetch origin && BASE=$(git rev-parse origin/main)   # one base, pinned: another session's fetch moves origin/main
-  git diff --binary $BASE -- <your files> > /tmp/<name>.patch
+  git fetch origin && git rev-parse origin/main > /tmp/<name>.base   # one base, pinned — another session's fetch moves origin/main
+  #   in a file, not a variable: an agent's shell does not keep variables between calls, and an empty $BASE turns the
+  #   next line back into a diff against the shared index. Every later line reads it with ${…:?} so an empty one stops.
+  git diff --binary "$(cat /tmp/<name>.base)" -- <your files> > /tmp/<name>.patch
   #   the working tree against origin/main itself — not the shared index, not the shared HEAD.
   #   read it and cut out every hunk that is not yours, whether uncommitted or in somebody's unpushed commit.
   #   a new file of yours is not in it: copy it across.
-  git worktree add --detach /tmp/epic-wt-<name> $BASE
+  git worktree add --detach /tmp/epic-wt-<name> "$(cat /tmp/<name>.base)"
   cd /tmp/epic-wt-<name> && git apply /tmp/<name>.patch
   cp <repo>/.env . && ln -s <repo>/node_modules node_modules && ln -s <repo>/apps/api/node_modules apps/api/node_modules   # + apps/web/node_modules for web work
   git add <your files> && git diff --cached           # nothing else is here to sweep in
@@ -30,7 +32,7 @@ Read `docs/requirements.md` (governing) and `docs/technical-constraints.md` befo
   <the message>
   MSG
   (cd apps/api && npm test)                            # the full suite, after the last commit, before the review
-  CODEX_HOME=$HOME/.codex-epic codex exec review --base $BASE
+  B=$(cat /tmp/<name>.base); CODEX_HOME=$HOME/.codex-epic codex exec review --base "${B:?no pinned base}"
   #   read every finding, and fix it in the SHARED tree — then carry it across the same way:
   #   git diff --binary $(git -C /tmp/epic-wt-<name> rev-parse HEAD) -- <your files> > /tmp/<name>-fix.patch
   #   (run in the shared tree; cut to your hunks), git apply it here, commit, suite, review again.
@@ -39,7 +41,7 @@ Read `docs/requirements.md` (governing) and `docs/technical-constraints.md` befo
   git push origin HEAD:main && cd <repo> && git worktree remove --force /tmp/epic-wt-<name>
   #   push only with nothing actionable left; the pre-push hook runs the suite once more.
   #   the worktree goes only once the push has succeeded — until then it is the only copy of the reviewed commit.
-  #   refused because main moved: git fetch && BASE=$(git rev-parse origin/main) && git rebase $BASE here — BASE re-pinned,
+  #   refused because main moved: git fetch && git rev-parse origin/main > /tmp/<name>.base && git rebase "$(cat /tmp/<name>.base)" here — re-pinned,
   #   or the review widens to everything upstream — then the suite and the review again,
   #   if the rebase is clean. On a conflict, git rebase --abort, resolve it in the shared tree, and cut the patch again.
   ```

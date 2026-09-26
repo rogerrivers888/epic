@@ -31,10 +31,12 @@ git status --short
   index** (owner, 26 Sep 2026; CLAUDE.md has the commands). A check followed by a
   separate commit races every other session: on 26 Sep a `git diff --cached` showing
   only this session's files was followed, a test run later, by a commit that also
-  carried another session's staged migration. So pin one base (`BASE=$(git rev-parse
-  origin/main)` after fetching — another session's fetch moves the ref), cut `git diff
-  --binary $BASE -- <your files>` to your hunks, apply it in `git worktree add --detach
-  /tmp/epic-wt-<name> $BASE`, and run every step below **there**. Never `git
+  carried another session's staged migration. So pin one base **in a file** —
+  `git rev-parse origin/main > /tmp/<name>.base` after fetching; an agent's shell loses
+  variables between calls, and an empty base turns the diff back into one against the
+  shared index — cut `git diff --binary "$(cat /tmp/<name>.base)" -- <your files>` to your
+  hunks, apply it in `git worktree add --detach /tmp/epic-wt-<name> "$(cat /tmp/<name>.base)"`,
+  and run every step below **there**. Never `git
   add`, `git commit`, amend or push `main` in the shared tree.
 - **Every edit, review fixes included, is made in the shared tree first** and carried to
   the worktree as a patch against the worktree's `HEAD`. The shared tree is the copy that
@@ -56,7 +58,7 @@ money and tells you nothing you needed.
 ## 3. Codex
 
 ```
-codex exec review --base $BASE        # the base pinned in step 1, not origin/main as it is now
+B=$(cat /tmp/<name>.base); codex exec review --base "${B:?no pinned base}"   # the base pinned in step 1
 ```
 
 Use `--commit <sha>` for one commit or `--uncommitted` for work not yet committed.
@@ -80,8 +82,8 @@ neither the tests nor the deployed site would.
 
 From the worktree: `git push origin HEAD:main && cd <repo> && git worktree remove --force /tmp/epic-wt-<name>`
 — removed **only once the push has succeeded**: until then the reviewed commit lives nowhere else.
-If the push is refused because `main` moved, `git fetch && BASE=$(git rev-parse origin/main) && git rebase $BASE`
-in the worktree — re-pinning `BASE`, or the review then covers everything upstream too — and go back to step 2 —
+If the push is refused because `main` moved, `git fetch && git rev-parse origin/main > /tmp/<name>.base && git rebase "$(cat /tmp/<name>.base)"`
+in the worktree — re-pinning the base, or the review then covers everything upstream too — and go back to step 2 —
 but only if the rebase is clean. If it stops on a conflict, `git rebase --abort`: resolve it in the shared tree,
 which is where every edit lives, then cut the patch again against the new `origin/main` in a fresh worktree.
 The `pre-push` hook runs the whole suite again and blocks the push if anything fails.
