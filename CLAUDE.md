@@ -32,6 +32,7 @@ Read `docs/requirements.md` (governing) and `docs/technical-constraints.md` befo
   #   read every finding, and fix it in the SHARED tree — then carry it across the same way:
   #   git diff --binary $(git -C /tmp/epic-wt-<name> rev-parse HEAD) -- <your files> > /tmp/<name>-fix.patch
   #   (run in the shared tree; cut to your hunks), git apply it here, commit, suite, review again.
+  #   A file NEW in this batch is untracked in the shared tree, and that diff would delete it: copy it across instead.
   #   Or stop and report it. Codex exits 0 with findings — the exit code is not the gate, you are.
   git push origin HEAD:main                           # only with nothing actionable left; the pre-push hook runs the suite once more
   cd <repo> && git worktree remove --force /tmp/epic-wt-<name>

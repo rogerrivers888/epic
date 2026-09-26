@@ -38,6 +38,8 @@ git status --short
 - **Every edit, review fixes included, is made in the shared tree first** and carried to
   the worktree as a patch against the worktree's `HEAD`. The shared tree is the copy that
   outlives the worktree; a fix made only in the worktree is reverted by the next patch.
+  A file new in the batch is untracked in the shared tree, so it is copied across, never diffed —
+  the diff would delete it.
 
 ## 2. The suite, after the final commit
 
