@@ -15,34 +15,39 @@ Codex runs on the Epic account. `.claude/settings.local.json` sets `CODEX_HOME` 
 file is missing (a fresh clone — it is gitignored), prefix every codex command with
 `CODEX_HOME=$HOME/.codex-epic` and tell the owner it needs restoring.
 
-## 1. Fix the range first
+## 1. Build the worktree, then fix the range in it
 
-Work out what is being handed over and say it out loud before running anything:
+**Commit and push only from a worktree off `origin/main`, never from the shared
+index** (owner, 26 Sep 2026; CLAUDE.md has the full commands). A check followed by a
+separate commit races every other session: on 26 Sep a `git diff --cached` showing only
+this session's files was followed, a test run later, by a commit that also carried
+another session's staged migration. The shared tree's `HEAD` also routinely holds other
+sessions' unpushed commits, so nothing about the range can be read there. So, in order:
 
-```
-git log --oneline origin/main..HEAD   # in the worktree: exactly your commits
-git status --short
-```
+1. **In the shared tree, only read and cut.** `git fetch origin && git rev-parse
+   origin/main > /tmp/<name>.base` — the base in a file, because an agent's shell loses
+   variables between calls and an empty base turns the diff back into one against the
+   shared index. Then `git diff --binary "$(cat /tmp/<name>.base)" -- <your files> >
+   /tmp/<name>.patch`, cut to your hunks; files new in the batch are copied across,
+   never diffed.
+2. **Make the worktree and move into it:** `git worktree add --detach
+   /tmp/epic-wt-<name> "$(cat /tmp/<name>.base)"`, apply the patch, copy `.env`, symlink
+   the `node_modules`. Every step from here runs **there**; never `git add`, `git
+   commit`, amend or push `main` in the shared tree.
+3. **Now say the range out loud**, from the worktree:
+   ```
+   git log --oneline "$(cat /tmp/<name>.base)"..HEAD   # exactly your commits
+   git status --short
+   ```
 
 - A **migration and the tests that depend on it are committed together, never
   separately.** An uncommitted migration is invisible to every other session on this
-  machine. If `git status` shows one, stop and commit it with its tests before going on.
-- **Commit and push only from a worktree off `origin/main`, never from the shared
-  index** (owner, 26 Sep 2026; CLAUDE.md has the commands). A check followed by a
-  separate commit races every other session: on 26 Sep a `git diff --cached` showing
-  only this session's files was followed, a test run later, by a commit that also
-  carried another session's staged migration. So pin one base **in a file** —
-  `git rev-parse origin/main > /tmp/<name>.base` after fetching; an agent's shell loses
-  variables between calls, and an empty base turns the diff back into one against the
-  shared index — cut `git diff --binary "$(cat /tmp/<name>.base)" -- <your files>` to your
-  hunks, apply it in `git worktree add --detach /tmp/epic-wt-<name> "$(cat /tmp/<name>.base)"`,
-  and run every step below **there**. Never `git
-  add`, `git commit`, amend or push `main` in the shared tree.
+  machine; commit it with its tests, in the worktree, before going on.
 - **Every edit, review fixes included, is made in the shared tree first** and carried to
   the worktree as a patch against the worktree's `HEAD`. The shared tree is the copy that
   outlives the worktree; a fix made only in the worktree is reverted by the next patch.
-  A file new in the batch is untracked in the shared tree, so it is copied across, never diffed —
-  the diff would delete it.
+  A file new in the batch is untracked in the shared tree, so it is copied across, never
+  diffed — the diff would delete it.
 
 ## 2. The suite, after the final commit
 
