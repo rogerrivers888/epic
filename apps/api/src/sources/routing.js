@@ -1,4 +1,4 @@
-import { bump, noteFault } from './meter.js';
+import { noteFault } from './meter.js';
 import { sourceOff } from './switches.js';
 import { admitPaid } from './paidGate.js';
 import { wallClock, wallToUtc } from '../domain/time.js';
@@ -94,18 +94,20 @@ export const routingEnabled = () => Boolean(KEY()) && !sourceOff('google');
  * origin × destination pair in a matrix — and what the household's Google
  * bound is charged. Refused at the same door as Places (sources/paidGate.js):
  * a household and a signed-in session, or nothing goes out.
+ *
+ * **The door writes the ledger row, the moment it admits the request** (Codex,
+ * 26 Sep 2026, twice). Leaving it to callers meant a row only if every caller
+ * remembered, in order, on every path: `directions()` had no meter at all, and
+ * a run cut short by a deploy never reached its caller's write. An admitted
+ * request that reaches no row lives only in this process's count, and the
+ * month's bound forgets it at the next restart. So callers name a `purpose`
+ * (and a plan, where there is one) and write no Routes row of their own.
  */
-async function post(path, body, fieldMask, { elements = 1, meter = null } = {}) {
+async function post(path, body, fieldMask, { elements = 1, meter = null, purpose = null, planSessionId = null } = {}) {
   if (sourceOff('google')) { noteFault(meter, 'switched_off'); throw Object.assign(new Error('Google is switched off in Settings › Providers'), { code: 'switched_off' }); }
   if (routingPaused(path === ROUTE ? 'route' : 'matrix')) throw new Error('Google Routes has no quota left today — travel times are worked out from the distance until it resets.');
   await admitPaid({ meter, requests: elements });
-  // On the meter once it is admitted, so a refused request is not counted as one Google billed.
-  bump(meter, 'google-routes', elements);
-  // A caller with no meter writes no ledger row, and a request admitted into
-  // this process's count alone is forgotten at the next deploy — the bound
-  // would then let the month run past it (Codex, 26 Sep 2026). So the door
-  // writes that row itself, against whoever it admitted.
-  if (!meter) await recordUnmetered(elements);
+  await recordAdmitted(elements, purpose ?? (path === ROUTE ? 'routes.route' : 'routes.matrix'), planSessionId);
   const res = await fetch(`${ROUTES}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'X-Goog-Api-Key': KEY(), 'X-Goog-FieldMask': fieldMask },
@@ -127,10 +129,11 @@ async function post(path, body, fieldMask, { elements = 1, meter = null } = {}) 
   return data;
 }
 
-async function recordUnmetered(elements) {
+async function recordAdmitted(elements, purpose, planSessionId) {
   const [{ record }, { currentSpender }] = await Promise.all([import('../repositories/providerCalls.js'), import('../context.js')]);
   const { householdId, sessionId } = currentSpender();
-  await record(householdId, 'google-routes', 'routes.unmetered', { 'google-routes': elements }, sessionId).catch(() => null);
+  // Not caught: a request that cannot be written down does not go out.
+  await record(householdId, 'google-routes', purpose, { 'google-routes': elements }, sessionId, null, { planSessionId });
 }
 
 const wp = (p) => ({ location: { latLng: { latitude: p.lat, longitude: p.lng } } });
@@ -141,7 +144,7 @@ const secondsToMinutes = (s) => Math.round(Number(String(s || '0s').replace('s',
  * Returns rows[origin][destination], null where no route exists. Billed per
  * element, so the caller keeps the two sides small.
  */
-export async function routeMatrixMinutes({ origins, destinations, mode = 'driving', departAt = null, meter = null }) {
+export async function routeMatrixMinutes({ origins, destinations, mode = 'driving', departAt = null, meter = null, purpose = null, planSessionId = null }) {
   if (!routingEnabled() || routingPaused('matrix') || !origins.length || !destinations.length) return null;
   const out = origins.map(() => new Array(destinations.length).fill(null));
   // The matrix allows up to 625 elements; keep batches small so one failure is cheap.
@@ -156,7 +159,7 @@ export async function routeMatrixMinutes({ origins, destinations, mode = 'drivin
       ...(departAt && new Date(departAt) > new Date() ? { departureTime: new Date(departAt).toISOString() } : {}),
     };
     // Billed per origin × destination element, and counted as it is admitted.
-    const rows = await post('/distanceMatrix/v2:computeRouteMatrix', body, 'originIndex,destinationIndex,duration,distanceMeters,condition', { elements: batch.length * origins.length, meter });
+    const rows = await post('/distanceMatrix/v2:computeRouteMatrix', body, 'originIndex,destinationIndex,duration,distanceMeters,condition', { elements: batch.length * origins.length, meter, purpose, planSessionId });
     for (const r of rows) {
       // A zero index is left out of the JSON, so both must be read as optional:
       // reading destinationIndex as undefined silently dropped every first column.
@@ -167,13 +170,13 @@ export async function routeMatrixMinutes({ origins, destinations, mode = 'drivin
 }
 
 /** Minutes from one origin to many destinations. Null entries where no route. */
-export async function travelMatrixMinutes({ origin, destinations, mode = 'driving', departAt = null, meter = null }) {
-  const rows = await routeMatrixMinutes({ origins: [origin], destinations, mode, departAt, meter });
+export async function travelMatrixMinutes({ origin, destinations, mode = 'driving', departAt = null, meter = null, purpose = null, planSessionId = null }) {
+  const rows = await routeMatrixMinutes({ origins: [origin], destinations, mode, departAt, meter, purpose, planSessionId });
   return rows ? rows[0] : null;
 }
 
 /** One journey: minutes, distance and the encoded polyline (for search-along-route). */
-export async function routeBetween({ from, to, mode = 'driving', departAt = null, meter = null }) {
+export async function routeBetween({ from, to, mode = 'driving', departAt = null, meter = null, purpose = null, planSessionId = null }) {
   if (!routingEnabled() || routingPaused('route')) return null;
   const body = {
     origin: wp(from), destination: wp(to), travelMode: MODE[mode] || 'DRIVE',
@@ -181,7 +184,7 @@ export async function routeBetween({ from, to, mode = 'driving', departAt = null
     ...(departAt && new Date(departAt) > new Date() ? { departureTime: new Date(departAt).toISOString() } : {}),
     ...(mode === 'transit' ? { transitPreferences: { routingPreference: 'FEWER_TRANSFERS' } } : {}),
   };
-  const data = await post('/directions/v2:computeRoutes', body, 'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline', { meter });
+  const data = await post('/directions/v2:computeRoutes', body, 'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline', { meter, purpose, planSessionId });
   const r = data.routes?.[0];
   return r ? { minutes: secondsToMinutes(r.duration), meters: r.distanceMeters ?? null, encodedPolyline: r.polyline?.encodedPolyline ?? null, estimated: false } : null;
 }
@@ -191,7 +194,7 @@ export async function routeBetween({ from, to, mode = 'driving', departAt = null
  * walking turns, driving, or public transport with the line, headsign, stops
  * and departure time. Fetched when the drawer opens, never stored.
  */
-export async function directions({ from, to, mode = 'walking', departAt = null, meter = null }) {
+export async function directions({ from, to, mode = 'walking', departAt = null, meter = null, purpose = null }) {
   if (!routingEnabled() || routingPaused('route')) return null;
   const body = {
     origin: wp(from), destination: wp(to), travelMode: MODE[mode] || 'WALK',
@@ -205,7 +208,7 @@ export async function directions({ from, to, mode = 'walking', departAt = null, 
     'routes.legs.steps.transitDetails.stopDetails', 'routes.legs.steps.transitDetails.localizedValues', 'routes.legs.steps.transitDetails.headsign',
     'routes.legs.steps.transitDetails.transitLine', 'routes.legs.steps.transitDetails.stopCount',
   ].join(',');
-  const data = await post('/directions/v2:computeRoutes', body, mask, { meter });
+  const data = await post('/directions/v2:computeRoutes', body, mask, { meter, purpose });
   const r = data.routes?.[0];
   if (!r) return null;
   const steps = (r.legs || []).flatMap((leg) => leg.steps || []).map((s) => {

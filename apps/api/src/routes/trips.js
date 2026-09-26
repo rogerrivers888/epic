@@ -2,6 +2,7 @@
 // (docs/trip-planner-design.md). Trip → days → stops in slots; a per-trip
 // shortlist of researched places; a base to come back to.
 
+import { restampForSpender } from '../sources/photoLinks.js';
 import { Router } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -1800,7 +1801,8 @@ router.get('/:id/shortlist/search/stream', async (req, res) => {
     // until the search finished and defeat the whole point.
     'x-accel-buffering': 'no',
   });
-  const send = (type, data) => { if (!res.writableEnded) res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`); };
+  // Photo links signed for this request, not for whoever filled the cache (sources/photoLinks.js).
+  const send = (type, data) => { if (!res.writableEnded) res.write(`event: ${type}\ndata: ${JSON.stringify(restampForSpender(data))}\n\n`); };
   // Every five seconds, so a source that has gone quiet is visible as quiet
   // rather than as nothing happening.
   const beat = setInterval(() => send('waiting', { at: Date.now() }), 5_000);

@@ -23,7 +23,6 @@ import {
 } from '../sources/flights.js';
 import { nightsOf } from './trips.js';
 import { directions, routingEnabled } from '../sources/routing.js';
-import * as providerCalls from '../repositories/providerCalls.js';
 import { kmBetween } from '../domain/travel.js';
 import { wallToUtc, DEFAULT_TZ } from '../domain/time.js';
 
@@ -394,11 +393,8 @@ router.get('/:id/travel/suggest', async (req, res, next) => {
     // Leave at the trip's own start, in the household's own zone.
     const date = String(trip.start_date ?? '').slice(0, 10);
     const departAt = date ? wallToUtc(date, '08:00', trip.timezone || DEFAULT_TZ) : null;
-    // Metered and written down: a Routes request that reaches nobody's ledger
-    // is one the household's Google bound forgets at the next deploy.
-    const meter = {};
-    const found = await directions({ from: home, to, mode: mode === 'train' ? 'transit' : 'driving', departAt, meter })
-      .finally(() => (meter['google-routes'] ? providerCalls.record(household.id, 'google-routes', 'trip.travel.directions', meter).catch(() => null) : null));
+    // Written down by the Routes door as it is admitted (sources/routing.js).
+    const found = await directions({ from: home, to, mode: mode === 'train' ? 'transit' : 'driving', departAt, purpose: 'trip.travel.directions' });
     if (!found) {
       return res.json({ ok: false, message: mode === 'train' ? 'No train Epic can find between those two. Type what you have booked.' : 'No road route Epic can find. Type what you have booked.' });
     }

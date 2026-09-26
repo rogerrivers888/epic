@@ -52,12 +52,51 @@ const sign = (name, expiry) =>
  * builds; nothing here reveals the key, and a signature is only good for the
  * one photograph it was made for.
  */
+// Every stamp its own expiry, so every stamp its own signature: two
+// households stamping one picture in the same millisecond would otherwise get
+// the same link, and the second would take the first's place in `signedFor`.
+let lastExpiry = 0;
+const nextExpiry = () => (lastExpiry = Math.max(Date.now() + LIFETIME_MS, lastExpiry + 1));
+
 export function stampPhoto(photo) {
   if (!photo?.ref) return photo;
-  const expiry = Date.now() + LIFETIME_MS;
+  const expiry = nextExpiry();
   const sig = sign(photo.ref, expiry);
   remember(sig, expiry);
   return { ...photo, exp: expiry, sig };
+}
+
+/**
+ * Every photo link in an answer, signed again for whoever it is being sent to.
+ *
+ * A link is first signed when the provider's answer is shaped, and that answer
+ * goes into a cache every household shares — so the spender remembered then is
+ * whoever happened to fill the cache, and a second household served the same
+ * results would spend the first one's quota on every picture (Codex, 26 Sep
+ * 2026). So the link is bound again as the response leaves, inside the
+ * request: `server.js` passes every JSON answer through here, and the two
+ * event streams pass each event. Copy on write — a cached object is never
+ * changed in place.
+ */
+export function restampForSpender(value, depth = 0) {
+  if (depth > 16 || value == null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) {
+    let out = null;
+    for (let i = 0; i < value.length; i += 1) {
+      const next = restampForSpender(value[i], depth + 1);
+      if (next !== value[i]) { out ??= value.slice(); out[i] = next; }
+    }
+    return out ?? value;
+  }
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return value;
+  if (typeof value.ref === 'string' && value.sig && value.exp && value.ref.startsWith('places/')) return stampPhoto(value);
+  let out = null;
+  for (const [k, v] of Object.entries(value)) {
+    const next = restampForSpender(v, depth + 1);
+    if (next !== v) { out ??= { ...value }; out[k] = next; }
+  }
+  return out ?? value;
 }
 
 /**

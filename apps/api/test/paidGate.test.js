@@ -111,15 +111,16 @@ test('Routes is refused unattributed, charged per element, and under the Google 
   const one = [{ lat: 51.4, lng: -0.6 }];
   const two = [{ lat: 51.41, lng: -0.61 }, { lat: 51.42, lng: -0.62 }];
   await withGoogle(async (out) => {
-    const meter = {};
-    await assert.rejects(() => routeMatrixMinutes({ origins: one, destinations: two, meter }), refused);
+    await assert.rejects(() => routeMatrixMinutes({ origins: one, destinations: two, meter: {}, purpose: 'test.refused' }), refused);
     assert.equal(out(), 0);
-    assert.equal(meter['google-routes'] ?? 0, 0, 'refused elements are not metered as billed');
+    const rowsFor = async (purpose) => (await query('select units, session_id from provider_calls where purpose = $1', [purpose])).rows;
+    assert.equal((await rowsFor('test.refused')).length, 0, 'a refused request is not on the ledger as one Google billed');
 
-    const paid = {};
-    await runAsSpender({ householdId: HH, sessionId: SIGNED_IN }, () => routeMatrixMinutes({ origins: one, destinations: two, meter: paid }));
+    await runAsSpender({ householdId: HH, sessionId: SIGNED_IN }, () => routeMatrixMinutes({ origins: one, destinations: two, meter: {}, purpose: 'test.matrix' }));
     assert.equal(out(), 1);
-    assert.equal(paid['google-routes'], 2, 'one per origin × destination element');
+    const [row] = await rowsFor('test.matrix');
+    assert.deepEqual(row?.units, { 'google-routes': 2 }, 'written by the door, one per origin × destination element');
+    assert.equal(row.session_id, SIGNED_IN);
 
     const was = offKeysList();
     setOffKeys([...was, 'google']);
@@ -159,14 +160,36 @@ test('Claude’s budget is its own default where no account has set a number', a
   } finally { await query('delete from households where id = $1', [bare]); }
 });
 
-test('a Routes request with no meter still reaches the ledger, so a restart cannot forget it', async () => {
+test('a Routes request whose caller writes nothing still reaches the ledger, so a restart cannot forget it', async () => {
   const { directions } = await import('../src/sources/routing.js');
   await withGoogle(async (out) => {
     await runAsSpender({ householdId: HH, sessionId: SIGNED_IN }, () => directions({ from: { lat: 51.4, lng: -0.6 }, to: { lat: 51.5, lng: -0.1 } }));
     assert.equal(out(), 1);
     const { rows: [row] } = await query(
-      `select units, session_id from provider_calls where household_id = $1 and purpose = 'routes.unmetered' order by created_at desc limit 1`, [HH]);
+      `select units, session_id from provider_calls where household_id = $1 and purpose = 'routes.route' order by created_at desc limit 1`, [HH]);
     assert.deepEqual(row?.units, { 'google-routes': 1 });
     assert.equal(row.session_id, SIGNED_IN);
   });
+});
+
+test('a photo link is signed again for whoever it is sent to', async () => {
+  const { stampPhoto, restampForSpender, spenderForLink } = await import('../src/sources/photoLinks.js');
+  const OTHER = '00000000-0000-4000-8000-0000000a7e04';
+  // Cached by the first household's search…
+  const cached = runAsSpender({ householdId: HH, sessionId: SIGNED_IN }, () => ({ venue: { photos: [stampPhoto({ ref: 'places/x/photos/cached' })] } }));
+  // …and served to another (Codex, 26 Sep 2026).
+  const served = runAsSpender({ householdId: OTHER, sessionId: SIGNED_IN }, () => restampForSpender(cached));
+  const photo = served.venue.photos[0];
+  assert.notEqual(photo.sig, cached.venue.photos[0].sig);
+  assert.equal(spenderForLink({ s: photo.sig }).householdId, OTHER);
+  assert.equal(spenderForLink({ s: cached.venue.photos[0].sig }).householdId, HH, 'the cached copy is not changed in place');
+});
+
+test('a paid request from the drawer upgrades a free job already waiting', () => {
+  // Codex, 26 Sep 2026: the loop's free job swallowed the drawer's paid one.
+  const line = [{ venueRef: 'google:a', householdId: HH }, { venueRef: 'google:b', householdId: HH }];
+  assert.equal(own.upgradeWaiting(line, 'google:b', { householdId: HH, paid: true, force: true }, SIGNED_IN), true);
+  assert.deepEqual(line[1], { venueRef: 'google:b', householdId: HH, paid: true, force: true, sessionId: SIGNED_IN });
+  assert.equal(own.upgradeWaiting(line, 'google:a', { householdId: HH }, SIGNED_IN), false, 'a free ask changes nothing');
+  assert.equal(line[0].paid, undefined);
 });

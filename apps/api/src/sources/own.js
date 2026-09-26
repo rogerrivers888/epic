@@ -948,8 +948,24 @@ function pump() {
 }
 
 /** Put a place in line to be researched. Returns immediately; nothing waits on this. */
+/** A paid ask replaces a free job for the same place still waiting in line. Pure, so it is tested alone. */
+export function upgradeWaiting(line, venueRef, opts, sessionId) {
+  if (!opts.paid) return false;
+  const i = line.findIndex((j) => j.venueRef === venueRef);
+  if (i < 0 || line[i].paid) return false;
+  line[i] = { ...line[i], ...opts, venueRef, sessionId };
+  return true;
+}
+
 export function queueEnrichment(venueRef, opts = {}) {
-  if (!venueRef || queued.has(venueRef)) return;
+  if (!venueRef) return;
+  if (queued.has(venueRef)) {
+    // Already waiting — but a free job the loop queued must not swallow a paid
+    // one somebody asked for by opening the drawer: the waiting job becomes the
+    // asked-for one, on the asker's household and session (Codex, 26 Sep 2026).
+    upgradeWaiting(waiting, venueRef, opts, opts.sessionId ?? currentSpender().sessionId ?? null);
+    return;
+  }
   queued.add(venueRef);
   // The session is taken now, from whoever queued it. The job runs later in
   // whatever context kicked the pump — often the background loop's — and a

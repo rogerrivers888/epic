@@ -59,7 +59,7 @@ import { ensureAttributeAliases } from './repositories/questionSets.js';
 import voiceRoutes, { adminRouter as voiceLabRoutes } from './routes/voice.js';
 import { startScoutLoop } from './sources/scoutArea.js';
 import { photoFor } from './sources/google.js';
-import { spenderForLink } from './sources/photoLinks.js';
+import { spenderForLink, restampForSpender } from './sources/photoLinks.js';
 import { currentSpender, runAsSpender } from './context.js';
 import { currentHousehold } from './routes/household.js';
 import { SCOUT_MONTHLY_RUNS } from './sources/localscout.js';
@@ -148,6 +148,15 @@ app.use('/api/images', libraryImageRoutes);
 app.use('/api/order', orderTicketRoutes);
 
 app.use(requireSession);
+// Every photo link in a JSON answer is signed for the household and session it
+// is being sent to, not for whoever filled the shared cache it came out of —
+// the picture it fetches is spent on their behalf (sources/photoLinks.js;
+// Codex, 26 Sep 2026).
+app.use((_req, res, next) => {
+  const json = res.json.bind(res);
+  res.json = (body) => json(restampForSpender(body));
+  next();
+});
 // Which devices are signed in is the household's business, so it is mounted on
 // this side of the door rather than with the sign-in verbs.
 app.use('/api', deviceRoutes);

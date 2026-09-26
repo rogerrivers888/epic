@@ -634,13 +634,13 @@ async function retrievePool({ household, trip, attendees, intent, sessionId, sou
       // finite: 200 of these on every plan was three quarters of a day's
       // allowance (owner, 4 Sep 2026, after the quota was breached).
       const asked = [...reached].sort((a, b) => a.travelMinutes - b.travelMinutes).slice(0, MATRIX_MAX);
-      const real = await travelMatrixMinutes({ origin: originPoint, destinations: asked, mode: trip.travel_mode, departAt: trip.depart_at, meter });
+      // The Routes door writes this row itself (sources/routing.js).
+      const real = await travelMatrixMinutes({ origin: originPoint, destinations: asked, mode: trip.travel_mode, departAt: trip.depart_at, meter, purpose: 'plan.matrix', planSessionId: sessionId });
       if (real) {
         const roadMinutes = new Map();
         asked.forEach((v, i) => { if (real[i]) roadMinutes.set(v, real[i].minutes); });
         reached = reached.map((v) => (roadMinutes.has(v) ? { ...v, travelMinutes: roadMinutes.get(v), travelEstimated: false } : { ...v, travelEstimated: true }));
       }
-      if (Object.keys(meter).length) await planSessions.recordSessionCall(household.id, sessionId, 'google-routes', 'plan.matrix', meter);
     } catch { /* keep estimates */ }
   }
   const inReach = reached
@@ -724,11 +724,10 @@ async function retrieveCorridor({ household, trip, dayTrip, attendees, sessionId
     try {
       const m = {};
       const [a, b] = await Promise.all([
-        routeMatrixMinutes({ origins: [origin], destinations: near, mode, departAt: dayTrip.depart_at, meter: m }),
-        routeMatrixMinutes({ origins: near, destinations: [destination], mode, departAt: dayTrip.depart_at, meter: m }),
+        routeMatrixMinutes({ origins: [origin], destinations: near, mode, departAt: dayTrip.depart_at, meter: m, purpose: 'plan.corridor.detour', planSessionId: sessionId }),
+        routeMatrixMinutes({ origins: near, destinations: [destination], mode, departAt: dayTrip.depart_at, meter: m, purpose: 'plan.corridor.detour', planSessionId: sessionId }),
       ]);
       if (a && b) { toThem = a[0]; fromThem = b.map((row) => row[0]); measured = true; }
-      await planSessions.recordSessionCall(household.id, sessionId, 'google-routes', 'plan.corridor.detour', m).catch(() => null);
     } catch { /* the estimate stands */ }
   }
   const direct = journey.minutes;
@@ -801,9 +800,8 @@ async function journeyWithStops({ household, trip, dayTrip, attendees, sessionId
   if (routingEnabled() && awayFromHome) {
     try {
       const meter = {};
-      const r = await routeBetween({ from: { lat: trip.origin_lat, lng: trip.origin_lng }, to: { lat: trip.base_lat, lng: trip.base_lng }, mode: trip.travel_mode, departAt: new Date(new Date(dayTrip.depart_at).getTime() - 3 * 3600_000).toISOString(), meter });
+      const r = await routeBetween({ from: { lat: trip.origin_lat, lng: trip.origin_lng }, to: { lat: trip.base_lat, lng: trip.base_lng }, mode: trip.travel_mode, departAt: new Date(new Date(dayTrip.depart_at).getTime() - 3 * 3600_000).toISOString(), meter, purpose: 'plan.journey', planSessionId: sessionId });
       if (r) { Object.assign(journey, { minutes: r.minutes, estimated: false, meters: r.meters }); polyline = r.encodedPolyline ?? null; }
-      await planSessions.recordSessionCall(household.id, sessionId, 'google-routes', 'plan.journey', meter);
     } catch { /* the estimate stands */ }
   }
   // Everything between home and the destination is invisible to a search around

@@ -24,6 +24,7 @@
  * the modes can be compared — see migration 074.
  */
 
+import { restampForSpender } from '../sources/photoLinks.js';
 import express from 'express';
 import { z } from 'zod/v4';
 import { query } from '../db.js';
@@ -185,7 +186,8 @@ router.post('/transcribe', express.raw({ type: audioMimes, limit: '25mb' }), asy
     res.setHeader('cache-control', 'no-cache, no-transform');
     res.setHeader('x-accel-buffering', 'no');
     res.flushHeaders?.();
-    const send = (event, data) => { if (!res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
+    // Photo links signed for this request (sources/photoLinks.js).
+    const send = (event, data) => { if (!res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(restampForSpender(data))}\n\n`); };
     const abort = new AbortController();
     req.on('close', () => { if (!res.writableEnded) abort.abort(); });
     try {

@@ -53,7 +53,7 @@ async function legMinutes(from, to, mode, departAt, meter) {
   if (!base || Date.now() - base.at > LEG_TTL_MS) {
     let r = null;
     if (routingEnabled() && meter) {
-      try { r = await routeBetween({ from, to, mode: apiMode, departAt }); meter.calls += 1; } catch (e) { meter.errors.push(e.message); }
+      try { r = await routeBetween({ from, to, mode: apiMode, departAt, purpose: 'trip.journey.leg' }); meter.calls += 1; } catch (e) { meter.errors.push(e.message); }
     }
     base = r ? { minutes: r.minutes, estimated: false, at: Date.now() } : { minutes: estimateTravelMinutes(from, to, apiMode), estimated: true, at: Date.now() };
     legCache.set(k, base);

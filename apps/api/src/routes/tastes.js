@@ -157,7 +157,7 @@ async function buildTable({ household, attending, attendees, session, taste, hom
   // ask again to be told the same thing (and billed for asking).
   if (routingEnabled() && !paused && !routing.off && finalists.length) {
     try {
-      const rows = await travelMatrixMinutes({ origin: home, destinations: finalists, mode: 'driving', meter });
+      const rows = await travelMatrixMinutes({ origin: home, destinations: finalists, mode: 'driving', meter, purpose: 'plan.tastes.routing', planSessionId: session.id });
       rows?.forEach((row, i) => { if (row?.minutes != null) { finalists[i].travelMinutes = row.minutes; finalists[i].travelEstimated = false; } });
       // A spent quota comes back both ways: a 429, and a 200 whose rows carry
       // an error instead of a route. Neither is worth asking again this run.
@@ -273,11 +273,9 @@ async function runTables({ household, attending, attendees, session, input }) {
   }
   run.running = false;
   run.at = Date.now();
-  // What the drive times cost, attributed like every other outbound call.
+  // What the drive times cost is written by the Routes door as each request
+  // is admitted (sources/routing.js), so a run cut short loses none of it.
   try {
-    if (Object.keys(meter).length) {
-      await planSessions.recordSessionCall(household.id, session.id, 'google-routes', 'plan.tastes.routing', meter);
-    }
     await planSessions.savePlanState(session.id, { kind: 'tastes', input, running: false });
   } catch { /* the tables are already in hand */ }
 }
