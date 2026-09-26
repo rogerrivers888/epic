@@ -697,7 +697,7 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
     // category, so a hill in the hills drawer may match the hill's article
     // and a sports centre may not (Codex, 26 Sep 2026).
     const drawer = (await query('select subcategory from place_index where venue_ref = $1', [venueRef]).catch(() => ({ rows: [] }))).rows[0]?.subcategory ?? null;
-    try { enc = await encyclopediaFor({ name: seed.name, lat: osm?.lat ?? seed.lat, lng: osm?.lng ?? seed.lng, locality: seed.locality ?? null, address: seed.address ?? null, category: [seed.category, drawer].filter(Boolean).join(' ') || null }); }
+    try { enc = await encyclopediaFor({ name: seed.name, lat: osm?.lat ?? seed.lat, lng: osm?.lng ?? seed.lng, locality: seed.locality ?? null, address: seed.address ?? null, category: seed.category ?? null, drawer }); }
     finally { await logCall(householdId, 'wikipedia', 'own.encyclopedia'); }
     // Wikidata is a second service and gets its own line, so the usage table
     // says who was actually asked.

@@ -167,7 +167,7 @@ async function entity(qid) {
  * there is an article, three when it also has a Wikidata entity; all free, all
  * keepable.
  */
-export async function encyclopediaFor({ name, lat, lng, locality = null, address = null, category = null } = {}) {
+export async function encyclopediaFor({ name, lat, lng, locality = null, address = null, category = null, drawer = null } = {}) {
   if (lat == null || lng == null || !String(name || '').trim()) return null;
   const { nameScore, placeWords } = await import('./openMatch.js');
   // The village's name is in half the articles written about the village, so it
@@ -207,7 +207,9 @@ export async function encyclopediaFor({ name, lat, lng, locality = null, address
   try { facts = await entity(page.wikidataId); } catch { return null; }
   // An article about the town, the hill or the borough is not an article
   // about the place, however well the name scores.
-  if (refused(facts.classes, category)) return null;
+  // The drawer is asked beside the category, never joined to it: the food
+  // threshold above reads the category whole (Codex, 26 Sep 2026).
+  if (refused(facts.classes, [category, drawer].filter(Boolean).join(' ') || null)) return null;
   const text = await body(best.title).catch(() => null);
 
   return {
