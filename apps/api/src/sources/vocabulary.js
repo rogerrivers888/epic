@@ -728,7 +728,10 @@ export async function classifyCandidates({
     const byWord = new Map((verdicts ?? []).map((v) => [normalise(v.word), v.kind]));
     for (const row of slice) {
       const kind = byWord.get(row.norm) ?? byWord.get(normalise(row.raw_forms?.[0] ?? '')) ?? 'unclear';
-      if (kind === 'unclear') { counts.unclear += 1; continue; }
+      // An unclear verdict is written down too — as the count it was called
+      // at — so the pen does not hand the same words back on the next call and
+      // buy the same "cannot tell" again (migration 252). It is re-asked when a
+      // later harvest raises its count, which is what "looked at again" means.
       await sets.setKind(row.id, { kind, by: ask ? 'test' : MODEL });
       counts[kind] += 1;
     }

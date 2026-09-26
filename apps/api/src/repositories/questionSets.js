@@ -508,22 +508,33 @@ export async function candidates({
  * overwriting one somebody took by hand.
  */
 export async function setKind(id, { kind, by = null } = {}) {
+  // `classified_seen` is written for every verdict, "unclear" included: it is
+  // the count the word was called at, and the pen re-asks a word only once
+  // that count has risen (migration 252).
   const { rows } = await query(
     `update harvest_candidates
         set kind = $2, status = case when $2 = 'feature' then 'new' else 'unresolved' end,
-            classified_at = now(), classified_by = $3
+            classified_at = now(), classified_by = $3, classified_seen = places_seen
       where id = $1 and status in ('new', 'unresolved') returning *`,
     [id, kind, by],
   );
   return rows[0] ?? null;
 }
 
-/** The holding pen, oldest first: what a classifier has yet to call. */
+/**
+ * The holding pen, most-seen first: what a classifier has yet to call.
+ *
+ * A word the classifier has already declined is not "yet to call" until a
+ * later harvest has raised its count — otherwise the same four hundred words
+ * come back at the top of every tranche and are bought again (26 Sep 2026:
+ * 416 of 480 held, then 461 of 480, at six model calls a tranche).
+ */
 export async function unclassified({ subcategory = null, limit = 200 } = {}) {
   const { rows } = await query(
     `select id, norm, raw_forms, subcategory, places_seen, places_total
        from harvest_candidates
       where kind = 'unclear' and status = 'unresolved'
+        and (classified_seen is null or places_seen > classified_seen)
         and ($1::text is null or subcategory = $1)
       order by places_seen desc, id
       limit $2`,

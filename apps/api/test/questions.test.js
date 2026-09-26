@@ -565,3 +565,31 @@ test('the Google pass is decided against, and the code refuses before it quotes 
   assert.equal(await harvest.verdictAgainst('harvest.google-pass'), null, 'a superseded verdict no longer stands');
   await query("delete from data_verdicts where key = 'harvest.google-pass.test-reopen'");
 });
+
+test('a word the classifier cannot call is not asked again until its count rises', async () => {
+  // 26 Sep 2026: an unclear verdict wrote nothing, and the pen is read
+  // most-seen first, so the same four hundred words came back at the top of
+  // every tranche — 416 of 480 held, then 461 of 480 — and were bought again.
+  const harvest = await import('../src/sources/vocabulary.js');
+  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+  const { rows: [row] } = await query(
+    `insert into harvest_candidates (norm, raw_forms, subcategory, places_seen, places_total, kind, status)
+     values ('zz murk', array['zz murk'], $1, 7, 20, 'unclear', 'unresolved') returning id`, [sub],
+  );
+  const first = await harvest.classifyCandidates({ subcategory: sub, limit: 10, ask: async (slice) => slice.map((w) => ({ word: w.norm, kind: 'unclear' })) });
+  assert.equal(first.looked, 1);
+  assert.equal(first.held, 1, 'the verdict was unclear');
+  const { rows: [after] } = await query('select classified_at, classified_seen, kind, status from harvest_candidates where id = $1', [row.id]);
+  assert.ok(after.classified_at, 'an unclear verdict is written down');
+  assert.equal(after.classified_seen, 7);
+  assert.equal(after.kind, 'unclear');
+  assert.equal(after.status, 'unresolved', 'still in the pen');
+  const second = await harvest.classifyCandidates({ subcategory: sub, limit: 10, ask: async () => { throw new Error('must not be asked'); } });
+  assert.equal(second.looked, 0, 'not asked again at the same count');
+  await query('update harvest_candidates set places_seen = 9 where id = $1', [row.id]);
+  const third = await harvest.classifyCandidates({ subcategory: sub, limit: 10, ask: async (slice) => slice.map((w) => ({ word: w.norm, kind: 'feature' })) });
+  assert.equal(third.looked, 1, 'a raised count earns another look');
+  assert.equal(third.features, 1);
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+});
