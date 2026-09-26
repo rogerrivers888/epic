@@ -55,7 +55,13 @@ const SAME_VALUE = `case
       -- The host alone: a visit page against a root is not a disagreement
       -- (owner, 26 Sep 2026); a different host is. A query, a fragment or a
       -- port on a root is still the same host (Codex, 26 Sep 2026).
-      then substring(regexp_replace(lower(btrim(f.value #>> '{}')), '^https?://(www\\.)?', '') from '^[^/?#:]+')
+      -- On a host many venues share, the page is the venue, so the first
+      -- path segment is kept: two Facebook pages are two sites (Codex, 26 Sep 2026).
+      then (select case when h.host = any(array['facebook.com', 'm.facebook.com', 'instagram.com', 'sites.google.com', 'linktr.ee', 'twitter.com', 'x.com', 'tiktok.com'])
+                        then h.host || '/' || coalesce(substring(h.rest from '^/([^/?#]+)'), '')
+                        else h.host end
+              from (select substring(u from '^[^/?#:]+') as host, substring(u from '^[^/?#]*(.*)$') as rest
+                      from (select regexp_replace(lower(btrim(f.value #>> '{}')), '^https?://(www\\.)?', '') as u) x) h)
     when f.field = 'phone'
       -- "+44 (0)20…", "+44 20…" and "020…" are one number (Codex, 26 Sep 2026).
       then regexp_replace(regexp_replace(f.value #>> '{}', '[^0-9]', '', 'g'), '^(440?|0)', '')

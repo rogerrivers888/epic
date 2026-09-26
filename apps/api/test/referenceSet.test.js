@@ -251,6 +251,14 @@ test('the facts behind a disagreement can be read, field by field and source by 
   // A root with a tracking query or a fragment is the same host (Codex, 26 Sep 2026).
   await put('website', 'wikipedia', 'https://birdworld.co.uk?utm_source=x#top');
   assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === seven).disagreements, 0);
+  // Two pages on a host many venues share are two sites (Codex, 26 Sep 2026).
+  const six = 'google:ChIJ_ref_006';
+  for (const [source, value] of [['osm', 'https://www.facebook.com/venue-a/'], ['site', 'https://facebook.com/venue-a?ref=x']]) {
+    await query(`insert into place_facts (venue_ref, field, source, value, licence, retention, confidence, expires_at) values ($1, 'website', $2, $3, 'x', 'indefinite', 1, null) on conflict do nothing`, [six, source, JSON.stringify(value)]);
+  }
+  assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === six).disagreements, 0, 'one Facebook page written two ways');
+  await query(`insert into place_facts (venue_ref, field, source, value, licence, retention, confidence, expires_at) values ($1, 'website', 'wikidata', $2, 'x', 'indefinite', 1, null) on conflict do nothing`, [six, JSON.stringify('https://facebook.com/venue-b')]);
+  assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === six).disagreements, 1, 'two Facebook pages are two sites');
   await put('website', 'nominatim', 'https://www.everyoneactive.com/centre/x');
   assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === seven).disagreements, 1, 'another operator\u2019s site is a disagreement');
 });

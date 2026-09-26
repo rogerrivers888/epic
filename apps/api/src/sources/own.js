@@ -985,7 +985,10 @@ export async function ownedRecords(refs) {
  * leaves the record with what the open map and the venue's own page said.
  */
 export async function forgetEncyclopedia(venueRef) {
-  await forgetSource(venueRef, ['wikipedia', 'wikidata']);
+  // Not the swallowing helper research uses: a delete that failed must fail
+  // the audit, not report a place forgotten while its facts remain (Codex,
+  // 26 Sep 2026).
+  await owned.forgetSourceFacts(venueRef, ['wikipedia', 'wikidata']);
   const out = await compose(venueRef);
   // A place whose only owned facts were the article's is not owned any more,
   // and coverage and the paid paths must not go on treating it as researched
