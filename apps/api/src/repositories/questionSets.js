@@ -772,13 +772,16 @@ export async function globalFromCandidate(id, { label = null, kind = 'yesno', re
       }
       await client.query('insert into attribute_aliases (norm, target_key, raw) values ($1, $2, $3) on conflict (norm) do nothing', [c.norm, key, c.raw_forms?.[0] ?? null]);
     }
-    let question = await addQuestion({ attributeKey: key, scope: 'global', refreshDays, fromCandidate: id }, client);
-    // Asked everywhere now, so no set asks it as well: a set question on the
-    // same label would store the same fact twice (Codex, 26 Sep 2026). It is
-    // switched off, never deleted.
-    await client.query(
-      "update questions set active = false, updated_at = now() where attribute_key = $1 and scope = 'set' and active", [key],
+    // A label a set already asks is not made global here. Switching the set's
+    // question off would strand the answers it holds on the old id, and
+    // leaving it on would ask the same fact twice (Codex, 26 Sep 2026, twice
+    // over) — converting a set fact to a global one is its own decision, with
+    // its answers moved, and not a side effect of promoting a word.
+    const { rows: local } = await client.query(
+      "select set_key from questions where attribute_key = $1 and scope = 'set' and active", [key],
     );
+    if (local.length) throw bad(`${key} is already asked by ${local.map((r) => r.set_key).join(', ')}. Making it global is a separate decision — the answers it holds have to move with it.`);
+    let question = await addQuestion({ attributeKey: key, scope: 'global', refreshDays, fromCandidate: id }, client);
     // An existing global question on this label that was switched off is
     // switched back on, rather than the word being marked promoted to a
     // question nobody is asked (Codex, 26 Sep 2026).
