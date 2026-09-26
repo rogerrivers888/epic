@@ -118,9 +118,12 @@ export const MARGIN = { lat: 0.001, lng: 0.0016 };
  * in the margin came back through the object clause and could not be told
  * from a candidate (Codex, 26 Sep 2026) — so the answers are kept apart.
  */
-const fix = (n) => Number(n).toFixed(4);
+// Only the computed margin edges are rounded (to seven places, a centimetre):
+// the box as given is used exactly, since rounding it moved every edge by up
+// to five metres (Codex, 26 Sep 2026).
+const fix = (n) => String(Number(Number(n).toFixed(7)));
 const candidatesQuery = (drawer, box) =>
-  `[out:json][timeout:120];nwr${NAMED_FOR[drawer].selector}(${fix(box.s)},${fix(box.w)},${fix(box.n)},${fix(box.e)});out center tags;`;
+  `[out:json][timeout:120];nwr${NAMED_FOR[drawer].selector}(${box.s},${box.w},${box.n},${box.e});out center tags;`;
 const objectsQuery = (drawer, box) =>
   `[out:json][timeout:120];nwr${OBJECTS[drawer]}(${fix(box.s - MARGIN.lat)},${fix(box.w - MARGIN.lng)},${fix(box.n + MARGIN.lat)},${fix(box.e + MARGIN.lng)});out center tags;`;
 
@@ -235,7 +238,9 @@ export async function dryRun({ drawer, box, textFor = null, fetch = overpassQuer
   const rows = [];
   for (const c of candidates) {
     const nearby = c.lat == null ? [] : objects
-      .filter((o) => o !== c && o.lat != null && metres(c, o) <= ADJACENT_M)
+      // By OSM identity: the two questions return separate copies of a feature
+      // that is both a candidate and an object (Codex, 26 Sep 2026).
+      .filter((o) => !(o.type === c.type && o.id === c.id) && o.lat != null && metres(c, o) <= ADJACENT_M)
       .map((o) => ({ tags: o.tags, name: o.tags.name ?? null, m: Math.round(metres(c, o)) }));
     const text = await readText(c);
     const v = dayOutVerdict(drawer, { tags: c.tags, nearby, text, name: c.tags.name ?? '' });
@@ -323,8 +328,13 @@ export async function judge(venueRef, { drawer, name = '', lat = null, lng = nul
     // unmoved for ever, since the catch-up skips a place carrying the fact;
     // a filing before a failed fact moved the place out of the tested drawer
     // where the catch-up would have found it again. Together, or neither.
+    // The counts are refreshed after the commit, on the committed rows: a
+    // refresh inside the transaction read the old filing from another
+    // connection (Codex, 26 Sep 2026).
+    let moved = false;
     await withTransaction(async (client) => {
       const effect = await applyVerdict(venueRef, { drawer, verdict: v, tags, land, client });
+      moved = effect?.effect === 'refiled' || effect?.effect === 'not-in-epic';
       await client.query(
         `insert into place_facts (venue_ref, field, source, value, licence, retention, confidence, fetched_at, expires_at)
          values ($1, 'day_out_test', 'own', $2, 'ours', 'indefinite', $3, now(), null)
@@ -333,6 +343,7 @@ export async function judge(venueRef, { drawer, name = '', lat = null, lng = nul
         [venueRef, JSON.stringify({ drawer, ...v, effect: effect?.effect ?? null, to: effect?.to ?? null, checkedAt: new Date().toISOString() }), v.verdict === 'provisional' ? 0.5 : 1],
       );
     });
+    if (moved) await refreshStats().catch(() => null);
   }
   return v;
 }
@@ -373,7 +384,7 @@ export async function applyVerdict(venueRef, { drawer, verdict, tags = null, lan
     );
     // The shelf and area counts read a cache; a place that moved drawer is
     // counted under the old one until it is refreshed (Codex, 26 Sep 2026).
-    if (rows.length) await refreshStats().catch(() => null);
+    if (rows.length && !client) await refreshStats().catch(() => null);
     return { effect: rows.length ? 'refiled' : 'unchanged', to: other };
   }
   const { rows } = await run(
@@ -384,7 +395,7 @@ export async function applyVerdict(venueRef, { drawer, verdict, tags = null, lan
       returning venue_ref`,
     [venueRef, `${drawer}: ${verdict.reason}`, drawer],
   );
-  if (rows.length) await refreshStats().catch(() => null);
+  if (rows.length && !client) await refreshStats().catch(() => null);
   return { effect: rows.length ? 'not-in-epic' : 'unchanged' };
 }
 

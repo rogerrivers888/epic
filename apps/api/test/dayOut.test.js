@@ -323,8 +323,15 @@ test('the dry run asks the open map twice — candidates from the box, objects w
   };
   const d = await dryRun({ drawer: 'climbing', box, fetch, textFor: async () => '' });
   assert.equal(asked.length, 2);
-  assert.match(asked[0], /leisure"="sports_centre"\]\(51\.4000,-0\.7000,51\.4500,-0\.6000\)/, 'the first question is the box, by the drawer\'s selector');
-  assert.match(asked[1], /sport"~"climbing\|bouldering"\]\(51\.3990,-0\.7016,51\.4510,-0\.5984\)/, 'the second is the objects, with the margin');
+  assert.match(asked[0], /leisure"="sports_centre"\]\(51\.4,-0\.7,51\.45,-0\.6\)/, 'the first question is the box, by the drawer\'s selector');
+  assert.match(asked[1], /sport"~"climbing\|bouldering"\]\(51\.399,-0\.7016,51\.451,-0\.5984\)/, 'the second is the objects, with the margin');
   assert.deepEqual(d.rows.map((r) => r.name), ['Inside Sports Centre'], 'the margin centre is evidence, never a candidate');
   assert.deepEqual([d.rows[0].verdict, d.rows[0].by], ['kept', 'object'], 'and the wall inside the box speaks for the centre');
+});
+
+test('a feature that is both candidate and object is not its own evidence', async () => {
+  const lido = el(7, { leisure: 'swimming_pool', name: 'Sandford Parks Lido' }, 51.42, -0.65);
+  // Both questions return their own copy of the same feature.
+  const d = await dryRun({ drawer: 'lidos', box: boxOf('51.40,-0.70,51.45,-0.60'), fetch: async () => ({ elements: [{ ...lido, tags: { ...lido.tags } }] }), textFor: async () => '' });
+  assert.deepEqual([d.rows[0].verdict, d.rows[0].by, d.rows[0].nearest], ['provisional', 'name', null], 'not kept by a pool 0 m away that is itself');
 });

@@ -117,3 +117,41 @@ test('the filing and the fact commit together', async () => {
     if (was == null) delete process.env.EPIC_DAY_OUT_TEST; else process.env.EPIC_DAY_OUT_TEST = was;
   }
 });
+
+// ---------------------------------------------------------------------------
+// A5: Not in Epic survives every rebuild, whoever put it there (owner, 26 Sep 2026)
+// ---------------------------------------------------------------------------
+
+test('a place the test set aside stays out through a full rebuild, while its twin is re-filed', async () => {
+  const { shelveAll } = await import('../src/repositories/placeIndex.js');
+  // Two places the rebuild files the same way from an owned record — a museum
+  // — and neither filed by hand, so the rebuild is free to re-derive both.
+  // One is set aside by the test. The twin is what gives the test teeth: it
+  // proves the rebuild really does put a place like this back on a shelf.
+  for (const ref of ['google:a5-twin', 'google:a5-aside']) {
+    await query('delete from place_index where venue_ref = $1', [ref]);
+    await query("insert into place_index (venue_ref, category, subcategory, derived_by) values ($1, 'culture', 'museums', 'provider-type')", [ref]);
+    await query('delete from place_records where venue_ref = $1', [ref]);
+    await query("insert into place_records (venue_ref, name, category, experiences) values ($1, 'x', 'attraction', '[\"museum\"]'::jsonb)", [ref]);
+  }
+  const set = await applyVerdict('google:a5-aside', { drawer: 'museums', verdict: { verdict: 'out', by: null, reason: 'nothing says it has one' }, tags: {}, land: () => ({ subcategory: null }) });
+  assert.equal(set.effect, 'not-in-epic');
+  const { rows: [aside] } = await query('select derived_by from place_index where venue_ref = $1', ['google:a5-aside']);
+  assert.notEqual(aside.derived_by, 'hand', 'set aside by the test, not by a person — the case the hand guard never covered');
+
+  await shelveAll(); // the full rebuild: no refs, the whole estate
+
+  const { rows } = await query(
+    "select venue_ref, subcategory, not_in_epic_at, not_in_epic_before from place_index where venue_ref in ('google:a5-twin', 'google:a5-aside')",
+  );
+  const byRef = Object.fromEntries(rows.map((r) => [r.venue_ref, r]));
+  assert.equal(byRef['google:a5-twin'].subcategory, 'museums', 'the rebuild re-files a place like this one');
+  assert.equal(byRef['google:a5-aside'].subcategory, null, 'but not the one set aside — still off every shelf');
+  assert.ok(byRef['google:a5-aside'].not_in_epic_at, 'and still on the Not in Epic list');
+  assert.equal(byRef['google:a5-aside'].not_in_epic_before, 'museums');
+  // Only a person reversing it brings it back.
+  const back = await restoreToEpic('google:a5-aside');
+  assert.equal(back.subcategory, 'museums');
+  await query("delete from place_records where venue_ref in ('google:a5-twin', 'google:a5-aside')");
+  await query("delete from place_index where venue_ref in ('google:a5-twin', 'google:a5-aside')");
+});
