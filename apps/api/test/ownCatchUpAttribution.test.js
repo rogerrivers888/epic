@@ -28,8 +28,12 @@ test('with nobody to attribute it to, a place is left unresearched rather than r
 test('a version bump that only adds free facts is caught up for free, and a first research is not (26 Sep 2026)', async () => {
   const { freeBackfill, RESEARCH_VERSION, PAID_RESEARCH_VERSION, alreadyResearched } = await import('../src/sources/own.js');
   const free = freeBackfill([
-    { venue_ref: 'google:old-done', enrich_state: 'done', research_version: RESEARCH_VERSION - 1 },
-    { venue_ref: 'google:old-partial', enrich_state: 'partial', research_version: 1 },
+    { venue_ref: 'google:old-done', enrich_state: 'done', research_version: RESEARCH_VERSION - 1, provenance: { name: 'osm' } },
+    { venue_ref: 'google:old-partial', enrich_state: 'partial', research_version: 1, next_attempt_at: new Date(Date.now() + 86_400_000) },
+    // Due for its own paid retry, or done without ever identifying the place:
+    // those keep the retry they would have had (Codex, 26 Sep 2026).
+    { venue_ref: 'google:retry-due', enrich_state: 'failed', research_version: 2, next_attempt_at: new Date(Date.now() - 1000) },
+    { venue_ref: 'google:unidentified', enrich_state: 'done', research_version: 3, provenance: {}, enrich_attempts: 1 },
     { venue_ref: 'google:new', enrich_state: 'pending', research_version: 0 },
     { venue_ref: 'google:never', enrich_state: 'failed', research_version: 0 },
     { venue_ref: 'google:current', enrich_state: 'done', research_version: RESEARCH_VERSION },

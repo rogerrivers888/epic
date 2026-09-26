@@ -1092,7 +1092,7 @@ export async function catchUp({ limit = 8 } = {}) {
   // A place researched before, and due only because the version moved on, is
   // brought up to date by the free sources and nothing else.
   const versions = refs.length
-    ? (await query('select venue_ref, enrich_state, research_version from place_records where venue_ref = any($1)', [refs])).rows
+    ? (await query('select venue_ref, enrich_state, research_version, next_attempt_at, provenance, enrich_attempts from place_records where venue_ref = any($1)', [refs])).rows
     : [];
   const free = freeBackfill(versions);
   // On the claiming household's behalf, so the calls are attributed and held
@@ -1102,7 +1102,9 @@ export async function catchUp({ limit = 8 } = {}) {
   const founding = refs.some((r) => !claimants[r]) ? await households.firstHousehold().catch(() => null) : null;
   const { queue, skipped } = attributeCatchUp(refs, claimants, founding?.id ?? null);
   for (const [ref, householdId] of queue) {
-    queueEnrichment(ref, { ...(seeds[ref] ? { seed: seeds[ref] } : {}), householdId, ...(free.has(ref) ? { paid: false } : {}) });
+    // A free backfill is forced past the already-researched skip, which a
+    // version-3 record still passes, and adds without replacing (Codex, 26 Sep 2026).
+    queueEnrichment(ref, { ...(seeds[ref] ? { seed: seeds[ref] } : {}), householdId, ...(free.has(ref) ? { paid: false, force: true, replace: false } : {}) });
   }
   if (skipped.length) console.warn(`own: catch-up left ${skipped.length} place(s) unresearched: nobody to attribute them to`);
   return queue.length;
@@ -1115,10 +1117,17 @@ export async function catchUp({ limit = 8 } = {}) {
  * tested on its own. Anything the query could not read is left paid-as-before
  * rather than guessed free — the set only ever names a place it has seen.
  */
-export function freeBackfill(rows, version = RESEARCH_VERSION) {
+export function freeBackfill(rows, version = RESEARCH_VERSION, { now = Date.now(), maxAttempts = MAX_ATTEMPTS } = {}) {
+  // Due on its own account — a retry whose time has come, or a done record
+  // that never identified the place — keeps the paid retry it would have had
+  // before the version moved (Codex, 26 Sep 2026).
+  const dueAnyway = (r) =>
+    (['failed', 'partial'].includes(r.enrich_state) && r.next_attempt_at != null && new Date(r.next_attempt_at).getTime() <= now)
+    || (r.enrich_state === 'done' && !isIdentified(r.provenance) && Number(r.enrich_attempts ?? 0) < maxAttempts);
   return new Set(rows
     .filter((r) => r && r.enrich_state !== 'pending' && r.enrich_state !== 'scored'
-      && Number(r.research_version) >= 1 && Number(r.research_version) < version)
+      && Number(r.research_version) >= 1 && Number(r.research_version) < version
+      && !dueAnyway(r))
     .map((r) => r.venue_ref));
 }
 
