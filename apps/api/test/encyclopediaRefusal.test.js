@@ -11,7 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { refused } from '../src/sources/encyclopedia.js';
+import { refused, beyondTheLead } from '../src/sources/encyclopedia.js';
 import { paragraphsOf } from '../src/sources/site.js';
 
 test('a town, a borough or a parish is refused for any place', () => {
@@ -48,4 +48,11 @@ test('a page\u2019s paragraphs are kept as its body, and its furniture is not', 
   assert.match(body, /play barn/);
   assert.doesNotMatch(body, /Book now|Copyright|var a/);
   assert.equal(paragraphsOf(''), null);
+});
+
+test('the body starts at the first heading, so the lead is never held twice (Codex, 26 Sep 2026)', () => {
+  const extract = 'Birdworld is a bird park near Farnham.\n\n\n== History ==\nIt opened in 1968 with a penguin beach.\n\n\n== See also ==\nList of zoos';
+  assert.equal(beyondTheLead(extract), '== History ==\nIt opened in 1968 with a penguin beach.');
+  assert.equal(beyondTheLead('Only a lead, nothing beyond it.'), null);
+  assert.equal(beyondTheLead(null), null);
 });

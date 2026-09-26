@@ -78,7 +78,22 @@ async function body(title) {
   const p = new URLSearchParams({ action: 'query', prop: 'extracts', titles: title, explaintext: '1', exlimit: '1', format: 'json', origin: '*', redirects: '1' });
   const data = await get(`${WIKI}?${p}`);
   const page = Object.values(data?.query?.pages ?? {})[0];
-  const text = String(page?.extract ?? '').replace(/\s*==+\s*(See also|References|External links|Notes|Further reading|Bibliography)\s*==+[\s\S]*$/i, '').trim();
+  return beyondTheLead(page?.extract);
+}
+
+/**
+ * The plain-text extract without its lead and without its furniture.
+ *
+ * The full extract begins with the lead the summary already holds, so keeping
+ * it would hand the extractor the same sentences twice (Codex, 26 Sep 2026):
+ * the body starts at the first section heading. An article that is all lead
+ * has no body.
+ */
+export function beyondTheLead(extract) {
+  const whole = String(extract ?? '');
+  const first = whole.search(/(^|\n)\s*==+[^=\n]+==+/);
+  if (first < 0) return null;
+  const text = whole.slice(first).replace(/\s*==+\s*(See also|References|External links|Notes|Further reading|Bibliography)\s*==+[\s\S]*$/i, '').trim();
   return text ? text.slice(0, BODY_MAX) : null;
 }
 
@@ -181,7 +196,10 @@ export async function encyclopediaFor({ name, lat, lng, locality = null, address
   if (!page?.summary) return null;
 
   let facts = { classes: [], officialWebsite: null, openedYear: null, commonsImage: null };
-  if (page.wikidataId) { try { facts = await entity(page.wikidataId); } catch { /* the article alone is worth having */ } }
+  // With no answer from Wikidata there is nothing to refuse on, and an article
+  // that cannot be checked is not stored on the strength of its title: the
+  // match is left for the next pass rather than taken (Codex, 26 Sep 2026).
+  if (page.wikidataId) { try { facts = await entity(page.wikidataId); } catch { return null; } }
   // An article about the town, the hill or the borough is not an article
   // about the place, however well the name scores.
   if (refused(facts.classes, category)) return null;
