@@ -1013,10 +1013,34 @@ export async function catchUp({ limit = 8 } = {}) {
   // founding household, whose estate it is (Codex, 25 Sep 2026).
   const claimants = await owned.claimantsFor(refs).catch(() => ({}));
   const founding = refs.some((r) => !claimants[r]) ? await households.firstHousehold().catch(() => null) : null;
-  for (const ref of refs) {
-    queueEnrichment(ref, { ...(seeds[ref] ? { seed: seeds[ref] } : {}), householdId: claimants[ref] ?? founding?.id ?? null });
+  const { queue, skipped } = attributeCatchUp(refs, claimants, founding?.id ?? null);
+  for (const [ref, householdId] of queue) {
+    queueEnrichment(ref, { ...(seeds[ref] ? { seed: seeds[ref] } : {}), householdId });
   }
-  return refs.length;
+  if (skipped.length) console.warn(`own: catch-up left ${skipped.length} place(s) unresearched: nobody to attribute them to`);
+  return queue.length;
+}
+
+/**
+ * Whose account a caught-up place is researched on — and which are not
+ * researched at all.
+ *
+ * Owner, 26 Sep 2026: the loop "spends with no household attached, against a
+ * ceiling nobody can attribute and a cap that cannot refuse it — which is
+ * exactly the hole the cap was built to close … Do not leave it running
+ * unattributed." So a place goes to its claimant, or to the founding
+ * household where nobody has claimed it; and where there is no founding
+ * household either — a fresh installation, or the lookup failing — it is not
+ * researched, rather than researched on nobody's account. Pure, so the rule
+ * can be tested without a database.
+ */
+export function attributeCatchUp(refs, claimants = {}, foundingId = null) {
+  const queue = []; const skipped = [];
+  for (const ref of refs) {
+    const householdId = claimants[ref] ?? foundingId ?? null;
+    if (householdId) queue.push([ref, householdId]); else skipped.push(ref);
+  }
+  return { queue, skipped };
 }
 
 /** How much of the household's research is owned, for Settings and the offline card. */
