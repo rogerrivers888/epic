@@ -22,7 +22,9 @@ import { Image, Text, TextInput, View } from 'react-native';
 import { Icon } from '../../components/Icon';
 import { Press } from '../../components/press';
 import { LIME, ON_LIME, desk, fonts, house } from '../../theme';
-import { Act, Band, Kicker, Nothing, Value } from './desk';
+import {
+  Act, Band, Kicker, Nothing, Value, Wide,
+} from './desk';
 import { heartAge, shareSays, thinSomewhere, waiting } from './say';
 import type { BrowseRow, District, HouseMember } from './types';
 
@@ -93,6 +95,7 @@ export function Ideas({
         </Value>
       </View>
 
+      <Wide>
       <View>
         {/* The header carries the district codes, because the columns are areas. */}
         <View style={{
@@ -245,6 +248,7 @@ export function Ideas({
           );
         })}
       </View>
+      </Wide>
     </>
   );
 }
@@ -303,8 +307,15 @@ const STATES: { key: HouseState; name: string }[] = [
   { key: 'named', name: 'Named ideas' },
 ];
 
-const SAYS: Record<HouseState, string> = {
-  list: 'Forty ideas, scrollable, hearts inline. An idea is a title and a rule over facts — nothing is ever filed into one.',
+/**
+ * What each state shows, in a sentence. The list's count is the real one:
+ * it said "Forty ideas" whatever the household held (F4, 26 Sep 2026).
+ */
+const says = (state: HouseState, count: number): string => (state === 'list'
+  ? `${count} ${count === 1 ? 'idea' : 'ideas'}, scrollable, hearts inline. An idea is a title and a rule over facts — nothing is ever filed into one.`
+  : SAYS[state]);
+
+const SAYS: Record<Exclude<HouseState, 'list'>, string> = {
   first: 'The first heart asks whose list this is. One tap, sticky, never asked again in the session.',
   inspire: 'Hearted ideas rise to the top, and two or three unhearted ones stay mixed in so discovery does not stop.',
   thin: 'A hearted idea below minimum fill waits quietly rather than showing an empty shelf.',
@@ -344,10 +355,10 @@ export function HouseholdView({
   return (
     <>
       <View style={{
-        flexDirection: 'row', alignItems: 'center', gap: 20,
+        flexDirection: 'row', alignItems: 'center', gap: 20, flexWrap: 'wrap',
         borderBottomWidth: 2, borderBottomColor: desk.ruleStrong, paddingBottom: 16,
       }}>
-        <View style={{ flex: 1 }}>
+        <View style={{ flexGrow: 1, flexShrink: 1, flexBasis: 240 }}>
           <Text style={{
             fontFamily: fonts.heading, fontSize: 31, fontWeight: '800',
             letterSpacing: -1.085, lineHeight: 32, color: desk.ink,
@@ -355,7 +366,9 @@ export function HouseholdView({
             What the household sees
           </Text>
         </View>
-        <View style={{ flexDirection: 'row', borderWidth: 1, borderColor: desk.ruleStrong }}>
+        {/* Five states do not fit 390, so the strip scrolls in its own box. */}
+        <Wide min={0}>
+        <View style={{ flexDirection: 'row', alignSelf: 'flex-start', borderWidth: 1, borderColor: desk.ruleStrong }}>
           {STATES.map((s, i) => {
             const on = s.key === state;
             return (
@@ -377,8 +390,10 @@ export function HouseholdView({
             );
           })}
         </View>
+        </Wide>
       </View>
 
+      <Wide>
       <View style={{ flexDirection: 'row', gap: 40, alignItems: 'flex-start' }}>
         <View style={{
           width: 390, flexGrow: 0, flexShrink: 0,
@@ -549,7 +564,7 @@ export function HouseholdView({
         <View style={{ flex: 1, minWidth: 0, gap: 13 }}>
           <Kicker>What this state shows</Kicker>
           <Text style={{ fontFamily: fonts.body, fontSize: 13, color: desk.inkMuted, lineHeight: 20.8 }}>
-            {SAYS[state]}
+            {says(state, rows.length)}
           </Text>
           <View style={{ gap: 9, borderTopWidth: 1, borderTopColor: desk.rule, paddingTop: 14 }}>
             {hearts.length === 0 ? <Nothing>Nothing is hearted yet.</Nothing> : null}
@@ -578,6 +593,7 @@ export function HouseholdView({
           </View>
         </View>
       </View>
+      </Wide>
     </>
   );
 }

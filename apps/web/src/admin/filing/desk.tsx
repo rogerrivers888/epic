@@ -19,7 +19,7 @@
  */
 
 import React from 'react';
-import { Text, View } from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
 
 import { Icon } from '../../components/Icon';
 import { Press } from '../../components/press';
@@ -84,6 +84,41 @@ export const tabular = { fontVariant: ['tabular-nums' as const] };
 // ---------------------------------------------------------------------------
 // The page frame
 // ---------------------------------------------------------------------------
+
+/**
+ * A wide block — a table, or two columns side by side — that scrolls sideways
+ * inside its own box on a phone.
+ *
+ * The owner, 26 Sep 2026 (F4): no phone redesign for the back office; "each
+ * wide table scrolls sideways inside its own box, headings wrap, and the page
+ * itself never scrolls sideways". So below the shell's phone breakpoint the
+ * block keeps the width it was designed at (`min`) and the box scrolls; above
+ * it the block fills the column exactly as before. One tree either way — the
+ * ScrollView is always there — so flipping the shell's Web / Mobile toggle
+ * keeps whatever row was open.
+ *
+ * `min = 0` keeps the block at its own natural width, for a strip of controls
+ * that is wider than a phone but has no designed width of its own.
+ */
+export function Wide({ children, min = 1080 }: { children: React.ReactNode; min?: number }) {
+  const narrow = useViewport().width < 900;
+  return (
+    <ScrollView
+      horizontal
+      // Always able to scroll: where the content fits there is nothing to
+      // scroll and no bar, and where it does not — a desktop window just over
+      // the phone breakpoint — a box that would not scroll would hide the end
+      // of its rows instead.
+      style={{ flexGrow: 0 }}
+      // Wide: exactly the column's width. A horizontal scroller otherwise sizes
+      // its content to the longest unwrapped line, and a two-column block ran
+      // off the right edge on a desktop with its actions cut off.
+      contentContainerStyle={narrow ? { flexGrow: 1 } : { width: '100%' }}
+    >
+      <View style={narrow ? (min ? { width: min } : null) : { flex: 1 }}>{children}</View>
+    </ScrollView>
+  );
+}
 
 /**
  * The band across the top of every screen: a title, and the facts about it.

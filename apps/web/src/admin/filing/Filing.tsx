@@ -23,7 +23,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, View, type ViewStyle } from 'react-native';
+import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
 import { Press } from '../../components/press';
 import { desk, fonts, LIME } from '../../theme';
 import { asText, useQueryState, useRouter } from '../../router';
@@ -352,22 +352,17 @@ export function Filing({ canManage }: { canManage: boolean }) {
   // desk it is 390 wide through this hook, and a screen reading the window
   // would draw the desktop inside the phone.
   //
-  // Only while Overview is the tab shown: it is the one screen here with a
-  // phone layout, and the other tabs' tables have fixed columns that clip
-  // inside a 390 canvas worse than they scroll inside an 1180 one (Codex,
-  // 25 Sep 2026). Each tab that gains a phone layout joins this condition.
+  // On a phone every tab is drawn at the frame's width and **the page never
+  // scrolls sideways** (owner, 26 Sep 2026, F4). Headings wrap; each wide
+  // table or pair of columns sits in its own `Wide` box, which scrolls
+  // sideways by itself. This replaces the earlier arrangement, where every
+  // tab but Overview drew its 1180 canvas and the whole page scrolled.
   const { width } = useViewport();
-  const narrow = width < PHONE && tab === 'overview';
+  const narrow = width < PHONE;
   const gutter = narrow ? 16 : 28;
-  // A desktop canvas inside a phone frame has to be able to scroll sideways,
-  // or the frame shows its left 390px and nothing else. react-native-web's
-  // vertical ScrollView hides horizontal overflow, so it is switched back on
-  // here for exactly that case (Codex, 25 Sep 2026). The style key is the
-  // web's, which the native types do not know about.
-  const sideways = width < PHONE && !narrow ? ({ overflowX: 'auto' } as unknown as ViewStyle) : null;
 
   return (
-    <ScrollView style={[{ flex: 1, backgroundColor: desk.ground }, sideways]}
+    <ScrollView style={{ flex: 1, backgroundColor: desk.ground }}
                 contentContainerStyle={{ minWidth: narrow ? undefined : MIN_WIDTH }}>
       <View style={{ flex: 1 }}>
         {/* The tab row, and the two things that live to the right of it. On
@@ -923,7 +918,9 @@ function householdRows(
     return data.rows.filter((r) => /yourself|Jonah|Big kids|Older kids|Sneakily|Teenager/.test(r.title))
       .map(shelf);
   }
-  return data.rows.slice(0, 14).map(shelf);
+  // Every idea: the list is the whole list, and the sentence beside it counts
+  // what is drawn rather than naming a number (F4, 26 Sep 2026).
+  return data.rows.map(shelf);
 }
 
 type BrowseRowWithFill = Parameters<typeof Ideas>[0]['rows'][number];

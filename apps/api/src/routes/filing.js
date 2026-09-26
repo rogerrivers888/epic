@@ -146,7 +146,9 @@ filingRoutes.get('/overview', requires('view_library'), async (_req, res, next) 
       auditEvidence: audit?.audit?.evidence ?? null,
       runs: runs.rows.map((r) => ({
         id: r.id,
-        name: r.kind === 'google' ? 'Vocabulary harvest' : r.kind === 'free' ? 'Free sweep' : r.kind,
+        // The same names the Runs screen uses. This line knew two of the four
+        // kinds and printed the rest by their key — "features" (F4, 26 Sep 2026).
+        name: RUN_NAMES[r.kind] ?? r.kind,
         at: r.finished_at ?? r.started_at,
         state: r.status,
         scope: r.subcategories?.length ? `${r.subcategories.length} subcategories` : 'every fact sheet',
@@ -787,24 +789,30 @@ function candidateState(c) {
 }
 
 /** How a source is named to a person. Never the table's own word. */
-const SOURCE_WORDS = {
-  site: 'venue page', venue: 'venue page', osm: 'OSM tag', wikipedia: 'Wikipedia',
+/**
+ * Each source by a plain name, said as where the sightings came from. The
+ * count goes in front and the name is never pluralised by adding an "s": a
+ * source name is a name, and "2 featuress" is what that did to the feature
+ * harvest (F4, 26 Sep 2026). A source missing from here is shown by its key.
+ */
+export const SOURCE_WORDS = {
+  site: 'venue pages', venue: 'venue pages', osm: 'OSM tags', wikipedia: 'Wikipedia',
   wikidata: 'Wikidata', fsa: 'the hygiene register', reviews: 'reviews', google: 'reviews',
+  features: 'the feature harvest',
 };
 
 /**
  * The provenance line, written here so no screen composes a number into prose.
  *
- * "seen in reviews of 2 of 60 · confirmed on 2 venue pages · 1 OSM tag" is one
- * string, because the rules for which clause appears when are rules about the
- * data and belong beside it.
+ * "seen in 2 of 60 read · 2 from venue pages · 1 from OSM tags" is one string,
+ * because the rules for which clause appears when are rules about the data
+ * and belong beside it.
  */
-function provenanceOf(c) {
+export function provenanceOf(c) {
   const bits = [`seen in ${c.places_seen} of ${c.places_total} read`];
   for (const [k, v] of Object.entries(c.sources ?? {})) {
     if (k === 'reviews' || k === 'google' || !Number(v)) continue;
-    const word = SOURCE_WORDS[k] ?? k;
-    bits.push(`${v} ${word}${Number(v) === 1 ? '' : 's'}`);
+    bits.push(`${v} from ${SOURCE_WORDS[k] ?? k}`);
   }
   if (bits.length === 1 && c.classified_at) bits.push('no owned source agreed');
   return bits.join(' · ');
@@ -1344,7 +1352,7 @@ const RUN_NAMES = {
   google: 'Vocabulary harvest',
   free: 'Free sweep',
   probe: 'Probe',
-  features: 'Feature pass',
+  features: 'Feature harvest',
 };
 
 const TRIGGERS = [
@@ -1966,11 +1974,13 @@ filingRoutes.get('/pending', requires('view_library'), async (_req, res, next) =
       .map((a) => ({
         id: a.key,
         word: a.label,
-        times: 1,
-        from: 'approved into the vocabulary, and never attached to a set',
+        // Nobody typed it, so there is no count — null, not a one that
+        // happens to look like one (the can't-speak rule).
+        times: null,
+        from: 'approved into the vocabulary, and never attached to a sheet',
         // The closest things we already have, by the words they share.
         near: nearestLabels(a, attrs).map((x) => x.label),
-        repoint: 'nothing asks it, so nothing would move',
+        repoint: 'No fact sheet checks this, so nothing would change',
         kind: 'orphan',
       }));
 

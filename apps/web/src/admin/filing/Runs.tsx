@@ -23,7 +23,9 @@ import { Text, View } from 'react-native';
 
 import { Press } from '../../components/press';
 import { LIME, ON_LIME, desk, fonts } from '../../theme';
-import { Act, Band, Cell, Col, Head, Kicker, Nothing, Row, Value, WARN, tabular } from './desk';
+import {
+  Act, Band, Cell, Col, Head, Kicker, Nothing, Row, Value, WARN, tabular, Wide,
+} from './desk';
 import type { Decision, RunRow, Saturation, Trail, Trigger, RunWeek } from './types';
 
 // ---------------------------------------------------------------------------
@@ -103,6 +105,7 @@ export function Runs({
         people's sites; both get stated up front, with the money, so nobody
         starts one to see what happens.
       */}
+      <Wide>
       <View style={{
         flexDirection: 'row', gap: 1, backgroundColor: desk.rule,
         borderWidth: 1, borderColor: desk.rule,
@@ -134,7 +137,9 @@ export function Runs({
           </View>
         ))}
       </View>
+      </Wide>
 
+      <Wide>
       {live ? (
         <View style={{ borderLeftWidth: 2, borderLeftColor: LIME, paddingLeft: 16, paddingTop: 12, paddingBottom: 14, gap: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18 }}>
@@ -159,7 +164,9 @@ export function Runs({
           </View>
         </View>
       ) : null}
+      </Wide>
 
+      <Wide>
       <View style={{ gap: 11 }}>
         <Kicker>Runs · where the volume dies</Kicker>
         <View>
@@ -327,7 +334,9 @@ export function Runs({
           })}
         </View>
       </View>
+      </Wide>
 
+      <Wide>
       <View style={{
         flexDirection: 'row', gap: 40, alignItems: 'flex-start',
         borderTopWidth: 2, borderTopColor: desk.ruleStrong, paddingTop: 20,
@@ -426,6 +435,7 @@ export function Runs({
           </View>
         </View>
       </View>
+      </Wide>
     </>
   );
 }
@@ -480,14 +490,18 @@ export function DecisionLog({
         right={<Value tone="dim" size={12.5}>newest first · every row opens that word’s trail</Value>}
       />
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 26, flexWrap: 'wrap' }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        {/* maxWidth keeps a wrapping row inside the frame: without it the row is
+            as long as its labels and never wraps at all (F4). */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap', maxWidth: '100%' }}>
           <Kicker>Decision</Kicker>
           {DECISIONS.map((d) => (
             <Act key={d.key} label={d.name} tone={d.key === decision ? 'ink' : 'dim'}
               ruled={d.key === decision} onPress={() => onDecision(d.key)} />
           ))}
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        {/* maxWidth keeps a wrapping row inside the frame: without it the row is
+            as long as its labels and never wraps at all (F4). */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap', maxWidth: '100%' }}>
           <Kicker>Set</Kicker>
           <Act label="Every set" tone={set === 'all' ? 'ink' : 'dim'} ruled={set === 'all'}
             onPress={() => onSet('all')} />
@@ -498,6 +512,7 @@ export function DecisionLog({
         </View>
       </View>
 
+      <Wide>
       <View>
         <Head cols={LOG_COLS} />
         {rows.length === 0 ? <Nothing>Nothing has been decided yet.</Nothing> : null}
@@ -547,6 +562,7 @@ export function DecisionLog({
           );
         })}
       </View>
+      </Wide>
     </>
   );
 }

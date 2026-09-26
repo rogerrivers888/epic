@@ -119,7 +119,8 @@ export type Candidate = {
 export type PendingWord = {
   id: number;
   word: string;
-  times: number;
+  /** How many times it was typed. Null for a fact nobody typed — never a made-up one. */
+  times: number | null;
   /** Where it came from: "Inspect · Coral Reef and 6 others". */
   from: string;
   /** The closest labels we already have. */

@@ -25,8 +25,7 @@ import { Press } from '../../components/press';
 import { Icon } from '../../components/Icon';
 import { desk, fonts, LIME } from '../../theme';
 import {
-  Act, Alarm, Band, Cell, DeskButton, DeskPill, DeskSection, Head, Kicker,
-  LimeOutline, Link, Mark, Nothing, Row, TickBox, Value, WARN, tabular, type Col,
+  Act, Alarm, Band, Cell, DeskButton, DeskPill, DeskSection, Head, Kicker, LimeOutline, Link, Mark, Nothing, Row, TickBox, Value, WARN, tabular, type Col, Wide,
 } from './desk';
 import { Picker, type Destination, type PickCategory } from './Picker';
 import { TextInput } from 'react-native';
@@ -62,6 +61,7 @@ export function CategoryList({ data, onOpen }: {
           { label: 'VALUES TO REVIEW', value: data.counts.review.toLocaleString(), strong: true },
         ]}
       />
+      <Wide>
       <View>
         <Head cols={CAT_COLS} />
         {data.categories.length === 0 ? <Nothing>Nothing here yet.</Nothing> : null}
@@ -81,6 +81,7 @@ export function CategoryList({ data, onOpen }: {
           </Row>
         ))}
       </View>
+      </Wide>
     </>
   );
 }
@@ -189,7 +190,7 @@ export function CategoryBoard({ data, canManage, busy, picker, onOpen, onAdd, on
         </>
       ) : null}
 
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
         {adding ? (
           <>
             <TextInput
@@ -227,6 +228,7 @@ export function CategoryBoard({ data, canManage, busy, picker, onOpen, onAdd, on
         ) : null}
       </View>
 
+      <Wide>
       <View>
         <Head cols={SUB_COLS} />
         {data.subcategories.length === 0 ? <Nothing>Nothing here yet.</Nothing> : null}
@@ -266,6 +268,7 @@ export function CategoryBoard({ data, canManage, busy, picker, onOpen, onAdd, on
           </Row>
         ))}
       </View>
+      </Wide>
     </>
   );
 }
@@ -344,6 +347,7 @@ export function SubcategoryBoard({ data, busy, canManage, onAccept, onFlip, onAc
         )}
       />
 
+      <Wide>
       <DeskSection kicker={`WHAT FILLS IT · ${data.rules.length} ${data.rules.length === 1 ? 'MAPPING' : 'MAPPINGS'}`}>
         {s.places === 0 ? (
           <Alarm title="Nothing fills it — that is a mapping gap, not a fact about Britain">
@@ -436,6 +440,7 @@ export function SubcategoryBoard({ data, busy, canManage, onAccept, onFlip, onAc
           ) : null}
         </View>
       </DeskSection>
+      </Wide>
 
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 20 }}>
         <DeskButton label={`Train · ${data.disagreeing.length} to look at`} onPress={onTrain} />
@@ -445,6 +450,7 @@ export function SubcategoryBoard({ data, busy, canManage, onAccept, onFlip, onAc
         ) : null}
       </View>
 
+      <Wide>
       <View style={{ flexDirection: 'row', gap: 36, alignItems: 'flex-start' }}>
         <View style={{ flex: 1, minWidth: 0, gap: 14 }}>
           <DeskSection
@@ -546,6 +552,7 @@ export function SubcategoryBoard({ data, busy, canManage, onAccept, onFlip, onAc
           </View>
         </View>
       </View>
+      </Wide>
     </>
   );
 }
@@ -629,6 +636,7 @@ export function PlacesBoard({ data, label }: { data: FilingPlaces; label: string
   return (
     <>
       <Band title={`${data.counts.places.toLocaleString()} ${data.counts.places === 1 ? 'place' : 'places'}`} sub={label} />
+      <Wide>
       <View>
         {data.places.length === 0 ? <Nothing>Nothing is filed here.</Nothing> : null}
         {data.places.map((p) => (
@@ -651,6 +659,7 @@ export function PlacesBoard({ data, label }: { data: FilingPlaces; label: string
           </Row>
         ))}
       </View>
+      </Wide>
     </>
   );
 }

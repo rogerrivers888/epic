@@ -18,7 +18,9 @@ import React, { useState } from 'react';
 import { Text, View } from 'react-native';
 import { Press } from '../../components/press';
 import { desk, fonts } from '../../theme';
-import { Act, Band, DeskButton, DeskSection, Nothing, SegStrip, Value, WARN } from './desk';
+import {
+  Act, Band, DeskButton, DeskSection, Nothing, SegStrip, Value, WARN, Wide,
+} from './desk';
 import type { FilingTrain, FilingPlace } from '../../api';
 
 type Mode = 'grid' | 'inspect';
@@ -62,6 +64,7 @@ export function Train({ data, place, mode, onMode, busy, canManage, onNotSure, o
         )}
       />
 
+      <Wide>
       {mode === 'grid' ? (
         <>
           <Value tone="dim" size={12.5}>
@@ -121,11 +124,14 @@ export function Train({ data, place, mode, onMode, busy, canManage, onNotSure, o
           </View>
         </>
       ) : null}
+      </Wide>
 
+      <Wide>
       {mode === 'inspect' ? (
         place ? <Inspect place={place} onHousehold={onHousehold} />
           : <Nothing>Pick a place from the grid or the drawer&rsquo;s list to look at it.</Nothing>
       ) : null}
+      </Wide>
     </>
   );
 }

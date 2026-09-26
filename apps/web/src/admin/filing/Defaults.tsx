@@ -29,7 +29,9 @@
 import React from 'react';
 import { View } from 'react-native';
 
-import { Act, Band, Cell, Col, Head, Nothing, Row, Value } from './desk';
+import {
+  Act, Band, Cell, Col, Head, Nothing, Row, Value, Wide,
+} from './desk';
 import type { RuleRow } from './types';
 
 const RULE_COLS: Col[] = [
@@ -68,6 +70,7 @@ export function Defaults({ rows, total, onRetire, onEdit }: {
         how="defaults"
         stats={[{ label: 'Defaults', value: total }]}
       />
+      <Wide>
       <View>
         <Head cols={RULE_COLS} />
         {rows.length === 0 ? (
@@ -118,6 +121,7 @@ export function Defaults({ rows, total, onRetire, onEdit }: {
           );
         })}
       </View>
+      </Wide>
       {/*
         The explanation belongs on the columns it explains, not in a caption
         under the table — "no prose on screen, no commentary captions" (the

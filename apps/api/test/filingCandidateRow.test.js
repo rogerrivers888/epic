@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { testDatabase } from './helpers/db.js';
 
 const { pool } = await testDatabase();
-const { candidateRow } = await import('../src/routes/filing.js');
+const { candidateRow, provenanceOf } = await import('../src/routes/filing.js');
 
 test.after(() => pool.end());
 
@@ -32,4 +32,17 @@ test('no quote is no quotes, not a blank one', () => {
     evidence: null, evidence_ref: null, evidence_at: null,
   });
   assert.deepEqual(row.quotes, []);
+});
+
+test('a source is named in plain words and never pluralised by an added s (F4, 26 Sep 2026)', () => {
+  // "2 featuress" was the feature harvest's key with an s on the end.
+  assert.equal(provenanceOf({ places_seen: 2, places_total: 20, sources: { features: 2 } }),
+    'seen in 2 of 20 read · 2 from the feature harvest');
+  assert.equal(provenanceOf({ places_seen: 3, places_total: 60, sources: { site: 2, osm: 1, wikipedia: 1 } }),
+    'seen in 3 of 60 read · 2 from venue pages · 1 from OSM tags · 1 from Wikipedia');
+  // A source nobody has named yet is shown by its key, as it is.
+  assert.equal(provenanceOf({ places_seen: 1, places_total: 5, sources: { newsource: 3 } }),
+    'seen in 1 of 5 read · 3 from newsource');
+  // Reviews are rented and never counted as a confirming source.
+  assert.equal(provenanceOf({ places_seen: 1, places_total: 5, sources: { google: 4 } }), 'seen in 1 of 5 read');
 });

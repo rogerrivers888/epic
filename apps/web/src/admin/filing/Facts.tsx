@@ -25,10 +25,19 @@ import { Text, View } from 'react-native';
 import { Press } from '../../components/press';
 import { LIME, ON_LIME, desk, fonts } from '../../theme';
 import {
-  Act, Alarm, Band, Cell, Col, DeskPill, Head, Kicker, Link, Mark, Nothing, Row, Value, WARN, tabular,
+  Act, Alarm, Band, Cell, Col, DeskPill, Head, Kicker, Link, Mark, Nothing, Row, Value, WARN, tabular, Wide,
 } from './desk';
 import { rung, tooManyChecks } from './say';
 import type { Candidate, GlobalLabel, PendingWord, SetDetail, SetQuestion, SetRow, Threshold, VocabRow } from './types';
+
+/**
+ * The narrowest a word column may get in the candidate lists. Below it a
+ * word such as "accessible parking" broke a letter at a time, because the
+ * notes beside it kept their width and the word took what was left (F4,
+ * 26 Sep 2026). With a floor the notes give way instead, and the word wraps
+ * at its spaces.
+ */
+const WORD_MIN = 140;
 
 // ---------------------------------------------------------------------------
 // The fact sheets
@@ -46,6 +55,7 @@ export function FactSheets({ sets, onOpen }: { sets: SetRow[]; onOpen: (key: str
   return (
     <>
       <Band title="Fact sheets — what we find out, about what kind of place" how="sheets" />
+      <Wide>
       <View>
         <Head cols={SET_COLS} />
         {sets.length === 0 ? <Nothing>No fact sheets yet.</Nothing> : null}
@@ -84,6 +94,7 @@ export function FactSheets({ sets, onOpen }: { sets: SetRow[]; onOpen: (key: str
           </Row>
         ))}
       </View>
+      </Wide>
     </>
   );
 }
@@ -141,6 +152,7 @@ export function FactSheet({
         ))}
       </View>
 
+      <Wide>
       <View style={{ flexDirection: 'row', gap: 40, alignItems: 'flex-start' }}>
         {/* Checked here, and what every place is checked for anyway. */}
         <View style={{ width: 620, flexGrow: 0, flexShrink: 0, gap: 12 }}>
@@ -248,8 +260,8 @@ export function FactSheet({
                 <View style={{ width: 86, flexGrow: 0, flexShrink: 0, alignItems: 'flex-end' }}>
                   <Value tone="dim" size={13} numeric>{`${c.seen} of ${c.of}`}</Value>
                 </View>
-                <View style={{ flex: 1 }}><Value tone="muted" size={13}>{c.word}</Value></View>
-                <View style={{ width: 240, flexGrow: 0, flexShrink: 0 }}>
+                <View style={{ flex: 1, minWidth: WORD_MIN }}><Value tone="muted" size={13}>{c.word}</Value></View>
+                <View style={{ width: 240, flexGrow: 0, flexShrink: 1, minWidth: 100 }}>
                   <Value tone="dim" size={12}>{c.why ?? 'nobody could call it'}</Value>
                 </View>
                 <View style={{ width: 130, flexGrow: 0, flexShrink: 0, alignItems: 'flex-end' }}>
@@ -274,7 +286,7 @@ export function FactSheet({
                 <View style={{ width: 86, flexGrow: 0, flexShrink: 0, alignItems: 'flex-end' }}>
                   <Value tone="dim" size={13} numeric>{`${c.seen} of ${c.of}`}</Value>
                 </View>
-                <View style={{ flex: 1 }}><Value tone="muted" size={13}>{c.word}</Value></View>
+                <View style={{ flex: 1, minWidth: WORD_MIN }}><Value tone="muted" size={13}>{c.word}</Value></View>
                 <View style={{ width: 150, flexGrow: 0, flexShrink: 0 }}>
                   <Text style={{
                     fontFamily: fonts.body, fontSize: 11.5, fontWeight: '800',
@@ -283,7 +295,7 @@ export function FactSheet({
                     {c.state === 'validating' ? 'VALIDATING' : 'SEEN'}
                   </Text>
                 </View>
-                <View style={{ width: 240, flexGrow: 0, flexShrink: 0 }}>
+                <View style={{ width: 240, flexGrow: 0, flexShrink: 1, minWidth: 100 }}>
                   <Value tone="dim" size={12}>{c.doing ?? 'waiting for validation · nothing for you to do'}</Value>
                 </View>
               </View>
@@ -291,6 +303,7 @@ export function FactSheet({
           </View>
         </View>
       </View>
+      </Wide>
     </>
   );
 }
@@ -316,8 +329,8 @@ function Quiet({ count, word, note }: { count: string; word: string; note: strin
       <View style={{ width: 86, flexGrow: 0, flexShrink: 0, alignItems: 'flex-end' }}>
         <Value tone="dim" size={13} numeric>{count}</Value>
       </View>
-      <View style={{ flex: 1 }}><Value tone="dim" size={13}>{word}</Value></View>
-      <View style={{ width: 240, flexGrow: 0, flexShrink: 0 }}><Value tone="dim" size={12}>{note}</Value></View>
+      <View style={{ flex: 1, minWidth: WORD_MIN }}><Value tone="dim" size={13}>{word}</Value></View>
+      <View style={{ width: 240, flexGrow: 0, flexShrink: 1, minWidth: 100 }}><Value tone="dim" size={12}>{note}</Value></View>
     </View>
   );
 }
@@ -519,8 +532,8 @@ function Radio({ label, on, onPress }: { label: string; on: boolean; onPress: ()
 // ---------------------------------------------------------------------------
 
 const PENDING_COLS: Col[] = [
-  { w: 240, label: 'Typed' },
-  { w: 80, label: 'Times', align: 'right' },
+  { w: 240, label: 'Word or fact', title: 'A word somebody typed on a place, or a fact approved into the vocabulary that no fact sheet checks.' },
+  { w: 80, label: 'Times', align: 'right', title: 'How many times a person typed it. A dash for a fact nobody typed.' },
   { w: 'auto', label: 'Closest fact we have' },
   { w: 200, label: 'A merge repoints' },
   { w: 260, label: '' },
@@ -561,6 +574,7 @@ export function Pending({ words, sets, why, counts, onApprove, onMerge, onReject
       <Band title={pendingTitle(counts ?? { typed: words.length, orphans: 0 })}
         how="facts"
         sub="approve into a sheet, merge into something we already check, or reject" />
+      <Wide>
       <View>
         <Head cols={PENDING_COLS} />
         {/*
@@ -575,7 +589,7 @@ export function Pending({ words, sets, why, counts, onApprove, onMerge, onReject
             <View key={w.id}>
               <Row lifted={open === w.id}>
                 <Cell col={PENDING_COLS[0]}><Value weight="700">{w.word}</Value></Cell>
-                <Cell col={PENDING_COLS[1]}><Value numeric>{w.times}</Value></Cell>
+                <Cell col={PENDING_COLS[1]}><Value numeric tone={w.times == null ? 'dim' : 'ink'}>{w.times ?? '—'}</Value></Cell>
                 <Cell col={PENDING_COLS[2]}><Value tone="muted" size={12.5}>{w.near.join(' · ')}</Value></Cell>
                 <Cell col={PENDING_COLS[3]}><Value tone="dim" size={12.5}>{w.repoint}</Value></Cell>
                 <Cell col={PENDING_COLS[4]}>
@@ -650,6 +664,7 @@ export function Pending({ words, sets, why, counts, onApprove, onMerge, onReject
           );
         })}
       </View>
+      </Wide>
     </>
   );
 }
@@ -692,6 +707,7 @@ export function AllFacts({ rows, onAskIn, onRetire, onOpenSet }: {
         explanation lives on the column instead (the side-by-side audit,
         21 Sep 2026).
       */}
+      <Wide>
       <View>
         <Head cols={VOCAB_COLS} />
         {rows.map((r) => {
@@ -733,6 +749,7 @@ export function AllFacts({ rows, onAskIn, onRetire, onOpenSet }: {
           );
         })}
       </View>
+      </Wide>
     </>
   );
 }

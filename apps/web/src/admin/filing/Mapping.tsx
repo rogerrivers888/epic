@@ -27,7 +27,7 @@ import { Icon, IconName } from '../../components/Icon';
 import { Press } from '../../components/press';
 import { LIME, ON_LIME, desk, fonts } from '../../theme';
 import {
-  Act, Band, Cell, Col, DeskPill, Head, Kicker, Mark, Nothing, Row, Value, WARN,
+  Act, Band, Cell, Col, DeskPill, Head, Kicker, Mark, Nothing, Row, Value, WARN, Wide,
 } from './desk';
 import { Destination, PickCategory, Picker } from './Picker';
 import { SORTS, appliedSays, pointsAt, sortLabel, startsDescending } from './say';
@@ -137,7 +137,9 @@ export function Words({
           label={sortLabel(sort, desc)}
           onPress={() => { setSortMenu(!sortMenu); setFilterMenu(false); }}
         />
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 9, flex: 1, minWidth: 0, paddingTop: 2 }}>
+        {/* A basis, not flex: 1 — on a phone the note takes its own line
+            rather than overflowing a strip of nought width (F4). */}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 9, flexGrow: 1, flexBasis: 200, minWidth: 0, paddingTop: 2 }}>
           {filters.map((f) => (
             <DeskPill key={f.key} name={f.name} onRemove={() => onFilters(filters.filter((x) => x.key !== f.key))} />
           ))}
@@ -150,7 +152,7 @@ export function Words({
       </View>
 
       {sortMenu ? (
-        <View style={{ width: 460, borderWidth: 1, borderColor: desk.ruleStrong, backgroundColor: desk.well }}>
+        <View style={{ width: 460, maxWidth: '100%', borderWidth: 1, borderColor: desk.ruleStrong, backgroundColor: desk.well }}>
           {SORTS.map((s) => {
             const on = s.key === sort;
             return (
@@ -179,7 +181,7 @@ export function Words({
       ) : null}
 
       {filterMenu ? (
-        <View style={{ width: 760, borderWidth: 1, borderColor: desk.ruleStrong, backgroundColor: desk.well }}>
+        <View style={{ width: 760, maxWidth: '100%', borderWidth: 1, borderColor: desk.ruleStrong, backgroundColor: desk.well }}>
           <View style={{
             flexDirection: 'row', alignItems: 'center', gap: 12,
             paddingVertical: 11, paddingHorizontal: 14,
@@ -220,6 +222,7 @@ export function Words({
         </View>
       ) : null}
 
+      <Wide>
       <View>
         <SortHead cols={WORD_COLS} sort={sort} desc={desc} onSort={onSort} />
         {words.length === 0 ? <Nothing>No words match those filters.</Nothing> : null}
@@ -328,6 +331,7 @@ export function Words({
           );
         })}
       </View>
+      </Wide>
 
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 20, paddingTop: 4 }}>
         <Value tone="dim" size={12}>click a column header to sort</Value>
@@ -484,6 +488,7 @@ export function NotInEpic({ rows, placesKeptOut, onRestore }: {
         how="mapping"
         stats={[{ label: 'Places kept out', value: placesKeptOut.toLocaleString() }]}
       />
+      <Wide>
       <View>
         <Head cols={EXCLUDED_COLS} />
         {rows.length === 0 ? <Nothing>Nothing is excluded yet.</Nothing> : null}
@@ -504,6 +509,7 @@ export function NotInEpic({ rows, placesKeptOut, onRestore }: {
           </Row>
         ))}
       </View>
+      </Wide>
     </>
   );
 }
@@ -613,6 +619,7 @@ export function Audit({
         </View>
       ) : null}
 
+      <Wide>
       <View style={{
         flexDirection: 'row', alignItems: 'center', gap: 30,
         borderBottomWidth: 1, borderBottomColor: desk.rule, paddingBottom: 16,
@@ -687,6 +694,7 @@ export function Audit({
           </View>
         );
       })}
+      </Wide>
     </>
   );
 }
