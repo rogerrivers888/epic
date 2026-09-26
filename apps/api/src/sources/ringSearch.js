@@ -283,13 +283,26 @@ export async function categoryPage({
   if (page > 1) {
     const before = kept.get(pageKey(ringKey, category, page - 1));
     if (!usable(before)) return { venues: [], nextPageToken: null, cached: false, requests: 0, problem: 'the page before it has gone from the pool' };
+    // A search that has already ended stays ended. Near and wide run out at
+    // different pages, and an end that was not remembered read as "the page
+    // before it has gone from the pool" on every page after it, marking the
+    // other search's good pages with a problem they did not have (Codex,
+    // 26 Sep 2026).
+    if (before.value.end) {
+      const ended = { venues: [], nextPageToken: null, problem: null, end: true, askedAt: before.value.askedAt ?? 0 };
+      hold(key, ended);
+      return { ...ended, cached: true, requests: 0 };
+    }
     pageToken = before.value.nextPageToken ?? null;
     // Google has no more of *that* question. Ask the next one rather than
     // stopping: the census says there are more of these here, and a category is
     // a cabinet of drawers.
     askedAt = pageToken ? before.value.askedAt ?? 0 : (before.value.askedAt ?? 0) + 1;
     if (!pageToken && askedAt > rest.length) {
-      return { venues: [], nextPageToken: null, cached: false, requests: 0, problem: null, end: true };
+      // Held, so the page after this one knows the search has ended.
+      const ended = { venues: [], nextPageToken: null, problem: null, end: true, askedAt };
+      hold(key, ended);
+      return { ...ended, cached: false, requests: 0 };
     }
   }
   const asking = askedAt === 0 ? lead : { includedType: null, words: rest[askedAt - 1] };

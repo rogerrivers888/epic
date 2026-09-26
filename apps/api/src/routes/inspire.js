@@ -503,7 +503,13 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
     // turns and let the far places crowd the near ones out again (Codex, 26 Sep
     // 2026). Cut here, the twenty it re-sorts are already half near.
   };
-  const isNear = (it) => kmBetween(start, it) <= NEAR_KM;
+  // Near means inside the near search's own box, not within a 22km circle: the
+  // box is square, its corners about 31km out, and a place the near search
+  // spent a slot on would otherwise be sorted in with the far ones and thin
+  // the near side it was bought for (Codex, 26 Sep 2026). Nothing is dropped
+  // either way; this only decides which side of the page a place takes.
+  const isNear = (it) => nearBox != null && it.lat >= nearBox.minLat && it.lat <= nearBox.maxLat
+    && it.lng >= nearBox.minLng && it.lng <= nearBox.maxLng;
   const { mine, items } = await rank(got.venues);
   // Ten and ten, merged: already one page, so nothing is cut and nothing
   // left over. The page only takes turns — see `alternate`.

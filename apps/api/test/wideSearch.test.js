@@ -139,3 +139,17 @@ test('a half page is asked for as a half page, and pooled apart from a whole one
   assert.deepEqual(asked, [10, 20], 'ten when asked near and wide, twenty otherwise — and not one answered from the other');
   forgetPool();
 });
+
+test('a search that has ended stays ended, and the page after says so without a problem', async () => {
+  forgetPool();
+  const cellAt = async () => null;
+  // One question and one page: the chain has nothing after page one.
+  const search = async () => ({ venues: [], nextPageToken: null, requests: 1 });
+  await categoryPage({ ringKey: 'x', box: {}, cells: null, category: 'no-such-category', page: 1, cellAt, search });
+  const two = await categoryPage({ ringKey: 'x', box: {}, cells: null, category: 'no-such-category', page: 2, cellAt, search });
+  const three = await categoryPage({ ringKey: 'x', box: {}, cells: null, category: 'no-such-category', page: 3, cellAt, search });
+  assert.equal(two.end, true);
+  assert.equal(three.end, true, 'the end is remembered');
+  assert.equal(three.problem, null, 'not "the page before it has gone from the pool"');
+  forgetPool();
+});
