@@ -191,7 +191,14 @@ test('a box the size of the fine tile is placed by its centre', async () => {
   const { whereBoxSits, widthOf } = await import('../src/repositories/censusRing.js');
   const tile = { minLat: 51.55, minLng: -0.06, maxLat: 51.56, maxLng: -0.045 };
   assert.ok(widthOf(tile) > 1000 && widthOf(tile) < 1200, `a fine tile is ${Math.round(widthOf(tile))} m wide`);
-  const universe = [{ code: 'sector:E5 8', lat: 51.5555, lng: -0.052 }, { code: 'sector:N16 7', lat: 51.556, lng: -0.075 }];
+  // N16's sector sits by the tile's south-west corner, so under the corner
+  // test that corner is N16's and the tile reads as straddling; the centre
+  // is E5's, and the centre is what places it (Codex, 26 Sep 2026: a fixture
+  // whose corners all agreed proved nothing).
+  const universe = [{ code: 'sector:E5 8', lat: 51.5555, lng: -0.052 }, { code: 'sector:N16 7', lat: 51.551, lng: -0.062 }];
+  const { nearestSector } = await import('../src/repositories/censusRing.js');
+  assert.equal(nearestSector({ lat: 51.55, lng: -0.06 }, universe).code, 'sector:N16 7', 'a corner is the neighbour\'s');
+  assert.equal(nearestSector({ lat: 51.555, lng: -0.0525 }, universe).code, 'sector:E5 8', 'the centre is E5\'s');
   assert.equal(whereBoxSits(tile, { cells: ['sector:E5 8'], universe }), 'inside', 'placed by its centre, which is E5');
   assert.equal(whereBoxSits(tile, { cells: ['sector:N16 7'], universe }), 'outside');
 });
