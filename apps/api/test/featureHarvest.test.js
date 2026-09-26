@@ -314,3 +314,13 @@ test('opening hours are read for what they say, not fed as syntax', () => {
   assert.match(text, /Open every day, open late/);
   assert.match(text, /Serves pizza food/);
 });
+
+test('the body is read before the lead, and is what makes the corpus deep', () => {
+  // Owner, 26 Sep 2026: the lead is what a place page shows; the body is
+  // what the extractor reads.
+  const { text } = textOf({ name: 'A', postcode: 'RG1', accessibility: {}, experiences: [],
+    summary: 'A country park near Reading.',
+    body: 'The park has a wave machine in its lido and a high ropes course through the beech wood, with a cafe by the lake.' });
+  assert.ok(text.indexOf('wave machine') < text.indexOf('country park'));
+  assert.match(text, /high ropes course/);
+});

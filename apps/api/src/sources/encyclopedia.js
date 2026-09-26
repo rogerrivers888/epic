@@ -63,6 +63,69 @@ async function article(title) {
   };
 }
 
+/** The most of an article's body that is kept. Owned text; the extractor reads it, a page never shows it. */
+export const BODY_MAX = 8000;
+
+/**
+ * The article's body, beyond the lead.
+ *
+ * The lead is what a place page shows; the body is what the extractor reads
+ * — kept separately, never in its place (owner, 26 Sep 2026: "the chain has
+ * been starved for a fortnight on a two-sentence summary"). One more free
+ * request, plain text, capped.
+ */
+async function body(title) {
+  const p = new URLSearchParams({ action: 'query', prop: 'extracts', titles: title, explaintext: '1', exlimit: '1', format: 'json', origin: '*', redirects: '1' });
+  const data = await get(`${WIKI}?${p}`);
+  const page = Object.values(data?.query?.pages ?? {})[0];
+  const text = String(page?.extract ?? '').replace(/\s*==+\s*(See also|References|External links|Notes|Further reading|Bibliography)\s*==+[\s\S]*$/i, '').trim();
+  return text ? text.slice(0, BODY_MAX) : null;
+}
+
+/**
+ * Article subjects an ordinary place is never the same thing as.
+ *
+ * The matcher paired the town of Woking with an escape room called "Woking",
+ * the hill with Horsenden Hill Activity Centre and Kentish Town with its
+ * sports centre — and attached each article's facts to the place (owner,
+ * 26 Sep 2026). Wikidata says what an article is about (P31); a settlement
+ * or an administrative area is refused for any place, and a landform is
+ * refused unless the place is the kind of thing a landform is.
+ */
+export const SETTLEMENT_OR_AREA = new Set([
+  'Q486972', // human settlement
+  'Q515', 'Q3957', 'Q532', 'Q5084', 'Q1549591', 'Q7930989', 'Q702492', // city, town, village, hamlet, big city, city/town, urban area
+  'Q56061', 'Q1115575', 'Q211690', 'Q1187811', 'Q3624078', // administrative territorial entity, civil parish, London borough, metropolitan borough, sovereign state
+  'Q179049', 'Q3455524', 'Q1637706', 'Q123705', 'Q188509', 'Q15303838', // district (UK), county, city with millions, neighbourhood, suburb, London district
+  'Q1907114', 'Q2983893', 'Q5119', 'Q1093829', 'Q1500350', // metropolitan area, quarter, capital, city (US), township
+]);
+export const LANDFORM = new Set([
+  'Q8502', 'Q54050', 'Q4022', 'Q23397', 'Q39816', 'Q23442', 'Q39594', 'Q2143825', 'Q473972', 'Q4421', 'Q188055', // mountain, hill, river, lake, valley, island, moor, hillside, protected area, forest, common land
+]);
+const LANDFORM_KIND = /hill|mountain|park|wood|forest|nature|reserve|beach|coast|lake|river|water|garden|trail|common|heath|moor|fell|valley|view|cave|fall|island|outdoor|walk|countryside/i;
+
+export function refused(classes = [], category = null) {
+  if (classes.some((c) => SETTLEMENT_OR_AREA.has(c))) return 'a settlement or an area';
+  if (classes.some((c) => LANDFORM.has(c)) && !LANDFORM_KIND.test(String(category ?? ''))) return 'a landform';
+  return null;
+}
+
+/** What Wikidata says several entities are (P31), fifty a request. */
+export async function classesOf(qids) {
+  const out = {};
+  const ids = [...new Set(qids.filter(Boolean))];
+  for (let i = 0; i < ids.length; i += 50) {
+    const chunk = ids.slice(i, i + 50);
+    const p = new URLSearchParams({ action: 'wbgetentities', ids: chunk.join('|'), props: 'claims', format: 'json', origin: '*' });
+    const data = await get(`${WIKIDATA}?${p}`);
+    for (const id of chunk) {
+      const claims = data?.entities?.[id]?.claims ?? {};
+      out[id] = (claims.P31 ?? []).map((c) => c?.mainsnak?.datavalue?.value?.id).filter(Boolean);
+    }
+  }
+  return out;
+}
+
 /** The statements worth keeping from a Wikidata entity: all CC0. */
 async function entity(qid) {
   const p = new URLSearchParams({ action: 'wbgetentities', ids: qid, props: 'claims', format: 'json', origin: '*' });
@@ -71,6 +134,7 @@ async function entity(qid) {
   const first = (prop) => claims[prop]?.[0]?.mainsnak?.datavalue?.value ?? null;
   const inception = first('P571');
   return {
+    classes: (claims.P31 ?? []).map((c) => c?.mainsnak?.datavalue?.value?.id).filter(Boolean),
     officialWebsite: typeof first('P856') === 'string' ? first('P856') : null,
     // "+1894-01-01T00:00:00Z" — the year is the part worth showing.
     openedYear: inception?.time ? Number(String(inception.time).slice(1, 5)) || null : null,
@@ -116,12 +180,17 @@ export async function encyclopediaFor({ name, lat, lng, locality = null, address
   const page = await article(best.title);
   if (!page?.summary) return null;
 
-  let facts = { officialWebsite: null, openedYear: null, commonsImage: null };
+  let facts = { classes: [], officialWebsite: null, openedYear: null, commonsImage: null };
   if (page.wikidataId) { try { facts = await entity(page.wikidataId); } catch { /* the article alone is worth having */ } }
+  // An article about the town, the hill or the borough is not an article
+  // about the place, however well the name scores.
+  if (refused(facts.classes, category)) return null;
+  const text = await body(best.title).catch(() => null);
 
   return {
     ...page,
     ...facts,
+    body: text,
     // Wikipedia disambiguates in the title — "Roman Baths (Bath)", "Dishoom
     // (restaurant)" — which is right for an encyclopedia and wrong for the name
     // of somewhere you are going. The full title still travels, because that is

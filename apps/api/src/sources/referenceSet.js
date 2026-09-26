@@ -41,7 +41,9 @@ export const PER_CATEGORY = 20;
  * only compared between sources that state one rather than derive it, and
  * a website, a phone number and a name are compared as what they name.
  */
-const NEVER_A_DISAGREEMENT = ['summary', 'summary_source', 'address', 'image_url', 'attribution'];
+// Two phone numbers are two true answers — a switchboard and a box office
+// (owner, 26 Sep 2026); the body is prose, several by nature.
+const NEVER_A_DISAGREEMENT = ['summary', 'summary_source', 'body', 'address', 'image_url', 'attribution', 'phone'];
 const DERIVED_SOURCES = ['nominatim'];
 const COMPARABLE = `f.field <> all(array[${NEVER_A_DISAGREEMENT.map((x) => `'${x}'`).join(', ')}]) and not (f.field = 'postcode' and f.source = any(array[${DERIVED_SOURCES.map((x) => `'${x}'`).join(', ')}]))`;
 
@@ -50,7 +52,9 @@ const SAME_VALUE = `case
     when jsonb_typeof(f.value) = 'array'
       then (select coalesce(jsonb_agg(e order by e::text), '[]'::jsonb) from jsonb_array_elements(f.value) e)::text
     when f.field = 'website'
-      then regexp_replace(regexp_replace(regexp_replace(lower(f.value #>> '{}'), '^https?://(www\\.)?', ''), '[?#].*$', ''), '/+$', '')
+      -- The host alone: a visit page against a root is not a disagreement
+      -- (owner, 26 Sep 2026); a different host is.
+      then split_part(regexp_replace(lower(f.value #>> '{}'), '^https?://(www\\.)?', ''), '/', 1)
     when f.field = 'phone'
       -- "+44 (0)20…", "+44 20…" and "020…" are one number (Codex, 26 Sep 2026).
       then regexp_replace(regexp_replace(f.value #>> '{}', '[^0-9]', '', 'g'), '^(440?|0)', '')
@@ -349,6 +353,30 @@ export async function disagreements(id, { limit = 20 } = {}) {
       limit $2`,
     [id, limit]);
   return rows;
+}
+
+/**
+ * Every place whose encyclopedia match is an article about a town, an area
+ * or a landform it is not — and what forgetting that match would take with
+ * it. The matcher refuses those now; this is the audit of what it attached
+ * before it did (owner, 26 Sep 2026: "a matcher that paired Kentish Town
+ * with a sports centre did not only get the name wrong, it attached that
+ * article's facts to the place").
+ */
+export async function wikipediaAudit() {
+  const { classesOf, refused } = await import('./encyclopedia.js');
+  const { rows } = await query(
+    `select f.venue_ref, f.value #>> '{}' as qid, r.name, r.category, p.subcategory,
+            (select jsonb_agg(field) from place_facts g where g.venue_ref = f.venue_ref and g.source in ('wikipedia', 'wikidata') and g.expires_at is null) as attached
+       from place_facts f
+       left join place_records r on r.venue_ref = f.venue_ref
+       left join place_index p on p.venue_ref = f.venue_ref
+      where f.field = 'wikidata_id' and f.source = 'wikipedia' and f.expires_at is null`);
+  const classes = await classesOf(rows.map((r) => r.qid));
+  const flagged = rows
+    .map((r) => ({ ...r, why: refused(classes[r.qid] ?? [], r.category ?? r.subcategory) }))
+    .filter((r) => r.why);
+  return { checked: rows.length, flagged: flagged.length, places: flagged.map((r) => ({ venue_ref: r.venue_ref, name: r.name, subcategory: r.subcategory, qid: r.qid, why: r.why, attached: r.attached ?? [] })) };
 }
 
 export { sweep };

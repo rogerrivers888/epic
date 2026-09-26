@@ -244,7 +244,11 @@ test('the facts behind a disagreement can be read, field by field and source by 
   await put('name', 'wikipedia', 'The Birdworld');
   const heldSeven = (await ref.held(row.id)).find((p) => p.venue_ref === seven);
   assert.equal(heldSeven.disagreements, 0, 'none of those is two answers to one question');
-  // And a real one still is.
+  // Two numbers are two true answers, and a visit page against a root is
+  // the same site (owner, 26 Sep 2026); a different host is not.
   await put('phone', 'wikidata', '020 7091 3067');
-  assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === seven).disagreements, 1, 'a different number is a disagreement');
+  await put('website', 'fsa', 'https://www.birdworld.co.uk/visit/today');
+  assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === seven).disagreements, 0);
+  await put('website', 'nominatim', 'https://www.everyoneactive.com/centre/x');
+  assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === seven).disagreements, 1, 'another operator\u2019s site is a disagreement');
 });

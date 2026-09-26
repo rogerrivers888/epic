@@ -35,6 +35,35 @@ const SOCIAL = {
 
 const text = (v) => (typeof v === 'string' ? v.trim() : null);
 
+/** The most of a page's own words that is kept. */
+export const BODY_MAX = 6000;
+
+/**
+ * The page's paragraphs, as the body the extractor reads.
+ *
+ * The meta description is the lead a place page shows; the paragraphs are
+ * what the venue actually says about itself — the room, the garden, the
+ * wave machine — and were thrown away (owner, 26 Sep 2026). Scripts, styles
+ * and the furniture of a page are dropped; a paragraph is kept when it is a
+ * sentence or two rather than a menu item or a button.
+ */
+export function paragraphsOf(html) {
+  if (!html) return null;
+  const cleaned = String(html)
+    .replace(/<(script|style|noscript|svg|nav|header|footer|form)[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ');
+  const out = [];
+  let total = 0;
+  for (const [, inner] of cleaned.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)) {
+    const t = inner.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&#0?39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/&[a-z]+;/g, ' ').replace(/\s+/g, ' ').trim();
+    if (t.length < 60 || !/[.!?]/.test(t)) continue;
+    out.push(t);
+    total += t.length;
+    if (total >= BODY_MAX) break;
+  }
+  return out.length ? out.join(' ').slice(0, BODY_MAX) : null;
+}
+
 /** Every JSON-LD object on the page, including the ones nested in @graph. */
 function jsonLd(html) {
   const out = [];
@@ -327,6 +356,7 @@ export async function siteFacts({ website, name = '', category = null, locality 
     bookingUrl: booking ? (() => { try { return new URL(booking, page.url).toString(); } catch { return null; } })() : null,
     socials,
     summary: meta ? meta.replace(/\s+/g, ' ').trim() : null,
+    body: paragraphsOf(html),
     menu: menu ?? null,
     sourceUrl: page.url,
     how: node['@type'] ? `Read the ${[].concat(node['@type'])[0]} details they publish on ${new URL(page.url).hostname}.` : `Read ${new URL(page.url).hostname}.`,

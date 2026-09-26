@@ -651,6 +651,9 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
           put('menu_label', site.menu?.label ?? null),
           put('summary', site.summary),
           put('summary_source', site.summary ? (site.sourceUrl ?? seed.website) : null),
+          // The body is a fact, never a column: the record goes to devices and
+          // the body is for the extractor (owner, 26 Sep 2026).
+          put('body', site.body),
         ]);
         identified += 1;
       } else {
@@ -699,6 +702,7 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
       matched.wikipedia = { title: enc.title, url: enc.url, distanceM: enc.distanceM, confidence: enc.confidence };
       await Promise.all([
         putFact(venueRef, 'summary', 'wikipedia', enc.summary, enc.confidence),
+        putFact(venueRef, 'body', 'wikipedia', enc.body, enc.confidence),
         putFact(venueRef, 'summary_source', 'wikipedia', enc.attribution, enc.confidence),
         putFact(venueRef, 'wikipedia_url', 'wikipedia', enc.url, enc.confidence),
         putFact(venueRef, 'wikidata_id', 'wikipedia', enc.wikidataId, enc.confidence),
@@ -961,6 +965,19 @@ export async function ownedRecords(refs) {
  * is indefinite — but the moment a 30-day source is enabled this is what keeps
  * the promise, and it must already work before that day (L7).
  */
+/**
+ * Forget what a wrong encyclopedia match attached, and recompose the record.
+ *
+ * The matcher paired the town with the escape room and the hill with the
+ * activity centre, and every article fact — name, summary, body, image,
+ * website — went onto the place. Forgetting the two sources and recomposing
+ * leaves the record with what the open map and the venue's own page said.
+ */
+export async function forgetEncyclopedia(venueRef) {
+  await forgetSource(venueRef, ['wikipedia', 'wikidata']);
+  return compose(venueRef);
+}
+
 export async function sweepExpired() {
   const discarded = await owned.discardExpiredFacts();
   const refs = [...new Set(discarded)];

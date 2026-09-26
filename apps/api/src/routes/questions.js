@@ -531,6 +531,21 @@ questionRoutes.get('/reference/:id/disagreements', requires('view_library'), asy
   try { res.json({ places: await reference.disagreements(String(req.params.id), { limit: Math.min(200, Number(req.query.limit ?? 20) || 20) }) }); } catch (err) { next(err); }
 });
 
+/** The audit of encyclopedia matches that are about a town, an area or a landform the place is not. */
+questionRoutes.get('/reference/wikipedia-audit', requires('view_library'), async (_req, res, next) => {
+  try { res.json(await reference.wikipediaAudit()); } catch (err) { next(err); }
+});
+/** Forget what those wrong matches attached, and recompose each record. Owned data, corrected. */
+questionRoutes.post('/reference/wikipedia-audit/forget', requires('manage_questions'), async (_req, res, next) => {
+  try {
+    const own = await import('../sources/own.js');
+    const audit = await reference.wikipediaAudit();
+    let forgotten = 0;
+    for (const p of audit.places) { await own.forgetEncyclopedia(p.venue_ref); forgotten += 1; }
+    res.json({ checked: audit.checked, flagged: audit.flagged, forgotten });
+  } catch (err) { next(err); }
+});
+
 questionRoutes.get('/sweep', requires('view_library'), async (_req, res, next) => {
   try {
     const rows = await sweep.recent();

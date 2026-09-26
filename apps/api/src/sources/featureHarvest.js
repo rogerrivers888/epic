@@ -112,7 +112,10 @@ Rules:
  * corpus read 159 tokens a place against 174 the day before (owner, 26 Sep
  * 2026).
  */
-const SAID_SQL = `concat_ws(' ', r.summary, a.summary, r.opening_hours, r.price_range, r.fsa_rating,
+const BODY_SQL = `(select f.value #>> '{}' from place_facts f
+     where f.venue_ref = p.venue_ref and f.field = 'body' and f.expires_at is null
+     order by case f.source when 'wikipedia' then 0 else 1 end limit 1)`;
+const SAID_SQL = `concat_ws(' ', ${BODY_SQL}, r.summary, a.summary, r.opening_hours, r.price_range, r.fsa_rating,
    array_to_string(array(select jsonb_array_elements_text(coalesce(r.cuisines, '[]'::jsonb))), ' '),
    array_to_string(array(select jsonb_array_elements_text(coalesce(r.dietary_options, '[]'::jsonb))), ' '),
    array_to_string(array(select jsonb_array_elements_text(coalesce(r.experiences, '[]'::jsonb))), ' '))`;
@@ -126,6 +129,7 @@ async function placesFor(subcategory, { size = SAMPLE_SIZE } = {}) {
             r.experiences,
             r.opening_hours, r.cuisines, r.dietary_options, r.price_range,
             r.good_for_children, r.fsa_rating, r.booking_url,
+            ${BODY_SQL} as body,
             concat_ws(' ', r.summary, a.summary) as summary
        from place_index p
        left join place_records r on r.venue_ref = p.venue_ref
@@ -218,6 +222,9 @@ export function textOf(place) {
   // one — "step free, hearing loop" reads as a sentence to the extractor and
   // carries exactly the facilities this run is looking for.
   const said = [
+    // The body first — the venue's own paragraphs, or the article beyond its
+    // lead — then the lead, then the facts said in words.
+    place.body,
     place.summary,
     listOf(place.experiences).join(', '),
     asserted(place.accessibility).join(', '),
