@@ -35,6 +35,9 @@ git status --short
   <your files>` to your hunks, apply it in `git worktree add --detach
   /tmp/epic-wt-<name> origin/main`, and run every step below **there**. Never `git
   add`, `git commit`, amend or push `main` in the shared tree.
+- **Every edit, review fixes included, is made in the shared tree first** and carried to
+  the worktree as a patch against the worktree's `HEAD`. The shared tree is the copy that
+  outlives the worktree; a fix made only in the worktree is reverted by the next patch.
 
 ## 2. The suite, after the final commit
 
@@ -72,7 +75,7 @@ neither the tests nor the deployed site would.
 
 ## 5. Push
 
-From the worktree: `git push origin HEAD:main`, then `git worktree remove --force`.
+From the worktree: `git push origin HEAD:main`; then `cd <repo> && git worktree remove --force /tmp/epic-wt-<name>`.
 The `pre-push` hook runs the whole suite again and blocks the push if anything fails.
 **Never `--no-verify`** — it is the only thing between a broken commit and four other
 sessions pulling it.
