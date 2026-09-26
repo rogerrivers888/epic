@@ -859,3 +859,30 @@ test('a word set aside says why', async () => {
   assert.match(row.decision_reason, /boilerplate/);
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
 });
+
+test('Codex on C27: a blank label falls back, a switched-off global comes back on, and a restore forgets the old reason', async () => {
+  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+  await sets.recordCandidates(sub, [
+    { norm: 'zz kosher', raw: 'zz kosher', kind: 'feature', sources: ['features'], placesSeen: 2, asserts: 2, evidence: 'certified kosher kitchen', evidenceRef: 'osm:k' },
+    { norm: 'zz wifi', raw: 'zz wifi', kind: 'feature', sources: ['features'], placesSeen: 2, asserts: 2, evidence: 'free wifi throughout', evidenceRef: 'osm:w' },
+  ], { placesTotal: 20 });
+  const rows = await sets.candidates({ subcategory: sub, status: 'new', limit: 50 });
+  const kosher = rows.find((c) => c.norm === 'zz kosher');
+  // A switched-off global question on the same label is switched back on.
+  await query("insert into place_attributes (key, label, kind, position) values ('zz-kosher', 'Zz kosher', 'yesno', 200) on conflict do nothing");
+  await query("insert into attribute_aliases (norm, target_key, raw) values ('zz kosher', 'zz-kosher', 'zz kosher') on conflict do nothing");
+  await query("insert into questions (attribute_key, scope, active) values ('zz-kosher', 'global', false)");
+  const out = await sets.globalFromCandidate(kosher.id, { label: '   ', refreshDays: 90, actor: 'test' });
+  assert.equal(out.question.active, true, 'the global question is asked again');
+  assert.equal(out.question.refresh_days, 90);
+  // A restore forgets the reason the word was set aside for.
+  const wifi = rows.find((c) => c.norm === 'zz wifi');
+  await sets.ignoreCandidate(wifi.id, { actor: 'test', reason: 'boilerplate' });
+  const back = await sets.unignore(wifi.id);
+  assert.equal(back.decision_reason, null);
+  await query("delete from questions where attribute_key = 'zz-kosher'");
+  await query("delete from attribute_aliases where norm like 'zz %'");
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+  await query("delete from place_attributes where key like 'zz-%'");
+});

@@ -754,12 +754,26 @@ export async function globalFromCandidate(id, { label = null, kind = 'yesno', re
     const { rows: [pointed] } = await client.query('select target_key from attribute_aliases where norm = $1', [c.norm]);
     let key = pointed?.target_key ?? null;
     if (!key) {
-      const text = label ?? c.raw_forms?.[0] ?? c.norm;
+      // A blank label is no label: fall back to the words as found, or the
+      // key and label would both be empty (Codex, 26 Sep 2026).
+      const given = typeof label === 'string' && label.trim() ? label.trim() : null;
+      const text = given ?? c.raw_forms?.[0] ?? c.norm;
+      if (!slug(text)) throw bad('A global fact needs a name.');
       key = slug(text);
       await client.query("insert into place_attributes (key, label, kind, position) values ($1, $2, $3, 200) on conflict (key) do nothing", [key, sentence(text), kind]);
       await client.query('insert into attribute_aliases (norm, target_key, raw) values ($1, $2, $3) on conflict (norm) do nothing', [c.norm, key, c.raw_forms?.[0] ?? null]);
     }
-    const question = await addQuestion({ attributeKey: key, scope: 'global', refreshDays, fromCandidate: id }, client);
+    let question = await addQuestion({ attributeKey: key, scope: 'global', refreshDays, fromCandidate: id }, client);
+    // An existing global question on this label that was switched off is
+    // switched back on, rather than the word being marked promoted to a
+    // question nobody is asked (Codex, 26 Sep 2026).
+    if (question && !question.active) {
+      const { rows: [on_] } = await client.query(
+        'update questions set active = true, refresh_days = coalesce($2, refresh_days), updated_at = now() where id = $1 returning *',
+        [question.id, refreshDays],
+      );
+      question = on_;
+    }
     await client.query(
       `update harvest_candidates set status = 'promoted', question_id = $2, decided_by = $3, decided_at = now(), examples = '{}',
               decision_reason = 'a global fact (C20)'
@@ -777,7 +791,7 @@ export async function unignore(id) {
     // was never quoted comes back to the pen, not to the promotable list.
     `update harvest_candidates
         set status = case when ${PROMOTABLE_SQL} then 'new' else 'unresolved' end,
-            decided_by = null, decided_at = null
+            decided_by = null, decided_at = null, decision_reason = null
       where id = $1 and status = 'ignored' returning *`, [id],
   );
   return rows[0] ?? null;

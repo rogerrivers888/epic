@@ -312,8 +312,11 @@ questionRoutes.post('/candidates/:id/alias', requires('manage_questions'), async
 questionRoutes.post('/candidates/:id/global', requires('manage_questions'), async (req, res, next) => {
   try {
     const { label = null, kind = 'yesno', refreshDays = null } = req.body ?? {};
-    const days = refreshDays == null ? null : Math.floor(Number(refreshDays));
-    if (days != null && !(Number.isFinite(days) && days >= 1 && days <= 3650)) throw bad('A re-check cadence is a whole number of days, 1 to 3650.');
+    // A shape the labels hold, and a whole number of days as given — never
+    // rounded into a different cadence (Codex, 26 Sep 2026).
+    if (!['yesno', 'range', 'oneof'].includes(kind)) throw bad('A global fact is yes/no, a range or one of a list.');
+    const days = refreshDays == null ? null : Number(refreshDays);
+    if (days != null && !(Number.isInteger(days) && days >= 1 && days <= 3650)) throw bad('A re-check cadence is a whole number of days, 1 to 3650.');
     res.json(await sets.globalFromCandidate(Number(req.params.id), { label, kind, refreshDays: days, actor: actorOf(req) }));
   } catch (err) { next(err); }
 });
