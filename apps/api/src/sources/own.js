@@ -30,6 +30,7 @@
 // place_records goes to the device.
 
 import * as owned from '../repositories/ownedPlaces.js';
+import { query } from '../db.js';
 import * as households from '../repositories/households.js';
 import { phoneOf } from '../domain/contact.js';
 import * as providerCalls from '../repositories/providerCalls.js';
@@ -692,7 +693,11 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
   // 4. The encyclopedias, for the places that have an article.
   try {
     let enc;
-    try { enc = await encyclopediaFor({ name: seed.name, lat: osm?.lat ?? seed.lat, lng: osm?.lng ?? seed.lng, locality: seed.locality ?? null, address: seed.address ?? null, category: seed.category ?? null }); }
+    // The drawer the index files it under travels with the record's own
+    // category, so a hill in the hills drawer may match the hill's article
+    // and a sports centre may not (Codex, 26 Sep 2026).
+    const drawer = (await query('select subcategory from place_index where venue_ref = $1', [venueRef]).catch(() => ({ rows: [] }))).rows[0]?.subcategory ?? null;
+    try { enc = await encyclopediaFor({ name: seed.name, lat: osm?.lat ?? seed.lat, lng: osm?.lng ?? seed.lng, locality: seed.locality ?? null, address: seed.address ?? null, category: [seed.category, drawer].filter(Boolean).join(' ') || null }); }
     finally { await logCall(householdId, 'wikipedia', 'own.encyclopedia'); }
     // Wikidata is a second service and gets its own line, so the usage table
     // says who was actually asked.
@@ -975,7 +980,12 @@ export async function ownedRecords(refs) {
  */
 export async function forgetEncyclopedia(venueRef) {
   await forgetSource(venueRef, ['wikipedia', 'wikidata']);
-  return compose(venueRef);
+  const out = await compose(venueRef);
+  // A place whose only owned facts were the article's is not owned any more,
+  // and coverage and the paid paths must not go on treating it as researched
+  // (Codex, 26 Sep 2026) — the same settling the administrative edit does.
+  await owned.settleOwnership(venueRef).catch(() => null);
+  return out;
 }
 
 export async function sweepExpired() {

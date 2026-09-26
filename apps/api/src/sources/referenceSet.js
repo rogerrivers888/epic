@@ -374,7 +374,9 @@ export async function wikipediaAudit() {
       where f.field = 'wikidata_id' and f.source = 'wikipedia' and f.expires_at is null`);
   const classes = await classesOf(rows.map((r) => r.qid));
   const flagged = rows
-    .map((r) => ({ ...r, why: refused(classes[r.qid] ?? [], r.category ?? r.subcategory) }))
+    // Both what the record calls it and which drawer it is in: a hill filed
+    // as "attraction" in the hills drawer is a hill (Codex, 26 Sep 2026).
+    .map((r) => ({ ...r, why: refused(classes[r.qid] ?? [], [r.category, r.subcategory].filter(Boolean).join(' ')) }))
     .filter((r) => r.why);
   return { checked: rows.length, flagged: flagged.length, places: flagged.map((r) => ({ venue_ref: r.venue_ref, name: r.name, subcategory: r.subcategory, qid: r.qid, why: r.why, attached: r.attached ?? [] })) };
 }

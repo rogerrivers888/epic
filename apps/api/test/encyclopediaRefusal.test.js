@@ -24,6 +24,9 @@ test('a hill is refused for a sports centre and allowed for a hill', () => {
   assert.equal(refused(['Q54050'], 'sports centre'), 'a landform');
   assert.equal(refused(['Q54050'], 'hill'), null);
   assert.equal(refused(['Q8502'], 'nature reserve'), null);
+  // A record called "attraction" that the index files under hills is a hill (Codex, 26 Sep 2026).
+  assert.equal(refused(['Q54050'], 'attraction hills'), null);
+  assert.equal(refused(['Q54050'], 'attraction athletics'), 'a landform');
 });
 
 test('a museum, a theme park or a church is never refused', () => {
