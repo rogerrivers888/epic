@@ -79,7 +79,9 @@ neither the tests nor the deployed site would.
 
 From the worktree: `git push origin HEAD:main && cd <repo> && git worktree remove --force /tmp/epic-wt-<name>`
 — removed **only once the push has succeeded**: until then the reviewed commit lives nowhere else.
-If the push is refused because `main` moved, `git fetch && git rebase origin/main` in the worktree and go back to step 2.
+If the push is refused because `main` moved, `git fetch && git rebase origin/main` in the worktree and go back to step 2 —
+but only if the rebase is clean. If it stops on a conflict, `git rebase --abort`: resolve it in the shared tree,
+which is where every edit lives, then cut the patch again against the new `origin/main` in a fresh worktree.
 The `pre-push` hook runs the whole suite again and blocks the push if anything fails.
 **Never `--no-verify`** — it is the only thing between a broken commit and four other
 sessions pulling it.
