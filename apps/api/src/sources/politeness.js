@@ -101,10 +101,14 @@ export function parse(text) {
     }
   }
   // Our own name, or the one we answered to before the rebrand: a site that
-  // wrote a rule for RoamBot meant this crawler (Codex, 26 Sep 2026).
-  const mine = groups.find((g) => g.agents.some((a) => a.includes(ME) || a.includes('roambot')))
-    ?? groups.find((g) => g.agents.includes('*'));
-  return { rules: mine?.rules ?? [], delayMs: mine?.delayMs ?? DEFAULT_DELAY_MS };
+  // wrote a rule for RoamBot meant this crawler. Every group naming us under
+  // either name is merged, so a RoamBot refusal is not lost behind an EpicBot
+  // group written above it (Codex, 26 Sep 2026); the wildcard only when
+  // nobody named us.
+  const named = groups.filter((g) => g.agents.some((a) => a.includes(ME) || a.includes('roambot')));
+  const mine = named.length ? named : groups.filter((g) => g.agents.includes('*')).slice(0, 1);
+  const delays = mine.map((g) => g.delayMs).filter((d) => d != null);
+  return { rules: mine.flatMap((g) => g.rules), delayMs: delays.length ? Math.max(...delays) : DEFAULT_DELAY_MS };
 }
 
 /**
@@ -120,7 +124,9 @@ export function allowedBy(rules, path) {
   for (const rule of rules) {
     if (!rule.path) continue;
     if (!matches(rule.path, path)) continue;
-    if (!best || rule.path.length > best.path.length) best = rule;
+    // On a tie the refusal wins: merged groups can say both, and Epic asks
+    // before it reads (26 Sep 2026).
+    if (!best || rule.path.length > best.path.length || (rule.path.length === best.path.length && !rule.allow)) best = rule;
   }
   return best ? best.allow : true;
 }

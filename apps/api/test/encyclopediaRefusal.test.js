@@ -174,4 +174,10 @@ test('a robots.txt group written for RoamBot still binds this crawler (Codex, 26
   const { parse, allowedBy } = await import('../src/sources/politeness.js');
   const { rules } = parse('User-agent: *\nAllow: /\n\nUser-agent: RoamBot\nDisallow: /');
   assert.equal(allowedBy(rules, '/menu'), false);
+  // Both names, EpicBot allowing above RoamBot refusing: the refusal is not lost.
+  const both = parse('User-agent: EpicBot\nAllow: /\n\nUser-agent: RoamBot\nDisallow: /');
+  assert.equal(allowedBy(both.rules, '/menu'), false);
+  // And a specific Allow still beats a shorter Disallow.
+  const inner = parse('User-agent: EpicBot\nDisallow: /\nAllow: /menu');
+  assert.equal(allowedBy(inner.rules, '/menu'), true);
 });
