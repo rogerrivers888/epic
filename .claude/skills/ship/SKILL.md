@@ -56,7 +56,7 @@ money and tells you nothing you needed.
 ## 3. Codex
 
 ```
-codex exec review --base origin/main
+codex exec review --base $BASE        # the base pinned in step 1, not origin/main as it is now
 ```
 
 Use `--commit <sha>` for one commit or `--uncommitted` for work not yet committed.
