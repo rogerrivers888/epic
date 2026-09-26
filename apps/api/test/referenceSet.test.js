@@ -259,6 +259,14 @@ test('the facts behind a disagreement can be read, field by field and source by 
   assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === six).disagreements, 0, 'one Facebook page written two ways');
   await query(`insert into place_facts (venue_ref, field, source, value, licence, retention, confidence, expires_at) values ($1, 'website', 'wikidata', $2, 'x', 'indefinite', 1, null) on conflict do nothing`, [six, JSON.stringify('https://facebook.com/venue-b')]);
   assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === six).disagreements, 1, 'two Facebook pages are two sites');
+  // On Google Sites the venue is the second segment (Codex, 26 Sep 2026).
+  const four = 'google:ChIJ_ref_004';
+  const put4 = (source, value) => query(`insert into place_facts (venue_ref, field, source, value, licence, retention, confidence, expires_at) values ($1, 'website', $2, $3, 'x', 'indefinite', 1, null) on conflict do nothing`, [four, source, JSON.stringify(value)]);
+  await put4('osm', 'https://sites.google.com/view/venue-a/home');
+  await put4('site', 'https://sites.google.com/view/venue-a');
+  assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === four).disagreements, 0, 'one Google Site, two pages of it');
+  await put4('wikidata', 'https://sites.google.com/view/venue-b');
+  assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === four).disagreements, 1, 'two Google Sites are two sites');
   await put('website', 'nominatim', 'https://www.everyoneactive.com/centre/x');
   assert.equal((await ref.held(row.id)).find((p) => p.venue_ref === seven).disagreements, 1, 'another operator\u2019s site is a disagreement');
 });

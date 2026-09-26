@@ -57,7 +57,10 @@ const SAME_VALUE = `case
       -- port on a root is still the same host (Codex, 26 Sep 2026).
       -- On a host many venues share, the page is the venue, so the first
       -- path segment is kept: two Facebook pages are two sites (Codex, 26 Sep 2026).
-      then (select case when h.host = any(array['facebook.com', 'm.facebook.com', 'instagram.com', 'sites.google.com', 'linktr.ee', 'twitter.com', 'x.com', 'tiktok.com'])
+      -- Google Sites names the venue in the second segment, after /view/ or /site/.
+      then (select case when h.host = 'sites.google.com'
+                        then h.host || coalesce(substring(h.rest from '^(/[^/?#]+/[^/?#]+)'), substring(h.rest from '^(/[^/?#]+)'), '')
+                        when h.host = any(array['facebook.com', 'm.facebook.com', 'instagram.com', 'linktr.ee', 'twitter.com', 'x.com', 'tiktok.com'])
                         then h.host || '/' || coalesce(substring(h.rest from '^/([^/?#]+)'), '')
                         else h.host end
               from (select substring(u from '^[^/?#:]+') as host, substring(u from '^[^/?#]*(.*)$') as rest
