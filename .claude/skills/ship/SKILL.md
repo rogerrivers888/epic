@@ -34,7 +34,10 @@ sessions' unpushed commits, so nothing about the range can be read there. So, in
    /tmp/epic-wt-<name> "$(cat /tmp/<name>.base)"`, apply the patch, copy `.env`, symlink
    the `node_modules`. Every step from here runs **there**; never `git add`, `git
    commit`, amend or push `main` in the shared tree.
-3. **Now say the range out loud**, from the worktree:
+3. **Commit it there:** `git add <your files>`, read `git diff --cached` — it can hold
+   nothing but yours — and commit with a heredoc message. Without this the push below
+   sends nothing and the cleanup removes the only copy of the work.
+4. **Now say the range out loud**, from the worktree:
    ```
    git log --oneline "$(cat /tmp/<name>.base)"..HEAD   # exactly your commits
    git status --short
@@ -89,8 +92,9 @@ From the worktree: `git push origin HEAD:main && cd <repo> && git worktree remov
 — removed **only once the push has succeeded**: until then the reviewed commit lives nowhere else.
 If the push is refused because `main` moved, `git fetch && git rev-parse origin/main > /tmp/<name>.base && git rebase "$(cat /tmp/<name>.base)"`
 in the worktree — re-pinning the base, or the review then covers everything upstream too — and go back to step 2 —
-but only if the rebase is clean. If it stops on a conflict, `git rebase --abort`: resolve it in the shared tree,
-which is where every edit lives, then cut the patch again against the new `origin/main` in a fresh worktree.
+but only if the rebase is clean. If it stops on a conflict, `git rebase --abort`, then `cd <repo> && git worktree remove --force
+/tmp/epic-wt-<name>` so the path is free; resolve the conflict in the shared tree, which is where every
+edit lives, and start again at step 1 against the new `origin/main`.
 The `pre-push` hook runs the whole suite again and blocks the push if anything fails.
 **Never `--no-verify`** — it is the only thing between a broken commit and four other
 sessions pulling it.
