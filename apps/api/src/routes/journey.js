@@ -221,11 +221,6 @@ async function buildJourney({ trip, day, household, items, source }) {
   };
 }
 
-async function logRouting(household, purpose, calls) {
-  if (!calls) return;
-  await trips.recordProviderCall(household.id, 'google-routes', purpose, calls).catch(() => null);
-}
-
 /** The shortlist's places for this day, in the running, in order. Unassigned places belong to whichever day is open. */
 async function runningItems(trip, day) {
   return trips.runningShortlist(trip.id, day.id);
@@ -254,7 +249,6 @@ router.get('/:id/journey', async (req, res, next) => {
     const source = req.query.source === 'day' ? 'day' : 'shortlist';
     const items = source === 'day' ? await savedItems(trip, day) : await runningItems(trip, day);
     const journey = await buildJourney({ trip, day, household, items, source });
-    await logRouting(household, `trip.journey.${source}`, journey.lookups);
     if (source === 'shortlist') {
       const others = await trips.setAsideShortlist(trip.id, day.id);
       journey.others = others.map((o) => ({ id: o.id, name: o.venue_label, category: o.category, status: o.status, statusNote: o.status_note, statusOn: o.status_on }));
@@ -271,7 +265,6 @@ router.post('/:id/journey/save', async (req, res, next) => {
     const day = await loadDay(trip, req.body?.dayId ?? null);
     const items = await runningItems(trip, day);
     const journey = await buildJourney({ trip, day, household, items, source: 'shortlist' });
-    await logRouting(household, 'trip.journey.save', journey.lookups);
     if (!journey.stops.length) return res.status(400).json({ error: 'nothing_to_save', message: 'Nothing is in the running for this day.' });
     if (!journey.canSave && req.body?.force !== true) return res.status(409).json({ error: 'not_ready', blockers: journey.blockers });
     const tz = trip.timezone || DEFAULT_TZ;
@@ -316,8 +309,9 @@ router.get('/:id/directions', async (req, res, next) => {
     const departAt = req.query.departAt ? String(req.query.departAt) : null;
     let d = null;
     if (routingEnabled()) {
-      d = await fetchDirections({ from, to, mode: apiMode, departAt });
-      await logRouting(household, 'trip.directions', 1);
+      // Written down by the Routes door as it is admitted (sources/routing.js);
+      // a row here as well counted every request twice (Codex, 26 Sep 2026).
+      d = await fetchDirections({ from, to, mode: apiMode, departAt, purpose: 'trip.directions' });
     }
     if (!d) d = { minutes: estimateTravelMinutes(from, to, apiMode), meters: null, encodedPolyline: null, steps: [], estimated: true };
     if (mode === 'taxi') d.minutes += TAXI_WAIT_MINUTES;

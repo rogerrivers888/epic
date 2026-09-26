@@ -221,3 +221,19 @@ test('the Google paid line on Settings is the guard’s own count, for any perio
   const series = await usageByMonth(HH, 3);
   assert.equal(series.lines['google-paid'].at(-1).units, await countGoogleThisMonth(HH));
 });
+
+test('a revoked or expired session stops spending, even through a link it signed', async () => {
+  // Codex, 26 Sep 2026: the check looked only at the kind of session.
+  const { rows: [{ id: gone }] } = await query(
+    `insert into api_sessions (token_hash, label, expires_at, revoked_at) values ('test:paid-gate-revoked', 'signed out', now() + interval '1 day', now())
+     on conflict (token_hash) do update set revoked_at = now() returning id`);
+  const { rows: [{ id: old }] } = await query(
+    `insert into api_sessions (token_hash, label, expires_at) values ('test:paid-gate-expired', 'expired', now() - interval '1 minute')
+     on conflict (token_hash) do update set expires_at = now() - interval '1 minute' returning id`);
+  await withGoogle(async (out) => {
+    for (const sessionId of [gone, old]) {
+      await assert.rejects(() => runAsSpender({ householdId: HH, sessionId }, () => googleSource.brief('ChIJ_gone', { meter: {} })), refused);
+    }
+    assert.equal(out(), 0);
+  });
+});

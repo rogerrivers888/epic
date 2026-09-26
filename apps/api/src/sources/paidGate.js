@@ -49,23 +49,29 @@ const load = () => (deps ??= Promise.all([import('../claude.js'), import('../rep
   })));
 
 /**
- * Whether a session is somebody's sign-in rather than the server's own.
+ * Whether a session is somebody's live sign-in rather than the server's own.
  *
- * Cached for the life of the process: a session's kind is fixed when it is
- * made. Fails closed — a lookup that cannot be answered is not a real session.
+ * Live as well as real: a photo link outlives the request that signed it, and
+ * a device signed out or a session expired must stop spending when it stops
+ * signing in (Codex, 26 Sep 2026). Remembered for a minute, not for the
+ * process, so a revocation takes effect within one. Fails closed — a lookup
+ * that cannot be answered is not a real session.
  */
+const LIVE_FOR_MS = 60_000;
 const kinds = new Map();
 export async function isRealSession(sessionId) {
   if (!sessionId) return false;
-  if (kinds.has(sessionId)) return kinds.get(sessionId);
+  const hit = kinds.get(sessionId);
+  if (hit && Date.now() - hit.at < LIVE_FOR_MS) return hit.real;
   const { query } = await load();
   const { rows: [row] } = await query(
-    `select token_hash not like 'service:%' as real from api_sessions where id = $1`,
+    `select token_hash not like 'service:%' and revoked_at is null and expires_at > now() as real
+       from api_sessions where id = $1`,
     [sessionId],
   );
   const real = Boolean(row?.real);
   if (kinds.size > 5000) kinds.clear();
-  kinds.set(sessionId, real);
+  kinds.set(sessionId, { real, at: Date.now() });
   return real;
 }
 
