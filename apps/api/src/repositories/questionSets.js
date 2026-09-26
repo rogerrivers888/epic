@@ -762,10 +762,23 @@ export async function globalFromCandidate(id, { label = null, kind = 'yesno', re
       const text = given ?? c.raw_forms?.[0] ?? c.norm;
       if (!slug(text)) throw bad('A global fact needs a name.');
       key = slug(text);
-      await client.query("insert into place_attributes (key, label, kind, position) values ($1, $2, $3, 200) on conflict (key) do nothing", [key, sentence(text), kind]);
+      try {
+        await client.query("insert into place_attributes (key, label, kind, position) values ($1, $2, $3, 200) on conflict (key) do nothing", [key, sentence(text), kind]);
+      } catch (err) {
+        // A label may not take a drawer's key (migration 110); say so, as
+        // promote() does, rather than answer 500 (Codex, 26 Sep 2026).
+        if (err?.code === '23505') throw bad(`"${text}" is already one of our drawers. Name the fact something else.`);
+        throw err;
+      }
       await client.query('insert into attribute_aliases (norm, target_key, raw) values ($1, $2, $3) on conflict (norm) do nothing', [c.norm, key, c.raw_forms?.[0] ?? null]);
     }
     let question = await addQuestion({ attributeKey: key, scope: 'global', refreshDays, fromCandidate: id }, client);
+    // Asked everywhere now, so no set asks it as well: a set question on the
+    // same label would store the same fact twice (Codex, 26 Sep 2026). It is
+    // switched off, never deleted.
+    await client.query(
+      "update questions set active = false, updated_at = now() where attribute_key = $1 and scope = 'set' and active", [key],
+    );
     // An existing global question on this label that was switched off is
     // switched back on, rather than the word being marked promoted to a
     // question nobody is asked (Codex, 26 Sep 2026).

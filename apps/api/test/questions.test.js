@@ -887,3 +887,22 @@ test('Codex on C27: a blank label falls back, a switched-off global comes back o
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
   await query("delete from place_attributes where key like 'zz-%'");
 });
+
+test('Codex on C27: a fact made global is no longer asked by a set as well', async () => {
+  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+  await query("insert into question_sets (key, name) values ('zz-set', 'Zz') on conflict do nothing");
+  await query("insert into place_attributes (key, label, kind, position) values ('zz-vegan', 'Zz vegan', 'yesno', 200) on conflict do nothing");
+  await query("insert into attribute_aliases (norm, target_key, raw) values ('zz vegan', 'zz-vegan', 'zz vegan') on conflict do nothing");
+  const { rows: [local] } = await query("insert into questions (attribute_key, scope, set_key) values ('zz-vegan', 'set', 'zz-set') returning id");
+  await sets.recordCandidates(sub, [{ norm: 'zz vegan', raw: 'zz vegan', kind: 'feature', sources: ['features'], placesSeen: 2, asserts: 2, evidence: 'fully vegan menu', evidenceRef: 'osm:v' }], { placesTotal: 20 });
+  const [w] = (await sets.candidates({ subcategory: sub, status: 'new', limit: 50 })).filter((c) => c.norm === 'zz vegan');
+  const out = await sets.globalFromCandidate(w.id, { actor: 'test' });
+  assert.equal(out.question.scope, 'global');
+  assert.equal((await query('select active from questions where id = $1', [local.id])).rows[0].active, false, 'the set no longer asks it too');
+  await query("delete from questions where attribute_key = 'zz-vegan'");
+  await query("delete from question_sets where key = 'zz-set'");
+  await query("delete from attribute_aliases where norm like 'zz %'");
+  await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
+  await query("delete from place_attributes where key like 'zz-%'");
+});

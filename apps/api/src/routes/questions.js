@@ -314,7 +314,9 @@ questionRoutes.post('/candidates/:id/global', requires('manage_questions'), asyn
     const { label = null, kind = 'yesno', refreshDays = null } = req.body ?? {};
     // A shape the labels hold, and a whole number of days as given — never
     // rounded into a different cadence (Codex, 26 Sep 2026).
-    if (!['yesno', 'range', 'oneof'].includes(kind)) throw bad('A global fact is yes/no, a range or one of a list.');
+    // One of a list needs its list, which this door does not take, so it is
+    // yes/no or a range here (Codex, 26 Sep 2026).
+    if (!['yesno', 'range'].includes(kind)) throw bad('A global fact made from a word is yes/no or a range.');
     const days = refreshDays == null ? null : Number(refreshDays);
     if (days != null && !(Number.isInteger(days) && days >= 1 && days <= 3650)) throw bad('A re-check cadence is a whole number of days, 1 to 3650.');
     res.json(await sets.globalFromCandidate(Number(req.params.id), { label, kind, refreshDays: days, actor: actorOf(req) }));
