@@ -1643,11 +1643,34 @@ test('a run rolls up the districts it censused, not the fresh ones it walked pas
     ref: 'google:walked_new', slice: '50.1150,-2.0450,50.1250,-2.0350', gridKey: 'test/walked/1',
   });
 
+  // And a square it asked before its slices carried its id (migration 263):
+  // a run that spans the migration is still one run.
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, saturated)
+     values ('test/walked/2', 50.16, -2.10, 50.24, -1.98, array['ZZ7C'], 'done', now(), 0)
+     on conflict (grid_key) do update set state = 'done', censused_at = excluded.censused_at, outcodes = excluded.outcodes`);
+  await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'test/walked/2') on conflict do nothing`, [run.id]);
+  await query(
+    `insert into census_slices (area_slug, min_lat, min_lng, max_lat, max_lng, category, subcategory,
+                                google_type, query, returned, new_ids, saturated, depth, requests, ran_at)
+     values ('test/walked/2', 50.16, -2.10, 50.24, -1.98, 'sport', 'golf', 'golf_course', 'golf course', 1, 1, false, 0, 1, now())`);
+  await seaDistrict({
+    outcode: 'ZZ7C', sectors: [['ZZ7C 1', 50.20, -2.04]],
+    ref: 'google:walked_legacy', slice: '50.1950,-2.0450,50.2050,-2.0350', gridKey: 'test/walked/2',
+  });
+
+  const counts = async () => (await query(
+    `select area_slug, census_count from area_counts where area_slug in ('zz7a', 'zz7b', 'zz7c') and subcategory = 'golf' order by 1`,
+  )).rows.map((r) => [r.area_slug, r.census_count]);
+
+  // Named districts as well as the run: still only what the run asked.
+  await rollUpOutcodes({ runId: run.id, outcodes: ['ZZ7A'] });
+  assert.deepEqual(await counts(), [['zz7a', 999]], 'naming a district the run walked past does not roll it up under the run');
+
   await rollUpOutcodes({ runId: run.id });
-  const { rows } = await query(
-    `select area_slug, census_count from area_counts where area_slug in ('zz7a', 'zz7b') and subcategory = 'golf' order by 1`);
-  assert.deepEqual(rows.map((r) => [r.area_slug, r.census_count]), [['zz7a', 999], ['zz7b', 1]],
-    'the district it walked past keeps its count; the one it asked is rolled up');
+  assert.deepEqual(await counts(), [['zz7a', 999], ['zz7b', 1], ['zz7c', 1]],
+    'the district it walked past keeps its count; the ones it asked, before and after its slices carried its id, are rolled up');
+  t.after(() => query(`delete from area_counts where area_slug = 'zz7c'`));
 });
 
 test('a run waiting for the quota day can be stopped, and the clock does not wake it', async (t) => {
@@ -1668,4 +1691,12 @@ test('a run waiting for the quota day can be stopped, and the clock does not wak
   assert.equal(after.state, 'stopped');
   assert.equal(after.resume_after, null);
   assert.match(after.problem, /^stopped while waiting: 75,000 requests today/, 'and says what it was waiting for');
+
+  // A running one is asked, and its loop stops it — the same one statement.
+  const going = await startTestRun({ label: 'test one day running' });
+  const asked = await requestStop(going.id);
+  assert.deepEqual(asked, { stopping: true, stopped: false });
+  const { rows: [g] } = await query('select state, stop_requested from census_runs where id = $1', [going.id]);
+  assert.deepEqual([g.state, g.stop_requested], ['running', true]);
+  assert.deepEqual(await requestStop(run.id), { stopping: false, stopped: false }, 'and a stopped run is left alone');
 });

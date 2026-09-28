@@ -377,22 +377,26 @@ export async function startRun({
 
 /** A person pressing stop. The run finishes the tile it is on and stops. */
 export async function requestStop(id) {
+  // One statement for both, so the clock cannot wake a waiting run between a
+  // check for "running" and a check for "waiting" and leave the stop landing
+  // on neither (Codex, 28 Sep 2026). A running run is asked to stop and its
+  // loop does it; a run waiting for the quota day has no loop to read a flag —
+  // it is asleep until the clock wakes it — so it is stopped here and now,
+  // and the clock finds nothing to wake. Without this a run meant for one day
+  // that met the day's cap first would carry on the next morning (owner,
+  // 28 Sep 2026: "one day only … do not continue tomorrow until I say go").
   const { rows } = await query(
-    `update census_runs set stop_requested = true where id = $1 and state = 'running' returning id`, [id]);
-  if (rows.length) return { stopping: true };
-  // A run waiting for the quota day has no loop to read a flag: it is asleep
-  // until the clock wakes it. So it is stopped here and now, and the clock
-  // finds nothing to wake. Without this a run meant for one day that met the
-  // day's cap first would carry on the next morning, and nothing could stop it
-  // short of resuming it first (owner, 28 Sep 2026: "one day only … do not
-  // continue tomorrow until I say go").
-  const { rows: asleep } = await query(
     `update census_runs
-        set state = 'stopped', resume_after = null, finished_at = now(), last_seen_at = now(),
-            problem = 'stopped while waiting: ' || coalesce(problem, 'for the quota day')
-      where id = $1 and state = 'waiting' returning id`, [id]);
-  if (asleep.length) await refreshProgress(id);
-  return { stopping: asleep.length > 0, stopped: asleep.length > 0 };
+        set stop_requested = (state = 'running') or stop_requested,
+            resume_after = case when state = 'waiting' then null else resume_after end,
+            finished_at  = case when state = 'waiting' then now() else finished_at end,
+            last_seen_at = case when state = 'waiting' then now() else last_seen_at end,
+            problem      = case when state = 'waiting' then 'stopped while waiting: ' || coalesce(problem, 'for the quota day') else problem end,
+            state        = case when state = 'waiting' then 'stopped' else state end
+      where id = $1 and state in ('running', 'waiting') returning state`, [id]);
+  const stopped = rows[0]?.state === 'stopped';
+  if (stopped) await refreshProgress(id);
+  return { stopping: rows.length > 0, stopped };
 }
 
 /** Start again where it left off. Nothing is re-asked; the tiles remember. */
@@ -1176,27 +1180,35 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
   // plan touched. A run's plan keeps the fresh tiles it walked past as members,
   // so a whole-country run holds London's eight-kilometre squares — and rolling
   // inner London up again from those alone would put back the wide-box counts
-  // the kilometre re-census replaced (28 Sep 2026). What the run asked is read
-  // from its own slices, which carry its id and never change hands; a tile's
-  // `censused_at` is shared by every run that ever takes the square, so an
-  // older paused run would have claimed districts a later one censused
-  // (Codex, 28 Sep 2026). A run from before its slices carried an id
-  // (migration 263) has no such record, and keeps the plan it always rolled.
-  const { rows: [asked] } = runId
-    ? await query('select exists (select 1 from census_slices where census_run_id = $1) as any', [runId])
-    : { rows: [{ any: false }] };
-  const codes = outcodes?.length
-    ? outcodes.map((c) => String(c).toUpperCase())
-    : (await query(
-      runId && asked.any
-        ? `select distinct unnest(t.outcodes) as code from census_tiles t
-             join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1
-            where t.censused_at is not null
-              and exists (select 1 from census_slices s where s.census_run_id = $1 and s.area_slug = t.grid_key)`
-        : `select distinct unnest(t.outcodes) as code from census_tiles t
-             ${runId ? 'join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1' : ''}
-            where t.censused_at is not null`,
-      runId ? [runId] : [])).rows.map((r) => r.code);
+  // the kilometre re-census replaced (28 Sep 2026).
+  //
+  // What the run asked is read from its own slices. A tile's `censused_at` is
+  // shared by every run that ever takes the square, so an older paused run
+  // would have claimed districts a later one censused (Codex, 28 Sep 2026).
+  // A slice carries its run's id from migration 263 on; one from before it
+  // carries none, and is the run's if it was asked of the run's square while
+  // the run was going — one run works at a time, so the window is the run's
+  // own — which keeps a run that spans the migration whole (Codex, same day).
+  // And the same filter when districts are named as well as the run: asking
+  // for a run by name is asking what *it* found (Codex, same day).
+  const askedByRun = `exists (select 1 from census_slices s
+                               where s.area_slug = t.grid_key
+                                 and (s.census_run_id = $1
+                                      or (s.census_run_id is null and s.ran_at >= r.started_at
+                                          and s.ran_at <= coalesce(r.finished_at, now()))))`;
+  const codes = runId
+    ? (await query(
+      `select distinct c.code from census_tiles t
+         join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1
+         join census_runs r on r.id = m.run_id
+         cross join lateral unnest(t.outcodes) as c(code)
+        where t.censused_at is not null and ${askedByRun}
+          ${outcodes?.length ? 'and upper(c.code) = any($2::text[])' : ''}`,
+      outcodes?.length ? [runId, outcodes.map((c) => String(c).toUpperCase())] : [runId])).rows.map((r) => String(r.code).toUpperCase())
+    : outcodes?.length
+      ? outcodes.map((c) => String(c).toUpperCase())
+      : (await query(
+        'select distinct unnest(t.outcodes) as code from census_tiles t where t.censused_at is not null')).rows.map((r) => r.code);
   if (!codes.length) return { outcodes: 0, rows: 0, unattributed: 0 };
 
   // Every sector there is. The verdict is a nearest-sector test, and it has to
