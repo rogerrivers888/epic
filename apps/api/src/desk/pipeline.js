@@ -35,10 +35,14 @@ const WISHES = [/\bwish (they|there|it) (had|was|were)\b/, /\bwould be (nice|goo
  * wave machine? We couldn't find one" mentions it and means the opposite; "I
  * wish they had a sauna" is not an assertion.
  */
-const VERB = /^(?:is|are|was|were|will|be|been|being|has|have|had|remains?|remained|stays?|stayed|seems?|seemed|appears?|appeared|looks?|looked|gets?|got|getting|'re|'ve|'ll|'d|’re|’ve|’ll|’d|isnt|isn't|wasnt|wasn't)$/;
+// A "be"-type link makes the closure a state of the phrase ("is closed",
+// "has been closed", "remains shut"); "has"/"had" alone is an active verb —
+// "the pool has broken tiles" says nothing of the pool (Codex, 28 Sep 2026).
+const BE = /^(?:is|are|was|were|be|been|being|remains?|remained|stays?|stayed|seems?|seemed|appears?|appeared|looks?|looked|gets?|got|getting|'re|’re|isnt|isn't|wasnt|wasn't)$/;
+const AUX = /^(?:will|would|has|have|had|'ve|'ll|'d|’ve|’ll|’d)$/;
 const ADVERB = /^(?:still|now|currently|permanently|temporarily|sadly|unfortunately|often|sometimes|always|\w+ly)$/;
 const CLOSURE = /^(?:closed|shut|removed|gone|broken|unavailable)$/;
-const CLOSURE_2 = /^(?:out of (?:order|use)|not working|not open)/;
+const CLOSURE_2 = /^(?:out of (?:order|use)|not working|not open)\b/;
 const WHEN_WHY = /^(?:for|until|till|since|on|at|in|during|over|by|due|because|when|as|today|tomorrow|now|again|this|last|next|all|to|pending|every|indefinitely|\w+ly)$/;
 function closureOfPhrase(clause) {
   const words = String(clause).replace(/^\s*(['’](?:s|ll|d|re|ve))/, ' $1').trim().split(/\s+/).map((w) => w.replace(/[^a-z'’]/g, '')).filter(Boolean);
@@ -46,12 +50,14 @@ function closureOfPhrase(clause) {
   for (let i = 0; i < Math.min(words.length, 6); i += 1) {
     const w = words[i];
     const rest = words.slice(i).join(' ');
-    if (CLOSURE.test(w) || CLOSURE_2.test(rest)) {
+    const multi = rest.match(CLOSURE_2);
+    if (CLOSURE.test(w) || multi) {
       if (verb) return true;
-      const next = words[i + (CLOSURE_2.test(rest) ? 3 : 1)];
+      const next = words[i + (multi ? multi[0].split(' ').length : 1)];
       return next === undefined || WHEN_WHY.test(next);
     }
-    if (VERB.test(w)) { verb = true; continue; }
+    if (BE.test(w)) { verb = true; continue; }
+    if (AUX.test(w)) continue;
     if (ADVERB.test(w) || /^['’]s$/.test(w)) continue;
     return false; // anything else between them: the closure belongs to something else
   }

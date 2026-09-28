@@ -683,3 +683,10 @@ test('a closure linked by a verb is the phrase’s whatever follows; without one
   for (const s of ["The pool's recently closed cafe is being renovated.", 'The pool is next to the closed cafe.', 'We enjoyed the pool; the cafe was closed.'])
     assert.equal(pipeline.polarity(s, 'pool'), 'asserts', s);
 });
+
+test('an active verb acting on something else is not a closure of the phrase', () => {
+  for (const s of ['The pool has broken tiles.', 'The pool has closed its cafe for repairs.', "They repaired the pool's not working pump today."])
+    assert.equal(pipeline.polarity(s, 'pool'), 'asserts', s);
+  for (const s of ['The pool has been closed for weeks.', 'The pool has closed.', 'The pool will be closed tomorrow.', 'The pool is not working.'])
+    assert.equal(pipeline.polarity(s, 'pool'), 'denies', s);
+});
