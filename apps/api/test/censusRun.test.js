@@ -1995,4 +1995,12 @@ test('a district reached for the first time that has found nothing yet is on the
   const { censusCounts } = await import('../src/sources/ringSearch.js');
   const seen = await censusCounts(['ZZ0A']);
   assert.deepEqual([seen.missing, seen.partial], [[], ['zz0a']], 'reached, not unseen');
+
+  // A slice that was refused reached nothing, and says nothing about the
+  // district (Codex, 28 Sep 2026).
+  await query(`delete from area_counts where area_slug = 'zz0a'`);
+  await query(`update census_slices set problem = 'Google refused: 429' where area_slug = 'test/nothing/0'`);
+  await rollUpOutcodes({ runId: run.id });
+  const { rows: none } = await query(`select 1 from area_counts where area_slug = 'zz0a'`);
+  assert.equal(none.length, 0, 'a refused question writes no row');
 });

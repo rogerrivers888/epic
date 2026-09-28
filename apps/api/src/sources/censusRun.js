@@ -1268,7 +1268,9 @@ export async function rollUpOutcodes({ outcodes = null, runId = null, alsoSquare
     // Finished or not: a run stopped half way through a square has asked some
     // of its drawers, and that is what a partial district is made of (Codex,
     // 28 Sep 2026). Unfinished, it has no `censused_at` yet.
-    ? 'exists (select 1 from census_slices s where s.census_run_id = $1 and s.area_slug = t.grid_key)'
+    // Answered, not merely asked: a refused or failed slice is on the record
+    // but reached nothing (Codex, 28 Sep 2026).
+    ? 'exists (select 1 from census_slices s where s.census_run_id = $1 and s.area_slug = t.grid_key and s.problem is null)'
     : 't.censused_at is not null'}
           ${named ? 'and upper(c.code) = any($2::text[])' : ''}`,
       named ? [runId, named] : [runId])).rows.map((r) => r.code)
@@ -1306,7 +1308,7 @@ export async function rollUpOutcodes({ outcodes = null, runId = null, alsoSquare
       `select t.grid_key, t.min_lat, t.min_lng, t.max_lat, t.max_lng, t.outcodes, t.saturated, t.censused_at, t.started_at, t.state, t.done_subcategories
          from census_tiles t join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1
         where t.censused_at is not null
-           or exists (select 1 from census_slices s where s.census_run_id = $1 and s.area_slug = t.grid_key)`, [runId])
+           or exists (select 1 from census_slices s where s.census_run_id = $1 and s.area_slug = t.grid_key and s.problem is null)`, [runId])
     : await query(
       `select t.grid_key, t.min_lat, t.min_lng, t.max_lat, t.max_lng, t.outcodes, t.saturated, t.censused_at, t.started_at, t.state, t.done_subcategories
          from census_tiles t
@@ -1411,7 +1413,7 @@ export async function rollUpOutcodes({ outcodes = null, runId = null, alsoSquare
   // new place, so after this pass it is rolled up the way the board's own
   // button does: from all the ground on it (Codex, 28 Sep 2026).
   const askedTiles = runId && stamped.any && !named
-    ? new Set((await query('select distinct area_slug from census_slices where census_run_id = $1', [runId])).rows.map((r) => r.area_slug))
+    ? new Set((await query('select distinct area_slug from census_slices where census_run_id = $1 and problem is null', [runId])).rows.map((r) => r.area_slug))
     : null;
   const neighbours = new Set();
   const reachedFrom = (tile, outcode) => { if (askedTiles?.has(tile.grid_key) && outcode) neighbours.add(outcode); };
@@ -1473,7 +1475,7 @@ export async function rollUpOutcodes({ outcodes = null, runId = null, alsoSquare
   if (runId && stamped.any) {
     const { rows: askedDrawers } = await query(
       `select distinct area_slug, category, subcategory from census_slices
-        where census_run_id = $1 and category is not null and subcategory is not null`, [runId]);
+        where census_run_id = $1 and problem is null and category is not null and subcategory is not null`, [runId]);
     for (const r of askedDrawers) {
       if (!tileByKey.has(r.area_slug)) continue;
       if (!drawersOfTile.has(r.area_slug)) drawersOfTile.set(r.area_slug, new Map());
