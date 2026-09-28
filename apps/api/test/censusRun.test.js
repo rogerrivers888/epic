@@ -1873,3 +1873,35 @@ test('a stop asked for on the way to sleep is honoured, and the clock never wake
   const woke = await resumeInterrupted();
   assert.ok(!(woke.runs ?? []).some((x) => x.id === other.id), 'the clock leaves it');
 });
+
+test('a district fed a place by a neighbour\'s unfinished square is partial until that square is done', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from area_counts where area_slug in ('zz2a', 'zz2b')`);
+    await query(`delete from geo_cells where code like 'ZZ2%'`);
+    await query(`delete from place_index where venue_ref like 'google:fed_%'`);
+    await clean();
+  });
+  // ZZ2B's own square is done. ZZ2A's is still being asked, and one of its
+  // places sits nearest ZZ2B: that count is not final while the square that
+  // fed it may have more (Codex, 28 Sep 2026).
+  const run = await startTestRun({ label: 'test fed' });
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, started_at, saturated) values
+       ('test/fed/0', 49.20, -5.60, 49.28, -5.48, array['ZZ2A'], 'doing', null, now(), 0),
+       ('test/fed/1', 49.20, -5.48, 49.28, -5.36, array['ZZ2B'], 'done', now(), now(), 0)
+     on conflict (grid_key) do update set state = excluded.state, censused_at = excluded.censused_at, started_at = excluded.started_at, outcodes = excluded.outcodes`);
+  for (const k of ['test/fed/0', 'test/fed/1']) {
+    await query(`insert into census_run_tiles (run_id, grid_key) values ($1, $2) on conflict do nothing`, [run.id, k]);
+    await askedBy(run, k);
+  }
+  await seaDistrict({ outcode: 'ZZ2A', sectors: [['ZZ2A 1', 49.24, -5.58]] });
+  await seaDistrict({
+    outcode: 'ZZ2B', sectors: [['ZZ2B 1', 49.24, -5.47]],
+    ref: 'google:fed_edge', slice: '49.2380,-5.4850,49.2420,-5.4810', gridKey: 'test/fed/0',
+  });
+  await rollUpOutcodes({ runId: run.id });
+  const { rows: [b] } = await query(`select census_count, complete from area_counts where area_slug = 'zz2b' and subcategory = 'golf'`);
+  assert.equal(b.census_count, 1, 'the place is counted where it is nearest');
+  assert.equal(b.complete, false, 'and the district is partial while the square that fed it is unfinished');
+});

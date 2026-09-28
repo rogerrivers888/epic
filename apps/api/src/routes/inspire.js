@@ -581,10 +581,12 @@ inspire.get('/around', async (req, res, next) => {
         label: tax.vocab?.categories?.[key]?.label ?? key,
         // What the census says is here — the number the screen prints beside
         // the name, and the one thing on this board that never costs anything.
-        // A floor: the straddlers are beside it, never inside it.
+        // A floor: the straddlers are beside it, never inside it — and so is
+        // a category nothing has been found for yet in a district a run
+        // stopped part-way across (Codex, 28 Sep 2026).
         count: census.counts[key] ?? 0,
         unresolved: census.unresolved[key] ?? 0,
-        floor: (census.unresolved[key] ?? 0) > 0 || census.missing.length > 0 || Boolean(census.floors?.[key]),
+        floor: (census.unresolved[key] ?? 0) > 0 || census.missing.length > 0 || (census.partial?.length ?? 0) > 0 || Boolean(census.floors?.[key]),
         censused: census.missing.length === 0,
         items: got.items.slice(0, shows).map((it) => asCard(it, {
           centre: { lat: ring.at?.lat ?? it.lat, lng: ring.at?.lng ?? it.lng },
@@ -735,7 +737,7 @@ inspire.get('/near', async (req, res, next) => {
            */
           count: census.counts[key] ?? 0,
           unresolved: census.unresolved[key] ?? 0,
-          floor: (census.unresolved[key] ?? 0) > 0 || census.missing.length > 0 || Boolean(census.floors?.[key]),
+          floor: (census.unresolved[key] ?? 0) > 0 || census.missing.length > 0 || (census.partial?.length ?? 0) > 0 || Boolean(census.floors?.[key]),
           icon: tax.vocab?.categories?.[key]?.icon ?? null,
           // Food is a shelf again, not a door: it is bought the same way as
           // everything else now.

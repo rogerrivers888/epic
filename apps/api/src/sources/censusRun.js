@@ -1360,9 +1360,9 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
   };
 
   // Everything bucketed by the district it fell in, in one pass over the rows.
-  const bucket = new Map(); // outcode -> { counted, unresolved, sourcedBy, fromText, drawer }
+  const bucket = new Map(); // outcode -> { counted, unresolved, sourcedBy, fromText, drawer, fed }
   const bucketFor = (code) => {
-    if (!bucket.has(code)) bucket.set(code, { counted: new Map(), unresolved: new Map(), sourcedBy: new Map(), fromText: new Map(), drawer: new Map() });
+    if (!bucket.has(code)) bucket.set(code, { counted: new Map(), unresolved: new Map(), sourcedBy: new Map(), fromText: new Map(), drawer: new Map(), fed: new Set() });
     return bucket.get(code);
   };
   const add = (map, key, ref) => {
@@ -1408,6 +1408,7 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
     if (v.kind === 'inside') {
       if (!codes.includes(v.outcode)) { reachedFrom(tile, v.outcode); continue; }
       const b = bucketFor(v.outcode);
+      b.fed.add(tile.grid_key);
       b.drawer.set(key, { category: r.category, subcategory: r.subcategory });
       add(b.counted, key, r.venue_ref);
       // How it was found, counted only where it is counted.
@@ -1425,6 +1426,7 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
       for (const o of v.outcodes) {
         if (!codes.includes(o)) { reachedFrom(tile, o); continue; }
         const b = bucketFor(o);
+        b.fed.add(tile.grid_key);
         b.drawer.set(key, { category: r.category, subcategory: r.subcategory });
         add(b.unresolved, key, r.venue_ref);
       }
@@ -1482,7 +1484,11 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
       .sort((x, y) => x - y);
     const saturatedTiles = own.filter((t) => Number(t.saturated) > 0).length;
     const grids = new Set(own.map((t) => gridOf(t.grid_key)));
+    // And every square that fed it a place, tagged with it or not: a place in
+    // a neighbour's unfinished square that sits nearest this district is part
+    // of this count, and the square may have more (Codex, 28 Sep 2026).
     const complete = own.every((t) => t.state === 'done')
+      && [...b.fed].every((k) => tileByKey.get(k)?.state === 'done')
       && plannedTiles.every((t) => !t.outcodes?.includes(code) || !grids.has(gridOf(t.grid_key)) || t.state === 'done');
     for (const [key, { category, subcategory }] of drawer) {
       const refs = b.counted.get(key) ?? new Set();
