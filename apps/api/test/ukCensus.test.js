@@ -253,3 +253,47 @@ test('a day\'s run is switched on only once its plan is written, and a plan cut 
   const { rows: [old] } = await query('select state, problem from census_runs where id = $1', [out.started.id]);
   assert.deepEqual([old.state, old.problem], ['stopped', 'planning cut short; replaced by the next run']);
 });
+
+test('a day\'s run still going after its quota day turned is brought to its ceiling, and today gets its own', async (t) => {
+  await clean(); t.after(clean);
+  const run = await dayOne({ state: 'running', problem: null, finished: null });
+  await query('update census_runs set requests = 51234 where id = $1', [run.id]);
+  const r = recorder();
+  const out = await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start });
+  assert.equal(out.action, 'overran');
+  const { rows: [after] } = await query('select max_requests from census_runs where id = $1', [run.id]);
+  assert.equal(after.max_requests, 51234, 'it pauses where it stands');
+  // Once paused at that ceiling, today's run starts.
+  await query(`update census_runs set state = 'paused', problem = 'stopped at the 51234-request ceiling; resume to carry on', finished_at = '2026-09-29T08:05:00Z' where id = $1`, [run.id]);
+  const next = await uk.tick({ now: new Date('2026-09-29T08:10:00Z'), start: r.start });
+  assert.equal(next.action, 'start');
+});
+
+test('a day\'s run is not switched on over a census somebody else started meanwhile', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from census_runs where label = 'test by hand'`);
+    await clean();
+  });
+  await dayOne();
+  const start = async (args) => {
+    const { rows: [run] } = await query(
+      `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state, problem, started_by)
+       values ($1, array['ZZ'], 0.08, 0.12, 70000, 5, 30, 'paused', 'built paused; resume to start', $2) returning *`, [args.label, args.startedBy]);
+    await query(`insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state) values ('test by hand', array['ZZ'], 0.08, 0.12, 10, 5, 30, 'running')`);
+    return run;
+  };
+  const out = await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start });
+  const { rows: [mine] } = await query('select state from census_runs where id = $1', [out.started.id]);
+  assert.equal(mine.state, 'paused', 'left built-paused, not a second live run');
+});
+
+test('a replaced plan is not a day in the report', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state, problem, started_at)
+     values ('The rest of the UK — day 2', array['ZZ'], 0.08, 0.12, 70000, 5, 30, 'stopped', 'planning cut short; replaced by the next run', '2026-09-29T07:10:00Z')`);
+  const st = await uk.status(new Date('2026-09-29T09:00:00Z'));
+  assert.equal(st.days.length, 1);
+});

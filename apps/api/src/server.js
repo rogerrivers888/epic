@@ -865,14 +865,15 @@ setInterval(() => { void advanceCensus(); }, CENSUS_EVERY_MS).unref?.();
 
 // The census of the rest of the UK, a day at a time (owner, 28 Sep 2026): a new
 // 70,000-request run once each quota day has turned, held on a census bill
-// above pennies, stopped on any day over £5. Hourly, so a deploy or a restart
-// loses at most an hour; every decision is read from the runs and the billing
-// export, so nothing is lost by the process going (sources/ukCensus.js).
+// above pennies, stopped on any day over £5. Every ten minutes, so a day's run
+// still going after its quota day turns is brought to its ceiling promptly;
+// every decision is read from the runs and the billing export, so nothing is
+// lost by the process going (sources/ukCensus.js).
 const ukCensusDaily = () => import('./sources/ukCensus.js').then(({ daily }) => daily())
   .then((r) => { if (r?.started) console.log(`epic-api: census — the rest of the UK, day ${r.day} started`); })
   .catch((err) => console.error('uk census', err.message));
 setTimeout(() => { void ukCensusDaily(); }, RESUME_AFTER_MS + 90_000).unref?.();
-setInterval(() => { void ukCensusDaily(); }, 3600_000).unref?.();
+setInterval(() => { void ukCensusDaily(); }, 10 * 60_000).unref?.();
 
 /**
  * The free count the census is measured against (sources/groundCounts.js).

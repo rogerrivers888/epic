@@ -132,7 +132,13 @@ export async function decide(now = new Date()) {
         where m.run_id = $1 and t.state <> 'done'`, [latest.id])
     : { rows: [{ failed: 0 }] };
   if (latest.state === 'done' && !failed) return { action: 'complete', runs, latest, bills };
-  if (['running', 'waiting'].includes(latest.state)) return { action: 'working', runs, latest, bills };
+  if (['running', 'waiting'].includes(latest.state)) {
+    // Still going after its quota day turned — a late start, an outage — it is
+    // not today's run: it is brought to its ceiling where it stands, pauses
+    // there as any day does, and today gets a run of its own (Codex, 28 Sep 2026).
+    const late = latest.state === 'running' && pacificDay(latest.started_at) < pacificDay(now);
+    return { action: late ? 'overran' : 'working', runs, latest, bills };
+  }
   // A day's run the programme built but never switched on — the process went
   // while its plan was being written — is not anybody's stop. It is set aside
   // and the day started again, the same day (Codex, 28 Sep 2026).
@@ -142,10 +148,9 @@ export async function decide(now = new Date()) {
   if (cutShort(latest)) return { action: 'start', runs, latest, bills, yesterday: null, day: days + 1 };
   const dayEnded = (latest.state === 'paused' && DAY_ENDED.test(latest.problem ?? '')) || latest.state === 'done';
   if (!dayEnded) return { action: 'stopped', runs, latest, bills };
-  // The quota day it last asked in: a run ended for the day just after the
-  // reset still belongs to the day it met the cap in (Codex, 28 Sep 2026).
-  const lastDay = latest.quota_day ?? pacificDay(latest.finished_at ?? latest.last_seen_at ?? latest.started_at);
-  if (lastDay >= pacificDay(now)) return { action: 'today', runs, latest, bills };
+  // A day's run is the quota day it was started in: one run a day, however
+  // late the last one was closed off (Codex, 28 Sep 2026).
+  if (pacificDay(latest.started_at) >= pacificDay(now)) return { action: 'today', runs, latest, bills };
   const yesterday = bills.find((b) => b.day === pacificDay(latest.started_at));
   if (yesterday && yesterday.census_gbp >= PENNIES_GBP) return { action: 'held', runs, latest, bills, yesterday };
   return { action: 'start', runs, latest, bills, yesterday: yesterday ?? null, day: days + 1 };
@@ -183,6 +188,11 @@ async function tickLocked({ now = new Date(), start = censusRun.startRun, stop =
     tell({ kind: 'alert', subject: `Census stopped: Google billed £${d.over.google_gbp.toFixed(2)} on ${d.over.day}`, d });
   }
   if (d.action === 'held') tell({ kind: 'alert', subject: `Census held: the census was billed £${d.yesterday.census_gbp.toFixed(2)} on ${d.yesterday.day}`, d });
+  if (d.action === 'overran') {
+    await query(
+      `update census_runs set max_requests = least(max_requests, requests) where id = $1 and state = 'running'`, [d.latest.id]);
+    return d;
+  }
   if (d.action === 'replan') {
     await query(
       `update census_runs set state = 'stopped', finished_at = now(), problem = 'planning cut short; replaced by the next run'
@@ -203,9 +213,13 @@ async function tickLocked({ now = new Date(), start = censusRun.startRun, stop =
     startedBy: STARTED_BY, startedSessionId: sessionId, paused: true,
   });
   if (run?.id) {
+    // Only if nothing else is going: a census started by hand while this one
+    // was being planned is not joined by a second (Codex, 28 Sep 2026). Left
+    // built-paused, it is replanned once the other is done.
     await query(
       `update census_runs set state = 'running', problem = null, last_seen_at = now()
-        where id = $1 and state = 'paused' and problem like 'built paused%'`, [run.id]);
+        where id = $1 and state = 'paused' and problem like 'built paused%'
+          and not exists (select 1 from census_runs o where o.id <> $1 and o.state in ('running', 'waiting'))`, [run.id]);
   }
   tell({ kind: 'started', subject: `Census day ${d.day} started`, d, run });
   return { ...d, started: run, sessionId };
@@ -225,7 +239,8 @@ export async function status(now = new Date()) {
   const bills = new Map((d.bills ?? []).map((b) => [b.day, b]));
   const days = [];
   let requests = 0; let tilesAsked = 0;
-  for (const [i, r] of d.runs.entries()) {
+  const counted = d.runs.filter((r) => !(r.state === 'stopped' && /^planning cut short/.test(r.problem ?? '')));
+  for (const [i, r] of counted.entries()) {
     const { rows: [t] } = await query(
       `select count(*) filter (where s.n > 0)::int as asked
          from census_run_tiles m
