@@ -43,6 +43,30 @@ const LEDGER_METERS = `
      and (m.key like 'google-%'
           or (m.key = 'google' and not exists (select 1 from jsonb_object_keys(p.units) k where k like 'google-%')))`;
 
+/**
+ * The ledger's Google estimate for a month, as Google would bill it: per
+ * SKU line, only the requests beyond that line's free monthly allowance, at
+ * its price (sources/pricing.js LINES). The ledger's own per-request figure
+ * is list price for every request — the reason September read £512 against
+ * Google's £40.61 (owner, 29 Sep 2026). Pre-tier rows count against the old
+ * `google` line only, never twice.
+ */
+export async function googleEstimate(month) {
+  const { LINES } = await import('../sources/pricing.js');
+  const { rows } = await query(`select meter, sum(n)::float as units from (${LEDGER_METERS}) x where month = $1 group by 1`, [month]);
+  const units = new Map(rows.map((r) => [r.meter === 'google-legacy' ? 'google' : r.meter, r.units]));
+  let usd = 0;
+  const lines = [];
+  for (const line of LINES.filter((l) => l.source === 'google' && l.allowance)) {
+    const used = units.get(line.key) ?? 0;
+    const billable = Math.max(0, used - line.allowance.limit);
+    const lineUsd = billable * (line.allowance.beyondUsd ?? 0);
+    usd += lineUsd;
+    lines.push({ key: line.key, used, free: line.allowance.limit, billable, gbp: lineUsd * USD_TO_GBP });
+  }
+  return { gbp: usd * USD_TO_GBP, lines };
+}
+
 /** Read a month from the export into billing_days. Returns what it read, or why it cannot. */
 export async function readMonth(month) {
   const got = await monthBySkuDay(month);
@@ -115,9 +139,14 @@ export async function reconcile(month) {
   const billedOnly = days.filter((d) => !d.ledgerRequests && d.billedGbp > 0);
   const ledgerOnly = ledger.filter((l) => !billed.some((b) => key(b) === key(l)) && l.requests > 0);
   const sum = (xs, f) => xs.reduce((s, x) => s + (f(x) || 0), 0);
+  const estimate = await googleEstimate(month);
   return {
     month,
-    totals: { billedGbp: sum(days, (d) => d.billedGbp), creditGbp: sum(days, (d) => d.creditGbp), ledgerEstimateGbp: sum(ledger, (l) => l.est_usd) * USD_TO_GBP, attributedGbp: sum(days, (d) => d.attributedGbp) },
+    totals: {
+      billedGbp: sum(days, (d) => d.billedGbp), creditGbp: sum(days, (d) => d.creditGbp), attributedGbp: sum(days, (d) => d.attributedGbp),
+      // after Google's free monthly allowances, per SKU line — the fair comparison with billing
+      ledgerEstimateGbp: estimate.gbp, estimateLines: estimate.lines,
+    },
     days, billedOnly, ledgerOnly, unmapped,
   };
 }

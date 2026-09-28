@@ -28,14 +28,19 @@ import { USD_TO_GBP } from '../domain/providerPrices.js';
  */
 const contradictedDefaults = () => banded();
 
-/** Spend this month in pounds, by Google and Claude, from the ledger. */
+/**
+ * Spend this month in pounds, from the ledger: Claude as recorded, Google as
+ * Google would bill it — after each SKU's free monthly allowance (billing.js
+ * googleEstimate). An estimate either way, and the tile says so.
+ */
 async function spend() {
   const { rows } = await query(`
-    select case when provider ~ 'google' then 'google' when provider ~ 'anthropic|claude' then 'claude' else 'other' end as who,
-           coalesce(sum(estimated_cost_usd), 0)::float usd
-      from provider_calls where created_at >= date_trunc('month', now()) group by 1`);
-  const by = new Map(rows.map((r) => [r.who, r.usd * USD_TO_GBP]));
-  return { google: by.get('google') ?? 0, claude: by.get('claude') ?? 0 };
+    select coalesce(sum(estimated_cost_usd), 0)::float usd
+      from provider_calls where created_at >= date_trunc('month', now()) and provider ~ 'anthropic|claude'`);
+  const { googleEstimate } = await import('./billing.js');
+  const month = new Date().toISOString().slice(0, 7);
+  const g = await googleEstimate(month).catch(() => ({ gbp: 0 }));
+  return { google: g.gbp, claude: (rows[0]?.usd ?? 0) * USD_TO_GBP };
 }
 
 /**

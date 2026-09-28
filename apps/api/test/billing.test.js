@@ -129,3 +129,18 @@ test('late usage on a later invoice is attributed to the day it was used', async
   await query(`delete from provider_calls where purpose = 'billing-late'`);
   await query(`delete from billing_days where day = '2026-08-30'`);
 });
+
+test('the ledger estimate is what Google would bill: nothing inside each SKU’s free monthly allowance', async () => {
+  await query(`delete from provider_calls where purpose = 'billing-allow'`);
+  // 3,000 Pro requests (free up to 5,000) and 1,200 Enterprise searches (free up to 1,000).
+  await query(`insert into provider_calls (provider, purpose, units, estimated_cost_usd, created_at)
+               values ('google', 'billing-allow', '{"google": 3000, "google-pro": 3000}', 96, '2026-07-10 10:00+01'),
+                      ('google', 'billing-allow', '{"google": 1200, "google-search": 1200}', 48, '2026-07-10 11:00+01')`);
+  const est = await billing.googleEstimate('2026-07');
+  const pro = est.lines.find((l) => l.key === 'google-pro');
+  const search = est.lines.find((l) => l.key === 'google-search');
+  assert.equal(pro.billable, 0, 'inside the Pro allowance');
+  assert.equal(search.billable, 200, 'only the 200 past the Enterprise allowance');
+  assert.ok(est.gbp > 0 && est.gbp < 10, `£${est.gbp.toFixed(2)}, not the £100+ list price`);
+  await query(`delete from provider_calls where purpose = 'billing-allow'`);
+});

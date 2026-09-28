@@ -41,20 +41,22 @@ test('spend reads close to budget above 80% and over budget above 100%', async (
   await query(`delete from bo_settings where key = 'billing'`);
   settings.forget();
   const { values } = await settings.settings();
-  const budget = values.budgetGoogle;
+  const budget = values.budgetClaude;
   const USD_TO_GBP = (await import('../src/domain/providerPrices.js')).USD_TO_GBP;
-  // 90% of the Google budget, in dollars.
-  await query(`insert into provider_calls (provider, purpose, estimated_cost_usd) values ('google-places', 'desk-overview-test', $1)`,
+  // Google's estimate comes from requests past each SKU's free allowance
+  // (billing.test.js); Claude's from recorded cost, so Claude drives this.
+  // 90% of the Claude budget, in dollars.
+  await query(`insert into provider_calls (provider, purpose, estimated_cost_usd) values ('anthropic', 'desk-overview-test', $1)`,
     [(budget * 0.9) / USD_TO_GBP]);
   let o = await overview();
   assert.equal(o.health.spend.tone, 'amber');
   assert.equal(o.health.spend.line, 'close to budget');
-  await query(`insert into provider_calls (provider, purpose, estimated_cost_usd) values ('google-places', 'desk-overview-test', $1)`,
+  await query(`insert into provider_calls (provider, purpose, estimated_cost_usd) values ('anthropic', 'desk-overview-test', $1)`,
     [(budget * 0.2) / USD_TO_GBP]);
   o = await overview();
   assert.equal(o.health.spend.tone, 'red');
   assert.equal(o.health.spend.line, 'over budget');
-  assert.match(o.health.spend.title, new RegExp(`^Google £\\d+ estimate of £${budget} · Claude £\\d+ estimate of £\\d+$`));
+  assert.match(o.health.spend.title, new RegExp(`^Google £\\d+ estimate of £\\d+ · Claude £\\d+ estimate of £${budget}$`));
   await query(`delete from provider_calls where purpose = 'desk-overview-test'`);
 });
 
