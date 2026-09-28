@@ -246,3 +246,41 @@ test('See as a household judges near you by the household’s own home: with non
   await query(`delete from browse_rows where key like 'c2-%'`);
   await query('delete from households where id = $1', [h.id]);
 });
+
+test('a fact a proposal made comes back on when the proposal is accepted again, and neither it nor its drawer is retired once something else uses it', async () => {
+  await query(`insert into shelf_categories (key, label, position) values ('educational', 'Educational', 9) on conflict (key) do update set active = true`);
+  await query(`delete from ready_bars where subcategory_key = 'science-learning-centres'`);
+  await query(`delete from shelf_rules where subcategory = 'science-learning-centres' or subject = 'science-learning-centres'`);
+  await query(`delete from word_targets where subcategory_key = 'science-learning-centres'`);
+  await query(`delete from shelf_subcategory_attributes where subcategory_key = 'science-learning-centres'`);
+  await query(`delete from subcategory_facts where subcategory_key = 'science-learning-centres' or attribute_key = 'has-planetarium'`);
+  await query(`delete from shelf_subcategories where key = 'science-learning-centres'`);
+  await query(`insert into taxonomy_labels (namespace, key, label, points_at, active) values ('google', 'planetarium', 'planetarium', null, true)
+               on conflict (namespace, key) do update set points_at = null, decision = null, active = true`);
+  await query(`delete from word_targets where word = 'planetarium'`);
+  await query(`delete from word_proposals where word = 'planetarium'`);
+  await query(`delete from word_decisions where word = 'planetarium'`);
+  await proposals.refreshProposals();
+  const { rows: [p] } = await query(`select id from word_proposals where word = 'planetarium' and state = 'open'`);
+  assert.ok(p, 'raised');
+  const fact = async () => (await query(`select active from place_attributes where key = 'has-planetarium'`)).rows[0]?.active;
+  const drawer = async () => (await query(`select active from shelf_subcategories where key = 'science-learning-centres'`)).rows[0]?.active;
+
+  let out = await mapping.decideProposal({ id: p.id, action: 'apply', who: WHO });
+  assert.equal(await fact(), true);
+  await mapping.undo({ id: out.decision.id, who: WHO });
+  assert.equal(await fact(), false, 'retired: nothing holds it');
+  out = await mapping.decideProposal({ id: p.id, action: 'apply', who: WHO });
+  assert.equal(await fact(), true, 'accepting again switches it back on');
+
+  // Something else comes to use both: a person sets a default on the drawer,
+  // and a collection names the fact. Undo then leaves both on.
+  await query(`insert into shelf_subcategory_attributes (subcategory_key, attribute_key, yesno, origin) values ('science-learning-centres', 'toilets', true, 'person')`);
+  await query(`insert into browse_rows (key, grouping, title, predicate, active, rule) values ('c2-planets', 'Test', 'Stars', '{"all":[]}'::jsonb, false, '{"facts":[{"id":"has-planetarium"}]}'::jsonb)
+               on conflict (key) do update set rule = excluded.rule`);
+  await mapping.undo({ id: out.decision.id, who: WHO });
+  assert.equal(await drawer(), true, 'a drawer a person has configured is kept');
+  assert.equal(await fact(), true, 'a fact a collection names is kept');
+  await query(`delete from browse_rows where key = 'c2-planets'`);
+  await query(`delete from shelf_subcategory_attributes where subcategory_key = 'science-learning-centres'`);
+});

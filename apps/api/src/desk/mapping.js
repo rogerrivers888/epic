@@ -655,7 +655,13 @@ export async function retireMadeSubcategory(c, key, who) {
         or exists (select 1 from place_index where subcategory = $1)
         or exists (select 1 from shelf_rules where subcategory = $1 and not (scope = 'ours' and subject = $1))
         or exists (select 1 from browse_rows where rule::text like '%' || to_jsonb($1::text)::text || '%'
-                                              or predicate::text like '%' || to_jsonb($1::text)::text || '%') as used`, [key]);
+                                              or predicate::text like '%' || to_jsonb($1::text)::text || '%')
+        -- configured since it was made: facts looked for, defaults, an "also in"
+        -- category link (Codex, 28 Sep 2026) — a person's work, kept.
+        or exists (select 1 from subcategory_facts where subcategory_key = $1)
+        or exists (select 1 from shelf_subcategory_attributes where subcategory_key = $1)
+        or exists (select 1 from shelf_subcategory_categories where subcategory_key = $1)
+        or exists (select 1 from subcategory_links where a = $1 or b = $1) as used`, [key]);
   if (used?.used) return false;
   await c.query('update shelf_subcategories set active = false, updated_at = now() where key = $1', [key]);
   await c.query(`delete from shelf_rules where scope = 'ours' and subject = $1`, [key]);
@@ -675,7 +681,14 @@ export async function retireMadeFact(c, key, who) {
     select exists (select 1 from taxonomy_label_carries where attribute_key = $1)
         or exists (select 1 from place_attribute_values where attribute_key = $1)
         or exists (select 1 from place_fact_answers where attribute_key = $1)
-        or exists (select 1 from shelf_subcategory_attributes where attribute_key = $1) as used`, [key]);
+        or exists (select 1 from shelf_subcategory_attributes where attribute_key = $1)
+        -- used since: looked for in a drawer, named by a collection, a
+        -- person's Don't know, a family's answer (Codex, 28 Sep 2026)
+        or exists (select 1 from subcategory_facts where attribute_key = $1)
+        or exists (select 1 from browse_rows where rule::text like '%' || to_jsonb($1::text)::text || '%'
+                                              or predicate::text like '%' || to_jsonb($1::text)::text || '%')
+        or exists (select 1 from fact_unknowns where attribute_key = $1)
+        or exists (select 1 from family_answers where attribute_key = $1) as used`, [key]);
   if (used?.used) return false;
   await c.query('update place_attributes set active = false where key = $1', [key]);
   const { rows: [added] } = await c.query(
@@ -687,7 +700,14 @@ export async function retireMadeFact(c, key, who) {
 
 /** Make a yes/no fact a proposal names, if it is not already one of ours. */
 export async function createFact(c, { key, label }, who) {
-  const { rows: [had] } = await c.query('select key from place_attributes where key = $1', [key]);
+  const { rows: [had] } = await c.query('select key, active from place_attributes where key = $1', [key]);
+  // One an earlier undo switched off comes back on, as a drawer does
+  // (Codex, 28 Sep 2026: accepting the reopened proposal left it off).
+  if (had && !had.active) {
+    await c.query('update place_attributes set active = true where key = $1', [key]);
+    await logChange({ client: c, who, area: 'Facts', what: `Fact added · ${label}`, before: 'Off', after: 'Yes or no', subjectType: 'fact', subjectId: key });
+    return true;
+  }
   if (had) return false;
   await c.query(
     `insert into place_attributes (key, label, kind, position, active) values ($1, $2, 'yesno', 200, true)`, [key, label]);
