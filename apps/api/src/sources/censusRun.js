@@ -1289,7 +1289,7 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
     : await query(
       `select t.grid_key, t.min_lat, t.min_lng, t.max_lat, t.max_lng, t.outcodes, t.saturated, t.censused_at, t.started_at, t.state, t.done_subcategories
          from census_tiles t
-        where (t.censused_at is not null or t.started_at is not null)
+        where t.censused_at is not null
           and t.max_lat >= $1 and t.min_lat <= $2 and t.max_lng >= $3 and t.min_lng <= $4`,
       [bounds.minLat - REACH_LAT, bounds.maxLat + REACH_LAT, bounds.minLng - REACH_LNG, bounds.maxLng + REACH_LNG]);
   if (!tiles.length) return { outcodes: codes.length, rows: 0, unattributed: 0 };
@@ -1301,8 +1301,9 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
   // with two of its four squares still to do, and a run stopped part-way
   // across the country would have published half-counted districts as whole
   // ones (28 Sep 2026: "partial counts shown as partial"). A run answers for
-  // its own plan; a district rolled up by name answers for every square on
-  // the grids it has been censused on.
+  // its own plan. A district rolled up by name is whole when some grid covers
+  // it whole: an abandoned square on a coarser grid a finer census has since
+  // covered is not work still owed (Codex, 28 Sep 2026).
   const { rows: plannedTiles } = runId
     ? await query(
       `select t.grid_key, t.outcodes, t.state from census_tiles t
@@ -1483,13 +1484,17 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
       .map((t) => new Date(t.state === 'done' ? (t.censused_at ?? t.started_at) : (t.started_at ?? t.censused_at)).getTime())
       .sort((x, y) => x - y);
     const saturatedTiles = own.filter((t) => Number(t.saturated) > 0).length;
-    const grids = new Set(own.map((t) => gridOf(t.grid_key)));
+    const squaresFor = plannedTiles.filter((t) => t.outcodes?.includes(code));
+    const byGrid = new Map();
+    for (const t of squaresFor) byGrid.set(gridOf(t.grid_key), [...(byGrid.get(gridOf(t.grid_key)) ?? []), t]);
+    const coveredWhole = runId
+      ? own.every((t) => t.state === 'done') && squaresFor.every((t) => t.state === 'done')
+      : [...byGrid.values()].some((g) => g.length && g.every((t) => t.state === 'done'));
     // And every square that fed it a place, tagged with it or not: a place in
     // a neighbour's unfinished square that sits nearest this district is part
     // of this count, and the square may have more (Codex, 28 Sep 2026).
-    const complete = own.every((t) => t.state === 'done')
-      && [...b.fed].every((k) => tileByKey.get(k)?.state === 'done')
-      && plannedTiles.every((t) => !t.outcodes?.includes(code) || !grids.has(gridOf(t.grid_key)) || t.state === 'done');
+    const complete = coveredWhole
+      && [...b.fed].every((k) => tileByKey.get(k)?.state === 'done');
     for (const [key, { category, subcategory }] of drawer) {
       const refs = b.counted.get(key) ?? new Set();
       const { rows: [scored] } = refs.size

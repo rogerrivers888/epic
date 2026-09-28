@@ -1905,3 +1905,32 @@ test('a district fed a place by a neighbour\'s unfinished square is partial unti
   assert.equal(b.census_count, 1, 'the place is counted where it is nearest');
   assert.equal(b.complete, false, 'and the district is partial while the square that fed it is unfinished');
 });
+
+test('a district rolled up by name is whole when a grid covers it whole, whatever an abandoned coarser square says', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from area_counts where area_slug = 'zz1a'`);
+    await query(`delete from geo_cells where code like 'ZZ1A%'`);
+    await query(`delete from place_subcategories where area_slug like 'testcoarse/%'`);
+    await query(`delete from census_tiles where grid_key like 'testcoarse/%'`);
+    await query(`delete from place_index where venue_ref like 'google:whole_%'`);
+    await clean();
+  });
+  // A coarse sweep began on ZZ1A's square and was abandoned; a finer census
+  // has since covered the district whole. By name, it is whole — the coarse
+  // square is not work still owed (Codex, 28 Sep 2026).
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, started_at, saturated) values
+       ('testcoarse/0', 49.00, -6.00, 49.08, -5.88, array['ZZ1A'], 'todo', null, now() - interval '3 days', 0),
+       ('test/fine/0', 49.00, -6.00, 49.04, -5.94, array['ZZ1A'], 'done', now(), now(), 0),
+       ('test/fine/1', 49.04, -6.00, 49.08, -5.94, array['ZZ1A'], 'done', now(), now(), 0)
+     on conflict (grid_key) do update set state = excluded.state, censused_at = excluded.censused_at, started_at = excluded.started_at, outcodes = excluded.outcodes`);
+  await seaDistrict({
+    outcode: 'ZZ1A', sectors: [['ZZ1A 1', 49.02, -5.97], ['ZZ1A 2', 49.06, -5.97]],
+    ref: 'google:whole_fine', slice: '49.0150,-5.9750,49.0250,-5.9650', gridKey: 'test/fine/0',
+  });
+  await rollUpOutcodes({ outcodes: ['ZZ1A'] });
+  const { rows: [a] } = await query(`select census_count, complete from area_counts where area_slug = 'zz1a' and subcategory = 'golf'`);
+  assert.equal(a.census_count, 1);
+  assert.equal(a.complete, true, 'whole on the grid that covered it whole');
+});
