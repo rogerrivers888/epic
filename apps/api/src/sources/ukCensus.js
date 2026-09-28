@@ -103,7 +103,9 @@ export function billedFor(bills, quotaDay) {
   const next = new Date(Date.parse(`${quotaDay}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
   const spans = bills.filter((b) => b.day === quotaDay || b.day === next);
   if (!spans.length) return null;
-  return { day: quotaDay, census_gbp: spans.reduce((n, b) => n + b.census_gbp, 0), google_gbp: spans.reduce((n, b) => n + b.google_gbp, 0) };
+  // Final only once both export days are in: a report marked billed from one
+  // of them would understate the day for good (Codex, 29 Sep 2026).
+  return { day: quotaDay, census_gbp: spans.reduce((n, b) => n + b.census_gbp, 0), google_gbp: spans.reduce((n, b) => n + b.google_gbp, 0), final: spans.length === 2 };
 }
 
 /** A service session of the run's own, so every ledger row names the day it belongs to. */
@@ -275,7 +277,7 @@ export async function status(now = new Date()) {
     days.push({
       day: i + 1, date: day, runId: r.id, state: r.state, requests: Number(r.requests ?? 0), places: Number(r.places ?? 0),
       tilesAsked: Number(t.asked ?? 0),
-      billed: b ? { censusGbp: b.census_gbp, googleGbp: b.google_gbp } : null,
+      billed: b ? { censusGbp: b.census_gbp, googleGbp: b.google_gbp, final: b.final } : null,
     });
   }
   const { rows: [districts] } = await query(
@@ -319,7 +321,10 @@ export async function notify({ subject, text = null, send = sendMail, configured
   // nothing sent and both send it (Codex, 29 Sep 2026).
   const client = await pool.connect();
   try {
-    await client.query('select pg_advisory_lock(hashtext($1))', ['census-notify']);
+    // Tried, not waited for: a waiter would hold a connection the holder may
+    // need. Whoever holds it sends; the rest find it sent next time.
+    const { rows: [{ got }] } = await client.query('select pg_try_advisory_lock(hashtext($1)) as got', ['census-notify']);
+    if (!got) return { mailed: false, why: 'another process is sending it' };
     try {
       const { rows } = await client.query(
         `select 1 from mail_messages where purpose = 'census' and subject = $1 and status <> 'failed' limit 1`, [subject.slice(0, 300)]);
@@ -337,7 +342,7 @@ export async function notify({ subject, text = null, send = sendMail, configured
 /** One day's report, in the owner's five figures. */
 export function reportLine(day, whole, daysLeft) {
   const billed = day.billed
-    ? `billed £${day.billed.censusGbp.toFixed(2)} for the census (Google £${day.billed.googleGbp.toFixed(2)} that day)`
+    ? `${day.billed.final ? 'billed' : 'billed so far'} £${day.billed.censusGbp.toFixed(2)} for the census (Google £${day.billed.googleGbp.toFixed(2)} that day)`
     : 'not billed yet';
   return `Day ${day.day} (${day.date}): ${whole.toLocaleString('en-GB')} districts done, ${day.places.toLocaleString('en-GB')} places added, `
     + `${day.requests.toLocaleString('en-GB')} requests, ${billed}, `
@@ -358,7 +363,7 @@ export async function daily(now = new Date()) {
   // Google has written it — a different subject, said once.
   for (const d of st.days.filter((x) => x.state !== 'running' && x.state !== 'waiting')) {
     const line = reportLine(d, st.districtsWhole, st.daysLeft);
-    await notify({ subject: `Census — the rest of the UK, day ${d.day}${d.billed ? ', billed' : ''}`, text: line });
+    await notify({ subject: `Census — the rest of the UK, day ${d.day}${d.billed?.final ? ', billed' : ''}`, text: line });
   }
   if (st.complete) await notify({ subject: 'Census — the rest of the UK is complete', text: st.days.map((d) => reportLine(d, st.districtsWhole, 0)).join('\n') });
   return { ...out, status: st };

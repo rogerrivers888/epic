@@ -147,7 +147,8 @@ test('the report carries the five figures, billed or not yet', async (t) => {
   const line = uk.reportLine(st.days[0], 184, 12);
   assert.match(line, /^Day 1 \(2026-09-28\): 184 districts done, 35,462 places added, 70,000 requests, not billed yet, about 12 days remaining\.$/);
   await billed('2026-09-28', 'google-essentials', 0);
-  const again = await uk.status(new Date('2026-09-29T23:00:00Z'));
+  await billed('2026-09-29', 'google-essentials', 0);
+  const again = await uk.status(new Date('2026-09-30T23:00:00Z'));
   assert.match(uk.reportLine(again.days[0], 184, 12), /billed £0\.00 for the census \(Google £0\.00 that day\)/);
 });
 
@@ -360,6 +361,11 @@ test('the report bills a day across both London days, as the decision does', asy
   await billed('2026-09-29', 'google-essentials', 0.02);
   const st = await uk.status(new Date('2026-09-29T23:00:00Z'));
   assert.equal(st.days[0].billed?.censusGbp, 0.02, 'a charge that landed on the next London day is still day 1\'s');
+  assert.equal(st.days[0].billed.final, false, 'one of its two export days is in: billed so far');
+  assert.match(uk.reportLine(st.days[0], 1, 1), /billed so far £0\.02/);
+  await billed('2026-09-28', 'google-essentials', 0);
+  const both = await uk.status(new Date('2026-09-30T23:00:00Z'));
+  assert.equal(both.days[0].billed.final, true);
 });
 
 test('a quota day over £5 across its two London days stops the census', async (t) => {

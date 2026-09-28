@@ -300,28 +300,6 @@ export async function startRun({
   if (!areas?.length && !outcodes?.length && !given?.length) {
     throw Object.assign(new Error('a run needs postcode areas or districts'), { status: 400 });
   }
-  // A run waiting for the quota day to turn over is still a run, and still owns
-  // its tiles. Letting a second one start while one waits reassigned those
-  // tiles, and at midnight the sleeper woke into a region somebody else was
-  // working — two rows saying running, one of them stripped of its ground
-  // (Codex, 21 Sep 2026).
-  const { rows: going } = await query(
-    // And a day's run of the UK census while its plan is being written: it is
-    // paused until the plan is whole, and a start in that gap would have two
-    // planners rewriting the same squares (Codex, 29 Sep 2026).
-    `select id, label, state from census_runs
-      where state in ('running', 'waiting')
-         or (state = 'paused' and problem like 'built paused%' and started_by = $1 and started_at > now() - interval '15 minutes')
-      limit 1`, [ONE_DAY_RUNS]);
-  if (going.length) {
-    throw Object.assign(
-      new Error(going[0].state === 'waiting'
-        ? `“${going[0].label}” is waiting for the quota day to turn over; stop it before starting another`
-        : going[0].state === 'paused'
-          ? `“${going[0].label}” is being planned; try again in a few minutes`
-          : `“${going[0].label}” is already running; stop it before starting another`),
-      { status: 409 });
-  }
   const tiles = given?.length ? given : await planTiles({ areas, outcodes, dLat, dLng, padKm });
   if (!tiles.length) throw Object.assign(new Error('no postcode sectors in those areas'), { status: 400 });
   // Whose decision the run is: the caller's word, else the request that is
@@ -329,14 +307,55 @@ export async function startRun({
   // person's, not the server's (Codex, 26 Sep 2026).
   const starterSession = startedSessionId ?? currentSpender().sessionId ?? null;
 
-  const { rows: [run] } = await query(
-    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, started_by, tiles_total, daily_cap, day, day_requests, started_session_id,
-                              night_share, window_from, window_to, state, problem)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, (now() at time zone 'America/Los_Angeles')::date, 0, $11, $12, $13, $14, $15, $16) returning *`,
-    [label ?? [...areas, ...outcodes].join(', '),
-      [...areas.map((a) => a.toUpperCase()), ...outcodes.map((o) => o.toUpperCase())], dLat, dLng,
-      maxRequests, ratePerSec, freshDays, startedBy, tiles.length, dailyCap, starterSession,
-      nightShare, windowFrom, windowTo, paused ? 'paused' : 'running', paused ? 'built paused; resume to start' : null]);
+  // The check and the row under one lock shared by every start: between a
+  // check that found nothing going and the insert, another start could pass
+  // the same check, and the two would then rewrite the same squares (Codex,
+  // 29 Sep 2026). The plan is drawn first, outside it: it writes nothing.
+  const holder = await pool.connect();
+  let run;
+  try {
+    // Tried, not waited for: a caller queued on the lock holds a connection
+    // while the holder needs the pool for its own queries, and enough of
+    // them would starve it. A start that finds another starting is refused,
+    // like one that finds another running.
+    const { rows: [{ got }] } = await holder.query('select pg_try_advisory_lock(hashtext($1)) as got', ['census-start']);
+    if (!got) throw Object.assign(new Error('another census is starting; try again in a moment'), { status: 409 });
+    try {
+      // A run waiting for the quota day to turn over is still a run, and still owns
+      // its tiles. Letting a second one start while one waits reassigned those
+      // tiles, and at midnight the sleeper woke into a region somebody else was
+      // working — two rows saying running, one of them stripped of its ground
+      // (Codex, 21 Sep 2026).
+      // On the lock's own connection: the pool may have nothing else free.
+      const { rows: going } = await holder.query(
+        // And a day's run of the UK census while its plan is being written: it is
+        // paused until the plan is whole, and a start in that gap would have two
+        // planners rewriting the same squares (Codex, 29 Sep 2026).
+        `select id, label, state from census_runs
+          where state in ('running', 'waiting')
+             or (state = 'paused' and problem like 'built paused%' and started_by = $1 and started_at > now() - interval '15 minutes')
+          limit 1`, [ONE_DAY_RUNS]);
+      if (going.length) {
+        throw Object.assign(
+          new Error(going[0].state === 'waiting'
+            ? `“${going[0].label}” is waiting for the quota day to turn over; stop it before starting another`
+            : going[0].state === 'paused'
+              ? `“${going[0].label}” is being planned; try again in a few minutes`
+              : `“${going[0].label}” is already running; stop it before starting another`),
+          { status: 409 });
+      }
+      ({ rows: [run] } = await holder.query(
+        `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, started_by, tiles_total, daily_cap, day, day_requests, started_session_id,
+                                  night_share, window_from, window_to, state, problem)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, (now() at time zone 'America/Los_Angeles')::date, 0, $11, $12, $13, $14, $15, $16) returning *`,
+        [label ?? [...areas, ...outcodes].join(', '),
+          [...areas.map((a) => a.toUpperCase()), ...outcodes.map((o) => o.toUpperCase())], dLat, dLng,
+          maxRequests, ratePerSec, freshDays, startedBy, tiles.length, dailyCap, starterSession,
+          nightShare, windowFrom, windowTo, paused ? 'paused' : 'running', paused ? 'built paused; resume to start' : null]));
+    } finally {
+      await holder.query('select pg_advisory_unlock(hashtext($1))', ['census-start']).catch(() => null);
+    }
+  } finally { holder.release(); }
 
   // Tiles outlive runs: the same square keeps its row and its history, and this
   // run simply claims the ones that are not fresh. `do update` on the outcodes
