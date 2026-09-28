@@ -71,7 +71,9 @@ test('the export is the bill up to two days before its last day; its latest days
   const g = await cost.googleMonth(MONTH);
   assert.equal(g.source, 'Google billing export');
   assert.equal(g.billedGbp, 12.5, 'only the day the export has finished');
-  assert.equal(new Date(g.cutoff).toISOString(), new Date(`${MONTH}-02T00:00:00+01:00`).toISOString());
+  // London midnight at the start of day 2, whatever the season (Codex).
+  const { rows: [want] } = await query(`select ($1::date::timestamp at time zone 'Europe/London') as t`, [`${MONTH}-02`]);
+  assert.equal(new Date(g.cutoff).toISOString(), new Date(want.t).toISOString());
   const room = await roomToSpend(0, { reserve: false });
   const board = await runs.list();
   const p = await cost.collectPurse(MONTH);
