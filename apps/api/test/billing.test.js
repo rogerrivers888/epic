@@ -4,6 +4,7 @@ import { testDatabase } from './helpers/db.js';
 const { query, pool } = await testDatabase();
 const billing = await import('../src/desk/billing.js');
 const exportReader = await import('../src/sources/billingExport.js');
+const { USD_TO_GBP } = await import('../src/domain/providerPrices.js');
 test.after(() => pool.end());
 
 test('Google SKUs map to our meters, and an unknown one is left unmapped', () => {
@@ -167,4 +168,15 @@ test('a Google row whose units are a bare number is counted in the estimate, not
   assert.equal(est.lines.find((l) => l.key === 'google').used, 6012);
   assert.ok(est.gbp > 0, 'past the old line’s 5,000');
   await query(`delete from provider_calls where purpose = 'billing-scalar'`);
+});
+
+test('Place Details Pro past its own allowance is priced at its own rate', async () => {
+  await query(`delete from provider_calls where purpose = 'billing-dpro'`);
+  await query(`insert into provider_calls (provider, purpose, units, estimated_cost_usd, created_at)
+               values ('google', 'billing-dpro', '{"google": 6000, "google-pro": 6000, "pro-details": 6000}', 0, '2026-04-10 10:00+01')`);
+  const est = await billing.googleEstimate('2026-04');
+  const d = est.lines.find((l) => l.key === 'google-pro-details');
+  assert.equal(d.billable, 1000);
+  assert.ok(Math.abs(est.gbp - 1000 * 0.017 * USD_TO_GBP) < 1e-9, 'at $0.017, not Text Search’s $0.032');
+  await query(`delete from provider_calls where purpose = 'billing-dpro'`);
 });

@@ -67,6 +67,11 @@ const PRO_DETAILS = `
  * Google's £40.61 (owner, 29 Sep 2026). Pre-tier rows count against the old
  * `google` line only, never twice.
  */
+// Google's list price for Place Details Pro — $17 a thousand, where Text
+// Search Pro is $32 (Codex). The ledger prices every Pro request at the
+// dearer rate; the estimate of a bill does not.
+const PLACE_DETAILS_PRO_USD = 0.017;
+
 export async function googleEstimate(month) {
   const { LINES } = await import('../sources/pricing.js');
   const { rows } = await query(`select meter, sum(n)::float as units from (${LEDGER_METERS}) x where month = $1 group by 1`, [month]);
@@ -83,14 +88,14 @@ export async function googleEstimate(month) {
     if (line.key === 'google-pro') {
       const details = Math.min(proDetails, used);
       counted.push({ line, key: 'google-pro', used: used - details });
-      counted.push({ line, key: 'google-pro-details', used: details });
+      counted.push({ line, key: 'google-pro-details', used: details, beyondUsd: PLACE_DETAILS_PRO_USD });
     } else counted.push({ line, key: line.key, used });
   }
   let usd = 0;
   const lines = [];
-  for (const { line, key, used } of counted) {
+  for (const { line, key, used, beyondUsd } of counted) {
     const billable = Math.max(0, used - line.allowance.limit);
-    const lineUsd = billable * (line.allowance.beyondUsd ?? 0);
+    const lineUsd = billable * (beyondUsd ?? line.allowance.beyondUsd ?? 0);
     usd += lineUsd;
     lines.push({ key, used, free: line.allowance.limit, billable, gbp: lineUsd * USD_TO_GBP });
   }

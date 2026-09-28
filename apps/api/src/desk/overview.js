@@ -34,12 +34,13 @@ const contradictedDefaults = () => banded();
  * googleEstimate). An estimate either way, and the tile says so.
  */
 async function spend() {
+  // One month for both, as the ledger groups it — London's, not UTC's (Codex).
+  const month = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit' }).format(new Date());
   const { rows } = await query(`
     select coalesce(sum(estimated_cost_usd), 0)::float usd
-      from provider_calls where created_at >= date_trunc('month', now()) and provider ~ 'anthropic|claude'`);
+      from provider_calls
+     where to_char(created_at at time zone 'Europe/London', 'YYYY-MM') = $1 and provider ~ 'anthropic|claude'`, [month]);
   const { googleEstimate } = await import('./billing.js');
-  // The month as the ledger groups it — London's, not UTC's (Codex).
-  const month = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit' }).format(new Date());
   const g = await googleEstimate(month).catch(() => ({ gbp: 0 }));
   return { google: g.gbp, claude: (rows[0]?.usd ?? 0) * USD_TO_GBP };
 }
