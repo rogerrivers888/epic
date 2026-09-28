@@ -1820,3 +1820,35 @@ test('a district asked again and stopped part-way reads as partial, dated from t
   assert.equal(d.complete, false);
   assert.ok(Date.now() - new Date(d.censused_at).getTime() < 3600_000, 'dated from the sweep asking it now');
 });
+
+test('a place a run asked that is nearest a district it walked past is counted there, from all the ground on it', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from area_counts where area_slug in ('zz3a', 'zz3b')`);
+    await query(`delete from geo_cells where code like 'ZZ3%'`);
+    await query(`delete from place_index where venue_ref like 'google:beside_%'`);
+    await clean();
+  });
+  // The run asked the square tagged ZZ3A and walked past ZZ3B's, fresh. A new
+  // place in the asked square is nearest ZZ3B's sector: ZZ3B is not the run's
+  // to roll up from its own ground, so the place was dropped (Codex, 28 Sep
+  // 2026). It is rolled up by name instead, from all the ground on it.
+  const run = await startTestRun({ label: 'test beside' });
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, saturated) values
+       ('test/beside/0', 49.40, -5.60, 49.48, -5.48, array['ZZ3A'], 'done', now(), 0),
+       ('test/beside/1', 49.40, -5.48, 49.48, -5.36, array['ZZ3B'], 'done', now() - interval '2 days', 0)
+     on conflict (grid_key) do update set state = 'done', censused_at = excluded.censused_at, outcodes = excluded.outcodes`);
+  for (const k of ['test/beside/0', 'test/beside/1']) {
+    await query(`insert into census_run_tiles (run_id, grid_key) values ($1, $2) on conflict do nothing`, [run.id, k]);
+  }
+  await askedBy(run, 'test/beside/0');
+  await seaDistrict({ outcode: 'ZZ3A', sectors: [['ZZ3A 1', 49.44, -5.58]] });
+  await seaDistrict({
+    outcode: 'ZZ3B', sectors: [['ZZ3B 1', 49.44, -5.47]],
+    ref: 'google:beside_new', slice: '49.4380,-5.4850,49.4420,-5.4810', gridKey: 'test/beside/0',
+  });
+  await rollUpOutcodes({ runId: run.id });
+  const { rows: [b] } = await query(`select census_count from area_counts where area_slug = 'zz3b' and subcategory = 'golf'`);
+  assert.equal(b?.census_count, 1, 'the new place is counted in the district it is nearest');
+});

@@ -191,7 +191,11 @@ export async function censusForRing(ring, { mode = 'driving', minutes = 30 } = {
     // again, even once the census has reached that district (Codex, 24 Sep
     // 2026). A floor nothing live explains is a ring the census has moved
     // past — counted again behind the screen.
-    const floors = Object.fromEntries(Object.entries(stored).map(([k, v]) => [k, Boolean(v.floor)]));
+    // And every category is a floor while a district of the ring is only
+    // partly counted: the screens read the flag per category, and a flag kept
+    // only on the ring as a whole never reached them (Codex, 28 Sep 2026).
+    const partly = byOutcode.partial.length > 0;
+    const floors = Object.fromEntries(Object.entries(stored).map(([k, v]) => [k, Boolean(v.floor) || partly]));
     const stale = byOutcode.missing.length === 0 && byOutcode.partial.length === 0
       && Object.values(stored).some((v) => v.floor && !(v.unresolved > 0));
     if (stale) void refreshRing({ cell: ring.cell, mode, minutes }).catch(() => null);
@@ -200,7 +204,8 @@ export async function censusForRing(ring, { mode = 'driving', minutes = 30 } = {
       unresolved,
       floors,
       missing: byOutcode.missing,
-      floor: byOutcode.missing.length > 0 || byOutcode.partial.length > 0
+      partial: byOutcode.partial,
+      floor: byOutcode.missing.length > 0 || partly
         || Object.values(stored).some((v) => v.floor || v.unresolved > 0),
     };
   }
@@ -208,10 +213,16 @@ export async function censusForRing(ring, { mode = 'driving', minutes = 30 } = {
   const inRing = await censusInRing({ cells: ring.band ?? ring.cells ?? [], outcodes });
   if (ring?.cell) void refreshRing({ cell: ring.cell, mode, minutes }).catch(() => null);
   const unresolved = inRing.unresolved ?? {};
+  const partly = byOutcode.partial.length > 0;
   return {
     counts: inRing.counts ?? {},
     unresolved,
+    // Per category, as the screens read it: every one is a floor while a
+    // district of the ring is only partly counted (Codex, 28 Sep 2026).
+    floors: Object.fromEntries([...new Set([...Object.keys(inRing.counts ?? {}), ...Object.keys(unresolved)])]
+      .map((k) => [k, partly])),
     missing: byOutcode.missing,
+    partial: byOutcode.partial,
     // A floor wherever anything straddles the edge or any outcode is unlooked-at
     // or only partly looked at.
     floor: byOutcode.missing.length > 0 || byOutcode.partial.length > 0 || Object.values(unresolved).some((n) => n > 0),

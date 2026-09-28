@@ -1361,6 +1361,16 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
   // says so, as it always did.
   const drawersOfTile = new Map();
   const unattributed = new Set();
+  // A district the run only walked past, that a place in a square it *asked*
+  // turns out to be nearest. Not rolled up from this run's ground — that is
+  // the regression the run's own-slices rule exists to prevent — but it has a
+  // new place, so after this pass it is rolled up the way the board's own
+  // button does: from all the ground on it (Codex, 28 Sep 2026).
+  const askedTiles = runId && stamped.any && !named
+    ? new Set((await query('select distinct area_slug from census_slices where census_run_id = $1', [runId])).rows.map((r) => r.area_slug))
+    : null;
+  const neighbours = new Set();
+  const reachedFrom = (tile, outcode) => { if (askedTiles?.has(tile.grid_key) && outcode) neighbours.add(outcode); };
   for (const r of rows) {
     const tile = tileByKey.get(r.area_slug);
     if (!tile) continue;
@@ -1383,7 +1393,7 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
       v = r.slice ? await verdictOf(tile, r.slice) : { kind: 'nowhere' };
     }
     if (v.kind === 'inside') {
-      if (!codes.includes(v.outcode)) continue;
+      if (!codes.includes(v.outcode)) { reachedFrom(tile, v.outcode); continue; }
       const b = bucketFor(v.outcode);
       b.drawer.set(key, { category: r.category, subcategory: r.subcategory });
       add(b.counted, key, r.venue_ref);
@@ -1400,7 +1410,7 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
       if (!tile.outcodes?.includes(v.outcode)) unattributed.add(r.venue_ref);
     } else if (v.kind === 'across') {
       for (const o of v.outcodes) {
-        if (!codes.includes(o)) continue;
+        if (!codes.includes(o)) { reachedFrom(tile, o); continue; }
         const b = bucketFor(o);
         b.drawer.set(key, { category: r.category, subcategory: r.subcategory });
         add(b.unresolved, key, r.venue_ref);
@@ -1502,8 +1512,10 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
   // there all the same, and reported so the tagging can be judged. And what
   // the boxes were placed against — postcodes, or the cruder sector centroids
   // where none were loaded — because the two are different facts.
+  // The neighbours, rolled up by name — no run, so no further neighbours.
+  const beside = neighbours.size ? await rollUpOutcodes({ outcodes: [...neighbours] }) : null;
   return {
-    outcodes: codes.length, rows: written, unattributed: unattributed.size,
+    outcodes: codes.length + (beside?.outcodes ?? 0), rows: written + (beside?.rows ?? 0), unattributed: unattributed.size,
     placedBy: placedBy.size === 0 ? null : placedBy.size === 1 ? [...placedBy][0] : 'mixed',
   };
 }
