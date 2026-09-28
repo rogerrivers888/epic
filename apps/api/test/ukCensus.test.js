@@ -8,7 +8,6 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import crypto from 'node:crypto';
 import { testDatabase } from './helpers/db.js';
 
 const { query, pool } = await testDatabase();
@@ -47,7 +46,15 @@ const billed = (day, meter, cost) => query(
 /** A stand-in for startRun: records what it was asked and returns a row. */
 const recorder = () => {
   const calls = [];
-  const start = async (args) => { calls.push(args); return { id: crypto.randomUUID(), label: args.label }; };
+  // A real row, built paused as startRun builds one, so the tick can switch it on.
+  const start = async (args) => {
+    calls.push(args);
+    const { rows: [run] } = await query(
+      `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state, problem, started_by, night_share)
+       values ($1, array['ZZ'], 0.08, 0.12, $2, 5, 30, 'paused', 'built paused; resume to start', $3, $4) returning *`,
+      [args.label, args.maxRequests, args.startedBy, args.nightShare]);
+    return run;
+  };
   return { calls, start };
 };
 
@@ -283,9 +290,12 @@ test('a day\'s run is not switched on over a census somebody else started meanwh
     await query(`insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state) values ('test by hand', array['ZZ'], 0.08, 0.12, 10, 5, 30, 'running')`);
     return run;
   };
-  const out = await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start });
-  const { rows: [mine] } = await query('select state from census_runs where id = $1', [out.started.id]);
+  const told = [];
+  const out = await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start, tell: (x) => told.push(x) });
+  assert.equal(out.action, 'blocked');
+  const { rows: [mine] } = await query('select state from census_runs where id = $1', [out.built.id]);
   assert.equal(mine.state, 'paused', 'left built-paused, not a second live run');
+  assert.equal(told.length, 0, 'and nobody is told it started');
 });
 
 test('a replaced plan is not a day in the report', async (t) => {
@@ -296,4 +306,36 @@ test('a replaced plan is not a day in the report', async (t) => {
      values ('The rest of the UK — day 2', array['ZZ'], 0.08, 0.12, 70000, 5, 30, 'stopped', 'planning cut short; replaced by the next run', '2026-09-29T07:10:00Z')`);
   const st = await uk.status(new Date('2026-09-29T09:00:00Z'));
   assert.equal(st.days.length, 1);
+});
+
+test('a quota day is billed across two London days, and both count', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  // 60p on each London day the Pacific 28th spans: £1.20 in all is a hold.
+  await billed('2026-09-28', 'google-essentials', 0.6);
+  await billed('2026-09-29', 'google-essentials', 0.6);
+  const r = recorder();
+  assert.equal((await uk.tick({ now: new Date('2026-09-29T09:00:00Z'), start: r.start })).action, 'held');
+});
+
+test('a starting census waits while a day\'s plan is being written', async (t) => {
+  await clean(); t.after(clean);
+  const { startRun, ONE_DAY_RUNS } = await import('../src/sources/censusRun.js');
+  await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state, problem, started_by)
+     values ('The rest of the UK — day 2', array['ZZ'], 0.08, 0.12, 70000, 5, 30, 'paused', 'built paused; resume to start', $1)`, [ONE_DAY_RUNS]);
+  await assert.rejects(() => startRun({ label: 'test by hand', outcodes: ['SL5'], padKm: 0 }), /is being planned/);
+});
+
+test('a notice is mailed once however many processes say it', async (t) => {
+  await clean();
+  const subject = `test notice ${Math.random()}`;
+  t.after(() => query(`delete from mail_messages where subject = $1`, [subject]));
+  const { recordSend } = await import('../src/repositories/mail.js');
+  const { ownerAccount } = await import('../src/repositories/accounts.js');
+  if (!(await ownerAccount())?.email) return; // no owner in this database: nothing to mail
+  let sent = 0;
+  const send = async ({ to, subject: s }) => { sent += 1; await new Promise((ok) => setTimeout(ok, 100)); await recordSend({ to, subject: s, purpose: 'census', status: 'sent' }); return { sent: true }; };
+  await Promise.all([1, 2, 3].map(() => uk.notify({ subject, send, configured: () => true })));
+  assert.equal(sent, 1);
 });

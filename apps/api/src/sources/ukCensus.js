@@ -151,7 +151,15 @@ export async function decide(now = new Date()) {
   // A day's run is the quota day it was started in: one run a day, however
   // late the last one was closed off (Codex, 28 Sep 2026).
   if (pacificDay(latest.started_at) >= pacificDay(now)) return { action: 'today', runs, latest, bills };
-  const yesterday = bills.find((b) => b.day === pacificDay(latest.started_at));
+  // The export's days are London's and the quota day is Los Angeles's, so a
+  // day's run is billed across two export days: both are read, and summed
+  // (Codex, 29 Sep 2026). Either written is enough to judge by.
+  const d0 = pacificDay(latest.started_at);
+  const d1 = new Date(Date.parse(`${d0}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  const spans = bills.filter((b) => b.day === d0 || b.day === d1);
+  const yesterday = spans.length
+    ? { day: d0, census_gbp: spans.reduce((n, b) => n + b.census_gbp, 0), google_gbp: spans.reduce((n, b) => n + b.google_gbp, 0) }
+    : null;
   if (yesterday && yesterday.census_gbp >= PENNIES_GBP) return { action: 'held', runs, latest, bills, yesterday };
   return { action: 'start', runs, latest, bills, yesterday: yesterday ?? null, day: days + 1 };
 }
@@ -212,15 +220,18 @@ async function tickLocked({ now = new Date(), start = censusRun.startRun, stop =
     label, areas: UK_AREAS, maxRequests: DAY_REQUESTS, nightShare: DAY_REQUESTS, ratePerSec: 5, dailyCap: 75_000,
     startedBy: STARTED_BY, startedSessionId: sessionId, paused: true,
   });
+  let on = false;
   if (run?.id) {
     // Only if nothing else is going: a census started by hand while this one
     // was being planned is not joined by a second (Codex, 28 Sep 2026). Left
     // built-paused, it is replanned once the other is done.
-    await query(
+    ({ rowCount: on } = await query(
       `update census_runs set state = 'running', problem = null, last_seen_at = now()
         where id = $1 and state = 'paused' and problem like 'built paused%'
-          and not exists (select 1 from census_runs o where o.id <> $1 and o.state in ('running', 'waiting'))`, [run.id]);
+          and not exists (select 1 from census_runs o where o.id <> $1 and o.state in ('running', 'waiting'))`, [run.id]));
   }
+  // Said only if it is true (Codex, 29 Sep 2026).
+  if (!on) return { ...d, action: 'blocked', built: run, sessionId };
   tell({ kind: 'started', subject: `Census day ${d.day} started`, d, run });
   return { ...d, started: run, sessionId };
 }
@@ -289,16 +300,26 @@ export async function status(now = new Date()) {
  * Doppler the log and GET /census/uk are all there is, and the status says so.
  */
 const saidHere = new Set();
-export async function notify({ subject, text = null }) {
+export async function notify({ subject, text = null, send = sendMail, configured = () => mailStatus().configured }) {
   if (!saidHere.has(subject)) { saidHere.add(subject); console.log(`epic-api: census — ${subject}`); }
-  if (!mailStatus().configured) return { mailed: false, why: 'no mail sender' };
-  const { rows } = await query(
-    `select 1 from mail_messages where purpose = 'census' and subject = $1 and status <> 'failed' limit 1`, [subject.slice(0, 300)]);
-  if (rows.length) return { mailed: false, why: 'already sent' };
-  const owner = await ownerAccount();
-  if (!owner?.email) return { mailed: false, why: 'no owner address' };
-  const out = await sendMail({ to: owner.email, subject, text: text ?? subject, purpose: 'census' });
-  return { mailed: Boolean(out.sent), why: out.sent ? null : out.message };
+  if (!configured()) return { mailed: false, why: 'no mail sender' };
+  // The check and the send under one lock, so two processes cannot both find
+  // nothing sent and both send it (Codex, 29 Sep 2026).
+  const client = await pool.connect();
+  try {
+    await client.query('select pg_advisory_lock(hashtext($1))', ['census-notify']);
+    try {
+      const { rows } = await client.query(
+        `select 1 from mail_messages where purpose = 'census' and subject = $1 and status <> 'failed' limit 1`, [subject.slice(0, 300)]);
+      if (rows.length) return { mailed: false, why: 'already sent' };
+      const owner = await ownerAccount();
+      if (!owner?.email) return { mailed: false, why: 'no owner address' };
+      const out = await send({ to: owner.email, subject, text: text ?? subject, purpose: 'census' });
+      return { mailed: Boolean(out.sent), why: out.sent ? null : out.message };
+    } finally {
+      await client.query('select pg_advisory_unlock(hashtext($1))', ['census-notify']);
+    }
+  } finally { client.release(); }
 }
 
 /** One day's report, in the owner's five figures. */

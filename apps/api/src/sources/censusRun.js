@@ -306,12 +306,20 @@ export async function startRun({
   // working — two rows saying running, one of them stripped of its ground
   // (Codex, 21 Sep 2026).
   const { rows: going } = await query(
-    `select id, label, state from census_runs where state in ('running', 'waiting') limit 1`);
+    // And a day's run of the UK census while its plan is being written: it is
+    // paused until the plan is whole, and a start in that gap would have two
+    // planners rewriting the same squares (Codex, 29 Sep 2026).
+    `select id, label, state from census_runs
+      where state in ('running', 'waiting')
+         or (state = 'paused' and problem like 'built paused%' and started_by = $1 and started_at > now() - interval '15 minutes')
+      limit 1`, [ONE_DAY_RUNS]);
   if (going.length) {
     throw Object.assign(
       new Error(going[0].state === 'waiting'
         ? `“${going[0].label}” is waiting for the quota day to turn over; stop it before starting another`
-        : `“${going[0].label}” is already running; stop it before starting another`),
+        : going[0].state === 'paused'
+          ? `“${going[0].label}” is being planned; try again in a few minutes`
+          : `“${going[0].label}” is already running; stop it before starting another`),
       { status: 409 });
   }
   const tiles = given?.length ? given : await planTiles({ areas, outcodes, dLat, dLng, padKm });
