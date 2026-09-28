@@ -1100,11 +1100,19 @@ async function rollUpAndRecount(id, scope = { skip: false, outcodes: null, runId
     try { await rollUpOutcodes(scope.outcodes?.length ? { outcodes: scope.outcodes } : { runId: scope.runId ?? id }); }
     catch (err) {
       console.warn(`epic-api: census — could not roll up run ${id}; will try again: ${err.message}`);
-      await query(`update census_runs set problem = $2 where id = $1`,
-        [id, `${ROLL_UP_PENDING}: ${String(err.message).slice(0, 200)}`]).catch(() => {});
+      // Beside the run's own reason, never over it: a paused run's "stopped at
+      // the ceiling" is what tells a person why it is paused, and a roll-up
+      // that failed once must not erase it (Codex, 28 Sep 2026).
+      await query(
+        `update census_runs
+            set problem = coalesce(nullif(regexp_replace(coalesce(problem, ''), '( · )?${ROLL_UP_PENDING}: .*$', ''), '') || ' · ', '') || $2
+          where id = $1`,
+        [id, `${ROLL_UP_PENDING}: ${String(err.message).replace(/ · /g, ' - ').slice(0, 200)}`]).catch(() => {});
       return false;
     }
-    await query(`update census_runs set problem = null where id = $1 and problem like $2`, [id, `${ROLL_UP_PENDING}%`]).catch(() => {});
+    await query(
+      `update census_runs set problem = nullif(regexp_replace(problem, '( · )?${ROLL_UP_PENDING}: .*$', ''), '')
+        where id = $1 and problem like $2`, [id, `%${ROLL_UP_PENDING}: %`]).catch(() => {});
   }
   const { rows: [{ at }] } = await query('select now() as at');
   void refreshRingsBefore({ before: at }).catch(() => {});
@@ -1118,7 +1126,7 @@ export async function retryRollUps() {
     // stopped run publishes its partial districts too, and one failed attempt
     // must not leave them unpublished for good (Codex, 28 Sep 2026).
     `select id, started_by, areas from census_runs
-      where state in ('done', 'paused', 'stopped') and problem like $1 order by finished_at limit 10`, [`${ROLL_UP_PENDING}%`]);
+      where state in ('done', 'paused', 'stopped') and problem like $1 order by finished_at limit 10`, [`%${ROLL_UP_PENDING}: %`]);
   const out = [];
   for (const r of rows) out.push({ id: r.id, rolled: await rollUpAndRecount(r.id, rollUpScope(r)) });
   return out;

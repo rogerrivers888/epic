@@ -1302,12 +1302,17 @@ test('a paused or stopped run\'s owed roll-up is tried again too', async () => {
   // finished run's (Codex, 28 Sep 2026).
   const { rows } = await query(
     `insert into census_runs (label, areas, tile_lat, tile_lng, state, problem, started_at, finished_at)
-     values ('test/owed paused', array['ZZ9Z'], 0.08, 0.12, 'paused', 'roll-up pending: the database went away', now() - interval '1 hour', now()),
+     values ('test/owed paused', array['ZZ9Z'], 0.08, 0.12, 'paused', 'stopped at the 70000-request ceiling; resume to carry on · roll-up pending: the database went away', now() - interval '1 hour', now()),
             ('test/owed stopped', array['ZZ9Z'], 0.08, 0.12, 'stopped', 'roll-up pending: the database went away', now() - interval '1 hour', now())
      returning id`);
   try {
     const out = await retryRollUps();
     for (const r of rows) assert.ok(out.some((o) => o.id === r.id && o.rolled), 'tried, and landed');
+    // And a paused run keeps the reason it is paused: the note that a roll-up
+    // was owed sits beside it and goes, the reason stays (Codex, 28 Sep 2026).
+    const { rows: after } = await query(
+      `select label, problem from census_runs where id = any($1) order by label`, [rows.map((r) => r.id)]);
+    assert.deepEqual(after.map((r) => r.problem), ['stopped at the 70000-request ceiling; resume to carry on', null]);
   } finally {
     await query(`delete from census_runs where id = any($1)`, [rows.map((r) => r.id)]);
   }
