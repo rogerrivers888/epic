@@ -1103,7 +1103,11 @@ async function rollUpAndRecount(id, scope = { skip: false, outcodes: null, runId
 /** Every done run still owing its roll-up, tried again. Bounded by runs, which are few. */
 export async function retryRollUps() {
   const { rows } = await query(
-    `select id, started_by, areas from census_runs where state = 'done' and problem like $1 order by finished_at limit 10`, [`${ROLL_UP_PENDING}%`]);
+    // Every state that rolls up on the way in, not only done: a paused or
+    // stopped run publishes its partial districts too, and one failed attempt
+    // must not leave them unpublished for good (Codex, 28 Sep 2026).
+    `select id, started_by, areas from census_runs
+      where state in ('done', 'paused', 'stopped') and problem like $1 order by finished_at limit 10`, [`${ROLL_UP_PENDING}%`]);
   const out = [];
   for (const r of rows) out.push({ id: r.id, rolled: await rollUpAndRecount(r.id, rollUpScope(r)) });
   return out;
@@ -1226,8 +1230,12 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
       `select distinct upper(c.code) as code from census_tiles t
          join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1
          cross join lateral unnest(t.outcodes) as c(code)
-        where t.censused_at is not null
-          ${stamped.any ? 'and exists (select 1 from census_slices s where s.census_run_id = $1 and s.area_slug = t.grid_key)' : ''}
+        where ${stamped.any
+    // Finished or not: a run stopped half way through a square has asked some
+    // of its drawers, and that is what a partial district is made of (Codex,
+    // 28 Sep 2026). Unfinished, it has no `censused_at` yet.
+    ? 'exists (select 1 from census_slices s where s.census_run_id = $1 and s.area_slug = t.grid_key)'
+    : 't.censused_at is not null'}
           ${named ? 'and upper(c.code) = any($2::text[])' : ''}`,
       named ? [runId, named] : [runId])).rows.map((r) => r.code)
     : named ?? (await query(
@@ -1261,13 +1269,14 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
   }), { minLat: 90, maxLat: -90, minLng: 180, maxLng: -180 });
   const { rows: tiles } = runId
     ? await query(
-      `select t.grid_key, t.min_lat, t.min_lng, t.max_lat, t.max_lng, t.outcodes, t.saturated, t.censused_at, t.state, t.done_subcategories
+      `select t.grid_key, t.min_lat, t.min_lng, t.max_lat, t.max_lng, t.outcodes, t.saturated, t.censused_at, t.started_at, t.state, t.done_subcategories
          from census_tiles t join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1
-        where t.censused_at is not null`, [runId])
-    : await query(
-      `select t.grid_key, t.min_lat, t.min_lng, t.max_lat, t.max_lng, t.outcodes, t.saturated, t.censused_at, t.state, t.done_subcategories
-         from census_tiles t
         where t.censused_at is not null
+           or exists (select 1 from census_slices s where s.census_run_id = $1 and s.area_slug = t.grid_key)`, [runId])
+    : await query(
+      `select t.grid_key, t.min_lat, t.min_lng, t.max_lat, t.max_lng, t.outcodes, t.saturated, t.censused_at, t.started_at, t.state, t.done_subcategories
+         from census_tiles t
+        where (t.censused_at is not null or t.started_at is not null)
           and t.max_lat >= $1 and t.min_lat <= $2 and t.max_lng >= $3 and t.min_lng <= $4`,
       [bounds.minLat - REACH_LAT, bounds.maxLat + REACH_LAT, bounds.minLng - REACH_LNG, bounds.maxLng + REACH_LNG]);
   if (!tiles.length) return { outcodes: codes.length, rows: 0, unattributed: 0 };
@@ -1441,7 +1450,9 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
       if (answered) drawer.set(key, { category: r.category, subcategory: r.subcategory });
     }
 
-    const censusedAt = own.map((t) => new Date(t.censused_at).getTime()).sort((x, y) => x - y);
+    // A square still being asked has no `censused_at`; its sweep began at
+    // `started_at`, and a null read as a date would put the district in 1970.
+    const censusedAt = own.map((t) => new Date(t.censused_at ?? t.started_at).getTime()).sort((x, y) => x - y);
     const saturatedTiles = own.filter((t) => Number(t.saturated) > 0).length;
     const grids = new Set(own.map((t) => gridOf(t.grid_key)));
     const complete = own.every((t) => t.state === 'done')

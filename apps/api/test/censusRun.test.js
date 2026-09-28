@@ -1297,6 +1297,22 @@ test('a roll-up a finished run still owes is tried again from the runner\'s tick
   }
 });
 
+test('a paused or stopped run\'s owed roll-up is tried again too', async () => {
+  // They roll up on the way in now, so a failed attempt is owed like a
+  // finished run's (Codex, 28 Sep 2026).
+  const { rows } = await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, state, problem, started_at, finished_at)
+     values ('test/owed paused', array['ZZ9Z'], 0.08, 0.12, 'paused', 'roll-up pending: the database went away', now() - interval '1 hour', now()),
+            ('test/owed stopped', array['ZZ9Z'], 0.08, 0.12, 'stopped', 'roll-up pending: the database went away', now() - interval '1 hour', now())
+     returning id`);
+  try {
+    const out = await retryRollUps();
+    for (const r of rows) assert.ok(out.some((o) => o.id === r.id && o.rolled), 'tried, and landed');
+  } finally {
+    await query(`delete from census_runs where id = any($1)`, [rows.map((r) => r.id)]);
+  }
+});
+
 test('a drawer the ground was asked about and answered nothing is written again, at nought', async (t) => {
   // Codex, 25 Sep 2026, on the day's range: a re-census that no longer finds
   // any place for a drawer reads no row for it, so the drawer never reached
@@ -1729,13 +1745,14 @@ test('a run that pauses at its ceiling publishes what it reached, as partial', a
     await query(`delete from geo_cells where code like 'ZZ5A%'`);
     await clean();
   });
-  // One district of two squares, out at sea, and a ceiling that buys exactly
-  // one of them: the one-day census of 28 Sep 2026 in miniature. Pausing used
-  // to publish nothing, and the day's work waited on a finish that a run
-  // meant for one day never reaches.
+  // One district of two squares, out at sea, and a ceiling that runs out half
+  // way through the first: the one-day census of 28 Sep 2026 in miniature.
+  // Pausing used to publish nothing, and the day's work waited on a finish
+  // that a run meant for one day never reaches — and a square still being
+  // asked has no `censused_at`, so its half was left out too (Codex, same day).
   await seaDistrict({ outcode: 'ZZ5A', sectors: [['ZZ5A 1', 49.84, -3.54], ['ZZ5A 2', 49.92, -3.54]] });
   const questions = (await slicePlan()).reduce((n, p) => n + p.questions.length, 0);
-  const run = await startTestRun({ label: 'test pause publishes', maxRequests: questions });
+  const run = await startTestRun({ label: 'test pause publishes', maxRequests: Math.floor(questions / 2) });
   for (const [k, lat] of [['test/pause/0', 49.80], ['test/pause/1', 49.88]]) {
     await query(
       `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, run_id, state)
@@ -1751,7 +1768,9 @@ test('a run that pauses at its ceiling publishes what it reached, as partial', a
   }
   assert.equal(out.reason, 'ceiling');
   const { rows } = await query(
-    `select bool_and(complete) as complete, sum(census_count)::int as places from area_counts where area_slug = 'zz5a'`);
-  assert.ok(rows[0].places > 0, 'what the square it reached found is on the board');
+    `select bool_and(complete) as complete, sum(census_count)::int as places, min(censused_at) as at
+       from area_counts where area_slug = 'zz5a'`);
+  assert.ok(rows[0].places > 0, 'what the half-asked square found is on the board');
   assert.equal(rows[0].complete, false, 'and the district says it is partial');
+  assert.ok(new Date(rows[0].at).getUTCFullYear() >= 2026, 'dated from when its sweep began, not 1970');
 });
