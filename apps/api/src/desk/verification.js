@@ -140,7 +140,10 @@ export async function sources(cfg) {
     out.push({ source: src, label: SOURCE_WORD[src], checked: e.checked, answered: e.answered, failingPct: n ? Math.round((failed / n) * 100) : null });
   }
   out.push({ source: 'families', label: SOURCE_WORD.families, checked: fam?.checked ?? 0, answered: fam?.answered ?? 0, failingPct: null });
-  const anyActive = out.some((s) => s.checked > 0);
+  // Only our machine sources say whether checking is running at all; a family
+  // answer arriving while nothing is checked must not turn every machine
+  // source red (Codex, 28 Sep 2026).
+  const anyActive = out.some((s) => s.source !== 'families' && s.checked > 0);
   for (const s of out) {
     if (s.source !== 'families' && anyActive && s.checked === 0) s.status = 'Failing';
     else if (s.failingPct == null) s.status = s.checked > 0 || s.source === 'families' ? 'Healthy' : '—';
@@ -167,6 +170,26 @@ export async function items({ kind, period = '7d', source = null, country = null
     ({ rows } = await query(
       `select x.venue_ref, a.label as feature, x.checked_at as at, 'conflict' as outcome, x.source
          from place_fact_answers x join place_attributes a on a.key = x.attribute_key where x.state = 'conflict' order by x.checked_at desc limit 2000`));
+  } else if (source && (kind === 'checked' || kind === 'answered')) {
+    // A Sources-table number, opened: read the same records it was counted
+    // from — every piece of evidence that source gave in the last 7 days, or
+    // every family answer — not the verdicts, which name only the source that
+    // won (Codex, 28 Sep 2026).
+    if (source === 'families') {
+      ({ rows } = await query(
+        `select f.venue_ref, a.label as feature, f.answered_at as at,
+                case f.answer when 'yes' then 'verified' when 'no' then 'no' else 'dont_know' end as outcome, 'families' as source
+           from family_answers f join place_attributes a on a.key = f.attribute_key
+          where f.answered_at >= now() - interval '7 days' ${kind === 'answered' ? `and f.answer <> 'didnt_notice'` : ''}
+          order by f.answered_at desc limit 2000`));
+    } else {
+      ({ rows } = await query(
+        `select e.venue_ref, a.label as feature, e.checked_at as at,
+                case e.says when 'yes' then 'verified' when 'no' then 'no' else 'dont_know' end as outcome, e.source
+           from place_fact_evidence e join place_attributes a on a.key = e.attribute_key
+          where e.source = $1 and e.checked_at >= now() - interval '7 days' ${kind === 'answered' ? `and e.says in ('yes','no')` : ''}
+          order by e.checked_at desc limit 2000`, [source]));
+    }
   } else {
     const outcome = {
       confirmed: ['verified'], dropped: ['dropped'], checked: ['verified', 'no', 'dont_know', 'conflict'],

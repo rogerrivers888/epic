@@ -99,10 +99,16 @@ test('verification drill-downs: a source narrows them, and the words are the scr
                ('dfx:b', 'Sauna', 'no', 'site', now() - interval '2 hours'),
                ('dfx:c', 'Sauna', 'dont_know', 'osm', now() - interval '3 hours'),
                ('dfx:c', 'Sauna', 'dropped', null, now())`);
+  // A source's numbers are counted from its own evidence, so its drill-down
+  // reads the evidence too — not the verdicts, which name only the winner.
+  await query(`delete from place_fact_evidence where venue_ref like 'dfx:%'`);
+  await query(`insert into place_fact_evidence (venue_ref, attribute_key, source, says) values
+               ('dfx:a', 'toilets', 'osm', 'yes'), ('dfx:b', 'toilets', 'site', 'no'), ('dfx:c', 'toilets', 'osm', 'nothing')`);
   const osm = await verification.items({ kind: 'checked', source: 'osm' });
-  assert.equal(osm.total, 2);
+  assert.equal(osm.rows.filter((r) => r.ref.startsWith('dfx:')).length, 2);
   const answered = await verification.items({ kind: 'answered', source: 'osm' });
-  assert.deepEqual(answered.rows.map((r) => r.outcome), ['Confirmed']);
+  assert.deepEqual(answered.rows.filter((r) => r.ref.startsWith('dfx:')).map((r) => r.outcome), ['Confirmed']);
+  await query(`delete from place_fact_evidence where venue_ref like 'dfx:%'`);
   const dropped = await verification.items({ kind: 'dropped' });
   assert.equal(dropped.rows[0].outcome, 'Dropped at 30 days');
   const out = await verification.verification({ period: '24h' });

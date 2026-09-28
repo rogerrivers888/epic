@@ -545,3 +545,20 @@ test('the location filter knows the first part of a postcode, and says when it k
   await query(`delete from postcodes where outcode = 'ZZ9'`);
   await query(`delete from geo_cells where code = 'sector:ZZ9 1'`);
 });
+
+test('a Sources number opens onto the records it was counted from, and families alone never turn a machine source red', async () => {
+  const verification = await import('../src/desk/verification.js');
+  await query(`delete from place_fact_evidence where venue_ref like 'desk:src%'`);
+  await query(`insert into place_fact_evidence (venue_ref, attribute_key, source, says) values ('desk:src1', 'toilets', 'osm', 'yes'), ('desk:src2', 'toilets', 'osm', 'nothing')`);
+  const checked = await verification.items({ kind: 'checked', source: 'osm' });
+  assert.deepEqual(checked.rows.filter((r) => String(r.ref).startsWith('desk:src')).map((r) => r.ref).sort(), ['desk:src1', 'desk:src2']);
+  const answered = await verification.items({ kind: 'answered', source: 'osm' });
+  assert.deepEqual(answered.rows.filter((r) => String(r.ref).startsWith('desk:src')).map((r) => r.ref), ['desk:src1'], 'nothing found is checked, not answered');
+  await query(`delete from place_fact_evidence where venue_ref like 'desk:src%'`);
+  // With only family answers this week, no machine source is Failing for having checked nothing.
+  await query(`delete from place_fact_evidence where checked_at >= now() - interval '7 days'`);
+  const { rows: [h] } = await query(`insert into households (name) values ('Desk src') returning id`);
+  await query(`insert into family_answers (venue_ref, attribute_key, household_id, answer) values ('desk:src3', 'toilets', $1, 'yes')`, [h.id]);
+  const srcs = await verification.sources({ sourceSlow: 5, sourceFailing: 15 });
+  assert.ok(srcs.filter((x) => x.source !== 'families').every((x) => x.status !== 'Failing' || x.failingPct != null));
+});

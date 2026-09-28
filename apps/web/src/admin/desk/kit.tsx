@@ -22,6 +22,7 @@ import { Press } from '../../components/press';
 import { useViewport } from '../../hooks/useViewport';
 import { LIME, ON_LIME, desk, fonts } from '../../theme';
 import { api } from '../../api';
+import { useRouter } from '../../router';
 
 export const AMBER = desk.amber;
 export const RED = desk.warn;
@@ -517,11 +518,31 @@ const LocCtx = createContext<{ loc: LocState; setLoc: (l: LocState) => void; ans
   loc: { where: '', minutes: 30, mode: 'car' }, setLoc: () => {}, answer: null, setAnswer: () => {},
 });
 
-/** One piece of state for Categories and Collections (README v2). */
+/**
+ * One piece of state for Categories and Collections (README v2), and it lives
+ * in the address — `?where=SL5&reach=15&by=transit` — so a filtered count can
+ * be reloaded and sent to someone (Codex, 28 Sep 2026). Moving between the
+ * two tabs keeps it, because the desk clears only its own layer keys.
+ * Changing it replaces rather than pushes: a filter is not a step.
+ */
 export function LocationProvider({ children }: { children: React.ReactNode }) {
-  const [loc, setLoc] = useState<LocState>({ where: '', minutes: 30, mode: 'car' });
+  const { query, setQuery } = useRouter();
+  const where = query.get('where') ?? '';
+  const reach = Number(query.get('reach'));
+  const loc: LocState = {
+    where,
+    minutes: [5, 15, 30, 60, 120].includes(reach) ? reach : 30,
+    mode: query.get('by') === 'transit' ? 'transit' : 'car',
+  };
+  const setLoc = useCallback((l: LocState) => {
+    setQuery({
+      where: l.where.trim() ? l.where : null,
+      reach: l.minutes === 30 ? null : String(l.minutes),
+      by: l.mode === 'car' ? null : l.mode,
+    }, { replace: true });
+  }, [setQuery]);
   const [answer, setAnswer] = useState<LocAnswer | null>(null);
-  const value = useMemo(() => ({ loc, setLoc, answer, setAnswer }), [loc, answer]);
+  const value = useMemo(() => ({ loc, setLoc, answer, setAnswer }), [loc.where, loc.minutes, loc.mode, setLoc, answer]); // eslint-disable-line react-hooks/exhaustive-deps
   return <LocCtx.Provider value={value}>{children}</LocCtx.Provider>;
 }
 export const useLocation = () => useContext(LocCtx);
