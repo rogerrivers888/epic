@@ -13,10 +13,14 @@ import { settings, setSetting } from './settings.js';
 import { USD_TO_GBP } from '../domain/providerPrices.js';
 
 /** Google's SKU description → our meter key. Unmapped SKUs are reported, never guessed. */
+// The ledger's own names (sources/google.js skuFor): `google-pro` is the Pro
+// tier of Text Search and of Place Details alike; Enterprise/Atmosphere is
+// `google-search` for a search and `google-details` for a place (Codex).
 export const METER_OF = [
   [/text search.*(enterprise|atmosphere)/i, 'google-search'],
-  [/text search.*pro/i, 'google-pro'],
-  [/text search.*(essentials|ids only)/i, 'google-essentials'],
+  [/place details.*(enterprise|atmosphere)/i, 'google-details'],
+  [/(text search|place details).*pro/i, 'google-pro'],
+  [/(text search|place details).*(essentials|ids only)/i, 'google-essentials'],
   [/place details/i, 'google-details'],
   [/place photo|photo/i, 'google-photos'],
   [/route/i, 'google-routes'],

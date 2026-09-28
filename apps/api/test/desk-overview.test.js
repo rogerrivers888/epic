@@ -36,6 +36,9 @@ test('growth carries seven weekly points (six weeks) for every tile, households 
 
 test('spend reads close to budget above 80% and over budget above 100%', async () => {
   await query(`delete from provider_calls where created_at >= date_trunc('month', now())`);
+  // The ledger-estimate tile, which is what shows before any billing figures
+  // exist (277 seeds them; the billing tile has its own test).
+  await query(`delete from bo_settings where key = 'billing'`);
   settings.forget();
   const { values } = await settings.settings();
   const budget = values.budgetGoogle;

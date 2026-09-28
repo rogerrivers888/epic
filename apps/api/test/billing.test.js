@@ -10,7 +10,7 @@ test('Google SKUs map to our meters, and an unknown one is left unmapped', () =>
   assert.equal(billing.meterOf('Places API Text Search Pro'), 'google-pro');
   assert.equal(billing.meterOf('Places API Text Search Enterprise + Atmosphere'), 'google-search');
   assert.equal(billing.meterOf('Places API Text Search Essentials (IDs Only)'), 'google-essentials');
-  assert.equal(billing.meterOf('Places API Place Details Pro'), 'google-details');
+  assert.equal(billing.meterOf('Places API Place Details Enterprise'), 'google-details');
   assert.equal(billing.meterOf('Routes: Compute Routes Essentials'), 'google-routes');
   assert.equal(billing.meterOf('Cloud Storage'), null);
 });
@@ -59,4 +59,30 @@ test('the open-map regions are a setting, only the two extracts, and the environ
   assert.deepEqual(await osm.regionsOn(), ['great-britain']);
   if (saved === undefined) delete process.env.EPIC_OSM_EXTRACT; else process.env.EPIC_OSM_EXTRACT = saved;
   await settings.setSetting('osmRegions', [], { who: 'test' });
+});
+
+test('Place Details tiers map as the ledger names them, and a query not yet finished is waited for', async () => {
+  assert.equal(billing.meterOf('Places API Place Details Pro'), 'google-pro');
+  assert.equal(billing.meterOf('Places API Place Details Enterprise + Atmosphere'), 'google-details');
+  assert.equal(billing.meterOf('Places API Place Details Essentials (IDs Only)'), 'google-essentials');
+  const { generateKeyPairSync } = await import('node:crypto');
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  process.env.GCP_BILLING_SA_JSON = JSON.stringify({ client_email: 'x@y', private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }) });
+  let polls = 0;
+  const fake = async (url) => {
+    if (String(url).includes('oauth2')) return { ok: true, json: async () => ({ access_token: 't', expires_in: 3600 }) };
+    if (String(url).endsWith('/queries')) return { ok: true, json: async () => ({ jobComplete: false, jobReference: { jobId: 'J', location: 'EU' } }) };
+    polls += 1;
+    return { ok: true, json: async () => ({ jobComplete: true, jobReference: { jobId: 'J' }, schema: { fields: [{ name: 'a' }] }, rows: [{ f: [{ v: '1' }] }] }) };
+  };
+  const rows = await exportReader.run('select 1', {}, fake);
+  assert.deepEqual(rows, [{ a: '1' }]);
+  assert.ok(polls >= 1, 'it waited for the job');
+  delete process.env.GCP_BILLING_SA_JSON;
+});
+
+test('the billing tile starts from the console figures (277)', async () => {
+  const { rows: [s] } = await query(`select value from bo_settings where key = 'billing'`);
+  assert.equal(s.value.creditExpires, '2026-12-20');
+  assert.equal(s.value.usageGbp, 40.61);
 });

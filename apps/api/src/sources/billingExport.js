@@ -80,8 +80,34 @@ export async function run(sql, params = {}, fetcher = fetch) {
     const notYet = /not found/i.test(why);
     throw Object.assign(new Error(notYet ? 'The billing export table is not there yet (it backfills over a day).' : `BigQuery: ${why.slice(0, 200)}`), { code: notYet ? 'not_yet' : 'bigquery' });
   }
-  const fields = (j.schema?.fields ?? []).map((f) => f.name);
-  return (j.rows ?? []).map((r) => Object.fromEntries(r.f.map((c, i) => [fields[i], c.v])));
+  // A query past its timeout comes back 200 with jobComplete false and no
+  // rows: wait for it, never read "not finished" as "empty" (Codex, 29 Sep).
+  let page = j;
+  const deadline = Date.now() + 120_000;
+  while (page.jobComplete === false) {
+    if (Date.now() > deadline) throw Object.assign(new Error('BigQuery did not finish the billing query in two minutes.'), { code: 'bigquery' });
+    await new Promise((r) => setTimeout(r, 2000));
+    const ref = page.jobReference ?? j.jobReference;
+    const r2 = await fetcher(`https://bigquery.googleapis.com/bigquery/v2/projects/${PROJECT}/queries/${ref.jobId}?location=${ref.location ?? LOCATION}&timeoutMs=10000`, {
+      headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20_000),
+    });
+    page = await r2.json().catch(() => ({}));
+    if (!r2.ok) throw Object.assign(new Error(`BigQuery: ${page?.error?.message ?? r2.status}`), { code: 'bigquery' });
+  }
+  const fields = (page.schema?.fields ?? []).map((f) => f.name);
+  const rows = [...(page.rows ?? [])];
+  let token2 = page.pageToken;
+  while (token2) {
+    const ref = page.jobReference ?? j.jobReference;
+    const r3 = await fetcher(`https://bigquery.googleapis.com/bigquery/v2/projects/${PROJECT}/queries/${ref.jobId}?location=${ref.location ?? LOCATION}&pageToken=${encodeURIComponent(token2)}`, {
+      headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20_000),
+    });
+    const more = await r3.json().catch(() => ({}));
+    if (!r3.ok) throw Object.assign(new Error(`BigQuery: ${more?.error?.message ?? r3.status}`), { code: 'bigquery' });
+    rows.push(...(more.rows ?? []));
+    token2 = more.pageToken;
+  }
+  return rows.map((r) => Object.fromEntries(r.f.map((c, i) => [fields[i], c.v])));
 }
 
 const speakless = (err) => ({ speaks: false, why: err.code === 'no_key' ? 'No billing key yet — GCP_BILLING_SA_JSON in Doppler.' : err.message });
