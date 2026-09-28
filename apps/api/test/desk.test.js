@@ -664,3 +664,9 @@ test('a closure said of something else in the clause is not said of the phrase',
   assert.equal(pipeline.polarity('The pool has a cafe that is closed.', 'pool'), 'asserts');
   assert.equal(pipeline.polarity('The pool has been closed for months.', 'pool'), 'denies');
 });
+
+test('a closure linked by any -ly adverb or a contraction is a denial', () => {
+  for (const s of ['The pool is completely closed.', 'The pool has recently been closed.', "The pool's closed.", 'The pool’s been shut for weeks.'])
+    assert.equal(pipeline.polarity(s, 'pool'), 'denies', s);
+  assert.equal(pipeline.polarity('The pool is next to the closed cafe.', 'pool'), 'asserts');
+});

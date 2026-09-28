@@ -66,7 +66,10 @@ export function polarity(sentence, phrase) {
   // "is still", "will be", "remains", "has been" — so the closure is said of
   // the phrase, not of the cafe next to it (Codex, 28 Sep 2026).
   const LINK = '(?:is|are|was|were|will|be|been|being|has|have|had|remains?|remained|stays?|stayed|still|now|currently|permanently|temporarily|sadly|unfortunately|often|sometimes|always|seems?|seemed|appears?|appeared|looks?|looked|got|gets|getting|is\\s+now)';
-  if (new RegExp(`^\\s*(?:${LINK}\\s+){0,4}(?:closed|shut|removed|gone|broken|unavailable|out of order|out of use|not working|not open)\\b`).test(clause)) return 'denies';
+  // Any "-ly" adverb ("completely", "recently") and a contraction ("the
+  // pool's closed", "'s been") link as well (Codex, 28 Sep 2026).
+  const LINKS = `(?:${LINK}|\\w+ly|'s|'re|'ve|’s|’re|’ve)`;
+  if (new RegExp(`^(?:'s|’s)?\\s*(?:${LINKS}\\s+){0,4}(?:closed|shut|removed|gone|broken|unavailable|out of order|out of use|not working|not open)\\b`).test(clause)) return 'denies';
   if (/\bno longer\b/.test(s.slice(Math.max(0, at - 30), at))) return 'denies';
   return 'asserts';
 }
