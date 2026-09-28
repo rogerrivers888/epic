@@ -395,7 +395,11 @@ export async function requestStop(id) {
             state        = case when state = 'waiting' then 'stopped' else state end
       where id = $1 and state in ('running', 'waiting') returning state`, [id]);
   const stopped = rows[0]?.state === 'stopped';
-  if (stopped) await refreshProgress(id);
+  if (stopped) {
+    await refreshProgress(id);
+    const { rows: [r] } = await query('select id, started_by from census_runs where id = $1', [id]);
+    await rollUpAndRecount(id, rollUpScope(r));
+  }
   return { stopping: rows.length > 0, stopped };
 }
 
@@ -1034,7 +1038,12 @@ async function finish(id, state, problem) {
   // floor with a fresh date, and nothing would look at it again for thirty
   // days — left alone, the cycle is its retry. Recounted behind the finish,
   // never awaited: a ring is a few reads of our own tables.
-  if (state === 'done' && run?.finished_at) await rollUpAndRecount(id, rollUpScope(run));
+  // And a run that stops short. A district it reached only part of is marked
+  // partial on the board, so what it found is published as a floor and says
+  // so, rather than waiting for a finish that a run meant for one day never
+  // has (owner, 28 Sep 2026: "partial counts shown as partial"; Codex, same
+  // day, on a run stopped while it waited for the quota day).
+  if (['done', 'paused', 'stopped'].includes(state) && run?.finished_at) await rollUpAndRecount(id, rollUpScope(run));
 }
 
 /** How a ring-edge run says what it is (sources/censusEdge.js). */
@@ -1058,18 +1067,6 @@ export function rollUpScope(run) {
     ? { skip: true, outcodes: null, runId: null }
     : { skip: false, outcodes: null, runId: run?.id ?? null };
 }
-
-/**
- * When census slices began carrying their run's id (migration 263).
- *
- * Read off production's runs rather than the migration table, which the test
- * database does not keep: "inner London at a kilometre, from the true
- * sectors" (4f5f2d00) began at 08:45 UTC on 26 Sep 2026 and stamps nothing;
- * "outer ring at a kilometre, overnight" (b8d354e3) was built paused at 13:05
- * the same day, which only 263's code can do. No run began in between, so
- * noon splits every run there is on the right side.
- */
-export const SLICES_STAMPED_FROM = new Date('2026-09-26T12:00:00Z');
 
 /** What a done run's `problem` says while its roll-up is still owed. */
 const ROLL_UP_PENDING = 'roll-up pending';
@@ -1200,16 +1197,29 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
   // A slice carries its run's id from migration 263 on, and only an id says
   // whose a slice is: a slice from before it cannot be pinned to a run by
   // time, because a paused run's lifetime encloses whatever ran while it slept
-  // (Codex, same day). So a run begun once slices were stamped is judged by
-  // its stamped slices alone — none, if it walked past every square, and then
-  // it rolls up nothing (Codex, same day: the existence of a slice is not a
-  // marker) — and a run begun before, every one of them finished (28 Sep
-  // 2026: none spans the migration), keeps the whole plan it always rolled.
-  // And the same filter when districts are named as well as the run: asking
-  // for a run by name is asking what *it* found.
-  const { rows: [stamped] } = runId
-    ? await query('select started_at >= $2 as any from census_runs where id = $1', [runId, SLICES_STAMPED_FROM])
-    : { rows: [{ any: false }] };
+  // (Codex, same day). So a run is judged by its stamped slices alone — none,
+  // if it walked past every square, and then it rolls up nothing (Codex, same
+  // day: having no slice is not being old). The one exception is a run from
+  // before the stamp, which is told by what only the old code left behind: no
+  // slice of its own, and an unstamped slice asked of its ground while it was
+  // going. Such a run keeps the whole plan it always rolled. Read from the
+  // run's own record, not from a date, so it holds in every database whenever
+  // 263 reached it (Codex, same day). A run that began before 263 and asked
+  // again after it counts as stamped and publishes only what it asked since —
+  // fewer districts rather than wrong ones; none such exists on production
+  // (28 Sep 2026). And the same filter when districts are named as well as the
+  // run: asking for a run by name is asking what *it* found.
+  const { rows: [run] } = runId
+    ? await query(
+      `select not exists (select 1 from census_slices where census_run_id = r.id)
+              and exists (select 1 from census_slices s
+                            join census_run_tiles m on m.grid_key = s.area_slug and m.run_id = r.id
+                           where s.census_run_id is null
+                             and s.ran_at between r.started_at and coalesce(r.finished_at, now())) as legacy
+         from census_runs r where r.id = $1`, [runId])
+    : { rows: [] };
+  if (runId && !run) return { outcodes: 0, rows: 0, unattributed: 0 };
+  const stamped = { any: Boolean(run && !run.legacy) };
   const named = outcodes?.length ? outcodes.map((c) => String(c).toUpperCase()) : null;
   const codes = runId
     ? (await query(

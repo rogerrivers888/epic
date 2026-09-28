@@ -1688,6 +1688,9 @@ test('a run rolls up the districts it censused, not the fresh ones it walked pas
   await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'test/walked/2') on conflict do nothing`, [old.id]);
   await rollUpOutcodes({ runId: old.id });
   assert.deepEqual(await counts(), [['zz7a', 999], ['zz7b', 1], ['zz7c', 1]], 'a run from before 263 rolls its plan, as it always did');
+
+  // And a run that is not there rolls up nothing, rather than failing.
+  assert.deepEqual(await rollUpOutcodes({ runId: '00000000-0000-4000-8000-000000000000' }), { outcodes: 0, rows: 0, unattributed: 0 });
   t.after(() => query(`delete from area_counts where area_slug = 'zz7c'`));
 });
 
@@ -1717,4 +1720,38 @@ test('a run waiting for the quota day can be stopped, and the clock does not wak
   const { rows: [g] } = await query('select state, stop_requested from census_runs where id = $1', [going.id]);
   assert.deepEqual([g.state, g.stop_requested], ['running', true]);
   assert.deepEqual(await requestStop(run.id), { stopping: false, stopped: false }, 'and a stopped run is left alone');
+});
+
+test('a run that pauses at its ceiling publishes what it reached, as partial', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from area_counts where area_slug = 'zz5a'`);
+    await query(`delete from geo_cells where code like 'ZZ5A%'`);
+    await clean();
+  });
+  // One district of two squares, out at sea, and a ceiling that buys exactly
+  // one of them: the one-day census of 28 Sep 2026 in miniature. Pausing used
+  // to publish nothing, and the day's work waited on a finish that a run
+  // meant for one day never reaches.
+  await seaDistrict({ outcode: 'ZZ5A', sectors: [['ZZ5A 1', 49.84, -3.54], ['ZZ5A 2', 49.92, -3.54]] });
+  const questions = (await slicePlan()).reduce((n, p) => n + p.questions.length, 0);
+  const run = await startTestRun({ label: 'test pause publishes', maxRequests: questions });
+  for (const [k, lat] of [['test/pause/0', 49.80], ['test/pause/1', 49.88]]) {
+    await query(
+      `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, run_id, state)
+       values ($1, $2::float8, -3.60, $2::float8 + 0.08, -3.48, array['ZZ5A'], $3, 'todo')
+       on conflict (grid_key) do update set run_id = excluded.run_id, state = 'todo', done_subcategories = '{}', censused_at = null`,
+      [k, lat, run.id]);
+    await query(`insert into census_run_tiles (run_id, grid_key) values ($1, $2) on conflict do nothing`, [run.id, k]);
+  }
+
+  let out;
+  for (let i = 0; i < 5 && out?.reason !== 'ceiling'; i += 1) {
+    out = await withCensus(answers(1), () => advance({ runId: run.id, budgetMs: 30_000 }));
+  }
+  assert.equal(out.reason, 'ceiling');
+  const { rows } = await query(
+    `select bool_and(complete) as complete, sum(census_count)::int as places from area_counts where area_slug = 'zz5a'`);
+  assert.ok(rows[0].places > 0, 'what the square it reached found is on the board');
+  assert.equal(rows[0].complete, false, 'and the district says it is partial');
 });
