@@ -1852,3 +1852,24 @@ test('a place a run asked that is nearest a district it walked past is counted t
   const { rows: [b] } = await query(`select census_count from area_counts where area_slug = 'zz3b' and subcategory = 'golf'`);
   assert.equal(b?.census_count, 1, 'the new place is counted in the district it is nearest');
 });
+
+test('a stop asked for on the way to sleep is honoured, and the clock never wakes a run asked to stop', async (t) => {
+  await clean();
+  t.after(clean);
+  const { waitUntil } = await import('../src/sources/censusRun.js');
+  // The loop checked the flag, found none, and is about to sleep for the
+  // quota day when the stop lands (Codex, 28 Sep 2026).
+  const run = await startTestRun({ label: 'test stop on the way to sleep' });
+  await query('update census_runs set stop_requested = true where id = $1', [run.id]);
+  await waitUntil(run.id, new Date(Date.now() - 60_000), '75,000 requests today');
+  const { rows: [r] } = await query('select state, resume_after, stop_requested, problem from census_runs where id = $1', [run.id]);
+  assert.deepEqual([r.state, r.resume_after, r.stop_requested], ['stopped', null, false]);
+  assert.match(r.problem, /^stopped while waiting: 75,000/);
+
+  // And a run asleep with a stop somehow pending stays asleep.
+  const other = await startTestRun({ label: 'test asleep with a stop' });
+  await query(
+    `update census_runs set state = 'waiting', resume_after = now() - interval '1 minute', stop_requested = true where id = $1`, [other.id]);
+  const woke = await resumeInterrupted();
+  assert.ok(!(woke.runs ?? []).some((x) => x.id === other.id), 'the clock leaves it');
+});

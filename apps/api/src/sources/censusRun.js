@@ -486,12 +486,23 @@ async function ownRequestsToday(runId) {
   return Number(row?.n ?? 0);
 }
 
-async function waitUntil(id, when, why) {
-  await query(
+/** Put a run to sleep until `when` — exported for the race it guards against, which a test cannot time. */
+export async function waitUntil(id, when, why) {
+  // A stop asked for while the run was on its way to sleep is honoured here,
+  // not carried into the sleep: a waiting run with the flag set would still be
+  // woken by the clock and carry on the next day (Codex, 28 Sep 2026). One
+  // statement, so a stop landing now is read by it or finds it waiting.
+  const { rows: [r] } = await query(
     `update census_runs
-        set state = 'waiting', resume_after = $2, problem = $3, last_seen_at = now()
-      where id = $1`, [id, when, why]);
+        set state        = case when stop_requested then 'stopped' else 'waiting' end,
+            resume_after = case when stop_requested then null else $2::timestamptz end,
+            problem      = case when stop_requested then 'stopped while waiting: ' || $3::text else $3::text end,
+            finished_at  = case when stop_requested then now() else finished_at end,
+            stop_requested = false,
+            last_seen_at = now()
+      where id = $1 returning state, started_by`, [id, when, why]);
   await refreshProgress(id);
+  if (r?.state === 'stopped') await rollUpAndRecount(id, rollUpScope(r));
 }
 
 /** Tiles left, and what the run has spent so far. */
@@ -1135,6 +1146,8 @@ export async function resumeInterrupted() {
         set state = 'running', resume_after = null, problem = null,
             day = (now() at time zone 'America/Los_Angeles')::date, day_requests = 0, last_seen_at = now()
       where state = 'waiting' and resume_after is not null and resume_after <= now()
+        -- Never a run somebody has asked to stop (Codex, 28 Sep 2026).
+        and not stop_requested
         -- Never into a region somebody else is working. Starting refuses while
         -- a run waits, so this should not arise — but a clock that wakes a run
         -- regardless of what else is going is the half of the pair that turns a
