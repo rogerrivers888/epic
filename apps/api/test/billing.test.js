@@ -86,3 +86,16 @@ test('the billing tile starts from the console figures (277)', async () => {
   assert.equal(s.value.creditExpires, '2026-12-20');
   assert.equal(s.value.usageGbp, 40.61);
 });
+
+test('a billing query that finished with errors is an error, never an empty month', async () => {
+  const { generateKeyPairSync } = await import('node:crypto');
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  process.env.GCP_BILLING_SA_JSON = JSON.stringify({ client_email: 'x@y', private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }) });
+  const fake = async (url) => {
+    if (String(url).includes('oauth2')) return { ok: true, json: async () => ({ access_token: 't2', expires_in: 3600 }) };
+    if (String(url).endsWith('/queries')) return { ok: true, json: async () => ({ jobComplete: false, jobReference: { jobId: 'J' } }) };
+    return { ok: true, json: async () => ({ jobComplete: true, errors: [{ message: 'Resources exceeded' }] }) };
+  };
+  await assert.rejects(() => exportReader.run('select 1', {}, fake), /Resources exceeded/);
+  delete process.env.GCP_BILLING_SA_JSON;
+});

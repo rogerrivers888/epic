@@ -94,6 +94,11 @@ export async function run(sql, params = {}, fetcher = fetch) {
     page = await r2.json().catch(() => ({}));
     if (!r2.ok) throw Object.assign(new Error(`BigQuery: ${page?.error?.message ?? r2.status}`), { code: 'bigquery' });
   }
+  // A job can finish and still have failed: 200, jobComplete, and an errors
+  // list. That is never an empty result (Codex, 29 Sep 2026).
+  const failed = page.errors?.length ? page.errors : j.errors?.length ? j.errors : null;
+  if (failed) throw Object.assign(new Error(`BigQuery: ${String(failed[0]?.message ?? 'the query failed').slice(0, 200)}`), { code: 'bigquery' });
+  if (!page.schema) throw Object.assign(new Error('BigQuery returned no result for the billing query.'), { code: 'bigquery' });
   const fields = (page.schema?.fields ?? []).map((f) => f.name);
   const rows = [...(page.rows ?? [])];
   let token2 = page.pageToken;
