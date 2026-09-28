@@ -1141,6 +1141,19 @@ export async function resumeInterrupted() {
   // Automatic, because the owner asked for it to be — "resume automatically
   // after the 00:00 UTC reset" — and because a run that needs a person at
   // midnight is a run that loses a day (21 Sep 2026).
+  // A run asleep with a stop already asked for — left by the race between a
+  // stop and a run going to sleep, before that race was closed — is stopped
+  // here and publishes what it reached, rather than lying "waiting" for ever
+  // (Codex, 28 Sep 2026).
+  const { rows: halted } = await query(
+    `update census_runs
+        set state = 'stopped', resume_after = null, finished_at = now(), last_seen_at = now(), stop_requested = false,
+            problem = 'stopped while waiting: ' || coalesce(problem, 'for the quota day')
+      where state = 'waiting' and stop_requested returning id, started_by`);
+  for (const r of halted) {
+    await refreshProgress(r.id);
+    await rollUpAndRecount(r.id, rollUpScope(r));
+  }
   const { rows: woken } = await query(
     `update census_runs
         set state = 'running', resume_after = null, problem = null,
@@ -1201,7 +1214,7 @@ export async function list({ limit = 10 } = {}) {
  * covered." A count drawn from four tiles of which one was cut off at sixty is
  * a different number from the same count out of four clean ones.
  */
-export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
+export async function rollUpOutcodes({ outcodes = null, runId = null, alsoSquares = [] } = {}) {
   // A run rolls up the districts it censused itself, not every district its
   // plan touched. A run's plan keeps the fresh tiles it walked past as members,
   // so a whole-country run holds London's eight-kilometre squares — and rolling
@@ -1289,9 +1302,12 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
     : await query(
       `select t.grid_key, t.min_lat, t.min_lng, t.max_lat, t.max_lng, t.outcodes, t.saturated, t.censused_at, t.started_at, t.state, t.done_subcategories
          from census_tiles t
-        where t.censused_at is not null
+        where (t.censused_at is not null or t.grid_key = any($5::text[]))
           and t.max_lat >= $1 and t.min_lat <= $2 and t.max_lng >= $3 and t.min_lng <= $4`,
-      [bounds.minLat - REACH_LAT, bounds.maxLat + REACH_LAT, bounds.minLng - REACH_LNG, bounds.maxLng + REACH_LNG]);
+      // `alsoSquares`: a run's unfinished squares, passed when the run rolls up
+      // a neighbour its squares reached — finished ground only would leave out
+      // the very place that made the neighbour worth rolling (Codex, 28 Sep 2026).
+      [bounds.minLat - REACH_LAT, bounds.maxLat + REACH_LAT, bounds.minLng - REACH_LNG, bounds.maxLng + REACH_LNG, alsoSquares]);
   if (!tiles.length) return { outcodes: codes.length, rows: 0, unattributed: 0 };
   const tileByKey = new Map(tiles.map((t) => [t.grid_key, t]));
 
@@ -1537,7 +1553,7 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
   // the boxes were placed against — postcodes, or the cruder sector centroids
   // where none were loaded — because the two are different facts.
   // The neighbours, rolled up by name — no run, so no further neighbours.
-  const beside = neighbours.size ? await rollUpOutcodes({ outcodes: [...neighbours] }) : null;
+  const beside = neighbours.size ? await rollUpOutcodes({ outcodes: [...neighbours], alsoSquares: [...askedTiles] }) : null;
   return {
     outcodes: codes.length + (beside?.outcodes ?? 0), rows: written + (beside?.rows ?? 0), unattributed: unattributed.size,
     placedBy: placedBy.size === 0 ? null : placedBy.size === 1 ? [...placedBy][0] : 'mixed',

@@ -1836,9 +1836,12 @@ test('a place a run asked that is nearest a district it walked past is counted t
   const run = await startTestRun({ label: 'test beside' });
   await query(
     `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, saturated) values
-       ('test/beside/0', 49.40, -5.60, 49.48, -5.48, array['ZZ3A'], 'done', now(), 0),
+       ('test/beside/0', 49.40, -5.60, 49.48, -5.48, array['ZZ3A'], 'doing', null, 0),
        ('test/beside/1', 49.40, -5.48, 49.48, -5.36, array['ZZ3B'], 'done', now() - interval '2 days', 0)
-     on conflict (grid_key) do update set state = 'done', censused_at = excluded.censused_at, outcodes = excluded.outcodes`);
+     on conflict (grid_key) do update set state = excluded.state, censused_at = excluded.censused_at, outcodes = excluded.outcodes`);
+  // The asked square is still unfinished — the run stopped in it (Codex, same
+  // day: finished ground alone left the neighbour's new place out).
+  await query(`update census_tiles set started_at = now() - interval '1 minute' where grid_key = 'test/beside/0'`);
   for (const k of ['test/beside/0', 'test/beside/1']) {
     await query(`insert into census_run_tiles (run_id, grid_key) values ($1, $2) on conflict do nothing`, [run.id, k]);
   }
@@ -1849,8 +1852,9 @@ test('a place a run asked that is nearest a district it walked past is counted t
     ref: 'google:beside_new', slice: '49.4380,-5.4850,49.4420,-5.4810', gridKey: 'test/beside/0',
   });
   await rollUpOutcodes({ runId: run.id });
-  const { rows: [b] } = await query(`select census_count from area_counts where area_slug = 'zz3b' and subcategory = 'golf'`);
+  const { rows: [b] } = await query(`select census_count, complete from area_counts where area_slug = 'zz3b' and subcategory = 'golf'`);
   assert.equal(b?.census_count, 1, 'the new place is counted in the district it is nearest');
+  assert.equal(b.complete, false, 'and that district is partial while the square that fed it is unfinished');
 });
 
 test('a stop asked for on the way to sleep is honoured, and the clock never wakes a run asked to stop', async (t) => {
@@ -1866,12 +1870,15 @@ test('a stop asked for on the way to sleep is honoured, and the clock never wake
   assert.deepEqual([r.state, r.resume_after, r.stop_requested], ['stopped', null, false]);
   assert.match(r.problem, /^stopped while waiting: 75,000/);
 
-  // And a run asleep with a stop somehow pending stays asleep.
+  // And a run asleep with a stop already pending — left by the race before it
+  // was closed — is stopped by the clock, not woken and not left asleep.
   const other = await startTestRun({ label: 'test asleep with a stop' });
   await query(
-    `update census_runs set state = 'waiting', resume_after = now() - interval '1 minute', stop_requested = true where id = $1`, [other.id]);
+    `update census_runs set state = 'waiting', resume_after = now() + interval '1 hour', stop_requested = true where id = $1`, [other.id]);
   const woke = await resumeInterrupted();
-  assert.ok(!(woke.runs ?? []).some((x) => x.id === other.id), 'the clock leaves it');
+  assert.ok(!(woke.runs ?? []).some((x) => x.id === other.id), 'the clock does not wake it');
+  const { rows: [o] } = await query('select state, resume_after, stop_requested from census_runs where id = $1', [other.id]);
+  assert.deepEqual([o.state, o.resume_after, o.stop_requested], ['stopped', null, false], 'it stops it');
 });
 
 test('a district fed a place by a neighbour\'s unfinished square is partial until that square is done', async (t) => {
