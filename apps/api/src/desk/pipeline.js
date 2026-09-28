@@ -43,7 +43,7 @@ const AUX = /^(?:will|would|has|have|had|'ve|'ll|'d|’ve|’ll|’d)$/;
 const ADVERB = /^(?:still|now|currently|permanently|temporarily|sadly|unfortunately|often|sometimes|always|\w+ly)$/;
 const CLOSURE = /^(?:closed|shut|removed|gone|broken|unavailable)$/;
 const CLOSURE_2 = /^(?:out of (?:order|use)|not working|not open)\b/;
-const WHEN_WHY = /^(?:for|until|till|since|on|at|in|during|over|by|due|because|when|as|today|tomorrow|now|again|this|last|next|all|to|pending|every|indefinitely|\w+ly)$/;
+const WHEN_WHY = /^(?:for|until|till|since|on|at|in|during|over|by|due|because|when|as|today|tomorrow|now|again|this|last|next|all|to|pending|every|indefinitely|after|following|before|owing|down|off|up|early|through|from|without|and|but|so|\w+ly)$/;
 function closureOfPhrase(clause) {
   const words = String(clause).replace(/^\s*(['’](?:s|ll|d|re|ve))/, ' $1').trim().split(/\s+/).map((w) => w.replace(/[^a-z'’]/g, '')).filter(Boolean);
   let verb = false;

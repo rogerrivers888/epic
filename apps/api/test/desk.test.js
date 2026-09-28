@@ -690,3 +690,9 @@ test('an active verb acting on something else is not a closure of the phrase', (
   for (const s of ['The pool has been closed for weeks.', 'The pool has closed.', 'The pool will be closed tomorrow.', 'The pool is not working.'])
     assert.equal(pipeline.polarity(s, 'pool'), 'denies', s);
 });
+
+test('a perfect-tense closure followed by when or why is still a closure', () => {
+  assert.equal(pipeline.polarity('The pool has closed after flooding.', 'pool'), 'denies');
+  assert.equal(pipeline.polarity('The lift has broken down.', 'lift'), 'denies');
+  assert.equal(pipeline.polarity('The pool has broken tiles.', 'pool'), 'asserts');
+});
