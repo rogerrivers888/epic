@@ -45,14 +45,17 @@ export const meterOf = (sku) => METER_OF.find(([re]) => re.test(String(sku ?? ''
 // branch can read and of more besides, so it changes nothing counted; it
 // lets the month be read from the partial index over Google's rows instead
 // of scanning every free-source row of the month (round 4 PERF).
-export const LEDGER_METERS = `
+// `ledgerMetersBetween(from, to)` is the same read over any range, given as
+// two SQL expressions — supplierCost.js prices twelve months from one read of
+// it (Codex, round 4: a query per supplier per month was 300 a request).
+export const ledgerMetersBetween = (from, to) => `
   select p.id, to_char(p.created_at at time zone 'Europe/London', 'YYYY-MM') as month,
          (p.created_at at time zone 'Europe/London')::date as day,
          case when m.key = 'google' then 'google-legacy' else m.key end as meter, (m.value)::numeric as n,
          p.created_at as at
     from provider_calls p, jsonb_each_text(p.units) m
-   where p.created_at >= (($1::text || '-01')::date::timestamp at time zone 'Europe/London')
-     and p.created_at < ((($1::text || '-01')::date + interval '1 month')::timestamp at time zone 'Europe/London')
+   where p.created_at >= ${from}
+     and p.created_at < ${to}
      and provider_call_bills_google(p.units, p.provider)
      and jsonb_typeof(p.units) = 'object' and m.value ~ '^[0-9.]+$'
      and (m.key like 'google-%'
@@ -63,10 +66,13 @@ export const LEDGER_METERS = `
          case when p.provider ~* 'route' then 'google-routes' else 'google-legacy' end, (p.units #>> '{}')::numeric,
          p.created_at
     from provider_calls p
-   where p.created_at >= (($1::text || '-01')::date::timestamp at time zone 'Europe/London')
-     and p.created_at < ((($1::text || '-01')::date + interval '1 month')::timestamp at time zone 'Europe/London')
+   where p.created_at >= ${from}
+     and p.created_at < ${to}
      and provider_call_bills_google(p.units, p.provider)
      and jsonb_typeof(p.units) in ('number', 'string') and p.provider ~* 'google' and (p.units #>> '{}') ~ '^[0-9.]+$'`;
+export const LEDGER_METERS = ledgerMetersBetween(
+  `(($1::text || '-01')::date::timestamp at time zone 'Europe/London')`,
+  `((($1::text || '-01')::date + interval '1 month')::timestamp at time zone 'Europe/London')`);
 
 /** How many of a month's `google-pro` requests were marked as Place Details. */
 export const PRO_DETAILS = `
@@ -105,7 +111,18 @@ export async function googleEstimate(month, { until = null, q = query } = {}) {
     q(`select meter, sum(n)::float as units from (${LEDGER_METERS}) x where month = $1 and ($2::timestamptz is null or at < $2) group by 1`, [month, until]),
     q(`${PRO_DETAILS} and ($2::timestamptz is null or p.created_at < $2)`, [month, until]),
   ]);
-  const units = new Map(rows.map((r) => [r.meter === 'google-legacy' ? 'google' : r.meter, r.units]));
+  const units = new Map();
+  for (const r of rows) units.set(r.meter === 'google-legacy' ? 'google' : r.meter, r.units);
+  return priceGoogle(units, proDetails, LINES);
+}
+
+/**
+ * Price a month's Google requests in memory: `units` is meter → requests
+ * (the pre-tier `google` meter under `google`), `proDetails` how many of the
+ * Pro requests were Place Details. The one pricing googleEstimate and the
+ * batched months in supplierCost.js both use, so the two cannot disagree.
+ */
+export function priceGoogle(units, proDetails, LINES) {
   const counted = [];
   for (const line of LINES.filter((l) => l.source === 'google' && l.allowance)) {
     const used = units.get(line.key) ?? 0;

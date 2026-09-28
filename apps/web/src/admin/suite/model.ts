@@ -48,7 +48,7 @@ export type Row = {
  * cutoff and an estimate after it, the ledger's estimate, or — for an
  * expectation only — the budget.
  */
-export type CostBasis = 'billed' | 'billed+estimate' | 'estimate' | 'budget';
+export type CostBasis = 'billed' | 'billed+estimate' | 'estimate' | 'budget' | 'budget+estimate' | 'billed+budget';
 
 export type Measure = {
   key: string;
@@ -473,19 +473,22 @@ const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'S
 
 /**
  * The basis a figure is on, in the words under it: "billed · Google billing
- * export", "console, 29 Sep", "billed + estimate", "estimate", "budget".
+ * export", "console, 29 Sep", "billed + estimate", "estimate", "budget",
+ * "budget + estimate". "billed" is only ever said of a figure with a bill in it.
  */
 export function basisWords(basis: CostBasis | null | undefined, source?: string | null, at?: string | null, apportioned?: boolean): string | null {
   if (!basis) return null;
   const part = apportioned ? ' · part month' : '';
   if (basis === 'estimate' || basis === 'budget') return `${basis}${part}`;
+  if (basis === 'budget+estimate') return `budget + estimate${part}`;
   const d = at ? new Date(at) : null;
   const when = d && !Number.isNaN(d.getTime()) ? `${d.getUTCDate()} ${SHORT_MONTHS[d.getUTCMonth()]}` : null;
   const from = source && /console/i.test(source)
     ? (when ? `console, ${when}` : 'console')
     : source && /export/i.test(source) ? 'billed · Google billing export'
       : source ? `billed · ${source}` : 'billed';
-  return `${basis === 'billed+estimate' ? `${from} + estimate` : from}${part}`;
+  const plus = basis === 'billed+estimate' ? ' + estimate' : basis === 'billed+budget' ? ' + budget' : '';
+  return `${from}${plus}${part}`;
 }
 
 /** Which currency each half of the model is measured in. */

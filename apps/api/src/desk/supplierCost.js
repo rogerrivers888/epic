@@ -21,7 +21,7 @@
 import { query } from '../db.js';
 import { USD_TO_GBP, PRICE_PER_UNIT_USD } from '../domain/providerPrices.js';
 import { OTHER_PURSE } from '../constants.js';
-import { googleEstimate } from './billing.js';
+import { googleEstimate, ledgerMetersBetween, priceGoogle } from './billing.js';
 
 /** London's month of an instant, as the ledger groups it. */
 export const londonMonth = (d = new Date()) =>
@@ -307,13 +307,20 @@ export const residueOf = (register) => ({
   providerKeys: register.map((c) => c.providerKey).filter(Boolean),
 });
 
-/** Bases combined: all billed is billed, all estimate is estimate, anything else is both. */
+/**
+ * Bases combined. All of one kind is that kind. A mix without a budget month
+ * is 'billed+estimate' — only when a bill is in it — never claimed of months
+ * that had none (Codex, round 4): a budget month mixed with estimates is
+ * 'budget+estimate', and one mixed with a bill is 'billed+budget' (with or
+ * without estimates beside them), so the words under it never say "billed"
+ * of a month nobody billed.
+ */
 export function combineBasis(bases) {
   const b = bases.filter(Boolean);
   if (!b.length) return null;
-  if (b.every((x) => x === 'billed')) return 'billed';
-  if (b.every((x) => x === 'estimate')) return 'estimate';
-  if (b.every((x) => x === 'budget')) return 'budget';
+  const kinds = new Set(b.flatMap((x) => x.split('+')));
+  if (kinds.size === 1) return [...kinds][0];
+  if (kinds.has('budget')) return kinds.has('billed') ? 'billed+budget' : 'budget+estimate';
   return 'billed+estimate';
 }
 
@@ -415,5 +422,155 @@ export function expectedMonths(period) {
   const n = Math.max(1, period.months ?? 1);
   const out = [];
   for (let i = n; i >= 1; i -= 1) out.push(monthKey(new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() - i, 1))));
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// many months at once (Codex, round 4: the suite's twelve-month history asked
+// supplierMonth per supplier per month — 300 queries a request). The same
+// inputs, read for the whole range in a handful of grouped queries, and the
+// months priced in memory the way supplierMonth prices one.
+// ---------------------------------------------------------------------------
+
+const RANGE_FROM = `(($1::text || '-01')::date::timestamp at time zone 'Europe/London')`;
+const RANGE_TO = `((($2::text || '-01')::date + interval '1 month')::timestamp at time zone 'Europe/London')`;
+const IN_RANGE = `created_at >= ${RANGE_FROM} and created_at < ${RANGE_TO}`;
+const LONDON_MONTH = `to_char(created_at at time zone 'Europe/London', 'YYYY-MM')`;
+const LONDON_DAY = `to_char(created_at at time zone 'Europe/London', 'YYYY-MM-DD')`;
+
+/**
+ * Every register entry's figure (and the residue's, under `several`) for each
+ * of `months`, keyed `${key}|${month}` — the same figures supplierMonth and
+ * the residue's month give, one at a time (r4-suppliers.test.js pins them
+ * equal). `cache`, when given, is filled with them so later windows and
+ * expectations read the same answers without asking again.
+ */
+export async function priceMonths(register, months, { q = query, cache = null } = {}) {
+  const sorted = [...new Set(months)].sort();
+  const out = new Map();
+  if (!sorted.length) return out;
+  const [first, last] = [sorted[0], sorted[sorted.length - 1]];
+  const { rows: set } = await q(`select key, value from bo_settings where key in ('billing', 'claudeBilling')`).catch(() => ({ rows: [] }));
+  const seed = set.find((r) => r.key === 'billing')?.value ?? null;
+  const cb = set.find((r) => r.key === 'claudeBilling')?.value ?? null;
+  const seedAt = seed?.at ?? null;
+  const TA_UNITS = `case when jsonb_typeof(units) = 'object' and (units->>'tripadvisor') ~ '^[0-9.]+$' then (units->>'tripadvisor')::numeric
+                         when provider = 'tripadvisor' and $3::numeric > 0 then round(coalesce(estimated_cost_usd, 0) / $3::numeric)
+                         else 0 end`;
+  const [{ rows: bills }, { rows: meters }, { rows: pro }, { rows: unmetered }, { rows: claude }, { rows: plain }, { rows: ta }, { LINES }] = await Promise.all([
+    q(`with d as (select to_char(day, 'YYYY-MM') as m, day, cost, max(day) over (partition by to_char(day, 'YYYY-MM')) - 1 as upto
+                    from billing_days where meter is not null and to_char(day, 'YYYY-MM') = any($1))
+       select m, coalesce(sum(cost) filter (where day < upto), 0)::float as gbp, count(*) filter (where day < upto)::int as n,
+              to_char(upto, 'YYYY-MM-DD') as upto, (upto::timestamp at time zone 'Europe/London') as cut
+         from d group by m, upto`, [sorted]),
+    q(`select month, meter, to_char(day, 'YYYY-MM-DD') as day, coalesce(at < $3::timestamptz, false) as b, sum(n)::float as units
+         from (${ledgerMetersBetween(RANGE_FROM, RANGE_TO)}) x group by 1, 2, 3, 4`, [first, last, seedAt]),
+    q(`select ${LONDON_MONTH} as month, ${LONDON_DAY} as day, coalesce(created_at < $3::timestamptz, false) as b,
+              sum((units->>'pro-details')::numeric)::float as n
+         from provider_calls
+        where ${IN_RANGE} and provider_call_bills_google(units, provider)
+          and jsonb_typeof(units) = 'object' and (units->>'pro-details') ~ '^[0-9.]+$'
+        group by 1, 2, 3`, [first, last, seedAt]),
+    q(`select ${LONDON_MONTH} as month, ${LONDON_DAY} as day, coalesce(created_at < $3::timestamptz, false) as b,
+              coalesce(sum(estimated_cost_usd), 0)::float as usd
+         from provider_calls where ${IN_RANGE} and ${GOOGLE_UNMETERED} group by 1, 2, 3`, [first, last, seedAt]),
+    q(`select ${LONDON_MONTH} as month, coalesce(sum(estimated_cost_usd), 0)::float as usd
+         from provider_calls where ${IN_RANGE} and ${CLAUDE_ROWS} group by 1`, [first, last]),
+    q(`select ${LONDON_MONTH} as month, provider, coalesce(sum(estimated_cost_usd), 0)::float as usd
+         from provider_calls where ${IN_RANGE} and ${NOT_CLAIMED} group by 1, 2`, [first, last]),
+    q(`select ${LONDON_MONTH} as month, coalesce(sum(${TA_UNITS}), 0)::float as locations
+         from provider_calls where ${IN_RANGE} and (${TA_PRICED}) group by 1`, [first, last, PRICE_PER_UNIT_USD.tripadvisor ?? 0]),
+    import('../sources/pricing.js'),
+  ]);
+
+  const keys = new Set(register.map((c) => c.providerKey).filter(Boolean));
+  const monthOf = (rows, m) => rows.filter((r) => r.month === m);
+  for (const month of sorted) {
+    // Google, as googleMonth reads it: the export to two days before its last
+    // day, else the console reading, else nothing billed.
+    const bill = bills.find((b) => b.m === month && b.n > 0);
+    let billedGbp = null; let cutoff = null; let source = null; let before = null;
+    if (bill) {
+      billedGbp = bill.gbp; cutoff = bill.cut; source = 'Google billing export';
+      before = (r) => r.day < bill.upto;
+    } else if (seed?.month === month && Number.isFinite(Number(seed.usageGbp))) {
+      billedGbp = Number(seed.usageGbp);
+      cutoff = seed.at ? new Date(seed.at) : null;
+      source = seed.source ?? 'Google Cloud console';
+      before = (r) => r.b;
+    }
+    const price = (keep) => {
+      const units = new Map();
+      for (const r of monthOf(meters, month)) {
+        if (!keep(r)) continue;
+        const k = r.meter === 'google-legacy' ? 'google' : r.meter;
+        units.set(k, (units.get(k) ?? 0) + r.units);
+      }
+      const pd = monthOf(pro, month).filter(keep).reduce((n, r) => n + r.n, 0);
+      return priceGoogle(units, pd, LINES).gbp;
+    };
+    const all = price(() => true);
+    let g;
+    if (billedGbp == null) g = { gbp: all, billedGbp: null, estimateGbp: all, cutoff: null, basis: 'estimate', source: null };
+    else if (!cutoff) g = { gbp: billedGbp, billedGbp, estimateGbp: 0, cutoff: null, basis: 'billed', source };
+    else {
+      const after = Math.max(0, all - price(before));
+      g = { gbp: billedGbp + after, billedGbp, estimateGbp: after, cutoff, basis: after > 0 ? 'billed+estimate' : 'billed', source };
+    }
+    const unmet = monthOf(unmetered, month);
+    const extraUsd = g.basis === 'estimate' ? unmet.reduce((n, r) => n + r.usd, 0)
+      : g.cutoff ? unmet.filter((r) => !before(r)).reduce((n, r) => n + r.usd, 0) : 0;
+    const extra = extraUsd * USD_TO_GBP;
+    const plainOf = (provider) => plain.filter((r) => r.month === month && r.provider === provider).reduce((n, r) => n + r.usd, 0);
+    const claudeUsd = monthOf(claude, month).reduce((n, r) => n + r.usd, 0);
+    const locations = Math.round(monthOf(ta, month).reduce((n, r) => n + r.locations, 0));
+
+    for (const c of register) {
+      const kind = supplierKind(c);
+      const usd = BILLS_IN_USD.has(c.key);
+      let fig;
+      if (kind === 'invoiced') fig = { gbp: null, nativeUsd: null, basis: null, source: null, at: null, note: 'Invoiced, not metered' };
+      else if (kind === 'within') fig = { gbp: null, nativeUsd: null, basis: null, source: null, at: null, within: 'google-places', note: 'In Google’s bill' };
+      else if (kind === 'google') {
+        fig = {
+          gbp: g.gbp + extra, nativeUsd: null, basis: g.basis === 'billed' && extra > 0 ? 'billed+estimate' : g.basis,
+          source: g.source, at: g.cutoff ?? null, billedGbp: g.billedGbp, estimateGbp: g.estimateGbp + extra,
+          note: g.basis === 'estimate' ? 'past each SKU’s free allowance' : null,
+        };
+      } else if (kind === 'anthropic') {
+        if (cb?.month === month && Number.isFinite(Number(cb.usd))) {
+          const u = Number(cb.usd);
+          fig = { gbp: cb.gbp != null && Number.isFinite(Number(cb.gbp)) ? Number(cb.gbp) : u * USD_TO_GBP, nativeUsd: u, basis: 'billed', source: cb.source ?? 'Anthropic console', at: cb.at ?? null, note: null };
+        } else fig = { gbp: claudeUsd * USD_TO_GBP, nativeUsd: claudeUsd, basis: 'estimate', source: null, at: null, note: 'ledger, at list price' };
+      } else if (kind === 'tripadvisor') {
+        const price = PRICE_PER_UNIT_USD.tripadvisor;
+        const billable = Math.max(0, locations - 1000);
+        const gbp = billable * price * USD_TO_GBP;
+        fig = { gbp, nativeUsd: gbp / USD_TO_GBP, basis: 'estimate', source: null, at: null, note: `${locations.toLocaleString('en-GB')} of 1,000 free`, locations };
+      } else if (LINES.some((l) => l.source === c.providerKey && l.allowance?.kind === 'monthly' && Number.isFinite(l.allowance.beyondUsd))) {
+        // A supplier priced past an allowance counts units, not dollars:
+        // rare enough to ask for on its own rather than read here as well.
+        fig = await supplierMonthUncached(c, month, { q });
+      } else {
+        const u = plainOf(c.providerKey);
+        fig = { gbp: u * USD_TO_GBP, nativeUsd: usd ? u : null, basis: 'estimate', source: null, at: null, note: 'ledger, at list price' };
+      }
+      out.set(`${c.key}|${month}`, fig);
+    }
+    const residueUsd = plain.filter((r) => r.month === month && !keys.has(r.provider)).reduce((n, r) => n + r.usd, 0);
+    out.set(`several|${month}`, { gbp: residueUsd * USD_TO_GBP, nativeUsd: null, basis: 'estimate', source: null, at: null, note: 'ledger, at list price' });
+  }
+  if (cache) for (const [k, v] of out) if (!cache.has(k)) cache.set(k, Promise.resolve(v));
+  return out;
+}
+
+/** The residue's figure for one month, one at a time — what priceMonths gives under `several`. */
+export const residueMonthOf = (register, month, { q = query, cache = null } = {}) => residueMonth(residueOf(register), month, { q, cache });
+
+/** The (UTC) month keys a window touches, as supplierWindow splits it. */
+export function windowMonths(from, to) {
+  const f = new Date(from); const t = new Date(to);
+  const out = [];
+  for (let m = new Date(Date.UTC(f.getUTCFullYear(), f.getUTCMonth(), 1)); m < t; m = nextMonth(monthKey(m))) out.push(monthKey(m));
   return out;
 }

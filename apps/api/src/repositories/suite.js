@@ -31,10 +31,10 @@ import { monthBuckets } from '../domain/reportingPeriods.js';
 import { listCounterparties, rateHistory } from './counterparties.js';
 import { annualPence, readBenefits, readChannels, readTiers } from './pricing.js';
 import {
-  BILLS_IN_USD, combineBasis, expectedMonths, residueOf, supplierExpected, supplierKind, supplierMonth, supplierWindow,
+  BILLS_IN_USD, combineBasis, expectedMonths, priceMonths, residueOf, windowMonths, supplierExpected, supplierKind, supplierWindow,
 } from '../desk/supplierCost.js';
 import { settings as deskSettings } from '../desk/settings.js';
-import { USD_TO_GBP } from '../domain/providerPrices.js';
+import { PRICE_PER_UNIT_USD, USD_TO_GBP } from '../domain/providerPrices.js';
 
 /**
  * The gaps, in the words the screens say out loud.
@@ -418,11 +418,19 @@ async function cost(from, to) {
             (provider_call_bills_google(c.units, c.provider) or c.provider ~* 'google') as google,
             (coalesce(jsonb_typeof(c.units) = 'object' and (c.units->>'tripadvisor') ~ '^[0-9.]+$', false)
                or c.provider = 'tripadvisor') as ta,
-            coalesce(sum(c.estimated_cost_usd), 0)::float as usd
+            coalesce(sum(c.estimated_cost_usd), 0)::float as usd,
+            -- Tripadvisor's own list-price part of a row: its locations at its
+            -- price, never more than the row's figure. A browse that asked
+            -- Google and Tripadvisor at once is split into the two (Codex).
+            coalesce(sum(least(coalesce(c.estimated_cost_usd, 0), case
+              when jsonb_typeof(c.units) = 'object' and (c.units->>'tripadvisor') ~ '^[0-9.]+$'
+                then (c.units->>'tripadvisor')::numeric * $3::numeric
+              when c.provider = 'tripadvisor' then coalesce(c.estimated_cost_usd, 0)
+              else 0 end)), 0)::float as ta_usd
        from provider_calls c
       where c.created_at >= $1 and c.created_at < $2
       group by 1, 2, 3, 4, 5, 6`,
-    [from, to],
+    [from, to, PRICE_PER_UNIT_USD.tripadvisor ?? 0],
   );
   const total = byProvider.reduce((n, p) => n + p.usd, 0);
   return { total, byClass, byProvider, byPurpose, owned };
@@ -452,6 +460,12 @@ async function supplierCosts(register, period, { now = new Date(), cache = new M
   const all = [...register, residue];
   const b = await budgets();
   const months = expectedMonths(period);
+  // Every month the windows and the expectation touch, priced in one batch
+  // where the history has not already priced it.
+  const needed = [...new Set([
+    ...windowMonths(period.from, period.to), ...windowMonths(period.prevFrom, period.prevTo), ...months,
+  ])].filter((m) => !cache.has(`several|${m}`));
+  await priceMonths(register, needed, { cache });
   const [win, prev, exp] = await Promise.all([
     Promise.all(all.map((c) => supplierWindow(c, period.from, period.to, { now, cache }))),
     Promise.all(all.map((c) => supplierWindow(c, period.prevFrom, period.prevTo, { now, cache }))),
@@ -471,29 +485,34 @@ async function supplierCosts(register, period, { now = new Date(), cache = new M
 }
 
 /**
- * Which supplier answers for a group of ledger rows — the same order of claim
- * as desk/supplierCost.js: Claude, then Google, then Tripadvisor, then the
- * register entry named by the provider, else the residue.
+ * Which suppliers answer for a group of ledger rows, and each one's part of
+ * its list price — the same claims as desk/supplierCost.js: Claude; else
+ * Google and Tripadvisor, a row that asked both split by Tripadvisor's own
+ * locations at its price (the rest is Google's); else the register entry
+ * named by the provider; else the residue.
  */
-function ownerOf(register, r) {
-  if (r.claude) return register.find((c) => supplierKind(c) === 'anthropic')?.key ?? 'several';
-  if (r.google) return register.find((c) => supplierKind(c) === 'google')?.key ?? 'several';
-  if (r.ta) return register.find((c) => supplierKind(c) === 'tripadvisor')?.key ?? 'several';
+function partsOf(register, r) {
+  const keyOf = (kind) => register.find((c) => supplierKind(c) === kind)?.key ?? 'several';
+  if (r.claude) return [[keyOf('anthropic'), r.usd]];
+  if (r.google && r.ta) {
+    const ta = Math.min(r.usd, r.ta_usd ?? 0);
+    return [[keyOf('google'), r.usd - ta], [keyOf('tripadvisor'), ta]];
+  }
+  if (r.google) return [[keyOf('google'), r.usd]];
+  if (r.ta) return [[keyOf('tripadvisor'), r.usd]];
   const c = register.find((x) => x.providerKey && x.providerKey === r.provider && supplierKind(x) === 'ledger');
-  return c?.key ?? 'several';
+  return [[c?.key ?? 'several', r.usd]];
 }
 
 /**
  * The window's corrected cost shared across classes and purposes: each
- * supplier's figure split over its own ledger rows by their list price. What
- * a supplier billed with no ledger row to carry it is "Not classified".
+ * supplier's figure split over its own part of the ledger rows by list
+ * price. What a supplier billed with no ledger part to carry it is "Not
+ * classified".
  */
 function apportion(register, costs, owned) {
   const ledgerBy = new Map();
-  for (const r of owned) {
-    const k = ownerOf(register, r);
-    ledgerBy.set(k, (ledgerBy.get(k) ?? 0) + r.usd);
-  }
+  for (const r of owned) for (const [k, usd] of partsOf(register, r)) ledgerBy.set(k, (ledgerBy.get(k) ?? 0) + usd);
   const factor = new Map();
   let unplaced = 0;
   for (const c of [...register, costs.residue]) {
@@ -505,7 +524,7 @@ function apportion(register, costs, owned) {
   const byClass = new Map();
   const byPurpose = new Map();
   for (const r of owned) {
-    const gbp = r.usd * (factor.get(ownerOf(register, r)) ?? 0);
+    const gbp = partsOf(register, r).reduce((n, [k, usd]) => n + usd * (factor.get(k) ?? 0), 0);
     byClass.set(r.class, (byClass.get(r.class) ?? 0) + gbp);
     const pk = `${r.purpose}|${r.class}`;
     const p = byPurpose.get(pk) ?? { label: r.purpose, cls: r.class, value: 0 };
@@ -778,15 +797,15 @@ async function history(now) {
  */
 async function supplierHistory(now, register, { cache = new Map(), residue = true } = {}) {
   const months = monthBuckets(now);
+  // Every month of every supplier from one batched read (priceMonths), which
+  // also fills the request's cache for the windows and expectations after it.
+  const priced = await priceMonths(register, months.map((m) => m.key), { cache });
   const all = residue ? [...register, residueOf(register)] : register;
-  const series = new Map(await Promise.all(all.map(async (c) => {
+  const series = new Map(all.map((c) => {
     const kind = c.kind === 'residue' ? 'residue' : supplierKind(c);
     if (kind === 'invoiced' || kind === 'within') return [c.key, null];
-    const figs = await Promise.all(months.map((m) => (kind === 'residue'
-      ? supplierWindow(c, m.from, m.to, { now, cache })
-      : supplierMonth(c, m.key, { cache }))));
-    return [c.key, figs.map((f) => r2(f.gbp ?? 0))];
-  })));
+    return [c.key, months.map((m) => r2(priced.get(`${c.key}|${m.key}`)?.gbp ?? 0))];
+  }));
   // The estate's cost a month is every supplier's, once — the residue included.
   const total = months.map((_, i) => r2([...series.values()].reduce((n, s) => n + (s ? s[i] : 0), 0)));
   return { months, of: (key) => series.get(key) ?? null, total };
@@ -1489,6 +1508,7 @@ export async function readSuite(period, { now = new Date() } = {}) {
   // One cache for the request: a supplier's month is read once however many
   // windows, series and expectations ask for it.
   const cache = new Map();
+  const supHistP = registerP.then((r) => supplierHistory(now, r, { cache }));
   const [est, subNow, subPrev, mrrRows, bookNow, bookPrev, costNow, hist, supHist, costs, register, subs] = await Promise.all([
     estate(period),
     subscriptionRevenue(period.from, period.to),
@@ -1498,8 +1518,9 @@ export async function readSuite(period, { now = new Date() } = {}) {
     bookings(period.prevFrom, period.prevTo),
     cost(period.from, period.to),
     history(now),
-    registerP.then((r) => supplierHistory(now, r, { cache })),
-    registerP.then((r) => supplierCosts(r, period, { now, cache })),
+    supHistP,
+    // After the history, so the months it priced are read from its cache.
+    supHistP.then(() => registerP).then((r) => supplierCosts(r, period, { now, cache })),
     registerP,
     subscriptions(),
   ]);

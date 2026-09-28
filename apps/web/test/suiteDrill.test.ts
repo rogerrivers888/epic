@@ -246,5 +246,7 @@ test('a cost is pounds first with the dollars in brackets, and says what it is r
   assert.equal(basisWords('billed+estimate', 'Google billing export', null), 'billed · Google billing export + estimate');
   assert.equal(basisWords('estimate'), 'estimate');
   assert.equal(basisWords('budget'), 'budget');
+  assert.equal(basisWords('budget+estimate'), 'budget + estimate', 'never "billed" of months nobody billed');
+  assert.equal(basisWords('billed+budget', 'Google billing export'), 'billed · Google billing export + budget');
   assert.equal(basisWords(null), null);
 });

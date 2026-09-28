@@ -182,3 +182,92 @@ test('mock mode keeps the shape the screens read', () => {
   assert.equal(rec.health.basis, 'billed');
   assert.equal(rec.health.currency, 'gbp');
 });
+
+test('a budget month mixed with estimates is "budget+estimate", never "billed" — the 3- and 12-month views', async () => {
+  await seed();
+  const budgets = { google: 50, claude: 100 };
+  // Three months: Claude has a ledger June and nothing in April or May.
+  await query(`insert into provider_calls (provider, purpose, units, estimated_cost_usd, created_at)
+               values ('anthropic', 'plan.preview', null, 10, '2026-06-10 12:00+01')`);
+  const three = cost.expectedMonths(resolvePeriod('last-3-months', AT));
+  const c3 = await cost.supplierExpected(CLAUDE, three, { budgets });
+  assert.equal(c3.basis, 'budget+estimate');
+  assert.ok(Math.abs(c3.gbp - (100 + 100 + 10 * 0.79)) < 1e-9);
+  const g3 = await cost.supplierExpected(GOOGLE, three, { budgets });
+  assert.deepEqual([g3.gbp, g3.basis], [150, 'budget']);
+  const m3 = await readSuite(resolvePeriod('last-3-months', AT), { now: AT });
+  assert.equal(m3.suppliers.rows.find((r) => r.key === 'anthropic').expectedBasis, 'budget+estimate');
+  // Twelve months: one billed Google month among budget ones is "billed+budget".
+  const twelve = cost.expectedMonths(resolvePeriod('last-12-months', AT));
+  assert.equal(twelve.length, 12);
+  assert.deepEqual([twelve[0], twelve[11]], ['2024-10', '2025-09']);
+  for (let d = 1; d <= 5; d += 1) {
+    await query(`insert into billing_days (invoice_month, day, service, sku, sku_id, meter, usage, cost, credits, promo, currency)
+                 values ('2025-02', $1, 'Places API', 'Text Search Pro', 'S', 'google-pro', 100, 1, 0, 0, 'GBP')`, [`2025-02-0${d}`]);
+  }
+  await query(`insert into provider_calls (provider, purpose, units, estimated_cost_usd, created_at)
+               values ('anthropic', 'plan.preview', null, 5, '2025-03-10 12:00+00')`);
+  const g12 = await cost.supplierExpected(GOOGLE, twelve, { budgets });
+  assert.equal(g12.basis, 'billed+budget');
+  assert.equal(g12.gbp, 11 * 50 + 3, 'three trusted days at £1 and eleven budget months');
+  const c12 = await cost.supplierExpected(CLAUDE, twelve, { budgets });
+  assert.equal(c12.basis, 'budget+estimate');
+  assert.equal(cost.combineBasis(['billed', 'estimate']), 'billed+estimate');
+  assert.equal(cost.combineBasis(['budget', 'budget']), 'budget');
+});
+
+test('a browse that asked Google and Tripadvisor at once is split between them before it is shared across classes', async () => {
+  await seed();
+  // August: one Google display search, inside its free thousand (£0), and
+  // 1,200 Tripadvisor locations, 200 past the free 1,000.
+  await query(`insert into provider_calls (provider, purpose, units, estimated_cost_usd, created_at)
+               values ('google+tripadvisor', 'ta.browse', '{"google-search": 1, "tripadvisor": 1200}', 18.04, '2026-08-20 12:00+01')`);
+  const m = await readSuite(resolvePeriod('last-month', AT), { now: AT });
+  const ta = m.suppliers.rows.find((r) => r.key === 'tripadvisor');
+  const want = 200 * 0.015 * 0.79;
+  assert.ok(Math.abs(ta.spend - Math.round(want * 100) / 100) < 1e-9, `Tripadvisor £${ta.spend}`);
+  const browse = m.money.costToServe.byPurpose.find((p) => p.label === 'ta.browse');
+  assert.ok(Math.abs(browse.value - Math.round(want * 100) / 100) < 0.011, `the browse carries Tripadvisor’s cost, got £${browse.value}`);
+  const classes = m.money.costToServe.byClass.reduce((n, r) => n + r.value, 0);
+  assert.ok(Math.abs(classes - m.suppliers.total) < 0.05);
+});
+
+test('the batched months are the months one at a time', async () => {
+  await seed();
+  await query(`insert into provider_calls (provider, purpose, units, estimated_cost_usd, created_at) values
+    ('google', 'drawer.open', '{"google-pro": 6000, "pro-details": 1500}', 150, '2026-07-10 12:00+01'),
+    ('google', 'drawer.legacy', null, 3, '2026-07-11 12:00+01'),
+    ('google', 'drawer.legacy', null, 2, '2026-09-30 12:00+01'),
+    ('google', 'drawer.after', '{"google-pro": 7000}', 224, '2026-09-30 13:00+01'),
+    ('google+tripadvisor', 'ta.browse', '{"google-search": 2, "tripadvisor": 1500}', 22.6, '2026-07-12 12:00+01'),
+    ('fixtures+osm', 'several', null, 1.5, '2026-08-01 00:30+01'),
+    ('mapbox', 'tiles', null, 0.4, '2026-06-30 23:30+01')`);
+  for (let d = 1; d <= 6; d += 1) {
+    await query(`insert into billing_days (invoice_month, day, service, sku, sku_id, meter, usage, cost, credits, promo, currency)
+                 values ('2026-08', $1, 'Places API', 'Text Search Pro', 'S', 'google-pro', 100, 2.5, 0, 0, 'GBP')`, [`2026-08-0${d}`]);
+  }
+  await query(`insert into provider_calls (provider, purpose, units, estimated_cost_usd, created_at) values
+    ('google', 'drawer.late', '{"google-pro": 5200}', 166, '2026-08-20 12:00+01')`);
+  const { rows: reg } = await query(`select key, provider_key from counterparties`);
+  const register = reg.map((r) => ({ key: r.key, providerKey: r.provider_key }));
+  const months = ['2026-05', '2026-06', '2026-07', '2026-08', '2026-09'];
+  const batch = await cost.priceMonths(register, months);
+  const close = (a, b, what) => {
+    for (const k of ['gbp', 'nativeUsd', 'billedGbp', 'estimateGbp']) {
+      if (a[k] == null || b[k] == null) assert.equal(a[k] ?? null, b[k] ?? null, `${what} ${k}`);
+      else assert.ok(Math.abs(a[k] - b[k]) < 1e-9, `${what} ${k}: ${a[k]} against ${b[k]}`);
+    }
+    for (const k of ['basis', 'source', 'note', 'within', 'locations']) assert.deepEqual(a[k] ?? null, b[k] ?? null, `${what} ${k}`);
+    assert.equal(a.at == null ? null : new Date(a.at).toISOString(), b.at == null ? null : new Date(b.at).toISOString(), `${what} at`);
+  };
+  for (const month of months) {
+    for (const c of register) close(batch.get(`${c.key}|${month}`), await cost.supplierMonth(c, month), `${c.key} ${month}`);
+    close(batch.get(`several|${month}`), await cost.residueMonthOf(register, month), `several ${month}`);
+  }
+  // And the months are not all nought: the comparison had something to compare.
+  assert.ok(batch.get(`google-places|2026-07`).gbp > 0);
+  assert.equal(batch.get(`google-places|2026-08`).basis, 'billed+estimate');
+  assert.equal(batch.get(`google-places|2026-09`).basis, 'billed+estimate');
+  assert.ok(batch.get(`tripadvisor|2026-07`).gbp > 0);
+  assert.ok(batch.get(`several|2026-08`).gbp > 0);
+});
