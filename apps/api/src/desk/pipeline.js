@@ -62,7 +62,11 @@ export function polarity(sentence, phrase) {
   // "but"/"and" — so "the pool is still closed", "Pool: closed" and "remains
   // closed" deny the pool, and "the pool; the cafe was closed" does not.
   const clause = tail.replace(/^\s*[:\-–—]\s*/, ' ').split(/[;.!?,]|\s(?:but|and|while|whereas)\s/)[0];
-  if (/\b(?:closed|shut|removed|gone|broken|unavailable|out of order|out of use|not working|not open)\b/.test(clause.split(/\s+/).slice(0, 8).join(' '))) return 'denies';
+  // Only verbs and adverbs may stand between the phrase and the closure —
+  // "is still", "will be", "remains", "has been" — so the closure is said of
+  // the phrase, not of the cafe next to it (Codex, 28 Sep 2026).
+  const LINK = '(?:is|are|was|were|will|be|been|being|has|have|had|remains?|remained|stays?|stayed|still|now|currently|permanently|temporarily|sadly|unfortunately|often|sometimes|always|seems?|seemed|appears?|appeared|looks?|looked|got|gets|getting|is\\s+now)';
+  if (new RegExp(`^\\s*(?:${LINK}\\s+){0,4}(?:closed|shut|removed|gone|broken|unavailable|out of order|out of use|not working|not open)\\b`).test(clause)) return 'denies';
   if (/\bno longer\b/.test(s.slice(Math.max(0, at - 30), at))) return 'denies';
   return 'asserts';
 }

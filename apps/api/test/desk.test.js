@@ -658,3 +658,9 @@ test('a closure in the phrase’s own clause is a denial, however it is said', (
   for (const s of ['We enjoyed the pool; the cafe was closed.', 'Great pool, the gift shop was closed.', 'The pool was lovely and the cafe was closed.'])
     assert.equal(pipeline.polarity(s, 'pool'), 'asserts', s);
 });
+
+test('a closure said of something else in the clause is not said of the phrase', () => {
+  assert.equal(pipeline.polarity('The pool is next to the closed cafe.', 'pool'), 'asserts');
+  assert.equal(pipeline.polarity('The pool has a cafe that is closed.', 'pool'), 'asserts');
+  assert.equal(pipeline.polarity('The pool has been closed for months.', 'pool'), 'denies');
+});
