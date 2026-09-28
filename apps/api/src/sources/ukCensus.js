@@ -290,12 +290,12 @@ export async function status(now = new Date()) {
     `select count(*)::int as whole from (
        select area_slug from area_counts where area_slug ~ '^[a-z]{1,2}[0-9]' group by area_slug having bool_and(complete)) x`);
   const latest = d.latest;
-  // Counted from the tiles: a tile given up on after its tries is not work
-  // left, and the run row does not carry that count (Codex, 28 Sep 2026).
+  // Counted from the tiles, every one not done: a square given up on within a
+  // run is tried again the next day, so it is work left like any other
+  // (Codex, 29 Sep 2026).
   const { rows: [l] } = await query(
-    `select count(*) filter (where t.state <> 'done' and not (t.state = 'failed' and t.failures >= $2))::int as left
-       from census_run_tiles m join census_tiles t on t.grid_key = m.grid_key where m.run_id = $1`,
-    [latest.id, censusRun.MAX_TILE_TRIES]);
+    `select count(*) filter (where t.state <> 'done')::int as left
+       from census_run_tiles m join census_tiles t on t.grid_key = m.grid_key where m.run_id = $1`, [latest.id]);
   const left = l.left;
   const perTile = tilesAsked ? requests / tilesAsked : null;
   return {
@@ -307,7 +307,7 @@ export async function status(now = new Date()) {
     requestsPerTile: perTile == null ? null : Math.round(perTile),
     // A floor on the days: the measured rate so far is the rural south-west,
     // and the cities to come split further.
-    daysLeft: perTile == null ? null : Math.ceil((left * perTile) / DAY_REQUESTS),
+    daysLeft: perTile == null ? null : Math.max(left ? 1 : 0, Math.ceil((left * perTile) / DAY_REQUESTS)),
     days,
   };
 }

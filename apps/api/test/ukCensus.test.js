@@ -405,3 +405,22 @@ test('a restart after setting a plan aside still passes through the billing gate
   assert.equal(out.action, 'held');
   assert.equal(r.calls.length, 0);
 });
+
+test('a square given up on is still a day left', async (t) => {
+  await clean(); t.after(async () => {
+    await query(`delete from census_run_tiles where grid_key = 'uktest/failed2'`);
+    await query(`delete from census_tiles where grid_key = 'uktest/failed2'`);
+    await clean();
+  });
+  const run = await dayOne({ state: 'done', problem: null });
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, failures)
+     values ('uktest/failed2', 48, -6, 48.08, -5.88, array['ZZ9Q'], 'failed', 3) on conflict (grid_key) do update set state = 'failed', failures = 3`);
+  await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'uktest/failed2')`, [run.id]);
+  await query(`insert into census_slices (area_slug, min_lat, min_lng, max_lat, max_lng, category, subcategory, google_type, query, returned, new_ids, saturated, depth, requests, ran_at, census_run_id)
+               values ('uktest/failed2', 48, -6, 48.08, -5.88, 'sport', 'golf', 'golf_course', 'golf', 0, 0, false, 0, 1, now(), $1)`, [run.id]);
+  t.after(() => query(`delete from census_slices where area_slug = 'uktest/failed2'`));
+  const st = await uk.status(new Date('2026-09-29T09:00:00Z'));
+  assert.equal(st.tilesLeft, 1);
+  assert.ok(st.daysLeft >= 1, 'not "0 days remaining" while a run is still owed');
+});
