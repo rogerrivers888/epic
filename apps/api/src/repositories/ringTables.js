@@ -110,9 +110,13 @@ async function countRing({ cell, kind, minutes }) {
   ]);
   // Looked at whole: a district with any row marked incomplete — a run stopped
   // part-way across it — is counted, and is a floor like one never reached
-  // (Codex, 28 Sep 2026).
+  // (Codex, 28 Sep 2026). But it is not *unseen*: `notCensusedOutcodes` is
+  // what a home move sends to be censused automatically, and a district a
+  // person stopped deliberately must wait for that person to resume it, not
+  // for a household to move (Codex, same day).
+  const reached = new Set(seen.rows.map((r) => r.area_slug));
   const partial = new Set(seen.rows.filter((r) => r.complete === false).map((r) => r.area_slug));
-  const censused = new Set(seen.rows.map((r) => r.area_slug).filter((a) => !partial.has(a)));
+  const censused = new Set([...reached].filter((a) => !partial.has(a)));
   const notCensused = ring.outcodes.filter((o) => !censused.has(o.toLowerCase())).length;
 
   // Every category the census knows in these districts, so a category it
@@ -195,7 +199,7 @@ async function countRing({ cell, kind, minutes }) {
     cell, mode: kind, minutes, counts: counts.filter((c) => c.category !== MARKER), ranked: rankings.length, notCensused,
     computedAt: startedAt,
     // Named, so the caller can ask the census to look at them.
-    notCensusedOutcodes: ring.outcodes.filter((o) => !censused.has(o.toLowerCase())),
+    notCensusedOutcodes: ring.outcodes.filter((o) => !reached.has(o.toLowerCase())),
   };
 }
 

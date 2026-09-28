@@ -211,6 +211,9 @@ test('a district a run stopped part-way across makes the count a floor too', asy
   await query(`update area_counts set complete = false where area_slug = 'zt1'`);
   const out = await tables.refreshRing({ cell: CELL, mode: 'drive', minutes: 30 });
   assert.equal(out.counts.find((c) => c.category === 'fun').floor, true);
+  // A floor, but not unseen: this list is what a home move censuses on its
+  // own, and a run stopped on purpose waits for a person (Codex, same day).
+  assert.deepEqual(out.notCensusedOutcodes, [], 'and not sent to be censused behind the stop');
   await query(`update area_counts set complete = true where area_slug = 'zt1'`);
   const whole = await tables.refreshRing({ cell: CELL, mode: 'drive', minutes: 30, force: true });
   assert.equal(whole.counts.find((c) => c.category === 'fun').floor, false, 'and not once the district is whole');
