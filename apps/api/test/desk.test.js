@@ -635,3 +635,12 @@ test('Codex on the branch: a phrase denied after it is a denial; verify waits wh
   const { rows } = await query(`select 1 from place_fact_answers where venue_ref = 'desk:empty'`);
   assert.equal(rows.length, 0, 'no Don’t know recorded for a place with nothing to read');
 });
+
+test('a status word at the end of a sentence is a denial, and a source read and found empty is an answer', async () => {
+  assert.equal(pipeline.polarity('The pool is unavailable.', 'pool'), 'denies');
+  assert.equal(pipeline.polarity('The pool closed.', 'pool'), 'denies');
+  assert.equal(pipeline.polarity('Great pool, not crowded at all.', 'pool'), 'asserts');
+  const read = await pipeline.verify({ ref: 'desk:readempty', fact: 'toilets', evidence: { site: null, wikipedia: null, osm: null, wikidata: [] } });
+  assert.equal(read.waiting, undefined, 'read and found nothing is not waiting');
+  assert.equal(read.state, 'dont_know');
+});

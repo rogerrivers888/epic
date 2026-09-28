@@ -54,7 +54,7 @@ export function polarity(sentence, phrase) {
   const tail = ri >= 0 ? raw.slice(ri + String(phrase).length, ri + String(phrase).length + 40) : s.slice(at + p.length, at + p.length + 40);
   if (/^\s*(?:(?:are|is|was|were|has been|have been|seems|seemed)\s+)?(?:not|never|no longer)\b/.test(tail)) return 'denies';
   if (/^\s*(?:isnt|isn't|arent|aren't|wasnt|wasn't|werent|weren't)\b/.test(tail)) return 'denies';
-  const after = tail.split(' ').filter(Boolean).slice(0, 5);
+  const after = tail.split(/\s+/).map((w) => w.replace(/[^a-z']/g, '')).filter(Boolean).slice(0, 5);
   if (after.some((w) => ['closed', 'shut', 'removed', 'gone', 'broken', 'unavailable'].includes(w))) return 'denies';
   if (/\bno longer\b/.test(s.slice(Math.max(0, at - 30), at))) return 'denies';
   return 'asserts';
@@ -317,7 +317,11 @@ export async function verify({ ref, fact, firstSeen = null, evidence: ev = null 
   // drawer open queues it separately): the suggestion waits rather than being
   // answered "don't know" and put off for months (Codex, 28 Sep 2026). The
   // 30-day expiry still clears it if nothing ever arrives.
-  if (!e?.site && !e?.wikipedia && !e?.osm && !(Array.isArray(e?.wikidata) && e.wikidata.length)) {
+  // "Read and found nothing" is not "not read": an OSM element looked up and
+  // absent is null, a Wikidata item with no facilities is [] — both answers.
+  // Only sources never read (undefined), or a Wikidata fetch that failed (null),
+  // leave nothing to go on.
+  if (!e?.site && !e?.wikipedia && e?.osm === undefined && (e?.wikidata === undefined || e?.wikidata === null)) {
     return { ref, fact, waiting: true, why: 'nothing of ours to read yet' };
   }
   const evidence = judge(attr, phrases, e);

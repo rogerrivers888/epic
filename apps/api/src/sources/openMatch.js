@@ -254,21 +254,8 @@ export async function matchOsm({ venueRef, name, lat, lng, locality = null, addr
   // fall back to everything of the right kind, in a tighter circle.
   const byKind = `[out:json][timeout:20];nwr["name"][~"^(${KINDS.join('|')})$"~"."](around:${Math.round(MAX_M / 2)},${lat},${lng});out center tags 300;`;
 
-  let elements = [];
-  if (await local.covers(lat, lng)) {
-    // The same two questions, asked of our own copy of the map.
-    if (stems.length) elements = await local.nearByName(lat, lng, MAX_M, stems);
-    if (!elements.length) elements = await local.nearByKind(lat, lng, Math.round(MAX_M / 2), KINDS);
-  }
-  // An extract's box is a rectangle, not its border — Great Britain's takes in
-  // part of Ireland — so nothing found locally is asked of Overpass rather than
-  // read as "not on the map" (Codex, 28 Sep 2026).
-  if (!elements.length) {
-    if (byName) elements = (await overpass(byName, meter)).elements ?? [];
-    if (!elements.length) elements = (await overpass(byKind, meter)).elements ?? [];
-  }
-
   const here = { lat, lng };
+  const pick = (elements) => {
   let best = null;
   for (const el of elements) {
     const elat = el.lat ?? el.center?.lat, elng = el.lon ?? el.center?.lon;
@@ -288,6 +275,27 @@ export async function matchOsm({ venueRef, name, lat, lng, locality = null, addr
     if (!best || confidence > best.confidence) {
       best = { ref: `${el.type}/${el.id}`, tags, lat: elat, lng: elng, distanceM: Math.round(distanceM), confidence: Number(confidence.toFixed(2)), matchedName: tags.name };
     }
+  }
+  return best;
+  };
+
+  // Our own copy of the map first. An extract's box is a rectangle, not its
+  // border — Great Britain's takes in part of Ireland — so when nothing local
+  // is an acceptable match (none returned, or none that passes the name, kind
+  // and distance tests), Overpass is asked rather than "not on the map"
+  // (Codex, 28 Sep 2026, twice).
+  let best = null;
+  if (await local.covers(lat, lng)) {
+    let elements = [];
+    if (stems.length) elements = await local.nearByName(lat, lng, MAX_M, stems);
+    best = pick(elements);
+    if (!best) best = pick(await local.nearByKind(lat, lng, Math.round(MAX_M / 2), KINDS));
+  }
+  if (!best) {
+    let elements = [];
+    if (byName) elements = (await overpass(byName, meter)).elements ?? [];
+    best = pick(elements);
+    if (!best) best = pick((await overpass(byKind, meter)).elements ?? []);
   }
   if (!best) return null;
   best.how = `Matched “${best.matchedName}” in OpenStreetMap, ${best.distanceM} m away.`;
