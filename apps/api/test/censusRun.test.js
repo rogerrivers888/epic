@@ -1673,12 +1673,21 @@ test('a run rolls up the districts it censused, not the fresh ones it walked pas
   assert.deepEqual(await counts(), [['zz7a', 999], ['zz7b', 1]],
     'the district it walked past keeps its count, one it cannot prove it asked is left alone, and the one it asked is rolled up');
 
-  // A run from before slices carried an id has none at all, and keeps the
-  // whole plan it always rolled.
+  // A run begun since slices carried an id that walked past every square it
+  // was given has no slices at all — and that is not "from before the id"
+  // (Codex, 28 Sep 2026). It rolls up nothing.
+  const idle = await startTestRun({ label: 'test walked past everything' });
+  await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'test/walked/0') on conflict do nothing`, [idle.id]);
+  await rollUpOutcodes({ runId: idle.id });
+  assert.deepEqual(await counts(), [['zz7a', 999], ['zz7b', 1]], 'a run that asked nothing publishes nothing');
+
+  // A run begun before slices were stamped (migration 263) has no ids to go
+  // on, and keeps the whole plan it always rolled.
   const old = await startTestRun({ label: 'test before 263' });
+  await query(`update census_runs set started_at = '2026-09-25T10:00:00Z' where id = $1`, [old.id]);
   await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'test/walked/2') on conflict do nothing`, [old.id]);
   await rollUpOutcodes({ runId: old.id });
-  assert.deepEqual(await counts(), [['zz7a', 999], ['zz7b', 1], ['zz7c', 1]], 'an unstamped run rolls its plan, as it always did');
+  assert.deepEqual(await counts(), [['zz7a', 999], ['zz7b', 1], ['zz7c', 1]], 'a run from before 263 rolls its plan, as it always did');
   t.after(() => query(`delete from area_counts where area_slug = 'zz7c'`));
 });
 

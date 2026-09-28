@@ -1059,6 +1059,18 @@ export function rollUpScope(run) {
     : { skip: false, outcodes: null, runId: run?.id ?? null };
 }
 
+/**
+ * When census slices began carrying their run's id (migration 263).
+ *
+ * Read off production's runs rather than the migration table, which the test
+ * database does not keep: "inner London at a kilometre, from the true
+ * sectors" (4f5f2d00) began at 08:45 UTC on 26 Sep 2026 and stamps nothing;
+ * "outer ring at a kilometre, overnight" (b8d354e3) was built paused at 13:05
+ * the same day, which only 263's code can do. No run began in between, so
+ * noon splits every run there is on the right side.
+ */
+export const SLICES_STAMPED_FROM = new Date('2026-09-26T12:00:00Z');
+
 /** What a done run's `problem` says while its roll-up is still owed. */
 const ROLL_UP_PENDING = 'roll-up pending';
 
@@ -1188,13 +1200,15 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
   // A slice carries its run's id from migration 263 on, and only an id says
   // whose a slice is: a slice from before it cannot be pinned to a run by
   // time, because a paused run's lifetime encloses whatever ran while it slept
-  // (Codex, same day). So a run with id-stamped slices is judged by those
-  // alone, and a run with none — every one of them from before 263, and every
-  // one of those finished (28 Sep 2026: none spans the migration) — keeps the
-  // whole plan it always rolled. And the same filter when districts are named
-  // as well as the run: asking for a run by name is asking what *it* found.
+  // (Codex, same day). So a run begun once slices were stamped is judged by
+  // its stamped slices alone — none, if it walked past every square, and then
+  // it rolls up nothing (Codex, same day: the existence of a slice is not a
+  // marker) — and a run begun before, every one of them finished (28 Sep
+  // 2026: none spans the migration), keeps the whole plan it always rolled.
+  // And the same filter when districts are named as well as the run: asking
+  // for a run by name is asking what *it* found.
   const { rows: [stamped] } = runId
-    ? await query('select exists (select 1 from census_slices where census_run_id = $1) as any', [runId])
+    ? await query('select started_at >= $2 as any from census_runs where id = $1', [runId, SLICES_STAMPED_FROM])
     : { rows: [{ any: false }] };
   const named = outcodes?.length ? outcodes.map((c) => String(c).toUpperCase()) : null;
   const codes = runId
