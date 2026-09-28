@@ -311,51 +311,40 @@ export async function startRun({
   // check that found nothing going and the insert, another start could pass
   // the same check, and the two would then rewrite the same squares (Codex,
   // 29 Sep 2026). The plan is drawn first, outside it: it writes nothing.
-  const holder = await pool.connect();
-  let run;
-  try {
-    // Tried, not waited for: a caller queued on the lock holds a connection
-    // while the holder needs the pool for its own queries, and enough of
-    // them would starve it. A start that finds another starting is refused,
-    // like one that finds another running.
-    const { rows: [{ got }] } = await holder.query('select pg_try_advisory_lock(hashtext($1)) as got', ['census-start']);
-    if (!got) throw Object.assign(new Error('another census is starting; try again in a moment'), { status: 409 });
-    try {
-      // A run waiting for the quota day to turn over is still a run, and still owns
-      // its tiles. Letting a second one start while one waits reassigned those
-      // tiles, and at midnight the sleeper woke into a region somebody else was
-      // working — two rows saying running, one of them stripped of its ground
-      // (Codex, 21 Sep 2026).
-      // On the lock's own connection: the pool may have nothing else free.
-      const { rows: going } = await holder.query(
-        // And a day's run of the UK census while its plan is being written: it is
-        // paused until the plan is whole, and a start in that gap would have two
-        // planners rewriting the same squares (Codex, 29 Sep 2026).
-        `select id, label, state from census_runs
-          where state in ('running', 'waiting')
-             or (state = 'paused' and problem like 'built paused%' and started_by = $1 and started_at > now() - interval '15 minutes')
-          limit 1`, [ONE_DAY_RUNS]);
-      if (going.length) {
-        throw Object.assign(
-          new Error(going[0].state === 'waiting'
-            ? `“${going[0].label}” is waiting for the quota day to turn over; stop it before starting another`
-            : going[0].state === 'paused'
-              ? `“${going[0].label}” is being planned; try again in a few minutes`
-              : `“${going[0].label}” is already running; stop it before starting another`),
-          { status: 409 });
-      }
-      ({ rows: [run] } = await holder.query(
-        `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, started_by, tiles_total, daily_cap, day, day_requests, started_session_id,
-                                  night_share, window_from, window_to, state, problem)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, (now() at time zone 'America/Los_Angeles')::date, 0, $11, $12, $13, $14, $15, $16) returning *`,
-        [label ?? [...areas, ...outcodes].join(', '),
-          [...areas.map((a) => a.toUpperCase()), ...outcodes.map((o) => o.toUpperCase())], dLat, dLng,
-          maxRequests, ratePerSec, freshDays, startedBy, tiles.length, dailyCap, starterSession,
-          nightShare, windowFrom, windowTo, paused ? 'paused' : 'running', paused ? 'built paused; resume to start' : null]));
-    } finally {
-      await holder.query('select pg_advisory_unlock(hashtext($1))', ['census-start']).catch(() => null);
+  const run = await withStartLock(async (db) => {
+    // A run waiting for the quota day to turn over is still a run, and still owns
+    // its tiles. Letting a second one start while one waits reassigned those
+    // tiles, and at midnight the sleeper woke into a region somebody else was
+    // working — two rows saying running, one of them stripped of its ground
+    // (Codex, 21 Sep 2026).
+    // On the lock's own connection: the pool may have nothing else free.
+    const { rows: going } = await db.query(
+      // And a day's run of the UK census while its plan is being written: it is
+      // paused until the plan is whole, and a start in that gap would have two
+      // planners rewriting the same squares (Codex, 29 Sep 2026).
+      `select id, label, state from census_runs
+        where state in ('running', 'waiting')
+           or (state = 'paused' and problem like 'built paused%' and started_by = $1 and started_at > now() - interval '15 minutes')
+        limit 1`, [ONE_DAY_RUNS]);
+    if (going.length) {
+      throw Object.assign(
+        new Error(going[0].state === 'waiting'
+          ? `“${going[0].label}” is waiting for the quota day to turn over; stop it before starting another`
+          : going[0].state === 'paused'
+            ? `“${going[0].label}” is being planned; try again in a few minutes`
+            : `“${going[0].label}” is already running; stop it before starting another`),
+        { status: 409 });
     }
-  } finally { holder.release(); }
+    const { rows: [row] } = await db.query(
+      `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, started_by, tiles_total, daily_cap, day, day_requests, started_session_id,
+                                night_share, window_from, window_to, state, problem)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, (now() at time zone 'America/Los_Angeles')::date, 0, $11, $12, $13, $14, $15, $16) returning *`,
+      [label ?? [...areas, ...outcodes].join(', '),
+        [...areas.map((a) => a.toUpperCase()), ...outcodes.map((o) => o.toUpperCase())], dLat, dLng,
+        maxRequests, ratePerSec, freshDays, startedBy, tiles.length, dailyCap, starterSession,
+        nightShare, windowFrom, windowTo, paused ? 'paused' : 'running', paused ? 'built paused; resume to start' : null]);
+    return row;
+  });
 
   // Tiles outlive runs: the same square keeps its row and its history, and this
   // run simply claims the ones that are not fresh. `do update` on the outcodes
@@ -439,25 +428,53 @@ export async function requestStop(id) {
 }
 
 /** Start again where it left off. Nothing is re-asked; the tiles remember. */
+/**
+ * Something that changes which run is live, done under the one lock every
+ * such change shares — starting, resuming, and switching a day's run on once
+ * its plan is written — so no two can each find nothing live and both go
+ * live (Codex, 29 Sep 2026). Tried, not waited for, and `fn` is handed the
+ * lock's own connection to work on: a waiter would hold a connection the
+ * holder may need, and the pool may have nothing else free.
+ */
+export async function withStartLock(fn) {
+  const holder = await pool.connect();
+  try {
+    const { rows: [{ got }] } = await holder.query('select pg_try_advisory_lock(hashtext($1)) as got', ['census-start']);
+    if (!got) throw Object.assign(new Error('another census is starting; try again in a moment'), { status: 409 });
+    try { return await fn(holder); } finally {
+      await holder.query('select pg_advisory_unlock(hashtext($1))', ['census-start']).catch(() => null);
+    }
+  } finally { holder.release(); }
+}
+
 export async function resume(id, { sessionId = null } = {}) {
-  // The same rule as starting. Without it, resuming an older paused run while a
-  // newer one is going left two rows saying "running" — and since the loop
-  // advances the earliest, the other one sat there looking active and being
-  // given no work at all (Codex, 21 Sep 2026).
-  const { rows: going } = await query(
-    `select id, label from census_runs where state = 'running' and id <> $1 limit 1`, [id]);
-  if (going.length) {
-    throw Object.assign(new Error(`“${going[0].label}” is running; stop it before resuming another`), { status: 409 });
-  }
-  const { rows } = await query(
-    `update census_runs
-        set state = 'running', stop_requested = false, problem = null,
-            resume_after = null, finished_at = null, last_seen_at = now(),
-            -- Whoever resumed it is spending from here on: a resume is the
-            -- decision to use today's quota, and the ledger says whose.
-            started_session_id = coalesce($2, started_session_id)
-      where id = $1 and state in ('paused', 'stopped', 'refused', 'waiting') returning *`, [id, sessionId]);
-  return rows[0] ?? null;
+  return withStartLock(async (db) => {
+    // The same rule as starting. Without it, resuming an older paused run while a
+    // newer one is going left two rows saying "running" — and since the loop
+    // advances the earliest, the other one sat there looking active and being
+    // given no work at all (Codex, 21 Sep 2026). And not while a day's run of
+    // the UK census is being planned (Codex, 29 Sep 2026).
+    const { rows: going } = await db.query(
+      `select id, label, state from census_runs
+        where id <> $1
+          and (state = 'running'
+               or (state = 'paused' and problem like 'built paused%' and started_by = $2 and started_at > now() - interval '15 minutes'))
+        limit 1`, [id, ONE_DAY_RUNS]);
+    if (going.length) {
+      throw Object.assign(new Error(going[0].state === 'paused'
+        ? `“${going[0].label}” is being planned; try again in a few minutes`
+        : `“${going[0].label}” is running; stop it before resuming another`), { status: 409 });
+    }
+    const { rows } = await db.query(
+      `update census_runs
+          set state = 'running', stop_requested = false, problem = null,
+              resume_after = null, finished_at = null, last_seen_at = now(),
+              -- Whoever resumed it is spending from here on: a resume is the
+              -- decision to use today's quota, and the ledger says whose.
+              started_session_id = coalesce($2, started_session_id)
+        where id = $1 and state in ('paused', 'stopped', 'refused', 'waiting') returning *`, [id, sessionId]);
+    return rows[0] ?? null;
+  });
 }
 
 /**

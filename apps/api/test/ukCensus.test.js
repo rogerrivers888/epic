@@ -378,3 +378,16 @@ test('a quota day over £5 across its two London days stops the census', async (
   assert.equal(out.action, 'halted');
   assert.equal(out.over.google_gbp, 6);
 });
+
+test('a resume waits while a day\'s plan is being written', async (t) => {
+  await clean();
+  t.after(async () => { await query(`delete from census_runs where label = 'test older'`); await clean(); });
+  const { resume, ONE_DAY_RUNS } = await import('../src/sources/censusRun.js');
+  const { rows: [older] } = await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state, problem)
+     values ('test older', array['ZZ'], 0.08, 0.12, 10, 5, 30, 'paused', 'stopped at the 10-request ceiling; resume to carry on') returning id`);
+  await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state, problem, started_by)
+     values ('The rest of the UK — day 2', array['ZZ'], 0.08, 0.12, 70000, 5, 30, 'paused', 'built paused; resume to start', $1)`, [ONE_DAY_RUNS]);
+  await assert.rejects(() => resume(older.id), /is being planned/);
+});
