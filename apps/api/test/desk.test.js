@@ -564,3 +564,23 @@ test('a Sources number opens onto the records it was counted from, and families 
   const srcs = await verification.sources({ sourceSlow: 5, sourceFailing: 15 });
   assert.ok(srcs.filter((x) => x.source !== 'families').every((x) => x.status !== 'Failing' || x.failingPct != null));
 });
+
+test('Codex on 6cd61a5: Include anyway stays Active, and a person’s Don’t know outlives the next check', async () => {
+  const { effective } = await import('../src/desk/categories.js');
+  assert.equal(effective('active', 0, 2), 'gathering');
+  assert.equal(effective('active', 0, 2, true), 'active', 'a person said include it anyway');
+  // Don't know is kept as a person's row with no value, and hides our sources' yes for good.
+  await query(`delete from place_attribute_values where venue_ref = 'desk:dk'`);
+  await query(`insert into place_fact_answers (venue_ref, attribute_key, state, yesno, source) values ('desk:dk', 'toilets', 'yes', true, 'osm')
+               on conflict (venue_ref, attribute_key) do update set state = 'yes', yesno = true, hidden_at = null`);
+  await facts.correct({ ref: 'desk:dk', fact: 'toilets', option: 'dont_know', who: WHO });
+  const { rows: [held] } = await query(`select who from fact_unknowns where venue_ref = 'desk:dk' and attribute_key = 'toilets'`);
+  assert.deepEqual(held, { who: WHO });
+  const { HAS_SQL } = await import('../src/desk/categories.js');
+  const has = async () => (await query(`select 1 from (${HAS_SQL}) h where venue_ref = 'desk:dk' and attribute_key = 'toilets'`)).rows.length;
+  assert.equal(await has(), 0);
+  // A later check that finds yes does not bring it back.
+  await query(`update place_fact_answers set hidden_at = null where venue_ref = 'desk:dk' and attribute_key = 'toilets'`);
+  assert.equal(await has(), 0, 'the person’s Don’t know still stands');
+  await query(`delete from fact_unknowns where venue_ref = 'desk:dk'`);
+});

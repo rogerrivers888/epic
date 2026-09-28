@@ -274,7 +274,9 @@ async function record({ ref, attr, evidence, verdict, cfg, firstSeen = null }) {
     const { rows: [was] } = await c.query('select state, hidden_at from place_fact_answers where venue_ref = $1 and attribute_key = $2', [ref, fact]);
     // Reinstated (4.7): a fact families hid, confirmed again by our sources,
     // comes back marked "disputed before" so the next visitors are asked first.
-    const reinstated = Boolean(was?.hidden_at && state === 'yes');
+    // A person's Don't know stands: nothing the machine finds reinstates it.
+    const { rows: [held] } = await c.query('select 1 from fact_unknowns where venue_ref = $1 and attribute_key = $2', [ref, fact]);
+    const reinstated = Boolean(was?.hidden_at && state === 'yes' && !held);
     await c.query(
       `insert into place_fact_answers (venue_ref, attribute_key, state, yesno, source, evidence_quote, checked_at, recheck_due, venue_override, hidden_at, disputed_before)
        values ($1, $2, $3, $4, $5, $6, now(), $7, $8, null, false)

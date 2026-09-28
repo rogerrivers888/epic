@@ -68,14 +68,20 @@ export const HAS_SQL = `
    where state = 'yes' and hidden_at is null
      and not exists (select 1 from place_attribute_values v
                       where v.venue_ref = place_fact_answers.venue_ref and v.attribute_key = place_fact_answers.attribute_key
-                        and v.set_by is not null and v.yesno is false)`;
+                        and v.set_by is not null and v.yesno is false)
+     -- a person's Don't know: nobody can tell, so our sources' yes is not shown
+     and not exists (select 1 from fact_unknowns u
+                      where u.venue_ref = place_fact_answers.venue_ref and u.attribute_key = place_fact_answers.attribute_key)`;
 
 /**
  * A fact is Active in a subcategory only when it is confirmed at `addPlaces`
  * places there (README "Statuses"): fewer is Gathering evidence, whatever
  * the stored status says.
  */
-export const effective = (status, n, needed) => (status === 'active' && (n ?? 0) < needed ? 'gathering' : status);
+export const effective = (status, n, needed, includeAnyway = false) =>
+  // A person's "Include anyway" (C41) keeps a fact Active whatever its count
+  // (Codex, 28 Sep 2026): that is exactly what the person decided.
+  (status === 'active' && !includeAnyway && (n ?? 0) < needed ? 'gathering' : status);
 
 /**
  * Every fact a subcategory looks for (or once looked for), with the places
@@ -98,7 +104,7 @@ export async function factsWithCounts({ sub = null, fact = null, standard = fals
     [sub, fact, standard]);
   const month = 30 * 86400_000;
   return rows.map((r) => {
-    const status = effective(r.status, r.places_with, needed);
+    const status = effective(r.status, r.places_with, needed, r.include_anyway);
     const demoted = r.status === 'active' && status !== 'active';
     return {
       ...r,
