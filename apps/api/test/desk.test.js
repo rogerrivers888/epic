@@ -444,6 +444,9 @@ test('families: two agreeing settle a fact, two saying a shown fact is wrong hid
   const { rows: [h2] } = await query(`insert into households (name) values ('Desk two') returning id`);
   await query(`insert into place_fact_answers (venue_ref, attribute_key, state, yesno, source) values ('desk:fam', 'toilets', 'yes', true, 'site')
                on conflict (venue_ref, attribute_key) do update set state = 'yes', yesno = true, hidden_at = null`);
+  await assert.rejects(pipeline.familyAnswer({ householdId: h1.id, ref: 'desk:fam', fact: 'toilets', answer: 'no' }),
+    (e) => e.status === 409, 'a question nobody asked cannot be answered');
+  for (const h of [h1, h2]) await query(`insert into family_asks (household_id, venue_ref, attribute_key) values ($1, 'desk:fam', 'toilets')`, [h.id]);
   await pipeline.familyAnswer({ householdId: h1.id, ref: 'desk:fam', fact: 'toilets', answer: 'no' });
   const two = await pipeline.familyAnswer({ householdId: h2.id, ref: 'desk:fam', fact: 'toilets', answer: 'no' });
   assert.equal(two.settled, 'hidden');
@@ -454,6 +457,21 @@ test('families: two agreeing settle a fact, two saying a shown fact is wrong hid
   await assert.rejects(pipeline.familyAnswer({ householdId: h1.id, ref: 'desk:fam', fact: 'toilets', answer: 'maybe' }));
   const none = await pipeline.questionFor({ householdId: h1.id, ref: 'desk:fam' });
   assert.deepEqual(none, [], 'someone who has not been cannot be asked');
+});
+
+test('a visit carries at most askPerVisit questions, however often it is asked for', async () => {
+  const { rows: [h] } = await query(`insert into households (name) values ('Desk three') returning id`);
+  await query(`insert into visits (household_id, venue_ref, venue_label, visited_on) values ($1, 'desk:visit', 'Desk visit', current_date)`, [h.id]);
+  await query(`insert into place_index (venue_ref, subcategory) values ('desk:visit', 'desk-water') on conflict (venue_ref) do update set subcategory = 'desk-water'`);
+  const visit = '00000000-0000-4000-8000-00000000d351';
+  const first = await pipeline.questionFor({ householdId: h.id, ref: 'desk:visit', visitId: visit });
+  const cap = (await settings.settings()).values.askPerVisit;
+  assert.ok(first.length > 0 && first.length <= cap);
+  const again = await pipeline.questionFor({ householdId: h.id, ref: 'desk:visit', visitId: visit });
+  assert.deepEqual(again.map((q) => q.fact), first.map((q) => q.fact), 'the same questions, not a fresh batch');
+  await pipeline.familyAnswer({ householdId: h.id, ref: 'desk:visit', fact: first[0].fact, answer: 'didnt_notice' });
+  const after = await pipeline.questionFor({ householdId: h.id, ref: 'desk:visit', visitId: visit });
+  assert.equal(after.length, first.length - 1, 'an answered question is not asked again, and nothing new is added');
 });
 
 test('add makes a fact Active at addPlaces verified places, and never re-adds one a person removed', async () => {

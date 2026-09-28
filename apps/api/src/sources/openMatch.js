@@ -173,12 +173,13 @@ async function overpass(body, meter = null) {
 export async function osmElement(ref, { meter = null } = {}) {
   const [type, id] = String(ref).split('/');
   if (!['node', 'way', 'relation'].includes(type) || !/^\d+$/.test(id || '')) return null;
-  // Our own copy first (handover 5.3). Once an extract is loaded it is the
-  // answer: an element it does not hold is one we do not keep, not a reason
-  // to go back to Overpass.
+  // Our own copy first (handover 5.3). An element it does not hold may be
+  // outside every loaded region, or one the extract does not keep, and a
+  // reference carries no coordinates to tell which — so a miss goes on to
+  // Overpass rather than answering "nothing" (Codex, 28 Sep 2026).
   if (await local.covers(null, null)) {
     const el = await local.element(`${type}/${id}`);
-    return el ? { ref: `${el.type}/${el.id}`, tags: el.tags || {}, lat: el.lat ?? el.center?.lat, lng: el.lon ?? el.center?.lon } : null;
+    if (el) return { ref: `${el.type}/${el.id}`, tags: el.tags || {}, lat: el.lat ?? el.center?.lat, lng: el.lon ?? el.center?.lon };
   }
   const data = await overpass(`[out:json][timeout:15];${type}(${id});out center tags;`, meter);
   const el = (data.elements || [])[0];

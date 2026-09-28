@@ -488,6 +488,21 @@ export async function questionFor({ householdId, ref, visitId = null }) {
   const ages = members.map((m) => (m.birth_date ? year - new Date(m.birth_date).getFullYear() : m.birth_year ? year - m.birth_year : m.is_minor ? 8 : 35));
   const young = ages.some((a) => a <= 4);
   const kids = ages.some((a) => a <= 12);
+  // One visit carries at most askPerVisit questions, however often it is
+  // asked for (Codex, 28 Sep 2026): a visit that already has its questions
+  // gets the ones still unanswered, never a fresh batch. With no visit named,
+  // the last day's asks at this place stand in for the visit.
+  const { rows: already } = await query(
+    `select x.attribute_key, pa.label,
+            exists (select 1 from family_answers f where f.household_id = x.household_id and f.venue_ref = x.venue_ref and f.attribute_key = x.attribute_key) as answered
+       from family_asks x join place_attributes pa on pa.key = x.attribute_key
+      where x.household_id = $1 and x.venue_ref = $2
+        and (case when $3::uuid is null then x.asked_at > now() - interval '1 day' else x.visit_id = $3::uuid end)`,
+    [householdId, ref, visitId]);
+  if (already.length) {
+    return already.filter((a) => !a.answered).slice(0, cfg.askPerVisit)
+      .map((p) => ({ fact: p.attribute_key, label: p.label, answers: ['Yes', 'No', 'Didn’t notice'] }));
+  }
   const { rows } = await query(`
     with subs as (select subcategory as sub from place_index where venue_ref = $1 and subcategory is not null),
     looked as (
@@ -524,6 +539,12 @@ export async function questionFor({ householdId, ref, visitId = null }) {
  */
 export async function familyAnswer({ householdId, ref, fact, answer }) {
   if (!['yes', 'no', 'didnt_notice'].includes(answer)) throw Object.assign(new Error('Yes, no or didn’t notice.'), { status: 400 });
+  // Only a question we asked can be answered (Codex, 28 Sep 2026): otherwise
+  // any two households could settle or hide a fact about a place neither of
+  // them has been to. The ask is issued only after a recorded visit.
+  const { rows: [asked] } = await query(
+    'select 1 from family_asks where household_id = $1 and venue_ref = $2 and attribute_key = $3', [householdId, ref, fact]);
+  if (!asked) throw Object.assign(new Error('That question was not asked of this household.'), { status: 409 });
   const cfg = (await settings()).values;
   const { rows: [m] } = await query('select state, source from place_fact_answers where venue_ref = $1 and attribute_key = $2', [ref, fact]);
   const { rows: [sub] } = await query('select subcategory from place_index where venue_ref = $1', [ref]);
