@@ -644,3 +644,10 @@ test('a status word at the end of a sentence is a denial, and a source read and 
   assert.equal(read.waiting, undefined, 'read and found nothing is not waiting');
   assert.equal(read.state, 'dont_know');
 });
+
+test('a status word in another clause says nothing about the phrase', () => {
+  assert.equal(pipeline.polarity('We enjoyed the pool; the cafe was closed.', 'pool'), 'asserts');
+  assert.equal(pipeline.polarity('The pool was closed.', 'pool'), 'denies');
+  assert.equal(pipeline.polarity('The pool is permanently closed.', 'pool'), 'denies');
+  assert.equal(pipeline.polarity('The pool is unavailable.', 'pool'), 'denies');
+});

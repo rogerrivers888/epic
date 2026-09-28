@@ -18,6 +18,7 @@
 import { query, withTransaction } from '../db.js';
 import { settings } from './settings.js';
 import * as osmLocal from '../sources/osmExtract.js';
+import { osmElement } from '../sources/openMatch.js';
 import { noteFetch } from './verification.js';
 
 // ---------------------------------------------------------------------------
@@ -54,8 +55,10 @@ export function polarity(sentence, phrase) {
   const tail = ri >= 0 ? raw.slice(ri + String(phrase).length, ri + String(phrase).length + 40) : s.slice(at + p.length, at + p.length + 40);
   if (/^\s*(?:(?:are|is|was|were|has been|have been|seems|seemed)\s+)?(?:not|never|no longer)\b/.test(tail)) return 'denies';
   if (/^\s*(?:isnt|isn't|arent|aren't|wasnt|wasn't|werent|weren't)\b/.test(tail)) return 'denies';
-  const after = tail.split(/\s+/).map((w) => w.replace(/[^a-z']/g, '')).filter(Boolean).slice(0, 5);
-  if (after.some((w) => ['closed', 'shut', 'removed', 'gone', 'broken', 'unavailable'].includes(w))) return 'denies';
+  // A status word counts only when it belongs to the phrase — straight after
+  // it or after its verb, inside the same clause: "the pool; the cafe was
+  // closed" says nothing about the pool (Codex, 28 Sep 2026).
+  if (/^\s*(?:(?:(?:is|are|was|were|has been|have been|seems|seemed|now|currently|permanently|temporarily)\s+)+)?(?:closed|shut|removed|gone|broken|unavailable|out of order|out of use)\b/.test(tail)) return 'denies';
   if (/\bno longer\b/.test(s.slice(Math.max(0, at - 30), at))) return 'denies';
   return 'asserts';
 }
@@ -228,9 +231,18 @@ export async function evidenceFor(ref) {
   ]);
   const textOf = (src) => facts.filter((f) => f.source === src).map((f) => (typeof f.value === 'string' ? f.value : f.value?.text ?? '')).join('\n');
   const out = { site: textOf('site') || null, wikipedia: textOf('wikipedia') || null, osm: undefined, wikidata: undefined };
-  if (rec?.osm_ref && await osmLocal.covers(null, null)) {
-    const el = await osmLocal.element(String(rec.osm_ref).replace(/^osm:/, ''));
-    out.osm = el?.tags ?? null;
+  if (rec?.osm_ref) {
+    // Our own copy first; a miss there may only mean the element lies outside
+    // every loaded extract, so it is asked of the open map itself before it
+    // counts as "read and found nothing" (Codex, 28 Sep 2026). A failed fetch
+    // leaves it unread (undefined), never an answer.
+    const ref = String(rec.osm_ref).replace(/^osm:/, '');
+    const el = (await osmLocal.covers(null, null)) ? await osmLocal.element(ref) : null;
+    if (el) out.osm = el.tags ?? null;
+    else {
+      const got = await osmElement(ref).catch(() => undefined);
+      if (got !== undefined) out.osm = got?.tags ?? null;
+    }
   }
   if (rec?.wikidata_id) out.wikidata = await wikidataFacilities(rec.wikidata_id);
   return out;
