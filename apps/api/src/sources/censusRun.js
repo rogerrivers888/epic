@@ -379,7 +379,20 @@ export async function startRun({
 export async function requestStop(id) {
   const { rows } = await query(
     `update census_runs set stop_requested = true where id = $1 and state = 'running' returning id`, [id]);
-  return { stopping: rows.length > 0 };
+  if (rows.length) return { stopping: true };
+  // A run waiting for the quota day has no loop to read a flag: it is asleep
+  // until the clock wakes it. So it is stopped here and now, and the clock
+  // finds nothing to wake. Without this a run meant for one day that met the
+  // day's cap first would carry on the next morning, and nothing could stop it
+  // short of resuming it first (owner, 28 Sep 2026: "one day only … do not
+  // continue tomorrow until I say go").
+  const { rows: asleep } = await query(
+    `update census_runs
+        set state = 'stopped', resume_after = null, finished_at = now(), last_seen_at = now(),
+            problem = 'stopped while waiting: ' || coalesce(problem, 'for the quota day')
+      where id = $1 and state = 'waiting' returning id`, [id]);
+  if (asleep.length) await refreshProgress(id);
+  return { stopping: asleep.length > 0, stopped: asleep.length > 0 };
 }
 
 /** Start again where it left off. Nothing is re-asked; the tiles remember. */
@@ -1159,12 +1172,21 @@ export async function list({ limit = 10 } = {}) {
  * a different number from the same count out of four clean ones.
  */
 export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
+  // A run rolls up the districts it censused itself, not every district its
+  // plan touched. A run's plan keeps the fresh tiles it walked past as members,
+  // so a whole-country run holds London's eight-kilometre squares — and rolling
+  // inner London up again from those alone would put back the wide-box counts
+  // the kilometre re-census replaced (28 Sep 2026). A tile this run censused
+  // has its `censused_at` after the run began; one it walked past does not.
   const codes = outcodes?.length
     ? outcodes.map((c) => String(c).toUpperCase())
     : (await query(
-      `select distinct unnest(t.outcodes) as code from census_tiles t
-         ${runId ? 'join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1' : ''}
-        where t.censused_at is not null`,
+      runId
+        ? `select distinct unnest(t.outcodes) as code from census_tiles t
+             join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1
+             join census_runs r on r.id = m.run_id
+            where t.censused_at is not null and t.censused_at >= r.started_at`
+        : `select distinct unnest(t.outcodes) as code from census_tiles t where t.censused_at is not null`,
       runId ? [runId] : [])).rows.map((r) => r.code);
   if (!codes.length) return { outcodes: 0, rows: 0, unattributed: 0 };
 
@@ -1206,6 +1228,23 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
       [bounds.minLat - REACH_LAT, bounds.maxLat + REACH_LAT, bounds.minLng - REACH_LNG, bounds.maxLng + REACH_LNG]);
   if (!tiles.length) return { outcodes: codes.length, rows: 0, unattributed: 0 };
   const tileByKey = new Map(tiles.map((t) => [t.grid_key, t]));
+
+  // Every tile planned for these districts, censused or not. `tiles` above is
+  // the ground that has answered, and a tile's `censused_at` is written only
+  // when it finishes — so a district judged from `tiles` alone read complete
+  // with two of its four squares still to do, and a run stopped part-way
+  // across the country would have published half-counted districts as whole
+  // ones (28 Sep 2026: "partial counts shown as partial"). A run answers for
+  // its own plan; a district rolled up by name answers for every square on
+  // the grids it has been censused on.
+  const { rows: plannedTiles } = runId
+    ? await query(
+      `select t.grid_key, t.outcodes, t.state from census_tiles t
+         join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1
+        where t.outcodes && $2::text[]`, [runId, codes])
+    : await query(
+      `select grid_key, outcodes, state from census_tiles where outcodes && $1::text[]`, [codes]);
+  const gridOf = (key) => String(key).split('/')[0];
 
   // Only what the current census of each tile found. A surfacing is kept
   // after its question stops finding it — "this used to be here" is worth
@@ -1360,7 +1399,9 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
 
     const censusedAt = own.map((t) => new Date(t.censused_at).getTime()).sort((x, y) => x - y);
     const saturatedTiles = own.filter((t) => Number(t.saturated) > 0).length;
-    const complete = own.every((t) => t.state === 'done');
+    const grids = new Set(own.map((t) => gridOf(t.grid_key)));
+    const complete = own.every((t) => t.state === 'done')
+      && plannedTiles.every((t) => !t.outcodes?.includes(code) || !grids.has(gridOf(t.grid_key)) || t.state === 'done');
     for (const [key, { category, subcategory }] of drawer) {
       const refs = b.counted.get(key) ?? new Set();
       const { rows: [scored] } = refs.size

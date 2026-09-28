@@ -1536,3 +1536,125 @@ test('a run built paused does nothing until a person starts it', async (t) => {
   assert.equal(out.working, false);
   assert.equal(Number((await query('select requests from census_runs where id = $1', [run.id])).rows[0].requests), 0, 'not a request until resumed');
 });
+
+// ---------------------------------------------------------------------------
+// a run stopped part-way across the country (28 Sep 2026)
+// ---------------------------------------------------------------------------
+
+/** A district out at sea, its sectors, and a place in a small box inside one tile. */
+const seaDistrict = async ({ outcode, sectors, ref, slice, gridKey }) => {
+  for (const [code, lat, lng] of sectors) {
+    await query(
+      `insert into geo_cells (code, scheme, label, outcode, lat, lng, source) values ($1, 'sector', $1, $2, $3, $4, 'test')
+       on conflict (code) do update set outcode = excluded.outcode, lat = excluded.lat, lng = excluded.lng`,
+      [code, outcode, lat, lng]);
+  }
+  if (!ref) return;
+  await query(
+    `insert into place_index (venue_ref, country_code, slice, category, subcategory)
+     values ($1, 'GB', $2, 'sport', 'golf') on conflict (venue_ref) do update set slice = excluded.slice`, [ref, slice]);
+  await query(
+    `insert into place_subcategories (venue_ref, category, subcategory, found_by, area_slug, first_seen, last_seen)
+     values ($1, 'sport', 'golf', 'golf_course', $2, now(), now())
+     on conflict (venue_ref, subcategory, coalesce(area_slug, '')) do nothing`, [ref, gridKey]);
+};
+
+test('a district with a square still to do reads as partial, not complete', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from area_counts where area_slug = 'zz8a'`);
+    await query(`delete from geo_cells where code like 'ZZ8A%'`);
+    await query(`delete from place_index where venue_ref like 'google:partial_%'`);
+    await clean();
+  });
+  // Two squares of one district. The first has finished; the second has not
+  // been reached, so it has no `censused_at` — which is all the roll-up used
+  // to look at, and so the district read complete with half its ground unasked.
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, saturated) values
+       ('test/partial/0', 50.20, -1.30, 50.28, -1.18, array['ZZ8A'], 'done', now(), 0),
+       ('test/partial/1', 50.28, -1.30, 50.36, -1.18, array['ZZ8A'], 'todo', null, 0)
+     on conflict (grid_key) do update set state = excluded.state, censused_at = excluded.censused_at, outcodes = excluded.outcodes`);
+  await seaDistrict({
+    outcode: 'ZZ8A', sectors: [['ZZ8A 1', 50.24, -1.24], ['ZZ8A 2', 50.32, -1.24]],
+    ref: 'google:partial_one', slice: '50.2350,-1.2450,50.2450,-1.2350', gridKey: 'test/partial/0',
+  });
+
+  await rollUpOutcodes({ outcodes: ['ZZ8A'] });
+  const read = async () => (await query(
+    `select census_count, complete from area_counts where area_slug = 'zz8a' and subcategory = 'golf'`)).rows[0];
+  const half = await read();
+  assert.equal(half.census_count, 1, 'what the finished square found is counted, as a floor');
+  assert.equal(half.complete, false, 'and the district says it is partial while a square of it is still to do');
+
+  // Asked for by a run, the same: the run's own plan decides.
+  const run = await startTestRun({ label: 'test partial run' });
+  for (const k of ['test/partial/0', 'test/partial/1']) {
+    await query(`insert into census_run_tiles (run_id, grid_key) values ($1, $2) on conflict do nothing`, [run.id, k]);
+  }
+  await query(`update census_tiles set censused_at = now() where grid_key = 'test/partial/0'`);
+  await rollUpOutcodes({ runId: run.id });
+  assert.equal((await read()).complete, false, 'a run stopped part-way publishes the district as partial');
+
+  await query(`update census_tiles set state = 'done', censused_at = now() where grid_key = 'test/partial/1'`);
+  await rollUpOutcodes({ outcodes: ['ZZ8A'] });
+  assert.equal((await read()).complete, true, 'and complete once every square has answered');
+});
+
+test('a run rolls up the districts it censused, not the fresh ones it walked past', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from area_counts where area_slug in ('zz7a', 'zz7b')`);
+    await query(`delete from geo_cells where code like 'ZZ7%'`);
+    await query(`delete from place_index where venue_ref like 'google:walked_%'`);
+    await clean();
+  });
+  // A square censused two days ago on a finer, better census — kept by this
+  // run as fresh and walked past — and a square this run asked itself. The
+  // standing count on the first is what a kilometre re-census wrote, and
+  // rolling it up again from this run's coarser ground would undo it.
+  await query(
+    `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, complete)
+     values ('zz7a', 'sport', 'golf', 999, 999, true)
+     on conflict (area_slug, category, subcategory) do update set census_count = 999`);
+  const run = await startTestRun({ label: 'test walked past' });
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, saturated) values
+       ('test/walked/0', 50.00, -2.10, 50.08, -1.98, array['ZZ7A'], 'done', now() - interval '2 days', 0),
+       ('test/walked/1', 50.08, -2.10, 50.16, -1.98, array['ZZ7B'], 'done', now(), 0)
+     on conflict (grid_key) do update set state = 'done', censused_at = excluded.censused_at, outcodes = excluded.outcodes`);
+  for (const k of ['test/walked/0', 'test/walked/1']) {
+    await query(`insert into census_run_tiles (run_id, grid_key) values ($1, $2) on conflict do nothing`, [run.id, k]);
+  }
+  await seaDistrict({ outcode: 'ZZ7A', sectors: [['ZZ7A 1', 50.04, -2.04]] });
+  await seaDistrict({
+    outcode: 'ZZ7B', sectors: [['ZZ7B 1', 50.12, -2.04]],
+    ref: 'google:walked_new', slice: '50.1150,-2.0450,50.1250,-2.0350', gridKey: 'test/walked/1',
+  });
+
+  await rollUpOutcodes({ runId: run.id });
+  const { rows } = await query(
+    `select area_slug, census_count from area_counts where area_slug in ('zz7a', 'zz7b') and subcategory = 'golf' order by 1`);
+  assert.deepEqual(rows.map((r) => [r.area_slug, r.census_count]), [['zz7a', 999], ['zz7b', 1]],
+    'the district it walked past keeps its count; the one it asked is rolled up');
+});
+
+test('a run waiting for the quota day can be stopped, and the clock does not wake it', async (t) => {
+  await clean();
+  t.after(clean);
+  // One day only (owner, 28 Sep 2026). A run that met the day's cap before its
+  // own ceiling sleeps until the reset, and a stop that only set a flag for a
+  // loop that was not running left it to wake and carry on the next morning.
+  const run = await startTestRun({ label: 'test one day only' });
+  await query(
+    `update census_runs set state = 'waiting', resume_after = now() - interval '1 minute',
+            problem = '75,000 requests today' where id = $1`, [run.id]);
+  const out = await requestStop(run.id);
+  assert.equal(out.stopped, true, 'stopped where it lies');
+  const woke = await resumeInterrupted();
+  assert.ok(!(woke.runs ?? []).some((r) => r.id === run.id), 'the clock finds nothing to wake');
+  const { rows: [after] } = await query('select state, resume_after, problem from census_runs where id = $1', [run.id]);
+  assert.equal(after.state, 'stopped');
+  assert.equal(after.resume_after, null);
+  assert.match(after.problem, /^stopped while waiting: 75,000 requests today/, 'and says what it was waiting for');
+});
