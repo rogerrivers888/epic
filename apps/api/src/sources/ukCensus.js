@@ -280,9 +280,26 @@ export async function status(now = new Date()) {
     const day = pacificDay(r.started_at);
     const b = billedFor(d.bills ?? [], day);
     requests += Number(r.requests ?? 0); tilesAsked += Number(t.asked ?? 0);
+    // Each day's figures as they stood when that day ended, not as they stand
+    // now (Codex, 29 Sep 2026): its plan is the whole UK, so the districts
+    // whose every square in it had been censused by its end is how many were
+    // done in all that day, and the squares not yet censused by then are what
+    // was left. A square's censused_at only moves when it is censused again,
+    // thirty days on, so both stay what they were.
+    const { rows: [then] } = await query(
+      `with plan as (
+         select t.outcodes, (t.censused_at is not null and t.censused_at <= coalesce(r.finished_at, now())) as done
+           from census_run_tiles m join census_tiles t on t.grid_key = m.grid_key join census_runs r on r.id = m.run_id
+          where m.run_id = $1)
+       select (select count(*)::int from (select c.code from plan, unnest(plan.outcodes) c(code) group by c.code having bool_and(done)) x) as districts,
+              (select count(*) filter (where not done)::int from plan) as left`, [r.id]);
+    const rate = tilesAsked ? requests / tilesAsked : null;
     days.push({
       day: i + 1, date: day, runId: r.id, state: r.state, requests: Number(r.requests ?? 0), places: Number(r.places ?? 0),
       tilesAsked: Number(t.asked ?? 0),
+      districts: then.districts,
+      tilesLeft: then.left,
+      daysLeft: rate == null ? null : Math.max(then.left ? 1 : 0, Math.ceil((then.left * rate) / DAY_REQUESTS)),
       billed: b ? { censusGbp: b.census_gbp, googleGbp: b.google_gbp, final: b.final } : null,
     });
   }
@@ -346,7 +363,7 @@ export async function notify({ subject, text = null, send = sendMail, configured
 }
 
 /** One day's report, in the owner's five figures. */
-export function reportLine(day, whole, daysLeft) {
+export function reportLine(day, whole = day.districts, daysLeft = day.daysLeft) {
   const billed = day.billed
     ? `${day.billed.final ? 'billed' : 'billed so far'} £${day.billed.censusGbp.toFixed(2)} for the census (Google £${day.billed.googleGbp.toFixed(2)} that day)`
     : 'not billed yet';
@@ -362,15 +379,15 @@ export async function daily(now = new Date()) {
   if (out.action === 'off') return out;
   const st = await status(now);
   for (const t of tellings) {
-    await notify({ subject: t.subject, text: `${t.subject}.\n\n${st.days.map((d) => reportLine(d, st.districtsWhole, st.daysLeft)).join('\n')}` });
+    await notify({ subject: t.subject, text: `${t.subject}.\n\n${st.days.map((d) => reportLine(d)).join('\n')}` });
   }
   // A day's report once its run has stopped for the day (or for good). The
   // billed figure arrives a day or so later, so a report is sent again once
   // Google has written it — a different subject, said once.
   for (const d of st.days.filter((x) => x.state !== 'running' && x.state !== 'waiting')) {
-    const line = reportLine(d, st.districtsWhole, st.daysLeft);
+    const line = reportLine(d);
     await notify({ subject: `Census — the rest of the UK, day ${d.day}${d.billed?.final ? ', billed' : ''}`, text: line });
   }
-  if (st.complete) await notify({ subject: 'Census — the rest of the UK is complete', text: st.days.map((d) => reportLine(d, st.districtsWhole, 0)).join('\n') });
+  if (st.complete) await notify({ subject: 'Census — the rest of the UK is complete', text: st.days.map((d) => reportLine(d)).join('\n') });
   return { ...out, status: st };
 }

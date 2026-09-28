@@ -424,3 +424,26 @@ test('a square given up on is still a day left', async (t) => {
   assert.equal(st.tilesLeft, 1);
   assert.ok(st.daysLeft >= 1, 'not "0 days remaining" while a run is still owed');
 });
+
+test('each day reports its own figures, as they stood when it ended', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from census_run_tiles where grid_key like 'uktest/day%'`);
+    await query(`delete from census_tiles where grid_key like 'uktest/day%'`);
+    await clean();
+  });
+  const one = await dayOne();
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at) values
+       ('uktest/day/a', 48, -6, 48.08, -5.88, array['ZZ8Q'], 'done', '2026-09-28T20:00:00Z'),
+       ('uktest/day/b', 48.08, -6, 48.16, -5.88, array['ZZ8R'], 'todo', null)
+     on conflict (grid_key) do update set state = excluded.state, censused_at = excluded.censused_at`);
+  await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'uktest/day/a'), ($1, 'uktest/day/b')`, [one.id]);
+  const before = await uk.status(new Date('2026-09-29T01:00:00Z'));
+  assert.deepEqual([before.days[0].districts, before.days[0].tilesLeft], [1, 1]);
+  // Day 2 finishes the other square; day 1's line does not change.
+  await query(`update census_tiles set state = 'done', censused_at = '2026-09-29T20:00:00Z' where grid_key = 'uktest/day/b'`);
+  const after = await uk.status(new Date('2026-09-30T01:00:00Z'));
+  assert.deepEqual([after.days[0].districts, after.days[0].tilesLeft], [1, 1], 'day 1 says what day 1 knew');
+  assert.match(uk.reportLine(after.days[0]), /^Day 1 \(2026-09-28\): 1 districts done/);
+});
