@@ -58,7 +58,11 @@ export function polarity(sentence, phrase) {
   // A status word counts only when it belongs to the phrase — straight after
   // it or after its verb, inside the same clause: "the pool; the cafe was
   // closed" says nothing about the pool (Codex, 28 Sep 2026).
-  if (/^\s*(?:(?:(?:is|are|was|were|has been|have been|seems|seemed|now|currently|permanently|temporarily)\s+)+)?(?:closed|shut|removed|gone|broken|unavailable|out of order|out of use)\b/.test(tail)) return 'denies';
+  // The phrase's own clause: what follows it up to the next ; . ! ? , or a
+  // "but"/"and" — so "the pool is still closed", "Pool: closed" and "remains
+  // closed" deny the pool, and "the pool; the cafe was closed" does not.
+  const clause = tail.replace(/^\s*[:\-–—]\s*/, ' ').split(/[;.!?,]|\s(?:but|and|while|whereas)\s/)[0];
+  if (/\b(?:closed|shut|removed|gone|broken|unavailable|out of order|out of use|not working|not open)\b/.test(clause.split(/\s+/).slice(0, 8).join(' '))) return 'denies';
   if (/\bno longer\b/.test(s.slice(Math.max(0, at - 30), at))) return 'denies';
   return 'asserts';
 }
@@ -224,6 +228,24 @@ async function wikidataFacilities(qid) {
  * of the open map, and Wikidata's facilities. Answering several facts reads
  * this once, not once a fact.
  */
+/**
+ * An element fetched from the open map, remembered for a day — including
+ * "not there" — so opening a place again, or a pre-warm, does not ask the
+ * public mirrors for the same element over and over and hold up the queue
+ * (Codex, 28 Sep 2026). A failed fetch is not remembered.
+ */
+const OSM_TTL_MS = 24 * 3600_000;
+const osmSeen = new Map();
+async function osmFetched(ref) {
+  const hit = osmSeen.get(ref);
+  if (hit && Date.now() - hit.at < OSM_TTL_MS) return hit.value;
+  const value = await osmElement(ref).catch(() => undefined);
+  if (value === undefined) return undefined;
+  if (osmSeen.size > 5000) osmSeen.delete(osmSeen.keys().next().value);
+  osmSeen.set(ref, { at: Date.now(), value });
+  return value;
+}
+
 export async function evidenceFor(ref) {
   const [{ rows: facts }, { rows: [rec] }] = await Promise.all([
     query(`select source, field, value from place_facts where venue_ref = $1 and field in ('body', 'summary') and source in ('site', 'wikipedia')`, [ref]),
@@ -240,7 +262,7 @@ export async function evidenceFor(ref) {
     const el = (await osmLocal.covers(null, null)) ? await osmLocal.element(ref) : null;
     if (el) out.osm = el.tags ?? null;
     else {
-      const got = await osmElement(ref).catch(() => undefined);
+      const got = await osmFetched(ref);
       if (got !== undefined) out.osm = got?.tags ?? null;
     }
   }
