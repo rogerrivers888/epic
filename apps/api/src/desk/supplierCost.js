@@ -43,14 +43,21 @@ const RANGE = `created_at >= (($1::text || '-01')::date::timestamp at time zone 
  * up to `cutoff` and an estimate after), or 'estimate'.
  */
 export async function googleMonth(month, { q = query } = {}) {
+  // The export fills a day over the next day or two, so its latest days are
+  // not complete: the bill is trusted only up to two days before the last day
+  // it holds, and everything from there on is estimated (Codex, 29 Sep 2026:
+  // a part-filled day read as whole would hide the rest of that day's spend).
   const { rows: [b] } = await q(
-    `select coalesce(sum(cost), 0)::float as gbp, max(day) as last, count(*)::int as n
-       from billing_days where meter is not null and to_char(day, 'YYYY-MM') = $1`, [month]);
+    `with m as (select day, cost from billing_days where meter is not null and to_char(day, 'YYYY-MM') = $1),
+          edge as (select max(day) - 1 as upto from m)
+     select coalesce(sum(m.cost) filter (where m.day < edge.upto), 0)::float as gbp,
+            count(*) filter (where m.day < edge.upto)::int as n,
+            (select upto from edge) as upto
+       from m, edge group by edge.upto`, [month]);
   let billedGbp = null; let cutoff = null; let source = null;
   if (b?.n) {
     billedGbp = b.gbp;
-    // The export is by usage day: everything up to the end of its last day.
-    const { rows: [c] } = await q(`select (($1::date + 1)::timestamp at time zone 'Europe/London') as t`, [b.last]);
+    const { rows: [c] } = await q(`select ($1::date::timestamp at time zone 'Europe/London') as t`, [b.upto]);
     cutoff = c.t; source = 'Google billing export';
   } else {
     // Read from the table, not the settings cache: on the caller's client,

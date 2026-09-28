@@ -61,16 +61,17 @@ test('a bill is taken up to its cutoff, and only what came after is estimated â€
   assert.ok(Math.abs(g.gbp - (40.61 + 1000 * per)) < 0.01);
 });
 
-test('the export, where it has days, is the bill; the guard and the Runs board say the same number', async () => {
+test('the export is the bill up to two days before its last day; its latest days are estimated; the guard and the Runs board agree', async () => {
   await clean();
-  await query(`insert into billing_days (invoice_month, day, service, sku, sku_id, meter, usage, cost, credits, promo, currency)
-               values ($1, $2, 'Places API', 'Text Search Pro', 'S', 'google-pro', 100, 12.5, -12.5, -12.5, 'GBP')`, [MONTH, `${MONTH}-01`]);
-  await query(`insert into provider_calls (provider, purpose, units, estimated_cost_usd, created_at) values
-    ('google', 'purse-old', '{"google": 20000}', 640, $1)`, [at(9)]);
+  // Days 1â€“3 in the export: day 1 is trusted, days 2 and 3 may still be filling.
+  for (const [d, c] of [['01', 12.5], ['02', 3], ['03', 1]]) {
+    await query(`insert into billing_days (invoice_month, day, service, sku, sku_id, meter, usage, cost, credits, promo, currency)
+                 values ($1, $2, 'Places API', 'Text Search Pro', 'S', 'google-pro', 100, $3, 0, 0, 'GBP')`, [MONTH, `${MONTH}-${d}`, c]);
+  }
   const g = await cost.googleMonth(MONTH);
   assert.equal(g.source, 'Google billing export');
-  assert.equal(g.billedGbp, 12.5);
-  assert.equal(g.estimateGbp, 0, 'everything the ledger asked was on the billed day');
+  assert.equal(g.billedGbp, 12.5, 'only the day the export has finished');
+  assert.equal(new Date(g.cutoff).toISOString(), new Date(`${MONTH}-02T00:00:00+01:00`).toISOString());
   const room = await roomToSpend(0, { reserve: false });
   const board = await runs.list();
   const p = await cost.collectPurse(MONTH);
