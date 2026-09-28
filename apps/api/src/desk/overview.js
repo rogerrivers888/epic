@@ -39,11 +39,32 @@ async function spend() {
   const { rows } = await query(`
     select coalesce(sum(estimated_cost_usd), 0)::float usd
       from provider_calls
-     where to_char(created_at at time zone 'Europe/London', 'YYYY-MM') = $1 and provider ~ 'anthropic|claude'`, [month]);
+     where created_at >= (($1::text || '-01')::date::timestamp at time zone 'Europe/London')
+       and created_at < ((($1::text || '-01')::date + interval '1 month')::timestamp at time zone 'Europe/London')
+       and provider ~ 'anthropic|claude'`, [month]);
   const { googleEstimate } = await import('./billing.js');
   const g = await googleEstimate(month).catch(() => ({ gbp: 0 }));
-  return { google: g.gbp, claude: (rows[0]?.usd ?? 0) * USD_TO_GBP };
+  // Claude from Anthropic's own console where it has been read for this
+  // month (owner, 29 Sep 2026); the ledger's list-price figure otherwise,
+  // and then said to be an estimate.
+  const cb = (await settings()).values.claudeBilling;
+  if (cb && cb.month === month) {
+    return { google: g.gbp, claude: cb.gbp ?? cb.usd * USD_TO_GBP, claudeUsd: cb.usd, claudeFrom: 'console', claudeCreditUsd: cb.creditUsd, claudeSource: cb.source };
+  }
+  const usd = rows[0]?.usd ?? 0;
+  return { google: g.gbp, claude: usd * USD_TO_GBP, claudeUsd: usd, claudeFrom: 'estimate' };
 }
+
+/** Claude in the tile's words: dollars first, as Anthropic bills, pounds beside. */
+export function claudeWords(money, cfg) {
+  const usd = money.claudeUsd ?? money.claude / USD_TO_GBP;
+  const est = money.claudeFrom === 'console' ? '' : ' estimate';
+  return `Claude $${usd.toFixed(2)} (£${Math.round(money.claude)})${est} of £${cfg.budgetClaude}`;
+}
+const claudeOf = (money, cfg) => ({
+  spent: money.claude, spentUsd: money.claudeUsd ?? null, from: money.claudeFrom ?? 'estimate',
+  creditUsd: money.claudeCreditUsd ?? null, source: money.claudeSource ?? null, budget: cfg.budgetClaude,
+});
 
 /**
  * The Spend tile: the month's Google and Claude spend against each budget, in
@@ -61,10 +82,10 @@ function spendTile(money, cfg, now = new Date()) {
     tone: worst > 1 ? 'red' : worst > 0.8 ? 'amber' : 'green',
     // Both from our own ledger's list-price estimate, not a bill: said so,
     // never as though it were what was charged (owner, 29 Sep 2026).
-    title: `Google £${Math.round(money.google)} estimate of £${cfg.budgetGoogle} · Claude £${Math.round(money.claude)} estimate of £${cfg.budgetClaude}`,
+    title: `Google £${Math.round(money.google)} estimate of £${cfg.budgetGoogle} · ${claudeWords(money, cfg)}`,
     line: worst > 1 ? 'over budget' : worst > 0.8 ? 'close to budget' : 'within budget',
     google: { spent: money.google, budget: cfg.budgetGoogle },
-    claude: { spent: money.claude, budget: cfg.budgetClaude },
+    claude: claudeOf(money, cfg),
   };
 }
 
@@ -99,10 +120,9 @@ export function billingTile(b, money, cfg, now = new Date()) {
   return {
     tone,
     title,
-    // Claude is still our ledger's estimate until its own billing is read.
-    line: `${said} · Claude £${Math.round(money.claude)} estimate of £${cfg.budgetClaude}`,
+    line: `${said} · ${claudeWords(money, cfg)}`,
     google: { spent: thisMonth ? b.usageGbp : null, budget: cfg.budgetGoogle, credit: b.creditGbp, creditExpires: b.creditExpires, source: b.source },
-    claude: { spent: money.claude, budget: cfg.budgetClaude },
+    claude: claudeOf(money, cfg),
   };
 }
 

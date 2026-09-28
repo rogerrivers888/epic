@@ -494,6 +494,29 @@ deskRoutes.get('/pilot', requires('view_library'), async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/**
+ * POST /billing/refresh — read Google's billing export now rather than at the
+ * next daily tick, attribute it to the ledger, and refresh the tile. Reads
+ * only: a query over the export costs nothing Epic is billed for.
+ */
+deskRoutes.post('/billing/refresh', requires('manage_settings'), async (_req, res, next) => {
+  try {
+    const { billingDaily } = await import('../desk/billing.js');
+    res.json(await billingDaily());
+  } catch (err) { next(err); }
+});
+
+/** GET /claude?month=YYYY-MM — Claude's month by caller, family and sign-in, from the ledger. */
+deskRoutes.get('/claude', requires('view_library'), async (req, res, next) => {
+  try {
+    const month = str(req.query.month) ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit' }).format(new Date());
+    if (!/^\d{4}-\d{2}$/.test(month)) throw bad('month is YYYY-MM');
+    const { claudeByCaller } = await import('../desk/claudeSpend.js');
+    const cfg = (await settingsRepo.settings()).values;
+    res.json({ ...(await claudeByCaller(month)), console: cfg.claudeBilling?.month === month ? cfg.claudeBilling : null });
+  } catch (err) { next(err); }
+});
+
 /** The local open-map extracts, read only: which regions, when, how many places. */
 deskRoutes.get('/osm', requires('view_library'), async (_req, res, next) => {
   try { res.json({ extracts: await osmExtracts(), switchedOn: String(process.env.EPIC_OSM_EXTRACT ?? '') || null }); } catch (err) { next(err); }

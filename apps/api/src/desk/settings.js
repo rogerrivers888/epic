@@ -43,6 +43,10 @@ export const SETTINGS = {
   // expires. Seeded from the console (29 Sep 2026) until the BigQuery export
   // is read; the Overview spend tile judges budgets on usage, not on credit.
   billing:             { kind: 'billing' },
+  // What Anthropic's console says Claude cost this month, in dollars, and the
+  // prepaid credit left (owner, 29 Sep 2026) — the ledger's figure is an
+  // estimate at whichever rate each caller assumed.
+  claudeBilling:       { kind: 'claudeBilling' },
   ageBands:            { kind: 'bands' },
   durationBands:       { kind: 'bands' },
   costBands:           { kind: 'cost' },
@@ -60,6 +64,7 @@ export const DEFAULTS = {
   budgetGoogle: 50, budgetClaude: 30,
   osmRegions: [],
   billing: null,
+  claudeBilling: null,
   ageBands: [
     { key: 'babies', label: 'Babies under 2', from: 0, to: 1 },
     { key: 'toddlers', label: 'Toddlers 2–4', from: 2, to: 4 },
@@ -146,6 +151,14 @@ export function validate(key, value) {
       creditTotalGbp: value.creditTotalGbp == null ? null : Number(value.creditTotalGbp), creditExpires: String(value.creditExpires),
       source: String(value.source ?? 'console'), at: String(value.at ?? new Date().toISOString()) };
   }
+  if (spec.kind === 'claudeBilling') {
+    if (value === null) return null;
+    const ok = value && typeof value === 'object' && Number.isFinite(Number(value.usd)) && /^\d{4}-\d{2}$/.test(String(value.month ?? ''));
+    if (!ok) throw bad(`${key} needs month (YYYY-MM) and usd`);
+    return { month: String(value.month), usd: Number(value.usd), gbp: value.gbp == null ? null : Number(value.gbp),
+      creditUsd: value.creditUsd == null ? null : Number(value.creditUsd),
+      source: String(value.source ?? 'Anthropic console'), at: String(value.at ?? new Date().toISOString()) };
+  }
   if (spec.kind === 'cost') {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw bad(`${key} is bands per country`);
     for (const [country, v] of Object.entries(value)) {
@@ -179,6 +192,7 @@ export const SENTENCES = {
   suggestExpiry: 'A suggestion still in the backlog is dropped after {} days',
   osmRegions: 'Our own copy of the open map is kept for · {}',
   billing: 'Google billing · {}',
+  claudeBilling: 'Claude billing · {}',
 };
 
 /** "What changed" for a setting set to `value`: its row with the value filled in. */
@@ -187,6 +201,7 @@ export function sentenceFor(key, value) {
   if (!row) return `Setting · ${key}`;
   const words = typeof value === 'number' ? String(value)
     : Array.isArray(value) ? (value.length ? value.join(', ') : 'nowhere')
+      : value && typeof value === 'object' && 'usd' in value ? `${value.month}: $${value.usd.toFixed(2)}${value.creditUsd == null ? '' : `, $${value.creditUsd.toFixed(2)} credit left`}`
       : value && typeof value === 'object' && 'usageGbp' in value ? `${value.month}: usage £${value.usageGbp.toFixed(2)}, £${value.creditGbp.toFixed(2)} credit left, expires ${value.creditExpires}`
         : '';
   return row.replace('{}', words);
@@ -199,6 +214,7 @@ export function said(key, value) {
   if (typeof value === 'boolean') return value ? 'On' : 'Off';
   if (typeof value === 'number') return unit === '%' ? `${value}%` : unit === '£' ? `£${value}` : String(value);
   if (Array.isArray(value)) return value.length ? value.map((b) => (typeof b === 'string' ? b : b.label)).join(' · ') : 'None';
+  if (typeof value === 'object' && 'usd' in value) return `$${value.usd.toFixed(2)} used`;
   if (typeof value === 'object' && 'usageGbp' in value) return `£${value.usageGbp.toFixed(2)} used · £${value.creditGbp.toFixed(2)} credit`;
   return JSON.stringify(value);
 }
