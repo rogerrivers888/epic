@@ -27,7 +27,8 @@ test('a month by caller: tokens and dollars per purpose, what failed, and who wa
                values ('anthropic', 'cs-test.plan', 1000, 200, 0, 0, 0.01, true, 0, '2026-03-10 10:00+00'),
                       ('anthropic', 'cs-test.plan', 3000, 800, 500, 100, 0.03, true, 0, '2026-03-11 10:00+00'),
                       ('anthropic', 'cs-test.plan', null, null, null, null, 0.02, false, 1, '2026-03-11 11:00+00'),
-                      ('anthropic', 'cs-test.plan', 10, 10, 0, 0, 0.5, true, 0, '2026-04-01 10:00+01')`);
+                      ('anthropic', 'cs-test.plan', 10, 10, 0, 0, 0.5, true, 0, '2026-04-01 10:00+01'),
+                      ('anthropic', 'cs-test.cache', 0, 0, 900, 0, 0.004, true, 0, '2026-03-12 10:00+00')`);
   const m = await spend.claudeByCaller('2026-03');
   const p = m.purposes.find((x) => x.purpose === 'cs-test.plan');
   assert.equal(p.calls, 3, 'April’s row is not March’s');
@@ -35,7 +36,9 @@ test('a month by caller: tokens and dollars per purpose, what failed, and who wa
   assert.equal(p.tokens, 1000 + 200 + 3000 + 800 + 500 + 100);
   assert.ok(Math.abs(p.usd - 0.06) < 1e-9);
   assert.ok(Math.abs(p.usdNoTokens - 0.02) < 1e-9, 'a cost no tokens account for is named');
-  assert.equal(m.days.length, 2);
+  assert.equal(m.days.length, 3);
+  assert.equal(m.purposes.find((x) => x.purpose === 'cs-test.cache').usdNoTokens, 0, 'cached tokens are tokens');
+  assert.ok(m.topSessions.length >= 1 && 'label' in m.topSessions[0], 'each caller, by session');
   await query(`delete from provider_calls where purpose like 'cs-test%'`);
 });
 

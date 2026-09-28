@@ -36,7 +36,7 @@ const IN_MONTH = `p.created_at >= (($1::text || '-01')::date::timestamp at time 
  * at all (a cost nobody's tokens can account for).
  */
 export async function claudeByCaller(month) {
-  const [{ rows: purposes }, { rows: kinds }, { rows: days }] = await Promise.all([
+  const [{ rows: purposes }, { rows: kinds }, { rows: days }, { rows: sessions }] = await Promise.all([
     query(`
       select p.purpose, count(*)::int calls,
              count(*) filter (where p.ok = false or p.failed > 0)::int failed,
@@ -44,7 +44,8 @@ export async function claudeByCaller(month) {
              coalesce(sum(p.cache_read_tokens), 0)::float cache_read, coalesce(sum(p.cache_write_tokens), 0)::float cache_write,
              coalesce(sum(p.estimated_cost_usd), 0)::float usd,
              coalesce(sum(p.estimated_cost_usd) filter (where p.ok = false or p.failed > 0), 0)::float usd_failed,
-             coalesce(sum(p.estimated_cost_usd) filter (where coalesce(p.input_tokens, 0) + coalesce(p.output_tokens, 0) = 0), 0)::float usd_no_tokens
+             coalesce(sum(p.estimated_cost_usd) filter (where coalesce(p.input_tokens, 0) + coalesce(p.output_tokens, 0)
+               + coalesce(p.cache_read_tokens, 0) + coalesce(p.cache_write_tokens, 0) = 0), 0)::float usd_no_tokens
         from provider_calls p
        where ${CLAUDE} and ${IN_MONTH}
        group by 1 order by usd desc`, [month]),
@@ -64,6 +65,17 @@ export async function claudeByCaller(month) {
         from provider_calls p
        where ${CLAUDE} and ${IN_MONTH}
        group by 1 order by 1`, [month]),
+    // The individual callers: each session with its label and kind, the
+    // biggest first (Codex) — a kind alone folds every agent into one row.
+    query(`
+      select p.session_id, s.label, coalesce(s.kind, 'none') kind, count(*)::int calls,
+             coalesce(sum(p.input_tokens), 0)::float + coalesce(sum(p.output_tokens), 0)::float
+               + coalesce(sum(p.cache_read_tokens), 0)::float + coalesce(sum(p.cache_write_tokens), 0)::float tokens,
+             coalesce(sum(p.estimated_cost_usd), 0)::float usd,
+             array_agg(distinct p.purpose) purposes
+        from provider_calls p left join api_sessions s on s.id = p.session_id
+       where ${CLAUDE} and ${IN_MONTH}
+       group by 1, 2, 3 order by usd desc limit 20`, [month]),
   ]);
   const tokensOf = (r) => r.input + r.output + r.cache_read + r.cache_write;
   const families = new Map();
@@ -91,6 +103,7 @@ export async function claudeByCaller(month) {
     // agent is a passcode session (Claude Code, scripts); a service row is
     // the server's own loops; none is a row from before sessions were kept.
     bySession: kinds,
+    topSessions: sessions.map((r) => ({ sessionId: r.session_id, label: r.label, kind: r.kind, calls: r.calls, tokens: r.tokens, usd: r.usd, purposes: r.purposes })),
     days,
   };
 }
