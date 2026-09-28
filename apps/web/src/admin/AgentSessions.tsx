@@ -80,7 +80,8 @@ export function AgentSessions() {
         <View key={r.id} style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm, paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: colors.lineSoft }}>
           <View style={{ flexGrow: 1, flexBasis: 180, gap: 1 }}>
             <Text style={[type.small, { color: colors.ink, fontWeight: '700' }]} numberOfLines={1}>
-              {`${r.label ?? 'Agent'} · ${r.id.slice(0, 8)}`}{wanted && r.id.startsWith(wanted) ? '  ← this one' : ''}
+              {/* The id first: a long label is cut at the end, never the id (Codex). */}
+              {`${r.id.slice(0, 8)}${wanted && r.id.startsWith(wanted) ? ' ← this one' : ''} · ${r.label ?? 'Agent'}`}
             </Text>
             <Text style={type.tiny}>
               {`${ago(r.last_seen_at ?? r.created_at)} · ${money(r.spent_24h_usd)} in 24 h`}
