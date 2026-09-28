@@ -941,11 +941,16 @@ function pump() {
     const job = waiting.shift();
     queued.delete(job.venueRef);
     running += 1;
-    withDeadline(enrich(job.venueRef, job), job.venueRef)
-      // `onDone`: whoever queued this wants to read the record once the
-      // research has landed — the pre-warm answers the place's facts then,
-      // not before (an answer queued beside the research read nothing).
-      .then((out) => (typeof job.onDone === 'function' ? job.onDone(out) : null))
+    const work = enrich(job.venueRef, job);
+    // `onDone`: whoever queued this wants to read the record once the
+    // research has landed — the pre-warm answers the place's facts then, not
+    // before (an answer queued beside the research read nothing). It follows
+    // the work itself, never the slot's deadline: a pass that outlives its
+    // turn has not landed yet (Codex, 29 Sep 2026).
+    if (typeof job.onDone === 'function') {
+      work.then((out) => job.onDone(out)).catch(() => null);
+    }
+    withDeadline(work, job.venueRef)
       .catch((err) => console.warn(`own: ${job.venueRef} failed: ${err.message}`))
       .finally(() => { running -= 1; pump(); });
   }
@@ -961,13 +966,27 @@ export function upgradeWaiting(line, venueRef, opts, sessionId) {
   return true;
 }
 
+/** Both callbacks, each once, neither able to stop the other. */
+export function chainDone(a, b) {
+  const fa = typeof a === 'function' ? a : null;
+  const fb = typeof b === 'function' ? b : null;
+  if (!fa || !fb || fa === fb) return fa ?? fb ?? undefined;
+  return (out) => { try { fa(out); } catch { /* the other still runs */ } fb(out); };
+}
+
 export function queueEnrichment(venueRef, opts = {}) {
   if (!venueRef) return;
   if (queued.has(venueRef)) {
     // Already waiting — but a free job the loop queued must not swallow a paid
     // one somebody asked for by opening the drawer: the waiting job becomes the
     // asked-for one, on the asker's household and session (Codex, 26 Sep 2026).
+    // A second asker's `onDone` joins the first's rather than being dropped
+    // (Codex, 29 Sep 2026).
+    const w = waiting.find((j) => j.venueRef === venueRef);
+    const before = w?.onDone;
     upgradeWaiting(waiting, venueRef, opts, opts.sessionId ?? currentSpender().sessionId ?? null);
+    const now = waiting.find((j) => j.venueRef === venueRef);
+    if (now) now.onDone = chainDone(before, opts.onDone);
     return;
   }
   queued.add(venueRef);

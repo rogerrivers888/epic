@@ -287,3 +287,21 @@ test('POST /pilot needs manage_settings and starts for the caller’s household 
     assert.equal(got.run.id, body.run.run.id);
   } finally { await owner.close(); }
 });
+
+test('a place whose paid research was refused stays pending, and the resume does it again', async () => {
+  const session = await seed();
+  const refusing = async (ref) => ({ state: 'failed', problems: [`${ref}: a paid provider call was refused`] });
+  const first = await pilot.runPilot({
+    householdId: HH, sessionId: session, cell: CELL, paid: true, wait: true, top: 2,
+    deps: { standing: async () => 'may_spend', detail: async (id, { meter }) => { meter['google-details'] = 1; return { name: 'x', lat: 51, lng: 0, reviews: [] }; }, enrich: refusing },
+  });
+  assert.equal(first.run.run.state, 'waiting');
+  assert.equal(first.run.run.done, 0, 'the refused place is not counted done');
+  const asked = [];
+  const again = await pilot.runPilot({
+    householdId: HH, sessionId: session, cell: CELL, paid: true, wait: true, top: 2,
+    deps: { standing: async () => 'may_spend', detail: async (id, { meter }) => { meter['google-details'] = 1; return { name: 'x', lat: 51, lng: 0, reviews: [] }; }, enrich: fakeEnrich(asked) },
+  });
+  assert.equal(again.run.run.state, 'done');
+  assert.ok(asked.some((a) => a.ref === 'google:pilot-a1'), 'the refused place was researched on the resume');
+});

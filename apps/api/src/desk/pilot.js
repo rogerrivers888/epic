@@ -256,15 +256,17 @@ async function drive(runId, deps) {
           await query(`update pilot_runs set state = 'waiting', waiting_why = $2, updated_at = now() where id = $1`, [runId, r.stop]);
           return { state: 'waiting', why: r.stop };
         }
-        await query(
-          `update pilot_places set state = $3, outcome = $4, done_at = now() where run_id = $1 and venue_ref = $2`,
-          [runId, next.venue_ref, r.failed ? 'failed' : 'done', JSON.stringify(r.outcome)]);
-        await query('update pilot_runs set updated_at = now() where id = $1', [runId]);
+        // A place whose paid research was refused stays pending, so the
+        // resume does it again rather than stepping past it (Codex, 29 Sep).
         if (r.outcome?.researchRefused) {
           const why = 'the researcher’s paid page lead was refused — waiting for a paid grant';
           await query(`update pilot_runs set state = 'waiting', waiting_why = $2, updated_at = now() where id = $1`, [runId, why]);
           return { state: 'waiting', why };
         }
+        await query(
+          `update pilot_places set state = $3, outcome = $4, done_at = now() where run_id = $1 and venue_ref = $2`,
+          [runId, next.venue_ref, r.failed ? 'failed' : 'done', JSON.stringify(r.outcome)]);
+        await query('update pilot_runs set updated_at = now() where id = $1', [runId]);
       }
       // What the run confirmed joins its subcategories now, not at the next
       // daily pass — the fact pages and collections read the result (C33).

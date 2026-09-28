@@ -565,9 +565,20 @@ export async function add() {
     // Nothing confirmed here: a machine link goes; a person's stays as it is.
     if (!r.v) {
       if (r.status && r.status !== 'ignored' && !r.include_anyway && !r.added_by) {
-        await query(
-          `delete from subcategory_facts where subcategory_key = $1 and attribute_key = $2
-              and status <> 'ignored' and not include_anyway and added_by is null`, [r.sub, r.attribute_key]);
+        // Kept on record first, as 282 did, so answerPlace still asks it of
+        // this drawer's places and it can be found again (Codex, 29 Sep 2026).
+        await withTransaction(async (c) => {
+          await c.query(
+            `insert into subcategory_facts_detached (subcategory_key, attribute_key, status, reason, first_seen, active_since, verified_places, why)
+             select subcategory_key, attribute_key, status, reason, first_seen, active_since, verified_places,
+                    'no confirmed place left (pipeline.add)'
+               from subcategory_facts
+              where subcategory_key = $1 and attribute_key = $2
+                and status <> 'ignored' and not include_anyway and added_by is null`, [r.sub, r.attribute_key]);
+          await c.query(
+            `delete from subcategory_facts where subcategory_key = $1 and attribute_key = $2
+                and status <> 'ignored' and not include_anyway and added_by is null`, [r.sub, r.attribute_key]);
+        });
         detached += 1;
       } else if (r.status === 'active' && !r.include_anyway) {
         await query(`update subcategory_facts set status = 'gathering', verified_places = 0, updated_at = now()
