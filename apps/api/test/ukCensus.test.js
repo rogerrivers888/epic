@@ -391,3 +391,17 @@ test('a resume waits while a day\'s plan is being written', async (t) => {
      values ('The rest of the UK — day 2', array['ZZ'], 0.08, 0.12, 70000, 5, 30, 'paused', 'built paused; resume to start', $1)`, [ONE_DAY_RUNS]);
   await assert.rejects(() => resume(older.id), /is being planned/);
 });
+
+test('a restart after setting a plan aside still passes through the billing gate', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state, problem, started_at)
+     values ('The rest of the UK — day 2', array['ZZ'], 0.08, 0.12, 70000, 5, 30, 'stopped', 'planning cut short; replaced by the next run', '2026-09-29T07:10:00Z')`);
+  // Day 1's census was billed above pennies: the replacement is held, not started (Codex, 29 Sep 2026).
+  await billed('2026-09-28', 'google-essentials', 2);
+  const r = recorder();
+  const out = await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start });
+  assert.equal(out.action, 'held');
+  assert.equal(r.calls.length, 0);
+});

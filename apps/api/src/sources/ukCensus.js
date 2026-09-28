@@ -132,11 +132,15 @@ async function sessionFor(label) {
 export async function decide(now = new Date()) {
   const runs = await programme();
   if (!runs.length) return { action: 'off', runs };
-  const latest = runs[runs.length - 1];
   // Days are numbered by the runs that were days: a plan cut short and
-  // replaced does not use up a number.
+  // replaced does not use up a number. And a plan cut short is not the latest
+  // day either: everything is decided from the last real day's run, so a
+  // restart between setting one aside and starting its replacement still
+  // passes through the billing gate (Codex, 29 Sep 2026).
   const cutShort = (r) => r.state === 'stopped' && /^planning cut short/.test(r.problem ?? '');
-  const days = runs.filter((r) => !cutShort(r)).length;
+  const real = runs.filter((r) => !cutShort(r));
+  const days = real.length;
+  const latest = real[real.length - 1] ?? runs[runs.length - 1];
   const bills = await billedByDay(pacificDay(runs[0].started_at));
   // Any export day over £5, and any quota day of the programme over £5 across
   // the two London days it spans — £3 and £3 is £6 (Codex, 29 Sep 2026). The
@@ -165,9 +169,8 @@ export async function decide(now = new Date()) {
   // while its plan was being written — is not anybody's stop. It is set aside
   // and the day started again, the same day (Codex, 28 Sep 2026).
   const unfinishedPlan = latest.state === 'paused' && latest.started_by === STARTED_BY && /^built paused/.test(latest.problem ?? '')
-    && Date.now() - new Date(latest.started_at).getTime() > PLANNING_MS;
+    && new Date(now).getTime() - new Date(latest.started_at).getTime() > PLANNING_MS;
   if (unfinishedPlan) return { action: 'replan', runs, latest, bills, day: days };
-  if (cutShort(latest)) return { action: 'start', runs, latest, bills, yesterday: null, day: days + 1 };
   const dayEnded = (latest.state === 'paused' && DAY_ENDED.test(latest.problem ?? '')) || latest.state === 'done';
   if (!dayEnded) return { action: 'stopped', runs, latest, bills };
   // A day's run is the quota day it was started in: one run a day, however
