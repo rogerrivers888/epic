@@ -1703,6 +1703,18 @@ test('a run rolls up the districts it censused, not the fresh ones it walked pas
   await rollUpOutcodes({ runId: idle.id });
   assert.deepEqual(await counts(), [['zz7a', 999], ['zz7b', 1]], 'a run that asked nothing publishes nothing');
 
+  // A run begun since stamping began, beside which an old worker wrote an
+  // unstamped slice during a rolling deploy, is still not from before the
+  // stamp (Codex, 28 Sep 2026): it asked nothing, and rolls up nothing.
+  const beside = await startTestRun({ label: 'test beside an old worker' });
+  await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'test/walked/2') on conflict do nothing`, [beside.id]);
+  await query(
+    `insert into census_slices (area_slug, min_lat, min_lng, max_lat, max_lng, category, subcategory,
+                                google_type, query, returned, new_ids, saturated, depth, requests, ran_at)
+     values ('test/walked/2', 50.16, -2.10, 50.24, -1.98, 'sport', 'golf', 'golf_course', 'golf course', 1, 1, false, 0, 1, now())`);
+  await rollUpOutcodes({ runId: beside.id });
+  assert.deepEqual(await counts(), [['zz7a', 999], ['zz7b', 1]], 'an old worker\'s slice does not make a new run old');
+
   // A run begun before slices were stamped (migration 263) has no ids to go
   // on, and keeps the whole plan it always rolled.
   const old = await startTestRun({ label: 'test before 263' });

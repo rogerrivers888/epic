@@ -1253,7 +1253,13 @@ export async function rollUpOutcodes({ outcodes = null, runId = null, alsoSquare
               and exists (select 1 from census_slices s
                             join census_run_tiles m on m.grid_key = s.area_slug and m.run_id = r.id
                            where s.census_run_id is null
-                             and s.ran_at between r.started_at and coalesce(r.finished_at, now())) as legacy
+                             and s.ran_at between r.started_at and coalesce(r.finished_at, now()))
+              -- And it began before this database ever stamped a slice: a run
+              -- begun since cannot be from before the stamp, whatever an old
+              -- worker wrote beside it during a rolling deploy (Codex, 28 Sep
+              -- 2026). Read from the data, so it holds wherever 263 landed.
+              and r.started_at < coalesce((select min(ran_at) from census_slices where census_run_id is not null), 'infinity')
+              as legacy
          from census_runs r where r.id = $1`, [runId])
     : { rows: [] };
   if (runId && !run) return { outcodes: 0, rows: 0, unattributed: 0 };
