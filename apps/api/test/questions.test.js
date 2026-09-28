@@ -420,7 +420,7 @@ test('a key is split however it was written, so stepFree meets step free', async
 test('a sweep clears the glued spelling of a word it now raises properly', async () => {
   // Migration 211 cleared what was in the queue; this is the same test run on
   // every sweep, so the next change to extraction cleans up after itself.
-  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  const sub = (await query("select key from shelf_subcategories where active order by key limit 1")).rows[0].key;
   await query("delete from harvest_candidates where subcategory = $1 and norm in ('splash zone', 'splashzone')", [sub]);
   await query(
     `insert into harvest_candidates (norm, raw_forms, subcategory, places_seen, places_total, kind, status)
@@ -510,7 +510,7 @@ test('the pen can be read from its common end, above a sightings floor', async (
   // list capped at a thousand rows and sorted that way can never show the
   // words seen on the most places in a drawer whose pen holds more than that —
   // with thirty-seven thousand words in the pen, that was every rich drawer.
-  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  const sub = (await query("select key from shelf_subcategories where active order by key limit 1")).rows[0].key;
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
   const rows = [['zz once', 1], ['zz twice', 2], ['zz thrice', 3]];
   for (const [norm, seen] of rows) {
@@ -532,7 +532,7 @@ test('a floor that is not a whole number is no floor, not a 500', async () => {
   // Codex, 25 Sep 2026: `minSeen=1.5` or `Infinity` reached `$7::int` and the
   // GET answered 500. A floor is a reading aid; anything the database cannot
   // hold as one is read as "no floor" rather than refused.
-  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  const sub = (await query("select key from shelf_subcategories where active order by key limit 1")).rows[0].key;
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
   await query(
     `insert into harvest_candidates (norm, raw_forms, subcategory, places_seen, places_total, kind, status)
@@ -586,7 +586,7 @@ test('a word the classifier cannot call is not asked again until its count rises
   // most-seen first, so the same four hundred words came back at the top of
   // every tranche — 416 of 480 held, then 461 of 480 — and were bought again.
   const harvest = await import('../src/sources/vocabulary.js');
-  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  const sub = (await query("select key from shelf_subcategories where active order by key limit 1")).rows[0].key;
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
   const { rows: [row] } = await query(
     `insert into harvest_candidates (norm, raw_forms, subcategory, places_seen, places_total, kind, status)
@@ -617,7 +617,7 @@ test('promotable means harvest-found and quoted; a classifier verdict alone neve
   // The owner, 26 Sep 2026 (C21): "A Google-raised word is never promoted on
   // a classifier verdict alone." Four doors, one rule at each.
   const harvest = await import('../src/sources/vocabulary.js');
-  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  const sub = (await query("select key from shelf_subcategories where active order by key limit 1")).rows[0].key;
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
 
   // 1. Written by a Google run as a feature: in the pen, not promotable.
@@ -657,7 +657,7 @@ test('an ignored word keeps its quote, so the way back leads somewhere', async (
   // word could never be promotable again — an unresolved feature nothing
   // would ever pick up. The examples are scaffolding and go; the quote is
   // owned text and stays.
-  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  const sub = (await query("select key from shelf_subcategories where active order by key limit 1")).rows[0].key;
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
   await sets.recordCandidates(sub, [{ norm: 'zz lazy river', raw: 'zz lazy river', kind: 'feature', sources: ['features'], placesSeen: 4, examples: ['osm:b'], asserts: 4, evidence: 'a lazy river winds round the outdoor pool', evidenceRef: 'osm:b' }], { placesTotal: 20 });
   const [row] = (await sets.candidates({ subcategory: sub, status: 'new', limit: 50 })).filter((c) => c.norm === 'zz lazy river');
@@ -677,7 +677,7 @@ test('an ignored word keeps its quote, so the way back leads somewhere', async (
 test('a word promoted onto an existing label becomes its alias, and may land on another sheet', async () => {
   // Riverside is river said another way (a merge), and a moat raised under
   // museums belongs to Historic (the owner, 26 Sep 2026).
-  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  const sub = (await query("select key from shelf_subcategories where active order by key limit 1")).rows[0].key;
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
   await query("insert into question_sets (key, name) values ('zz-other', 'Other') on conflict do nothing");
   await sets.recordCandidates(sub, [
@@ -701,7 +701,7 @@ test('a word promoted onto an existing label becomes its alias, and may land on 
 });
 
 test('a drawer name is decided as a filing, never a question', async () => {
-  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  const sub = (await query("select key from shelf_subcategories where active order by key limit 1")).rows[0].key;
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
   await sets.recordCandidates(sub, [
     { norm: 'zz lake', raw: 'zz lake', kind: 'feature', sources: ['features'], placesSeen: 10, examples: ['osm:l'], asserts: 10, evidence: 'a boating lake', evidenceRef: 'osm:l' },
@@ -725,7 +725,7 @@ test('dining area is food-on-site said another way', async () => {
 
 test('Codex: a filing needs its drawer, a merge names a real label, and a wording means one thing', async () => {
   // Three doors the alias plan opened and did not guard (Codex, 26 Sep 2026).
-  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  const sub = (await query("select key from shelf_subcategories where active order by key limit 1")).rows[0].key;
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
   await query("insert into question_sets (key, name) values ('zz-other', 'Other') on conflict do nothing");
   await sets.recordCandidates(sub, [
@@ -788,7 +788,7 @@ test('migration 260 turns a promoted soft play on Water into a filing under Play
 
 test('an evidence quote goes to the approver only; everybody else is told there is one (E11b, 26 Sep 2026)', async () => {
   const qs = await import('../src/repositories/questionSets.js');
-  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  const sub = (await query("select key from shelf_subcategories where active order by key limit 1")).rows[0].key;
   await query("delete from harvest_candidates where subcategory = $1 and norm = 'zz wave machine'", [sub]);
   await query(
     `insert into harvest_candidates (norm, raw_forms, subcategory, places_seen, places_total, kind, status, sources, evidence, evidence_ref)
@@ -810,7 +810,7 @@ test('an evidence quote goes to the approver only; everybody else is told there 
 // ---------------------------------------------------------------------------
 
 test('a word that means a global question becomes its alias, never a second question', async () => {
-  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  const sub = (await query("select key from shelf_subcategories where active order by key limit 1")).rows[0].key;
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
   await sets.recordCandidates(sub, [{ norm: 'zz car park', raw: 'zz car park', kind: 'feature', sources: ['features'], placesSeen: 3, examples: ['osm:c'], asserts: 3, evidence: 'There is a car park behind the pub', evidenceRef: 'osm:c' }], { placesTotal: 20 });
   const [w] = (await sets.candidates({ subcategory: sub, status: 'new', limit: 50 })).filter((c) => c.norm === 'zz car park');
@@ -827,7 +827,7 @@ test('a word that means a global question becomes its alias, never a second ques
 });
 
 test('an alias names a global question, or it is refused', async () => {
-  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  const sub = (await query("select key from shelf_subcategories where active order by key limit 1")).rows[0].key;
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
   await sets.recordCandidates(sub, [{ norm: 'zz thing', raw: 'zz thing', kind: 'feature', sources: ['features'], placesSeen: 2, asserts: 2, evidence: 'a thing', evidenceRef: 'osm:t' }], { placesTotal: 20 });
   const [w] = (await sets.candidates({ subcategory: sub, status: 'new', limit: 50 })).filter((c) => c.norm === 'zz thing');
@@ -836,7 +836,7 @@ test('an alias names a global question, or it is refused', async () => {
 });
 
 test('a quoted word can become a global fact with its own re-check cadence', async () => {
-  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  const sub = (await query("select key from shelf_subcategories where active order by key limit 1")).rows[0].key;
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
   await sets.recordCandidates(sub, [{ norm: 'zz halal', raw: 'zz halal', kind: 'feature', sources: ['features'], placesSeen: 3, asserts: 3, evidence: 'our meat is Halal', evidenceRef: 'osm:h' }], { placesTotal: 20 });
   const [w] = (await sets.candidates({ subcategory: sub, status: 'new', limit: 50 })).filter((c) => c.norm === 'zz halal');
@@ -851,7 +851,7 @@ test('a quoted word can become a global fact with its own re-check cadence', asy
 });
 
 test('a word set aside says why', async () => {
-  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  const sub = (await query("select key from shelf_subcategories where active order by key limit 1")).rows[0].key;
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
   await sets.recordCandidates(sub, [{ norm: 'zz gift voucher', raw: 'zz gift voucher', kind: 'feature', sources: ['features'], placesSeen: 8, asserts: 8, evidence: 'gift vouchers are available', evidenceRef: 'osm:g' }], { placesTotal: 20 });
   const [w] = (await sets.candidates({ subcategory: sub, status: 'new', limit: 50 })).filter((c) => c.norm === 'zz gift voucher');
@@ -862,7 +862,7 @@ test('a word set aside says why', async () => {
 });
 
 test('Codex on C27: a blank label falls back, a switched-off global comes back on, and a restore forgets the old reason', async () => {
-  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  const sub = (await query("select key from shelf_subcategories where active order by key limit 1")).rows[0].key;
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
   await sets.recordCandidates(sub, [
     { norm: 'zz kosher', raw: 'zz kosher', kind: 'feature', sources: ['features'], placesSeen: 2, asserts: 2, evidence: 'certified kosher kitchen', evidenceRef: 'osm:k' },
@@ -889,7 +889,7 @@ test('Codex on C27: a blank label falls back, a switched-off global comes back o
 });
 
 test('Codex on C27: a fact a set already asks is not made global as a side effect', async () => {
-  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  const sub = (await query("select key from shelf_subcategories where active order by key limit 1")).rows[0].key;
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
   await query("insert into question_sets (key, name) values ('zz-set', 'Zz') on conflict do nothing");
   await query("insert into place_attributes (key, label, kind, position) values ('zz-vegan', 'Zz vegan', 'yesno', 200) on conflict do nothing");
@@ -915,7 +915,7 @@ test('Codex on C27: a fact a set already asks is not made global as a side effec
 });
 
 test('Codex on C27: a word already filed is not aliased over its filing', async () => {
-  const sub = (await query("select key from shelf_subcategories where active limit 1")).rows[0].key;
+  const sub = (await query("select key from shelf_subcategories where active order by key limit 1")).rows[0].key;
   await query("delete from harvest_candidates where subcategory = $1 and norm like 'zz %'", [sub]);
   await sets.recordCandidates(sub, [{ norm: 'zz lot', raw: 'zz lot', kind: 'feature', sources: ['features'], placesSeen: 2, asserts: 2, evidence: 'a car lot', evidenceRef: 'osm:l' }], { placesTotal: 20 });
   const [w] = (await sets.candidates({ subcategory: sub, status: 'new', limit: 50 })).filter((c) => c.norm === 'zz lot');
