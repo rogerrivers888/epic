@@ -201,3 +201,19 @@ test('the census cost is its own SKU, and the £5 stop is every line billed', as
   await billed('2026-09-28', 'unmapped', 6);
   assert.equal((await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start, stop: async () => {} })).action, 'halted');
 });
+
+test('a run done with a square given up on is not the UK complete: the next day tries again', async (t) => {
+  await clean(); t.after(async () => {
+    await query(`delete from census_run_tiles where grid_key = 'uktest/failed'`);
+    await query(`delete from census_tiles where grid_key = 'uktest/failed'`);
+    await clean();
+  });
+  const run = await dayOne({ state: 'done', problem: null });
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, failures)
+     values ('uktest/failed', 48, -6, 48.08, -5.88, array['ZZ9Q'], 'failed', 3) on conflict (grid_key) do update set state = 'failed', failures = 3`);
+  await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'uktest/failed')`, [run.id]);
+  const r = recorder();
+  const out = await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start });
+  assert.equal(out.action, 'start', 'not complete while a square is unasked');
+});

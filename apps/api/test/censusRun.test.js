@@ -2074,10 +2074,10 @@ test('a new run keeps the drawers a half-asked square answered, and not its spen
   const tiles = await planTiles({ outcodes: ['ZZ0C'], padKm: 0 });
   const [tile] = tiles;
   await query(
-    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, started_at, done_subcategories, requests)
-     values ($1, $2, $3, $4, $5, array['ZZ0C'], 'doing', null, now() - interval '20 hours', array['golf','museums'], 400)
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, started_at, done_subcategories, requests, saturated)
+     values ($1, $2, $3, $4, $5, array['ZZ0C'], 'doing', null, now() - interval '20 hours', array['golf','museums'], 400, 2)
      on conflict (grid_key) do update set state = 'doing', censused_at = null, started_at = excluded.started_at,
-       done_subcategories = excluded.done_subcategories, requests = 400`,
+       done_subcategories = excluded.done_subcategories, requests = 400, saturated = 2`,
     [tile.gridKey, tile.minLat, tile.minLng, tile.maxLat, tile.maxLng]);
   const run = await startRun({ label: 'test next day', outcodes: ['ZZ0C'], padKm: 0 });
   t.after(async () => {
@@ -2085,7 +2085,8 @@ test('a new run keeps the drawers a half-asked square answered, and not its spen
     await query(`delete from census_tiles where grid_key = $1`, [tile.gridKey]);
   });
   const { rows: [after] } = await query(
-    'select state, done_subcategories, started_at is not null as swept, requests from census_tiles where grid_key = $1', [tile.gridKey]);
-  assert.deepEqual([after.state, after.done_subcategories, after.swept, after.requests], ['todo', ['golf', 'museums'], true, 0]);
+    'select state, done_subcategories, started_at is not null as swept, requests, saturated from census_tiles where grid_key = $1', [tile.gridKey]);
+  assert.deepEqual([after.state, after.done_subcategories, after.swept, after.requests, after.saturated], ['todo', ['golf', 'museums'], true, 0, 2],
+    'its drawers and what was cut off in them are kept; its spending is not');
   await query(`update census_runs set state = 'done' where id = $1`, [run.id]);
 });

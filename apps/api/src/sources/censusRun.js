@@ -364,7 +364,9 @@ export async function startRun({
               requests   = case when ${FRESH} then census_tiles.requests else 0 end,
               slices     = case when ${FRESH} then census_tiles.slices else 0 end,
               places     = case when ${FRESH} then census_tiles.places else 0 end,
-              saturated  = case when ${FRESH} then census_tiles.saturated else 0 end,
+              -- Kept with a half-asked square's checkpoint: a drawer it kept
+              -- may have hit the depth limit, and that stays true (Codex).
+              saturated  = case when ${FRESH} or ${PARTIAL} then census_tiles.saturated else 0 end,
               failures   = case when ${FRESH} then census_tiles.failures else 0 end,
               problem    = case when ${FRESH} then census_tiles.problem else null end,
               started_at = case when ${FRESH} or ${PARTIAL} then census_tiles.started_at else null end`,

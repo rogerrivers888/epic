@@ -116,9 +116,19 @@ export async function decide(now = new Date()) {
   const bills = await billedByDay(pacificDay(runs[0].started_at));
   const over = bills.find((b) => b.google_gbp > DAY_ALERT_GBP);
   if (over) return { action: 'halted', runs, latest, bills, over };
-  if (latest.state === 'done') return { action: 'complete', runs, latest, bills };
+  // Done is complete only if no square was given up on: a run finishes with
+  // its failed squares set aside, and the UK is not done while they are
+  // unasked. A day that ended so is followed by another, which tries them
+  // again (Codex, 28 Sep 2026).
+  const { rows: [{ failed }] } = latest.state === 'done'
+    ? await query(
+      `select count(*)::int as failed from census_run_tiles m join census_tiles t on t.grid_key = m.grid_key
+        where m.run_id = $1 and t.state <> 'done'`, [latest.id])
+    : { rows: [{ failed: 0 }] };
+  if (latest.state === 'done' && !failed) return { action: 'complete', runs, latest, bills };
   if (['running', 'waiting'].includes(latest.state)) return { action: 'working', runs, latest, bills };
-  if (!(latest.state === 'paused' && DAY_ENDED.test(latest.problem ?? ''))) return { action: 'stopped', runs, latest, bills };
+  const dayEnded = (latest.state === 'paused' && DAY_ENDED.test(latest.problem ?? '')) || latest.state === 'done';
+  if (!dayEnded) return { action: 'stopped', runs, latest, bills };
   // The quota day it last asked in: a run ended for the day just after the
   // reset still belongs to the day it met the cap in (Codex, 28 Sep 2026).
   const lastDay = latest.quota_day ?? pacificDay(latest.finished_at ?? latest.last_seen_at ?? latest.started_at);
