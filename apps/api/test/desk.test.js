@@ -526,3 +526,22 @@ test('the local open map answers a place near a point by name, and says when it 
   await query(`delete from osm_extracts where region = 'desk-test'`);
   osm.forgetCoverage();
 });
+
+test('the location filter knows the first part of a postcode, and says when it knows nothing', async () => {
+  const { resolveLocation, chipOf } = await import('../src/desk/location.js');
+  await query(`delete from postcodes where outcode = 'ZZ9'`);
+  await query(`insert into postcodes (pcds, sector, outcode, lat, lng, source) values
+    ('ZZ9 1AA', 'ZZ9 1', 'ZZ9', 60.1, -1.1, 'test'), ('ZZ9 1AB', 'ZZ9 1', 'ZZ9', 60.1002, -1.1002, 'test')`);
+  await query(`insert into geo_cells (code, scheme, label, outcode, lat, lng, source) values ('sector:ZZ9 1', 'sector', 'ZZ9 1', 'ZZ9', 60.1001, -1.1001, 'test')
+               on conflict (code) do nothing`);
+  const known = await resolveLocation({ where: 'zz9', minutes: 30, mode: 'car' });
+  assert.equal(known.unknown, undefined);
+  assert.equal(chipOf(known), 'within 30 min of ZZ9 by car');
+  const sector = await resolveLocation({ where: 'ZZ9 1', minutes: 15, mode: 'transit' });
+  assert.equal(chipOf(sector), 'within 15 min of ZZ9 1 by public transport');
+  assert.equal(sector.approx, true, 'public transport is an approximation and says so');
+  assert.equal((await resolveLocation({ where: 'ZZ8', minutes: 30 })).unknown, true, 'an outcode with no postcodes is not a place we know');
+  assert.equal(await resolveLocation({ where: '  ' }), null, 'empty is the whole estate');
+  await query(`delete from postcodes where outcode = 'ZZ9'`);
+  await query(`delete from geo_cells where code = 'sector:ZZ9 1'`);
+});

@@ -80,6 +80,7 @@ export async function verification({ period = '24h' } = {}) {
     backlog: {
       now: st.backlog,
       oldestDays: oldest?.at ? Math.floor((Date.now() - new Date(oldest.at).getTime()) / 86400_000) : null,
+      oldestAt: oldest?.at ?? null,
       series: backlogSeries,
       // Amber if rising across the period.
       amber: backlogSeries.length > 1 && backlogSeries[backlogSeries.length - 1].n > backlogSeries[0].n,
@@ -153,38 +154,48 @@ export async function sources(cfg) {
 /**
  * A drill-down: fact · place · area · outcome · when, filterable by country,
  * county and feature. `kind` is backlog | confirmed | dropped | checked |
- * notThere | nothingFound | conflicts. Backlog items sort oldest first.
+ * answered | notThere | nothingFound | conflicts; `source` narrows to one of
+ * our sources (the Sources table's numbers). Backlog items sort oldest first;
+ * Dropped at 30 days is this month's, as its chart card counts it.
  */
-export async function items({ kind, period = '7d', country = null, county = null, feature = null, limit = 300 } = {}) {
+export async function items({ kind, period = '7d', source = null, country = null, county = null, feature = null, limit = 300 } = {}) {
   const since = new Date(Date.now() - (period === '24h' ? 1 : period === '30d' ? 30 : 7) * 86400_000);
   let rows = [];
   if (kind === 'backlog') {
-    ({ rows } = await query(`select venue_ref, feature, first_seen as at, 'Backlog' as outcome, null as source from fact_suggestions order by first_seen asc limit 2000`));
+    ({ rows } = await query(`select venue_ref, feature, first_seen as at, 'backlog' as outcome, null as source from fact_suggestions order by first_seen asc limit 2000`));
   } else if (kind === 'conflicts') {
     ({ rows } = await query(
-      `select x.venue_ref, a.label as feature, x.checked_at as at, 'Conflict' as outcome, x.source
+      `select x.venue_ref, a.label as feature, x.checked_at as at, 'conflict' as outcome, x.source
          from place_fact_answers x join place_attributes a on a.key = x.attribute_key where x.state = 'conflict' order by x.checked_at desc limit 2000`));
   } else {
-    const outcome = { confirmed: ['verified'], dropped: ['dropped'], checked: ['verified', 'no', 'dont_know', 'conflict'], notThere: ['no'], nothingFound: ['dont_know'] }[kind];
-    if (!outcome) return { rows: [] };
-    ({ rows } = await query(
-      `select venue_ref, feature, at, outcome, source from fact_checks where outcome = any($1) and at >= $2 order by at desc limit 2000`,
-      [outcome, since]));
+    const outcome = {
+      confirmed: ['verified'], dropped: ['dropped'], checked: ['verified', 'no', 'dont_know', 'conflict'],
+      answered: ['verified', 'no', 'conflict'], notThere: ['no'], nothingFound: ['dont_know'],
+    }[kind];
+    if (!outcome) return { rows: [], total: 0, counties: [], countries: [], features: [] };
+    const args = [outcome];
+    let where = 'outcome = any($1)';
+    if (kind === 'dropped') where += ` and at >= date_trunc('month', now())`;
+    else { args.push(since); where += ` and at >= $${args.length}`; }
+    if (source) { args.push(source); where += ` and source = $${args.length}`; }
+    ({ rows } = await query(`select venue_ref, feature, at, outcome, source from fact_checks where ${where} order by at desc limit 2000`, args));
   }
   const d = await describe(rows.map((r) => r.venue_ref));
-  const WORD = { verified: 'Verified', no: 'Not there', dont_know: 'Nothing found', conflict: 'Conflict', dropped: 'Dropped' };
-  const out = rows.map((r) => {
+  const WORD = { verified: 'Confirmed', no: 'Not there', dont_know: 'Nothing found', conflict: 'Conflict', dropped: 'Dropped at 30 days', backlog: 'Backlog' };
+  const all = rows.map((r) => {
     const p = d.get(r.venue_ref) ?? {};
-    return { ref: r.venue_ref, feature: r.feature, place: p.name, area: p.area, county: p.county, country: p.country, outcome: WORD[r.outcome] ?? r.outcome, source: SOURCE_WORD[r.source] ?? r.source ?? null, at: r.at };
-  })
+    return { ref: r.venue_ref, feature: r.feature, place: p.name ?? null, area: p.area ?? null, county: p.county ?? null, country: p.country ?? null, outcome: WORD[r.outcome] ?? r.outcome, source: SOURCE_WORD[r.source] ?? r.source ?? null, at: r.at };
+  });
+  const out = all
     .filter((r) => !country || r.country === country)
     .filter((r) => !county || r.county === county)
     .filter((r) => !feature || String(r.feature).toLowerCase() === String(feature).toLowerCase());
   return {
     rows: out.slice(0, limit),
     total: out.length,
-    counties: [...new Set(out.map((r) => r.county).filter(Boolean))].sort(),
-    countries: [...new Set(out.map((r) => r.country).filter(Boolean))].sort(),
-    features: [...new Set(out.map((r) => r.feature).filter(Boolean))].sort(),
+    // The filters' choices come from the whole drill-down, not the narrowed one.
+    counties: [...new Set(all.map((r) => r.county).filter(Boolean))].sort(),
+    countries: [...new Set(all.map((r) => r.country).filter(Boolean))].sort(),
+    features: [...new Set(all.map((r) => r.feature).filter(Boolean))].sort(),
   };
 }

@@ -121,11 +121,20 @@ export async function subcategoryList({ cat = null, q = null, loc = null } = {})
       facts: facts.get(s.key)?.live ?? 0,
       related: (related.get(s.key) ?? []).filter((r) => labelOf.has(r.key)).map((r) => ({ key: r.key, label: labelOf.get(r.key), why: r.why })),
     }));
+  // The bulk bar's facts and their value pills, from the same vocabularies a
+  // subcategory page's Change offers (README "Value vocabularies").
+  const cfg = (await settings()).values;
+  const { rows: attrs } = await query('select key, label, kind, options from place_attributes where key = any($1) and active', [STANDARD]);
+  const attrOf = new Map(attrs.map((a) => [a.key, a]));
+  const defaultFacts = STANDARD.filter((k) => attrOf.has(k)).map((k) => ({
+    key: k, label: attrOf.get(k).label, options: optionsOf(attrOf.get(k), cfg).map(({ key, label }) => ({ key, label })),
+  }));
   const factsTotal = [...facts.values()].reduce((n, f) => n + f.live, 0);
   const newFacts = [...facts.values()].reduce((n, f) => n + f.fresh, 0);
   return {
     counts: { subcategories: subs.length, places: total, facts: factsTotal, newFacts },
     rows,
+    defaultFacts,
     atLeast: Boolean(loc?.capped),
   };
 }
@@ -215,7 +224,9 @@ export async function subcategoryPage(key) {
                       and x.venue_ref in (select venue_ref from (${FILED_SQL}) f where f.sub = sf.subcategory_key)) as places_with
              from subcategory_facts sf join place_attributes a on a.key = sf.attribute_key
             where sf.subcategory_key = $1 and a.active order by a.label`, [key]),
-    query(`select count(distinct f.venue_ref)::int n from (${FILED_SQL}) f where f.sub = $1 and not f.is_primary`, [key]),
+    query(`select count(distinct f.venue_ref)::int n,
+                  count(distinct f.venue_ref) filter (where not f.is_primary)::int secondary
+             from (${FILED_SQL}) f where f.sub = $1`, [key]),
     relatedPairs(),
   ]);
   if (!sub) throw missing(`${key} is not one of our subcategories.`);
@@ -271,8 +282,57 @@ export async function subcategoryPage(key) {
     categoryLabel: sub.category_label,
     defaults: defaultRows,
     facts: factRows,
-    secondaryPlaces: secondary[0]?.n ?? 0,
+    places: secondary[0]?.n ?? 0,
+    secondaryPlaces: secondary[0]?.secondary ?? 0,
+    // Header counts: facts looked for here, and those that became Active in
+    // the last 30 days (the prototype's LOOKING FOR and NEW · 30 DAYS).
+    live: factRows.filter((f) => f.status === 'active').length,
+    fresh: factRows.filter((f) => f.isNew).length,
+    // A fact is Active at this many confirmed places (the `addPlaces` setting):
+    // "Confirmed at 1 of 2 places needed".
+    needed: cfg.addPlaces ?? null,
     related: (related.get(key) ?? []).filter((r) => labelOf.has(r.key)).map((r) => ({ key: r.key, label: labelOf.get(r.key), why: r.why })),
+  };
+}
+
+/**
+ * New facts (the header's NEW FACTS drill): every fact the machine made Active
+ * in a subcategory in the last 30 days, newest first, with what it rests on —
+ * "Mentioned at 9 places · confirmed on 4 by our own sources · found on 31% of
+ * places". A share over no places is not a number: `pct` is null, not 0.
+ */
+export async function newFacts() {
+  const { rows } = await query(
+    `with f as (${FILED_SQL}),
+     fresh as (
+       select sf.subcategory_key as sub, sf.attribute_key, sf.active_since, a.label, s.label as sub_label
+         from subcategory_facts sf
+         join place_attributes a on a.key = sf.attribute_key and a.active and not a.standard
+         join shelf_subcategories s on s.key = sf.subcategory_key and s.active
+        where sf.status = 'active' and sf.active_since > now() - interval '30 days')
+     select x.*,
+            (select count(distinct f.venue_ref)::int from f where f.sub = x.sub) as places,
+            (select count(distinct e.venue_ref)::int from place_fact_evidence e
+              where e.attribute_key = x.attribute_key and e.says in ('yes', 'no')
+                and e.venue_ref in (select venue_ref from f where f.sub = x.sub)) as mentioned,
+            (select count(distinct a.venue_ref)::int from place_fact_answers a
+              where a.attribute_key = x.attribute_key and a.state = 'yes' and a.hidden_at is null
+                and a.venue_ref in (select venue_ref from f where f.sub = x.sub)) as confirmed
+       from fresh x
+      order by x.active_since desc, x.sub_label, x.label`);
+  return {
+    total: rows.length,
+    rows: rows.map((r) => ({
+      sub: r.sub,
+      subLabel: r.sub_label,
+      fact: r.attribute_key,
+      label: r.label,
+      activeSince: r.active_since,
+      places: r.places,
+      mentioned: r.mentioned,
+      confirmed: r.confirmed,
+      pct: r.places ? Math.round((r.confirmed / r.places) * 100) : null,
+    })),
   };
 }
 

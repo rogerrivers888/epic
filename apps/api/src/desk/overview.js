@@ -4,7 +4,9 @@
  *   - Needs you: only true human decisions — mapping decisions waiting, and
  *     person-set defaults their confirmed places contradict. "Nothing needs
  *     you" when empty. The machine's backlog is not listed.
- *   - Health: Verification, Sources, Accuracy, Spend, each green, amber or red.
+ *   - Health: Verification, Sources, Accuracy, Spend, each green, amber or red
+ *     — or `none` where the tile cannot speak (Accuracy building, no source
+ *     asked anything this week), which is never drawn as green.
  *   - Collections: most engaged, shown but never opened, reach nobody; "—"
  *     until there are real households.
  *   - Growth: places known, facts verified this week, households, with trends.
@@ -75,9 +77,10 @@ export async function overview() {
   // ---- Needs you
   const needs = [];
   if (mapping.counts.needs) needs.push({ key: 'mapping', n: mapping.counts.needs, label: `${mapping.counts.needs} mapping decision${mapping.counts.needs === 1 ? '' : 's'}`, where: 'Mapping › Needs a decision' });
-  if (contradicted.length) needs.push({ key: 'defaults', n: contradicted.length, label: `${contradicted.length} bulk setting${contradicted.length === 1 ? '' : 's'} contradicted by ${contradicted.length === 1 ? 'its' : 'their'} places`, where: 'Categories', subs: contradicted.map((c) => c.subcategory_key) });
+  if (contradicted.length) needs.push({ key: 'defaults', n: contradicted.length, label: `${contradicted.length} bulk setting${contradicted.length === 1 ? '' : 's'} contradicted by ${contradicted.length === 1 ? 'its' : 'their'} places`, where: 'Categories › subcategory defaults', subs: contradicted.map((c) => c.subcategory_key) });
 
   // ---- Health
+  const heard = srcs.some((s) => s.source !== 'families' && s.checked > 0);
   const failing = srcs.filter((s) => s.status === 'Failing');
   const slow = srcs.filter((s) => s.status === 'Slow');
   const googlePct = cfg.budgetGoogle ? money.google / cfg.budgetGoogle : 0;
@@ -87,15 +90,19 @@ export async function overview() {
     verification: {
       tone: verif.state === 'running' ? 'green' : 'red',
       title: verif.state === 'running' ? 'Running' : verif.state === 'stalled' ? 'Stalled' : 'Never run',
-      line: verif.state === 'running' ? `last checked ${ago(verif.lastAt)}` : verif.state === 'stalled' ? `nothing checked for ${verif.hours} hours` : 'nothing has been checked yet',
+      line: verif.state === 'running' ? `last checked ${ago(verif.lastAt)}` : verif.state === 'stalled' ? `nothing checked for ${verif.hours} hours` : 'nothing checked yet',
     },
-    sources: {
-      tone: failing.length ? 'red' : slow.length ? 'amber' : 'green',
-      title: failing.length ? `${failing.map((s) => s.label).join(', ')} failing` : slow.length ? `${slow.map((s) => s.label).join(', ')} slow` : 'All answering',
-      line: failing.length || slow.length ? 'the rest answering' : null,
-    },
+    // "All answering" is a claim, and it can only be made of sources that were
+    // asked something: with nothing checked this week the tile cannot speak.
+    sources: failing.length || slow.length || heard
+      ? {
+        tone: failing.length ? 'red' : slow.length ? 'amber' : 'green',
+        title: failing.length ? `${failing.map((s) => s.label).join(', ')} failing` : slow.length ? `${slow.map((s) => s.label).join(', ')} slow` : 'All answering',
+        line: failing.length || slow.length ? 'the rest answering' : null,
+      }
+      : { tone: 'none', title: 'Not asked yet', line: 'no source checked anything this week' },
     accuracy: acc.headline.building
-      ? { tone: 'green', title: 'Building', line: `${acc.headline.answered} family answer${acc.headline.answered === 1 ? '' : 's'} so far` }
+      ? { tone: 'none', title: 'Building', line: `${acc.headline.answered} family answer${acc.headline.answered === 1 ? '' : 's'} so far` }
       : {
         tone: acc.headline.accuracy >= 90 ? 'green' : acc.headline.accuracy >= 80 ? 'amber' : 'red',
         title: `Machine agreed with families ${acc.headline.accuracy}%`,
@@ -104,7 +111,7 @@ export async function overview() {
     spend: {
       tone: worstSpend > 1 ? 'red' : worstSpend > 0.8 ? 'amber' : 'green',
       title: `Google £${Math.round(money.google)} of £${cfg.budgetGoogle} · Claude £${Math.round(money.claude)} of £${cfg.budgetClaude}`,
-      line: worstSpend > 1 ? 'over budget' : worstSpend > 0.8 ? 'near budget' : 'within budget',
+      line: worstSpend > 1 ? 'over budget' : worstSpend > 0.8 ? 'close to budget' : 'within budget',
     },
   };
 
@@ -121,21 +128,28 @@ export async function overview() {
     : { speaks: false };
 
   // ---- Growth
-  const [placesSeries, factsSeries] = await Promise.all([
+  const [placesSeries, factsSeries, householdsSeries] = await Promise.all([
     weekly(`select to_char(date_trunc('week', g), 'YYYY-MM-DD') as week,
                    (select count(*) from place_index where subcategory is not null and not_in_epic_at is null and first_seen < g + interval '7 days') as n
               from generate_series(date_trunc('week', now()) - interval '5 weeks', date_trunc('week', now()), interval '1 week') g`),
     weekly(`select to_char(date_trunc('week', g), 'YYYY-MM-DD') as week,
                    (select count(*) from fact_checks where outcome = 'verified' and at >= g and at < g + interval '7 days') as n
               from generate_series(date_trunc('week', now()) - interval '5 weeks', date_trunc('week', now()), interval '1 week') g`),
+    // Households by the end of each week, counted the way the headline is:
+    // once somebody has signed in to it.
+    weekly(`select to_char(date_trunc('week', g), 'YYYY-MM-DD') as week,
+                   (select count(*) from households h where exists (
+                      select 1 from accounts a where a.household_id = h.id and a.activated_at is not null
+                         and a.activated_at < g + interval '7 days')) as n
+              from generate_series(date_trunc('week', now()) - interval '5 weeks', date_trunc('week', now()), interval '1 week') g`),
   ]);
   const placesNow = placesSeries[placesSeries.length - 1]?.n ?? 0;
   const factsNow = factsSeries[factsSeries.length - 1]?.n ?? 0;
   const factsLast = factsSeries[factsSeries.length - 2]?.n ?? 0;
   const growth = {
-    places: { n: placesNow, line: `+${placesNow - (placesSeries[0]?.n ?? 0)} in 6 weeks`, series: placesSeries },
-    facts: { n: factsNow, line: `last week ${factsLast}`, series: factsSeries },
-    households: households ? { n: households, line: null, series: [] } : { n: null, line: 'none yet', series: [] },
+    places: { n: placesNow, line: `+${(placesNow - (placesSeries[0]?.n ?? 0)).toLocaleString('en-GB')} in 6 weeks`, series: placesSeries },
+    facts: { n: factsNow, line: `last week ${factsLast.toLocaleString('en-GB')}`, series: factsSeries },
+    households: households ? { n: households, line: null, series: householdsSeries } : { n: null, line: 'none yet', series: householdsSeries },
   };
 
   return { needs, health, collections, growth };

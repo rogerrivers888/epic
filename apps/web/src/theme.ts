@@ -449,6 +449,12 @@ export const desk = {
    * value is the handoff's own `oklch(0.72 0.19 25)` converted to sRGB.
    */
   warn: '#FF6A65',
+  /**
+   * "Watch this" — a rising backlog, a slow source, a default its places
+   * contradict (back-office handover v2, 28 Sep 2026). Not danger, so not red;
+   * the handoff's `oklch(0.82 0.15 75)` in sRGB.
+   */
+  amber: '#FCB442',
 } as const;
 
 /**

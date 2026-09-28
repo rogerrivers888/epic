@@ -61,7 +61,12 @@ export function Runs({
   headline: string;
   /** "Berkshire · 105 places loaded · harvests read beyond it". */
   scope: string;
-  triggers: Trigger[];
+  /**
+   * The runs that can be started, with their price. Optional: the desk of
+   * 28 Sep 2026 has no button that starts a job ("humans decide; the machine
+   * runs itself"), so where there is no `onTrigger` the band is not drawn.
+   */
+  triggers?: Trigger[];
   /** The run in flight, if there is one. Runs take hours; this is not optional. */
   live: { name: string; scope: string; funnel: { name: string; count: number; done: boolean }[] } | null;
   runs: RunRow[];
@@ -72,8 +77,9 @@ export function Runs({
    */
   clears: { says: string; note: string; ever: boolean };
   saturation: Saturation[];
-  onTrigger: (key: Trigger['key']) => void;
-  onStop: () => void;
+  onTrigger?: (key: Trigger['key']) => void;
+  /** Optional, as `onTrigger`: with none, the run in flight has no Stop. */
+  onStop?: () => void;
   onOpenStage: (runId: string, stageKey: string) => void;
   /**
    * Which stage of which run is open, and what is in it.
@@ -105,6 +111,7 @@ export function Runs({
         people's sites; both get stated up front, with the money, so nobody
         starts one to see what happens.
       */}
+      {triggers?.length && onTrigger ? (
       <Wide>
       <View style={{
         flexDirection: 'row', gap: 1, backgroundColor: desk.rule,
@@ -138,6 +145,7 @@ export function Runs({
         ))}
       </View>
       </Wide>
+      ) : null}
 
       <Wide>
       {live ? (
@@ -146,7 +154,7 @@ export function Runs({
             <Value size={14} weight="800">{live.name}</Value>
             <Value size={12.5} tone="dim">{live.scope}</Value>
             <View style={{ flex: 1 }} />
-            <Act label="Stop it" tone="warn" onPress={onStop} />
+            {onStop ? <Act label="Stop it" tone="warn" onPress={onStop} /> : null}
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 10 }}>
             {live.funnel.map((s) => (

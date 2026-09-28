@@ -12,6 +12,7 @@ import {
   HandPlatter, Shield, ShieldCheck, BadgeCheck, Video, Megaphone, Repeat, CalendarCheck, Banknote, Laptop, DoorOpen, Handshake, GraduationCap,
   Share2, CircleAlert, UserRound, Award, Presentation, HandHeart,
   Bell, BellOff, Link, Reply, Flag, SmilePlus, Smile, Globe, CircleHelp,
+  Tag, ArrowDownWideNarrow,
 } from 'lucide-react-native';
 import { colors, spacing, type } from '../theme';
 
@@ -75,6 +76,10 @@ const ICONS = {
   fullscreen: Maximize2,
   /** Narrowing a list down, rather than a single setting: the browse's Filters. */
   filters: SlidersHorizontal,
+  /** Something broken that needs a person: the desk's red banners (Verification stalled / never run). */
+  warning: TriangleAlert,
+  /** A fact a Google word carries (the desk's Mapping chips), and the desk's Sort control. */
+  tag: Tag, sort: ArrowDownWideNarrow,
   allergen: TriangleAlert, archived: Archive, refresh: RefreshCw, delete: Trash2,
   // the device's own copy: no signal, saving it, and what Epic owns outright
   offline: CloudOff, download: Download, owned: Database,

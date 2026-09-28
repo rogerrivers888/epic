@@ -158,6 +158,12 @@ export async function mappingState() {
     query(`select * from word_proposals where namespace = $1 and state = 'open'`, [NS]),
   ]);
   const proposalByWord = new Map(proposals.map((p) => [p.word, p]));
+  // A narrowing states what it keeps and what leaves (README: "only churches
+  // with a Wikipedia/Wikidata entry or heritage listing (14) · the other 198
+  // leave Epic"), counted now rather than when the proposal was raised.
+  for (const p of proposals) {
+    if (p.action === 'narrow' && NARROWING_SQL[p.change_to?.condition]) p.narrowed = await narrowCounts(p.word, p.change_to.condition);
+  }
 
   const inEpic = []; const needs = []; const notInEpic = [];
   for (const w of words) {
@@ -195,17 +201,38 @@ export async function mappingState() {
   };
 }
 
+/**
+ * How a narrowing splits a word's places: those that qualify and stay, and
+ * those that do not qualify and that no other in-Epic word carries — the ones
+ * that would actually leave.
+ */
+export async function narrowCounts(word, condition) {
+  const cond = NARROWING_SQL[condition];
+  if (!cond) return null;
+  const { rows: [r] } = await query(`
+    select count(distinct pil.venue_ref) filter (where ${cond})::int as kept,
+           count(distinct pil.venue_ref) filter (where not ${cond} and not exists (
+             select 1 from place_index_labels o join taxonomy_labels l on l.namespace = 'google' and 'google:' || l.key = o.label
+              where o.venue_ref = pil.venue_ref and o.label <> pil.label and l.active
+                and (l.points_at is not null or l.decision = 'generic'
+                     or exists (select 1 from word_targets t where t.namespace = l.namespace and t.word = l.key))))::int as leave
+      from place_index_labels pil where pil.label = $1`, [`${NS}:${word}`]);
+  return { kept: r?.kept ?? 0, leave: r?.leave ?? 0 };
+}
+
 /** A proposal as the Needs a decision row draws it. */
 function proposalOut(p, targets, counts) {
+  const text = p.change_to?.text ?? null;
+  const n = p.narrowed;
   return {
     id: p.id,
     group: p.grp,
     action: p.action,
-    changeTo: p.change_to?.text ?? null,
+    changeTo: n && text ? `${text} (${n.kept.toLocaleString('en-GB')}) · the other ${n.leave.toLocaleString('en-GB')} leave Epic` : text,
     target: p.change_to?.subcategory ?? null,
     fact: p.change_to?.fact ?? null,
     ruleText: p.rule_text ?? null,
-    affected: p.places_affected ?? counts.affected,
+    affected: n ? n.leave : (p.places_affected ?? counts.affected),
     pointsAtNow: targets.length ? targets.map((t) => t.label).join(' · ') : null,
   };
 }
@@ -213,12 +240,21 @@ function proposalOut(p, targets, counts) {
 /** The Decided view: every past decision, newest first, filterable by kind. */
 export async function decisions({ kind = null } = {}) {
   const args = [NS];
-  let where = 'namespace = $1';
-  if (kind) { args.push(kind); where += ` and kind = $${args.length}`; }
-  const { rows } = await query(
-    `select id, word, kind, why, who, at, before, after, proposal_id, undone_at
-       from word_decisions where ${where} order by at desc limit 500`, args);
-  return rows;
+  let where = 'd.namespace = $1 and d.undone_at is null';
+  if (kind) { args.push(kind); where += ` and d.kind = $${args.length}`; }
+  // An undone decision leaves this view (it is still in Changes, marked
+  // undone). `latest` says whether Undo can be offered: only the newest live
+  // decision on a word can be taken back. `total` is uncapped, so the screen
+  // can say when it is showing the first 500 and not all.
+  const [{ rows }, { rows: [{ n }] }] = await Promise.all([
+    query(
+      `select d.id, d.word, d.kind, d.why, d.who, d.at, d.proposal_id,
+              not exists (select 1 from word_decisions x where x.namespace = d.namespace and x.word = d.word
+                            and x.undone_at is null and x.id <> d.id and x.at > d.at) as latest
+         from word_decisions d where ${where} order by d.at desc limit 500`, args),
+    query(`select count(*)::int n from word_decisions d where ${where}`, args),
+  ]);
+  return { rows, total: n };
 }
 
 // ---------------------------------------------------------------------------
@@ -234,9 +270,14 @@ async function snapshot(c, word) {
       where namespace = $1 and word = $2 order by is_primary desc, position`, [NS, word]);
   const { rows: [rule] } = await c.query(
     `select id, subcategory, reason, taught_by from shelf_rules where scope = 'labels' and subject = $1`, [`${NS}:${word}`]);
+  const { rows: f } = await c.query(
+    `select attribute_key from taxonomy_label_carries where namespace = $1 and key = $2 order by attribute_key`, [NS, word]);
   return {
     decision: w.decision, pointsAt: w.points_at, active: w.active,
     targets: t, rule: rule ? { subcategory: rule.subcategory, reason: rule.reason, by: rule.taught_by } : null,
+    // The facts the word carries (the README's `labels`): part of what a
+    // decision puts back, so a picker's fact tick is undone like any other.
+    facts: f.map((r) => r.attribute_key),
   };
 }
 
@@ -309,6 +350,16 @@ async function apply(c, word, state, who) {
   } else {
     await c.query(`delete from shelf_rules where scope = 'labels' and subject = $1`, [subject]);
   }
+  // Facts are restored only when the state names them: a snapshot written
+  // before facts were part of one (undefined) leaves the carries alone.
+  if (Array.isArray(state.facts)) {
+    await c.query('delete from taxonomy_label_carries where namespace = $1 and key = $2 and not (attribute_key = any($3))', [NS, word, state.facts]);
+    for (const f of state.facts) {
+      await c.query(
+        `insert into taxonomy_label_carries (namespace, key, attribute_key, yesno) values ($1, $2, $3, true)
+         on conflict (namespace, key, attribute_key) do nothing`, [NS, word, f]);
+    }
+  }
   await narrowRules(c, word);
 }
 
@@ -324,10 +375,14 @@ export async function refreshNarrowings() {
 /** How a state reads in the Changes log's Before → After. */
 async function pointsLabel(c, state) {
   if (state.decision && WHY_OUT[state.decision]) return 'Not in Epic';
-  if (!state.targets?.length) return state.decision === 'generic' ? 'Fact only' : 'Not answered';
+  const { rows: fr } = state.facts?.length
+    ? await c.query('select key, label from place_attributes where key = any($1)', [state.facts])
+    : { rows: [] };
+  const facts = fr.map((r) => `fact: ${r.label}`);
+  if (!state.targets?.length) return [state.decision === 'generic' ? 'Fact only' : 'Not answered', ...facts].join(' · ');
   const { rows } = await c.query('select key, label from shelf_subcategories where key = any($1)', [state.targets.map((t) => t.sub)]);
   const label = new Map(rows.map((r) => [r.key, r.label]));
-  return state.targets.map((t) => (label.get(t.sub) ?? t.sub) + (t.primary && state.targets.length > 1 ? ' (primary)' : '')).join(' · ');
+  return [...state.targets.map((t) => (label.get(t.sub) ?? t.sub) + (t.primary && state.targets.length > 1 ? ' (primary)' : '')), ...facts].join(' · ');
 }
 
 const forgetAll = () => { forgetRules(); forgetTaxonomy(); forgetAttributes(); };
@@ -383,7 +438,28 @@ export async function setTargets({ word, subs, primary = null, why = null, who }
     word, kind: 'Repointed', why, who,
     next: async (before, c) => {
       for (const s of ordered) await subExists(c, s);
-      return { decision: null, active: true, targets: ordered.map((s, i) => ({ sub: s, primary: i === 0 })), rule: before.rule };
+      return { decision: null, active: true, targets: ordered.map((s, i) => ({ sub: s, primary: i === 0 })), rule: before.rule, facts: before.facts };
+    },
+  });
+}
+
+/**
+ * The picker's Fact tab: tick or untick a fact the word carries. A picker
+ * edit, so it is a Repointed decision (README: "Picker edits … are logged as
+ * Repointed and are undoable"), with the word's subcategories left as they are.
+ */
+export async function setFact({ word, fact, on = true, why = null, who }) {
+  return decide({
+    word, kind: 'Repointed', why, who,
+    next: async (before, c) => {
+      const { rows: [a] } = await c.query('select key, label, kind from place_attributes where key = $1 and active', [fact]);
+      if (!a) throw bad(`${fact} is not one of our facts.`);
+      if (a.kind !== 'yesno') throw bad(`${a.label} is not a yes or no; a word can only carry a yes.`);
+      const facts = on ? [...new Set([...before.facts, fact])] : before.facts.filter((f) => f !== fact);
+      return {
+        decision: before.decision, active: before.active, rule: before.rule, facts,
+        targets: before.targets.map((t) => ({ sub: t.sub, primary: t.primary, condition: t.condition })),
+      };
     },
   });
 }
@@ -404,14 +480,10 @@ export async function bringBack({ word, why, who }) {
 
 /** Stop filing by a word and keep it as a fact only (tourist_attraction). */
 export async function makeFact({ word, fact = null, why, who, proposalId = null }) {
-  const out = await decide({ word, kind: 'Made a fact', why, who, proposalId, next: { decision: 'generic', active: true, targets: [] } });
-  if (fact) {
-    await query(
-      `insert into taxonomy_label_carries (namespace, key, attribute_key, yesno) values ($1, $2, $3, true)
-       on conflict (namespace, key, attribute_key) do nothing`, [NS, word, fact]);
-    forgetAttributes();
-  }
-  return out;
+  return decide({
+    word, kind: 'Made a fact', why, who, proposalId,
+    next: (before) => ({ decision: 'generic', active: true, targets: [], facts: fact ? [...new Set([...before.facts, fact])] : before.facts }),
+  });
 }
 
 /**
@@ -429,11 +501,11 @@ export async function decideProposal({ id, action, why = null, who }) {
       const { rows: [d] } = await c.query(
         `insert into word_decisions (namespace, word, kind, why, who, before, after, proposal_id)
          values ($1, $2, 'Kept', $3, $4, $5::jsonb, $5::jsonb, $6) returning *`,
-        [NS, p.word, why?.trim() || 'Proposal declined', who, JSON.stringify(before), id]);
+        [NS, p.word, why?.trim() || 'Kept — proposal declined', who, JSON.stringify(before), id]);
       await c.query(`update word_proposals set state = 'kept', decided_at = now(), decided_by = $2 where id = $1`, [id, who]);
       const change = await logChange({
         client: c, who, area: 'Mapping', what: `Google word · ${p.word} · Kept`,
-        before: p.change_to?.text ?? null, after: 'Kept — proposal declined', why: why || 'Proposal declined',
+        before: p.change_to?.text ?? null, after: 'Kept — proposal declined', why: why || 'Kept — proposal declined',
         subjectType: 'word', subjectId: p.word, undo: { kind: 'word_decision', id: d.id },
       });
       return { decision: d, change };
@@ -456,14 +528,10 @@ export async function decideProposal({ id, action, why = null, who }) {
         if (p.change_to?.newSub) await createSubcategory(c, p.change_to.newSub, who);
         if (p.change_to?.newFact) await createFact(c, p.change_to.newFact, who);
         await subExists(c, sub);
-        return { decision: null, active: true, targets: [{ sub, primary: true, condition }], rule: before.rule };
+        const facts = p.change_to?.fact ? [...new Set([...before.facts, p.change_to.fact])] : before.facts;
+        return { decision: null, active: true, targets: [{ sub, primary: true, condition }], rule: before.rule, facts };
       },
     });
-    if (p.change_to?.fact) {
-      await query(`insert into taxonomy_label_carries (namespace, key, attribute_key, yesno) values ($1, $2, $3, true)
-                   on conflict do nothing`, [NS, p.word, p.change_to.fact]);
-      forgetAttributes();
-    }
     return out;
   }
   throw bad(`${p.action} cannot be carried out from here; choose where it goes.`);
@@ -525,7 +593,7 @@ export async function undo({ id, who }) {
       await snapshot(c, d.word);
       await apply(c, d.word, {
         decision: d.before.decision, active: d.before.active,
-        targets: d.before.targets ?? [], rule: d.before.rule,
+        targets: d.before.targets ?? [], rule: d.before.rule, facts: d.before.facts,
       }, who);
     }
     await c.query('update word_decisions set undone_at = now(), undone_by = $2 where id = $1', [id, who]);

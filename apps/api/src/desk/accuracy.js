@@ -16,6 +16,9 @@ import { describe, SOURCE_WORD } from './places.js';
 
 export const BUILDING_BELOW = 10;
 
+/** The sources whose answers families check, in the order the screens list them. */
+export const MACHINE_SOURCES = ['site', 'osm', 'wikipedia', 'wikidata'];
+
 /** Every comparison, one row each. */
 async function comparisons({ since = null } = {}) {
   const args = [];
@@ -92,7 +95,9 @@ export async function accuracy({ view = 'fact', source = null, chart = 'monthly'
       return { at: d, ...figure(all.filter((c) => new Date(c.at) >= d && new Date(c.at) < e)) };
     });
 
-  const bySource = grouped(all, (c) => c.source ?? null).map((r) => ({ ...r, label: SOURCE_WORD[r.key] ?? r.key }));
+  const gotSrc = new Map(grouped(all, (c) => c.source ?? null).map((r) => [r.key, r]));
+  const bySource = [...MACHINE_SOURCES, ...[...gotSrc.keys()].filter((k) => !MACHINE_SOURCES.includes(k))]
+    .map((k) => ({ ...(gotSrc.get(k) ?? { key: k, ...figure([]) }), label: SOURCE_WORD[k] ?? k }));
   const filtered = source ? all.filter((c) => c.source === source) : all;
   const table = view === 'category'
     ? grouped(filtered, (c) => subBy.get(c.sub)?.category_key ?? null).map((r) => ({
@@ -133,11 +138,21 @@ export async function health({ kind, key, source = null }) {
       : c.sub === key));
   const scoped = source ? mine.filter((c) => c.source === source) : mine;
   const head = figure(scoped);
+  const { rows: cats } = await query('select key, label from shelf_categories');
+  const label = kind === 'fact' ? attrLabel.get(key) ?? key
+    : kind === 'category' ? cats.find((c) => c.key === key)?.label ?? key
+      : subBy.get(key)?.label ?? key;
+  // Every machine source has a row, compared or not, so a source nobody has
+  // checked reads "Building" rather than being missing from the table.
+  const got = new Map(grouped(mine, (c) => c.source ?? null).map((r) => [r.key, r]));
+  const bySource = [...MACHINE_SOURCES, ...[...got.keys()].filter((k) => !MACHINE_SOURCES.includes(k))]
+    .map((k) => ({ ...(got.get(k) ?? { key: k, ...figure([]) }), label: SOURCE_WORD[k] ?? k }));
   return {
-    kind, key,
+    kind, key, label,
     headline: head,
     subcategoryCount: new Set(scoped.map((c) => c.sub).filter(Boolean)).size,
-    bySource: grouped(mine, (c) => c.source ?? null).map((r) => ({ ...r, label: SOURCE_WORD[r.key] ?? r.key })),
+    factCount: new Set(scoped.map((c) => c.attribute_key).filter(Boolean)).size,
+    bySource,
     second: kind === 'subcategory'
       ? { by: 'fact', rows: grouped(scoped, (c) => c.attribute_key).map((r) => ({ ...r, label: attrLabel.get(r.key) ?? r.key })) }
       : { by: 'subcategory', rows: grouped(scoped, (c) => c.sub).map((r) => ({ ...r, label: subBy.get(r.key)?.label ?? r.key })) },
@@ -151,6 +166,8 @@ export async function health({ kind, key, source = null }) {
 export async function disagreements({ kind, key, source, q = null }) {
   const all = await comparisons();
   const { rows: subs } = await query('select key, label, category_key from shelf_subcategories');
+  const { rows: attrs } = await query('select key, label from place_attributes');
+  const attrLabel = new Map(attrs.map((a) => [a.key, a.label]));
   const subBy = new Map(subs.map((s) => [s.key, s]));
   const list = all.filter((c) => !c.agreed && c.source === source && (kind === 'fact' ? c.attribute_key === key
     : kind === 'category' ? subBy.get(c.sub)?.category_key === key : c.sub === key));
@@ -164,6 +181,7 @@ export async function disagreements({ kind, key, source, q = null }) {
     label: SOURCE_WORD[source] ?? source,
     rows: once.map((c) => ({
       ref: c.venue_ref, place: d.get(c.venue_ref)?.name ?? null, subcategory: subBy.get(c.sub)?.label ?? null,
+      fact: attrLabel.get(c.attribute_key) ?? c.attribute_key,
       sourceSaid: WORD[c.machine_state], familiesSaid: WORD[c.answer], date: c.at,
     })).filter((r) => !needle || String(r.place ?? '').toLowerCase().includes(needle))
       .sort((a, b) => new Date(b.date) - new Date(a.date)),

@@ -3602,13 +3602,6 @@ export const api = {
       candidates: Candidate[]; pen: Candidate[]; inFlight: Candidate[]; thin: Candidate[];
       readNote: string;
     }>(`/api/admin/filing/labels/sets/${encodeURIComponent(key)}`),
-  /** Ask a candidate of every place in the set, as an ordinary question or a gate. */
-  adminFilingPromote: (id: number, gate: boolean) =>
-    post<{ question: SetQuestion }>(`/api/admin/filing/candidates/${id}/promote`, { gate }),
-  /** Ignoring a word is permanent, and it does not come back. */
-  adminFilingIgnore: (id: number) => post<{ ignored: true }>(`/api/admin/filing/candidates/${id}/ignore`, {}),
-  adminFilingRemoveQuestion: (id: number) =>
-    request<{ removed: true }>(`/api/admin/filing/questions/${id}`, { method: 'DELETE' }),
 
   /** Words a human typed that nothing asks yet. */
   /**
@@ -3623,12 +3616,6 @@ export const api = {
     counts: { typed: number; orphans: number };
     why: string | null;
   }>('/api/admin/filing/pending'),
-  adminFilingApprove: (id: number, sets: string[]) =>
-    post<{ asked: number }>(`/api/admin/filing/pending/${id}/approve`, { sets }),
-  /** Parked: in the vocabulary, asked nowhere, and All labels says so. */
-  adminFilingPark: (id: number) => post<{ parked: true }>(`/api/admin/filing/pending/${id}/park`, {}),
-  adminFilingMerge: (id: number) => post<{ merged: true }>(`/api/admin/filing/pending/${id}/merge`, {}),
-  adminFilingReject: (id: number) => post<{ rejected: true }>(`/api/admin/filing/pending/${id}/reject`, {}),
 
   /** Epic's whole vocabulary, and where each word is asked. */
   adminFilingVocabulary: () =>
@@ -3636,9 +3623,6 @@ export const api = {
       vocabulary: VocabRow[];
       counts: { labels: number; everywhere: number; nowhere: number };
     }>('/api/admin/filing/labels/vocabulary'),
-  /** Retiring takes it out of the vocabulary and out of every set. */
-  adminFilingRetire: (key: string) =>
-    post<{ retired: true }>(`/api/admin/filing/labels/${encodeURIComponent(key)}/retire`, {}),
 
   /** The defaults, and the two different ways each can be wrong. */
   adminFilingRules: () => request<{ rules: RuleRow[]; counts: { rules: number } }>('/api/admin/filing/rules'),
@@ -3696,8 +3680,6 @@ export const api = {
       count: number | null; listed: number; more: number;
       recorded: boolean; exact: boolean; listNote: string | null;
     }>(`/api/admin/filing/runs/${encodeURIComponent(runId)}/stages/${encodeURIComponent(stage)}`),
-  adminFilingStartRun: (kind: string) => post<{ started: true }>('/api/admin/filing/runs', { kind }),
-  adminFilingStopRun: () => post<{ stopped: true }>('/api/admin/filing/runs/stop', {}),
 
   /** What was decided, newest first, and the whole trail behind any word. */
   adminFilingDecisions: (p: { decision?: string; set?: string } = {}) =>
@@ -3705,6 +3687,18 @@ export const api = {
       `/api/admin/filing/decisions${qs(p)}`),
   adminFilingTrail: (word: string) =>
     request<{ trail: Trail }>(`/api/admin/filing/decisions/${encodeURIComponent(word)}/trail`),
+
+  // --- the back office desk (handover of 28 Sep 2026) ----------------------
+  //
+  // `/api/admin/desk`: Overview, Categories, Facts, Mapping, Collections,
+  // Fact automations and Changes. Two doors rather than forty calls, because
+  // each screen owns the type of what it reads (admin/desk/kit.tsx `deskApi`).
+  // Nothing here is remembered for offline: `offline/policy.ts` names no desk
+  // endpoint, and a back office read on a stale copy is worse than none.
+  deskGet: <T,>(path: string, params: Record<string, string | number | boolean | null | undefined> = {}) =>
+    request<T>(`/api/admin/desk${path}${qs(params)}`),
+  deskSend: <T,>(method: 'POST' | 'PUT', path: string, body: unknown) =>
+    request<T>(`/api/admin/desk${path}`, { method, body: JSON.stringify(body ?? {}) }),
 
   // --- writes that have not gone yet ----------------------------------------
 

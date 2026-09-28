@@ -162,12 +162,13 @@ export async function setSetting(key, raw, { who, what = null } = {}) {
     await c.query(
       'insert into bo_settings_log (key, version, before, after, who) values ($1, $2, $3::jsonb, $4::jsonb, $5)',
       [key, version, JSON.stringify(before ?? null), JSON.stringify(value), who]);
-    await logChange({
+    // The change's id goes back to the screen, so the toast's Undo names it.
+    const change = await logChange({
       client: c, who, area: 'Fact automations', what: what ?? `Setting · ${key}`,
       before: said(key, before), after: said(key, value),
       subjectType: 'setting', subjectId: key, undo: { kind: 'setting', key, value: before },
     });
-    return { changed: true, value, version };
+    return { changed: true, value, version, change: change.id };
   });
   forget();
   return out;

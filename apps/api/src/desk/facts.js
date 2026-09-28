@@ -67,9 +67,12 @@ export async function allFacts({ q = null, cat = null, sub = null, status = null
       fact: a.key,
       label: a.label,
       standard: a.standard,
-      subcategories: a.standard ? 'All' : st === 'ignored' && ignored.length === 1 ? ignored[0].sub_label : String(st === 'active' ? active.length : st === 'gathering' ? gathering.length : ignored.length),
-      subcategoryCount: a.standard ? null : u.length,
-      places: hasBy.get(a.key) ?? 0,
+      // Ignored names where it is ignored (C46); otherwise how many look for it.
+      subcategories: a.standard ? 'All' : st === 'ignored' ? ignored.map((x) => x.sub_label).sort().join(', ') : String(active.length + gathering.length),
+      subcategoryCount: a.standard ? null : st === 'ignored' ? 0 : active.length + gathering.length,
+      // Not looked for anywhere, or gathering with nothing confirmed: no count
+      // to give, so null ("—"), never a 0 that means "unknown".
+      places: st === 'ignored' || (st === 'gathering' && !hasBy.get(a.key)) ? null : hasBy.get(a.key) ?? 0,
       status: st,
       statusText: st === 'active' ? (isNew ? 'New' : '') : STATUS_WORD[st],
       isNew,
@@ -101,10 +104,11 @@ export async function factPage(key) {
   if (!a) throw missing(`${key} is not one of our facts.`);
   const { rows: [{ n: places }] } = await query(`select count(distinct venue_ref)::int n from (${HAS_SQL}) h where attribute_key = $1`, [key]);
   if (a.standard) {
-    return { fact: a.key, label: a.label, standard: true, places, definition: definitionOf(a, cfg) };
+    return { fact: a.key, label: a.label, kind: a.kind, standard: true, status: 'active', statusText: STATUS_WORD.active, isNew: false, places, definition: definitionOf(a, cfg), conflicts: 0, conflictLine: null };
   }
+  const needed = cfg.addPlaces ?? 2;
   const [{ rows: subs }, { rows: [{ n: conflicts }] }] = await Promise.all([
-    query(`select sf.subcategory_key, sf.status, sf.reason, s.label, c.label as category_label,
+    query(`select sf.subcategory_key, sf.status, sf.reason, sf.first_seen, sf.active_since, sf.verified_places, s.label, s.category_key, c.label as category_label,
                   (select count(distinct h.venue_ref)::int from (${HAS_SQL}) h
                     where h.attribute_key = sf.attribute_key
                       and h.venue_ref in (select venue_ref from (${FILED_SQL}) f where f.sub = sf.subcategory_key)) as places
@@ -115,41 +119,80 @@ export async function factPage(key) {
   ]);
   const active = subs.filter((s) => s.status === 'active');
   const st = active.length ? 'active' : subs.some((s) => s.status === 'gathering') ? 'gathering' : 'ignored';
+  const fresh = (s) => s.active_since && Date.now() - new Date(s.active_since).getTime() < 30 * 86400_000;
+  // Spelled by hand: ICU writes September as "Sept" in en-GB.
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const day = (t) => { const d = new Date(t); return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`; };
   return {
     fact: a.key,
     label: a.label,
+    kind: a.kind,
     standard: false,
     status: st,
     statusText: STATUS_WORD[st],
-    places,
+    isNew: st === 'active' && active.some(fresh),
+    places: st === 'ignored' ? null : places,
+    needed,
     subcategories: subs.filter((s) => s.status !== 'ignored').map((s) => ({
-      key: s.subcategory_key, label: s.label, category: s.category_label, places: s.places, status: s.status,
+      key: s.subcategory_key, label: s.label, category: s.category_label, categoryKey: s.category_key, places: s.places, status: s.status,
+      isNew: s.status === 'active' && !!fresh(s),
+      // What a row that is not yet Active says instead of a count (README
+      // "Gathering evidence": "Confirmed at 1 of 2 places needed · first seen 19 Sep").
+      note: s.status === 'gathering'
+        ? `Confirmed at ${s.verified_places ?? 0} of ${needed} places needed${s.first_seen ? ` · first seen ${day(s.first_seen)}` : ''}`
+        : null,
     })),
     conflicts,
     conflictLine: conflicts ? `${conflicts} place${conflicts === 1 ? '' : 's'} where our sources disagree — families will be asked` : null,
   };
 }
 
-/** A standard fact's definition: its shape and, where it has them, its bands. */
+/** A standard fact's definition: its shape, a line, and its bands (README "All facts"). */
 export function definitionOf(a, cfg) {
-  if (a.kind === 'yesno') return { shape: 'Yes or no' };
-  if (a.key === 'suits-ages') return { shape: 'Who it’s for', bands: (cfg.ageBands ?? []).map((b) => b.label) };
-  if (a.key === 'duration') return { shape: 'How long', bands: (cfg.durationBands ?? []).map((b) => b.label) };
-  if (a.key === 'cost-band') {
-    const sym = { GBP: '£', EUR: '€' };
+  if (a.kind === 'yesno') return { shape: 'Yes or no', line: 'Yes or no, answered for every place Epic holds.' };
+  if (a.key === 'suits-ages') {
     return {
-      shape: 'Cost per person',
-      byCountry: Object.entries(cfg.costBands ?? {}).map(([country, v]) => ({
-        country,
-        currency: v.currency,
-        bands: v.bands.map((b) => (b.to === 0 ? b.label
-          : b.under != null ? `${b.label} under ${sym[v.currency] ?? ''}${b.under}`
-            : b.over != null ? `${b.label} over ${sym[v.currency] ?? ''}${b.over}`
-              : `${b.label} ${sym[v.currency] ?? ''}${b.from}–${b.to}`)),
+      shape: 'Who it’s for',
+      line: 'The ages a place suits. Each place answers with the youngest and oldest age; families see the bands it covers.',
+      bands: (cfg.ageBands ?? []).map((b) => {
+        const means = b.from <= 0 ? `under ${b.to + 1}` : b.to >= 99 ? `${b.from} and over` : `${b.from}–${b.to}`;
+        return { name: String(b.label).replace(/\s+(under \d+|\d+[–-]\d+|\d+\+)$/, ''), means };
+      }),
+    };
+  }
+  if (a.key === 'duration') {
+    const bands = cfg.durationBands ?? [];
+    const h = (m) => Math.round(m / 60);
+    return {
+      shape: 'How long',
+      line: 'How long a visit usually takes, from arriving to leaving.',
+      bands: bands.map((b, i) => ({
+        name: b.label,
+        means: b.from <= 0 ? 'less than 1 hour'
+          : i === bands.length - 1 ? `${h(b.from)} hours or more`
+            : /hour/i.test(b.label) ? ''
+              : `${h(b.from)}–${h(b.to)} hours`,
       })),
     };
   }
-  return { shape: a.kind };
+  if (a.key === 'cost-band') {
+    const sym = { GBP: '£', EUR: '€' };
+    const COUNTRY = { GB: 'UK', IE: 'Ireland' };
+    return {
+      shape: 'Cost per person',
+      line: 'What one person usually pays to get in, sorted into four bands. Each country uses its own currency and thresholds.',
+      cost: Object.entries(cfg.costBands ?? {}).map(([country, v]) => {
+        const c = sym[v.currency] ?? '';
+        const word = (b) => (b.to === 0 ? b.label
+          : b.under != null ? `under ${c}${b.under}`
+            : b.over != null ? `over ${c}${b.over}`
+              : `${c}${b.from}–${b.to}`);
+        const by = Object.fromEntries(v.bands.map((b) => [String(b.key).toLowerCase(), word(b)]));
+        return { country: COUNTRY[country] ?? country, currency: `${c} ${v.currency}`.trim(), free: by.free ?? '—', cheap: by.cheap ?? '—', mid: by.mid ?? '—', dear: by.dear ?? '—' };
+      }),
+    };
+  }
+  return { shape: a.kind, line: null };
 }
 
 /**
@@ -175,9 +218,13 @@ export async function factPlaces(key, { sub = null, country = null, county = nul
   const described = await describe(rows.map((r) => r.venue_ref));
   const needle = q ? String(q).trim().toLowerCase() : null;
   const pc = postcode ? String(postcode).trim().toUpperCase().replace(/\s+/g, '') : null;
-  const out = rows.map((r) => {
+  const options = optionsOf(a, cfg);
+  const outward = (p) => (p ? String(p).trim().toUpperCase().split(/\s+/)[0] : null);
+  const all = rows.map((r) => {
     const d = described.get(r.venue_ref) ?? {};
     const value = r.set_by ? { yesno: r.p_yesno, from: r.p_from, to: r.p_to, choice: r.p_choice } : { yesno: r.yesno, from: r.from_value, to: r.to_value, choice: r.choice };
+    const answer = a.kind === 'yesno' ? null : wordOf(a, value, cfg);
+    const word = a.kind === 'yesno' ? (value.yesno === false ? 'No' : 'Yes') : answer;
     return {
       ref: r.venue_ref,
       name: d.name,
@@ -186,16 +233,18 @@ export async function factPlaces(key, { sub = null, country = null, county = nul
       country: d.country,
       countryCode: d.countryCode,
       postcode: d.postcode,
+      outward: outward(d.postcode),
       how: r.set_by ? SOURCE_WORD.person : SOURCE_WORD[r.source] ?? null,
-      answer: a.kind === 'yesno' ? null : wordOf(a, value, cfg),
-      options: optionsOf(a, cfg),
+      answer,
+      // The option the place holds now, so Edit can light it.
+      current: options.find((o) => o.label === word)?.key ?? null,
     };
-  })
+  }).sort((x, y) => String(x.name ?? '~').localeCompare(String(y.name ?? '~')));
+  const out = all
     .filter((r) => !country || r.countryCode === country || r.country === country)
     .filter((r) => !county || r.county === county)
     .filter((r) => !pc || String(r.postcode ?? '').toUpperCase().replace(/\s+/g, '').startsWith(pc))
-    .filter((r) => !needle || String(r.name ?? '').toLowerCase().includes(needle))
-    .sort((x, y) => String(x.name ?? '~').localeCompare(String(y.name ?? '~')));
+    .filter((r) => !needle || String(r.name ?? '').toLowerCase().includes(needle));
 
   // Looked for: places in the subcategories that look for it (every filed
   // place for a standard fact), within the same subcategory filter.
@@ -209,16 +258,31 @@ export async function factPlaces(key, { sub = null, country = null, county = nul
   if (sub) { lookedArgs.push(sub); conds.push(`f.sub = $${lookedArgs.length}`); }
   const lookedSql = `select count(distinct f.venue_ref)::int n from (${FILED_SQL}) f ${join} ${conds.length ? `where ${conds.join(' and ')}` : ''}`;
   const { rows: [{ n: lookedFor }] } = await query(lookedSql, lookedArgs);
+  let subLabel = null;
+  let categoryLabel = null;
+  if (sub) {
+    const { rows: [x] } = await query('select s.label, c.label as category_label from shelf_subcategories s join shelf_categories c on c.key = s.category_key where s.key = $1', [sub]);
+    subLabel = x?.label ?? null;
+    categoryLabel = x?.category_label ?? null;
+  }
   return {
     fact: a.key,
     label: a.label,
     kind: a.kind,
+    standard: a.standard,
+    sub, subLabel, categoryLabel,
+    options: options.map(({ key: k, label }) => ({ key: k, label })),
     rows: out.slice(0, limit),
+    // Shown after the filters; found at is every place that has it (in the
+    // subcategory, when one is named), whatever the filters say.
     total: out.length,
     lookedFor,
-    foundAt: out.length,
-    counties: [...new Set(out.map((r) => r.county).filter(Boolean))].sort(),
-    countries: [...new Set(out.map((r) => r.country).filter(Boolean))].sort(),
+    foundAt: all.length,
+    // The filters' choices come from every place that has it, not from the
+    // ones a filter has already narrowed to.
+    counties: [...new Set(all.map((r) => r.county).filter(Boolean))].sort(),
+    countries: [...new Set(all.map((r) => r.country).filter(Boolean))].sort(),
+    postcodes: [...new Set(all.map((r) => r.outward).filter(Boolean))].sort(),
   };
 }
 

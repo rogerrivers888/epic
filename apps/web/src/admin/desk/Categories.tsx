@@ -1,0 +1,457 @@
+/**
+ * Categories (back-office handover, 28 Sep 2026; design README v2
+ * "Categories" and "Location filter").
+ *
+ * Four layers, each with its own address:
+ *   - the subcategory list (`?tab=categories`, `q`, `cat`), with the bulk bar
+ *     and the related-subcategory adder;
+ *   - New facts (`view=new`), the header count's drill;
+ *   - a subcategory's page (`sub`): its defaults, then its facts;
+ *   - one fact at that subcategory (`sub` + `fact`): the places that have it.
+ *
+ * Humans decide here; nothing starts a job. Every write is logged in Changes
+ * by the API and the toast offers its Undo.
+ */
+
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Platform, Text, TextInput, View } from 'react-native';
+
+import { Icon } from '../../components/Icon';
+import { Press } from '../../components/press';
+import { useViewport } from '../../hooks/useViewport';
+import { useCrumbs, useDeskGo, useDeskParam } from './Desk';
+import {
+  Dropdown, InfoTip, LIME, LocationFilter, Muted, ON_LIME, RED, SearchBox, THead, Table, Tick, deskApi, desk, fonts,
+  locParams, n, saidOf, sortRows, tabular, useLocation, useToast, type SortState, type TCol,
+} from './kit';
+import { Count, FACT_ORDER, Failed, PillBar, factName, undoChanges, type Change, type Option } from './categories/shared';
+import { SubPage } from './categories/SubPage';
+import { FactAtSub } from './categories/FactAtSub';
+import { NewFacts } from './categories/NewFacts';
+
+type Related = { key: string; label: string; why: 'linked' | 'shared' };
+type Row = {
+  key: string; label: string; category: string; categoryLabel: string;
+  places: number; facts: number; related: Related[];
+};
+type Filter =
+  | { unknown: true; where: string; message: string }
+  | { unknown?: false; where: string; label: string; minutes: number; mode: string; chip: string; approx?: boolean; capped?: boolean };
+type ListResponse = {
+  counts: { subcategories: number; places: number; facts: number; newFacts: number };
+  rows: Row[];
+  defaultFacts: { key: string; label: string; options: Option[] }[];
+  atLeast: boolean;
+  filter: Filter | null;
+  categories: { key: string; label: string }[];
+};
+
+export function Categories({ canManage = false }: { canManage?: boolean }) {
+  const [sub] = useDeskParam('sub');
+  const [fact] = useDeskParam('fact');
+  const [view] = useDeskParam('view');
+  if (view === 'new') return <NewFacts canManage={canManage} />;
+  if (sub && fact) return <FactAtSub sub={sub} fact={fact} canManage={canManage} />;
+  if (sub) return <SubPage sub={sub} canManage={canManage} />;
+  return <SubList canManage={canManage} />;
+}
+
+// ---------------------------------------------------------------------------
+// The subcategory list
+// ---------------------------------------------------------------------------
+
+type ColKey = 'name' | 'cat' | 'places' | 'facts' | 'related';
+
+const hover = Platform.OS === 'web';
+
+function SubList({ canManage }: { canManage: boolean }) {
+  const go = useDeskGo();
+  const toast = useToast();
+  const { width } = useViewport();
+  const narrow = width < 900;
+  const { loc, setAnswer } = useLocation();
+  const [q, setQ] = useDeskParam('q');
+  const [cat, setCat] = useDeskParam('cat');
+  const [data, setData] = useState<ListResponse | null>(null);
+  const [err, setErr] = useState<unknown>(null);
+  const [tick, setTick] = useState(0);
+  const [sort, setSort] = useState<SortState<ColKey>>({ key: 'name', dir: 'asc' });
+  const [ticked, setTicked] = useState<string[]>([]);
+  const [adding, setAdding] = useState<string | null>(null);
+  const [text, setText] = useState(q);
+
+  useCrumbs([{ name: 'Categories' }], []);
+  const reload = useCallback(() => setTick((t) => t + 1), []);
+
+  // The search box writes the address a beat after the typing stops; a filter replaces.
+  useEffect(() => { setText(q); }, [q]);
+  useEffect(() => {
+    const t = setTimeout(() => { if (text !== q) setQ(text, { replace: true }); }, 250);
+    return () => clearTimeout(t);
+  }, [text]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const params = locParams(loc);
+  const paramKey = JSON.stringify(params);
+  useEffect(() => {
+    let live = true;
+    setErr(null);
+    deskApi.get<ListResponse>('/categories', params).then((d) => {
+      if (!live) return;
+      setData(d);
+      const f = d.filter;
+      setAnswer(f ? (f.unknown ? { known: false, label: null, chip: null } : { known: true, label: f.label, chip: f.chip, approx: f.approx, capped: f.capped }) : null);
+    }).catch((e) => { if (live) setErr(e); });
+    return () => { live = false; };
+  }, [paramKey, tick]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const within = Boolean(data?.filter && !data.filter.unknown);
+  const plus = data?.atLeast ? '+' : '';
+  const needle = q.trim().toLowerCase();
+  const all = data?.rows ?? [];
+  const shown = useMemo(() => {
+    const f = all
+      .filter((r) => !cat || r.category === cat)
+      .filter((r) => !needle || r.label.toLowerCase().includes(needle) || r.categoryLabel.toLowerCase().includes(needle));
+    return sortRows(f, sort, (r, k) => (
+      k === 'name' ? r.label : k === 'cat' ? r.categoryLabel : k === 'places' ? r.places : k === 'facts' ? r.facts : r.related.length
+    ));
+  }, [all, cat, needle, sort]);
+  const filtered = Boolean(needle || cat);
+
+  const cols: TCol<ColKey>[] = [
+    { key: 'name', name: 'Subcategory', width: 240 },
+    { key: 'cat', name: 'Category', width: 130 },
+    { key: 'places', name: within ? 'Within reach' : 'Places', width: 80, first: 'asc' },
+    {
+      key: 'facts', name: 'Facts', width: 80, first: 'desc',
+      tip: 'The facts Epic finds out about every place in this subcategory, automatically, from its own sources — for Water parks: wave machine, toddler pool, flumes. Click the number to see them.',
+    },
+    {
+      key: 'related', name: 'Related', width: 400, first: 'desc',
+      tip: 'Other subcategories that belong alongside this one — either because the same places are filed in both, or because a person linked them. Click one to open it.',
+    },
+  ];
+  const GAP = 18;
+  const tableW = 20 + GAP + cols.reduce((s, c) => s + c.width, 0) + GAP * (cols.length - 1) + 16;
+
+  const allOn = shown.length > 0 && shown.every((r) => ticked.includes(r.key));
+  const liveTicked = ticked.filter((k) => all.some((r) => r.key === k));
+
+  const unlink = async (row: Row, other: Related) => {
+    try {
+      const c = await deskApi.post<Change>(`/subcategories/${encodeURIComponent(row.key)}/related`, { other: other.key, on: false });
+      toast(`${other.label} removed from ${row.label}`, () => undoChanges([c.id], toast, reload));
+      reload();
+    } catch (e) { toast(saidOf(e)); }
+  };
+  const link = async (row: Row, other: { key: string; label: string }) => {
+    try {
+      const c = await deskApi.post<Change>(`/subcategories/${encodeURIComponent(row.key)}/related`, { other: other.key });
+      toast(`${row.label} linked to ${other.label}`, () => undoChanges([c.id], toast, reload));
+      reload();
+    } catch (e) { toast(saidOf(e)); }
+  };
+
+  return (
+    <View style={{ gap: 14 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'space-between', gap: 24, paddingBottom: 4, zIndex: 40 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <Text style={{ fontFamily: fonts.heading, fontWeight: '800', fontSize: 31, letterSpacing: -1.085, lineHeight: 32, color: desk.ink }}>Subcategories</Text>
+          <InfoTip text="Every subcategory Epic files places under. Tick some to set a fact for all of them at once; open one to see its defaults and the facts Epic looks for there." />
+        </View>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', gap: 30, maxWidth: '100%', flexShrink: 1 }}>
+          <Count label="Subcategories" n={data ? n(data.counts.subcategories) : '—'} />
+          <Count label="Places" n={data ? `${n(data.counts.places)}${plus}` : '—'} />
+          <Count label="Facts" n={data ? n(data.counts.facts) : '—'} />
+          <Count label="New facts" n={data ? n(data.counts.newFacts) : '—'} lime onPress={() => go('categories', { view: 'new' })} />
+        </View>
+      </View>
+
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 14, zIndex: 35 }}>
+        <SearchBox value={text} onChange={setText} placeholder="Search every subcategory" width={narrow ? Math.min(280, width - 32) : 280} />
+        <Dropdown
+          label={cat ? data?.categories.find((c) => c.key === cat)?.label ?? 'All categories' : 'All categories'}
+          value={cat || 'all'}
+          width={240}
+          options={[{ key: 'all', name: 'All categories' }, ...(data?.categories ?? []).map((c) => ({ key: c.key, name: c.label }))]}
+          onChange={(v) => setCat(v === 'all' ? '' : v, { replace: true })}
+        />
+        {filtered && data ? <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>{shown.length} of {data.rows.length}</Text> : null}
+      </View>
+      <View style={{ zIndex: 30 }}><LocationFilter /></View>
+
+      {canManage && liveTicked.length ? (
+        <BulkBar
+          subs={liveTicked}
+          facts={data?.defaultFacts ?? []}
+          onClear={() => setTicked([])}
+          onDone={(ids, line) => {
+            setTicked([]);
+            toast(line, () => undoChanges(ids, toast, reload));
+            reload();
+          }}
+        />
+      ) : null}
+
+      {err ? <Failed err={err} /> : !data ? <Muted>Loading</Muted> : (
+        <Table width={tableW}>
+          <THead
+            cols={cols}
+            sort={sort}
+            onSort={setSort}
+            gap={GAP}
+            lead={canManage ? <Tick on={allOn} onPress={() => setTicked(allOn ? [] : shown.map((r) => r.key))} /> : <View style={{ width: 20 }} />}
+          />
+          {shown.length === 0 ? <Muted>No subcategories match.</Muted> : null}
+          {shown.map((r) => (
+            <ListRow
+              key={r.key}
+              row={r}
+              plus={plus}
+              narrow={narrow}
+              canManage={canManage}
+              ticked={ticked.includes(r.key)}
+              onTick={() => setTicked((t) => (t.includes(r.key) ? t.filter((x) => x !== r.key) : [...t, r.key]))}
+              open={() => go('categories', { sub: r.key })}
+              openFacts={() => go('categories', { sub: r.key, state: 'active' })}
+              openOther={(k) => go('categories', { sub: k })}
+              adding={adding === r.key}
+              toggleAdd={() => setAdding((a) => (a === r.key ? null : r.key))}
+              catalogue={all}
+              categories={data.categories}
+              onLink={(o) => link(r, o)}
+              onUnlink={(o) => unlink(r, o)}
+            />
+          ))}
+        </Table>
+      )}
+    </View>
+  );
+}
+
+function ListRow({
+  row, plus, narrow, canManage, ticked, onTick, open, openFacts, openOther, adding, toggleAdd, catalogue, categories, onLink, onUnlink,
+}: {
+  row: Row; plus: string; narrow: boolean; canManage: boolean; ticked: boolean; onTick: () => void;
+  open: () => void; openFacts: () => void; openOther: (k: string) => void;
+  adding: boolean; toggleAdd: () => void; catalogue: Row[]; categories: { key: string; label: string }[];
+  onLink: (o: { key: string; label: string }) => void; onUnlink: (o: Related) => void;
+}) {
+  const [over, setOver] = useState<string | null>(null);
+  return (
+    <View style={{ borderBottomWidth: 1, borderBottomColor: desk.rule }}>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 18, paddingVertical: 12, paddingHorizontal: 8, backgroundColor: ticked ? desk.picked : 'transparent' }}>
+        {canManage ? <Tick on={ticked} onPress={onTick} /> : <View style={{ width: 20 }} />}
+        <View style={{ width: 240, minWidth: 0 }}>
+          <Press effect="none" onPress={open}>
+            <Text style={{ fontFamily: fonts.body, fontSize: 13.5, fontWeight: '700', color: desk.ink }}>{row.label}</Text>
+          </Press>
+        </View>
+        <Text style={{ width: 130, fontFamily: fonts.body, fontSize: 13, color: desk.inkMuted }}>{row.categoryLabel}</Text>
+        <Text style={[{ width: 80, fontFamily: fonts.body, fontSize: 13.5, color: row.places ? desk.ink : RED }, tabular]}>{n(row.places)}{row.places ? plus : ''}</Text>
+        <View style={{ width: 80 }}>
+          <Press effect="none" onPress={openFacts}>
+            <Text style={[{ fontFamily: fonts.body, fontSize: 13.5, color: row.facts ? desk.ink : desk.inkDim }, tabular]}>{n(row.facts)}</Text>
+          </Press>
+        </View>
+        <View style={{ width: 400, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 14, rowGap: 6 }}>
+          {row.related.map((x) => (
+            <Press
+              key={x.key}
+              effect="none"
+              onHoverIn={hover ? () => setOver(x.key) : undefined}
+              onHoverOut={hover ? () => setOver(null) : undefined}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Press effect="none" onPress={() => openOther(x.key)}>
+                  <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: desk.ink }}>{x.label}</Text>
+                </Press>
+                {/* Only a link a person made can be taken off here; a pair that shares places is related by its places. */}
+                {canManage && x.why === 'linked' ? (
+                  <Press effect="none" onPress={() => onUnlink(x)} accessibilityLabel={`Remove ${x.label}`}>
+                    <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: desk.inkDim, paddingHorizontal: 2, opacity: !hover || over === x.key ? 1 : 0 }}>×</Text>
+                  </Press>
+                ) : null}
+              </View>
+            </Press>
+          ))}
+          {canManage ? (
+            <Press effect="none" onPress={toggleAdd}>
+              <Text style={{ fontFamily: fonts.body, fontSize: 12, color: desk.inkDim }}>+ Add related</Text>
+            </Press>
+          ) : null}
+        </View>
+      </View>
+      {adding ? (
+        <View style={{ paddingLeft: narrow ? 46 : 486, paddingRight: 8, paddingBottom: 16 }}>
+          <RelatedAdder row={row} catalogue={catalogue} categories={categories} onClose={toggleAdd} onLink={onLink} onUnlink={onUnlink} />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** "+ Add related": search every subcategory, or browse by category. */
+function RelatedAdder({ row, catalogue, categories, onClose, onLink, onUnlink }: {
+  row: Row; catalogue: Row[]; categories: { key: string; label: string }[]; onClose: () => void;
+  onLink: (o: { key: string; label: string }) => void; onUnlink: (o: Related) => void;
+}) {
+  const [q, setQ] = useState('');
+  const [browse, setBrowse] = useState(row.category);
+  const needle = q.trim().toLowerCase();
+  const others = catalogue.filter((o) => o.key !== row.key);
+  const opt = (o: Row, withCat: boolean) => {
+    const r = row.related.find((z) => z.key === o.key);
+    const shared = r && r.why !== 'linked';
+    const note = [withCat ? o.categoryLabel : null, shared ? 'shares places' : null].filter(Boolean).join(' · ');
+    return (
+      <Press
+        key={o.key}
+        effect="none"
+        onPress={shared ? undefined : () => (r ? onUnlink(r) : onLink({ key: o.key, label: o.label }))}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 7, paddingHorizontal: 14 }}>
+          <View style={{ width: 14 }}>
+            {r ? <Icon name="check" size={13} color={LIME} /> : <Text style={{ fontFamily: fonts.body, fontSize: 13, color: desk.ink }}>+</Text>}
+          </View>
+          <Text style={{ flex: withCat ? undefined : 1, width: withCat ? 220 : undefined, minWidth: 0, fontFamily: fonts.body, fontSize: 13.5, fontWeight: r ? '700' : '500', color: r ? LIME : desk.ink }}>{o.label}</Text>
+          {note ? <Text style={{ flex: withCat ? 1 : undefined, minWidth: 0, fontFamily: fonts.body, fontSize: withCat ? 12 : 11.5, color: desk.inkDim }}>{note}</Text> : null}
+        </View>
+      </Press>
+    );
+  };
+  return (
+    <View style={{ width: 560, maxWidth: '100%', borderWidth: 1, borderColor: desk.ruleStrong, backgroundColor: desk.well }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: desk.rule }}>
+        <Icon name="search" size={14} color={desk.inkDim} />
+        <TextInput
+          value={q}
+          onChangeText={setQ}
+          placeholder="Search every subcategory"
+          placeholderTextColor={desk.inkDim}
+          autoFocus
+          style={[{ flex: 1, minWidth: 0, color: desk.ink, fontFamily: fonts.body, fontSize: 13.5, fontWeight: '600', padding: 0 }, Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null]}
+        />
+        <Press effect="none" onPress={onClose}><Text style={{ fontFamily: fonts.body, fontSize: 12, color: desk.inkDim }}>close</Text></Press>
+      </View>
+      {needle ? (
+        <View style={{ paddingVertical: 6, minHeight: 220 }}>
+          {others.filter((o) => o.label.toLowerCase().includes(needle)).slice(0, 12).map((o) => opt(o, true))}
+        </View>
+      ) : (
+        <View style={{ flexDirection: 'row', alignItems: 'stretch', minHeight: 220 }}>
+          <View style={{ width: 200, borderRightWidth: 1, borderRightColor: desk.rule, paddingVertical: 6 }}>
+            {categories.map((c) => {
+              const on = browse === c.key;
+              const count = catalogue.filter((o) => o.category === c.key).length;
+              return (
+                <Press key={c.key} effect="none" onPress={() => setBrowse(c.key)}>
+                  <View style={{ gap: 2, paddingVertical: 7, paddingHorizontal: 14, backgroundColor: on ? desk.picked : 'transparent' }}>
+                    <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: on ? '700' : '500', color: on ? desk.ink : desk.inkMuted }}>{c.label}</Text>
+                    <Text style={{ fontFamily: fonts.body, fontSize: 11, color: desk.inkDim }}>{count} {count === 1 ? 'subcategory' : 'subcategories'}</Text>
+                  </View>
+                </Press>
+              );
+            })}
+          </View>
+          <View style={{ flex: 1, minWidth: 0, paddingVertical: 6 }}>
+            {others.filter((o) => o.category === browse).sort((a, b) => a.label.localeCompare(b.label)).map((o) => opt(o, false))}
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The bulk bar
+// ---------------------------------------------------------------------------
+
+/**
+ * "4 selected · Set a fact" → the fact → its value → "Applies to 212 places
+ * without their own answer · 9 keep their own" and Set. Logged in Changes
+ * under Defaults with that line as the Why.
+ */
+function BulkBar({ subs, facts, onClear, onDone }: {
+  subs: string[]; facts: { key: string; label: string; options: Option[] }[];
+  onClear: () => void; onDone: (ids: string[], line: string) => void;
+}) {
+  const toast = useToast();
+  const [fact, setFact] = useState<string | null>(null);
+  const [value, setValue] = useState<string | null>(null);
+  const [impact, setImpact] = useState<{ applies: number; keep: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const ordered = FACT_ORDER.map((k) => facts.find((f) => f.key === k)).filter(Boolean) as typeof facts;
+  const def = ordered.find((f) => f.key === fact) ?? null;
+  const opt = def?.options.find((o) => o.key === value) ?? null;
+  const subsKey = subs.join(',');
+
+  useEffect(() => {
+    setImpact(null);
+    if (!fact) return;
+    let live = true;
+    deskApi.get<{ applies: number; keep: number }>('/categories/impact', { subs: subsKey, fact })
+      .then((r) => { if (live) setImpact(r); })
+      .catch(() => { if (live) setImpact(null); });
+    return () => { live = false; };
+  }, [fact, subsKey]);
+
+  const apply = async () => {
+    if (!def || !opt || busy) return;
+    setBusy(true);
+    try {
+      const why = impact ? `Applies to ${impact.applies} places without their own answer · ${impact.keep} keep their own` : null;
+      const out = await deskApi.post<{ changes: Change[] }>('/categories/defaults', { subs, fact: def.key, option: opt.key, why });
+      const name = factName(def.key, def.label);
+      setFact(null); setValue(null);
+      onDone(out.changes.map((c) => c.id), `${name}: ${opt.label} set on ${subs.length} ${subs.length === 1 ? 'subcategory' : 'subcategories'}`);
+    } catch (e) {
+      toast(saidOf(e));
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <View style={{
+      gap: 12, borderTopWidth: 2, borderTopColor: LIME, borderBottomWidth: 1, borderBottomColor: desk.rule,
+      paddingVertical: 13, paddingHorizontal: 8, backgroundColor: desk.lifted, zIndex: 32,
+    }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 16 }}>
+        <Text style={{ fontFamily: fonts.body, fontSize: 13.5, fontWeight: '800', color: desk.ink }}>{subs.length} selected</Text>
+        <Text style={{ fontFamily: fonts.body, fontSize: 13, color: desk.inkDim }}>·</Text>
+        <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: desk.inkMuted }}>Set a fact</Text>
+        <Dropdown
+          label={def ? factName(def.key, def.label) : 'Choose a fact'}
+          value={fact}
+          width={190}
+          listWidth={210}
+          options={ordered.map((f) => ({ key: f.key, name: factName(f.key, f.label) }))}
+          onChange={(k) => { setFact(k); setValue(null); }}
+        />
+        {def ? (
+          <PillBar
+            options={def.options.map((o) => ({ key: o.key, name: o.label }))}
+            value={value}
+            onChange={setValue}
+            padH={14}
+          />
+        ) : null}
+        <View style={{ flexGrow: 1 }} />
+        <Press effect="none" onPress={() => { setFact(null); setValue(null); onClear(); }}>
+          <Text style={{ fontFamily: fonts.body, fontSize: 13, color: desk.inkDim }}>Clear</Text>
+        </Press>
+      </View>
+      {def && opt ? (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 16 }}>
+          <Text style={[{ fontFamily: fonts.body, fontSize: 13, color: desk.inkMuted }, tabular]}>
+            {impact ? `Applies to ${n(impact.applies)} places without their own answer · ${n(impact.keep)} keep their own` : 'Counting the places it reaches'}
+          </Text>
+          <Press effect="none" onPress={apply} disabled={busy}>
+            <Text style={{ backgroundColor: LIME, color: ON_LIME, paddingVertical: 9, paddingHorizontal: 16, fontFamily: fonts.body, fontSize: 13, fontWeight: '700' }}>
+              Set {factName(def.key, def.label)}: {opt.label} on {subs.length}
+            </Text>
+          </Press>
+        </View>
+      ) : null}
+    </View>
+  );
+}

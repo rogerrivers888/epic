@@ -246,15 +246,23 @@ test('Household, Settings, Prototypes and the back office', () => {
   assert.equal(paths.filing('facts', { set: 'water' }), '/admin/filing?set=water&tab=facts');
   assert.equal(paths.filing('overview'), '/admin/filing');
   assert.equal(paths.filing(null), '/admin/filing');
-  assert.deepEqual(FILING_TABS, ['overview', 'categories', 'facts', 'mapping', 'defaults', 'ideas', 'runs']);
+  assert.deepEqual(FILING_TABS, ['overview', 'categories', 'facts', 'mapping', 'collections', 'automations', 'changes', 'runs']);
   assert.equal(filingTabOf('facts'), 'facts');
   assert.equal(filingTabOf('labels'), 'facts');
-  assert.equal(filingTabOf('rules'), 'defaults');
-  assert.equal(filingTabOf('rows'), 'ideas');
+  // Defaults and Ideas are gone (28 Sep 2026); their old links land where the job went.
+  assert.equal(filingTabOf('rules'), 'categories');
+  assert.equal(filingTabOf('defaults'), 'categories');
+  assert.equal(filingTabOf('rows'), 'collections');
+  assert.equal(filingTabOf('ideas'), 'collections');
+  assert.equal(filingTabOf('automations'), 'automations');
+  assert.equal(filingTabOf('changes'), 'changes');
   assert.equal(filingTabOf('runs'), 'runs');
   assert.equal(filingTabOf('questions'), null);
   assert.equal(filingTabOf(null), null);
-  assert.equal(splitHref(paths.filing('ideas', { view: 'household' })).query.get('tab'), 'ideas');
+  assert.equal(splitHref(paths.filing('collections', { view: 'household' })).query.get('tab'), 'collections');
+  assert.equal(paths.filing('categories', { sub: 'golf' }), '/admin/filing?sub=golf&tab=categories');
+  assert.equal(paths.filing('facts', { ftab: 'accuracy', fact: 'toilets' }), '/admin/filing?ftab=accuracy&fact=toilets&tab=facts');
+  assert.equal(paths.filing('mapping', { view: 'needs' }), '/admin/filing?view=needs&tab=mapping');
 
   /**
    * The info icon beside every filing heading opens How it works at the
@@ -266,9 +274,14 @@ test('Household, Settings, Prototypes and the back office', () => {
   assert.equal(paths.how(null), '/admin/how');
   assert.equal(paths.how('facts'), '/admin/how?at=facts');
   assert.deepEqual(parseRoute('/admin/how?at=sheets'), { name: 'admin', screen: 'how' });
-  assert.equal(splitHref(paths.how('defaults')).query.get('at'), 'defaults');
-  assert.deepEqual(HOW_ANCHORS, ['mechanics', 'categories', 'facts', 'sheets', 'mapping', 'defaults', 'ideas']);
+  assert.equal(splitHref(paths.how('collections')).query.get('at'), 'collections');
+  assert.deepEqual(HOW_ANCHORS, ['layers', 'categories', 'mapping', 'place', 'facts', 'where', 'pipeline', 'collections', 'journey', 'counting', 'state']);
   for (const at of HOW_ANCHORS) assert.equal(howAnchorOf(at), at);
+  // A link to an old section lands on the one that took its place.
+  assert.equal(howAnchorOf('mechanics'), 'layers');
+  assert.equal(howAnchorOf('sheets'), 'facts');
+  assert.equal(howAnchorOf('defaults'), 'place');
+  assert.equal(howAnchorOf('ideas'), 'collections');
   assert.equal(howAnchorOf('labels'), null);
   assert.equal(howAnchorOf(''), null);
   assert.equal(howAnchorOf(undefined), null);

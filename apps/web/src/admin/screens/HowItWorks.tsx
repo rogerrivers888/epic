@@ -1,36 +1,476 @@
 /**
- * How it works — the decisions behind what Epic does, written down.
+ * How it works — the model behind the filing, and the decisions behind the
+ * rest of Epic, written down.
  *
- * The owner, 6 Sep 2026: "I think we need a 'how it works' in the desktop back
- * office thing, and you can put all of these assumptions there in terms of what
- * we've done. This is an example of something: in order to reduce cost, we've
- * decided to estimate the detour. Maybe once the user adds it to their actual
- * trip, not in a short list, then we can recalculate the actual correct number."
+ * The first part of the page is the owner's own document, "Epic — How It
+ * Works" v2, updated for the Collections rename and the fact pipeline (owner,
+ * 28 Sep 2026; back-office handover §9, Phase 4). It is drawn as the document
+ * draws itself — eleven numbered sections, its diagrams as square boxes — and
+ * every section carries the anchor the info icons on the desk deep-link to
+ * (`HOW_ANCHORS` in routes.ts, `?at=`). Where the handover or the register
+ * (Decisions and policies) changed something the document said, the document
+ * is corrected here rather than quoted wrong: which tabs exist, fact sheets,
+ * the bands, the pipeline's numbers.
  *
- * Three rules keep this page honest, because a page like this is worthless the
- * moment it describes something that is not true:
+ * The second part is the older decision log. The owner, 6 Sep 2026: "I think
+ * we need a 'how it works' in the desktop back office thing, and you can put
+ * all of these assumptions there in terms of what we've done." Three rules
+ * keep it honest, because a page like this is worthless the moment it
+ * describes something that is not true:
  *
  *   1. Every entry says whether it is **live** or **decided and not built**.
- *      A plan and a fact look identical in prose, so they are not allowed to.
  *   2. Every entry names the file the rule is actually in, so the page can be
  *      checked against the code rather than believed.
  *   3. Where the answer changes by the minute — whether travel times are real
  *      or estimated right now — it is read from the API, not written here.
- *
- * It is the back office's answer to "why did it say that", and to "what is this
- * going to cost".
  */
 
 import React, { useEffect, useState } from 'react';
-import { Linking, Platform, StyleSheet, Text, View } from 'react-native';
+import { Linking, Platform, ScrollView, StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 import { Press } from '../../components/press';
 import { api } from '../../api';
-import { colors, fonts, spacing, type, BORDER } from '../../theme';
+import { colors, desk, fonts, spacing, type, BORDER, ON_LIME } from '../../theme';
 import { Icon, IconName } from '../../components/Icon';
 import { AdminPage, Banner, PageHead, Panel, Pill } from '../kit';
 import { Explain } from '../explain';
 import { useQueryState } from '../../router';
+import { useViewport } from '../../hooks/useViewport';
 import { howAnchorOf, type HowAnchor } from '../../routes';
+
+// ---------------------------------------------------------------------------
+// The document: Epic — How It Works (v2, updated 28 Sep 2026)
+// ---------------------------------------------------------------------------
+
+/**
+ * A line of the document, with its emphasis written the way the document
+ * writes it: `**bold**` and `*italic*`. Nothing else is parsed.
+ */
+function Rich({ children, style }: { children: string; style?: StyleProp<TextStyle> }) {
+  const parts = children.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g).filter(Boolean);
+  return (
+    <Text style={style}>
+      {parts.map((p, i) => p.startsWith('**')
+        ? <Text key={i} style={{ fontWeight: '800' }}>{p.slice(2, -2)}</Text>
+        : p.startsWith('*')
+          ? <Text key={i} style={{ fontStyle: 'italic' }}>{p.slice(1, -1)}</Text>
+          : p)}
+    </Text>
+  );
+}
+
+const P = ({ children }: { children: string }) => <Rich style={doc.p}>{children}</Rich>;
+const H3 = ({ children }: { children: string }) => <Text style={doc.h3}>{children}</Text>;
+
+function Bullets({ items }: { items: string[] }) {
+  return (
+    <View style={doc.list}>
+      {items.map((t) => (
+        <View key={t} style={doc.li}>
+          <Text style={doc.dot}>–</Text>
+          <Rich style={[doc.p, { flex: 1, marginBottom: 0 }]}>{t}</Rich>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/** The document's note: a rule down the left, never a box. */
+function Note({ children }: { children: string | string[] }) {
+  const lines = Array.isArray(children) ? children : [children];
+  return (
+    <View style={doc.note}>
+      {lines.map((l, i) => <Rich key={i} style={[doc.p, { fontSize: 15, marginBottom: i === lines.length - 1 ? 0 : 10 }]}>{l}</Rich>)}
+    </View>
+  );
+}
+
+/**
+ * A table as the document draws it. On a wide screen the columns share the
+ * width in the document's own proportions; on a phone the table keeps a width
+ * it can be read at and scrolls sideways inside its own box, so the page
+ * itself never does (F4).
+ */
+function Table({ cols, rows, phone, minWidth = 620 }: {
+  cols: { label: string; share: number }[];
+  rows: string[][];
+  phone: boolean;
+  minWidth?: number;
+}) {
+  const body = (
+    <View style={phone ? { width: minWidth } : undefined}>
+      <View style={[doc.tr, doc.thRow]}>
+        {cols.map((c) => <Text key={c.label} style={[doc.th, { flex: c.share }]}>{c.label}</Text>)}
+      </View>
+      {rows.map((r, i) => (
+        <View key={i} style={[doc.tr, i === rows.length - 1 && { borderBottomWidth: 0 }]}>
+          {r.map((cell, j) => <Rich key={j} style={[doc.td, { flex: cols[j].share }]}>{cell}</Rich>)}
+        </View>
+      ))}
+    </View>
+  );
+  return phone
+    ? <ScrollView horizontal style={doc.tableBox} contentContainerStyle={{ flexGrow: 0 }}>{body}</ScrollView>
+    : <View style={doc.tableBox}>{body}</View>;
+}
+
+// --- The diagrams -----------------------------------------------------------
+
+/**
+ * The document's four box colours, taken onto Epic's palette. Green (what is
+ * real) is the lime tint with a moss rule; the document's "key" colour (what
+ * the family actually meets) is lime itself, with ink type; amber is "works,
+ * but watch it"; and what is thrown out is a dashed grey — not red, because
+ * red in Epic means danger and an excluded word is not one.
+ */
+type Tone = 'plain' | 'live' | 'key' | 'wait' | 'out';
+
+function Box({ title, sub, note, tone = 'plain', style }: {
+  title: string; sub?: string; note?: string; tone?: Tone; style?: StyleProp<ViewStyle>;
+}) {
+  const onLime = tone === 'key';
+  return (
+    <View style={[doc.box, doc[`box_${tone}` as const], style]}>
+      <Rich style={[doc.boxTitle, onLime && { color: ON_LIME }, tone === 'out' && { color: colors.inkMuted }]}>{title}</Rich>
+      {sub ? <Rich style={[doc.boxSub, onLime && { color: ON_LIME }]}>{sub}</Rich> : null}
+      {note ? <Text style={[doc.boxNote, onLime && { color: ON_LIME }]}>{note}</Text> : null}
+    </View>
+  );
+}
+
+/** A downward arrow between two boxes: a rule and a chevron, not a glyph. */
+function Down() {
+  return (
+    <View style={doc.down}>
+      <View style={doc.downLine} />
+      <Icon name="expand" size={14} color={colors.inkMuted} strokeWidth={2} />
+    </View>
+  );
+}
+
+/** Boxes side by side on a wide screen; stacked on a phone. */
+function Across({ children, phone, gap = 12 }: { children: React.ReactNode; phone: boolean; gap?: number }) {
+  return <View style={{ flexDirection: phone ? 'column' : 'row', gap, alignItems: 'stretch' }}>{children}</View>;
+}
+
+const Figure = ({ children, caption }: { children: React.ReactNode; caption?: string[] }) => (
+  <View style={doc.figure}>
+    {children}
+    {caption ? <View style={{ marginTop: 14, gap: 4 }}>{caption.map((c) => <Text key={c} style={doc.cap}>{c}</Text>)}</View> : null}
+  </View>
+);
+
+// --- The sections -------------------------------------------------------------
+
+const TITLES: Record<HowAnchor, string> = {
+  layers: '1. The three layers',
+  categories: '2. Nine categories — and no scores',
+  mapping: '3. Google’s words, and where they go',
+  place: '4. What a place actually carries',
+  facts: '5. Two kinds of check, and why they are different',
+  where: '6. Where a value comes from',
+  pipeline: '7. How a fact gets born',
+  collections: '8. Collections — what a family actually browses',
+  journey: '9. What happens when a family searches',
+  counting: '10. Counting honestly',
+  state: '11. Where this actually stands',
+};
+
+/** What the contents line calls each section: shorter than its heading. */
+const NAV: [HowAnchor, string][] = [
+  ['layers', 'The three layers'], ['categories', 'The nine categories'], ['mapping', 'Google’s words'],
+  ['place', 'A place'], ['facts', 'Two kinds of check'], ['where', 'Where a value comes from'],
+  ['pipeline', 'How a fact gets born'], ['collections', 'Collections'], ['journey', 'A family searches'],
+  ['counting', 'Counting honestly'], ['state', 'Where we are'],
+];
+
+function Section({ at, landed, children }: { at: HowAnchor; landed: boolean; children: React.ReactNode }) {
+  // `nativeID` is the DOM id on the web, so `?at=facts` can find the section.
+  return (
+    <View nativeID={anchorId(at)} style={[doc.section, landed && doc.landed]}>
+      <Text style={doc.h2}>{TITLES[at]}</Text>
+      {children}
+    </View>
+  );
+}
+
+function TheDocument({ at, jump }: { at: HowAnchor | null; jump: (a: HowAnchor) => void }) {
+  const { width } = useViewport();
+  const phone = width < 900;
+  // Side by side on a wide screen. On a phone the boxes stack, and a flex of 1
+  // in a column of no fixed height would squash them to nothing.
+  const half = phone ? undefined : { flex: 1 };
+
+  return (
+    <View style={doc.wrap}>
+      <Text style={doc.eyebrow}>Epic · How the filing works · v2</Text>
+      <Text style={[doc.h1, phone && { fontSize: 32, lineHeight: 34 }]}>What is actually going on</Text>
+      <Text style={doc.meta}>28 September 2026 · the model behind Overview · Categories · Facts · Mapping · Collections · Fact automations · Changes</Text>
+
+      <Note>{[
+        '**Renamed on 26 and 28 September.** On 26 September "labels", "rules" and "rows" were each doing several jobs, so the words changed: labels → **facts** · question set → **fact sheet** · question → **check** · answer → **what we found** · subcategory defaults → **defaults** · rows → **ideas**.',
+        'On 28 September ideas became **collections**; the Defaults tab went, and a subcategory’s defaults now sit on its own page; shared fact sheets gave way to **each subcategory’s own list of facts**; and the harvest’s approvals gave way to the **fact pipeline**, which adds facts by rule. Older documents and screenshots use the old words.',
+      ]}</Note>
+
+      <Rich style={doc.lede}>Epic holds a very large number of places and has to answer one question well: given this family, this weather, this Saturday and this much time — what should they do? Everything below exists to turn a list of places into an answer to that question.</Rich>
+
+      <View style={doc.nav}>
+        {NAV.map(([a, label]) => (
+          <Press key={a} effect="none" onPress={() => jump(a)} accessibilityRole="link">
+            <Text style={doc.navLink}>{label}</Text>
+          </Press>
+        ))}
+      </View>
+
+      {/* 1 */}
+      <Section at="layers" landed={at === 'layers'}>
+        <P>Three separate jobs, done in order. Each one is useless without the one above it.</P>
+        <Figure>
+          <Box title="Census" sub="what exists, and where" style={doc.mid} />
+          <Down />
+          <Box title="Categories" sub="which drawer each place sits in" style={doc.mid} />
+          <Down />
+          <Across phone={phone}>
+            <Box tone="live" title="Facts" sub="indoors · step free · who it’s for" style={half} />
+            <Box tone="live" title="The fact pipeline" sub="spot · verify · add · re-check · families" style={half} />
+          </Across>
+          <Down />
+          <Box tone="key" title="Collections" sub="rules over those facts" style={doc.mid} />
+          <Down />
+          <Box title="Inspire" sub="what the family actually sees" style={doc.mid} />
+        </Figure>
+        <P>**The census** says a place exists and roughly where. It is free, permanent, and it has run: 177,297 places across the south east.</P>
+        <P>**Categories** say which drawer a place belongs in. Also done: nine categories, 72 subcategories, 485 of Google’s words mapped.</P>
+        <P>**Facts** say what a place is *actually like*. Each subcategory keeps its own list of the facts it looks for, and the fact pipeline fills them in from Epic’s own sources, place by place, as households search. This is the half that is unfinished, and it is where the product’s value lives.</P>
+        <P>**Collections** turn those facts into things a family recognises. Nothing is ever filed into a collection.</P>
+      </Section>
+
+      {/* 2 */}
+      <Section at="categories" landed={at === 'categories'}>
+        <P>An earlier version of this model carried eight graded axes — how thrilling, how much walking, how much planning, how new, how busy, how much you learn, how smart, how long a day — each scored 0 to 4 on every place. **They have been cancelled.**</P>
+        <P>Every one failed the same test. Thrill duplicated the Adrenaline category and could not be scored consistently: nobody can say non-arbitrarily that a climbing wall is 2 and coasteering is 3. Walking was covered by step free plus duration and was obvious to a family anyway. Learning became the Educational category. Busy duplicated the Epic score. Planning collapsed into booking required. Smart was Dining style. Novelty turned out to be a property of the household’s history rather than the place. Duration was a range, not a grade.</P>
+        <Note>**The rule that came out of it: if a value cannot be extracted from text, it cannot exist at Epic’s scale.** Every axis was a judgement no person could make twice the same way and no machine could read. Everything that survives is a fact sitting in a sentence on a website.</Note>
+        <P>What is left is nine categories, and they do one job: **where a place is filed.**</P>
+        <Table phone={phone} minWidth={520} cols={[{ label: 'Category', share: 34 }, { label: 'What it holds', share: 66 }]} rows={[
+          ['Fun', 'Theme parks, soft play, cinemas, arcades, water parks'],
+          ['Food & drink', 'Restaurants, pubs, cafés, farm shops, breweries'],
+          ['Culture', 'Museums, castles, galleries, cathedrals, theatres'],
+          ['**Educational**', 'Science centres, discovery centres, learning barns — new, and distinct from Culture'],
+          ['Sport', 'Grounds, courses, clubs, and have-a-go activities'],
+          ['Active', 'Pools, rinks, climbing, cycling, riding'],
+          ['Adrenaline', 'Karting, paintball, high ropes, skydiving, indoor snow'],
+          ['Relaxing', 'Gardens, spas, markets, browsing'],
+          ['Outdoors', 'Parks, woods, beaches, lakes, trails, viewpoints'],
+        ]} />
+        <P>A castle is Culture. A science centre is Educational. A farm with a learning barn is Educational and not Culture at all. A museum is both — Culture primary, Educational secondary.</P>
+        <P>A place has **one primary subcategory and any number of secondaries**, and it appears in every category it is filed under. It is not shown twice within one browsing session, but its place in a category never depends on what a household has already seen.</P>
+      </Section>
+
+      {/* 3 */}
+      <Section at="mapping" landed={at === 'mapping'}>
+        <P>Google describes every place with types from its own list — golf course, race course, road bridge, kebab shop. That list is built for maps, not for days out, so every one of the 485 has to be given an answer.</P>
+        <Figure caption={[
+          'A word can land in more than one place — golf course fills a drawer and sets "not indoors"',
+          'A word can fill several drawers, and exactly one of them is always its primary',
+          'Travel places are held for reachability and never shown as somewhere to go',
+        ]}>
+          <Box title="Google’s 485 words" sub="golf course · road bridge · kebab shop" style={doc.mid} />
+          <Down />
+          <View style={doc.five}>
+            <Box tone="live" title="A drawer" sub="Golf clubs" style={doc.fiveBox} />
+            <Box tone="live" title="A fact" sub="indoors" style={doc.fiveBox} />
+            <Box title="Travel" sub="a station" style={doc.fiveBox} />
+            <Box title="Useful nearby" sub="a loo" style={doc.fiveBox} />
+            <Box tone="out" title="Excluded" sub="a road bridge" style={doc.fiveBox} />
+          </View>
+        </Figure>
+        <P>Excluding a word is a real answer, not a gap. A road bridge is on the map because maps need bridges; nobody is going to spend Saturday at one.</P>
+        <H3>How a word is decided</H3>
+        <Bullets items={[
+          'Every word sits in exactly one of four views: **In Epic · Needs a decision · Not in Epic · Decided**.',
+          'A word Google adds later goes straight into Needs a decision, with the machine’s suggestion or "No suggestion — choose where it goes". Until it is decided, its places are not in Epic unless another word carries them.',
+          'Decisions are made one at a time — there is no "Accept all" — and each keeps its reason, who made it and when, can be undone, and appears in Changes. A proposal somebody chose to keep is never raised again, and one that would reverse a settled decision is never shown.',
+          '**Places affected** counts only places that would actually leave Epic or move. Highgate is not lost if cemetery is excluded, because tourist attraction still carries it.',
+          'Tourist attraction no longer files anything. It is kept as a fact only.',
+        ]} />
+      </Section>
+
+      {/* 4 */}
+      <Section at="place" landed={at === 'place'}>
+        <Figure>
+          <View style={doc.placeFrame}>
+            <Text style={doc.boxTitle}>Coral Reef Waterworld</Text>
+            <Text style={[doc.boxNote, { marginBottom: 12 }]}>one Google place ID · coordinates held 30 days</Text>
+            <View style={{ gap: 12 }}>
+              <Across phone={phone}>
+                <Box title="Primary subcategory" sub="Fun › Water parks" style={half} />
+                <Box title="Secondary subcategories" sub="Active › Pools & leisure centres" style={half} />
+              </Across>
+              <Across phone={phone}>
+                <Box tone="live" title="Standard facts" sub="indoors yes · step free yes · who it’s for 4–10" style={half} />
+                <Box tone="live" title="Ranges and cost" sub="2–3 hours · Mid" style={half} />
+              </Across>
+              <Box tone="live" title="Facts its subcategory looks for · Water parks" sub="wave machine Verified yes · toddler pool Verified yes · lane swimming Don’t know" />
+            </View>
+          </View>
+        </Figure>
+        <P>Five kinds of thing, and they do not overlap. The filing says where it lives. The standard facts — yes/no, ranges and the cost band — say what it is like generally, and are looked for at every place. The facts its subcategory looks for say the specific things that only matter for *this kind* of place.</P>
+        <H3>What an answer can be</H3>
+        <Table phone={phone} minWidth={560} cols={[{ label: 'Answer', share: 24 }, { label: 'Seen by', share: 20 }, { label: 'What it means', share: 56 }]} rows={[
+          ['**Verified yes**', 'public, counted', 'Our own sources say so, and none says otherwise.'],
+          ['**No**', 'public, counted', 'One of our own sources says it is not there.'],
+          ['**Conflict**', 'private', 'Our own sources disagree and the venue’s own website says nothing. Never shown; families who visit settle it.'],
+          ['**Suggestion**', 'private', 'Reviewers raised it and it is waiting to be checked. Deleted once checked, and after 30 days at the latest.'],
+          ['**Don’t know**', 'normal', 'Nothing we own mentions it. Most places do not have most features, so it is never a headline number and never a problem.'],
+        ]} />
+      </Section>
+
+      {/* 5 */}
+      <Section at="facts" landed={at === 'facts'}>
+        <Table phone={phone} cols={[{ label: 'Kind', share: 22 }, { label: 'Shape', share: 24 }, { label: 'Asked of', share: 24 }, { label: 'Example', share: 30 }]} rows={[
+          ['**Standard check**', 'yes / no, a range, or a band', 'everything', 'indoors · step free · parking · toilets · booking required · food on site · dog friendly · who it’s for · duration · cost band'],
+          ['**Subcategory check**', 'yes / no / don’t know', 'the places in each subcategory whose list holds it', 'wave machine — looked for only in the subcategories where our own sources have verified it'],
+        ]} />
+        <P>The test: **could two reasonable people standing in front of the place disagree?** If no, it is a fact, and a check can find it. If yes, it is a judgement — and since judgements are not stored, it belongs in a collection’s rule instead.</P>
+        <Note>**"Rainy day" is none of these.** It is a conclusion drawn from indoors, and storing it separately means the same fact held twice, out of step the moment one changes. Anything that describes how people *feel* about a place is a collection’s rule, not something the place carries. Kid friendly went the same way, in favour of who it’s for.</Note>
+        <H3>What the bands mean</H3>
+        <P>One set, shared by defaults, facts, collections and the families’ questions (signed off 28 September). A standard fact’s own page shows its definition.</P>
+        <Table phone={phone} minWidth={600} cols={[{ label: 'Standard fact', share: 28 }, { label: 'Bands', share: 72 }]} rows={[
+          ['Who it’s for', 'Babies under 2 · Toddlers 2–4 · Young children 5–8 · Older children 9–12 · Teens 13–17 · Adults 18+'],
+          ['Duration', 'Under 1 hour · 1–2 hours · 2–3 hours · Half a day · A full day'],
+          ['Cost band, UK (per person)', 'Free · Cheap, under £10 · Mid, £10–25 · Dear, over £25'],
+          ['Cost band, Ireland (per person)', 'Free · Cheap, under €12 · Mid, €12–30 · Dear, over €30'],
+        ]} />
+        <P>Who it’s for is the sweet spot, not the tolerance: Coral Reef is best for 4–10, even though a two-year-old can paddle. One range per place, and accepted fuzziness where a place spans more than one.</P>
+      </Section>
+
+      {/* 6 */}
+      <Section at="where" landed={at === 'where'}>
+        <P>A fact can be set at three levels. Each is a default for the one below it, and the most specific one wins. The first lives under Mapping; the second on each subcategory’s own page — there is no Defaults tab.</P>
+        <Figure>
+          <Box title="Set on one of Google’s words" sub={'every place carrying that word · "golf course is not indoors"'} />
+          <Down />
+          <Box title="Set on a subcategory — a default" sub={'every place in that drawer · "golf clubs need booking"'} />
+          <Down />
+          <Box tone="key" title="Set on the place itself" sub={'one place · "Swinley suits ages 8+" — our own sources, families who went, or a person said so, and it wins'} />
+        </Figure>
+        <P>A human’s answer is never overwritten by a default. Change the default afterwards and the places a person has touched keep their own value; the disagreement is recorded instead, which is how you find out a default is wrong.</P>
+        <Bullets items={[
+          'A person can set a standard fact on one subcategory, or tick several on the Categories list and set it across all of them at once. **A default a person sets counts as an answer from Epic**: it is public for every place with no answer of its own.',
+          'A default the machine proposes from the places’ own values is private until a person accepts it.',
+          'Families never see hedged wording such as "usually indoors".',
+          'When most confirmed places contradict a person-set default — three or more confirmed, more than half of them disagreeing — it is flagged amber on the subcategory’s page and listed under Needs you on Overview.',
+          'Age is never set on a Google word.',
+        ]} />
+      </Section>
+
+      {/* 7 */}
+      <Section at="pipeline" landed={at === 'pipeline'}>
+        <P>Nobody sits and writes the facts, and nobody approves them one by one. They come out of what is written about places, are checked against sources Epic owns, and are added by rule. **The machine runs itself: no button starts any of it.** A person corrects what is wrong, removes what should not be looked for, and sets the rules.</P>
+        <Note>{[
+          '**How Epic grows its knowledge.**',
+          '"Epic gets to know the places near each household. The moment someone subscribes, we find the top 20 in every category around their home and check them against their own websites and other sources, so their first search is fast. Scroll past 20 and we fetch the next 20. Each new household overlaps and extends what we know. We never sweep a whole subcategory, area or country — we only look at places families will see."',
+        ]}</Note>
+        <Figure>
+          <Box title="1. Spot" sub="When a household’s search pays Google for a place’s details, the reviews are read in memory for features — and whether each one asserts, denies or merely asks. Features only, never opinions or conditions." note={'1 mention → we go and look · any denial → a conflict · 2 asserting reviews, none denying → "Reviewers mention a sauna", in that session only'} />
+          <Down />
+          <Box tone="live" title="2. Verify" sub="At once, against the venue’s own website, our local copy of OpenStreetMap, the Wikipedia body and Wikidata." note="1 source saying yes, none saying no → Verified yes · a source says no → No · sources disagree → the venue’s website decides (on) · nothing found → Don’t know" />
+          <Down />
+          <Box tone="live" title="3. Add" sub="Verified at enough places in a subcategory, the fact joins that subcategory’s list, and is looked for at each place as it next comes up — never as a sweep." note="2 places → Active · on more than 90% of places → Ignored instead (access and age facts exempt)" />
+          <Down />
+          <Box title="4. Re-check" sub="When a place a search surfaces has a fact past its period, it is checked again — never as a sweep." note="physical features 12 months · access 6 months · food and dietary 6 months, worded “the venue says…”" />
+          <Down />
+          <Box tone="key" title="5. Families confirm" sub="Families who have visited are one of our own sources. Asked after a visit, only about what matters to them — a toddler pool only to a household with a toddler." note="at most 1 question a visit · 2 families agreeing, none disagreeing, settles it · 2 saying a shown fact is wrong hides it until it is re-checked" />
+          <Down />
+          <Box tone="out" title="Housekeeping" sub="A suggestion still waiting to be checked is deleted after 30 days. It comes back the next time a search finds the place." />
+        </Figure>
+        <P>**Google may suggest; it never answers.** The only thing derived from Google that is stored is a suggestion — a place ID, a feature, a status and the day it was first seen, with no text, quotes, review ids or counts. It is never public, never counted, never used by a collection or a filter, and it is deleted once checked. A stored fact comes from our own sources, with the source and an evidence quote, because owned text may be kept. Six reviews mentioning a feature and no owned source is Don’t know; two venue pages is Yes. That is the policy working.</P>
+        <P>A fact’s status in a subcategory is **Active** (Epic looks for it there), **Gathering evidence** (seen, not yet confirmed enough), or **Ignored**, with its reason: on nearly every place, an opinion, a condition, or removed by a person. **New** marks the first 30 days after it became Active. A word on nearly every place of a kind is ignored for a reason of its own: lockers are in every water park, so knowing about lockers tells a family nothing. A fact a person removes is never added back.</P>
+        <P>Every threshold is a setting on **Fact automations**, and changing one is a person’s decision, logged in Changes. What the machine did is reported apart from the settings, under Facts: **Verification** says whether it is running and flowing — a source is Slow at 5% failures and Failing at 15%; **Accuracy** compares the machine’s answers with what families said after visiting, and reads "Building" until there are ten answers; **Excluded facts** lists what it chose not to add, with Put back and Include anyway. Nobody works through a queue of exceptions: conflicts and disputes are settled by rules and by families.</P>
+      </Section>
+
+      {/* 8 */}
+      <Section at="collections" landed={at === 'collections'}>
+        <P>Nobody browses "Sport". They browse "it’s raining again" and "wear them out". A collection is a title, a line of copy and a rule — and nothing is filed into it.</P>
+        <Figure>
+          <Across phone={phone}>
+            <Box tone="key" title="Toddler-proof" sub="who it’s for overlaps 0–3" note="works today — the fact exists" style={half} />
+            <Box tone="wait" title="Big kids" sub="Fun or Adrenaline · ages from ≤12 to ≥60" note="works, but thin — left thin on purpose" style={half} />
+          </Across>
+          <View style={{ flexDirection: phone ? 'column' : 'row', gap: 12, marginTop: 12 }}>
+            <View style={half}>
+              <Down />
+              <Box title="Every place that answers" sub="whatever drawer it happens to sit in" note="a soft play, a farm, a museum with a play barn" />
+            </View>
+            <View style={[half, { justifyContent: 'center', gap: 4, paddingTop: phone ? 0 : 30 }]}>
+              <Text style={doc.cap}>Change the rule and the collection’s contents change</Text>
+              <Text style={doc.cap}>the same afternoon. Nothing is refiled,</Text>
+              <Text style={doc.cap}>because nothing was filed in the first place.</Text>
+            </View>
+          </View>
+        </Figure>
+        <H3>The rule</H3>
+        <Bullets items={[
+          'A rule gathers places from any category. Pills in the same group mean "any of"; different groups must all hold; any pill can be turned to "not".',
+          'Ages and duration are from–to ranges; cost is Free · Cheap · Mid · Dear.',
+          'Who sees it is **derived, never set**: no age condition → everyone; a lower age of 16 or more → households with an adult; otherwise → households with somebody in that age range. "Not visited by this household" is applied on its own when it is shown.',
+          'A collection is hidden from a household when fewer than 4 places match within its reach. Thinness is information, not an alarm.',
+        ]} />
+        <P>Hearting a collection is the strongest signal in the product, because a collection is a rule — one tap says something about several facts at once, where hearting a single place says something about one place. Hearted collections rise to the top of Inspire; two or three unhearted ones always stay in view; an empty hearted one is never shown; and hearts fade. The first heart asks whose list it is, once.</P>
+        <P>A collection may use a household member’s name — "A day to yourself, Sarah" — and never attaches a child’s name to a negative. How often each is shown, opened and hearted is counted per collection and per audience, and reads "—" until there are real households.</P>
+        <P>Kept as they were: **Big kids** (Fun or Adrenaline, ages from 12 or under to 60 or over, deliberately thin), **Sneakily educational** (Educational, with Fun as its primary), and the four age collections — Toddler-proof 0–3, Little ones 4–7, Older kids 8–12, Teenager-proof 13–18.</P>
+      </Section>
+
+      {/* 9 */}
+      <Section at="journey" landed={at === 'journey'}>
+        <Figure>
+          <Box title="Everything within reach" sub="from the census — free, already known, thousands of places" />
+          <Down />
+          <Box title="Narrowed by the hard constraints" sub="open now · close enough · suits the youngest · indoors because it is raining" />
+          <Down />
+          <Box title="Ordered by the Epic score" sub="our own number — never a stored copy of anyone else’s rating" />
+          <Down />
+          <Box tone="key" title="Re-ordered for this household" sub="what each member will tolerate, what they love, what they have already done" />
+        </Figure>
+        <P>The constraints do most of the work and cost nothing to apply. A learned model never overrides them: a bad recommendation on a social app costs fifteen seconds, and a wasted Saturday with two children in the car undoes a month of good ones.</P>
+        <P>What is shown is what Epic then gets to know. Buying a place’s details to draw it is where the fact pipeline’s Spot step runs, and a household that scrolls past twenty in a category brings in the next twenty. Nothing is swept, and nothing is paid for twice.</P>
+      </Section>
+
+      {/* 10 */}
+      <Section at="counting" landed={at === 'counting'}>
+        <P>Epic’s numbers are floors more often than they are answers, and the discipline that keeps them useful is saying so on the number itself rather than in a flag beside it.</P>
+        <H3>A page is not a count</H3>
+        <P>Google returns twenty places per request and stops. For a long time the home screen printed the length of that list, so a ring holding 16,258 culture places read **19**. The census count is free, permanent and read from our own tables; it is what gets shown, with the handful bought for display beneath it.</P>
+        <H3>Unresolved splits — it does not resolve inward</H3>
+        <P>The census works in boxes, and a ring’s edge cuts through them. Those straddling boxes go in an unresolved bucket, and some of what is in them lies inside the ring and some outside. So the true figure sits *between* the counted number and the sum of both, and nothing narrows it but a finer census of the edge.</P>
+        <H3>A partial count says it is partial, in the number</H3>
+        <P>While a sweep is running, one tile has answered a drawer and another has not. The count reads **"at least 340, sweeping, 4 of 11 tiles"** — the caveat inseparable from the figure — and partial counts sort after finished ones. A labelled wrong number beats an unlabelled stale one, because you can see the first is wrong. A count in the same typeface as a finished one, with a flag beside it, will be read as a count.</P>
+        <H3>Every count carries its scope</H3>
+        <P>The whole estate by default, with geography as a drill-down: "Wave machine · 2 places" means two everywhere. The location filter on Categories and Collections — a postcode, town or city and a reach, 30 minutes by car unless changed — switches a count to what a household there would see. A place counts once however many subcategories share it, and a sample size is never a denominator.</P>
+        <Note>**The rule underneath all of these: every diagnostic has a can’t-speak state.** A signal without enough evidence says so — "Building", "Never run", "—" — rather than recommending an action. Six separate faults this month were the same shape — a number that could not see saying something anyway.</Note>
+      </Section>
+
+      {/* 11 */}
+      <Section at="state" landed={at === 'state'}>
+        <Table phone={phone} cols={[{ label: 'Piece', share: 30 }, { label: 'State', share: 18 }, { label: 'What is left', share: 52 }]} rows={[
+          ['Census', 'Done', 'Inner London corrected; nearest-postcode placement next'],
+          ['Categories and subcategories', 'Done', 'Educational live; the taxonomy audit waits to be accepted'],
+          ['Google’s words mapped', 'Done', 'Re-fenced by type; text-sourced drawers no longer counted; decisions now one at a time, each with its reason'],
+          ['Facts (yes/no, ranges, cost band)', 'Working', 'Bands signed off 28 September; defaults set on each subcategory’s page; what we know per place is thin'],
+          ['Fact sheets', '**Replaced**', 'Each subcategory keeps its own list of facts, filled by the pipeline'],
+          ['The fact pipeline', 'Built', 'Spot, Verify, Add, Re-check and Families confirm run themselves; the families’ question in the app waits on its design brief'],
+          ['The eight axes', '**Cancelled**', 'See section 2 — nothing replaces them'],
+          ['The corpus', 'Thin', 'Verify reads the venue’s paragraphs and the Wikipedia body; nothing is re-extracted before the prose change lands'],
+          ['Collections', 'Built', '41 collections, all rules over facts; engagement reads "—" until there are real households'],
+        ]} />
+        <P>The blockage has moved again. Facts are no longer approved from a harvest: the machine adds one to a subcategory once our own sources have verified it at two of its places. So what Epic can learn is bounded by how much owned text it can read about each place — which is why the venue’s own paragraphs and the Wikipedia body come first, and why families who have been are counted as a source.</P>
+      </Section>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The decision log: the rest of Epic
+// ---------------------------------------------------------------------------
 
 /**
  * `live` — Epic does this today.
@@ -53,313 +493,16 @@ type Decision = {
 };
 
 /**
- * `at` is the section's address inside the page — `/admin/how?at=facts` — and
- * the id the info icons on the filing desk deep-link to. Only the Business
- * mechanics sections carry one; the rest are read top to bottom.
+ * The filing sections that used to open this log (mechanics, categories,
+ * facts, sheets, mapping, defaults, ideas) are the document above now; what
+ * stays here is everything else Epic has decided.
  */
-type Section = { key: string; title: string; blurb: string; icon: IconName; decisions: Decision[]; at?: HowAnchor };
+type Section = { key: string; title: string; blurb: string; icon: IconName; decisions: Decision[] };
 
 /** A path is a path: it reads as one, and it is meant to be copied into an editor. */
 const MONO = Platform.OS === 'web' ? 'ui-monospace, SFMono-Regular, Menlo, monospace' : undefined;
 
 const SECTIONS: Section[] = [
-  /**
-   * Business mechanics — the five objects the filing desk is made of, and one
-   * section per screen, in the words of the rename (owner's brief, 26 Sep
-   * 2026). Each carries an `at` so the info icon beside that screen's heading
-   * lands on it. The owner is supplying a rewritten page; these sections are
-   * the anchors it will fill, written in the new words rather than left in
-   * the old ones until then.
-   */
-  {
-    key: 'mechanics',
-    at: 'mechanics',
-    title: 'Business mechanics — what each thing is',
-    blurb: 'Three words were each doing several jobs and the back office was unreadable because of it. These are the five objects the filing desk is made of, and the one sentence each one is.',
-    icon: 'owned',
-    decisions: [
-      {
-        title: 'A category is where a place is filed',
-        rule: 'Fun › Water parks. A place has exactly one home subcategory, which is what stops it drawing twice on Inspire or in a trip’s Activities lanes. A subcategory can be shown in other categories as well, but the place keeps one home.',
-        why: 'The owner, on seeing a drawer in two categories: once something is duplicated, if the user sees it in Fun, they don’t need to see it again in Sport. One home is the only rule that makes that true everywhere at once.',
-        state: 'live',
-        where: 'apps/api/src/domain/moods.js · MAX_SHELVES, shelvesOf() · migration 103',
-      },
-      {
-        title: 'A fact is something we find out about a place',
-        rule: 'Indoors, step free, wave machine. Any shape — a yes or no, a range such as Suits ages or Duration, a band such as cost. A fact is read from the place first, then from its drawer’s default, then nowhere. A fact can bring another fact with a value: splash pad brings suits ages 0 to 7.',
-        why: 'The owner: there’s a very big difference between what a 5-year-old can do and what a 12-year-old can do. Ages are the clearest case, but the same machinery answers rainy day and step free without a column being added for each. Facts were called labels until 26 Sep 2026, when one word was holding facts, sheets and checks at once.',
-        state: 'live',
-        where: 'apps/api/src/repositories/placeAttributes.js · resolveFor() · migrations 105, 114–116, 118',
-      },
-      {
-        title: 'A check is one thing we go and find out; a standard check is made on everything',
-        rule: 'A check names a fact and goes looking for it on one place. A standard check — step free, parking, toilets, booking required, food on site, duration, cost band — is made on every place, everywhere. A set check is made only on the places a fact sheet covers.',
-        why: 'The question a check answers is closed, so two places can be compared: this one has a toddler pool and that one does not. An open question produces prose, and two places described freely cannot be compared.',
-        state: 'live',
-        where: 'apps/api/src/repositories/questionSets.js · migration 207',
-      },
-      {
-        title: 'A fact sheet is a bundle of checks for one kind of place',
-        rule: '“Water parks & pools” is a sheet name, not a subcategory — it covers two. A sheet is attached to one or more subcategories and never owned by one, so water parks, lidos and leisure pools share one sheet rather than three copies of nearly the same thing. What a sheet covers is said on its row, because a sheet is named like a place but is a checklist.',
-        why: 'A sheet is the thing people misread most. It looks like a place and it is a list of things to find out — which is why every sheet row says what it covers and how many checks it carries.',
-        state: 'live',
-        where: 'apps/api/src/repositories/questionSets.js · question_sets, question_set_subcategories',
-      },
-      {
-        title: 'An idea is a rule over facts, which is what a family browses',
-        rule: '“It’s raining again” is an idea for a day out: a title, a copy line and a rule over facts — indoors, suits the ages in this household, within reach today. Nothing is ever filed into an idea; it fills itself from whatever the facts say. Ideas were called rows until 26 Sep 2026, and a row is a shape, not a concept.',
-        why: 'An idea that is a rule can fill differently in Ascot and in Hungerford without anybody curating either. An idea that is a list has to be kept by hand in every district, and it goes stale in all of them.',
-        state: 'live',
-        where: 'apps/api/src/domain/browseRows.js · migration 208',
-      },
-      {
-        title: 'What we found is one of four things, and “nothing found” is one of them',
-        rule: 'A check on a place has found yes, found no, found nothing, or has not been made yet. Nothing found is stored rather than inferred: we looked, and no owned source mentioned it. Not checked yet means the check was added after this place was last looked at, and is the absence of a row.',
-        why: 'A place where nothing anywhere mentioned a toddler pool probably has not got one, and that is worth knowing. If it were drawn the same as a check nobody has got round to yet, the two would be indistinguishable and neither could be trusted.',
-        state: 'live',
-        where: 'apps/api/src/domain/questions.js · settle()',
-      },
-    ],
-  },
-  {
-    key: 'categories',
-    at: 'categories',
-    title: 'Categories — where a place is filed',
-    blurb: 'How a place comes to sit in one drawer, what a drawer assumes about everything in it, and what happens when the places disagree.',
-    icon: 'shortlist',
-    decisions: [
-      {
-        title: 'A primary fact is a subcategory, and a place has exactly one',
-        rule: 'The subcategories are the primary facts about a place. A place gets one and only one, which is its home. A subcategory can be shown in other categories as well, but the place keeps one home and each carousel gives it to one lane.',
-        why: 'The owner, on seeing a drawer in two categories: once something is duplicated, if the user sees it in Fun, they don’t need to see it again in Sport.',
-        state: 'live',
-        where: 'apps/api/src/domain/moods.js · MAX_SHELVES, shelvesOf() · migration 103',
-      },
-      {
-        title: 'Something inside a bigger place is not its own day out',
-        rule: 'Amity Beach is part of Thorpe Park. A child is recorded against its parent, one step only, and is dropped from every list: the parent is shown, and it inherits what the child carried — the moods, the experiences, and any fact the parent had nothing to say about.',
-        why: 'The owner had seen rides inside Thorpe Park listed on Inspire as separate days out. A family cannot go to Amity Beach; they can go to Thorpe Park, and the beach is a reason to.',
-        state: 'live',
-        where: 'apps/api/src/repositories/placeParts.js · withoutParts(), rollUp() · migration 106',
-        said: {
-          who: 'Roger', on: '13 Sep 2026',
-          words: 'I’ve seen multiple times activities that actually exist in Thorpe Park being listed as separate activities on the Inspire tab, and we absolutely have to stop that happening… we should only ever display Thorpe Park, not Amity Beach.',
-        },
-      },
-      {
-        title: 'Not sure is a list, and a research run fills it in',
-        rule: 'Where the mapping cannot settle a place, it goes on a list with its address, its words and the reason it could not be settled — never filed by a guess. A run then asks Claude, with web search, what it is and whether it is part of somewhere bigger. An answer is refused unless it names one of the subcategories offered, gives a sentence saying why, and cites a link. The answer is a proposal; a person settles it, and settling it can write the mapping at the same time.',
-        why: 'The owner: I don’t want to have to determine whether Amity Beach is part of Thorpe Park. You should use the Anthropic API to confirm and fill in those blanks. The refusals matter more than the answers — a model that cannot cite a page has not looked anything up.',
-        state: 'live',
-        where: 'apps/api/src/domain/research.js · apps/api/src/repositories/notSure.js · migrations 117, 119',
-      },
-      {
-        title: 'Twelve real places, before a mapping is saved',
-        rule: 'A word can be opened to see twelve real places that carry it, fetched once from Google with a small field mask and nothing stored. The screen groups them by the other words they carry, because the shape they share is the mapping worth writing, and says of each one where the mapping puts it today. Places nothing settles can be sent to the not-sure list from there.',
-        why: 'The owner, on adventure sports centre: I don’t know what that is. Twelve gym results shared one shape and twelve water parks had ten different ones — which is the difference between a mapping worth writing and a word that needs looking at one place at a time.',
-        state: 'live',
-        where: 'apps/api/src/sources/google.js · examplesOfType() · metered as admin.taxonomy.examples',
-      },
-    ],
-  },
-  {
-    key: 'facts',
-    at: 'facts',
-    title: 'Facts — what we find out about a place',
-    blurb: 'Where facts come from, why a water park and a country walk are checked for different things, and who is allowed to say what a place has.',
-    icon: 'question',
-    decisions: [
-      {
-        title: 'The checks come from the places, and a person promotes them',
-        rule: 'Epic reads what is written about places of a kind — the open map’s tags, the venue’s own page, Wikipedia — counts which words keep appearing, and offers them as candidates with the share of places each appeared for. Somebody promotes the ones worth checking. A word rejected here is never offered again.',
-        why: 'Nobody can sit down and list what matters about fifty-two kinds of place, and a list written from an armchair misses what the places themselves keep saying. The share is the point: wave machine at 10% tells you more than lockers at 95%, which is true of everywhere and separates nothing.',
-        state: 'live',
-        where: 'apps/api/src/sources/vocabulary.js · freeSweep()',
-      },
-      {
-        title: 'Google may raise a word; it may never answer a check',
-        rule: 'Google’s review summaries can be read to find out which words matter for a kind of place. The text is read in memory, turned into counted words, and thrown away — none of it is written to a row, a log or a debug field, and none of it becomes a fact about the place it came from. A check on a place is answered from what Epic owns or may freely read: the venue’s own page, OpenStreetMap, Wikipedia, Wikidata, the hygiene register.',
-        why: 'Two reasons and they point the same way. A fact we keep has to be one we are allowed to keep, and a stored copy of somebody else’s writing is not. And a wrong claim about a real business carries real risk — what we found on the venue’s own page can be shown with a link and a date beside it.',
-        state: 'live',
-        where: 'apps/api/src/domain/questions.js · OWNED_SOURCES · place_answers source check',
-      },
-      {
-        title: 'Everything we found says where it came from, and two sources may disagree',
-        rule: 'What we found carries its source, the page it came from and the day it was checked — “Wave machine · from coralreef.co.uk · checked 12 Sep”. Where the venue’s page and the open map say different things, both are kept and the pair is marked unresolved for a person to settle. Nothing resolves it quietly.',
-        why: 'A provenance line is what makes a fact checkable a year later. And silently picking a winner between two sources is how a confident wrong answer gets built — the disagreement is itself information.',
-        state: 'live',
-        where: 'apps/api/src/repositories/questionSets.js · markDisagreement()',
-      },
-      {
-        title: 'A word can be mentioned and denied in the same breath',
-        rule: 'When a word is noticed, Epic also records what the sentence did to it: asserted it, denied it, or merely asked about it. “Does it have a wave machine? We couldn’t find one” counts as a question, not as evidence. A candidate whose mentions are mostly denials says so on the row.',
-        why: 'It cannot be worked out later. The rented text is discarded within milliseconds of arriving, so if the polarity is not read at that moment there is nothing left to read it from — and a feature nobody has would look exactly like one everybody has.',
-        state: 'live',
-        where: 'apps/api/src/domain/questions.js · polarityOf()',
-      },
-      {
-        title: 'Only a feature becomes a check, and an unclear word simply waits',
-        rule: 'A harvested word is a feature (a wave machine), a condition (busy at weekends) or an opinion (rude staff). Only features can become checks. A word nothing can call sits in a holding pen — not pending, not rejected, not waiting on anybody — and is looked at again when a later harvest raises its count.',
-        why: 'A wrong “feature” becomes a check made on thousands of places; an unclear word costs nothing while it waits. And opinions are the Epic score’s job, not a check’s — checking every place for rude staff would be a rating system with extra steps.',
-        state: 'live',
-        where: 'apps/api/src/sources/vocabulary.js · classifyCandidates()',
-      },
-      {
-        title: 'A fact never checked anywhere is an orphan, and All facts says so in red',
-        rule: 'A fact approved into the vocabulary and attached to no sheet is never checked on any place. It is a real fact with nothing behind it, and it sits on the All facts list marked never checked anywhere until somebody attaches it to a sheet or retires it.',
-        why: 'Approving a word with no sheet is what creates orphans, so parking one is an explicit act rather than the quiet result of forgetting the second step.',
-        state: 'live',
-        where: 'apps/api/src/routes/filing.js · GET /labels/vocabulary',
-      },
-      {
-        title: 'Epic asks a venue’s website before it reads it',
-        rule: 'Every fetch of a business’s own page checks their robots.txt first, waits the crawl delay they ask for, and identifies itself as EpicBot with a contact address. A site that says no is not read, and yields nothing — the same as a site that is down.',
-        why: 'Enrichment reads venue pages on behalf of a household looking at that venue, which is a reasonable thing to do and stops being reasonable the moment it ignores what the site owner asked for. The cost is real: a venue whose robots.txt was written for search engines may lose us a phone number.',
-        state: 'live',
-        where: 'apps/api/src/sources/politeness.js',
-      },
-      {
-        title: 'Checking a place waits for somebody to want it',
-        rule: 'Checks are raised in bulk; they are made one place at a time. A place has its checks made once it crosses a threshold of appearances in search or drawer opens — never by sweeping everywhere. It is triggered by the search rather than by the tap, so by the time somebody opens a place it is usually already checked, and a place never checked still shows what its drawer assumes about places of that kind rather than nothing. The hook is built and switched off.',
-        why: 'A small share of places carries most of the searching. Checking all of them up front spends effort on places nobody opens, and it would go stale before anybody read it.',
-        state: 'partial',
-        where: 'apps/api/src/sources/vocabulary.js · enrichmentQueue() · EPIC_ENRICHMENT',
-      },
-    ],
-  },
-  {
-    key: 'sheets',
-    at: 'sheets',
-    title: 'Fact sheets — what we find out, about what kind of place',
-    blurb: 'A sheet is named like a place but is a checklist. Why every water park is checked for the same things, why the list is short, and when a kind of place stops costing money.',
-    icon: 'question',
-    decisions: [
-      {
-        title: 'A kind of place has a fixed, short list of checks',
-        rule: 'Every water park is checked for the same eight things — wave machine, toddler pool, splash area, step free. The list belongs to a fact sheet, and a sheet is shared: water parks, lidos and leisure pools use one between them rather than three copies of nearly the same thing. On top of it, the standard checks are made on everything.',
-        why: 'An open question about a place produces prose, and two places described freely cannot be compared. Eight closed checks can be: this one has a toddler pool and that one does not. It is also the only way a filter can ever be honest — “somewhere with a splash area” needs a check, not a paragraph that mentions one.',
-        state: 'partial',
-        where: 'apps/api/src/repositories/questionSets.js · migration 207',
-      },
-      {
-        title: 'A sheet says what it covers, because its name does not',
-        rule: 'Every sheet row reads name · covers these subcategories · so many checks · so many places. A sheet whose name does not say which subcategories it covers is renamed by a person, never silently.',
-        why: 'A sheet name that does not tell you which subcategories it covers defeats the point of having one.',
-        state: 'live',
-        where: 'apps/web/src/admin/filing/Facts.tsx · FactSheets',
-      },
-      {
-        title: 'Once a kind of place has its checks, Google leaves that category',
-        rule: 'When a fact sheet stops learning new words, it is settled: the Google pass skips it from then on, and every future place of that kind is checked from the venue’s own page, the open map and the encyclopedias. Attaching a new subcategory to the sheet unsettles it, because it brings vocabulary nobody has harvested.',
-        why: 'It is the moment a category stops costing money. Epic buys the vocabulary once and owns it; the alternative is paying to be told about wave machines again every time a new water park opens.',
-        state: 'live',
-        where: 'apps/api/src/sources/vocabulary.js · settleFromSaturation()',
-      },
-    ],
-  },
-  {
-    key: 'mapping',
-    at: 'mapping',
-    title: 'Mapping — where a provider’s word points',
-    blurb: 'How a word a provider uses becomes a drawer on the home screen — and why the mappings are written in Epic’s own words rather than a provider’s.',
-    icon: 'shortlist',
-    decisions: [
-      {
-        title: 'Providers’ words are mapped to our facts; the mappings are written in our facts',
-        rule: 'Every word a provider uses — google:water_park, wikidata:Q1 — points at one of Epic’s own facts. A mapping is then written over Epic’s facts, not over Google’s: when a place carries these facts, it goes in this drawer. A mapping written in our words is stored with scope “ours” and its facts bare; the same mapping reads a word from OpenStreetMap or Wikidata the day that source is added, without being rewritten.',
-        why: 'Mappings written over one provider’s vocabulary have to be written again for every other provider, and they break when that provider renames a word. 353 mappings were backfilled from the single-word rules that already existed, and 46 in our own words were written from them.',
-        state: 'live',
-        where: 'apps/api/src/domain/labels.js · scopeFor() · migrations 107–109',
-        said: {
-          who: 'Roger', on: '14 Sep 2026',
-          words: 'we don’t use Google words; we use our own words. The first exercise is to map Google words to our labels, and then we can add labels. We create rules using our own internal labels, which will change over time because we have other providers other than Google.',
-        },
-      },
-      {
-        title: 'A word that describes a place without saying what it is',
-        rule: 'Some of a provider’s words — tourist attraction, establishment, point of interest — describe a place without saying what it is. They are kept as a fact rather than mapped to a drawer, and they never settle a place on their own. A place carrying nothing else goes on the not-sure list instead of being filed by one of them.',
-        why: 'Filing by tourist attraction would put a castle, a cave and a garden centre in the same drawer. Throwing the word away instead loses real information about the place, so it is kept where it is true: as something the place is, not somewhere it lives.',
-        state: 'live',
-        where: 'apps/api/src/domain/googleSuggest.js · GENERIC_TYPES · migration 092',
-      },
-      {
-        title: 'The order the mappings are read in',
-        rule: 'This place → a mapping over a provider’s words → a mapping over ours → the kind of place → its category → what it was tagged with. A mapping somebody wrote by hand beats one Epic wrote for itself at every level. Mappings in our words sit below mappings over a provider’s, because ours name one fact each and a hand-written combination is more specific than any of them.',
-        why: 'Without the ordering, a single word could out-vote a longer mapping that was written precisely because the single word was wrong. It is also why a place taught by hand can never be moved by a later mapping.',
-        state: 'live',
-        where: 'apps/api/src/domain/moods.js · shelvesForVenue()',
-      },
-      {
-        title: 'Identifiers are proposed, never written unattended',
-        rule: 'A skill tag or a fact can carry an outside identifier — a Wikidata QID. A run proposes one for every tag nobody has looked up, with the description that tells the senses apart, and writes nothing. A person accepts. Only where exactly one thing in Wikidata carries that name is it offered for acceptance in a batch; saying no is written down, so no later run proposes the same thing again.',
-        why: 'A plain search puts fossil collector above fossil collecting, and foraging has a human sense and an animal one. Accepting four hundred first results would bed in mistakes that nothing downstream would ever surface.',
-        state: 'live',
-        where: 'apps/api/src/routes/hostSkills.js · /identifiers · migrations 120–121',
-      },
-    ],
-  },
-  {
-    key: 'defaults',
-    at: 'defaults',
-    title: 'Defaults — what a drawer assumes',
-    blurb: 'A default is assumed for every place in a drawer unless a place says otherwise. Why they are worth having, and the two different ways one can be wrong.',
-    icon: 'filters',
-    decisions: [
-      {
-        title: 'A default is read after the place and before nothing',
-        rule: 'A fact is read from the place first, then from its drawer’s default, then nowhere. A place that says otherwise wins; a place that says nothing takes what its drawer assumes. A default is a rule over a drawer, never a fact recorded against a place.',
-        why: 'Most places never say whether they are indoors, and most drawers can. Answering “indoors?” for every soft play centre at once is what lets a rule over facts fill an idea before any place has been checked.',
-        state: 'live',
-        where: 'apps/api/src/repositories/placeAttributes.js · resolveFor()',
-      },
-      {
-        title: 'Two columns, because there are two different ways a default can be wrong',
-        rule: 'Places contradict it is computed: of the places the default files, how many hold a different value. People called it wrong is human: how many times somebody overrode it by hand. They are never collapsed into one number. Three corrections is where a default stops being a rounding error, and it is drawn loud from there.',
-        why: 'A high contradiction count can mean the default is too broad or that the drawer wants splitting — nobody has said anything; the data disagrees with itself. Every override is a person who looked at a place and said no, which makes it the stronger signal of the two.',
-        state: 'live',
-        where: 'apps/web/src/admin/filing/Defaults.tsx · rule_overrides',
-        said: { who: 'Roger', on: '20 Sep 2026', words: 'this rule has been called wrong 41 times — that is the single most useful number in the system.' },
-      },
-      {
-        title: 'Retiring a default never touches a place',
-        rule: 'When a default is retired the drawer stops saying it. Every place keeps what it says for itself.',
-        why: 'A default was never a fact about any one place, so taking it away cannot remove one.',
-        state: 'live',
-        where: 'apps/api/src/routes/filing.js · POST /rules/:id/retire',
-      },
-    ],
-  },
-  {
-    key: 'ideas',
-    at: 'ideas',
-    title: 'Ideas — what a family browses',
-    blurb: 'An idea is a title, a copy line and a rule over facts. Nothing is ever filed into one. How they fill, why hearting one matters, and what a thin district does to the list.',
-    icon: 'keep',
-    decisions: [
-      {
-        title: 'An idea is a rule over facts, and it fills itself',
-        rule: '“It’s raining again” is indoors, within reach today, suits the ages in this household. Nothing is put into an idea by hand; it fills from whatever the facts say about the places within reach, so the same idea reads differently in Ascot and in Hungerford.',
-        why: 'An idea that is a list has to be curated in every district and goes stale in all of them. A rule over facts is written once and is right wherever the facts are.',
-        state: 'live',
-        where: 'apps/api/src/domain/browseRows.js',
-      },
-      {
-        title: 'A hearted idea rises, and unhearted ones stay mixed in',
-        rule: 'Hearting an idea is the highest-signal tap in the product. On Inspire, hearted ideas rise to the top and two or three unhearted ones stay mixed in among them, never only at the bottom. A heart belongs to a member, and the first heart asks whose list this is.',
-        why: 'A list that only ever shows you what you have already said yes to has stopped being a way of finding anything.',
-        state: 'live',
-        where: 'apps/web/src/admin/filing/Ideas.tsx · householdRows()',
-      },
-      {
-        title: 'A hearted idea with too little near you waits quietly',
-        rule: 'An idea below its minimum fill in a district shows no shelf at all rather than an empty one. Only a hearted idea waits: an unhearted one below the fill is simply an idea nobody asked for.',
-        why: 'An empty shelf reads as “there is nothing good here”; no shelf reads as “not this week”. An idea that fills with twelve places in Ascot returns two in Hungerford, and an idea nobody can fill is not a bad idea — it is one waiting for a district to get denser.',
-        state: 'live',
-        where: 'apps/web/src/admin/filing/say.ts · waiting(), thinSomewhere()',
-      },
-    ],
-  },
   {
     key: 'money',
     title: 'What things cost, and where we cut',
@@ -753,8 +896,8 @@ const SECTIONS: Section[] = [
         where: 'apps/api/src/routes/atlas.js · city.holiday',
       },
       {
-        title: 'A place sits on at most two shelves, and the mapping is taught',
-        rule: 'Each shelf carries a weight from 0 to 1. Only the strongest two above the floor are drawn. Anything in `shelf_rules` beats the built-in tables, narrowest rule first.',
+        title: 'A place has one primary subcategory and any number of secondaries, and the mapping is taught',
+        rule: 'A place is filed under exactly one primary subcategory and as many secondaries as its Google words point at (register A2, 28 Sep 2026; this replaced "at most two shelves"). Within one browsing session a place is shown once. Anything in `shelf_rules` beats the built-in tables, narrowest rule first.',
         why: 'A flat list of moods put anything arguably two things on four shelves, and the home screen became the same places six times. The tables were also simply wrong in places — the atlas has one word for a Formula One circuit and a football ground — and re-guessing does not fix that; teaching it does.',
         state: 'live',
         where: 'apps/api/src/domain/moods.js · back office › Shelves',
@@ -804,9 +947,9 @@ const SECTIONS: Section[] = [
         where: 'apps/web/src/hooks/useSpeech.ts',
       },
       {
-        title: 'Red means one of two things, and never anything else',
-        rule: 'Red is the heart — a place the household loves — and it is "this needs doing": a trip with dates and nowhere to sleep, a visit nobody has rated. Counts, statuses and totals are never red.',
-        why: 'A colour that means five things means nothing. Two meanings, both of which want your attention, is the most it can carry.',
+        title: 'Red means danger, and never anything else',
+        rule: 'Red is kept for allergen and overrun warnings, the one Stop while a household is speaking, and — in the back office — what is broken: a stalled check, a failing source, accuracy under 90%, a destructive confirm. The loved heart is ink since the rebrand (7 Sep 2026). Counts, statuses and totals are never red.',
+        why: 'A colour that means five things means nothing. Danger is the one meaning worth a colour of its own; everything that merely wants attention is amber.',
         state: 'live',
         where: 'apps/web/src/theme.ts',
       },
@@ -1065,7 +1208,7 @@ export function HowItWorks() {
    * the web, which is the one thing a screen may reach for by name here;
    * the address itself is only ever read through the router.
    */
-  const [at] = useQueryState<HowAnchor | null>('at', null, { read: howAnchorOf, write: (v) => v });
+  const [at, setAt] = useQueryState<HowAnchor | null>('at', null, { read: howAnchorOf, write: (v) => v });
   useEffect(() => {
     if (!at || Platform.OS !== 'web') return;
     // After the paint: the section has to exist before it can be scrolled to.
@@ -1075,6 +1218,16 @@ export function HowItWorks() {
     return () => cancelAnimationFrame(id);
   }, [at]);
 
+  /**
+   * The contents line. It writes the address like any other link into the
+   * page, and scrolls at once as well, so a second tap on the section already
+   * in the address still goes there.
+   */
+  const jump = (a: HowAnchor) => {
+    setAt(a);
+    if (Platform.OS === 'web') document.getElementById(anchorId(a))?.scrollIntoView({ block: 'start' });
+  };
+
   const now = sources?.routingNow ?? null;
   const paused = now ? now.matrix ?? now.route ?? null : null;
 
@@ -1082,12 +1235,19 @@ export function HowItWorks() {
     <AdminPage>
       <PageHead
         title="How it works"
-        sub="The decisions behind what Epic does — what each one buys, what it gives up, and where the rule lives."
+        sub="The model behind the filing, then the decisions behind the rest of Epic — what each one buys, what it gives up, and where the rule lives."
       />
 
+      <TheDocument at={at} jump={jump} />
+
+      <View style={styles.part}>
+        <Text style={styles.partKicker}>Part two</Text>
+        <Text style={styles.partTitle}>The decisions behind the rest of Epic</Text>
+      </View>
+
       <Banner tone={paused ? 'warn' : 'plain'}>
-        {sources == null ? 'Reading what the API is doing…'
-          : error ? `Could not read the API: ${error}`
+        {sources == null && !error ? 'Reading what the API is doing…'
+          : error || sources == null ? 'Could not read what the API is doing just now, so this page cannot say whether travel times are real or estimated.'
             : sources.routing !== 'google-routes' ? 'No routing key is set, so every travel time on screen is worked out from the distance.'
               : paused ? `Google Routes has no quota left just now, so travel times are worked out from the distance until ${new Date(paused.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`
                 : 'Google Routes is answering, so travel times on screen are real ones.'}
@@ -1096,11 +1256,7 @@ export function HowItWorks() {
       <WhatWeOwe />
 
       {SECTIONS.map((s) => (
-        // `nativeID` is the DOM id on the web, so `?at=facts` can find the
-        // section. A section with no anchor is an ordinary panel.
-        <View key={s.key} nativeID={s.at ? anchorId(s.at) : undefined}
-              style={s.at && s.at === at ? styles.landed : undefined}>
-        <Panel title={s.title} sub={s.blurb} padded={false}>
+        <Panel key={s.key} title={s.title} sub={s.blurb} padded={false}>
           {s.decisions.map((d, i) => (
             <View key={d.title} style={[styles.row, i > 0 && styles.rowLine]}>
               <View style={styles.head}>
@@ -1120,17 +1276,16 @@ export function HowItWorks() {
             </View>
           ))}
         </Panel>
-        </View>
       ))}
 
       <Panel title="Keeping this page honest" sub="What it is for, and how it is meant to be maintained.">
         <Text style={type.body}>
-          A page like this is worthless the moment it describes something that is not true, so every entry says whether it is live or
-          only decided, and names the file the rule is in. If an entry cannot be checked against the code in a minute, it is written wrong.
+          A page like this is worthless the moment it describes something that is not true, so every entry in the decision log says whether it
+          is live or only decided, and names the file the rule is in. If an entry cannot be checked against the code in a minute, it is written wrong.
+          The document above is the owner’s own, corrected wherever the back-office handover or the register of decisions has since changed it.
         </Text>
         <Text style={type.small}>
-          Anything that changes by the minute — whether travel times are real right now — is read from the API at the top of this page rather
-          than written down here.
+          Anything that changes by the minute — whether travel times are real right now — is read from the API rather than written down here.
         </Text>
         <Press onPress={() => Linking.openURL('https://github.com/rogerrivers888/epic/blob/main/CLAUDE.md')} accessibilityRole="link">
           <Text style={styles.link}>The working agreements this page draws on →</Text>
@@ -1144,9 +1299,9 @@ export function HowItWorks() {
 const anchorId = (at: HowAnchor) => `how-${at}`;
 
 const styles = StyleSheet.create({
-  // The section a link landed on, marked with a moss rule so the eye finds
-  // it after the scroll. A rule, not a fill: this surface has no boxes.
-  landed: { borderLeftWidth: 3, borderLeftColor: colors.accent, paddingLeft: 12, marginLeft: -15 },
+  part: { gap: 4, borderTopWidth: BORDER, borderTopColor: colors.line, paddingTop: 18, marginTop: spacing.xl },
+  partKicker: { ...type.tiny, fontSize: 11, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase', color: colors.inkMuted },
+  partTitle: { ...type.title, fontSize: 24, letterSpacing: -0.5, lineHeight: 28 },
   row: { paddingVertical: 13, gap: 6 },
   rowLine: { borderTopWidth: 1, borderTopColor: colors.lineSoft },
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
@@ -1157,4 +1312,52 @@ const styles = StyleSheet.create({
   // no fill behind it. A filled token in a list of them reads as a row of chips.
   where: { fontFamily: MONO, fontSize: 11, color: colors.inkMuted, alignSelf: 'flex-start', paddingVertical: 2 },
   link: { fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: colors.accent },
+});
+
+/**
+ * The document's own measures: a 760px reading column, 17px body at 1.6, the
+ * section heading under a 2px ink rule. Archivo throughout — the document's
+ * three faces are Epic's one.
+ */
+const doc = StyleSheet.create({
+  wrap: { maxWidth: 760, width: '100%' },
+  eyebrow: { fontFamily: fonts.body, fontSize: 12, fontWeight: '600', letterSpacing: 1, textTransform: 'uppercase', color: colors.inkMuted, marginBottom: 14 },
+  h1: { fontFamily: fonts.heading, fontSize: 44, lineHeight: 46, fontWeight: '800', letterSpacing: -0.9, color: colors.ink },
+  meta: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted, marginTop: 12, marginBottom: 18 },
+  lede: { fontFamily: fonts.body, fontSize: 19, lineHeight: 29, color: colors.ink, marginTop: 10 },
+  nav: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 14, rowGap: 6, marginTop: 22 },
+  navLink: { fontFamily: fonts.heading, fontSize: 14, fontWeight: '600', color: colors.accent, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  section: { marginTop: 48, paddingTop: 18, borderTopWidth: BORDER, borderTopColor: colors.line },
+  // The section a link landed on, marked with a moss rule so the eye finds it
+  // after the scroll. A rule, not a fill: this surface has no boxes.
+  landed: { borderLeftWidth: 3, borderLeftColor: colors.accent, paddingLeft: 12, marginLeft: -15 },
+  h2: { fontFamily: fonts.heading, fontSize: 24, lineHeight: 29, fontWeight: '800', letterSpacing: -0.3, color: colors.ink, marginBottom: 12 },
+  h3: { fontFamily: fonts.heading, fontSize: 17, fontWeight: '800', color: colors.ink, marginTop: 20, marginBottom: 6 },
+  p: { fontFamily: fonts.body, fontSize: 17, lineHeight: 27, color: colors.ink, marginBottom: 14 },
+  list: { gap: 8, marginBottom: 14 },
+  li: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
+  dot: { fontFamily: fonts.body, fontSize: 17, lineHeight: 27, color: colors.inkMuted },
+  note: { borderLeftWidth: 3, borderLeftColor: colors.accent, paddingVertical: 4, paddingLeft: 16, marginVertical: 18 },
+  tableBox: { marginTop: 8, marginBottom: 18 },
+  tr: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
+  thRow: { borderBottomWidth: BORDER, borderBottomColor: colors.line },
+  th: { fontFamily: fonts.heading, fontSize: 13, fontWeight: '800', color: colors.ink, paddingVertical: 8, paddingRight: 12 },
+  td: { fontFamily: fonts.body, fontSize: 14.5, lineHeight: 21, color: colors.ink, paddingVertical: 8, paddingRight: 12 },
+  figure: { marginTop: 14, marginBottom: 22 },
+  cap: { fontFamily: fonts.body, fontSize: 12, lineHeight: 17, color: colors.inkMuted },
+  mid: { alignSelf: 'center', width: '100%', maxWidth: 340 },
+  five: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  fiveBox: { flexGrow: 1, flexBasis: 120, minWidth: 104 },
+  placeFrame: { borderWidth: 1, borderStyle: 'dashed', borderColor: colors.ruleMuted, padding: 20 },
+  box: { paddingVertical: 12, paddingHorizontal: 16, gap: 4, borderWidth: 1 },
+  box_plain: { borderColor: colors.ruleMuted },
+  box_live: { backgroundColor: colors.accentSoft, borderColor: colors.accent },
+  box_key: { backgroundColor: colors.selected, borderColor: colors.selected },
+  box_wait: { borderColor: desk.amber, borderLeftWidth: 4 },
+  box_out: { borderColor: colors.ruleMuted, borderStyle: 'dashed' },
+  boxTitle: { fontFamily: fonts.heading, fontSize: 14, fontWeight: '800', color: colors.ink },
+  boxSub: { fontFamily: fonts.body, fontSize: 13, lineHeight: 18, color: colors.inkMuted },
+  boxNote: { fontFamily: fonts.body, fontSize: 12, lineHeight: 17, fontWeight: '600', color: colors.inkMuted },
+  down: { alignItems: 'center', height: 30, justifyContent: 'flex-end' },
+  downLine: { width: 1, flex: 1, backgroundColor: colors.inkMuted, marginBottom: -4 },
 });

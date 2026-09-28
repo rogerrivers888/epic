@@ -18,10 +18,11 @@
  */
 
 import React, { useMemo } from 'react';
+import { useRouter } from '../router';
 import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from '../components/press';
 import { Access } from '../api';
-import { AdminScreen } from '../routes';
+import { AdminScreen, filingTabOf } from '../routes';
 import { colors, spacing, type } from '../theme';
 import { Icon, IconName } from '../components/Icon';
 import { Wordmark } from '../components/Wordmark';
@@ -56,7 +57,7 @@ import { Hosting } from './screens/Hosting';
 import { Mail } from './screens/Mail';
 import { Sources } from './screens/Sources';
 import { Categories } from './screens/Categories';
-import { Filing } from './filing/Filing';
+import { Desk as Filing } from './desk/Desk';
 import { Skills } from './screens/Skills';
 
 const DESKTOP = 900;
@@ -146,13 +147,14 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
   { key: 'places', label: 'Places', icon: 'places', needs: 'view_library', sub: 'What we know, where, and how good it is', group: 'Data' },
   { key: 'demand', label: 'Demand', icon: 'list', needs: 'view_reporting', sub: 'What people asked for, and what we failed to give them', group: 'Data' },
   { key: 'sources', label: 'Sources', icon: 'list', needs: 'view_reporting', sub: 'Every provider, every field, and which of them we read', group: 'Data' },
-  { key: 'categories', label: 'Categories', icon: 'filters', needs: 'view_library', sub: 'Categories and subcategories, every provider\'s words, and the rules that map one onto the other', group: 'Data' },
   /**
-   * The filing desk (the Places redesign, 20 Sep 2026): six tabs over one
-   * taxonomy. It sits beside Categories rather than replacing it, because the
-   * screens it supersedes are live and retiring one is the owner's call.
+   * Categories is the filing desk (back-office handover, 28 Sep 2026): the
+   * design's rail has one Categories item, and it opens the seven tabs —
+   * Overview, Categories, Facts, Mapping, Collections, Fact automations,
+   * Changes. The older Categories screen is no longer in the rail; its address
+   * (`/admin/categories`) still resolves, so nothing anybody kept is a 404.
    */
-  { key: 'filing', label: 'Filing desk', icon: 'filters', needs: 'view_library', sub: 'Overview, categories, facts, mapping, defaults and the ideas a household browses', group: 'Data' },
+  { key: 'filing', label: 'Categories', icon: 'filters', needs: 'view_library', sub: 'Overview, categories, facts, mapping, collections, fact automations and changes', group: 'Data' },
   { key: 'voice', label: 'Voice lab', icon: 'mic', needs: 'manage_settings', sub: 'The ways of hearing, compared on the same sentences', group: 'Data' },
   { key: 'hosting', label: 'Hosting', icon: 'host', needs: 'view_hosting', sub: 'First pitches to read within 48 hours, the trust ladder, and reports', group: 'Data' },
   { key: 'skills', label: 'Skills', icon: 'credential', needs: 'view_skills', sub: 'What hosts say they are expert in, the sixteen buckets it is browsed by, and the words Epic has not heard before', group: 'Data' },
@@ -222,6 +224,15 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
   useActivity(`admin.${screen}`);
 
   const current = items.find((n) => n.key === screen) ?? items[0];
+  /**
+   * The lit item follows the screen (handover §7). On the desk that is
+   * Categories only while a Categories page is open; Facts, Mapping,
+   * Collections, Fact automations, Changes and the desk's own Overview and
+   * Runs live under the desk's tabs and light nothing here (design README v2).
+   */
+  const { query } = useRouter();
+  const deskTab = filingTabOf(query.get('tab')) ?? 'overview';
+  const lit = (key: string) => key === screen && !(screen === 'filing' && deskTab !== 'categories');
 
   const body = (
     <>
@@ -298,13 +309,13 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
               ) : null}
               <Press
                 onPress={() => setScreen(n.key)}
-                style={[styles.navItem, screen === n.key && styles.navItemOn, n.group ? styles.navItemGrouped : null]}
+                style={[styles.navItem, lit(n.key) && styles.navItemOn, n.group ? styles.navItemGrouped : null]}
                 accessibilityRole="tab"
-                accessibilityState={{ selected: screen === n.key }}
+                accessibilityState={{ selected: lit(n.key) }}
               >
-                <Icon name={n.icon} size={15} strokeWidth={1.8} color={screen === n.key ? colors.selectedFg : colors.ink} />
+                <Icon name={n.icon} size={15} strokeWidth={1.8} color={lit(n.key) ? colors.selectedFg : colors.ink} />
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.navLabel, screen === n.key && { color: colors.selectedFg, fontWeight: '700' }]}>{n.label}</Text>
+                  <Text style={[styles.navLabel, lit(n.key) && { color: colors.selectedFg, fontWeight: '700' }]}>{n.label}</Text>
                 </View>
               </Press>
             </React.Fragment>
@@ -340,12 +351,12 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
               <Press
                 key={n.key}
                 onPress={() => setScreen(n.key)}
-                style={[styles.chip, screen === n.key && styles.chipOn]}
+                style={[styles.chip, lit(n.key) && styles.chipOn]}
                 accessibilityRole="tab"
-                accessibilityState={{ selected: screen === n.key }}
+                accessibilityState={{ selected: lit(n.key) }}
               >
-                <Icon name={n.icon} size={13} color={screen === n.key ? colors.selectedFg : colors.ink} />
-                <Text style={[type.tiny, { color: screen === n.key ? colors.selectedFg : colors.ink }, screen === n.key && { fontWeight: '700' }]}>{n.label}</Text>
+                <Icon name={n.icon} size={13} color={lit(n.key) ? colors.selectedFg : colors.ink} />
+                <Text style={[type.tiny, { color: lit(n.key) ? colors.selectedFg : colors.ink }, lit(n.key) && { fontWeight: '700' }]}>{n.label}</Text>
               </Press>
             ))}
           </ScrollView>

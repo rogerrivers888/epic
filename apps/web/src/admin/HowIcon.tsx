@@ -22,13 +22,17 @@ import { desk } from '../theme';
 
 /** What each section is called, so the icon can say where it goes. */
 const SAYS: Record<HowAnchor, string> = {
-  mechanics: 'What a category, a fact, a check, a fact sheet and an idea each are',
-  categories: 'How categories work',
-  facts: 'How facts and checks work',
-  sheets: 'How a fact sheet works',
-  mapping: 'How mapping works',
-  defaults: 'How defaults work',
-  ideas: 'How ideas work',
+  layers: 'The three layers',
+  categories: 'Nine categories — and no scores',
+  mapping: 'Google’s words, and where they go',
+  place: 'What a place actually carries',
+  facts: 'Two kinds of check, and why they are different',
+  where: 'Where a value comes from',
+  pipeline: 'How a fact gets born',
+  collections: 'Collections — what a family actually browses',
+  journey: 'What happens when a family searches',
+  counting: 'Counting honestly',
+  state: 'Where this actually stands',
 };
 
 export function HowIcon({ at, size = 15 }: { at: HowAnchor; size?: number }) {

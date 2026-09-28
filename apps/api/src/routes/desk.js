@@ -128,7 +128,7 @@ deskRoutes.get('/mapping', requires('view_library'), async (_req, res, next) => 
 });
 
 deskRoutes.get('/mapping/decisions', requires('view_library'), async (req, res, next) => {
-  try { res.json({ rows: await mapping.decisions({ kind: str(req.query.kind) }) }); } catch (err) { next(err); }
+  try { res.json(await mapping.decisions({ kind: str(req.query.kind) })); } catch (err) { next(err); }
 });
 
 /** The picker's catalogue: categories, subcategories and facts, searchable client-side. */
@@ -155,20 +155,11 @@ deskRoutes.put('/mapping/:word/facts', requires('manage_library'), async (req, r
   try {
     // A fact chip ticked or unticked in the picker: carried by every place the
     // word brings. Logged as Repointed (README: "picker edits are logged as
-    // Repointed and are undoable") through the same decision path.
-    const word = String(req.params.word);
-    const fact = String(req.body?.fact ?? '');
-    const on = req.body?.on !== false;
-    const { rows: [a] } = await query('select key, label, kind from place_attributes where key = $1 and active', [fact]);
-    if (!a) throw bad(`${fact} is not one of our facts.`);
-    if (a.kind !== 'yesno') throw bad(`${a.label} is not a yes or no; a word can only carry a yes.`);
-    if (on) await query(`insert into taxonomy_label_carries (namespace, key, attribute_key, yesno) values ('google', $1, $2, true) on conflict do nothing`, [word, fact]);
-    else await query(`delete from taxonomy_label_carries where namespace = 'google' and key = $1 and attribute_key = $2`, [word, fact]);
-    const change = await changesRepo.logChange({
-      who: who(req), area: 'Mapping', what: `Google word · ${word} · Repointed`, before: on ? '—' : a.label, after: on ? `carries ${a.label}` : '—',
-      why: str(req.body?.why), subjectType: 'word', subjectId: word, undo: { kind: 'carry', word, fact, on: !on },
-    });
-    res.json({ word, fact, on, change });
+    // Repointed and are undoable") through the same decision path, so it is
+    // in Decided as well as Changes and its Undo is the decision's.
+    res.json(await mapping.setFact({
+      word: String(req.params.word), fact: String(req.body?.fact ?? ''), on: req.body?.on !== false, why: str(req.body?.why), who: who(req),
+    }));
   } catch (err) { next(err); }
 });
 
@@ -226,6 +217,10 @@ deskRoutes.get('/categories/impact', requires('view_library'), async (req, res, 
     const subs = String(req.query.subs ?? '').split(',').filter(Boolean);
     res.json(await categories.bulkImpact({ subs, fact: String(req.query.fact ?? '') }));
   } catch (err) { next(err); }
+});
+
+deskRoutes.get('/categories/new-facts', requires('view_library'), async (_req, res, next) => {
+  try { res.json(await categories.newFacts()); } catch (err) { next(err); }
 });
 
 deskRoutes.post('/categories/defaults', requires('manage_library'), async (req, res, next) => {
@@ -299,7 +294,7 @@ deskRoutes.get('/verification', requires('view_library'), async (req, res, next)
 deskRoutes.get('/verification/items', requires('view_library'), async (req, res, next) => {
   try {
     res.json(await verification.items({
-      kind: String(req.query.kind ?? ''), period: str(req.query.period) ?? '7d',
+      kind: String(req.query.kind ?? ''), period: str(req.query.period) ?? '7d', source: str(req.query.source),
       country: str(req.query.country), county: str(req.query.county), feature: str(req.query.feature),
     }));
   } catch (err) { next(err); }

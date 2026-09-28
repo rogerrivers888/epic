@@ -284,7 +284,7 @@ export async function preview({ rule: raw, loc = null }) {
  */
 export async function placeCard(ref) {
   const [idx, d, { rows: rows_ }, { rows: attrs }] = await Promise.all([
-    placeIndex(), describe([ref]), query('select * from browse_rows'), query('select key, label from place_attributes where active'),
+    placeIndex(), describe([ref]), query('select * from browse_rows'), query('select key, label, kind, standard from place_attributes where active order by position, label'),
   ]);
   const p = idx.places.find((x) => x.ref === ref);
   const info = d.get(ref) ?? {};
@@ -298,9 +298,33 @@ export async function placeCard(ref) {
     sub: sub?.label ?? null,
     town: info.town ?? null,
     sentence: info.sentence ?? null,
-    facts: p ? [...p.facts].map((k) => label.get(k) ?? k).sort() : [],
+    facts: p ? factLines(p, attrs) : [],
     collections: p ? rows_.map(toCollection).filter((c) => (c.legacy || !ruleIsEmpty(c.rule)) && fits(c, p)).map((c) => ({ key: c.key, title: c.title })) : [],
   };
+}
+
+const COST_SIGN = { Free: 'Free', Cheap: '£', Mid: '££', Dear: '£££' };
+
+/**
+ * A place's facts as the drawer lists them (prototype: name, value): every
+ * standard fact with Yes, No or Don't know — "Don't know" is a real answer
+ * here, never a No — then every other fact the place has a yes for.
+ */
+export function factLines(p, attrs) {
+  const out = [];
+  for (const a of attrs) {
+    if (a.key === 'suits-ages') {
+      if (a.standard || p.ages) out.push({ name: a.label, value: p.ages ? `${p.ages[0]}–${p.ages[1] >= 99 ? '99' : p.ages[1]}` : null });
+    } else if (a.key === 'duration') {
+      if (a.standard || p.hours != null) out.push({ name: a.label, value: p.hours == null ? null : `${p.hours} hour${p.hours === 1 ? '' : 's'}` });
+    } else if (a.key === 'cost-band') {
+      if (a.standard || p.cost) out.push({ name: a.label, value: p.cost ? COST_SIGN[p.cost] ?? p.cost : null });
+    } else if (a.kind === 'yesno') {
+      const v = p.facts.has(a.key) ? 'Yes' : p.no?.has(a.key) ? 'No' : null;
+      if (a.standard || v === 'Yes') out.push({ name: a.label, value: v });
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -333,8 +357,8 @@ export async function saveCollection({ key = null, title, copy = '', rule: raw, 
       await c.query(
         `insert into browse_rows (key, grouping, title, copy, predicate, rule, position, active, seeded, updated_by)
          values ($1, 'custom', $2, $3, '{}'::jsonb, $4::jsonb, 1000, true, false, $5)`, [k, t, cp, JSON.stringify(rule), who]);
-      await logChange({ client: c, who, area: 'Collections', what: `Collection added · ${t}`, before: '—', after: t, subjectType: 'collection', subjectId: k, undo: { kind: 'collection', key: k, was: null } });
-      return { key: k, created: true };
+      const change = await logChange({ client: c, who, area: 'Collections', what: `Collection added · ${t}`, before: '—', after: ruleWords(rule), subjectType: 'collection', subjectId: k, undo: { kind: 'collection', key: k, was: null } });
+      return { key: k, created: true, change };
     }
     await c.query(
       `update browse_rows set title = $2, copy = $3, rule = $4::jsonb, active = true, updated_by = $5, updated_at = now() where key = $1`,
@@ -348,8 +372,9 @@ export async function saveCollection({ key = null, title, copy = '', rule: raw, 
     if (!row.active) changes.push(['shown', 'switched off', 'live']);
     // One save is one change, so its Undo puts back everything the save did
     // and nothing else (Codex, 28 Sep 2026).
+    let change = null;
     if (changes.length) {
-      await logChange({
+      change = await logChange({
         client: c, who, area: 'Collections',
         what: `Collection ${changes.map(([f]) => f).join(', ')} · ${t}`,
         before: changes.map(([f, b]) => `${f}: ${b}`).join(' · '),
@@ -357,7 +382,8 @@ export async function saveCollection({ key = null, title, copy = '', rule: raw, 
         subjectType: 'collection', subjectId: k, undo: { kind: 'collection', key: k, was },
       });
     }
-    return { key: k, created: false, changed: changes.length };
+    // The change's id is what the toast's Undo sends (`POST /undo/:id`).
+    return { key: k, created: false, changed: changes.length, change };
   });
   forget();
   return out;
@@ -415,29 +441,53 @@ export async function asHousehold({ householdId, loc = null }) {
   const cfg = (await settings()).values;
   const [{ rows: [h] }, { rows: members }, { rows }, idx, { rows: hearts }] = await Promise.all([
     query('select id, name, home_label, home_lat, home_lng, max_travel_minutes from households where id = $1', [householdId]),
-    query('select name, birth_year, birth_date, is_minor from members where household_id = $1', [householdId]),
+    query('select id, name, birth_year, birth_date, is_minor from members where household_id = $1 order by created_at', [householdId]),
     query('select * from browse_rows where active order by position, title'),
     placeIndex(),
-    query('select row_key, hearted_at from browse_row_hearts where household_id = $1', [householdId]),
+    query('select row_key, member_id, hearted_at from browse_row_hearts where household_id = $1 order by hearted_at desc', [householdId]),
   ]);
   if (!h) throw missing('No such household.');
   const year = new Date().getFullYear();
-  const ages = members.map((m) => (m.birth_date ? year - new Date(m.birth_date).getFullYear() : m.birth_year ? year - m.birth_year : m.is_minor ? 8 : 35));
+  // An age we do not know is null, never a guess drawn as a fact: a member
+  // with no birth year counts as a child (is_minor) or an adult for the
+  // audience test only, and the screen says "age not given".
+  const known = members.map((m) => (m.birth_date ? year - new Date(m.birth_date).getFullYear() : m.birth_year ? year - m.birth_year : null));
+  const ages = members.map((m, i) => known[i] ?? (m.is_minor ? 8 : 35));
   const refs = loc && !loc.unknown ? loc.refs : null;
   const pool = refs ? idx.places.filter((p) => refs.has(p.ref)) : idx.places;
   // Hearts fade (D7): a heart older than FADE_DAYS no longer lifts a row.
   const fresh = hearts.filter((x) => Date.now() - new Date(x.hearted_at).getTime() < FADE_DAYS * 86400_000);
   const hearted = new Map(fresh.map((x) => [x.row_key, x.hearted_at]));
+  const firstHits = new Map();
   const out = rows.map((r) => {
     const c = toCollection(r);
-    const n = !c.legacy && ruleIsEmpty(c.rule) ? 0 : pool.filter((p) => fits(c, p)).length;
+    const hits = !c.legacy && ruleIsEmpty(c.rule) ? [] : pool.filter((p) => fits(c, p));
+    const n = hits.length;
+    firstHits.set(c.key, hits.slice(0, 3));
     const a = c.audience;
-    const fits = a.key === 'everyone' ? true : a.key === 'adult' ? ages.some((x) => x >= 16) : ages.some((x) => x >= a.lo && x <= a.hi);
+    // Named `suits`, not `fits`: a local `fits` here shadowed the rule test
+    // above and threw before it was assigned.
+    const suits = a.key === 'everyone' ? true : a.key === 'adult' ? ages.some((x) => x >= 16) : ages.some((x) => x >= a.lo && x <= a.hi);
     let why = null;
-    if (!fits) why = `Nobody here is ${a.key === 'adult' ? 'an adult' : `aged ${a.lo}–${a.hi}`}`;
+    if (!suits) why = `Nobody here is ${a.key === 'adult' ? 'an adult' : `aged ${a.lo}–${a.hi}`}`;
     else if (n < cfg.collectionMinPlaces) why = `Too thin here · ${n} place${n === 1 ? '' : 's'}`;
     return { key: c.key, title: c.title, copy: c.copy, places: n, audience: a.label, hearted: hearted.has(c.key), shown: !why, why };
   });
+  // Three places a shown collection would put on its shelf, named from our
+  // own record only; a place with no name we may print is left off.
+  const shelfRefs = out.filter((c) => c.shown).flatMap((c) => firstHits.get(c.key).map((p) => p.ref));
+  const [named, { rows: subLabels }] = await Promise.all([
+    describe(shelfRefs),
+    query('select key, label from shelf_subcategories'),
+  ]);
+  const subLabel = new Map(subLabels.map((x) => [x.key, x.label]));
+  for (const c of out) {
+    c.shelf = c.shown
+      ? firstHits.get(c.key).filter((p) => named.get(p.ref)?.name).map((p) => ({ ref: p.ref, name: named.get(p.ref).name, kind: subLabel.get(p.primarySub) ?? null }))
+      : [];
+  }
+  const memberName = new Map(members.map((m) => [m.id, m.name]));
+  const title = new Map(rows.map((r) => [r.key, r.title]));
   const shown = out.filter((c) => c.shown);
   const heartedShown = shown.filter((c) => c.hearted);
   const rest = shown.filter((c) => !c.hearted);
@@ -448,6 +498,14 @@ export async function asHousehold({ householdId, loc = null }) {
     : rest;
   return {
     household: { id: h.id, name: h.name, home: h.home_label, ages },
+    members: members.map((m, i) => ({ id: m.id, name: m.name, age: known[i], adult: ages[i] >= 16 })),
+    // Every heart, fading ones included and marked, so the screen can say why
+    // an old heart no longer lifts its collection.
+    hearts: hearts.map((x) => {
+      const days = Math.max(0, Math.floor((Date.now() - new Date(x.hearted_at).getTime()) / 86400_000));
+      return { key: x.row_key, title: title.get(x.row_key) ?? x.row_key, member: memberName.get(x.member_id) ?? null, heartedAt: x.hearted_at, days, fading: days >= FADE_DAYS };
+    }),
+    fadeDays: FADE_DAYS,
     shown: order,
     hidden: out.filter((c) => !c.shown),
   };

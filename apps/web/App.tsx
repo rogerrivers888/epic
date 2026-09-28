@@ -336,7 +336,7 @@ function Gate({ route }: { route: Route }) {
   const mayAdminister = Boolean(access?.doors?.includes('admin'));
   if (route.name === 'admin') {
     if (!mayAdminister) return <NotHere title="That is not a page you can open" body="The back office needs an account with the admin door." href={paths.inspire()} />;
-    return <AdminApp access={access} screen={route.screen} onScreen={(s) => navigate(paths.admin(s))} onLeave={() => navigate(paths.inspire())} />;
+    return <AdminApp access={access} screen={route.screen} onScreen={(s) => navigate(s === 'filing' ? paths.filing('categories') : paths.admin(s))} onLeave={() => navigate(paths.inspire())} />;
   }
   return <Shell route={route} isOwner={isOwner} mayAdminister={mayAdminister} />;
 }

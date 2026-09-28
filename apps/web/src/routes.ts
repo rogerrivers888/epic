@@ -268,26 +268,28 @@ export type AdminScreen =
   | 'money' | 'subscriptions' | 'customers' | 'suppliers' | 'behaviour' | 'engagement'
   | 'places' | 'demand' | 'runs' | 'queue'
   /**
-   * The filing desk (the Places redesign, 20 Sep 2026): six tabs over one
-   * taxonomy — Overview, Categories, Facts, Mapping, Defaults, Ideas. One
-   * address with the tab and everything inside it as query state, so
-   * `/admin/filing?tab=categories&sub=golf` opens on that drawer for whoever
-   * it is sent to. The tab's spellings are `FILING_TABS` below.
+   * The filing desk (back-office handover, 28 Sep 2026): seven tabs over one
+   * taxonomy — Overview, Categories, Facts, Mapping, Collections, Fact
+   * automations, Changes. One address with the tab and everything inside it
+   * as query state, so `/admin/filing?tab=categories&sub=golf` opens on that
+   * drawer for whoever it is sent to. The tab's spellings are `FILING_TABS`.
    */
   | 'filing'
   | 'lookup' | 'coverage' | 'library' | 'shelves' | 'scout' | 'sources' | 'categories' | 'voice' | 'hosting' | 'skills' | 'mail' | 'roles' | 'plans' | 'audit' | 'how';
 /**
  * The filing desk's tabs, as the address spells them.
  *
- * The rename (owner's brief, 26 Sep 2026): Labels became Facts, Rules became
- * Defaults and Rows became Ideas, because each old word was doing several
- * jobs. Runs is a place you can be without being a tab. The old spellings
- * still open the right screen — a link somebody was sent last week is still a
- * link — but nothing writes them any more.
+ * The handover of 28 Sep 2026: Defaults and Ideas are gone — defaults live on
+ * each subcategory's page, and Ideas are Collections everywhere — and Fact
+ * automations and Changes are new. Runs is a place you can be without being a
+ * tab. Every old spelling still opens the screen that took its job over — a
+ * link somebody was sent last week is still a link — but nothing writes them.
  */
-export const FILING_TABS = ['overview', 'categories', 'facts', 'mapping', 'defaults', 'ideas', 'runs'] as const;
+export const FILING_TABS = ['overview', 'categories', 'facts', 'mapping', 'collections', 'automations', 'changes', 'runs'] as const;
 export type FilingTab = typeof FILING_TABS[number];
-const FILING_TAB_WAS: Record<string, FilingTab> = { labels: 'facts', rules: 'defaults', rows: 'ideas' };
+const FILING_TAB_WAS: Record<string, FilingTab> = {
+  labels: 'facts', rules: 'categories', defaults: 'categories', rows: 'collections', ideas: 'collections',
+};
 /** `?tab=` read: the new spelling, an old one mapped across, or null. */
 export const filingTabOf = (raw: string | null | undefined): FilingTab | null => {
   if (raw == null) return null;
@@ -296,19 +298,23 @@ export const filingTabOf = (raw: string | null | undefined): FilingTab | null =>
 };
 
 /**
- * Where a link into How it works lands.
- *
- * Every screen on the filing desk carries a small info icon beside its
- * heading that opens the Business mechanics page at the section explaining
- * that screen (owner's brief, 26 Sep 2026: "deep-link to the relevant section
- * rather than the top of the page"). `?at=` is the section; the page scrolls
- * to it. `mechanics` is the glossary at the top; `sheets` is the fact sheets,
- * kept apart from `facts` because a sheet is the thing people misread most.
+ * Where a link into How it works lands: `?at=` is the section and the page
+ * scrolls to it. The sections are those of "Epic — How It Works" v2 (owner,
+ * 28 Sep 2026), updated for Collections and the fact pipeline. The old
+ * anchors still land on the section that took their place.
  */
-export const HOW_ANCHORS = ['mechanics', 'categories', 'facts', 'sheets', 'mapping', 'defaults', 'ideas'] as const;
+export const HOW_ANCHORS = [
+  'layers', 'categories', 'mapping', 'place', 'facts', 'where', 'pipeline', 'collections', 'journey', 'counting', 'state',
+] as const;
 export type HowAnchor = typeof HOW_ANCHORS[number];
-export const howAnchorOf = (raw: string | null | undefined): HowAnchor | null =>
-  raw != null && (HOW_ANCHORS as readonly string[]).includes(raw) ? (raw as HowAnchor) : null;
+const HOW_ANCHOR_WAS: Record<string, HowAnchor> = {
+  mechanics: 'layers', sheets: 'facts', defaults: 'place', ideas: 'collections', rows: 'collections', eights: 'categories', harvest: 'pipeline',
+};
+export const howAnchorOf = (raw: string | null | undefined): HowAnchor | null => {
+  if (raw == null) return null;
+  if ((HOW_ANCHORS as readonly string[]).includes(raw)) return raw as HowAnchor;
+  return HOW_ANCHOR_WAS[raw] ?? null;
+};
 
 export const ADMIN_SCREENS: AdminScreen[] = [
   'overview', 'accounts', 'households', 'activity', 'reporting',
