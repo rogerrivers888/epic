@@ -10,14 +10,14 @@
  */
 
 import React, { useState } from 'react';
-import { Text, View } from 'react-native';
+import { Platform, Text, View } from 'react-native';
 
 import { Icon } from '../../../components/Icon';
 import { Press } from '../../../components/press';
 import { useViewport } from '../../../hooks/useViewport';
 import { useCrumbs, useDeskGo, useDeskParam } from '../Desk';
 import {
-  LIME, Muted, ON_LIME, PageTitle, SearchBox, T, TCell, THead, TRow, Table,
+  LH, LIME, Muted, ON_LIME, PageTitle, SearchBox, T, TCell, THead, TRow, Table,
   desk, fonts, n, sortRows, tableWidth, tabular, type SortState, type TCol,
 } from '../kit';
 import { DeskLineChart, percentScale } from './Chart';
@@ -30,11 +30,13 @@ import {
 // Shapes (apps/api/src/desk/accuracy.js)
 // ---------------------------------------------------------------------------
 
-type SubFig = Fig & { key: string; label: string };
+type SubFig = Fig & { key: string; label: string; facts?: number };
 type Row = Fig & { key: string; label: string; subcategories: number | SubFig[] };
 type AccResp = {
   headline: Fig;
   series: (Fig & { at: string })[];
+  /** Every name the table could show, whatever the view or source (sizes the first column once). */
+  names?: { facts: string[]; categories: string[]; subcategories: string[] };
   sources: (Fig & { key: string; label: string })[];
   source: string | null;
   sourceCompared: number | null;
@@ -50,6 +52,7 @@ type HealthResp = {
 type DisResp = { source: string; label: string; rows: { ref: string; place: string | null; subcategory: string | null; fact: string | null; sourceSaid: string; familiesSaid: string; date: string }[] };
 
 type Kind = 'fact' | 'category' | 'subcategory';
+const NOWRAP = (Platform.OS === 'web' ? { whiteSpace: 'nowrap' } : {}) as object;
 const kindOf = (raw: string): Kind | null => (raw === 'fact' || raw === 'category' || raw === 'subcategory' ? raw : null);
 
 export function Accuracy() {
@@ -77,7 +80,13 @@ function Main() {
   const [chart, setChart] = useDeskParam('chart');
   const view = by === 'category' ? 'category' : 'fact';
   const daily = chart === 'daily';
-  const [sort, setSort] = useState<SortState>({ key: 'acc', dir: 'asc' });
+  // The sort is part of the address (`?sort=answered.desc`), worst accuracy first by default.
+  const [sortRaw, setSortRaw] = useDeskParam('sort');
+  const sort: SortState = (() => {
+    const [key, dir] = sortRaw.split('.');
+    return key && (dir === 'asc' || dir === 'desc') ? { key, dir } : { key: 'acc', dir: 'asc' };
+  })();
+  const setSort = (x: SortState) => setSortRaw(x && !(x.key === 'acc' && x.dir === 'asc') ? `${x.key}.${x.dir}` : '', { replace: true });
   const [openCats, setOpenCats] = useState<string[]>([]);
   const load = useDesk<AccResp>('/accuracy', { view, source: src || null, chart: daily ? 'daily' : null });
   useCrumbs([{ name: 'Facts', go: () => go('facts') }, { name: 'Accuracy' }], []);
@@ -97,7 +106,15 @@ function Main() {
   };
 
   const table = a?.table ?? [];
-  const nameW = nameWidth(table.map((r) => r.label));
+  // Sized once from every fact name (and category name) there is, whatever
+  // the view or the source, so neither the column nor the toolbar measured to
+  // it moves when either changes (prototype `accFactW`, logic.js 3345; audit
+  // 28 Sep 2026). The formula's 96px of slack is what an indented
+  // subcategory name at 13px sits in, on one line.
+  const names = a?.names;
+  const nameW = names
+    ? Math.max(nameWidth(names.facts), nameWidth(names.categories) + 18)
+    : nameWidth(table.map((r) => r.label));
   const cols: TCol[] = [
     { key: 'name', name: view === 'category' ? 'Category' : 'Fact', width: nameW, first: 'asc' },
     { key: 'subs', name: 'Subcategories', width: 150, first: 'desc' },
@@ -114,7 +131,8 @@ function Main() {
           : key === 'agreed' ? r.agreed
             : key === 'dis' ? r.disagreements
               : r.accuracy);
-  const rows = sortRows(table, sort, val);
+  const byName = (r: { label: string }) => r.label;
+  const rows = sortRows(table, sort, val, byName);
 
   const openRow = (kind: Kind, key: string) => go('facts', { ftab: 'accuracy', kind, key, src: src || null });
   const bySrc = new Map((a?.sources ?? []).map((s) => [s.key, s]));
@@ -152,6 +170,7 @@ function Main() {
               <DeskLineChart
                 series={values} labels={labels} tip={tip} color={LIME} lo={scale.lo} hi={scale.hi}
                 fmt={(v) => `${Math.round(v)}%`} height={150} axisWidth={32} gap={6}
+                blank={daily ? 'Every day has fewer than 10 answers — Building' : 'Every month has fewer than 10 answers — Building'}
               />
             </View>
           </View>
@@ -159,15 +178,18 @@ function Main() {
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 24, flexWrap: 'wrap', marginTop: 12, width, maxWidth: '100%' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, flexWrap: 'wrap', flexShrink: 1, maxWidth: '100%' }}>
               <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: desk.inkDim }}>Source</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', borderWidth: 1, borderColor: desk.ruleStrong, alignSelf: 'flex-start', flexShrink: 1, maxWidth: '100%' }}>
-                {srcOpts.map((o, i) => {
+              {/* Each segment carries its own 1px rule, pulled back over its
+                  neighbour's, so a row that wraps on a phone closes as a clean
+                  grid rather than leaving a stray left rule at a line's start. */}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingTop: 1, paddingLeft: 1, alignSelf: 'flex-start', flexShrink: 1, maxWidth: '100%' }}>
+                {srcOpts.map((o) => {
                   const on = o.key === src;
                   const f = o.f ?? { accuracy: null, building: true };
                   return (
                     <Press key={o.key || 'all'} effect="none" onPress={() => setSrc(o.key, { replace: true })}>
                       <View style={{
                         flexDirection: 'row', alignItems: 'baseline', gap: 7, paddingVertical: 7, paddingHorizontal: 14,
-                        backgroundColor: on ? LIME : 'transparent', borderLeftWidth: i ? 1 : 0, borderLeftColor: desk.ruleStrong,
+                        backgroundColor: on ? LIME : 'transparent', borderWidth: 1, borderColor: desk.ruleStrong, marginTop: -1, marginLeft: -1,
                       }}>
                         <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: on ? '700' : '600', color: on ? ON_LIME : desk.inkDim }}>{o.name}</Text>
                         <Text style={[{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '800', color: on ? ON_LIME : desk.inkMuted }, tabular]}>
@@ -182,8 +204,8 @@ function Main() {
                 <Text style={[{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }, tabular]}>{`${n(a.sourceCompared)} answers compared`}</Text>
               ) : null}
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: desk.inkDim }}>View by</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+              <Text style={[{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: desk.inkDim }, NOWRAP]}>View by</Text>
               <SmallSeg
                 options={[{ key: 'fact', name: 'Fact' }, { key: 'category', name: 'Category' }]}
                 value={view}
@@ -203,7 +225,7 @@ function Main() {
                     </TRow>
                   );
                 }
-                const subs = Array.isArray(r.subcategories) ? sortRows(r.subcategories, sort, val) : [];
+                const subs = Array.isArray(r.subcategories) ? sortRows(r.subcategories, sort, val, byName) : [];
                 const open = openCats.includes(r.key);
                 return (
                   <View key={r.key}>
@@ -213,8 +235,8 @@ function Main() {
                     {open ? subs.map((s) => (
                       <Press key={s.key} effect="none" onPress={() => openRow('subcategory', s.key)}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 24, paddingVertical: 9, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: desk.rule, backgroundColor: desk.lifted }}>
-                          <TCell width={nameW}><View style={{ paddingLeft: 18 }}><T size={13} tone={desk.inkMuted}>{s.label}</T></View></TCell>
-                          <TCell width={150}><T size={13} tone={desk.inkDim}>{''}</T></TCell>
+                          <TCell width={nameW}><View style={{ paddingLeft: 18 }}><Text numberOfLines={1} style={[{ fontFamily: fonts.body, fontSize: 13, lineHeight: LH(13), color: desk.inkMuted }, NOWRAP]}>{s.label}</Text></View></TCell>
+                          <TCell width={150}><T size={13} tone={desk.inkDim} num>{s.facts == null ? '' : n(s.facts)}</T></TCell>
                           <TCell width={150}><T size={13} tone={desk.inkMuted} num>{n(s.answered)}</T></TCell>
                           <TCell width={150}><T size={13} tone={desk.inkMuted} num>{n(s.agreed)}</T></TCell>
                           <TCell width={150}><Pct f={s} size={13} /></TCell>

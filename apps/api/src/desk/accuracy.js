@@ -104,16 +104,31 @@ export async function accuracy({ view = 'fact', source = null, chart = 'monthly'
       ...r,
       label: subs.find((s) => s.category_key === r.key)?.category_label ?? r.key,
       subcategories: grouped(filtered.filter((c) => subBy.get(c.sub)?.category_key === r.key), (c) => c.sub)
-        .map((s) => ({ ...s, label: subBy.get(s.key)?.label ?? s.key })),
+        .map((s) => ({
+          ...s,
+          label: subBy.get(s.key)?.label ?? s.key,
+          // The prototype's second column on a subcategory row: how many facts it was compared on.
+          facts: new Set(filtered.filter((c) => c.sub === s.key).map((c) => c.attribute_key)).size,
+        })),
     }))
     : grouped(filtered, (c) => c.attribute_key).map((r) => ({
       ...r,
       label: attrLabel.get(r.key) ?? r.key,
       subcategories: new Set(filtered.filter((c) => c.attribute_key === r.key).map((c) => c.sub).filter(Boolean)).size,
     }));
+  // Every name the table could show, whatever the view or source: the first
+  // column is sized from these once, so it — and the toolbar measured to the
+  // table — stays the same width as the view and the source change
+  // (prototype `accFactW`, logic.js 3345; audit 28 Sep 2026).
+  const names = {
+    facts: [...new Set(all.map((c) => attrLabel.get(c.attribute_key) ?? c.attribute_key).filter(Boolean))],
+    categories: [...new Set(all.map((c) => subBy.get(c.sub)?.category_label).filter(Boolean))],
+    subcategories: [...new Set(all.map((c) => subBy.get(c.sub)?.label).filter(Boolean))],
+  };
   return {
     headline,
     series,
+    names,
     sources: bySource,
     source,
     sourceCompared: source ? filtered.length : null,

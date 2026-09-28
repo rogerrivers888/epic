@@ -308,7 +308,7 @@ export const HOW_ANCHORS = [
 ] as const;
 export type HowAnchor = typeof HOW_ANCHORS[number];
 const HOW_ANCHOR_WAS: Record<string, HowAnchor> = {
-  mechanics: 'layers', sheets: 'facts', defaults: 'place', ideas: 'collections', rows: 'collections', eights: 'categories', harvest: 'pipeline',
+  mechanics: 'layers', sheets: 'facts', defaults: 'where', ideas: 'collections', rows: 'collections', eights: 'categories', harvest: 'pipeline',
 };
 export const howAnchorOf = (raw: string | null | undefined): HowAnchor | null => {
   if (raw == null) return null;
@@ -808,7 +808,12 @@ export const paths = {
   prototypes: (section?: PrototypeSection | null) => buildHref(['prototypes', section]),
   admin: (screen: AdminScreen) => buildHref(['admin', screen]),
   /** How it works, at one section — or the top when none is named. */
-  how: (at?: HowAnchor | null) => buildHref(['admin', 'how'], at ? { at } : undefined),
+  /**
+   * How it works, at a section of Business mechanics, or on its second
+   * document ("The decisions behind the rest of Epic", `doc=decisions`).
+   */
+  how: (at?: HowAnchor | null, doc?: 'decisions' | null) =>
+    buildHref(['admin', 'how'], at || doc ? { ...(doc ? { doc } : {}), ...(at ? { at } : {}) } : undefined),
   /** The filing desk on one tab. Overview is the default and is not written down. */
   filing: (tab?: FilingTab | null, query?: Record<string, string | null | undefined>) =>
     buildHref(['admin', 'filing'], { ...(query ?? {}), tab: tab && tab !== 'overview' ? tab : null }),

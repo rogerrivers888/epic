@@ -9,7 +9,7 @@
  * never "Waiting".
  */
 
-import React, { useState } from 'react';
+import React from 'react';
 import { Text, View } from 'react-native';
 
 import { Icon } from '../../../components/Icon';
@@ -17,7 +17,7 @@ import { Press } from '../../../components/press';
 import { useViewport } from '../../../hooks/useViewport';
 import { useCrumbs, useDeskGo, useDeskParam } from '../Desk';
 import {
-  AMBER, Dropdown, Kicker, LIME, Muted, ON_LIME, PageTitle, RED, T, TCell, THead, TRow, Table,
+  AMBER, Dropdown, InfoTip, Kicker, LIME, Muted, ON_LIME, PageTitle, RED, T, TCell, THead, TRow, Table,
   ago, desk, fonts, n, tableWidth, tabular, type TCol,
 } from '../kit';
 import { DeskLineChart, countScale } from './Chart';
@@ -29,7 +29,13 @@ import { BackLink, Dot, FactTabs, LoadLine, SRC_NAME, Title, dur, plural, useDes
 
 type Point = { at: string; n: number };
 type Status = { state: 'never' | 'stalled' | 'running'; lastAt: string | null; backlog: number; hours?: number };
-type Source = { source: string; label: string; checked: number; answered: number; failingPct: number | null; status: string };
+type Source = {
+  source: string; label: string; checked: number; answered: number; failingPct: number | null; status: string;
+  /** Why Failing % cannot speak, where it is null. */
+  failingWhy?: string | null;
+  /** A quiet word beside a "—" status ("no family answers this week"). */
+  note?: string | null;
+};
 type VerifResp = {
   status: Status;
   period: '24h' | '7d';
@@ -43,11 +49,14 @@ type Item = { ref: string; feature: string; place: string | null; area: string |
 type ItemsResp = { rows: Item[]; total: number; counties: string[]; countries: string[]; features: string[] };
 
 type Period = '24h' | '7d';
+/** A drill-down may also be this calendar month — Fact automations' header opens those. */
+type DrillPeriod = Period | 'month';
 const periodOf = (raw: string): Period => (raw === '24h' ? '24h' : '7d');
+const drillPeriodOf = (raw: string): DrillPeriod => (raw === 'month' ? 'month' : periodOf(raw));
 
 /** A drill-down's title and the line under it. */
-function drillWords(view: string, src: string, period: Period): { title: string; sub: string } {
-  const p = period === '24h' ? 'last 24 hours' : 'last 7 days';
+function drillWords(view: string, src: string, period: DrillPeriod): { title: string; sub: string } {
+  const p = period === 'month' ? 'this month' : period === '24h' ? 'last 24 hours' : 'last 7 days';
   if (src) {
     const name = SRC_NAME[src] ?? src;
     return view === 'answered'
@@ -56,11 +65,11 @@ function drillWords(view: string, src: string, period: Period): { title: string;
   }
   switch (view) {
     case 'backlog': return { title: 'Backlog', sub: 'Not yet checked · oldest first' };
-    case 'confirmed': return { title: 'Confirmed', sub: `The ${p}` };
+    case 'confirmed': return { title: 'Confirmed', sub: period === 'month' ? 'This month' : `The ${p}` };
     case 'dropped': return { title: 'Dropped at 30 days', sub: 'This month · never confirmed or ruled out' };
     case 'checked': return { title: 'Checked', sub: `The ${p}` };
     case 'notThere': return { title: 'Not there', sub: `The ${p}` };
-    case 'nothingFound': return { title: 'Nothing found', sub: `The ${p}` };
+    case 'nothingFound': return { title: 'Nothing found', sub: period === 'month' ? 'This month' : `The ${p}` };
     default: return { title: 'Conflicts', sub: 'Our own sources disagree' };
   }
 }
@@ -69,13 +78,12 @@ export function Verification() {
   const [view] = useDeskParam('view');
   const [src] = useDeskParam('src');
   const [periodRaw] = useDeskParam('period');
-  const period = periodOf(periodRaw);
   const go = useDeskGo();
   useCrumbs([{ name: 'Facts', go: () => go('facts') }, { name: 'Verification' }], []);
   return (
     <>
       <FactTabs on="verification" />
-      {view ? <Drill view={view} src={src} period={period} /> : <Health period={period} />}
+      {view ? <Drill view={view} src={src} period={drillPeriodOf(periodRaw)} /> : <Health period={periodOf(periodRaw)} />}
     </>
   );
 }
@@ -232,22 +240,32 @@ function SourcesTable({ rows, onOpen }: { rows: Source[]; onOpen: (source: strin
       {rows.map((r) => {
         const c = tone(r.status);
         return (
-          <View key={r.source} style={{ flexDirection: 'row', alignItems: 'center', gap: 24, paddingVertical: 12, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: desk.rule }}>
+          <TRow key={r.source} gap={24} vpad={12}>
             <TCell width={200}><T weight="700">{SRC_NAME[r.source] ?? r.label}</T></TCell>
             <TCell width={150}><Press effect="none" onPress={() => onOpen(r.source, 'checked')}><T num>{n(r.checked)}</T></Press></TCell>
             <TCell width={150}><Press effect="none" onPress={() => onOpen(r.source, 'answered')}><T num>{n(r.answered)}</T></Press></TCell>
             <TCell width={150}>
-              <Press effect="none" onPress={() => onOpen(r.source, 'checked')}>
-                <T num weight={r.status === 'Healthy' ? '500' : '800'} tone={c}>{r.failingPct == null ? '—' : `${r.failingPct}%`}</T>
-              </Press>
+              {r.failingPct == null ? (
+                // Can't speak: the check fetched nothing from this source, so
+                // there is no failure rate to give — "—" and the reason.
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <T num tone={desk.inkDim}>—</T>
+                  {r.failingWhy ? <InfoTip text={r.failingWhy} size={13} width={260} /> : null}
+                </View>
+              ) : (
+                <Press effect="none" onPress={() => onOpen(r.source, 'checked')}>
+                  <T num weight={r.status === 'Healthy' ? '500' : '800'} tone={c}>{`${r.failingPct}%`}</T>
+                </Press>
+              )}
             </TCell>
             <TCell width={150}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Dot color={c} />
-                <T size={13} weight="800" tone={c}>{r.status}</T>
+                {r.status === '—' ? null : <Dot color={c} />}
+                <T size={13} weight={r.status === '—' ? '500' : '800'} tone={c}>{r.status}</T>
               </View>
+              {r.note ? <T size={12} tone={desk.inkDim}>{r.note}</T> : null}
             </TCell>
-          </View>
+          </TRow>
         );
       })}
     </Table>
@@ -263,11 +281,15 @@ const DRILL_COLS: TCol[] = [
   { key: 'outcome', name: 'Outcome', width: 150 }, { key: 'when', name: 'When', width: 160 },
 ];
 
-function Drill({ view, src, period }: { view: string; src: string; period: Period }) {
+function Drill({ view, src, period }: { view: string; src: string; period: DrillPeriod }) {
   const go = useDeskGo();
-  const [country, setCountry] = useState('');
-  const [county, setCounty] = useState('');
-  const [feature, setFeature] = useState('');
+  // The filters are part of the address (a filter replaces, never pushes).
+  const [country, setCountryQ] = useDeskParam('country');
+  const [county, setCountyQ] = useDeskParam('county');
+  const [feature, setFeatureQ] = useDeskParam('feature');
+  const setCountry = (v: string) => setCountryQ(v, { replace: true });
+  const setCounty = (v: string) => setCountyQ(v, { replace: true });
+  const setFeature = (v: string) => setFeatureQ(v, { replace: true });
   const load = useDesk<ItemsResp>('/verification/items', {
     kind: view, source: src || null, period: src ? '7d' : period,
     country: country || null, county: county || null, feature: feature || null,
@@ -278,7 +300,7 @@ function Drill({ view, src, period }: { view: string; src: string; period: Perio
   return (
     <>
       <View style={{ gap: 8, borderBottomWidth: 2, borderBottomColor: desk.ruleStrong, paddingBottom: 18 }}>
-        <BackLink label="Verification" onPress={() => go('facts', { ftab: 'verification', period: period === '7d' ? null : period })} />
+        <BackLink label="Verification" onPress={() => go('facts', { ftab: 'verification', period: period === '24h' ? period : null })} />
         <Title>{words.title}</Title>
         <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>{d ? `${words.sub} · ${plural(d.total, 'item')}` : words.sub}</Text>
       </View>

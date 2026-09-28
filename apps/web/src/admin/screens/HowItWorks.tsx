@@ -12,7 +12,9 @@
  * is corrected here rather than quoted wrong: which tabs exist, fact sheets,
  * the bands, the pipeline's numbers.
  *
- * The second part is the older decision log. The owner, 6 Sep 2026: "I think
+ * The page is two document tabs, as the prototype draws it: Business
+ * mechanics beside a jump list of its eleven sections, and "The decisions
+ * behind the rest of Epic" — the older decision log. The owner, 6 Sep 2026: "I think
  * we need a 'how it works' in the desktop back office thing, and you can put
  * all of these assumptions there in terms of what we've done." Three rules
  * keep it honest, because a page like this is worthless the moment it
@@ -29,13 +31,83 @@ import React, { useEffect, useState } from 'react';
 import { Linking, Platform, ScrollView, StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 import { Press } from '../../components/press';
 import { api } from '../../api';
-import { colors, desk, fonts, spacing, type, BORDER, ON_LIME } from '../../theme';
+import { desk, fonts, spacing, type, BORDER, LIME, ON_LIME } from '../../theme';
 import { Icon, IconName } from '../../components/Icon';
-import { AdminPage, Banner, PageHead, Panel, Pill } from '../kit';
+import { AdminPage, Banner, Panel, Pill } from '../kit';
 import { Explain } from '../explain';
-import { useQueryState } from '../../router';
+import { asOneOf, useQueryState, useRouter } from '../../router';
 import { useViewport } from '../../hooks/useViewport';
-import { howAnchorOf, type HowAnchor } from '../../routes';
+import { howAnchorOf, HOW_ANCHORS, type HowAnchor } from '../../routes';
+import { deskApi } from '../desk/kit';
+
+// ---------------------------------------------------------------------------
+// What the document reads live: the settings, and the counts
+// ---------------------------------------------------------------------------
+
+/**
+ * Every number in the document that is a setting is read from
+ * `GET /api/admin/desk/settings` when the page is drawn, never typed here —
+ * a threshold changed on Fact automations changes this page the same minute
+ * (fix pass, 28 Sep 2026). The shapes are the API's (`desk/settings.js`).
+ */
+type Band = { key: string; label: string };
+type CostBand = { key: string; label: string; to?: number; under?: number; from?: number; over?: number };
+type Cfg = {
+  spotMentions: number; suggestReviews: number; verifySources: number; venueWins: boolean;
+  addPlaces: number; shareMax: number; recheckPhysical: number; recheckAccess: number; recheckFood: number;
+  suggestExpiry: number; askPerVisit: number; familiesSettle: number; familiesWrong: number;
+  collectionMinPlaces: number; sourceSlow: number; sourceFailing: number;
+  ageBands: Band[]; durationBands: Band[];
+  costBands: Record<string, { currency: string; bands: CostBand[] }>;
+};
+
+/**
+ * The counts the document states — subcategories, Google's words, collections.
+ * Each is read from the endpoint that owns it; one that cannot be read is
+ * `null` and its sentence leaves the number out rather than print a stale one.
+ */
+type Counts = { categories: number | null; subcategories: number | null; words: number | null; mapped: number | null; collections: number | null };
+type Live = { cfg: Cfg | null; cfgFailed: boolean; counts: Counts };
+
+const NO_COUNTS: Counts = { categories: null, subcategories: null, words: null, mapped: null, collections: null };
+
+function useLive(): Live {
+  const [cfg, setCfg] = useState<Cfg | null>(null);
+  const [cfgFailed, setCfgFailed] = useState(false);
+  const [counts, setCounts] = useState<Counts>(NO_COUNTS);
+  useEffect(() => {
+    let live = true;
+    deskApi.get<{ values: Cfg }>('/settings')
+      .then((r) => { if (live) setCfg(r.values); })
+      .catch(() => { if (live) setCfgFailed(true); });
+    const put = (patch: Partial<Counts>) => { if (live) setCounts((c) => ({ ...c, ...patch })); };
+    deskApi.get<{ counts: { subcategories: number }; categories: unknown[] }>('/categories')
+      .then((r) => put({ subcategories: r.counts.subcategories, categories: r.categories.length })).catch(() => {});
+    deskApi.get<{ counts: { inEpic: number; needs: number; notInEpic: number } }>('/mapping')
+      .then((r) => put({ words: r.counts.inEpic + r.counts.needs + r.counts.notInEpic, mapped: r.counts.inEpic + r.counts.notInEpic })).catch(() => {});
+    deskApi.get<{ count: number }>('/collections')
+      .then((r) => put({ collections: r.count })).catch(() => {});
+    return () => { live = false; };
+  }, []);
+  return { cfg, cfgFailed, counts };
+}
+
+/** A setting as the document says it: its number, or "—" while it cannot be read. */
+const said = (v: number | null | undefined) => (v == null ? '—' : v.toLocaleString('en-GB'));
+/** "12 months", "1 month", "— months". */
+const many = (v: number | null | undefined, one: string, more = `${one}s`) => `${said(v)} ${v === 1 ? one : more}`;
+
+const MONEY: Record<string, string> = { GBP: '£', EUR: '€' };
+const COUNTRY: Record<string, string> = { GB: 'UK', IE: 'Ireland' };
+
+/** "Cheap, under £10", "Mid, £10–25" — a cost band as the definition reads it. */
+function costBand(b: CostBand, currency: string) {
+  const s = MONEY[currency] ?? `${currency} `;
+  if (b.under != null) return `${b.label}, under ${s}${b.under}`;
+  if (b.over != null) return `${b.label}, over ${s}${b.over}`;
+  if (b.from != null && b.to != null) return `${b.label}, ${s}${b.from}–${b.to}`;
+  return b.label;
+}
 
 // ---------------------------------------------------------------------------
 // The document: Epic — How It Works (v2, updated 28 Sep 2026)
@@ -74,12 +146,12 @@ function Bullets({ items }: { items: string[] }) {
   );
 }
 
-/** The document's note: a rule down the left, never a box. */
+/** The document's note: a rule down the left. */
 function Note({ children }: { children: string | string[] }) {
   const lines = Array.isArray(children) ? children : [children];
   return (
     <View style={doc.note}>
-      {lines.map((l, i) => <Rich key={i} style={[doc.p, { fontSize: 15, marginBottom: i === lines.length - 1 ? 0 : 10 }]}>{l}</Rich>)}
+      {lines.map((l, i) => <Rich key={i} style={[doc.p, { fontSize: 15.5, marginBottom: i === lines.length - 1 ? 0 : 10 }]}>{l}</Rich>)}
     </View>
   );
 }
@@ -102,7 +174,7 @@ function Table({ cols, rows, phone, minWidth = 620 }: {
         {cols.map((c) => <Text key={c.label} style={[doc.th, { flex: c.share }]}>{c.label}</Text>)}
       </View>
       {rows.map((r, i) => (
-        <View key={i} style={[doc.tr, i === rows.length - 1 && { borderBottomWidth: 0 }]}>
+        <View key={i} style={doc.tr}>
           {r.map((cell, j) => <Rich key={j} style={[doc.td, { flex: cols[j].share }]}>{cell}</Rich>)}
         </View>
       ))}
@@ -116,11 +188,10 @@ function Table({ cols, rows, phone, minWidth = 620 }: {
 // --- The diagrams -----------------------------------------------------------
 
 /**
- * The document's four box colours, taken onto Epic's palette. Green (what is
- * real) is the lime tint with a moss rule; the document's "key" colour (what
- * the family actually meets) is lime itself, with ink type; amber is "works,
- * but watch it"; and what is thrown out is a dashed grey — not red, because
- * red in Epic means danger and an excluded word is not one.
+ * The document's four box colours, taken onto the desk's palette. What is real
+ * has a lime rule; what the family actually meets is lime itself, with ink
+ * type; amber is "works, but watch it"; and what is thrown out is dashed —
+ * not red, because red in Epic means danger and an excluded word is not one.
  */
 type Tone = 'plain' | 'live' | 'key' | 'wait' | 'out';
 
@@ -130,7 +201,7 @@ function Box({ title, sub, note, tone = 'plain', style }: {
   const onLime = tone === 'key';
   return (
     <View style={[doc.box, doc[`box_${tone}` as const], style]}>
-      <Rich style={[doc.boxTitle, onLime && { color: ON_LIME }, tone === 'out' && { color: colors.inkMuted }]}>{title}</Rich>
+      <Rich style={[doc.boxTitle, onLime && { color: ON_LIME }, tone === 'out' && { color: desk.inkDim }]}>{title}</Rich>
       {sub ? <Rich style={[doc.boxSub, onLime && { color: ON_LIME }]}>{sub}</Rich> : null}
       {note ? <Text style={[doc.boxNote, onLime && { color: ON_LIME }]}>{note}</Text> : null}
     </View>
@@ -142,7 +213,7 @@ function Down() {
   return (
     <View style={doc.down}>
       <View style={doc.downLine} />
-      <Icon name="expand" size={14} color={colors.inkMuted} strokeWidth={2} />
+      <Icon name="expand" size={14} color={desk.inkDim} strokeWidth={2} />
     </View>
   );
 }
@@ -161,21 +232,26 @@ const Figure = ({ children, caption }: { children: React.ReactNode; caption?: st
 
 // --- The sections -------------------------------------------------------------
 
+/**
+ * The eleven titles, as the prototype's jump list spells them (logic.js
+ * `HOW_SECTIONS`). Section 7 is "How a fact gets born", not the prototype's
+ * "check": the pipeline replaced the harvest (fix pass, 28 Sep 2026).
+ */
 const TITLES: Record<HowAnchor, string> = {
   layers: '1. The three layers',
   categories: '2. Nine categories — and no scores',
   mapping: '3. Google’s words, and where they go',
   place: '4. What a place actually carries',
-  facts: '5. Two kinds of check, and why they are different',
+  facts: '5. Two kinds of check',
   where: '6. Where a value comes from',
   pipeline: '7. How a fact gets born',
-  collections: '8. Collections — what a family actually browses',
+  collections: '8. Collections — what a family browses',
   journey: '9. What happens when a family searches',
   counting: '10. Counting honestly',
   state: '11. Where this actually stands',
 };
 
-/** What the contents line calls each section: shorter than its heading. */
+/** What the document's own contents line calls each section: shorter than its heading. */
 const NAV: [HowAnchor, string][] = [
   ['layers', 'The three layers'], ['categories', 'The nine categories'], ['mapping', 'Google’s words'],
   ['place', 'A place'], ['facts', 'Two kinds of check'], ['where', 'Where a value comes from'],
@@ -193,23 +269,42 @@ function Section({ at, landed, children }: { at: HowAnchor; landed: boolean; chi
   );
 }
 
-function TheDocument({ at, jump }: { at: HowAnchor | null; jump: (a: HowAnchor) => void }) {
-  const { width } = useViewport();
-  const phone = width < 900;
+function TheDocument({ at, jump, live, phone }: { at: HowAnchor | null; jump: (a: HowAnchor) => void; live: Live; phone: boolean }) {
   // Side by side on a wide screen. On a phone the boxes stack, and a flex of 1
   // in a column of no fixed height would squash them to nothing.
   const half = phone ? undefined : { flex: 1 };
+  const c = live.cfg;
+  const k = live.counts;
+
+  // Section 1's line about the filing names only the counts that could be read.
+  const filed = [
+    k.categories != null ? `${said(k.categories)} categories` : null,
+    k.subcategories != null ? `${said(k.subcategories)} subcategories` : null,
+    k.mapped != null ? `${said(k.mapped)} of Google’s words mapped` : null,
+  ].filter(Boolean).join(', ');
+
+  const bands: string[][] = c ? [
+    ['Who it’s for', c.ageBands.map((b) => b.label).join(' · ')],
+    ['Duration', c.durationBands.map((b) => b.label).join(' · ')],
+    ...Object.entries(c.costBands).map(([country, v]) => [
+      `Cost band, ${COUNTRY[country] ?? country} (per person)`, v.bands.map((b) => costBand(b, v.currency)).join(' · '),
+    ]),
+  ] : [['Who it’s for', '—'], ['Duration', '—'], ['Cost band (per person)', '—']];
 
   return (
     <View style={doc.wrap}>
       <Text style={doc.eyebrow}>Epic · How the filing works · v2</Text>
-      <Text style={[doc.h1, phone && { fontSize: 32, lineHeight: 34 }]}>What is actually going on</Text>
+      <Text style={[doc.h1, phone && { fontSize: 32, lineHeight: 33 }]}>What is actually going on</Text>
       <Text style={doc.meta}>28 September 2026 · the model behind Overview · Categories · Facts · Mapping · Collections · Fact automations · Changes</Text>
 
       <Note>{[
         '**Renamed on 26 and 28 September.** On 26 September "labels", "rules" and "rows" were each doing several jobs, so the words changed: labels → **facts** · question set → **fact sheet** · question → **check** · answer → **what we found** · subcategory defaults → **defaults** · rows → **ideas**.',
         'On 28 September ideas became **collections**; the Defaults tab went, and a subcategory’s defaults now sit on its own page; shared fact sheets gave way to **each subcategory’s own list of facts**; and the harvest’s approvals gave way to the **fact pipeline**, which adds facts by rule. Older documents and screenshots use the old words.',
       ]}</Note>
+
+      {live.cfgFailed ? (
+        <Text style={doc.cantSpeak}>The settings could not be read just now, so every number below that is a setting reads —.</Text>
+      ) : null}
 
       <Rich style={doc.lede}>Epic holds a very large number of places and has to answer one question well: given this family, this weather, this Saturday and this much time — what should they do? Everything below exists to turn a list of places into an answer to that question.</Rich>
 
@@ -238,8 +333,8 @@ function TheDocument({ at, jump }: { at: HowAnchor | null; jump: (a: HowAnchor) 
           <Down />
           <Box title="Inspire" sub="what the family actually sees" style={doc.mid} />
         </Figure>
-        <P>**The census** says a place exists and roughly where. It is free, permanent, and it has run: 177,297 places across the south east.</P>
-        <P>**Categories** say which drawer a place belongs in. Also done: nine categories, 72 subcategories, 485 of Google’s words mapped.</P>
+        <P>**The census** says a place exists and roughly where. It is free, permanent, and it has run across the south east.</P>
+        <P>{`**Categories** say which drawer a place belongs in. Also done${filed ? `: ${filed}` : ''}.`}</P>
         <P>**Facts** say what a place is *actually like*. Each subcategory keeps its own list of the facts it looks for, and the fact pipeline fills them in from Epic’s own sources, place by place, as households search. This is the half that is unfinished, and it is where the product’s value lives.</P>
         <P>**Collections** turn those facts into things a family recognises. Nothing is ever filed into a collection.</P>
       </Section>
@@ -267,13 +362,13 @@ function TheDocument({ at, jump }: { at: HowAnchor | null; jump: (a: HowAnchor) 
 
       {/* 3 */}
       <Section at="mapping" landed={at === 'mapping'}>
-        <P>Google describes every place with types from its own list — golf course, race course, road bridge, kebab shop. That list is built for maps, not for days out, so every one of the 485 has to be given an answer.</P>
+        <P>{`Google describes every place with types from its own list — golf course, race course, road bridge, kebab shop. That list is built for maps, not for days out, so every one of ${k.words != null ? `the ${said(k.words)}` : 'them'} has to be given an answer.`}</P>
         <Figure caption={[
           'A word can land in more than one place — golf course fills a drawer and sets "not indoors"',
           'A word can fill several drawers, and exactly one of them is always its primary',
           'Travel places are held for reachability and never shown as somewhere to go',
         ]}>
-          <Box title="Google’s 485 words" sub="golf course · road bridge · kebab shop" style={doc.mid} />
+          <Box title={k.words != null ? `Google’s ${said(k.words)} words` : 'Google’s words'} sub="golf course · road bridge · kebab shop" style={doc.mid} />
           <Down />
           <View style={doc.five}>
             <Box tone="live" title="A drawer" sub="Golf clubs" style={doc.fiveBox} />
@@ -318,8 +413,8 @@ function TheDocument({ at, jump }: { at: HowAnchor | null; jump: (a: HowAnchor) 
         <Table phone={phone} minWidth={560} cols={[{ label: 'Answer', share: 24 }, { label: 'Seen by', share: 20 }, { label: 'What it means', share: 56 }]} rows={[
           ['**Verified yes**', 'public, counted', 'Our own sources say so, and none says otherwise.'],
           ['**No**', 'public, counted', 'One of our own sources says it is not there.'],
-          ['**Conflict**', 'private', 'Our own sources disagree and the venue’s own website says nothing. Never shown; families who visit settle it.'],
-          ['**Suggestion**', 'private', 'Reviewers raised it and it is waiting to be checked. Deleted once checked, and after 30 days at the latest.'],
+          ['**Conflict**', 'private', 'Our own sources contradict each other and the venue’s own website says nothing. Never shown; families who visit settle it.'],
+          ['**Suggestion**', 'private', `Reviewers raised it and it is in the backlog, to be checked. Deleted once checked, and dropped after ${many(c?.suggestExpiry, 'day')} at the latest.`],
           ['**Don’t know**', 'normal', 'Nothing we own mentions it. Most places do not have most features, so it is never a headline number and never a problem.'],
         ]} />
       </Section>
@@ -328,18 +423,13 @@ function TheDocument({ at, jump }: { at: HowAnchor | null; jump: (a: HowAnchor) 
       <Section at="facts" landed={at === 'facts'}>
         <Table phone={phone} cols={[{ label: 'Kind', share: 22 }, { label: 'Shape', share: 24 }, { label: 'Asked of', share: 24 }, { label: 'Example', share: 30 }]} rows={[
           ['**Standard check**', 'yes / no, a range, or a band', 'everything', 'indoors · step free · parking · toilets · booking required · food on site · dog friendly · who it’s for · duration · cost band'],
-          ['**Subcategory check**', 'yes / no / don’t know', 'the places in each subcategory whose list holds it', 'wave machine — looked for only in the subcategories where our own sources have verified it'],
+          ['**Subcategory check**', 'yes / no / don’t know', 'the places in each subcategory whose list holds it', `wave machine — looked for only in the subcategories where our own sources have verified it at ${many(c?.addPlaces, 'place')}`],
         ]} />
         <P>The test: **could two reasonable people standing in front of the place disagree?** If no, it is a fact, and a check can find it. If yes, it is a judgement — and since judgements are not stored, it belongs in a collection’s rule instead.</P>
         <Note>**"Rainy day" is none of these.** It is a conclusion drawn from indoors, and storing it separately means the same fact held twice, out of step the moment one changes. Anything that describes how people *feel* about a place is a collection’s rule, not something the place carries. Kid friendly went the same way, in favour of who it’s for.</Note>
         <H3>What the bands mean</H3>
-        <P>One set, shared by defaults, facts, collections and the families’ questions (signed off 28 September). A standard fact’s own page shows its definition.</P>
-        <Table phone={phone} minWidth={600} cols={[{ label: 'Standard fact', share: 28 }, { label: 'Bands', share: 72 }]} rows={[
-          ['Who it’s for', 'Babies under 2 · Toddlers 2–4 · Young children 5–8 · Older children 9–12 · Teens 13–17 · Adults 18+'],
-          ['Duration', 'Under 1 hour · 1–2 hours · 2–3 hours · Half a day · A full day'],
-          ['Cost band, UK (per person)', 'Free · Cheap, under £10 · Mid, £10–25 · Dear, over £25'],
-          ['Cost band, Ireland (per person)', 'Free · Cheap, under €12 · Mid, €12–30 · Dear, over €30'],
-        ]} />
+        <P>One set, shared by defaults, facts, collections and the families’ questions, read from Fact automations. A standard fact’s own page shows its definition.</P>
+        <Table phone={phone} minWidth={600} cols={[{ label: 'Standard fact', share: 28 }, { label: 'Bands', share: 72 }]} rows={bands} />
         <P>Who it’s for is the sweet spot, not the tolerance: Coral Reef is best for 4–10, even though a two-year-old can paddle. One range per place, and accepted fuzziness where a place spans more than one.</P>
       </Section>
 
@@ -353,12 +443,12 @@ function TheDocument({ at, jump }: { at: HowAnchor | null; jump: (a: HowAnchor) 
           <Down />
           <Box tone="key" title="Set on the place itself" sub={'one place · "Swinley suits ages 8+" — our own sources, families who went, or a person said so, and it wins'} />
         </Figure>
-        <P>A human’s answer is never overwritten by a default. Change the default afterwards and the places a person has touched keep their own value; the disagreement is recorded instead, which is how you find out a default is wrong.</P>
+        <P>A human’s answer is never overwritten by a default. Change the default afterwards and the places a person has touched keep their own value; the places that say otherwise are counted instead, which is how you find out a default is wrong.</P>
         <Bullets items={[
           'A person can set a standard fact on one subcategory, or tick several on the Categories list and set it across all of them at once. **A default a person sets counts as an answer from Epic**: it is public for every place with no answer of its own.',
           'A default the machine proposes from the places’ own values is private until a person accepts it.',
           'Families never see hedged wording such as "usually indoors".',
-          'When most confirmed places contradict a person-set default — three or more confirmed, more than half of them disagreeing — it is flagged amber on the subcategory’s page and listed under Needs you on Overview.',
+          'When most confirmed places contradict a person-set default — three or more confirmed, more than half of them saying otherwise — it is flagged amber on the subcategory’s page ("7 of 10 confirmed places say otherwise") and listed under Needs you on Overview.',
           'Age is never set on a Google word.',
         ]} />
       </Section>
@@ -371,21 +461,27 @@ function TheDocument({ at, jump }: { at: HowAnchor | null; jump: (a: HowAnchor) 
           '"Epic gets to know the places near each household. The moment someone subscribes, we find the top 20 in every category around their home and check them against their own websites and other sources, so their first search is fast. Scroll past 20 and we fetch the next 20. Each new household overlaps and extends what we know. We never sweep a whole subcategory, area or country — we only look at places families will see."',
         ]}</Note>
         <Figure>
-          <Box title="1. Spot" sub="When a household’s search pays Google for a place’s details, the reviews are read in memory for features — and whether each one asserts, denies or merely asks. Features only, never opinions or conditions." note={'1 mention → we go and look · any denial → a conflict · 2 asserting reviews, none denying → "Reviewers mention a sauna", in that session only'} />
+          <Box title="1. Spot" sub="When a household’s search pays Google for a place’s details, the reviews are read in memory for features — and whether each one asserts, denies or merely asks. Features only, never opinions or conditions."
+            note={`${many(c?.spotMentions, 'mention')} → we go and look · any denial → a conflict · ${many(c?.suggestReviews, 'asserting review')}, none denying → "Reviewers mention a sauna", in that session only`} />
           <Down />
-          <Box tone="live" title="2. Verify" sub="At once, against the venue’s own website, our local copy of OpenStreetMap, the Wikipedia body and Wikidata." note="1 source saying yes, none saying no → Verified yes · a source says no → No · sources disagree → the venue’s website decides (on) · nothing found → Don’t know" />
+          <Box tone="live" title="2. Verify" sub="At once, against the venue’s own website, our local copy of OpenStreetMap, the Wikipedia body and Wikidata."
+            note={`${many(c?.verifySources, 'source')} saying yes, none saying no → Verified yes · a source says no → No · sources conflict → the venue’s website decides (${c ? (c.venueWins ? 'on' : 'off') : '—'}) · nothing found → Don’t know`} />
           <Down />
-          <Box tone="live" title="3. Add" sub="Verified at enough places in a subcategory, the fact joins that subcategory’s list, and is looked for at each place as it next comes up — never as a sweep." note="2 places → Active · on more than 90% of places → Ignored instead (access and age facts exempt)" />
+          <Box tone="live" title="3. Add" sub="Verified at enough places in a subcategory, the fact joins that subcategory’s list, and is looked for at each place as it next comes up — never as a sweep."
+            note={`${many(c?.addPlaces, 'place')} → Active · on more than ${said(c?.shareMax)}% of places → Ignored instead (access and age facts exempt)`} />
           <Down />
-          <Box title="4. Re-check" sub="When a place a search surfaces has a fact past its period, it is checked again — never as a sweep." note="physical features 12 months · access 6 months · food and dietary 6 months, worded “the venue says…”" />
+          <Box title="4. Re-check" sub="When a place a search surfaces has a fact past its period, it is checked again — never as a sweep."
+            note={`physical features ${many(c?.recheckPhysical, 'month')} · access ${many(c?.recheckAccess, 'month')} · food and dietary ${many(c?.recheckFood, 'month')}, worded “the venue says…”`} />
           <Down />
-          <Box tone="key" title="5. Families confirm" sub="Families who have visited are one of our own sources. Asked after a visit, only about what matters to them — a toddler pool only to a household with a toddler." note="at most 1 question a visit · 2 families agreeing, none disagreeing, settles it · 2 saying a shown fact is wrong hides it until it is re-checked" />
+          <Box tone="key" title="5. Families confirm" sub="Families who have visited are one of our own sources. Asked after a visit, only about what matters to them — a toddler pool only to a household with a toddler."
+            note={`at most ${many(c?.askPerVisit, 'question')} a visit · ${many(c?.familiesSettle, 'family', 'families')} agreeing, none saying otherwise, settles it · ${said(c?.familiesWrong)} saying a shown fact is wrong hides it until it is re-checked`} />
           <Down />
-          <Box tone="out" title="Housekeeping" sub="A suggestion still waiting to be checked is deleted after 30 days. It comes back the next time a search finds the place." />
+          <Box tone="out" title="Housekeeping" sub={`A suggestion still in the backlog is dropped after ${many(c?.suggestExpiry, 'day')}. It comes back the next time a search finds the place.`} />
         </Figure>
+        <P>{`**Disputed before.** A fact families have hidden is checked again when it is next due. If our own sources confirm it again it is reinstated and marked **disputed before**, and the next families who visit are asked about it first.`}</P>
         <P>**Google may suggest; it never answers.** The only thing derived from Google that is stored is a suggestion — a place ID, a feature, a status and the day it was first seen, with no text, quotes, review ids or counts. It is never public, never counted, never used by a collection or a filter, and it is deleted once checked. A stored fact comes from our own sources, with the source and an evidence quote, because owned text may be kept. Six reviews mentioning a feature and no owned source is Don’t know; two venue pages is Yes. That is the policy working.</P>
-        <P>A fact’s status in a subcategory is **Active** (Epic looks for it there), **Gathering evidence** (seen, not yet confirmed enough), or **Ignored**, with its reason: on nearly every place, an opinion, a condition, or removed by a person. **New** marks the first 30 days after it became Active. A word on nearly every place of a kind is ignored for a reason of its own: lockers are in every water park, so knowing about lockers tells a family nothing. A fact a person removes is never added back.</P>
-        <P>Every threshold is a setting on **Fact automations**, and changing one is a person’s decision, logged in Changes. What the machine did is reported apart from the settings, under Facts: **Verification** says whether it is running and flowing — a source is Slow at 5% failures and Failing at 15%; **Accuracy** compares the machine’s answers with what families said after visiting, and reads "Building" until there are ten answers; **Excluded facts** lists what it chose not to add, with Put back and Include anyway. Nobody works through a queue of exceptions: conflicts and disputes are settled by rules and by families.</P>
+        <P>{`A fact’s status in a subcategory is **Active** (Epic looks for it there — confirmed at ${many(c?.addPlaces, 'place')} or more), **Gathering evidence** (seen, and confirmed at fewer, whatever else is true), or **Ignored**, with its reason: on nearly every place, an opinion, a condition, or removed by a person. **New** marks the first 30 days after it became Active. A word on nearly every place of a kind is ignored for a reason of its own: lockers are in every water park, so knowing about lockers tells a family nothing. A fact a person removes is never added back.`}</P>
+        <P>{`Every threshold is a setting on **Fact automations**, and changing one is a person’s decision, logged in Changes; the numbers on this page are read from there. What the machine did is reported apart from the settings, under Facts: **Verification** says whether it is running and flowing, with its **Backlog** — a source is Slow at ${said(c?.sourceSlow)}% failures and Failing at ${said(c?.sourceFailing)}%; **Accuracy** compares the machine’s answers with what families said after visiting — where the two differ is a disagreement — and reads "Building" until there are ten answers; **Excluded facts** lists what it chose not to add, with Put back and Include anyway. Nobody works through a queue of exceptions: conflicts and disputes are settled by rules and by families.`}</P>
       </Section>
 
       {/* 8 */}
@@ -413,7 +509,7 @@ function TheDocument({ at, jump }: { at: HowAnchor | null; jump: (a: HowAnchor) 
           'A rule gathers places from any category. Pills in the same group mean "any of"; different groups must all hold; any pill can be turned to "not".',
           'Ages and duration are from–to ranges; cost is Free · Cheap · Mid · Dear.',
           'Who sees it is **derived, never set**: no age condition → everyone; a lower age of 16 or more → households with an adult; otherwise → households with somebody in that age range. "Not visited by this household" is applied on its own when it is shown.',
-          'A collection is hidden from a household when fewer than 4 places match within its reach. Thinness is information, not an alarm.',
+          `A collection is hidden from a household when fewer than ${many(c?.collectionMinPlaces, 'place')} match within its reach. Thinness is information, not an alarm.`,
         ]} />
         <P>Hearting a collection is the strongest signal in the product, because a collection is a rule — one tap says something about several facts at once, where hearting a single place says something about one place. Hearted collections rise to the top of Inspire; two or three unhearted ones always stay in view; an empty hearted one is never shown; and hearts fade. The first heart asks whose list it is, once.</P>
         <P>A collection may use a household member’s name — "A day to yourself, Sarah" — and never attaches a child’s name to a negative. How often each is shown, opened and hearted is counted per collection and per audience, and reads "—" until there are real households.</P>
@@ -460,13 +556,82 @@ function TheDocument({ at, jump }: { at: HowAnchor | null; jump: (a: HowAnchor) 
           ['The fact pipeline', 'Built', 'Spot, Verify, Add, Re-check and Families confirm run themselves; the families’ question in the app waits on its design brief'],
           ['The eight axes', '**Cancelled**', 'See section 2 — nothing replaces them'],
           ['The corpus', 'Thin', 'Verify reads the venue’s paragraphs and the Wikipedia body; nothing is re-extracted before the prose change lands'],
-          ['Collections', 'Built', '41 collections, all rules over facts; engagement reads "—" until there are real households'],
+          ['Collections', 'Built', `${k.collections != null ? `${said(k.collections)} collections, all` : 'All'} rules over facts; engagement reads "—" until there are real households`],
         ]} />
-        <P>The blockage has moved again. Facts are no longer approved from a harvest: the machine adds one to a subcategory once our own sources have verified it at two of its places. So what Epic can learn is bounded by how much owned text it can read about each place — which is why the venue’s own paragraphs and the Wikipedia body come first, and why families who have been are counted as a source.</P>
+        <P>{`The blockage has moved again. Facts are no longer approved from a harvest: the machine adds one to a subcategory once our own sources have verified it at ${many(c?.addPlaces, 'place')} of its places. So what Epic can learn is bounded by how much owned text it can read about each place — which is why the venue’s own paragraphs and the Wikipedia body come first, and why families who have been are counted as a source.`}</P>
       </Section>
     </View>
   );
 }
+
+// ---------------------------------------------------------------------------
+// The frame: the document tabs and the jump list
+// ---------------------------------------------------------------------------
+
+/** The two documents on this page, each a tab (prototype `howDocs`). */
+const DOCS = ['mechanics', 'decisions'] as const;
+type Doc = typeof DOCS[number];
+const DOC_NAME: Record<Doc, string> = { mechanics: 'Business mechanics', decisions: 'The decisions behind the rest of Epic' };
+
+/**
+ * The tab strip over the document: 15/800, a lime rule under the one that is
+ * open, a 2px rule under the whole strip. On a phone the strip scrolls
+ * sideways rather than wrapping, so the rule stays one line.
+ */
+function DocTabs({ value, onChange }: { value: Doc; onChange: (d: Doc) => void }) {
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ flexGrow: 1 }}>
+      {DOCS.map((d, i) => (
+        <React.Fragment key={d}>
+          {i > 0 ? <View style={frame.tabGap} /> : null}
+          <Press effect="none" onPress={() => onChange(d)} accessibilityRole="tab" accessibilityState={{ selected: value === d }}>
+            <Text style={[frame.tab, { color: value === d ? desk.ink : desk.inkDim, borderBottomColor: value === d ? LIME : desk.ruleStrong }]}>{DOC_NAME[d]}</Text>
+          </Press>
+        </React.Fragment>
+      ))}
+      <View style={frame.tabRest} />
+    </ScrollView>
+  );
+}
+
+/**
+ * The eleven numbered titles beside the document (prototype template, the How
+ * page's 230px column): 13px, the one in view 800 with a lime rule down its
+ * left, the rest 500 and dim. On a phone it is a row that scrolls sideways
+ * above the document, the rule under each title instead of beside it.
+ */
+function JumpList({ on, onJump, phone }: { on: HowAnchor; onJump: (a: HowAnchor) => void; phone: boolean }) {
+  const items = HOW_ANCHORS.map((a) => (
+    <Press key={a} effect="none" onPress={() => onJump(a)} accessibilityRole="link">
+      <Text style={[
+        frame.jump,
+        phone ? frame.jumpPhone : frame.jumpWide,
+        { fontWeight: on === a ? '800' : '500', color: on === a ? desk.ink : desk.inkDim },
+        phone ? { borderBottomColor: on === a ? LIME : desk.rule } : { borderLeftColor: on === a ? LIME : desk.rule },
+      ]}>{TITLES[a]}</Text>
+    </Press>
+  ));
+  return phone
+    ? <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}>{items}</ScrollView>
+    : <View style={[frame.jumpCol, STICKY]}>{items}</View>;
+}
+
+/** The web keeps the jump list in view as the page scrolls; native has no sticky. */
+const STICKY = (Platform.OS === 'web' ? { position: 'sticky', top: 16 } : {}) as unknown as ViewStyle;
+
+const frame = StyleSheet.create({
+  tab: { fontFamily: fonts.heading, fontSize: 15, fontWeight: '800', paddingBottom: 11, borderBottomWidth: BORDER },
+  tabGap: { width: 30, borderBottomWidth: BORDER, borderBottomColor: desk.ruleStrong },
+  tabRest: { flexGrow: 1, minWidth: 30, borderBottomWidth: BORDER, borderBottomColor: desk.ruleStrong },
+  body: { gap: 28, alignItems: 'flex-start' },
+  jumpCol: { width: 230, flexShrink: 0 },
+  jump: { fontFamily: fonts.body, fontSize: 13, lineHeight: 17.5 },
+  jumpWide: { paddingVertical: 8, paddingLeft: 12, borderLeftWidth: 2 },
+  jumpPhone: { paddingVertical: 8, paddingHorizontal: 12, borderBottomWidth: 2 },
+  // The document sits in its own frame, as the prototype's does.
+  paper: { flex: 1, minWidth: 0, borderWidth: 1, borderColor: desk.rule, backgroundColor: desk.well, paddingVertical: 48, paddingHorizontal: 20 },
+  paperPhone: { alignSelf: 'stretch', paddingVertical: 28, paddingHorizontal: 16 },
+});
 
 // ---------------------------------------------------------------------------
 // The decision log: the rest of Epic
@@ -849,7 +1014,7 @@ const SECTIONS: Section[] = [
   {
     key: 'decides',
     title: 'How Epic decides',
-    blurb: 'The rules behind the words on screen — what counts as a holiday, what a mood means, what excludes a place and what merely ranks it.',
+    blurb: 'The rules behind the words on screen — what counts as a holiday, what a category means, what excludes a place and what merely ranks it.',
     icon: 'plan',
     decisions: [
       {
@@ -897,10 +1062,10 @@ const SECTIONS: Section[] = [
       },
       {
         title: 'A place has one primary subcategory and any number of secondaries, and the mapping is taught',
-        rule: 'A place is filed under exactly one primary subcategory and as many secondaries as its Google words point at (register A2, 28 Sep 2026; this replaced "at most two shelves"). Within one browsing session a place is shown once. Anything in `shelf_rules` beats the built-in tables, narrowest rule first.',
-        why: 'A flat list of moods put anything arguably two things on four shelves, and the home screen became the same places six times. The tables were also simply wrong in places — the atlas has one word for a Formula One circuit and a football ground — and re-guessing does not fix that; teaching it does.',
+        rule: 'A place is filed under exactly one primary subcategory and as many secondaries as its Google words point at (register A2, 28 Sep 2026; this replaced the old limit of two categories a place). Within one browsing session a place is shown once. Anything in `shelf_rules` beats the built-in tables, narrowest rule first.',
+        why: 'A flat list of categories put anything arguably two things in four of them, and the home screen became the same places six times. The tables were also simply wrong in places — the atlas has one word for a Formula One circuit and a football ground — and re-guessing does not fix that; teaching it does.',
         state: 'live',
-        where: 'apps/api/src/domain/moods.js · back office › Shelves',
+        where: 'apps/api/src/domain/moods.js · back office › Categories',
       },
       {
         title: 'A place is hidden only when something says the public cannot go',
@@ -1129,7 +1294,7 @@ const OWED_TIP: Record<Owed['state'], readonly [string, string]> = {
   'Parked, on purpose': ['Parked', 'Parked on purpose, to be raised again rather than decided now.'],
 };
 
-function WhatWeOwe() {
+function WhatWeOwe({ phone }: { phone: boolean }) {
   const count = (s: Owed['state']) => OWED.filter((o) => o.state === s).length;
   return (
     <View style={owedStyles.block}>
@@ -1138,10 +1303,10 @@ function WhatWeOwe() {
           <Explain tip={['/admin/how', 'This page. What is built, what is half-built and what is owed — kept beside the code so it cannot drift from it.']}><Text style={owedStyles.kicker}>/admin/how</Text></Explain>
           <Text style={owedStyles.title}>What we owe</Text>
         </View>
-        <View style={owedStyles.stats}>
+        <View style={[owedStyles.stats, phone && { gap: 20 }]}>
           <Explain tip={OWED_TIP['Not started']} style={{ gap: 2 }}>
-            <Text style={[owedStyles.kicker, { color: colors.accent }]}>Not started</Text>
-            <Text style={[owedStyles.statValue, { color: colors.accent }]}>{count('Not started')}</Text>
+            <Text style={[owedStyles.kicker, { color: LIME }]}>Not started</Text>
+            <Text style={[owedStyles.statValue, { color: LIME }]}>{count('Not started')}</Text>
           </Explain>
           <Explain tip={OWED_TIP['With the log']} style={{ gap: 2 }}>
             <Text style={owedStyles.kicker}>With this build</Text>
@@ -1158,6 +1323,10 @@ function WhatWeOwe() {
         </View>
       </View>
 
+      {/* On a phone the table keeps a width it can be read at and scrolls
+          sideways inside its own box; the page never does (F4). */}
+      <ScrollView horizontal={phone} scrollEnabled={phone} showsHorizontalScrollIndicator={false}>
+      <View style={phone ? { width: 640 } : { flex: 1 }}>
       <View style={owedStyles.head}>
         <Explain tip="whatWeOwe" style={{ flex: 1 }}><Text style={owedStyles.headLabel}>What we owe</Text></Explain>
         <Explain tip="state" style={{ width: 150 }}><Text style={owedStyles.headLabel}>State</Text></Explain>
@@ -1167,11 +1336,13 @@ function WhatWeOwe() {
         <View key={o.what} style={[owedStyles.row, i === OWED.length - 1 && { borderBottomWidth: 0 }]}>
           <Explain tip="whatWeOwe" style={{ flex: 1, minWidth: 0 }}><Text style={owedStyles.what}>{o.what}</Text></Explain>
           <Explain tip={OWED_TIP[o.state]} style={{ width: 150 }}>
-            <Text style={[owedStyles.state, o.state === 'Not started' && { color: colors.accent, fontWeight: '700' }]}>{o.state}</Text>
+            <Text style={[owedStyles.state, o.state === 'Not started' && { color: LIME, fontWeight: '700' }]}>{o.state}</Text>
           </Explain>
           <Explain tip="whose" style={{ width: 140 }}><Text style={owedStyles.whose}>{o.whose}</Text></Explain>
         </View>
       ))}
+      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -1179,27 +1350,40 @@ function WhatWeOwe() {
 const owedStyles = StyleSheet.create({
   block: { gap: 0 },
   band: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: spacing.xl, flexWrap: 'wrap',
-          borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted, paddingBottom: 16, marginBottom: 16 },
-  kicker: { ...type.tiny, fontSize: 10, fontWeight: '700', letterSpacing: 0.7, textTransform: 'uppercase', color: colors.inkMuted },
-  title: { ...type.title, fontSize: 27, letterSpacing: -0.81, lineHeight: 30 },
+          borderBottomWidth: BORDER, borderBottomColor: desk.ruleStrong, paddingBottom: 16, marginBottom: 16 },
+  kicker: { ...type.tiny, fontSize: 10, fontWeight: '700', letterSpacing: 0.7, textTransform: 'uppercase', color: desk.inkDim },
+  title: { ...type.title, fontSize: 27, letterSpacing: -0.81, lineHeight: 30, color: desk.ink },
   stats: { flexDirection: 'row', alignItems: 'flex-end', gap: 30, flexWrap: 'wrap' },
-  statValue: { ...type.title, fontSize: 20, fontWeight: '800', color: colors.ink, fontVariant: ['tabular-nums'] },
+  statValue: { ...type.title, fontSize: 20, fontWeight: '800', color: desk.ink, fontVariant: ['tabular-nums'] },
   head: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.md, paddingBottom: 9,
-          borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted },
-  headLabel: { ...type.small, fontSize: 12.5, fontWeight: '600', color: colors.inkMuted },
+          borderBottomWidth: BORDER, borderBottomColor: desk.ruleStrong },
+  headLabel: { ...type.small, fontSize: 12.5, fontWeight: '600', color: desk.inkDim },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: 11,
-         borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
-  what: { ...type.body, fontSize: 13.5, color: colors.ink },
-  state: { ...type.small, fontSize: 13, fontWeight: '600', color: colors.ink },
-  whose: { ...type.small, fontSize: 13, color: colors.inkMuted },
+         borderBottomWidth: 1, borderBottomColor: desk.rule },
+  what: { ...type.body, fontSize: 13.5, color: desk.ink },
+  state: { ...type.small, fontSize: 13, fontWeight: '600', color: desk.ink },
+  whose: { ...type.small, fontSize: 13, color: desk.inkDim },
 });
 
 export function HowItWorks() {
+  const { width } = useViewport();
+  const phone = width < 900;
+  const { setQuery } = useRouter();
+  const live = useLive();
+
   // What is true this minute rather than in general: are travel times real
   // right now, or is the quota spent and everything an estimate?
   const [sources, setSources] = useState<Awaited<ReturnType<typeof api.sources>> | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { api.sources().then(setSources).catch((e) => setError(e.message)); }, []);
+
+  /**
+   * Which document is open is part of the address (`?doc=decisions`), and
+   * opening the other one is a move, so it pushes: Back returns to the one
+   * you were reading. The section anchor belongs to Business mechanics only.
+   */
+  const [docTab] = useQueryState<Doc>('doc', 'mechanics', asOneOf(DOCS, 'mechanics'));
+  const openDoc = (d: Doc) => setQuery({ doc: d === 'mechanics' ? null : d, at: null }, { replace: false });
 
   /**
    * Where a link into the page lands. The info icon beside every filing
@@ -1210,21 +1394,42 @@ export function HowItWorks() {
    */
   const [at, setAt] = useQueryState<HowAnchor | null>('at', null, { read: howAnchorOf, write: (v) => v });
   useEffect(() => {
-    if (!at || Platform.OS !== 'web') return;
+    if (!at || docTab !== 'mechanics' || Platform.OS !== 'web') return;
     // After the paint: the section has to exist before it can be scrolled to.
     const id = requestAnimationFrame(() => {
       document.getElementById(anchorId(at))?.scrollIntoView({ block: 'start' });
     });
     return () => cancelAnimationFrame(id);
-  }, [at]);
+  }, [at, docTab]);
 
   /**
-   * The contents line. It writes the address like any other link into the
-   * page, and scrolls at once as well, so a second tap on the section already
-   * in the address still goes there.
+   * The section in view, for the jump list. It follows the scroll on the web;
+   * it is not written to the address, which says where a link landed, not
+   * where the reader has got to.
+   */
+  const [inView, setInView] = useState<HowAnchor | null>(null);
+  useEffect(() => {
+    if (docTab !== 'mechanics' || Platform.OS !== 'web' || typeof IntersectionObserver === 'undefined') return;
+    const seen = new Map<HowAnchor, boolean>();
+    const obs = new IntersectionObserver((entries) => {
+      for (const e of entries) seen.set(e.target.id.replace(/^how-/, '') as HowAnchor, e.isIntersecting);
+      const first = HOW_ANCHORS.find((a) => seen.get(a));
+      if (first) setInView(first);
+    }, { rootMargin: '0px 0px -65% 0px' });
+    const id = requestAnimationFrame(() => {
+      for (const a of HOW_ANCHORS) { const el = document.getElementById(anchorId(a)); if (el) obs.observe(el); }
+    });
+    return () => { cancelAnimationFrame(id); obs.disconnect(); };
+  }, [docTab]);
+
+  /**
+   * A jump writes the address like any other link into the page, and scrolls
+   * at once as well, so a second tap on the section already in the address
+   * still goes there. Moving within one document replaces.
    */
   const jump = (a: HowAnchor) => {
     setAt(a);
+    setInView(a);
     if (Platform.OS === 'web') document.getElementById(anchorId(a))?.scrollIntoView({ block: 'start' });
   };
 
@@ -1233,64 +1438,68 @@ export function HowItWorks() {
 
   return (
     <AdminPage>
-      <PageHead
-        title="How it works"
-        sub="The model behind the filing, then the decisions behind the rest of Epic — what each one buys, what it gives up, and where the rule lives."
-      />
+      <DocTabs value={docTab} onChange={openDoc} />
 
-      <TheDocument at={at} jump={jump} />
+      {docTab === 'mechanics' ? (
+        <View style={[frame.body, { flexDirection: phone ? 'column' : 'row' }]}>
+          <JumpList on={inView ?? at ?? 'layers'} onJump={jump} phone={phone} />
+          <View style={[frame.paper, phone && frame.paperPhone]}>
+            <TheDocument at={at} jump={jump} live={live} phone={phone} />
+          </View>
+        </View>
+      ) : null}
 
-      <View style={styles.part}>
-        <Text style={styles.partKicker}>Part two</Text>
-        <Text style={styles.partTitle}>The decisions behind the rest of Epic</Text>
-      </View>
+      {docTab === 'decisions' ? (
+        <>
+          <Banner tone={paused ? 'warn' : 'plain'}>
+            {sources == null && !error ? 'Reading what the API is doing…'
+              : error || sources == null ? 'Could not read what the API is doing just now, so this page cannot say whether travel times are real or estimated.'
+                : sources.routing !== 'google-routes' ? 'No routing key is set, so every travel time on screen is worked out from the distance.'
+                  : paused ? `Google Routes has no quota left just now, so travel times are worked out from the distance until ${new Date(paused.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`
+                    : 'Google Routes is answering, so travel times on screen are real ones.'}
+          </Banner>
 
-      <Banner tone={paused ? 'warn' : 'plain'}>
-        {sources == null && !error ? 'Reading what the API is doing…'
-          : error || sources == null ? 'Could not read what the API is doing just now, so this page cannot say whether travel times are real or estimated.'
-            : sources.routing !== 'google-routes' ? 'No routing key is set, so every travel time on screen is worked out from the distance.'
-              : paused ? `Google Routes has no quota left just now, so travel times are worked out from the distance until ${new Date(paused.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`
-                : 'Google Routes is answering, so travel times on screen are real ones.'}
-      </Banner>
+          <WhatWeOwe phone={phone} />
 
-      <WhatWeOwe />
-
-      {SECTIONS.map((s) => (
-        <Panel key={s.key} title={s.title} sub={s.blurb} padded={false}>
-          {s.decisions.map((d, i) => (
-            <View key={d.title} style={[styles.row, i > 0 && styles.rowLine]}>
-              <View style={styles.head}>
-                <Icon name={s.icon} size={16} color={colors.inkMuted} />
-                <Text style={[type.h3, { flex: 1 }]}>{d.title}</Text>
-                <Pill label={STATE[d.state].label} tone={STATE[d.state].tone} />
-              </View>
-              <Text style={type.body}>{d.rule}</Text>
-              <View style={styles.why}>
-                <Text style={[type.tiny, styles.whyLabel]}>WHY</Text>
-                <Text style={[type.small, { flex: 1 }]}>{d.why}</Text>
-              </View>
-              {d.said ? (
-                <Text style={styles.quote}>“{d.said.words}” — {d.said.who}, {d.said.on}</Text>
-              ) : null}
-              {d.where ? <Text style={styles.where}>{d.where}</Text> : null}
-            </View>
+          {SECTIONS.map((s) => (
+            <Panel key={s.key} title={s.title} sub={s.blurb} padded={false}>
+              {s.decisions.map((d, i) => (
+                <View key={d.title} style={[styles.row, i > 0 && styles.rowLine]}>
+                  <View style={styles.head}>
+                    <Icon name={s.icon} size={16} color={desk.inkDim} />
+                    <Text style={[type.h3, { flex: 1, color: desk.ink }]}>{d.title}</Text>
+                    <Pill label={STATE[d.state].label} tone={STATE[d.state].tone} />
+                  </View>
+                  <Text style={[type.body, { color: desk.ink }]}>{d.rule}</Text>
+                  <View style={styles.why}>
+                    <Text style={[type.tiny, styles.whyLabel]}>WHY</Text>
+                    <Text style={[type.small, { flex: 1, color: desk.inkMuted }]}>{d.why}</Text>
+                  </View>
+                  {d.said ? (
+                    <Text style={styles.quote}>“{d.said.words}” — {d.said.who}, {d.said.on}</Text>
+                  ) : null}
+                  {d.where ? <Text style={styles.where}>{d.where}</Text> : null}
+                </View>
+              ))}
+            </Panel>
           ))}
-        </Panel>
-      ))}
 
-      <Panel title="Keeping this page honest" sub="What it is for, and how it is meant to be maintained.">
-        <Text style={type.body}>
-          A page like this is worthless the moment it describes something that is not true, so every entry in the decision log says whether it
-          is live or only decided, and names the file the rule is in. If an entry cannot be checked against the code in a minute, it is written wrong.
-          The document above is the owner’s own, corrected wherever the back-office handover or the register of decisions has since changed it.
-        </Text>
-        <Text style={type.small}>
-          Anything that changes by the minute — whether travel times are real right now — is read from the API rather than written down here.
-        </Text>
-        <Press onPress={() => Linking.openURL('https://github.com/rogerrivers888/epic/blob/main/CLAUDE.md')} accessibilityRole="link">
-          <Text style={styles.link}>The working agreements this page draws on →</Text>
-        </Press>
-      </Panel>
+          <Panel title="Keeping this page honest" sub="What it is for, and how it is meant to be maintained.">
+            <Text style={[type.body, { color: desk.ink }]}>
+              A page like this is worthless the moment it describes something that is not true, so every entry in the decision log says whether it
+              is live or only decided, and names the file the rule is in. If an entry cannot be checked against the code in a minute, it is written wrong.
+              Business mechanics is the owner’s own document, corrected wherever the back-office handover or the register of decisions has since changed it,
+              and every number in it that is a setting is read from Fact automations.
+            </Text>
+            <Text style={[type.small, { color: desk.inkMuted }]}>
+              Anything that changes by the minute — whether travel times are real right now — is read from the API rather than written down here.
+            </Text>
+            <Press onPress={() => Linking.openURL('https://github.com/rogerrivers888/epic/blob/main/CLAUDE.md')} accessibilityRole="link">
+              <Text style={styles.link}>The working agreements this page draws on →</Text>
+            </Press>
+          </Panel>
+        </>
+      ) : null}
     </AdminPage>
   );
 }
@@ -1299,65 +1508,64 @@ export function HowItWorks() {
 const anchorId = (at: HowAnchor) => `how-${at}`;
 
 const styles = StyleSheet.create({
-  part: { gap: 4, borderTopWidth: BORDER, borderTopColor: colors.line, paddingTop: 18, marginTop: spacing.xl },
-  partKicker: { ...type.tiny, fontSize: 11, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase', color: colors.inkMuted },
-  partTitle: { ...type.title, fontSize: 24, letterSpacing: -0.5, lineHeight: 28 },
   row: { paddingVertical: 13, gap: 6 },
-  rowLine: { borderTopWidth: 1, borderTopColor: colors.lineSoft },
+  rowLine: { borderTopWidth: 1, borderTopColor: desk.rule },
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   why: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start', marginTop: 2 },
-  whyLabel: { width: 34, paddingTop: 2, fontWeight: '700', letterSpacing: 0.6, color: colors.inkFaint },
-  quote: { fontFamily: fonts.body, fontSize: 13, fontStyle: 'italic', color: colors.headerSub, lineHeight: 18 },
+  whyLabel: { width: 34, paddingTop: 2, fontWeight: '700', letterSpacing: 0.6, color: desk.inkFaint },
+  quote: { fontFamily: fonts.body, fontSize: 13, fontStyle: 'italic', color: desk.inkMuted, lineHeight: 18 },
   // Where a rule lives: the monospace is what marks it as a path, so it needs
   // no fill behind it. A filled token in a list of them reads as a row of chips.
-  where: { fontFamily: MONO, fontSize: 11, color: colors.inkMuted, alignSelf: 'flex-start', paddingVertical: 2 },
-  link: { fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: colors.accent },
+  where: { fontFamily: MONO, fontSize: 11, color: desk.inkDim, alignSelf: 'flex-start', paddingVertical: 2 },
+  link: { fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: LIME },
 });
 
 /**
- * The document's own measures: a 760px reading column, 17px body at 1.6, the
- * section heading under a 2px ink rule. Archivo throughout — the document's
- * three faces are Epic's one.
+ * The document's own measures (v2 stylesheet): a 760px reading column, 17px
+ * body at 1.6, the title 48/700, each section 56px below the last under a 2px
+ * ink rule. Archivo throughout — the document's three faces are Epic's one —
+ * and the desk's colours, lime for links and rules.
  */
 const doc = StyleSheet.create({
-  wrap: { maxWidth: 760, width: '100%' },
-  eyebrow: { fontFamily: fonts.body, fontSize: 12, fontWeight: '600', letterSpacing: 1, textTransform: 'uppercase', color: colors.inkMuted, marginBottom: 14 },
-  h1: { fontFamily: fonts.heading, fontSize: 44, lineHeight: 46, fontWeight: '800', letterSpacing: -0.9, color: colors.ink },
-  meta: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted, marginTop: 12, marginBottom: 18 },
-  lede: { fontFamily: fonts.body, fontSize: 19, lineHeight: 29, color: colors.ink, marginTop: 10 },
-  nav: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 14, rowGap: 6, marginTop: 22 },
-  navLink: { fontFamily: fonts.heading, fontSize: 14, fontWeight: '600', color: colors.accent, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
-  section: { marginTop: 48, paddingTop: 18, borderTopWidth: BORDER, borderTopColor: colors.line },
-  // The section a link landed on, marked with a moss rule so the eye finds it
-  // after the scroll. A rule, not a fill: this surface has no boxes.
-  landed: { borderLeftWidth: 3, borderLeftColor: colors.accent, paddingLeft: 12, marginLeft: -15 },
-  h2: { fontFamily: fonts.heading, fontSize: 24, lineHeight: 29, fontWeight: '800', letterSpacing: -0.3, color: colors.ink, marginBottom: 12 },
-  h3: { fontFamily: fonts.heading, fontSize: 17, fontWeight: '800', color: colors.ink, marginTop: 20, marginBottom: 6 },
-  p: { fontFamily: fonts.body, fontSize: 17, lineHeight: 27, color: colors.ink, marginBottom: 14 },
+  wrap: { maxWidth: 760, width: '100%', alignSelf: 'center' },
+  eyebrow: { fontFamily: fonts.body, fontSize: 12, fontWeight: '600', letterSpacing: 1, textTransform: 'uppercase', color: desk.inkDim, marginBottom: 14 },
+  h1: { fontFamily: fonts.heading, fontSize: 48, lineHeight: 49, fontWeight: '700', letterSpacing: -0.96, color: desk.ink },
+  meta: { fontFamily: fonts.body, fontSize: 13, color: desk.inkMuted, marginTop: 12 },
+  cantSpeak: { fontFamily: fonts.body, fontSize: 13.5, color: desk.amber, marginBottom: 6 },
+  lede: { fontFamily: fonts.body, fontSize: 19, lineHeight: 29.5, color: desk.ink, marginTop: 24 },
+  nav: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 14, rowGap: 6, marginTop: 26 },
+  navLink: { fontFamily: fonts.heading, fontSize: 14, fontWeight: '600', color: LIME, borderBottomWidth: 1, borderBottomColor: desk.rule },
+  section: { marginTop: 56, paddingTop: 18, borderTopWidth: BORDER, borderTopColor: desk.ink },
+  // The section a link landed on, marked with a lime rule so the eye finds it
+  // after the scroll. A rule, not a fill.
+  landed: { borderLeftWidth: 3, borderLeftColor: LIME, paddingLeft: 12, marginLeft: -15 },
+  h2: { fontFamily: fonts.heading, fontSize: 24, lineHeight: 29, fontWeight: '700', letterSpacing: -0.24, color: desk.ink, marginBottom: 12 },
+  h3: { fontFamily: fonts.heading, fontSize: 17, fontWeight: '700', color: desk.ink, marginTop: 26, marginBottom: 6 },
+  p: { fontFamily: fonts.body, fontSize: 17, lineHeight: 27, color: desk.ink, marginBottom: 14 },
   list: { gap: 8, marginBottom: 14 },
   li: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
-  dot: { fontFamily: fonts.body, fontSize: 17, lineHeight: 27, color: colors.inkMuted },
-  note: { borderLeftWidth: 3, borderLeftColor: colors.accent, paddingVertical: 4, paddingLeft: 16, marginVertical: 18 },
-  tableBox: { marginTop: 8, marginBottom: 18 },
-  tr: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
-  thRow: { borderBottomWidth: BORDER, borderBottomColor: colors.line },
-  th: { fontFamily: fonts.heading, fontSize: 13, fontWeight: '800', color: colors.ink, paddingVertical: 8, paddingRight: 12 },
-  td: { fontFamily: fonts.body, fontSize: 14.5, lineHeight: 21, color: colors.ink, paddingVertical: 8, paddingRight: 12 },
-  figure: { marginTop: 14, marginBottom: 22 },
-  cap: { fontFamily: fonts.body, fontSize: 12, lineHeight: 17, color: colors.inkMuted },
+  dot: { fontFamily: fonts.body, fontSize: 17, lineHeight: 27, color: desk.inkDim },
+  note: { borderWidth: 1, borderColor: desk.rule, borderLeftWidth: 3, borderLeftColor: LIME, backgroundColor: desk.lifted, paddingVertical: 12, paddingHorizontal: 16, marginVertical: 18 },
+  tableBox: { marginTop: 14, marginBottom: 18 },
+  tr: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: desk.rule },
+  thRow: { borderBottomWidth: BORDER, borderBottomColor: desk.ink, backgroundColor: desk.picked },
+  th: { fontFamily: fonts.heading, fontSize: 13, fontWeight: '700', color: desk.ink, padding: 8 },
+  td: { fontFamily: fonts.body, fontSize: 14.5, lineHeight: 21, color: desk.ink, padding: 8 },
+  figure: { marginTop: 20, marginBottom: 22 },
+  cap: { fontFamily: fonts.body, fontSize: 12, lineHeight: 17, color: desk.inkDim },
   mid: { alignSelf: 'center', width: '100%', maxWidth: 340 },
   five: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   fiveBox: { flexGrow: 1, flexBasis: 120, minWidth: 104 },
-  placeFrame: { borderWidth: 1, borderStyle: 'dashed', borderColor: colors.ruleMuted, padding: 20 },
+  placeFrame: { borderWidth: 1, borderStyle: 'dashed', borderColor: desk.ruleStrong, padding: 20 },
   box: { paddingVertical: 12, paddingHorizontal: 16, gap: 4, borderWidth: 1 },
-  box_plain: { borderColor: colors.ruleMuted },
-  box_live: { backgroundColor: colors.accentSoft, borderColor: colors.accent },
-  box_key: { backgroundColor: colors.selected, borderColor: colors.selected },
-  box_wait: { borderColor: desk.amber, borderLeftWidth: 4 },
-  box_out: { borderColor: colors.ruleMuted, borderStyle: 'dashed' },
-  boxTitle: { fontFamily: fonts.heading, fontSize: 14, fontWeight: '800', color: colors.ink },
-  boxSub: { fontFamily: fonts.body, fontSize: 13, lineHeight: 18, color: colors.inkMuted },
-  boxNote: { fontFamily: fonts.body, fontSize: 12, lineHeight: 17, fontWeight: '600', color: colors.inkMuted },
+  box_plain: { borderColor: desk.ruleStrong, backgroundColor: desk.lifted },
+  box_live: { backgroundColor: desk.picked, borderColor: LIME },
+  box_key: { backgroundColor: LIME, borderColor: LIME },
+  box_wait: { borderColor: desk.amber, borderLeftWidth: 4, backgroundColor: desk.lifted },
+  box_out: { borderColor: desk.ruleStrong, borderStyle: 'dashed' },
+  boxTitle: { fontFamily: fonts.heading, fontSize: 14, fontWeight: '700', color: desk.ink },
+  boxSub: { fontFamily: fonts.body, fontSize: 13, lineHeight: 18, color: desk.inkMuted },
+  boxNote: { fontFamily: fonts.body, fontSize: 12, lineHeight: 17, fontWeight: '600', color: desk.inkDim },
   down: { alignItems: 'center', height: 30, justifyContent: 'flex-end' },
-  downLine: { width: 1, flex: 1, backgroundColor: colors.inkMuted, marginBottom: -4 },
+  downLine: { width: 1, flex: 1, backgroundColor: desk.inkDim, marginBottom: -4 },
 });

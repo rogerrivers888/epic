@@ -28,6 +28,10 @@ export const AMBER = desk.amber;
 export const RED = desk.warn;
 export const tabular = { fontVariant: ['tabular-nums' as const] };
 const hover = Platform.OS === 'web';
+/** The prototype's body line height, 1.55 of the type size. */
+export const LH = (size: number) => Math.round(size * 1.55 * 100) / 100;
+/** A table header that stays at the top of the page while its rows scroll (web only). */
+const STICKY = (Platform.OS === 'web' ? { position: 'sticky', top: 0 } : {}) as unknown as ViewStyle;
 const SHADOW: ViewStyle = Platform.OS === 'web' ? ({ boxShadow: '0 12px 32px rgba(0,0,0,.5)' } as unknown as ViewStyle) : {};
 
 // ---------------------------------------------------------------------------
@@ -230,9 +234,11 @@ export type Opt<T extends string = string> = { key: T; name: string };
  * The prototype's dropdown: a 1px ruled well with a chevron, a raised list
  * below that closes on selection.
  */
-export function Dropdown<T extends string>({ label, options, value, onChange, width = 180, listWidth, maxHeight = 320 }: {
+export function Dropdown<T extends string>({ label, options, value, onChange, width = 180, listWidth, maxHeight = 320, mark = false }: {
   label: string; options: Opt<T>[]; value: T | null; onChange: (v: T) => void;
   width?: number; listWidth?: number; maxHeight?: number;
+  /** A lime tick beside the chosen option, where the prototype draws one. */
+  mark?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -252,14 +258,20 @@ export function Dropdown<T extends string>({ label, options, value, onChange, wi
           backgroundColor: desk.picked, borderWidth: 1, borderColor: desk.ruleStrong, paddingVertical: 4,
           overflow: 'scroll' as ViewStyle['overflow'],
         }, SHADOW]}>
-          {options.map((o) => (
-            <Press key={o.key} effect="none" onPress={() => { setOpen(false); onChange(o.key); }}>
-              <Text style={{
-                paddingVertical: 8, paddingHorizontal: 12, fontFamily: fonts.body, fontSize: 13,
-                fontWeight: o.key === value ? '700' : '500', color: o.key === value ? LIME : desk.inkMuted,
-              }}>{o.name}</Text>
-            </Press>
-          ))}
+          {options.map((o) => {
+            const on = o.key === value;
+            return (
+              <Press key={o.key} effect="none" onPress={() => { setOpen(false); onChange(o.key); }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: on ? desk.picked : 'transparent' }}>
+                  {mark ? <View style={{ width: 14 }}>{on ? <Icon name="check" size={13} color={LIME} /> : null}</View> : null}
+                  <Text style={{
+                    flex: 1, fontFamily: fonts.body, fontSize: 13, lineHeight: 20,
+                    fontWeight: on ? '800' : '500', color: on ? desk.ink : desk.inkMuted,
+                  }}>{o.name}</Text>
+                </View>
+              </Press>
+            );
+          })}
         </View>
       ) : null}
     </View>
@@ -314,7 +326,7 @@ export function Tick({ on, onPress, size = 20 }: { on: boolean; onPress: () => v
   return (
     <Press effect="none" onPress={onPress} accessibilityRole="checkbox" accessibilityState={{ checked: on }}>
       <View style={{
-        width: size, height: size, borderWidth: on ? 0 : 1.5, borderColor: desk.ruleStrong,
+        width: size, height: size, borderWidth: on ? 0 : 1.5, borderColor: desk.inkFaint,
         backgroundColor: on ? LIME : 'transparent', alignItems: 'center', justifyContent: 'center',
       }}>
         {on ? <Icon name="check" size={13} color={ON_LIME} /> : null}
@@ -353,6 +365,8 @@ export function Pills<T extends string>({ options, value, onChange }: { options:
  */
 export type TCol<K extends string = string> = {
   key: K; name: string; width: number; tip?: string;
+  /** Takes the room left over, never narrower than `width` (a table with `fill`). */
+  grow?: boolean;
   /** How the first click sorts: text and Places ascend, other numbers descend. */
   first?: 'asc' | 'desc';
   sortable?: boolean;
@@ -366,35 +380,48 @@ export function nextSort<K extends string>(col: TCol<K>, sort: SortState<K>): So
   return { key: col.key, dir: col.first ?? 'asc' };
 }
 
-export function sortRows<T>(rows: T[], sort: SortState, value: (row: T, key: string) => string | number | null | undefined): T[] {
+/**
+ * Sort rows by a column. Equal values fall back to `tiebreak` — the row's
+ * name or title — so rows that tie keep one order from load to load instead
+ * of whatever order the API happened to send (audit, 28 Sep 2026).
+ */
+export function sortRows<T>(
+  rows: T[], sort: SortState, value: (row: T, key: string) => string | number | null | undefined,
+  tiebreak?: (row: T) => string | null | undefined,
+): T[] {
   if (!sort) return rows;
   const d = sort.dir === 'asc' ? 1 : -1;
+  const tie = (a: T, b: T) => (tiebreak ? String(tiebreak(a) ?? '').localeCompare(String(tiebreak(b) ?? '')) : 0);
   return [...rows].sort((a, b) => {
     const x = value(a, sort.key); const y = value(b, sort.key);
-    if (x == null && y == null) return 0;
+    if (x == null && y == null) return tie(a, b);
     if (x == null) return 1;
     if (y == null) return -1;
-    if (typeof x === 'number' && typeof y === 'number') return (x - y) * d;
-    return String(x).localeCompare(String(y)) * d;
+    const c = typeof x === 'number' && typeof y === 'number' ? (x - y) * d : String(x).localeCompare(String(y)) * d;
+    return c || tie(a, b);
   });
 }
 
-/** A header row: 12.5px, the sorted column bold with a lime arrow; a 2px strong rule under it. */
+/**
+ * A header row: 12.5px, the sorted column bold with its arrow in the header's
+ * own colour (prototype template 413), a 2px strong rule under it. It sticks
+ * to the top of the page as the rows scroll under it, as the prototype's does.
+ */
 export function THead<K extends string>({ cols, sort, onSort, gap = 18, lead, pad = 8 }: {
   cols: TCol<K>[]; sort?: SortState<K>; onSort?: (s: SortState<K>) => void; gap?: number; lead?: React.ReactNode; pad?: number;
 }) {
   const [tip, setTip] = useState<string | null>(null);
   return (
-    <View style={{
+    <View style={[{
       flexDirection: 'row', alignItems: 'center', gap, borderBottomWidth: 2, borderBottomColor: desk.ruleStrong,
       paddingTop: 12, paddingBottom: 9, paddingHorizontal: pad, zIndex: 5, backgroundColor: desk.ground,
-    }}>
+    }, STICKY]}>
       {lead}
       {cols.map((c) => {
         const on = sort?.key === c.key;
         const canSort = onSort && c.sortable !== false;
         return (
-          <View key={c.key} style={{ width: c.width, position: 'relative', zIndex: tip === c.key ? 30 : 1 }}>
+          <View key={c.key} style={[{ width: c.width, position: 'relative', zIndex: tip === c.key ? 30 : 1 }, c.grow ? { flexGrow: 1, flexShrink: 1, flexBasis: c.width } : null]}>
             <Press
               effect="none"
               onPress={canSort ? () => onSort!(nextSort(c, sort ?? null)) : undefined}
@@ -403,10 +430,10 @@ export function THead<K extends string>({ cols, sort, onSort, gap = 18, lead, pa
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Text style={{
-                  fontFamily: fonts.body, fontSize: 12.5, fontWeight: on ? '800' : '600', color: on ? desk.ink : desk.inkDim,
+                  fontFamily: fonts.body, fontSize: 12.5, lineHeight: LH(12.5), fontWeight: on ? '800' : '600', color: on ? desk.ink : desk.inkDim,
                   borderBottomWidth: c.tip ? 1 : 0, borderBottomColor: desk.ruleStrong, borderStyle: 'dotted',
                 }}>{c.name}</Text>
-                {on ? <Text style={{ fontSize: 11, color: LIME }}>{sort!.dir === 'asc' ? '↑' : '↓'}</Text> : null}
+                {on ? <Icon name={sort!.dir === 'asc' ? 'collapse' : 'expand'} size={12} color={desk.ink} /> : null}
               </View>
             </Press>
             {tip === c.key && c.tip ? (
@@ -425,14 +452,18 @@ export function THead<K extends string>({ cols, sort, onSort, gap = 18, lead, pa
   );
 }
 
-/** A table row on a 1px hairline. */
-export function TRow({ children, onPress, gap = 18, lifted, pad = 8, align = 'center' }: {
-  children: React.ReactNode; onPress?: () => void; gap?: number; lifted?: boolean; pad?: number; align?: 'center' | 'flex-start';
+/**
+ * A table row on a 1px hairline: 10px by 8px, as the prototype's rows are
+ * (`vpad` for the tables it draws at 11 or 12). With `T`'s 1.55 line height
+ * a one-line row is 42px, as the prototype measures.
+ */
+export function TRow({ children, onPress, gap = 18, lifted, pad = 8, vpad = 10, align = 'center' }: {
+  children: React.ReactNode; onPress?: () => void; gap?: number; lifted?: boolean; pad?: number; vpad?: number; align?: 'center' | 'flex-start' | 'baseline';
 }) {
   const [over, setOver] = useState(false);
   const body = (
     <View style={{
-      flexDirection: 'row', alignItems: align, gap, paddingVertical: 11, paddingHorizontal: pad,
+      flexDirection: 'row', alignItems: align, gap, paddingVertical: vpad, paddingHorizontal: pad,
       borderBottomWidth: 1, borderBottomColor: desk.rule, backgroundColor: lifted || (onPress && over) ? desk.lifted : 'transparent',
     }}>{children}</View>
   );
@@ -441,9 +472,9 @@ export function TRow({ children, onPress, gap = 18, lifted, pad = 8, align = 'ce
   ) : body;
 }
 
-/** A cell of a fixed width. */
-export function TCell({ width, children, style }: { width: number; children?: React.ReactNode; style?: ViewStyle }) {
-  return <View style={[{ width, minWidth: 0 }, style]}>{children}</View>;
+/** A cell of a fixed width — or, with `grow`, at least that wide and taking what is left. */
+export function TCell({ width, children, style, grow }: { width: number; children?: React.ReactNode; style?: ViewStyle; grow?: boolean }) {
+  return <View style={[grow ? { flexGrow: 1, flexShrink: 1, flexBasis: width, minWidth: width } : { width, minWidth: 0 }, style]}>{children}</View>;
 }
 
 /** A cell's text: 13.5px, ink unless told. */
@@ -451,18 +482,22 @@ export function T({ children, tone = desk.ink, weight = '400', size = 13.5, num,
   children: React.ReactNode; tone?: string; weight?: '400' | '500' | '600' | '700' | '800'; size?: number; num?: boolean; lines?: number;
 }) {
   return (
-    <Text numberOfLines={lines} style={[{ fontFamily: fonts.body, fontSize: size, fontWeight: weight, color: tone }, num ? tabular : null]}>{children}</Text>
+    <Text numberOfLines={lines} style={[{ fontFamily: fonts.body, fontSize: size, lineHeight: LH(size), fontWeight: weight, color: tone }, num ? tabular : null]}>{children}</Text>
   );
 }
 
-/** A compact table: `max-content`, empty space on the right, scrolls sideways on a phone. */
-export function Table({ children, width }: { children: React.ReactNode; width: number }) {
+/**
+ * A compact table: `max-content`, empty space on the right, scrolls sideways
+ * on a phone. With `fill` it spans the page instead, `width` becoming its
+ * least width, and a `grow` column takes the room (Changes' "What changed").
+ */
+export function Table({ children, width, fill }: { children: React.ReactNode; width: number; fill?: boolean }) {
   const narrow = useViewport().width < 900;
   return (
-    <View style={{ alignSelf: 'flex-start', maxWidth: '100%' }}>
+    <View style={fill && !narrow ? { alignSelf: 'stretch' } : { alignSelf: 'flex-start', maxWidth: '100%' }}>
       {narrow ? (
         <HScroll><View style={{ width }}>{children}</View></HScroll>
-      ) : <View style={{ width }}>{children}</View>}
+      ) : <View style={fill ? { minWidth: width } : { width }}>{children}</View>}
     </View>
   );
 }
@@ -512,6 +547,13 @@ export type Mode = 'car' | 'transit';
 export type LocState = { where: string; minutes: number; mode: Mode };
 export type LocAnswer = {
   known: boolean; label: string | null; chip: string | null; approx?: boolean; capped?: boolean;
+  /**
+   * From the API's `filter` (location.js): `speaks` false when the census has
+   * not covered the ring, so a count of 0 there means "we cannot tell" and is
+   * drawn "—"; `atLeast` when some places could not be placed either side of
+   * the ring's edge, or the reach was capped, so every count is a floor.
+   */
+  speaks?: boolean; atLeast?: boolean; unresolved?: number;
 };
 
 const LocCtx = createContext<{ loc: LocState; setLoc: (l: LocState) => void; answer: LocAnswer | null; setAnswer: (a: LocAnswer | null) => void }>({
@@ -598,7 +640,7 @@ export function LocationFilter() {
                   <Press key={m} effect="none" style={{ flex: 1 }} onPress={() => setLoc({ ...loc, mode: m })}>
                     <Text style={{
                       textAlign: 'center', paddingVertical: 7, fontFamily: fonts.body, fontSize: 12.5,
-                      fontWeight: on ? '700' : '500', color: on ? desk.ink : desk.inkDim,
+                      fontWeight: on ? '800' : '600', color: on ? desk.ink : desk.inkDim,
                       borderBottomWidth: 2, borderBottomColor: on ? LIME : 'transparent',
                     }}>{MODE_NAME[m]}</Text>
                   </Press>
@@ -610,8 +652,8 @@ export function LocationFilter() {
               return (
                 <Press key={r} effect="none" onPress={() => { setOpen(false); setLoc({ ...loc, minutes: r }); }}>
                   <Text style={{
-                    paddingVertical: 8, paddingHorizontal: 12, fontFamily: fonts.body, fontSize: 13,
-                    fontWeight: on ? '700' : '500', color: on ? LIME : desk.inkMuted,
+                    paddingVertical: 8, paddingHorizontal: 12, fontFamily: fonts.body, fontSize: 13, lineHeight: 20,
+                    fontWeight: on ? '800' : '500', color: on ? desk.ink : desk.inkMuted, backgroundColor: on ? desk.picked : 'transparent',
                   }}>{r} min</Text>
                 </Press>
               );
@@ -623,9 +665,12 @@ export function LocationFilter() {
         <Press effect="none" onPress={() => { setText(''); setLoc({ ...loc, where: '' }); }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: LIME, paddingVertical: 6, paddingHorizontal: 10 }}>
             <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: desk.ink }}>{answer.chip}</Text>
-            <Text style={{ color: LIME, fontSize: 14, lineHeight: 14 }}>×</Text>
+            <Icon name="close" size={13} color={LIME} />
           </View>
         </Press>
+      ) : null}
+      {filled && answer?.known && answer.approx ? (
+        <Text style={{ fontFamily: fonts.body, fontSize: 12, color: desk.inkDim }}>Public transport reaches roughly half as far</Text>
       ) : null}
       {filled && answer && !answer.known ? (
         <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>Not a place we know yet — try a town or the first part of a postcode</Text>

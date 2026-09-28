@@ -3,6 +3,11 @@
  * happens (design README v2 "Fact automations"; prototype block `isFactRules`,
  * its `RULE_STEPS` and `RULE_HOUSEKEEPING`).
  *
+ * The header carries the prototype's four results (`ruleResults`) — Verified
+ * and Don't know this month, Conflicts standing, Backlog — each with its words
+ * on hover and each opening its Verification drill-down. The prototype's
+ * "How Epic grows its knowledge" box stays out: README v2 avoids info boxes.
+ *
  * Five numbered steps — Spot, Verify, Add to the subcategory, Re-check,
  * Families confirm — each a sentence per row with its setting inline, and the
  * step's info box under its rows. Then Housekeeping. No change log here: every
@@ -23,11 +28,21 @@ import { Platform, Text, TextInput, View } from 'react-native';
 import { Icon } from '../../components/Icon';
 import { Press } from '../../components/press';
 import { Wide } from '../filing/desk';
-import { LIME, Muted, ON_LIME, deskApi, desk, fonts, saidOf, tabular, useToast } from './kit';
+import { useDeskGo } from './Desk';
+import { LIME, Muted, ON_LIME, deskApi, desk, fonts, n, saidOf, tabular, useToast } from './kit';
 
 type Spec = { kind: 'int' | 'bool' | 'bands' | 'cost'; min?: number; max?: number; step?: number; unit?: string };
 type SettingsData = { values: Record<string, unknown>; spec: Record<string, Spec> };
 type Saved = { changed: boolean; value: unknown; version?: number; change?: string };
+type Month = { verified: number; conflicts: number; dontKnow: number; backlog: number };
+
+/** The header's four results, in the prototype's words (logic.js `ruleResults`). */
+const RESULTS: { key: keyof Month; head: string; tipTitle: string; tip: string; view: string; period?: string; lit?: boolean }[] = [
+  { key: 'verified', head: 'VERIFIED', tipTitle: 'Verified this month', tip: 'Answers where one of our own sources says yes and none say no.', view: 'confirmed', period: 'month', lit: true },
+  { key: 'conflicts', head: 'CONFLICTS', tipTitle: 'Conflicts this month', tip: 'Our own sources disagree and the venue’s website says nothing. Kept private until families who visit settle it.', view: 'conflicts' },
+  { key: 'dontKnow', head: 'DON’T KNOW', tipTitle: 'Don’t know this month', tip: 'We looked at the venue page, OpenStreetMap, Wikipedia and Wikidata, and none of them mention this fact for this place.', view: 'nothingFound', period: 'month' },
+  { key: 'backlog', head: 'BACKLOG', tipTitle: 'Backlog', tip: 'Reviews suggested it during a household search. Not yet looked up on our own sources. Counts towards nothing.', view: 'backlog' },
+];
 
 /**
  * A row is a sentence in segments: plain text, `#key` a number setting (with a
@@ -79,8 +94,17 @@ function sentence(segs: Seg[], values: Record<string, unknown>, over?: Record<st
 
 export function Automations({ canManage = false }: { canManage?: boolean }) {
   const toast = useToast();
+  const go = useDeskGo();
   const [data, setData] = useState<SettingsData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [month, setMonth] = useState<Month | null>(null);
+  const [tip, setTip] = useState<keyof Month | null>(null);
+  useEffect(() => {
+    let live = true;
+    // A count that did not load stays "—", never 0.
+    deskApi.get<Month>('/verification/month').then((m) => { if (live) setMonth(m); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
 
   const load = useCallback(() => {
     deskApi.get<SettingsData>('/settings')
@@ -143,9 +167,42 @@ export function Automations({ canManage = false }: { canManage?: boolean }) {
 
   return (
     <View style={{ gap: 20 }}>
-      <View style={{ gap: 6, paddingBottom: 4 }}>
-        <Text style={{ fontFamily: fonts.heading, fontWeight: '800', fontSize: 31, letterSpacing: -1.085, lineHeight: 32, color: desk.ink }}>Fact automations</Text>
-        <Text style={{ fontFamily: fonts.body, fontSize: 13, color: desk.inkDim }}>What the machine does on its own, in the order it happens.</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 24, paddingBottom: 4, flexWrap: 'wrap', zIndex: 20 }}>
+        <View style={{ gap: 6, flexShrink: 1 }}>
+          <Text style={{ fontFamily: fonts.heading, fontWeight: '800', fontSize: 31, letterSpacing: -1.085, lineHeight: 32, color: desk.ink }}>Fact automations</Text>
+          <Text style={{ fontFamily: fonts.body, fontSize: 13, color: desk.inkDim }}>What the machine does on its own, in the order it happens.</Text>
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 30 }}>
+          {RESULTS.map((r) => (
+            <View key={r.key} style={{ position: 'relative', zIndex: tip === r.key ? 30 : 1 }}>
+              <Press
+                effect="none"
+                accessibilityRole="link"
+                accessibilityLabel={`${r.tipTitle}: ${month ? month[r.key] : 'not known'}`}
+                onHoverIn={() => setTip(r.key)}
+                onHoverOut={() => setTip((t) => (t === r.key ? null : t))}
+                onPress={() => go('facts', { ftab: 'verification', view: r.view, period: r.period ?? null })}
+              >
+                <View style={{ alignItems: 'center', gap: 2 }}>
+                  <Text style={{ fontFamily: fonts.heading, fontSize: 10, fontWeight: '700', letterSpacing: 0.7, color: desk.inkDim }}>{r.head}</Text>
+                  <Text style={[{
+                    fontFamily: fonts.body, fontSize: 15, fontWeight: '800', color: r.lit ? LIME : desk.ink,
+                    borderBottomWidth: 1.5, borderBottomColor: r.lit ? LIME : desk.ruleStrong,
+                  }, tabular]}>{month ? n(month[r.key]) : '—'}</Text>
+                </View>
+              </Press>
+              {tip === r.key ? (
+                <View style={[{
+                  position: 'absolute', top: '100%', marginTop: 10, right: 0, width: 260, zIndex: 30,
+                  backgroundColor: desk.picked, borderWidth: 1, borderColor: desk.ruleStrong, paddingVertical: 12, paddingHorizontal: 14, gap: 5,
+                }, TIP_SHADOW]}>
+                  <Text style={{ fontFamily: fonts.heading, fontSize: 13.5, fontWeight: '800', color: desk.ink }}>{r.tipTitle}</Text>
+                  <Text style={{ fontFamily: fonts.body, fontSize: 12.5, lineHeight: 18.75, fontWeight: '500', color: desk.inkMuted }}>{r.tip}</Text>
+                </View>
+              ) : null}
+            </View>
+          ))}
+        </View>
       </View>
 
       <Wide min={900}>
@@ -206,6 +263,8 @@ export function Automations({ canManage = false }: { canManage?: boolean }) {
     </View>
   );
 }
+
+const TIP_SHADOW = (Platform.OS === 'web' ? { boxShadow: '0 12px 32px rgba(0,0,0,.5)' } : {}) as object;
 
 const headCell = { fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600' as const, color: desk.inkDim };
 

@@ -30,7 +30,11 @@ export const SEEDS = [
   { word: 'staff_college', grp: 'not_places', action: 'exclude', text: 'Exclude' },
   { word: 'parking', grp: 'not_places', action: 'exclude', text: 'Exclude' },
   { word: 'sports_coaching', grp: 'not_places', action: 'exclude', text: 'Exclude — weekly lessons near home, not a day out' },
-  { word: 'heritage_railway', grp: 'fold', action: 'repoint', subcategory: 'heritage-railways', text: 'Fun › Heritage railways' },
+  {
+    word: 'heritage_railway', grp: 'fold', action: 'repoint', subcategory: 'heritage-railways',
+    newSub: { key: 'heritage-railways', label: 'Heritage railways', category: 'fun' },
+    text: 'Fun › Heritage railways (new subcategory)',
+  },
   {
     word: 'planetarium', grp: 'fold', action: 'repoint', subcategory: 'science-learning-centres',
     newSub: { key: 'science-learning-centres', label: 'Science & learning centres', category: 'educational' },
@@ -38,9 +42,12 @@ export const SEEDS = [
     text: 'Educational › Science & learning centres + fact: Has a planetarium',
   },
   {
-    word: 'church', grp: 'narrow', action: 'narrow', subcategory: 'landmarks-you-can-see', condition: 'encyclopedia_or_listing',
+    // The drawer is named in the handover as Landmarks; its key has been
+    // spelled two ways, so the proposal names whichever exists, and is not
+    // raised at all where neither does (audit, 28 Sep 2026).
+    word: 'church', grp: 'narrow', action: 'narrow', subcategory: ['landmarks-you-can-see', 'landmarks'], condition: 'encyclopedia_or_listing',
     rule: 'only churches with a Wikipedia/Wikidata entry or heritage listing',
-    text: 'Culture › Landmarks — only churches with a Wikipedia/Wikidata entry or heritage listing',
+    text: '{target} — only churches with a Wikipedia/Wikidata entry or heritage listing',
   },
   { word: 'tourist_attraction', grp: 'stop_filing', action: 'make_fact', text: 'Keep as a fact only (stop filing by it)' },
 ];
@@ -53,19 +60,38 @@ export const SEEDS = [
  */
 export const NEVER_FOLD = new Set(['model_village', 'miniature_golf', 'miniature_golf_course', 'heritage_railway']);
 
+/**
+ * The subcategory a seed files into, as it stands today: the drawer it will
+ * create on accept (`newSub`), or the first of the keys it names that exists
+ * and is active. Null where none does — a proposal is never raised for a
+ * drawer that is not there and that nobody will make.
+ */
+export function resolveTarget(seed, subs) {
+  if (!seed.subcategory) return { key: null, label: null };
+  if (seed.newSub) return { key: seed.newSub.key, label: null };
+  for (const k of [seed.subcategory].flat()) {
+    const s = subs.get(k);
+    if (s?.active) return { key: k, label: s.cat ? `${s.cat} › ${s.label}` : s.label };
+  }
+  return null;
+}
+
 /** Whether a seed would change anything about the word as it stands. */
 export function changesSomething(seed, word) {
   if (!word) return false;
   const out = word.decision && ['aside', 'travel', 'nearby'].includes(word.decision);
   if (seed.action === 'exclude') return !out;
   if (seed.action === 'make_fact') return word.decision !== 'generic';
+  // A seed may name its drawer more than one way (church: Landmarks); being
+  // in any of them is being there.
+  const targets = [seed.subcategory].flat();
   if (seed.action === 'narrow') {
     if (out) return false; // settled out by a person; the register wins
-    return word.narrowedTo !== seed.subcategory;
+    return !targets.includes(word.narrowedTo);
   }
   if (seed.action === 'repoint') {
     if (out) return false;
-    return word.points_at !== seed.subcategory;
+    return !targets.includes(word.points_at);
   }
   return false;
 }
@@ -75,36 +101,52 @@ export function changesSomething(seed, word) {
  * run at boot and daily. Returns what it did, for the log line.
  */
 export async function refreshProposals() {
-  const [{ rows: words }, { rows: kept }, { rows: open }, { rows: narrowed }, counts] = await Promise.all([
+  const [{ rows: words }, { rows: kept }, { rows: open }, { rows: narrowed }, counts, { rows: subRows }] = await Promise.all([
     query(`select key, decision, points_at, active from taxonomy_labels where namespace = 'google'`),
     query(`select word from word_proposals where state = 'kept'`),
     query(`select id, word from word_proposals where state = 'open'`),
     query(`select word, subcategory_key from word_targets where condition is not null and is_primary`),
     bringsAndAffected(),
+    query(`select s.key, s.label, s.active, c.label as cat from shelf_subcategories s left join shelf_categories c on c.key = s.category_key`),
   ]);
+  const subs = new Map(subRows.map((r) => [r.key, r]));
   const byWord = new Map(words.map((w) => [w.key, w]));
   for (const n of narrowed) { const w = byWord.get(n.word); if (w) w.narrowedTo = n.subcategory_key; }
   const keptSet = new Set(kept.map((k) => k.word));
   const openSet = new Set(open.map((o) => o.word));
   let raised = 0; let retired = 0;
-  for (const s of SEEDS) {
-    const w = byWord.get(s.word);
-    if (keptSet.has(s.word)) continue;
-    if (NEVER_FOLD.has(s.word) && s.subcategory && s.newSub == null && s.subcategory !== 'heritage-railways') continue;
-    const wanted = changesSomething(s, w);
-    if (wanted && !openSet.has(s.word)) {
+  for (const seed of SEEDS) {
+    const w = byWord.get(seed.word);
+    if (keptSet.has(seed.word)) continue;
+    // A word the owner said not to fold is only ever proposed into its own
+    // drawer (heritage_railway → Heritage railways), never folded elsewhere.
+    if (NEVER_FOLD.has(seed.word) && seed.subcategory && !seed.newSub) continue;
+    const target = resolveTarget(seed, subs);
+    const s = target === null ? null : {
+      ...seed,
+      subcategory: target.key,
+      text: seed.text.replace('{target}', target.label ?? ''),
+    };
+    const wanted = s !== null && changesSomething(s, w);
+    const changeTo = s && JSON.stringify({ text: s.text, subcategory: s.subcategory ?? null, newSub: s.newSub ?? null, fact: s.fact ?? null, newFact: s.newFact ?? null, condition: s.condition ?? null });
+    if (wanted && openSet.has(s.word)) {
+      // Keep an open proposal saying what the seed says today (a drawer
+      // renamed, a target that now exists): the owner decides what is shown.
+      await query(`update word_proposals set change_to = $2::jsonb, rule_text = $3 where word = $1 and state = 'open' and change_to is distinct from $2::jsonb`,
+        [s.word, changeTo, s.rule ?? null]);
+    } else if (wanted) {
       const c = counts.get(s.word) ?? { brings: 0, affected: 0 };
       await query(
         `insert into word_proposals (namespace, word, grp, action, change_to, rule_text, places_affected)
          values ('google', $1, $2, $3, $4::jsonb, $5, $6) on conflict do nothing`,
-        [s.word, s.grp, s.action,
-          JSON.stringify({ text: s.text, subcategory: s.subcategory ?? null, newSub: s.newSub ?? null, fact: s.fact ?? null, newFact: s.newFact ?? null, condition: s.condition ?? null }),
-          s.rule ?? null, s.action === 'repoint' || s.action === 'narrow' ? c.brings : c.affected]);
+        // places_affected is what it was when raised; the screen recounts on
+        // every read (mapping.js), so this is a record, not the number shown.
+        [s.word, s.grp, s.action, changeTo, s.rule ?? null, c.affected]);
       raised += 1;
-    } else if (!wanted && openSet.has(s.word)) {
+    } else if (!wanted && openSet.has(seed.word)) {
       // It no longer changes anything (somebody decided it another way): retire
       // it quietly rather than leave a proposal that would be a no-op.
-      await query(`delete from word_proposals where word = $1 and state = 'open'`, [s.word]);
+      await query(`delete from word_proposals where word = $1 and state = 'open'`, [seed.word]);
       retired += 1;
     }
   }

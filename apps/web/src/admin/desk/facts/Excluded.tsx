@@ -54,7 +54,7 @@ export function Excluded({ canManage }: { canManage: boolean }) {
             <TRow key={`${r.sub}|${r.fact}`}>
               <TCell width={220}><T weight="700">{r.label}</T></TCell>
               <TCell width={240}>
-                <Press effect="none" onPress={() => go('categories', { sub: r.sub })}><T size={13} tone={desk.inkMuted}>{r.subLabel}</T></Press>
+                <Press effect="none" onPress={() => go('categories', { sub: r.sub, state: 'ignored' })}><T size={13} tone={desk.inkMuted}>{r.subLabel}</T></Press>
               </TCell>
               <TCell width={260}><T size={12.5} tone={desk.inkDim}>{whyOf(r)}</T></TCell>
               <TCell width={120} style={{ alignItems: 'flex-end' }}>

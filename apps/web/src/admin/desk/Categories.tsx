@@ -21,24 +21,35 @@ import { Press } from '../../components/press';
 import { useViewport } from '../../hooks/useViewport';
 import { useCrumbs, useDeskGo, useDeskParam } from './Desk';
 import {
-  Dropdown, InfoTip, LIME, LocationFilter, Muted, ON_LIME, RED, SearchBox, THead, Table, Tick, deskApi, desk, fonts,
+  Dropdown, LIME, LocationFilter, Muted, ON_LIME, RED, SearchBox, THead, Table, Tick, deskApi, desk, fonts,
   locParams, n, saidOf, sortRows, tabular, useLocation, useToast, type SortState, type TCol,
 } from './kit';
-import { Count, FACT_ORDER, Failed, PillBar, factName, undoChanges, type Change, type Option } from './categories/shared';
+import { Count, FACT_ORDER, Failed, HowTip, PillBar, count, factName, undoChanges, type Change, type Option } from './categories/shared';
+import { HoverTitle } from './facts/shared';
 import { SubPage } from './categories/SubPage';
+import { Review } from './categories/Review';
 import { FactAtSub } from './categories/FactAtSub';
 import { NewFacts } from './categories/NewFacts';
 
 type Related = { key: string; label: string; why: 'linked' | 'shared' };
 type Row = {
   key: string; label: string; category: string; categoryLabel: string;
-  places: number; facts: number; related: Related[];
+  /** Null where the location filter cannot say (can't-speak): drawn "—". */
+  places: number | null; atLeast?: boolean; facts: number; related: Related[];
+  /** Person-set defaults most of its confirmed places contradict (`?sort=review` puts these first). */
+  contradicted?: number;
+  /** The subcategory's synonyms for the search ("swim" finds the pools). */
+  terms?: string | null;
 };
 type Filter =
   | { unknown: true; where: string; message: string }
-  | { unknown?: false; where: string; label: string; minutes: number; mode: string; chip: string; approx?: boolean; capped?: boolean };
+  | {
+    unknown?: false; where: string; label: string; minutes: number; mode: string; chip: string; approx?: boolean; capped?: boolean;
+    /** location.js's can't-speak: false where the census has not covered the area; `why` says so, and why a count is a floor. */
+    speaks?: boolean; atLeast?: boolean; why?: string | null;
+  };
 type ListResponse = {
-  counts: { subcategories: number; places: number; facts: number; newFacts: number };
+  counts: { subcategories: number; places: number; within?: number | null; facts: number; newFacts: number };
   rows: Row[];
   defaultFacts: { key: string; label: string; options: Option[] }[];
   atLeast: boolean;
@@ -51,6 +62,7 @@ export function Categories({ canManage = false }: { canManage?: boolean }) {
   const [fact] = useDeskParam('fact');
   const [view] = useDeskParam('view');
   if (view === 'new') return <NewFacts canManage={canManage} />;
+  if (sub && fact && view === 'review') return <Review sub={sub} fact={fact} />;
   if (sub && fact) return <FactAtSub sub={sub} fact={fact} canManage={canManage} />;
   if (sub) return <SubPage sub={sub} canManage={canManage} />;
   return <SubList canManage={canManage} />;
@@ -61,6 +73,21 @@ export function Categories({ canManage = false }: { canManage?: boolean }) {
 // ---------------------------------------------------------------------------
 
 type ColKey = 'name' | 'cat' | 'places' | 'facts' | 'related';
+const COL_KEYS: ColKey[] = ['name', 'cat', 'places', 'facts', 'related'];
+
+/**
+ * The list's sort, as the address spells it (a sort is part of the address):
+ * `sort=places` ascending, `sort=-facts` descending, `sort=review` the
+ * subcategories with a contradicted default first (Overview links here).
+ * Name ascending is the default and not written.
+ */
+function sortOf(raw: string): SortState<ColKey> | 'review' {
+  if (raw === 'review') return 'review';
+  const desc = raw.startsWith('-');
+  const k = (desc ? raw.slice(1) : raw) as ColKey;
+  return COL_KEYS.includes(k) ? { key: k, dir: desc ? 'desc' : 'asc' } : { key: 'name', dir: 'asc' };
+}
+const sortText = (s: SortState<ColKey>) => (!s || (s.key === 'name' && s.dir === 'asc') ? '' : `${s.dir === 'desc' ? '-' : ''}${s.key}`);
 
 const hover = Platform.OS === 'web';
 
@@ -75,7 +102,10 @@ function SubList({ canManage }: { canManage: boolean }) {
   const [data, setData] = useState<ListResponse | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [tick, setTick] = useState(0);
-  const [sort, setSort] = useState<SortState<ColKey>>({ key: 'name', dir: 'asc' });
+  const [sortRaw, setSortRaw] = useDeskParam('sort');
+  const sorted = sortOf(sortRaw);
+  const sort: SortState<ColKey> = sorted === 'review' ? null : sorted;
+  const setSort = (s: SortState<ColKey>) => setSortRaw(sortText(s), { replace: true });
   const [ticked, setTicked] = useState<string[]>([]);
   const [adding, setAdding] = useState<string | null>(null);
   const [text, setText] = useState(q);
@@ -111,11 +141,14 @@ function SubList({ canManage }: { canManage: boolean }) {
   const shown = useMemo(() => {
     const f = all
       .filter((r) => !cat || r.category === cat)
-      .filter((r) => !needle || r.label.toLowerCase().includes(needle) || r.categoryLabel.toLowerCase().includes(needle));
+      .filter((r) => !needle || r.label.toLowerCase().includes(needle) || r.categoryLabel.toLowerCase().includes(needle) || (r.terms ?? '').includes(needle));
+    if (sorted === 'review') {
+      return [...f].sort((a, b) => (b.contradicted ?? 0) - (a.contradicted ?? 0) || a.label.localeCompare(b.label));
+    }
     return sortRows(f, sort, (r, k) => (
       k === 'name' ? r.label : k === 'cat' ? r.categoryLabel : k === 'places' ? r.places : k === 'facts' ? r.facts : r.related.length
     ));
-  }, [all, cat, needle, sort]);
+  }, [all, cat, needle, sortRaw]); // eslint-disable-line react-hooks/exhaustive-deps
   const filtered = Boolean(needle || cat);
 
   const cols: TCol<ColKey>[] = [
@@ -154,20 +187,21 @@ function SubList({ canManage }: { canManage: boolean }) {
 
   return (
     <View style={{ gap: 14 }}>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'space-between', gap: 24, paddingBottom: 4, zIndex: 40 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'space-between', gap: 24, paddingBottom: 4, zIndex: 45 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <Text style={{ fontFamily: fonts.heading, fontWeight: '800', fontSize: 31, letterSpacing: -1.085, lineHeight: 32, color: desk.ink }}>Subcategories</Text>
-          <InfoTip text="Every subcategory Epic files places under. Tick some to set a fact for all of them at once; open one to see its defaults and the facts Epic looks for there." />
+          <HowTip text="Every subcategory Epic files places under. Tick some to set a fact for all of them at once; open one to see its defaults and the facts Epic looks for there." />
         </View>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', gap: 30, maxWidth: '100%', flexShrink: 1 }}>
           <Count label="Subcategories" n={data ? n(data.counts.subcategories) : '—'} />
-          <Count label="Places" n={data ? `${n(data.counts.places)}${plus}` : '—'} />
+          {/* The estate's total whatever the location says (the prototype); the column shows what is within reach. */}
+          <Count label="Places" n={data ? n(data.counts.places) : '—'} />
           <Count label="Facts" n={data ? n(data.counts.facts) : '—'} />
           <Count label="New facts" n={data ? n(data.counts.newFacts) : '—'} lime onPress={() => go('categories', { view: 'new' })} />
         </View>
       </View>
 
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 14, zIndex: 35 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 14, zIndex: 42 }}>
         <SearchBox value={text} onChange={setText} placeholder="Search every subcategory" width={narrow ? Math.min(280, width - 32) : 280} />
         <Dropdown
           label={cat ? data?.categories.find((c) => c.key === cat)?.label ?? 'All categories' : 'All categories'}
@@ -178,7 +212,8 @@ function SubList({ canManage }: { canManage: boolean }) {
         />
         {filtered && data ? <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>{shown.length} of {data.rows.length}</Text> : null}
       </View>
-      <View style={{ zIndex: 30 }}><LocationFilter /></View>
+      {/* Above the bulk bar: the reach dropdown opens over it. */}
+      <View style={{ zIndex: 38 }}><LocationFilter /></View>
 
       {canManage && liveTicked.length ? (
         <BulkBar
@@ -208,6 +243,7 @@ function SubList({ canManage }: { canManage: boolean }) {
               key={r.key}
               row={r}
               plus={plus}
+              why={data.filter && !data.filter.unknown ? data.filter.why ?? null : null}
               narrow={narrow}
               canManage={canManage}
               ticked={ticked.includes(r.key)}
@@ -230,9 +266,9 @@ function SubList({ canManage }: { canManage: boolean }) {
 }
 
 function ListRow({
-  row, plus, narrow, canManage, ticked, onTick, open, openFacts, openOther, adding, toggleAdd, catalogue, categories, onLink, onUnlink,
+  row, plus, why, narrow, canManage, ticked, onTick, open, openFacts, openOther, adding, toggleAdd, catalogue, categories, onLink, onUnlink,
 }: {
-  row: Row; plus: string; narrow: boolean; canManage: boolean; ticked: boolean; onTick: () => void;
+  row: Row; plus: string; why: string | null; narrow: boolean; canManage: boolean; ticked: boolean; onTick: () => void;
   open: () => void; openFacts: () => void; openOther: (k: string) => void;
   adding: boolean; toggleAdd: () => void; catalogue: Row[]; categories: { key: string; label: string }[];
   onLink: (o: { key: string; label: string }) => void; onUnlink: (o: Related) => void;
@@ -248,7 +284,14 @@ function ListRow({
           </Press>
         </View>
         <Text style={{ width: 130, fontFamily: fonts.body, fontSize: 13, color: desk.inkMuted }}>{row.categoryLabel}</Text>
-        <Text style={[{ width: 80, fontFamily: fonts.body, fontSize: 13.5, color: row.places ? desk.ink : RED }, tabular]}>{n(row.places)}{row.places ? plus : ''}</Text>
+        {/* Within reach: "—" where the filter cannot speak, "N+" where the count is a floor; the reason on hover. */}
+        <View style={{ width: 80 }}>
+          <HoverTitle title={row.places == null || row.atLeast ? why ?? '' : ''}>
+            <Text style={[{ fontFamily: fonts.body, fontSize: 13.5, color: row.places == null ? desk.inkDim : row.places ? desk.ink : RED }, tabular]}>
+              {count(row.places, row.atLeast ?? Boolean(plus) ? '+' : '')}
+            </Text>
+          </HoverTitle>
+        </View>
         <View style={{ width: 80 }}>
           <Press effect="none" onPress={openFacts}>
             <Text style={[{ fontFamily: fonts.body, fontSize: 13.5, color: row.facts ? desk.ink : desk.inkDim }, tabular]}>{n(row.facts)}</Text>

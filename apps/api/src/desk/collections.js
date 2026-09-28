@@ -26,6 +26,7 @@ import { logChange } from './changes.js';
 import { settings } from './settings.js';
 import { COST_WORD } from './categories.js';
 import { describe } from './places.js';
+import { countOf } from './location.js';
 
 /** A heart this old no longer lifts a collection (the existing desk's rule, say.ts). */
 export const FADE_DAYS = 120;
@@ -64,6 +65,7 @@ export function fromPredicate(p) {
     if (Array.isArray(c.any)) { c.any.forEach((x) => take(x, not)); return; }
     if (c.overlaps && c.attribute === 'suits-ages') out.ages = [c.overlaps[0], c.overlaps[1]];
     else if (Array.isArray(c.subcategory)) c.subcategory.forEach((s) => out.subs.push({ id: s, not }));
+    else if (Array.isArray(c.category)) c.category.forEach((k) => out.cats.push({ id: k, not }));
     else if (c.attribute && typeof c.yes === 'boolean') {
       if (c.attribute === 'indoor' && c.yes === false) out.facts.push({ id: 'indoor', not: !not });
       else if (c.attribute === 'booking-required' && c.yes === false) out.facts.push({ id: 'booking-required', not: !not });
@@ -93,17 +95,78 @@ export function matchesPredicate(pred, p) {
   return false;
 }
 
+/**
+ * Whether a legacy predicate converts to the rule model *exactly* — so the
+ * editor's pills return the same places as the list's count (audit, 28 Sep
+ * 2026). Decided from its shape, not from today's places:
+ *
+ *   - one clause, or `all` of clauses (an `any` across kinds has no pills);
+ *   - at most one positive subcategory list, one positive category list and
+ *     one positive yes — several would become "any of" inside their group,
+ *     where the predicate meant "all of";
+ *   - negatives only as `not` of a subcategory, a category or a yes;
+ *   - `yes: false` never: the predicate asks for a recorded no, the rule's
+ *     "not" for the absence of a yes, and a place nobody has asked about
+ *     answers the two differently;
+ *   - at most one age overlap, nothing else.
+ */
+export function legacyExact(pred) {
+  if (!pred || typeof pred !== 'object') return true;
+  const list = Array.isArray(pred.all) ? pred.all : [pred];
+  const seen = { sub: 0, cat: 0, yes: 0, ages: 0 };
+  for (const c of list) {
+    if (!c || typeof c !== 'object') return false;
+    if (c.not) {
+      const n = c.not;
+      if (Array.isArray(n.subcategory) || Array.isArray(n.category)) continue;
+      if (n.attribute && n.yes === true) continue;
+      return false;
+    }
+    if (Array.isArray(c.subcategory)) { seen.sub += 1; continue; }
+    if (Array.isArray(c.category)) { seen.cat += 1; continue; }
+    if (c.attribute === 'suits-ages' && Array.isArray(c.overlaps)) { seen.ages += 1; continue; }
+    if (c.attribute && c.yes === true) { seen.yes += 1; continue; }
+    return false;
+  }
+  return seen.sub <= 1 && seen.cat <= 1 && seen.yes <= 1 && seen.ages <= 1;
+}
+
+/** A legacy predicate in words, for the editor's read-only line and Changes. */
+export function legacyWords(pred, names = {}) {
+  const sub = (k) => names.subs?.get(k) ?? k;
+  const cat = (k) => names.cats?.get(k) ?? k;
+  const fact = (k) => names.facts?.get(k) ?? k;
+  const say = (c) => {
+    if (!c || typeof c !== 'object') return '';
+    if (Array.isArray(c.all)) return c.all.map(say).join(' and ');
+    if (Array.isArray(c.any)) return `(${c.any.map(say).join(' or ')})`;
+    if (c.not) return `not ${say(c.not)}`;
+    if (Array.isArray(c.subcategory)) return c.subcategory.map(sub).join(' or ');
+    if (Array.isArray(c.category)) return c.category.map(cat).join(' or ');
+    if (c.overlaps) return `suits ages ${c.overlaps[0]} to ${c.overlaps[1]}`;
+    if (c.attribute && typeof c.yes === 'boolean') return c.yes ? fact(c.attribute) : `${fact(c.attribute)}: no`;
+    if (c.attribute) return fact(c.attribute);
+    return '';
+  };
+  return say(pred) || '—';
+}
+
 /** Whether a place fits a collection: its new rule, or its legacy predicate exactly. */
 export const fits = (c, p) => (c.legacy ? matchesPredicate(c.legacy, p) : matches(c.rule, p));
 
 /** The audience a rule implies (D11), in the words the list uses. */
 export function audienceOf(rule) {
+  // The README's rule for every collection, `ageSpan` ones too (audit, 28 Sep
+  // 2026): no ages → Everyone; lower age ≥ 16 → an adult; otherwise someone
+  // in the range. A top of 60 or more reads "60+".
   if (!rule.ages) return { key: 'everyone', label: 'Everyone' };
   const [lo, hi] = rule.ages;
-  if (rule.ageSpan) return { key: 'everyone', label: 'Everyone' };
   if (lo >= 16) return { key: 'adult', label: 'Households with an adult' };
-  return { key: `ages:${lo}-${hi}`, label: `Households with someone aged ${lo}–${hi >= 99 ? '99' : hi}`, lo, hi };
+  return { key: `ages:${lo}-${hi}`, label: `Households with someone aged ${lo}–${ageTop(hi)}`, lo, hi };
 }
+
+/** The top of an age range as it is read: 60 or more is "60+". */
+export const ageTop = (hi) => (hi >= 60 ? '60+' : String(hi));
 
 /** Whether a place fits a rule. */
 export function matches(rule, p) {
@@ -194,6 +257,9 @@ export async function placeIndex() {
     const dur = get('duration');
     const mins = dur ? (dur.to_value ?? dur.from_value) : null;
     p.hours = mins == null ? null : Math.round((mins / 60) * 10) / 10;
+    // The range as the drawer reads it ("2–3 hours"), from the same answer.
+    const h = (m) => (m == null ? null : Math.round((m / 60) * 10) / 10);
+    p.durRange = dur && (dur.from_value != null || dur.to_value != null) ? [h(dur.from_value), h(dur.to_value)] : null;
     const cost = get('cost-band');
     p.cost = cost?.choice ? COST_WORD[cost.choice] ?? null : null;
     delete p.answers;
@@ -226,30 +292,49 @@ async function engagement() {
 function toCollection(r) {
   const legacy = !r.rule && r.predicate && Object.keys(r.predicate).length ? r.predicate : null;
   const rule = r.rule ? cleanRule(r.rule) : fromPredicate(r.predicate);
-  return { key: r.key, title: r.title, copy: r.copy, active: r.active, grouping: r.grouping, rule, legacy, audience: audienceOf(rule) };
+  // `legacyExact`: the pills return what the predicate returns, so the editor
+  // may show them; otherwise it shows the old rule read-only until re-saved.
+  return { key: r.key, title: r.title, copy: r.copy, active: r.active, grouping: r.grouping, rule, legacy, legacyExact: legacy ? legacyExact(legacy) : true, audience: audienceOf(rule) };
+}
+
+/** Labels for categories, subcategories and facts, to say a rule in names. */
+async function ruleNames(run = query) {
+  const [{ rows: c }, { rows: s }, { rows: f }] = await Promise.all([
+    run('select key, label from shelf_categories'),
+    run('select key, label from shelf_subcategories'),
+    run('select key, label from place_attributes'),
+  ]);
+  return { cats: new Map(c.map((x) => [x.key, x.label])), subs: new Map(s.map((x) => [x.key, x.label])), facts: new Map(f.map((x) => [x.key, x.label])) };
 }
 
 /** The list: Collection · Places (or within reach) · Shown to · Shown · Opened · Hearted. */
 export async function collectionList({ loc = null } = {}) {
-  const [{ rows }, idx, eng] = await Promise.all([
+  const [{ rows }, idx, eng, names] = await Promise.all([
     query('select * from browse_rows order by position, title'),
     placeIndex(),
     engagement(),
+    ruleNames(),
   ]);
   const refs = loc && !loc.unknown ? loc.refs : null;
   const pool = refs ? idx.places.filter((p) => refs.has(p.ref)) : idx.places;
   const list = rows.map((r) => {
     const c = toCollection(r);
     const e = eng.by.get(r.key);
+    // Within a location, the count says what it can: null where the filter
+    // cannot speak (drawn "—"), a floor where it is one (drawn "N+").
+    const raw = !c.legacy && ruleIsEmpty(c.rule) ? 0 : pool.filter((p) => fits(c, p)).length;
+    const said = refs ? countOf(raw, loc) : { n: raw, atLeast: false };
     return {
       ...c,
-      places: !c.legacy && ruleIsEmpty(c.rule) ? 0 : pool.filter((p) => fits(c, p)).length,
+      legacyText: c.legacy && !c.legacyExact ? legacyWords(c.legacy, names) : null,
+      places: said.n,
+      placesAtLeast: said.atLeast,
       shown: eng.speaks ? (e?.shown ?? 0) : null,
       opened: eng.speaks ? (e?.opened ?? 0) : null,
       hearted: eng.speaks ? (eng.hearts.get(r.key) ?? 0) : null,
     };
   });
-  return { rows: list, count: list.length, engagementSpeaks: eng.speaks, atLeast: Boolean(loc?.capped) };
+  return { rows: list, count: list.length, engagementSpeaks: eng.speaks, atLeast: list.some((r) => r.placesAtLeast) };
 }
 
 /**
@@ -259,23 +344,40 @@ export async function collectionList({ loc = null } = {}) {
  */
 export async function preview({ rule: raw, loc = null }) {
   const rule = cleanRule(raw);
-  if (ruleIsEmpty(rule)) return { count: 0, examples: [] };
+  if (ruleIsEmpty(rule)) return { count: 0, anywhere: 0, examples: [] };
   const idx = await placeIndex();
   const refs = loc && !loc.unknown ? loc.refs : null;
-  const hits = (refs ? idx.places.filter((p) => refs.has(p.ref)) : idx.places).filter((p) => matches(rule, p));
+  const everywhere = idx.places.filter((p) => matches(rule, p));
+  const hits = refs ? everywhere.filter((p) => refs.has(p.ref)) : everywhere;
   const bySub = new Map();
   for (const p of hits) bySub.set(p.primarySub, [...(bySub.get(p.primarySub) ?? []), p]);
   const each = bySub.size >= 5 ? 1 : 2;
-  const described = await describe(hits.slice(0, 2000).map((p) => p.ref));
+  // Names are looked for across every matching place in a subcategory, a
+  // batch at a time until enough are found — never only the first 2,000, which
+  // could all be nameless while named ones sit further down (audit, 28 Sep).
   const picked = [];
   for (const [sub, list] of bySub) {
-    const named = list.filter((p) => described.get(p.ref)?.name);
-    for (const p of named.slice(0, each)) picked.push({ ref: p.ref, sub, name: described.get(p.ref).name, town: described.get(p.ref).town });
+    let found = 0;
+    for (let i = 0; i < list.length && found < each; i += 200) {
+      const batch = list.slice(i, i + 200);
+      const described = await describe(batch.map((p) => p.ref));
+      for (const p of batch) {
+        const d = described.get(p.ref);
+        if (!d?.name) continue;
+        picked.push({ ref: p.ref, sub, name: d.name, town: d.town ?? null });
+        found += 1;
+        if (found >= each) break;
+      }
+    }
     if (picked.length >= 10) break;
   }
   const { rows: subs } = await query('select key, label from shelf_subcategories where key = any($1)', [[...bySub.keys()]]);
   const label = new Map(subs.map((s) => [s.key, s.label]));
-  return { count: hits.length, examples: picked.slice(0, 10).map((x) => ({ ...x, subLabel: label.get(x.sub) ?? x.sub })) };
+  // `anywhere` is the whole estate's count, which is what Save is judged on
+  // (the server's rule): a rule that returns nothing near one town may still
+  // be a collection.
+  const said = refs ? countOf(hits.length, loc) : { n: hits.length, atLeast: false };
+  return { count: said.n, atLeast: said.atLeast, anywhere: everywhere.length, examples: picked.slice(0, 10).map((x) => ({ ...x, subLabel: label.get(x.sub) ?? x.sub })) };
 }
 
 /**
@@ -310,19 +412,43 @@ const COST_SIGN = { Free: 'Free', Cheap: '£', Mid: '££', Dear: '£££' };
  * standard fact with Yes, No or Don't know — "Don't know" is a real answer
  * here, never a No — then every other fact the place has a yes for.
  */
+/**
+ * The drawer's standard facts, in the prototype's order and under its names
+ * (logic.js STD): the six yes-or-nos, then Who is it for, Duration, Cost band.
+ */
+export const DRAWER_FACTS = [
+  ['indoor', 'Indoors'], ['step-free', 'Step free'], ['parking', 'Parking'], ['toilets', 'Toilets'],
+  ['booking-required', 'Booking required'], ['food-on-site', 'Food on site'],
+  ['suits-ages', 'Who is it for'], ['duration', 'Duration'], ['cost-band', 'Cost band'],
+];
+
+const hoursText = (x) => String(x).replace(/\.0$/, '');
+
 export function factLines(p, attrs) {
   const out = [];
-  for (const a of attrs) {
-    if (a.key === 'suits-ages') {
-      if (a.standard || p.ages) out.push({ name: a.label, value: p.ages ? `${p.ages[0]}–${p.ages[1] >= 99 ? '99' : p.ages[1]}` : null });
-    } else if (a.key === 'duration') {
-      if (a.standard || p.hours != null) out.push({ name: a.label, value: p.hours == null ? null : `${p.hours} hour${p.hours === 1 ? '' : 's'}` });
-    } else if (a.key === 'cost-band') {
-      if (a.standard || p.cost) out.push({ name: a.label, value: p.cost ? COST_SIGN[p.cost] ?? p.cost : null });
-    } else if (a.kind === 'yesno') {
-      const v = p.facts.has(a.key) ? 'Yes' : p.no?.has(a.key) ? 'No' : null;
-      if (a.standard || v === 'Yes') out.push({ name: a.label, value: v });
+  for (const [key, name] of DRAWER_FACTS) {
+    let value = null;
+    if (key === 'suits-ages') {
+      value = p.ages ? (p.ages[1] >= 99 ? `${p.ages[0]}+` : `${p.ages[0]}–${p.ages[1]}`) : null;
+    } else if (key === 'duration') {
+      const r = p.durRange;
+      if (r) {
+        const [lo, hi] = [r[0] ?? r[1], r[1] ?? r[0]];
+        const band = lo === hi ? hoursText(lo) : `${hoursText(lo)}–${hoursText(hi)}`;
+        value = `${band} ${band === '1' ? 'hour' : 'hours'}`;
+      }
+    } else if (key === 'cost-band') {
+      value = p.cost ? COST_SIGN[p.cost] ?? p.cost : null;
+    } else {
+      value = p.facts.has(key) ? 'Yes' : p.no?.has(key) ? 'No' : null;
     }
+    out.push({ name, value });
+  }
+  // Then every other fact the place has a yes for.
+  const std = new Set(DRAWER_FACTS.map(([k]) => k));
+  for (const a of attrs) {
+    if (std.has(a.key) || a.kind !== 'yesno') continue;
+    if (p.facts.has(a.key)) out.push({ name: a.label, value: 'Yes' });
   }
   return out;
 }
@@ -342,8 +468,10 @@ export async function saveCollection({ key = null, title, copy = '', rule: raw, 
   const rule = cleanRule(raw);
   if (!t) throw bad('A collection needs a title.');
   if (ruleIsEmpty(rule)) throw bad('A collection needs a rule.');
+  // Judged on the whole estate, whatever the location filter on the screen.
   const { count } = await preview({ rule });
   if (!count) throw bad('Nothing matches that rule yet.');
+  const names = await ruleNames();
   const out = await withTransaction(async (c) => {
     let row = null;
     if (key) {
@@ -357,7 +485,7 @@ export async function saveCollection({ key = null, title, copy = '', rule: raw, 
       await c.query(
         `insert into browse_rows (key, grouping, title, copy, predicate, rule, position, active, seeded, updated_by)
          values ($1, 'custom', $2, $3, '{}'::jsonb, $4::jsonb, 1000, true, false, $5)`, [k, t, cp, JSON.stringify(rule), who]);
-      const change = await logChange({ client: c, who, area: 'Collections', what: `Collection added · ${t}`, before: '—', after: ruleWords(rule), subjectType: 'collection', subjectId: k, undo: { kind: 'collection', key: k, was: null } });
+      const change = await logChange({ client: c, who, area: 'Collections', what: `Collection added · ${t}`, before: '—', after: ruleWords(rule, names), subjectType: 'collection', subjectId: k, undo: { kind: 'collection', key: k, was: null } });
       return { key: k, created: true, change };
     }
     await c.query(
@@ -365,20 +493,26 @@ export async function saveCollection({ key = null, title, copy = '', rule: raw, 
       [k, t, cp, JSON.stringify(rule), who]);
     const was = { title: row.title, copy: row.copy, rule: row.rule, predicate: row.predicate, active: row.active };
     const changes = [];
-    if (row.title !== t) changes.push(['title', row.title, t]);
-    if ((row.copy ?? '') !== cp) changes.push(['copy', row.copy || '—', cp || '—']);
+    const legacy = !row.rule && row.predicate && Object.keys(row.predicate).length ? row.predicate : null;
     const oldRule = row.rule ? cleanRule(row.rule) : fromPredicate(row.predicate);
-    if (JSON.stringify(oldRule) !== JSON.stringify(rule)) changes.push(['rule', ruleWords(oldRule), ruleWords(rule)]);
-    if (!row.active) changes.push(['shown', 'switched off', 'live']);
+    const ruleChanged = legacy ? true : JSON.stringify(oldRule) !== JSON.stringify(rule);
+    if (row.title !== t) changes.push('title');
+    if ((row.copy ?? '') !== cp) changes.push('copy');
+    if (ruleChanged) changes.push('rule');
+    if (!row.active) changes.push('shown');
     // One save is one change, so its Undo puts back everything the save did
-    // and nothing else (Codex, 28 Sep 2026).
+    // and nothing else (Codex, 28 Sep 2026). It reads as the prototype's:
+    // "Collection edited · <title>", the rule said in names before and after
+    // (logic.js 2247), with a title or copy change named beside it.
     let change = null;
     if (changes.length) {
+      const was_ = legacy ? legacyWords(legacy, names) : ruleWords(oldRule, names);
+      const before = [row.title !== t ? `Title: ${row.title}` : null, (row.copy ?? '') !== cp ? `Copy: ${row.copy || '—'}` : null, was_, !row.active ? 'switched off' : null].filter(Boolean).join(' · ');
+      const after = [row.title !== t ? `Title: ${t}` : null, (row.copy ?? '') !== cp ? `Copy: ${cp || '—'}` : null, ruleWords(rule, names), !row.active ? 'live' : null].filter(Boolean).join(' · ');
       change = await logChange({
         client: c, who, area: 'Collections',
-        what: `Collection ${changes.map(([f]) => f).join(', ')} · ${t}`,
-        before: changes.map(([f, b]) => `${f}: ${b}`).join(' · '),
-        after: changes.map(([f, , a]) => `${f}: ${a}`).join(' · '),
+        what: `Collection edited · ${t}`,
+        before, after,
         subjectType: 'collection', subjectId: k, undo: { kind: 'collection', key: k, was },
       });
     }
@@ -398,16 +532,26 @@ async function uniqueKey(c, base) {
   throw bad('Could not find a free key for that title.');
 }
 
-/** A rule in words, for the Changes log. */
-export function ruleWords(r) {
-  const part = (label, items) => (items.length ? `${label}: ${items.map((i) => (i.not ? `not ${i.id}` : i.id)).join(' or ')}` : null);
-  return [
-    part('Category', r.cats), part('Subcategory', r.subs), part('Fact', r.facts),
-    r.primaryCat ? `Primary: ${r.primaryCat}` : null,
-    r.ages ? `Ages ${r.ageSpan ? 'from ≤' : ''}${r.ages[0]} to ${r.ageSpan ? '≥' : ''}${r.ages[1]}` : null,
-    r.dur ? `Duration ${r.dur[0]}–${r.dur[1]} hours` : null,
-    r.cost.length ? `Cost ${r.cost.join(' or ')}` : null,
-  ].filter(Boolean).join(' · ') || '—';
+/**
+ * A rule in words, for the Changes log — the prototype's `ruleWords`
+ * (logic.js 2155): names, not keys; "or" inside a group, "not" for the
+ * negatives, "· and" between groups.
+ */
+export function ruleWords(r, names = {}) {
+  const nm = (items, map) => {
+    const name = (id) => map?.get(id) ?? id;
+    const yes = items.filter((x) => !x.not).map((x) => name(x.id));
+    const no = items.filter((x) => x.not).map((x) => name(x.id));
+    return [yes.length ? yes.join(' or ') : null, no.length ? `not ${no.join(' or ')}` : null].filter(Boolean);
+  };
+  const parts = [
+    ...nm(r.cats, names.cats), ...nm(r.subs, names.subs), ...nm(r.facts, names.facts),
+    r.primaryCat ? `with ${names.cats?.get(r.primaryCat) ?? r.primaryCat} as its primary` : null,
+    r.ages ? `suits ages ${r.ageSpan ? 'from ' : ''}${r.ages[0]} to ${ageTop(r.ages[1])}` : null,
+    r.dur ? (r.dur[0] <= 0 ? `up to ${r.dur[1]} hours` : `${r.dur[0]} to ${r.dur[1]} hours`) : null,
+    r.cost.length ? r.cost.join(' or ') : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(' · and ') : 'Every place';
 }
 
 /** Undo a collection change: the row goes back to what it was (or away if new). */
@@ -442,10 +586,11 @@ export async function asHousehold({ householdId, loc = null }) {
   const [{ rows: [h] }, { rows: members }, { rows }, idx, { rows: hearts }] = await Promise.all([
     query('select id, name, home_label, home_lat, home_lng, max_travel_minutes from households where id = $1', [householdId]),
     query('select id, name, birth_year, birth_date, is_minor from members where household_id = $1 order by created_at', [householdId]),
-    query('select * from browse_rows where active order by position, title'),
+    query('select * from browse_rows order by position, title'),
     placeIndex(),
     query('select row_key, member_id, hearted_at from browse_row_hearts where household_id = $1 order by hearted_at desc', [householdId]),
   ]);
+  const live = rows.filter((r) => r.active);
   if (!h) throw missing('No such household.');
   const year = new Date().getFullYear();
   // An age we do not know is null, never a guess drawn as a fact: a member
@@ -458,11 +603,14 @@ export async function asHousehold({ householdId, loc = null }) {
   // Hearts fade (D7): a heart older than FADE_DAYS no longer lifts a row.
   const fresh = hearts.filter((x) => Date.now() - new Date(x.hearted_at).getTime() < FADE_DAYS * 86400_000);
   const hearted = new Map(fresh.map((x) => [x.row_key, x.hearted_at]));
+  const heartedBy = new Map(fresh.map((x) => [x.row_key, x.member_id]));
   const firstHits = new Map();
-  const out = rows.map((r) => {
+  const hitsOf = new Map();
+  const out = live.map((r) => {
     const c = toCollection(r);
     const hits = !c.legacy && ruleIsEmpty(c.rule) ? [] : pool.filter((p) => fits(c, p));
     const n = hits.length;
+    hitsOf.set(c.key, hits);
     firstHits.set(c.key, hits.slice(0, 3));
     const a = c.audience;
     // Named `suits`, not `fits`: a local `fits` here shadowed the rule test
@@ -473,19 +621,22 @@ export async function asHousehold({ householdId, loc = null }) {
     else if (n < cfg.collectionMinPlaces) why = `Too thin here · ${n} place${n === 1 ? '' : 's'}`;
     return { key: c.key, title: c.title, copy: c.copy, places: n, audience: a.label, hearted: hearted.has(c.key), shown: !why, why };
   });
-  // Three places a shown collection would put on its shelf, named from our
-  // own record only; a place with no name we may print is left off.
-  const shelfRefs = out.filter((c) => c.shown).flatMap((c) => firstHits.get(c.key).map((p) => p.ref));
+  // Three places a live collection would put on its shelf, named from our
+  // own record only; a place with no name we may print is left off. Every
+  // live row has one, because the preview's hearts are the screen's own and a
+  // row can be hearted there (prototype `phoneRow`: a shelf on every hearted
+  // live row that is not waiting, in every state).
+  const shelfRefs = out.flatMap((c) => hitsOf.get(c.key).slice(0, 12).map((p) => p.ref));
   const [named, { rows: subLabels }] = await Promise.all([
     describe(shelfRefs),
     query('select key, label from shelf_subcategories'),
   ]);
   const subLabel = new Map(subLabels.map((x) => [x.key, x.label]));
   for (const c of out) {
-    c.shelf = c.shown
-      ? firstHits.get(c.key).filter((p) => named.get(p.ref)?.name).map((p) => ({ ref: p.ref, name: named.get(p.ref).name, kind: subLabel.get(p.primarySub) ?? null }))
-      : [];
+    c.shelf = hitsOf.get(c.key).slice(0, 12).filter((p) => named.get(p.ref)?.name).slice(0, 3)
+      .map((p) => ({ ref: p.ref, name: named.get(p.ref).name, kind: subLabel.get(p.primarySub) ?? null }));
   }
+  const outBy = new Map(out.map((c) => [c.key, c]));
   const memberName = new Map(members.map((m) => [m.id, m.name]));
   const title = new Map(rows.map((r) => [r.key, r.title]));
   const shown = out.filter((c) => c.shown);
@@ -497,6 +648,23 @@ export async function asHousehold({ householdId, loc = null }) {
     ? [...heartedShown.slice(0, 3), ...rest.slice(0, 2), ...heartedShown.slice(3), ...rest.slice(2)]
     : rest;
   return {
+    // The phone's rows: every collection in library order, live or not, with
+    // what the preview needs to draw it in each of its five states. The
+    // preview's hearts and "whose list" are the screen's own and are never
+    // written (audit decision, 28 Sep 2026).
+    rows: rows.map((r) => {
+      const c = outBy.get(r.key);
+      return {
+        key: r.key, title: r.title, copy: r.copy, live: r.active,
+        // A personalised row (handover D6): "A day to yourself, Sarah".
+        person: r.key === 'dayyourself',
+        places: c ? c.places : null,
+        audience: c ? c.audience : audienceOf(toCollection(r).rule).label,
+        hearted: hearted.has(r.key), heartedBy: heartedBy.get(r.key) ?? null,
+        shelf: c ? c.shelf : [],
+      };
+    }),
+    minPlaces: cfg.collectionMinPlaces,
     household: { id: h.id, name: h.name, home: h.home_label, ages },
     members: members.map((m, i) => ({ id: m.id, name: m.name, age: known[i], adult: ages[i] >= 16 })),
     // Every heart, fading ones included and marked, so the screen can say why

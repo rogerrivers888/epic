@@ -21,7 +21,7 @@ import * as verification from '../desk/verification.js';
 import * as accuracy from '../desk/accuracy.js';
 import * as collections from '../desk/collections.js';
 import { overview } from '../desk/overview.js';
-import { resolveLocation, chipOf, REACHES, MODES } from '../desk/location.js';
+import { resolveLocation, chipOf, filterSays, REACHES, MODES } from '../desk/location.js';
 import * as pipeline from '../desk/pipeline.js';
 import { extracts as osmExtracts } from '../sources/osmExtract.js';
 
@@ -39,7 +39,7 @@ async function loc(req) {
     loc: l,
     filter: l.unknown
       ? { unknown: true, where: l.where, message: 'Not a place we know yet — try a town or the first part of a postcode' }
-      : { where: l.where, label: l.label, minutes: l.minutes, mode: l.mode, chip: `Showing: ${chipOf(l)}`, approx: l.approx, capped: l.capped },
+      : { where: l.where, label: l.label, minutes: l.minutes, mode: l.mode, chip: `Showing: ${chipOf(l)}`, approx: l.approx, capped: l.capped, ...filterSays(l) },
   };
 }
 
@@ -243,6 +243,16 @@ deskRoutes.post('/subcategories/:key/facts/:fact/remove', requires('manage_libra
   try { res.json(await categories.removeFact({ sub: String(req.params.key), fact: String(req.params.fact), who: who(req) })); } catch (err) { next(err); }
 });
 
+/** Review on a flagged default: the places here with a confirmed answer, beside the default. */
+deskRoutes.get('/subcategories/:key/defaults/:fact/review', requires('view_library'), async (req, res, next) => {
+  try { res.json(await categories.reviewDefault({ sub: String(req.params.key), fact: String(req.params.fact) })); } catch (err) { next(err); }
+});
+
+/** Copy facts from another subcategory: they arrive as Gathering evidence. */
+deskRoutes.post('/subcategories/:key/copy-facts', requires('manage_library'), async (req, res, next) => {
+  try { res.json(await categories.copyFacts({ to: String(req.params.key), from: String(req.body?.from ?? ''), who: who(req) })); } catch (err) { next(err); }
+});
+
 deskRoutes.post('/subcategories/:key/related', requires('manage_library'), async (req, res, next) => {
   try {
     res.json(await categories.link({ a: String(req.params.key), b: String(req.body?.other ?? ''), who: who(req), on: req.body?.on !== false }));
@@ -289,6 +299,11 @@ deskRoutes.put('/places/:ref/facts/:fact', requires('manage_library'), async (re
 
 deskRoutes.get('/verification', requires('view_library'), async (req, res, next) => {
   try { res.json(await verification.verification({ period: req.query.period === '7d' ? '7d' : '24h' })); } catch (err) { next(err); }
+});
+
+// Fact automations' header counts: verified, conflicts, don't know, backlog.
+deskRoutes.get('/verification/month', requires('view_library'), async (_req, res, next) => {
+  try { res.json(await verification.monthResults()); } catch (err) { next(err); }
 });
 
 deskRoutes.get('/verification/items', requires('view_library'), async (req, res, next) => {

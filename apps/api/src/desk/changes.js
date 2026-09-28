@@ -39,7 +39,7 @@ export async function markUndone({ client = null, id, who }) {
 
 /**
  * The log, newest first, filtered by area, person and a search over what,
- * before, after and why. Undone changes are kept and marked, never hidden: the
+ * before, after, why, who and area. The person list is alphabetical. Undone changes are kept and marked, never hidden: the
  * trail is of what people did, including taking something back.
  */
 export async function changes({ area = null, who = null, q = null, limit = 200, offset = 0 } = {}) {
@@ -49,7 +49,8 @@ export async function changes({ area = null, who = null, q = null, limit = 200, 
   if (who) { args.push(who); where.push(`who = $${args.length}`); }
   if (q) {
     args.push(`%${String(q).trim()}%`);
-    where.push(`(what ilike $${args.length} or before ilike $${args.length} or after ilike $${args.length} or why ilike $${args.length})`);
+    where.push(`(what ilike $${args.length} or before ilike $${args.length} or after ilike $${args.length} or why ilike $${args.length}
+                 or who ilike $${args.length} or area ilike $${args.length})`);
   }
   const clause = where.length ? `where ${where.join(' and ')}` : '';
   args.push(Math.min(1000, Math.max(1, Number(limit) || 200)));
@@ -58,7 +59,7 @@ export async function changes({ area = null, who = null, q = null, limit = 200, 
     query(`select id, at, who, area, what, before, after, why, subject_type, subject_id, undone_at, undone_by
              from bo_changes ${clause} order by at desc limit $${args.length - 1} offset $${args.length}`, args),
     query(`select count(*)::int n from bo_changes ${clause}`, args.slice(0, -2)),
-    query('select who, count(*)::int n from bo_changes group by who order by n desc'),
+    query('select who from bo_changes group by who order by lower(who), who'),
   ]);
   return { rows, total: n, people: people.map((p) => p.who), areas: AREAS };
 }

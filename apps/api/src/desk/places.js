@@ -24,7 +24,9 @@ export async function describe(refs) {
             (select l.name from place_areas pa join localities l on l.slug = pa.area_slug
               where pa.venue_ref = r.ref and l.kind in ('town', 'city', 'village') limit 1) as town,
             (select l.slug from place_areas pa join localities l on l.slug = pa.area_slug
-              where pa.venue_ref = r.ref and l.kind = 'county' limit 1) as county_slug
+              where pa.venue_ref = r.ref and l.kind = 'county' limit 1) as county_slug,
+            (select l.nation from place_areas pa join localities l on l.slug = pa.area_slug
+              where pa.venue_ref = r.ref and l.kind = 'county' and l.nation is not null limit 1) as nation
        from unnest($1::text[]) as r(ref)
        left join place_records pr on pr.venue_ref = r.ref
        left join lateral (
@@ -33,6 +35,8 @@ export async function describe(refs) {
           order by x.last_seen desc limit 1) a on true
        left join place_index pi on pi.venue_ref = r.ref`, [list]);
   const COUNTRY = { GB: 'United Kingdom', IE: 'Ireland' };
+  // The prototype writes "Berkshire, England": a British county names its
+  // nation (England, Scotland, Wales, Northern Ireland) where we hold it.
   return new Map(rows.map((r) => [r.ref, {
     ref: r.ref,
     name: r.name ?? null,
@@ -42,9 +46,9 @@ export async function describe(refs) {
     county: r.county ?? null,
     countySlug: r.county_slug ?? null,
     town: r.town ?? null,
-    country: COUNTRY[r.country_code] ?? r.country_code ?? null,
+    country: r.nation ?? COUNTRY[r.country_code] ?? r.country_code ?? null,
     countryCode: r.country_code ?? null,
-    area: [r.county, COUNTRY[r.country_code] ?? r.country_code].filter(Boolean).join(', ') || null,
+    area: [r.county, r.nation ?? COUNTRY[r.country_code] ?? r.country_code].filter(Boolean).join(', ') || null,
   }]));
 }
 
@@ -56,5 +60,13 @@ export const SOURCE_WORD = {
   wikidata: 'Wikidata',
   fsa: 'Hygiene register',
   families: 'Families',
-  person: 'A person',
+  person: 'Set by a person',
 };
+
+/** Several of our sources in one line, in a fixed order: "OpenStreetMap · Venue website". */
+const SOURCE_ORDER = ['osm', 'site', 'wikipedia', 'wikidata', 'fsa', 'families'];
+export function sourcesWord(sources) {
+  const rank = (s) => { const i = SOURCE_ORDER.indexOf(s); return i < 0 ? SOURCE_ORDER.length : i; };
+  const seen = [...new Set((sources ?? []).filter(Boolean))].sort((a, b) => rank(a) - rank(b));
+  return seen.map((s) => SOURCE_WORD[s] ?? s).join(' · ') || null;
+}

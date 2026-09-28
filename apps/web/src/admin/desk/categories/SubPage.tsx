@@ -9,8 +9,8 @@ import { Text, View } from 'react-native';
 
 import { Press } from '../../../components/press';
 import { useCrumbs, useDeskGo, useDeskParam } from '../Desk';
-import { AMBER, InfoTip, LIME, Muted, Table, deskApi, desk, fonts, ago, n, saidOf, tabular, useToast } from '../kit';
-import { Count, FACT_ORDER, Failed, OptPill, PillBar, factName, undoChanges, type Change, type Option } from './shared';
+import { AMBER, LIME, Muted, Table, deskApi, desk, fonts, ago, n, saidOf, tabular, useToast } from '../kit';
+import { Count, FACT_ORDER, Failed, HowTip, OptPill, PillBar, factName, undoChanges, type Change, type Option } from './shared';
 
 type DefaultRow = {
   fact: string; label: string; value: string | null; setBy: string | null; setAt: string | null;
@@ -19,6 +19,8 @@ type DefaultRow = {
 };
 type FactRow = {
   fact: string; label: string; status: 'active' | 'gathering' | 'ignored'; reason: string | null; isNew: boolean;
+  /** Stored Active but confirmed at fewer than `needed` places: shown as Gathering evidence. */
+  demoted?: boolean;
   placesWith: number; verifiedPlaces: number; firstSeen: string | null; removedBy: string | null;
 };
 export type SubPageData = {
@@ -26,6 +28,10 @@ export type SubPageData = {
   defaults: DefaultRow[]; facts: FactRow[]; places: number; secondaryPlaces: number;
   live: number; fresh: number; needed: number | null;
   related: { key: string; label: string; why: string }[];
+  /** The places filed here as a second subcategory we may name, with their primary. */
+  secondaryList?: { ref: string; name: string; primary: string }[];
+  /** Copy facts from another subcategory: those with Active facts, and how many. */
+  copyFrom?: { key: string; label: string; n: number }[];
 };
 
 type Pill = 'all' | 'active' | 'gathering' | 'ignored';
@@ -50,6 +56,7 @@ export function SubPage({ sub, canManage }: { sub: string; canManage: boolean })
   const [err, setErr] = useState<unknown>(null);
   const [tick, setTick] = useState(0);
   const [editing, setEditing] = useState<string | null>(null);
+  const [copying, setCopying] = useState(false);
   const reload = useCallback(() => setTick((t) => t + 1), []);
 
   useEffect(() => {
@@ -77,6 +84,14 @@ export function SubPage({ sub, canManage }: { sub: string; canManage: boolean })
     try {
       const c = await deskApi.post<Change>(`/subcategories/${encodeURIComponent(sub)}/defaults/${encodeURIComponent(d.fact)}/accept`);
       toast(`${factName(d.fact, d.label)} accepted on ${data.label}`, () => undoChanges([c.id], toast, reload));
+      reload();
+    } catch (e) { toast(saidOf(e)); }
+  };
+  const copyFrom = async (o: { key: string; label: string }) => {
+    setCopying(false);
+    try {
+      const c = await deskApi.post<Change & { copied: number }>(`/subcategories/${encodeURIComponent(sub)}/copy-facts`, { from: o.key });
+      toast(`${c.copied} ${c.copied === 1 ? 'fact' : 'facts'} copied from ${o.label}`, () => undoChanges([c.id], toast, reload));
       reload();
     } catch (e) { toast(saidOf(e)); }
   };
@@ -111,7 +126,7 @@ export function SubPage({ sub, canManage }: { sub: string; canManage: boolean })
         <View style={{ gap: 6, flexShrink: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             <Text style={{ fontFamily: fonts.heading, fontWeight: '800', fontSize: 31, letterSpacing: -1.085, lineHeight: 32, color: desk.ink, flexShrink: 1 }}>{data.label}</Text>
-            <InfoTip text="Defaults are assumed for a place here until a person or one of our sources says otherwise. Facts are what Epic looks for at every place in this subcategory." />
+            <HowTip text="Defaults are assumed for a place here until a person or one of our sources says otherwise. Facts are what Epic looks for at every place in this subcategory." />
           </View>
           <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>{data.categoryLabel} › {data.label}</Text>
         </View>
@@ -131,6 +146,9 @@ export function SubPage({ sub, canManage }: { sub: string; canManage: boolean })
           {data.secondaryPlaces > 0 ? (
             <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkMuted }}>
               {data.secondaryPlaces} {data.secondaryPlaces === 1 ? 'place is' : 'places are'} filed here as a second subcategory
+              {(data.secondaryList ?? []).map((p) => ` · ${p.name} (primary: ${p.primary})`).join('')}
+              {data.secondaryPlaces > (data.secondaryList ?? []).length && (data.secondaryList ?? []).length
+                ? ` · and ${n(data.secondaryPlaces - (data.secondaryList ?? []).length)} more` : ''}
             </Text>
           ) : null}
           {data.related.length ? (
@@ -146,7 +164,14 @@ export function SubPage({ sub, canManage }: { sub: string; canManage: boolean })
         </View>
       ) : null}
 
-      <PillBar options={PILLS.map((p) => ({ key: p.key, name: `${p.name} · ${count(p.key)}` }))} value={pill} onChange={(k) => setState(k === 'all' ? '' : k, { replace: true })} />
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 22, rowGap: 10 }}>
+        <PillBar options={PILLS.map((p) => ({ key: p.key, name: `${p.name} · ${count(p.key)}` }))} value={pill} onChange={(k) => setState(k === 'all' ? '' : k, { replace: true })} />
+        {canManage ? (
+          <Press effect="none" onPress={() => setCopying((c) => !c)}>
+            <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: desk.inkMuted }}>Copy facts from another subcategory</Text>
+          </Press>
+        ) : null}
+      </View>
 
       {/* Defaults */}
       <View style={{ marginTop: 12, gap: 0 }}>
@@ -165,32 +190,39 @@ export function SubPage({ sub, canManage }: { sub: string; canManage: boolean })
             const machine = d.origin === 'machine';
             const isEditing = editing === d.fact;
             const current = d.options.find((o) => o.label === d.value)?.key ?? null;
+            // Change opens the values in place across Default, Set by and Basis, so
+            // the six age bands and All ages lie in a row or two rather than a
+            // stack in the Default column (decision, fix pass 28 Sep).
+            const spanW = dW[1] + dW[2] + dW[3] + DG * 2;
             return (
               <View key={d.fact} style={{ flexDirection: 'row', gap: DG, alignItems: 'center', paddingVertical: 10, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: desk.rule }}>
                 <Text style={{ width: dW[0], fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: desk.ink }}>{factName(d.fact, d.label)}</Text>
-                <View style={{ width: dW[1] }}>
-                  {isEditing ? (
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-                      {d.options.map((o) => <OptPill key={o.key} label={o.label} on={o.key === current} onPress={() => setDefault(d, o)} />)}
-                    </View>
-                  ) : (
-                    <Text style={{ fontFamily: fonts.body, fontSize: 13.5, fontWeight: '700', color: d.value == null ? desk.inkDim : person ? desk.ink : desk.inkMuted }}>{d.value ?? 'Not set'}</Text>
-                  )}
-                </View>
-                <Text style={{ width: dW[2], fontFamily: fonts.body, fontSize: 12.5, color: person ? desk.ink : desk.inkDim }}>
-                  {person ? `${d.setBy ?? 'A person'} · ${ago(d.setAt)}` : machine ? 'Machine · proposed' : '—'}
-                </Text>
-                <View style={{ width: dW[3], flexDirection: 'row', flexWrap: 'wrap', columnGap: 10 }}>
-                  <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>{d.basis ?? 'No default · each place answers for itself'}</Text>
-                  {d.contradicted && d.contradiction ? (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: AMBER }}>{d.contradiction} ·</Text>
-                      <Press effect="none" onPress={() => go('categories', { sub, fact: d.fact })}>
-                        <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: AMBER, borderBottomWidth: 1.5, borderBottomColor: AMBER }}>Review</Text>
-                      </Press>
-                    </View>
-                  ) : null}
-                </View>
+                {isEditing ? (
+                  <View style={{ width: spanW, flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                    {d.options.map((o) => <OptPill key={o.key} label={o.label} on={o.key === current} onPress={() => setDefault(d, o)} />)}
+                  </View>
+                ) : null}
+                {!isEditing ? (
+                  <Text style={{ width: dW[1], fontFamily: fonts.body, fontSize: 13.5, fontWeight: '700', color: d.value == null ? desk.inkDim : person ? desk.ink : desk.inkMuted }}>{d.value ?? 'Not set'}</Text>
+                ) : null}
+                {!isEditing ? (
+                  <Text style={{ width: dW[2], fontFamily: fonts.body, fontSize: 12.5, color: person ? desk.ink : desk.inkDim }}>
+                    {person ? `${d.setBy ?? 'A person'} · ${ago(d.setAt)}` : machine ? 'Machine · proposed' : '—'}
+                  </Text>
+                ) : null}
+                {!isEditing ? (
+                  <View style={{ width: dW[3], flexDirection: 'row', flexWrap: 'wrap', columnGap: 10 }}>
+                    <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>{d.basis ?? 'The places disagree, so each answers for itself'}</Text>
+                    {d.contradicted && d.contradiction ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: AMBER }}>{d.contradiction} ·</Text>
+                        <Press effect="none" onPress={() => go('categories', { sub, fact: d.fact, view: 'review' })}>
+                          <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: AMBER, borderBottomWidth: 1.5, borderBottomColor: AMBER }}>Review</Text>
+                        </Press>
+                      </View>
+                    ) : null}
+                  </View>
+                ) : null}
                 <View style={{ width: dW[4], flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
                   {canManage && machine && d.value != null ? (
                     <Press effect="none" onPress={() => accept(d)}>
@@ -210,6 +242,21 @@ export function SubPage({ sub, canManage }: { sub: string; canManage: boolean })
           })}
         </Table>
       </View>
+
+      {copying ? (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+          {(data.copyFrom ?? []).length === 0 ? (
+            <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>No other subcategory has an Active fact to copy yet.</Text>
+          ) : null}
+          {(data.copyFrom ?? []).map((o) => (
+            <Press key={o.key} effect="none" onPress={() => copyFrom(o)}>
+              <Text style={{ borderWidth: 1.5, borderColor: desk.ruleStrong, color: desk.inkMuted, fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', paddingVertical: 5, paddingHorizontal: 11 }}>
+                {o.label} · {o.n} {o.n === 1 ? 'fact' : 'facts'}
+              </Text>
+            </Press>
+          ))}
+        </View>
+      ) : null}
 
       {/* Facts */}
       <Table width={factsW}>

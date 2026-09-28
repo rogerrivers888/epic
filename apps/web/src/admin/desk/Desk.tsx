@@ -20,7 +20,7 @@
  * or nothing.
  */
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 
 import { Press } from '../../components/press';
@@ -58,6 +58,11 @@ const TABS: { key: Tab; name: string }[] = [
  */
 export const DESK_KEYS = [
   'sub', 'cat', 'fact', 'q', 'view', 'ftab', 'places', 'acc', 'key', 'src', 'word', 'collection', 'place', 'area', 'who', 'state', 'period', 'chart', 'by', 'kind', 'run',
+  // Mapping's filters and its picker's tab (agent C, 28 Sep; `sort` below).
+  'filters', 'ptab',
+  'sort', 'country', 'county', 'feature',
+  // A fact drill-down's postcode filter (agent B, fix pass 28 Sep).
+  'pc',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -83,7 +88,8 @@ export function useDeskGo() {
   const { setQuery } = useRouter();
   return useCallback((tab: Tab | null, query: Partial<Record<(typeof DESK_KEYS)[number], string | null>> = {}, replace = false) => {
     const cleared = Object.fromEntries(DESK_KEYS.map((k) => [k, null])) as Record<string, string | null>;
-    setQuery({ ...cleared, ...query, tab: asTab.write(tab) }, replace ? { replace: true } : undefined);
+    // A move pushes, a filter replaces: the router replaces unless told not to.
+    setQuery({ ...cleared, ...query, tab: asTab.write(tab) }, { replace });
   }, [setQuery]);
 }
 
@@ -114,7 +120,10 @@ export function Desk({ canManage }: { canManage: boolean }) {
 
   const lit = tab === 'runs' ? null : tab;
 
+  // The desk scrolls in its own box: inside the Mobile frame nothing above it
+  // scrolls, and a page taller than the frame could not be read (audit, 28 Sep).
   return (
+    <ScrollView style={{ flex: 1, backgroundColor: desk.ground }} contentContainerStyle={{ flexGrow: 1 }}>
     <ToastProvider render={(toast, clear) => (
       <DeskChrome
         lit={lit}
@@ -138,9 +147,8 @@ export function Desk({ canManage }: { canManage: boolean }) {
                     {i ? <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkFaint }}>/</Text> : null}
                     <Press effect="none" onPress={last ? undefined : c.go}>
                       <Text style={{
-                        fontFamily: fonts.body, fontSize: 12.5, fontWeight: last ? '700' : '500',
-                        color: last ? desk.ink : desk.inkDim,
-                        borderBottomWidth: last ? 0 : 1, borderBottomColor: desk.ruleStrong, paddingBottom: 1,
+                        fontFamily: fonts.body, fontSize: 12.5, fontWeight: last ? '800' : '600',
+                        color: last ? desk.ink : desk.inkDim, paddingBottom: 1,
                       }}>{c.name}</Text>
                     </Press>
                   </React.Fragment>
@@ -159,6 +167,7 @@ export function Desk({ canManage }: { canManage: boolean }) {
         </CrumbCtx.Provider>
       </LocationProvider>
     </ToastProvider>
+    </ScrollView>
   );
 }
 
@@ -169,34 +178,59 @@ export function Desk({ canManage }: { canManage: boolean }) {
 function DeskChrome({ lit, narrow, onTab, onRuns, toast }: {
   lit: Tab | null; narrow: boolean; onTab: (t: Tab) => void; onRuns: () => void; toast: React.ReactNode;
 }) {
-  const strip = (
-    <View style={{ flexDirection: 'row', gap: 24, borderBottomWidth: 2, borderBottomColor: desk.ruleStrong, flexGrow: 1 }}>
-      {TABS.map((t) => {
-        const on = lit === t.key;
-        return (
-          <Press key={t.key} effect="none" onPress={() => onTab(t.key)}>
-            <View style={{ paddingBottom: 13, marginBottom: -2, borderBottomWidth: 2, borderBottomColor: on ? LIME : 'transparent' }}>
-              <Text style={{ fontFamily: fonts.heading, fontSize: 16, fontWeight: '800', letterSpacing: -0.32, color: on ? desk.ink : desk.inkDim }}>{t.name}</Text>
-            </View>
-          </Press>
-        );
-      })}
-    </View>
+  // On a phone the strip scrolls sideways, and the lit tab is brought into
+  // view — "Changes" lit at the far end was off the frame (audit, 28 Sep).
+  const scroller = useRef<ScrollView | null>(null);
+  const xs = useRef<Partial<Record<Tab, number>>>({});
+  const [laid, setLaid] = useState(0);
+  useEffect(() => {
+    if (!narrow || !lit) return;
+    const x = xs.current[lit];
+    if (x != null) scroller.current?.scrollTo({ x: Math.max(0, x - 24), animated: false });
+  }, [lit, narrow, laid]);
+  const runs = (
+    <Press effect="none" onPress={onRuns}>
+      <Text style={{ fontFamily: fonts.body, fontSize: 12, fontWeight: '700', color: desk.inkMuted }}>Runs</Text>
+    </Press>
   );
+  // One tree for both widths: the strip always sits in a sideways scroller
+  // (on a wide screen it never needs to move), Runs always on the strip's
+  // line; only the toast moves under it on a phone, where there is no room.
   return (
-    <View style={{
-      flexDirection: narrow ? 'column' : 'row', alignItems: narrow ? 'stretch' : 'center', justifyContent: 'space-between',
-      gap: narrow ? 10 : 24, paddingTop: 18, paddingHorizontal: narrow ? 16 : 28, backgroundColor: desk.ground,
-    }}>
-      {narrow ? (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}>{strip}</ScrollView>
-      ) : <View style={{ flex: 1, minWidth: 0 }}>{strip}</View>}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, paddingBottom: 11 }}>
-        {toast}
-        <Press effect="none" onPress={onRuns}>
-          <Text style={{ fontFamily: fonts.body, fontSize: 12, fontWeight: '700', color: lit == null ? LIME : desk.inkMuted }}>Runs</Text>
-        </Press>
+    <View style={{ paddingTop: 18, paddingHorizontal: narrow ? 16 : 28, backgroundColor: desk.ground }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: narrow ? 14 : 24 }}>
+        <ScrollView
+          ref={scroller}
+          horizontal
+          scrollEnabled={narrow}
+          showsHorizontalScrollIndicator={false}
+          style={{ flex: 1, minWidth: 0, flexGrow: 1 }}
+          contentContainerStyle={{ flexGrow: 1 }}
+        >
+          <View style={{ flexDirection: 'row', gap: 24, borderBottomWidth: 2, borderBottomColor: desk.ruleStrong, flexGrow: 1 }}>
+            {TABS.map((t) => {
+              const on = lit === t.key;
+              return (
+                <Press
+                  key={t.key}
+                  effect="none"
+                  onPress={() => onTab(t.key)}
+                  onLayout={(e) => { xs.current[t.key] = e.nativeEvent.layout.x; if (on) setLaid((n) => n + 1); }}
+                >
+                  <View style={{ paddingBottom: 13, marginBottom: -2, borderBottomWidth: 2, borderBottomColor: on ? LIME : 'transparent' }}>
+                    <Text style={{ fontFamily: fonts.heading, fontSize: 16, fontWeight: '800', letterSpacing: -0.32, color: on ? desk.ink : desk.inkDim }}>{t.name}</Text>
+                  </View>
+                </Press>
+              );
+            })}
+          </View>
+        </ScrollView>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, paddingBottom: 11 }}>
+          {narrow ? null : toast}
+          {runs}
+        </View>
       </View>
+      {narrow ? <View style={{ paddingTop: 8 }}>{toast}</View> : null}
     </View>
   );
 }

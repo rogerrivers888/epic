@@ -4,10 +4,13 @@
  * standard facts' names as README v2 spells them, and the toast's Undo.
  */
 
-import React from 'react';
-import { Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { Platform, Text, View } from 'react-native';
 
+import { Icon } from '../../../components/Icon';
 import { Press } from '../../../components/press';
+import { useRouter } from '../../../router';
+import { paths } from '../../../routes';
 import { LIME, ON_LIME, deskApi, desk, fonts, saidOf, tabular } from '../kit';
 
 export type Change = { id: string; at?: string };
@@ -60,20 +63,25 @@ export function Count({ label, n, onPress, lime, align = 'center', weight = '800
   return onPress ? <Press effect="none" onPress={onPress}>{body}</Press> : body;
 }
 
-/** The status pills: 1px ruled, the chosen one lime with ink letters. */
+/**
+ * The status pills: 1px ruled, the chosen one lime with ink letters. Every
+ * pill carries its own rule and overlaps its neighbour's by one pixel, so a
+ * row that wraps at 390px draws a clean grid rather than a box with a
+ * dangling divider (fix pass, 28 Sep).
+ */
 export function PillBar<T extends string>({ options, value, onChange, padH = 16, padV = 8 }: {
   options: { key: T; name: string }[]; value: T | null; onChange: (v: T) => void; padH?: number; padV?: number;
 }) {
   return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', borderWidth: 1, borderColor: desk.ruleStrong, alignSelf: 'flex-start' }}>
-      {options.map((o, i) => {
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignSelf: 'flex-start', maxWidth: '100%', paddingLeft: 1, paddingTop: 1 }}>
+      {options.map((o) => {
         const on = o.key === value;
         return (
           <Press key={o.key} effect="none" onPress={() => onChange(o.key)}>
             <Text style={{
               paddingVertical: padV, paddingHorizontal: padH, fontFamily: fonts.body, fontSize: 12.5,
               fontWeight: on ? '700' : '600', backgroundColor: on ? LIME : 'transparent', color: on ? ON_LIME : desk.inkDim,
-              borderLeftWidth: i ? 1 : 0, borderLeftColor: desk.ruleStrong,
+              borderWidth: 1, borderColor: desk.ruleStrong, marginLeft: -1, marginTop: -1,
             }}>{o.name}</Text>
           </Press>
         );
@@ -82,6 +90,40 @@ export function PillBar<T extends string>({ options, value, onChange, padH = 16,
   );
 }
 
+/**
+ * The page title's (i): its words on hover, and a click opens How it works
+ * at the Categories section (the prototype's `how.categories`).
+ */
+export function HowTip({ text, size = 17 }: { text: string; size?: number }) {
+  const { navigate } = useRouter();
+  const [open, setOpen] = useState(false);
+  const web = Platform.OS === 'web';
+  return (
+    <View style={{ position: 'relative', zIndex: open ? 40 : 1 }}>
+      <Press
+        effect="none"
+        onHoverIn={web ? () => setOpen(true) : undefined}
+        onHoverOut={web ? () => setOpen(false) : undefined}
+        onPress={() => navigate(paths.how('categories'))}
+        accessibilityLabel="How it works"
+      >
+        <Icon name="info" size={size} color={desk.inkDim} />
+      </Press>
+      {open ? (
+        <View style={{
+          position: 'absolute', top: size + 8, left: -10, width: 360, zIndex: 40,
+          backgroundColor: desk.picked, borderWidth: 1, borderColor: desk.ruleStrong, paddingVertical: 11, paddingHorizontal: 14,
+        }}>
+          <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '500', lineHeight: 19.4, color: desk.inkMuted }}>{text}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** A count that is not a number yet says so: "—", never a 0 that means "we could not tell". */
+export const count = (v: number | null | undefined, plus = '') => (v == null ? '—' : `${v.toLocaleString('en-GB')}${v ? plus : ''}`);
+
 /** A small in-place option pill ("Yes", "No"), lime-ruled when it is the value. */
 export function OptPill({ label, on, onPress }: { label: string; on: boolean; onPress: () => void }) {
   return (
@@ -89,7 +131,7 @@ export function OptPill({ label, on, onPress }: { label: string; on: boolean; on
       <Text style={{
         fontFamily: fonts.body, fontSize: 12, fontWeight: '700', borderWidth: 1.5,
         borderColor: on ? LIME : desk.ruleStrong, color: on ? LIME : desk.inkMuted, paddingVertical: 3, paddingHorizontal: 8,
-      }}>{label}</Text>
+      }} numberOfLines={1}>{label}</Text>
     </Press>
   );
 }

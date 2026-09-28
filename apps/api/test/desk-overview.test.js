@@ -25,10 +25,10 @@ test('a tile that cannot speak says so and is never drawn green', async () => {
   assert.equal(o.health.verification.line, 'nothing checked yet');
 });
 
-test('growth carries a six-week series for every tile, households included', async () => {
+test('growth carries seven weekly points (six weeks) for every tile, households included', async () => {
   const o = await overview();
   for (const k of ['places', 'facts', 'households']) {
-    assert.equal(o.growth[k].series.length, 6, `${k} has six weeks`);
+    assert.equal(o.growth[k].series.length, 7, `${k} has seven points, six weeks apart`);
     assert.ok(o.growth[k].series.every((p) => Number.isFinite(p.n)));
   }
   if (o.growth.households.n == null) assert.equal(o.growth.households.line, 'none yet');

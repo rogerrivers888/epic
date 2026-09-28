@@ -273,6 +273,8 @@ test('Household, Settings, Prototypes and the back office', () => {
   assert.equal(paths.how(), '/admin/how');
   assert.equal(paths.how(null), '/admin/how');
   assert.equal(paths.how('facts'), '/admin/how?at=facts');
+  assert.equal(paths.how(null, 'decisions'), '/admin/how?doc=decisions');
+  assert.deepEqual(parseRoute('/admin/how?doc=decisions'), { name: 'admin', screen: 'how' });
   assert.deepEqual(parseRoute('/admin/how?at=sheets'), { name: 'admin', screen: 'how' });
   assert.equal(splitHref(paths.how('collections')).query.get('at'), 'collections');
   assert.deepEqual(HOW_ANCHORS, ['layers', 'categories', 'mapping', 'place', 'facts', 'where', 'pipeline', 'collections', 'journey', 'counting', 'state']);
@@ -280,7 +282,7 @@ test('Household, Settings, Prototypes and the back office', () => {
   // A link to an old section lands on the one that took its place.
   assert.equal(howAnchorOf('mechanics'), 'layers');
   assert.equal(howAnchorOf('sheets'), 'facts');
-  assert.equal(howAnchorOf('defaults'), 'place');
+  assert.equal(howAnchorOf('defaults'), 'where');
   assert.equal(howAnchorOf('ideas'), 'collections');
   assert.equal(howAnchorOf('labels'), null);
   assert.equal(howAnchorOf(''), null);

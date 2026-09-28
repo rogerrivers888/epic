@@ -220,7 +220,7 @@ test('a removed fact is ignored with its reason and can be put back; Include any
   await assert.rejects(categories.restoreFact({ sub: 'desk-water', fact: 'toilets', who: WHO, mode: 'include_anyway' }), /nearly every place/);
   await categories.restoreFact({ sub: 'desk-water', fact: 'toilets', who: WHO, mode: 'put_back' });
   const { rows: [f] } = await query(`select status from subcategory_facts where subcategory_key = 'desk-water' and attribute_key = 'toilets'`);
-  assert.equal(f.status, 'active');
+  assert.equal(f.status, 'gathering', 'put back where its places put it: confirmed nowhere, so not Active (fix pass, 28 Sep)');
 });
 
 test('All facts lists standard facts as All and one row per fact', async () => {
@@ -271,7 +271,8 @@ test('saving a collection needs a title, a rule and a place, and logs each field
   const again = await collections.saveCollection({ key: made.key, title: 'Desk play days', copy: 'Let off steam.', rule: { subs: ['desk-play'] }, who: WHO });
   assert.equal(again.changed, 1);
   const { rows } = await query(`select what from bo_changes where area = 'Collections' and subject_id = $1 order by at`, [made.key]);
-  assert.deepEqual(rows.map((r) => r.what.split(' · ')[0]), ['Collection added', 'Collection title']);
+  // Named as the prototype names them (audit fix, 28 Sep 2026): "Collection edited · <title>".
+  assert.deepEqual(rows.map((r) => r.what.split(' · ')[0]), ['Collection added', 'Collection edited']);
 });
 
 // ---------------------------------------------------------------------------
@@ -358,7 +359,8 @@ test('a collection save is one change, its undo puts back every field, and a sav
   assert.equal(r1.active, true);
   await collections.saveCollection({ key: made.key, title: 'Desk two', copy: 'b', rule: { subs: ['desk-play'] }, who: WHO });
   const { rows } = await query(`select * from bo_changes where subject_id = $1 and area = 'Collections' order by at desc`, [made.key]);
-  assert.match(rows[0].what, /title, copy/);
+  assert.equal(rows[0].what, 'Collection edited · Desk two');
+  assert.match(rows[0].before, /Title: Desk one · Copy: a/);
   await collections.undoCollection({ change: rows[0], who: WHO });
   const { rows: [r2] } = await query('select title, copy from browse_rows where key = $1', [made.key]);
   assert.deepEqual(r2, { title: 'Desk one', copy: 'a' });

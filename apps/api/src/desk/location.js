@@ -14,6 +14,20 @@
  *     production once the owner enables them.
  *   - **120 minutes**: past the matrix's 90-minute cap, so it is answered at
  *     90 and the result says `capped: true` — every count is "at least".
+ *
+ * And two things the ring itself may not be able to say (the can't-speak
+ * rule, audit 28 Sep 2026) — a count under the filter is never a confident 0
+ * that really means "we could not tell":
+ *
+ *   - **no census coverage**: none of the ring's districts has been censused,
+ *     so the only places it can count are the few a household has been shown
+ *     lately. `speaks: false` — a 0 is drawn "—", anything else "at least N".
+ *     Some districts censused and some not is `atLeast` with `uncovered`
+ *     naming the rest.
+ *   - **places either side of the edge**: a census box that straddles the
+ *     ring's edge holds places that are in it or not, and nothing in the row
+ *     says which (`censusInRing().unresolved`); those, and places the census
+ *     could not place at all (`unplaceable`), make every count a floor.
  */
 
 import { query } from '../db.js';
@@ -84,11 +98,20 @@ export async function resolveLocation({ where, minutes = 30, mode = 'car' } = {}
   // own boxes (every place the census found, placed by where it was found —
   // the IDs-only census gives no coordinates of its own), and the places a
   // household has been shown whose coordinates we still hold (30 days).
-  const [placed, within] = await Promise.all([
-    censusInRing({ cells: ring.band ?? ring.cells, outcodes: ring.outcodes }).catch(() => ({ refs: {} })),
+  const [placed, within, covered] = await Promise.all([
+    censusInRing({ cells: ring.band ?? ring.cells, outcodes: ring.outcodes }).catch(() => null),
     placesWithin(ring.cell, { minutes: used, mode: 'driving', edge: 0 }),
+    censusCovered(ring.outcodes ?? []),
   ]);
-  const refs = new Set([...Object.values(placed.refs ?? {}).flat(), ...within.map((p) => p.venue_ref)]);
+  const refs = new Set([...Object.values(placed?.refs ?? {}).flat(), ...within.map((p) => p.venue_ref)]);
+  const outcodes = (ring.outcodes ?? []).map((o) => String(o).toUpperCase());
+  const uncovered = outcodes.filter((o) => !covered.has(o));
+  const unresolvedBy = placed?.unresolved ?? {};
+  const unresolved = Object.values(unresolvedBy).reduce((n, v) => n + Number(v || 0), 0);
+  const unplaceable = Number(placed?.unplaceable ?? 0);
+  // The census answer failing to come back is the same as no census: we
+  // cannot say what is in the ring, only what a household was shown there.
+  const speaks = Boolean(placed) && outcodes.length > 0 && uncovered.length < outcodes.length;
   return {
     where: said,
     label: ring.label,
@@ -97,7 +120,29 @@ export async function resolveLocation({ where, minutes = 30, mode = 'car' } = {}
     approx: m === 'transit',
     capped,
     refs,
+    speaks,
+    atLeast: capped || !speaks || uncovered.length > 0 || unresolved > 0 || unplaceable > 0,
+    unresolved,
+    unresolvedBy,
+    unplaceable,
+    uncovered,
   };
+}
+
+/**
+ * Which of these districts the census has covered: a finished grid tile that
+ * names the district, or the district's own run from before the grid — the
+ * same two the census findings count coverage from (censusFindings.js).
+ */
+export async function censusCovered(outcodes = []) {
+  const up = [...new Set(outcodes.map((o) => String(o).toUpperCase()))];
+  if (!up.length) return new Set();
+  const { rows } = await query(
+    `select o as code from unnest($1::text[]) o
+      where exists (select 1 from census_tiles t where t.state = 'done' and o = any(t.outcodes))
+         or exists (select 1 from area_counts a where upper(a.area_slug) = o)
+         or exists (select 1 from place_subcategories ps where upper(ps.area_slug) = o)`, [up]).catch(() => ({ rows: [] }));
+  return new Set(rows.map((r) => r.code));
 }
 
 /** How the filter reads on the chip: "within 30 min of Sunningdale by car". */
@@ -107,8 +152,47 @@ export function chipOf(loc) {
   return `within ${loc.minutes} min of ${loc.label} ${by}`;
 }
 
-/** A count under the filter: exact, or "at least" when the reach was capped. */
-export function countOf(n, loc) {
-  if (!loc || loc.unknown) return { n, atLeast: false };
-  return { n, atLeast: Boolean(loc.capped), approx: Boolean(loc.approx) };
+/**
+ * A count under the filter: exact, or "at least" when the ring cannot be
+ * counted exactly, or no number at all when it cannot speak.
+ *
+ * `category` narrows the edge question to the category the count is of: a
+ * ring whose straddling boxes hold only Food places does not make a Sport
+ * count a floor. Returns `{ n, atLeast, approx, speaks }`: with `speaks`
+ * false, `n` is null where it would have been 0 (draw "—") and a floor
+ * otherwise (draw "at least N").
+ */
+export function countOf(n, loc, { category = null } = {}) {
+  if (!loc || loc.unknown) return { n, atLeast: false, approx: false, speaks: true };
+  const speaks = loc.speaks !== false;
+  const edge = category
+    ? Number(loc.unresolvedBy?.[category] ?? 0) > 0
+    : Number(loc.unresolved ?? 0) > 0;
+  const atLeast = Boolean(loc.capped) || !speaks || (loc.uncovered?.length ?? 0) > 0 || edge || Number(loc.unplaceable ?? 0) > 0;
+  return { n: !speaks && !n ? null : n, atLeast, approx: Boolean(loc.approx), speaks };
+}
+
+/**
+ * What the filter says about itself, for the API's `filter` block: whether
+ * its counts speak, whether they are floors, and why.
+ */
+export function filterSays(loc) {
+  if (!loc || loc.unknown) return {};
+  return {
+    speaks: loc.speaks !== false,
+    atLeast: Boolean(loc.atLeast),
+    unresolved: loc.unresolved ?? 0,
+    unplaceable: loc.unplaceable ?? 0,
+    uncovered: loc.uncovered ?? [],
+    why: loc.speaks === false
+      ? 'The census has not covered this area yet'
+      : loc.atLeast
+        ? [
+          loc.capped ? 'counted to 90 minutes by car' : null,
+          loc.uncovered?.length ? `${loc.uncovered.length} district${loc.uncovered.length === 1 ? '' : 's'} not censused yet` : null,
+          loc.unresolved ? `${loc.unresolved} place${loc.unresolved === 1 ? '' : 's'} on the edge could be either side` : null,
+          loc.unplaceable ? `${loc.unplaceable} place${loc.unplaceable === 1 ? '' : 's'} could not be placed` : null,
+        ].filter(Boolean).join(' · ')
+        : null,
+  };
 }

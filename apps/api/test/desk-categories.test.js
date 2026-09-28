@@ -61,12 +61,11 @@ test('New facts lists the last 30 days only, with its evidence, and never a shar
   assert.equal(r.pct, 50);
   assert.equal(out.total, out.rows.length);
 
-  // A drawer with no places gives no share: null, not 0.
+  // A drawer with no places confirms nothing, so its fact is Gathering
+  // evidence (README "Statuses", fix pass 28 Sep) and is not new at all.
   await query(`update subcategory_facts set active_since = now() - interval '1 day' where subcategory_key = 'dc-empty'`);
   const again = await categories.newFacts();
-  const empty = again.rows.find((x) => x.sub === 'dc-empty');
-  assert.equal(empty.places, 0);
-  assert.equal(empty.pct, null);
+  assert.equal(again.rows.find((x) => x.sub === 'dc-empty'), undefined);
 });
 
 test('the list carries the bulk bar\'s ten facts with their value pills', async () => {

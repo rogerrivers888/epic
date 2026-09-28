@@ -13,12 +13,14 @@ import React, { useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 
 import { Press } from '../../../components/press';
-import { useCrumbs, useDeskGo, useDeskParam } from '../Desk';
+import { useViewport } from '../../../hooks/useViewport';
+import { useCrumbs, useDeskGo, useDeskParam, type Crumb } from '../Desk';
 import {
-  Dropdown, HeadCount, Kicker, LIME, Muted, PageTitle, Pills, SearchBox, T, TCell, THead, TRow, Table,
+  Dropdown, HeadCount, Kicker, LIME, Muted, PageTitle, RED, SearchBox, T, TCell, THead, TRow, Table,
   deskApi, desk, fonts, n, sortRows, tableWidth, tabular, type SortState, type TCol,
 } from '../kit';
-import { FactTabs, LoadLine, Title, nameWidth, plural, useDebounced, useDesk, useWrite } from './shared';
+import { OptPill } from '../categories/shared';
+import { FactTabs, HoverTitle, LoadLine, Title, nameWidth, plural, useDebounced, useDesk, useWrite } from './shared';
 
 // ---------------------------------------------------------------------------
 // Shapes (apps/api/src/desk/facts.js)
@@ -45,10 +47,15 @@ type PlaceRow = {
   ref: string; name: string | null; area: string | null; county: string | null; country: string | null; postcode: string | null;
   how: string | null; answer: string | null; current: string | null;
 };
-type PlacesResp = {
+export type PlacesResp = {
   fact: string; label: string; kind: string; standard: boolean; sub: string | null; subLabel: string | null; categoryLabel: string | null;
-  options: { key: string; label: string }[]; rows: PlaceRow[]; total: number; lookedFor: number; foundAt: number;
+  options: { key: string; label: string }[]; rows: PlaceRow[]; total: number;
+  /** Null for a standard fact nobody has asked about: "—", never 0. */
+  lookedFor: number | null; foundAt: number;
   counties: string[]; countries: string[]; postcodes: string[];
+  queued: number;
+  queue: { ref: string; place: string | null; line: string; conflict: boolean }[];
+  outcomes: { ref: string; place: string | null; outcome: string; key: string; source: string; at: string }[];
 };
 
 const STATUS_OPTS: { key: string; name: string }[] = [
@@ -69,7 +76,12 @@ export function AllFacts() {
   const [text, setText] = useState(q);
   const typed = useDebounced(text);
   React.useEffect(() => { if (typed !== q) setQ(typed, { replace: true }); }, [typed]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [sort, setSort] = useState<SortState>({ key: 'name', dir: 'asc' });
+  // The sort is part of the address: `sort=places`, `sort=-subs`; Fact ascending is the default.
+  const [sortRaw, setSortRaw] = useDeskParam('sort');
+  const sort: SortState = sortRaw
+    ? { key: sortRaw.replace(/^-/, ''), dir: sortRaw.startsWith('-') ? 'desc' : 'asc' }
+    : { key: 'name', dir: 'asc' };
+  const setSort = (s: SortState) => setSortRaw(!s || (s.key === 'name' && s.dir === 'asc') ? '' : `${s.dir === 'desc' ? '-' : ''}${s.key}`, { replace: true });
 
   const load = useDesk<AllFactsResp>('/facts', { q: q || null, cat: cat || null, sub: sub || null, status: state || null });
   const cata = useDesk<Catalogue>('/mapping/picker');
@@ -79,9 +91,10 @@ export function AllFacts() {
   const factW = nameWidth(all.map((r) => r.label));
   const cols: TCol[] = [
     { key: 'name', name: 'Fact', width: factW, first: 'asc' },
-    { key: 'subs', name: 'Subcategories', width: 150, first: 'asc' },
-    { key: 'places', name: 'Places with it', width: 150, first: 'asc' },
-    { key: 'status', name: 'Status', width: 150, first: 'asc' },
+    // The other three equal (README v2), wide enough for "Ignored · Removed by a person" on one line.
+    { key: 'subs', name: 'Subcategories', width: 200, first: 'desc' },
+    { key: 'places', name: 'Places with it', width: 200, first: 'asc' },
+    { key: 'status', name: 'Status', width: 200, first: 'asc' },
   ];
   const rows = sortRows(all, sort, (r, k) => (k === 'name' ? r.label
     : k === 'subs' ? (r.standard ? 9999 : r.subcategoryCount)
@@ -134,9 +147,12 @@ export function AllFacts() {
           {rows.length === 0 ? <Muted>No facts match.</Muted> : rows.map((r) => (
             <TRow key={r.fact} onPress={() => go('facts', { fact: r.fact })}>
               <TCell width={factW}><T weight="700">{r.label}</T></TCell>
-              <TCell width={150}><T tone={desk.inkMuted} num lines={1}>{r.subcategories}</T></TCell>
-              <TCell width={150}><T weight="800" num>{n(r.places)}</T></TCell>
-              <TCell width={150}><View style={{ minHeight: 20, justifyContent: 'center' }}><T size={13} tone={desk.inkMuted} lines={1}>{r.statusText}</T></View></TCell>
+              <TCell width={200}>
+                {/* An Ignored fact names its subcategories; cut to one line, the whole list is its hover title. */}
+                <HoverTitle title={r.subcategories}><T tone={desk.inkMuted} num lines={1}>{r.subcategories}</T></HoverTitle>
+              </TCell>
+              <TCell width={200}><T weight="800" num>{n(r.places)}</T></TCell>
+              <TCell width={200}><View style={{ minHeight: 20, justifyContent: 'center' }}><T size={13} tone={desk.inkMuted}>{r.statusText}</T></View></TCell>
             </TRow>
           ))}
         </Table>
@@ -284,96 +300,161 @@ function SubsTable({ f, canManage, onOpenSub, onPlaces, onRemove }: {
 // The places that have it
 // ---------------------------------------------------------------------------
 
+/** The Facts tab's drill-down (`?tab=facts&fact=<key>&places=1`, optional `sub`). */
 export function FactPlaces({ fact, canManage }: { fact: string; canManage: boolean }) {
   const go = useDeskGo();
   const [sub] = useDeskParam('sub');
-  const [text, setText] = useState('');
-  const q = useDebounced(text);
-  const [country, setCountry] = useState('');
-  const [county, setCounty] = useState('');
-  const [postcode, setPostcode] = useState('');
+  return (
+    <PlacesDrill
+      fact={fact}
+      sub={sub || null}
+      canManage={canManage}
+      crumbs={(d) => (d?.standard
+        // A standard fact's places sit one level under Facts: "Facts / Duration".
+        ? [{ name: 'Facts', go: () => go('facts') }, { name: d.label }]
+        : [
+          { name: 'Facts', go: () => go('facts') },
+          { name: d?.label ?? '', go: () => go('facts', { fact }) },
+          { name: d?.subLabel ?? 'Places with it' },
+        ])}
+    />
+  );
+}
+
+const OUTCOME_TONE: Record<string, string> = { verified: LIME, conflict: RED, no: desk.ink };
+
+/**
+ * The places that have a fact (README v2 drill-down; prototype `isFact`):
+ * Place · (Answer) · Area · How we know · Edit, filters and a search in the
+ * address, "Looked for at N places · found at M" under it, and beside it the
+ * fact's VERIFICATION column from our own tables. Used by the Facts tab and
+ * by a subcategory's fact (Categories › a subcategory › a fact).
+ */
+export function PlacesDrill({ fact, sub, canManage, crumbs }: {
+  fact: string; sub: string | null; canManage: boolean; crumbs: (d: PlacesResp | null) => Crumb[];
+}) {
+  const go = useDeskGo();
+  const { width } = useViewport();
+  const narrow = width < 900;
+  const [q, setQ] = useDeskParam('q');
+  const [country, setCountry] = useDeskParam('country');
+  const [county, setCounty] = useDeskParam('county');
+  const [postcode, setPostcode] = useDeskParam('pc');
+  const [text, setText] = useState(q);
+  const typed = useDebounced(text);
+  React.useEffect(() => { setText(q); }, [q]);
+  React.useEffect(() => { if (typed !== q) setQ(typed, { replace: true }); }, [typed]); // eslint-disable-line react-hooks/exhaustive-deps
   const [editing, setEditing] = useState<string | null>(null);
   const load = useDesk<PlacesResp>(`/facts/${encodeURIComponent(fact)}/places`, {
-    sub: sub || null, country: country || null, county: county || null, postcode: postcode || null, q: q || null,
+    sub, country: country || null, county: county || null, postcode: postcode || null, q: q || null,
   });
   const write = useWrite(load.reload);
   const d = load.data;
-  useCrumbs([
-    { name: 'Facts', go: () => go('facts') },
-    { name: d?.label ?? '', go: () => go('facts', { fact }) },
-    { name: d?.subLabel ?? 'Places with it' },
-  ], [d?.label, d?.subLabel, fact]);
+  useCrumbs(crumbs(d), [d?.label, d?.subLabel, d?.standard, fact, sub]);
 
   const multi = d ? d.kind !== 'yesno' : false;
   const cols = useMemo(() => {
     const c: TCol[] = [{ key: 'place', name: 'Place', width: 230 }];
     if (multi) c.push({ key: 'answer', name: 'Answer', width: 110 });
-    c.push({ key: 'area', name: 'Area', width: 160 }, { key: 'how', name: 'How we know', width: 180 }, { key: 'edit', name: '', width: 150 });
+    c.push({ key: 'area', name: 'Area', width: 160 }, { key: 'how', name: 'How we know', width: 200 }, { key: 'edit', name: '', width: 150 });
     return c;
   }, [multi]);
 
   if (!d) return <LoadLine load={load} what="These places" />;
   const found = `${multi ? 'Answered at' : 'Found at'} ${plural(d.foundAt, 'place')}`;
   const where = d.sub ? [d.categoryLabel, d.subLabel].filter(Boolean).join(' › ') : d.standard ? 'Standard fact · every place' : null;
-  const looked = multi
-    ? `Asked at ${n(d.lookedFor)} places · answered at ${n(d.foundAt)}`
-    : `Looked for at ${n(d.lookedFor)} places · found at ${n(d.foundAt)}`;
+  const looked = `${multi ? 'Asked at' : 'Looked for at'} ${d.lookedFor == null ? '—' : n(d.lookedFor)} places · ${multi ? 'answered at' : 'found at'} ${n(d.foundAt)}`;
+  const drop = (label: string, all: string, values: string[], value: string, set: (v: string, o?: { replace?: boolean }) => void) => (
+    <Dropdown
+      key={label}
+      label={value || all}
+      value={value}
+      width={170}
+      options={[{ key: '', name: all }, ...values.map((c) => ({ key: c, name: c }))]}
+      onChange={(v) => set(v, { replace: true })}
+    />
+  );
 
   return (
     <>
       <View style={{ gap: 6, borderBottomWidth: 2, borderBottomColor: desk.ruleStrong, paddingBottom: 18 }}>
         <Title>{d.label}</Title>
-        <Text style={{ fontFamily: fonts.body, fontSize: 15, fontWeight: '800', color: LIME }}>{found}</Text>
+        <Text style={[{ fontFamily: fonts.body, fontSize: 15, fontWeight: '800', color: LIME }, tabular]}>{found}</Text>
         {where ? <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>{where}</Text> : null}
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap', zIndex: 15 }}>
-        <SearchBox value={text} onChange={setText} placeholder="Search places" width={260} />
-        <Dropdown label={country || 'All countries'} value={country} width={170}
-          options={[{ key: '', name: 'All countries' }, ...d.countries.map((c) => ({ key: c, name: c }))]} onChange={setCountry} />
-        <Dropdown label={county || 'All counties'} value={county} width={170}
-          options={[{ key: '', name: 'All counties' }, ...d.counties.map((c) => ({ key: c, name: c }))]} onChange={setCounty} />
-        <Dropdown label={postcode || 'All postcodes'} value={postcode} width={170}
-          options={[{ key: '', name: 'All postcodes' }, ...d.postcodes.map((c) => ({ key: c, name: c }))]} onChange={setPostcode} />
+        <SearchBox value={text} onChange={setText} placeholder="Search places" width={narrow ? Math.min(260, width - 32) : 260} />
+        {drop('country', 'All countries', d.countries, country, setCountry)}
+        {drop('county', 'All counties', d.counties, county, setCounty)}
+        {drop('pc', 'All postcodes', d.postcodes, postcode, setPostcode)}
       </View>
-      <View>
-        <Table width={tableWidth(cols, 16, 0)}>
-          <THead cols={cols} gap={16} pad={0} />
-          {d.rows.length === 0 ? <Muted size={13}>No places match.</Muted> : d.rows.map((p) => {
-            const open = editing === p.ref;
-            return (
-              <TRow key={p.ref} gap={16} pad={0}>
-                <TCell width={230}><T weight="700">{p.name ?? p.ref}</T></TCell>
-                {multi ? <TCell width={110}><T size={13} weight="700">{p.answer ?? '—'}</T></TCell> : null}
-                <TCell width={160}><T size={13} tone={desk.inkMuted}>{p.area ?? '—'}</T></TCell>
-                <TCell width={180}><T size={12.5} tone={desk.inkMuted}>{p.how ?? '—'}</T></TCell>
-                <TCell width={150} style={{ alignItems: 'flex-end' }}>
-                  {!canManage ? null : open ? (
-                    <Pills
-                      options={d.options.map((o) => ({ key: o.key, name: o.label }))}
-                      value={p.current}
-                      onChange={(opt) => {
-                        setEditing(null);
-                        const word = d.options.find((o) => o.key === opt)?.label ?? opt;
-                        write(
-                          () => deskApi.put<{ id: string }>(`/places/${encodeURIComponent(p.ref)}/facts/${encodeURIComponent(d.fact)}`, { option: opt }),
-                          `${d.label} on ${p.name ?? p.ref} → ${word} · logged as a correction`,
-                        );
-                      }}
-                    />
-                  ) : (
-                    <Press effect="none" onPress={() => setEditing(p.ref)}>
-                      <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>Edit</Text>
-                    </Press>
-                  )}
-                </TCell>
-              </TRow>
-            );
-          })}
-          {d.total > d.rows.length ? (
-            <Text style={{ fontFamily: fonts.body, fontSize: 12, color: desk.inkDim, paddingTop: 8 }}>{`The first ${n(d.rows.length)} of ${n(d.total)} — narrow with the filters to see the rest`}</Text>
-          ) : null}
-          <Text style={{ fontFamily: fonts.body, fontSize: 12, color: desk.inkDim, paddingTop: 8 }}>{looked}</Text>
-        </Table>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 36, alignItems: 'flex-start' }}>
+        <View style={{ flexGrow: 1, flexShrink: 1, flexBasis: narrow ? '100%' : 640, minWidth: 0 }}>
+          <Table width={tableWidth(cols, 16, 0)}>
+            <THead cols={cols} gap={16} pad={0} />
+            {d.rows.length === 0 ? <Muted size={13}>No places match.</Muted> : d.rows.map((p) => {
+              const open = editing === p.ref;
+              return (
+                <TRow key={p.ref} gap={16} pad={0}>
+                  <TCell width={230}><T weight="700">{p.name ?? p.ref}</T></TCell>
+                  {multi ? <TCell width={110}><T size={13} weight="700">{p.answer ?? '—'}</T></TCell> : null}
+                  <TCell width={160}><T size={13} tone={desk.inkMuted}>{p.area ?? '—'}</T></TCell>
+                  <TCell width={200}><T size={12.5} tone={desk.inkMuted}>{p.how ?? '—'}</T></TCell>
+                  <TCell width={150} style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>
+                    {!canManage ? null : open ? d.options.map((o) => (
+                      <OptPill
+                        key={o.key}
+                        label={o.label}
+                        on={o.key === p.current}
+                        onPress={() => {
+                          setEditing(null);
+                          write(
+                            () => deskApi.put<{ id: string }>(`/places/${encodeURIComponent(p.ref)}/facts/${encodeURIComponent(d.fact)}`, { option: o.key }),
+                            `${d.label} on ${p.name ?? p.ref} → ${o.label} · logged as a correction`,
+                          );
+                        }}
+                      />
+                    )) : (
+                      <Press effect="none" onPress={() => setEditing(p.ref)}>
+                        <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>Edit</Text>
+                      </Press>
+                    )}
+                  </TCell>
+                </TRow>
+              );
+            })}
+            {d.total > d.rows.length ? (
+              <Text style={{ fontFamily: fonts.body, fontSize: 12, color: desk.inkDim, paddingTop: 8 }}>{`The first ${n(d.rows.length)} of ${n(d.total)} — narrow with the filters to see the rest`}</Text>
+            ) : null}
+            <Text style={[{ fontFamily: fonts.body, fontSize: 12, color: desk.inkDim, paddingTop: 8 }, tabular]}>{looked}</Text>
+          </Table>
+        </View>
+        <View style={{
+          width: narrow ? '100%' : 340, gap: 12,
+          borderLeftWidth: narrow ? 0 : 1, borderLeftColor: desk.rule, paddingLeft: narrow ? 0 : 28,
+          borderTopWidth: narrow ? 1 : 0, borderTopColor: desk.rule, paddingTop: narrow ? 18 : 0,
+        }}>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+            <Kicker>Verification</Kicker>
+            <Press effect="none" onPress={() => go('facts', { ftab: 'verification', view: 'backlog', feature: d.label })}>
+              <Text style={[{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: desk.inkMuted }, tabular]}>{n(d.queued)} in the queue</Text>
+            </Press>
+          </View>
+          {d.queue.map((x) => (
+            <View key={x.ref} style={{ gap: 2, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: desk.rule }}>
+              <T size={13} weight="700">{x.place ?? 'A place we cannot name'}</T>
+              <T size={12} tone={x.conflict ? RED : desk.inkDim}>{x.line}</T>
+            </View>
+          ))}
+          <View style={{ paddingTop: 8 }}><Kicker>Recent outcomes</Kicker></View>
+          {d.outcomes.length === 0 ? <T size={12.5} tone={desk.inkDim}>None yet.</T> : d.outcomes.map((o, i) => (
+            <View key={`${o.ref}-${i}`} style={{ flexDirection: 'row', alignItems: 'baseline', gap: 10, paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: desk.rule }}>
+              <View style={{ flex: 1, minWidth: 0 }}><T size={12.5} weight="700">{o.place ?? 'A place we cannot name'}</T></View>
+              <T size={12} weight="800" tone={OUTCOME_TONE[o.key] ?? desk.inkDim}>{o.outcome}</T>
+              <T size={11.5} tone={desk.inkDim}>{o.source}</T>
+            </View>
+          ))}
+        </View>
       </View>
     </>
   );

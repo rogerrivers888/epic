@@ -158,14 +158,18 @@ export async function mappingState() {
     query(`select * from word_proposals where namespace = $1 and state = 'open'`, [NS]),
   ]);
   const proposalByWord = new Map(proposals.map((p) => [p.word, p]));
-  // A narrowing states what it keeps and what leaves (README: "only churches
-  // with a Wikipedia/Wikidata entry or heritage listing (14) · the other 198
-  // leave Epic"), counted now rather than when the proposal was raised.
+  // Places affected is counted on every read, for every kind, never taken
+  // from when the proposal was raised (audit, 28 Sep 2026). A narrowing
+  // states what it keeps and what leaves (README: "only churches with a
+  // Wikipedia/Wikidata entry or heritage listing (14) · the other 198 leave
+  // Epic"); a repoint counts the places that would actually move.
   for (const p of proposals) {
     if (p.action === 'narrow' && NARROWING_SQL[p.change_to?.condition]) p.narrowed = await narrowCounts(p.word, p.change_to.condition);
+    if (p.action === 'repoint' && p.change_to?.subcategory) p.moving = await movingCount(p.word, p.change_to.subcategory);
   }
 
   const inEpic = []; const needs = []; const notInEpic = [];
+  const keptAsIs = [];
   for (const w of words) {
     const t = targets.get(w.word) ?? [];
     const answer = answerOf({ decision: w.decision, targets: t });
@@ -181,8 +185,15 @@ export async function mappingState() {
       decision: w.decision,
     };
     const p = proposalByWord.get(w.word);
+    // A proposal that was Kept on a word nobody has answered is a decision to
+    // leave it as it is: it is not raised again under No suggestion (the
+    // prototype leaves every word ever proposed out of that group), until a
+    // later decision on the word — a bring-back, say — reopens the question.
+    const kept = last.get(w.word)?.kind === 'Kept';
     if (p) {
       needs.push({ ...row, proposal: proposalOut(p, t, c) });
+    } else if (answer === 'undecided' && kept) {
+      keptAsIs.push(row);
     } else if (answer === 'undecided') {
       needs.push({ ...row, proposal: { id: null, group: 'no_suggestion', action: 'choose', changeTo: 'Choose where it goes', affected: c.affected } });
     } else if (answer === 'notinepic') {
@@ -195,8 +206,13 @@ export async function mappingState() {
   const { rows: [{ n: decided }] } = await query(
     'select count(*)::int n from word_decisions where namespace = $1 and undone_at is null', [NS]);
   return {
-    counts: { inEpic: inEpic.length, needs: needs.length, notInEpic: notInEpic.length, decided },
+    // `everything` is every word not excluded, whatever view it sits in —
+    // the prototype's "Everything · N words" (audit, 28 Sep 2026).
+    counts: { inEpic: inEpic.length, needs: needs.length, notInEpic: notInEpic.length, decided, everything: inEpic.length + needs.length + keptAsIs.length },
     inEpic, needs, notInEpic,
+    // Kept as it is and never answered: in no view of its own (the
+    // prototype), but openable from Decided, so it is sent.
+    keptAsIs,
     everOpenedSpeaks: opened !== null,
   };
 }
@@ -220,6 +236,21 @@ export async function narrowCounts(word, condition) {
   return { kept: r?.kept ?? 0, leave: r?.leave ?? 0 };
 }
 
+/**
+ * How many of a word's places a repoint would actually move: those it brings
+ * that are not already filed in the target drawer. A drawer that does not
+ * exist yet holds none of them, so every place moves.
+ */
+export async function movingCount(word, target) {
+  const { rows: [r] } = await query(`
+    select count(distinct pil.venue_ref)::int n
+      from place_index_labels pil
+     where pil.label = $1
+       and not exists (select 1 from place_index pi where pi.venue_ref = pil.venue_ref and pi.subcategory = $2)`,
+  [`${NS}:${word}`, target]);
+  return r?.n ?? 0;
+}
+
 /** A proposal as the Needs a decision row draws it. */
 function proposalOut(p, targets, counts) {
   const text = p.change_to?.text ?? null;
@@ -232,7 +263,9 @@ function proposalOut(p, targets, counts) {
     target: p.change_to?.subcategory ?? null,
     fact: p.change_to?.fact ?? null,
     ruleText: p.rule_text ?? null,
-    affected: n ? n.leave : (p.places_affected ?? counts.affected),
+    // Counted now: a narrowing's leavers, a repoint's movers, otherwise the
+    // places that would leave Epic because no other in-Epic word carries them.
+    affected: n ? n.leave : p.moving != null ? p.moving : counts.affected,
     pointsAtNow: targets.length ? targets.map((t) => t.label).join(' · ') : null,
   };
 }
@@ -503,9 +536,13 @@ export async function decideProposal({ id, action, why = null, who }) {
          values ($1, $2, 'Kept', $3, $4, $5::jsonb, $5::jsonb, $6) returning *`,
         [NS, p.word, why?.trim() || 'Kept — proposal declined', who, JSON.stringify(before), id]);
       await c.query(`update word_proposals set state = 'kept', decided_at = now(), decided_by = $2 where id = $1`, [id, who]);
+      // Keep changes nothing, so its Before and After are the same: where
+      // the word points, as every other Mapping entry says it (prototype
+      // `decide`, logic.js 751).
+      const pointsAt = await pointsLabel(c, before);
       const change = await logChange({
         client: c, who, area: 'Mapping', what: `Google word · ${p.word} · Kept`,
-        before: p.change_to?.text ?? null, after: 'Kept — proposal declined', why: why || 'Kept — proposal declined',
+        before: pointsAt, after: pointsAt, why: why || 'Kept — proposal declined',
         subjectType: 'word', subjectId: p.word, undo: { kind: 'word_decision', id: d.id },
       });
       return { decision: d, change };

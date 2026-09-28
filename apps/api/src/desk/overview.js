@@ -18,30 +18,15 @@ import { mappingState } from './mapping.js';
 import { status as verificationStatus, sources } from './verification.js';
 import { accuracy } from './accuracy.js';
 import { collectionList } from './collections.js';
-import { FILED_SQL, STANDARD } from './categories.js';
+import { FILED_SQL, STANDARD, contradictedDefaults as banded } from './categories.js';
 import { USD_TO_GBP } from '../domain/providerPrices.js';
 
-/** Person-set defaults most confirmed places contradict (C49), counted. */
-async function contradictedDefaults() {
-  const { rows } = await query(`
-    with f as (select distinct venue_ref, sub from (${FILED_SQL}) x),
-    d as (select * from shelf_subcategory_attributes where (origin = 'person' or settled) and attribute_key = any($1)),
-    confirmed as (
-      select d.subcategory_key, d.attribute_key, f.venue_ref,
-             coalesce(v.yesno, case a.state when 'yes' then coalesce(a.yesno, true) when 'no' then false end) as yesno,
-             coalesce(v.choice, a.choice) as choice, coalesce(v.from_value, a.from_value) as from_value, coalesce(v.to_value, a.to_value) as to_value,
-             d.yesno as d_yesno, d.choice as d_choice, d.from_value as d_from, d.to_value as d_to
-        from d join f on f.sub = d.subcategory_key
-        left join place_attribute_values v on v.venue_ref = f.venue_ref and v.attribute_key = d.attribute_key and v.set_by is not null
-        left join place_fact_answers a on a.venue_ref = f.venue_ref and a.attribute_key = d.attribute_key and a.state in ('yes','no') and a.hidden_at is null
-       where v.venue_ref is not null or a.venue_ref is not null
-    )
-    select subcategory_key, attribute_key, count(*)::int n,
-           count(*) filter (where yesno is not distinct from d_yesno and choice is not distinct from d_choice
-                              and from_value is not distinct from d_from and to_value is not distinct from d_to)::int agree
-      from confirmed group by 1, 2`, [STANDARD]);
-  return rows.filter((r) => r.n >= 3 && (r.n - r.agree) * 2 > r.n);
-}
+/**
+ * Person-set defaults most confirmed places contradict (C49), compared in
+ * bands exactly as Categories compares them (`?sort=review` puts the same
+ * subcategories first), so the two never disagree about what needs a person.
+ */
+const contradictedDefaults = () => banded();
 
 /** Spend this month in pounds, by Google and Claude, from the ledger. */
 async function spend() {
@@ -53,7 +38,10 @@ async function spend() {
   return { google: by.get('google') ?? 0, claude: by.get('claude') ?? 0 };
 }
 
-/** A weekly series over six weeks. */
+/**
+ * A weekly series: seven points, this week and the six before it, so the
+ * sparkline's first point is the "6 weeks" ago its line counts from.
+ */
 async function weekly(sql) {
   const { rows } = await query(sql);
   return rows.map((r) => ({ week: r.week, n: Number(r.n) }));
@@ -77,7 +65,7 @@ export async function overview() {
   // ---- Needs you
   const needs = [];
   if (mapping.counts.needs) needs.push({ key: 'mapping', n: mapping.counts.needs, label: `${mapping.counts.needs} mapping decision${mapping.counts.needs === 1 ? '' : 's'}`, where: 'Mapping › Needs a decision' });
-  if (contradicted.length) needs.push({ key: 'defaults', n: contradicted.length, label: `${contradicted.length} bulk setting${contradicted.length === 1 ? '' : 's'} contradicted by ${contradicted.length === 1 ? 'its' : 'their'} places`, where: 'Categories › subcategory defaults', subs: contradicted.map((c) => c.subcategory_key) });
+  if (contradicted.length) needs.push({ key: 'defaults', n: contradicted.length, label: `${contradicted.length} bulk setting${contradicted.length === 1 ? '' : 's'} contradicted by ${contradicted.length === 1 ? 'its' : 'their'} places`, where: 'Categories › subcategory defaults', subs: [...new Set(contradicted.map((c) => c.sub))] });
 
   // ---- Health
   const heard = srcs.some((s) => s.source !== 'families' && s.checked > 0);
@@ -131,23 +119,23 @@ export async function overview() {
   const [placesSeries, factsSeries, householdsSeries] = await Promise.all([
     weekly(`select to_char(date_trunc('week', g), 'YYYY-MM-DD') as week,
                    (select count(*) from place_index where subcategory is not null and not_in_epic_at is null and first_seen < g + interval '7 days') as n
-              from generate_series(date_trunc('week', now()) - interval '5 weeks', date_trunc('week', now()), interval '1 week') g`),
+              from generate_series(date_trunc('week', now()) - interval '6 weeks', date_trunc('week', now()), interval '1 week') g`),
     weekly(`select to_char(date_trunc('week', g), 'YYYY-MM-DD') as week,
                    (select count(*) from fact_checks where outcome = 'verified' and at >= g and at < g + interval '7 days') as n
-              from generate_series(date_trunc('week', now()) - interval '5 weeks', date_trunc('week', now()), interval '1 week') g`),
+              from generate_series(date_trunc('week', now()) - interval '6 weeks', date_trunc('week', now()), interval '1 week') g`),
     // Households by the end of each week, counted the way the headline is:
     // once somebody has signed in to it.
     weekly(`select to_char(date_trunc('week', g), 'YYYY-MM-DD') as week,
                    (select count(*) from households h where exists (
                       select 1 from accounts a where a.household_id = h.id and a.activated_at is not null
                          and a.activated_at < g + interval '7 days')) as n
-              from generate_series(date_trunc('week', now()) - interval '5 weeks', date_trunc('week', now()), interval '1 week') g`),
+              from generate_series(date_trunc('week', now()) - interval '6 weeks', date_trunc('week', now()), interval '1 week') g`),
   ]);
   const placesNow = placesSeries[placesSeries.length - 1]?.n ?? 0;
   const factsNow = factsSeries[factsSeries.length - 1]?.n ?? 0;
   const factsLast = factsSeries[factsSeries.length - 2]?.n ?? 0;
   const growth = {
-    places: { n: placesNow, line: `+${(placesNow - (placesSeries[0]?.n ?? 0)).toLocaleString('en-GB')} in 6 weeks`, series: placesSeries },
+    places: { n: placesNow, line: `+${(placesNow - (placesSeries[0]?.n ?? 0)).toLocaleString('en-GB')} in ${placesSeries.length - 1} weeks`, series: placesSeries },
     facts: { n: factsNow, line: `last week ${factsLast.toLocaleString('en-GB')}`, series: factsSeries },
     households: households ? { n: households, line: null, series: householdsSeries } : { n: null, line: 'none yet', series: householdsSeries },
   };

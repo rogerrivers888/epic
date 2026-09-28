@@ -18,6 +18,7 @@
 import { query, withTransaction } from '../db.js';
 import { settings } from './settings.js';
 import * as osmLocal from '../sources/osmExtract.js';
+import { noteFetch } from './verification.js';
 
 // ---------------------------------------------------------------------------
 // Words
@@ -179,15 +180,26 @@ export function fromText(phrases, text) {
 /** Wikidata's "has facility" (P912) and "has part" (P527) labels, fetched free. */
 async function wikidataFacilities(qid) {
   if (!/^Q\d+$/.test(String(qid ?? ''))) return null;
+  // The one source the verify step fetches live, so its fetches are written
+  // down (Verification's Failing %, via noteFetch) — the others are read from
+  // our own stored copies.
+  const began = Date.now();
+  const note = (ok, fault = null) => noteFetch('wikidata', ok, { ms: Date.now() - began, fault });
   try {
     const ua = { headers: { 'user-agent': `Epic/0.1 (${process.env.EPIC_CONTACT_EMAIL ?? 'hello@epic.day'})` }, signal: AbortSignal.timeout(8000) };
-    const e = await (await fetch(`https://www.wikidata.org/wiki/Special:EntityData/${qid}.json`, ua)).json();
+    const r1 = await fetch(`https://www.wikidata.org/wiki/Special:EntityData/${qid}.json`, ua);
+    if (!r1.ok) { await note(false, `http_${r1.status}`); return null; }
+    const e = await r1.json();
     const claims = e.entities?.[qid]?.claims ?? {};
     const ids = ['P912', 'P527'].flatMap((p) => (claims[p] ?? []).map((c) => c.mainsnak?.datavalue?.value?.id).filter(Boolean)).slice(0, 40);
-    if (!ids.length) return [];
-    const l = await (await fetch(`https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${ids.join('|')}&props=labels&languages=en&format=json`, ua)).json();
+    if (!ids.length) { await note(true); return []; }
+    const r2 = await fetch(`https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${ids.join('|')}&props=labels&languages=en&format=json`, ua);
+    if (!r2.ok) { await note(false, `http_${r2.status}`); return null; }
+    const l = await r2.json();
+    await note(true);
     return Object.values(l.entities ?? {}).map((x) => x.labels?.en?.value).filter(Boolean);
-  } catch {
+  } catch (err) {
+    await note(false, err?.name === 'TimeoutError' ? 'timeout' : 'unreachable');
     return null;
   }
 }

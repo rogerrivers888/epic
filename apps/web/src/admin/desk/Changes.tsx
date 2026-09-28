@@ -17,7 +17,7 @@ import { Text, View } from 'react-native';
 
 import { useDeskParam } from './Desk';
 import {
-  Dropdown, Muted, SearchBox, T, TCell, THead, TRow, Table, ago, deskApi, desk, fonts, LIME, saidOf, tabular, tableWidth,
+  Dropdown, LH, Muted, SearchBox, T, TCell, THead, TRow, Table, ago, deskApi, desk, fonts, LIME, saidOf, tabular, tableWidth,
   type TCol,
 } from './kit';
 
@@ -29,11 +29,13 @@ type Change = {
 type ChangesData = { rows: Change[]; total: number; people: string[]; areas: string[] };
 
 type Key = 'when' | 'who' | 'area' | 'what' | 'change';
+// The prototype's widths: What changed takes the room left over (never under
+// 240), so at 1440 beside the rail the page never scrolls sideways.
 const COLS: TCol<Key>[] = [
   { key: 'when', name: 'When', width: 120 },
-  { key: 'who', name: 'Who', width: 150 },
+  { key: 'who', name: 'Who', width: 100 },
   { key: 'area', name: 'Area', width: 140 },
-  { key: 'what', name: 'What changed', width: 380 },
+  { key: 'what', name: 'What changed', width: 240, grow: true },
   { key: 'change', name: 'Before → After', width: 360 },
 ];
 const WIDTH = tableWidth(COLS);
@@ -99,26 +101,26 @@ export function Changes(_props: { canManage?: boolean }) {
       </View>
 
       {error ? <Muted>{error}</Muted> : !data ? <Muted>Loading…</Muted> : (
-        <Table width={WIDTH}>
+        <Table width={WIDTH} fill>
           <THead cols={COLS} />
           {data.rows.length === 0 ? <Muted>No changes match.</Muted> : null}
           {data.rows.map((c) => (
-            <TRow key={c.id} align="flex-start">
+            <TRow key={c.id} align="flex-start" vpad={11}>
               <TCell width={COLS[0].width}><T size={12.5} tone={desk.inkDim}>{ago(c.at)}</T></TCell>
               <TCell width={COLS[1].width}><T size={13} weight="700">{c.who}</T></TCell>
               <TCell width={COLS[2].width}><T size={13} tone={desk.inkMuted}>{c.area}</T></TCell>
-              <TCell width={COLS[3].width}><T size={13}>{c.what}</T></TCell>
+              <TCell width={COLS[3].width} grow><T size={13}>{c.what}</T></TCell>
               <TCell width={COLS[4].width}>
-                <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkMuted }}>
+                <Text style={{ fontFamily: fonts.body, fontSize: 12.5, lineHeight: LH(12.5), color: desk.inkMuted }}>
                   <Text style={{ color: desk.inkDim }}>{c.before ?? '—'}</Text>
                   {' → '}
                   <Text style={{ fontWeight: '700', color: LIME }}>{c.after ?? '—'}</Text>
                 </Text>
                 {c.why ? (
-                  <Text style={{ fontFamily: fonts.body, fontSize: 12, color: desk.inkDim, marginTop: 2 }}>{c.why}</Text>
+                  <Text style={{ fontFamily: fonts.body, fontSize: 12, lineHeight: LH(12), color: desk.inkDim, marginTop: 2 }}>{c.why}</Text>
                 ) : null}
                 {c.undone_at ? (
-                  <Text style={{ fontFamily: fonts.body, fontSize: 12, color: desk.inkDim, marginTop: 2 }}>
+                  <Text style={{ fontFamily: fonts.body, fontSize: 12, lineHeight: LH(12), color: desk.inkDim, marginTop: 2 }}>
                     {`Undone ${ago(c.undone_at)}${c.undone_by ? ` by ${c.undone_by}` : ''}`}
                   </Text>
                 ) : null}

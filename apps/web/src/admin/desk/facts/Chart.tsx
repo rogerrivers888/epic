@@ -20,6 +20,10 @@ import { desk, fonts } from '../../../theme';
 
 const tabular = { fontVariant: ['tabular-nums' as const] };
 const NOWRAP = (Platform.OS === 'web' ? { whiteSpace: 'nowrap' } : {}) as object;
+// An edge label is anchored to the plot's edge rather than centred on its
+// column (web: the text's own box is moved, the column keeps its share).
+const EDGE_RIGHT = (Platform.OS === 'web' ? { position: 'absolute', right: 0 } : { alignSelf: 'flex-end' }) as object;
+const EDGE_LEFT = (Platform.OS === 'web' ? { position: 'absolute', left: 0 } : { alignSelf: 'flex-start' }) as object;
 const TIP_SHADOW: ViewStyle = Platform.OS === 'web' ? ({ boxShadow: '0 8px 20px rgba(0,0,0,.45)' } as unknown as ViewStyle) : {};
 
 export type DeskLineChartProps = {
@@ -42,6 +46,12 @@ export type DeskLineChartProps = {
   axisWidth?: number;
   /** Space between the plot and its labels. */
   gap?: number;
+  /**
+   * What an empty plot says when no point can speak ("Every day has fewer
+   * than 10 answers — Building"): a blank chart is never left to look like
+   * a flat line of nothing.
+   */
+  blank?: string;
 };
 
 /** A count's scale: nought to twice a round step, so the middle rule is a round number. */
@@ -59,7 +69,7 @@ export function percentScale(series: (number | null)[]): { lo: number; hi: numbe
 }
 
 export function DeskLineChart({
-  series, labels, tip, color, lo, hi, fmt = (v) => String(Math.round(v)), height = 96, axisWidth = 24, gap = 6,
+  series, labels, tip, color, lo, hi, fmt = (v) => String(Math.round(v)), height = 96, axisWidth = 24, gap = 6, blank,
 }: DeskLineChartProps) {
   const [w, setW] = useState(0);
   const [hov, setHov] = useState<number | null>(null);
@@ -76,6 +86,13 @@ export function DeskLineChart({
     run.push(`${px(i).toFixed(1)},${py(v).toFixed(1)}`);
   });
   if (run.length) runs.push(run.join(' '));
+  // A point with no neighbour that can speak — one measured month among
+  // Building ones — is a dot the size of the hover dot, or it would not show.
+  const lone = series.map((v, i) => (v != null && series[i - 1] == null && series[i + 1] == null ? i : -1)).filter((i) => i >= 0);
+  const silent = series.every((v) => v == null);
+  // Columns narrower than a label ("Today" under one of thirty days): the
+  // edge labels are anchored to the plot's edges so they stay inside it.
+  const tight = n > 1 && w > 0 && w / n < 44;
 
   const hv = hov != null && hov < n ? hov : null;
   const hvVal = hv != null ? series[hv] : null;
@@ -100,12 +117,20 @@ export function DeskLineChart({
           ) : null}
           {w ? (
             <Svg width={w} height={height} style={{ position: 'absolute', left: 0, top: 0, overflow: 'visible' }} pointerEvents="none">
-              {runs.map((pts, i) => (
-                pts.includes(' ')
-                  ? <Polyline key={i} points={pts} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" />
-                  : <Polyline key={i} points={`${pts} ${pts}`} fill="none" stroke={color} strokeWidth={3} strokeLinecap="round" />
+              {runs.filter((pts) => pts.includes(' ')).map((pts, i) => (
+                <Polyline key={i} points={pts} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" />
               ))}
             </Svg>
+          ) : null}
+          {w ? lone.map((i) => (
+            <View key={`dot${i}`} pointerEvents="none" style={{
+              position: 'absolute', left: px(i) - 4, top: py(series[i] as number) - 4, width: 8, height: 8, borderRadius: 4, backgroundColor: color,
+            }} />
+          )) : null}
+          {silent && blank ? (
+            <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 }}>
+              <Text style={{ fontFamily: fonts.body, fontSize: 12, color: desk.inkDim, textAlign: 'center', backgroundColor: desk.ground, paddingHorizontal: 8 }}>{blank}</Text>
+            </View>
           ) : null}
           <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, flexDirection: 'row' }}>
             {series.map((_, i) => (
@@ -138,10 +163,15 @@ export function DeskLineChart({
           ) : null}
         </View>
       </View>
+      {/* The last label ends at the plot's right edge and the first starts at
+          its left, so "Today" under a narrow last column stays inside the
+          plot instead of hanging past it. */}
       <View style={{ flexDirection: 'row', marginLeft: axisWidth + 8 }}>
         {labels.map((t, i) => (
           <View key={i} style={{ flex: 1, minWidth: 0, alignItems: 'center', overflow: 'visible' }}>
-            <Text style={[{ flexShrink: 0, fontFamily: fonts.body, fontSize: 10.5, color: desk.inkDim }, NOWRAP]}>{t}</Text>
+            <Text style={[{
+              flexShrink: 0, fontFamily: fonts.body, fontSize: 10.5, color: desk.inkDim,
+            }, NOWRAP, tight && i === n - 1 ? EDGE_RIGHT : null, tight && i === 0 ? EDGE_LEFT : null]}>{t}</Text>
           </View>
         ))}
       </View>

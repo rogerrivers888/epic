@@ -101,8 +101,10 @@ export function Overview(_props: { canManage?: boolean }) {
   if (!data) return <Muted>Loading…</Muted>;
 
   const needs = data.needs;
+  // A contradicted bulk setting opens Categories with the rows that need
+  // review first (`?sort=review`, which Categories reads).
   const openNeed = (k: OverviewData['needs'][number]['key']) =>
-    k === 'mapping' ? go('mapping', { view: 'needs' }) : go('categories');
+    k === 'mapping' ? go('mapping', { view: 'needs' }) : go('categories', { view: null, sort: 'review' });
 
   const health: { name: string; tile: Tile; on: () => void }[] = [
     { name: 'Verification', tile: data.health.verification, on: () => go('facts', { ftab: 'verification' }) },
@@ -135,7 +137,8 @@ export function Overview(_props: { canManage?: boolean }) {
           <View style={{ gap: 6 }}>
             {needs.map((x) => (
               <View key={x.key} style={{ flexDirection: 'row', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-                <Press effect="none" onPress={() => openNeed(x.key)} accessibilityRole="link">
+                {/* Shrinks to the frame and wraps: on a phone the line is longer than the screen. */}
+                <Press effect="none" onPress={() => openNeed(x.key)} accessibilityRole="link" style={{ flexShrink: 1, maxWidth: '100%' }}>
                   <Text style={{
                     fontFamily: fonts.heading, fontSize: 22, fontWeight: '800', letterSpacing: -0.44, color: desk.ink,
                     borderBottomWidth: 2, borderBottomColor: LIME, paddingBottom: 1,

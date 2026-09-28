@@ -15,7 +15,11 @@
  * menu is "Excluded by a person".
  *
  * Query: `view` (inepic | needs | notinepic | decided), `word` (the picker is
- * open for it), `kind` (Decided's filter), `q` (the picker's search).
+ * open for it), `kind` (Decided's filter), `q` (the picker's search),
+ * `filters` (the Filter menu's picks, comma-separated), `sort`
+ * (`<column>.<asc|desc>`, only when not the default), and the picker's `ptab`
+ * and `cat`. A move to a view or a word pushes; a filter, a sort or a tab
+ * replaces.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -25,10 +29,11 @@ import { Icon } from '../../components/Icon';
 import { Press } from '../../components/press';
 import { useViewport } from '../../hooks/useViewport';
 import { useRouter } from '../../router';
+import { paths } from '../../routes';
 import { LIME, ON_LIME, desk, fonts } from '../../theme';
 import { useDeskParam } from './Desk';
 import {
-  InfoTip, Muted, RED, Seg, T, TCell, THead, TRow, Table, ago, deskApi, n, saidOf, sortRows, tableWidth, tabular, useToast,
+  Muted, RED, Seg, T, TCell, THead, TRow, Table, ago, deskApi, n, saidOf, sortRows, tableWidth, tabular, useToast,
   type SortState, type TCol,
 } from './kit';
 import { WordPicker, type Catalogue } from './Picker';
@@ -47,8 +52,10 @@ type Word = {
   proposal?: Proposal; why?: string | null; decidedBy?: string | null; decidedAt?: string | null;
 };
 type MappingState = {
-  counts: { inEpic: number; needs: number; notInEpic: number; decided: number };
+  counts: { inEpic: number; needs: number; notInEpic: number; decided: number; everything?: number };
   inEpic: Word[]; needs: Word[]; notInEpic: Word[]; everOpenedSpeaks: boolean;
+  /** Kept as it is and never answered: in no view, openable from Decided. */
+  keptAsIs?: Word[];
 };
 type Decision = { id: string; word: string; kind: string; why: string | null; who: string; at: string; latest: boolean };
 type Decided = { rows: Decision[]; total: number };
@@ -79,7 +86,8 @@ const KINDS = ['Excluded', 'Repointed', 'Narrowed', 'Made a fact', 'Kept', 'Brou
 type SortKey = 'word' | 'brings' | 'opened' | 'points';
 const SORTS: { key: SortKey; name: string; dir: string; first: 'asc' | 'desc'; label: string }[] = [
   { key: 'brings', name: 'Places it brings in', dir: 'most first', first: 'desc', label: 'places it brings in' },
-  { key: 'opened', name: 'Ever opened', dir: 'fewest first', first: 'asc', label: 'ever opened' },
+  // README: other numbers default descending — most first.
+  { key: 'opened', name: 'Ever opened', dir: 'most first', first: 'desc', label: 'ever opened' },
   { key: 'word', name: 'Google’s word', dir: 'A to Z', first: 'asc', label: 'word' },
   { key: 'points', name: 'Where it points', dir: 'A to Z', first: 'asc', label: 'where it points' },
 ];
@@ -88,19 +96,32 @@ type Filter = { key: string; name: string };
 
 const web = Platform.OS === 'web';
 const SHADOW: ViewStyle = web ? ({ boxShadow: '0 12px 32px rgba(0,0,0,.5)' } as unknown as ViewStyle) : {};
+/** A flexible column: what is left of the page, held between two widths. */
+const flex = (avail: number, others: number, min: number, max: number) => Math.max(min, Math.min(max, avail - others));
+
 const pointsOf = (w: Word) => (w.targets[0]?.label ?? (w.answer === 'secondary' ? 'kept as a fact' : w.answer === 'notinepic' ? 'Not in Epic' : 'not answered'));
 
 // ---------------------------------------------------------------------------
 
 export function Mapping({ canManage = false }: { canManage?: boolean }) {
-  const narrow = useViewport().width < 900;
+  const vw = useViewport().width;
+  const narrow = vw < 900;
   const toast = useToast();
-  const { setQuery } = useRouter();
+  const { setQuery, navigate } = useRouter();
   const [viewRaw] = useDeskParam('view');
   const [word] = useDeskParam('word');
   const [kind, setKind] = useDeskParam('kind');
   const [q, setQ] = useDeskParam('q');
+  const [filtersRaw, setFiltersRaw] = useDeskParam('filters');
+  const [sortRaw, setSortRaw] = useDeskParam('sort');
+  const [ptab, setPtab] = useDeskParam('ptab');
+  const [pcat, setPcat] = useDeskParam('cat');
   const view = asView(viewRaw);
+  // What the page has to draw a flexible column in: the width the desk gives
+  // this screen, measured (the admin shell's sidebar is not ours to know), or
+  // the frame less the desk's padding until it has been.
+  const [boxW, setBoxW] = useState(0);
+  const avail = boxW || vw - (narrow ? 32 : 56);
 
   const [state, setState] = useState<MappingState | null>(null);
   const [catalogue, setCatalogue] = useState<Catalogue | null>(null);
@@ -108,8 +129,19 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const [sort, setSort] = useState<SortState<SortKey>>({ key: 'brings', dir: 'desc' });
-  const [filters, setFilters] = useState<Filter[]>([]);
+  // Sort and filters live in the address (owner rule: every page state has
+  // one); only what differs from the default is written down.
+  const sort: SortState<SortKey> = useMemo(() => {
+    const [k, d] = sortRaw.split('.');
+    const spec = SORTS.find((x) => x.key === k);
+    return spec ? { key: spec.key, dir: d === 'asc' ? 'asc' : d === 'desc' ? 'desc' : spec.first } : { key: 'brings', dir: 'desc' };
+  }, [sortRaw]);
+  const setSort = (next: SortState<SortKey>) => {
+    const v = next && !(next.key === 'brings' && next.dir === 'desc') ? `${next.key}.${next.dir}` : '';
+    setSortRaw(v);
+  };
+  const filterKeys = useMemo(() => filtersRaw.split(',').map((x) => x.trim()).filter(Boolean), [filtersRaw]);
+  const setFilterKeys = (keys: string[]) => setFiltersRaw(keys.join(','));
   const [menu, setMenu] = useState<'filter' | 'sort' | null>(null);
   const [filterQ, setFilterQ] = useState('');
   const [rowMenu, setRowMenu] = useState<{ word: string; confirming: boolean } | null>(null);
@@ -129,32 +161,37 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { if (view === 'decided') void loadDecided(); }, [view, loadDecided]);
 
+  // A move to a view or to a word's picker is a step, so it pushes.
   const go = (v: View_, extra: { word?: string | null } = {}) => {
     setMenu(null); setRowMenu(null);
-    setQuery({ view: v === 'inepic' ? null : v, word: extra.word ?? null, q: null, kind: null });
+    setQuery({ view: v === 'inepic' ? null : v, word: extra.word ?? null, q: null, kind: null, ptab: null, cat: null }, { replace: false });
   };
-  const openWord = (w: string | null) => setQuery({ view: null, word: w, q: null });
+  const openWord = (w: string | null) => setQuery({ view: null, word: w, q: null, ptab: null, cat: null }, { replace: false });
 
+  // A failure is said in the red error line, in one plain sentence — never
+  // in the lime toast, which is for what worked (audit, 28 Sep 2026).
+  const NOT_YOURS = 'Only someone who manages the library can change this.';
   /** Write, reload, and toast with an Undo that names the change. */
   const write = async (call: () => Promise<Written>, said: string): Promise<boolean> => {
-    if (!canManage) { toast('Only someone who manages the library can change this.'); return false; }
+    if (!canManage) { setError(NOT_YOURS); return false; }
     if (busy) return false;
     setBusy(true);
     try {
       const out = await call();
+      setError(null);
       await load();
       if (view === 'decided') await loadDecided();
       const change = out.change?.id;
       toast(said, change ? () => { void undoChange(change); } : null);
       return true;
-    } catch (err) { toast(saidOf(err)); return false; } finally { setBusy(false); }
+    } catch (err) { setError(saidOf(err)); return false; } finally { setBusy(false); }
   };
   const undoChange = async (id: string) => {
-    try { await deskApi.post(`/undo/${encodeURIComponent(id)}`); await load(); if (view === 'decided') await loadDecided(); toast('Undone'); } catch (err) { toast(saidOf(err)); }
+    try { await deskApi.post(`/undo/${encodeURIComponent(id)}`); setError(null); await load(); if (view === 'decided') await loadDecided(); toast('Undone'); } catch (err) { setError(saidOf(err)); }
   };
   const undoDecision = async (id: string) => {
-    if (!canManage) { toast('Only someone who manages the library can change this.'); return; }
-    try { await deskApi.post(`/mapping/decisions/${encodeURIComponent(id)}/undo`); await Promise.all([load(), loadDecided()]); toast('Undone'); } catch (err) { toast(saidOf(err)); }
+    if (!canManage) { setError(NOT_YOURS); return; }
+    try { await deskApi.post(`/mapping/decisions/${encodeURIComponent(id)}/undo`); setError(null); await Promise.all([load(), loadDecided()]); toast('Undone'); } catch (err) { setError(saidOf(err)); }
   };
 
   const enc = encodeURIComponent;
@@ -202,7 +239,7 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
     );
   };
   const create = async (w: string, label: string, category: string) => {
-    if (!canManage) { toast('Only someone who manages the library can change this.'); return; }
+    if (!canManage) { setError(NOT_YOURS); return; }
     try {
       const made = await deskApi.post<{ key: string; label: string }>('/subcategories', { label, category, wouldBrowse: true });
       const cur = find(w);
@@ -213,7 +250,7 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
         () => deskApi.put<Written>(`/mapping/${enc(w)}/targets`, { subs: next, primary: primary ?? made.key, why: `Added ${made.label} (new subcategory)` }),
         `${made.label} made · ${w} → ${made.label}`,
       );
-    } catch (err) { toast(saidOf(err)); }
+    } catch (err) { setError(saidOf(err)); }
   };
 
   // --- Needs a decision ------------------------------------------------------
@@ -229,14 +266,8 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
   const tableWords = useMemo(() => {
     if (!state) return [];
     let list = view === 'notinepic' ? state.notInEpic : state.inEpic;
-    // A word opened from elsewhere (Needs a decision, Brought back) is drawn
-    // at the top of In Epic with its picker open, as the prototype does.
-    if (view === 'inepic' && word && !list.some((w) => w.word === word)) {
-      const w = [...state.needs, ...state.inEpic].find((x) => x.word === word);
-      if (w) list = [w, ...list];
-    }
-    for (const f of filters) {
-      const [k, v] = [f.key.slice(0, f.key.indexOf(':')), f.key.slice(f.key.indexOf(':') + 1)];
+    for (const key of filterKeys) {
+      const [k, v] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)];
       if (k === 'state') {
         if (v === 'mapped') list = list.filter((w) => w.targets.length > 0);
         else if (v === 'secondary') list = list.filter((w) => w.answer === 'secondary');
@@ -248,13 +279,16 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
       if (k === 'fact') list = list.filter((w) => w.facts.some((x) => x.key === v));
     }
     const sorted = sortRows(list, sort, (w, key) => (key === 'word' ? w.word : key === 'brings' ? w.brings : key === 'opened' ? w.opened : pointsOf(w)));
-    // The opened word stays at the top whatever the sort.
-    if (view === 'inepic' && word) {
-      const i = sorted.findIndex((w) => w.word === word);
-      if (i > 0) sorted.unshift(sorted.splice(i, 1)[0]);
+    // A word opened from elsewhere (Needs a decision, Brought back, Decided)
+    // that is not in this list is drawn at the top of In Epic with its picker
+    // open, as the prototype does; a word already listed stays where the sort
+    // puts it (audit, 28 Sep 2026).
+    if (view === 'inepic' && word && !sorted.some((w) => w.word === word)) {
+      const w = [...state.needs, ...state.inEpic, ...(state.keptAsIs ?? [])].find((x) => x.word === word);
+      if (w) return [w, ...sorted];
     }
     return sorted;
-  }, [state, view, word, filters, sort]);
+  }, [state, view, word, filterKeys, sort]);
 
   const filterOptions = useMemo(() => {
     if (!state || !catalogue) return [];
@@ -270,19 +304,26 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
       ...catalogue.subcategories.map((s) => ({ key: `sub:${s.key}`, name: s.label, kind: 'SUBCATEGORY', note: `${count(words.filter((w) => w.targets.some((t) => t.key === s.key)).length, 'word points', 'words point')} here` })),
       ...catalogue.facts.filter((f) => f.kind === 'yesno').map((f) => ({ key: `fact:${f.key}`, name: f.label, kind: 'FACT', note: `${count(words.filter((w) => w.facts.some((x) => x.key === f.key)).length, 'word carries', 'words carry')} it` })),
     ];
+    return opts;
+  }, [state, catalogue, view]);
+  const shownOptions = useMemo(() => {
     const fq = filterQ.trim().toLowerCase();
-    return opts.filter((o) => !fq || o.name.toLowerCase().includes(fq) || o.kind.toLowerCase().includes(fq)).slice(0, 60);
-  }, [state, catalogue, view, filterQ]);
+    return filterOptions.filter((o) => !fq || o.name.toLowerCase().includes(fq) || o.kind.toLowerCase().includes(fq)).slice(0, 60);
+  }, [filterOptions, filterQ]);
+  // A filter in the address is named from the catalogue; a key nothing names
+  // any more (a drawer retired since the link was copied) is dropped.
+  const filters: Filter[] = filterKeys.map((k) => ({ key: k, name: filterOptions.find((o) => o.key === k)?.name ?? '' })).filter((f) => f.name);
 
   if (error && !state) return <Muted>{error}</Muted>;
   if (!state || !catalogue) return <Muted>Loading…</Muted>;
 
   const sortSpec = SORTS.find((s) => s.key === sort?.key) ?? SORTS[0];
-  const shownCount = view === 'notinepic' ? state.notInEpic.length : state.inEpic.length;
+  // Every word not excluded, whatever view it is in (the prototype's count).
+  const shownCount = state.counts.everything ?? state.inEpic.length + state.needs.length;
 
   // ------------------------------------------------------------------------
   return (
-    <View style={{ gap: 18 }}>
+    <View style={{ gap: 18 }} onLayout={(e) => setBoxW(Math.round(e.nativeEvent.layout.width))}>
       {/* Title and the four counts, each a door to its view. */}
       <View style={{
         flexDirection: narrow ? 'column' : 'row', alignItems: narrow ? 'flex-start' : 'flex-end', justifyContent: 'space-between',
@@ -290,7 +331,7 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
       }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexShrink: 1 }}>
           <Text style={{ fontFamily: fonts.heading, fontWeight: '800', fontSize: 31, letterSpacing: -1.085, lineHeight: 32, color: desk.ink, flexShrink: 1 }}>Where each of Google’s words points</Text>
-          <InfoTip text="Google files every place under its own words. Each word points at the subcategories its places land in — one primary, any others as well — and may carry facts. A word that is not a day out is excluded, and its places leave Epic unless another word keeps them." />
+          <HowTip onPress={() => navigate(paths.how('mapping'))} text="Google files every place under its own words. Each word points at the subcategories its places land in — one primary, any others as well — and may carry facts. A word that is not a day out is excluded, and its places leave Epic unless another word keeps them." />
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: narrow ? 18 : 30, flexWrap: 'wrap' }}>
           {VIEWS.map((v) => {
@@ -323,10 +364,10 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
         <ToolButton icon="sort" label={`Sorted by ${sortSpec.label} ${sort?.dir === 'asc' ? '↑' : '↓'}`} onPress={() => setMenu(menu === 'sort' ? null : 'sort')} />
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 9, flex: 1, minWidth: 0, paddingTop: 2 }}>
           {filters.map((f) => (
-            <Press key={f.key} effect="none" onPress={() => setFilters(filters.filter((x) => x.key !== f.key))}>
+            <Press key={f.key} effect="none" onPress={() => setFilterKeys(filterKeys.filter((x) => x !== f.key))} accessibilityLabel={`Remove ${f.name}`}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: LIME, paddingVertical: 5, paddingHorizontal: 11 }}>
                 <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: ON_LIME }}>{f.name}</Text>
-                <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: ON_LIME, opacity: 0.55 }}>×</Text>
+                <View style={{ opacity: 0.55 }}><Icon name="close" size={12} color={ON_LIME} /></View>
               </View>
             </Press>
           ))}
@@ -367,10 +408,10 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
             <Press effect="none" onPress={() => setMenu(null)}><Text style={{ fontFamily: fonts.body, fontSize: 12, color: desk.inkDim }}>close</Text></Press>
           </View>
           <View style={{ maxHeight: 330, overflow: 'scroll' as ViewStyle['overflow'], paddingVertical: 6 }}>
-            {filterOptions.map((o) => {
-              const on = filters.some((f) => f.key === o.key);
+            {shownOptions.map((o) => {
+              const on = filterKeys.includes(o.key);
               return (
-                <Press key={o.key} effect="none" onPress={() => setFilters(on ? filters.filter((f) => f.key !== o.key) : [...filters, { key: o.key, name: o.name }])}>
+                <Press key={o.key} effect="none" onPress={() => setFilterKeys(on ? filterKeys.filter((k) => k !== o.key) : [...filterKeys, o.key])}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 7, paddingHorizontal: 14, flexWrap: narrow ? 'wrap' : 'nowrap' }}>
                     <View style={{ width: 14, alignItems: 'center' }}><Icon name={on ? 'check' : 'add'} size={13} color={on ? LIME : desk.ink} /></View>
                     <Text style={{ width: narrow ? 180 : 280, fontFamily: fonts.body, fontSize: 13, fontWeight: on ? '700' : '500', color: on ? LIME : desk.ink }}>{o.name}</Text>
@@ -387,11 +428,12 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
       {error ? <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: RED }}>{error}</Text> : null}
 
       {view === 'needs' ? (
-        <NeedsView state={state} narrow={narrow} onDecide={decide} onChoose={(w) => openWord(w)} onExclude={(w) => void exclude(w)} />
+        <NeedsView state={state} avail={avail} onDecide={decide} onChoose={(w) => openWord(w)} onExclude={(w) => void exclude(w)} />
       ) : null}
 
       {view === 'decided' ? (
         <DecidedView
+          avail={avail}
           decided={decided}
           kind={kind}
           onKind={(k) => setKind(k ?? '', { replace: true })}
@@ -424,6 +466,10 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
               facts={w.facts.map((f) => f.key)}
               query={q}
               onQuery={(v) => setQ(v, { replace: true })}
+              tab={ptab === 'fact' ? 'fact' : 'cat'}
+              onTab={(t) => setPtab(t === 'cat' ? '' : t)}
+              cat={pcat || null}
+              onCat={(c) => setPcat(c)}
               onToggleSub={(s) => toggleSub(w.word, s)}
               onMakePrimary={(s) => makePrimary(w.word, s)}
               onToggleFact={(f) => toggleFact(w.word, f)}
@@ -453,6 +499,36 @@ function ToolButton({ icon, label, lit, onPress }: { icon: 'filters' | 'sort'; l
   );
 }
 
+/**
+ * The title's (i): its words on hover, and a click opens How it works at
+ * Google's words (prototype: `how.mapping`).
+ */
+function HowTip({ text, onPress }: { text: string; onPress: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <View style={{ position: 'relative', zIndex: open ? 40 : 1 }}>
+      <Press
+        effect="none"
+        onHoverIn={web ? () => setOpen(true) : undefined}
+        onHoverOut={web ? () => setOpen(false) : undefined}
+        onPress={onPress}
+        accessibilityRole="link"
+        accessibilityLabel="How it works"
+      >
+        <View style={{ opacity: 0.75 }}><Icon name="info" size={17} color={desk.inkDim} /></View>
+      </Press>
+      {open ? (
+        <View style={[{
+          position: 'absolute', top: 25, left: -10, width: 360, zIndex: 40, backgroundColor: desk.picked,
+          borderWidth: 1, borderColor: desk.ruleStrong, paddingVertical: 11, paddingHorizontal: 14,
+        }, SHADOW]}>
+          <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '500', lineHeight: 19.4, color: desk.inkMuted }}>{text}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // In Epic and Not in Epic: one table
 
@@ -469,7 +545,7 @@ function WordTable({ words, out, narrow, speaks, sort, onSort, open, onToggle, r
       { key: 'word', name: 'Word', width: 250, first: 'asc' },
       { key: 'brings', name: 'Brings in', width: 120, first: 'desc' },
       { key: 'why', name: 'Why it’s out', width: 240, sortable: false },
-      { key: 'who', name: 'Decided by', width: 150, sortable: false },
+      { key: 'who', name: 'Decided by', width: 110, sortable: false },
       { key: 'when', name: 'When', width: 110, sortable: false },
       { key: 'back', name: '', width: 130, sortable: false },
     ]
@@ -477,7 +553,7 @@ function WordTable({ words, out, narrow, speaks, sort, onSort, open, onToggle, r
       { key: 'word', name: 'Google’s word', width: 250, first: 'asc' },
       { key: 'brings', name: 'Brings in', width: 120, first: 'desc' },
       {
-        key: 'opened', name: 'Ever opened', width: 120, first: 'asc',
+        key: 'opened', name: 'Ever opened', width: 120, first: 'desc',
         tip: speaks ? undefined : 'Fewer than two households have ever opened a place, so this cannot say anything yet.',
       },
       { key: 'points', name: 'Points at', width: 440, first: 'asc' },
@@ -485,94 +561,107 @@ function WordTable({ words, out, narrow, speaks, sort, onSort, open, onToggle, r
     ];
   const width = tableWidth(cols);
   if (!words.length) return <Muted>{out ? 'No word is out of Epic.' : 'No word matches.'}</Muted>;
+  // On a phone the table scrolls sideways in its own box; the open picker is
+  // drawn below its row, outside that box and the width of the frame, so the
+  // table is cut in two round it (audit, 28 Sep 2026).
+  const at = narrow && !out ? words.findIndex((w) => w.word === open) : -1;
+  const parts = at >= 0 ? [words.slice(0, at + 1), words.slice(at + 1)] : [words];
+  const rowOf = (w: Word) => {
+    const isOpen = open === w.word && !out;
+    const menuOpen = rowMenu?.word === w.word;
+    return (
+      <View key={w.word} style={{ borderBottomWidth: 1, borderBottomColor: desk.rule, backgroundColor: isOpen ? desk.lifted : 'transparent', zIndex: menuOpen ? 30 : 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18, paddingVertical: 11, paddingHorizontal: 8 }}>
+          <TCell width={250}><T weight="600">{w.word}</T></TCell>
+          <TCell width={120}><T num weight={w.brings > 100 ? '800' : '400'}>{n(w.brings)}</T></TCell>
+          {out ? (
+            <>
+              <TCell width={240}><T size={12.5} tone={desk.inkMuted}>{w.why ?? '—'}</T></TCell>
+              <TCell width={110}><T size={12.5} tone={desk.inkMuted}>{w.decidedBy ?? '—'}</T></TCell>
+              <TCell width={110}><T size={12.5} tone={desk.inkDim}>{ago(w.decidedAt)}</T></TCell>
+              <TCell width={130}>
+                <Press effect="none" onPress={() => onBringBack(w.word)}>
+                  <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: LIME }}>Bring it back</Text>
+                </Press>
+              </TCell>
+            </>
+          ) : (
+            <>
+              <TCell width={120}>
+                {/* Null is "cannot speak": a dash, never a nought. */}
+                <T num tone={w.opened === 0 ? RED : desk.inkMuted}>{w.opened == null ? '—' : w.opened === 0 ? 'never' : n(w.opened)}</T>
+              </TCell>
+              <TCell width={440}>
+                <Press effect="none" onPress={() => onToggle(w.word)}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center', flexShrink: 1 }}>
+                      {!w.targets.length && !w.facts.length ? (
+                        <Text style={{ fontFamily: fonts.body, fontSize: 13.5, fontWeight: '600', color: w.answer === 'secondary' ? desk.inkMuted : LIME }}>{pointsOf(w)}</Text>
+                      ) : null}
+                      {w.targets.map((t, i) => (
+                        <Chip key={t.key} primary={i === 0} name={t.label + (i === 0 && w.targets.length > 1 ? ' (primary)' : '')} />
+                      ))}
+                      {w.facts.map((f) => <Chip key={f.key} fact name={f.label} />)}
+                    </View>
+                    <Icon name={isOpen ? 'collapse' : 'expand'} size={13} color={desk.inkDim} />
+                  </View>
+                </Press>
+              </TCell>
+              <TCell width={40} style={{ alignItems: 'flex-end', position: 'relative' }}>
+                <Press effect="none" onPress={() => onRowMenu(menuOpen ? null : { word: w.word, confirming: false })} accessibilityLabel={`More for ${w.word}`}>
+                  <View style={{ paddingHorizontal: 6 }}><Icon name="menu" size={16} color={desk.inkDim} /></View>
+                </Press>
+                {menuOpen ? (
+                  <View style={[{
+                    position: 'absolute', top: 24, right: 0, width: 300, zIndex: 30, backgroundColor: desk.picked,
+                    borderWidth: 1, borderColor: desk.ruleStrong,
+                  }, SHADOW]}>
+                    {rowMenu?.confirming ? (
+                      <View style={{ paddingVertical: 12, paddingHorizontal: 14, gap: 10 }}>
+                        <Text style={{ fontFamily: fonts.body, fontSize: 13, color: desk.ink, lineHeight: 19.5 }}>
+                          Exclude {w.word}? Its {n(w.brings)} places will leave Epic.
+                        </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+                          <Press effect="none" onPress={() => onExclude(w.word)}>
+                            <Text style={{ backgroundColor: RED, color: ON_LIME, paddingVertical: 7, paddingHorizontal: 12, fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700' }}>Exclude</Text>
+                          </Press>
+                          <Press effect="none" onPress={() => onRowMenu(null)}>
+                            <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>Cancel</Text>
+                          </Press>
+                        </View>
+                      </View>
+                    ) : (
+                      <Press effect="none" onPress={() => onRowMenu({ word: w.word, confirming: true })}>
+                        <Text style={{ paddingVertical: 10, paddingHorizontal: 14, fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: desk.ink }}>Exclude this word</Text>
+                      </Press>
+                    )}
+                  </View>
+                ) : null}
+              </TCell>
+            </>
+          )}
+        </View>
+        {isOpen && !narrow ? (
+          <View style={{ paddingTop: 4, paddingBottom: 20, paddingRight: 8, paddingLeft: 268 }}>
+            {picker(w)}
+          </View>
+        ) : null}
+      </View>
+    );
+  };
+  const openWord = at >= 0 ? words[at] : null;
   return (
     <View style={{ zIndex: 1 }}>
       <Table width={width}>
         <THead cols={cols} sort={sort as SortState<string>} onSort={(s) => onSort(s as SortState<SortKey>)} />
-        {words.map((w) => {
-          const isOpen = open === w.word && !out;
-          const menuOpen = rowMenu?.word === w.word;
-          return (
-            <View key={w.word} style={{ borderBottomWidth: 1, borderBottomColor: desk.rule, backgroundColor: isOpen ? desk.lifted : 'transparent', zIndex: menuOpen ? 30 : 1 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18, paddingVertical: 11, paddingHorizontal: 8 }}>
-                <TCell width={250}><T weight="600">{w.word}</T></TCell>
-                <TCell width={120}><T num weight={w.brings > 100 ? '800' : '400'}>{n(w.brings)}</T></TCell>
-                {out ? (
-                  <>
-                    <TCell width={240}><T size={12.5} tone={desk.inkMuted}>{w.why ?? '—'}</T></TCell>
-                    <TCell width={150}><T size={12.5} tone={desk.inkMuted}>{w.decidedBy ?? '—'}</T></TCell>
-                    <TCell width={110}><T size={12.5} tone={desk.inkDim}>{ago(w.decidedAt)}</T></TCell>
-                    <TCell width={130}>
-                      <Press effect="none" onPress={() => onBringBack(w.word)}>
-                        <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: LIME }}>Bring it back</Text>
-                      </Press>
-                    </TCell>
-                  </>
-                ) : (
-                  <>
-                    <TCell width={120}>
-                      {/* Null is "cannot speak": a dash, never a nought. */}
-                      <T num tone={w.opened === 0 ? RED : desk.inkMuted}>{w.opened == null ? '—' : w.opened === 0 ? 'never' : n(w.opened)}</T>
-                    </TCell>
-                    <TCell width={440}>
-                      <Press effect="none" onPress={() => onToggle(w.word)}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
-                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center', flexShrink: 1 }}>
-                            {!w.targets.length && !w.facts.length ? (
-                              <Text style={{ fontFamily: fonts.body, fontSize: 13.5, fontWeight: '600', color: w.answer === 'secondary' ? desk.inkMuted : LIME }}>{pointsOf(w)}</Text>
-                            ) : null}
-                            {w.targets.map((t, i) => (
-                              <Chip key={t.key} primary={i === 0} name={t.label + (i === 0 && w.targets.length > 1 ? ' (primary)' : '')} />
-                            ))}
-                            {w.facts.map((f) => <Chip key={f.key} fact name={f.label} />)}
-                          </View>
-                          <Icon name={isOpen ? 'collapse' : 'expand'} size={13} color={desk.inkDim} />
-                        </View>
-                      </Press>
-                    </TCell>
-                    <TCell width={40} style={{ alignItems: 'flex-end', position: 'relative' }}>
-                      <Press effect="none" onPress={() => onRowMenu(menuOpen ? null : { word: w.word, confirming: false })} accessibilityLabel={`More for ${w.word}`}>
-                        <View style={{ paddingHorizontal: 6 }}><Icon name="menu" size={16} color={desk.inkDim} /></View>
-                      </Press>
-                      {menuOpen ? (
-                        <View style={[{
-                          position: 'absolute', top: 24, right: 0, width: 300, zIndex: 30, backgroundColor: desk.picked,
-                          borderWidth: 1, borderColor: desk.ruleStrong,
-                        }, SHADOW]}>
-                          {rowMenu?.confirming ? (
-                            <View style={{ paddingVertical: 12, paddingHorizontal: 14, gap: 10 }}>
-                              <Text style={{ fontFamily: fonts.body, fontSize: 13, color: desk.ink, lineHeight: 19.5 }}>
-                                Exclude {w.word}? Its {n(w.brings)} places will leave Epic.
-                              </Text>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-                                <Press effect="none" onPress={() => onExclude(w.word)}>
-                                  <Text style={{ backgroundColor: RED, color: ON_LIME, paddingVertical: 7, paddingHorizontal: 12, fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700' }}>Exclude</Text>
-                                </Press>
-                                <Press effect="none" onPress={() => onRowMenu(null)}>
-                                  <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>Cancel</Text>
-                                </Press>
-                              </View>
-                            </View>
-                          ) : (
-                            <Press effect="none" onPress={() => onRowMenu({ word: w.word, confirming: true })}>
-                              <Text style={{ paddingVertical: 10, paddingHorizontal: 14, fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: desk.ink }}>Exclude this word</Text>
-                            </Press>
-                          )}
-                        </View>
-                      ) : null}
-                    </TCell>
-                  </>
-                )}
-              </View>
-              {isOpen ? (
-                <View style={{ paddingTop: 4, paddingBottom: 20, paddingRight: 8, paddingLeft: narrow ? 8 : 268 }}>
-                  {picker(w)}
-                </View>
-              ) : null}
-            </View>
-          );
-        })}
+        {parts[0].map(rowOf)}
       </Table>
+      {openWord ? (
+        <View style={{ paddingTop: 10, paddingBottom: 20, backgroundColor: desk.lifted, borderBottomWidth: 1, borderBottomColor: desk.rule }}>
+          {picker(openWord)}
+        </View>
+      ) : null}
+      {parts[1]?.length ? <Table width={width}>{parts[1].map(rowOf)}</Table> : null}
       <Text style={{ paddingTop: 4, fontFamily: fonts.body, fontSize: 12, color: desk.inkDim }}>click a column header to sort</Text>
     </View>
   );
@@ -595,16 +684,19 @@ function Chip({ name, primary, fact }: { name: string; primary?: boolean; fact?:
 // ---------------------------------------------------------------------------
 // Needs a decision
 
-function NeedsView({ state, narrow, onDecide, onChoose, onExclude }: {
-  state: MappingState; narrow: boolean;
+function NeedsView({ state, avail, onDecide, onChoose, onExclude }: {
+  state: MappingState; avail: number;
   onDecide: (w: Word, action: 'apply' | 'keep', group: string) => void;
   onChoose: (w: string) => void; onExclude: (w: string) => void;
 }) {
   if (!state.needs.length) return <Muted>Nothing needs a decision.</Muted>;
+  // Change to is the one flexible column: 260 to 560, as the prototype's
+  // grid (`minmax(260px, 560px)`).
+  const toW = flex(avail, 180 + 200 + 130 + 180 + 24 * 4 + 16, 260, 560);
   const cols: TCol[] = [
     { key: 'word', name: 'Google’s word', width: 180 },
     { key: 'from', name: 'Points at now', width: 200 },
-    { key: 'to', name: 'Change to', width: narrow ? 300 : 380 },
+    { key: 'to', name: 'Change to', width: toW },
     { key: 'affected', name: 'Places affected', width: 130 },
     { key: 'act', name: '', width: 180 },
   ];
@@ -631,7 +723,7 @@ function NeedsView({ state, narrow, onDecide, onChoose, onExclude }: {
                       <Press effect="none" onPress={() => onChoose(w.word)}><T weight="600">{w.word}</T></Press>
                     </TCell>
                     <TCell width={200}><T size={13} tone={desk.inkMuted}>{p.pointsAtNow ?? 'not answered'}</T></TCell>
-                    <TCell width={narrow ? 300 : 380}><T size={13}>{none ? 'No suggestion — choose where it goes' : p.changeTo ?? '—'}</T></TCell>
+                    <TCell width={toW}><T size={13}>{none ? 'No suggestion — choose where it goes' : p.changeTo ?? '—'}</T></TCell>
                     <TCell width={130}><T num>{n(none ? w.brings : p.affected)}</T></TCell>
                     <TCell width={180}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -674,15 +766,17 @@ function ActButton({ label, onPress, lime, quiet }: { label: string; onPress: ()
 // ---------------------------------------------------------------------------
 // Decided
 
-function DecidedView({ decided, kind, onKind, onOpen, onUndo }: {
-  decided: Decided | null; kind: string; onKind: (k: string | null) => void;
+function DecidedView({ avail, decided, kind, onKind, onOpen, onUndo }: {
+  avail: number; decided: Decided | null; kind: string; onKind: (k: string | null) => void;
   onOpen: (d: Decision) => void; onUndo: (d: Decision) => void;
 }) {
+  // Why is the one flexible column: 240 to 420, as the prototype's grid.
+  const whyW = flex(avail, 200 + 130 + 120 + 120 + 80 + 24 * 5 + 16, 240, 420);
   const cols: TCol[] = [
     { key: 'word', name: 'Google’s word', width: 200 },
     { key: 'kind', name: 'Decision', width: 130 },
-    { key: 'why', name: 'Why', width: 360 },
-    { key: 'who', name: 'Decided by', width: 150 },
+    { key: 'why', name: 'Why', width: whyW },
+    { key: 'who', name: 'Decided by', width: 120 },
     { key: 'when', name: 'When', width: 120 },
     { key: 'undo', name: '', width: 80 },
   ];
@@ -708,8 +802,8 @@ function DecidedView({ decided, kind, onKind, onOpen, onUndo }: {
             <TRow key={d.id} gap={24}>
               <TCell width={200}><Press effect="none" onPress={() => onOpen(d)}><T weight="600">{d.word}</T></Press></TCell>
               <TCell width={130}><T size={13}>{d.kind}</T></TCell>
-              <TCell width={360}><T size={12.5} tone={desk.inkMuted}>{d.why ?? '—'}</T></TCell>
-              <TCell width={150}><T size={12.5} tone={desk.inkMuted}>{d.who}</T></TCell>
+              <TCell width={whyW}><T size={12.5} tone={desk.inkMuted}>{d.why ?? '—'}</T></TCell>
+              <TCell width={120}><T size={12.5} tone={desk.inkMuted}>{d.who}</T></TCell>
               <TCell width={120}><T size={12.5} tone={desk.inkDim}>{ago(d.at)}</T></TCell>
               <TCell width={80}>
                 {/* Only the newest live decision on a word can be taken back. */}

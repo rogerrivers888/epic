@@ -5,7 +5,7 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Text, View } from 'react-native';
+import { Platform, Text, View } from 'react-native';
 
 import { Icon } from '../../../components/Icon';
 import { Press } from '../../../components/press';
@@ -97,31 +97,48 @@ const TABS: { key: FTab; name: string }[] = [
   { key: 'excluded', name: 'Excluded facts' },
 ];
 
-/** The segmented strip over the four screens, and How it works (i) at its end. */
+/**
+ * The segmented strip over the four screens, and How it works (i) at its end.
+ * Each segment carries its own rule and overlaps its neighbour by a pixel,
+ * so on a phone the strip wraps into a clean grid — no box around a ragged
+ * second row, no divider left hanging at a row's start (fix pass, 28 Sep).
+ */
 export function FactTabs({ on }: { on: FTab }) {
   const go = useDeskGo();
   const { navigate } = useRouter();
+  const cell = { borderWidth: 1, borderColor: desk.ruleStrong, marginLeft: -1, marginTop: -1 } as const;
   return (
-    <View style={{ flexDirection: 'row', borderWidth: 1, borderColor: desk.ruleStrong, alignSelf: 'flex-start', flexWrap: 'wrap' }}>
-      {TABS.map((t, i) => {
+    <View style={{ flexDirection: 'row', alignSelf: 'flex-start', flexWrap: 'wrap', maxWidth: '100%', paddingLeft: 1, paddingTop: 1 }}>
+      {TABS.map((t) => {
         const lit = t.key === on;
         return (
           <Press key={t.key} effect="none" onPress={() => go('facts', { ftab: t.key === 'all' ? null : t.key })}>
             <Text style={{
-              paddingVertical: 9, paddingHorizontal: 22, fontFamily: fonts.body, fontSize: 13, fontWeight: lit ? '700' : '600',
+              ...cell, paddingVertical: 9, paddingHorizontal: 22, fontFamily: fonts.body, fontSize: 13, fontWeight: lit ? '700' : '600',
               backgroundColor: lit ? LIME : 'transparent', color: lit ? ON_LIME : desk.inkDim,
-              borderLeftWidth: i ? 1 : 0, borderLeftColor: desk.ruleStrong,
             }}>{t.name}</Text>
           </Press>
         );
       })}
       <Press effect="none" onPress={() => navigate(paths.how('facts'))} accessibilityLabel="How it works">
-        <View style={{ height: '100%', justifyContent: 'center', paddingHorizontal: 12, borderLeftWidth: 1, borderLeftColor: desk.ruleStrong, minHeight: 36 }}>
+        <View style={{ ...cell, justifyContent: 'center', paddingHorizontal: 12, flexGrow: 1, minHeight: 36 }}>
           <Icon name="info" size={15} color={desk.inkDim} />
         </View>
       </Press>
     </View>
   );
+}
+
+/**
+ * A hover title on the web (the browser's own tooltip), for a cell cut to
+ * one line. React Native Web drops `title`, so it is set on the element.
+ */
+export function HoverTitle({ title, children }: { title: string; children: React.ReactNode }) {
+  const set = useCallback((el: unknown) => {
+    const node = el as { setAttribute?: (k: string, v: string) => void } | null;
+    if (Platform.OS === 'web' && node?.setAttribute) node.setAttribute('title', title);
+  }, [title]);
+  return <View ref={set as never}>{children}</View>;
 }
 
 // ---------------------------------------------------------------------------

@@ -44,7 +44,7 @@ test('All facts: an ignored fact names where it is ignored and has no count; one
   const out = await facts.allFacts({});
   const sauna = out.rows.find((r) => r.fact === 'dfx-sauna');
   assert.equal(sauna.subcategories, '2', 'active and gathering both look for it');
-  assert.equal(sauna.places, 3);
+  assert.equal(sauna.places, 2, 'only where it is Active: the soft play place is still gathering evidence');
   assert.equal(sauna.statusText, '', 'Active is blank');
   const wave = out.rows.find((r) => r.fact === 'dfx-wave');
   assert.equal(wave.status, 'ignored');
@@ -78,9 +78,9 @@ test('a standard fact shows its definition bands', async () => {
 test('the places drill-down: found at counts every place, the filters narrow the rows, and Edit knows the answer', async () => {
   await seed();
   const all = await facts.factPlaces('dfx-sauna', {});
-  assert.equal(all.foundAt, 3);
-  assert.equal(all.total, 3);
-  assert.deepEqual(all.options.map((o) => o.key), ['yes', 'no']);
+  assert.equal(all.foundAt, 2, 'where it is looked for (Active), not every place that has it');
+  assert.equal(all.total, 2);
+  assert.deepEqual(all.options.map((o) => o.key), ['yes', 'no', 'dont_know']);
   assert.ok(all.rows.every((r) => r.current === 'yes'));
   const one = await facts.factPlaces('dfx-sauna', { sub: 'dfx-water' });
   assert.equal(one.foundAt, 2);
@@ -89,7 +89,7 @@ test('the places drill-down: found at counts every place, the filters narrow the
   assert.equal(one.lookedFor, 2, 'looked for at the places filed where it is active');
   const none = await facts.factPlaces('dfx-sauna', { q: 'no such place' });
   assert.equal(none.total, 0);
-  assert.equal(none.foundAt, 3, 'a search narrows the rows, not what was found');
+  assert.equal(none.foundAt, 2, 'a search narrows the rows, not what was found');
 });
 
 test('verification drill-downs: a source narrows them, and the words are the screen’s', async () => {

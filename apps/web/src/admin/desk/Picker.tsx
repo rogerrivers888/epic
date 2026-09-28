@@ -138,6 +138,11 @@ export type WordPickerProps = {
   facts: string[];
   query: string;
   onQuery: (q: string) => void;
+  /** The tab and the category on show: part of the address (`ptab`, `cat`). */
+  tab?: 'cat' | 'fact';
+  onTab?: (t: 'cat' | 'fact') => void;
+  cat?: string | null;
+  onCat?: (c: string) => void;
   onToggleSub: (key: string) => void;
   onMakePrimary: (key: string) => void;
   onToggleFact: (key: string) => void;
@@ -151,9 +156,16 @@ const humanise = (w: string) => w.replace(/_/g, ' ').replace(/^./, (c) => c.toUp
 export function WordPicker(p: WordPickerProps) {
   const vw = useViewport().width;
   const narrow = vw < 900;
-  const [tab, setTab] = useState<'cat' | 'fact'>('cat');
+  const [tabHere, setTabHere] = useState<'cat' | 'fact'>('cat');
+  const tab = p.tab ?? tabHere;
+  const setTab = (t: 'cat' | 'fact') => { setTabHere(t); p.onTab?.(t); };
+  // It opens on the category of the word's primary (audit decision, 28 Sep
+  // 2026: more useful than always opening on the first), or where the address
+  // says.
   const primaryCat = p.catalogue.subcategories.find((s) => s.key === p.primary)?.category ?? null;
-  const [cat, setCat] = useState<string | null>(primaryCat ?? p.catalogue.categories[0]?.key ?? null);
+  const [catHere, setCatHere] = useState<string | null>(primaryCat ?? p.catalogue.categories[0]?.key ?? null);
+  const cat = p.cat && p.catalogue.categories.some((c) => c.key === p.cat) ? p.cat : catHere;
+  const setCat = (c: string) => { setCatHere(c); p.onCat?.(c); };
   const [hover, setHover] = useState<string | null>(null);
   const [adopting, setAdopting] = useState(false);
   const [newName, setNewName] = useState(humanise(p.word));
@@ -176,9 +188,9 @@ export function WordPicker(p: WordPickerProps) {
   ] : [];
 
   return (
-    // On a phone the picker sits inside a table that scrolls sideways, so it is
-    // sized to the screen rather than to the table.
-    <View style={[box, { width: narrow ? Math.min(640, vw - 48) : 640 }]}>
+    // On a phone the picker is drawn below its row, outside the table's
+    // sideways scroll, and takes the width of the frame.
+    <View style={[box, { width: narrow ? '100%' : 640 }]}>
       <SearchLine value={p.query} onChange={p.onQuery} placeholder="Search every subcategory and fact" note={q ? 'searching' : 'type to search'} onClose={p.onClose} />
       {q ? (
         <View style={{ minHeight: 240, paddingVertical: 6 }}>
@@ -219,13 +231,17 @@ export function WordPicker(p: WordPickerProps) {
                     const on = p.subs.includes(s.key);
                     const isPrimary = on && p.primary === s.key;
                     const key = s.key;
+                    // Hover is the row's own mouseenter / mouseleave, which do
+                    // not fire when the pointer moves onto a child — so "Make
+                    // primary" stays while the pointer is over it and can be
+                    // clicked (audit, 28 Sep 2026: a Press's hover-out fired on
+                    // the way to it and took it away).
+                    const hoverProps = web ? ({
+                      onMouseEnter: () => setHover(key),
+                      onMouseLeave: () => setHover((h) => (h === key ? null : h)),
+                    } as object) : {};
                     return (
-                      <Press
-                        key={key}
-                        effect="none"
-                        onHoverIn={web ? () => setHover(key) : undefined}
-                        onHoverOut={web ? () => setHover((h) => (h === key ? null : h)) : undefined}
-                      >
+                      <View key={key} {...hoverProps}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 7, paddingHorizontal: 14 }}>
                           {/* The tick is the mark and the name; the primary cannot be unticked — to take a word out of Epic, use Exclude. */}
                           <Press effect="none" style={{ flex: 1, minWidth: 0 }} onPress={isPrimary ? undefined : () => p.onToggleSub(key)}>
@@ -237,12 +253,12 @@ export function WordPicker(p: WordPickerProps) {
                           {isPrimary ? <PrimaryTag /> : null}
                           {/* "Make primary" on hover only (a tap on a phone shows it too, as there is no hover). */}
                           {on && !isPrimary && (hover === key || !web) ? (
-                            <Press effect="none" onPress={() => p.onMakePrimary(key)}>
+                            <Press effect="none" onPress={() => { setHover(null); p.onMakePrimary(key); }} accessibilityLabel={`Make ${s.label} the primary`}>
                               <Text style={{ fontFamily: fonts.body, fontSize: 11.5, fontWeight: '700', color: desk.inkMuted, borderBottomWidth: 1, borderBottomColor: desk.ruleStrong }}>Make primary</Text>
                             </Press>
                           ) : null}
                         </View>
-                      </Press>
+                      </View>
                     );
                   })}
                   <Press effect="none" onPress={() => setAdopting(true)}>

@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 
 import { Press } from '../../../components/press';
+import { useViewport } from '../../../hooks/useViewport';
 import { useCrumbs, useDeskGo } from '../Desk';
 import { LIME, Muted, Table, deskApi, desk, fonts, n, saidOf, tabular, useToast } from '../kit';
 import { Count, Failed, undoChanges, type Change } from './shared';
@@ -15,6 +16,8 @@ import { Count, Failed, undoChanges, type Change } from './shared';
 type Row = {
   sub: string; subLabel: string; fact: string; label: string; activeSince: string;
   places: number; mentioned: number; confirmed: number; pct: number | null;
+  /** "31%", or "<1%" for a fact that is there at under half a percent — never a rounded 0%. Null over no places. */
+  pctText?: string | null;
 };
 
 const daysAgo = (at: string) => {
@@ -48,15 +51,26 @@ export function NewFacts({ canManage }: { canManage: boolean }) {
     } catch (e) { toast(saidOf(e)); }
   };
 
-  const evidence = (r: Row) => [
-    `Mentioned at ${n(r.mentioned)} ${r.mentioned === 1 ? 'place' : 'places'}`,
-    `confirmed on ${n(r.confirmed)} by our own sources`,
-    r.pct == null ? null : `found on ${r.pct}% of places`,
-  ].filter(Boolean).join(' · ');
+  const evidence = (r: Row) => {
+    const pct = r.pctText ?? (r.pct == null ? null : `${r.pct}%`);
+    return [
+      `Mentioned at ${n(r.mentioned)} ${r.mentioned === 1 ? 'place' : 'places'}`,
+      `confirmed on ${n(r.confirmed)} by our own sources`,
+      pct == null ? null : `found on ${pct} of places`,
+    ].filter(Boolean).join(' · ');
+  };
 
-  // Subcategory 220 · New fact 190 · What we have 420 · Added 110 · 90, on an 18px gap.
+  // Subcategory 220 · New fact 190 · What we have (the prototype's flex column: it
+  // takes the room there is, and wraps rather than pushing Remove off the page) ·
+  // Added 110 · 90, on an 18px gap. On a phone the table scrolls sideways at a
+  // fixed width instead.
   const cols = [220, 190, 420, 110, 90];
   const tableW = cols.reduce((s, w) => s + w, 0) + 18 * (cols.length - 1) + 16;
+  const narrow = useViewport().width < 900;
+  const flexCol = narrow ? { width: cols[2] } : { flex: 1, minWidth: 300 };
+  const Frame = ({ children }: { children: React.ReactNode }) => (narrow
+    ? <Table width={tableW}>{children}</Table>
+    : <View style={{ alignSelf: 'stretch' }}>{children}</View>);
 
   return (
     <View style={{ gap: 14 }}>
@@ -70,10 +84,10 @@ export function NewFacts({ canManage }: { canManage: boolean }) {
 
       {err ? <Failed err={err} /> : !data ? <Muted>Loading</Muted> : (
         <View style={{ marginTop: 10 }}>
-          <Table width={tableW}>
+          <Frame>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18, borderBottomWidth: 2, borderBottomColor: desk.ruleStrong, paddingTop: 12, paddingBottom: 9, paddingHorizontal: 8 }}>
               {['Subcategory', 'New fact', 'What we have', 'Added', ''].map((h, i) => (
-                <Text key={i} style={{ width: cols[i], fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: desk.inkDim }}>{h}</Text>
+                <Text key={i} style={[i === 2 ? flexCol : { width: cols[i] }, { fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: desk.inkDim }]}>{h}</Text>
               ))}
             </View>
             {data.rows.length === 0 ? <Muted>Nothing added in the last 30 days.</Muted> : null}
@@ -89,7 +103,7 @@ export function NewFacts({ canManage }: { canManage: boolean }) {
                     <Text style={{ fontFamily: fonts.body, fontSize: 13.5, fontWeight: '700', color: desk.ink, borderBottomWidth: 1.5, borderBottomColor: LIME, paddingBottom: 2 }}>{r.label}</Text>
                   </Press>
                 </View>
-                <Text style={[{ width: cols[2], fontFamily: fonts.body, fontSize: 12.5, color: desk.inkMuted }, tabular]}>{evidence(r)}</Text>
+                <Text style={[flexCol, { fontFamily: fonts.body, fontSize: 12.5, color: desk.inkMuted }, tabular]}>{evidence(r)}</Text>
                 <Text style={{ width: cols[3], fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>{daysAgo(r.activeSince)}</Text>
                 <View style={{ width: cols[4], flexDirection: 'row', justifyContent: 'flex-end' }}>
                   {canManage ? (
@@ -100,7 +114,7 @@ export function NewFacts({ canManage }: { canManage: boolean }) {
                 </View>
               </View>
             ))}
-          </Table>
+          </Frame>
         </View>
       )}
     </View>
