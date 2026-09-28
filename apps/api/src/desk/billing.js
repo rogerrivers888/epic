@@ -128,6 +128,10 @@ export async function billingDaily(now = new Date()) {
   const last = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const out = [];
   const read = [month(last), month(now)];
+  // The usage months these invoices carried before the re-read too: a late
+  // row a refresh removes still leaves its month to be re-attributed (Codex).
+  const { rows: before } = await query(
+    `select distinct to_char(day, 'YYYY-MM') as m from billing_days where invoice_month = any($1)`, [read]);
   for (const m of read) {
     const r = await readMonth(m);
     if (!r.speaks) return { speaks: false, why: r.why };
@@ -135,9 +139,10 @@ export async function billingDaily(now = new Date()) {
   }
   // Attribute every usage month those invoices touched — including an
   // earlier month whose late usage a later invoice carried.
-  const { rows: usageMonths } = await query(
-    `select distinct to_char(day, 'YYYY-MM') as m from billing_days where invoice_month = any($1) order by 1`, [read]);
-  for (const { m } of usageMonths) out.push({ usageMonth: m, ...(await attribute(m)) });
+  const { rows: after } = await query(
+    `select distinct to_char(day, 'YYYY-MM') as m from billing_days where invoice_month = any($1)`, [read]);
+  const usageMonths = [...new Set([...before, ...after].map((r) => r.m))].sort();
+  for (const m of usageMonths) out.push({ month: m, attributed: true, ...(await attribute(m)) });
   // The tile: usage before credit this month, and the credit left.
   const cfg = (await settings()).values;
   const prev = cfg.billing ?? {};

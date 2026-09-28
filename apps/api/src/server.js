@@ -715,7 +715,7 @@ setInterval(deskDaily, BAR_CHECK_EVERY_MS).unref?.();
 // refreshed. Free; read only.
 const billingDaily = () => {
   void import('./desk/billing.js').then(({ billingDaily: run }) => run())
-    .then((r) => { if (r?.speaks) console.log(`billing export: ${r.months.map((m) => `${m.month} ${m.rows} rows`).join(', ')}`); })
+    .then((r) => { if (r?.speaks) console.log(`billing export: ${r.months.map((m) => (m.attributed ? `${m.month} attributed to ${m.rows} rows` : `${m.month} ${m.rows} billed lines`)).join(', ')}`); })
     .catch((err) => console.error('billing export', err.message));
 };
 void indexBuilt.then(billingDaily);
