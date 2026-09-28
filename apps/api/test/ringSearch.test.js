@@ -48,6 +48,13 @@ test('the census count for a reach is summed from area_counts, and says what it 
   // An outcode nobody has censused contributes nothing and is named: "we have
   // not looked here" is not "there is nothing here".
   assert.deepEqual(out.missing, ['zz3']);
+  assert.deepEqual(out.partial, [], 'and every district it has reached, it has reached whole');
+
+  // A district a run stopped part-way across is reached, not reached whole.
+  await query(`update area_counts set complete = false where area_slug = 'zz2'`);
+  const half = await search.censusCounts(['ZZ1', 'ZZ2', 'ZZ3']);
+  assert.deepEqual(half.partial, ['zz2']);
+  assert.deepEqual(half.missing, ['zz3'], 'still named as reached');
 });
 
 test('a page is bought once for the ring, held for the next household, and paged on its token', async () => {

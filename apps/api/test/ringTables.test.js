@@ -202,6 +202,20 @@ test('a district the census never looked at makes the count a floor', async () =
   assert.deepEqual(out.notCensusedOutcodes, ['ZT1'], 'and names it, so a census can be asked for');
 });
 
+test('a district a run stopped part-way across makes the count a floor too', async () => {
+  // Reached is not reached whole. The one-day census of the rest of the UK
+  // (28 Sep 2026) stops at its ceiling with districts half asked, marked
+  // incomplete on the board; a ring over one of them must not print its half
+  // count as the whole (Codex, same day).
+  await seed();
+  await query(`update area_counts set complete = false where area_slug = 'zt1'`);
+  const out = await tables.refreshRing({ cell: CELL, mode: 'drive', minutes: 30 });
+  assert.equal(out.counts.find((c) => c.category === 'fun').floor, true);
+  await query(`update area_counts set complete = true where area_slug = 'zt1'`);
+  const whole = await tables.refreshRing({ cell: CELL, mode: 'drive', minutes: 30, force: true });
+  assert.equal(whole.counts.find((c) => c.category === 'fun').floor, false, 'and not once the district is whole');
+});
+
 test('the 30-day cycle counts a stale ring again and leaves a fresh one alone', async () => {
   await seed();
   await tables.refreshRing({ cell: CELL, mode: 'drive', minutes: 30 });

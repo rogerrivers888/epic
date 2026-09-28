@@ -105,10 +105,14 @@ async function countRing({ cell, kind, minutes }) {
 
   const [placed, seen] = await Promise.all([
     censusInRing({ cells: band, outcodes: ring.outcodes }),
-    query('select distinct area_slug, category from area_counts where area_slug = any($1)',
+    query('select distinct area_slug, category, complete from area_counts where area_slug = any($1)',
       [ring.outcodes.map((o) => o.toLowerCase())]),
   ]);
-  const censused = new Set(seen.rows.map((r) => r.area_slug));
+  // Looked at whole: a district with any row marked incomplete — a run stopped
+  // part-way across it — is counted, and is a floor like one never reached
+  // (Codex, 28 Sep 2026).
+  const partial = new Set(seen.rows.filter((r) => r.complete === false).map((r) => r.area_slug));
+  const censused = new Set(seen.rows.map((r) => r.area_slug).filter((a) => !partial.has(a)));
   const notCensused = ring.outcodes.filter((o) => !censused.has(o.toLowerCase())).length;
 
   // Every category the census knows in these districts, so a category it

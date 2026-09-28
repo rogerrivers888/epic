@@ -192,7 +192,7 @@ export async function censusForRing(ring, { mode = 'driving', minutes = 30 } = {
     // 2026). A floor nothing live explains is a ring the census has moved
     // past — counted again behind the screen.
     const floors = Object.fromEntries(Object.entries(stored).map(([k, v]) => [k, Boolean(v.floor)]));
-    const stale = byOutcode.missing.length === 0
+    const stale = byOutcode.missing.length === 0 && byOutcode.partial.length === 0
       && Object.values(stored).some((v) => v.floor && !(v.unresolved > 0));
     if (stale) void refreshRing({ cell: ring.cell, mode, minutes }).catch(() => null);
     return {
@@ -200,7 +200,8 @@ export async function censusForRing(ring, { mode = 'driving', minutes = 30 } = {
       unresolved,
       floors,
       missing: byOutcode.missing,
-      floor: byOutcode.missing.length > 0 || Object.values(stored).some((v) => v.floor || v.unresolved > 0),
+      floor: byOutcode.missing.length > 0 || byOutcode.partial.length > 0
+        || Object.values(stored).some((v) => v.floor || v.unresolved > 0),
     };
   }
 
@@ -211,13 +212,14 @@ export async function censusForRing(ring, { mode = 'driving', minutes = 30 } = {
     counts: inRing.counts ?? {},
     unresolved,
     missing: byOutcode.missing,
-    // A floor wherever anything straddles the edge or any outcode is unlooked-at.
-    floor: byOutcode.missing.length > 0 || Object.values(unresolved).some((n) => n > 0),
+    // A floor wherever anything straddles the edge or any outcode is unlooked-at
+    // or only partly looked at.
+    floor: byOutcode.missing.length > 0 || byOutcode.partial.length > 0 || Object.values(unresolved).some((n) => n > 0),
   };
 }
 
 export async function censusCounts(outcodes = []) {
-  if (!outcodes.length) return { counts: {}, censused: [], missing: [] };
+  if (!outcodes.length) return { counts: {}, censused: [], missing: [], partial: [] };
   const slugs = outcodes.map((o) => String(o).toLowerCase());
   // Summed over the drawers, because that is how the census writes it: one row
   // per subcategory per outcode, which is the unit it slices Google into. The
@@ -228,13 +230,19 @@ export async function censusCounts(outcodes = []) {
        from area_counts
       where area_slug = any($1) and category <> ''
       group by category`, [slugs]);
+  // Reached, and reached whole, are different facts. A district a run
+  // stopped part-way across has rows on the board marked incomplete, and a
+  // ring counting it as looked-at would print its half count without the
+  // floor it is (Codex, 28 Sep 2026, on the one-day census of the rest of the
+  // UK). So `partial` is kept beside `missing`, and either makes a floor.
   const { rows: seen } = await query(
-    'select distinct area_slug from area_counts where area_slug = any($1)', [slugs]);
+    `select area_slug, bool_and(complete) as whole from area_counts where area_slug = any($1) group by area_slug`, [slugs]);
   const censused = seen.map((r) => r.area_slug);
   return {
     counts: Object.fromEntries(rows.map((r) => [r.category, r.places])),
     censused,
     missing: slugs.filter((s) => !censused.includes(s)),
+    partial: seen.filter((r) => !r.whole).map((r) => r.area_slug),
   };
 }
 
