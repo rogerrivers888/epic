@@ -13,7 +13,7 @@ import { testDatabase } from './helpers/db.js';
 
 const { pool } = await testDatabase();
 const { hashResumeKey, verifyResumeKey, looksLikeHash } = await import('../src/domain/resumeKey.js');
-const { resumeGuard, resumeKeyAccepted, resumeAttemptAllowed, noteResumeMiss } = await import('../src/routes/placeIndex.js');
+const { resumeGuard, resumeKeyAccepted, reserveResumeAttempt, releaseResumeAttempt } = await import('../src/routes/placeIndex.js');
 test.after(() => pool.end());
 
 // The cheapest cost the parser accepts; the command uses the real one.
@@ -90,9 +90,16 @@ test('the key has its own attempt limit, and a check never holds the request thr
   // Codex, 28 Sep 2026: scryptSync on the request thread let a burst of wrong
   // keys stall the whole API.
   const who = 'test-session-attempts';
-  for (let i = 0; i < 5; i += 1) { assert.equal(resumeAttemptAllowed(who), true); noteResumeMiss(who); }
-  assert.equal(resumeAttemptAllowed(who), false, 'the sixth wrong key in fifteen minutes is refused before hashing');
-  assert.equal(resumeAttemptAllowed(who, Date.now() + 16 * 60_000), true, 'and allowed again once the window has passed');
+  const t0 = Date.now();
+  // Five taken at once — as five requests arriving together would — and the sixth refused.
+  const taken = [0, 1, 2, 3, 4].map((i) => reserveResumeAttempt(who, t0 + i));
+  assert.ok(taken.every((x) => x != null));
+  assert.equal(reserveResumeAttempt(who, t0 + 5), null, 'the sixth in fifteen minutes is refused before hashing, however they arrive');
+  // A right key hands its attempt back.
+  releaseResumeAttempt(who, taken[4]);
+  assert.notEqual(reserveResumeAttempt(who, t0 + 6), null);
+  assert.notEqual(reserveResumeAttempt('another-session', t0 + 7), null, 'one session\u2019s misses are not another\u2019s');
+  assert.notEqual(reserveResumeAttempt(who, t0 + 16 * 60_000), null, 'and allowed again once the window has passed');
 
   const stored = hashResumeKey(PHRASE);
   let ticks = 0;

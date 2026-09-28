@@ -3644,19 +3644,27 @@ const RESUME_TRIES = 5;
 const RESUME_WINDOW_MS = 15 * 60_000;
 const resumeMisses = new Map();
 let resumeChecking = 0;
-export function resumeAttemptAllowed(sessionId, now = Date.now()) {
-  if (resumeChecking >= 2) return false;
+/**
+ * Take one attempt, or refuse. Counted as a miss the moment it starts — in
+ * the same synchronous step as the check — so two guesses arriving together
+ * cannot both pass a session that has one try left (Codex, 28 Sep 2026). A
+ * right key hands its attempt back with `releaseResumeAttempt`.
+ */
+export function reserveResumeAttempt(sessionId, now = Date.now()) {
+  if (resumeChecking >= 2) return null;
   const misses = (resumeMisses.get(sessionId) ?? []).filter((t) => now - t < RESUME_WINDOW_MS);
-  resumeMisses.set(sessionId, misses);
-  return misses.length < RESUME_TRIES;
-}
-export function noteResumeMiss(sessionId, now = Date.now()) {
-  const misses = resumeMisses.get(sessionId) ?? [];
+  if (misses.length >= RESUME_TRIES) { resumeMisses.set(sessionId, misses); return null; }
   misses.push(now);
-  resumeMisses.set(sessionId, misses);
   if (resumeMisses.size > 1000) resumeMisses.clear();
+  resumeMisses.set(sessionId, misses);
+  return now;
 }
-async function checkResumeKey(guard, given, sessionId) {
+export function releaseResumeAttempt(sessionId, stamp) {
+  const misses = resumeMisses.get(sessionId) ?? [];
+  const i = misses.indexOf(stamp);
+  if (i >= 0) misses.splice(i, 1);
+}
+async function checkResumeKey(guard, given) {
   resumeChecking += 1;
   try { return await resumeKeyAccepted(guard, given); } finally { resumeChecking -= 1; }
 }
@@ -3683,11 +3691,12 @@ router.post('/census/run/:id/resume', requires('manage_library'), async (req, re
     const key = guard.kind !== 'none';
     if (key) {
       const who = req.session?.id ?? 'no-session';
-      if (!resumeAttemptAllowed(who)) {
+      const attempt = reserveResumeAttempt(who);
+      if (attempt == null) {
         return res.status(429).json({ error: 'resume_key_attempts', message: 'Too many tries at the resume key. Wait fifteen minutes.' });
       }
-      const accepted = await checkResumeKey(guard, req.body?.key, who);
-      if (!accepted) noteResumeMiss(who);
+      const accepted = await checkResumeKey(guard, req.body?.key);
+      if (accepted) releaseResumeAttempt(who, attempt);
       if (!accepted) {
         return res.status(403).json({
           error: 'resume_key',
