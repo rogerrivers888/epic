@@ -3746,6 +3746,18 @@ router.post('/census/run/:id/resume', requires('manage_library'), async (req, re
  * calls nobody.
  */
 /** What a run did, by postcode area and in total, with the ledger's own figure. */
+/**
+ * The census of the rest of the UK, a day at a time: what it will do next, and
+ * the owner's five figures for every day (sources/ukCensus.js). Read only.
+ */
+router.get('/census/uk', requires('view_library'), async (_req, res, next) => {
+  try {
+    const { status } = await import('../sources/ukCensus.js');
+    const { mailStatus } = await import('../sources/mail.js');
+    res.json({ ...(await status()), mail: mailStatus().configured ? 'sends' : 'not configured: reports are here and in the log' });
+  } catch (err) { next(err); }
+});
+
 router.get('/census/report', requires('view_library'), async (req, res, next) => {
   try {
     const out = await censusRun.report(req.query.runId ? String(req.query.runId) : null);
