@@ -26,7 +26,7 @@
  */
 
 import crypto from 'node:crypto';
-import { query } from '../db.js';
+import { query, pool } from '../db.js';
 import * as censusRun from './censusRun.js';
 import { sendMail, mailStatus } from './mail.js';
 import { ownerAccount } from '../repositories/accounts.js';
@@ -48,10 +48,10 @@ export const DAY_REQUESTS = 70_000;
 export const PENNIES_GBP = 1;
 /** "stop and alert me the moment any day shows more than £5." */
 export const DAY_ALERT_GBP = 5;
-/** Whose decision a daily run is: the programme's, not a request's. */
-export const STARTED_BY = 'Epic — the UK census, a day at a time';
-/** A run stopped at its own ceiling, which is how a day ends. */
-const AT_CEILING = /^stopped at the \d+-request ceiling/;
+/** Whose decision a daily run is: the programme's — and the reset clock never wakes it. */
+export const STARTED_BY = censusRun.ONE_DAY_RUNS;
+/** How a day ends: at the run's own ceiling, or ended for the day at the shared cap. */
+const DAY_ENDED = /^(stopped at the \d+-request ceiling|ended for the day)/;
 
 /** The quota day a moment falls in: Google's day is Los Angeles's. */
 export const pacificDay = (at) => new Intl.DateTimeFormat('en-CA', {
@@ -112,7 +112,7 @@ export async function decide(now = new Date()) {
   if (over) return { action: 'halted', runs, latest, bills, over };
   if (latest.state === 'done') return { action: 'complete', runs, latest, bills };
   if (['running', 'waiting'].includes(latest.state)) return { action: 'working', runs, latest, bills };
-  if (!(latest.state === 'paused' && AT_CEILING.test(latest.problem ?? ''))) return { action: 'stopped', runs, latest, bills };
+  if (!(latest.state === 'paused' && DAY_ENDED.test(latest.problem ?? ''))) return { action: 'stopped', runs, latest, bills };
   const ended = latest.finished_at ?? latest.last_seen_at ?? latest.started_at;
   if (pacificDay(ended) >= pacificDay(now)) return { action: 'today', runs, latest, bills };
   const yesterday = bills.find((b) => b.day === pacificDay(latest.started_at));
@@ -125,7 +125,27 @@ export async function decide(now = new Date()) {
  * once at boot. `start` is a seam for the tests, which cannot plan the whole
  * UK on every assertion.
  */
-export async function tick({ now = new Date(), start = censusRun.startRun, stop = censusRun.requestStop, tell = () => {} } = {}) {
+export async function tick(opts = {}) {
+  // One tick at a time across every process: two replicas that both decided
+  // "start" before either had inserted its run would each start the day
+  // (Codex, 28 Sep 2026). A tick that cannot take the lock does nothing; the
+  // one holding it decides for both.
+  const client = await pool.connect();
+  try {
+    const { rows: [{ ok }] } = await client.query('select pg_try_advisory_lock($1) as ok', [LOCK]);
+    if (!ok) return { action: 'busy' };
+    try { return await tickLocked(opts); } finally { await client.query('select pg_advisory_unlock($1)', [LOCK]); }
+  } finally { client.release(); }
+}
+/** The advisory lock's key: "UKCENSUS" folded into an int8. */
+const LOCK = 0x554b43454e535553n.toString();
+
+async function tickLocked({ now = new Date(), start = censusRun.startRun, stop = censusRun.requestStop, tell = () => {}, endDay = censusRun.endForTheDay } = {}) {
+  // A day's run asleep at the shared cap is ended for the day, not carried
+  // into tomorrow (Codex, 28 Sep 2026).
+  const { rows: asleep } = await query(
+    `select id from census_runs where label like $1 and state = 'waiting'`, [`${LABEL} %`]);
+  for (const r of asleep) await endDay(r.id);
   const d = await decide(now);
   if (d.action === 'halted') {
     if (['running', 'waiting'].includes(d.latest?.state)) await stop(d.latest.id);
@@ -176,7 +196,13 @@ export async function status(now = new Date()) {
     `select count(*)::int as whole from (
        select area_slug from area_counts where area_slug ~ '^[a-z]{1,2}[0-9]' group by area_slug having bool_and(complete)) x`);
   const latest = d.latest;
-  const left = Math.max(0, Number(latest.tiles_total ?? 0) - Number(latest.tiles_done ?? 0) - Number(latest.tiles_failed ?? 0));
+  // Counted from the tiles: a tile given up on after its tries is not work
+  // left, and the run row does not carry that count (Codex, 28 Sep 2026).
+  const { rows: [l] } = await query(
+    `select count(*) filter (where t.state <> 'done' and not (t.state = 'failed' and t.failures >= $2))::int as left
+       from census_run_tiles m join census_tiles t on t.grid_key = m.grid_key where m.run_id = $1`,
+    [latest.id, censusRun.MAX_TILE_TRIES]);
+  const left = l.left;
   const perTile = tilesAsked ? requests / tilesAsked : null;
   return {
     action: d.action,

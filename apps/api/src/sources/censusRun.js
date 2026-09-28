@@ -1034,6 +1034,27 @@ async function spentSince(startedAt) {
   return Number(row?.usd ?? 0);
 }
 
+/**
+ * Who starts a run that lives for one quota day (sources/ukCensus.js): the
+ * reset clock never wakes it, because tomorrow is a new run of its own.
+ */
+export const ONE_DAY_RUNS = 'Epic — the UK census, a day at a time';
+
+/**
+ * A one-day run that met the shared daily cap, or a refusal, before its own
+ * ceiling: it sleeps until the reset, and nothing will wake it. It is ended
+ * for the day here — paused, published as far as it reached — so the next day
+ * starts a run of its own (Codex, 28 Sep 2026). Only while still waiting.
+ */
+export async function endForTheDay(id) {
+  const { rows: [r] } = await query(
+    `update census_runs set state = 'paused', resume_after = null
+      where id = $1 and state = 'waiting' returning problem`, [id]);
+  if (!r) return false;
+  await finish(id, 'paused', `ended for the day: ${r.problem ?? 'the quota day'}`);
+  return true;
+}
+
 async function finish(id, state, problem) {
   const { rows: [run] } = await query(
     `update census_runs set state = $2, problem = $3, finished_at = now(), last_seen_at = now(), stop_requested = false
@@ -1169,12 +1190,15 @@ export async function resumeInterrupted() {
       where state = 'waiting' and resume_after is not null and resume_after <= now()
         -- Never a run somebody has asked to stop (Codex, 28 Sep 2026).
         and not stop_requested
+        -- Never a one-day run: its day ends where it stops, and tomorrow is a
+        -- new run of its own (sources/ukCensus.js; Codex, 28 Sep 2026).
+        and coalesce(started_by, '') <> $1
         -- Never into a region somebody else is working. Starting refuses while
         -- a run waits, so this should not arise — but a clock that wakes a run
         -- regardless of what else is going is the half of the pair that turns a
         -- refused start into two live runs (Codex, 21 Sep 2026).
         and not exists (select 1 from census_runs other where other.state = 'running')
-      returning id, label`);
+      returning id, label`, [ONE_DAY_RUNS]);
 
   const { rows } = await query(
     `select id, label, last_seen_at from census_runs

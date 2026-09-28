@@ -134,3 +134,34 @@ test('the report carries the five figures, billed or not yet', async (t) => {
   const again = await uk.status(new Date('2026-09-29T23:00:00Z'));
   assert.match(uk.reportLine(again.days[0], 184, 12), /billed £0\.00 for the census \(Google £0\.00 that day\)/);
 });
+
+test('a day\'s run that met the shared cap is ended for the day, never woken into tomorrow, and tomorrow starts its own', async (t) => {
+  await clean(); t.after(clean);
+  const { resumeInterrupted, ONE_DAY_RUNS } = await import('../src/sources/censusRun.js');
+  const run = await dayOne({ state: 'waiting', problem: '75,000 requests today, which is the 75,000 assumed daily cap', finished: null });
+  await query(`update census_runs set started_by = $2, resume_after = now() - interval '1 minute' where id = $1`, [run.id, ONE_DAY_RUNS]);
+  // The reset clock leaves it (Codex, 28 Sep 2026).
+  const woke = await resumeInterrupted();
+  assert.ok(!(woke.runs ?? []).some((r) => r.id === run.id), 'the reset clock does not wake a one-day run');
+  // The tick ends it for the day, and the next quota day starts a new one.
+  const r = recorder();
+  const out = await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start });
+  const { rows: [after] } = await query('select state, problem from census_runs where id = $1', [run.id]);
+  assert.equal(after.state, 'paused');
+  assert.match(after.problem, /^ended for the day: 75,000 requests today/);
+  assert.equal(out.action, 'start');
+  assert.equal(r.calls[0].label, 'The rest of the UK — day 2');
+});
+
+test('two ticks at once start the day once', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  const r = recorder();
+  const slow = async (args) => { await new Promise((ok) => setTimeout(ok, 200)); return r.start(args); };
+  const outs = await Promise.all([
+    uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: slow }),
+    uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: slow }),
+  ]);
+  assert.equal(r.calls.length, 1, 'one start, however many ticks');
+  assert.deepEqual(outs.map((o) => o.action).sort(), ['busy', 'start']);
+});
