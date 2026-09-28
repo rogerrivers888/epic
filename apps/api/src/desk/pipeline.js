@@ -15,7 +15,7 @@
  *   - Add, Re-check and Families work on our own tables.
  */
 
-import { PLACE_WORDS } from './words.js';
+import { FILED_SQL } from './categories.js';
 import { query, withTransaction } from '../db.js';
 import { settings } from './settings.js';
 import * as osmLocal from '../sources/osmExtract.js';
@@ -411,10 +411,9 @@ export async function verify({ ref, fact, firstSeen = null, evidence: ev = null 
 export async function answerPlace(ref) {
   const cfg = (await settings()).values;
   const { rows: wanted } = await query(`
-    with subs as (
-      select subcategory as sub from place_index where venue_ref = $1 and subcategory is not null
-      union
-      select t.subcategory_key from ${PLACE_WORDS} pil join word_targets t on 'google:' || t.word = pil.label where pil.venue_ref = $1)
+    -- Where the place is filed, primary and secondary, by the one filing rule
+    -- every desk screen uses (Codex, 28 Sep 2026).
+    with subs as (select distinct f.sub from (${FILED_SQL}) f where f.venue_ref = $1)
     select pa.key, pa.label, pa.kind, pa.access, pa.age, pa.dietary
       from place_attributes pa
      where pa.active and pa.kind = 'yesno'
