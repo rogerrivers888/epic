@@ -613,3 +613,32 @@ test('undoing a Don’t know shows the answer a check wrote while it stood', asy
   const { rows: held } = await query(`select 1 from fact_unknowns where venue_ref = 'desk:dk3'`);
   assert.equal(held.length, 0);
 });
+
+test('undoing a Don’t know: an answer rechecked while it stood is shown even if families had hidden it before; a later family hide stands', async () => {
+  const setUp = async () => {
+    await query(`delete from fact_unknowns where venue_ref = 'desk:dk4'`);
+    await query(`delete from place_attribute_values where venue_ref = 'desk:dk4'`);
+    await query(`insert into place_fact_answers (venue_ref, attribute_key, state, yesno, source, checked_at, hidden_at)
+                 values ('desk:dk4', 'toilets', 'yes', true, 'osm', now() - interval '2 days', now() - interval '1 day')
+                 on conflict (venue_ref, attribute_key) do update set state = 'yes', checked_at = excluded.checked_at, hidden_at = excluded.hidden_at`);
+  };
+  const undo = async (out) => {
+    const { rows: [change] } = await query('select * from bo_changes where id = $1', [out.change ?? out.changeId ?? out.id]);
+    await facts.undoCorrection({ change, who: WHO });
+  };
+  const hidden = async () => (await query(`select hidden_at from place_fact_answers where venue_ref = 'desk:dk4'`)).rows[0].hidden_at;
+  // Families hid it; a person says Don't know; a check confirms yes; undo shows it.
+  await setUp();
+  let out = await facts.correct({ ref: 'desk:dk4', fact: 'toilets', option: 'dont_know', who: WHO });
+  await pipeline.verify({ ref: 'desk:dk4', fact: 'toilets', evidence: { site: 'Clean toilets on site, and the toilets were spotless.' } });
+  await undo(out);
+  assert.equal(await hidden(), null);
+  // Families hide it after the check: undo leaves their hide standing.
+  await setUp();
+  out = await facts.correct({ ref: 'desk:dk4', fact: 'toilets', option: 'dont_know', who: WHO });
+  await pipeline.verify({ ref: 'desk:dk4', fact: 'toilets', evidence: { site: 'Clean toilets on site, and the toilets were spotless.' } });
+  await query(`update place_fact_answers set hidden_at = now() + interval '1 second' where venue_ref = 'desk:dk4'`);
+  await undo(out);
+  assert.ok(await hidden(), 'a later family hide stands');
+  await query(`delete from place_fact_answers where venue_ref = 'desk:dk4'`);
+});

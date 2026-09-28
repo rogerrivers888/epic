@@ -442,10 +442,15 @@ export async function correct({ ref, fact, option, why = null, who }) {
 export async function undoCorrection({ change, who }) {
   const { ref, fact, was, hid, unknownWas = null, madeUnknown = false } = change.undo;
   await withTransaction(async (c) => {
-    // An answer our checks wrote while this Don't know stood was hidden only
-    // because of it (Codex, 28 Sep 2026): undoing the Don't know shows it.
+    // A yes our checks wrote while this Don't know stood was kept hidden only
+    // because of it, and is shown again — identified by when the check wrote
+    // it, not by when it was hidden (Codex, 28 Sep 2026): a hide families
+    // made after that check (hidden_at later than checked_at) still stands.
     if (madeUnknown) {
-      await c.query('update place_fact_answers set hidden_at = null where venue_ref = $1 and attribute_key = $2 and hidden_at >= $3',
+      await c.query(
+        `update place_fact_answers set hidden_at = null
+          where venue_ref = $1 and attribute_key = $2 and state = 'yes'
+            and checked_at >= $3 and hidden_at is not null and hidden_at <= checked_at`,
         [ref, fact, change.at]);
     }
     // A Don't know that stood before is put back; one this correction made goes.
