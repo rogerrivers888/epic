@@ -342,7 +342,7 @@ export const PROVIDERS = [
   {
     key: 'tripadvisor', label: 'Tripadvisor', short: 'Tripadv.', kind: 'data', keep: 'id',
     licence: 'Tripadvisor Content API terms', retention: 'Location ID only; reviews must not be crawlable, so /api answers robots.txt with Disallow',
-    attribution: 'Tripadvisor', cost: '1,000 locations free for the life of the account, then $0.015 a location',
+    attribution: 'Tripadvisor', cost: '1,000 locations free a month, then $0.015 a location',
     envKey: 'TRIPADVISOR_API_KEY', file: 'apps/api/src/sources/tripadvisor.js',
     console: { label: 'Tripadvisor developer portal', url: 'https://www.tripadvisor.com/developers' },
     docs: 'https://tripadvisor-content-api.readme.io/reference/getlocationdetails',

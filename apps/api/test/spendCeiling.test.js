@@ -20,6 +20,15 @@ const { roomToSpend, releaseSpend } = await import('../src/routes/placeIndex.js'
 
 test.after(() => pool.end());
 
+// Google's bill for the month is part of the purse now (desk/supplierCost.js):
+// migration 277's console figure for September would be counted in every
+// test here, so these start from a month with no bill read.
+const settings = await import('../src/desk/settings.js');
+test.beforeEach(async () => {
+  await query(`delete from bo_settings where key = 'billing'`);
+  settings.forget();
+});
+
 const ceiling = (pence) => query(
   `insert into app_settings (key, value) values ('collect.ceiling_pence', $1::text::jsonb)
    on conflict (key) do update set value = excluded.value`, [String(pence)]);

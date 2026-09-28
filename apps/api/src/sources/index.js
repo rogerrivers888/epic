@@ -56,8 +56,8 @@ export const eventSources = () => enabledSources().filter((s) => s.events);
  * opt-in ones. `includeOptIn: true` lists everything live, which the status
  * endpoint and the detail view need.
  *
- * Tripadvisor is opt-in: billed per location returned, 1,000 free for the
- * account's lifetime.
+ * Tripadvisor is opt-in: billed per location returned, 1,000 free a month
+ * (owner, 29 Sep 2026).
  */
 // Sources the owner has switched off in Settings › Providers (app_settings
 // 'sources.off'). Loaded once at start and kept in memory: enabledSources()

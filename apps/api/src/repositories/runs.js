@@ -221,11 +221,17 @@ export async function list() {
   // planning and OpenAI speech into a board about buying places — a number that
   // disagrees with the guard beside it is worse than no number (Codex, 18 Sep
   // 2026). `constants.js` OTHER_PURSE holds the two that bill elsewhere.
-  const spend = await one(
-    `select coalesce(sum(estimated_cost_usd), 0)::numeric as usd, count(*)::int as calls
-       from provider_calls
-      where created_at > date_trunc('month', now())
-        and provider <> all ($1::text[])`, [OTHER_PURSE]);
+  // Corrected as the guard is (routes/placeIndex.js roomToSpend reads the
+  // same function), so the board and the guard can never disagree.
+  const { collectPurse } = await import('../desk/supplierCost.js');
+  const [purse, spend] = await Promise.all([
+    collectPurse(),
+    one(
+      `select count(*)::int as calls
+         from provider_calls
+        where created_at > date_trunc('month', now())
+          and provider <> all ($1::text[])`, [OTHER_PURSE]),
+  ]);
   const ceiling = await one("select value from app_settings where key = 'collect.ceiling_pence'").catch(() => null);
 
   return {
@@ -236,7 +242,9 @@ export async function list() {
     // somebody has to act on today.
     needsLooking: rows.filter((r) => r.stranded || r.state === 'failed' || (r.key === 'menus' && r.ours > 0)).length
       + (collect?.alsoStranded ?? 0),
-    spentPence: Math.round(Number(spend?.usd ?? 0) * 100 * USD_TO_GBP),
+    spentPence: purse.pence,
+    // What the figure is made of: a bill where one is readable, else an estimate.
+    spentBasis: { google: purse.google.basis, googleSource: purse.google.source, googleBilledGbp: purse.google.billedGbp, googleEstimateGbp: purse.google.estimateGbp, tripadvisorGbp: purse.tripadvisor.gbp, otherGbp: purse.otherGbp },
     calls: spend?.calls ?? 0,
     ceilingPence: Number(ceiling?.value ?? 25000),
     tripadvisor: { left: Math.max(0, TRIPADVISOR_CAP - (ta?.calls ?? 0)), of: TRIPADVISOR_CAP },

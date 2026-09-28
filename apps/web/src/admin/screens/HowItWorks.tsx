@@ -833,7 +833,7 @@ const SECTIONS: Section[] = [
       {
         title: 'Tripadvisor is opt-in per search',
         rule: 'It runs only when a search names it. Everything else uses the default set.',
-        why: 'It bills per location returned — 1,000 free for life, then about 15 cents a search. That is the one source where an idle browse costs real money.',
+        why: 'It bills per location returned — 1,000 free a month, then about 15 cents a search. That is the one source where an idle browse costs real money.',
         state: 'live',
         where: 'apps/api/src/sources/index.js',
       },

@@ -99,7 +99,10 @@ export const LINES = [
   {
     key: 'tripadvisor', label: 'Tripadvisor', source: 'tripadvisor', unit: 'location', unitPlural: 'locations',
     what: 'Billed per location ID returned, not per search: a page of 10, each name lookup, and two for opening a place (details and reviews).',
-    allowance: { kind: 'lifetime', limit: 1000, beyondUsd: PRICE_PER_UNIT_USD['tripadvisor'], basis: `Terra Discover: 1,000 free for the life of the account, then $${PRICE_PER_UNIT_USD['tripadvisor']} a location` },
+    // Monthly, not lifetime (owner, 29 Sep 2026: "TripAdvisor: 79 look-ups,
+    // within the 1,000 free a month — the page says $5.81"). The old
+    // 'lifetime' basis was wrong, and priced every location from the first.
+    allowance: { kind: 'monthly', limit: 1000, beyondUsd: PRICE_PER_UNIT_USD['tripadvisor'], basis: `1,000 free a month, then $${PRICE_PER_UNIT_USD['tripadvisor']} a location` },
     legacyUnitsPerCall: () => 10,
     console: { label: 'Tripadvisor developer portal', url: 'https://www.tripadvisor.com/developers' },
   },
@@ -187,7 +190,7 @@ export function perSearchCost({ scoutAvgUsd = null } = {}) {
     fixtures: { perSearchUsd: 0, note: 'Sample data, free.' },
     osm: { perSearchUsd: 0, note: 'OpenStreetMap, free open data.' },
     google: { perSearchUsd: 0, note: 'Google gives 5,000 free searches a month per kind; beyond that about $0.03 a search. The quota is capped in Cloud Console.' },
-    tripadvisor: { perSearchUsd: 0.15, note: 'Billed per location returned: 1,000 free for life (about 50 searches), then about $0.15 a search.' },
+    tripadvisor: { perSearchUsd: 0.15, note: 'Billed per location returned: 1,000 free a month (about 100 searches), then about $0.15 a search.' },
     ticketmaster: { perSearchUsd: 0, note: 'Free.' },
     seatgeek: { perSearchUsd: 0, note: 'Free.' },
     predicthq: { perSearchUsd: 0, note: 'Free plan.' },

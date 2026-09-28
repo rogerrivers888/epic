@@ -18,6 +18,7 @@
  */
 
 import express from 'express';
+import { collectPurse } from '../desk/supplierCost.js';
 import { timingSafeEqual } from 'node:crypto';
 import { looksLikeHash, verifyResumeKey } from '../domain/resumeKey.js';
 import { can, requires } from '../access.js';
@@ -95,15 +96,17 @@ export async function roomToSpend(pence, { holder = null, reserve = true } = {})
     // land in the same ledger and never ask this ceiling before they run, so
     // counting them here refuses collection for spending Collect did not do
     // (Codex, 18 Sep 2026) — on production that was $86.85 of the month.
-    const { rows: [spend] } = await client.query(
-      `select coalesce(sum(estimated_cost_usd), 0)::numeric as usd
-         from provider_calls
-        where created_at > date_trunc('month', now())
-          and provider <> all ($1::text[])`, [OTHER_PURSE]);
+    //
+    // And at what the suppliers actually charge, not the ledger's list price
+    // for every request (owner, 29 Sep 2026: "£516.22 of a ceiling of £550 …
+    // real spend is about £130"): Google past each SKU's free allowance, read
+    // from its bill where there is one; Tripadvisor past its 1,000 a month
+    // (desk/supplierCost.js). Read under the ceiling's lock, as before.
+    const purse = await collectPurse();
     const { rows: [held] } = await client.query(
       'select coalesce(sum(pence), 0)::int as pence from spend_reservations');
     // The ledger is in dollars; the ceiling is the owner's, in pounds.
-    const spentPence = Math.round(Number(spend?.usd ?? 0) * 100 * USD_TO_GBP);
+    const spentPence = purse.pence;
     const claimed = held.pence;
     const left = ceilingPence - spentPence - claimed;
     // A run that spends nothing is never over a ceiling — the ceiling is about

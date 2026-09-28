@@ -38,7 +38,9 @@ export const meterOf = (sku) => METER_OF.find(([re]) => re.test(String(sku ?? ''
  * separate from Text Search's (googleEstimate).
  */
 // Every reader passes the month as $1: the range keeps it to the month's
-// rows instead of reading the whole ledger (perf, round 3).
+// rows instead of reading the whole ledger (perf, round 3). `at` is the row's
+// own instant, so a reader can take part of a month (supplierCost.js prices
+// a window that starts or ends inside one) without a second read.
 // `provider_call_bills_google` (migration 285) is true of every row either
 // branch can read and of more besides, so it changes nothing counted; it
 // lets the month be read from the partial index over Google's rows instead
@@ -46,7 +48,8 @@ export const meterOf = (sku) => METER_OF.find(([re]) => re.test(String(sku ?? ''
 export const LEDGER_METERS = `
   select p.id, to_char(p.created_at at time zone 'Europe/London', 'YYYY-MM') as month,
          (p.created_at at time zone 'Europe/London')::date as day,
-         case when m.key = 'google' then 'google-legacy' else m.key end as meter, (m.value)::numeric as n
+         case when m.key = 'google' then 'google-legacy' else m.key end as meter, (m.value)::numeric as n,
+         p.created_at as at
     from provider_calls p, jsonb_each_text(p.units) m
    where p.created_at >= (($1::text || '-01')::date::timestamp at time zone 'Europe/London')
      and p.created_at < ((($1::text || '-01')::date + interval '1 month')::timestamp at time zone 'Europe/London')
@@ -57,7 +60,8 @@ export const LEDGER_METERS = `
   union all
   select p.id, to_char(p.created_at at time zone 'Europe/London', 'YYYY-MM'),
          (p.created_at at time zone 'Europe/London')::date,
-         case when p.provider ~* 'route' then 'google-routes' else 'google-legacy' end, (p.units #>> '{}')::numeric
+         case when p.provider ~* 'route' then 'google-routes' else 'google-legacy' end, (p.units #>> '{}')::numeric,
+         p.created_at
     from provider_calls p
    where p.created_at >= (($1::text || '-01')::date::timestamp at time zone 'Europe/London')
      and p.created_at < ((($1::text || '-01')::date + interval '1 month')::timestamp at time zone 'Europe/London')
@@ -86,7 +90,7 @@ export const PRO_DETAILS = `
 // dearer rate; the estimate of a bill does not.
 const PLACE_DETAILS_PRO_USD = 0.017;
 
-export async function googleEstimate(month) {
+export async function googleEstimate(month, { until = null } = {}) {
   const { LINES } = await import('../sources/pricing.js');
   // Text Search Pro and Place Details Pro are two SKUs with a free allowance
   // each, not pooled (Codex, 29 Sep 2026). A request marked `pro-details` is
@@ -94,8 +98,10 @@ export async function googleEstimate(month) {
   // before the mark) against Text Search's — the dearer reading, never the
   // cheaper one. The two reads are asked side by side (round 4 PERF).
   const [{ rows }, { rows: [{ n: proDetails = 0 } = {}] }] = await Promise.all([
-    query(`select meter, sum(n)::float as units from (${LEDGER_METERS}) x where month = $1 group by 1`, [month]),
-    query(PRO_DETAILS, [month]),
+    // `until`: only the rows before an instant — what a bill read up to that
+    // instant has not yet covered is the rest (desk/supplierCost.js).
+    query(`select meter, sum(n)::float as units from (${LEDGER_METERS}) x where month = $1 and ($2::timestamptz is null or at < $2) group by 1`, [month, until]),
+    query(`${PRO_DETAILS} and ($2::timestamptz is null or p.created_at < $2)`, [month, until]),
   ]);
   const units = new Map(rows.map((r) => [r.meter === 'google-legacy' ? 'google' : r.meter, r.units]));
   const counted = [];

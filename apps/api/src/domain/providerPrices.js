@@ -68,7 +68,10 @@ export const PRICE_PER_UNIT_USD = {
   'google-photos': 0.007,
   // Routes API, priced per element rather than per request, past 5,000.
   'google-routes': 0.01,
-  // Tripadvisor: a location, past the 1,000 free for the life of the account —
+  // Tripadvisor: a location, past the 1,000 free a month (owner, 29 Sep 2026;
+  // not for the life of the account, as this used to say). The ledger's
+  // per-row figure is this list price for every location; what the month
+  // costs past the allowance is desk/supplierCost.js's to say —
   // and separately bounded by a hard monthly count, which is the limit that
   // actually stops it (`TRIPADVISOR_CAP`).
   tripadvisor: 0.015,
