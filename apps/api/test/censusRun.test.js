@@ -1607,6 +1607,11 @@ test('a district with a square still to do reads as partial, not complete', asyn
     outcode: 'ZZ8A', sectors: [['ZZ8A 1', 50.24, -1.24], ['ZZ8A 2', 50.32, -1.24]],
     ref: 'google:partial_one', slice: '50.2350,-1.2450,50.2450,-1.2350', gridKey: 'test/partial/0',
   });
+  // The run whose plan the district answers to: both squares.
+  const run = await startTestRun({ label: 'test partial run' });
+  for (const k of ['test/partial/0', 'test/partial/1']) {
+    await query(`insert into census_run_tiles (run_id, grid_key) values ($1, $2) on conflict do nothing`, [run.id, k]);
+  }
 
   await rollUpOutcodes({ outcodes: ['ZZ8A'] });
   const read = async () => (await query(
@@ -1615,11 +1620,7 @@ test('a district with a square still to do reads as partial, not complete', asyn
   assert.equal(half.census_count, 1, 'what the finished square found is counted, as a floor');
   assert.equal(half.complete, false, 'and the district says it is partial while a square of it is still to do');
 
-  // Asked for by a run, the same: the run's own plan decides.
-  const run = await startTestRun({ label: 'test partial run' });
-  for (const k of ['test/partial/0', 'test/partial/1']) {
-    await query(`insert into census_run_tiles (run_id, grid_key) values ($1, $2) on conflict do nothing`, [run.id, k]);
-  }
+  // Asked for by the run, the same.
   await askedBy(run, 'test/partial/0');
   await rollUpOutcodes({ runId: run.id });
   assert.equal((await read()).complete, false, 'a run stopped part-way publishes the district as partial');
@@ -1918,33 +1919,56 @@ test('a district fed a place by a neighbour\'s unfinished square is partial unti
   assert.equal(b.complete, false, 'and the district is partial while the square that fed it is unfinished');
 });
 
-test('a district rolled up by name is whole when a grid covers it whole, whatever an abandoned coarser square says', async (t) => {
+test('a district rolled up by name answers to the latest area run that planned it whole', async (t) => {
   await clean();
   t.after(async () => {
     await query(`delete from area_counts where area_slug = 'zz1a'`);
     await query(`delete from geo_cells where code like 'ZZ1A%'`);
     await query(`delete from place_subcategories where area_slug like 'testcoarse/%'`);
+    await query(`delete from census_run_tiles where grid_key like 'testcoarse/%'`);
     await query(`delete from census_tiles where grid_key like 'testcoarse/%'`);
     await query(`delete from place_index where venue_ref like 'google:whole_%'`);
+    await query(`delete from census_runs where started_by like 'ring-edge:test%'`);
     await clean();
   });
-  // A coarse sweep began on ZZ1A's square and was abandoned; a finer census
-  // has since covered the district whole. By name, it is whole — the coarse
-  // square is not work still owed (Codex, 28 Sep 2026).
+  // A coarse run began on ZZ1A and was abandoned; a finer run since covered
+  // it whole; and a ring's edge later re-asked one sliver of it and left it
+  // unfinished. By name, the district answers to the finer run's plan: the
+  // abandoned square is not owed, and a sliver is not a plan (Codex, 28 Sep
+  // 2026: only a plan says what whole is).
   await query(
     `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, started_at, saturated) values
        ('testcoarse/0', 49.00, -6.00, 49.08, -5.88, array['ZZ1A'], 'todo', null, now() - interval '3 days', 0),
        ('test/fine/0', 49.00, -6.00, 49.04, -5.94, array['ZZ1A'], 'done', now(), now(), 0),
-       ('test/fine/1', 49.04, -6.00, 49.08, -5.94, array['ZZ1A'], 'done', now(), now(), 0)
+       ('test/fine/1', 49.04, -6.00, 49.08, -5.94, array['ZZ1A'], 'done', now(), now(), 0),
+       ('test/edge/0', 49.00, -6.00, 49.01, -5.985, array['ZZ1A'], 'todo', null, null, 0)
      on conflict (grid_key) do update set state = excluded.state, censused_at = excluded.censused_at, started_at = excluded.started_at, outcodes = excluded.outcodes`);
+  const coarse = await startTestRun({ label: 'test coarse' });
+  await query(`update census_runs set started_at = now() - interval '3 days' where id = $1`, [coarse.id]);
+  await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'testcoarse/0') on conflict do nothing`, [coarse.id]);
+  const fine = await startTestRun({ label: 'test fine' });
+  await query(`update census_runs set started_at = now() - interval '1 day' where id = $1`, [fine.id]);
+  for (const k of ['test/fine/0', 'test/fine/1']) {
+    await query(`insert into census_run_tiles (run_id, grid_key) values ($1, $2) on conflict do nothing`, [fine.id, k]);
+  }
+  const edge = await startTestRun({ label: 'test edge' });
+  await query(`update census_runs set started_by = 'ring-edge:test' where id = $1`, [edge.id]);
+  await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'test/edge/0') on conflict do nothing`, [edge.id]);
   await seaDistrict({
     outcode: 'ZZ1A', sectors: [['ZZ1A 1', 49.02, -5.97], ['ZZ1A 2', 49.06, -5.97]],
     ref: 'google:whole_fine', slice: '49.0150,-5.9750,49.0250,-5.9650', gridKey: 'test/fine/0',
   });
   await rollUpOutcodes({ outcodes: ['ZZ1A'] });
-  const { rows: [a] } = await query(`select census_count, complete from area_counts where area_slug = 'zz1a' and subcategory = 'golf'`);
+  const read = async () => (await query(`select census_count, complete from area_counts where area_slug = 'zz1a' and subcategory = 'golf'`)).rows[0];
+  const a = await read();
   assert.equal(a.census_count, 1);
-  assert.equal(a.complete, true, 'whole on the grid that covered it whole');
+  assert.equal(a.complete, true, 'whole by the plan of the run that covered it whole');
+
+  // And a newer area run over it that has not finished makes it partial again.
+  const later = await startTestRun({ label: 'test later' });
+  await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'test/fine/0'), ($1, 'testcoarse/0') on conflict do nothing`, [later.id]);
+  await rollUpOutcodes({ outcodes: ['ZZ1A'] });
+  assert.equal((await read()).complete, false, 'partial while the latest plan over it has squares to do');
 });
 
 test('a district reached for the first time that has found nothing yet is on the board, at nought and partial', async (t) => {

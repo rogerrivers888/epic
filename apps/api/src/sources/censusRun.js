@@ -1325,17 +1325,23 @@ export async function rollUpOutcodes({ outcodes = null, runId = null, alsoSquare
   // with two of its four squares still to do, and a run stopped part-way
   // across the country would have published half-counted districts as whole
   // ones (28 Sep 2026: "partial counts shown as partial"). A run answers for
-  // its own plan. A district rolled up by name is whole when some grid covers
-  // it whole: an abandoned square on a coarser grid a finer census has since
-  // covered is not work still owed (Codex, 28 Sep 2026).
+  // its own plan. A district rolled up by name answers for the plan of the
+  // latest run that set out to cover it whole — an area run, never a ring's
+  // edge, whose squares are slivers of a district — because only a plan says
+  // what whole is: the squares that happen to exist do not, and inferring it
+  // from them certified a ring-edge patch as a whole district and left an
+  // abandoned coarser square owed for ever (Codex, 28 Sep 2026).
   const { rows: plannedTiles } = runId
     ? await query(
-      `select t.grid_key, t.outcodes, t.state from census_tiles t
+      `select t.grid_key, t.outcodes, t.state, m.run_id, r.started_at from census_tiles t
          join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1
+         join census_runs r on r.id = m.run_id
         where t.outcodes && $2::text[]`, [runId, codes])
     : await query(
-      `select grid_key, outcodes, state from census_tiles where outcodes && $1::text[]`, [codes]);
-  const gridOf = (key) => String(key).split('/')[0];
+      `select t.grid_key, t.outcodes, t.state, m.run_id, r.started_at from census_tiles t
+         join census_run_tiles m on m.grid_key = t.grid_key
+         join census_runs r on r.id = m.run_id
+        where t.outcodes && $1::text[] and coalesce(r.started_by, '') not like $2`, [codes, `${RING_EDGE}%`]);
 
   // Only what the current census of each tile found. A surfacing is kept
   // after its question stops finding it — "this used to be here" is worth
@@ -1525,12 +1531,10 @@ export async function rollUpOutcodes({ outcodes = null, runId = null, alsoSquare
       .map((t) => new Date(t.state === 'done' ? (t.censused_at ?? t.started_at) : (t.started_at ?? t.censused_at)).getTime())
       .sort((x, y) => x - y);
     const saturatedTiles = own.filter((t) => Number(t.saturated) > 0).length;
-    const squaresFor = plannedTiles.filter((t) => t.outcodes?.includes(code));
-    const byGrid = new Map();
-    for (const t of squaresFor) byGrid.set(gridOf(t.grid_key), [...(byGrid.get(gridOf(t.grid_key)) ?? []), t]);
-    const coveredWhole = runId
-      ? own.every((t) => t.state === 'done') && squaresFor.every((t) => t.state === 'done')
-      : [...byGrid.values()].some((g) => g.length && g.every((t) => t.state === 'done'));
+    const naming = plannedTiles.filter((t) => t.outcodes?.includes(code));
+    const latest = naming.reduce((a, t) => (!a || new Date(t.started_at) > new Date(a.started_at) ? t : a), null);
+    const squaresFor = latest ? naming.filter((t) => t.run_id === latest.run_id) : [];
+    const coveredWhole = own.every((t) => t.state === 'done') && squaresFor.every((t) => t.state === 'done');
     // And every square that fed it a place, tagged with it or not: a place in
     // a neighbour's unfinished square that sits nearest this district is part
     // of this count, and the square may have more (Codex, 28 Sep 2026).
