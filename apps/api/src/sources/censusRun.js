@@ -358,7 +358,11 @@ export async function startRun({
   // next run asks only the rest. Clearing them made every day repeat the same
   // drawers, and a costly square might never finish (Codex, 28 Sep 2026). Its
   // spending is still the last run's, and is not carried.
-  const PARTIAL = "census_tiles.censused_at is null and census_tiles.started_at > now() - ($8 || ' days')::interval";
+  // A sweep begun after the square's last completion, or with none, and not
+  // finished: a stale square being asked again keeps its old censused_at, and
+  // is half asked all the same (Codex, 29 Sep 2026).
+  const PARTIAL = "census_tiles.state <> 'done' and census_tiles.started_at > now() - ($8 || ' days')::interval"
+    + " and (census_tiles.censused_at is null or census_tiles.started_at > census_tiles.censused_at)";
   for (const t of tiles) {
     await query(
       `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, run_id, state)

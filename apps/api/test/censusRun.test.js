@@ -2089,4 +2089,14 @@ test('a new run keeps the drawers a half-asked square answered, and not its spen
   assert.deepEqual([after.state, after.done_subcategories, after.swept, after.requests, after.saturated], ['todo', ['golf', 'museums'], true, 0, 2],
     'its drawers and what was cut off in them are kept; its spending is not');
   await query(`update census_runs set state = 'done' where id = $1`, [run.id]);
+
+  // And a stale square being asked again, interrupted: its old completion is
+  // still on it, and its new sweep's drawers are kept all the same.
+  await query(
+    `update census_tiles set state = 'doing', censused_at = now() - interval '40 days', started_at = now() - interval '3 hours',
+            done_subcategories = array['golf'] where grid_key = $1`, [tile.gridKey]);
+  const again = await startRun({ label: 'test day after', outcodes: ['ZZ0C'], padKm: 0 });
+  const { rows: [later] } = await query('select done_subcategories from census_tiles where grid_key = $1', [tile.gridKey]);
+  assert.deepEqual(later.done_subcategories, ['golf']);
+  await query(`update census_runs set state = 'done' where id = $1`, [again.id]);
 });
