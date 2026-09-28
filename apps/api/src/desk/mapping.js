@@ -661,7 +661,9 @@ export async function retireMadeSubcategory(c, key, who) {
         or exists (select 1 from subcategory_facts where subcategory_key = $1)
         or exists (select 1 from shelf_subcategory_attributes where subcategory_key = $1)
         or exists (select 1 from shelf_subcategory_categories where subcategory_key = $1)
-        or exists (select 1 from subcategory_links where a = $1 or b = $1) as used`, [key]);
+        or exists (select 1 from subcategory_links where a = $1 or b = $1)
+        or exists (select 1 from question_set_subcategories where subcategory_key = $1)
+        or exists (select 1 from ready_bars where subcategory_key = $1 and set_by is distinct from 'inherited') as used`, [key]);
   if (used?.used) return false;
   await c.query('update shelf_subcategories set active = false, updated_at = now() where key = $1', [key]);
   await c.query(`delete from shelf_rules where scope = 'ours' and subject = $1`, [key]);
@@ -688,7 +690,9 @@ export async function retireMadeFact(c, key, who) {
         or exists (select 1 from browse_rows where rule::text like '%' || to_jsonb($1::text)::text || '%'
                                               or predicate::text like '%' || to_jsonb($1::text)::text || '%')
         or exists (select 1 from fact_unknowns where attribute_key = $1)
-        or exists (select 1 from family_answers where attribute_key = $1) as used`, [key]);
+        or exists (select 1 from family_answers where attribute_key = $1)
+        or exists (select 1 from questions where attribute_key = $1)
+        or exists (select 1 from attribute_brings where attribute_key = $1 or brings_key = $1) as used`, [key]);
   if (used?.used) return false;
   await c.query('update place_attributes set active = false where key = $1', [key]);
   const { rows: [added] } = await c.query(
