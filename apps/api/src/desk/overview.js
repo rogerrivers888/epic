@@ -44,7 +44,9 @@ async function spend() {
  * top, so the tile and "Recent runs and spend →" land where the spend is shown
  * (second audit CH.4) and the two can never disagree.
  */
-function spendTile(money, cfg) {
+function spendTile(money, cfg, now = new Date()) {
+  const billing = cfg.billing;
+  if (billing) return billingTile(billing, money, cfg, now);
   const googlePct = cfg.budgetGoogle ? money.google / cfg.budgetGoogle : 0;
   const claudePct = cfg.budgetClaude ? money.claude / cfg.budgetClaude : 0;
   const worst = Math.max(googlePct, claudePct);
@@ -53,6 +55,43 @@ function spendTile(money, cfg) {
     title: `Google £${Math.round(money.google)} of £${cfg.budgetGoogle} · Claude £${Math.round(money.claude)} of £${cfg.budgetClaude}`,
     line: worst > 1 ? 'over budget' : worst > 0.8 ? 'close to budget' : 'within budget',
     google: { spent: money.google, budget: cfg.budgetGoogle },
+    claude: { spent: money.claude, budget: cfg.budgetClaude },
+  };
+}
+
+const MONTH = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const gbp = (n) => `£${Number(n).toFixed(2)}`;
+
+/**
+ * The tile from Google's own billing (owner, 29 Sep 2026): budgets judged on
+ * usage before credit, and what the credit is doing — "Usage this month £X ·
+ * paid by credit · £Y credit left, expires 20 Dec". Amber when the credit is
+ * under £20 or under 30 days from expiry. A snapshot from an earlier month is
+ * named for its month and judged on nothing: it cannot speak for this one.
+ */
+export function billingTile(b, money, cfg, now = new Date()) {
+  const thisMonth = b.month === `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const monthName = MONTH[Number(b.month.slice(5, 7)) - 1] ?? b.month;
+  const exp = new Date(`${b.creditExpires}T23:59:59Z`);
+  const daysLeft = Math.ceil((exp.getTime() - now.getTime()) / 86400_000);
+  const expWord = exp.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+  const paid = b.paidGbp > 0.005 ? `${gbp(b.paidGbp)} paid` : 'paid by credit';
+  const credit = daysLeft > 0 ? `${gbp(b.creditGbp)} credit left, expires ${expWord}` : `credit expired ${expWord}`;
+  const title = `${thisMonth ? 'Usage this month' : `Usage in ${monthName}`} ${gbp(b.usageGbp)} · ${paid} · ${credit}`;
+  const googlePct = thisMonth && cfg.budgetGoogle ? b.usageGbp / cfg.budgetGoogle : 0;
+  const claudePct = cfg.budgetClaude ? money.claude / cfg.budgetClaude : 0;
+  const worst = Math.max(googlePct, claudePct);
+  const creditLow = daysLeft > 0 && (b.creditGbp < 20 || daysLeft < 30);
+  const tone = worst > 1 ? 'red' : worst > 0.8 || creditLow || daysLeft <= 0 ? 'amber' : thisMonth ? 'green' : 'none';
+  const said = worst > 1 ? 'over budget' : worst > 0.8 ? 'close to budget'
+    : daysLeft <= 0 ? 'the credit has run out — usage is paid for real'
+      : creditLow ? (b.creditGbp < 20 ? 'credit running low' : `credit expires in ${daysLeft} days`)
+        : thisMonth ? 'within budget' : `this month not yet in the billing`;
+  return {
+    tone,
+    title,
+    line: `${said} · Claude £${Math.round(money.claude)} of £${cfg.budgetClaude}`,
+    google: { spent: thisMonth ? b.usageGbp : null, budget: cfg.budgetGoogle, credit: b.creditGbp, creditExpires: b.creditExpires, source: b.source },
     claude: { spent: money.claude, budget: cfg.budgetClaude },
   };
 }

@@ -72,7 +72,7 @@ test('the defaults arrive proposed, banded from typical minutes, and a quick sto
 });
 
 test('every row whose rule named an axis is off, and Bring the grandparents has the brief’s rule', async () => {
-  const { rows } = await query('select key, active, predicate from browse_rows order by position');
+  const { rows } = await query('select key, active, predicate, retired_at, retired_why from browse_rows order by position');
   const axis = /"(how-thrilling|how-much-walking|how-much-planning|how-new|how-busy-and-loud|how-much-you-learn|how-smart|how-long-a-day)"/;
   for (const r of rows) {
     if (axis.test(JSON.stringify(r.predicate))) assert.equal(r.active, false, `${r.key} names an axis and is off`);
@@ -90,14 +90,19 @@ test('every row whose rule named an axis is off, and Bring the grandparents has 
   for (const key of ['toddler', 'little', 'older', 'teen', 'raining', 'dog', 'goingout']) {
     assert.equal(by[key].active, true, `${key} is on`);
   }
-  // And the ones waiting on the Rows work are off with their rule kept, so
-  // the rewrite can read what was meant.
-  assert.equal(by.wearout.active, false);
-  assert.equal(by.wearout.predicate.all[0].attribute, 'how-much-walking');
+  // The ones that waited on the Rows work were rewritten without an axis and
+  // put live (275), their old predicate emptied; the three whose meaning
+  // needed an axis are retired, off, with why.
+  assert.equal(by.wearout.active, true);
+  assert.deepEqual(by.wearout.predicate, { all: [] });
+  for (const key of ['fun', 'norush', 'neverdone']) {
+    assert.equal(by[key].active, false, `${key} is retired`);
+    assert.ok(by[key].retired_at && by[key].retired_why, `${key} says why`);
+  }
   // Only the live rows are what a household could be shown.
   const live = await browseRows.rows();
   assert.ok(live.every((r) => r.active));
-  assert.ok(!live.some((r) => r.key === 'wearout'));
+  assert.ok(!live.some((r) => ['fun', 'norush', 'neverdone'].includes(r.key)));
 });
 
 test('a row cannot be saved against a retired label, and the reason names it', async () => {

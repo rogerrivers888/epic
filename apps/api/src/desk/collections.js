@@ -333,7 +333,9 @@ async function ruleNames(run = query) {
 /** The list: Collection · Places (or within reach) · Shown to · Shown · Opened · Hearted. */
 export async function collectionList({ loc = null } = {}) {
   const [{ rows }, idx, eng, names] = await Promise.all([
-    query('select * from browse_rows order by position, title'),
+    // A retired collection (275: its meaning needed a graded axis) is kept
+    // with why, and listed nowhere.
+    query('select * from browse_rows where retired_at is null order by position, title'),
     placeIndex(),
     engagement(),
     ruleNames(),

@@ -123,6 +123,13 @@ deskRoutes.put('/settings/:key', requires('manage_library'), async (req, res, ne
     // "What changed" is composed by the API from the key and value; a `what`
     // in the body is ignored (second audit CH.6).
     const out = await settingsRepo.setSetting(String(req.params.key), req.body?.value, { who: who(req) });
+    // Switching a region on is what starts its load (config, never a button):
+    // in the background, in its own worker process.
+    if (String(req.params.key) === 'osmRegions' && out.changed) {
+      const { loadDue } = await import('../sources/osmExtract.js');
+      void loadDue({ who: who(req) }).then((r) => { for (const x of r) console.log(x.error ? `osm extract ${x.region}: ${x.error}` : `osm extract ${x.region}: ${x.features} places`); })
+        .catch((err) => console.error('osm extract', err.message));
+    }
     res.json(out);
   } catch (err) { next(err); }
 });
@@ -410,6 +417,19 @@ export async function deskHousekeeping() {
   const added = await pipeline.add().catch((err) => ({ error: err.message }));
   return { proposals: await refreshProposals(), narrowed: await mapping.refreshNarrowings(), dropped, checked, added };
 }
+
+/**
+ * Google billing against the ledger for a month (owner, 29 Sep 2026): read
+ * only — the export is read by the daily job, never by a button.
+ */
+deskRoutes.get('/billing/reconcile', requires('view_library'), async (req, res, next) => {
+  try {
+    const month = /^\d{4}-\d{2}$/.test(String(req.query.month ?? '')) ? String(req.query.month) : new Date().toISOString().slice(0, 7);
+    const { reconcile } = await import('../desk/billing.js');
+    const { configured } = await import('../sources/billingExport.js');
+    res.json({ configured: configured(), ...(await reconcile(month)) });
+  } catch (err) { next(err); }
+});
 
 /** The local open-map extracts, read only: which regions, when, how many places. */
 deskRoutes.get('/osm', requires('view_library'), async (_req, res, next) => {

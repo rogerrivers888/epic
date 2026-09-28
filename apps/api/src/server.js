@@ -56,7 +56,7 @@ import { filingRoutes } from './routes/filing.js';
 import { deskRoutes, deskHousekeeping } from './routes/desk.js';
 import { familyRoutes } from './routes/families.js';
 import { collectionRoutes } from './routes/collections.js';
-import { loadDue as loadOsmDue, REGIONS_ON as osmRegionsOn } from './sources/osmExtract.js';
+import { loadDue as loadOsmDue } from './sources/osmExtract.js';
 import hostSkillRoutes, { adminRouter as skillsAdminRoutes, publicRouter as skillsPublicRoutes, ensureSkillsReady } from './routes/hostSkills.js';
 import questionRoutes from './routes/questions.js';
 import { ensureAttributeAliases } from './repositories/questionSets.js';
@@ -706,11 +706,21 @@ const deskDaily = () => deskHousekeeping()
   .catch((err) => console.error('desk housekeeping', err.message));
 void indexBuilt.then(deskDaily);
 setInterval(deskDaily, BAR_CHECK_EVERY_MS).unref?.();
-// The local open-map extract (handover 5.3): loaded for the regions the owner
-// switched on in config (EPIC_OSM_EXTRACT), at boot if never loaded, and again
-// when a month old. No button starts it. Free; a bulk load, so config-gated.
+// The local open-map extract (handover 5.3): loaded for the regions switched
+// on in config (the osmRegions setting, or EPIC_OSM_EXTRACT), at boot if never
+// loaded, when the setting changes, and again when a month old — each in its
+// own worker process. No button starts it. Free; a bulk load, so config-gated.
+// Google's billing export (owner, 29 Sep 2026): read daily once a key is in
+// Doppler (GCP_BILLING_SA_JSON), attributed to the ledger, the spend tile
+// refreshed. Free; read only.
+const billingDaily = () => {
+  void import('./desk/billing.js').then(({ billingDaily: run }) => run())
+    .then((r) => { if (r?.speaks) console.log(`billing export: ${r.months.map((m) => `${m.month} ${m.rows} rows`).join(', ')}`); })
+    .catch((err) => console.error('billing export', err.message));
+};
+void indexBuilt.then(billingDaily);
+setInterval(billingDaily, BAR_CHECK_EVERY_MS).unref?.();
 const osmDaily = () => {
-  if (!osmRegionsOn().length) return;
   void loadOsmDue()
     .then((out) => { for (const r of out) console.log(r.error ? `osm extract ${r.region}: ${r.error}` : `osm extract ${r.region}: ${r.features} places`); })
     .catch((err) => console.error('osm extract', err.message));

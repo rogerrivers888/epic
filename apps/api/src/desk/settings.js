@@ -36,6 +36,13 @@ export const SETTINGS = {
   sourceFailing:       { kind: 'int', min: 1, max: 100, unit: '%' },
   budgetGoogle:        { kind: 'int', min: 0, max: 100000, unit: '£' },
   budgetClaude:        { kind: 'int', min: 0, max: 100000, unit: '£' },
+  // Which open-map extracts Epic keeps its own copy of (handover 5.3). Config,
+  // not a button: setting it starts the load. EPIC_OSM_EXTRACT overrides it.
+  osmRegions:          { kind: 'regions', allowed: ['great-britain', 'ireland-and-northern-ireland'] },
+  // What Google's billing says: usage before credit, credit left and when it
+  // expires. Seeded from the console (29 Sep 2026) until the BigQuery export
+  // is read; the Overview spend tile judges budgets on usage, not on credit.
+  billing:             { kind: 'billing' },
   ageBands:            { kind: 'bands' },
   durationBands:       { kind: 'bands' },
   costBands:           { kind: 'cost' },
@@ -51,6 +58,8 @@ export const DEFAULTS = {
   recheckPhysical: 12, recheckAccess: 6, recheckFood: 6, suggestExpiry: 30, askPerVisit: 1,
   familiesSettle: 2, familiesWrong: 2, collectionMinPlaces: 4, sourceSlow: 5, sourceFailing: 15,
   budgetGoogle: 50, budgetClaude: 30,
+  osmRegions: [],
+  billing: null,
   ageBands: [
     { key: 'babies', label: 'Babies under 2', from: 0, to: 1 },
     { key: 'toddlers', label: 'Toddlers 2–4', from: 2, to: 4 },
@@ -123,6 +132,20 @@ export function validate(key, value) {
     }
     return value;
   }
+  if (spec.kind === 'regions') {
+    if (!Array.isArray(value) || value.some((r) => !spec.allowed.includes(r))) throw bad(`${key} is a list of: ${spec.allowed.join(', ')}`);
+    return [...new Set(value)];
+  }
+  if (spec.kind === 'billing') {
+    if (value === null) return null;
+    const ok = value && typeof value === 'object'
+      && Number.isFinite(Number(value.usageGbp)) && Number.isFinite(Number(value.creditGbp))
+      && /^\d{4}-\d{2}-\d{2}$/.test(String(value.creditExpires ?? '')) && /^\d{4}-\d{2}$/.test(String(value.month ?? ''));
+    if (!ok) throw bad(`${key} needs month (YYYY-MM), usageGbp, creditGbp and creditExpires (YYYY-MM-DD)`);
+    return { month: String(value.month), usageGbp: Number(value.usageGbp), paidGbp: Number(value.paidGbp ?? 0), creditGbp: Number(value.creditGbp),
+      creditTotalGbp: value.creditTotalGbp == null ? null : Number(value.creditTotalGbp), creditExpires: String(value.creditExpires),
+      source: String(value.source ?? 'console'), at: String(value.at ?? new Date().toISOString()) };
+  }
   if (spec.kind === 'cost') {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw bad(`${key} is bands per country`);
     for (const [country, v] of Object.entries(value)) {
@@ -154,13 +177,19 @@ export const SENTENCES = {
   familiesSettle: '{} or more families agreeing, none disagreeing, settles a fact',
   familiesWrong: 'If {} or more families say a fact is wrong, it’s hidden and re-checked when next due; if our sources confirm it again, the next families who visit are asked',
   suggestExpiry: 'A suggestion still in the backlog is dropped after {} days',
+  osmRegions: 'Our own copy of the open map is kept for · {}',
+  billing: 'Google billing · {}',
 };
 
 /** "What changed" for a setting set to `value`: its row with the value filled in. */
 export function sentenceFor(key, value) {
   const row = SENTENCES[key];
   if (!row) return `Setting · ${key}`;
-  return row.replace('{}', typeof value === 'number' ? String(value) : '');
+  const words = typeof value === 'number' ? String(value)
+    : Array.isArray(value) ? (value.length ? value.join(', ') : 'nowhere')
+      : value && typeof value === 'object' && 'usageGbp' in value ? `${value.month}: usage £${value.usageGbp.toFixed(2)}, £${value.creditGbp.toFixed(2)} credit left, expires ${value.creditExpires}`
+        : '';
+  return row.replace('{}', words);
 }
 
 /** How a value reads in the Changes log. */
@@ -169,7 +198,9 @@ export function said(key, value) {
   const unit = SETTINGS[key]?.unit;
   if (typeof value === 'boolean') return value ? 'On' : 'Off';
   if (typeof value === 'number') return unit === '%' ? `${value}%` : unit === '£' ? `£${value}` : String(value);
-  return Array.isArray(value) ? value.map((b) => b.label).join(' · ') : JSON.stringify(value);
+  if (Array.isArray(value)) return value.length ? value.map((b) => (typeof b === 'string' ? b : b.label)).join(' · ') : 'None';
+  if (typeof value === 'object' && 'usageGbp' in value) return `£${value.usageGbp.toFixed(2)} used · £${value.creditGbp.toFixed(2)} credit`;
+  return JSON.stringify(value);
 }
 
 /**

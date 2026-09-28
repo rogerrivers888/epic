@@ -70,3 +70,18 @@ test('a setting change returns the id of its Changes row, and that row undoes to
   assert.equal(same.change, undefined, 'a change that changes nothing has no row to undo');
   await settings.setSetting('recheckFood', was, { who: WHO });
 });
+
+test('the spend tile from Google billing: usage before credit, credit left and when it expires', async () => {
+  const { billingTile } = await import('../src/desk/overview.js');
+  const cfg = { budgetGoogle: 50, budgetClaude: 30 };
+  const b = { month: '2026-09', usageGbp: 40.61, paidGbp: 0, creditGbp: 180.15, creditExpires: '2026-12-20', source: 'console' };
+  const t = billingTile(b, { claude: 3 }, cfg, new Date('2026-09-29T12:00:00Z'));
+  assert.equal(t.title, 'Usage this month £40.61 · paid by credit · £180.15 credit left, expires 20 Dec');
+  assert.equal(t.tone, 'amber', '40.61 of 50 is over 80% of the budget');
+  const low = billingTile({ ...b, usageGbp: 10, creditGbp: 15 }, { claude: 3 }, cfg, new Date('2026-09-29T12:00:00Z'));
+  assert.equal(low.tone, 'amber'); assert.match(low.line, /credit running low/);
+  const soon = billingTile({ ...b, usageGbp: 10 }, { claude: 3 }, cfg, new Date('2026-11-25T12:00:00Z'));
+  assert.equal(soon.tone, 'amber'); assert.match(soon.title, /Usage in September/);
+  const fine = billingTile({ ...b, usageGbp: 10 }, { claude: 3 }, cfg, new Date('2026-09-29T12:00:00Z'));
+  assert.equal(fine.tone, 'green');
+});

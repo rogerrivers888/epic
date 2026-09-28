@@ -198,7 +198,32 @@ export async function loadFile({ path, region, url = null, onProgress = null }) 
  * Download and load one region. Started by a person (H1); marks its state as
  * it goes so the back office can show it, and cleans its file up after.
  */
-export async function loadRegion({ region, who, dir = '/tmp/epic-osm' }) {
+/**
+ * Load one region in its own process. A national extract peaks near 1 GB
+ * (Great Britain, measured 28 Sep 2026: 972,593 places, 2½ minutes, 1.0 GB
+ * resident), which must never be the API's own memory: a worker that runs
+ * out stops alone, and the region reads failed with the reason.
+ */
+export async function loadRegion({ region, who }) {
+  if (!EXTRACTS[region]) throw Object.assign(new Error(`${region} is not an extract Epic loads.`), { status: 400 });
+  const { fork } = await import('node:child_process');
+  const worker = new URL('./osmWorker.js', import.meta.url);
+  const code = await new Promise((resolve) => {
+    const child = fork(worker, [region, who ?? 'Epic'], { execArgv: ['--max-old-space-size=3072'], stdio: 'inherit' });
+    child.on('exit', (c, sig) => resolve(sig ? `signal ${sig}` : c));
+    child.on('error', () => resolve('could not start'));
+  });
+  const { rows: [x] } = await query('select state, features, problem from osm_extracts where region = $1', [region]);
+  if (code !== 0 && x && ['downloading', 'reading'].includes(x.state)) {
+    await query(`update osm_extracts set state = 'failed', problem = $2, finished_at = now() where region = $1`,
+      [region, `the loader stopped (${code}) before it finished`]);
+    return { region, error: `stopped (${code})` };
+  }
+  return x?.state === 'done' ? { region, features: x.features } : { region, error: x?.problem ?? `stopped (${code})` };
+}
+
+/** The load itself, run inside the worker (osmWorker.js). */
+export async function loadRegionHere({ region, who, dir = '/tmp/epic-osm' }) {
   const url = EXTRACTS[region];
   if (!url) throw Object.assign(new Error(`${region} is not an extract Epic loads.`), { status: 400 });
   const path = `${dir}/${region}.osm.pbf`;
@@ -293,15 +318,38 @@ export async function extracts() {
  */
 export const REGIONS_ON = () => String(process.env.EPIC_OSM_EXTRACT ?? '').split(',').map((r) => r.trim()).filter((r) => EXTRACTS[r]);
 
+/**
+ * The regions switched on: EPIC_OSM_EXTRACT where it is set, otherwise the
+ * back-office setting `osmRegions` (config a person sets, logged in Changes).
+ */
+export async function regionsOn() {
+  if (String(process.env.EPIC_OSM_EXTRACT ?? '').trim()) return REGIONS_ON();
+  const { settings } = await import('../desk/settings.js');
+  const v = (await settings()).values.osmRegions;
+  return Array.isArray(v) ? v.filter((r) => EXTRACTS[r]) : [];
+}
+
+/** A load still marked running after this long died with its process. */
+const STUCK_MS = 6 * 3600_000;
+let loading = null;
+
 /** Load every switched-on region that has never loaded, failed, or is a month old. One at a time. */
 export async function loadDue({ who = 'Epic (monthly)' } = {}) {
-  const out = [];
-  for (const region of REGIONS_ON()) {
-    const { rows: [x] } = await query('select state, finished_at from osm_extracts where region = $1', [region]);
-    const stale = !x || x.state === 'never' || x.state === 'failed'
-      || (x.state === 'done' && Date.now() - new Date(x.finished_at).getTime() > 30 * 86400_000);
-    if (!stale || x?.state === 'downloading' || x?.state === 'reading') continue;
-    out.push(await loadRegion({ region, who }).catch((err) => ({ region, error: err.message })));
-  }
-  return out;
+  // One pass at a time in this process: the setting and the daily tick can
+  // both ask.
+  if (loading) return loading;
+  loading = (async () => {
+    const out = [];
+    for (const region of await regionsOn()) {
+      const { rows: [x] } = await query('select state, started_at, finished_at from osm_extracts where region = $1', [region]);
+      const running = x && ['downloading', 'reading'].includes(x.state);
+      const stuck = running && (!x.started_at || Date.now() - new Date(x.started_at).getTime() > STUCK_MS);
+      const stale = !x || x.state === 'never' || x.state === 'failed' || stuck
+        || (x.state === 'done' && Date.now() - new Date(x.finished_at).getTime() > 30 * 86400_000);
+      if (!stale || (running && !stuck)) continue;
+      out.push(await loadRegion({ region, who }).catch((err) => ({ region, error: err.message })));
+    }
+    return out;
+  })().finally(() => { loading = null; });
+  return loading;
 }
