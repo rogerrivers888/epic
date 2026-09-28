@@ -21,6 +21,11 @@ import { AgentSession, api, ApiError } from '../api';
 import { colors, spacing, type } from '../theme';
 import { Button } from '../components/ui';
 import { Panel, ago, money } from './kit';
+import { asText, useQueryState } from '../router';
+
+const DAY_MS = 24 * 3600_000;
+const recent = (r: AgentSession) => Date.now() - new Date(r.last_seen_at ?? r.created_at).getTime() < DAY_MS
+  || Boolean(r.paid_grant_until && new Date(r.paid_grant_until) > new Date());
 
 export function AgentSessions() {
   const [rows, setRows] = useState<AgentSession[] | null>(null);
@@ -28,6 +33,12 @@ export function AgentSessions() {
   const [all, setAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [canGrant, setCanGrant] = useState(true);
+  // `?session=<id>`: a link that names one session (the id an agent reports)
+  // opens the panel on it — listed first and marked, even if it was last
+  // seen more than a day ago (29 Sep 2026).
+  const [asked_] = useQueryState<string>('session', '', asText);
+  const wanted = asked_.trim().toLowerCase();
 
   // Only the latest ask may draw: a slow "all" answer arriving after a switch
   // back to the last 24 hours, or after a grant's reload, would otherwise
@@ -39,10 +50,15 @@ export function AgentSessions() {
   const load = useCallback(async () => {
     const n = ++asked.current;
     try {
-      const out = await api.agentSessions(mode.current);
-      if (n === asked.current) { setRows(out.sessions); setTotal(out.total); }
+      const out = await api.agentSessions(mode.current || Boolean(wanted));
+      if (n === asked.current) {
+        const list = wanted ? [...out.sessions].sort((a, b) => Number(b.id.startsWith(wanted)) - Number(a.id.startsWith(wanted))) : out.sessions;
+        setRows(wanted && !mode.current ? list.filter((r) => r.id.startsWith(wanted) || recent(r)) : list);
+        setTotal(out.total);
+        setCanGrant(out.canGrant !== false);
+      }
     } catch { if (n === asked.current) setRows(null); }
-  }, []);
+  }, [wanted]);
   useEffect(() => { void load(); }, [load, all]);
 
   const grant = async (id: string, hours: number) => {
@@ -57,18 +73,28 @@ export function AgentSessions() {
   return (
     <Panel title="Agent sessions" sub="No paid calls unless you allow them.">
       {error ? <Text style={[type.small, { color: colors.overrun }]}>{error}</Text> : null}
+      {!canGrant ? (
+        <Text style={[type.small, { color: colors.ink }]}>Only you, signed in on your phone or computer, can allow paid calls — this sign-in is an agent’s.</Text>
+      ) : null}
       {rows.length ? rows.map((r) => (
         <View key={r.id} style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm, paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: colors.lineSoft }}>
           <View style={{ flexGrow: 1, flexBasis: 180, gap: 1 }}>
-            <Text style={[type.small, { color: colors.ink, fontWeight: '700' }]} numberOfLines={1}>{r.label ?? 'No name given'}</Text>
+            <Text style={[type.small, { color: colors.ink, fontWeight: '700' }]} numberOfLines={1}>
+              {`${r.label ?? 'Agent'} · ${r.id.slice(0, 8)}`}{wanted && r.id.startsWith(wanted) ? '  ← this one' : ''}
+            </Text>
             <Text style={type.tiny}>
               {`${ago(r.last_seen_at ?? r.created_at)} · ${money(r.spent_24h_usd)} in 24 h`}
               {granted(r) ? ` · paid until ${new Date(r.paid_grant_until!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
             </Text>
           </View>
-          {granted(r)
+          {!canGrant ? null : granted(r)
             ? <Button kind="secondary" label="Stop paid calls" loading={busy === r.id} onPress={() => void grant(r.id, 0)} />
-            : <Button kind="secondary" label="Allow 24 hours" loading={busy === r.id} onPress={() => void grant(r.id, 24)} />}
+            : (
+              <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                <Button kind="secondary" label="Allow 3 hours" loading={busy === r.id} onPress={() => void grant(r.id, 3)} />
+                <Button kind="secondary" label="Allow 24 hours" loading={busy === r.id} onPress={() => void grant(r.id, 24)} />
+              </View>
+            )}
         </View>
       )) : <Text style={type.small}>{all ? 'None signed in.' : 'None seen in the last 24 hours.'}</Text>}
       {total > rows.length || all ? (

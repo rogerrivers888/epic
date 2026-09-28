@@ -24,6 +24,7 @@ import { useViewport } from '../../hooks/useViewport';
 import { asText, useQueryState, useRouter } from '../../router';
 import { api, type RunsList, type Run, type RunFailures } from '../../api';
 import { AdminPage, ago, day, pounds, since } from '../kit';
+import { AgentSessions } from '../AgentSessions';
 import { Explain } from '../explain';
 import { Ladder, Num, Word, Blank, Progress, Act, Footer, Kicker, Stat, type Col } from '../table';
 
@@ -142,6 +143,10 @@ function RunsBoard({ canManage, canSetCeiling, onFailures }: {
   const stranded = data.stranded[0] ?? null;
   return (
     <AdminPage>
+      {/* Paid hours for an agent are granted here, on a screen in the rail
+          (29 Sep 2026: the panel was only on /admin/overview, which left the
+          rail on 20 Sep, so a grant could not be made). */}
+      <AgentSessions />
       <View style={styles.band}>
         <View style={{ flexGrow: 1, flexBasis: 240, minWidth: 0, gap: 5 }}>
           <Kicker tip="sectionRunsThatSpend">Runs that spend</Kicker>
@@ -357,6 +362,7 @@ function RunsPhone({ canManage, onFailures }: { canManage: boolean; onFailures: 
 
   return (
     <AdminPage>
+      <AgentSessions />
       <View style={styles.bandPhone}>
         <Kicker tip="sectionToday">Today</Kicker>
         <Text style={styles.titlePhone}>

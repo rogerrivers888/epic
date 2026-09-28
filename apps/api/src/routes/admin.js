@@ -692,7 +692,11 @@ router.get('/spend/today', async (_req, res, next) => {
  * budget at all.
  */
 router.get('/sessions/agents', requires('manage_settings'), async (req, res, next) => {
-  try { res.json(await liveAgentSessions({ all: req.query.all === '1' })); } catch (err) { next(err); }
+  // `canGrant`: the panel says up front when the screen it is on cannot grant
+  // (an agent's own session), rather than letting a tap fail (29 Sep 2026).
+  try {
+    res.json({ ...(await liveAgentSessions({ all: req.query.all === '1' })), canGrant: req.session?.kind === 'device', you: req.session?.id ?? null });
+  } catch (err) { next(err); }
 });
 
 router.post('/sessions/:id/grant', requires('manage_settings'), async (req, res, next) => {
