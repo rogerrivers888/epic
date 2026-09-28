@@ -21,7 +21,7 @@ test('a billed day is shared across that day’s ledger rows by requests, and bo
   await query(`insert into billing_days (invoice_month, day, service, sku, sku_id, meter, usage, cost, credits, promo, currency)
                values ('2026-09', '2026-09-20', 'Places API', 'Places API Text Search Pro', 'SKU-PRO', 'google-pro', 300, 6.00, -6.00, -6.00, 'GBP'),
                       ('2026-09', '2026-09-20', 'Other', 'Cloud Storage', 'SKU-X', null, 1, 0.10, 0, 0, 'GBP')`);
-  // A scalar and a pre-tier row the same month: neither breaks it, the second is reported.
+  // A scalar and a pre-tier row the same month: neither breaks it, both are reported as google-legacy.
   await query(`insert into provider_calls (provider, purpose, units, estimated_cost_usd, created_at)
                values ('google', 'billing-test', '5', 0, '2026-09-20 09:00+01'), ('google', 'billing-test', '{"google": 7}', 0.2, '2026-09-20 09:30+01')`);
   const { rows: [h] } = await query(`insert into households (name) values ('billing test') returning id`);
@@ -38,7 +38,7 @@ test('a billed day is shared across that day’s ledger rows by requests, and bo
   assert.equal(d.ledgerRequests, 300);
   assert.equal(d.noHousehold, 1, 'the unattributed row is named');
   assert.ok(rec.unmapped.some((u) => u.sku === 'Cloud Storage'));
-  assert.ok(rec.ledgerOnly.some((l) => l.meter === 'google-legacy' && l.requests === 7), 'a pre-tier row is seen, as google-legacy');
+  assert.ok(rec.ledgerOnly.some((l) => l.meter === 'google-legacy' && l.requests === 12), 'a pre-tier row and a bare number are seen, as google-legacy');
   await query(`delete from provider_calls where purpose = 'billing-test'`);
   await query(`delete from billing_days where day = '2026-09-20'`);
 });
@@ -143,4 +143,28 @@ test('the ledger estimate is what Google would bill: nothing inside each SKU’s
   assert.equal(search.billable, 200, 'only the 200 past the Enterprise allowance');
   assert.ok(est.gbp > 0 && est.gbp < 10, `£${est.gbp.toFixed(2)}, not the £100+ list price`);
   await query(`delete from provider_calls where purpose = 'billing-allow'`);
+});
+
+test('Text Search Pro and Place Details Pro are judged against their own allowances, not pooled', async () => {
+  await query(`delete from provider_calls where purpose = 'billing-pool'`);
+  // 3,000 of each: both free, where a pooled count of 6,000 would bill 1,000.
+  await query(`insert into provider_calls (provider, purpose, units, estimated_cost_usd, created_at)
+               values ('google', 'billing-pool', '{"google": 3000, "google-pro": 3000}', 0, '2026-06-10 10:00+01'),
+                      ('google', 'billing-pool', '{"google": 3000, "google-pro": 3000, "pro-details": 3000}', 0, '2026-06-10 11:00+01')`);
+  const est = await billing.googleEstimate('2026-06');
+  assert.equal(est.lines.find((l) => l.key === 'google-pro').used, 3000);
+  assert.equal(est.lines.find((l) => l.key === 'google-pro-details').used, 3000);
+  assert.equal(est.gbp, 0);
+  await query(`delete from provider_calls where purpose = 'billing-pool'`);
+});
+
+test('a Google row whose units are a bare number is counted in the estimate, not dropped', async () => {
+  await query(`delete from provider_calls where purpose = 'billing-scalar'`);
+  await query(`insert into provider_calls (provider, purpose, units, estimated_cost_usd, created_at)
+               values ('google', 'billing-scalar', '"6000"', 0, '2026-05-10 10:00+01'),
+                      ('google', 'billing-scalar', '12', 0, '2026-05-10 11:00+01')`);
+  const est = await billing.googleEstimate('2026-05');
+  assert.equal(est.lines.find((l) => l.key === 'google').used, 6012);
+  assert.ok(est.gbp > 0, 'past the old line’s 5,000');
+  await query(`delete from provider_calls where purpose = 'billing-scalar'`);
 });

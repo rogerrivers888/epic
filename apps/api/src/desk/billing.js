@@ -28,11 +28,14 @@ export const METER_OF = [
 export const meterOf = (sku) => METER_OF.find(([re]) => re.test(String(sku ?? '')))?.[1] ?? null;
 
 /**
- * The ledger's Google requests, one row per row and meter. Only rows whose
- * units are an object are expanded (a legacy scalar is skipped, never an
- * error); a row from before SKU-tier metering carries only a bare `google`
- * count and is reported as `google-legacy` — seen, but not attributable to a
- * billed SKU (Codex, 29 Sep 2026).
+ * The ledger's Google requests, one row per row and meter. A row from before
+ * SKU-tier metering carries only a bare `google` count and is reported as
+ * `google-legacy` — seen, but not attributable to a billed SKU (Codex, 29 Sep
+ * 2026). So is a row whose units are a bare number or numeric string (the
+ * source bench writes its call count that way): counted, never dropped
+ * (Codex). `pro-details` is not a meter of its own: it marks how many of a
+ * row's `google-pro` requests were Place Details, whose free allowance is
+ * separate from Text Search's (googleEstimate).
  */
 const LEDGER_METERS = `
   select p.id, to_char(p.created_at at time zone 'Europe/London', 'YYYY-MM') as month,
@@ -41,7 +44,20 @@ const LEDGER_METERS = `
     from provider_calls p, jsonb_each_text(p.units) m
    where jsonb_typeof(p.units) = 'object' and m.value ~ '^[0-9.]+$'
      and (m.key like 'google-%'
-          or (m.key = 'google' and not exists (select 1 from jsonb_object_keys(p.units) k where k like 'google-%')))`;
+          or (m.key = 'google' and not exists (select 1 from jsonb_object_keys(p.units) k where k like 'google-%')))
+  union all
+  select p.id, to_char(p.created_at at time zone 'Europe/London', 'YYYY-MM'),
+         (p.created_at at time zone 'Europe/London')::date,
+         case when p.provider ~* 'route' then 'google-routes' else 'google-legacy' end, (p.units #>> '{}')::numeric
+    from provider_calls p
+   where jsonb_typeof(p.units) in ('number', 'string') and p.provider ~* 'google' and (p.units #>> '{}') ~ '^[0-9.]+$'`;
+
+/** How many of a month's `google-pro` requests were marked as Place Details. */
+const PRO_DETAILS = `
+  select coalesce(sum((p.units->>'pro-details')::numeric), 0)::float as n
+    from provider_calls p
+   where jsonb_typeof(p.units) = 'object' and (p.units->>'pro-details') ~ '^[0-9.]+$'
+     and to_char(p.created_at at time zone 'Europe/London', 'YYYY-MM') = $1`;
 
 /**
  * The ledger's Google estimate for a month, as Google would bill it: per
@@ -55,14 +71,28 @@ export async function googleEstimate(month) {
   const { LINES } = await import('../sources/pricing.js');
   const { rows } = await query(`select meter, sum(n)::float as units from (${LEDGER_METERS}) x where month = $1 group by 1`, [month]);
   const units = new Map(rows.map((r) => [r.meter === 'google-legacy' ? 'google' : r.meter, r.units]));
-  let usd = 0;
-  const lines = [];
+  // Text Search Pro and Place Details Pro are two SKUs with a free allowance
+  // each, not pooled (Codex, 29 Sep 2026). A request marked `pro-details` is
+  // judged against its own allowance; an unmarked Pro request (every row from
+  // before the mark) against Text Search's — the dearer reading, never the
+  // cheaper one.
+  const [{ n: proDetails = 0 } = {}] = (await query(PRO_DETAILS, [month])).rows;
+  const counted = [];
   for (const line of LINES.filter((l) => l.source === 'google' && l.allowance)) {
     const used = units.get(line.key) ?? 0;
+    if (line.key === 'google-pro') {
+      const details = Math.min(proDetails, used);
+      counted.push({ line, key: 'google-pro', used: used - details });
+      counted.push({ line, key: 'google-pro-details', used: details });
+    } else counted.push({ line, key: line.key, used });
+  }
+  let usd = 0;
+  const lines = [];
+  for (const { line, key, used } of counted) {
     const billable = Math.max(0, used - line.allowance.limit);
     const lineUsd = billable * (line.allowance.beyondUsd ?? 0);
     usd += lineUsd;
-    lines.push({ key: line.key, used, free: line.allowance.limit, billable, gbp: lineUsd * USD_TO_GBP });
+    lines.push({ key, used, free: line.allowance.limit, billable, gbp: lineUsd * USD_TO_GBP });
   }
   return { gbp: usd * USD_TO_GBP, lines };
 }

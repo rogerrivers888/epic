@@ -38,7 +38,8 @@ async function spend() {
     select coalesce(sum(estimated_cost_usd), 0)::float usd
       from provider_calls where created_at >= date_trunc('month', now()) and provider ~ 'anthropic|claude'`);
   const { googleEstimate } = await import('./billing.js');
-  const month = new Date().toISOString().slice(0, 7);
+  // The month as the ledger groups it — London's, not UTC's (Codex).
+  const month = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit' }).format(new Date());
   const g = await googleEstimate(month).catch(() => ({ gbp: 0 }));
   return { google: g.gbp, claude: (rows[0]?.usd ?? 0) * USD_TO_GBP };
 }

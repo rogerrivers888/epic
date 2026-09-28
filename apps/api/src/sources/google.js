@@ -421,6 +421,9 @@ async function call(path, { method = 'POST', body, fieldMask, meter }) {
   // Usage and the free-allowance lines are counted in requests.
   bump(meter, 'google');
   bump(meter, sku);
+  // Place Details Pro has its own free allowance beside Text Search Pro's;
+  // the ledger marks which Pro requests were details (desk/billing.js).
+  if (sku === 'google-pro' && /^\/places\/[^:/]+$/.test(path)) bump(meter, 'pro-details');
 
   const began = Date.now();
   let res;
