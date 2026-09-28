@@ -27,19 +27,35 @@ export const METER_OF = [
 ];
 export const meterOf = (sku) => METER_OF.find(([re]) => re.test(String(sku ?? '')))?.[1] ?? null;
 
+/**
+ * The ledger's Google requests, one row per row and meter. Only rows whose
+ * units are an object are expanded (a legacy scalar is skipped, never an
+ * error); a row from before SKU-tier metering carries only a bare `google`
+ * count and is reported as `google-legacy` — seen, but not attributable to a
+ * billed SKU (Codex, 29 Sep 2026).
+ */
+const LEDGER_METERS = `
+  select p.id, to_char(p.created_at at time zone 'Europe/London', 'YYYY-MM') as month,
+         (p.created_at at time zone 'Europe/London')::date as day,
+         case when m.key = 'google' then 'google-legacy' else m.key end as meter, (m.value)::numeric as n
+    from provider_calls p, jsonb_each_text(p.units) m
+   where jsonb_typeof(p.units) = 'object' and m.value ~ '^[0-9.]+$'
+     and (m.key like 'google-%'
+          or (m.key = 'google' and not exists (select 1 from jsonb_object_keys(p.units) k where k like 'google-%')))`;
+
 /** Read a month from the export into billing_days. Returns what it read, or why it cannot. */
 export async function readMonth(month) {
   const got = await monthBySkuDay(month);
   if (!got.speaks) return got;
   await withTransaction(async (c) => {
-    await c.query(`delete from billing_days where to_char(day, 'YYYY-MM') = $1`, [month]);
+    // The invoice month's import is replaced whole — the export is read by
+    // invoice month, so it is kept and replaced by invoice month (278).
+    await c.query('delete from billing_days where invoice_month = $1', [month]);
     for (const r of got.rows) {
       await c.query(
-        `insert into billing_days (day, service, sku, sku_id, meter, usage, unit, cost, credits, promo, currency)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-         on conflict (day, sku_id) do update set usage = billing_days.usage + excluded.usage, cost = billing_days.cost + excluded.cost,
-           credits = billing_days.credits + excluded.credits, promo = billing_days.promo + excluded.promo, read_at = now()`,
-        [r.day, r.service, r.sku, r.skuId, meterOf(r.sku), r.usage, r.unit, r.cost, r.credits, r.promo, r.currency]);
+        `insert into billing_days (invoice_month, day, service, sku, sku_id, meter, usage, unit, cost, credits, promo, currency)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [month, r.day, r.service, r.sku, r.skuId, meterOf(r.sku), r.usage, r.unit, r.cost, r.credits, r.promo, r.currency]);
     }
   });
   return { speaks: true, month, rows: got.rows.length };
@@ -57,12 +73,9 @@ export async function attribute(month) {
     const { rowCount } = await c.query(`
       with billed as (
         select day, meter, sum(cost) as cost from billing_days
-         where meter is not null and to_char(day, 'YYYY-MM') = $1 group by 1, 2),
+         where meter is not null and invoice_month = $1 group by 1, 2),
       asked as (
-        select id, (created_at at time zone 'Europe/London')::date as day, m.key as meter, (m.value)::numeric as n
-          from provider_calls, jsonb_each_text(units) m
-         where to_char(created_at at time zone 'Europe/London', 'YYYY-MM') = $1
-           and m.key like 'google-%' and m.value ~ '^[0-9.]+$' and (m.value)::numeric > 0),
+        select id, day, meter, n from (${LEDGER_METERS}) x where month = $1 and n > 0),
       totals as (select day, meter, sum(n) as n from asked group by 1, 2),
       share as (
         select a.id, sum(b.cost * a.n / nullif(t.n, 0)) as gbp
@@ -81,14 +94,14 @@ export async function attribute(month) {
 export async function reconcile(month) {
   const [{ rows: billed }, { rows: ledger }, { rows: unmapped }] = await Promise.all([
     query(`select to_char(day, 'YYYY-MM-DD') as day, meter, sum(usage)::float usage, sum(cost)::float cost, sum(credits)::float credits, sum(promo)::float promo
-             from billing_days where meter is not null and to_char(day, 'YYYY-MM') = $1 group by 1, 2 order by 1, 2`, [month]),
-    query(`select to_char((created_at at time zone 'Europe/London')::date, 'YYYY-MM-DD') as day, m.key as meter,
-                  sum((m.value)::numeric)::float requests, sum(estimated_cost_usd)::float est_usd, sum(billed_gbp)::float billed_gbp,
-                  count(*) filter (where household_id is null)::int no_household
-             from provider_calls, jsonb_each_text(units) m
-            where to_char(created_at at time zone 'Europe/London', 'YYYY-MM') = $1 and m.key like 'google-%' and m.value ~ '^[0-9.]+$'
+             from billing_days where meter is not null and invoice_month = $1 group by 1, 2 order by 1, 2`, [month]),
+    query(`select to_char(x.day, 'YYYY-MM-DD') as day, x.meter,
+                  sum(x.n)::float requests, sum(p.estimated_cost_usd)::float est_usd, sum(p.billed_gbp)::float billed_gbp,
+                  count(*) filter (where p.household_id is null)::int no_household
+             from (${LEDGER_METERS}) x join provider_calls p on p.id = x.id
+            where x.month = $1
             group by 1, 2 order by 1, 2`, [month]),
-    query(`select sku, sum(cost)::float cost from billing_days where meter is null and to_char(day, 'YYYY-MM') = $1 group by 1 order by 2 desc`, [month]),
+    query(`select sku, sum(cost)::float cost from billing_days where meter is null and invoice_month = $1 group by 1 order by 2 desc`, [month]),
   ]);
   const key = (r) => `${r.day}|${r.meter}`;
   const L = new Map(ledger.map((r) => [key(r), r]));

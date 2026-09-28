@@ -18,15 +18,19 @@ test('Google SKUs map to our meters, and an unknown one is left unmapped', () =>
 test('a billed day is shared across that day’s ledger rows by requests, and both sides are reported', async () => {
   await query(`delete from billing_days where day = '2026-09-20'`);
   await query(`delete from provider_calls where purpose = 'billing-test'`);
-  await query(`insert into billing_days (day, service, sku, sku_id, meter, usage, cost, credits, promo, currency)
-               values ('2026-09-20', 'Places API', 'Places API Text Search Pro', 'SKU-PRO', 'google-pro', 300, 6.00, -6.00, -6.00, 'GBP'),
-                      ('2026-09-20', 'Other', 'Cloud Storage', 'SKU-X', null, 1, 0.10, 0, 0, 'GBP')`);
+  await query(`insert into billing_days (invoice_month, day, service, sku, sku_id, meter, usage, cost, credits, promo, currency)
+               values ('2026-09', '2026-09-20', 'Places API', 'Places API Text Search Pro', 'SKU-PRO', 'google-pro', 300, 6.00, -6.00, -6.00, 'GBP'),
+                      ('2026-09', '2026-09-20', 'Other', 'Cloud Storage', 'SKU-X', null, 1, 0.10, 0, 0, 'GBP')`);
+  // A scalar and a pre-tier row the same month: neither breaks it, the second is reported.
+  await query(`insert into provider_calls (provider, purpose, units, estimated_cost_usd, created_at)
+               values ('google', 'billing-test', '5', 0, '2026-09-20 09:00+01'), ('google', 'billing-test', '{"google": 7}', 0.2, '2026-09-20 09:30+01')`);
   const { rows: [h] } = await query(`insert into households (name) values ('billing test') returning id`);
   await query(`insert into provider_calls (household_id, provider, purpose, units, estimated_cost_usd, created_at)
                values ($1, 'google', 'billing-test', '{"google": 100, "google-pro": 100}', 3.2, '2026-09-20 10:00+01'),
                       (null, 'google', 'billing-test', '{"google": 200, "google-pro": 200}', 6.4, '2026-09-20 11:00+01')`, [h.id]);
   await billing.attribute('2026-09');
-  const { rows } = await query(`select household_id is null as nobody, billed_gbp::float g from provider_calls where purpose = 'billing-test' order by nobody`);
+  const { rows } = await query(`select household_id is null as nobody, billed_gbp::float g from provider_calls
+                                  where purpose = 'billing-test' and jsonb_typeof(units) = 'object' and units ? 'google-pro' order by nobody`);
   assert.deepEqual(rows.map((r) => Math.round(r.g * 100) / 100), [2, 4], 'one third and two thirds of £6');
   const rec = await billing.reconcile('2026-09');
   const d = rec.days.find((x) => x.day === '2026-09-20' && x.meter === 'google-pro');
@@ -34,6 +38,7 @@ test('a billed day is shared across that day’s ledger rows by requests, and bo
   assert.equal(d.ledgerRequests, 300);
   assert.equal(d.noHousehold, 1, 'the unattributed row is named');
   assert.ok(rec.unmapped.some((u) => u.sku === 'Cloud Storage'));
+  assert.ok(rec.ledgerOnly.some((l) => l.meter === 'google-legacy' && l.requests === 7), 'a pre-tier row is seen, as google-legacy');
   await query(`delete from provider_calls where purpose = 'billing-test'`);
   await query(`delete from billing_days where day = '2026-09-20'`);
 });
