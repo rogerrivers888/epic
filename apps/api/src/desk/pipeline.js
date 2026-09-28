@@ -35,6 +35,29 @@ const WISHES = [/\bwish (they|there|it) (had|was|were)\b/, /\bwould be (nice|goo
  * wave machine? We couldn't find one" mentions it and means the opposite; "I
  * wish they had a sauna" is not an assertion.
  */
+const VERB = /^(?:is|are|was|were|will|be|been|being|has|have|had|remains?|remained|stays?|stayed|seems?|seemed|appears?|appeared|looks?|looked|gets?|got|getting|'re|'ve|'ll|'d|’re|’ve|’ll|’d|isnt|isn't|wasnt|wasn't)$/;
+const ADVERB = /^(?:still|now|currently|permanently|temporarily|sadly|unfortunately|often|sometimes|always|\w+ly)$/;
+const CLOSURE = /^(?:closed|shut|removed|gone|broken|unavailable)$/;
+const CLOSURE_2 = /^(?:out of (?:order|use)|not working|not open)/;
+const WHEN_WHY = /^(?:for|until|till|since|on|at|in|during|over|by|due|because|when|as|today|tomorrow|now|again|this|last|next|all|to|pending|every|indefinitely|\w+ly)$/;
+function closureOfPhrase(clause) {
+  const words = String(clause).replace(/^\s*(['’](?:s|ll|d|re|ve))/, ' $1').trim().split(/\s+/).map((w) => w.replace(/[^a-z'’]/g, '')).filter(Boolean);
+  let verb = false;
+  for (let i = 0; i < Math.min(words.length, 6); i += 1) {
+    const w = words[i];
+    const rest = words.slice(i).join(' ');
+    if (CLOSURE.test(w) || CLOSURE_2.test(rest)) {
+      if (verb) return true;
+      const next = words[i + (CLOSURE_2.test(rest) ? 3 : 1)];
+      return next === undefined || WHEN_WHY.test(next);
+    }
+    if (VERB.test(w)) { verb = true; continue; }
+    if (ADVERB.test(w) || /^['’]s$/.test(w)) continue;
+    return false; // anything else between them: the closure belongs to something else
+  }
+  return false;
+}
+
 export function polarity(sentence, phrase) {
   const s = norm(sentence);
   const p = norm(phrase);
@@ -62,18 +85,14 @@ export function polarity(sentence, phrase) {
   // "but"/"and" — so "the pool is still closed", "Pool: closed" and "remains
   // closed" deny the pool, and "the pool; the cafe was closed" does not.
   const clause = tail.replace(/^\s*[:\-–—]\s*/, ' ').split(/[;.!?,]|\s(?:but|and|while|whereas)\s/)[0];
-  // Only verbs and adverbs may stand between the phrase and the closure —
-  // "is still", "will be", "remains", "has been" — so the closure is said of
-  // the phrase, not of the cafe next to it (Codex, 28 Sep 2026).
-  const LINK = '(?:is|are|was|were|will|be|been|being|has|have|had|remains?|remained|stays?|stayed|still|now|currently|permanently|temporarily|sadly|unfortunately|often|sometimes|always|seems?|seemed|appears?|appeared|looks?|looked|got|gets|getting|is\\s+now)';
-  // Any "-ly" adverb ("completely", "recently") and a contraction ("the
-  // pool's closed", "'s been") link as well (Codex, 28 Sep 2026).
-  const LINKS = `(?:${LINK}|\\w+ly|'s|'re|'ve|'ll|'d|’s|’re|’ve|’ll|’d)`;
-  // …and the closure must end the clause or be followed by when or why ("for
-  // weeks", "until May", "today") — a noun after it means it describes that
-  // noun: "the pool's recently closed cafe" (Codex, 28 Sep 2026).
-  const AFTER = '(?=\\s*(?:$|for\\b|until\\b|till\\b|since\\b|on\\b|at\\b|in\\b|during\\b|over\\b|by\\b|due\\b|because\\b|when\\b|as\\b|today\\b|tomorrow\\b|now\\b|again\\b|this\\b|last\\b|next\\b|all\\b))';
-  if (new RegExp(`^(?:'s|’s|'ll|’ll|'d|’d)?\\s*(?:${LINKS}\\s+){0,4}(?:closed|shut|removed|gone|broken|unavailable|out of order|out of use|not working|not open)\\b${AFTER}`).test(clause.trimEnd())) return 'denies';
+  // Walk the phrase's clause: links (verbs, adverbs, contractions) up to a
+  // closure word. Said of the phrase when a verb links them — "is closed",
+  // "has been closed", "'ll be closed" — whatever follows ("indefinitely",
+  // "to visitors", "every Monday"). With no verb — "Pool: closed", or the
+  // possessive "the pool's recently closed cafe" — it is said of the phrase
+  // only if nothing but when or why follows; a noun after it means it
+  // describes that noun (Codex, 28 Sep 2026, several rounds).
+  if (closureOfPhrase(clause)) return 'denies';
   if (/\bno longer\b/.test(s.slice(Math.max(0, at - 30), at))) return 'denies';
   return 'asserts';
 }

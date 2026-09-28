@@ -676,3 +676,10 @@ test('contractions and possessives: a closure said of the phrase, not of what it
     assert.equal(pipeline.polarity(s, 'pool'), 'denies', s);
   assert.equal(pipeline.polarity("The pool's recently closed cafe is being renovated.", 'pool'), 'asserts');
 });
+
+test('a closure linked by a verb is the phrase’s whatever follows; without one, a noun after it is what it describes', () => {
+  for (const s of ['The pool is closed indefinitely.', 'The pool is closed to visitors.', 'The pool is closed pending repairs.', 'The pool is closed every Monday.', 'Pool: closed.', 'The pool is out of order.', "The pool isn't working."])
+    assert.equal(pipeline.polarity(s, 'pool'), 'denies', s);
+  for (const s of ["The pool's recently closed cafe is being renovated.", 'The pool is next to the closed cafe.', 'We enjoyed the pool; the cafe was closed.'])
+    assert.equal(pipeline.polarity(s, 'pool'), 'asserts', s);
+});
