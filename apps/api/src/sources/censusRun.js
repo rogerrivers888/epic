@@ -267,6 +267,13 @@ export async function planTiles({ areas = [], outcodes = [], dLat = TILE_LAT, dL
   return [...tiles.values()].map((t) => ({ ...t, outcodes: [...t.outcodes].sort() }));
 }
 
+/** Why a start is refused, in the words a person needs. */
+const busyError = (r) => Object.assign(new Error(r.state === 'waiting'
+  ? `“${r.label}” is waiting for the quota day to turn over; stop it before starting another`
+  : r.state === 'paused'
+    ? `“${r.label}” is being planned; try again in a few minutes`
+    : `“${r.label}” is already running; stop it before starting another`), { status: 409 });
+
 /**
  * Start a run, or refuse to start a second one over the same ground.
  *
@@ -300,6 +307,15 @@ export async function startRun({
   if (!areas?.length && !outcodes?.length && !given?.length) {
     throw Object.assign(new Error('a run needs postcode areas or districts'), { status: 400 });
   }
+  // A quick look before the plan, which for the whole UK is thousands of
+  // squares: a start that will be refused is refused before drawing it. Not
+  // the authority — that is the locked check below (Codex, 29 Sep 2026).
+  const { rows: busy } = await query(
+    `select id, label, state from census_runs
+      where state in ('running', 'waiting')
+         or (state = 'paused' and problem like 'built paused%' and started_by = $1 and started_at > now() - interval '15 minutes')
+      limit 1`, [ONE_DAY_RUNS]);
+  if (busy.length) throw busyError(busy[0]);
   const tiles = given?.length ? given : await planTiles({ areas, outcodes, dLat, dLng, padKm });
   if (!tiles.length) throw Object.assign(new Error('no postcode sectors in those areas'), { status: 400 });
   // Whose decision the run is: the caller's word, else the request that is
@@ -326,15 +342,7 @@ export async function startRun({
         where state in ('running', 'waiting')
            or (state = 'paused' and problem like 'built paused%' and started_by = $1 and started_at > now() - interval '15 minutes')
         limit 1`, [ONE_DAY_RUNS]);
-    if (going.length) {
-      throw Object.assign(
-        new Error(going[0].state === 'waiting'
-          ? `“${going[0].label}” is waiting for the quota day to turn over; stop it before starting another`
-          : going[0].state === 'paused'
-            ? `“${going[0].label}” is being planned; try again in a few minutes`
-            : `“${going[0].label}” is already running; stop it before starting another`),
-        { status: 409 });
-    }
+    if (going.length) throw busyError(going[0]);
     const { rows: [row] } = await db.query(
       `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, started_by, tiles_total, daily_cap, day, day_requests, started_session_id,
                                 night_share, window_from, window_to, state, problem)
@@ -920,10 +928,14 @@ async function advanceRun(run, { budgetMs = SLICE_MS, now = () => Date.now() } =
       // landing in the middle threw away two thousand answered requests that
       // nothing had written down yet.
       until,
+      // And a ceiling brought down while the tile is being asked — a day's
+      // run closed off when its quota day turned — ends the tile at the next
+      // drawer, not at its end (Codex, 29 Sep 2026).
       stopping: async () => {
         const { rows: [now] } = await query(
-          'select stop_requested from census_runs where id = $1', [run.id]);
-        return Boolean(now?.stop_requested);
+          'select stop_requested, max_requests from census_runs where id = $1', [run.id]);
+        return Boolean(now?.stop_requested)
+          || Number(now?.max_requests) < Number(fresh?.max_requests ?? run.max_requests);
       },
     });
     tiles += 1;

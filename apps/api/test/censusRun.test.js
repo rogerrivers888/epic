@@ -2100,3 +2100,20 @@ test('a new run keeps the drawers a half-asked square answered, and not its spen
   assert.deepEqual(later.done_subcategories, ['golf']);
   await query(`update census_runs set state = 'done' where id = $1`, [again.id]);
 });
+
+test('a tile being asked stops at the next drawer when its run\'s ceiling is brought down', async (t) => {
+  await clean();
+  t.after(clean);
+  const run = await startTestRun({ label: 'test trimmed', maxRequests: 100_000 });
+  await seedTile(run, 'test/trimmed');
+  let asked = 0;
+  // Bring the ceiling down from inside the tile, after the first question.
+  const impl = async (args) => {
+    asked += 1;
+    if (asked === 1) await query('update census_runs set max_requests = 1 where id = $1', [run.id]);
+    return answers(1)(args);
+  };
+  await withCensus(impl, () => advance({ runId: run.id, budgetMs: 30_000 }));
+  const perDrawer = Math.max(...(await slicePlan()).map((p) => p.questions.length));
+  assert.ok(asked <= perDrawer, `stopped within the drawer it was in (${asked} asked)`);
+});
