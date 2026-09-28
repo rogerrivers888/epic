@@ -696,3 +696,15 @@ test('a perfect-tense closure followed by when or why is still a closure', () =>
   assert.equal(pipeline.polarity('The lift has broken down.', 'lift'), 'denies');
   assert.equal(pipeline.polarity('The pool has broken tiles.', 'pool'), 'asserts');
 });
+
+test('a word brings the places the census found by it, and its Google types, not only labelled ones', async () => {
+  await query(`insert into taxonomy_labels (namespace, key, label, active) values ('google', 'desk_foundword', 'found word', true)
+               on conflict (namespace, key) do update set active = true`);
+  await query(`insert into place_index (venue_ref, subcategory, found_by) values ('desk:fw1', 'desk-water', 'desk_foundword')
+               on conflict (venue_ref) do update set found_by = 'desk_foundword', subcategory = 'desk-water', not_in_epic_at = null`);
+  await query(`insert into place_index (venue_ref, subcategory, google_types) values ('desk:fw2', 'desk-water', array['desk_foundword'])
+               on conflict (venue_ref) do update set google_types = array['desk_foundword'], subcategory = 'desk-water', not_in_epic_at = null`);
+  const counts = await mapping.bringsAndAffected();
+  assert.equal(counts.get('desk_foundword')?.brings, 2);
+  await query(`delete from place_index where venue_ref in ('desk:fw1', 'desk:fw2')`);
+});

@@ -19,6 +19,7 @@
  * proposal the decision answered.
  */
 
+import { PLACE_WORDS } from './words.js';
 import { query, withTransaction } from '../db.js';
 import { logChange, markUndone } from './changes.js';
 import { forget as forgetRules } from '../repositories/shelfRules.js';
@@ -108,10 +109,15 @@ export async function bringsAndAffected(run = query) {
               or (l.decision is null and exists (select 1 from shelf_rules r where r.scope = 'labels' and r.subcategory is not null
                                                    and r.labels = array[l.namespace || ':' || l.key])))
     ),
+    -- Which words each place carries: the census word that found it
+    -- (found_by), its Google types, and any Google label the index holds —
+    -- the same evidence the taxonomy audit reads (production's
+    -- place_index_labels holds no Google words, so reading only that made
+    -- every word bring nought: found on the live site, 28 Sep 2026).
+    words as (select venue_ref, label from ${PLACE_WORDS} w
+    ),
     carried as (
-      select pil.venue_ref, pil.label, (pil.label in (select label from inepic)) as in_epic
-        from place_index_labels pil
-       where pil.label like 'google:%'
+      select w.venue_ref, w.label, (w.label in (select label from inepic)) as in_epic from words w
     ),
     kept as (
       select venue_ref, count(*) filter (where in_epic) as inepic_words from carried group by venue_ref
@@ -139,7 +145,7 @@ export async function everOpened(run = query) {
   if ((h?.n ?? 0) < 2) return null;
   const { rows } = await run(`
     select substr(pil.label, 8) as word, count(*)::int n
-      from search_events e join place_index_labels pil on pil.venue_ref = e.venue_ref
+      from search_events e join ${PLACE_WORDS} pil on pil.venue_ref = e.venue_ref
      where e.kind = 'open' and pil.label like 'google:%'
      group by pil.label`).catch(() => ({ rows: [] }));
   return new Map(rows.map((r) => [r.word, r.n]));
@@ -260,13 +266,13 @@ export async function narrowCounts(word, condition) {
   const { rows: [r] } = await query(`
     select count(distinct pil.venue_ref) filter (where ${cond})::int as kept,
            count(distinct pil.venue_ref) filter (where not ${cond} and not exists (
-             select 1 from place_index_labels o join taxonomy_labels l on l.namespace = 'google' and 'google:' || l.key = o.label
+             select 1 from ${PLACE_WORDS} o join taxonomy_labels l on l.namespace = 'google' and 'google:' || l.key = o.label
               where o.venue_ref = pil.venue_ref and o.label <> pil.label and l.active
                 and (l.points_at is not null or l.decision = 'generic'
                      or exists (select 1 from word_targets t where t.namespace = l.namespace and t.word = l.key)
                      or (l.decision is null and exists (select 1 from shelf_rules r where r.scope = 'labels' and r.subcategory is not null
                                                           and r.labels = array[l.namespace || ':' || l.key])))))::int as leave
-      from place_index_labels pil where pil.label = $1`, [`${NS}:${word}`]);
+      from ${PLACE_WORDS} pil where pil.label = $1`, [`${NS}:${word}`]);
   return { kept: r?.kept ?? 0, leave: r?.leave ?? 0 };
 }
 
@@ -278,7 +284,7 @@ export async function narrowCounts(word, condition) {
 export async function movingCount(word, target) {
   const { rows: [r] } = await query(`
     select count(distinct pil.venue_ref)::int n
-      from place_index_labels pil
+      from ${PLACE_WORDS} pil
      where pil.label = $1
        and not exists (select 1 from place_index pi where pi.venue_ref = pil.venue_ref and pi.subcategory = $2)`,
   [`${NS}:${word}`, target]);
@@ -380,7 +386,7 @@ export async function narrowRules(c, word) {
   const { rowCount } = await run(
     `insert into shelf_rules (scope, subject, subject_label, weights, subcategory, reason, taught_by, seeded)
      select 'place', pil.venue_ref, null, '{}'::jsonb, $2, $3, $4, false
-       from place_index_labels pil
+       from ${PLACE_WORDS} pil
       where pil.label = $1 and ${cond}
      on conflict (scope, subject) do nothing`,
     [`${NS}:${word}`, t[0].subcategory_key, `Narrowed: ${word} files only places with an encyclopedia entry or a heritage listing.`, `narrowing:${word}`]);

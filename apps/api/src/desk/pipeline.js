@@ -15,6 +15,7 @@
  *   - Add, Re-check and Families work on our own tables.
  */
 
+import { PLACE_WORDS } from './words.js';
 import { query, withTransaction } from '../db.js';
 import { settings } from './settings.js';
 import * as osmLocal from '../sources/osmExtract.js';
@@ -413,7 +414,7 @@ export async function answerPlace(ref) {
     with subs as (
       select subcategory as sub from place_index where venue_ref = $1 and subcategory is not null
       union
-      select t.subcategory_key from place_index_labels pil join word_targets t on 'google:' || t.word = pil.label where pil.venue_ref = $1)
+      select t.subcategory_key from ${PLACE_WORDS} pil join word_targets t on 'google:' || t.word = pil.label where pil.venue_ref = $1)
     select pa.key, pa.label, pa.kind, pa.access, pa.age, pa.dietary
       from place_attributes pa
      where pa.active and pa.kind = 'yesno'

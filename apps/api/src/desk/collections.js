@@ -21,6 +21,7 @@
  * that range. "Not visited by this household" is applied at display time.
  */
 
+import { PLACE_WORDS } from './words.js';
 import { query, withTransaction } from '../db.js';
 import { logChange } from './changes.js';
 import { settings } from './settings.js';
@@ -229,7 +230,7 @@ export async function placeIndex() {
     query(`select pi.venue_ref, pi.subcategory as sub, true as primary_ from place_index pi
             where pi.subcategory is not null and pi.not_in_epic_at is null
            union
-           select pil.venue_ref, t.subcategory_key, false from place_index_labels pil
+           select pil.venue_ref, t.subcategory_key, false from ${PLACE_WORDS} pil
              join word_targets t on 'google:' || t.word = pil.label and not t.is_primary
              join place_index pi on pi.venue_ref = pil.venue_ref
             where pi.subcategory is not null and pi.not_in_epic_at is null and pi.subcategory <> t.subcategory_key`),

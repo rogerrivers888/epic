@@ -6,6 +6,7 @@
  * and a place counts once in a subcategory however many words file it there.
  */
 
+import { PLACE_WORDS } from './words.js';
 import { query, withTransaction } from '../db.js';
 import { logChange } from './changes.js';
 import { settings } from './settings.js';
@@ -51,7 +52,7 @@ export const FILED_SQL = `
    where pi.subcategory is not null and pi.not_in_epic_at is null
   union
   select pil.venue_ref, t.subcategory_key as sub, false as is_primary
-    from place_index_labels pil
+    from ${PLACE_WORDS} pil
     join word_targets t on t.namespace = 'google' and 'google:' || t.word = pil.label and not t.is_primary
     join place_index pi on pi.venue_ref = pil.venue_ref
    where pi.subcategory is not null and pi.not_in_epic_at is null and pi.subcategory <> t.subcategory_key`;
