@@ -431,7 +431,7 @@ export async function correct({ ref, fact, option, why = null, who }) {
     return logChange({
       client: c, who, area: 'Facts', what: `Answer corrected · ${label} · ${d?.name ?? ref}`,
       before, after: o.label, why, subjectType: 'place_fact', subjectId: `${ref}|${fact}`,
-      undo: { kind: 'correction', ref, fact, hid, unknownWas: unknownWas?.who ?? null, was: was ? { yesno: was.yesno, from: was.from_value, to: was.to_value, choice: was.choice, reason: was.reason, set_by: was.set_by } : null },
+      undo: { kind: 'correction', ref, fact, hid, unknownWas: unknownWas?.who ?? null, madeUnknown: option === 'dont_know' && !unknownWas, was: was ? { yesno: was.yesno, from: was.from_value, to: was.to_value, choice: was.choice, reason: was.reason, set_by: was.set_by } : null },
     });
   });
   forgetAttributes();
@@ -440,8 +440,14 @@ export async function correct({ ref, fact, option, why = null, who }) {
 
 /** Undo a correction: the place goes back to exactly what it held. */
 export async function undoCorrection({ change, who }) {
-  const { ref, fact, was, hid, unknownWas = null } = change.undo;
+  const { ref, fact, was, hid, unknownWas = null, madeUnknown = false } = change.undo;
   await withTransaction(async (c) => {
+    // An answer our checks wrote while this Don't know stood was hidden only
+    // because of it (Codex, 28 Sep 2026): undoing the Don't know shows it.
+    if (madeUnknown) {
+      await c.query('update place_fact_answers set hidden_at = null where venue_ref = $1 and attribute_key = $2 and hidden_at >= $3',
+        [ref, fact, change.at]);
+    }
     // A Don't know that stood before is put back; one this correction made goes.
     if (unknownWas) {
       await c.query(`insert into fact_unknowns (venue_ref, attribute_key, who) values ($1, $2, $3)

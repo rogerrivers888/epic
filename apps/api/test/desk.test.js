@@ -596,3 +596,20 @@ test('a person’s Don’t know holds against a first check and against families
   await query(`delete from fact_unknowns where venue_ref = 'desk:dk2'`);
   await query(`delete from place_fact_answers where venue_ref = 'desk:dk2'`);
 });
+
+test('undoing a Don’t know shows the answer a check wrote while it stood', async () => {
+  await query(`delete from fact_unknowns where venue_ref = 'desk:dk3'`);
+  await query(`delete from place_fact_answers where venue_ref = 'desk:dk3'`);
+  await query(`delete from place_attribute_values where venue_ref = 'desk:dk3'`);
+  const out = await facts.correct({ ref: 'desk:dk3', fact: 'toilets', option: 'dont_know', who: WHO });
+  await pipeline.verify({ ref: 'desk:dk3', fact: 'toilets', evidence: { site: 'Clean toilets on site, and the toilets were spotless.' } });
+  let { rows: [a] } = await query(`select hidden_at from place_fact_answers where venue_ref = 'desk:dk3' and attribute_key = 'toilets'`);
+  assert.ok(a.hidden_at, 'hidden while the Don’t know stands');
+  const id = out.change ?? out.changeId ?? out.id;
+  const { rows: [change] } = await query('select * from bo_changes where id = $1', [id]);
+  await facts.undoCorrection({ change, who: WHO });
+  ({ rows: [a] } = await query(`select hidden_at from place_fact_answers where venue_ref = 'desk:dk3' and attribute_key = 'toilets'`));
+  assert.equal(a.hidden_at, null, 'shown again once the Don’t know is undone');
+  const { rows: held } = await query(`select 1 from fact_unknowns where venue_ref = 'desk:dk3'`);
+  assert.equal(held.length, 0);
+});
