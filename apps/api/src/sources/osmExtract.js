@@ -29,9 +29,14 @@ import { randomUUID } from 'node:crypto';
 import { query, withTransaction } from '../db.js';
 import { readPbf } from './osmPbf.js';
 
-/** The extracts Epic covers. */
+/**
+ * The extracts Epic covers. Great Britain rather than the United Kingdom:
+ * the UK extract includes Northern Ireland, which the Ireland one also holds,
+ * and one region is loaded once (checked 28 Sep 2026: GB 2.18 GB, Ireland and
+ * Northern Ireland 0.41 GB at Geofabrik).
+ */
 export const EXTRACTS = {
-  'great-britain': 'https://download.geofabrik.de/europe/united-kingdom-latest.osm.pbf',
+  'great-britain': 'https://download.geofabrik.de/europe/great-britain-latest.osm.pbf',
   'ireland-and-northern-ireland': 'https://download.geofabrik.de/europe/ireland-and-northern-ireland-latest.osm.pbf',
 };
 

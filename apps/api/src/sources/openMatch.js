@@ -259,7 +259,11 @@ export async function matchOsm({ venueRef, name, lat, lng, locality = null, addr
     // The same two questions, asked of our own copy of the map.
     if (stems.length) elements = await local.nearByName(lat, lng, MAX_M, stems);
     if (!elements.length) elements = await local.nearByKind(lat, lng, Math.round(MAX_M / 2), KINDS);
-  } else {
+  }
+  // An extract's box is a rectangle, not its border — Great Britain's takes in
+  // part of Ireland — so nothing found locally is asked of Overpass rather than
+  // read as "not on the map" (Codex, 28 Sep 2026).
+  if (!elements.length) {
     if (byName) elements = (await overpass(byName, meter)).elements ?? [];
     if (!elements.length) elements = (await overpass(byKind, meter)).elements ?? [];
   }

@@ -357,9 +357,9 @@ async function verificationOf(a, label, sub) {
   const inSub = `($3::text is null or venue_ref in (select venue_ref from (${FILED_SQL}) f where f.sub = $3))`;
   const [{ rows: waiting }, { rows: [{ n: queued }] }, { rows: checks }] = await Promise.all([
     query(`select venue_ref, status, first_seen from fact_suggestions
-            where lower(feature) = lower($1) and $2::text is not null and ${inSub}
+            where (feature = $2 or lower(feature) = lower($1)) and ${inSub}
             order by (status = 'conflict') desc, first_seen asc limit 8`, [label, a.key, sub]),
-    query(`select count(*)::int n from fact_suggestions where lower(feature) = lower($1) and $2::text is not null and ${inSub}`, [label, a.key, sub]),
+    query(`select count(*)::int n from fact_suggestions where (feature = $2 or lower(feature) = lower($1)) and ${inSub}`, [label, a.key, sub]),
     query(`select venue_ref, outcome, source, at from fact_checks
             where (attribute_key = $2 or lower(feature) = lower($1)) and ${inSub}
             order by at desc limit 8`, [label, a.key, sub]),

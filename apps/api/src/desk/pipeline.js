@@ -43,8 +43,19 @@ export function polarity(sentence, phrase) {
   if (WISHES.some((re) => re.test(s))) return 'asks';
   const before = s.slice(Math.max(0, at - 40), at).split(' ').filter(Boolean).slice(-5);
   if (before.some((w) => NEGATIONS.has(w))) return 'denies';
-  const after = s.slice(at + p.length, at + p.length + 30).split(' ').filter(Boolean).slice(0, 4);
-  if (after.some((w) => ['closed', 'shut', 'removed', 'gone'].includes(w))) return 'denies';
+  // After the phrase: "the toilets are not available", "the sauna isn't
+  // working", "the pool was closed" (Codex, 28 Sep 2026).
+  // Only a negation that belongs to the phrase: straight after it, or after
+  // its verb — "great, not crowded" says nothing against the pool.
+  // Read from the sentence as written: normalising drops the comma, and
+  // "pool, not crowded" would read as "pool not" (Codex, 28 Sep 2026).
+  const raw = String(sentence).toLowerCase();
+  const ri = raw.indexOf(String(phrase).toLowerCase());
+  const tail = ri >= 0 ? raw.slice(ri + String(phrase).length, ri + String(phrase).length + 40) : s.slice(at + p.length, at + p.length + 40);
+  if (/^\s*(?:(?:are|is|was|were|has been|have been|seems|seemed)\s+)?(?:not|never|no longer)\b/.test(tail)) return 'denies';
+  if (/^\s*(?:isnt|isn't|arent|aren't|wasnt|wasn't|werent|weren't)\b/.test(tail)) return 'denies';
+  const after = tail.split(' ').filter(Boolean).slice(0, 5);
+  if (after.some((w) => ['closed', 'shut', 'removed', 'gone', 'broken', 'unavailable'].includes(w))) return 'denies';
   if (/\bno longer\b/.test(s.slice(Math.max(0, at - 30), at))) return 'denies';
   return 'asserts';
 }
@@ -302,6 +313,13 @@ export async function verify({ ref, fact, firstSeen = null, evidence: ev = null 
   if (!attr) return null;
   const phrases = (await vocabulary()).find((a) => a.key === fact)?.phrases ?? [norm(attr.label)];
   const e = ev ?? await evidenceFor(ref);
+  // Nothing of ours to read yet — research on the place has not landed (a
+  // drawer open queues it separately): the suggestion waits rather than being
+  // answered "don't know" and put off for months (Codex, 28 Sep 2026). The
+  // 30-day expiry still clears it if nothing ever arrives.
+  if (!e?.site && !e?.wikipedia && !e?.osm && !(Array.isArray(e?.wikidata) && e.wikidata.length)) {
+    return { ref, fact, waiting: true, why: 'nothing of ours to read yet' };
+  }
   const evidence = judge(attr, phrases, e);
   const verdict = decide(evidence, cfg);
   await record({ ref, attr, evidence, verdict, cfg, firstSeen });

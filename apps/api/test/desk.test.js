@@ -437,7 +437,9 @@ test('verify reads our own text, decides by the rules, deletes the suggestion an
   assert.equal(s.length, 0);
   const { rows: [c] } = await query(`select outcome from fact_checks where venue_ref = 'desk:v1' order by at desc limit 1`);
   assert.equal(c.outcome, 'verified');
-  const none = await pipeline.verify({ ref: 'desk:nothing', fact: 'toilets' });
+  // Our own text read, and it says nothing about toilets: a real answer.
+  // (A place with nothing of ours to read at all waits instead — see below.)
+  const none = await pipeline.verify({ ref: 'desk:nothing', fact: 'toilets', evidence: { site: 'A lovely park with swings and a pond.' } });
   assert.equal(none.state, 'dont_know', 'nothing found is a real answer');
 });
 
@@ -620,4 +622,16 @@ test('a Don’t know stops a default standing in for it in collections, leaves t
   await query(`delete from shelf_subcategory_attributes where subcategory_key = 'desk-water' and attribute_key = 'toilets'`);
   await query(`delete from place_attribute_values where venue_ref = 'desk:dk5'`);
   await query(`delete from place_fact_answers where venue_ref = 'desk:dk5'`);
+});
+
+test('Codex on the branch: a phrase denied after it is a denial; verify waits when nothing of ours is there yet', async () => {
+  assert.equal(pipeline.polarity('The toilets are not available.', 'toilets'), 'denies');
+  assert.equal(pipeline.polarity("The sauna isn't working.", 'sauna'), 'denies');
+  assert.equal(pipeline.polarity('Great pool, not crowded at all.', 'pool'), 'asserts');
+  await query(`delete from fact_suggestions where venue_ref = 'desk:empty'`);
+  await query(`insert into fact_suggestions (venue_ref, feature, status) values ('desk:empty', 'toilets', 'backlog') on conflict do nothing`).catch(() => null);
+  const out = await pipeline.verify({ ref: 'desk:empty', fact: 'toilets' });
+  assert.equal(out.waiting, true);
+  const { rows } = await query(`select 1 from place_fact_answers where venue_ref = 'desk:empty'`);
+  assert.equal(rows.length, 0, 'no Don’t know recorded for a place with nothing to read');
 });

@@ -570,7 +570,7 @@ export async function newFacts() {
           m as (
             select e.venue_ref, e.attribute_key from place_fact_evidence e where e.says in ('yes', 'no')
             union
-            select s.venue_ref, a.key from fact_suggestions s join place_attributes a on lower(a.label) = lower(s.feature)
+            select s.venue_ref, a.key from fact_suggestions s join place_attributes a on (a.key = s.feature or lower(a.label) = lower(s.feature))
             union
             select venue_ref, attribute_key from (${HAS_SQL}) h)
      select f.sub, m.attribute_key, count(distinct f.venue_ref)::int mentioned
