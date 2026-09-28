@@ -53,6 +53,7 @@ import scoutRoutes, { areaRouter } from './routes/scout.js';
 import shelfRoutes from './routes/shelves.js';
 import taxonomyRoutes, { ensureTaxonomyReady } from './routes/taxonomy.js';
 import { filingRoutes } from './routes/filing.js';
+import { deskRoutes, deskHousekeeping } from './routes/desk.js';
 import hostSkillRoutes, { adminRouter as skillsAdminRoutes, publicRouter as skillsPublicRoutes, ensureSkillsReady } from './routes/hostSkills.js';
 import questionRoutes from './routes/questions.js';
 import { ensureAttributeAliases } from './repositories/questionSets.js';
@@ -235,6 +236,9 @@ app.use('/api/admin/taxonomy', requireDoor('admin'), taxonomyRoutes);
 // redesign, 20 Sep 2026). Its own prefix rather than more of /taxonomy, because
 // it reads the taxonomy rather than being it.
 app.use('/api/admin/filing', requireDoor('admin'), filingRoutes);
+// The rebuilt filing desk (back-office handover, 28 Sep 2026). The old routes
+// above stay until no screen reads them.
+app.use('/api/admin/desk', requireDoor('admin'), deskRoutes);
 // Host skills: the five vocabularies, the review queue, credentials and the
 // source register (routes/hostSkills.js). Its own capability pair, because
 // approving a word is not the same privilege as reading the queue.
@@ -697,6 +701,14 @@ setInterval(refreshRingsDue, BAR_CHECK_EVERY_MS).unref?.();
 const checkPostcodes = () => { void refreshPostcodesIfDue().then((out) => { if (out.checked) console.log(`postcodes: ${out.loaded ? `loaded ${out.release}` : out.why}`); }).catch((err) => console.warn(`postcodes: ${err.message}`)); };
 void indexBuilt.then(checkPostcodes);
 setInterval(checkPostcodes, BAR_CHECK_EVERY_MS).unref?.();
+// The desk's own housekeeping: raise the mapping proposals that would change
+// something and retire the ones that no longer would. Free; reads only our
+// own tables. Logged, never fatal.
+const deskDaily = () => deskHousekeeping()
+  .then((r) => { if (r.proposals.raised || r.proposals.retired) console.log(`epic-api: desk — ${r.proposals.raised} proposal(s) raised, ${r.proposals.retired} retired`); })
+  .catch((err) => console.error('desk housekeeping', err.message));
+void indexBuilt.then(deskDaily);
+setInterval(deskDaily, BAR_CHECK_EVERY_MS).unref?.();
 void indexBuilt.then(() => sweep());
 setInterval(() => { void sweep(); }, 3600_000).unref?.();
 

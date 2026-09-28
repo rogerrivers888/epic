@@ -60,7 +60,19 @@ import {
   STAGES, clearsOf, diagnose, headlineOf, livenessOf, saturationOf, stageOf,
 } from '../domain/runFunnel.js';
 
+import { logChange } from '../desk/changes.js';
+
 export const filingRoutes = Router();
+
+/**
+ * Every write on this desk is a change a person made, and goes in the Changes
+ * log (owner, 28 Sep 2026: "Wire the Changes log into every existing write
+ * path — mapping, defaults, collection edits, hearts"). Logged after the
+ * write succeeds; a log that fails to write never undoes the change it
+ * describes, but it is reported.
+ */
+const logged = (req, entry) => logChange({ who: actorOf(req), ...entry })
+  .catch((err) => console.warn(`changes log: ${err.message}`));
 
 const bad = (message) => Object.assign(new Error(message), { status: 400, code: 'bad_request' });
 const actorOf = (req) => req.account?.email ?? 'the owner (passcode)';
@@ -270,7 +282,7 @@ async function unengagedShare() {
 /** PUT /thresholds — one of the numbers, nudged. */
 filingRoutes.put('/thresholds', requires('manage_library'), async (req, res, next) => {
   try {
-    const saved = await setThreshold(req.body?.key, req.body?.value);
+    const saved = await setThreshold(req.body?.key, req.body?.value, actorOf(req));
     res.json({ threshold: saved, thresholds: await thresholds() });
   } catch (err) { next(err); }
 });
@@ -583,6 +595,7 @@ filingRoutes.put('/subcategories/:key/defaults', requires('manage_library'), asy
       // down the proposal that was not, and never overwrites a value somebody
       // set while this request was reading.
       const value = await placeAttributes.acceptDefault(key, attribute, now.value);
+      await logged(req, { area: 'Defaults', what: `${key} · ${attr.label}`, before: `${filing.said(now.value, attr)} (proposed)`, after: `${filing.said(now.value, attr)} (accepted)`, why: 'Accepted the machine\u2019s proposal', subjectType: 'default', subjectId: `${key}|${attribute}` });
       return res.json({ attribute, value, settled: true });
     }
 
@@ -591,10 +604,13 @@ filingRoutes.put('/subcategories/:key/defaults', requires('manage_library'), asy
       const now = await effective();
       if (now.value?.yesno == null) throw bad(`${attr.label} has no answer here to flip.`);
       const value = await placeAttributes.setDefault(key, attribute, { yesno: !now.value.yesno }, { settled: true });
+      await logged(req, { area: 'Defaults', what: `${key} · ${attr.label}`, before: filing.said(now.value, attr), after: filing.said({ yesno: !now.value.yesno }, attr), why: req.body?.why ?? null, subjectType: 'default', subjectId: `${key}|${attribute}` });
       return res.json({ attribute, value, settled: true });
     }
 
+    const was = await effective().catch(() => ({ value: null }));
     const value = await placeAttributes.setDefault(key, attribute, req.body?.value ?? null, { settled: true });
+    await logged(req, { area: 'Defaults', what: `${key} · ${attr.label}`, before: was.value ? filing.said(was.value, attr) : '—', after: value ? filing.said(req.body?.value, attr) : '—', why: req.body?.why ?? null, subjectType: 'default', subjectId: `${key}|${attribute}` });
     return res.json({ attribute, value, settled: Boolean(value) });
   } catch (err) { next(err); }
 });
@@ -617,6 +633,7 @@ filingRoutes.post('/subcategories/:key/accept', requires('manage_library'), asyn
     let accepted = 0;
     for (const a of proposed) {
       await placeAttributes.acceptDefault(key, a.key, a.value);
+      await logged(req, { area: 'Defaults', what: `${key} · ${a.label ?? a.key}`, before: 'proposed', after: 'accepted', why: 'Accepted the machine\u2019s proposal', subjectType: 'default', subjectId: `${key}|${a.key}` });
       accepted += 1;
     }
     placeAttributes.forget();
@@ -1070,6 +1087,11 @@ filingRoutes.put('/mapping/:word', requires('manage_library'), async (req, res, 
     }
 
     placeAttributes.forget();
+    await logged(req, {
+      area: 'Mapping', what: `Google word · ${word} · ${decision === 'aside' ? 'Excluded' : subcategory ? 'Repointed' : 'Made a fact'}`,
+      before: before.subcategory ?? (before.decision === 'aside' ? 'Not in Epic' : before.decision ? 'Fact only' : 'Not answered'),
+      after: subcategory ?? (decision === 'aside' ? 'Not in Epic' : 'Fact only'), why: req.body?.why ?? null, subjectType: 'word', subjectId: word,
+    });
     res.json({ word, said, before });
   } catch (err) { next(err); }
 });
@@ -1103,6 +1125,7 @@ filingRoutes.put('/mapping/:word/carries', requires('manage_library'), async (re
       else throw bad(`${attr.label} is not a yes or no, so say what it carries.`);
     }
     await placeAttributes.setCarries(`google:${word}`, attribute, value);
+    await logged(req, { area: 'Mapping', what: `Google word · ${word} · Repointed`, before: on ? '—' : attr.label, after: on ? `carries ${attr.label}` : '—', why: req.body?.why ?? null, subjectType: 'word', subjectId: word });
     res.json({ word, attribute, on, said: `${attr.label} ${on ? 'carried by' : 'off'} ${word}` });
   } catch (err) { next(err); }
 });
@@ -1217,6 +1240,7 @@ filingRoutes.put('/rows/:id', requires('manage_library'), async (req, res, next)
       throw bad('An idea\u2019s rule is set as structure, not as its shorthand. Send `predicate`.');
     }
     const ctx = await browseRows.pool();
+    const { rows: [wasRow] } = await query('select title, copy from browse_rows where key = $1', [String(req.params.id)]);
     const row = await browseRows.save(String(req.params.id), {
       title: req.body?.title,
       copy: req.body?.copy,
@@ -1226,6 +1250,15 @@ filingRoutes.put('/rows/:id', requires('manage_library'), async (req, res, next)
       subcategories: new Set(ctx.subcategories.keys()),
       categories: new Set(ctx.categories.map((c) => c.key)),
     });
+    if (wasRow && req.body?.title !== undefined && req.body.title !== wasRow.title) {
+      await logged(req, { area: 'Collections', what: `Collection title · ${req.body.title}`, before: wasRow.title, after: req.body.title, subjectType: 'collection', subjectId: String(req.params.id) });
+    }
+    if (wasRow && req.body?.copy !== undefined && req.body.copy !== wasRow.copy) {
+      await logged(req, { area: 'Collections', what: `Collection copy · ${row?.title ?? wasRow.title}`, before: wasRow.copy || '—', after: req.body.copy || '—', subjectType: 'collection', subjectId: String(req.params.id) });
+    }
+    if (req.body?.predicate !== undefined) {
+      await logged(req, { area: 'Collections', what: `Collection rule · ${row?.title ?? wasRow?.title ?? req.params.id}`, before: '—', after: 'changed', subjectType: 'collection', subjectId: String(req.params.id) });
+    }
     res.json({ row });
   } catch (err) { next(err); }
 });
@@ -1253,6 +1286,7 @@ filingRoutes.post('/rows/:id/heart', requires('manage_library'), async (req, res
     const out = await browseRows.heart(String(req.params.id), {
       householdId: household.id, memberId, on: req.body?.on !== false,
     });
+    await logged(req, { area: 'Collections', what: `Collection heart · ${req.params.id}`, before: req.body?.on !== false ? '—' : 'hearted', after: out ? 'hearted' : '—', subjectType: 'collection', subjectId: String(req.params.id) });
     res.json({ row: req.params.id, hearted: Boolean(out) });
   } catch (err) { next(err); }
 });
@@ -1336,6 +1370,7 @@ filingRoutes.post('/rules/:id/retire', requires('manage_library'), async (req, r
       [subcategory, attribute],
     );
     if (!rowCount) throw bad('That drawer does not set that answer.');
+    await logged(req, { area: 'Defaults', what: `${subcategory} · ${attribute}`, before: 'set', after: 'retired', why: req.body?.why ?? null, subjectType: 'default', subjectId: `${subcategory}|${attribute}` });
     res.json({ retired: true, subcategory, attribute, by: actorOf(req) });
   } catch (err) { next(err); }
 });
@@ -1689,6 +1724,7 @@ filingRoutes.put('/places/:ref', requires('manage_library'), async (req, res, ne
       reason: req.body?.reason ? String(req.body.reason).slice(0, 300) : null,
       by: actorOf(req),
     });
+    await logged(req, { area: 'Facts', what: `Place corrected · ${ref} · ${attr.label}`, before: '—', after: saved ? filing.said(value, attr) : 'inherits', why: req.body?.reason ?? null, subjectType: 'place_fact', subjectId: `${ref}|${attribute}` });
     res.json({
       ref,
       attribute,
@@ -2144,6 +2180,7 @@ filingRoutes.post('/categories', requires('manage_library'), async (req, res, ne
     const label = String(req.body?.label ?? '').trim();
     if (!label) throw bad('Name the category.');
     const row = await shelfTaxonomy.saveCategory({ label, by: actorOf(req) });
+    await logged(req, { area: 'Categories', what: `Category added · ${row.label}`, before: '—', after: row.label, subjectType: 'category', subjectId: row.key });
     res.json({ category: { key: row.key, label: row.label }, said: `${row.label} added · no subcategories yet` });
   } catch (err) { next(err); }
 });
@@ -2172,6 +2209,7 @@ filingRoutes.post('/subcategories', requires('manage_library'), async (req, res,
     // Inherited from the drawers beside it, because there is no coded bar for
     // a drawer nobody has written one for.
     const bar = await placeIndex.inheritBar(row.key).catch(() => null);
+    await logged(req, { area: 'Categories', what: `Subcategory added · ${row.label}`, before: '—', after: `Active › ${row.label}`, subjectType: 'subcategory', subjectId: row.key });
     res.json({
       subcategory: { key: row.key, label: row.label },
       bar: Boolean(bar),
@@ -2220,6 +2258,7 @@ filingRoutes.post('/categories/:key/apply', requires('manage_library'), async (r
         }
         for (const sub of subs) {
           await placeAttributes.setDefault(sub, key, { yesno: true }, { settled: true });
+          await logged(req, { area: 'Defaults', what: `${sub} · ${attr.label}`, before: '—', after: 'Yes', why: `Set on ${subs.length} drawer${subs.length === 1 ? '' : 's'} at once`, subjectType: 'default', subjectId: `${sub}|${key}` });
         }
         did.push(`${attr.label} set on ${subs.length} ${subs.length === 1 ? 'drawer' : 'drawers'}`);
       } else if (kind === 'subcategory' || kind === 'category') {
@@ -2233,6 +2272,7 @@ filingRoutes.post('/categories/:key/apply', requires('manage_library'), async (r
           await query(
             `insert into shelf_subcategory_categories (subcategory_key, category_key)
              values ($1, $2) on conflict do nothing`, [sub, cabinet]);
+          await logged(req, { area: 'Subcategories', what: `Also in · ${sub}`, before: '—', after: cat?.label ?? cabinet, subjectType: 'subcategory', subjectId: sub });
         }
         did.push(`${subs.length} also in ${cat?.label ?? cabinet}`);
       } else {

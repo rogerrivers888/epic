@@ -27,6 +27,7 @@
  */
 
 import { Router } from 'express';
+import { logChange } from '../desk/changes.js';
 import { requires } from '../access.js';
 import { query, withTransaction } from '../db.js';
 import * as shelfRules from '../repositories/shelfRules.js';
@@ -50,6 +51,11 @@ import * as visitsRepo from '../repositories/visits.js';
 import { SHELF_FLOOR, ourLabelsOf, shelvesForAtlas, shelvesForVenue } from '../domain/moods.js';
 
 export const taxonomyRoutes = Router();
+
+// Writes here that `admin_audit` does not record go to Changes directly
+// (owner, 28 Sep 2026); the audited ones reach Changes by trigger (266).
+const toChanges = (req, entry) => logChange({ who: req.account?.email ?? 'the owner (passcode)', ...entry })
+  .catch((err) => console.warn(`changes log: ${err.message}`));
 
 const actorOf = (req) => req.account?.email ?? 'the owner (passcode)';
 const bad = (message) => Object.assign(new Error(message), { status: 400, code: 'bad_request' });
@@ -979,6 +985,7 @@ taxonomyRoutes.put('/labels/carries', requires('manage_library'), async (req, re
   try {
     const value = await placeAttributes.setCarries(
       String(req.body?.label || ''), String(req.body?.attribute || ''), req.body?.value ?? null);
+    await toChanges(req, { area: 'Mapping', what: `Google word · ${req.body?.label} · Repointed`, before: value ? '—' : String(req.body?.attribute ?? ''), after: value ? `carries ${req.body?.attribute}` : '—', subjectType: 'word', subjectId: String(req.body?.label ?? '') });
     res.json({ label: req.body?.label, attribute: req.body?.attribute, value });
   } catch (err) { next(err); }
 });
@@ -997,6 +1004,7 @@ taxonomyRoutes.put('/attributes/default', requires('manage_library'), async (req
     const value = await placeAttributes.setDefault(
       String(req.body?.subcategory || ''), String(req.body?.attribute || ''), req.body?.value ?? null,
       { settled: true });
+    await toChanges(req, { area: 'Defaults', what: `${req.body?.subcategory} · ${req.body?.attribute}`, before: '—', after: value ? JSON.stringify(value) : '—', why: req.body?.why ?? null, subjectType: 'default', subjectId: `${req.body?.subcategory}|${req.body?.attribute}` });
     res.json({ subcategory: req.body?.subcategory, attribute: req.body?.attribute, value });
   } catch (err) { next(err); }
 });
@@ -1039,6 +1047,7 @@ taxonomyRoutes.put('/attributes/place', requires('manage_library'), async (req, 
     if (!ref) throw bad('Which place?');
     const saved = await placeAttributes.setValue(ref, String(req.body?.attribute || ''), req.body?.value ?? null,
       { reason: req.body?.reason ?? null, by: actorOf(req) });
+    await toChanges(req, { area: 'Facts', what: `Place corrected · ${ref} · ${req.body?.attribute}`, before: '—', after: saved ? JSON.stringify(req.body?.value) : 'inherits', why: req.body?.reason ?? null, subjectType: 'place_fact', subjectId: `${ref}|${req.body?.attribute}` });
     res.json({ ref, attribute: req.body?.attribute, value: saved });
   } catch (err) { next(err); }
 });
@@ -1762,6 +1771,9 @@ taxonomyRoutes.put('/labels', requires('manage_library'), async (req, res, next)
     if (!parseLabel(`${namespace}:${key}`)) throw bad('Say which label.');
     const row = await labelRepo.save({ namespace, key, label: req.body?.label, note: req.body?.note, active: req.body?.active });
     if (!row) return res.status(404).json({ error: 'not_found' });
+    if (req.body?.active !== undefined) {
+      await toChanges(req, { area: 'Mapping', what: `Google word · ${key} · ${req.body.active ? 'Brought back' : 'Excluded'}`, before: req.body.active ? 'Not in Epic' : 'In Epic', after: req.body.active ? 'In Epic' : 'Not in Epic', subjectType: 'word', subjectId: key });
+    }
     res.json({ label: row });
   } catch (err) { next(err); }
 });
