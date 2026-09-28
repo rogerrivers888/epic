@@ -1946,3 +1946,29 @@ test('a district rolled up by name is whole when a grid covers it whole, whateve
   assert.equal(a.census_count, 1);
   assert.equal(a.complete, true, 'whole on the grid that covered it whole');
 });
+
+test('a district reached for the first time that has found nothing yet is on the board, at nought and partial', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from area_counts where area_slug = 'zz0a'`);
+    await query(`delete from geo_cells where code like 'ZZ0A%'`);
+    await clean();
+  });
+  // Asked, nothing found, stopped: without a row the district read as never
+  // looked at, and the next home move would census it behind the stop
+  // (Codex, 28 Sep 2026).
+  const run = await startTestRun({ label: 'test nothing yet' });
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, started_at, saturated)
+     values ('test/nothing/0', 48.80, -6.00, 48.88, -5.88, array['ZZ0A'], 'doing', null, now(), 0)
+     on conflict (grid_key) do update set state = 'doing', censused_at = null, started_at = now(), outcodes = excluded.outcodes`);
+  await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'test/nothing/0') on conflict do nothing`, [run.id]);
+  await askedBy(run, 'test/nothing/0');
+  await seaDistrict({ outcode: 'ZZ0A', sectors: [['ZZ0A 1', 48.84, -5.94]] });
+  await rollUpOutcodes({ runId: run.id });
+  const { rows: [z] } = await query(`select census_count, complete from area_counts where area_slug = 'zz0a' and subcategory = 'golf'`);
+  assert.deepEqual([z?.census_count, z?.complete], [0, false], 'asked, nothing yet, and partial');
+  const { censusCounts } = await import('../src/sources/ringSearch.js');
+  const seen = await censusCounts(['ZZ0A']);
+  assert.deepEqual([seen.missing, seen.partial], [[], ['zz0a']], 'reached, not unseen');
+});

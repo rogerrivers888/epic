@@ -1458,6 +1458,23 @@ export async function rollUpOutcodes({ outcodes = null, runId = null, alsoSquare
     }
   }
 
+  // Every drawer the run asked of its squares, found anything or not. A
+  // district reached for the first time whose answered questions have found
+  // nothing yet otherwise wrote no row, read as never looked at, and was
+  // sent to be censused again by the next home move behind a deliberate stop
+  // (Codex, 28 Sep 2026). Nought from a question asked is an answer; the row
+  // says so, and is partial like the rest of the district.
+  if (runId && stamped.any) {
+    const { rows: askedDrawers } = await query(
+      `select distinct area_slug, category, subcategory from census_slices
+        where census_run_id = $1 and category is not null and subcategory is not null`, [runId]);
+    for (const r of askedDrawers) {
+      if (!tileByKey.has(r.area_slug)) continue;
+      if (!drawersOfTile.has(r.area_slug)) drawersOfTile.set(r.area_slug, new Map());
+      drawersOfTile.get(r.area_slug).set(`${r.category}/${r.subcategory}`, { category: r.category, subcategory: r.subcategory });
+    }
+  }
+
   // What is asked today, so a drawer that is no longer asked can be told from
   // one this sweep has not reached yet.
   const planned = new Set((await slicePlan()).map((p) => p.subcategory));
