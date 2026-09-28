@@ -39,13 +39,18 @@ export const meterOf = (sku) => METER_OF.find(([re]) => re.test(String(sku ?? ''
  */
 // Every reader passes the month as $1: the range keeps it to the month's
 // rows instead of reading the whole ledger (perf, round 3).
-const LEDGER_METERS = `
+// `provider_call_bills_google` (migration 285) is true of every row either
+// branch can read and of more besides, so it changes nothing counted; it
+// lets the month be read from the partial index over Google's rows instead
+// of scanning every free-source row of the month (round 4 PERF).
+export const LEDGER_METERS = `
   select p.id, to_char(p.created_at at time zone 'Europe/London', 'YYYY-MM') as month,
          (p.created_at at time zone 'Europe/London')::date as day,
          case when m.key = 'google' then 'google-legacy' else m.key end as meter, (m.value)::numeric as n
     from provider_calls p, jsonb_each_text(p.units) m
    where p.created_at >= (($1::text || '-01')::date::timestamp at time zone 'Europe/London')
      and p.created_at < ((($1::text || '-01')::date + interval '1 month')::timestamp at time zone 'Europe/London')
+     and provider_call_bills_google(p.units, p.provider)
      and jsonb_typeof(p.units) = 'object' and m.value ~ '^[0-9.]+$'
      and (m.key like 'google-%'
           or (m.key = 'google' and not exists (select 1 from jsonb_object_keys(p.units) k where k like 'google-%')))
@@ -56,13 +61,15 @@ const LEDGER_METERS = `
     from provider_calls p
    where p.created_at >= (($1::text || '-01')::date::timestamp at time zone 'Europe/London')
      and p.created_at < ((($1::text || '-01')::date + interval '1 month')::timestamp at time zone 'Europe/London')
+     and provider_call_bills_google(p.units, p.provider)
      and jsonb_typeof(p.units) in ('number', 'string') and p.provider ~* 'google' and (p.units #>> '{}') ~ '^[0-9.]+$'`;
 
 /** How many of a month's `google-pro` requests were marked as Place Details. */
-const PRO_DETAILS = `
+export const PRO_DETAILS = `
   select coalesce(sum((p.units->>'pro-details')::numeric), 0)::float as n
     from provider_calls p
-   where jsonb_typeof(p.units) = 'object' and (p.units->>'pro-details') ~ '^[0-9.]+$'
+   where provider_call_bills_google(p.units, p.provider)
+     and jsonb_typeof(p.units) = 'object' and (p.units->>'pro-details') ~ '^[0-9.]+$'
      and p.created_at >= (($1::text || '-01')::date::timestamp at time zone 'Europe/London')
      and p.created_at < ((($1::text || '-01')::date + interval '1 month')::timestamp at time zone 'Europe/London')`;
 
@@ -81,14 +88,16 @@ const PLACE_DETAILS_PRO_USD = 0.017;
 
 export async function googleEstimate(month) {
   const { LINES } = await import('../sources/pricing.js');
-  const { rows } = await query(`select meter, sum(n)::float as units from (${LEDGER_METERS}) x where month = $1 group by 1`, [month]);
-  const units = new Map(rows.map((r) => [r.meter === 'google-legacy' ? 'google' : r.meter, r.units]));
   // Text Search Pro and Place Details Pro are two SKUs with a free allowance
   // each, not pooled (Codex, 29 Sep 2026). A request marked `pro-details` is
   // judged against its own allowance; an unmarked Pro request (every row from
   // before the mark) against Text Search's — the dearer reading, never the
-  // cheaper one.
-  const [{ n: proDetails = 0 } = {}] = (await query(PRO_DETAILS, [month])).rows;
+  // cheaper one. The two reads are asked side by side (round 4 PERF).
+  const [{ rows }, { rows: [{ n: proDetails = 0 } = {}] }] = await Promise.all([
+    query(`select meter, sum(n)::float as units from (${LEDGER_METERS}) x where month = $1 group by 1`, [month]),
+    query(PRO_DETAILS, [month]),
+  ]);
+  const units = new Map(rows.map((r) => [r.meter === 'google-legacy' ? 'google' : r.meter, r.units]));
   const counted = [];
   for (const line of LINES.filter((l) => l.source === 'google' && l.allowance)) {
     const used = units.get(line.key) ?? 0;
@@ -160,7 +169,7 @@ export async function attribute(month) {
  * and whose they were. Unmapped SKUs and unmatched days are listed.
  */
 export async function reconcile(month) {
-  const [{ rows: billed }, { rows: ledger }, { rows: unmapped }] = await Promise.all([
+  const [{ rows: billed }, { rows: ledger }, { rows: unmapped }, estimate] = await Promise.all([
     query(`select to_char(day, 'YYYY-MM-DD') as day, meter, sum(usage)::float usage, sum(cost)::float cost, sum(credits)::float credits, sum(promo)::float promo
              from billing_days where meter is not null and invoice_month = $1 group by 1, 2 order by 1, 2`, [month]),
     query(`select to_char(x.day, 'YYYY-MM-DD') as day, x.meter,
@@ -170,6 +179,7 @@ export async function reconcile(month) {
             where x.month = $1
             group by 1, 2 order by 1, 2`, [month]),
     query(`select sku, sum(cost)::float cost from billing_days where meter is null and invoice_month = $1 group by 1 order by 2 desc`, [month]),
+    googleEstimate(month),
   ]);
   const key = (r) => `${r.day}|${r.meter}`;
   const L = new Map(ledger.map((r) => [key(r), r]));
@@ -181,7 +191,6 @@ export async function reconcile(month) {
   const billedOnly = days.filter((d) => !d.ledgerRequests && d.billedGbp > 0);
   const ledgerOnly = ledger.filter((l) => !billed.some((b) => key(b) === key(l)) && l.requests > 0);
   const sum = (xs, f) => xs.reduce((s, x) => s + (f(x) || 0), 0);
-  const estimate = await googleEstimate(month);
   return {
     month,
     totals: {

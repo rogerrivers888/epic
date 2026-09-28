@@ -36,18 +36,24 @@ const contradictedDefaults = () => banded();
 async function spend() {
   // One month for both, as the ledger groups it — London's, not UTC's (Codex).
   const month = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit' }).format(new Date());
-  const { rows } = await query(`
+  const { googleEstimate } = await import('./billing.js');
+  // The three reads side by side (round 4 PERF). `~*` beside `~` changes
+  // nothing counted (a case-sensitive match is also a case-blind one); it
+  // is what lets the month be read from Claude's own index (migration 285).
+  const [{ rows }, g, cfg] = await Promise.all([
+    query(`
     select coalesce(sum(estimated_cost_usd), 0)::float usd
       from provider_calls
      where created_at >= (($1::text || '-01')::date::timestamp at time zone 'Europe/London')
        and created_at < ((($1::text || '-01')::date + interval '1 month')::timestamp at time zone 'Europe/London')
-       and provider ~ 'anthropic|claude'`, [month]);
-  const { googleEstimate } = await import('./billing.js');
-  const g = await googleEstimate(month).catch(() => ({ gbp: 0 }));
+       and provider ~* 'anthropic|claude' and provider ~ 'anthropic|claude'`, [month]),
+    googleEstimate(month).catch(() => ({ gbp: 0 })),
+    settings(),
+  ]);
   // Claude from Anthropic's own console where it has been read for this
   // month (owner, 29 Sep 2026); the ledger's list-price figure otherwise,
   // and then said to be an estimate.
-  const cb = (await settings()).values.claudeBilling;
+  const cb = cfg.values.claudeBilling;
   if (cb && cb.month === month) {
     return { google: g.gbp, claude: cb.gbp ?? cb.usd * USD_TO_GBP, claudeUsd: cb.usd, claudeFrom: 'console', claudeCreditUsd: cb.creditUsd, claudeSource: cb.source };
   }
@@ -159,6 +165,32 @@ async function weekly(sql) {
 }
 
 export async function overview() {
+  // The growth series depend on nothing read below, so they are asked at
+  // the same time rather than after (round 4 PERF).
+  const growthP = Promise.all([
+    // Places counted once by the week they arrived, then summed up to each
+    // week — one pass over the index, not seven (round 3 PERF). A place first
+    // seen before the end of week g is one whose own week starts on or before g.
+    weekly(`with arrived as materialized (
+              select date_trunc('week', first_seen) as wk, count(*) as c from place_index
+               where subcategory is not null and not_in_epic_at is null group by 1)
+            select to_char(date_trunc('week', g), 'YYYY-MM-DD') as week,
+                   (select coalesce(sum(c), 0) from arrived where wk <= g) as n
+              from generate_series(date_trunc('week', now()) - interval '6 weeks', date_trunc('week', now()), interval '1 week') g
+             order by g`),
+    weekly(`select to_char(date_trunc('week', g), 'YYYY-MM-DD') as week,
+                   (select count(*) from fact_checks where outcome = 'verified' and at >= g and at < g + interval '7 days') as n
+              from generate_series(date_trunc('week', now()) - interval '6 weeks', date_trunc('week', now()), interval '1 week') g`),
+    // Households by the end of each week, counted the way the headline is:
+    // once somebody has signed in to it.
+    weekly(`select to_char(date_trunc('week', g), 'YYYY-MM-DD') as week,
+                   (select count(*) from households h where exists (
+                      select 1 from accounts a where a.household_id = h.id and a.activated_at is not null
+                         and a.activated_at < g + interval '7 days')) as n
+              from generate_series(date_trunc('week', now()) - interval '6 weeks', date_trunc('week', now()), interval '1 week') g`),
+  ]);
+  // Awaited with everything else; never left to reject unobserved.
+  growthP.catch(() => {});
   const cfg = (await settings()).values;
   const [mapping, contradicted, verif, srcs, acc, coll, money, { rows: [{ n: households }] }] = await Promise.all([
     mappingState(),
@@ -216,28 +248,7 @@ export async function overview() {
     : { speaks: false };
 
   // ---- Growth
-  const [placesSeries, factsSeries, householdsSeries] = await Promise.all([
-    // Places counted once by the week they arrived, then summed up to each
-    // week — one pass over the index, not seven (round 3 PERF). A place first
-    // seen before the end of week g is one whose own week starts on or before g.
-    weekly(`with arrived as materialized (
-              select date_trunc('week', first_seen) as wk, count(*) as c from place_index
-               where subcategory is not null and not_in_epic_at is null group by 1)
-            select to_char(date_trunc('week', g), 'YYYY-MM-DD') as week,
-                   (select coalesce(sum(c), 0) from arrived where wk <= g) as n
-              from generate_series(date_trunc('week', now()) - interval '6 weeks', date_trunc('week', now()), interval '1 week') g
-             order by g`),
-    weekly(`select to_char(date_trunc('week', g), 'YYYY-MM-DD') as week,
-                   (select count(*) from fact_checks where outcome = 'verified' and at >= g and at < g + interval '7 days') as n
-              from generate_series(date_trunc('week', now()) - interval '6 weeks', date_trunc('week', now()), interval '1 week') g`),
-    // Households by the end of each week, counted the way the headline is:
-    // once somebody has signed in to it.
-    weekly(`select to_char(date_trunc('week', g), 'YYYY-MM-DD') as week,
-                   (select count(*) from households h where exists (
-                      select 1 from accounts a where a.household_id = h.id and a.activated_at is not null
-                         and a.activated_at < g + interval '7 days')) as n
-              from generate_series(date_trunc('week', now()) - interval '6 weeks', date_trunc('week', now()), interval '1 week') g`),
-  ]);
+  const [placesSeries, factsSeries, householdsSeries] = await growthP;
   const placesNow = placesSeries[placesSeries.length - 1]?.n ?? 0;
   const factsNow = factsSeries[factsSeries.length - 1]?.n ?? 0;
   const factsLast = factsSeries[factsSeries.length - 2]?.n ?? 0;

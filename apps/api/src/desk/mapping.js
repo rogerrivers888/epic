@@ -89,6 +89,21 @@ export async function labelRulePointers(run = query) {
 }
 
 /**
+ * The Google words that keep a place in Epic, as `google:<word>` labels: a
+ * word pointing somewhere (by its pointer, its targets or a labels rule of
+ * its own) or a fact only. One definition, read by the brings/affected
+ * counts and by a narrowing's leavers, so the two never disagree.
+ */
+const IN_EPIC_LABELS = `
+      select l.namespace || ':' || l.key as label
+        from taxonomy_labels l
+       where l.namespace = 'google' and l.active
+         and (l.points_at is not null or l.decision = 'generic'
+              or exists (select 1 from word_targets t where t.namespace = l.namespace and t.word = l.key)
+              or (l.decision is null and exists (select 1 from shelf_rules r where r.scope = 'labels' and r.subcategory is not null
+                                                   and r.labels = array[l.namespace || ':' || l.key])))`;
+
+/**
  * How many places each word brings, and how many of them would actually
  * leave Epic if it went (handover: "Places affected counts only places that
  * would actually leave Epic or move. A place also carried by another in-Epic
@@ -100,15 +115,7 @@ export async function labelRulePointers(run = query) {
  */
 export async function bringsAndAffected(run = query) {
   const { rows } = await run(`
-    with inepic as (
-      select l.namespace || ':' || l.key as label
-        from taxonomy_labels l
-       where l.namespace = 'google' and l.active
-         and (l.points_at is not null or l.decision = 'generic'
-              or exists (select 1 from word_targets t where t.namespace = l.namespace and t.word = l.key)
-              or (l.decision is null and exists (select 1 from shelf_rules r where r.scope = 'labels' and r.subcategory is not null
-                                                   and r.labels = array[l.namespace || ':' || l.key])))
-    ),
+    with inepic as (${IN_EPIC_LABELS}),
     -- Which words each place carries: the census word that found it
     -- (found_by), its Google types, and any Google label the index holds —
     -- the same evidence the taxonomy audit reads (production's
@@ -188,33 +195,14 @@ async function lastDecisionByWord(run = query) {
 }
 
 /**
- * The whole table, as its four views draw it.
- *
- * A word appears in exactly one view. A word with an open proposal is in
- * Needs a decision until decided; so is a word nobody has answered, as "No
- * suggestion — choose where it goes".
+ * Places affected is counted on every read, for every kind, never taken
+ * from when the proposal was raised (audit, 28 Sep 2026). A narrowing
+ * states what it keeps and what leaves (README: "only churches with a
+ * Wikipedia/Wikidata entry or heritage listing (14) · the other 198 leave
+ * Epic"); a repoint counts the places that would actually move.
  */
-export async function mappingState() {
-  const [{ rows: words }, targets, counts, opened, carries, last, { rows: proposals }, { rows: liveSubs }, labelRules] = await Promise.all([
-    query(`select key as word, label, note, seen_count, decision, points_at, active
-             from taxonomy_labels where namespace = $1`, [NS]),
-    targetsByWord(),
-    bringsAndAffected(),
-    everOpened(),
-    carriesByWord(),
-    lastDecisionByWord(),
-    query(`select * from word_proposals where namespace = $1 and state = 'open'`, [NS]),
-    query('select key from shelf_subcategories where active'),
-    labelRulePointers(),
-  ]);
-  const live = new Set(liveSubs.map((r) => r.key));
-  const proposalByWord = new Map(proposals.map((p) => [p.word, p]));
-  // Places affected is counted on every read, for every kind, never taken
-  // from when the proposal was raised (audit, 28 Sep 2026). A narrowing
-  // states what it keeps and what leaves (README: "only churches with a
-  // Wikipedia/Wikidata entry or heritage listing (14) · the other 198 leave
-  // Epic"); a repoint counts the places that would actually move.
-  for (const p of proposals) {
+async function counted(proposals, targets) {
+  await Promise.all(proposals.map(async (p) => {
     if (p.action === 'narrow' && NARROWING_SQL[p.change_to?.condition]) p.narrowed = await narrowCounts(p.word, p.change_to.condition);
     if (p.action === 'repoint' && p.change_to?.subcategory) {
       // Where the primary stays and only a secondary is added (brewpub), the
@@ -223,8 +211,37 @@ export async function mappingState() {
       const gains = primaryNow === p.change_to.subcategory && p.change_to.also?.length ? p.change_to.also[0] : p.change_to.subcategory;
       p.moving = await movingCount(p.word, gains);
     }
-  }
+  }));
+}
 
+/**
+ * The whole table, as its four views draw it.
+ *
+ * A word appears in exactly one view. A word with an open proposal is in
+ * Needs a decision until decided; so is a word nobody has answered, as "No
+ * suggestion — choose where it goes".
+ */
+export async function mappingState() {
+  const targetsP = targetsByWord();
+  // Each open proposal's count is its own query: asked side by side, and
+  // alongside the reads below rather than after them (round 4 PERF).
+  const proposalsP = query(`select * from word_proposals where namespace = $1 and state = 'open'`, [NS])
+    .then(async ({ rows: proposals }) => { await counted(proposals, await targetsP); return proposals; });
+  const [{ rows: words }, targets, counts, opened, carries, last, proposals, { rows: liveSubs }, labelRules, { rows: [{ n: decided }] }] = await Promise.all([
+    query(`select key as word, label, note, seen_count, decision, points_at, active
+             from taxonomy_labels where namespace = $1`, [NS]),
+    targetsP,
+    bringsAndAffected(),
+    everOpened(),
+    carriesByWord(),
+    lastDecisionByWord(),
+    proposalsP,
+    query('select key from shelf_subcategories where active'),
+    labelRulePointers(),
+    query('select count(*)::int n from word_decisions where namespace = $1 and undone_at is null', [NS]),
+  ]);
+  const live = new Set(liveSubs.map((r) => r.key));
+  const proposalByWord = new Map(proposals.map((p) => [p.word, p]));
   const inEpic = []; const needs = []; const notInEpic = [];
   const keptAsIs = [];
   for (const w of words) {
@@ -264,8 +281,6 @@ export async function mappingState() {
       inEpic.push(row);
     }
   }
-  const { rows: [{ n: decided }] } = await query(
-    'select count(*)::int n from word_decisions where namespace = $1 and undone_at is null', [NS]);
   return {
     // `everything` is every word not excluded, whatever view it sits in —
     // the prototype's "Everything · N words" (audit, 28 Sep 2026).
@@ -286,16 +301,21 @@ export async function mappingState() {
 export async function narrowCounts(word, condition) {
   const cond = NARROWING_SQL[condition];
   if (!cond) return null;
+  // The in-Epic words are worked out once and asked as a set, not
+  // re-derived from taxonomy_labels for every place the word brings: the
+  // church narrowing (15,000 places) spent 870 ms there (round 4 PERF).
+  // A place is kept by another word when any other in-Epic word is on it;
+  // those places are found once, as a set, and asked by hash.
   const { rows: [r] } = await query(`
-    select count(distinct pil.venue_ref) filter (where ${cond})::int as kept,
-           count(distinct pil.venue_ref) filter (where not ${cond} and not exists (
-             select 1 from ${PLACE_WORDS} o join taxonomy_labels l on l.namespace = 'google' and 'google:' || l.key = o.label
-              where o.venue_ref = pil.venue_ref and o.label <> pil.label and l.active
-                and (l.points_at is not null or l.decision = 'generic'
-                     or exists (select 1 from word_targets t where t.namespace = l.namespace and t.word = l.key)
-                     or (l.decision is null and exists (select 1 from shelf_rules r where r.scope = 'labels' and r.subcategory is not null
-                                                          and r.labels = array[l.namespace || ':' || l.key])))))::int as leave
-      from ${PLACE_WORDS} pil where pil.label = $1`, [`${NS}:${word}`]);
+    with inepic as materialized (${IN_EPIC_LABELS}),
+    kept_by_other as materialized (
+      select o.venue_ref from ${PLACE_WORDS} o
+       where o.label <> $1 and o.label in (select label from inepic)
+         and o.venue_ref in (select venue_ref from ${PLACE_WORDS} w where w.label = $1))
+    select count(distinct x.venue_ref) filter (where x.qualifies)::int as kept,
+           count(distinct x.venue_ref) filter (where not x.qualifies
+             and x.venue_ref not in (select venue_ref from kept_by_other))::int as leave
+      from (select pil.venue_ref, (${cond}) as qualifies from ${PLACE_WORDS} pil where pil.label = $1) x`, [`${NS}:${word}`]);
   return { kept: r?.kept ?? 0, leave: r?.leave ?? 0 };
 }
 
