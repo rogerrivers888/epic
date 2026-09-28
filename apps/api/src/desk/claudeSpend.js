@@ -66,7 +66,8 @@ export async function claudeByCaller(month) {
        where ${CLAUDE} and ${IN_MONTH}
        group by 1 order by 1`, [month]),
     // The individual callers: each session with its label and kind, the
-    // biggest first (Codex) — a kind alone folds every agent into one row.
+    // most tokens first, as the owner asked (Codex) — a kind alone folds
+    // every agent into one row.
     query(`
       select p.session_id, s.label, coalesce(s.kind, 'none') kind, count(*)::int calls,
              coalesce(sum(p.input_tokens), 0)::float + coalesce(sum(p.output_tokens), 0)::float
@@ -75,7 +76,7 @@ export async function claudeByCaller(month) {
              array_agg(distinct p.purpose) purposes
         from provider_calls p left join api_sessions s on s.id = p.session_id
        where ${CLAUDE} and ${IN_MONTH}
-       group by 1, 2, 3 order by usd desc limit 20`, [month]),
+       group by 1, 2, 3 order by tokens desc limit 20`, [month]),
   ]);
   const tokensOf = (r) => r.input + r.output + r.cache_read + r.cache_write;
   const families = new Map();
