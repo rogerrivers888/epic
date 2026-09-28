@@ -99,3 +99,14 @@ test('a billing query that finished with errors is an error, never an empty mont
   await assert.rejects(() => exportReader.run('select 1', {}, fake), /Resources exceeded/);
   delete process.env.GCP_BILLING_SA_JSON;
 });
+
+test('a warning beside a good billing result is not a failure', async () => {
+  const { generateKeyPairSync } = await import('node:crypto');
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  process.env.GCP_BILLING_SA_JSON = JSON.stringify({ client_email: 'x@y', private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }) });
+  const fake = async (url) => (String(url).includes('oauth2')
+    ? { ok: true, json: async () => ({ access_token: 't3', expires_in: 3600 }) }
+    : { ok: true, json: async () => ({ jobComplete: true, errors: [{ message: 'a warning', reason: 'warning' }], schema: { fields: [{ name: 'a' }] }, rows: [{ f: [{ v: '2' }] }] }) });
+  assert.deepEqual(await exportReader.run('select 2', {}, fake), [{ a: '2' }]);
+  delete process.env.GCP_BILLING_SA_JSON;
+});

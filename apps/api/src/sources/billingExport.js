@@ -96,9 +96,11 @@ export async function run(sql, params = {}, fetcher = fetch) {
   }
   // A job can finish and still have failed: 200, jobComplete, and an errors
   // list. That is never an empty result (Codex, 29 Sep 2026).
-  const failed = page.errors?.length ? page.errors : j.errors?.length ? j.errors : null;
-  if (failed) throw Object.assign(new Error(`BigQuery: ${String(failed[0]?.message ?? 'the query failed').slice(0, 200)}`), { code: 'bigquery' });
-  if (!page.schema) throw Object.assign(new Error('BigQuery returned no result for the billing query.'), { code: 'bigquery' });
+  // `errors` can also carry warnings beside a good result, so what is fatal is
+  // a failed job (`status.errorResult`) or no result at all (Codex).
+  const listed = page.errors?.length ? page.errors : j.errors?.length ? j.errors : null;
+  const fatal = page.status?.errorResult ?? (!page.schema ? listed?.[0] ?? { message: 'no result' } : null);
+  if (fatal) throw Object.assign(new Error(`BigQuery: ${String(fatal.message ?? 'the query failed').slice(0, 200)}`), { code: 'bigquery' });
   const fields = (page.schema?.fields ?? []).map((f) => f.name);
   const rows = [...(page.rows ?? [])];
   let token2 = page.pageToken;
