@@ -12,6 +12,7 @@ import { paceOf, DEFAULT_PACE } from '../domain/pace.js';
 import { browseOf, mergeBrowse } from '../domain/browse.js';
 import * as ringTables from '../repositories/ringTables.js';
 import * as censusRun from '../sources/censusRun.js';
+import { prewarm } from '../desk/pipeline.js';
 import { isValidTimezone } from '../domain/time.js';
 import { currentAccount } from '../context.js';
 import {
@@ -282,6 +283,11 @@ router.patch('/', async (req, res, next) => {
       if (moved || modeChanged) {
         void ringTables.refreshForHome({ lat: at.lat, lng: at.lng, mode: h.travel_mode ?? travelMode ?? 'driving' })
           .then(async (ring) => {
+            // The sign-up pre-warm (back-office handover 4.5, C38): the top 20
+            // in every category around the home are checked against our own
+            // sources now, free, so the household's first search is fast. The
+            // census below counts what is missing; this answers what is known.
+            if (ring?.cell) await prewarm({ cell: ring.cell, mode: h.travel_mode ?? travelMode ?? 'driving' }).catch(() => null);
             if (!ring?.notCensusedOutcodes?.length) return;
             await censusRun.startRun({
               label: `home · ${ring.cell}`,

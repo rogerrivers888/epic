@@ -74,6 +74,28 @@ export function fromPredicate(p) {
   return cleanRule(out);
 }
 
+/**
+ * A row still written in the old predicate format, evaluated exactly as it
+ * was meant — `all` is and, `any` is or, `not` negates — so an unsaved legacy
+ * row counts what it always counted. Converting it to the new model is only
+ * for the editor's pills; saving it there writes the new rule (Codex, 28 Sep
+ * 2026: flattening changed "Too hot to think" from or to and).
+ */
+export function matchesPredicate(pred, p) {
+  if (!pred || typeof pred !== 'object') return true;
+  if (Array.isArray(pred.all)) return pred.all.every((x) => matchesPredicate(x, p));
+  if (Array.isArray(pred.any)) return pred.any.some((x) => matchesPredicate(x, p));
+  if (pred.not) return !matchesPredicate(pred.not, p);
+  if (pred.overlaps && pred.attribute === 'suits-ages') return Boolean(p.ages) && p.ages[0] <= pred.overlaps[1] && p.ages[1] >= pred.overlaps[0];
+  if (Array.isArray(pred.subcategory)) return pred.subcategory.some((s) => p.subs.includes(s));
+  if (Array.isArray(pred.category)) return pred.category.some((c) => p.cats.includes(c));
+  if (pred.attribute && typeof pred.yes === 'boolean') return pred.yes ? p.facts.has(pred.attribute) : p.no?.has(pred.attribute) ?? false;
+  return false;
+}
+
+/** Whether a place fits a collection: its new rule, or its legacy predicate exactly. */
+export const fits = (c, p) => (c.legacy ? matchesPredicate(c.legacy, p) : matches(c.rule, p));
+
 /** The audience a rule implies (D11), in the words the list uses. */
 export function audienceOf(rule) {
   if (!rule.ages) return { key: 'everyone', label: 'Everyone' };
@@ -163,7 +185,9 @@ export async function placeIndex() {
   for (const p of places.values()) {
     const get = (k) => p.answers.get(k) ?? (p.primarySub ? defaultBy.get(`${p.primarySub}|${k}`) : null) ?? null;
     p.facts = new Set();
-    for (const [k, v] of p.answers) if (v.yesno === true) p.facts.add(k);
+    p.no = new Set();
+    for (const [k, v] of p.answers) { if (v.yesno === true) p.facts.add(k); else if (v.yesno === false) p.no.add(k); }
+    for (const d of defaultsOfSub.get(p.primarySub) ?? []) if (d.yesno === false && !p.answers.has(d.attribute_key)) p.no.add(d.attribute_key);
     for (const d of defaultsOfSub.get(p.primarySub) ?? []) if (d.yesno === true && !p.answers.has(d.attribute_key)) p.facts.add(d.attribute_key);
     const ages = get('suits-ages');
     p.ages = ages && (ages.from_value != null || ages.to_value != null) ? [ages.from_value ?? 0, ages.to_value ?? 99] : null;
@@ -200,8 +224,9 @@ async function engagement() {
 
 /** A stored row as a collection. */
 function toCollection(r) {
+  const legacy = !r.rule && r.predicate && Object.keys(r.predicate).length ? r.predicate : null;
   const rule = r.rule ? cleanRule(r.rule) : fromPredicate(r.predicate);
-  return { key: r.key, title: r.title, copy: r.copy, active: r.active, grouping: r.grouping, rule, audience: audienceOf(rule) };
+  return { key: r.key, title: r.title, copy: r.copy, active: r.active, grouping: r.grouping, rule, legacy, audience: audienceOf(rule) };
 }
 
 /** The list: Collection · Places (or within reach) · Shown to · Shown · Opened · Hearted. */
@@ -218,7 +243,7 @@ export async function collectionList({ loc = null } = {}) {
     const e = eng.by.get(r.key);
     return {
       ...c,
-      places: ruleIsEmpty(c.rule) ? 0 : pool.filter((p) => matches(c.rule, p)).length,
+      places: !c.legacy && ruleIsEmpty(c.rule) ? 0 : pool.filter((p) => fits(c, p)).length,
       shown: eng.speaks ? (e?.shown ?? 0) : null,
       opened: eng.speaks ? (e?.opened ?? 0) : null,
       hearted: eng.speaks ? (eng.hearts.get(r.key) ?? 0) : null,
@@ -274,7 +299,7 @@ export async function placeCard(ref) {
     town: info.town ?? null,
     sentence: info.sentence ?? null,
     facts: p ? [...p.facts].map((k) => label.get(k) ?? k).sort() : [],
-    collections: p ? rows_.map(toCollection).filter((c) => !ruleIsEmpty(c.rule) && matches(c.rule, p)).map((c) => ({ key: c.key, title: c.title })) : [],
+    collections: p ? rows_.map(toCollection).filter((c) => (c.legacy || !ruleIsEmpty(c.rule)) && fits(c, p)).map((c) => ({ key: c.key, title: c.title })) : [],
   };
 }
 
@@ -303,23 +328,34 @@ export async function saveCollection({ key = null, title, copy = '', rule: raw, 
     }
     const k = key ?? (await uniqueKey(c, slug(t) || 'collection'));
     if (!row) {
+      // Live on save: a collection's audience and thinness decide who sees it
+      // (D7, D11); there is no separate switch (Codex, 28 Sep 2026).
       await c.query(
         `insert into browse_rows (key, grouping, title, copy, predicate, rule, position, active, seeded, updated_by)
-         values ($1, 'custom', $2, $3, '{}'::jsonb, $4::jsonb, 1000, false, false, $5)`, [k, t, cp, JSON.stringify(rule), who]);
+         values ($1, 'custom', $2, $3, '{}'::jsonb, $4::jsonb, 1000, true, false, $5)`, [k, t, cp, JSON.stringify(rule), who]);
       await logChange({ client: c, who, area: 'Collections', what: `Collection added · ${t}`, before: '—', after: t, subjectType: 'collection', subjectId: k, undo: { kind: 'collection', key: k, was: null } });
       return { key: k, created: true };
     }
     await c.query(
-      `update browse_rows set title = $2, copy = $3, rule = $4::jsonb, updated_by = $5, updated_at = now() where key = $1`,
+      `update browse_rows set title = $2, copy = $3, rule = $4::jsonb, active = true, updated_by = $5, updated_at = now() where key = $1`,
       [k, t, cp, JSON.stringify(rule), who]);
-    const was = { title: row.title, copy: row.copy, rule: row.rule, predicate: row.predicate };
+    const was = { title: row.title, copy: row.copy, rule: row.rule, predicate: row.predicate, active: row.active };
     const changes = [];
-    if (row.title !== t) changes.push(['Collection title', row.title, t]);
-    if ((row.copy ?? '') !== cp) changes.push(['Collection copy', row.copy || '—', cp || '—']);
+    if (row.title !== t) changes.push(['title', row.title, t]);
+    if ((row.copy ?? '') !== cp) changes.push(['copy', row.copy || '—', cp || '—']);
     const oldRule = row.rule ? cleanRule(row.rule) : fromPredicate(row.predicate);
-    if (JSON.stringify(oldRule) !== JSON.stringify(rule)) changes.push(['Collection rule', ruleWords(oldRule), ruleWords(rule)]);
-    for (const [what, before, after] of changes) {
-      await logChange({ client: c, who, area: 'Collections', what: `${what} · ${t}`, before, after, subjectType: 'collection', subjectId: k, undo: { kind: 'collection', key: k, was } });
+    if (JSON.stringify(oldRule) !== JSON.stringify(rule)) changes.push(['rule', ruleWords(oldRule), ruleWords(rule)]);
+    if (!row.active) changes.push(['shown', 'switched off', 'live']);
+    // One save is one change, so its Undo puts back everything the save did
+    // and nothing else (Codex, 28 Sep 2026).
+    if (changes.length) {
+      await logChange({
+        client: c, who, area: 'Collections',
+        what: `Collection ${changes.map(([f]) => f).join(', ')} · ${t}`,
+        before: changes.map(([f, b]) => `${f}: ${b}`).join(' · '),
+        after: changes.map(([f, , a]) => `${f}: ${a}`).join(' · '),
+        subjectType: 'collection', subjectId: k, undo: { kind: 'collection', key: k, was },
+      });
     }
     return { key: k, created: false, changed: changes.length };
   });
@@ -353,7 +389,7 @@ export async function undoCollection({ change, who }) {
   const { key, was } = change.undo;
   await withTransaction(async (c) => {
     if (!was) await c.query('delete from browse_rows where key = $1 and not seeded', [key]);
-    else await c.query('update browse_rows set title = $2, copy = $3, rule = $4::jsonb, updated_at = now() where key = $1', [key, was.title, was.copy, was.rule ? JSON.stringify(was.rule) : null]);
+    else await c.query('update browse_rows set title = $2, copy = $3, rule = $4::jsonb, active = $5, updated_at = now() where key = $1', [key, was.title, was.copy, was.rule ? JSON.stringify(was.rule) : null, was.active ?? true]);
     await c.query('update bo_changes set undone_at = now(), undone_by = $2 where id = $1', [change.id, who]);
   });
   forget();
@@ -394,7 +430,7 @@ export async function asHousehold({ householdId, loc = null }) {
   const hearted = new Map(fresh.map((x) => [x.row_key, x.hearted_at]));
   const out = rows.map((r) => {
     const c = toCollection(r);
-    const n = ruleIsEmpty(c.rule) ? 0 : pool.filter((p) => matches(c.rule, p)).length;
+    const n = !c.legacy && ruleIsEmpty(c.rule) ? 0 : pool.filter((p) => fits(c, p)).length;
     const a = c.audience;
     const fits = a.key === 'everyone' ? true : a.key === 'adult' ? ages.some((x) => x >= 16) : ages.some((x) => x >= a.lo && x <= a.hi);
     let why = null;

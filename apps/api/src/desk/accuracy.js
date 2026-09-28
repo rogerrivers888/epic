@@ -25,15 +25,14 @@ async function comparisons({ since = null } = {}) {
     `select f.venue_ref, f.attribute_key, f.answer, f.machine_state, f.machine_source as source, f.answered_at as at,
             coalesce(f.subcategory_key, pi.subcategory) as sub
        from family_answers f left join place_index pi on pi.venue_ref = f.venue_ref where ${where}`, args);
+  // A person's corrections, compared with what the machine had said at the
+  // moment of the correction (fact_corrections freezes it).
   const cargs = [];
-  let cwhere = `v.set_by is not null and x.state in ('yes','no') and v.yesno is not null`;
-  if (since) { cargs.push(since); cwhere += ` and v.updated_at >= $${cargs.length}`; }
+  let cwhere = `machine_state in ('yes','no')`;
+  if (since) { cargs.push(since); cwhere += ` and at >= $${cargs.length}`; }
   const { rows: corr } = await query(
-    `select v.venue_ref, v.attribute_key, case when v.yesno then 'yes' else 'no' end as answer, x.state as machine_state,
-            x.source, v.updated_at as at, pi.subcategory as sub
-       from place_attribute_values v
-       join place_fact_answers x on x.venue_ref = v.venue_ref and x.attribute_key = v.attribute_key
-       left join place_index pi on pi.venue_ref = v.venue_ref where ${cwhere}`, cargs);
+    `select venue_ref, attribute_key, answer, machine_state, machine_source as source, at, subcategory_key as sub
+       from fact_corrections where ${cwhere}`, cargs);
   return [...fam, ...corr].map((r) => ({ ...r, agreed: r.answer === r.machine_state }));
 }
 

@@ -240,10 +240,48 @@ async function snapshot(c, word) {
   };
 }
 
+/**
+ * A narrowing (handover 4.10): the word files a place in its target only when
+ * the place qualifies, so it does not file by itself at all — no labels rule,
+ * no pointer the classifier reads — and each qualifying place gets a
+ * place-scope rule the narrowing owns (`taught_by = 'narrowing:<word>'`).
+ * Places that do not qualify leave Epic unless another word carries them
+ * ("parish churches leave Epic", A7). Recomputed whenever the word changes and
+ * daily, as places gain or lose an encyclopedia entry or a listing.
+ */
+export const NARROWING_SQL = {
+  // A Wikipedia or Wikidata entry in our own record or the atlas, or a
+  // heritage listing on the atlas.
+  encyclopedia_or_listing: `(
+    exists (select 1 from place_records r where r.venue_ref = pil.venue_ref and (r.wikidata_id is not null or r.wikipedia_url is not null))
+    or exists (select 1 from attractions a where (a.venue_ref = pil.venue_ref or 'atlas:' || a.id::text = pil.venue_ref)
+               and (a.wikidata_id is not null or a.wikipedia_url is not null or a.heritage is not null)))`,
+};
+
+export async function narrowRules(c, word) {
+  const run = (sql, args) => c.query(sql, args);
+  const { rows: t } = await run(
+    `select subcategory_key, condition from word_targets where namespace = $1 and word = $2 and is_primary and condition is not null`, [NS, word]);
+  await run(`delete from shelf_rules where scope = 'place' and taught_by = $1`, [`narrowing:${word}`]);
+  if (!t.length) return 0;
+  const cond = NARROWING_SQL[t[0].condition];
+  if (!cond) return 0;
+  const { rowCount } = await run(
+    `insert into shelf_rules (scope, subject, subject_label, weights, subcategory, reason, taught_by, seeded)
+     select 'place', pil.venue_ref, null, '{}'::jsonb, $2, $3, $4, false
+       from place_index_labels pil
+      where pil.label = $1 and ${cond}
+     on conflict (scope, subject) do nothing`,
+    [`${NS}:${word}`, t[0].subcategory_key, `Narrowed: ${word} files only places with an encyclopedia entry or a heritage listing.`, `narrowing:${word}`]);
+  return rowCount;
+}
+
 /** Put a word into a state, all three tables at once. */
 async function apply(c, word, state, who) {
   const { decision, targets, active = true } = state;
-  const primary = targets.find((t) => t.primary)?.sub ?? null;
+  const narrowed = targets.find((t) => t.primary && t.condition);
+  // A narrowed word files nothing by itself: no pointer, no labels rule.
+  const primary = narrowed ? null : (targets.find((t) => t.primary)?.sub ?? null);
   await c.query(
     `update taxonomy_labels set decision = $3, points_at = $4, active = $5, updated_at = now()
       where namespace = $1 and key = $2`, [NS, word, decision, primary, active]);
@@ -262,7 +300,7 @@ async function apply(c, word, state, who) {
        on conflict (scope, subject) do update set subcategory = excluded.subcategory, reason = excluded.reason,
          taught_by = excluded.taught_by, weights = '{}'::jsonb, labels = excluded.labels, updated_at = now()`,
       [subject, word.replace(/_/g, ' '), primary, rule.reason ?? 'Pointed at from Mapping.', rule.by ?? who, [subject]]);
-  } else if (state.rule?.subcategory) {
+  } else if (!narrowed && state.rule?.subcategory) {
     // A rule with no primary behind it: only reachable when restoring a
     // snapshot that had one, which apply() never produces on its own.
     await c.query(
@@ -271,6 +309,16 @@ async function apply(c, word, state, who) {
   } else {
     await c.query(`delete from shelf_rules where scope = 'labels' and subject = $1`, [subject]);
   }
+  await narrowRules(c, word);
+}
+
+/** Recompute every narrowing's place rules (daily). */
+export async function refreshNarrowings() {
+  const { rows } = await query(`select distinct word from word_targets where condition is not null`);
+  let n = 0;
+  for (const r of rows) n += await withTransaction((c) => narrowRules(c, r.word));
+  forgetAll();
+  return n;
 }
 
 /** How a state reads in the Changes log's Before → After. */

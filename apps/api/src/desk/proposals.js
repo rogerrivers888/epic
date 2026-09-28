@@ -59,10 +59,13 @@ export function changesSomething(seed, word) {
   const out = word.decision && ['aside', 'travel', 'nearby'].includes(word.decision);
   if (seed.action === 'exclude') return !out;
   if (seed.action === 'make_fact') return word.decision !== 'generic';
-  if (seed.action === 'repoint' || seed.action === 'narrow') {
+  if (seed.action === 'narrow') {
     if (out) return false; // settled out by a person; the register wins
-    if (word.points_at !== seed.subcategory) return true;
-    return seed.action === 'narrow' && !word.narrowed;
+    return word.narrowedTo !== seed.subcategory;
+  }
+  if (seed.action === 'repoint') {
+    if (out) return false;
+    return word.points_at !== seed.subcategory;
   }
   return false;
 }
@@ -76,11 +79,11 @@ export async function refreshProposals() {
     query(`select key, decision, points_at, active from taxonomy_labels where namespace = 'google'`),
     query(`select word from word_proposals where state = 'kept'`),
     query(`select id, word from word_proposals where state = 'open'`),
-    query(`select word from word_targets where condition is not null`),
+    query(`select word, subcategory_key from word_targets where condition is not null and is_primary`),
     bringsAndAffected(),
   ]);
   const byWord = new Map(words.map((w) => [w.key, w]));
-  for (const n of narrowed) { const w = byWord.get(n.word); if (w) w.narrowed = true; }
+  for (const n of narrowed) { const w = byWord.get(n.word); if (w) w.narrowedTo = n.subcategory_key; }
   const keptSet = new Set(kept.map((k) => k.word));
   const openSet = new Set(open.map((o) => o.word));
   let raised = 0; let retired = 0;

@@ -616,10 +616,11 @@ inspire.get('/around', async (req, res, next) => {
       await visitsRepo.recordProviderCall(household.id, 'google', 'inspire.around', meter).catch(() => null);
     }
 
-    // Every outbound call attributed to a household, before the answer goes
-    // out (Technical Constraints §11, and the data policy's own rule). The
-    // purpose is a stable string and is added to, never renamed.
-    if (requests) await visitsRepo.recordProviderCall(household.id, 'google', 'inspire.ring', meter).catch(() => null);
+    // One meter, one row. This used to be written a second time as
+    // `inspire.ring` from the same meter, so every ring search was counted
+    // twice in the ledger (Phase 0, 28 Sep 2026: about 484 requests, $19.36,
+    // that Google never billed). `inspire.ring` stays a known purpose for the
+    // rows already written; nothing writes it now.
 
     res.json({
       ring: {
@@ -764,7 +765,8 @@ inspire.get('/near', async (req, res, next) => {
         tookMs: Date.now() - started,
         attribution: ['Powered by Google'],
       };
-      if (requests) await visitsRepo.recordProviderCall(household.id, 'google', 'inspire.ring', meter).catch(() => null);
+      // Written once, below, as `inspire.near` — never again as `inspire.ring`
+      // from the same meter (see /around).
       // The home screen is a search, and what happens to each card afterwards
       // is the click stream Demand counts. A count-only caller is not drawing
       // anything and does not log one (the same rule the old pool kept).

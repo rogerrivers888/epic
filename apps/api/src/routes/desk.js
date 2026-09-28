@@ -22,6 +22,8 @@ import * as accuracy from '../desk/accuracy.js';
 import * as collections from '../desk/collections.js';
 import { overview } from '../desk/overview.js';
 import { resolveLocation, chipOf, REACHES, MODES } from '../desk/location.js';
+import * as pipeline from '../desk/pipeline.js';
+import { extracts as osmExtracts } from '../sources/osmExtract.js';
 
 export const deskRoutes = Router();
 
@@ -71,13 +73,26 @@ deskRoutes.post('/undo/:id', requires('manage_library'), async (req, res, next) 
     if (change.undone_at) throw bad('That change has already been undone.');
     const u = change.undo;
     if (!u) throw bad('That change cannot be undone from here.');
+    // Only the latest live change to a thing can be undone: undoing an older
+    // one would write its before over a newer change (Codex, 28 Sep 2026).
+    if (change.subject_type && change.subject_id) {
+      const { rows: [newer] } = await query(
+        `select id from bo_changes where subject_type = $1 and subject_id = $2 and undone_at is null and id <> $3
+            and at > (select at from bo_changes where id = $3) limit 1`,
+        [change.subject_type, change.subject_id, change.id]);
+      if (newer) throw bad('A later change to the same thing stands; undo that one first.');
+    }
     const by = who(req);
     if (u.kind === 'word_decision') await mapping.undo({ id: u.id, who: by });
     else if (u.kind === 'default') await categories.undoDefault({ change, who: by });
     else if (u.kind === 'subcategory_fact') await categories.undoFact({ change, who: by });
     else if (u.kind === 'correction') await facts.undoCorrection({ change, who: by });
     else if (u.kind === 'collection') await collections.undoCollection({ change, who: by });
-    else if (u.kind === 'link') {
+    else if (u.kind === 'carry') {
+      if (u.on) await query(`insert into taxonomy_label_carries (namespace, key, attribute_key, yesno) values ('google', $1, $2, true) on conflict do nothing`, [u.word, u.fact]);
+      else await query(`delete from taxonomy_label_carries where namespace = 'google' and key = $1 and attribute_key = $2`, [u.word, u.fact]);
+      await changesRepo.markUndone({ id: change.id, who: by });
+    } else if (u.kind === 'link') {
       await categories.link({ a: u.a, b: u.b, who: by, on: u.on });
       await changesRepo.markUndone({ id: change.id, who: by });
     } else if (u.kind === 'setting') {
@@ -151,7 +166,7 @@ deskRoutes.put('/mapping/:word/facts', requires('manage_library'), async (req, r
     else await query(`delete from taxonomy_label_carries where namespace = 'google' and key = $1 and attribute_key = $2`, [word, fact]);
     const change = await changesRepo.logChange({
       who: who(req), area: 'Mapping', what: `Google word · ${word} · Repointed`, before: on ? '—' : a.label, after: on ? `carries ${a.label}` : '—',
-      why: str(req.body?.why), subjectType: 'word', subjectId: word,
+      why: str(req.body?.why), subjectType: 'word', subjectId: word, undo: { kind: 'carry', word, fact, on: !on },
     });
     res.json({ word, fact, on, change });
   } catch (err) { next(err); }
@@ -363,7 +378,17 @@ deskRoutes.get('/places/:ref/card', requires('view_library'), async (req, res, n
 // daily): raise and retire mapping proposals.
 
 export async function deskHousekeeping() {
-  return { proposals: await refreshProposals() };
+  // Order matters: drop what has expired, check what is waiting, then work out
+  // each drawer's facts from what has now been verified.
+  const dropped = await pipeline.dropExpired().catch((err) => ({ error: err.message }));
+  const checked = await pipeline.verifyBacklog({ limit: 200 }).catch((err) => ({ error: err.message }));
+  const added = await pipeline.add().catch((err) => ({ error: err.message }));
+  return { proposals: await refreshProposals(), narrowed: await mapping.refreshNarrowings(), dropped, checked, added };
 }
+
+/** The local open-map extracts, read only: which regions, when, how many places. */
+deskRoutes.get('/osm', requires('view_library'), async (_req, res, next) => {
+  try { res.json({ extracts: await osmExtracts(), switchedOn: String(process.env.EPIC_OSM_EXTRACT ?? '') || null }); } catch (err) { next(err); }
+});
 
 export default deskRoutes;

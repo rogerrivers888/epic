@@ -8,6 +8,7 @@
 // takes. Everything on it survives even if the source's record goes away.
 
 import { Router } from 'express';
+import * as pipeline from '../desk/pipeline.js';
 import { ratingsFor, reviewsFor } from '../sources/providerMatch.js';
 import { rules as shelfRules } from '../repositories/shelfRules.js';
 import { taxonomy } from '../repositories/shelfTaxonomy.js';
@@ -676,6 +677,26 @@ places.get('/detail', async (req, res, next) => {
     // source is over its allowance, and a place we have researched already
     // knows where its own menu is — which is the difference between a menu tab
     // that works and one that says there is no website (owner, 5 Sep 2026).
+    // The fact pipeline (back-office handover 5.2). Spot reads the review text
+    // this paid call brought into memory and writes suggestions only — a place
+    // id, a feature, a status, a date; the text itself goes nowhere. What two
+    // or more reviews assert and none deny may be shown to this household now
+    // ("Reviewers mention a sauna", credited to Google) and is never stored.
+    // Answering the place's facts and re-checking any past their period are
+    // free and queued, never waited for.
+    let reviewersMention = [];
+    if (venue?.reviews?.length || venue?.aiSummary) {
+      const spotted = await pipeline.spot({
+        ref, reviews: (venue.reviews ?? []).map((r) => r.text).filter(Boolean), summary: venue.aiSummary ?? null,
+      }).catch(() => null);
+      if (spotted) {
+        reviewersMention = spotted.mention;
+        for (const s of spotted.suggested) pipeline.enqueue('verify', ref, s.fact);
+      }
+    }
+    pipeline.enqueue('recheck', ref);
+    pipeline.enqueue('answer', ref);
+
     const website = ours?.website ?? venue?.website ?? null;
     const eats = EATING.has(venue?.category ?? ours?.category ?? '');
     // Which town, before anything follows a link. Two branches of one group
@@ -695,7 +716,7 @@ places.get('/detail', async (req, res, next) => {
       householdStatus(household.id, [ref]),
       menuLookup,
     ]);
-    res.json({ venueRef: ref, venue: venue ? { ...venue, venueRef: ref } : null, household: status[ref] ?? null, visits: history, menu, ours, sourceError, researching });
+    res.json({ venueRef: ref, venue: venue ? { ...venue, venueRef: ref } : null, household: status[ref] ?? null, visits: history, menu, ours, sourceError, researching, reviewersMention });
   } catch (err) {
     next(err);
   }

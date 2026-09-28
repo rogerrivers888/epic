@@ -54,6 +54,8 @@ import shelfRoutes from './routes/shelves.js';
 import taxonomyRoutes, { ensureTaxonomyReady } from './routes/taxonomy.js';
 import { filingRoutes } from './routes/filing.js';
 import { deskRoutes, deskHousekeeping } from './routes/desk.js';
+import { familyRoutes } from './routes/families.js';
+import { loadDue as loadOsmDue, REGIONS_ON as osmRegionsOn } from './sources/osmExtract.js';
 import hostSkillRoutes, { adminRouter as skillsAdminRoutes, publicRouter as skillsPublicRoutes, ensureSkillsReady } from './routes/hostSkills.js';
 import questionRoutes from './routes/questions.js';
 import { ensureAttributeAliases } from './repositories/questionSets.js';
@@ -309,6 +311,8 @@ app.use('/api/voice', voiceRoutes);
 app.use('/api/concepts', conceptRoutes);
 app.use('/api/prototypes', prototypeRoutes);
 app.use('/api/places', placeRoutes);
+// Families who have visited (back-office handover 4.7). Backend only for now.
+app.use('/api/families', familyRoutes);
 app.use('/api/places', placePhotoRoutes);
 app.use('/api/places', areaRouter);
 app.use('/api/visits', visitRoutes);
@@ -709,6 +713,17 @@ const deskDaily = () => deskHousekeeping()
   .catch((err) => console.error('desk housekeeping', err.message));
 void indexBuilt.then(deskDaily);
 setInterval(deskDaily, BAR_CHECK_EVERY_MS).unref?.();
+// The local open-map extract (handover 5.3): loaded for the regions the owner
+// switched on in config (EPIC_OSM_EXTRACT), at boot if never loaded, and again
+// when a month old. No button starts it. Free; a bulk load, so config-gated.
+const osmDaily = () => {
+  if (!osmRegionsOn().length) return;
+  void loadOsmDue()
+    .then((out) => { for (const r of out) console.log(r.error ? `osm extract ${r.region}: ${r.error}` : `osm extract ${r.region}: ${r.features} places`); })
+    .catch((err) => console.error('osm extract', err.message));
+};
+void indexBuilt.then(osmDaily);
+setInterval(osmDaily, BAR_CHECK_EVERY_MS).unref?.();
 void indexBuilt.then(() => sweep());
 setInterval(() => { void sweep(); }, 3600_000).unref?.();
 

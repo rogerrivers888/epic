@@ -12,6 +12,7 @@
 // confidence is returned and the caller stores what it was.
 
 import { bump } from './meter.js';
+import * as local from './osmExtract.js';
 import { mirrorsInOrder, mirrorAnswered, mirrorFailed, UA } from './overpass.js';
 
 // The interactive search (sources/osm.js) makes one Overpass call when somebody
@@ -172,6 +173,13 @@ async function overpass(body, meter = null) {
 export async function osmElement(ref, { meter = null } = {}) {
   const [type, id] = String(ref).split('/');
   if (!['node', 'way', 'relation'].includes(type) || !/^\d+$/.test(id || '')) return null;
+  // Our own copy first (handover 5.3). Once an extract is loaded it is the
+  // answer: an element it does not hold is one we do not keep, not a reason
+  // to go back to Overpass.
+  if (await local.covers(null, null)) {
+    const el = await local.element(`${type}/${id}`);
+    return el ? { ref: `${el.type}/${el.id}`, tags: el.tags || {}, lat: el.lat ?? el.center?.lat, lng: el.lon ?? el.center?.lon } : null;
+  }
   const data = await overpass(`[out:json][timeout:15];${type}(${id});out center tags;`, meter);
   const el = (data.elements || [])[0];
   if (!el) return null;
@@ -246,8 +254,14 @@ export async function matchOsm({ venueRef, name, lat, lng, locality = null, addr
   const byKind = `[out:json][timeout:20];nwr["name"][~"^(${KINDS.join('|')})$"~"."](around:${Math.round(MAX_M / 2)},${lat},${lng});out center tags 300;`;
 
   let elements = [];
-  if (byName) elements = (await overpass(byName, meter)).elements ?? [];
-  if (!elements.length) elements = (await overpass(byKind, meter)).elements ?? [];
+  if (await local.covers(lat, lng)) {
+    // The same two questions, asked of our own copy of the map.
+    if (stems.length) elements = await local.nearByName(lat, lng, MAX_M, stems);
+    if (!elements.length) elements = await local.nearByKind(lat, lng, Math.round(MAX_M / 2), KINDS);
+  } else {
+    if (byName) elements = (await overpass(byName, meter)).elements ?? [];
+    if (!elements.length) elements = (await overpass(byKind, meter)).elements ?? [];
+  }
 
   const here = { lat, lng };
   let best = null;

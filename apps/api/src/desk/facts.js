@@ -241,6 +241,15 @@ export async function correct({ ref, fact, option, why = null, who }) {
        on conflict (venue_ref, attribute_key) do update set yesno = excluded.yesno, from_value = excluded.from_value,
          to_value = excluded.to_value, choice = excluded.choice, reason = excluded.reason, set_by = excluded.set_by, updated_at = now()`,
       [ref, fact, o.value.yesno ?? null, o.value.from ?? null, o.value.to ?? null, o.value.choice ?? null, why ?? 'Corrected in Facts', who]);
+    // For accuracy: the machine's answer and source as they stand now, frozen
+    // with the correction, so a later re-check cannot rewrite history.
+    if (a.kind === 'yesno' && o.value.yesno != null) {
+      const { rows: [sub] } = await c.query('select subcategory from place_index where venue_ref = $1', [ref]);
+      await c.query(
+        `insert into fact_corrections (venue_ref, attribute_key, answer, machine_state, machine_source, subcategory_key, who)
+         values ($1, $2, $3, $4, $5, $6, $7)`,
+        [ref, fact, o.value.yesno ? 'yes' : 'no', machine?.state ?? null, machine?.source ?? null, sub?.subcategory ?? null, who]);
+    }
     const d = (await describe([ref])).get(ref);
     const before = was?.set_by ? wordOf(a, { yesno: was.yesno, from: was.from_value, to: was.to_value, choice: was.choice }, cfg)
       : machine ? (machine.state === 'yes' || machine.state === 'no' ? wordOf(a, { yesno: machine.yesno, from: machine.from_value, to: machine.to_value, choice: machine.choice }, cfg) ?? (machine.state === 'no' ? 'No' : 'Yes') : 'Don’t know') : 'Don’t know';

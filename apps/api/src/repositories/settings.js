@@ -91,7 +91,8 @@ export async function setThreshold(key, value, who = 'the owner (passcode)') {
   }
   const { setSetting } = await import('../desk/settings.js');
   await setSetting(spec.setting, Math.round(n * spec.scale), { who });
-  return thresholds();
+  // One threshold, the shape the route and the old screen read (Codex, 28 Sep 2026).
+  return (await thresholds()).find((t) => t.key === spec.key);
 }
 
 /**

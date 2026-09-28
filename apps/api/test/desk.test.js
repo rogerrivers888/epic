@@ -311,3 +311,199 @@ test('the Changes log filters by area, person and search', async () => {
   assert.ok(s.rows.every((r) => /desk_church/.test(`${r.what} ${r.before} ${r.after} ${r.why}`)));
   await assert.rejects(changes.logChange({ who: WHO, area: 'Nowhere', what: 'x' }), /not an area/);
 });
+
+// ---------------------------------------------------------------------------
+// Codex, 28 Sep 2026, on the first batch
+
+test('a narrowed word files nothing by itself; only its qualifying places are filed, by rules it owns', async () => {
+  await seedTaxonomy();
+  await query(`insert into place_index (venue_ref, subcategory) values ('desk:ch1', null), ('desk:ch2', null) on conflict (venue_ref) do nothing`);
+  await query(`insert into place_index_labels (venue_ref, label) values ('desk:ch1', 'google:desk_church'), ('desk:ch2', 'google:desk_church') on conflict do nothing`);
+  await query(`insert into place_records (venue_ref, name, wikidata_id) values ('desk:ch1', 'St Notable', 'Q42') on conflict (venue_ref) do update set wikidata_id = 'Q42'`);
+  const { rows: [p] } = await query(
+    `insert into word_proposals (word, grp, action, change_to, rule_text) values ('desk_church', 'narrow', 'narrow', $1::jsonb, 'only notable ones') returning id`,
+    [JSON.stringify({ text: 'Landmarks — only notable', subcategory: 'desk-landmarks', condition: 'encyclopedia_or_listing' })]);
+  const out = await mapping.decideProposal({ id: p.id, action: 'apply', who: WHO });
+  assert.equal(out.decision.kind, 'Narrowed');
+  const { rows: [w] } = await query(`select points_at from taxonomy_labels where key = 'desk_church'`);
+  assert.equal(w.points_at, null, 'the classifier sees no pointer for a narrowed word');
+  const { rows: rule } = await query(`select 1 from shelf_rules where scope = 'labels' and subject = 'google:desk_church'`);
+  assert.equal(rule.length, 0, 'no unconditional labels rule');
+  const { rows: place } = await query(`select subject, subcategory from shelf_rules where scope = 'place' and taught_by = 'narrowing:desk_church'`);
+  assert.deepEqual(place.map((r) => [r.subject, r.subcategory]), [['desk:ch1', 'desk-landmarks']], 'only the place with an encyclopedia entry');
+  const refreshed = await proposals.changesSomething(proposals.SEEDS.find((s) => s.word === 'church'), { decision: null, points_at: null, narrowedTo: 'landmarks-you-can-see' });
+  assert.equal(refreshed, false, 'a decided narrowing is not raised again');
+  await mapping.undo({ id: out.decision.id, who: WHO });
+  const { rows: gone } = await query(`select 1 from shelf_rules where scope = 'place' and taught_by = 'narrowing:desk_church'`);
+  assert.equal(gone.length, 0, 'undo takes the narrowing’s place rules away');
+  const { rows: [w2] } = await query(`select points_at from taxonomy_labels where key = 'desk_church'`);
+  assert.equal(w2.points_at, 'desk-museums');
+});
+
+test('an old row rule keeps its and/or meaning until it is re-saved', () => {
+  const p = { cats: ['fun'], subs: ['desk-water'], facts: new Set(), no: new Set(), ages: null };
+  const toohot = { any: [{ yes: true, attribute: 'indoor' }, { subcategory: ['desk-water', 'coast'] }] };
+  assert.equal(collections.matchesPredicate(toohot, p), true, 'water, not indoors: still too hot to think');
+  const grandparents = { all: [{ yes: true, attribute: 'step-free' }, { yes: true, attribute: 'parking' }] };
+  assert.equal(collections.matchesPredicate(grandparents, { ...p, facts: new Set(['step-free']) }), false, 'all means all');
+  assert.equal(collections.matchesPredicate({ all: [{ yes: false, attribute: 'indoor' }] }, { ...p, no: new Set(['indoor']) }), true);
+});
+
+test('a collection save is one change, its undo puts back every field, and a saved collection is live', async () => {
+  await seedTaxonomy();
+  await query(`insert into place_index (venue_ref, subcategory) values ('desk:c2', 'desk-play') on conflict (venue_ref) do update set subcategory = 'desk-play', not_in_epic_at = null`);
+  collections.forget();
+  const made = await collections.saveCollection({ title: 'Desk one', copy: 'a', rule: { subs: ['desk-play'] }, who: WHO });
+  const { rows: [r1] } = await query('select active from browse_rows where key = $1', [made.key]);
+  assert.equal(r1.active, true);
+  await collections.saveCollection({ key: made.key, title: 'Desk two', copy: 'b', rule: { subs: ['desk-play'] }, who: WHO });
+  const { rows } = await query(`select * from bo_changes where subject_id = $1 and area = 'Collections' order by at desc`, [made.key]);
+  assert.match(rows[0].what, /title, copy/);
+  await collections.undoCollection({ change: rows[0], who: WHO });
+  const { rows: [r2] } = await query('select title, copy from browse_rows where key = $1', [made.key]);
+  assert.deepEqual(r2, { title: 'Desk one', copy: 'a' });
+});
+
+test('the old thresholds route gets one threshold back, and the deleted three are gone', async () => {
+  const { setThreshold, thresholds, thresholdValues } = await import('../src/repositories/settings.js');
+  const t = await setThreshold('minRowFill', 5, WHO);
+  assert.equal(t.key, 'minRowFill');
+  assert.equal(t.value, 5);
+  settings.forget();
+  assert.equal(await settings.setting('collectionMinPlaces'), 5, 'one number for each thing');
+  const keys = (await thresholds()).map((x) => x.key);
+  assert.deepEqual(keys, ['sightingFloor', 'distinctHigh', 'minRowFill']);
+  const v = await thresholdValues();
+  assert.equal(v.spreadLimit, 0.35);
+  assert.equal(v.saturationLimit, 1);
+  await setThreshold('minRowFill', 4, WHO);
+});
+
+test('a correction freezes the machine’s answer at the time, for accuracy', async () => {
+  await seedTaxonomy();
+  await query(`insert into place_index (venue_ref, subcategory) values ('desk:acc', 'desk-water') on conflict (venue_ref) do update set subcategory = 'desk-water'`);
+  await query(`insert into place_fact_answers (venue_ref, attribute_key, state, yesno, source) values ('desk:acc', 'toilets', 'yes', true, 'osm')
+               on conflict (venue_ref, attribute_key) do update set state = 'yes', yesno = true, source = 'osm'`);
+  await facts.correct({ ref: 'desk:acc', fact: 'toilets', option: 'no', who: WHO });
+  // The machine later changes its mind; the correction's comparison must not.
+  await query(`update place_fact_answers set state = 'no', yesno = false, source = 'site' where venue_ref = 'desk:acc' and attribute_key = 'toilets'`);
+  const { rows: [fc] } = await query(`select machine_state, machine_source from fact_corrections where venue_ref = 'desk:acc'`);
+  assert.deepEqual(fc, { machine_state: 'yes', machine_source: 'osm' });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2: the fact pipeline
+
+const pipeline = await import('../src/desk/pipeline.js');
+
+test('polarity: asserts, denies, asks — and a wish is not an assertion', () => {
+  assert.equal(pipeline.polarity('Lovely sauna and steam room.', 'sauna'), 'asserts');
+  assert.equal(pipeline.polarity('There is no sauna here.', 'sauna'), 'denies');
+  assert.equal(pipeline.polarity("They don't have a sauna any more.", 'sauna'), 'denies');
+  assert.equal(pipeline.polarity('Does it have a sauna?', 'sauna'), 'asks');
+  assert.equal(pipeline.polarity('I wish they had a sauna.', 'sauna'), 'asks');
+  assert.equal(pipeline.polarity('The sauna was closed for repairs.', 'sauna'), 'denies');
+  assert.equal(pipeline.polarity('Great pool.', 'sauna'), null);
+});
+
+test('spot writes a suggestion with no text, and says what a household may be told in session', async () => {
+  await query(`delete from fact_suggestions where venue_ref = 'desk:spot'`);
+  pipeline.forgetVocabulary();
+  const out = await pipeline.spot({ ref: 'desk:spot', reviews: ['Clean toilets and good parking.', 'The toilets were spotless.'], summary: null });
+  assert.ok(out.suggested.some((s) => s.fact === 'toilets'));
+  const { rows } = await query(`select * from fact_suggestions where venue_ref = 'desk:spot'`);
+  assert.deepEqual(Object.keys(rows[0]).sort(), ['feature', 'first_seen', 'status', 'venue_ref'], 'a place, a feature, a status, a date — nothing else');
+  assert.ok(out.mention.some((m) => m.fact === 'toilets' && /Reviewers mention/.test(m.text)), 'two asserting reviews, none denying');
+  assert.ok(!out.mention.some((m) => m.fact === 'parking'), 'one review is not enough to mention');
+  const denied = await pipeline.spot({ ref: 'desk:spot2', reviews: ['No toilets anywhere.'] });
+  assert.equal(denied.suggested.find((s) => s.fact === 'toilets')?.status, 'conflict', 'any denial marks it a conflict');
+});
+
+test('verify reads our own text, decides by the rules, deletes the suggestion and records the outcome', async () => {
+  await query(`insert into place_facts (venue_ref, field, source, value, licence, retention) values ('desk:v1', 'body', 'site', to_jsonb('We have accessible toilets on every floor.'::text), 'own', 'keep')
+               on conflict (venue_ref, field, source) do update set value = excluded.value`);
+  await query(`insert into fact_suggestions (venue_ref, feature) values ('desk:v1', 'toilets') on conflict do nothing`);
+  const out = await pipeline.verify({ ref: 'desk:v1', fact: 'toilets' });
+  assert.equal(out.state, 'yes');
+  assert.equal(out.source, 'site');
+  const { rows: [a] } = await query(`select state, evidence_quote, recheck_due from place_fact_answers where venue_ref = 'desk:v1' and attribute_key = 'toilets'`);
+  assert.equal(a.state, 'yes');
+  assert.match(a.evidence_quote, /accessible toilets/);
+  const months = Math.round((new Date(a.recheck_due) - Date.now()) / (30 * 86400_000));
+  assert.equal(months, 6, 'toilets is an access fact: re-checked at 6 months');
+  const { rows: s } = await query(`select 1 from fact_suggestions where venue_ref = 'desk:v1'`);
+  assert.equal(s.length, 0);
+  const { rows: [c] } = await query(`select outcome from fact_checks where venue_ref = 'desk:v1' order by at desc limit 1`);
+  assert.equal(c.outcome, 'verified');
+  const none = await pipeline.verify({ ref: 'desk:nothing', fact: 'toilets' });
+  assert.equal(none.state, 'dont_know', 'nothing found is a real answer');
+});
+
+test('families: two agreeing settle a fact, two saying a shown fact is wrong hide it, and a household is asked once', async () => {
+  const { rows: [h1] } = await query(`insert into households (name) values ('Desk one') returning id`);
+  const { rows: [h2] } = await query(`insert into households (name) values ('Desk two') returning id`);
+  await query(`insert into place_fact_answers (venue_ref, attribute_key, state, yesno, source) values ('desk:fam', 'toilets', 'yes', true, 'site')
+               on conflict (venue_ref, attribute_key) do update set state = 'yes', yesno = true, hidden_at = null`);
+  await pipeline.familyAnswer({ householdId: h1.id, ref: 'desk:fam', fact: 'toilets', answer: 'no' });
+  const two = await pipeline.familyAnswer({ householdId: h2.id, ref: 'desk:fam', fact: 'toilets', answer: 'no' });
+  assert.equal(two.settled, 'hidden');
+  const { rows: [a] } = await query(`select hidden_at from place_fact_answers where venue_ref = 'desk:fam' and attribute_key = 'toilets'`);
+  assert.ok(a.hidden_at, 'hidden until re-checked');
+  const { rows: [fa] } = await query(`select machine_state, machine_source from family_answers where household_id = $1 and venue_ref = 'desk:fam'`, [h1.id]);
+  assert.deepEqual(fa, { machine_state: 'yes', machine_source: 'site' }, 'the machine’s answer at the time, for accuracy');
+  await assert.rejects(pipeline.familyAnswer({ householdId: h1.id, ref: 'desk:fam', fact: 'toilets', answer: 'maybe' }));
+  const none = await pipeline.questionFor({ householdId: h1.id, ref: 'desk:fam' });
+  assert.deepEqual(none, [], 'someone who has not been cannot be asked');
+});
+
+test('add makes a fact Active at addPlaces verified places, and never re-adds one a person removed', async () => {
+  await seedTaxonomy();
+  await query(`insert into place_attributes (key, label, kind) values ('desk-wave', 'Desk wave machine', 'yesno') on conflict (key) do nothing`);
+  for (const r of ['desk:w1', 'desk:w2', 'desk:w3', 'desk:w4', 'desk:w5']) {
+    await query(`insert into place_index (venue_ref, subcategory) values ($1, 'desk-water') on conflict (venue_ref) do update set subcategory = 'desk-water', not_in_epic_at = null`, [r]);
+  }
+  for (const r of ['desk:w1', 'desk:w2']) {
+    await query(`insert into place_fact_answers (venue_ref, attribute_key, state, yesno) values ($1, 'desk-wave', 'yes', true) on conflict (venue_ref, attribute_key) do update set state = 'yes'`, [r]);
+  }
+  await query(`delete from subcategory_facts where attribute_key = 'desk-wave'`);
+  await pipeline.add();
+  let { rows: [f] } = await query(`select status, verified_places from subcategory_facts where subcategory_key = 'desk-water' and attribute_key = 'desk-wave'`);
+  assert.deepEqual(f, { status: 'active', verified_places: 2 });
+  await categories.removeFact({ sub: 'desk-water', fact: 'desk-wave', who: WHO });
+  await pipeline.add();
+  ({ rows: [f] } = await query(`select status, reason from subcategory_facts where subcategory_key = 'desk-water' and attribute_key = 'desk-wave'`));
+  assert.deepEqual(f, { status: 'ignored', reason: 'removed_by_a_person' }, 'a removed fact stays removed');
+});
+
+test('the pre-warm puts the top 20 of every category in the ring in line, free, and nothing more', async () => {
+  await query(`delete from ring_rankings where cell = 'DESK1'`);
+  for (let i = 1; i <= 25; i += 1) {
+    await query(`insert into ring_rankings (cell, mode, minutes, category, venue_ref, epic_score, rank) values ('DESK1', 'driving', 30, 'active', $1, 50, $2)`, [`desk:pw-a${i}`, i]);
+  }
+  await query(`insert into ring_rankings (cell, mode, minutes, category, venue_ref, epic_score, rank) values ('DESK1', 'driving', 30, 'food', 'desk:pw-f1', 50, 1)`);
+  const researched = [];
+  const out = await pipeline.prewarm({ cell: 'DESK1', research: (ref) => researched.push(ref) });
+  assert.equal(out.places, 21);
+  assert.equal(researched.length, 21);
+  assert.ok(!researched.includes('desk:pw-a21'), 'rank 21 is not pre-warmed');
+  assert.deepEqual(await pipeline.prewarm({ cell: null }), { places: 0 });
+  await pipeline.drained();
+});
+
+test('the local open map answers a place near a point by name, and says when it does not cover the point', async () => {
+  const osm = await import('../src/sources/osmExtract.js');
+  await query(`delete from osm_features where ref like 'node/9990%'`);
+  await query(`insert into osm_extracts (region, url, load_id, state, features, min_lat, max_lat, min_lng, max_lng)
+               values ('desk-test', 'file:', gen_random_uuid(), 'done', 1, 51.4, 51.6, -0.7, -0.5)
+               on conflict (region) do update set state = 'done', min_lat = 51.4, max_lat = 51.6, min_lng = -0.7, max_lng = -0.5`);
+  osm.forgetCoverage();
+  await query(`insert into osm_features (ref, name, lat, lng, tags, region, load_id) select 'node/99901', 'Desk Test Castle', 51.48, -0.6, '{"tourism":"attraction","name":"Desk Test Castle"}', 'desk-test', load_id from osm_extracts where region = 'desk-test'`);
+  assert.ok(await osm.covers(51.48, -0.6));
+  assert.equal(await osm.covers(55, -3), false);
+  const hits = await osm.nearByName(51.4801, -0.6001, 200, ['desk test castle']);
+  assert.deepEqual(hits.map((h) => `${h.type}/${h.id}`), ['node/99901']);
+  assert.deepEqual(await osm.nearByName(51.4801, -0.6001, 200, ['nowhere at all']), []);
+  await query(`delete from osm_features where ref = 'node/99901'`);
+  await query(`delete from osm_extracts where region = 'desk-test'`);
+  osm.forgetCoverage();
+});
