@@ -321,6 +321,16 @@ function Gate({ route }: { route: Route }) {
     return () => { dropped = true; };
   }, [link, recheck, setQuery]);
 
+  // Signed in but the access check never answered (a 429, or no network):
+  // that is not a "no", so the back office says it is busy and asks again
+  // every five seconds rather than refusing the page (second audit, 28 Sep).
+  const accessUnknown = route.name === 'admin' && !access && (state === 'in' || state === 'unreachable');
+  useEffect(() => {
+    if (!accessUnknown) return;
+    const t = setInterval(() => recheck(), 5000);
+    return () => clearInterval(t);
+  }, [accessUnknown, recheck]);
+
   if (redeeming || state === 'checking') return <View style={styles.waiting} />;
   if (state === 'out' || state === 'unconfigured') {
     return <LockScreen onIn={recheck} configured={state !== 'unconfigured'} notice={linkFailed} />;
@@ -335,6 +345,7 @@ function Gate({ route }: { route: Route }) {
   // (api/src/access.js).
   const mayAdminister = Boolean(access?.doors?.includes('admin'));
   if (route.name === 'admin') {
+    if (accessUnknown) return <NotHere title="The back office is busy — try again in a moment" body="Trying again by itself every few seconds." href={paths.inspire()} />;
     if (!mayAdminister) return <NotHere title="That is not a page you can open" body="The back office needs an account with the admin door." href={paths.inspire()} />;
     return <AdminApp access={access} screen={route.screen} onScreen={(s) => navigate(s === 'filing' ? paths.filing('categories') : paths.admin(s))} onLeave={() => navigate(paths.inspire())} />;
   }

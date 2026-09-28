@@ -182,7 +182,8 @@ test('a machine proposal names how many places it came from, never "its places"'
   await query(`insert into place_fact_answers (venue_ref, attribute_key, state, yesno, source) values ('fxb:5', 'parking', 'yes', true, 'osm')`);
   const d = (await categories.subcategoryPage('fxb-lidos')).defaults;
   assert.equal(d.find((x) => x.fact === 'parking').basis, 'Proposed from 1 place · private until accepted');
-  assert.equal(d.find((x) => x.fact === 'duration').basis, 'The places disagree, so each answers for itself');
+  // Unset with no confirmed place: nothing to disagree (second audit, 28 Sep 2026).
+  assert.equal(d.find((x) => x.fact === 'duration').basis, 'No confirmed places yet');
 });
 
 test('the bulk bar\'s Set is one change, and one Undo puts every subcategory back', async () => {

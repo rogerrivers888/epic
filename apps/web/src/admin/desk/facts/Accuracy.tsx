@@ -87,7 +87,16 @@ function Main() {
     return key && (dir === 'asc' || dir === 'desc') ? { key, dir } : { key: 'acc', dir: 'asc' };
   })();
   const setSort = (x: SortState) => setSortRaw(x && !(x.key === 'acc' && x.dir === 'asc') ? `${x.key}.${x.dir}` : '', { replace: true });
-  const [openCats, setOpenCats] = useState<string[]>([]);
+  // Expanded category rows are part of the address (`?open=a,b`), as a filter is.
+  const [openRaw, setOpenRaw] = useDeskParam('open');
+  const openCats = openRaw ? openRaw.split(',').filter(Boolean) : [];
+  const setOpenCats = (next: string[]) => setOpenRaw(next.join(','), { replace: true });
+  // The room the page gives the table, and the toolbar's own two halves at
+  // their natural widths: the first column is widened until the toolbar sits
+  // on one line, and narrowed until the table ends at the rule (audit, 28 Sep).
+  const [roomW, setRoomW] = useState(0);
+  const [leftW, setLeftW] = useState(0);
+  const [rightW, setRightW] = useState(0);
   const load = useDesk<AccResp>('/accuracy', { view, source: src || null, chart: daily ? 'daily' : null });
   useCrumbs([{ name: 'Facts', go: () => go('facts') }, { name: 'Accuracy' }], []);
   const a = load.data;
@@ -112,9 +121,16 @@ function Main() {
   // 28 Sep 2026). The formula's 96px of slack is what an indented
   // subcategory name at 13px sits in, on one line.
   const names = a?.names;
-  const nameW = names
+  const REST = 5 * 150 + 5 * 24 + 16;
+  // "N answers compared" appears beside the sources once one is picked; its
+  // room is kept from the start so picking a source never moves the table.
+  const NOTE_W = 170;
+  const wanted = names
     ? Math.max(nameWidth(names.facts), nameWidth(names.categories) + 18)
     : nameWidth(table.map((r) => r.label));
+  const toolbarMin = leftW && rightW ? leftW + 14 + NOTE_W + 24 + rightW : 0;
+  const fitted = Math.max(wanted, toolbarMin - REST);
+  const nameW = !narrow && roomW ? Math.max(120, Math.min(fitted, roomW - REST)) : fitted;
   const cols: TCol[] = [
     { key: 'name', name: view === 'category' ? 'Category' : 'Fact', width: nameW, first: 'asc' },
     { key: 'subs', name: 'Subcategories', width: 150, first: 'desc' },
@@ -175,8 +191,10 @@ function Main() {
             </View>
           </View>
 
+          <View onLayout={(e) => setRoomW(Math.floor(e.nativeEvent.layout.width))} style={{ alignSelf: 'stretch', height: 0 }} />
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 24, flexWrap: 'wrap', marginTop: 12, width, maxWidth: '100%' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, flexWrap: 'wrap', flexShrink: 1, maxWidth: '100%' }}>
+              <View onLayout={(e) => { if (!narrow) setLeftW(Math.ceil(e.nativeEvent.layout.width)); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, flexShrink: narrow ? 1 : 0, maxWidth: '100%' }}>
               <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: desk.inkDim }}>Source</Text>
               {/* Each segment carries its own 1px rule, pulled back over its
                   neighbour's, so a row that wraps on a phone closes as a clean
@@ -200,16 +218,17 @@ function Main() {
                   );
                 })}
               </View>
+              </View>
               {src && a.sourceCompared != null ? (
                 <Text style={[{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }, tabular]}>{`${n(a.sourceCompared)} answers compared`}</Text>
               ) : null}
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+            <View onLayout={(e) => setRightW(Math.ceil(e.nativeEvent.layout.width))} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 0 }}>
               <Text style={[{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: desk.inkDim }, NOWRAP]}>View by</Text>
               <SmallSeg
                 options={[{ key: 'fact', name: 'Fact' }, { key: 'category', name: 'Category' }]}
                 value={view}
-                onChange={(v) => { setBy(v === 'category' ? 'category' : '', { replace: true }); setOpenCats([]); }}
+                onChange={(v) => setBy(v === 'category' ? 'category' : '', { replace: true })}
               />
             </View>
           </View>
@@ -229,7 +248,7 @@ function Main() {
                 const open = openCats.includes(r.key);
                 return (
                   <View key={r.key}>
-                    <TRow gap={24} onPress={() => setOpenCats((o) => (open ? o.filter((x) => x !== r.key) : [...o, r.key]))}>
+                    <TRow gap={24} onPress={() => setOpenCats(open ? openCats.filter((x) => x !== r.key) : [...openCats, r.key])}>
                       <AccCells r={r} nameW={nameW} subs={subs.length} caret={open ? 'open' : 'shut'} />
                     </TRow>
                     {open ? subs.map((s) => (
@@ -261,7 +280,7 @@ function AccCells({ r, nameW, subs, caret }: { r: Row; nameW: number; subs: numb
       <TCell width={nameW}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           {caret ? <View style={{ width: 10 }}><Icon name={caret === 'open' ? 'expand' : 'more'} size={11} color={desk.inkDim} /></View> : null}
-          <T weight="700">{r.label}</T>
+          <View style={{ flexShrink: 1, minWidth: 0 }}><T weight="700">{r.label}</T></View>
         </View>
       </TCell>
       <TCell width={150}><T tone={desk.inkMuted} num>{n(subs)}</T></TCell>
@@ -286,7 +305,9 @@ function Health({ kind, rowKey }: { kind: Kind; rowKey: string }) {
   const go = useDeskGo();
   const narrow = useViewport().width < 900;
   const [src, setSrc] = useDeskParam('src');
-  const [q, setQ] = useState('');
+  // The search is part of the address (`?q=`), as every filter is.
+  const [q, setQRaw] = useDeskParam('q');
+  const setQ = (v: string) => setQRaw(v, { replace: true });
   const path = `/accuracy/${kind}/${encodeURIComponent(rowKey)}`;
   const load = useDesk<HealthResp>(path);
   const dis = useDesk<DisResp>(src ? `${path}/disagreements` : null, { source: src || null });

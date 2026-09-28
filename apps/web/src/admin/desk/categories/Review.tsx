@@ -42,7 +42,7 @@ export function Review({ sub, fact }: { sub: string; fact: string }) {
         <Text style={[{ fontFamily: fonts.body, fontSize: 15, fontWeight: '800', color: d.disagree ? AMBER : desk.ink }, tabular]}>
           {d.confirmed ? `${n(d.disagree)} of ${n(d.confirmed)} confirmed places say otherwise` : 'No confirmed places yet'}
         </Text>
-        <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>{d.categoryLabel} › {d.subLabel} · the default, and what each confirmed place says</Text>
+        <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>{d.categoryLabel} › {d.subLabel}</Text>
       </View>
       <Table width={tableWidth(COLS)}>
         <THead cols={COLS} />

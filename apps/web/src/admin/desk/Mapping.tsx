@@ -361,7 +361,7 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
           lit={filters.length > 0}
           onPress={() => { setFilterQ(''); setMenu(menu === 'filter' ? null : 'filter'); }}
         />
-        <ToolButton icon="sort" label={`Sorted by ${sortSpec.label} ${sort?.dir === 'asc' ? '↑' : '↓'}`} onPress={() => setMenu(menu === 'sort' ? null : 'sort')} />
+        <ToolButton icon="sort" label={`Sorted by ${sortSpec.label}`} arrow={sort?.dir === 'asc' ? 'ascending' : 'descending'} onPress={() => setMenu(menu === 'sort' ? null : 'sort')} />
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 9, flex: 1, minWidth: 0, paddingTop: 2 }}>
           {filters.map((f) => (
             <Press key={f.key} effect="none" onPress={() => setFilterKeys(filterKeys.filter((x) => x !== f.key))} accessibilityLabel={`Remove ${f.name}`}>
@@ -486,13 +486,15 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
 // ---------------------------------------------------------------------------
 // The toolbar's Filter and Sort buttons
 
-function ToolButton({ icon, label, lit, onPress }: { icon: 'filters' | 'sort'; label: string; lit?: boolean; onPress: () => void }) {
+function ToolButton({ icon, label, lit, arrow, onPress }: { icon: 'filters' | 'sort'; label: string; lit?: boolean; arrow?: 'ascending' | 'descending'; onPress: () => void }) {
   const fg = lit ? LIME : desk.inkMuted;
   return (
     <Press effect="none" onPress={onPress}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1.5, borderColor: lit ? LIME : desk.ruleStrong, paddingVertical: 9, paddingHorizontal: 14 }}>
         <Icon name={icon} size={14} color={fg} />
         <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: fg }}>{label}</Text>
+        {/* Which way it runs: an icon, never a ↑ / ↓ character (audit 2). */}
+        {arrow ? <View style={{ marginLeft: -6 }}><Icon name={arrow} size={13} color={fg} /></View> : null}
         <Icon name="expand" size={13} color={fg} />
       </View>
     </Press>

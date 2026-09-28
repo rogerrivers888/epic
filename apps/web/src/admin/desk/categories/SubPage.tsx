@@ -5,9 +5,10 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Text, View } from 'react-native';
+import { Platform, Text, View, type ViewStyle } from 'react-native';
 
 import { Press } from '../../../components/press';
+import { useViewport } from '../../../hooks/useViewport';
 import { useCrumbs, useDeskGo, useDeskParam } from '../Desk';
 import { AMBER, LIME, Muted, Table, deskApi, desk, fonts, ago, n, saidOf, tabular, useToast } from '../kit';
 import { Count, FACT_ORDER, Failed, HowTip, OptPill, PillBar, factName, undoChanges, type Change, type Option } from './shared';
@@ -34,6 +35,9 @@ export type SubPageData = {
   copyFrom?: { key: string; label: string; n: number }[];
 };
 
+/** Held at the left edge of a table that scrolls sideways, so it stays in the frame (web). */
+const STICK_LEFT = (Platform.OS === 'web' ? { position: 'sticky', left: 0 } : {}) as unknown as ViewStyle;
+
 type Pill = 'all' | 'active' | 'gathering' | 'ignored';
 const PILLS: { key: Pill; name: string }[] = [
   { key: 'all', name: 'All' }, { key: 'active', name: 'Active' }, { key: 'gathering', name: 'Gathering evidence' }, { key: 'ignored', name: 'Ignored' },
@@ -57,6 +61,8 @@ export function SubPage({ sub, canManage }: { sub: string; canManage: boolean })
   const [tick, setTick] = useState(0);
   const [editing, setEditing] = useState<string | null>(null);
   const [copying, setCopying] = useState(false);
+  const vw = useViewport().width;
+  const phone = vw < 900; // where the Defaults table scrolls sideways (kit `Table`)
   const reload = useCallback(() => setTick((t) => t + 1), []);
 
   useEffect(() => {
@@ -194,25 +200,28 @@ export function SubPage({ sub, canManage }: { sub: string; canManage: boolean })
             // the six age bands and All ages lie in a row or two rather than a
             // stack in the Default column (decision, fix pass 28 Sep).
             const spanW = dW[1] + dW[2] + dW[3] + DG * 2;
+            // On a phone the values open under the row, held at the frame's
+            // left edge, never across columns scrolled out of view (audit, 28 Sep).
+            const inRow = isEditing && !phone;
+            const pills = d.options.map((o) => <OptPill key={o.key} label={o.label} on={o.key === current} onPress={() => setDefault(d, o)} />);
             return (
-              <View key={d.fact} style={{ flexDirection: 'row', gap: DG, alignItems: 'center', paddingVertical: 10, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: desk.rule }}>
+              <View key={d.fact} style={{ borderBottomWidth: 1, borderBottomColor: desk.rule }}>
+              <View style={{ flexDirection: 'row', gap: DG, alignItems: 'center', paddingVertical: 10, paddingHorizontal: 8 }}>
                 <Text style={{ width: dW[0], fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: desk.ink }}>{factName(d.fact, d.label)}</Text>
-                {isEditing ? (
-                  <View style={{ width: spanW, flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                    {d.options.map((o) => <OptPill key={o.key} label={o.label} on={o.key === current} onPress={() => setDefault(d, o)} />)}
-                  </View>
+                {inRow ? (
+                  <View style={{ width: spanW, flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>{pills}</View>
                 ) : null}
-                {!isEditing ? (
+                {!inRow ? (
                   <Text style={{ width: dW[1], fontFamily: fonts.body, fontSize: 13.5, fontWeight: '700', color: d.value == null ? desk.inkDim : person ? desk.ink : desk.inkMuted }}>{d.value ?? 'Not set'}</Text>
                 ) : null}
-                {!isEditing ? (
+                {!inRow ? (
                   <Text style={{ width: dW[2], fontFamily: fonts.body, fontSize: 12.5, color: person ? desk.ink : desk.inkDim }}>
                     {person ? `${d.setBy ?? 'A person'} · ${ago(d.setAt)}` : machine ? 'Machine · proposed' : '—'}
                   </Text>
                 ) : null}
-                {!isEditing ? (
+                {!inRow ? (
                   <View style={{ width: dW[3], flexDirection: 'row', flexWrap: 'wrap', columnGap: 10 }}>
-                    <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>{d.basis ?? 'The places disagree, so each answers for itself'}</Text>
+                    <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>{d.basis ?? '—'}</Text>
                     {d.contradicted && d.contradiction ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                         <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: AMBER }}>{d.contradiction} ·</Text>
@@ -238,6 +247,10 @@ export function SubPage({ sub, canManage }: { sub: string; canManage: boolean })
                   ) : null}
                 </View>
               </View>
+              {isEditing && phone ? (
+                <View style={[{ width: Math.max(200, Math.min(defaultsW, vw - 48)), flexDirection: 'row', flexWrap: 'wrap', gap: 4, paddingHorizontal: 8, paddingBottom: 12 }, STICK_LEFT]}>{pills}</View>
+              ) : null}
+              </View>
             );
           })}
         </Table>
@@ -246,7 +259,7 @@ export function SubPage({ sub, canManage }: { sub: string; canManage: boolean })
       {copying ? (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           {(data.copyFrom ?? []).length === 0 ? (
-            <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>No other subcategory has an Active fact to copy yet.</Text>
+            <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>Nothing to copy.</Text>
           ) : null}
           {(data.copyFrom ?? []).map((o) => (
             <Press key={o.key} effect="none" onPress={() => copyFrom(o)}>

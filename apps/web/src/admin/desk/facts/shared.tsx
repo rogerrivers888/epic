@@ -32,7 +32,15 @@ export const MACHINE_SOURCES = ['site', 'osm', 'wikipedia', 'wikidata'] as const
 
 export type Load<T> = { data: T | null; error: string | null; loading: boolean; reload: () => void };
 
-/** One desk read, fetched again whenever its path or params change. */
+/**
+ * One desk read, fetched again whenever its path or params change.
+ *
+ * A failed read never leaves the last answer on screen as if it were current
+ * (audit, 28 Sep 2026): a new address clears to Loading, a failure clears the
+ * data and says so, and `reload` (the error line's Try again, or a write) asks
+ * again. A reload of the same address keeps what is drawn until the answer
+ * comes, so a write does not blank the table under the person's hand.
+ */
 export function useDesk<T>(path: string | null, params: Record<string, string | number | null | undefined> = {}): Load<T> {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,17 +48,22 @@ export function useDesk<T>(path: string | null, params: Record<string, string | 
   const [tick, setTick] = useState(0);
   const key = path ? `${path}?${JSON.stringify(params)}` : null;
   const seq = useRef(0);
+  const shown = useRef<string | null>(null);
   useEffect(() => {
-    if (!path) return;
     const mine = ++seq.current;
+    if (shown.current !== key) { shown.current = key; setData(null); }
+    setError(null);
+    if (!path) { setLoading(false); return; }
     setLoading(true);
     deskApi.get<T>(path, params)
-      .then((d) => { if (mine === seq.current) { setData(d); setError(null); } })
-      .catch((e) => { if (mine === seq.current) setError(saidOf(e)); })
+      .then((d) => { if (mine === seq.current) setData(d); })
+      .catch((e) => { if (mine === seq.current) { setData(null); setError(saidOf(e)); } })
       .finally(() => { if (mine === seq.current) setLoading(false); });
   }, [key, tick]); // eslint-disable-line react-hooks/exhaustive-deps
   const reload = useCallback(() => setTick((t) => t + 1), []);
-  return { data, error, loading, reload };
+  // The screen draws from this render's address only: data fetched for the
+  // previous one is never handed out while the effect catches up.
+  return { data: shown.current === key ? data : null, error: shown.current === key ? error : null, loading: shown.current !== key || loading, reload };
 }
 
 /** Text typed into a search box, handed on once the typing stops. */
@@ -82,7 +95,16 @@ export function useWrite(reload: () => void) {
 
 /** The one line a screen draws while it loads or when its read failed. */
 export function LoadLine({ load, what }: { load: Load<unknown>; what: string }) {
-  if (load.error) return <Text style={{ fontFamily: fonts.body, fontSize: 13.5, color: RED }}>{`${what} did not load. ${load.error}`}</Text>;
+  if (load.error) {
+    return (
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
+        <Text style={{ fontFamily: fonts.body, fontSize: 13.5, color: RED }}>{`${what} did not load. ${load.error}`}</Text>
+        <Press effect="none" onPress={load.reload}>
+          <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: desk.inkMuted, borderBottomWidth: 1.5, borderBottomColor: desk.ruleStrong }}>Try again</Text>
+        </Press>
+      </View>
+    );
+  }
   return <Text style={{ fontFamily: fonts.body, fontSize: 13.5, color: desk.inkDim }}>Loading…</Text>;
 }
 

@@ -9,7 +9,8 @@
  *      speak (Accuracy still building, no source asked anything this week) is
  *      drawn in the quiet rule colour, never green.
  *   3. COLLECTIONS — Most engaged · Shown but never opened · Reach nobody, "—"
- *      until there are real households.
+ *      until there are real households, "None yet" where it can speak and a
+ *      list is empty.
  *   4. GROWTH — Places known · Facts verified this week · Households, each with
  *      a small trend line.
  *   5. "Recent runs and spend →" to Runs.
@@ -180,13 +181,15 @@ export function Overview(_props: { canManage?: boolean }) {
           {colls.map((x) => (
             <View key={x.name} style={{ flexGrow: 1, backgroundColor: desk.ground, paddingVertical: 16, paddingHorizontal: 18, gap: 8, minHeight: 120 }}>
               <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: '800', color: desk.ink }}>{x.name}</Text>
-              {x.items == null || x.items.length === 0 ? (
+              {x.items == null ? (
                 <>
                   <Text style={{ fontFamily: fonts.heading, fontSize: 22, fontWeight: '800', color: desk.inkDim }}>—</Text>
-                  {x.items == null ? (
-                    <Text style={{ fontFamily: fonts.body, fontSize: 12, color: desk.inkDim }}>Appears once there are real households</Text>
-                  ) : null}
+                  <Text style={{ fontFamily: fonts.body, fontSize: 12, color: desk.inkDim }}>Appears once there are real households</Text>
                 </>
+              ) : x.items.length === 0 ? (
+                // It can speak and the list is empty: that is an answer, said
+                // in words — not the dash of a list that cannot speak (CH.11).
+                <Text style={{ fontFamily: fonts.body, fontSize: 13, color: desk.inkDim }}>None yet</Text>
               ) : x.items.map((i) => (
                 <Press key={i.key} effect="none" onPress={() => go('collections', { collection: i.key })} accessibilityRole="link" style={{ alignSelf: 'flex-start' }}>
                   <Text style={{ fontFamily: fonts.body, fontSize: 13, color: desk.inkMuted, borderBottomWidth: 1, borderBottomColor: desk.ruleStrong }}>{i.title}</Text>

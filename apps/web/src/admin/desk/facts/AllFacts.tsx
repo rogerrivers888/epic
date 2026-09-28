@@ -145,8 +145,9 @@ export function AllFacts() {
         <Table width={tableWidth(cols)}>
           <THead cols={cols} sort={sort} onSort={setSort} />
           {rows.length === 0 ? <Muted>No facts match.</Muted> : rows.map((r) => (
-            <TRow key={r.fact} onPress={() => go('facts', { fact: r.fact })}>
-              <TCell width={factW}><T weight="700">{r.label}</T></TCell>
+            <TRow key={r.fact} vpad={11} onPress={() => go('facts', { fact: r.fact })}>
+              {/* The prototype's row sits on a 15px line (23.25px) inside 11px by 8px: 46px a row. */}
+              <TCell width={factW} style={{ minHeight: 23.25, justifyContent: 'center' }}><T weight="700">{r.label}</T></TCell>
               <TCell width={200}>
                 {/* An Ignored fact names its subcategories; cut to one line, the whole list is its hover title. */}
                 <HoverTitle title={r.subcategories}><T tone={desk.inkMuted} num lines={1}>{r.subcategories}</T></HoverTitle>
@@ -321,6 +322,8 @@ export function FactPlaces({ fact, canManage }: { fact: string; canManage: boole
   );
 }
 
+const HOW_MIN = 140;
+const EDIT_W = 150;
 const OUTCOME_TONE: Record<string, string> = { verified: LIME, conflict: RED, no: desk.ink };
 
 /**
@@ -353,12 +356,26 @@ export function PlacesDrill({ fact, sub, canManage, crumbs }: {
   useCrumbs(crumbs(d), [d?.label, d?.subLabel, d?.standard, fact, sub]);
 
   const multi = d ? d.kind !== 'yesno' : false;
+  // The left column's own width: the table fills it, "How we know" takes what
+  // is left (never under 140, prototype template 272-279), and where even
+  // that does not fit — a range's Answer column at 1440 beside VERIFICATION —
+  // Place gives up the difference rather than the table running under the
+  // column beside it (audit, 28 Sep 2026).
+  const [leftW, setLeftW] = useState(0);
   const cols = useMemo(() => {
-    const c: TCol[] = [{ key: 'place', name: 'Place', width: 230 }];
+    const fixed = (multi ? 110 : 0) + 160 + HOW_MIN + EDIT_W + 16 * (multi ? 4 : 3);
+    const placeW = leftW && !narrow ? Math.max(150, Math.min(230, leftW - fixed)) : 230;
+    const c: TCol[] = [{ key: 'place', name: 'Place', width: placeW }];
     if (multi) c.push({ key: 'answer', name: 'Answer', width: 110 });
-    c.push({ key: 'area', name: 'Area', width: 160 }, { key: 'how', name: 'How we know', width: 200 }, { key: 'edit', name: '', width: 150 });
+    c.push({ key: 'area', name: 'Area', width: 160 }, { key: 'how', name: 'How we know', width: HOW_MIN, grow: true }, { key: 'edit', name: '', width: EDIT_W });
     return c;
-  }, [multi]);
+  }, [multi, leftW, narrow]);
+  const placeW = cols[0].width;
+  // An open Edit sizes to its pills, but never past the column: what the other
+  // cells leave at their least (a range's five bands wrap between pills there).
+  const editMax = leftW && !narrow
+    ? Math.max(EDIT_W, leftW - (placeW + (multi ? 110 : 0) + 160 + HOW_MIN + 16 * (multi ? 4 : 3)))
+    : 340;
 
   if (!d) return <LoadLine load={load} what="These places" />;
   const found = `${multi ? 'Answered at' : 'Found at'} ${plural(d.foundAt, 'place')}`;
@@ -389,18 +406,19 @@ export function PlacesDrill({ fact, sub, canManage, crumbs }: {
         {drop('pc', 'All postcodes', d.postcodes, postcode, setPostcode)}
       </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 36, alignItems: 'flex-start' }}>
-        <View style={{ flexGrow: 1, flexShrink: 1, flexBasis: narrow ? '100%' : 640, minWidth: 0 }}>
-          <Table width={tableWidth(cols, 16, 0)}>
+        <View onLayout={(e) => setLeftW(Math.floor(e.nativeEvent.layout.width))} style={{ flexGrow: 1, flexShrink: 1, flexBasis: narrow ? '100%' : 640, minWidth: 0 }}>
+          <Table width={tableWidth(cols, 16, 0)} fill>
             <THead cols={cols} gap={16} pad={0} />
             {d.rows.length === 0 ? <Muted size={13}>No places match.</Muted> : d.rows.map((p) => {
               const open = editing === p.ref;
               return (
                 <TRow key={p.ref} gap={16} pad={0}>
-                  <TCell width={230}><T weight="700">{p.name ?? p.ref}</T></TCell>
+                  <TCell width={placeW}><T weight="700">{p.name ?? 'A place we cannot name'}</T></TCell>
                   {multi ? <TCell width={110}><T size={13} weight="700">{p.answer ?? '—'}</T></TCell> : null}
                   <TCell width={160}><T size={13} tone={desk.inkMuted}>{p.area ?? '—'}</T></TCell>
-                  <TCell width={200}><T size={12.5} tone={desk.inkMuted}>{p.how ?? '—'}</T></TCell>
-                  <TCell width={150} style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>
+                  <TCell width={HOW_MIN} grow><T size={12.5} tone={desk.inkMuted}>{p.how ?? '—'}</T></TCell>
+                  {/* Sized to its pills when open, so "Don't know" stays on one line (audit, 28 Sep 2026). */}
+                  <View style={{ minWidth: EDIT_W, maxWidth: editMax, flexShrink: 0, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>
                     {!canManage ? null : open ? d.options.map((o) => (
                       <OptPill
                         key={o.key}
@@ -419,7 +437,7 @@ export function PlacesDrill({ fact, sub, canManage, crumbs }: {
                         <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>Edit</Text>
                       </Press>
                     )}
-                  </TCell>
+                  </View>
                 </TRow>
               );
             })}

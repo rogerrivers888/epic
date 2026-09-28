@@ -292,7 +292,10 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
     <Explains>
     <View style={[styles.root, !desktop && styles.rootPhone]}>
       {desktop ? (
-        <View style={styles.rail}>
+        // The rail scrolls in its own box: taller than a 900px window, it made
+        // the window scroll as well as the desk — two scrollers and a blank
+        // band under the page (second audit CH.10).
+        <ScrollView style={styles.railBox} contentContainerStyle={styles.rail}>
           <View style={styles.brand}>
             <Wordmark height={30} ground={colors.bg} />
             <Explain tip="railBackOffice" cursor="help"><Text style={styles.badge}>Back office</Text></Explain>
@@ -334,7 +337,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
             </Press>
             <Lights />
           </View>
-        </View>
+        </ScrollView>
       ) : (
         <View style={styles.phoneHead}>
           <View style={styles.phoneHeadTop}>
@@ -373,17 +376,16 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, flexDirection: 'row', backgroundColor: colors.bg },
+  // Held to the window: the rail and the page each scroll in their own box.
+  root: { flex: 1, flexDirection: 'row', backgroundColor: colors.bg, minHeight: 0 },
   content: { flex: 1 },
 
   // 196px and a hairline edge — the handoff's own measurements ("Category
   // screens v2", 14 Sep 2026). The rail stands on the same ground as the page:
   // a second surface colour behind it would be the panel the handoff forbids,
   // and the one rule is enough to say where the page starts.
-  rail: {
-    width: 196, borderRightWidth: 1, borderRightColor: colors.lineSoft,
-    paddingVertical: 20, paddingHorizontal: spacing.sm, gap: 1,
-  },
+  railBox: { width: 196, flexGrow: 0, flexShrink: 0, borderRightWidth: 1, borderRightColor: colors.lineSoft },
+  rail: { flexGrow: 1, paddingVertical: 20, paddingHorizontal: spacing.sm, gap: 1 },
   brand: { gap: 3, marginBottom: 20, paddingHorizontal: spacing.xs },
   badge: {
     ...type.tiny, fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1.3, fontWeight: '700',

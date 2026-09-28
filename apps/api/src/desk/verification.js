@@ -25,6 +25,9 @@ export async function status() {
   // Stalled only when there is something to check and nothing has been: an
   // empty backlog with no recent checks is quiet, not broken.
   if (backlog > 0 && age > STALL_MS) return { state: 'stalled', lastAt: last.at, backlog, hours: Math.floor(age / 3600_000) };
+  // Nothing waiting and nothing checked for longer than the stall window: not
+  // broken, but not "Running" either — idle, drawn grey (audit CH.3, 28 Sep).
+  if (backlog === 0 && age > STALL_MS) return { state: 'idle', lastAt: last.at, backlog };
   return { state: 'running', lastAt: last.at, backlog };
 }
 
@@ -179,8 +182,12 @@ export async function sources(cfg) {
     if (s.source === 'families') {
       s.status = s.checked > 0 ? 'Healthy' : '—';
       if (!s.checked && anyActive) s.note = 'no family answers this week';
-    } else if (anyActive && s.checked === 0) s.status = 'Failing';
-    else if (s.failingPct == null) s.status = s.checked > 0 ? 'Healthy' : '—';
+    } else if (anyActive && s.checked === 0) {
+      // Failing because it checked nothing while the others did — not because
+      // a fetch failed, so "nothing can fail" would contradict the red word.
+      s.status = 'Failing';
+      if (s.failingPct == null) s.failingWhy = 'Checked nothing this week while others did';
+    } else if (s.failingPct == null) s.status = s.checked > 0 ? 'Healthy' : '—';
     else if (s.failingPct >= cfg.sourceFailing) s.status = 'Failing';
     else if (s.failingPct >= cfg.sourceSlow) s.status = 'Slow';
     else s.status = 'Healthy';

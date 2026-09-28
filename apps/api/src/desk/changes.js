@@ -48,7 +48,9 @@ export async function changes({ area = null, who = null, q = null, limit = 200, 
   if (area) { args.push(area); where.push(`area = $${args.length}`); }
   if (who) { args.push(who); where.push(`who = $${args.length}`); }
   if (q) {
-    args.push(`%${String(q).trim()}%`);
+    // A typed % or _ is a letter, not a wildcard (second audit CH.5); the
+    // backslash is ilike's default escape, so it is escaped first.
+    args.push(`%${String(q).trim().replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
     where.push(`(what ilike $${args.length} or before ilike $${args.length} or after ilike $${args.length} or why ilike $${args.length}
                  or who ilike $${args.length} or area ilike $${args.length})`);
   }

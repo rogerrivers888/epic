@@ -15,6 +15,7 @@
 import React, { useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 
+import { useViewport } from '../../hooks/useViewport';
 import { useDeskParam } from './Desk';
 import {
   Dropdown, LH, Muted, SearchBox, T, TCell, THead, TRow, Table, ago, deskApi, desk, fonts, LIME, saidOf, tabular, tableWidth,
@@ -63,6 +64,10 @@ export function Changes(_props: { canManage?: boolean }) {
     return () => { live = false; };
   }, [area, who, q]);
 
+  // A phone stacks each change as two lines — when · who · area, then what
+  // changed and before → after — rather than a table whose last two columns
+  // sit off the edge of a 390 frame (second audit CH.8).
+  const narrow = useViewport().width < 900;
   const areas = data?.areas ?? [];
   const people = data?.people ?? [];
 
@@ -94,44 +99,67 @@ export function Changes(_props: { canManage?: boolean }) {
           label={who || 'Everyone'}
           value={who || ''}
           width={180}
-          listWidth={240}
           options={[{ key: '', name: 'Everyone' }, ...people.map((p) => ({ key: p, name: p }))]}
           onChange={(v) => setWho(v, { replace: true })}
         />
       </View>
 
-      {error ? <Muted>{error}</Muted> : !data ? <Muted>Loading…</Muted> : (
+      {error ? <Muted>{error}</Muted> : !data ? <Muted>Loading…</Muted> : narrow ? (
+        <View style={{ borderTopWidth: 2, borderTopColor: desk.ruleStrong }}>
+          {data.rows.length === 0 ? <Muted>No changes match.</Muted> : null}
+          {data.rows.map((c) => (
+            <View key={c.id} style={{ gap: 4, paddingVertical: 11, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: desk.rule }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', columnGap: 12, rowGap: 2 }}>
+                <T size={12.5} tone={desk.inkDim}>{ago(c.at)}</T>
+                <T size={13} weight="700">{c.who}</T>
+                <T size={13} tone={desk.inkMuted}>{c.area}</T>
+              </View>
+              <T size={13}>{c.what}</T>
+              <BeforeAfter c={c} />
+            </View>
+          ))}
+          {data.total > data.rows.length ? <Muted size={12.5}>{more(data)}</Muted> : null}
+        </View>
+      ) : (
         <Table width={WIDTH} fill>
           <THead cols={COLS} />
           {data.rows.length === 0 ? <Muted>No changes match.</Muted> : null}
           {data.rows.map((c) => (
-            <TRow key={c.id} align="flex-start" vpad={11}>
+            <TRow key={c.id} align="baseline" vpad={11}>
               <TCell width={COLS[0].width}><T size={12.5} tone={desk.inkDim}>{ago(c.at)}</T></TCell>
               <TCell width={COLS[1].width}><T size={13} weight="700">{c.who}</T></TCell>
               <TCell width={COLS[2].width}><T size={13} tone={desk.inkMuted}>{c.area}</T></TCell>
               <TCell width={COLS[3].width} grow><T size={13}>{c.what}</T></TCell>
-              <TCell width={COLS[4].width}>
-                <Text style={{ fontFamily: fonts.body, fontSize: 12.5, lineHeight: LH(12.5), color: desk.inkMuted }}>
-                  <Text style={{ color: desk.inkDim }}>{c.before ?? '—'}</Text>
-                  {' → '}
-                  <Text style={{ fontWeight: '700', color: LIME }}>{c.after ?? '—'}</Text>
-                </Text>
-                {c.why ? (
-                  <Text style={{ fontFamily: fonts.body, fontSize: 12, lineHeight: LH(12), color: desk.inkDim, marginTop: 2 }}>{c.why}</Text>
-                ) : null}
-                {c.undone_at ? (
-                  <Text style={{ fontFamily: fonts.body, fontSize: 12, lineHeight: LH(12), color: desk.inkDim, marginTop: 2 }}>
-                    {`Undone ${ago(c.undone_at)}${c.undone_by ? ` by ${c.undone_by}` : ''}`}
-                  </Text>
-                ) : null}
-              </TCell>
+              <TCell width={COLS[4].width}><BeforeAfter c={c} /></TCell>
             </TRow>
           ))}
-          {data.total > data.rows.length ? (
-            <Muted size={12.5}>{`The newest ${data.rows.length.toLocaleString('en-GB')} of ${data.total.toLocaleString('en-GB')} — narrow the search to see older ones.`}</Muted>
-          ) : null}
+          {data.total > data.rows.length ? <Muted size={12.5}>{more(data)}</Muted> : null}
         </Table>
       )}
+    </View>
+  );
+}
+
+const more = (d: ChangesData) =>
+  `The newest ${d.rows.length.toLocaleString('en-GB')} of ${d.total.toLocaleString('en-GB')} — narrow the search to see older ones.`;
+
+/** Before → After, then the Why and whether it was undone, under it. */
+function BeforeAfter({ c }: { c: Change }) {
+  return (
+    <View>
+      <Text style={{ fontFamily: fonts.body, fontSize: 12.5, lineHeight: LH(12.5), color: desk.inkMuted }}>
+        <Text style={{ color: desk.inkDim }}>{c.before ?? '—'}</Text>
+        {' → '}
+        <Text style={{ fontWeight: '700', color: LIME }}>{c.after ?? '—'}</Text>
+      </Text>
+      {c.why ? (
+        <Text style={{ fontFamily: fonts.body, fontSize: 12, lineHeight: LH(12), color: desk.inkDim, marginTop: 2 }}>{c.why}</Text>
+      ) : null}
+      {c.undone_at ? (
+        <Text style={{ fontFamily: fonts.body, fontSize: 12, lineHeight: LH(12), color: desk.inkDim, marginTop: 2 }}>
+          {`Undone ${ago(c.undone_at)}${c.undone_by ? ` by ${c.undone_by}` : ''}`}
+        </Text>
+      ) : null}
     </View>
   );
 }

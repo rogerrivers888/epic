@@ -418,12 +418,13 @@ export async function correct({ ref, fact, option, why = null, who }) {
     }
     // For accuracy: the machine's answer and source as they stand now, frozen
     // with the correction, so a later re-check cannot rewrite history.
+    let correctionId = null;
     if (a.kind === 'yesno' && o.value?.yesno != null) {
       const { rows: [sub] } = await c.query('select subcategory from place_index where venue_ref = $1', [ref]);
-      await c.query(
+      ({ rows: [{ id: correctionId }] } = await c.query(
         `insert into fact_corrections (venue_ref, attribute_key, answer, machine_state, machine_source, subcategory_key, who)
-         values ($1, $2, $3, $4, $5, $6, $7)`,
-        [ref, fact, o.value.yesno ? 'yes' : 'no', machine?.state ?? null, machine?.source ?? null, sub?.subcategory ?? null, who]);
+         values ($1, $2, $3, $4, $5, $6, $7) returning id`,
+        [ref, fact, o.value.yesno ? 'yes' : 'no', machine?.state ?? null, machine?.source ?? null, sub?.subcategory ?? null, who]));
     }
     const d = (await describe([ref])).get(ref);
     const before = unknownWas ? 'Don’t know' : was?.set_by ? wordOf(a, { yesno: was.yesno, from: was.from_value, to: was.to_value, choice: was.choice }, cfg)
@@ -431,7 +432,7 @@ export async function correct({ ref, fact, option, why = null, who }) {
     return logChange({
       client: c, who, area: 'Facts', what: `Answer corrected · ${label} · ${d?.name ?? ref}`,
       before, after: o.label, why, subjectType: 'place_fact', subjectId: `${ref}|${fact}`,
-      undo: { kind: 'correction', ref, fact, unknownWas: unknownWas?.who ?? null, was: was ? { yesno: was.yesno, from: was.from_value, to: was.to_value, choice: was.choice, reason: was.reason, set_by: was.set_by } : null },
+      undo: { kind: 'correction', ref, fact, correctionId, unknownWas: unknownWas?.who ?? null, was: was ? { yesno: was.yesno, from: was.from_value, to: was.to_value, choice: was.choice, reason: was.reason, set_by: was.set_by } : null },
     });
   });
   forgetAttributes();
@@ -443,8 +444,18 @@ export async function correct({ ref, fact, option, why = null, who }) {
 export async function undoCorrection({ change, who }) {
   // `hid` is from before a Don't know stopped hiding answers (e749d6a): a
   // change recorded then still unhides what it hid.
-  const { ref, fact, was, unknownWas = null, hid = false } = change.undo;
+  const { ref, fact, was, unknownWas = null, hid = false, correctionId = null } = change.undo;
   await withTransaction(async (c) => {
+    // The accuracy row this correction wrote goes with it: an undone
+    // correction is not a family-grade answer to count (audit, 28 Sep 2026).
+    // A change logged before the id was kept is matched on its own moment —
+    // the correction and its log row share one transaction's now().
+    if (correctionId) await c.query('delete from fact_corrections where id = $1', [correctionId]);
+    else {
+      await c.query(
+        'delete from fact_corrections where venue_ref = $1 and attribute_key = $2 and at = (select at from bo_changes where id = $3)',
+        [ref, fact, change.id]);
+    }
 
     // A Don't know that stood before is put back; one this correction made goes.
     if (unknownWas) {
@@ -462,7 +473,7 @@ export async function undoCorrection({ change, who }) {
     }
     // Only the hide that correction made (same transaction, same moment): a
     // later family hide stands (Codex, 28 Sep 2026).
-    if (hid) await c.query('update place_fact_answers set hidden_at = null where venue_ref = $1 and attribute_key = $2 and hidden_at <= $3', [ref, fact, change.at]);
+    if (hid) await c.query('update place_fact_answers set hidden_at = null where venue_ref = $1 and attribute_key = $2 and hidden_at <= (select at from bo_changes where id = $3)', [ref, fact, change.id]);
     await c.query('update bo_changes set undone_at = now(), undone_by = $2 where id = $1', [change.id, who]);
   });
   forgetAttributes();

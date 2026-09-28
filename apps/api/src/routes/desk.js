@@ -20,7 +20,7 @@ import * as facts from '../desk/facts.js';
 import * as verification from '../desk/verification.js';
 import * as accuracy from '../desk/accuracy.js';
 import * as collections from '../desk/collections.js';
-import { overview } from '../desk/overview.js';
+import { overview, spendThisMonth } from '../desk/overview.js';
 import { resolveLocation, chipOf, filterSays, REACHES, MODES } from '../desk/location.js';
 import * as pipeline from '../desk/pipeline.js';
 import { extracts as osmExtracts } from '../sources/osmExtract.js';
@@ -48,6 +48,11 @@ async function loc(req) {
 
 deskRoutes.get('/overview', requires('view_library'), async (_req, res, next) => {
   try { res.json(await overview()); } catch (err) { next(err); }
+});
+
+/** The month's Google and Claude spend against budget — the Spend tile's own numbers, drawn atop Runs. */
+deskRoutes.get('/overview/spend', requires('view_library'), async (_req, res, next) => {
+  try { res.json(await spendThisMonth()); } catch (err) { next(err); }
 });
 
 // ---------------------------------------------------------------------------
@@ -115,7 +120,9 @@ deskRoutes.get('/settings', requires('view_library'), async (_req, res, next) =>
 
 deskRoutes.put('/settings/:key', requires('manage_library'), async (req, res, next) => {
   try {
-    const out = await settingsRepo.setSetting(String(req.params.key), req.body?.value, { who: who(req), what: str(req.body?.what) });
+    // "What changed" is composed by the API from the key and value; a `what`
+    // in the body is ignored (second audit CH.6).
+    const out = await settingsRepo.setSetting(String(req.params.key), req.body?.value, { who: who(req) });
     res.json(out);
   } catch (err) { next(err); }
 });
@@ -227,6 +234,7 @@ deskRoutes.post('/categories/defaults', requires('manage_library'), async (req, 
   try {
     res.json(await categories.setDefaults({
       subs: req.body?.subs, fact: String(req.body?.fact ?? ''), option: String(req.body?.option ?? ''), who: who(req), why: str(req.body?.why),
+      bulk: req.body?.bulk === true,
     }));
   } catch (err) { next(err); }
 });

@@ -118,6 +118,9 @@ export function diagnose(f) {
 export function headlineOf(weeks) {
   const last = weeks[weeks.length - 1];
   if (!last) return 'Nothing has run yet';
+  // Four empty weeks are nothing to compare, and "held level" would read as a
+  // verdict on a queue nobody fed (second audit CH.2).
+  if (weeks.every((w) => !w.raised && !w.decided)) return 'Nothing raised or decided in the last four weeks';
   const by = last.raised - last.decided;
   if (by > 0) return `The queue grew by ${by} last week`;
   if (by < 0) return `You are ${Math.abs(by)} ahead of the harvest`;
@@ -137,7 +140,9 @@ export function clearsOf(weeks) {
   const raised = weeks.reduce((a, w) => a + w.raised, 0) / n;
   const decided = weeks.reduce((a, w) => a + w.decided, 0) / n;
   if (!raised && !decided) {
-    return { says: 'Nothing raised and nothing decided', note: 'No runs in the last four weeks.', ever: true };
+    // `spoke: false`: not a verdict either way, so the screen draws it grey,
+    // never in the lime of good news (second audit CH.2).
+    return { says: 'Nothing raised and nothing decided', note: 'No runs in the last four weeks.', ever: true, spoke: false };
   }
   const rates = `Deciding ${Math.round(decided)} a week against ${Math.round(raised)} raised`;
   if (decided <= raised) {

@@ -73,6 +73,7 @@ export function DeskLineChart({
 }: DeskLineChartProps) {
   const [w, setW] = useState(0);
   const [hov, setHov] = useState<number | null>(null);
+  const [tipW, setTipW] = useState(0);
   const n = series.length;
   const span = hi - lo || 1;
   const px = (i: number) => ((i + 0.5) / Math.max(1, n)) * w;
@@ -151,14 +152,24 @@ export function DeskLineChart({
                   position: 'absolute', left: px(hv) - 4, top: py(hvVal) - 4, width: 8, height: 8, borderRadius: 4, backgroundColor: color,
                 }} />
               ) : null}
-              <View pointerEvents="none" style={{
-                position: 'absolute', left: px(hv) - 120, width: 240, alignItems: 'center', zIndex: 10,
-                bottom: height - (hvVal != null ? py(hvVal) : height / 2) + 10,
-              }}>
-                <View style={[{ backgroundColor: desk.picked, borderWidth: 1, borderColor: desk.ruleStrong, paddingVertical: 4, paddingHorizontal: 8 }, TIP_SHADOW]}>
-                  <Text numberOfLines={1} style={{ fontFamily: fonts.body, fontSize: 12, fontWeight: '700', color: desk.ink }}>{tip(hv)}</Text>
+              {/* Measured unseen first, then placed centred on the point but
+                  clamped inside the card: never past the plot's right edge,
+                  never further left than the axis (audit, 28 Sep 2026). */}
+              <View pointerEvents="none" style={{ position: 'absolute', left: 0, top: 0, width: 480, alignItems: 'flex-start', opacity: 0 }}>
+                <View onLayout={(e: LayoutChangeEvent) => setTipW(Math.ceil(e.nativeEvent.layout.width))} style={{ borderWidth: 1, paddingVertical: 4, paddingHorizontal: 8 }}>
+                  <Text numberOfLines={1} style={{ fontFamily: fonts.body, fontSize: 12, fontWeight: '700' }}>{tip(hv)}</Text>
                 </View>
               </View>
+              {tipW ? (
+                <View pointerEvents="none" style={[{
+                  position: 'absolute', zIndex: 10, width: tipW + 1,
+                  left: Math.max(-(axisWidth + 8), Math.min(w - tipW - 1, px(hv) - tipW / 2)),
+                  bottom: height - (hvVal != null ? py(hvVal) : height / 2) + 10,
+                  backgroundColor: desk.picked, borderWidth: 1, borderColor: desk.ruleStrong, paddingVertical: 4, paddingHorizontal: 8,
+                }, TIP_SHADOW]}>
+                  <Text numberOfLines={1} style={{ fontFamily: fonts.body, fontSize: 12, fontWeight: '700', color: desk.ink }}>{tip(hv)}</Text>
+                </View>
+              ) : null}
             </>
           ) : null}
         </View>

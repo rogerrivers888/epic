@@ -27,11 +27,11 @@
  *      or estimated right now — it is read from the API, not written here.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Linking, Platform, ScrollView, StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 import { Press } from '../../components/press';
 import { api } from '../../api';
-import { desk, fonts, spacing, type, BORDER, LIME, ON_LIME } from '../../theme';
+import { colors, desk, fonts, spacing, type, BORDER, LIME, ON_LIME } from '../../theme';
 import { Icon, IconName } from '../../components/Icon';
 import { AdminPage, Banner, Panel, Pill } from '../kit';
 import { Explain } from '../explain';
@@ -83,8 +83,14 @@ function useLive(): Live {
     const put = (patch: Partial<Counts>) => { if (live) setCounts((c) => ({ ...c, ...patch })); };
     deskApi.get<{ counts: { subcategories: number }; categories: unknown[] }>('/categories')
       .then((r) => put({ subcategories: r.counts.subcategories, categories: r.categories.length })).catch(() => {});
-    deskApi.get<{ counts: { inEpic: number; needs: number; notInEpic: number } }>('/mapping')
-      .then((r) => put({ words: r.counts.inEpic + r.counts.needs + r.counts.notInEpic, mapped: r.counts.inEpic + r.counts.notInEpic })).catch(() => {});
+    // Every word Google has is in one of the four lists the mapping sends —
+    // the words kept as they are, never answered, included (they sit in no
+    // view of their own but are still Google's words).
+    deskApi.get<{ counts: { inEpic: number; needs: number; notInEpic: number }; keptAsIs?: unknown[] }>('/mapping')
+      .then((r) => put({
+        words: r.counts.inEpic + r.counts.needs + r.counts.notInEpic + (r.keptAsIs?.length ?? 0),
+        mapped: r.counts.inEpic + r.counts.notInEpic,
+      })).catch(() => {});
     deskApi.get<{ count: number }>('/collections')
       .then((r) => put({ collections: r.count })).catch(() => {});
     return () => { live = false; };
@@ -259,10 +265,15 @@ const NAV: [HowAnchor, string][] = [
   ['counting', 'Counting honestly'], ['state', 'Where we are'],
 ];
 
+/** On a phone the jump row is pinned over the top of the page, so a section scrolled to stops below it. */
+const PhoneDoc = React.createContext(false);
+const UNDER_ROW = (Platform.OS === 'web' ? { scrollMarginTop: 44 } : {}) as unknown as ViewStyle;
+
 function Section({ at, landed, children }: { at: HowAnchor; landed: boolean; children: React.ReactNode }) {
+  const phone = React.useContext(PhoneDoc);
   // `nativeID` is the DOM id on the web, so `?at=facts` can find the section.
   return (
-    <View nativeID={anchorId(at)} style={[doc.section, landed && doc.landed]}>
+    <View nativeID={anchorId(at)} style={[doc.section, landed && doc.landed, phone && UNDER_ROW]}>
       <Text style={doc.h2}>{TITLES[at]}</Text>
       {children}
     </View>
@@ -575,22 +586,27 @@ const DOC_NAME: Record<Doc, string> = { mechanics: 'Business mechanics', decisio
 
 /**
  * The tab strip over the document: 15/800, a lime rule under the one that is
- * open, a 2px rule under the whole strip. On a phone the strip scrolls
- * sideways rather than wrapping, so the rule stays one line.
+ * open, a 2px rule under the whole strip. On a phone the two names do not fit
+ * side by side at 390px, and a strip that scrolls sideways shows the second
+ * one cut off — so there they stack, one full-width tab to a line, each with
+ * its own rule, and nothing is shortened.
  */
-function DocTabs({ value, onChange }: { value: Doc; onChange: (d: Doc) => void }) {
+function DocTabs({ value, onChange, phone }: { value: Doc; onChange: (d: Doc) => void; phone: boolean }) {
+  const tab = (d: Doc) => (
+    <Press key={d} effect="none" onPress={() => onChange(d)} accessibilityRole="tab" accessibilityState={{ selected: value === d }}>
+      <Text style={[frame.tab, phone && frame.tabPhone, { color: value === d ? desk.ink : desk.inkDim, borderBottomColor: value === d ? LIME : desk.ruleStrong }]}>{DOC_NAME[d]}</Text>
+    </Press>
+  );
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ flexGrow: 1 }}>
+    <View nativeID={TOP_ID} style={{ flexDirection: phone ? 'column' : 'row', alignItems: phone ? 'stretch' : 'flex-end' }}>
       {DOCS.map((d, i) => (
         <React.Fragment key={d}>
-          {i > 0 ? <View style={frame.tabGap} /> : null}
-          <Press effect="none" onPress={() => onChange(d)} accessibilityRole="tab" accessibilityState={{ selected: value === d }}>
-            <Text style={[frame.tab, { color: value === d ? desk.ink : desk.inkDim, borderBottomColor: value === d ? LIME : desk.ruleStrong }]}>{DOC_NAME[d]}</Text>
-          </Press>
+          {i > 0 && !phone ? <View style={frame.tabGap} /> : null}
+          {tab(d)}
         </React.Fragment>
       ))}
-      <View style={frame.tabRest} />
-    </ScrollView>
+      {phone ? null : <View style={frame.tabRest} />}
+    </View>
   );
 }
 
@@ -598,11 +614,21 @@ function DocTabs({ value, onChange }: { value: Doc; onChange: (d: Doc) => void }
  * The eleven numbered titles beside the document (prototype template, the How
  * page's 230px column): 13px, the one in view 800 with a lime rule down its
  * left, the rest 500 and dim. On a phone it is a row that scrolls sideways
- * above the document, the rule under each title instead of beside it.
+ * above the document, the rule under each title instead of beside it; it
+ * stays pinned to the top of the page while the document is read, and when
+ * the section in view changes the row slides so that title is in sight.
  */
 function JumpList({ on, onJump, phone }: { on: HowAnchor; onJump: (a: HowAnchor) => void; phone: boolean }) {
+  const row = useRef<ScrollView>(null);
+  const xs = useRef(new Map<HowAnchor, number>());
+  useEffect(() => {
+    if (!phone) return;
+    const x = xs.current.get(on);
+    if (x != null) row.current?.scrollTo({ x: Math.max(0, x - 12), animated: true });
+  }, [on, phone]);
   const items = HOW_ANCHORS.map((a) => (
-    <Press key={a} effect="none" onPress={() => onJump(a)} accessibilityRole="link">
+    <Press key={a} effect="none" onPress={() => onJump(a)} accessibilityRole="link"
+           onLayout={phone ? (e) => { xs.current.set(a, e.nativeEvent.layout.x); } : undefined}>
       <Text style={[
         frame.jump,
         phone ? frame.jumpPhone : frame.jumpWide,
@@ -612,17 +638,25 @@ function JumpList({ on, onJump, phone }: { on: HowAnchor; onJump: (a: HowAnchor)
     </Press>
   ));
   return phone
-    ? <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}>{items}</ScrollView>
+    ? (
+      <View style={[frame.jumpRow, STICKY_TOP]}>
+        <ScrollView ref={row} horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}>{items}</ScrollView>
+      </View>
+    )
     : <View style={[frame.jumpCol, STICKY]}>{items}</View>;
 }
 
 /** The web keeps the jump list in view as the page scrolls; native has no sticky. */
 const STICKY = (Platform.OS === 'web' ? { position: 'sticky', top: 16 } : {}) as unknown as ViewStyle;
+/** The phone's row sits flush with the top edge, over the document as it passes under. */
+const STICKY_TOP = (Platform.OS === 'web' ? { position: 'sticky', top: 0, zIndex: 2 } : {}) as unknown as ViewStyle;
 
 const frame = StyleSheet.create({
   tab: { fontFamily: fonts.heading, fontSize: 15, fontWeight: '800', paddingBottom: 11, borderBottomWidth: BORDER },
   tabGap: { width: 30, borderBottomWidth: BORDER, borderBottomColor: desk.ruleStrong },
   tabRest: { flexGrow: 1, minWidth: 30, borderBottomWidth: BORDER, borderBottomColor: desk.ruleStrong },
+  tabPhone: { paddingTop: 11 },
+  jumpRow: { alignSelf: 'stretch', backgroundColor: colors.bg },
   body: { gap: 28, alignItems: 'flex-start' },
   jumpCol: { width: 230, flexShrink: 0 },
   jump: { fontFamily: fonts.body, fontSize: 13, lineHeight: 17.5 },
@@ -1386,6 +1420,26 @@ export function HowItWorks() {
   const openDoc = (d: Doc) => setQuery({ doc: d === 'mechanics' ? null : d, at: null }, { replace: false });
 
   /**
+   * A new document opens at its top, whichever way it was opened — a tab or
+   * Back. The page's scroller is the nearest ancestor of the tab strip that
+   * scrolls; it is found from the strip rather than held, because the page
+   * frame (`AdminPage`) is shared and hands out no ref. The first paint is
+   * left alone: a link that arrived with `?at=` scrolls to its section.
+   */
+  const shownDoc = useRef(docTab);
+  useEffect(() => {
+    if (shownDoc.current === docTab) return;
+    shownDoc.current = docTab;
+    if (Platform.OS !== 'web') return;
+    const id = requestAnimationFrame(() => {
+      let el = document.getElementById(TOP_ID)?.parentElement ?? null;
+      while (el && !(el.scrollHeight > el.clientHeight && /(auto|scroll)/.test(getComputedStyle(el).overflowY))) el = el.parentElement;
+      if (el) el.scrollTop = 0; else window.scrollTo(0, 0);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [docTab]);
+
+  /**
    * Where a link into the page lands. The info icon beside every filing
    * heading arrives with `?at=<section>`, and the page scrolls to it rather
    * than to the top. Each anchored section is a DOM node with a known id on
@@ -1438,13 +1492,15 @@ export function HowItWorks() {
 
   return (
     <AdminPage>
-      <DocTabs value={docTab} onChange={openDoc} />
+      <DocTabs value={docTab} onChange={openDoc} phone={phone} />
 
       {docTab === 'mechanics' ? (
         <View style={[frame.body, { flexDirection: phone ? 'column' : 'row' }]}>
           <JumpList on={inView ?? at ?? 'layers'} onJump={jump} phone={phone} />
           <View style={[frame.paper, phone && frame.paperPhone]}>
-            <TheDocument at={at} jump={jump} live={live} phone={phone} />
+            <PhoneDoc.Provider value={phone}>
+              <TheDocument at={at} jump={jump} live={live} phone={phone} />
+            </PhoneDoc.Provider>
           </View>
         </View>
       ) : null}
@@ -1506,6 +1562,8 @@ export function HowItWorks() {
 
 /** The DOM id a section is reached by: `how-facts`. */
 const anchorId = (at: HowAnchor) => `how-${at}`;
+/** The tab strip's DOM id: where the page's scroller is found from. */
+const TOP_ID = 'how-top';
 
 const styles = StyleSheet.create({
   row: { paddingVertical: 13, gap: 6 },

@@ -39,6 +39,48 @@ async function spend() {
 }
 
 /**
+ * The Spend tile: the month's Google and Claude spend against each budget, in
+ * the words the tile uses. The desk's Runs screen draws the same object at its
+ * top, so the tile and "Recent runs and spend →" land where the spend is shown
+ * (second audit CH.4) and the two can never disagree.
+ */
+function spendTile(money, cfg) {
+  const googlePct = cfg.budgetGoogle ? money.google / cfg.budgetGoogle : 0;
+  const claudePct = cfg.budgetClaude ? money.claude / cfg.budgetClaude : 0;
+  const worst = Math.max(googlePct, claudePct);
+  return {
+    tone: worst > 1 ? 'red' : worst > 0.8 ? 'amber' : 'green',
+    title: `Google £${Math.round(money.google)} of £${cfg.budgetGoogle} · Claude £${Math.round(money.claude)} of £${cfg.budgetClaude}`,
+    line: worst > 1 ? 'over budget' : worst > 0.8 ? 'close to budget' : 'within budget',
+    google: { spent: money.google, budget: cfg.budgetGoogle },
+    claude: { spent: money.claude, budget: cfg.budgetClaude },
+  };
+}
+
+/** This month's spend on its own, for the Runs screen. */
+export async function spendThisMonth() {
+  const [cfg, money] = await Promise.all([settings().then((s) => s.values), spend()]);
+  return spendTile(money, cfg);
+}
+
+/**
+ * The Verification tile. "Running" is claimed only when the verifier checked
+ * something inside the stall window; an empty backlog with no check for
+ * longer than that is Idle — grey, can't-speak, never green (second audit
+ * CH.3). Read from the status's own `lastAt`, so it holds whether or not the
+ * status names the idle state itself.
+ */
+export function verificationTile(verif, now = Date.now()) {
+  const quiet = verif.lastAt && now - new Date(verif.lastAt).getTime() > STALL_MS;
+  const state = verif.state === 'running' && quiet ? 'idle' : verif.state;
+  if (state === 'running') return { tone: 'green', title: 'Running', line: `last checked ${ago(verif.lastAt)}` };
+  if (state === 'idle') return { tone: 'none', title: 'Idle', line: `nothing to check · last checked ${ago(verif.lastAt)}` };
+  if (state === 'stalled') return { tone: 'red', title: 'Stalled', line: `nothing checked for ${verif.hours} hours` };
+  return { tone: 'red', title: 'Never run', line: 'nothing checked yet' };
+}
+const STALL_MS = 3 * 3600_000;
+
+/**
  * A weekly series: seven points, this week and the six before it, so the
  * sparkline's first point is the "6 weeks" ago its line counts from.
  */
@@ -71,15 +113,8 @@ export async function overview() {
   const heard = srcs.some((s) => s.source !== 'families' && s.checked > 0);
   const failing = srcs.filter((s) => s.status === 'Failing');
   const slow = srcs.filter((s) => s.status === 'Slow');
-  const googlePct = cfg.budgetGoogle ? money.google / cfg.budgetGoogle : 0;
-  const claudePct = cfg.budgetClaude ? money.claude / cfg.budgetClaude : 0;
-  const worstSpend = Math.max(googlePct, claudePct);
   const health = {
-    verification: {
-      tone: verif.state === 'running' ? 'green' : 'red',
-      title: verif.state === 'running' ? 'Running' : verif.state === 'stalled' ? 'Stalled' : 'Never run',
-      line: verif.state === 'running' ? `last checked ${ago(verif.lastAt)}` : verif.state === 'stalled' ? `nothing checked for ${verif.hours} hours` : 'nothing checked yet',
-    },
+    verification: verificationTile(verif),
     // "All answering" is a claim, and it can only be made of sources that were
     // asked something: with nothing checked this week the tile cannot speak.
     sources: failing.length || slow.length || heard
@@ -96,11 +131,7 @@ export async function overview() {
         title: `Machine agreed with families ${acc.headline.accuracy}%`,
         line: 'against family answers',
       },
-    spend: {
-      tone: worstSpend > 1 ? 'red' : worstSpend > 0.8 ? 'amber' : 'green',
-      title: `Google £${Math.round(money.google)} of £${cfg.budgetGoogle} · Claude £${Math.round(money.claude)} of £${cfg.budgetClaude}`,
-      line: worstSpend > 1 ? 'over budget' : worstSpend > 0.8 ? 'close to budget' : 'within budget',
-    },
+    spend: spendTile(money, cfg),
   };
 
   // ---- Collections

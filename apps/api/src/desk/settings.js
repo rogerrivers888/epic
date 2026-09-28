@@ -133,6 +133,36 @@ export function validate(key, value) {
   throw bad(`${key} cannot be set here`);
 }
 
+/**
+ * A Fact automations setting's row, as the screen reads it, with `{}` where
+ * the value goes (prototype `RULE_STEPS`, `RULE_HOUSEKEEPING`). Changes'
+ * "What changed" is composed here from the key and the new value — never
+ * taken from the client, which could write anything into the audit trail
+ * (second audit CH.6). A key with no row reads "Setting · <key>".
+ */
+export const SENTENCES = {
+  spotMentions: 'A review mentions a feature at a place → we go and look for it on our own sources · {} mention',
+  suggestReviews: 'A household is shown “reviewers mention a sauna” during its search once {} separate reviews say so and none say no',
+  verifySources: 'Verified: {} or more of our own sources say yes and none say no · venue page, OpenStreetMap, Wikipedia, Wikidata',
+  venueWins: 'When our sources disagree, the venue’s own website wins',
+  addPlaces: 'Once verified at {} or more places, it joins the subcategory’s facts, looked for as each place comes up · listed under New facts',
+  shareMax: 'Not added if more than {}% of places already have it — it tells a family nothing · access and age facts are exempt',
+  recheckPhysical: 'Physical features are re-checked every {} months',
+  recheckAccess: 'Access features are re-checked every {} months',
+  recheckFood: 'Food and dietary facts are re-checked every {} months',
+  askPerVisit: 'Ask families about a fact after their visit, only where it matters to them — a toddler pool only to households with a toddler · at most {} question per visit',
+  familiesSettle: '{} or more families agreeing, none disagreeing, settles a fact',
+  familiesWrong: 'If {} or more families say a fact is wrong, it’s hidden and re-checked when next due; if our sources confirm it again, the next families who visit are asked',
+  suggestExpiry: 'A suggestion still in the backlog is dropped after {} days',
+};
+
+/** "What changed" for a setting set to `value`: its row with the value filled in. */
+export function sentenceFor(key, value) {
+  const row = SENTENCES[key];
+  if (!row) return `Setting · ${key}`;
+  return row.replace('{}', typeof value === 'number' ? String(value) : '');
+}
+
 /** How a value reads in the Changes log. */
 export function said(key, value) {
   if (value == null) return '—';
@@ -147,6 +177,8 @@ export function said(key, value) {
  * it already is (a change that changes nothing is not written down). Logged in
  * `bo_settings_log` and in Changes under Fact automations, in one transaction.
  */
+// `what` is for the server's own callers only (the undo route's "Undo · …");
+// the PUT route never passes the client's words through.
 export async function setSetting(key, raw, { who, what = null } = {}) {
   const value = validate(key, raw);
   const out = await withTransaction(async (c) => {
@@ -164,7 +196,7 @@ export async function setSetting(key, raw, { who, what = null } = {}) {
       [key, version, JSON.stringify(before ?? null), JSON.stringify(value), who]);
     // The change's id goes back to the screen, so the toast's Undo names it.
     const change = await logChange({
-      client: c, who, area: 'Fact automations', what: what ?? `Setting · ${key}`,
+      client: c, who, area: 'Fact automations', what: what ?? sentenceFor(key, value),
       before: said(key, before), after: said(key, value),
       subjectType: 'setting', subjectId: key, undo: { kind: 'setting', key, value: before },
     });

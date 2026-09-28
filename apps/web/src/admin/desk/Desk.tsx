@@ -63,6 +63,8 @@ export const DESK_KEYS = [
   'sort', 'country', 'county', 'feature',
   // A fact drill-down's postcode filter (agent B, fix pass 28 Sep).
   'pc',
+  // Accuracy's expanded category rows, comma-separated (agent B2, 28 Sep).
+  'open',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -180,13 +182,30 @@ function DeskChrome({ lit, narrow, onTab, onRuns, toast }: {
 }) {
   // On a phone the strip scrolls sideways, and the lit tab is brought into
   // view — "Changes" lit at the far end was off the frame (audit, 28 Sep).
+  // Measured, never timed: every tab's place and the strip's own width come
+  // from onLayout, and the lit tab is brought into view whenever any of them
+  // (or the lit tab) changes — on the frame after, once the scroller knows its
+  // content is wider than itself (second audit CH.9).
   const scroller = useRef<ScrollView | null>(null);
-  const xs = useRef<Partial<Record<Tab, number>>>({});
+  const spans = useRef<Partial<Record<Tab, { x: number; w: number }>>>({});
+  const view = useRef({ w: 0, at: 0 });
   const [laid, setLaid] = useState(0);
+  const relaid = useCallback(() => setLaid((n) => n + 1), []);
   useEffect(() => {
     if (!narrow || !lit) return;
-    const x = xs.current[lit];
-    if (x != null) scroller.current?.scrollTo({ x: Math.max(0, x - 24), animated: false });
+    const span = spans.current[lit];
+    const { w } = view.current;
+    if (!span || !w) return;
+    const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (f: () => void) => setTimeout(f, 0) as unknown as number;
+    const caf = typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame : (h: number) => clearTimeout(h);
+    const h = raf(() => {
+      const { at } = view.current;
+      // Already wholly in view: leave the strip where the person put it.
+      if (span.x >= at && span.x + span.w <= at + w) return;
+      const x = span.x < at ? span.x - 24 : span.x + span.w - w + 24;
+      scroller.current?.scrollTo({ x: Math.max(0, x), animated: false });
+    });
+    return () => caf(h);
   }, [lit, narrow, laid]);
   const runs = (
     <Press effect="none" onPress={onRuns}>
@@ -206,6 +225,10 @@ function DeskChrome({ lit, narrow, onTab, onRuns, toast }: {
           showsHorizontalScrollIndicator={false}
           style={{ flex: 1, minWidth: 0, flexGrow: 1 }}
           contentContainerStyle={{ flexGrow: 1 }}
+          onLayout={(e) => { view.current.w = e.nativeEvent.layout.width; relaid(); }}
+          onContentSizeChange={relaid}
+          onScroll={(e) => { view.current.at = e.nativeEvent.contentOffset.x; }}
+          scrollEventThrottle={16}
         >
           <View style={{ flexDirection: 'row', gap: 24, borderBottomWidth: 2, borderBottomColor: desk.ruleStrong, flexGrow: 1 }}>
             {TABS.map((t) => {
@@ -215,7 +238,7 @@ function DeskChrome({ lit, narrow, onTab, onRuns, toast }: {
                   key={t.key}
                   effect="none"
                   onPress={() => onTab(t.key)}
-                  onLayout={(e) => { xs.current[t.key] = e.nativeEvent.layout.x; if (on) setLaid((n) => n + 1); }}
+                  onLayout={(e) => { const { x, width } = e.nativeEvent.layout; spans.current[t.key] = { x, w: width }; if (on) relaid(); }}
                 >
                   <View style={{ paddingBottom: 13, marginBottom: -2, borderBottomWidth: 2, borderBottomColor: on ? LIME : 'transparent' }}>
                     <Text style={{ fontFamily: fonts.heading, fontSize: 16, fontWeight: '800', letterSpacing: -0.32, color: on ? desk.ink : desk.inkDim }}>{t.name}</Text>

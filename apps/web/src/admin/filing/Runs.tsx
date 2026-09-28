@@ -75,7 +75,7 @@ export function Runs({
    * Whether deciding outruns raising, said plainly. A single backlog total
    * cannot say this, which is the whole reason the chart is here.
    */
-  clears: { says: string; note: string; ever: boolean };
+  clears: { says: string; note: string; ever: boolean; spoke?: boolean };
   saturation: Saturation[];
   onTrigger?: (key: Trigger['key']) => void;
   /** Optional, as `onTrigger`: with none, the run in flight has no Stop. */
@@ -104,7 +104,8 @@ export function Runs({
 
   return (
     <>
-      <Band title={headline} right={<Value tone="dim" size={12.5}>{scope}</Value>} />
+      {/* With no runs there is nothing to compare, and the title says so (CH.2). */}
+      <Band title={runs.length === 0 && !live ? 'No runs yet' : headline} right={<Value tone="dim" size={12.5}>{scope}</Value>} />
 
       {/*
         Before it runs. A run is minutes of attention and a crawl against other
@@ -381,10 +382,11 @@ export function Runs({
             total cannot say, and it is the point of the chart.
           */}
           <View style={{
-            borderLeftWidth: 2, borderLeftColor: clears.ever ? LIME : WARN,
+            // Grey where there was nothing to judge: neither good news nor bad.
+            borderLeftWidth: 2, borderLeftColor: clears.spoke === false ? desk.ruleStrong : clears.ever ? LIME : WARN,
             paddingLeft: 13, paddingVertical: 3,
           }}>
-            <Value size={14.5} weight="800" tone={clears.ever ? 'lime' : 'warn'}>{clears.says}</Value>
+            <Value size={14.5} weight="800" tone={clears.spoke === false ? 'dim' : clears.ever ? 'lime' : 'warn'}>{clears.says}</Value>
             <View style={{ marginTop: 3 }}><Value size={12} tone="dim">{clears.note}</Value></View>
           </View>
         </View>
@@ -395,6 +397,16 @@ export function Runs({
             <Value size={11.5} tone="dim">with what is waiting beside it</Value>
           </View>
           <View>
+            {/* Blank is said, with its reason — never an empty panel (CH.2). */}
+            {saturation.length === 0 ? (
+              <View style={{ paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: desk.rule }}>
+                <Value size={12.5} tone="dim">
+                  {runs.length === 0
+                    ? 'Blank until a harvest has read places: saturation is measured from what a run reads.'
+                    : 'Blank because there is no fact sheet yet to measure.'}
+                </Value>
+              </View>
+            ) : null}
             {saturation.map((s) => {
               const most = Math.max(1, ...s.trend);
               return (

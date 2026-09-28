@@ -14,13 +14,20 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { View } from 'react-native';
+import { Text, View } from 'react-native';
 
 import { api } from '../../api';
 import { DecisionLog, Runs } from '../filing/Runs';
 import type { Decision, Trail } from '../filing/types';
 import { useCrumbs, useDeskGo, useDeskParam } from './Desk';
-import { Muted, Seg, saidOf, useToast } from './kit';
+import { AMBER, LIME, Muted, RED, Seg, deskApi, desk, fonts, saidOf, tabular, useToast } from './kit';
+
+/** The Overview's Spend tile, from the same endpoint's numbers (`/overview/spend`). */
+type Spend = {
+  tone: 'green' | 'amber' | 'red'; title: string; line: string;
+  google: { spent: number; budget: number }; claude: { spent: number; budget: number };
+};
+const SPEND_TONE = { green: LIME, amber: AMBER, red: RED } as const;
 
 type RunsData = Awaited<ReturnType<typeof api.adminFilingRuns>>;
 type DecisionsData = Awaited<ReturnType<typeof api.adminFilingDecisions>>;
@@ -43,6 +50,10 @@ export function RunsScreen() {
   const [stage, setStage] = useState<StageData | null>(null);
   const [trails, setTrails] = useState<Record<string, Trail>>({});
   const [error, setError] = useState<string | null>(null);
+  // The month's spend heads the page: Overview's Spend tile and its "Recent
+  // runs and spend →" both land here (second audit CH.4). Unknown stays "—".
+  const [spend, setSpend] = useState<Spend | null>(null);
+  const [spendSaid, setSpendSaid] = useState<string | null>(null);
   const asked = useRef(new Set<string>());
 
   useCrumbs(log ? [{ name: 'Runs', go: () => go('runs') }, { name: 'Decision log' }] : [], [log]);
@@ -52,6 +63,14 @@ export function RunsScreen() {
     api.adminFilingRuns()
       .then((d) => { if (live) setRuns(d); })
       .catch((err) => { if (live) setError(saidOf(err) || 'The runs did not load.'); });
+    return () => { live = false; };
+  }, []);
+
+  useEffect(() => {
+    let live = true;
+    deskApi.get<Spend>('/overview/spend')
+      .then((d) => { if (live) setSpend(d); })
+      .catch((err) => { if (live) setSpendSaid(saidOf(err) || 'The spend did not load.'); });
     return () => { live = false; };
   }, []);
 
@@ -69,13 +88,22 @@ export function RunsScreen() {
 
   return (
     <View style={{ gap: 20 }}>
+      <View style={{ gap: 6, borderLeftWidth: 3, borderLeftColor: spend ? SPEND_TONE[spend.tone] : desk.inkFaint, paddingLeft: 14, paddingVertical: 2 }}>
+        <Text style={{ fontFamily: fonts.heading, fontSize: 10, fontWeight: '700', letterSpacing: 0.7, color: desk.inkDim }}>SPEND THIS MONTH</Text>
+        <Text style={[{ fontFamily: fonts.body, fontSize: 15, fontWeight: '800', color: spend ? desk.ink : desk.inkDim }, tabular]}>
+          {spend ? spend.title : '—'}
+        </Text>
+        <Text style={{ fontFamily: fonts.body, fontSize: 12, color: desk.inkDim }}>{spend ? spend.line : spendSaid ?? 'Loading…'}</Text>
+      </View>
+
       <Seg
         options={[
           { key: 'runs', name: 'Runs' },
           { key: 'log', name: `Decision log${decisions ? ` · ${decisions.decisions.length}` : ''}` },
         ]}
         value={log ? 'log' : 'runs'}
-        onChange={(k) => setView(k === 'log' ? 'log' : '')}
+        // The Decision log is a layer (it has a crumb), so the move pushes.
+        onChange={(k) => setView(k === 'log' ? 'log' : '', { replace: false })}
       />
 
       {error ? <Muted>{error}</Muted> : null}

@@ -28,7 +28,7 @@ import { BackLink, Dot, FactTabs, LoadLine, SRC_NAME, Title, dur, plural, useDes
 // ---------------------------------------------------------------------------
 
 type Point = { at: string; n: number };
-type Status = { state: 'never' | 'stalled' | 'running'; lastAt: string | null; backlog: number; hours?: number };
+type Status = { state: 'never' | 'stalled' | 'idle' | 'running'; lastAt: string | null; backlog: number; hours?: number };
 type Source = {
   source: string; label: string; checked: number; answered: number; failingPct: number | null; status: string;
   /** Why Failing % cannot speak, where it is null. */
@@ -79,7 +79,12 @@ export function Verification() {
   const [src] = useDeskParam('src');
   const [periodRaw] = useDeskParam('period');
   const go = useDeskGo();
-  useCrumbs([{ name: 'Facts', go: () => go('facts') }, { name: 'Verification' }], []);
+  // The trail ends at the state it shows: "Facts / Verification / Conflicts"
+  // for a drill-down, as the prototype's does (audit CH.13).
+  const drillTitle = view ? drillWords(view, src, drillPeriodOf(periodRaw)).title : null;
+  useCrumbs(drillTitle
+    ? [{ name: 'Facts', go: () => go('facts') }, { name: 'Verification', go: () => go('facts', { ftab: 'verification' }) }, { name: drillTitle }]
+    : [{ name: 'Facts', go: () => go('facts') }, { name: 'Verification' }], [drillTitle]);
   return (
     <>
       <FactTabs on="verification" />
@@ -103,7 +108,8 @@ function Health({ period }: { period: Period }) {
   const st = v?.status;
   const line = !st ? '' : st.state === 'never' ? 'Never run · verification hasn’t checked anything yet'
     : st.state === 'stalled' ? `Stalled · nothing checked for ${plural(st.hours ?? 0, 'hour')}`
-      : `Running · last checked ${ago(st.lastAt)}`;
+      : st.state === 'idle' ? `Idle · nothing to check · last checked ${ago(st.lastAt)}`
+        : `Running · last checked ${ago(st.lastAt)}`;
 
   return (
     <>
@@ -114,10 +120,17 @@ function Health({ period }: { period: Period }) {
             <Dot color={LIME} size={9} />
             <Text style={{ fontFamily: fonts.body, fontSize: 14, fontWeight: '800', color: LIME }}>{line}</Text>
           </View>
+        ) : st?.state === 'idle' ? (
+          // Nothing waiting and nothing checked lately: quiet, not broken —
+          // grey, and no banner (audit CH.3).
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+            <Dot color={desk.inkDim} size={9} />
+            <Text style={{ fontFamily: fonts.body, fontSize: 14, fontWeight: '700', color: desk.inkMuted }}>{line}</Text>
+          </View>
         ) : null}
       </View>
       {!v ? <LoadLine load={load} what="Verification" /> : null}
-      {st && st.state !== 'running' ? (
+      {st && (st.state === 'never' || st.state === 'stalled') ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: RED, paddingVertical: 14, paddingHorizontal: 18 }}>
           <Icon name="warning" size={18} color={ON_LIME} />
           <Text style={{ flex: 1, fontFamily: fonts.body, fontSize: 15, fontWeight: '800', color: ON_LIME }}>{line}</Text>
@@ -231,20 +244,41 @@ const SRC_COLS: TCol[] = [
   { key: 'name', name: 'Source', width: 200 }, { key: 'checked', name: 'Checked · 7 days', width: 150 },
   { key: 'answered', name: 'Answered', width: 150 }, { key: 'failing', name: 'Failing', width: 150 }, { key: 'status', name: 'Status', width: 150 },
 ];
+/**
+ * On a phone Status comes second, so the one column that may need action is
+ * in view without scrolling the table sideways (audit, 28 Sep 2026).
+ */
+const SRC_COLS_PHONE: TCol[] = [
+  { key: 'name', name: 'Source', width: 130 }, { key: 'status', name: 'Status', width: 150 },
+  { key: 'checked', name: 'Checked · 7 days', width: 130 }, { key: 'answered', name: 'Answered', width: 100 }, { key: 'failing', name: 'Failing', width: 100 },
+];
 
 function SourcesTable({ rows, onOpen }: { rows: Source[]; onOpen: (source: string, kind: 'checked' | 'answered') => void }) {
+  const phone = useViewport().width < 600;
+  const cols = phone ? SRC_COLS_PHONE : SRC_COLS;
+  const w = (key: string) => cols.find((x) => x.key === key)!.width;
   const tone = (s: string) => (s === 'Healthy' ? LIME : s === 'Slow' ? AMBER : s === 'Failing' ? RED : desk.inkDim);
   return (
-    <Table width={tableWidth(SRC_COLS, 24)}>
-      <THead cols={SRC_COLS} gap={24} />
+    <Table width={tableWidth(cols, 24)}>
+      <THead cols={cols} gap={24} />
       {rows.map((r) => {
         const c = tone(r.status);
+        const status = (
+          <TCell key="status" width={w('status')}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              {r.status === '—' ? null : <Dot color={c} />}
+              <T size={13} weight={r.status === '—' ? '500' : '800'} tone={c}>{r.status}</T>
+            </View>
+            {r.note ? <T size={12} tone={desk.inkDim}>{r.note}</T> : null}
+          </TCell>
+        );
         return (
           <TRow key={r.source} gap={24} vpad={12}>
-            <TCell width={200}><T weight="700">{SRC_NAME[r.source] ?? r.label}</T></TCell>
-            <TCell width={150}><Press effect="none" onPress={() => onOpen(r.source, 'checked')}><T num>{n(r.checked)}</T></Press></TCell>
-            <TCell width={150}><Press effect="none" onPress={() => onOpen(r.source, 'answered')}><T num>{n(r.answered)}</T></Press></TCell>
-            <TCell width={150}>
+            <TCell width={w('name')}><T weight="700">{SRC_NAME[r.source] ?? r.label}</T></TCell>
+            {phone ? status : null}
+            <TCell width={w('checked')}><Press effect="none" onPress={() => onOpen(r.source, 'checked')}><T num>{n(r.checked)}</T></Press></TCell>
+            <TCell width={w('answered')}><Press effect="none" onPress={() => onOpen(r.source, 'answered')}><T num>{n(r.answered)}</T></Press></TCell>
+            <TCell width={w('failing')}>
               {r.failingPct == null ? (
                 // Can't speak: the check fetched nothing from this source, so
                 // there is no failure rate to give — "—" and the reason.
@@ -258,13 +292,7 @@ function SourcesTable({ rows, onOpen }: { rows: Source[]; onOpen: (source: strin
                 </Press>
               )}
             </TCell>
-            <TCell width={150}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                {r.status === '—' ? null : <Dot color={c} />}
-                <T size={13} weight={r.status === '—' ? '500' : '800'} tone={c}>{r.status}</T>
-              </View>
-              {r.note ? <T size={12} tone={desk.inkDim}>{r.note}</T> : null}
-            </TCell>
+            {phone ? null : status}
           </TRow>
         );
       })}
@@ -315,7 +343,7 @@ function Drill({ view, src, period }: { view: string; src: string; period: Drill
           {d.rows.length === 0 ? <Muted>Nothing matches.</Muted> : d.rows.map((r, i) => (
             <TRow key={`${r.ref}|${r.feature}|${i}`}>
               <TCell width={180}><T weight="700">{r.feature}</T></TCell>
-              <TCell width={230}><T size={13} tone={desk.inkMuted}>{r.place ?? r.ref}</T></TCell>
+              <TCell width={230}><T size={13} tone={desk.inkMuted}>{r.place ?? 'A place we cannot name'}</T></TCell>
               <TCell width={170}><T size={13} tone={desk.inkMuted}>{r.area ?? '—'}</T></TCell>
               <TCell width={150}><T size={13} weight="700" tone={tone(r.outcome)}>{r.outcome}</T></TCell>
               <TCell width={160}><T size={12.5} tone={desk.inkDim}>{r.outcome === 'Backlog' ? `in backlog ${dur((Date.now() - new Date(r.at).getTime()) / 60000)}` : ago(r.at)}</T></TCell>

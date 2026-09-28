@@ -96,6 +96,7 @@ export function Collections({ canManage = false }: { canManage?: boolean }) {
 // The list and its editor
 
 type ColKey = 'title' | 'places' | 'audience' | 'shown' | 'opened' | 'hearted';
+const SORT_KEYS: ColKey[] = ['title', 'places', 'audience', 'shown', 'opened', 'hearted'];
 
 function CollectionList({ canManage }: { canManage: boolean }) {
   const narrow = useViewport().width < 900;
@@ -107,7 +108,14 @@ function CollectionList({ canManage }: { canManage: boolean }) {
   const [catalogue, setCatalogue] = useState<Catalogue | null>(null);
   const [minPlaces, setMinPlaces] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [sort, setSort] = useState<SortState<ColKey>>({ key: 'title', dir: 'asc' });
+  // The sort is part of the address (owner rule), written only when it is not
+  // the default (Collection, A to Z); a sort replaces, never pushes.
+  const [sortRaw, setSortRaw] = useDeskParam('sort');
+  const sort: SortState<ColKey> = useMemo(() => {
+    const [k, d] = sortRaw.split('.');
+    return SORT_KEYS.includes(k as ColKey) ? { key: k as ColKey, dir: d === 'desc' ? 'desc' : 'asc' } : { key: 'title', dir: 'asc' };
+  }, [sortRaw]);
+  const setSort = (next: SortState<ColKey>) => setSortRaw(next && !(next.key === 'title' && next.dir === 'asc') ? `${next.key}.${next.dir}` : '', { replace: true });
 
   const params = useMemo(() => locParams(loc), [loc]);
   const load = useCallback(async () => {
@@ -212,8 +220,7 @@ function CollectionList({ canManage }: { canManage: boolean }) {
               // The open row is the picked colour (prototype #232120); a click
               // on it opens it again rather than closing it — the × closes.
               return (
-                <View key={r.key} style={{ backgroundColor: open === r.key ? desk.picked : 'transparent' }}>
-                <TRow gap={24} onPress={() => { if (open !== r.key) openRow(r.key); }}>
+                <TRow key={r.key} gap={24} vpad={11} lifted={open === r.key} onPress={() => { if (open !== r.key) openRow(r.key); }}>
                   <TCell width={300}>
                     <View style={{ gap: 2 }}>
                       <Text style={{ fontFamily: fonts.body, fontSize: 13.5, lineHeight: 20.9, fontWeight: '700', color: desk.ink }}>{r.title}</Text>
@@ -231,7 +238,6 @@ function CollectionList({ canManage }: { canManage: boolean }) {
                   <TCell width={90}><T size={13} num tone={desk.inkDim}>{n(r.opened)}</T></TCell>
                   <TCell width={90}><T size={13} num tone={desk.inkDim}>{n(r.hearted)}</T></TCell>
                 </TRow>
-                </View>
               );
             })}
           </Table>
@@ -367,6 +373,20 @@ function Editor({ row, catalogue, narrow, params, within, canManage, onClose, on
               </View>
             ))}
           </View>
+          {/* The two parts of a handover rule the pills cannot draw, said as
+              read-only lines with a × to clear them (audit 2). */}
+          {rule.primaryCat ? (
+            <ReadOnlyPart
+              text={`Only places whose main category is ${nameOf('cats', rule.primaryCat)}`}
+              onClear={() => setRule((r) => ({ ...r, primaryCat: null }))}
+            />
+          ) : null}
+          {rule.ageSpan && rule.ages ? (
+            <ReadOnlyPart
+              text={`Ages: covers from ≤${rule.ages[0]} to ≥${rule.ages[1]}`}
+              onClear={() => setRule((r) => ({ ...r, ageSpan: false }))}
+            />
+          ) : null}
           <RulePicker catalogue={catalogue} isOn={(k, id) => rule[k].some((x) => x.id === id)} onToggle={toggle} />
           <View style={{ gap: 10, paddingTop: 4 }}>
             <RangeLine label="Ages" value={rule.ages} onChange={(lo, hi) => range('ages', lo, hi)} onClear={() => setRule((r) => ({ ...r, ages: null }))} />
@@ -401,7 +421,9 @@ function Editor({ row, catalogue, narrow, params, within, canManage, onClose, on
             {!any
               // An older rule not yet rewritten returns what the list counts.
               ? (legacy && row ? `${n(row.places)}${row.placesAtLeast ? '+' : ''} ${row.places === 1 && !row.placesAtLeast ? 'place' : 'places'}${within ? ' within reach' : ''}` : 'Pick a category, subcategory or fact')
-              : !preview ? '…' : !countSpeaks ? '— within reach' : `${n(count)}${preview.atLeast ? '+' : ''} ${count === 1 && !preview.atLeast ? 'place' : 'places'}${within ? ' within reach' : ''}`}
+              // While a rule is being counted the line says so, never the
+              // last rule's number (audit 2).
+              : previewing || !preview ? 'Counting…' : !countSpeaks ? '— within reach' : `${n(count)}${preview.atLeast ? '+' : ''} ${count === 1 && !preview.atLeast ? 'place' : 'places'}${within ? ' within reach' : ''}`}
           </Text>
           {any && preview && count > 0 && !preview.examples.length ? (
             <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>None of these has a name we hold yet</Text>
@@ -426,6 +448,22 @@ function Editor({ row, catalogue, narrow, params, within, canManage, onClose, on
             </Press>
           </View>
         </View>
+      </View>
+    </View>
+  );
+}
+
+/** A rule part the pills cannot draw: its words, and a × that clears it. */
+function ReadOnlyPart({ text, onClear }: { text: string; onClear: () => void }) {
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+      {/* Under the pills, lined up with them. */}
+      <View style={{ width: 120 }} />
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1.5, borderColor: desk.ruleStrong, paddingVertical: 4, paddingHorizontal: 10, flexShrink: 1 }}>
+        <Text style={{ flexShrink: 1, fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: desk.inkMuted }}>{text}</Text>
+        <Press effect="none" onPress={onClear} accessibilityLabel={`Clear: ${text}`}>
+          <View style={{ opacity: 0.55 }}><Icon name="close" size={12} color={desk.inkMuted} /></View>
+        </Press>
       </View>
     </View>
   );
@@ -538,14 +576,16 @@ function PlaceDrawer({ placeRef, onClose }: { placeRef: string; onClose: () => v
 type HouseRow = {
   key: string; title: string; copy: string | null; live: boolean; person: boolean;
   /** Places within reach; null for a row that is not live (never a nought). */
-  places: number | null; audience: string; hearted: boolean; heartedBy: string | null;
+  places: number | null; placesAtLeast?: boolean; audience: string; hearted: boolean; heartedBy: string | null;
   shelf: { ref: string; name: string; kind: string | null }[];
 };
 type House = {
   households: { id: string; name: string }[];
   household?: { id: string; name: string; home: string | null };
   members?: { id: string; name: string; age: number | null; adult: boolean }[];
-  hearts?: { key: string; title: string; member: string | null; days: number; fading: boolean }[];
+  hearts?: { key: string; title: string; member: string | null; memberId?: string | null; days: number; fading: boolean }[];
+  /** What "near you" means for this household; null where it has no home we can place. */
+  reach?: { label: string | null; minutes: number; speaks: boolean; atLeast: boolean } | null;
   fadeDays?: number;
   rows?: HouseRow[];
   minPlaces?: number;
@@ -581,7 +621,6 @@ function Household() {
   const narrow = useViewport().width < 900;
   const toast = useToast();
   const { setQuery } = useRouter();
-  const { loc } = useLocation();
   const [stateRaw, setStateRaw] = useDeskParam('state');
   const state = asHouseState(stateRaw);
   const setState = (s: HouseState) => setStateRaw(s === 'list' ? '' : s);
@@ -595,18 +634,24 @@ function Household() {
 
   useCrumbs([{ name: 'Collections', go: () => setQuery({ view: null, state: null }, { replace: false }) }, { name: 'See as a household' }], [setQuery]);
 
+  // Asked again only when the household changes. The desk's location filter
+  // is not part of it — a household sees what is within its own reach — so a
+  // state change or a filter elsewhere never reloads it and never throws away
+  // the preview's hearts (audit 2, 28 Sep 2026).
   useEffect(() => {
     let live = true;
-    deskApi.get<House>('/collections/as-household', { ...locParams(loc), household: id })
+    deskApi.get<House>('/collections/as-household', { household: id })
       .then((h) => {
         if (!live) return;
         setHouse(h); setError(null);
-        setHearts(new Map((h.rows ?? []).filter((r) => r.hearted).map((r) => [r.key, r.heartedBy])));
-        setHeartDays(new Map((h.hearts ?? []).filter((x) => !x.fading).map((x) => [x.key, x.days])));
+        // Every heart, fading ones too: a fading heart is listed as such and
+        // no longer lifts its row.
+        setHearts(new Map((h.hearts ?? []).map((x) => [x.key, x.memberId ?? null])));
+        setHeartDays(new Map((h.hearts ?? []).map((x) => [x.key, x.days])));
       })
       .catch((err) => { if (live) setError(saidOf(err)); });
     return () => { live = false; };
-  }, [id, loc]);
+  }, [id]);
 
   const members = house?.members ?? [];
   const ownerM = members.find((m) => m.id === owner) ?? null;
@@ -614,30 +659,40 @@ function Household() {
   const all = house?.rows ?? [];
   // A personalised row is never shown to a child who is looking (D6).
   const visible = all.filter((r) => !(r.person && ownerM && !ownerM.adult));
-  const isHearted = (r: HouseRow) => hearts.has(r.key);
-  const here = (r: HouseRow) => (r.live ? r.places ?? 0 : 0);
+  const fadeDays = house?.fadeDays ?? 120;
+  const fadingKey = (key: string) => (heartDays.get(key) ?? 0) >= fadeDays;
+  // A fading heart no longer lifts its row (D7).
+  const isHearted = (r: HouseRow) => hearts.has(r.key) && !fadingKey(r.key);
+  /** Places within the household's reach; null where that cannot be said. */
+  const here = (r: HouseRow): number | null => (r.live ? r.places : 0);
+  /** Waiting: hearted, live, and an exact count under the minimum. */
+  const thinHere = (r: HouseRow) => { const x = here(r); return r.live && x != null && !r.placesAtLeast && x < min; };
   const titleOf = (r: HouseRow) => (r.person ? (ownerM?.adult ? `${r.title}, ${ownerM.name}` : r.title) : r.title);
 
   const phoneRows: HouseRow[] = (() => {
     if (state === 'inspire') {
-      const h1 = visible.filter((r) => isHearted(r) && r.live && here(r) >= min);
+      const h1 = visible.filter((r) => isHearted(r) && r.live && !thinHere(r));
       const rest = visible.filter((r) => !isHearted(r) && r.live).slice(0, 6);
       const mixed: HouseRow[] = [];
       h1.forEach((r, i) => { mixed.push(r); if (i === 1 && rest[0]) mixed.push(rest[0]); });
       return [...mixed, ...rest.slice(1, 4)];
     }
     if (state === 'thin') {
-      const thin = (r: HouseRow) => r.live && here(r) < min;
-      const t = visible.filter((r) => isHearted(r) && thin(r));
-      const pad = visible.filter((r) => isHearted(r) && r.live && !thin(r)).slice(0, 2);
-      return [...t, ...pad, ...visible.filter((r) => !isHearted(r) && r.live).slice(0, 3)];
+      const t = visible.filter((r) => isHearted(r) && thinHere(r));
+      const pad = visible.filter((r) => isHearted(r) && r.live && !thinHere(r)).slice(0, 2);
+      // Nothing hearted is waiting: the prototype draws the dog row in its place.
+      const lead = t.length ? t : visible.filter((r) => r.key === 'dog');
+      const leadKeys = new Set(lead.map((r) => r.key));
+      return [...lead, ...pad.filter((r) => !leadKeys.has(r.key)), ...visible.filter((r) => !isHearted(r) && r.live && !leadKeys.has(r.key)).slice(0, 3)];
     }
     if (state === 'named') return NAMED_ROWS.map((k) => visible.find((r) => r.key === k)).filter((r): r is HouseRow => !!r);
     return visible.filter((r) => r.live);
   })();
 
-  const heart = (r: HouseRow) => {
-    const on = hearts.has(r.key);
+  // A fading heart reads as not hearted on the phone, so a tap there hearts
+  // it afresh; the list's "unheart" takes any heart away.
+  const heart = (r: HouseRow, off = false) => {
+    const on = off || isHearted(r);
     // The first heart asks whose list it is (prototype `toggleHeart`).
     if (!owner && !on) { setState('first'); return; }
     const next = new Map(hearts);
@@ -710,11 +765,14 @@ function Household() {
                     const hearted = isHearted(r);
                     const n_ = here(r);
                     const notReady = !r.live;
-                    const waiting = r.live && hearted && n_ < min;
+                    const waiting = hearted && thinHere(r);
                     // The prototype's `phoneRow`: a waiting row says so; a live
-                    // one its copy line, or how many places are near.
-                    const sub = notReady ? (r.copy || '') : waiting ? 'Nothing near you this week — it comes back when there is' : (r.copy || `${n_} ${n_ === 1 ? 'place' : 'places'} near you`);
-                    const showShelf = hearted && r.live && !waiting && r.shelf.length > 0;
+                    // one its copy line, or how many places are near — never a
+                    // number we could not count.
+                    const near = n_ == null ? '' : `${n_}${r.placesAtLeast ? '+' : ''} ${n_ === 1 && !r.placesAtLeast ? 'place' : 'places'} near you`;
+                    const sub = notReady ? (r.copy || '') : waiting ? 'Nothing near you this week — it comes back when there is' : (r.copy || near);
+                    // The shelf's frame is drawn even with nothing named on it (the prototype).
+                    const showShelf = hearted && r.live && !waiting;
                     const fg = notReady ? APP.decor : INK;
                     return (
                       <View key={r.key} style={{ gap: 3, paddingVertical: 11, paddingHorizontal: 18, borderBottomWidth: 1, borderBottomColor: APP.lineSoft, backgroundColor: hearted ? APP.warm : 'transparent' }}>
@@ -750,7 +808,7 @@ function Household() {
                       </View>
                     );
                   })}
-                  {!phoneRows.length ? <Text style={{ paddingVertical: 20, paddingHorizontal: 18, fontFamily: fonts.body, fontSize: 13, color: APP.inkMuted }}>{state === 'thin' ? 'No hearted row is waiting here.' : 'Nothing shows for this household yet.'}</Text> : null}
+                  {!phoneRows.length ? <Text style={{ paddingVertical: 20, paddingHorizontal: 18, fontFamily: fonts.body, fontSize: 13, color: APP.inkMuted }}>Nothing shows for this household yet.</Text> : null}
                 </View>
               </View>
             </View>
@@ -760,6 +818,12 @@ function Household() {
           <View style={{ flex: narrow ? undefined : 1, minWidth: 0, gap: 13, alignSelf: 'stretch' }}>
             <Kicker>WHAT THIS STATE SHOWS</Kicker>
             <Text style={{ fontFamily: fonts.body, fontSize: 13, color: desk.inkMuted, lineHeight: 20.8 }}>{STATE_NOTE[state]}</Text>
+            {/* What "near you" is judged against: the household's own home and reach. */}
+            <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim, lineHeight: 19.4 }}>
+              {house.reach
+                ? `Near you: within ${house.reach.minutes} min of ${house.reach.label ?? 'home'} by car${house.reach.speaks ? '' : ' · the census has not covered it yet'}`
+                : 'This household has no home set, so nothing can be judged near it.'}
+            </Text>
             {state === 'named' || state === 'first' ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                 <Text style={{ fontFamily: fonts.body, fontSize: 11.5, fontWeight: '700', letterSpacing: 0.69, color: desk.inkDim }}>SEEN AS</Text>
@@ -780,7 +844,7 @@ function Household() {
               {all.filter((r) => hearts.has(r.key)).map((r) => {
                 const who = members.find((m) => m.id === hearts.get(r.key))?.name ?? '';
                 const days = heartDays.get(r.key) || 1;
-                const fading = days > (house.fadeDays ?? 120);
+                const fading = fadingKey(r.key);
                 return (
                   <View key={r.key} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingBottom: 9, borderBottomWidth: 1, borderBottomColor: desk.rule, flexWrap: 'wrap' }}>
                     <Text style={{ width: 230, fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: desk.ink }}>{titleOf(r)}</Text>
@@ -788,7 +852,7 @@ function Household() {
                     <Text style={{ flex: 1, minWidth: 0, fontFamily: fonts.body, fontSize: 12, color: fading ? RED : desk.inkDim }}>
                       {fading ? `hearted ${Math.round(days / 30)} months ago · fading` : `hearted ${days} ${days === 1 ? 'day' : 'days'} ago`}
                     </Text>
-                    <Press effect="none" onPress={() => heart(r)}>
+                    <Press effect="none" onPress={() => heart(r, true)}>
                       <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>unheart</Text>
                     </Press>
                   </View>

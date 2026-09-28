@@ -385,6 +385,14 @@ export async function contradictedDefaults() {
   return out;
 }
 
+/** An unset default's basis: nothing confirmed, confirmed and mixed, or confirmed and of one mind. */
+function unsetBasis(attr, list, cfg) {
+  if (!list.length) return 'No confirmed places yet';
+  const words = new Set(list.map((c) => wordOf(attr, c.value, cfg) ?? '?'));
+  if (words.size > 1) return 'The places disagree, so each answers for itself';
+  return `${list.length} confirmed ${list.length === 1 ? 'place says' : 'places say'} ${[...words][0]} · not proposed yet`;
+}
+
 /**
  * One subcategory's page: its defaults, its facts, and the places filed here
  * as a secondary.
@@ -421,7 +429,7 @@ export async function subcategoryPage(key) {
     if (!attr) continue;
     const d = defaultBy.get(k);
     const value = valueOfRow(d);
-    const list = d ? confirmed.get(`${key}|${k}`) ?? [] : [];
+    const list = confirmed.get(`${key}|${k}`) ?? [];
     const agree = list.filter((c) => agrees(attr, c.value, value, cfg)).length;
     const person = d?.origin === 'person' || (d && d.settled);
     const said = d ? wordOf(attr, value, cfg) : null;
@@ -436,7 +444,10 @@ export async function subcategoryPage(key) {
       setBy: !d ? null : person ? (d.set_by ?? 'A person') : 'Machine',
       setAt: d ? (d.set_at ?? d.updated_at) : null,
       origin: !d ? null : person ? 'person' : 'machine',
-      basis: !d || said == null ? 'The places disagree, so each answers for itself'
+      // Unset: "the places disagree" only when confirmed places are there and
+      // mixed — with none, there is nothing to disagree (can't-speak, audit
+      // 28 Sep 2026; prototype logic 1369).
+      basis: !d || said == null ? unsetBasis(attr, list, cfg)
         : person ? (list.length ? `${agree} of ${list.length} confirmed places agree` : 'No confirmed places yet')
           : list.length ? `Proposed from ${places(list.length)} · private until accepted`
             : 'No confirmed places yet · private until accepted',
@@ -459,10 +470,13 @@ export async function subcategoryPage(key) {
     removedBy: f.removed_by,
   })).sort((a, b) => a.label.localeCompare(b.label));
 
-  // Copy facts from another subcategory: the others with Active facts, and how many.
+  // Copy facts from another subcategory: the others with an Active fact this
+  // one has never looked for, and how many — exactly what a copy would add
+  // (a fact already here, at any status or removed, is not copied; C35).
+  const here = new Set(facts.map((f) => f.attribute_key));
   const liveBy = new Map();
   for (const f of everyFact) {
-    if (f.status !== 'active' || f.subcategory_key === key) continue;
+    if (f.status !== 'active' || f.subcategory_key === key || here.has(f.attribute_key)) continue;
     const r = liveBy.get(f.subcategory_key) ?? { key: f.subcategory_key, label: f.sub_label, n: 0 };
     r.n += 1;
     liveBy.set(f.subcategory_key, r);
@@ -646,11 +660,15 @@ const wasOf = (row) => (row ? { ...valueOfRow(row), settled: row.settled, origin
  * Parking on 4 subcategories · A, B, C, D", with the Why), and one Undo puts
  * every subcategory back as it was.
  */
-export async function setDefaults({ subs, fact, option, who, why = null }) {
+export async function setDefaults({ subs, fact, option, who, why = null, bulk = false }) {
   const list = [...new Set((subs ?? []).map(String))];
   if (!list.length) throw bad('Tick at least one subcategory.');
   const cfg = (await settings()).values;
-  const impact = list.length > 1 ? await bulkImpact({ subs: list, fact }) : null;
+  // The bulk bar's Set is logged as one, whatever the count ("Default set ·
+  // Parking on 1 subcategory · Lidos"); a subcategory page's Change is the
+  // prototype's "Default · Parking · Lidos" (logic.js 1363).
+  const asBulk = bulk || list.length > 1;
+  const impact = asBulk ? await bulkImpact({ subs: list, fact }) : null;
   const out = await withTransaction(async (c) => {
     const attr = await attributeOf(c, fact);
     const o = valueFor(attr, option, cfg);
@@ -668,9 +686,9 @@ export async function setDefaults({ subs, fact, option, who, why = null }) {
       items.push({ sub, fact, was: wasOf(was) });
       names.push(s.label);
     }
-    if (list.length === 1) {
+    if (!asBulk) {
       const change = await logChange({
-        client: c, who, area: 'Defaults', what: `${names[0]} · ${name}`, before: [...befores][0], after: o.label, why,
+        client: c, who, area: 'Defaults', what: `Default · ${name} · ${names[0]}`, before: [...befores][0], after: o.label, why,
         subjectType: 'default', subjectId: `${list[0]}|${fact}`,
         undo: { kind: 'default', ...items[0] },
       });
@@ -678,7 +696,7 @@ export async function setDefaults({ subs, fact, option, who, why = null }) {
     }
     const change = await logChange({
       client: c, who, area: 'Defaults',
-      what: `Default set · ${name} on ${list.length} subcategories · ${names.join(', ')}`,
+      what: `Default set · ${name} on ${list.length} ${list.length === 1 ? 'subcategory' : 'subcategories'} · ${names.join(', ')}`,
       before: befores.size === 1 ? [...befores][0] : 'Mixed', after: o.label,
       why: why ?? `Applies to ${impact.applies} places without their own answer · ${impact.keep} keep their own`,
       subjectType: 'default_bulk', subjectId: `${fact}|${[...list].sort().join(',')}`,
@@ -704,8 +722,8 @@ export async function acceptDefault({ sub, fact, who }) {
         where subcategory_key = $1 and attribute_key = $2`, [sub, fact, who]);
     const { rows: [s] } = await c.query('select label from shelf_subcategories where key = $1', [sub]);
     return logChange({
-      client: c, who, area: 'Defaults', what: `${s?.label ?? sub} · ${factWord(attr.key, attr.label)}`,
-      before: `${wordOf(attr, valueOfRow(d), cfg)} (proposed)`, after: `${wordOf(attr, valueOfRow(d), cfg)} (accepted)`,
+      client: c, who, area: 'Defaults', what: `Default accepted · ${factWord(attr.key, attr.label)} · ${s?.label ?? sub}`,
+      before: 'Proposed', after: wordOf(attr, valueOfRow(d), cfg),
       why: 'Accepted the machine\'s proposal', subjectType: 'default', subjectId: `${sub}|${fact}`,
       undo: { kind: 'default', sub, fact, was: wasOf(d) },
     });

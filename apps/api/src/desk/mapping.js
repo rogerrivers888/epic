@@ -61,7 +61,30 @@ async function targetsByWord(run = query) {
       key: r.subcategory_key, label: r.label, category: r.category_key, primary: r.is_primary, active: r.active,
     }]);
   }
+  // A word has exactly one primary, always. A set written with none (by an
+  // older route, or half of one) is read with its first target as the
+  // primary, so the desk never shows a word answered without one (audit 2).
+  for (const list of out.values()) {
+    if (!list.some((t) => t.primary)) list[0] = { ...list[0], primary: true, primaryInferred: true };
+  }
   return out;
+}
+
+/**
+ * The older way a word was pointed: a `labels` rule naming that one Google
+ * word alone (`shelf_rules`, scope 'labels', labels = {google:<word>}) with a
+ * subcategory. It files the word's places whatever `taxonomy_labels` says, so
+ * a word with such a rule and no targets is read as pointing there — never
+ * shown as unanswered while it is filing (audit 2, 28 Sep 2026). Word →
+ * subcategory, with the drawer's label.
+ */
+export async function labelRulePointers(run = query) {
+  const { rows } = await run(
+    `select substr(r.labels[1], 8) as word, r.subcategory, s.label, s.category_key, s.active
+       from shelf_rules r join shelf_subcategories s on s.key = r.subcategory
+      where r.scope = 'labels' and r.subcategory is not null
+        and cardinality(r.labels) = 1 and r.labels[1] like 'google:%'`);
+  return new Map(rows.map((r) => [r.word, { key: r.subcategory, label: r.label, category: r.category_key, primary: true, active: r.active, fromRule: true }]));
 }
 
 /**
@@ -81,7 +104,9 @@ export async function bringsAndAffected(run = query) {
         from taxonomy_labels l
        where l.namespace = 'google' and l.active
          and (l.points_at is not null or l.decision = 'generic'
-              or exists (select 1 from word_targets t where t.namespace = l.namespace and t.word = l.key))
+              or exists (select 1 from word_targets t where t.namespace = l.namespace and t.word = l.key)
+              or (l.decision is null and exists (select 1 from shelf_rules r where r.scope = 'labels' and r.subcategory is not null
+                                                   and r.labels = array[l.namespace || ':' || l.key])))
     ),
     carried as (
       select pil.venue_ref, pil.label, (pil.label in (select label from inepic)) as in_epic
@@ -147,7 +172,7 @@ async function lastDecisionByWord(run = query) {
  * suggestion — choose where it goes".
  */
 export async function mappingState() {
-  const [{ rows: words }, targets, counts, opened, carries, last, { rows: proposals }] = await Promise.all([
+  const [{ rows: words }, targets, counts, opened, carries, last, { rows: proposals }, { rows: liveSubs }, labelRules] = await Promise.all([
     query(`select key as word, label, note, seen_count, decision, points_at, active
              from taxonomy_labels where namespace = $1`, [NS]),
     targetsByWord(),
@@ -156,7 +181,10 @@ export async function mappingState() {
     carriesByWord(),
     lastDecisionByWord(),
     query(`select * from word_proposals where namespace = $1 and state = 'open'`, [NS]),
+    query('select key from shelf_subcategories where active'),
+    labelRulePointers(),
   ]);
+  const live = new Set(liveSubs.map((r) => r.key));
   const proposalByWord = new Map(proposals.map((p) => [p.word, p]));
   // Places affected is counted on every read, for every kind, never taken
   // from when the proposal was raised (audit, 28 Sep 2026). A narrowing
@@ -171,7 +199,11 @@ export async function mappingState() {
   const inEpic = []; const needs = []; const notInEpic = [];
   const keptAsIs = [];
   for (const w of words) {
-    const t = targets.get(w.word) ?? [];
+    let t = targets.get(w.word) ?? [];
+    // No targets, not out of Epic and not a fact only, yet a labels rule of
+    // its own still files its places: it points there.
+    const ruled = labelRules.get(w.word);
+    if (!t.length && ruled && !w.decision) t = [ruled];
     const answer = answerOf({ decision: w.decision, targets: t });
     const c = counts.get(w.word) ?? { brings: 0, affected: 0 };
     const row = {
@@ -191,7 +223,7 @@ export async function mappingState() {
     // later decision on the word — a bring-back, say — reopens the question.
     const kept = last.get(w.word)?.kind === 'Kept';
     if (p) {
-      needs.push({ ...row, proposal: proposalOut(p, t, c) });
+      needs.push({ ...row, proposal: proposalOut(p, t, c, live) });
     } else if (answer === 'undecided' && kept) {
       keptAsIs.push(row);
     } else if (answer === 'undecided') {
@@ -231,7 +263,9 @@ export async function narrowCounts(word, condition) {
              select 1 from place_index_labels o join taxonomy_labels l on l.namespace = 'google' and 'google:' || l.key = o.label
               where o.venue_ref = pil.venue_ref and o.label <> pil.label and l.active
                 and (l.points_at is not null or l.decision = 'generic'
-                     or exists (select 1 from word_targets t where t.namespace = l.namespace and t.word = l.key))))::int as leave
+                     or exists (select 1 from word_targets t where t.namespace = l.namespace and t.word = l.key)
+                     or (l.decision is null and exists (select 1 from shelf_rules r where r.scope = 'labels' and r.subcategory is not null
+                                                          and r.labels = array[l.namespace || ':' || l.key])))))::int as leave
       from place_index_labels pil where pil.label = $1`, [`${NS}:${word}`]);
   return { kept: r?.kept ?? 0, leave: r?.leave ?? 0 };
 }
@@ -252,8 +286,11 @@ export async function movingCount(word, target) {
 }
 
 /** A proposal as the Needs a decision row draws it. */
-function proposalOut(p, targets, counts) {
-  const text = p.change_to?.text ?? null;
+function proposalOut(p, targets, counts, live = new Set()) {
+  // "(new subcategory)" is said only while the drawer is not there: once it
+  // exists (made by hand, or left by an older undo) accepting makes nothing.
+  const made = p.change_to?.newSub?.key;
+  const text = p.change_to?.text && made && live.has(made) ? p.change_to.text.replace(/\s*\(new subcategory\)/, '') : (p.change_to?.text ?? null);
   const n = p.narrowed;
   return {
     id: p.id,
@@ -430,7 +467,9 @@ async function decide({ word, kind, next, why, who, proposalId = null }) {
     const before = await snapshot(c, word);
     const target = typeof next === 'function' ? await next(before, c) : next;
     await apply(c, word, target, who);
-    const after = await snapshot(c, word);
+    // What the decision made that was not there before (a proposal's new
+    // drawer or fact) is part of its After, so its Undo can take it away again.
+    const after = { ...(await snapshot(c, word)), ...(target.created ? { created: target.created } : {}) };
     const { rows: [d] } = await c.query(
       `insert into word_decisions (namespace, word, kind, why, who, before, after, proposal_id)
        values ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8) returning *`,
@@ -562,11 +601,12 @@ export async function decideProposal({ id, action, why = null, who }) {
         // A proposal may name a drawer or a fact that does not exist yet
         // (Science & learning centres; Has a planetarium). They are made here,
         // when a person accepts, and never before.
-        if (p.change_to?.newSub) await createSubcategory(c, p.change_to.newSub, who);
-        if (p.change_to?.newFact) await createFact(c, p.change_to.newFact, who);
+        const created = {};
+        if (p.change_to?.newSub && await createSubcategory(c, p.change_to.newSub, who)) created.sub = p.change_to.newSub.key;
+        if (p.change_to?.newFact && await createFact(c, p.change_to.newFact, who)) created.fact = p.change_to.newFact.key;
         await subExists(c, sub);
         const facts = p.change_to?.fact ? [...new Set([...before.facts, p.change_to.fact])] : before.facts;
-        return { decision: null, active: true, targets: [{ sub, primary: true, condition }], rule: before.rule, facts };
+        return { decision: null, active: true, targets: [{ sub, primary: true, condition }], rule: before.rule, facts, created: Object.keys(created).length ? created : null };
       },
     });
     return out;
@@ -595,6 +635,53 @@ export async function createSubcategory(c, { key, label, category }, who) {
     [key, label, `Said in our words: every provider word pointing at ${label} reaches this.`, who, [key]]);
   await inheritBar(key, c);
   await logChange({ client: c, who, area: 'Categories', what: `Subcategory added · ${label}`, before: '—', after: `Active › ${label}`, subjectType: 'subcategory', subjectId: key });
+  return true;
+}
+
+/**
+ * Retire a drawer a decision made, on that decision's undo — only where
+ * nothing else has come to use it: no word points at it, no place is filed in
+ * it, no rule but its own 'ours' rule names it, and no collection asks for
+ * it. Its 'ours' rule and inherited bar go with it; its "Subcategory added"
+ * change is marked undone. Retired, not deleted: accepting the proposal again
+ * switches it back on (`createSubcategory`). Returns whether it was retired.
+ */
+export async function retireMadeSubcategory(c, key, who) {
+  const { rows: [s] } = await c.query('select key, label, active from shelf_subcategories where key = $1 for update', [key]);
+  if (!s?.active) return false;
+  const { rows: [used] } = await c.query(`
+    select exists (select 1 from word_targets where subcategory_key = $1)
+        or exists (select 1 from taxonomy_labels where points_at = $1)
+        or exists (select 1 from place_index where subcategory = $1)
+        or exists (select 1 from shelf_rules where subcategory = $1 and not (scope = 'ours' and subject = $1))
+        or exists (select 1 from browse_rows where rule::text like '%' || to_jsonb($1::text)::text || '%'
+                                              or predicate::text like '%' || to_jsonb($1::text)::text || '%') as used`, [key]);
+  if (used?.used) return false;
+  await c.query('update shelf_subcategories set active = false, updated_at = now() where key = $1', [key]);
+  await c.query(`delete from shelf_rules where scope = 'ours' and subject = $1`, [key]);
+  await c.query(`delete from ready_bars where subcategory_key = $1 and set_by = 'inherited'`, [key]);
+  const { rows: [added] } = await c.query(
+    `select id from bo_changes where area = 'Categories' and subject_type = 'subcategory' and subject_id = $1
+        and what like 'Subcategory added%' and undone_at is null order by at desc limit 1`, [key]);
+  if (added) await markUndone({ client: c, id: added.id, who });
+  return true;
+}
+
+/** The same for a fact a decision made: switched off where nothing holds it. */
+export async function retireMadeFact(c, key, who) {
+  const { rows: [a] } = await c.query('select key, active from place_attributes where key = $1 for update', [key]);
+  if (!a?.active) return false;
+  const { rows: [used] } = await c.query(`
+    select exists (select 1 from taxonomy_label_carries where attribute_key = $1)
+        or exists (select 1 from place_attribute_values where attribute_key = $1)
+        or exists (select 1 from place_fact_answers where attribute_key = $1)
+        or exists (select 1 from shelf_subcategory_attributes where attribute_key = $1) as used`, [key]);
+  if (used?.used) return false;
+  await c.query('update place_attributes set active = false where key = $1', [key]);
+  const { rows: [added] } = await c.query(
+    `select id from bo_changes where area = 'Facts' and subject_type = 'fact' and subject_id = $1
+        and what like 'Fact added%' and undone_at is null order by at desc limit 1`, [key]);
+  if (added) await markUndone({ client: c, id: added.id, who });
   return true;
 }
 
@@ -633,6 +720,13 @@ export async function undo({ id, who }) {
         targets: d.before.targets ?? [], rule: d.before.rule, facts: d.before.facts,
       }, who);
     }
+    // A drawer or a fact this decision made goes again, if nothing else has
+    // come to use it since (audit 2, 28 Sep 2026: undoing Heritage railways
+    // left the drawer, its bar and its 'ours' rule behind, and the reopened
+    // proposal still said "(new subcategory)").
+    const made = d.after?.created;
+    if (made?.sub) await retireMadeSubcategory(c, made.sub, who);
+    if (made?.fact) await retireMadeFact(c, made.fact, who);
     await c.query('update word_decisions set undone_at = now(), undone_by = $2 where id = $1', [id, who]);
     if (d.proposal_id) {
       await c.query(`update word_proposals set state = 'open', decided_at = null, decided_by = null where id = $1`, [d.proposal_id]);

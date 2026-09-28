@@ -145,9 +145,10 @@ function SubList({ canManage }: { canManage: boolean }) {
     if (sorted === 'review') {
       return [...f].sort((a, b) => (b.contradicted ?? 0) - (a.contradicted ?? 0) || a.label.localeCompare(b.label));
     }
+    // Ties fall back to the name, so equal rows keep one order from load to load.
     return sortRows(f, sort, (r, k) => (
       k === 'name' ? r.label : k === 'cat' ? r.categoryLabel : k === 'places' ? r.places : k === 'facts' ? r.facts : r.related.length
-    ));
+    ), (r) => r.label);
   }, [all, cat, needle, sortRaw]); // eslint-disable-line react-hooks/exhaustive-deps
   const filtered = Boolean(needle || cat);
 
@@ -312,7 +313,7 @@ function ListRow({
                 {/* Only a link a person made can be taken off here; a pair that shares places is related by its places. */}
                 {canManage && x.why === 'linked' ? (
                   <Press effect="none" onPress={() => onUnlink(x)} accessibilityLabel={`Remove ${x.label}`}>
-                    <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: desk.inkDim, paddingHorizontal: 2, opacity: !hover || over === x.key ? 1 : 0 }}>×</Text>
+                    <View style={{ paddingHorizontal: 2, opacity: !hover || over === x.key ? 1 : 0 }}><Icon name="close" size={12} color={desk.inkDim} /></View>
                   </Press>
                 ) : null}
               </View>
@@ -355,7 +356,7 @@ function RelatedAdder({ row, catalogue, categories, onClose, onLink, onUnlink }:
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 7, paddingHorizontal: 14 }}>
           <View style={{ width: 14 }}>
-            {r ? <Icon name="check" size={13} color={LIME} /> : <Text style={{ fontFamily: fonts.body, fontSize: 13, color: desk.ink }}>+</Text>}
+            {r ? <Icon name="check" size={13} color={LIME} /> : <Icon name="add" size={13} color={desk.ink} />}
           </View>
           <Text style={{ flex: withCat ? undefined : 1, width: withCat ? 220 : undefined, minWidth: 0, fontFamily: fonts.body, fontSize: 13.5, fontWeight: r ? '700' : '500', color: r ? LIME : desk.ink }}>{o.label}</Text>
           {note ? <Text style={{ flex: withCat ? 1 : undefined, minWidth: 0, fontFamily: fonts.body, fontSize: withCat ? 12 : 11.5, color: desk.inkDim }}>{note}</Text> : null}
@@ -444,7 +445,7 @@ function BulkBar({ subs, facts, onClear, onDone }: {
     setBusy(true);
     try {
       const why = impact ? `Applies to ${impact.applies} places without their own answer · ${impact.keep} keep their own` : null;
-      const out = await deskApi.post<{ changes: Change[] }>('/categories/defaults', { subs, fact: def.key, option: opt.key, why });
+      const out = await deskApi.post<{ changes: Change[] }>('/categories/defaults', { subs, fact: def.key, option: opt.key, why, bulk: true });
       const name = factName(def.key, def.label);
       setFact(null); setValue(null);
       onDone(out.changes.map((c) => c.id), `${name}: ${opt.label} set on ${subs.length} ${subs.length === 1 ? 'subcategory' : 'subcategories'}`);
@@ -458,7 +459,8 @@ function BulkBar({ subs, facts, onClear, onDone }: {
       gap: 12, borderTopWidth: 2, borderTopColor: LIME, borderBottomWidth: 1, borderBottomColor: desk.rule,
       paddingVertical: 13, paddingHorizontal: 8, backgroundColor: desk.lifted, zIndex: 32,
     }}>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 16 }}>
+      {/* Raised over the row under it, so the fact list opens above the summary line and Set (audit, 28 Sep 2026). */}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 16, position: 'relative', zIndex: 5 }}>
         <Text style={{ fontFamily: fonts.body, fontSize: 13.5, fontWeight: '800', color: desk.ink }}>{subs.length} selected</Text>
         <Text style={{ fontFamily: fonts.body, fontSize: 13, color: desk.inkDim }}>·</Text>
         <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: desk.inkMuted }}>Set a fact</Text>
@@ -484,7 +486,7 @@ function BulkBar({ subs, facts, onClear, onDone }: {
         </Press>
       </View>
       {def && opt ? (
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 16 }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 16, position: 'relative', zIndex: 1 }}>
           <Text style={[{ fontFamily: fonts.body, fontSize: 13, color: desk.inkMuted }, tabular]}>
             {impact ? `Applies to ${n(impact.applies)} places without their own answer · ${n(impact.keep)} keep their own` : 'Counting the places it reaches'}
           </Text>

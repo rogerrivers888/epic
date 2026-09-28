@@ -27,7 +27,7 @@ import { Platform, Text, TextInput, View } from 'react-native';
 
 import { Icon } from '../../components/Icon';
 import { Press } from '../../components/press';
-import { Wide } from '../filing/desk';
+import { useViewport } from '../../hooks/useViewport';
 import { useDeskGo } from './Desk';
 import { LIME, Muted, ON_LIME, deskApi, desk, fonts, n, saidOf, tabular, useToast } from './kit';
 
@@ -83,11 +83,11 @@ const isSwitch = (seg: Seg) => seg.startsWith('?');
 const pct = (seg: Seg) => seg.endsWith('%');
 
 /** The sentence with its numbers filled in, as Changes records it. */
-function sentence(segs: Seg[], values: Record<string, unknown>, over?: Record<string, unknown>) {
+function sentence(segs: Seg[], values: Record<string, unknown>) {
   return segs.filter((s) => !isSwitch(s)).map((s) => {
     if (!isNum(s)) return s;
     const k = keyOf(s);
-    const v = over && k in over ? over[k] : values[k];
+    const v = values[k];
     return `${v ?? '—'}${pct(s) ? '%' : ''}`;
   }).join('');
 }
@@ -99,6 +99,9 @@ export function Automations({ canManage = false }: { canManage?: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [month, setMonth] = useState<Month | null>(null);
   const [tip, setTip] = useState<keyof Month | null>(null);
+  // A phone stacks each step — its number and name, the sentence, then its
+  // setting boxes beneath — in the same tree the wide table draws (CH.8).
+  const narrow = useViewport().width < 900;
   useEffect(() => {
     let live = true;
     // A count that did not load stays "—", never 0.
@@ -113,15 +116,14 @@ export function Automations({ canManage = false }: { canManage?: boolean }) {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const save = useCallback(async (segs: Seg[], key: string, value: number | boolean) => {
+  const save = useCallback(async (key: string, value: number | boolean) => {
     if (!data) return;
     const was = data.values[key];
     // Drawn at once; put back if the API refuses.
     setData((d) => (d ? { ...d, values: { ...d.values, [key]: value } } : d));
     try {
-      const out = await deskApi.put<Saved>(`/settings/${encodeURIComponent(key)}`, {
-        value, what: sentence(segs, data.values, { [key]: value }),
-      });
+      // The API writes "What changed" itself from the key and the value.
+      const out = await deskApi.put<Saved>(`/settings/${encodeURIComponent(key)}`, { value });
       if (!out.changed) return;
       const unit = data.spec[key]?.unit === '%' ? '%' : '';
       const text = typeof value === 'boolean'
@@ -154,7 +156,7 @@ export function Automations({ canManage = false }: { canManage?: boolean }) {
         max={spec.max ?? 999}
         step={spec.step ?? 1}
         editable={canManage}
-        onCommit={(v) => { void save(segs, k, v); }}
+        onCommit={(v) => { void save(k, v); }}
       />
     );
   });
@@ -162,7 +164,7 @@ export function Automations({ canManage = false }: { canManage?: boolean }) {
   const switches = (segs: Seg[]) => segs.filter(isSwitch).map((s) => {
     const k = keyOf(s);
     const on = data.values[k] === true;
-    return <Switch key={k} on={on} disabled={!canManage} onFlip={() => { void save(segs, k, !on); }} />;
+    return <Switch key={k} on={on} disabled={!canManage} onFlip={() => { void save(k, !on); }} />;
   });
 
   return (
@@ -172,7 +174,7 @@ export function Automations({ canManage = false }: { canManage?: boolean }) {
           <Text style={{ fontFamily: fonts.heading, fontWeight: '800', fontSize: 31, letterSpacing: -1.085, lineHeight: 32, color: desk.ink }}>Fact automations</Text>
           <Text style={{ fontFamily: fonts.body, fontSize: 13, color: desk.inkDim }}>What the machine does on its own, in the order it happens.</Text>
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 30 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 30, flexWrap: 'wrap' }}>
           {RESULTS.map((r) => (
             <View key={r.key} style={{ position: 'relative', zIndex: tip === r.key ? 30 : 1 }}>
               <Press
@@ -205,9 +207,8 @@ export function Automations({ canManage = false }: { canManage?: boolean }) {
         </View>
       </View>
 
-      <Wide min={900}>
-        <View style={{ marginTop: 10 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18, borderBottomWidth: 2, borderBottomColor: desk.ruleStrong, paddingTop: 12, paddingBottom: 9 }}>
+      <View style={{ marginTop: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18, borderBottomWidth: 2, borderBottomColor: desk.ruleStrong, paddingTop: 12, paddingBottom: 9, display: narrow ? 'none' : 'flex' }}>
             <Text style={[headCell, { width: 190 }]}>Step</Text>
             <Text style={[headCell, { flex: 1 }]}>What happens</Text>
             <Text style={[headCell, { width: 300 }]}>Setting</Text>
@@ -216,10 +217,10 @@ export function Automations({ canManage = false }: { canManage?: boolean }) {
             <React.Fragment key={step.no}>
               {step.rows.map((segs, i) => (
                 <View key={i} style={{
-                  flexDirection: 'row', alignItems: 'center', gap: 18, paddingVertical: 12,
+                  flexDirection: narrow ? 'column' : 'row', alignItems: narrow ? 'stretch' : 'center', gap: narrow ? 8 : 18, paddingVertical: 12,
                   borderTopWidth: i === 0 ? 2 : 1, borderTopColor: i === 0 ? desk.ruleStrong : desk.rule,
                 }}>
-                  <View style={{ width: 190, flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
+                  <View style={{ width: narrow ? undefined : 190, flexDirection: 'row', alignItems: 'baseline', gap: 8, display: narrow && i > 0 ? 'none' : 'flex' }}>
                     {i === 0 ? (
                       <>
                         <Text style={{ fontFamily: fonts.heading, fontSize: 13, fontWeight: '800', color: LIME }}>{step.no}</Text>
@@ -227,8 +228,8 @@ export function Automations({ canManage = false }: { canManage?: boolean }) {
                       </>
                     ) : null}
                   </View>
-                  <Text style={{ flex: 1, minWidth: 0, fontFamily: fonts.body, fontSize: 13.5, lineHeight: 20, color: desk.ink }}>{sentence(segs, data.values)}</Text>
-                  <View style={{ width: 300, flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                  <Text style={{ flex: narrow ? undefined : 1, minWidth: 0, fontFamily: fonts.body, fontSize: 13.5, lineHeight: 20, color: desk.ink }}>{sentence(segs, data.values)}</Text>
+                  <View style={{ width: narrow ? undefined : 300, flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
                     {switches(segs)}
                     {setting(segs)}
                   </View>
@@ -236,7 +237,7 @@ export function Automations({ canManage = false }: { canManage?: boolean }) {
               ))}
               {step.note ? (
                 <View style={{
-                  flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginLeft: 208, marginBottom: 14,
+                  flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginLeft: narrow ? 0 : 208, marginBottom: 14,
                   paddingVertical: 11, paddingHorizontal: 14, backgroundColor: desk.picked, borderWidth: 1, borderColor: desk.rule,
                 }}>
                   <View style={{ marginTop: 2 }}><Icon name="info" size={15} color={desk.inkDim} /></View>
@@ -245,21 +246,18 @@ export function Automations({ canManage = false }: { canManage?: boolean }) {
               ) : null}
             </React.Fragment>
           ))}
-        </View>
-      </Wide>
+      </View>
 
-      <Wide min={900}>
-        <View style={{ marginTop: 22 }}>
+      <View style={{ marginTop: 22 }}>
           <Text style={{
             fontFamily: fonts.heading, fontSize: 10, fontWeight: '700', letterSpacing: 0.7, color: desk.inkDim,
             paddingBottom: 8, borderBottomWidth: 2, borderBottomColor: desk.ruleStrong,
           }}>HOUSEKEEPING</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: desk.rule }}>
-            <Text style={{ flex: 1, minWidth: 0, fontFamily: fonts.body, fontSize: 13.5, lineHeight: 20, color: desk.ink }}>{sentence(HOUSEKEEPING, data.values)}</Text>
-            <View style={{ width: 300, flexDirection: 'row' }}>{setting(HOUSEKEEPING)}</View>
+          <View style={{ flexDirection: narrow ? 'column' : 'row', alignItems: narrow ? 'stretch' : 'center', gap: narrow ? 8 : 18, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: desk.rule }}>
+            <Text style={{ flex: narrow ? undefined : 1, minWidth: 0, fontFamily: fonts.body, fontSize: 13.5, lineHeight: 20, color: desk.ink }}>{sentence(HOUSEKEEPING, data.values)}</Text>
+            <View style={{ width: narrow ? undefined : 300, flexDirection: 'row' }}>{setting(HOUSEKEEPING)}</View>
           </View>
-        </View>
-      </Wide>
+      </View>
     </View>
   );
 }
@@ -280,8 +278,12 @@ function NumberBox({ value, percent, min, max, step, editable, onCommit }: {
   const [text, setText] = useState(String(value));
   useEffect(() => { setText(String(value)); }, [value]);
   const commit = () => {
-    const typed = Number(String(text).replace(/[^0-9]/g, ''));
-    if (text.trim() === '' || !Number.isFinite(typed)) { setText(String(value)); return; }
+    // Only whole digits (a trailing % allowed) count as typed. Anything else —
+    // empty, "abc", "1.5", "-3" — puts the old value back and saves nothing;
+    // it is never read as 0 and clamped up to the minimum (second audit CH.1).
+    const m = /^\s*(\d+)\s*%?\s*$/.exec(String(text));
+    const typed = m ? Number(m[1]) : NaN;
+    if (!m || !Number.isFinite(typed)) { setText(String(value)); return; }
     const stepped = step > 1 ? Math.round(typed / step) * step : Math.round(typed);
     const next = Math.min(max, Math.max(min, stepped));
     setText(String(next));
@@ -300,7 +302,11 @@ function NumberBox({ value, percent, min, max, step, editable, onCommit }: {
         editable={editable}
         keyboardType="number-pad"
         inputMode="numeric"
-        selectTextOnFocus
+        // Select the old value in the focus event itself. `selectTextOnFocus`
+        // selects a moment later on the web, so a quick first digit was
+        // selected and then overwritten by the second ("13" saved as 3).
+        onFocus={(e) => { const t = e?.target as unknown as { select?: () => void }; if (Platform.OS === 'web') t?.select?.(); }}
+        selectTextOnFocus={Platform.OS !== 'web'}
         accessibilityLabel="Setting"
         style={[{
           width: String(text).length > 2 ? 36 : 26, padding: 0, textAlign: percent ? 'right' : 'center',

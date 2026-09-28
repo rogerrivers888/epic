@@ -227,7 +227,9 @@ test('See as a household sends every row in library order with what the preview 
   const [a, b] = out.rows.filter((r) => r.key.startsWith('fc-'));
   assert.equal(a.key, 'fc-a');
   assert.equal(a.live, true);
-  assert.equal(a.places, 6);
+  // Judged within the household's own reach (audit 2): with no home set,
+  // nothing can be said to be near it — null, never a nought or the estate.
+  assert.equal(a.places, null);
   assert.deepEqual(a.shelf.map((p) => p.name), ['The Named Pool']);
   assert.equal(b.live, false, 'a row that is not live is sent, and drawn as not ready');
   assert.equal(b.places, null, 'and its count is not a nought');

@@ -122,6 +122,12 @@ function ResultRow({ on, name, kind, onPress, nameWidth }: { on: boolean; name: 
   );
 }
 
+/**
+ * The prototype's body line height (1.55): a subcategory row is 35px and a
+ * category row 53px with it, and React Native's default draws them shorter.
+ */
+const LH = (size: number) => Math.round(size * 1.55);
+
 const box: ViewStyle = { borderWidth: 1, borderColor: desk.ruleStrong, backgroundColor: desk.well, maxWidth: '100%' };
 const match = (q: string) => (s: string) => s.toLowerCase().includes(q);
 
@@ -156,6 +162,8 @@ const humanise = (w: string) => w.replace(/_/g, ' ').replace(/^./, (c) => c.toUp
 export function WordPicker(p: WordPickerProps) {
   const vw = useViewport().width;
   const narrow = vw < 900;
+  // No hover to reveal "Make primary" with: a phone-width frame, or native.
+  const touch = narrow || !web;
   const [tabHere, setTabHere] = useState<'cat' | 'fact'>('cat');
   const tab = p.tab ?? tabHere;
   const setTab = (t: 'cat' | 'fact') => { setTabHere(t); p.onTab?.(t); };
@@ -191,7 +199,7 @@ export function WordPicker(p: WordPickerProps) {
     // On a phone the picker is drawn below its row, outside the table's
     // sideways scroll, and takes the width of the frame.
     <View style={[box, { width: narrow ? '100%' : 640 }]}>
-      <SearchLine value={p.query} onChange={p.onQuery} placeholder="Search every subcategory and fact" note={q ? 'searching' : 'type to search'} onClose={p.onClose} />
+      <SearchLine value={p.query} onChange={p.onQuery} placeholder={narrow ? 'Search' : 'Search every subcategory and fact'} note={q ? 'searching' : 'type to search'} onClose={p.onClose} />
       {q ? (
         <View style={{ minHeight: 240, paddingVertical: 6 }}>
           {results.map((r) => <ResultRow key={r.key} on={r.on} name={r.name} kind={r.kind} onPress={r.go} nameWidth={narrow ? 170 : 230} />)}
@@ -208,7 +216,7 @@ export function WordPicker(p: WordPickerProps) {
                   <Text style={{ width: narrow ? undefined : 210, fontFamily: fonts.body, fontSize: 13.5, fontWeight: '800', color: desk.ink }}>{primaryName}</Text>
                   <PrimaryTag />
                   <View style={{ flex: 1 }} />
-                  <Text style={{ fontFamily: fonts.body, fontSize: 11.5, color: desk.inkDim }}>to change it, hover another ticked subcategory</Text>
+                  <Text style={{ fontFamily: fonts.body, fontSize: 11.5, color: desk.inkDim }}>{touch ? 'to change it, tap Make primary on another ticked subcategory' : 'to change it, hover another ticked subcategory'}</Text>
                 </View>
               ) : null}
               <View style={{ flexDirection: 'row', alignItems: 'stretch', minHeight: 240 }}>
@@ -219,8 +227,8 @@ export function WordPicker(p: WordPickerProps) {
                     return (
                       <Press key={c.key} effect="none" onPress={() => setCat(c.key)}>
                         <View style={{ gap: 2, paddingVertical: 7, paddingHorizontal: 14, backgroundColor: on ? desk.picked : 'transparent' }}>
-                          <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: on ? '700' : '500', color: on ? desk.ink : desk.inkMuted }}>{c.label}</Text>
-                          <Text style={{ fontFamily: fonts.body, fontSize: 11, color: desk.inkDim }}>{n} {n === 1 ? 'subcategory' : 'subcategories'}</Text>
+                          <Text style={{ fontFamily: fonts.body, fontSize: 13, lineHeight: LH(13), fontWeight: on ? '700' : '500', color: on ? desk.ink : desk.inkMuted }}>{c.label}</Text>
+                          <Text style={{ fontFamily: fonts.body, fontSize: 11, lineHeight: LH(11), color: desk.inkDim }}>{n} {n === 1 ? 'subcategory' : 'subcategories'}</Text>
                         </View>
                       </Press>
                     );
@@ -247,12 +255,12 @@ export function WordPicker(p: WordPickerProps) {
                           <Press effect="none" style={{ flex: 1, minWidth: 0 }} onPress={isPrimary ? undefined : () => p.onToggleSub(key)}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                               <Mark on={on} />
-                              <Text style={{ flex: 1, minWidth: 0, fontFamily: fonts.body, fontSize: 13.5, fontWeight: on ? '800' : '500', color: on ? LIME : desk.ink }}>{s.label}</Text>
+                              <Text style={{ flex: 1, minWidth: 0, fontFamily: fonts.body, fontSize: 13.5, lineHeight: LH(13.5), fontWeight: on ? '800' : '500', color: on ? LIME : desk.ink }}>{s.label}</Text>
                             </View>
                           </Press>
                           {isPrimary ? <PrimaryTag /> : null}
-                          {/* "Make primary" on hover only (a tap on a phone shows it too, as there is no hover). */}
-                          {on && !isPrimary && (hover === key || !web) ? (
+                          {/* "Make primary" on hover; on a phone, where there is no hover, on every ticked row. */}
+                          {on && !isPrimary && (hover === key || touch) ? (
                             <Press effect="none" onPress={() => { setHover(null); p.onMakePrimary(key); }} accessibilityLabel={`Make ${s.label} the primary`}>
                               <Text style={{ fontFamily: fonts.body, fontSize: 11.5, fontWeight: '700', color: desk.inkMuted, borderBottomWidth: 1, borderBottomColor: desk.ruleStrong }}>Make primary</Text>
                             </Press>
@@ -342,7 +350,7 @@ export function RulePicker({ catalogue, isOn, onToggle }: {
     : [];
   return (
     <View style={[box, { width: narrow ? '100%' : 640 }]}>
-      <SearchLine value={q} onChange={setQ} placeholder="Search categories, subcategories and facts" />
+      <SearchLine value={q} onChange={setQ} placeholder={narrow ? 'Search' : 'Search categories, subcategories and facts'} />
       {s ? (
         <View style={{ minHeight: 200, paddingVertical: 6 }}>
           {results.map(({ k, o }) => <ResultRow key={`${k}:${o.key}`} on={isOn(k, o.key)} name={o.label} kind={KIND[k]} onPress={() => onToggle(k, o.key)} nameWidth={narrow ? 170 : 240} />)}

@@ -26,7 +26,10 @@ import { logChange } from './changes.js';
 import { settings } from './settings.js';
 import { COST_WORD } from './categories.js';
 import { describe } from './places.js';
-import { countOf } from './location.js';
+import { censusCovered, countOf } from './location.js';
+import { ringFor, placesWithin } from '../repositories/reach.js';
+import { censusInRing } from '../repositories/censusRing.js';
+import { CAP_MINUTES } from '../domain/reach.js';
 
 /** A heart this old no longer lifts a collection (the existing desk's rule, say.ts). */
 export const FADE_DAYS = 120;
@@ -64,6 +67,7 @@ export function fromPredicate(p) {
     if (Array.isArray(c.all)) { c.all.forEach((x) => take(x, not)); return; }
     if (Array.isArray(c.any)) { c.any.forEach((x) => take(x, not)); return; }
     if (c.overlaps && c.attribute === 'suits-ages') out.ages = [c.overlaps[0], c.overlaps[1]];
+    else if (c.attribute === 'cost-band' && c.choice && COST_WORD[c.choice]) out.cost.push(COST_WORD[c.choice]);
     else if (Array.isArray(c.subcategory)) c.subcategory.forEach((s) => out.subs.push({ id: s, not }));
     else if (Array.isArray(c.category)) c.category.forEach((k) => out.cats.push({ id: k, not }));
     else if (c.attribute && typeof c.yes === 'boolean') {
@@ -92,6 +96,8 @@ export function matchesPredicate(pred, p) {
   if (Array.isArray(pred.subcategory)) return pred.subcategory.some((s) => p.subs.includes(s));
   if (Array.isArray(pred.category)) return pred.category.some((c) => p.cats.includes(c));
   if (pred.attribute && typeof pred.yes === 'boolean') return pred.yes ? p.facts.has(pred.attribute) : p.no?.has(pred.attribute) ?? false;
+  // A cost band is a choice ("cheap"): the place's band, in the same words.
+  if (pred.attribute === 'cost-band' && pred.choice) return Boolean(p.cost) && p.cost === COST_WORD[pred.choice];
   return false;
 }
 
@@ -145,6 +151,14 @@ export function legacyWords(pred, names = {}) {
     if (Array.isArray(c.category)) return c.category.map(cat).join(' or ');
     if (c.overlaps) return `suits ages ${c.overlaps[0]} to ${c.overlaps[1]}`;
     if (c.attribute && typeof c.yes === 'boolean') return c.yes ? fact(c.attribute) : `${fact(c.attribute)}: no`;
+    // The thresholds are the rule: "How much you learn at least 3", never
+    // the axis's name alone (audit 2 — a retired axis read as a bare fact).
+    if (c.attribute && c.atLeast != null) return `${fact(c.attribute)} at least ${c.atLeast}`;
+    if (c.attribute && c.atMost != null) return `${fact(c.attribute)} at most ${c.atMost}`;
+    if (c.attribute && c.is != null) return `${fact(c.attribute)} is ${c.is}`;
+    if (c.attribute === 'suits-ages' && c.from != null) return `suits ages from ${c.from}`;
+    if (c.attribute && c.from != null) return `${fact(c.attribute)} from ${c.from}`;
+    if (c.attribute && c.choice) return `${fact(c.attribute)}: ${c.choice}`;
     if (c.attribute) return fact(c.attribute);
     return '';
   };
@@ -341,39 +355,60 @@ export async function collectionList({ loc = null } = {}) {
   return { rows: list, count: list.length, engagementSpeaks: eng.speaks, atLeast: list.some((r) => r.placesAtLeast) };
 }
 
+/** How many of a subcategory's places the example search looks through. */
+const NAME_SEARCH = 5000;
+
+/**
+ * The first `limit` of `refs`, in order, that have a name in our own record
+ * or the atlas — each test an index lookup (place_records' key,
+ * attractions.venue_ref, and the atlas-ref expression index).
+ */
+async function namedAmong(refs, limit) {
+  if (!refs.length || limit <= 0) return [];
+  const { rows } = await query(
+    `select r.ref from unnest($1::text[]) with ordinality as r(ref, ord)
+      where exists (select 1 from place_records pr where pr.venue_ref = r.ref and pr.name is not null)
+         or exists (select 1 from attractions x where x.venue_ref = r.ref)
+         or exists (select 1 from attractions x where 'atlas:' || x.id::text = r.ref)
+      order by r.ord limit $2`, [refs, limit]);
+  return rows.map((r) => r.ref);
+}
+
 /**
  * What a rule would return: a count and example places spread across the
  * subcategories in it — two each, one each once there are five or more, up to
  * ten (README).
  */
-export async function preview({ rule: raw, loc = null }) {
+export async function preview({ rule: raw, loc = null, examples = true }) {
   const rule = cleanRule(raw);
   if (ruleIsEmpty(rule)) return { count: 0, anywhere: 0, examples: [] };
   const idx = await placeIndex();
   const refs = loc && !loc.unknown ? loc.refs : null;
   const everywhere = idx.places.filter((p) => matches(rule, p));
   const hits = refs ? everywhere.filter((p) => refs.has(p.ref)) : everywhere;
+  // Pushed, not spread: a copy per place made a big drawer quadratic.
   const bySub = new Map();
-  for (const p of hits) bySub.set(p.primarySub, [...(bySub.get(p.primarySub) ?? []), p]);
+  for (const p of hits) { const l = bySub.get(p.primarySub); if (l) l.push(p); else bySub.set(p.primarySub, [p]); }
+  if (!examples) {
+    const said = refs ? countOf(hits.length, loc) : { n: hits.length, atLeast: false };
+    return { count: said.n, atLeast: said.atLeast, anywhere: everywhere.length, examples: [] };
+  }
   const each = bySub.size >= 5 ? 1 : 2;
-  // Names are looked for across every matching place in a subcategory, a
-  // batch at a time until enough are found — never only the first 2,000, which
-  // could all be nameless while named ones sit further down (audit, 28 Sep).
+  // Names are found with one indexed question per subcategory — which of
+  // its places (the first NAME_SEARCH of them) have a name we hold — and only
+  // the few picked are described. The old way described every place a batch
+  // at a time until enough were named, which on a big nameless drawer held
+  // the count back for seconds (audit 2, 28 Sep 2026).
   const picked = [];
   for (const [sub, list] of bySub) {
-    let found = 0;
-    for (let i = 0; i < list.length && found < each; i += 200) {
-      const batch = list.slice(i, i + 200);
-      const described = await describe(batch.map((p) => p.ref));
-      for (const p of batch) {
-        const d = described.get(p.ref);
-        if (!d?.name) continue;
-        picked.push({ ref: p.ref, sub, name: d.name, town: d.town ?? null });
-        found += 1;
-        if (found >= each) break;
-      }
-    }
     if (picked.length >= 10) break;
+    const named = await namedAmong(list.slice(0, NAME_SEARCH).map((p) => p.ref), each);
+    if (!named.length) continue;
+    const described = await describe(named);
+    for (const ref of named) {
+      const d = described.get(ref);
+      if (d?.name) picked.push({ ref, sub, name: d.name, town: d.town ?? null });
+    }
   }
   const { rows: subs } = await query('select key, label from shelf_subcategories where key = any($1)', [[...bySub.keys()]]);
   const label = new Map(subs.map((s) => [s.key, s.label]));
@@ -405,7 +440,8 @@ export async function placeCard(ref) {
     town: info.town ?? null,
     sentence: info.sentence ?? null,
     facts: p ? factLines(p, attrs) : [],
-    collections: p ? rows_.map(toCollection).filter((c) => (c.legacy || !ruleIsEmpty(c.rule)) && fits(c, p)).map((c) => ({ key: c.key, title: c.title })) : [],
+    // At most eight, as the prototype's drawer (audit 2).
+    collections: p ? rows_.map(toCollection).filter((c) => (c.legacy || !ruleIsEmpty(c.rule)) && fits(c, p)).slice(0, 8).map((c) => ({ key: c.key, title: c.title })) : [],
   };
 }
 
@@ -473,7 +509,7 @@ export async function saveCollection({ key = null, title, copy = '', rule: raw, 
   if (!t) throw bad('A collection needs a title.');
   if (ruleIsEmpty(rule)) throw bad('A collection needs a rule.');
   // Judged on the whole estate, whatever the location filter on the screen.
-  const { count } = await preview({ rule });
+  const { count } = await preview({ rule, examples: false });
   if (!count) throw bad('Nothing matches that rule yet.');
   const names = await ruleNames();
   const out = await withTransaction(async (c) => {
@@ -585,7 +621,44 @@ export async function undoCollection({ change, who }) {
  *
  * Returns every collection with why it is shown or not, so the screen can say.
  */
-export async function asHousehold({ householdId, loc = null }) {
+/**
+ * A household's own reach — its home and its travel minutes, by car — as the
+ * location filter's shape (`refs`, `speaks`, `atLeast` …), so `countOf` reads
+ * it the same way. Null where the household has no home we can place: then
+ * nothing can be judged near it (audit 2, 28 Sep 2026: "near you" and
+ * WAITING were read against the desk's own filter, not the household).
+ */
+export async function householdReach(h) {
+  const hasPoint = h?.home_lat != null && h?.home_lng != null;
+  if (!h || (!hasPoint && !String(h.home_label ?? '').trim())) return null;
+  const asked = Number(h.max_travel_minutes) > 0 ? Number(h.max_travel_minutes) : 30;
+  const minutes = Math.min(asked, CAP_MINUTES);
+  const ring = await ringFor(hasPoint
+    ? { lat: Number(h.home_lat), lng: Number(h.home_lng), label: h.home_label ?? null, minutes, mode: 'driving' }
+    : { where: h.home_label, minutes, mode: 'driving' }).catch(() => null);
+  if (!ring) return null;
+  const [placed, within, covered] = await Promise.all([
+    censusInRing({ cells: ring.band ?? ring.cells, outcodes: ring.outcodes }).catch(() => null),
+    placesWithin(ring.cell, { minutes, mode: 'driving', edge: 0 }).catch(() => []),
+    censusCovered(ring.outcodes ?? []),
+  ]);
+  const outcodes = (ring.outcodes ?? []).map((o) => String(o).toUpperCase());
+  const uncovered = outcodes.filter((o) => !covered.has(o));
+  const unresolved = Object.values(placed?.unresolved ?? {}).reduce((n, v) => n + Number(v || 0), 0);
+  const unplaceable = Number(placed?.unplaceable ?? 0);
+  const speaks = Boolean(placed) && outcodes.length > 0 && uncovered.length < outcodes.length;
+  return {
+    label: ring.label ?? h.home_label ?? null, minutes: asked, mode: 'car',
+    capped: asked > CAP_MINUTES,
+    refs: new Set([...Object.values(placed?.refs ?? {}).flat(), ...within.map((p) => p.venue_ref)]),
+    speaks, uncovered, unresolved, unplaceable,
+    atLeast: asked > CAP_MINUTES || !speaks || uncovered.length > 0 || unresolved > 0 || unplaceable > 0,
+  };
+}
+
+// The desk's location filter is not asked (the route may still send it): a
+// household sees what is within its own reach, whatever the desk shows.
+export async function asHousehold({ householdId }) {
   const cfg = (await settings()).values;
   const [{ rows: [h] }, { rows: members }, { rows }, idx, { rows: hearts }] = await Promise.all([
     query('select id, name, home_label, home_lat, home_lng, max_travel_minutes from households where id = $1', [householdId]),
@@ -602,8 +675,7 @@ export async function asHousehold({ householdId, loc = null }) {
   // audience test only, and the screen says "age not given".
   const known = members.map((m) => (m.birth_date ? year - new Date(m.birth_date).getFullYear() : m.birth_year ? year - m.birth_year : null));
   const ages = members.map((m, i) => known[i] ?? (m.is_minor ? 8 : 35));
-  const refs = loc && !loc.unknown ? loc.refs : null;
-  const pool = refs ? idx.places.filter((p) => refs.has(p.ref)) : idx.places;
+  const reach = await householdReach(h);
   // Hearts fade (D7): a heart older than FADE_DAYS no longer lifts a row.
   const fresh = hearts.filter((x) => Date.now() - new Date(x.hearted_at).getTime() < FADE_DAYS * 86400_000);
   const hearted = new Map(fresh.map((x) => [x.row_key, x.hearted_at]));
@@ -612,9 +684,14 @@ export async function asHousehold({ householdId, loc = null }) {
   const hitsOf = new Map();
   const out = live.map((r) => {
     const c = toCollection(r);
-    const hits = !c.legacy && ruleIsEmpty(c.rule) ? [] : pool.filter((p) => fits(c, p));
-    const n = hits.length;
-    hitsOf.set(c.key, hits);
+    const all = !c.legacy && ruleIsEmpty(c.rule) ? [] : idx.places.filter((p) => fits(c, p));
+    // Within the household's own reach; with no reach, nothing is near and
+    // the count cannot speak (null, never a nought).
+    const hits = reach ? all.filter((p) => reach.refs.has(p.ref)) : [];
+    const said = reach ? countOf(hits.length, reach) : { n: null, atLeast: false };
+    const n = said.n;
+    // The shelf is from what is near; with no home, from anywhere.
+    hitsOf.set(c.key, reach ? hits : all);
     firstHits.set(c.key, hits.slice(0, 3));
     const a = c.audience;
     // Named `suits`, not `fits`: a local `fits` here shadowed the rule test
@@ -622,23 +699,29 @@ export async function asHousehold({ householdId, loc = null }) {
     const suits = a.key === 'everyone' ? true : a.key === 'adult' ? ages.some((x) => x >= 16) : ages.some((x) => x >= a.lo && x <= a.hi);
     let why = null;
     if (!suits) why = `Nobody here is ${a.key === 'adult' ? 'an adult' : `aged ${a.lo}–${a.hi}`}`;
-    else if (n < cfg.collectionMinPlaces) why = `Too thin here · ${n} place${n === 1 ? '' : 's'}`;
-    return { key: c.key, title: c.title, copy: c.copy, places: n, audience: a.label, hearted: hearted.has(c.key), shown: !why, why };
+    // Thin only where the count can say so: an exact number under the
+    // minimum, never a floor or a count we could not make.
+    else if (n != null && !said.atLeast && n < cfg.collectionMinPlaces) why = `Too thin here · ${n} place${n === 1 ? '' : 's'}`;
+    return { key: c.key, title: c.title, copy: c.copy, places: n, placesAtLeast: said.atLeast, audience: a.label, hearted: hearted.has(c.key), shown: !why, why };
   });
   // Three places a live collection would put on its shelf, named from our
   // own record only; a place with no name we may print is left off. Every
   // live row has one, because the preview's hearts are the screen's own and a
   // row can be hearted there (prototype `phoneRow`: a shelf on every hearted
   // live row that is not waiting, in every state).
-  const shelfRefs = out.flatMap((c) => hitsOf.get(c.key).slice(0, 12).map((p) => p.ref));
+  // The names are looked for past the first twelve (audit 2): the first
+  // three with a name we hold among the first NAME_SEARCH, by index.
+  const byRef = new Map(idx.places.map((p) => [p.ref, p]));
+  const shelfOf = new Map();
+  for (const c of out) shelfOf.set(c.key, await namedAmong(hitsOf.get(c.key).slice(0, NAME_SEARCH).map((p) => p.ref), 3));
   const [named, { rows: subLabels }] = await Promise.all([
-    describe(shelfRefs),
+    describe([...shelfOf.values()].flat()),
     query('select key, label from shelf_subcategories'),
   ]);
   const subLabel = new Map(subLabels.map((x) => [x.key, x.label]));
   for (const c of out) {
-    c.shelf = hitsOf.get(c.key).slice(0, 12).filter((p) => named.get(p.ref)?.name).slice(0, 3)
-      .map((p) => ({ ref: p.ref, name: named.get(p.ref).name, kind: subLabel.get(p.primarySub) ?? null }));
+    c.shelf = shelfOf.get(c.key).filter((ref) => named.get(ref)?.name)
+      .map((ref) => ({ ref, name: named.get(ref).name, kind: subLabel.get(byRef.get(ref)?.primarySub) ?? null }));
   }
   const outBy = new Map(out.map((c) => [c.key, c]));
   const memberName = new Map(members.map((m) => [m.id, m.name]));
@@ -663,6 +746,7 @@ export async function asHousehold({ householdId, loc = null }) {
         // A personalised row (handover D6): "A day to yourself, Sarah".
         person: r.key === 'dayyourself',
         places: c ? c.places : null,
+        placesAtLeast: c ? c.placesAtLeast : false,
         audience: c ? c.audience : audienceOf(toCollection(r).rule).label,
         hearted: hearted.has(r.key), heartedBy: heartedBy.get(r.key) ?? null,
         shelf: c ? c.shelf : [],
@@ -670,12 +754,15 @@ export async function asHousehold({ householdId, loc = null }) {
     }),
     minPlaces: cfg.collectionMinPlaces,
     household: { id: h.id, name: h.name, home: h.home_label, ages },
+    // What "near you" means for this household, or null where it has no
+    // home we can place (the screen says so).
+    reach: reach ? { label: reach.label, minutes: reach.minutes, speaks: reach.speaks, atLeast: reach.atLeast } : null,
     members: members.map((m, i) => ({ id: m.id, name: m.name, age: known[i], adult: ages[i] >= 16 })),
     // Every heart, fading ones included and marked, so the screen can say why
     // an old heart no longer lifts its collection.
     hearts: hearts.map((x) => {
       const days = Math.max(0, Math.floor((Date.now() - new Date(x.hearted_at).getTime()) / 86400_000));
-      return { key: x.row_key, title: title.get(x.row_key) ?? x.row_key, member: memberName.get(x.member_id) ?? null, heartedAt: x.hearted_at, days, fading: days >= FADE_DAYS };
+      return { key: x.row_key, title: title.get(x.row_key) ?? x.row_key, member: memberName.get(x.member_id) ?? null, memberId: x.member_id ?? null, heartedAt: x.hearted_at, days, fading: days >= FADE_DAYS };
     }),
     fadeDays: FADE_DAYS,
     shown: order,

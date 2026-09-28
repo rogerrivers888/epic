@@ -53,6 +53,12 @@ export const deskApi = {
 /** What a failed desk call says, in one sentence, never a provider's words. */
 export function saidOf(err: unknown): string {
   const e = err as { status?: number; body?: { error?: string; message?: string } };
+  // Two failures that are not the desk's to explain, said plainly rather than
+  // as the browser's or the rate limiter's own words (second audit CH.13).
+  if (e?.status === 429) return 'Too many requests just now — try again in a minute.';
+  if (err instanceof TypeError || (err instanceof Error && /failed to fetch|network ?error|load failed/i.test(err.message))) {
+    return 'Couldn’t reach the server — try again.';
+  }
   return e?.body?.message ?? e?.body?.error ?? (err instanceof Error ? err.message : 'That did not work.');
 }
 
@@ -464,7 +470,9 @@ export function TRow({ children, onPress, gap = 18, lifted, pad = 8, vpad = 10, 
   const body = (
     <View style={{
       flexDirection: 'row', alignItems: align, gap, paddingVertical: vpad, paddingHorizontal: pad,
-      borderBottomWidth: 1, borderBottomColor: desk.rule, backgroundColor: lifted || (onPress && over) ? desk.lifted : 'transparent',
+      // An open (picked) row keeps its own colour under the pointer; hover
+      // only lifts a row that is not already open (prototype: #232120 stays).
+      borderBottomWidth: 1, borderBottomColor: desk.rule, backgroundColor: lifted ? desk.picked : onPress && over ? desk.lifted : 'transparent',
     }}>{children}</View>
   );
   return onPress ? (
@@ -571,11 +579,12 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   const { query, setQuery } = useRouter();
   const where = query.get('where') ?? '';
   const reach = Number(query.get('reach'));
-  const loc: LocState = {
-    where,
-    minutes: [5, 15, 30, 60, 120].includes(reach) ? reach : 30,
-    mode: query.get('by') === 'transit' ? 'transit' : 'car',
-  };
+  const minutes = [5, 15, 30, 60, 120].includes(reach) ? reach : 30;
+  const mode: Mode = query.get('by') === 'transit' ? 'transit' : 'car';
+  // One object while the filter is unchanged. A fresh one every render made
+  // every screen that fetches on [loc] fetch again whenever its answer came
+  // back — about twenty requests a second (second audit, 28 Sep 2026).
+  const loc: LocState = useMemo(() => ({ where, minutes, mode }), [where, minutes, mode]);
   const setLoc = useCallback((l: LocState) => {
     setQuery({
       where: l.where.trim() ? l.where : null,
@@ -584,7 +593,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     }, { replace: true });
   }, [setQuery]);
   const [answer, setAnswer] = useState<LocAnswer | null>(null);
-  const value = useMemo(() => ({ loc, setLoc, answer, setAnswer }), [loc.where, loc.minutes, loc.mode, setLoc, answer]); // eslint-disable-line react-hooks/exhaustive-deps
+  const value = useMemo(() => ({ loc, setLoc, answer, setAnswer }), [loc, setLoc, answer]);
   return <LocCtx.Provider value={value}>{children}</LocCtx.Provider>;
 }
 export const useLocation = () => useContext(LocCtx);

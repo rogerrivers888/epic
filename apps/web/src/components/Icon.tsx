@@ -12,7 +12,7 @@ import {
   HandPlatter, Shield, ShieldCheck, BadgeCheck, Video, Megaphone, Repeat, CalendarCheck, Banknote, Laptop, DoorOpen, Handshake, GraduationCap,
   Share2, CircleAlert, UserRound, Award, Presentation, HandHeart,
   Bell, BellOff, Link, Reply, Flag, SmilePlus, Smile, Globe, CircleHelp,
-  Tag, ArrowDownWideNarrow,
+  Tag, ArrowDownWideNarrow, ArrowUp, ArrowDown,
 } from 'lucide-react-native';
 import { colors, spacing, type } from '../theme';
 
@@ -80,6 +80,8 @@ const ICONS = {
   warning: TriangleAlert,
   /** A fact a Google word carries (the desk's Mapping chips), and the desk's Sort control. */
   tag: Tag, sort: ArrowDownWideNarrow,
+  /** Which way a sort runs, beside its name on the desk's Sort button (never a ↑ or ↓ character). */
+  ascending: ArrowUp, descending: ArrowDown,
   allergen: TriangleAlert, archived: Archive, refresh: RefreshCw, delete: Trash2,
   // the device's own copy: no signal, saving it, and what Epic owns outright
   offline: CloudOff, download: Download, owned: Database,
