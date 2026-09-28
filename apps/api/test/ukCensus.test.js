@@ -38,10 +38,10 @@ const SKU = {
   'details-essentials': 'Place Details Essentials',
   unmapped: 'Something Google has not told us about',
 };
-const billed = (day, meter, cost) => query(
+const billed = (day, meter, cost, { credits = 0, promo = 0 } = {}) => query(
   `insert into billing_days (invoice_month, day, service, sku, sku_id, meter, usage, unit, cost, credits, promo, currency)
-   values ('202609', $1, 'Places API', $2, 'x', $3, 1, 'count', $4, 0, 0, 'GBP')`,
-  [day, `test ${SKU[meter]} ${Math.random()}`, meter === 'unmapped' ? null : meter === 'details-essentials' ? 'google-essentials' : meter, cost]);
+   values ('202609', $1, 'Places API', $2, 'x', $3, 1, 'count', $4, $5, $6, 'GBP')`,
+  [day, `test ${SKU[meter]} ${Math.random()}`, meter === 'unmapped' ? null : meter === 'details-essentials' ? 'google-essentials' : meter, cost, credits, promo]);
 
 /** A stand-in for startRun: records what it was asked and returns a row. */
 const recorder = () => {
@@ -338,4 +338,26 @@ test('a notice is mailed once however many processes say it', async (t) => {
   const send = async ({ to, subject: s }) => { sent += 1; await new Promise((ok) => setTimeout(ok, 100)); await recordSend({ to, subject: s, purpose: 'census', status: 'sent' }); return { sent: true }; };
   await Promise.all([1, 2, 3].map(() => uk.notify({ subject, send, configured: () => true })));
   assert.equal(sent, 1);
+});
+
+test('free-tier credit is not spend; promotional credit is', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  // £40 of IDs-only usage, all of it free tier: nothing charged, nothing held.
+  await billed('2026-09-28', 'google-essentials', 40, { credits: -40, promo: 0 });
+  const r = recorder();
+  assert.equal((await uk.tick({ now: new Date('2026-09-29T09:00:00Z'), start: r.start })).action, 'start');
+  // £6 of Place Details paid from the promotional credit is still £6 spent.
+  await clean();
+  await dayOne();
+  await billed('2026-09-28', 'google-pro', 6, { credits: -6, promo: -6 });
+  assert.equal((await uk.tick({ now: new Date('2026-09-29T09:00:00Z'), start: r.start, stop: async () => {} })).action, 'halted');
+});
+
+test('the report bills a day across both London days, as the decision does', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  await billed('2026-09-29', 'google-essentials', 0.02);
+  const st = await uk.status(new Date('2026-09-29T23:00:00Z'));
+  assert.equal(st.days[0].billed?.censusGbp, 0.02, 'a charge that landed on the next London day is still day 1\'s');
 });

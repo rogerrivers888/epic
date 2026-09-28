@@ -81,13 +81,29 @@ export async function billedByDay(fromDay) {
     // `google-essentials` meter also carries Place Details Essentials — and
     // the £5 stop is every line the export billed that day, mapped to a meter
     // or not: a new SKU nobody has mapped yet is still money (Codex, 28 Sep 2026).
+    // After the credits Google never charges — free tier, discounts — and
+    // before the promotional credit, which is spending of a credit that runs
+    // out: the spend tile's own rule, usage not credit (Codex, 29 Sep 2026).
     `select to_char(day, 'YYYY-MM-DD') as day,
-            coalesce(sum(cost) filter (where sku ~* 'text search' and sku ~* '(essentials|ids only)'), 0)::float as census_gbp,
-            coalesce(sum(cost), 0)::float as google_gbp
+            coalesce(sum(cost + credits - promo) filter (where sku ~* 'text search' and sku ~* '(essentials|ids only)'), 0)::float as census_gbp,
+            coalesce(sum(cost + credits - promo), 0)::float as google_gbp
        from billing_days
       where day >= $1::date
       group by 1 order by 1`, [fromDay]);
   return rows;
+}
+
+/**
+ * What a quota day was billed. The export's days are London's and the quota
+ * day is Los Angeles's, so a day's run is billed across two export days: both
+ * are read and summed, for the decision and the report alike (Codex, 29 Sep
+ * 2026). Either written is enough to speak; neither is "not billed yet".
+ */
+export function billedFor(bills, quotaDay) {
+  const next = new Date(Date.parse(`${quotaDay}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  const spans = bills.filter((b) => b.day === quotaDay || b.day === next);
+  if (!spans.length) return null;
+  return { day: quotaDay, census_gbp: spans.reduce((n, b) => n + b.census_gbp, 0), google_gbp: spans.reduce((n, b) => n + b.google_gbp, 0) };
 }
 
 /** A service session of the run's own, so every ledger row names the day it belongs to. */
@@ -151,15 +167,7 @@ export async function decide(now = new Date()) {
   // A day's run is the quota day it was started in: one run a day, however
   // late the last one was closed off (Codex, 28 Sep 2026).
   if (pacificDay(latest.started_at) >= pacificDay(now)) return { action: 'today', runs, latest, bills };
-  // The export's days are London's and the quota day is Los Angeles's, so a
-  // day's run is billed across two export days: both are read, and summed
-  // (Codex, 29 Sep 2026). Either written is enough to judge by.
-  const d0 = pacificDay(latest.started_at);
-  const d1 = new Date(Date.parse(`${d0}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
-  const spans = bills.filter((b) => b.day === d0 || b.day === d1);
-  const yesterday = spans.length
-    ? { day: d0, census_gbp: spans.reduce((n, b) => n + b.census_gbp, 0), google_gbp: spans.reduce((n, b) => n + b.google_gbp, 0) }
-    : null;
+  const yesterday = billedFor(bills, pacificDay(latest.started_at));
   if (yesterday && yesterday.census_gbp >= PENNIES_GBP) return { action: 'held', runs, latest, bills, yesterday };
   return { action: 'start', runs, latest, bills, yesterday: yesterday ?? null, day: days + 1 };
 }
@@ -247,7 +255,7 @@ async function tickLocked({ now = new Date(), start = censusRun.startRun, stop =
 export async function status(now = new Date()) {
   const d = await decide(now);
   if (d.action === 'off') return { action: 'off', days: [] };
-  const bills = new Map((d.bills ?? []).map((b) => [b.day, b]));
+
   const days = [];
   let requests = 0; let tilesAsked = 0;
   const counted = d.runs.filter((r) => !(r.state === 'stopped' && /^planning cut short/.test(r.problem ?? '')));
@@ -258,7 +266,7 @@ export async function status(now = new Date()) {
          left join lateral (select count(*) n from census_slices s where s.census_run_id = m.run_id and s.area_slug = m.grid_key) s on true
         where m.run_id = $1`, [r.id]);
     const day = pacificDay(r.started_at);
-    const b = bills.get(day);
+    const b = billedFor(d.bills ?? [], day);
     requests += Number(r.requests ?? 0); tilesAsked += Number(t.asked ?? 0);
     days.push({
       day: i + 1, date: day, runId: r.id, state: r.state, requests: Number(r.requests ?? 0), places: Number(r.places ?? 0),
