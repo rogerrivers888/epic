@@ -60,15 +60,18 @@ test('signing out closes that door and leaves the others open', async () => {
   assert.ok(await findLiveSession(theirs), 'the other device is still signed in');
 });
 
-test('signing out everywhere closes all of them', async () => {
+test('signing out everywhere with no account is refused, and signs nobody out', async () => {
+  // G2 inventory, 28 Sep 2026: a missing account used to mean "everyone".
   const a = aToken();
   const b = aToken();
   await insertSession(a, 'a');
   await insertSession(b, 'b');
-  await revokeAllSessions();
-  assert.equal(await findLiveSession(a), null);
-  assert.equal(await findLiveSession(b), null);
-  assert.deepEqual(await liveSessions(), [], 'and Settings shows none');
+  await assert.rejects(revokeAllSessions(), /needs an account/);
+  await assert.rejects(revokeAllSessions(null), /needs an account/);
+  assert.ok(await findLiveSession(a), 'a is still signed in');
+  assert.ok(await findLiveSession(b), 'b is still signed in');
+  await revokeSession(a);
+  await revokeSession(b);
 });
 
 test('last-seen is lazy, and only ever moves forward', async () => {

@@ -77,6 +77,35 @@ export const signInLimit = limit({
   message: 'Too many sign-in attempts. Try again in a few minutes.',
 });
 
+/**
+ * The public doors that send a real text or e-mail (G2 inventory, 28 Sep 2026).
+ *
+ * They answer outside the session door by design — somebody asking for a way
+ * back in, a guest joining a trip — and with only the general limiter on them a
+ * script could run up Twilio and Postmark, and fill a stranger's phone, from
+ * outside. So they are held to the sign-in number, per caller address, in the
+ * same bucket as the passcode attempts.
+ */
+export const SENDING_DOORS = [
+  '/api/session/request-link',
+  '/api/join/:token/code/again',
+  '/api/join/:token/account',
+  '/api/shared/:token/enter',
+];
+
+/** Mount the sign-in limit on every sending door. Before the routes, so it answers first. */
+export function holdSendingDoors(app) {
+  for (const door of SENDING_DOORS) app.post(door, signInLimit);
+}
+
+/**
+ * The prefixes whose requests can reach a paid provider, held to `spendLimit`
+ * in server.js. `/api/inspire` joined them in the G2 inventory (28 Sep 2026):
+ * the ring board and the home shelves buy Google display searches on a cache
+ * miss, exactly as Places does.
+ */
+export const SPEND_PREFIXES = ['/api/discover', '/api/plan', '/api/atlas', '/api/menu', '/api/places', '/api/inspire'];
+
 /** Anything that can reach a paid provider. */
 export const spendLimit = limit({
   name: 'spend',

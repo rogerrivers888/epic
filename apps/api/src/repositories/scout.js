@@ -549,14 +549,24 @@ export async function recordMenuFound(venueRef, { venueLabel = null, menuUrl, ho
   );
 }
 
-/** Menus whose address is known and whose dishes have not been read yet. */
-export async function menusToRead(limit = 5, ref = null) {
+/**
+ * Menus whose address is known and whose dishes have not been read yet.
+ *
+ * Each row names its `claimant`: the household that claimed the place first
+ * (saved, shortlisted, visited, planned), or null when nobody has. The
+ * background reader charges the read to that household and leaves an
+ * unclaimed place alone; `claimedOnly` asks for claimed places only, so a tick
+ * is never spent on rows it would skip (G5, 28 Sep 2026).
+ */
+export async function menusToRead(limit = 5, ref = null, { claimedOnly = false } = {}) {
   // `ref` names one place: the queue runs in rank order across every area, so
   // without it a particular restaurant can sit behind ninety others while
   // somebody is waiting to see whether a fix worked.
   const { rows } = await query(
     `select m.venue_ref, m.venue_label, m.menu_url, p.area_code, p.rank,
             exists (select 1 from place_claims pc where pc.venue_ref = p.venue_ref) as claimed,
+            (select pc.household_id from place_claims pc where pc.venue_ref = p.venue_ref
+              order by pc.claimed_at, pc.household_id limit 1) as claimant,
             coalesce(r.name, p.name) as name, r.address, r.postcode
        from place_menus m
        join scout_places p on p.venue_ref = m.venue_ref
@@ -565,6 +575,7 @@ export async function menusToRead(limit = 5, ref = null) {
       where m.menu_url is not null
         and ($2::text is null or m.venue_ref = $2)
         and (m.state = 'found' or $2::text is not null)
+        and (not $3::boolean or exists (select 1 from place_claims pc where pc.venue_ref = p.venue_ref))
         -- Same rule as menusDue. A named ref is somebody asking, so it is not
         -- held to the depth at all.
         and ($2::text is not null
@@ -580,7 +591,7 @@ export async function menusToRead(limit = 5, ref = null) {
       -- A place a household claimed goes first: somebody is waiting for that one.
       order by (exists (select 1 from place_claims pc where pc.venue_ref = p.venue_ref)) desc, p.rank
       limit $1`,
-    [limit, ref],
+    [limit, ref, claimedOnly],
   );
   return rows;
 }

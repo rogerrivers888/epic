@@ -116,8 +116,11 @@ router.delete('/session', async (req, res, next) => {
       const live = token ? await findLiveSession(token) : null;
       if (!live) return res.status(401).json({ error: 'signed_out', message: 'Sign in first.' });
       // Their own devices, not the estate's: one customer signing out
-      // everywhere must not sign every other household out too.
-      await revokeAllSessions(live.account_id ?? null);
+      // everywhere must not sign every other household out too. A session
+      // with no account — the passcode, a service or an agent — has no
+      // "everywhere" of its own, so it signs out itself only (G2, 28 Sep 2026).
+      if (live.account_id) await revokeAllSessions(live.account_id);
+      else await closeSession(token);
     } else if (token) {
       await closeSession(token);
     }

@@ -573,14 +573,99 @@ export async function recheck(ref) {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Families confirm (4.7). Backend only; the in-app question is a separate
-// design brief.
+// 5. Families confirm (4.7) — the visit question ("Epic Visit Question" board
+// V1–V4, owner 28 Sep 2026). One yes/no question in the rating after a visit;
+// Yes · No · Didn't notice. Didn't notice is stored as `unsure`, so the fact
+// is not asked again, and is never counted anywhere.
+
+export const FAMILY_ANSWERS = ['yes', 'no', 'unsure'];
 
 /**
- * The question to ask a household after a visit, or none: at most
- * askPerVisit, only facts this place is looked at for, never one this
- * household has been asked, conflicts and disputed facts first. A fact about
- * young children is asked only of a household with a child that age.
+ * A place's name as a question says it: the board asks about "Magnet
+ * Leisure", not "Magnet Leisure Centre – Maidenhead". Cut at a dash, comma or
+ * bracket; a trailing Centre goes when two words are left to say it.
+ */
+export function shortName(name) {
+  let s = String(name ?? '').trim().split(/\s+[-–—|]\s+|,|\s\(/)[0].trim();
+  const words = s.split(/\s+/);
+  if (words.length > 2 && /^(centre|center|ltd|limited)$/i.test(words.at(-1))) s = words.slice(0, -1).join(' ');
+  return s || null;
+}
+
+/**
+ * The words of one fact's question: its own (`place_attributes.question`,
+ * migration 274) with {place} filled in, else "Was there a {fact} at {place}?".
+ */
+export function questionText({ question, label }, place) {
+  const where = place || 'this place';
+  if (question) return question.replaceAll('{place}', where);
+  const l = String(label ?? '').toLowerCase();
+  return /[^s]s$/.test(l) ? `Were there ${l} at ${where}?` : `Was there a ${l} at ${where}?`;
+}
+
+/** What a household is, for "only facts that matter to it": access needs said, and everyone's age. */
+async function householdFor(householdId) {
+  const [{ rows: [h] }, { rows: members }] = await Promise.all([
+    query('select access_needs from households where id = $1', [householdId]),
+    query('select birth_year, birth_date, is_minor from members where household_id = $1', [householdId]),
+  ]);
+  const year = new Date().getFullYear();
+  const ages = members.map((m) => (m.birth_date ? year - new Date(m.birth_date).getFullYear() : m.birth_year ? year - m.birth_year : m.is_minor ? 8 : 35));
+  return { access: Boolean(h?.access_needs), ages };
+}
+
+/**
+ * Whether a fact matters to this household. An access fact goes only to a
+ * household that has said access matters; a fact about toddlers only to one
+ * with a child of four or under, about children to one with a child of
+ * twelve or under, and any other age fact to one with somebody under 18.
+ */
+export function mattersTo(fact, who) {
+  if (fact.access_need) return who.access;
+  const l = String(fact.label ?? '').toLowerCase();
+  const child = (max) => who.ages.some((a) => a <= max);
+  if (/toddler|baby|babies|nappy|nappies|buggy|pushchair|pram|under[- ]?5s?\b/.test(l)) return child(4);
+  if (/\bkids?\b|children|\bchild\b|playground|play area|soft play/.test(l)) return child(12);
+  if (fact.age) return child(17);
+  return true;
+}
+
+/**
+ * Whether a fact at a place is one families may be asked: Don't know (or no
+ * answer yet, or a person's Don't know overlay), a Suggestion waiting, a
+ * Conflict between our sources, reinstated after families disputed it, or due
+ * a re-check. Never one families have settled, and never one hidden while it
+ * waits for its re-check.
+ */
+export function askable(r, now = new Date()) {
+  if (r.source === 'families') return false;
+  if (r.hidden_at) return false;
+  if (r.unknown || r.suggested) return true;
+  if (r.state == null || r.state === 'dont_know' || r.state === 'conflict') return true;
+  if (r.disputed_before) return true;
+  return Boolean(r.recheck_due && new Date(r.recheck_due) < now);
+}
+// Conflicts first, then a fact families disputed before, then a suggestion,
+// then Don't know, then a re-check.
+const askRank = (r) => (r.state === 'conflict' && !r.unknown ? 0 : r.disputed_before ? 1 : r.suggested ? 2 : r.unknown || r.state == null || r.state === 'dont_know' ? 3 : 4);
+
+/** The name a question uses for a place: our own record, else the household's own visit. */
+async function placeWord(ref, householdId) {
+  const { rows: [r] } = await query(
+    `select coalesce((select name from place_records where venue_ref = $1),
+                     (select venue_label from visits where household_id = $2 and venue_ref = $1 order by visited_on desc limit 1)) as name`,
+    [ref, householdId]);
+  return shortName(r?.name);
+}
+
+const asQuestion = (p, place) => ({ fact: p.attribute_key, label: p.label, question: questionText(p, place), answers: ['Yes', 'No', 'Didn’t notice'] });
+
+/**
+ * The question to ask a household after a visit, as a list of at most one:
+ * none unless the household has been; a visit named must be its own visit
+ * here; a visit carries at most askPerVisit questions and one is handed out
+ * at a time; never a fact this household has been asked about this place
+ * before, answered or skipped — asking is what is recorded, so a skip counts.
  */
 export async function questionFor({ householdId, ref, visitId = null }) {
   const cfg = (await settings()).values;
@@ -593,66 +678,85 @@ export async function questionFor({ householdId, ref, visitId = null }) {
     const { rows: [own] } = await query('select 1 from visits where id = $1 and household_id = $2 and venue_ref = $3', [visitId, householdId, ref]);
     if (!own) return [];
   }
-  const { rows: members } = await query('select birth_year, birth_date, is_minor from members where household_id = $1', [householdId]);
-  const year = new Date().getFullYear();
-  const ages = members.map((m) => (m.birth_date ? year - new Date(m.birth_date).getFullYear() : m.birth_year ? year - m.birth_year : m.is_minor ? 8 : 35));
-  const young = ages.some((a) => a <= 4);
-  const kids = ages.some((a) => a <= 12);
-  // One visit carries at most askPerVisit questions, however often it is
-  // asked for (Codex, 28 Sep 2026): a visit that already has its questions
-  // gets the ones still unanswered, never a fresh batch. With no visit named,
-  // the last day's asks at this place stand in for the visit.
-  const { rows: already } = await query(
-    `select x.attribute_key, pa.label,
-            exists (select 1 from family_answers f where f.household_id = x.household_id and f.venue_ref = x.venue_ref and f.attribute_key = x.attribute_key) as answered
+  const place = await placeWord(ref, householdId);
+  const who = await householdFor(householdId);
+  // One household's asks at one place are decided one request at a time, so
+  // two requests for the same visit cannot each add a question.
+  return withTransaction(async (c) => {
+    await c.query('select pg_advisory_xact_lock(hashtext($1))', [`ask:${householdId}|${ref}`]);
+    // One visit carries at most askPerVisit questions, however often it is
+    // asked for (Codex, 28 Sep 2026): a visit whose question is still open
+    // gets that one back, never a fresh one. With no visit named, the last
+    // day's asks at this place stand in for the visit.
+    const { rows: already } = await c.query(
+      `select x.attribute_key, pa.label, pa.question,
+              exists (select 1 from family_answers f where f.household_id = x.household_id and f.venue_ref = x.venue_ref and f.attribute_key = x.attribute_key) as answered
+         from family_asks x join place_attributes pa on pa.key = x.attribute_key
+        where x.household_id = $1 and x.venue_ref = $2
+          and (case when $3::uuid is null then x.asked_at > now() - interval '1 day' else x.visit_id = $3::uuid end)
+        order by x.asked_at, x.attribute_key`,
+      [householdId, ref, visitId]);
+    const open = already.filter((x) => !x.answered);
+    if (open.length) return [asQuestion(open[0], place)];
+    if (already.length >= cfg.askPerVisit) return [];
+    const { rows } = await c.query(`
+      -- Where the place is filed, primary and secondary, by the one filing rule.
+      with subs as (select distinct f.sub from (${FILED_SQL}) f where f.venue_ref = $1),
+      looked as (
+        select sf.attribute_key from subcategory_facts sf join subs on subs.sub = sf.subcategory_key
+         where sf.status = 'active'
+        union
+        select key from place_attributes where standard and active and kind = 'yesno')
+      select l.attribute_key, pa.label, pa.question, pa.access_need, pa.age,
+             a.state, a.source, a.recheck_due, a.hidden_at, a.disputed_before,
+             exists (select 1 from fact_suggestions s where s.venue_ref = $1 and s.feature = l.attribute_key) as suggested,
+             exists (select 1 from fact_unknowns u where u.venue_ref = $1 and u.attribute_key = l.attribute_key) as unknown
+        from looked l join place_attributes pa on pa.key = l.attribute_key and pa.active and pa.kind = 'yesno'
+        left join place_fact_answers a on a.venue_ref = $1 and a.attribute_key = l.attribute_key
+       where not exists (select 1 from family_asks x where x.household_id = $2 and x.venue_ref = $1 and x.attribute_key = l.attribute_key)`,
+      [ref, householdId]);
+    const [pick] = rows.filter((r) => askable(r) && mattersTo(r, who))
+      .sort((x, y) => askRank(x) - askRank(y) || String(x.attribute_key).localeCompare(String(y.attribute_key)));
+    if (!pick) return [];
+    await c.query(
+      'insert into family_asks (household_id, venue_ref, attribute_key, visit_id) values ($1, $2, $3, $4)',
+      [householdId, ref, pick.attribute_key, visitId]);
+    return [asQuestion(pick, place)];
+  });
+}
+
+/**
+ * The visit question as the rating screen draws it: the open question, or —
+ * once answered — the answer given, so the screen can say thank you and offer
+ * Change. Null when there is nothing to ask (V4).
+ */
+export async function visitQuestion({ householdId, visitId }) {
+  const { rows: [v] } = await query('select venue_ref from visits where id = $1 and household_id = $2', [visitId, householdId]);
+  if (!v) return null;
+  const [q] = await questionFor({ householdId, ref: v.venue_ref, visitId });
+  if (q) return { visitId, placeId: v.venue_ref, factId: q.fact, question: q.question, answer: null };
+  const { rows: [done] } = await query(
+    `select x.attribute_key, pa.label, pa.question, f.answer
        from family_asks x join place_attributes pa on pa.key = x.attribute_key
-      where x.household_id = $1 and x.venue_ref = $2
-        and (case when $3::uuid is null then x.asked_at > now() - interval '1 day' else x.visit_id = $3::uuid end)
-      order by x.asked_at, x.attribute_key`,
-    [householdId, ref, visitId]);
-  if (already.length) {
-    return already.filter((a) => !a.answered).slice(0, cfg.askPerVisit)
-      .map((p) => ({ fact: p.attribute_key, label: p.label, answers: ['Yes', 'No', 'Didn’t notice'] }));
-  }
-  const { rows } = await query(`
-    with subs as (select subcategory as sub from place_index where venue_ref = $1 and subcategory is not null),
-    looked as (
-      select sf.attribute_key from subcategory_facts sf join subs on subs.sub = sf.subcategory_key where sf.status = 'active'
-      union
-      select key from place_attributes where standard and active and kind = 'yesno')
-    select l.attribute_key, pa.label, a.state, a.disputed_before
-      from looked l join place_attributes pa on pa.key = l.attribute_key
-      left join place_fact_answers a on a.venue_ref = $1 and a.attribute_key = l.attribute_key
-     where not exists (select 1 from family_asks x where x.household_id = $2 and x.venue_ref = $1 and x.attribute_key = l.attribute_key)`,
-    [ref, householdId]);
-  const matters = (label) => {
-    const l = label.toLowerCase();
-    if (/toddler|baby|babies|nappy|changing/.test(l)) return young;
-    if (/kids|children|child|play/.test(l)) return kids;
-    return true;
-  };
-  const rank = (r) => (r.state === 'conflict' ? 0 : r.disputed_before ? 1 : r.state == null || r.state === 'dont_know' ? 2 : 3);
-  const pick = rows.filter((r) => matters(r.label)).sort((a, b) => rank(a) - rank(b)).slice(0, cfg.askPerVisit);
-  // Stamped a millisecond apart in the order they were ranked, so a repeat
-  // hands the batch back in the same order.
-  for (const [i, p] of pick.entries()) {
-    await query(
-      `insert into family_asks (household_id, venue_ref, attribute_key, visit_id, asked_at)
-       values ($1, $2, $3, $4, now() + make_interval(secs => $5::double precision / 1000)) on conflict do nothing`,
-      [householdId, ref, p.attribute_key, visitId, i]);
-  }
-  return pick.map((p) => ({ fact: p.attribute_key, label: p.label, answers: ['Yes', 'No', 'Didn’t notice'] }));
+       join family_answers f on f.household_id = x.household_id and f.venue_ref = x.venue_ref and f.attribute_key = x.attribute_key
+      where x.household_id = $1 and x.venue_ref = $2 and x.visit_id = $3
+      order by f.answered_at desc limit 1`, [householdId, v.venue_ref, visitId]);
+  if (!done) return null;
+  return { visitId, placeId: v.venue_ref, factId: done.attribute_key, question: questionText(done, await placeWord(v.venue_ref, householdId)), answer: done.answer };
 }
 
 /**
  * A family's answer. Kept with the machine's answer at the time and the
- * source it relied on, so accuracy measures the rules, not the places. Then
- * settled (4.7): two or more agreeing and none disagreeing settles a fact;
- * two or more saying a shown fact is wrong hides it until it is re-checked.
+ * source it relied on, so accuracy measures the rules, not the places; a
+ * Change overwrites the answer and keeps what the machine said the first
+ * time. Then settled (4.7): familiesSettle agreeing and none disagreeing
+ * settles a fact as Verified, source Families; familiesWrong saying a shown
+ * fact is wrong hides it until it is re-checked. Unsure is never counted.
  * Which household said what is never shown.
  */
 export async function familyAnswer({ householdId, ref, fact, answer }) {
-  if (!['yes', 'no', 'didnt_notice'].includes(answer)) throw Object.assign(new Error('Yes, no or didn’t notice.'), { status: 400 });
+  const said = answer === 'didnt_notice' ? 'unsure' : answer;
+  if (!FAMILY_ANSWERS.includes(said)) throw Object.assign(new Error('Yes, no or didn’t notice.'), { status: 400 });
   // Only a question we asked can be answered (Codex, 28 Sep 2026): otherwise
   // any two households could settle or hide a fact about a place neither of
   // them has been to. The ask is issued only after a recorded visit.
@@ -660,34 +764,58 @@ export async function familyAnswer({ householdId, ref, fact, answer }) {
     'select 1 from family_asks where household_id = $1 and venue_ref = $2 and attribute_key = $3', [householdId, ref, fact]);
   if (!asked) throw Object.assign(new Error('That question was not asked of this household.'), { status: 409 });
   const cfg = (await settings()).values;
-  const { rows: [m] } = await query('select state, source from place_fact_answers where venue_ref = $1 and attribute_key = $2', [ref, fact]);
-  const { rows: [sub] } = await query('select subcategory from place_index where venue_ref = $1', [ref]);
-  await query(
-    `insert into family_answers (venue_ref, attribute_key, household_id, answer, machine_state, machine_source, subcategory_key)
-     values ($1, $2, $3, $4, $5, $6, $7)
-     on conflict (venue_ref, attribute_key, household_id) do nothing`,
-    [ref, fact, householdId, answer, m?.state ?? null, m?.source ?? null, sub?.subcategory ?? null]);
-  const { rows: [t] } = await query(
-    `select count(*) filter (where answer = 'yes')::int yes, count(*) filter (where answer = 'no')::int no
-       from family_answers where venue_ref = $1 and attribute_key = $2`, [ref, fact]);
-  let settled = null;
-  if (m?.state === 'yes' && t.no >= cfg.familiesWrong) {
-    await query(`update place_fact_answers set hidden_at = now(), recheck_due = now() where venue_ref = $1 and attribute_key = $2`, [ref, fact]);
-    settled = 'hidden';
-  } else if (t.yes >= cfg.familiesSettle && t.no === 0 && m?.state !== 'yes') {
-    await query(
-      `insert into place_fact_answers (venue_ref, attribute_key, state, yesno, source, checked_at) values ($1, $2, 'yes', true, 'families', now())
-       on conflict (venue_ref, attribute_key) do update set state = 'yes', yesno = true, source = 'families', checked_at = now(), hidden_at = null`, [ref, fact]);
-    settled = 'yes';
-  } else if (t.no >= cfg.familiesSettle && t.yes === 0 && m?.state !== 'no') {
-    await query(
-      `insert into place_fact_answers (venue_ref, attribute_key, state, yesno, source, checked_at) values ($1, $2, 'no', false, 'families', now())
-       on conflict (venue_ref, attribute_key) do update set state = 'no', yesno = false, source = 'families', checked_at = now()`, [ref, fact]);
-    settled = 'no';
-  }
-  return { recorded: true, settled };
+  return withTransaction(async (c) => {
+    // One fact at one place is settled by one answer at a time, or two
+    // families answering together could each count without the other.
+    await c.query('select pg_advisory_xact_lock(hashtext($1))', [`family:${ref}|${fact}`]);
+    const { rows: [m] } = await c.query('select state, source, hidden_at from place_fact_answers where venue_ref = $1 and attribute_key = $2', [ref, fact]);
+    const { rows: [unknown] } = await c.query('select 1 from fact_unknowns where venue_ref = $1 and attribute_key = $2', [ref, fact]);
+    const { rows: [sub] } = await c.query('select subcategory from place_index where venue_ref = $1', [ref]);
+    // What the machine was showing: nothing, under a person's Don't know.
+    const machineState = unknown ? 'dont_know' : m?.state ?? null;
+    const machineSource = unknown ? null : m?.source ?? null;
+    const { rows: [row] } = await c.query(
+      `insert into family_answers (venue_ref, attribute_key, household_id, answer, machine_state, machine_source, subcategory_key)
+       values ($1, $2, $3, $4, $5, $6, $7)
+       on conflict (venue_ref, attribute_key, household_id) do update set answer = excluded.answer, answered_at = now()
+       returning answered_at`,
+      [ref, fact, householdId, said, machineState, machineSource, sub?.subcategory ?? null]);
+    const { rows: [t] } = await c.query(
+      `select count(*) filter (where answer = 'yes')::int yes, count(*) filter (where answer = 'no')::int no
+         from family_answers where venue_ref = $1 and attribute_key = $2`, [ref, fact]);
+    let settled = null;
+    const ours = m?.source === 'families';
+    if (m?.state === 'yes' && !ours && t.no >= cfg.familiesWrong) {
+      if (!m.hidden_at) await c.query(`update place_fact_answers set hidden_at = now(), recheck_due = now() where venue_ref = $1 and attribute_key = $2`, [ref, fact]);
+      settled = 'hidden';
+    } else if (m?.state === 'yes' && !ours && m.hidden_at && t.no < cfg.familiesWrong) {
+      // A family changed its No: the hide no longer has the families behind it.
+      await c.query('update place_fact_answers set hidden_at = null where venue_ref = $1 and attribute_key = $2', [ref, fact]);
+      settled = 'shown';
+    } else if (t.yes >= cfg.familiesSettle && t.no === 0) {
+      if (!(ours && m.state === 'yes')) {
+        await c.query(
+          `insert into place_fact_answers (venue_ref, attribute_key, state, yesno, source, checked_at) values ($1, $2, 'yes', true, 'families', now())
+           on conflict (venue_ref, attribute_key) do update set state = 'yes', yesno = true, source = 'families', checked_at = now(), hidden_at = null, disputed_before = false`, [ref, fact]);
+      }
+      settled = 'yes';
+    } else if (t.no >= cfg.familiesSettle && t.yes === 0 && m?.state !== 'yes') {
+      if (!(ours && m.state === 'no')) {
+        await c.query(
+          `insert into place_fact_answers (venue_ref, attribute_key, state, yesno, source, checked_at) values ($1, $2, 'no', false, 'families', now())
+           on conflict (venue_ref, attribute_key) do update set state = 'no', yesno = false, source = 'families', checked_at = now(), disputed_before = false`, [ref, fact]);
+      }
+      settled = 'no';
+    } else if (ours) {
+      // Families had settled it and a Change took the agreement away: nobody
+      // can say now, so it is Don't know again and the next family is asked.
+      await c.query(
+        `update place_fact_answers set state = 'dont_know', yesno = null, source = null, checked_at = now() where venue_ref = $1 and attribute_key = $2`, [ref, fact]);
+      settled = 'unsettled';
+    }
+    return { recorded: true, answer: said, at: row.answered_at, settled };
+  });
 }
-
 // ---------------------------------------------------------------------------
 // Pre-warm (handover 4.5, C38)
 

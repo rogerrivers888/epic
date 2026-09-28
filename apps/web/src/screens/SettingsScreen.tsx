@@ -196,6 +196,10 @@ function YouAndYours({ data, refresh }: { data: HouseholdResponse; refresh: () =
             ))}
           </View>
         </FoldLine>
+        {/* Off by default: access facts (step free…) are asked of a household
+            after a visit only once it has said access matters to it. */}
+        <SwitchRow label="Access needs in our household" hint="Step-free, accessible toilets and the like" value={!!household.accessNeeds}
+          onChange={async (v) => { await api.updateHousehold({ accessNeeds: v }); await refresh(); }} />
       </View>
 
       {/* Where you are. */}
@@ -378,9 +382,10 @@ function SwitchRow({ label, hint, value, onChange }: { label: string; hint: stri
 
 function Providers() {
   const [admin, setAdminState] = useState(isAdmin());
+  const { isOwner } = useSession();
   return (
     <>
-      <ProvidersTable />
+      <ProvidersTable canSwitch={isOwner} />
       <SectionTitle hint="For judging each provider's data before paying for it. On this device only; households never see it.">Admin</SectionTitle>
       <Card>
         <Row style={{ justifyContent: 'space-between' }}>

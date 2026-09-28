@@ -161,8 +161,10 @@ export async function sources(cfg) {
     `select provider, count(*)::int n, count(*) filter (where ok is false or failed > 0)::int failed
        from provider_calls where purpose = $1 and created_at >= now() - interval '7 days' group by provider`, [VERIFY_PURPOSE]);
   const { rows: [fam] } = await query(
-    `select count(*)::int checked, count(*) filter (where answer <> 'didnt_notice')::int answered
-       from family_answers where answered_at >= now() - interval '7 days'`);
+    // "Didn't notice" (stored as unsure) is never counted anywhere — not even
+    // as a check (the visit question, 28 Sep 2026).
+    `select count(*)::int checked, count(*)::int answered
+       from family_answers where answered_at >= now() - interval '7 days' and answer in ('yes', 'no')`);
   const ev = new Map(evidence.map((e) => [e.source, e]));
   const out = [];
   for (const src of MACHINE) {
@@ -238,9 +240,9 @@ export async function items({ kind, period = '7d', source = null, country = null
     if (source === 'families') {
       ({ rows } = await query(
         `select f.venue_ref, a.label as feature, f.answered_at as at,
-                case f.answer when 'yes' then 'verified' when 'no' then 'no' else 'dont_know' end as outcome, 'families' as source
+                case f.answer when 'yes' then 'verified' else 'no' end as outcome, 'families' as source
            from family_answers f join place_attributes a on a.key = f.attribute_key
-          where f.answered_at >= now() - interval '7 days' ${kind === 'answered' ? `and f.answer <> 'didnt_notice'` : ''}
+          where f.answered_at >= now() - interval '7 days' and f.answer in ('yes', 'no')
           order by f.answered_at desc limit 2000`));
     } else {
       ({ rows } = await query(

@@ -75,8 +75,10 @@ export async function updateVisit(id, { note, visitedOn, venueLabel }) {
   );
 }
 
-export async function deleteVisit(id) {
-  const { rowCount } = await query('delete from visits where id = $1', [id]);
+/** Deletes a visit only if it is this household's (G2, 28 Sep 2026); the household is required. */
+export async function deleteVisit(id, householdId) {
+  if (!householdId) throw new Error('deleteVisit needs the household it deletes for');
+  const { rowCount } = await query('delete from visits where id = $1 and household_id = $2', [id, householdId]);
   return rowCount;
 }
 

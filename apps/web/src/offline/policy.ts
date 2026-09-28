@@ -100,6 +100,27 @@ export function storable(fullPath: string, body: any): any | null {
   if (p === '/api/visits' || isVisit(p)) return body;
   if (p === '/api/sources') return body;
   if (p === '/api/offline/manifest') return body;
+  // The collections a household sees (routes/collections.js). Kept, and
+  // deliberately: every field in it is ours — the collection's own title and
+  // copy, the household's own hearts and members, and on each shelf a name
+  // from our own record (place_records / the atlas), our drawer's label and a
+  // picture from our own library (an id; the bytes are `/api/images/…`). No
+  // provider's name, rating or photo is in it — the API builds it from owned
+  // tables only — so the rule that sends nothing licensed to a device does not
+  // bite. It is still cut to the fields named here, so a field added later
+  // has to be named in this file before it can reach IndexedDB.
+  if (p === '/api/collections') {
+    const place = (x: any) => ({ ref: x?.ref, name: x?.name, kind: x?.kind ?? null, image: x?.image ?? null });
+    const row = (r: any) => ({
+      key: r?.key, title: r?.title, copy: r?.copy ?? null, places: r?.places ?? null, placesAtLeast: Boolean(r?.placesAtLeast),
+      hearted: Boolean(r?.hearted), waiting: Boolean(r?.waiting), shelf: (r?.shelf ?? []).map(place),
+    });
+    return {
+      whose: body.whose ?? null, ask: Boolean(body.ask), whoseFixed: Boolean(body.whoseFixed), members: body.members ?? [],
+      minPlaces: body.minPlaces, fadeDays: body.fadeDays, reach: body.reach ?? null,
+      inspire: (body.inspire ?? []).map(row), list: (body.list ?? []).map(row),
+    };
+  }
 
   // --- hosting (12 Sep 2026): a host's own words and pictures, and our own bookings ---
   // Everything under these was written or recorded by a host or by this

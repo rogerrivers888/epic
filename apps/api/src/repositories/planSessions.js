@@ -35,9 +35,15 @@ export async function insertPlanSession(householdId, state, tripId = null) {
   return rows[0];
 }
 
-/** A live session, by id. An expired one is not found rather than returned stale. */
-export async function livePlanSession(id) {
-  const { rows } = await query('select * from plan_sessions where id = $1 and expires_at > now()', [id]);
+/**
+ * A live session, by id, and only this household's (G2 inventory, 28 Sep
+ * 2026): a session carries a household's trip, attendees and allergens, and
+ * acting on one spends. An expired one is not found rather than returned
+ * stale; another household's is not found at all. The household is required.
+ */
+export async function livePlanSession(id, householdId) {
+  if (!householdId) throw new Error('livePlanSession needs the household it reads for');
+  const { rows } = await query('select * from plan_sessions where id = $1 and household_id = $2 and expires_at > now()', [id, householdId]);
   return rows[0] ?? null;
 }
 

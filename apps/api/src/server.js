@@ -55,6 +55,7 @@ import taxonomyRoutes, { ensureTaxonomyReady } from './routes/taxonomy.js';
 import { filingRoutes } from './routes/filing.js';
 import { deskRoutes, deskHousekeeping } from './routes/desk.js';
 import { familyRoutes } from './routes/families.js';
+import { collectionRoutes } from './routes/collections.js';
 import { loadDue as loadOsmDue, REGIONS_ON as osmRegionsOn } from './sources/osmExtract.js';
 import hostSkillRoutes, { adminRouter as skillsAdminRoutes, publicRouter as skillsPublicRoutes, ensureSkillsReady } from './routes/hostSkills.js';
 import questionRoutes from './routes/questions.js';
@@ -66,13 +67,14 @@ import { spenderForLink, restampForSpender } from './sources/photoLinks.js';
 import { currentSpender, runAsSpender } from './context.js';
 import { currentHousehold } from './routes/household.js';
 import { SCOUT_MONTHLY_RUNS } from './sources/localscout.js';
-import { enabledSources, defaultSourceKeys, loadSourceSettings, setSourceOff, sourceHasKey, sourceOff, sourceKeys, bedRatesOn } from './sources/index.js';
+import { enabledSources, defaultSourceKeys, loadSourceSettings, sourceHasKey, sourceOff, bedRatesOn } from './sources/index.js';
 import { routingEnabled, routingPaused } from './sources/routing.js';
 import sessionRoutes, { devices as deviceRoutes } from './routes/session.js';
 import { authConfigured, deployed, originAllowed, requireOwner, requireSession } from './auth.js';
 import { requireDoor } from './access.js';
+import sourceSwitchRoutes from './routes/sourceSwitch.js';
 import { APP_URL, canonicalRedirect } from './origins.js';
-import { generalLimit, photoLimit, signInLimit, spendLimit, voiceLimit } from './limits.js';
+import { SPEND_PREFIXES, generalLimit, holdSendingDoors, photoLimit, signInLimit, spendLimit, voiceLimit } from './limits.js';
 import { sweepDeadSessions } from './repositories/sessions.js';
 import { sweepExpiredPlanSessions } from './repositories/planSessions.js';
 import { refresh as refreshReach } from './repositories/reach.js';
@@ -137,6 +139,9 @@ app.use(generalLimit);
 // Only the attempt is held to ten a quarter-hour. Asking "am I signed in" is
 // what the app does on every load and is not a guess at anything.
 app.post('/api/session', signInLimit);
+// The public doors that send a real text or e-mail are held to the same number
+// (limits.js › SENDING_DOORS; G2 inventory, 28 Sep 2026).
+holdSendingDoors(app);
 app.use('/api', sessionRoutes);
 
 // The atlas image library, outside the door on purpose (routes/library.js):
@@ -175,7 +180,8 @@ app.use('/api', deviceRoutes);
 // named here rather than moved, because their addresses belong beside the
 // search they report on.
 const NOT_A_SEARCH = new Set(['/event', '/drawn']);
-for (const path of ['/api/discover', '/api/plan', '/api/atlas', '/api/menu', '/api/places']) {
+// The prefixes live in limits.js (SPEND_PREFIXES); `/api/inspire` joined them in the G2 inventory.
+for (const path of SPEND_PREFIXES) {
   app.use(path, (req, res, next) => (NOT_A_SEARCH.has(req.path) ? next() : spendLimit(req, res, next)));
 }
 /**
@@ -313,6 +319,8 @@ app.use('/api/prototypes', prototypeRoutes);
 app.use('/api/places', placeRoutes);
 // Families who have visited (back-office handover 4.7). Backend only for now.
 app.use('/api/families', familyRoutes);
+// The collections a household sees in Inspire, and its hearts (routes/collections.js).
+app.use('/api/collections', collectionRoutes);
 app.use('/api/places', placePhotoRoutes);
 app.use('/api/places', areaRouter);
 app.use('/api/visits', visitRoutes);
@@ -489,23 +497,8 @@ app.get('/api/keys', requireOwner, (_req, res) => {
   });
 });
 
-/**
- * Switch a live source off or back on from Settings › Providers. Non-secret
- * configuration: the key stays where it is; a source without one cannot be
- * switched on from here.
- */
-app.patch('/api/sources/:key', async (req, res, next) => {
-  try {
-    const key = String(req.params.key);
-    if (!sourceKeys().includes(key)) return res.status(404).json({ error: 'unknown_source' });
-    const on = Boolean(req.body?.on);
-    if (on && !sourceHasKey(key)) return res.status(409).json({ error: 'no_key', message: 'This source has no key yet; the owner adds it through Doppler.' });
-    const off = await setSourceOff(key, !on);
-    res.json({ key, on: on && sourceHasKey(key), off });
-  } catch (err) {
-    next(err);
-  }
-});
+// Settings › Providers' switch, behind the settings capability (routes/sourceSwitch.js; G2, 28 Sep 2026).
+app.use('/api', sourceSwitchRoutes);
 
 /**
  * Google photos are fetched here so the key never reaches the browser, and

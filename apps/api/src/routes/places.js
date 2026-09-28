@@ -111,6 +111,22 @@ places.get('/inside', async (req, res, next) => {
 });
 export const visits = Router();
 
+/**
+ * A visit is the caller's household's or it is not found (G2 inventory, 28 Sep
+ * 2026). Reading, editing, re-rating and deleting took the id alone, so any
+ * signed-in session could reach another household's visit and its ratings.
+ * As a param check, so the PATCH is refused before it writes.
+ */
+visits.param('id', async (req, res, next, id) => {
+  try {
+    const household = await currentHousehold();
+    const visit = await visitsRepo.visitById(id);
+    if (!visit || visit.household_id !== household.id) return res.status(404).json({ error: 'visit_not_found' });
+    req.visit = visit;
+    next();
+  } catch (err) { next(err); }
+});
+
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -975,7 +991,7 @@ visits.put('/:id/takes', async (req, res, next) => {
 
 visits.delete('/:id', async (req, res, next) => {
   try {
-    if (!await visitsRepo.deleteVisit(req.params.id)) return res.status(404).json({ error: 'visit_not_found' });
+    if (!await visitsRepo.deleteVisit(req.params.id, (await currentHousehold()).id)) return res.status(404).json({ error: 'visit_not_found' });
     res.status(204).end();
   } catch (err) {
     next(err);

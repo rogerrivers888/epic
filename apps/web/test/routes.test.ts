@@ -814,3 +814,13 @@ test('a question open takes the phone whole; the list keeps the tab bar', () => 
   assert.equal(titleOf(parseRoute('/trips/abc/chat/t1')), 'Trip — A question · Epic');
   assert.equal(titleOf(parseRoute('/trips/abc/chat/bell')), 'Trip — What you get told about · Epic');
 });
+
+test('every collection a household can heart is a page of Inspire, one layer under it', () => {
+  assert.deepEqual(roundTrip('/inspire/collections'), { name: 'collections' });
+  assert.equal(paths.collections(), '/inspire/collections');
+  assert.equal(tabOf(parseRoute('/inspire/collections')), 'inspire');
+  assert.equal(parentOf(parseRoute('/inspire/collections')), '/inspire');
+  assert.equal(isTabHome(parseRoute('/inspire/collections')), false);
+  assert.equal(titleOf(parseRoute('/inspire/collections')), 'Collections · Epic');
+  assert.equal(parseRoute('/inspire/collections/x').name, 'unknown');
+});

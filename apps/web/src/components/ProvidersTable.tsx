@@ -42,7 +42,12 @@ function split(line: SpendLine, period: Period) {
   return { ...p, freeUnits, paidUnits, paidUsd };
 }
 
-export function ProvidersTable() {
+/**
+ * `canSwitch`: switching a provider on or off is estate-wide and needs
+ * `manage_settings` (the owner); anyone else sees the state, not a switch
+ * that would answer 403.
+ */
+export function ProvidersTable({ canSwitch = true }: { canSwitch?: boolean } = {}) {
   const { width } = useViewport();
   const wide = width >= 900;
   const [period, setPeriod] = useState<Period>('month');
@@ -122,7 +127,7 @@ export function ProvidersTable() {
               <Text style={[styles.th, { flex: 0.8 }]}>Console</Text>
             </View>
           ) : null}
-          {rows.map((r) => <ProviderRow key={r.line.key} r={r} wide={wide} busy={busyKey === r.line.key} onOpen={() => setOpenKey(r.line.key)} onToggle={(on) => toggle(r.line.source, on)} />)}
+          {rows.map((r) => <ProviderRow key={r.line.key} r={r} wide={wide} busy={busyKey === r.line.key || !canSwitch} onOpen={() => setOpenKey(r.line.key)} onToggle={(on) => toggle(r.line.source, on)} />)}
           {!rows.length ? <Text style={[type.small, { padding: spacing.md }]}>Nothing matches that filter.</Text> : null}
         </Card>
       ) : null}
@@ -130,7 +135,7 @@ export function ProvidersTable() {
 
       <KeyWiring />
 
-      {open ? <ProviderDrawer line={open} period={period} spend={spend!} series={series} initialMonth={month} source={sources?.available.find((a) => a.key === open.source) ?? null} onClose={() => setOpenKey(null)} onToggle={(on) => toggle(open.source, on)} busy={busyKey === open.key} /> : null}
+      {open ? <ProviderDrawer line={open} period={period} spend={spend!} series={series} initialMonth={month} source={sources?.available.find((a) => a.key === open.source) ?? null} onClose={() => setOpenKey(null)} onToggle={(on) => toggle(open.source, on)} busy={busyKey === open.key || !canSwitch} /> : null}
     </View>
   );
 }

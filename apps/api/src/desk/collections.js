@@ -31,6 +31,7 @@ import { censusCovered, countOf } from './location.js';
 import { ringFor, placesWithin } from '../repositories/reach.js';
 import { censusInRing } from '../repositories/censusRing.js';
 import { CAP_MINUTES } from '../domain/reach.js';
+import { heroesForPlaces } from '../repositories/library.js';
 
 /** A heart this old no longer lifts a collection (the existing desk's rule, say.ts). */
 export const FADE_DAYS = 120;
@@ -233,7 +234,10 @@ export async function placeIndex() {
            select pil.venue_ref, t.subcategory_key, false from ${PLACE_WORDS} pil
              join word_targets t on 'google:' || t.word = pil.label and not t.is_primary
              join place_index pi on pi.venue_ref = pil.venue_ref
-            where pi.subcategory is not null and pi.not_in_epic_at is null and pi.subcategory <> t.subcategory_key`),
+            where pi.subcategory is not null and pi.not_in_epic_at is null and pi.subcategory <> t.subcategory_key
+           -- In a fixed order, so a shelf names the same places from one
+           -- request to the next (a union comes back in any order).
+           order by 1, 3 desc`),
     query('select key, category_key from shelf_subcategories where active'),
     query('select subcategory_key, category_key from shelf_subcategory_categories'),
     query('select venue_ref, attribute_key, yesno, from_value, to_value, choice from place_attribute_values where set_by is not null'),
@@ -657,73 +661,234 @@ export async function householdReach(h) {
   };
 }
 
-// The desk's location filter is not asked (the route may still send it): a
-// household sees what is within its own reach, whatever the desk shows.
-export async function asHousehold({ householdId }) {
+/** How many places a family's shelf carries (the desk's own list still names three). */
+export const SHELF = 8;
+
+/** The row that takes its reader's name (handover D6): "A day to yourself, Sarah". */
+const PERSONAL = new Set(['dayyourself']);
+
+/** A member's age from what we hold, or null; never a guess drawn as a fact. */
+const ageOf = (m, year = new Date().getFullYear()) =>
+  (m.birth_date ? year - new Date(m.birth_date).getFullYear() : m.birth_year ? year - m.birth_year : null);
+
+/**
+ * Everything a household's collections are judged from, read once. The one
+ * path both the family's Inspire (`familyCollections`) and the desk's "See as
+ * a household" (`asHousehold`) go through, so the preview is what a family
+ * gets (collections-for-families, 28 Sep 2026).
+ *
+ * `hearts`, where given, stands in for the household's stored hearts — the
+ * desk preview's own taps, which are never written — as `{ key, member, days }`.
+ * `reachFor` is the household's reach; tests hand in a fixed one.
+ */
+async function judge(householdId, { hearts: given = null, reachFor = householdReach } = {}) {
   const cfg = (await settings()).values;
-  const [{ rows: [h] }, { rows: members }, { rows }, idx, { rows: hearts }] = await Promise.all([
+  const [{ rows: [h] }, { rows: members }, { rows }, idx, { rows: stored }] = await Promise.all([
     query('select id, name, home_label, home_lat, home_lng, max_travel_minutes from households where id = $1', [householdId]),
     query('select id, name, birth_year, birth_date, is_minor from members where household_id = $1 order by created_at', [householdId]),
     query('select * from browse_rows order by position, title'),
     placeIndex(),
     query('select row_key, member_id, hearted_at from browse_row_hearts where household_id = $1 order by hearted_at desc', [householdId]),
   ]);
-  const live = rows.filter((r) => r.active);
   if (!h) throw missing('No such household.');
-  const year = new Date().getFullYear();
+  const mine = new Set(members.map((m) => m.id));
+  const hearts = given
+    ? given.filter((x) => x && x.key).map((x) => ({
+      row_key: String(x.key),
+      member_id: x.member && mine.has(String(x.member)) ? String(x.member) : null,
+      hearted_at: new Date(Date.now() - Math.max(0, Number(x.days) || 0) * 86400_000),
+    }))
+    : stored;
   // An age we do not know is null, never a guess drawn as a fact: a member
   // with no birth year counts as a child (is_minor) or an adult for the
   // audience test only, and the screen says "age not given".
-  const known = members.map((m) => (m.birth_date ? year - new Date(m.birth_date).getFullYear() : m.birth_year ? year - m.birth_year : null));
+  const known = members.map((m) => ageOf(m));
   const ages = members.map((m, i) => known[i] ?? (m.is_minor ? 8 : 35));
-  const reach = await householdReach(h);
-  // Hearts fade (D7): a heart older than FADE_DAYS no longer lifts a row.
-  const fresh = hearts.filter((x) => Date.now() - new Date(x.hearted_at).getTime() < FADE_DAYS * 86400_000);
-  const hearted = new Map(fresh.map((x) => [x.row_key, x.hearted_at]));
-  const heartedBy = new Map(fresh.map((x) => [x.row_key, x.member_id]));
-  const firstHits = new Map();
-  const hitsOf = new Map();
-  const out = live.map((r) => {
+  const reach = await reachFor(h);
+  const min = cfg.collectionMinPlaces;
+  const judged = rows.filter((r) => r.active).map((r) => {
     const c = toCollection(r);
     const all = !c.legacy && ruleIsEmpty(c.rule) ? [] : idx.places.filter((p) => fits(c, p));
     // Within the household's own reach; with no reach, nothing is near and
     // the count cannot speak (null, never a nought).
     const hits = reach ? all.filter((p) => reach.refs.has(p.ref)) : [];
     const said = reach ? countOf(hits.length, reach) : { n: null, atLeast: false };
-    const n = said.n;
-    // The shelf is from what is near; with no home, from anywhere.
-    hitsOf.set(c.key, reach ? hits : all);
-    firstHits.set(c.key, hits.slice(0, 3));
     const a = c.audience;
     // Named `suits`, not `fits`: a local `fits` here shadowed the rule test
     // above and threw before it was assigned.
     const suits = a.key === 'everyone' ? true : a.key === 'adult' ? ages.some((x) => x >= 16) : ages.some((x) => x >= a.lo && x <= a.hi);
-    let why = null;
-    if (!suits) why = `Nobody here is ${a.key === 'adult' ? 'an adult' : `aged ${a.lo}–${a.hi}`}`;
     // Thin only where the count can say so: an exact number under the
     // minimum, never a floor or a count we could not make.
-    else if (n != null && !said.atLeast && n < cfg.collectionMinPlaces) why = `Too thin here · ${n} place${n === 1 ? '' : 's'}`;
-    return { key: c.key, title: c.title, copy: c.copy, places: n, placesAtLeast: said.atLeast, audience: a.label, hearted: hearted.has(c.key), shown: !why, why };
+    const thin = said.n != null && !said.atLeast && said.n < min;
+    let why = null;
+    if (!suits) why = `Nobody here is ${a.key === 'adult' ? 'an adult' : `aged ${a.lo}–${a.hi}`}`;
+    else if (thin) why = `Too thin here · ${said.n} place${said.n === 1 ? '' : 's'}`;
+    // The shelf is from what is near; with no home, the desk's list still
+    // names places from anywhere (the family's never does: see below).
+    return { c, row: r, pool: reach ? hits : all, near: hits, places: said.n, placesAtLeast: said.atLeast, suits, thin, why };
   });
-  // Three places a live collection would put on its shelf, named from our
-  // own record only; a place with no name we may print is left off. Every
-  // live row has one, because the preview's hearts are the screen's own and a
-  // row can be hearted there (prototype `phoneRow`: a shelf on every hearted
-  // live row that is not waiting, in every state).
-  // The names are looked for past the first twelve (audit 2): the first
-  // three with a name we hold among the first NAME_SEARCH, by index.
+  // Up to SHELF places each row would put on its shelf, named from our own
+  // record only (place_records, the atlas); a place with no name we may print
+  // is left off. The names are looked for past the first few (audit 2): the
+  // first with a name we hold among the first NAME_SEARCH, by index.
   const byRef = new Map(idx.places.map((p) => [p.ref, p]));
   const shelfOf = new Map();
-  for (const c of out) shelfOf.set(c.key, await namedAmong(hitsOf.get(c.key).slice(0, NAME_SEARCH).map((p) => p.ref), 3));
-  const [named, { rows: subLabels }] = await Promise.all([
-    describe([...shelfOf.values()].flat()),
+  for (const j of judged) shelfOf.set(j.c.key, await namedAmong(j.pool.slice(0, NAME_SEARCH).map((p) => p.ref), SHELF));
+  const refs = [...new Set([...shelfOf.values()].flat())];
+  const [named, { rows: subLabels }, pictures] = await Promise.all([
+    describe(refs),
     query('select key, label from shelf_subcategories'),
+    heroesForPlaces(refs),
   ]);
   const subLabel = new Map(subLabels.map((x) => [x.key, x.label]));
-  for (const c of out) {
-    c.shelf = shelfOf.get(c.key).filter((ref) => named.get(ref)?.name)
-      .map((ref) => ({ ref, name: named.get(ref).name, kind: subLabel.get(byRef.get(ref)?.primarySub) ?? null }));
+  for (const j of judged) {
+    j.shelf = shelfOf.get(j.c.key).filter((ref) => named.get(ref)?.name)
+      .map((ref) => ({ ref, name: named.get(ref).name, kind: subLabel.get(byRef.get(ref)?.primarySub) ?? null, image: ownedPicture(pictures.get(ref)) }));
   }
+  return { cfg, h, members, known, ages, rows, hearts, reach, judged, min };
+}
+
+/**
+ * A picture from our own library (image_assets, approved), in the shape the
+ * app's cards read (routes/inspire.js `ownedImage`). Never a provider's photo.
+ */
+const ownedPicture = (row) => (row ? {
+  id: row.id, source: row.source, lqip: row.lqip, credit: row.credit_line,
+  licence: row.licence, licenceUrl: row.licence_url, sourceUrl: row.source_page_url,
+  creditRequired: row.attribution_required,
+} : null);
+
+/**
+ * The collections a family sees, as the prototype's household phone draws
+ * them (logic.js `rowVals` / `phoneRow`, 28 Sep 2026; README v2 Collections;
+ * handover 4.11, D6–D11):
+ *
+ *   - audience (D11): a row with an age condition only where somebody in the
+ *     household fits it; "lower age ≥ 16" needs an adult;
+ *   - the viewer: whose list this is. A heart belongs to a person, and the
+ *     first heart asks who (`ask`). Once known, the hearts that lift a row are
+ *     theirs; before, the household's. A personalised row takes an adult
+ *     viewer's name, and is never shown to a child who is looking (D6);
+ *   - hearts fade (D7): one older than FADE_DAYS no longer lifts its row;
+ *   - thinness: a row with fewer than `collectionMinPlaces` places within the
+ *     household's own reach is not shown. A hearted one is never shown empty:
+ *     it waits ("Nothing near you this week"), in the list only;
+ *   - an unhearted row is shown only where hearting it would put something on
+ *     its shelf — a place near, with a name we hold.
+ *
+ * Two orders, as the prototype has two phones:
+ *
+ *   `inspire`  hearted rows first, with one unhearted row after the second
+ *              and three more after them, so discovery does not stop;
+ *   `list`     every row the household can see, in library order (the
+ *              "Rows" phone), waiting rows marked.
+ *
+ * With no home we can place nothing is near, and that is said (`reach: null`,
+ * no rows) rather than drawn as a list of empty rows.
+ *
+ * Owned content only: names from our own record, pictures from our own
+ * library, the drawer's label from our taxonomy. No provider is asked.
+ */
+export async function familyCollections({ householdId, viewer = null, hearts = null, reachFor = householdReach } = {}) {
+  const s = await judge(householdId, { hearts, reachFor });
+  return familyFrom(s, viewer);
+}
+
+function familyFrom(s, viewerId) {
+  const { members, known, ages, reach, judged, min } = s;
+  const people = members.map((m, i) => ({ id: m.id, name: m.name, age: known[i], adult: ages[i] >= 16 }));
+  const viewer = people.find((m) => m.id === viewerId) ?? null;
+  const fresh = s.hearts.filter((x) => Date.now() - new Date(x.hearted_at).getTime() < FADE_DAYS * 86400_000);
+  // Before anybody has said whose list this is, the household's hearts show;
+  // after, the viewer's own.
+  const hearted = new Set(fresh.filter((x) => !viewer || x.member_id === viewer.id).map((x) => x.row_key));
+  const base = {
+    // Asked on the first heart, once; never where the account is somebody's own.
+    whose: viewer ? { id: viewer.id, name: viewer.name, adult: viewer.adult } : null,
+    ask: !viewer,
+    // For "Whose list is this?": a child's age beside their name, as the prototype.
+    members: people.map((m) => ({ id: m.id, name: m.name, age: m.adult ? null : m.age, adult: m.adult })),
+    minPlaces: min,
+    fadeDays: FADE_DAYS,
+    reach: reach ? { label: reach.label, minutes: reach.minutes, speaks: reach.speaks, atLeast: reach.atLeast } : null,
+  };
+  if (!reach) return { ...base, inspire: [], list: [] };
+  const list = [];
+  for (const j of judged) {
+    if (!j.suits) continue;
+    const personal = PERSONAL.has(j.c.key);
+    if (personal && viewer && !viewer.adult) continue;
+    const isHearted = hearted.has(j.c.key);
+    // Never an empty hearted row: under the minimum, or with nothing near we
+    // can name, it waits. An unhearted one in that state is not shown.
+    const waiting = isHearted && (j.thin || !j.shelf.length);
+    if (!isHearted && (j.thin || !j.shelf.length)) continue;
+    list.push({
+      key: j.c.key,
+      title: personal && viewer?.adult ? `${j.c.title}, ${viewer.name}` : j.c.title,
+      copy: j.c.copy || null,
+      places: j.places,
+      placesAtLeast: j.placesAtLeast,
+      hearted: isHearted,
+      waiting,
+      shelf: waiting ? [] : j.shelf,
+    });
+  }
+  const top = list.filter((r) => r.hearted && !r.waiting);
+  const rest = list.filter((r) => !r.hearted);
+  const inspire = top.length >= 2
+    ? [top[0], top[1], ...rest.slice(0, 1), ...top.slice(2), ...rest.slice(1, 4)]
+    : [...top, ...rest.slice(0, 3)];
+  return { ...base, inspire, list };
+}
+
+/**
+ * Heart a collection for a household, or take the heart back. A heart belongs
+ * to a person (migration 225): hearting with nobody named is not a heart to
+ * drop, it is the first-heart question, refused as `whose_list` so the app
+ * asks it. Taking a heart back with nobody named takes the household's.
+ */
+export async function heartCollection({ householdId, key, on, memberId = null }) {
+  const { rows: [row] } = await query('select key from browse_rows where key = $1 and active', [String(key)]);
+  if (!row) throw missing('No such collection.');
+  if (memberId) {
+    const { rows: [m] } = await query('select id from members where id = $1 and household_id = $2', [memberId, householdId]);
+    if (!m) throw bad('That is not somebody in this household.');
+  }
+  if (!on) {
+    if (memberId) await query('delete from browse_row_hearts where row_key = $1 and member_id = $2', [row.key, memberId]);
+    else await query('delete from browse_row_hearts where row_key = $1 and household_id = $2', [row.key, householdId]);
+    return { key: row.key, hearted: false };
+  }
+  if (!memberId) throw Object.assign(new Error('Whose list is this?'), { status: 409, code: 'whose_list' });
+  await query(
+    `insert into browse_row_hearts (row_key, household_id, member_id) values ($1, $2, $3)
+     on conflict (row_key, member_id) do update set hearted_at = now()`, [row.key, householdId, memberId]);
+  return { key: row.key, hearted: true };
+}
+
+// The desk's location filter is not asked (the route may still send it): a
+// household sees what is within its own reach, whatever the desk shows.
+/**
+ * See as a household: the desk's view of one household, read through the
+ * same `judge` as the family's own endpoint. `inspire` and `list` are exactly
+ * what `GET /api/collections` would send that household with these hearts,
+ * seen as `seenAs`; the rest is the desk's (every row, why each is hidden,
+ * every heart with its age).
+ */
+export async function asHousehold({ householdId, seenAs = null, hearts: given = null, reachFor = householdReach }) {
+  const s = await judge(householdId, { hearts: given, reachFor });
+  const { cfg, h, members, known, ages, rows, hearts, reach, judged } = s;
+  // Hearts fade (D7): a heart older than FADE_DAYS no longer lifts a row.
+  const fresh = hearts.filter((x) => Date.now() - new Date(x.hearted_at).getTime() < FADE_DAYS * 86400_000);
+  const hearted = new Map(fresh.map((x) => [x.row_key, x.hearted_at]));
+  const heartedBy = new Map(fresh.map((x) => [x.row_key, x.member_id]));
+  const out = judged.map((j) => ({
+    key: j.c.key, title: j.c.title, copy: j.c.copy, places: j.places, placesAtLeast: j.placesAtLeast,
+    audience: j.c.audience.label, hearted: hearted.has(j.c.key), shown: !j.why, why: j.why,
+    // The desk's phone names three (prototype `phoneRow`).
+    shelf: j.shelf.slice(0, 3).map(({ ref, name, kind }) => ({ ref, name, kind })),
+  }));
   const outBy = new Map(out.map((c) => [c.key, c]));
   const memberName = new Map(members.map((m) => [m.id, m.name]));
   const title = new Map(rows.map((r) => [r.key, r.title]));
@@ -735,6 +900,7 @@ export async function asHousehold({ householdId }) {
   const order = heartedShown.length
     ? [...heartedShown.slice(0, 3), ...rest.slice(0, 2), ...heartedShown.slice(3), ...rest.slice(2)]
     : rest;
+  const family = familyFrom(s, seenAs);
   return {
     // The phone's rows: every collection in library order, live or not, with
     // what the preview needs to draw it in each of its five states. The
@@ -745,7 +911,7 @@ export async function asHousehold({ householdId }) {
       return {
         key: r.key, title: r.title, copy: r.copy, live: r.active,
         // A personalised row (handover D6): "A day to yourself, Sarah".
-        person: r.key === 'dayyourself',
+        person: PERSONAL.has(r.key),
         places: c ? c.places : null,
         placesAtLeast: c ? c.placesAtLeast : false,
         audience: c ? c.audience : audienceOf(toCollection(r).rule).label,
@@ -753,6 +919,10 @@ export async function asHousehold({ householdId }) {
         shelf: c ? c.shelf : [],
       };
     }),
+    // What the family's own endpoint sends, from the same reading.
+    inspire: family.inspire,
+    list: family.list,
+    whose: family.whose,
     minPlaces: cfg.collectionMinPlaces,
     household: { id: h.id, name: h.name, home: h.home_label, ages },
     // What "near you" means for this household, or null where it has no

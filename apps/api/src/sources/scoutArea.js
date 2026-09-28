@@ -404,21 +404,27 @@ export async function fillMenus({ limit = 3, householdId = null } = {}) {
  * function that runs over a number of weeks", and a few menus every quarter of
  * an hour builds the dataset without a bill arriving in one afternoon.
  */
-export async function readFoundMenus({ limit = 2, householdId = null, sessionId = null, ref = null, searchTheWeb = false } = {}) {
-  if (!householdId) return { read: 0, done: [], why: 'no household to attribute the reads to' };
-  const due = await scout.menusToRead(limit, ref);
+export async function readFoundMenus({ limit = 2, householdId = null, sessionId = null, ref = null, searchTheWeb = false, asClaimant = false } = {}) {
+  // Somebody pressed it (the back office): their household pays. The loop
+  // presses nobody's button, so it reads only places a household claimed and
+  // charges each read to that household — never to the first household in the
+  // table, which is what it did until the G2 inventory (G5, 28 Sep 2026).
+  if (!householdId && !asClaimant) return { read: 0, done: [], why: 'no household to attribute the reads to' };
+  const due = await scout.menusToRead(limit, ref, { claimedOnly: asClaimant });
   const done = [];
   for (const row of due) {
+    const payer = asClaimant ? row.claimant : householdId;
+    if (!payer) { done.push({ name: row.venue_label, items: 0, why: 'nobody has claimed this place, so nobody pays to read it' }); continue; }
     try {
       let read;
       try {
-        read = await readMenu({ url: row.menu_url, venueLabel: row.venue_label, householdId, sessionId, searchTheWeb });
+        read = await readMenu({ url: row.menu_url, venueLabel: row.venue_label, householdId: payer, sessionId, searchTheWeb });
       } catch (err) {
         // The page we found is an index, not a menu: "Select a menu to view",
         // with the four real menus one click further in. Sebastian's Windsor is
         // exactly this, and it is the same click-through the owner opened with.
         if (!/menu_had_no_items|menu_unreadable/.test(err.message)) throw err;
-        read = await readChildren(row, { householdId, sessionId, searchTheWeb });
+        read = await readChildren(row, { householdId: payer, sessionId, searchTheWeb });
         if (!read) throw err;
       }
       const stored = await recordMenuRead({ venueRef: row.venue_ref, venueLabel: row.venue_label, read });
@@ -622,9 +628,10 @@ export function startScoutLoop({ everyMs = 15 * 60_000 } = {}) {
     try { await fillMenus({ limit: 3 }); } catch (err) { console.warn(`scout: menus failed: ${err.message}`); }
     // And read a couple of what it found. Small and slow: this is the only part
     // of the sweep that costs, and nobody is waiting on it.
+    // Each read is charged to the household that claimed the place; a place
+    // nobody claimed is not read by the loop at all (G5, 28 Sep 2026).
     try {
-      const household = await firstHousehold();
-      if (household) await readFoundMenus({ limit: 2, householdId: household.id });
+      await readFoundMenus({ limit: 2, asClaimant: true });
     } catch (err) { console.warn(`scout: menu reads failed: ${err.message}`); }
   };
   const first = setTimeout(tick, 120_000);

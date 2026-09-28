@@ -244,6 +244,19 @@ export function definitionOf(a, cfg) {
   return { shape: a.kind, line: null };
 }
 
+/** Families' answers at one place, counted: "3 said yes", "2 said yes, 1 no". */
+export function familiesWord({ yes = 0, no = 0 } = {}) {
+  if (!yes && !no) return null;
+  return yes ? `${yes} said yes${no ? `, ${no} no` : ''}` : `${no} said no`;
+}
+
+/** "OpenStreetMap · Families · 3 said yes" — Families named once, whoever put it there. */
+function withFamilies(how, word) {
+  if (!word) return how;
+  const parts = (how ?? '').split(' · ').filter(Boolean);
+  return parts.includes(SOURCE_WORD.families) ? `${how} · ${word}` : [...parts, SOURCE_WORD.families, word].join(' · ');
+}
+
 /**
  * The drill-down: only places that have the fact. Place · Area · How we know ·
  * Edit, with country, county and postcode filters and a search; footer "Looked
@@ -273,6 +286,13 @@ export async function factPlaces(key, { sub = null, country = null, county = nul
        left join place_fact_answers x on x.venue_ref = h.venue_ref and x.attribute_key = h.attribute_key
       where h.venue_ref in (select venue_ref from s)`, [key, sub]);
   const described = await describe(rows.map((r) => r.venue_ref));
+  // What families said, as counts per place and never who (the visit
+  // question, 28 Sep 2026): "Families · 3 said yes". Didn't notice is not counted.
+  const { rows: fam } = await query(
+    `select venue_ref, count(*) filter (where answer = 'yes')::int yes, count(*) filter (where answer = 'no')::int no
+       from family_answers where attribute_key = $1 and answer in ('yes', 'no') and venue_ref = any($2::text[]) group by venue_ref`,
+    [key, rows.map((r) => r.venue_ref)]);
+  const families = new Map(fam.map((f) => [f.venue_ref, familiesWord(f)]));
   const needle = q ? String(q).trim().toLowerCase() : null;
   const pc = postcode ? String(postcode).trim().toUpperCase().replace(/\s+/g, '') : null;
   const options = answerOptionsOf(a, cfg);
@@ -292,7 +312,7 @@ export async function factPlaces(key, { sub = null, country = null, county = nul
       postcode: d.postcode,
       outward: outward(d.postcode),
       // Every one of our sources that says so, in one line; a person's answer says it was a person.
-      how: r.set_by ? SOURCE_WORD.person : sourcesWord([...(r.sources ?? []), r.source]),
+      how: withFamilies(r.set_by ? SOURCE_WORD.person : sourcesWord([...(r.sources ?? []), r.source]), families.get(r.venue_ref)),
       answer,
       // The option the place holds now, so Edit can light it.
       current: options.find((o) => o.label === word)?.key ?? null,

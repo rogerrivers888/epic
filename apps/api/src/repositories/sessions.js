@@ -94,14 +94,19 @@ export function revokeSession(token) {
 }
 
 /**
- * Sign every device out — the answer to a passcode that has been shared too
- * widely. Given an account, only that account's devices: one customer signing
- * out everywhere must not sign the whole estate out.
+ * Sign every one of an account's devices out. Only ever one account's: one
+ * customer signing out everywhere must not sign the whole estate out.
+ *
+ * It used to read a missing account as "everyone", so a passcode, service or
+ * agent session asking for `?all=1` signed out every device on the estate (G2
+ * inventory, 28 Sep 2026). With no account there is nothing to scope to, and
+ * that is refused here rather than trusted to every caller.
  */
-export function revokeAllSessions(accountId = null) {
+export async function revokeAllSessions(accountId) {
+  if (!accountId) throw new Error('revokeAllSessions needs an account; it never signs the whole estate out');
   return query(
     `update api_sessions set revoked_at = now()
-      where revoked_at is null and ($1::uuid is null or account_id = $1)`,
+      where revoked_at is null and account_id = $1`,
     [accountId],
   );
 }

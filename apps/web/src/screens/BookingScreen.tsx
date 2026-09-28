@@ -27,6 +27,7 @@ import { HostFace, Kicker, REFUND_WORDS, VENUE_ICON, dateOnly, dayShort, duratio
 import { pickPhotoBlob } from '../components/pickPhoto';
 import { ChatScreen } from '../components/chat/ChatScreen';
 import { bookingDoor } from '../components/chat/door';
+import { VisitQuestion } from '../components/VisitQuestion';
 
 const WIDE = 900;
 const CHIPS = [{ key: 'skill', label: 'Skill' }, { key: 'company', label: 'Company' }, { key: 'value', label: 'Value' }];
@@ -228,6 +229,11 @@ function RateHost({ booking: b, wide, onBack, onDone }: { booking: Booking; wide
           </Press>
         ))}
       </Row>
+
+      {/* Help the next family (Visit Question board): one fact about the place
+          the experience happened at, between the stars and What stood out.
+          An experience at no place we know asks nothing, and nothing is drawn. */}
+      <VisitQuestion source={{ booking: b.id }} style={{ marginTop: spacing.lg }} />
 
       <View style={styles.block}>
         <Kicker>WHAT STOOD OUT</Kicker>

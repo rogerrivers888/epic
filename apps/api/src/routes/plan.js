@@ -157,7 +157,9 @@ The reply is spoken aloud as well as shown: one or two plain sentences, no lists
 // ---------------------------------------------------------------------------
 
 async function loadSession(id) {
-  const session = await planSessions.livePlanSession(id);
+  // The caller's household's session only (G2, 28 Sep 2026); another household's is "not found".
+  const household = await currentHousehold();
+  const session = await planSessions.livePlanSession(id, household.id);
   if (!session) {
     const err = new Error('Planning session not found or expired');
     err.status = 404;
@@ -911,7 +913,8 @@ function publicTrip(trip) {
 router.get('/trips/:tripId/sources', async (req, res, next) => {
   try {
     const household = await currentHousehold();
-    const real = await tripsRepo.tripById(req.params.tripId);
+    // The caller's trip only (G2, 28 Sep 2026): this runs the plan's paid retrieval for the trip's day.
+    const real = await tripsRepo.tripOfHouseholdFull(req.params.tripId, household.id);
     if (!real) return res.status(404).json({ error: 'trip_not_found' });
     const days = await tripsRepo.daysOf(real.id);
     const day = days.find((d) => d.id === req.query.dayId) ?? days[0];

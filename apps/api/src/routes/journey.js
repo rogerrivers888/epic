@@ -17,17 +17,14 @@ import { routingEnabled, routeBetween, directions as fetchDirections } from '../
 import { dayAsTrip, slotFor } from '../domain/days.js';
 import { wallToUtc, wallClock, DEFAULT_TZ } from '../domain/time.js';
 import { currentHousehold } from './household.js';
-import { tripPayload, LEG_MODES } from './trips.js';
+import { tripPayload, LEG_MODES, loadTrip, scopeTripParam } from './trips.js';
 
 const router = Router();
+// The caller's trips only (G2, 28 Sep 2026): the reorder writes before it reads, so the check is the param's.
+router.param('id', scopeTripParam);
 const RUNNING = new Set(['to_call', 'booked', 'no_booking']);
 const TAXI_WAIT_MINUTES = 4;
 
-async function loadTrip(tripId) {
-  const trip = await trips.tripById(tripId);
-  if (!trip) { const err = new Error('Trip not found'); err.status = 404; err.code = 'trip_not_found'; throw err; }
-  return trip;
-}
 
 /** The day asked for, or the trip's first — a day out has only one. */
 async function loadDay(trip, dayId) {

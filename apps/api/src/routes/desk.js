@@ -376,14 +376,21 @@ deskRoutes.put('/collections/:key', requires('manage_library'), async (req, res,
 
 deskRoutes.get('/collections/as-household', requires('view_library'), async (req, res, next) => {
   try {
-    const { loc: l } = await loc(req);
     let householdId = str(req.query.household);
     if (!householdId) householdId = req.account?.household_id ?? null;
     const { rows: households } = await query(
       `select h.id, h.name from households h where exists (select 1 from accounts a where a.household_id = h.id) order by h.created_at`);
     if (!householdId) householdId = households[0]?.id ?? null;
     if (!householdId) return res.json({ households: [], shown: [], hidden: [] });
-    res.json({ ...(await collections.asHousehold({ householdId, loc: l && !l.unknown ? l : null })), households });
+    // The preview's own taps, never written: who it is seen as, and its
+    // hearts as [{ key, member, days }]. Read through the same code as the
+    // family's endpoint, so `inspire` and `list` are what they would get.
+    let hearts = null;
+    if (req.query.hearts != null) {
+      try { hearts = JSON.parse(String(req.query.hearts)); } catch { hearts = null; }
+      if (!Array.isArray(hearts)) hearts = null;
+    }
+    res.json({ ...(await collections.asHousehold({ householdId, seenAs: str(req.query.as), hearts })), households });
   } catch (err) { next(err); }
 });
 

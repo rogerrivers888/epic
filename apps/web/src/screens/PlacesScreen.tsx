@@ -16,6 +16,7 @@ import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { Button, Card, Chip, Row, StatusLine, Wrap } from '../components/ui';
 import { SourcePicker } from '../components/SourcePicker';
 import { BeenCapture, VenueRow, VisitForm, VisitSummary, rowsForVisit } from '../components/Visits';
+import { VisitQuestion } from '../components/VisitQuestion';
 import { getViewer, onViewerChange } from '../viewer';
 import { isAdmin } from '../admin';
 import { CategoryStrip, PairSwitch, TOP_INSET } from '../components/InspireHeader';
@@ -889,6 +890,9 @@ function CapturePanel({ venue, household, ctx: where, been, saved, onChanged, on
   const [busy, setBusy] = useState(false);
   // Where the visit filed the place, kept from the create for the moment BeenCapture says it is done.
   const filedRef = useRef<PhotoFiled | null>(null);
+  // The visit just recorded: its one fact question follows the rating (Visit Question board).
+  const visitRef = useRef<string | null>(null);
+  const [visitId, setVisitId] = useState<string | null>(null);
   const ctx = { label: venue.name, category: venue.category, lat: venue.lat ?? undefined, lng: venue.lng ?? undefined, venue, ...where };
   if (!household) return null;
   // Saying we have been here saves the place as well; there is no second step
@@ -905,6 +909,8 @@ function CapturePanel({ venue, household, ctx: where, been, saved, onChanged, on
       ) : (
         <Text style={type.h3}>Have you been?</Text>
       )}
+      {/* Help the next family: one fact about this place, after the rating. */}
+      {!open ? <VisitQuestion source={visitId ? { visitId, placeId: venue.venueRef } : null} /> : null}
       {!open ? (
         <Row style={{ flexWrap: 'wrap' }}>
           <Button label={here ? 'Been again' : "We've been here"} kind={here ? 'secondary' : 'primary'} onPress={() => setOpen(true)} />
@@ -913,8 +919,8 @@ function CapturePanel({ venue, household, ctx: where, been, saved, onChanged, on
       ) : (
         <>
           <BeenCapture venue={venue} household={household}
-            onCreate={async (body) => { const r = await api.createVisit({ venueRef: venue.venueRef, venueLabel: venue.name, category: venue.category, lat: venue.lat, lng: venue.lng, visitedOn: body.visitedOn, note: body.note, attendeeIds: body.attendeeIds, takes: body.takes, venue: { experiences: venue.experiences, cuisines: venue.cuisines, category: venue.category }, ...where }); filedRef.current = r.filed ?? null; }}
-            onSaved={async () => { setOpen(false); setDone('been'); await onChanged(); onLanded(venue.venueRef, kindOfCategory(venue.category), filedRef.current); }} />
+            onCreate={async (body) => { const r = await api.createVisit({ venueRef: venue.venueRef, venueLabel: venue.name, category: venue.category, lat: venue.lat, lng: venue.lng, visitedOn: body.visitedOn, note: body.note, attendeeIds: body.attendeeIds, takes: body.takes, venue: { experiences: venue.experiences, cuisines: venue.cuisines, category: venue.category }, ...where }); filedRef.current = r.filed ?? null; visitRef.current = r.visit?.id ?? null; }}
+            onSaved={async () => { setOpen(false); setDone('been'); setVisitId(visitRef.current); await onChanged(); onLanded(venue.venueRef, kindOfCategory(venue.category), filedRef.current); }} />
           <Button label="Close" icon="close" kind="ghost" onPress={() => setOpen(false)} style={{ alignSelf: 'flex-start' }} />
         </>
       )}
@@ -956,6 +962,9 @@ function OursPanel({ place, household, ctx: where, viewer, onChanged, onRemoved 
   const [msg, setMsg] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [detailed, setDetailed] = useState(false);
+  // The visit just recorded here: its one fact question follows the rating (Visit Question board).
+  const visitRef = useRef<string | null>(null);
+  const [visitId, setVisitId] = useState<string | null>(null);
   const ctx = { label: place.name, category: place.category, lat: place.lat ?? undefined, lng: place.lng ?? undefined, ...where };
   const venue = atlasToVenue(place);
   void myScore(place, viewer);
@@ -987,14 +996,15 @@ function OursPanel({ place, household, ctx: where, viewer, onChanged, onRemoved 
       </Wrap>
       {!place.visits && !place.special ? <Text style={type.tiny}>Loved comes after you've been. Record the visit and it appears here.</Text> : null}
       {msg ? <StatusLine tone="good">{msg}</StatusLine> : null}
+      {!adding ? <VisitQuestion source={visitId ? { visitId, placeId: place.venueRef } : null} /> : null}
       {adding && household ? (
         detailed ? (
-          <VisitForm venue={venue} household={household} onDone={async () => { setAdding(false); setDetailed(false); await load(); await onChanged(); }} onCancel={() => setDetailed(false)}
-            createVia={async (body) => { await api.createVisit({ venueRef: place.venueRef, venueLabel: place.name, category: venue.category, lat: venue.lat, lng: venue.lng, visitedOn: body.visitedOn, note: body.note, attendeeIds: body.attendeeIds, takes: body.takes, venue: body.venue, ...where }); }} />
+          <VisitForm venue={venue} household={household} onDone={async () => { setAdding(false); setDetailed(false); setVisitId(visitRef.current); await load(); await onChanged(); }} onCancel={() => setDetailed(false)}
+            createVia={async (body) => { const r = await api.createVisit({ venueRef: place.venueRef, venueLabel: place.name, category: venue.category, lat: venue.lat, lng: venue.lng, visitedOn: body.visitedOn, note: body.note, attendeeIds: body.attendeeIds, takes: body.takes, venue: body.venue, ...where }); visitRef.current = r.visit?.id ?? null; }} />
         ) : (
           <BeenCapture venue={venue} household={household} onMore={() => setDetailed(true)}
-            onCreate={async (body) => { await api.createVisit({ venueRef: place.venueRef, venueLabel: place.name, category: venue.category, lat: venue.lat, lng: venue.lng, visitedOn: body.visitedOn, note: body.note, attendeeIds: body.attendeeIds, takes: body.takes, venue: { experiences: venue.experiences, cuisines: venue.cuisines, category: venue.category }, ...where }); }}
-            onSaved={async () => { setAdding(false); setMsg('Saved — thank you.'); await load(); await onChanged(); }} />
+            onCreate={async (body) => { const r = await api.createVisit({ venueRef: place.venueRef, venueLabel: place.name, category: venue.category, lat: venue.lat, lng: venue.lng, visitedOn: body.visitedOn, note: body.note, attendeeIds: body.attendeeIds, takes: body.takes, venue: { experiences: venue.experiences, cuisines: venue.cuisines, category: venue.category }, ...where }); visitRef.current = r.visit?.id ?? null; }}
+            onSaved={async () => { setAdding(false); setMsg('Saved — thank you.'); setVisitId(visitRef.current); await load(); await onChanged(); }} />
         )
       ) : null}
       {editing && household ? (

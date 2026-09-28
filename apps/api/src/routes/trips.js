@@ -72,10 +72,29 @@ export function nightsOf(t) {
   return Math.max(0, Math.round((+b - +a) / 86400000));
 }
 
-async function loadTrip(tripId) {
-  const trip = await trips.tripById(tripId);
+/**
+ * One trip, but only the caller's (G2 inventory, 28 Sep 2026). Every
+ * `/api/trips/:id…` route read the trip by id alone, so any signed-in session
+ * could read, edit, plan or delete another household's trip by knowing its id.
+ * A trip of another household is a 404 — the same answer as one that does not
+ * exist, so the id's existence is not confirmed either. Guests reach a shared
+ * trip through `/api/shared/:token`, which resolves it from the token and never
+ * comes through here.
+ */
+export async function loadTrip(tripId) {
+  const household = await currentHousehold();
+  const trip = await trips.tripOfHouseholdFull(tripId, household.id);
   if (!trip) { const err = new Error('Trip not found'); err.status = 404; err.code = 'trip_not_found'; throw err; }
   return trip;
+}
+
+/**
+ * The same check as a router param, so a route that writes before it reads —
+ * attendees, a day, a stop, the shortlist — is refused before its first write,
+ * not after it. Mounted on every router that serves `/api/trips/:id…`.
+ */
+export async function scopeTripParam(req, _res, next, id) {
+  try { req.trip = await loadTrip(id); next(); } catch (err) { next(err); }
 }
 
 /** From where the day starts (the bed, else home) to where it is for. Null without both, or when they are the same place. */
@@ -206,6 +225,8 @@ export async function tripPayload(tripId) {
 // ---------------------------------------------------------------------------
 
 /** GET /api/trips?country=GB&when=upcoming|past&kind=trip|outing&q= */
+router.param('id', scopeTripParam);
+
 router.get('/', async (req, res, next) => {
   try {
     const household = await currentHousehold();
@@ -704,15 +725,22 @@ router.patch('/:id', async (req, res, next) => {
 });
 
 router.delete('/:id', async (req, res, next) => {
-  try { if (!await trips.deleteTrip(req.params.id)) return res.status(404).json({ error: 'trip_not_found' }); res.status(204).end(); } catch (err) { next(err); }
+  try {
+    const household = await currentHousehold();
+    if (!await trips.deleteTrip(req.params.id, household.id)) return res.status(404).json({ error: 'trip_not_found' });
+    res.status(204).end();
+  } catch (err) { next(err); }
 });
 
 router.put('/:id/attendees', async (req, res, next) => {
   try {
     const { memberIds = [] } = req.body || {};
+    const household = await currentHousehold();
     await withTransaction(async (client) => {
+      // Only this household's own people can be put on its trip (G2, 28 Sep 2026).
+      const own = new Set(await trips.householdMemberIds(household.id, client));
       await trips.clearAttendees(req.params.id, client);
-      for (const memberId of memberIds) await trips.addAttendee(req.params.id, memberId, client);
+      for (const memberId of memberIds) if (own.has(memberId)) await trips.addAttendee(req.params.id, memberId, client);
     });
     res.json(await tripPayload(req.params.id));
   } catch (err) { next(err); }
@@ -1962,7 +1990,7 @@ router.post('/:id/days/:dayId/reorder', async (req, res, next) => {
   try {
     const { stopIds = [] } = req.body || {};
     await withTransaction(async (client) => {
-      for (let i = 0; i < stopIds.length; i += 1) await trips.setStopPosition(req.params.dayId, stopIds[i], i + 1, client);
+      for (let i = 0; i < stopIds.length; i += 1) await trips.setStopPosition(req.params.dayId, stopIds[i], i + 1, client, req.params.id);
     });
     res.json(await tripPayload(req.params.id));
   } catch (err) { next(err); }

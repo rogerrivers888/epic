@@ -33,6 +33,8 @@ import {
   type SortState, type TCol,
 } from './kit';
 import { RulePicker, type Catalogue, type RuleKind } from './Picker';
+import { CollectionRowView, WhoseList } from '../../components/CollectionRows';
+import type { CollectionRow } from '../../api';
 
 // ---------------------------------------------------------------------------
 // What the API answers (apps/api/src/desk/collections.js)
@@ -590,6 +592,13 @@ type House = {
   fadeDays?: number;
   rows?: HouseRow[];
   minPlaces?: number;
+  /**
+   * What `GET /api/collections` sends this household with the preview's
+   * hearts, seen as the preview's person — the same code, so the phone below
+   * is what a family gets: `inspire` is Inspire's order, `list` the Rows page.
+   */
+  inspire?: CollectionRow[];
+  list?: CollectionRow[];
 };
 type HouseState = 'list' | 'first' | 'inspire' | 'thin' | 'named';
 const HOUSE_STATES: { key: HouseState; name: string }[] = [
@@ -649,51 +658,59 @@ function Household() {
         // no longer lifts its row.
         setHearts(new Map((h.hearts ?? []).map((x) => [x.key, x.memberId ?? null])));
         setHeartDays(new Map((h.hearts ?? []).map((x) => [x.key, x.days])));
+        setFamily({ inspire: h.inspire ?? [], list: h.list ?? [] });
       })
       .catch((err) => { if (live) setError(saidOf(err)); });
     return () => { live = false; };
   }, [id]);
 
+  // The phone is what the family's own endpoint would send with these
+  // hearts, seen as this person — asked of the API, never ordered here, so
+  // the preview cannot drift from the app (collections-for-families,
+  // 28 Sep 2026). The preview's hearts ride along and are never written.
+  const [family, setFamily] = useState<{ inspire: CollectionRow[]; list: CollectionRow[] }>({ inspire: [], list: [] });
+  const asked = useRef(0);
+  useEffect(() => {
+    if (!house?.household) return;
+    const n_ = ++asked.current;
+    const said = [...hearts].map(([key, member]) => ({ key, member, days: heartDays.get(key) ?? 0 }));
+    deskApi.get<House>('/collections/as-household', { household: house.household.id, as: owner, hearts: JSON.stringify(said) })
+      .then((h) => { if (asked.current === n_) setFamily({ inspire: h.inspire ?? [], list: h.list ?? [] }); })
+      .catch((err) => { if (asked.current === n_) setError(saidOf(err)); });
+  }, [house?.household?.id, owner, hearts, heartDays]);
+
   const members = house?.members ?? [];
   const ownerM = members.find((m) => m.id === owner) ?? null;
-  const min = house?.minPlaces ?? 4;
   const all = house?.rows ?? [];
-  // A personalised row is never shown to a child who is looking (D6).
-  const visible = all.filter((r) => !(r.person && ownerM && !ownerM.adult));
   const fadeDays = house?.fadeDays ?? 120;
   const fadingKey = (key: string) => (heartDays.get(key) ?? 0) >= fadeDays;
   // A fading heart no longer lifts its row (D7).
   const isHearted = (r: HouseRow) => hearts.has(r.key) && !fadingKey(r.key);
-  /** Places within the household's reach; null where that cannot be said. */
-  const here = (r: HouseRow): number | null => (r.live ? r.places : 0);
-  /** Waiting: hearted, live, and an exact count under the minimum. */
-  const thinHere = (r: HouseRow) => { const x = here(r); return r.live && x != null && !r.placesAtLeast && x < min; };
   const titleOf = (r: HouseRow) => (r.person ? (ownerM?.adult ? `${r.title}, ${ownerM.name}` : r.title) : r.title);
 
-  const phoneRows: HouseRow[] = (() => {
-    if (state === 'inspire') {
-      const h1 = visible.filter((r) => isHearted(r) && r.live && !thinHere(r));
-      const rest = visible.filter((r) => !isHearted(r) && r.live).slice(0, 6);
-      const mixed: HouseRow[] = [];
-      h1.forEach((r, i) => { mixed.push(r); if (i === 1 && rest[0]) mixed.push(rest[0]); });
-      return [...mixed, ...rest.slice(1, 4)];
-    }
+  // Inspire and the list are the family's own rows, as the API sends them.
+  // Waiting row and Named rows are demonstrations over the same rows: the
+  // waiting ones first, and the prototype's five named rows.
+  const phoneRows: CollectionRow[] = (() => {
+    if (state === 'inspire') return family.inspire;
     if (state === 'thin') {
-      const t = visible.filter((r) => isHearted(r) && thinHere(r));
-      const pad = visible.filter((r) => isHearted(r) && r.live && !thinHere(r)).slice(0, 2);
+      const t = family.list.filter((r) => r.waiting);
+      const pad = family.list.filter((r) => r.hearted && !r.waiting).slice(0, 2);
       // Nothing hearted is waiting: the prototype draws the dog row in its place.
-      const lead = t.length ? t : visible.filter((r) => r.key === 'dog');
+      const lead = t.length ? t : family.list.filter((r) => r.key === 'dog');
       const leadKeys = new Set(lead.map((r) => r.key));
-      return [...lead, ...pad.filter((r) => !leadKeys.has(r.key)), ...visible.filter((r) => !isHearted(r) && r.live && !leadKeys.has(r.key)).slice(0, 3)];
+      return [...lead, ...pad.filter((r) => !leadKeys.has(r.key)), ...family.list.filter((r) => !r.hearted && !leadKeys.has(r.key)).slice(0, 3)];
     }
-    if (state === 'named') return NAMED_ROWS.map((k) => visible.find((r) => r.key === k)).filter((r): r is HouseRow => !!r);
-    return visible.filter((r) => r.live);
+    if (state === 'named') return NAMED_ROWS.map((k) => family.list.find((r) => r.key === k)).filter((r): r is CollectionRow => !!r);
+    return family.list;
   })();
+  const rowOf = (r: CollectionRow) => all.find((x) => x.key === r.key);
 
   // A fading heart reads as not hearted on the phone, so a tap there hearts
   // it afresh; the list's "unheart" takes any heart away.
-  const heart = (r: HouseRow, off = false) => {
-    const on = off || isHearted(r);
+  const heart = (r: HouseRow, off = false, shown?: boolean) => {
+    // `shown`: whether the phone drew it hearted — the API's word, for the person it is seen as.
+    const on = off || (shown ?? isHearted(r));
     // The first heart asks whose list it is (prototype `toggleHeart`).
     if (!owner && !on) { setState('first'); return; }
     const next = new Map(hearts);
@@ -744,72 +761,19 @@ function Household() {
                   {ownerM ? <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: APP.inkMuted }}>{ownerM.name}’s hearts</Text> : null}
                 </View>
                 {state === 'first' && !owner ? (
-                  <View style={{ gap: 12, paddingTop: 14, paddingHorizontal: 18, paddingBottom: 18, borderTopWidth: 1, borderBottomWidth: 1, borderColor: APP.ruleSoft, backgroundColor: APP.warm }}>
-                    <Text style={{ fontFamily: fonts.body, fontSize: 16, fontWeight: '700', lineHeight: 20.8, color: INK }}>Whose list is this?</Text>
-                    <View style={{ flexDirection: 'row', gap: 10 }}>
-                      {members.map((m) => (
-                        <Press key={m.id} effect="none" style={{ flex: 1 }} onPress={() => choose(m, `Hearts now attributed to ${m.name}`)}>
-                          <View style={{ alignItems: 'center', gap: 6 }}>
-                            <View style={{ width: 48, height: 48, borderRadius: 24, borderWidth: 2, borderColor: INK, alignItems: 'center', justifyContent: 'center' }}>
-                              <Text style={{ fontFamily: fonts.heading, fontSize: 17, fontWeight: '800', color: INK }}>{m.name.slice(0, 1)}</Text>
-                            </View>
-                            <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: INK }}>{m.name}{!m.adult && m.age != null ? ` · ${m.age}` : ''}</Text>
-                          </View>
-                        </Press>
-                      ))}
-                    </View>
-                    <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: APP.inkMuted }}>Asked once. Every heart after this is attributed to them.</Text>
-                  </View>
+                  <WhoseList members={members} palette={APP} onChoose={(m) => choose(m, `Hearts now attributed to ${m.name}`)} />
                 ) : null}
                 <View style={{ paddingTop: 2, paddingBottom: 20 }}>
-                  {phoneRows.map((r) => {
-                    const hearted = isHearted(r);
-                    const n_ = here(r);
-                    const notReady = !r.live;
-                    const waiting = hearted && thinHere(r);
-                    // The prototype's `phoneRow`: a waiting row says so; a live
-                    // one its copy line, or how many places are near — never a
-                    // number we could not count.
-                    const near = n_ == null ? '' : `${n_}${r.placesAtLeast ? '+' : ''} ${n_ === 1 && !r.placesAtLeast ? 'place' : 'places'} near you`;
-                    const sub = notReady ? (r.copy || '') : waiting ? 'Nothing near you this week — it comes back when there is' : (r.copy || near);
-                    // The shelf's frame is drawn even with nothing named on it (the prototype).
-                    const showShelf = hearted && r.live && !waiting;
-                    const fg = notReady ? APP.decor : INK;
-                    return (
-                      <View key={r.key} style={{ gap: 3, paddingVertical: 11, paddingHorizontal: 18, borderBottomWidth: 1, borderBottomColor: APP.lineSoft, backgroundColor: hearted ? APP.warm : 'transparent' }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
-                          <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                              <Text style={{ fontFamily: fonts.heading, fontSize: 16.5, fontWeight: '800', letterSpacing: -0.33, color: fg }}>{titleOf(r)}</Text>
-                              {waiting ? (
-                                <Text style={{ fontFamily: fonts.body, fontSize: 9.5, fontWeight: '800', letterSpacing: 0.38, borderWidth: 1, borderColor: APP.inkMuted, color: APP.inkMuted, paddingVertical: 1, paddingHorizontal: 5 }}>WAITING</Text>
-                              ) : null}
-                              {notReady ? (
-                                <Text style={{ fontFamily: fonts.body, fontSize: 9.5, fontWeight: '800', letterSpacing: 0.38, borderWidth: 1, borderStyle: 'dashed', borderColor: APP.decor, color: APP.inkMuted, paddingVertical: 1, paddingHorizontal: 5 }}>NOT READY YET</Text>
-                              ) : null}
-                            </View>
-                            {sub ? <Text style={{ fontFamily: fonts.body, fontSize: 13, lineHeight: 18.2, color: APP.inkMuted }}>{sub}</Text> : null}
-                          </View>
-                          <Press effect="none" onPress={() => heart(r)} accessibilityLabel={hearted ? `Unheart ${titleOf(r)}` : `Heart ${titleOf(r)}`} style={{ paddingTop: 2 }}>
-                            <Icon name="keep" size={21} color={notReady ? APP.decor : INK} fill={hearted} />
-                          </Press>
-                        </View>
-                        {showShelf ? (
-                          <View style={{ flexDirection: 'row', gap: 8, paddingTop: 7 }}>
-                            {r.shelf.map((p) => (
-                              <View key={p.ref} style={{ width: 106, gap: 5 }}>
-                                <View style={{ width: 106, height: 74, borderRadius: 8, backgroundColor: APP.warm, borderWidth: 1, borderStyle: 'dashed', borderColor: APP.ruleMuted, justifyContent: 'flex-end', padding: 7 }}>
-                                  <Text style={{ fontFamily: fonts.body, fontSize: 10, fontWeight: '700', letterSpacing: 0.3, lineHeight: 12, color: APP.inkMuted }}>{p.kind ?? ''}</Text>
-                                </View>
-                                <Text style={{ fontFamily: fonts.body, fontSize: 11.5, fontWeight: '600', lineHeight: 14.4, color: INK }}>{p.name}</Text>
-                              </View>
-                            ))}
-                          </View>
-                        ) : null}
-                      </View>
-                    );
-                  })}
-                  {!phoneRows.length ? <Text style={{ paddingVertical: 20, paddingHorizontal: 18, fontFamily: fonts.body, fontSize: 13, color: APP.inkMuted }}>Nothing shows for this household yet.</Text> : null}
+                  {phoneRows.map((r) => (
+                    <CollectionRowView
+                      key={r.key}
+                      palette={APP}
+                      row={r}
+                      // The preview's own heart: changes what the phone is asked with, never a household's hearts.
+                      onHeart={() => { const h = rowOf(r); if (h) heart(h, false, r.hearted); }}
+                    />
+                  ))}
+                  {!phoneRows.length ? <Text style={{ paddingVertical: 20, paddingHorizontal: 18, fontFamily: fonts.body, fontSize: 13, color: APP.inkMuted }}>{house.reach ? 'Nothing shows for this household yet.' : 'This household has no home set, so nothing is near it.'}</Text> : null}
                 </View>
               </View>
             </View>

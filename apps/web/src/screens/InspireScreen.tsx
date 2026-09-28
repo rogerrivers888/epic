@@ -19,6 +19,7 @@ import { ExperienceCard } from '../components/hosting';
 import { BoxRow, ControlButton, ControlRow, CrumbHead, Popover, PopoverFooter, PopoverGroup, PopoverList, type PopoverOption } from '../components/ControlRow';
 import { CardWide, Carousel, EmptyMatch, FoodRow, SubRow, TRAVEL } from '../components/InspireBody';
 import { Button } from '../components/ui';
+import { CollectionRowView, CollectionsHead, useCollections, WhoseList } from '../components/CollectionRows';
 import { TRAVEL_MODES, type TravelMode } from '../components/TravelSheet';
 import { activeCount, howFarShort, keeps, nextWider, sortItems, HOW_FAR, PRICE_BANDS, PRICE_KEYS, RATING_FLOORS, SORTS, SORT_KEYS, type Filters, type InspireSort } from './inspireList';
 import type { OpenTripOptions } from './PlanScreen';
@@ -701,9 +702,34 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
   } as BrowseItem);
   const open = (item: InspireItem) => { setMenu(null); setQuery({ place: item.venueRef }, { replace: false }); };
   const openedRef = query.get('place');
+  /**
+   * The collections this household sees (routes/collections.js), drawn as the
+   * prototype's household phone: hearted rows first, a few unhearted ones kept
+   * in view, each hearted row with its shelf of places near home. Their own
+   * read, from our own tables — no provider is asked for them.
+   */
+  const coll = useCollections();
+  /** A place on a collection's shelf, as the drawer takes it: our own name and picture, nothing rented. */
+  const shelfPlace = (ref: string) => {
+    for (const r of [...(coll.data?.inspire ?? []), ...(coll.data?.list ?? [])]) {
+      const p = r.shelf.find((x) => x.ref === ref);
+      if (p) return p;
+    }
+    return null;
+  };
   const drawer = useMemo(
-    () => { const it = openedRef ? (pool?.items ?? []).find((i) => i.venueRef === openedRef) : null; return it ? asDrawerItem(it) : null; },
-    [openedRef, pool],
+    () => {
+      const it = openedRef ? (pool?.items ?? []).find((i) => i.venueRef === openedRef) : null;
+      if (it) return asDrawerItem(it);
+      const p = openedRef ? shelfPlace(openedRef) : null;
+      return p ? ({
+        id: p.ref, venueRef: p.ref, name: p.name, category: 'attraction',
+        lat: null, lng: null, dwellMinutes: 0, reasons: [], justification: null,
+        startsAt: null, endsAt: null, pinned: false, image: p.image ?? null, photos: [],
+        summary: null, attribution: null, source: p.ref.split(':')[0],
+      } as unknown as BrowseItem) : null;
+    },
+    [openedRef, pool, coll.data],
   );
   const closeDrawer = () => { noteSearchEvent('inspire', 'close', openedRef); setQuery({ place: null }, { replace: false }); };
 
@@ -908,6 +934,21 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                 <Press onPress={me.forget} accessibilityRole="button" style={styles.dismiss}>
                   <Text style={styles.dismissText}>Not now</Text>
                 </Press>
+              </View>
+            </View>
+          ) : null}
+
+          {/* Collections (handover 4.11): the rows a family hearts, near home.
+              Only on the home view — they are judged against the household's
+              own home and travel time, not a town somebody searched. */}
+          {!pick && mode === 'activities' && !chosen && !unknown && !(answer && answer.length) && coll.data?.reach && (coll.data.inspire.length || coll.asking) ? (
+            <View>
+              <CollectionsHead title="Collections" whose={coll.data.whose} action="All collections ›" onAction={() => navigate(paths.collections())} />
+              {coll.asking ? <WhoseList members={coll.data.members} onChoose={coll.choose} /> : null}
+              <View style={{ borderTopWidth: 1, borderTopColor: colors.lineSoft }}>
+                {coll.data.inspire.map((r) => (
+                  <CollectionRowView key={r.key} row={r} wide={wide} onHeart={coll.heart} onOpenPlace={(p) => { setMenu(null); setQuery({ place: p.ref }, { replace: false }); }} />
+                ))}
               </View>
             </View>
           ) : null}
@@ -1166,7 +1207,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
             <Text style={[type.small, { flex: 1, color: colors.ink }]}>{notice}</Text>
           </Press>
         ) : null}
-        onAdd={onCreateTrip ? (it) => {
+        onAdd={onCreateTrip && openedItem ? (it) => {
           // The third of Demand's three: a place opened and actually taken
           // somewhere. Held rather than reported, because this only opens the
           // new-trip form — it is counted when a trip is actually made

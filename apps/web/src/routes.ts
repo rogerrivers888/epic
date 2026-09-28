@@ -53,6 +53,7 @@
  *   /bookings/<id>                     a booking: held, booked, or past
  *   /bookings/<id>/rate                   …rate the host
  *   /inspire/people                    who near your trip does what you love
+ *   /inspire/collections               every collection this household can heart (the prototype's "Rows" phone)
  *   /household/<memberId>                 …one person
  *   /household/<memberId>/tell               …telling Epic about them, by voice (D3)
  *   /household/<memberId>/review             …the card of what was heard (D4)
@@ -378,6 +379,7 @@ export type Route =
   | { name: 'booking'; id: string; rate: boolean; chat?: ChatLayer }
   /** Passion-led discovery: the people near a trip who do what you love (`?trip=`, `?love=`). */
   | { name: 'people' }
+  | { name: 'collections' }
   /**
    * A tag's own page (Host Skills, S14–S15): every host in Britain listed for
    * it. Public and logged-out, because "fossil hunting Jurassic Coast" is a
@@ -434,6 +436,7 @@ export function parseRoute(path: string): Route {
       if (!a) return { name: 'inspire', searching: false, mode: 'activities', pick: null };
       if (a === 'search') return { name: 'inspire', searching: true, mode: 'activities', pick: null };
       if (a === 'people') return b ? { name: 'unknown', path } : { name: 'people' };
+      if (a === 'collections') return b ? { name: 'unknown', path } : { name: 'collections' };
       if (a === 'food') {
         // A cuisine is open ended — the list comes from what is actually near —
         // so anything in the slot is taken as one rather than checked against a
@@ -672,6 +675,7 @@ export function hrefOf(route: Route): string {
     case 'experience': return buildHref(['experiences', route.id, route.layer]);
     case 'booking': return route.chat ? buildHref(['bookings', route.id, 'chat', chatSegment(route.chat)]) : buildHref(['bookings', route.id, route.rate ? 'rate' : null]);
     case 'people': return '/inspire/people';
+    case 'collections': return '/inspire/collections';
     case 'tag': return route.vocab === 'facet' ? buildHref(['places-known', route.key]) : buildHref(['tags', route.key]);
     case 'say':
       return route.steps ? '/say/steps'
@@ -776,6 +780,8 @@ export const paths = {
   experienceWhere: (id: string) => buildHref(['experiences', id, 'where']),
   booking: (id: string) => buildHref(['bookings', id]),
   bookingRate: (id: string) => buildHref(['bookings', id, 'rate']),
+  /** Every collection this household can heart. */
+  collections: () => '/inspire/collections',
   /** Who near a trip does what you love (F2). */
   people: (opts?: { trip?: string | null; love?: string | null }) => {
     const q = new URLSearchParams();
@@ -867,7 +873,7 @@ export function ownsHeader(route: Route): boolean {
    * offer's dashboard) is drawn to the top of the phone with its own title and
    * its own back (Hosts and Events, H1–H4, W1–W5, D1).
    */
-  if (route.name === 'host' || route.name === 'people' || route.name === 'booking') return true;
+  if (route.name === 'host' || route.name === 'people' || route.name === 'booking' || route.name === 'collections') return true;
   // Saying what you are up for is a form, and an introduction is one thing: each draws its own head.
   if (route.name === 'open') return true;
   // The booking sheet draws its own "Book this" head; the shell's band above it would be a second one.
@@ -962,6 +968,7 @@ export function tabOf(route: Route): Tab | null {
     // Saying what you are up for belongs to hosting; a trip's intake belongs to that trip.
     case 'open': return route.tripId ? 'trips' : 'host';
     case 'people': return 'inspire';
+    case 'collections': return 'inspire';
     case 'tag': return 'inspire';
     case 'booking': return 'trips';
     case 'prototypes': return 'prototypes';
@@ -990,7 +997,7 @@ export function isTabHome(route: Route): boolean {
   // A person is a record, not the list: Settings is left pointing at itself.
   if (route.name === 'household') return false;
   if (route.name === 'host') return ['home', 'shape', 'examples', 'example', 'who'].includes(route.page);
-  if (route.name === 'booking' || route.name === 'people') return false;
+  if (route.name === 'booking' || route.name === 'people' || route.name === 'collections') return false;
   return true;
 }
 
@@ -1024,6 +1031,7 @@ export function parentOf(route: Route): string {
     case 'experience': return route.layer ? paths.experience(route.id) : '/inspire';
     case 'booking': return route.chat ? (route.chat.page === 'list' ? paths.booking(route.id) : paths.bookingChat(route.id)) : route.rate ? paths.booking(route.id) : paths.bookings();
     case 'people': return '/inspire';
+    case 'collections': return '/inspire';
     case 'tag': return '/inspire/people';
     // Up from the questions is the card; up from the card or the wizard is the mic; up from the mic is home.
     case 'say': return route.ask ? paths.heard(route.intakeId!) : route.intakeId || route.steps ? '/say' : '/inspire';
@@ -1073,6 +1081,7 @@ export function titleOf(route: Route): string {
     case 'experience': return epic(route.layer === 'book' ? 'Book this' : route.layer === 'where' ? 'Where it happens' : route.layer === 'ask' ? 'Ask the host' : 'An experience');
     case 'booking': return epic(route.chat ? (route.chat.page === 'topic' ? 'A question' : route.chat.page === 'ask' ? 'Ask something' : route.chat.page === 'bell' ? 'What you get told about' : 'Chat') : route.rate ? 'How was it?' : 'Your booking');
     case 'people': return epic('Who does what you love?');
+    case 'collections': return epic('Collections');
     case 'tag': return epic(route.key.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase()));
     case 'prototypes': return epic('Prototypes');
     case 'admin': return epic(`Back office — ${route.screen}`);

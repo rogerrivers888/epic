@@ -163,8 +163,10 @@ export async function setTripSources(id, list, client) {
   await on(client)('update trips set sources = $2 where id = $1', [id, list && list.length ? JSON.stringify(list) : null]);
 }
 
-export async function deleteTrip(id) {
-  const { rowCount } = await query('delete from trips where id = $1', [id]);
+/** Deletes a trip only if it is this household's (G2, 28 Sep 2026); the household is required. */
+export async function deleteTrip(id, householdId) {
+  if (!householdId) throw new Error('deleteTrip needs the household it deletes for');
+  const { rowCount } = await query('delete from trips where id = $1 and household_id = $2', [id, householdId]);
   return rowCount;
 }
 
@@ -414,7 +416,12 @@ export async function deleteStop(tripId, stopId) {
   return rowCount;
 }
 
-export async function setStopPosition(dayId, stopId, position, client) {
+export async function setStopPosition(dayId, stopId, position, client, tripId = null) {
+  // With the trip named, a stop on somebody else's trip cannot be moved by naming its day (G2, 28 Sep 2026).
+  if (tripId) {
+    await on(client)('update trip_stops set position = $3 where id = $2 and day_id = $1 and trip_id = $4', [dayId, stopId, position, tripId]);
+    return;
+  }
   await on(client)('update trip_stops set position = $3 where id = $2 and day_id = $1', [dayId, stopId, position]);
 }
 

@@ -22,8 +22,17 @@ function assemble(table, sets, params, where) {
 // the group
 // ---------------------------------------------------------------------------
 
-export async function groupById(groupId) {
-  const { rows } = await query('select * from trip_groups where id = $1', [groupId]);
+/**
+ * One group. With `householdId`, only if it is that household's (G2 inventory,
+ * 28 Sep 2026): every organiser route passes it, so a group of another
+ * household is not found. Without it, the group whoever holds its id — for the
+ * join-token routes and the reminder loop, which have resolved the group from
+ * a token or their own row and have no caller household to hold it to.
+ */
+export async function groupById(groupId, householdId = null) {
+  const { rows } = householdId
+    ? await query('select * from trip_groups where id = $1 and household_id = $2', [groupId, householdId])
+    : await query('select * from trip_groups where id = $1', [groupId]);
   return rows[0] ?? null;
 }
 

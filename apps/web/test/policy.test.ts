@@ -221,3 +221,17 @@ test('a participant’s window onto the chat is kept like the household’s, con
   assert.equal(queueable('POST', '/api/join/tok/chat/t1/react'), true);
   assert.equal(queueable('POST', '/api/join/tok/chat/t1/report'), false);
 });
+
+test('the collections a household sees are kept, cut to the fields that are ours', () => {
+  const body = {
+    whose: { id: 'm1', name: 'Sarah', adult: true }, ask: false, members: [], minPlaces: 4, fadeDays: 120, reach: null,
+    inspire: [{ key: 'k', title: 'T', copy: 'C', places: 5, placesAtLeast: false, hearted: true, waiting: false, rating: 4.6,
+      shelf: [{ ref: 'google:x', name: 'Pool', kind: 'Pools', image: { id: 'i1' }, rating: 4.6, photos: ['p'] }] }],
+    list: [], secret: 'rented',
+  };
+  const kept = storable('/api/collections?as=m1', body);
+  assert.ok(kept, 'saved');
+  assert.equal(kept.secret, undefined, 'an unnamed field is not kept');
+  assert.equal(kept.inspire[0].rating, undefined);
+  assert.deepEqual(kept.inspire[0].shelf[0], { ref: 'google:x', name: 'Pool', kind: 'Pools', image: { id: 'i1' } });
+});

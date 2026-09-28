@@ -67,7 +67,22 @@ const shortName = (name) => {
 };
 const inWords = (d) => (d ? new Date(`${ymd(d)}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : '');
 
+/**
+ * The organiser's group: the caller's household's only (G2 inventory, 28 Sep
+ * 2026). Every `/api/groups/:id…` route read the group by id alone, so any
+ * signed-in session could read the roster and contacts of another household's
+ * group, mark its payments or cancel it. Another household's group is a 404.
+ * Participants act through their own join-token routes, which never come here.
+ */
 async function loadGroup(groupId) {
+  const household = await currentHousehold();
+  const group = await groupsRepo.groupById(groupId, household.id);
+  if (!group) { const e = new Error('That group does not exist.'); e.status = 404; e.code = 'group_not_found'; throw e; }
+  return group;
+}
+
+/** The group behind a payload, whoever is asking: the invite link and the reminder loop have no caller household. */
+async function groupRow(groupId) {
   const group = await groupsRepo.groupById(groupId);
   if (!group) { const e = new Error('That group does not exist.'); e.status = 404; e.code = 'group_not_found'; throw e; }
   return group;
@@ -75,6 +90,14 @@ async function loadGroup(groupId) {
 
 async function loadTrip(tripId) {
   const trip = await tripsRepo.tripById(tripId);
+  if (!trip) { const e = new Error('Trip not found'); e.status = 404; e.code = 'trip_not_found'; throw e; }
+  return trip;
+}
+
+/** The caller's own trip, for the organiser's routes under `/api/trips/:id/group` (G2, 28 Sep 2026). */
+async function loadOwnTrip(tripId) {
+  const household = await currentHousehold();
+  const trip = await tripsRepo.tripOfHouseholdFull(tripId, household.id);
   if (!trip) { const e = new Error('Trip not found'); e.status = 404; e.code = 'trip_not_found'; throw e; }
   return trip;
 }
@@ -167,7 +190,7 @@ const isAnswered = (state) => Boolean(state) && ALL_STATUSES.includes(state.stat
  * both from one read rather than making the phone ask twice.
  */
 export async function groupPayload(groupId) {
-  const group = await loadGroup(groupId);
+  const group = await groupRow(groupId);
   const trip = await loadTrip(group.trip_id);
   // The group's own household, not the caller's. This is read through the
   // invite link too, which is public and has no account in the air, so "the
@@ -411,7 +434,8 @@ async function syncFromTrip(group) {
 /** GET /api/trips/:id/group — null when the trip is still a household trip. */
 router.get('/trips/:id/group', async (req, res, next) => {
   try {
-    const groupId = await groupsRepo.groupIdForTrip(req.params.id);
+    const trip = await loadOwnTrip(req.params.id);
+    const groupId = await groupsRepo.groupIdForTrip(trip.id);
     if (!groupId) return res.json({ group: null });
     await syncFromTrip(await loadGroup(groupId));
     res.json(await groupPayload(groupId));
@@ -427,8 +451,12 @@ router.get('/trips/:id/group', async (req, res, next) => {
 router.post('/trips/:id/group', async (req, res, next) => {
   try {
     const household = await currentHousehold();
-    const trip = await loadTrip(req.params.id);
+    const trip = await loadOwnTrip(req.params.id);
     const b = req.body || {};
+    // "Use again" copies names and contacts, so only from one of this household's own groups (G2, 28 Sep 2026).
+    if (b.copyFromGroupId && !(await groupsRepo.groupById(b.copyFromGroupId, household.id))) {
+      return res.status(404).json({ error: 'group_not_found', message: 'That group does not exist.' });
+    }
     const existingId = await groupsRepo.groupIdForTrip(trip.id);
     if (existingId) return res.status(409).json({ error: 'group_exists', message: 'This trip already has a group.', ...(await groupPayload(existingId)) });
 

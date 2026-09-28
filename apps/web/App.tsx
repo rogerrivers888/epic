@@ -30,6 +30,7 @@ import { TagScreen } from './src/screens/TagScreen';
 import { ExperienceScreen } from './src/screens/ExperienceScreen';
 import { BookingScreen } from './src/screens/BookingScreen';
 import { PeopleScreen } from './src/screens/PeopleScreen';
+import { CollectionsScreen } from './src/screens/CollectionsScreen';
 import { InvitedScreen, InvitedLinkScreen } from './src/screens/InvitedScreen';
 import { ForkScreen, HeardScreen as UpForHeardScreen, ListeningScreen, SavedScreen, TripIntakeScreen, WhoScreen } from './src/screens/open/UpFor';
 import { MatchScreen } from './src/screens/open/Match';
@@ -534,6 +535,7 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
       {/* Hosting (12 Sep 2026): the tab, and every page inside it. */}
       {route.name === 'host' ? <HostScreen route={route} /> : null}
       {route.name === 'people' ? <PeopleScreen household={household} /> : null}
+      {route.name === 'collections' ? <CollectionsScreen /> : null}
       {route.name === 'booking' ? <BookingScreen route={route} /> : null}
       {route.name === 'experience' ? <ExperienceScreen route={route} /> : null}
       {/* What you are up for, and the introductions it leads to (Casual meet ups). */}

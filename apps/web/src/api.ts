@@ -291,6 +291,10 @@ export type BrowseDefaultsPatch = Partial<{
   things: Partial<BrowseDefaults['things']>;
 }>;
 
+export type VisitAnswer = 'yes' | 'no' | 'unsure';
+/** One fact question after a visit ("Help the next family"). `answer` is null while it is open. */
+export type VisitQuestion = { visitId: string; placeId: string; factId: string; question: string; answer: VisitAnswer | null };
+
 export type Household = {
   id: string;
   name: string;
@@ -298,6 +302,8 @@ export type Household = {
   maxTravelMinutes: number;
   /** How they usually travel on a day out (set-up step 2); null until said. */
   travelMode?: 'driving' | 'transit' | 'walking' | 'cycling' | null;
+  /** "Access needs in our household": access facts (step free…) are asked after a visit only when true. */
+  accessNeeds?: boolean;
   defaultIntensity: 'relaxed' | 'balanced' | 'packed';
   home: Place | null;
   /** How far "close to home" reaches, in miles (Settings › Home). */
@@ -1162,6 +1168,27 @@ export type Mood = {
 export type PhotoFiled = { country: string | null; countryCode: string | null; locality: string | null };
 export type PhotoWhere = PhotoFiled & { label: string | null; how: 'known' | 'nearest' | 'new' | 'unknown' };
 
+/** A place on a collection's shelf: our own name, our drawer's label, our own picture. */
+export type CollectionPlace = { ref: string; name: string; kind: string | null; image: OwnedImage | null };
+/** One collection as a family sees it (desk/collections.js `familyFrom`). */
+export type CollectionRow = {
+  key: string; title: string; copy: string | null;
+  places: number | null; placesAtLeast: boolean;
+  hearted: boolean; waiting: boolean; shelf: CollectionPlace[];
+};
+export type Collections = {
+  whose: { id: string; name: string; adult: boolean } | null;
+  /** Nobody has said whose list this is: the first heart asks. */
+  ask: boolean;
+  /** The account is somebody's own: never asked, never changed. */
+  whoseFixed?: boolean;
+  members: { id: string; name: string; age: number | null; adult: boolean }[];
+  minPlaces: number; fadeDays: number;
+  reach: { label: string | null; minutes: number; speaks: boolean; atLeast: boolean } | null;
+  inspire: CollectionRow[];
+  list: CollectionRow[];
+};
+
 export type OwnedImage = {
   id: string;
   /**
@@ -1873,7 +1900,7 @@ export const api = {
 
   // household
   household: () => request<HouseholdResponse>('/api/household'),
-  updateHousehold: (body: Partial<Pick<Household, 'name' | 'defaultVisitMinutes' | 'maxTravelMinutes' | 'defaultIntensity' | 'travelMode'>> & { home?: Place; homeText?: string; homeRadiusMiles?: number; homePhotoUrl?: string | null; pace?: { food?: Partial<PaceKind>; activity?: Partial<PaceKind> }; timezone?: string; browse?: BrowseDefaultsPatch }) =>
+  updateHousehold: (body: Partial<Pick<Household, 'name' | 'defaultVisitMinutes' | 'maxTravelMinutes' | 'defaultIntensity' | 'travelMode' | 'accessNeeds'>> & { home?: Place; homeText?: string; homeRadiusMiles?: number; homePhotoUrl?: string | null; pace?: { food?: Partial<PaceKind>; activity?: Partial<PaceKind> }; timezone?: string; browse?: BrowseDefaultsPatch }) =>
     patch<{ household: Household }>('/api/household', body),
   addMember: (body: { name: string; relationship?: string | null; birthYear?: number | null; birthDate?: string | null; avatarUrl?: string | null; email?: string | null; mobile?: string | null }) => post<{ member: any }>('/api/household/members', body),
 
@@ -1963,6 +1990,17 @@ export const api = {
   orderEaten: (id: string, body: { visitedOn?: string; attendeeIds?: string[] } = {}) => post<{ order: Order; visitId: string }>(`/api/orders/${id}/eaten`, body),
   rateOrder: (id: string, ratings: { orderItemId: string; memberId?: string | null; score?: number | null; notGreat?: boolean; comment?: string | null; conceptKey?: string | null }[]) =>
     post<{ order: Order }>(`/api/orders/${id}/ratings`, { ratings }),
+
+  /**
+   * The visit question (Families confirm): the one fact question for this
+   * visit — or, for a hosted booking at a place, the booking's — with the
+   * answer already given if any. Null: nothing to ask (the block is absent).
+   */
+  visitQuestion: (p: { visitId: string; placeId?: string } | { booking: string }) =>
+    request<VisitQuestion | null>(`/api/families/question${qs(p as any)}`),
+  /** Yes, no or didn't notice (unsure); a Change overwrites the same record. */
+  answerVisitQuestion: (body: { visitId: string; factId: string; answer: VisitAnswer }) =>
+    post<{ visitId: string; factId: string; answer: VisitAnswer; at: string }>('/api/families/answer', body),
 
   // places & visits
   /**
@@ -3541,6 +3579,16 @@ export const api = {
     request<{ categories: { key: string; label: string; count: number; items: InspireItem[]; more: boolean; sifted?: { returned: number; inRing: number; scored: number } }[]; spent: { displaySearches: number } }>(`/api/inspire/around${qs(q)}`),
   inspireNear: (q: { lat?: number; lng?: number; label?: string; locality?: string | null; from?: string | null; mode?: string; km?: number; minutes?: number; live?: 1; refresh?: 1; count?: 1 }) =>
     request<InspireNear>(`/api/inspire/near${qs(q)}`),
+
+  /**
+   * The collections this household sees (routes/collections.js): the rows in
+   * Inspire's order and in the list's, each with its shelf of places — owned
+   * names and pictures only. `as` is whose list this device is.
+   */
+  collections: (as?: string | null) => request<Collections>(`/api/collections${qs({ as: as ?? undefined })}`),
+  /** Heart a collection, or take it back; with nobody named the API answers 409 `whose_list`. */
+  heartCollection: (key: string, body: { on: boolean; member?: string | null }) =>
+    request<{ key: string; hearted: boolean }>(`/api/collections/${encodeURIComponent(key)}/heart`, { method: 'POST', body: JSON.stringify(body) }),
 
   /** A library picture's bytes. Given the row rather than the id, a pending household upload's signed link comes with it. */
   imageUrl: (image: string | { id: string; sig?: string; exp?: number }, width = 500) =>
