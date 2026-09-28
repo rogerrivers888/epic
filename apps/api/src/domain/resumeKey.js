@@ -34,24 +34,43 @@ export function hashResumeKey(passphrase, { salt = randomBytes(16), n = N, r = R
 }
 
 /**
+ * A stored value taken apart and checked, or null.
+ *
+ * One reading for the check and for the guard's own report, so the report can
+ * never call a value healthy that the check would refuse (Codex, 28 Sep 2026).
+ * The cost is bounded as a whole, not per factor: verification runs on the
+ * request thread, and a mistyped hash naming N 2^20 and r 32 would ask for
+ * 4 GB before it answered no. Anything past these is refused outright.
+ */
+const LIMITS = { minN: 2 ** 14, maxN: 2 ** 17, maxR: 16, maxP: 2, maxMem: 64 * 1024 * 1024, minSalt: 8 };
+export function parseHash(stored) {
+  const parts = String(stored ?? '').trim().split('$');
+  if (parts.length !== 6 || parts[0] !== 'scrypt') return null;
+  const [n, r, p] = parts.slice(1, 4).map(Number);
+  if (![n, r, p].every((x) => Number.isInteger(x) && x > 0)) return null;
+  if ((n & (n - 1)) !== 0 || n < LIMITS.minN || n > LIMITS.maxN || r > LIMITS.maxR || p > LIMITS.maxP) return null;
+  if (128 * n * r > LIMITS.maxMem) return null;
+  if (!/^[\w-]+$/.test(parts[4]) || !/^[\w-]+$/.test(parts[5])) return null;
+  const salt = Buffer.from(parts[4], 'base64url');
+  const hash = Buffer.from(parts[5], 'base64url');
+  if (salt.length < LIMITS.minSalt || hash.length !== KEYLEN) return null;
+  return { n, r, p, salt, hash };
+}
+
+/**
  * Whether `given` is the passphrase behind `stored`. False, never a throw, for
- * a stored value that is not in the form above: a mistyped Doppler value must
- * refuse every resume, not open them all.
+ * a stored value that does not parse: a mistyped Doppler value must refuse
+ * every resume, not open them all.
  */
 export function verifyResumeKey(given, stored) {
-  const parts = String(stored ?? '').trim().split('$');
-  if (parts.length !== 6 || parts[0] !== 'scrypt') return false;
-  const [n, r, p] = parts.slice(1, 4).map(Number);
-  if (![n, r, p].every((x) => Number.isInteger(x) && x > 0) || n > 2 ** 20 || r > 32 || p > 16) return false;
-  const salt = Buffer.from(parts[4], 'base64url');
-  const want = Buffer.from(parts[5], 'base64url');
-  if (!salt.length || want.length !== KEYLEN) return false;
+  const h = parseHash(stored);
+  if (!h) return false;
   let got;
   try {
-    got = scryptSync(String(given ?? '').normalize('NFC'), salt, KEYLEN, { N: n, r, p, maxmem: maxmem(n, r) });
+    got = scryptSync(String(given ?? '').normalize('NFC'), h.salt, KEYLEN, { N: h.n, r: h.r, p: h.p, maxmem: maxmem(h.n, h.r) });
   } catch { return false; }
-  return timingSafeEqual(got, want);
+  return timingSafeEqual(got, h.hash);
 }
 
 /** Whether a stored value is a hash this module can check — for the guard's own report. */
-export const looksLikeHash = (stored) => /^scrypt\$\d+\$\d+\$\d+\$[\w-]+\$[\w-]+$/.test(String(stored ?? '').trim());
+export const looksLikeHash = (stored) => parseHash(stored) !== null;

@@ -16,8 +16,8 @@ const { hashResumeKey, verifyResumeKey, looksLikeHash } = await import('../src/d
 const { resumeGuard, resumeKeyAccepted } = await import('../src/routes/placeIndex.js');
 test.after(() => pool.end());
 
-// Cheap parameters for the test only; the command uses the real cost.
-const quick = { n: 2 ** 10 };
+// The cheapest cost the parser accepts; the command uses the real one.
+const quick = { n: 2 ** 14 };
 const PHRASE = 'harbour lantern oatmeal quiet bicycle';
 
 test('the hash opens with its passphrase and nothing else', () => {
@@ -61,4 +61,27 @@ test('the real cost fits the default memory ceiling', () => {
   const stored = hashResumeKey(PHRASE);
   assert.match(stored, /^scrypt\$32768\$8\$1\$/);
   assert.equal(verifyResumeKey(PHRASE, stored), true);
+});
+
+test('the report and the check read a hash the same way, and an impractical cost is refused outright', async () => {
+  // Codex, 28 Sep 2026: the right shape with a short hash was reported healthy
+  // while every check refused it; and a cost of N 2^20, r 32 would ask the
+  // request thread for 4 GB before answering.
+  const { parseHash } = await import('../src/domain/resumeKey.js');
+  const good = hashResumeKey(PHRASE, quick);
+  assert.ok(parseHash(good));
+  const [, , , , salt, hash] = good.split('$');
+  const cases = {
+    shortHash: `scrypt$32768$8$1$${salt}$aGFzaA`,
+    shortSalt: `scrypt$32768$8$1$c2FsdA$${hash}`,
+    notPowerOfTwo: `scrypt$30000$8$1$${salt}$${hash}`,
+    hugeMemory: `scrypt$1048576$32$1$${salt}$${hash}`,
+    tooManyP: `scrypt$32768$8$16$${salt}$${hash}`,
+    tooCheap: `scrypt$1024$8$1$${salt}$${hash}`,
+  };
+  for (const [why, value] of Object.entries(cases)) {
+    assert.equal(looksLikeHash(value), false, why);
+    assert.equal(resumeGuard({ EPIC_CENSUS_RESUME_KEY_HASH: value }).malformed, true, why);
+    assert.equal(verifyResumeKey(PHRASE, value), false, why);
+  }
 });
