@@ -144,7 +144,14 @@ test('migration 272: every handover row with a rule is live, and a recorded No i
                                  where key in ('twoofyou', 'bigkids', 'sneaky', 'halfday', 'history', 'stilllight', 'quiet', 'cheapcheerful')`);
   const by = new Map(rows.map((r) => [r.key, r]));
   assert.ok(by.has('bigkids'), 'the seeded rows are in the test database');
-  for (const k of ['twoofyou', 'bigkids', 'sneaky', 'halfday', 'history']) if (by.has(k)) assert.equal(by.get(k).active, true, `${k} is live`);
+  // Live unless the household rule still names a retired axis (migration 273,
+  // the owner's rule from 246): then off until it is rewritten.
+  const axis = /"how-(thrilling|much-walking|much-planning|new|busy-and-loud|much-you-learn|smart|long-a-day)"/;
+  for (const k of ['twoofyou', 'bigkids', 'sneaky', 'halfday', 'history']) {
+    if (!by.has(k)) continue;
+    const r = by.get(k);
+    assert.equal(r.active, !axis.test(JSON.stringify(r.predicate)), `${k}: live exactly when its household rule can run`);
+  }
   const still = by.get('stilllight');
   if (still) {
     assert.equal(still.rule, null);
