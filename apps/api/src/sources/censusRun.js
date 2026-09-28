@@ -1350,7 +1350,7 @@ export async function rollUpOutcodes({ outcodes = null, runId = null, alsoSquare
          join census_runs r on r.id = m.run_id
         where t.outcodes && $2::text[]`, [runId, codes])
     : await query(
-      `select t.grid_key, t.outcodes, t.state, m.run_id, r.started_at from census_tiles t
+      `select t.grid_key, t.outcodes, t.state, m.run_id, r.started_at, r.areas from census_tiles t
          join census_run_tiles m on m.grid_key = t.grid_key
          join census_runs r on r.id = m.run_id
         where t.outcodes && $1::text[] and coalesce(r.started_by, '') not like $2`, [codes, `${RING_EDGE}%`]);
@@ -1543,7 +1543,12 @@ export async function rollUpOutcodes({ outcodes = null, runId = null, alsoSquare
       .map((t) => new Date(t.state === 'done' ? (t.censused_at ?? t.started_at) : (t.started_at ?? t.censused_at)).getTime())
       .sort((x, y) => x - y);
     const saturatedTiles = own.filter((t) => Number(t.saturated) > 0).length;
-    const naming = plannedTiles.filter((t) => t.outcodes?.includes(code));
+    // By name, only a run that set out to cover this district — its areas
+    // name the district or its postcode area — is a plan for it; a neighbour's
+    // run whose padding touched one square of it is not (Codex, 28 Sep 2026).
+    const areaOf = code.match(/^[A-Z]+/)?.[0];
+    const naming = plannedTiles.filter((t) => t.outcodes?.includes(code)
+      && (runId || (t.areas ?? []).some((a) => String(a).toUpperCase() === code || String(a).toUpperCase() === areaOf)));
     const latest = naming.reduce((a, t) => (!a || new Date(t.started_at) > new Date(a.started_at) ? t : a), null);
     const squaresFor = latest ? naming.filter((t) => t.run_id === latest.run_id) : [];
     const coveredWhole = own.every((t) => t.state === 'done') && squaresFor.every((t) => t.state === 'done');

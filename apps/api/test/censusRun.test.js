@@ -1976,6 +1976,18 @@ test('a district rolled up by name answers to the latest area run that planned i
   assert.equal(a.census_count, 1);
   assert.equal(a.complete, true, 'whole by the plan of the run that covered it whole');
 
+  // A neighbour's run whose padding touched one square of it is not a plan
+  // for it, however it ends (Codex, 28 Sep 2026).
+  const neighbour = await startTestRun({ label: 'test neighbour' });
+  await query(`update census_runs set areas = array['ZY'] where id = $1`, [neighbour.id]);
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, saturated)
+     values ('test/fine/n', 49.08, -6.00, 49.12, -5.94, array['ZZ1A','ZY1'], 'todo', 0)
+     on conflict (grid_key) do update set state = 'todo', outcodes = excluded.outcodes`);
+  await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'test/fine/n') on conflict do nothing`, [neighbour.id]);
+  await rollUpOutcodes({ outcodes: ['ZZ1A'] });
+  assert.equal((await read()).complete, true, 'still whole by its own plan');
+
   // And a newer area run over it that has not finished makes it partial again.
   const later = await startTestRun({ label: 'test later' });
   await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'test/fine/0'), ($1, 'testcoarse/0') on conflict do nothing`, [later.id]);
