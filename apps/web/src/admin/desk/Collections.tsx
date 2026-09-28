@@ -352,9 +352,10 @@ function Editor({ row, catalogue, narrow, params, within, canManage, onClose, on
             </Text>
           ) : null}
           <View style={{ gap: 8 }}>
-            {([['cats', 'CATEGORY'], ['subs', 'SUB-CATEGORY'], ['facts', 'FACT']] as [RuleKind, string][]).map(([kind, name]) => (
-              // Every group shows its label; an empty one has no pills (the
-              // prototype's template). Pills in a group are any of; groups must all hold.
+            {([['cats', 'CATEGORY'], ['subs', 'SUB-CATEGORY'], ['facts', 'FACT']] as [RuleKind, string][]).filter(([kind]) => rule[kind].length > 0).map(([kind, name]) => (
+              // Only groups with pills: README v2 "Empty groups show nothing",
+              // which wins on layout over the prototype's always-drawn labels
+              // (second audit, C.25). Pills in a group are any of; groups must all hold.
               <View key={kind} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap', minHeight: 20 }}>
                   <Text style={{ width: 120, fontFamily: fonts.body, fontSize: 11, lineHeight: 17, fontWeight: '700', letterSpacing: 0.66, color: desk.inkDim }}>{name}</Text>
                   {rule[kind].map((x) => (
