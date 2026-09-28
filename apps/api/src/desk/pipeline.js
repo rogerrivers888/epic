@@ -279,13 +279,16 @@ async function record({ ref, attr, evidence, verdict, cfg, firstSeen = null }) {
     const reinstated = Boolean(was?.hidden_at && state === 'yes' && !held);
     await c.query(
       `insert into place_fact_answers (venue_ref, attribute_key, state, yesno, source, evidence_quote, checked_at, recheck_due, venue_override, hidden_at, disputed_before)
-       values ($1, $2, $3, $4, $5, $6, now(), $7, $8, null, false)
+       values ($1, $2, $3, $4, $5, $6, now(), $7, $8, case when $10 then now() end, false)
        on conflict (venue_ref, attribute_key) do update set state = excluded.state, yesno = excluded.yesno, source = excluded.source,
          evidence_quote = excluded.evidence_quote, checked_at = now(), recheck_due = excluded.recheck_due, venue_override = excluded.venue_override,
-         hidden_at = case when $9 then null else place_fact_answers.hidden_at end,
+         -- A person's Don't know keeps the answer hidden, first check or later
+         -- (Codex, 28 Sep 2026); otherwise only a reinstatement unhides it.
+         hidden_at = case when $10 then coalesce(place_fact_answers.hidden_at, now())
+                          when $9 then null else place_fact_answers.hidden_at end,
          disputed_before = place_fact_answers.disputed_before or $9`,
       [ref, fact, state, state === 'yes' ? true : state === 'no' ? false : null, source,
-        source ? evidence[source]?.quote ?? null : null, due, venueOverride, reinstated]);
+        source ? evidence[source]?.quote ?? null : null, due, venueOverride, reinstated, Boolean(held)]);
     const { rows: [s] } = await c.query('delete from fact_suggestions where venue_ref = $1 and feature = $2 returning first_seen', [ref, fact]);
     await c.query(
       `insert into fact_checks (venue_ref, attribute_key, feature, outcome, source, first_seen) values ($1, $2, $3, $4, $5, $6)`,
@@ -561,6 +564,12 @@ export async function questionFor({ householdId, ref, visitId = null }) {
  * two or more saying a shown fact is wrong hides it until it is re-checked.
  * Which household said what is never shown.
  */
+/** Whether a person has said nobody can tell (fact_unknowns): families' votes are recorded, but do not settle it. */
+async function personSaidDontKnow(ref, fact) {
+  const { rows } = await query('select 1 from fact_unknowns where venue_ref = $1 and attribute_key = $2', [ref, fact]);
+  return rows.length > 0;
+}
+
 export async function familyAnswer({ householdId, ref, fact, answer }) {
   if (!['yes', 'no', 'didnt_notice'].includes(answer)) throw Object.assign(new Error('Yes, no or didn’t notice.'), { status: 400 });
   // Only a question we asked can be answered (Codex, 28 Sep 2026): otherwise
@@ -584,12 +593,12 @@ export async function familyAnswer({ householdId, ref, fact, answer }) {
   if (m?.state === 'yes' && t.no >= cfg.familiesWrong) {
     await query(`update place_fact_answers set hidden_at = now(), recheck_due = now() where venue_ref = $1 and attribute_key = $2`, [ref, fact]);
     settled = 'hidden';
-  } else if (t.yes >= cfg.familiesSettle && t.no === 0 && m?.state !== 'yes') {
+  } else if (t.yes >= cfg.familiesSettle && t.no === 0 && m?.state !== 'yes' && !(await personSaidDontKnow(ref, fact))) {
     await query(
       `insert into place_fact_answers (venue_ref, attribute_key, state, yesno, source, checked_at) values ($1, $2, 'yes', true, 'families', now())
        on conflict (venue_ref, attribute_key) do update set state = 'yes', yesno = true, source = 'families', checked_at = now(), hidden_at = null`, [ref, fact]);
     settled = 'yes';
-  } else if (t.no >= cfg.familiesSettle && t.yes === 0 && m?.state !== 'no') {
+  } else if (t.no >= cfg.familiesSettle && t.yes === 0 && m?.state !== 'no' && !(await personSaidDontKnow(ref, fact))) {
     await query(
       `insert into place_fact_answers (venue_ref, attribute_key, state, yesno, source, checked_at) values ($1, $2, 'no', false, 'families', now())
        on conflict (venue_ref, attribute_key) do update set state = 'no', yesno = false, source = 'families', checked_at = now()`, [ref, fact]);

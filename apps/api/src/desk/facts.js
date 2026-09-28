@@ -60,7 +60,7 @@ async function placesWith(key = null) {
 
 /**
  * Places Epic has actually asked about a standard fact — an answer of ours,
- * evidence either way, or a person's — among the places in Epic (in `sub`
+ * evidence either way, or a person's (a Don't know included) — among the places in Epic (in `sub`
  * when named). Null when nobody has asked: "—", never a 0 that means unknown.
  */
 async function askedAbout(key, sub = null) {
@@ -69,7 +69,8 @@ async function askedAbout(key, sub = null) {
      select count(distinct q.venue_ref)::int n from (
        select venue_ref from place_fact_answers where attribute_key = $1
        union select venue_ref from place_fact_evidence where attribute_key = $1
-       union select venue_ref from place_attribute_values where attribute_key = $1 and set_by is not null) q
+       union select venue_ref from place_attribute_values where attribute_key = $1 and set_by is not null
+       union select venue_ref from fact_unknowns where attribute_key = $1) q
       where q.venue_ref in (select venue_ref from f)`, [key, sub]);
   return n || null;
 }
@@ -83,7 +84,8 @@ export async function allFacts({ q = null, cat = null, sub = null, status = null
     query(`select attribute_key, count(distinct venue_ref)::int n from (
              select venue_ref, attribute_key from place_fact_answers
              union select venue_ref, attribute_key from place_fact_evidence
-             union select venue_ref, attribute_key from place_attribute_values where set_by is not null) q
+             union select venue_ref, attribute_key from place_attribute_values where set_by is not null
+             union select venue_ref, attribute_key from fact_unknowns) q
             where attribute_key = any($1) group by 1`, [STANDARD]),
   ]);
   const usesBy = new Map();

@@ -584,3 +584,15 @@ test('Codex on 6cd61a5: Include anyway stays Active, and a person’s Don’t kn
   assert.equal(await has(), 0, 'the person’s Don’t know still stands');
   await query(`delete from fact_unknowns where venue_ref = 'desk:dk'`);
 });
+
+test('a person’s Don’t know holds against a first check and against families, and counts as asked', async () => {
+  await query(`delete from fact_unknowns where venue_ref = 'desk:dk2'`);
+  await query(`delete from place_fact_answers where venue_ref = 'desk:dk2'`);
+  await query(`insert into fact_unknowns (venue_ref, attribute_key, who) values ('desk:dk2', 'toilets', $1)`, [WHO]);
+  await pipeline.verify({ ref: 'desk:dk2', fact: 'toilets', evidence: { site: 'Clean toilets on site, and the toilets were spotless.' } });
+  const { rows: [a] } = await query(`select state, hidden_at from place_fact_answers where venue_ref = 'desk:dk2' and attribute_key = 'toilets'`);
+  assert.ok(a, 'the check wrote its answer');
+  assert.ok(a.hidden_at, 'a first machine answer stays hidden behind a person’s Don’t know');
+  await query(`delete from fact_unknowns where venue_ref = 'desk:dk2'`);
+  await query(`delete from place_fact_answers where venue_ref = 'desk:dk2'`);
+});
