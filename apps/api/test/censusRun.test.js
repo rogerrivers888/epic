@@ -2016,3 +2016,36 @@ test('a district reached for the first time that has found nothing yet is on the
   const { rows: none } = await query(`select 1 from area_counts where area_slug = 'zz0a'`);
   assert.equal(none.length, 0, 'a refused question writes no row');
 });
+
+test('a stale square a run reset and never reached adds nothing to its partial count', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from area_counts where area_slug = 'zz0b'`);
+    await query(`delete from geo_cells where code like 'ZZ0B%'`);
+    await query(`delete from place_index where venue_ref like 'google:stale_%'`);
+    await clean();
+  });
+  // Two squares of ZZ0B: one the run asked, one it reset and never reached,
+  // still holding a place from a census forty days ago (Codex, 28 Sep 2026).
+  const run = await startTestRun({ label: 'test stale reset' });
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, started_at, saturated) values
+       ('test/stale/0', 48.60, -6.00, 48.68, -5.88, array['ZZ0B'], 'done', now(), now(), 0),
+       ('test/stale/1', 48.68, -6.00, 48.76, -5.88, array['ZZ0B'], 'todo', now() - interval '40 days', null, 0)
+     on conflict (grid_key) do update set state = excluded.state, censused_at = excluded.censused_at, started_at = excluded.started_at, outcodes = excluded.outcodes`);
+  for (const k of ['test/stale/0', 'test/stale/1']) {
+    await query(`insert into census_run_tiles (run_id, grid_key) values ($1, $2) on conflict do nothing`, [run.id, k]);
+  }
+  await askedBy(run, 'test/stale/0');
+  await seaDistrict({ outcode: 'ZZ0B', sectors: [['ZZ0B 1', 48.64, -5.94], ['ZZ0B 2', 48.72, -5.94]] });
+  await query(
+    `insert into place_index (venue_ref, country_code, slice, category, subcategory)
+     values ('google:stale_old', 'GB', '48.7150,-5.9450,48.7250,-5.9350', 'sport', 'golf') on conflict (venue_ref) do nothing`);
+  await query(
+    `insert into place_subcategories (venue_ref, category, subcategory, found_by, area_slug, first_seen, last_seen)
+     values ('google:stale_old', 'sport', 'golf', 'golf_course', 'test/stale/1', now() - interval '40 days', now() - interval '40 days')
+     on conflict (venue_ref, subcategory, coalesce(area_slug, '')) do nothing`);
+  await rollUpOutcodes({ runId: run.id });
+  const { rows: [r] } = await query(`select census_count, complete from area_counts where area_slug = 'zz0b' and subcategory = 'golf'`);
+  assert.deepEqual([r?.census_count, r?.complete], [0, false], 'the old find is not this census\'s evidence');
+});

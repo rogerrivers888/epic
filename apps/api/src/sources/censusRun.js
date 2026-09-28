@@ -1313,7 +1313,11 @@ export async function rollUpOutcodes({ outcodes = null, runId = null, alsoSquare
     ? await query(
       `select t.grid_key, t.min_lat, t.min_lng, t.max_lat, t.max_lng, t.outcodes, t.saturated, t.censused_at, t.started_at, t.state, t.done_subcategories
          from census_tiles t join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1
-        where t.censused_at is not null
+        -- Ground this run answered, and fresh ground it walked past (still
+        -- done). A stale square it reset to todo and never reached keeps its
+        -- old censused_at, but its old findings are not this census's evidence
+        -- (Codex, 28 Sep 2026).
+        where (t.censused_at is not null and t.state = 'done')
            or exists (select 1 from census_slices s where s.census_run_id = $1 and s.area_slug = t.grid_key and s.problem is null)`, [runId])
     : await query(
       `select t.grid_key, t.min_lat, t.min_lng, t.max_lat, t.max_lng, t.outcodes, t.saturated, t.censused_at, t.started_at, t.state, t.done_subcategories
