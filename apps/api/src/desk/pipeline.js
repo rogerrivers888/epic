@@ -274,21 +274,16 @@ async function record({ ref, attr, evidence, verdict, cfg, firstSeen = null }) {
     const { rows: [was] } = await c.query('select state, hidden_at from place_fact_answers where venue_ref = $1 and attribute_key = $2', [ref, fact]);
     // Reinstated (4.7): a fact families hid, confirmed again by our sources,
     // comes back marked "disputed before" so the next visitors are asked first.
-    // A person's Don't know stands: nothing the machine finds reinstates it.
-    const { rows: [held] } = await c.query('select 1 from fact_unknowns where venue_ref = $1 and attribute_key = $2', [ref, fact]);
-    const reinstated = Boolean(was?.hidden_at && state === 'yes' && !held);
+    const reinstated = Boolean(was?.hidden_at && state === 'yes');
     await c.query(
       `insert into place_fact_answers (venue_ref, attribute_key, state, yesno, source, evidence_quote, checked_at, recheck_due, venue_override, hidden_at, disputed_before)
-       values ($1, $2, $3, $4, $5, $6, now(), $7, $8, case when $10 then now() end, false)
+       values ($1, $2, $3, $4, $5, $6, now(), $7, $8, null, false)
        on conflict (venue_ref, attribute_key) do update set state = excluded.state, yesno = excluded.yesno, source = excluded.source,
          evidence_quote = excluded.evidence_quote, checked_at = now(), recheck_due = excluded.recheck_due, venue_override = excluded.venue_override,
-         -- A person's Don't know keeps the answer hidden, first check or later
-         -- (Codex, 28 Sep 2026); otherwise only a reinstatement unhides it.
-         hidden_at = case when $10 then coalesce(place_fact_answers.hidden_at, now())
-                          when $9 then null else place_fact_answers.hidden_at end,
+         hidden_at = case when $9 then null else place_fact_answers.hidden_at end,
          disputed_before = place_fact_answers.disputed_before or $9`,
       [ref, fact, state, state === 'yes' ? true : state === 'no' ? false : null, source,
-        source ? evidence[source]?.quote ?? null : null, due, venueOverride, reinstated, Boolean(held)]);
+        source ? evidence[source]?.quote ?? null : null, due, venueOverride, reinstated]);
     const { rows: [s] } = await c.query('delete from fact_suggestions where venue_ref = $1 and feature = $2 returning first_seen', [ref, fact]);
     await c.query(
       `insert into fact_checks (venue_ref, attribute_key, feature, outcome, source, first_seen) values ($1, $2, $3, $4, $5, $6)`,
@@ -433,7 +428,7 @@ export async function add() {
     sizes as (select sub, count(*)::int n from filed group by sub),
     verified as (
       select f.sub, a.attribute_key, count(distinct a.venue_ref)::int v
-        from filed f join place_fact_answers a on a.venue_ref = f.venue_ref and a.state = 'yes' and a.hidden_at is null
+        from filed f join place_fact_answers a on a.venue_ref = f.venue_ref and a.state = 'yes' and a.hidden_at is null and not exists (select 1 from fact_unknowns u where u.venue_ref = a.venue_ref and u.attribute_key = a.attribute_key)
         join place_attributes pa on pa.key = a.attribute_key and pa.active and not pa.standard and pa.kind = 'yesno'
        group by f.sub, a.attribute_key)
     select v.sub, v.attribute_key, v.v, s.n, pa.access, pa.age,
@@ -564,12 +559,6 @@ export async function questionFor({ householdId, ref, visitId = null }) {
  * two or more saying a shown fact is wrong hides it until it is re-checked.
  * Which household said what is never shown.
  */
-/** Whether a person has said nobody can tell (fact_unknowns): families' votes are recorded, but do not settle it. */
-async function personSaidDontKnow(ref, fact) {
-  const { rows } = await query('select 1 from fact_unknowns where venue_ref = $1 and attribute_key = $2', [ref, fact]);
-  return rows.length > 0;
-}
-
 export async function familyAnswer({ householdId, ref, fact, answer }) {
   if (!['yes', 'no', 'didnt_notice'].includes(answer)) throw Object.assign(new Error('Yes, no or didn’t notice.'), { status: 400 });
   // Only a question we asked can be answered (Codex, 28 Sep 2026): otherwise
@@ -593,12 +582,12 @@ export async function familyAnswer({ householdId, ref, fact, answer }) {
   if (m?.state === 'yes' && t.no >= cfg.familiesWrong) {
     await query(`update place_fact_answers set hidden_at = now(), recheck_due = now() where venue_ref = $1 and attribute_key = $2`, [ref, fact]);
     settled = 'hidden';
-  } else if (t.yes >= cfg.familiesSettle && t.no === 0 && m?.state !== 'yes' && !(await personSaidDontKnow(ref, fact))) {
+  } else if (t.yes >= cfg.familiesSettle && t.no === 0 && m?.state !== 'yes') {
     await query(
       `insert into place_fact_answers (venue_ref, attribute_key, state, yesno, source, checked_at) values ($1, $2, 'yes', true, 'families', now())
        on conflict (venue_ref, attribute_key) do update set state = 'yes', yesno = true, source = 'families', checked_at = now(), hidden_at = null`, [ref, fact]);
     settled = 'yes';
-  } else if (t.no >= cfg.familiesSettle && t.yes === 0 && m?.state !== 'no' && !(await personSaidDontKnow(ref, fact))) {
+  } else if (t.no >= cfg.familiesSettle && t.yes === 0 && m?.state !== 'no') {
     await query(
       `insert into place_fact_answers (venue_ref, attribute_key, state, yesno, source, checked_at) values ($1, $2, 'no', false, 'families', now())
        on conflict (venue_ref, attribute_key) do update set state = 'no', yesno = false, source = 'families', checked_at = now()`, [ref, fact]);

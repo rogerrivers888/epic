@@ -381,9 +381,11 @@ async function verificationOf(a, label, sub) {
 /**
  * A person's correction of one place's answer: kept for good, logged, and
  * counted in accuracy (handover 6.3). Never overwritten by the machine.
- * "Don't know" is a person saying nobody can tell. It is kept as a person's
- * row with no value (Codex, 28 Sep 2026): our sources' answer is hidden, and
- * a later check or a family answer cannot bring it back while it stands.
+ * "Don't know" is a person saying nobody can tell. It is kept on its own
+ * (`fact_unknowns`) and every reader of our sources' answers skips a place
+ * while it stands — the answers themselves are left exactly as the checks and
+ * families make them, so undoing it hides nothing and reveals nothing by
+ * guesswork (Codex, 28 Sep 2026, after four rounds of the other way).
  * Undo puts back what was there.
  */
 export async function correct({ ref, fact, option, why = null, who }) {
@@ -397,16 +399,12 @@ export async function correct({ ref, fact, option, why = null, who }) {
     const { rows: [was] } = await c.query('select * from place_attribute_values where venue_ref = $1 and attribute_key = $2', [ref, fact]);
     const { rows: [unknownWas] } = await c.query('select who from fact_unknowns where venue_ref = $1 and attribute_key = $2', [ref, fact]);
     const { rows: [machine] } = await c.query('select state, source, yesno, from_value, to_value, choice, hidden_at from place_fact_answers where venue_ref = $1 and attribute_key = $2', [ref, fact]);
-    let hid = false;
     if (o.value == null) {
       if (was) await c.query('delete from place_attribute_values where venue_ref = $1 and attribute_key = $2', [ref, fact]);
       await c.query(
         `insert into fact_unknowns (venue_ref, attribute_key, who) values ($1, $2, $3)
          on conflict (venue_ref, attribute_key) do update set who = excluded.who, at = now()`, [ref, fact, who]);
-      if (machine && !machine.hidden_at) {
-        await c.query('update place_fact_answers set hidden_at = now() where venue_ref = $1 and attribute_key = $2', [ref, fact]);
-        hid = true;
-      }
+
     } else {
       await c.query('delete from fact_unknowns where venue_ref = $1 and attribute_key = $2', [ref, fact]);
       await c.query(
@@ -431,7 +429,7 @@ export async function correct({ ref, fact, option, why = null, who }) {
     return logChange({
       client: c, who, area: 'Facts', what: `Answer corrected · ${label} · ${d?.name ?? ref}`,
       before, after: o.label, why, subjectType: 'place_fact', subjectId: `${ref}|${fact}`,
-      undo: { kind: 'correction', ref, fact, hid, unknownWas: unknownWas?.who ?? null, madeUnknown: option === 'dont_know' && !unknownWas, was: was ? { yesno: was.yesno, from: was.from_value, to: was.to_value, choice: was.choice, reason: was.reason, set_by: was.set_by } : null },
+      undo: { kind: 'correction', ref, fact, unknownWas: unknownWas?.who ?? null, was: was ? { yesno: was.yesno, from: was.from_value, to: was.to_value, choice: was.choice, reason: was.reason, set_by: was.set_by } : null },
     });
   });
   forgetAttributes();
@@ -440,19 +438,9 @@ export async function correct({ ref, fact, option, why = null, who }) {
 
 /** Undo a correction: the place goes back to exactly what it held. */
 export async function undoCorrection({ change, who }) {
-  const { ref, fact, was, hid, unknownWas = null, madeUnknown = false } = change.undo;
+  const { ref, fact, was, unknownWas = null } = change.undo;
   await withTransaction(async (c) => {
-    // A yes our checks wrote while this Don't know stood was kept hidden only
-    // because of it, and is shown again — identified by when the check wrote
-    // it, not by when it was hidden (Codex, 28 Sep 2026): a hide families
-    // made after that check (hidden_at later than checked_at) still stands.
-    if (madeUnknown) {
-      await c.query(
-        `update place_fact_answers set hidden_at = null
-          where venue_ref = $1 and attribute_key = $2 and state = 'yes'
-            and checked_at >= $3 and hidden_at is not null and hidden_at <= checked_at`,
-        [ref, fact, change.at]);
-    }
+
     // A Don't know that stood before is put back; one this correction made goes.
     if (unknownWas) {
       await c.query(`insert into fact_unknowns (venue_ref, attribute_key, who) values ($1, $2, $3)
@@ -467,7 +455,6 @@ export async function undoCorrection({ change, who }) {
            to_value = excluded.to_value, choice = excluded.choice, reason = excluded.reason, set_by = excluded.set_by, updated_at = now()`,
         [ref, fact, was.yesno, was.from, was.to, was.choice, was.reason, was.set_by]);
     }
-    if (hid) await c.query('update place_fact_answers set hidden_at = null where venue_ref = $1 and attribute_key = $2', [ref, fact]);
     await c.query('update bo_changes set undone_at = now(), undone_by = $2 where id = $1', [change.id, who]);
   });
   forgetAttributes();

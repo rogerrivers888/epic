@@ -342,7 +342,7 @@ async function confirmedValues({ sub = null } = {}) {
        from d join f on f.sub = d.sub
        left join place_attribute_values v on v.venue_ref = f.venue_ref and v.attribute_key = d.fact and v.set_by is not null
        left join place_fact_answers a on a.venue_ref = f.venue_ref and a.attribute_key = d.fact
-            and a.state in ('yes', 'no') and a.hidden_at is null
+            and a.state in ('yes', 'no') and a.hidden_at is null and not exists (select 1 from fact_unknowns u where u.venue_ref = a.venue_ref and u.attribute_key = a.attribute_key)
       where v.set_by is not null or a.state is not null`,
     sub ? [STANDARD, sub] : [STANDARD]);
   const out = new Map();
@@ -631,7 +631,9 @@ export async function bulkImpact({ subs, fact }) {
     `with f as (select distinct venue_ref from (${FILED_SQL}) x where x.sub = any($1))
      select count(*)::int total,
             count(*) filter (where exists (select 1 from place_attribute_values v where v.venue_ref = f.venue_ref and v.attribute_key = $2 and v.set_by is not null)
-                               or exists (select 1 from place_fact_answers a where a.venue_ref = f.venue_ref and a.attribute_key = $2 and a.state in ('yes','no') and a.hidden_at is null))::int own
+                               or exists (select 1 from place_fact_answers a where a.venue_ref = f.venue_ref and a.attribute_key = $2 and a.state in ('yes','no') and a.hidden_at is null)
+                               -- a person's Don't know is that place's own answer too
+                               or exists (select 1 from fact_unknowns u where u.venue_ref = f.venue_ref and u.attribute_key = $2))::int own
        from f`, [list, fact]);
   return { applies: r.total - r.own, keep: r.own };
 }

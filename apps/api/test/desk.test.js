@@ -565,80 +565,32 @@ test('a Sources number opens onto the records it was counted from, and families 
   assert.ok(srcs.filter((x) => x.source !== 'families').every((x) => x.status !== 'Failing' || x.failingPct != null));
 });
 
-test('Codex on 6cd61a5: Include anyway stays Active, and a person’s Don’t know outlives the next check', async () => {
-  const { effective } = await import('../src/desk/categories.js');
+test('Include anyway stays Active; a person’s Don’t know is skipped by every reader and undo simply lifts it', async () => {
+  const { effective, HAS_SQL } = await import('../src/desk/categories.js');
   assert.equal(effective('active', 0, 2), 'gathering');
   assert.equal(effective('active', 0, 2, true), 'active', 'a person said include it anyway');
-  // Don't know is kept as a person's row with no value, and hides our sources' yes for good.
-  await query(`delete from place_attribute_values where venue_ref = 'desk:dk'`);
-  await query(`insert into place_fact_answers (venue_ref, attribute_key, state, yesno, source) values ('desk:dk', 'toilets', 'yes', true, 'osm')
-               on conflict (venue_ref, attribute_key) do update set state = 'yes', yesno = true, hidden_at = null`);
-  await facts.correct({ ref: 'desk:dk', fact: 'toilets', option: 'dont_know', who: WHO });
-  const { rows: [held] } = await query(`select who from fact_unknowns where venue_ref = 'desk:dk' and attribute_key = 'toilets'`);
-  assert.deepEqual(held, { who: WHO });
-  const { HAS_SQL } = await import('../src/desk/categories.js');
   const has = async () => (await query(`select 1 from (${HAS_SQL}) h where venue_ref = 'desk:dk' and attribute_key = 'toilets'`)).rows.length;
-  assert.equal(await has(), 0);
-  // A later check that finds yes does not bring it back.
-  await query(`update place_fact_answers set hidden_at = null where venue_ref = 'desk:dk' and attribute_key = 'toilets'`);
-  assert.equal(await has(), 0, 'the person’s Don’t know still stands');
   await query(`delete from fact_unknowns where venue_ref = 'desk:dk'`);
-});
-
-test('a person’s Don’t know holds against a first check and against families, and counts as asked', async () => {
-  await query(`delete from fact_unknowns where venue_ref = 'desk:dk2'`);
-  await query(`delete from place_fact_answers where venue_ref = 'desk:dk2'`);
-  await query(`insert into fact_unknowns (venue_ref, attribute_key, who) values ('desk:dk2', 'toilets', $1)`, [WHO]);
-  await pipeline.verify({ ref: 'desk:dk2', fact: 'toilets', evidence: { site: 'Clean toilets on site, and the toilets were spotless.' } });
-  const { rows: [a] } = await query(`select state, hidden_at from place_fact_answers where venue_ref = 'desk:dk2' and attribute_key = 'toilets'`);
-  assert.ok(a, 'the check wrote its answer');
-  assert.ok(a.hidden_at, 'a first machine answer stays hidden behind a person’s Don’t know');
-  await query(`delete from fact_unknowns where venue_ref = 'desk:dk2'`);
-  await query(`delete from place_fact_answers where venue_ref = 'desk:dk2'`);
-});
-
-test('undoing a Don’t know shows the answer a check wrote while it stood', async () => {
-  await query(`delete from fact_unknowns where venue_ref = 'desk:dk3'`);
-  await query(`delete from place_fact_answers where venue_ref = 'desk:dk3'`);
-  await query(`delete from place_attribute_values where venue_ref = 'desk:dk3'`);
-  const out = await facts.correct({ ref: 'desk:dk3', fact: 'toilets', option: 'dont_know', who: WHO });
-  await pipeline.verify({ ref: 'desk:dk3', fact: 'toilets', evidence: { site: 'Clean toilets on site, and the toilets were spotless.' } });
-  let { rows: [a] } = await query(`select hidden_at from place_fact_answers where venue_ref = 'desk:dk3' and attribute_key = 'toilets'`);
-  assert.ok(a.hidden_at, 'hidden while the Don’t know stands');
-  const id = out.change ?? out.changeId ?? out.id;
-  const { rows: [change] } = await query('select * from bo_changes where id = $1', [id]);
+  await query(`delete from place_attribute_values where venue_ref = 'desk:dk'`);
+  await query(`delete from place_fact_answers where venue_ref = 'desk:dk'`);
+  // No machine answer yet: Don't know, then a check confirms yes.
+  const out = await facts.correct({ ref: 'desk:dk', fact: 'toilets', option: 'dont_know', who: WHO });
+  await pipeline.verify({ ref: 'desk:dk', fact: 'toilets', evidence: { site: 'Clean toilets on site, and the toilets were spotless.' } });
+  const { rows: [a] } = await query(`select state, hidden_at from place_fact_answers where venue_ref = 'desk:dk' and attribute_key = 'toilets'`);
+  assert.equal(a.state, 'yes');
+  assert.equal(a.hidden_at, null, 'the answer itself is left as the check made it');
+  assert.equal(await has(), 0, 'but nobody reads it while the Don’t know stands');
+  // Undo lifts the Don't know and nothing else.
+  const { rows: [change] } = await query('select * from bo_changes where id = $1', [out.change ?? out.changeId ?? out.id]);
   await facts.undoCorrection({ change, who: WHO });
-  ({ rows: [a] } = await query(`select hidden_at from place_fact_answers where venue_ref = 'desk:dk3' and attribute_key = 'toilets'`));
-  assert.equal(a.hidden_at, null, 'shown again once the Don’t know is undone');
-  const { rows: held } = await query(`select 1 from fact_unknowns where venue_ref = 'desk:dk3'`);
-  assert.equal(held.length, 0);
-});
-
-test('undoing a Don’t know: an answer rechecked while it stood is shown even if families had hidden it before; a later family hide stands', async () => {
-  const setUp = async () => {
-    await query(`delete from fact_unknowns where venue_ref = 'desk:dk4'`);
-    await query(`delete from place_attribute_values where venue_ref = 'desk:dk4'`);
-    await query(`insert into place_fact_answers (venue_ref, attribute_key, state, yesno, source, checked_at, hidden_at)
-                 values ('desk:dk4', 'toilets', 'yes', true, 'osm', now() - interval '2 days', now() - interval '1 day')
-                 on conflict (venue_ref, attribute_key) do update set state = 'yes', checked_at = excluded.checked_at, hidden_at = excluded.hidden_at`);
-  };
-  const undo = async (out) => {
-    const { rows: [change] } = await query('select * from bo_changes where id = $1', [out.change ?? out.changeId ?? out.id]);
-    await facts.undoCorrection({ change, who: WHO });
-  };
-  const hidden = async () => (await query(`select hidden_at from place_fact_answers where venue_ref = 'desk:dk4'`)).rows[0].hidden_at;
-  // Families hid it; a person says Don't know; a check confirms yes; undo shows it.
-  await setUp();
-  let out = await facts.correct({ ref: 'desk:dk4', fact: 'toilets', option: 'dont_know', who: WHO });
-  await pipeline.verify({ ref: 'desk:dk4', fact: 'toilets', evidence: { site: 'Clean toilets on site, and the toilets were spotless.' } });
-  await undo(out);
-  assert.equal(await hidden(), null);
-  // Families hide it after the check: undo leaves their hide standing.
-  await setUp();
-  out = await facts.correct({ ref: 'desk:dk4', fact: 'toilets', option: 'dont_know', who: WHO });
-  await pipeline.verify({ ref: 'desk:dk4', fact: 'toilets', evidence: { site: 'Clean toilets on site, and the toilets were spotless.' } });
-  await query(`update place_fact_answers set hidden_at = now() + interval '1 second' where venue_ref = 'desk:dk4'`);
-  await undo(out);
-  assert.ok(await hidden(), 'a later family hide stands');
-  await query(`delete from place_fact_answers where venue_ref = 'desk:dk4'`);
+  assert.equal(await has(), 1, 'the check’s yes is read again');
+  // A family hide made while it stood is untouched by the undo.
+  const again = await facts.correct({ ref: 'desk:dk', fact: 'toilets', option: 'dont_know', who: WHO });
+  await query(`update place_fact_answers set hidden_at = now() where venue_ref = 'desk:dk'`);
+  const { rows: [c2] } = await query('select * from bo_changes where id = $1', [again.change ?? again.changeId ?? again.id]);
+  await facts.undoCorrection({ change: c2, who: WHO });
+  const { rows: [b] } = await query(`select hidden_at from place_fact_answers where venue_ref = 'desk:dk'`);
+  assert.ok(b.hidden_at, 'the families’ hide stands');
+  assert.equal(await has(), 0);
+  await query(`delete from place_fact_answers where venue_ref = 'desk:dk'`);
 });

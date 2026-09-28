@@ -222,7 +222,7 @@ export async function placeIndex() {
     query('select key, category_key from shelf_subcategories where active'),
     query('select subcategory_key, category_key from shelf_subcategory_categories'),
     query('select venue_ref, attribute_key, yesno, from_value, to_value, choice from place_attribute_values where set_by is not null'),
-    query(`select venue_ref, attribute_key, state, yesno, from_value, to_value, choice from place_fact_answers where state in ('yes','no') and hidden_at is null`),
+    query(`select venue_ref, attribute_key, state, yesno, from_value, to_value, choice from place_fact_answers a where state in ('yes','no') and hidden_at is null and not exists (select 1 from fact_unknowns u where u.venue_ref = a.venue_ref and u.attribute_key = a.attribute_key)`),
     query(`select subcategory_key, attribute_key, yesno, from_value, to_value, choice from shelf_subcategory_attributes where origin = 'person' or settled`),
   ]);
   const catOf = new Map(subs.map((s) => [s.key, s.category_key]));
