@@ -670,3 +670,9 @@ test('a closure linked by any -ly adverb or a contraction is a denial', () => {
     assert.equal(pipeline.polarity(s, 'pool'), 'denies', s);
   assert.equal(pipeline.polarity('The pool is next to the closed cafe.', 'pool'), 'asserts');
 });
+
+test('contractions and possessives: a closure said of the phrase, not of what it owns', () => {
+  for (const s of ["The pool'll be closed tomorrow.", "The pool'd been closed for weeks.", 'The pool is closed until May.', "The pool's closed."])
+    assert.equal(pipeline.polarity(s, 'pool'), 'denies', s);
+  assert.equal(pipeline.polarity("The pool's recently closed cafe is being renovated.", 'pool'), 'asserts');
+});

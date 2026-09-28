@@ -68,8 +68,12 @@ export function polarity(sentence, phrase) {
   const LINK = '(?:is|are|was|were|will|be|been|being|has|have|had|remains?|remained|stays?|stayed|still|now|currently|permanently|temporarily|sadly|unfortunately|often|sometimes|always|seems?|seemed|appears?|appeared|looks?|looked|got|gets|getting|is\\s+now)';
   // Any "-ly" adverb ("completely", "recently") and a contraction ("the
   // pool's closed", "'s been") link as well (Codex, 28 Sep 2026).
-  const LINKS = `(?:${LINK}|\\w+ly|'s|'re|'ve|’s|’re|’ve)`;
-  if (new RegExp(`^(?:'s|’s)?\\s*(?:${LINKS}\\s+){0,4}(?:closed|shut|removed|gone|broken|unavailable|out of order|out of use|not working|not open)\\b`).test(clause)) return 'denies';
+  const LINKS = `(?:${LINK}|\\w+ly|'s|'re|'ve|'ll|'d|’s|’re|’ve|’ll|’d)`;
+  // …and the closure must end the clause or be followed by when or why ("for
+  // weeks", "until May", "today") — a noun after it means it describes that
+  // noun: "the pool's recently closed cafe" (Codex, 28 Sep 2026).
+  const AFTER = '(?=\\s*(?:$|for\\b|until\\b|till\\b|since\\b|on\\b|at\\b|in\\b|during\\b|over\\b|by\\b|due\\b|because\\b|when\\b|as\\b|today\\b|tomorrow\\b|now\\b|again\\b|this\\b|last\\b|next\\b|all\\b))';
+  if (new RegExp(`^(?:'s|’s|'ll|’ll|'d|’d)?\\s*(?:${LINKS}\\s+){0,4}(?:closed|shut|removed|gone|broken|unavailable|out of order|out of use|not working|not open)\\b${AFTER}`).test(clause.trimEnd())) return 'denies';
   if (/\bno longer\b/.test(s.slice(Math.max(0, at - 30), at))) return 'denies';
   return 'asserts';
 }
