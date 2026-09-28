@@ -52,7 +52,9 @@ function spendTile(money, cfg, now = new Date()) {
   const worst = Math.max(googlePct, claudePct);
   return {
     tone: worst > 1 ? 'red' : worst > 0.8 ? 'amber' : 'green',
-    title: `Google £${Math.round(money.google)} of £${cfg.budgetGoogle} · Claude £${Math.round(money.claude)} of £${cfg.budgetClaude}`,
+    // Both from our own ledger's list-price estimate, not a bill: said so,
+    // never as though it were what was charged (owner, 29 Sep 2026).
+    title: `Google £${Math.round(money.google)} estimate of £${cfg.budgetGoogle} · Claude £${Math.round(money.claude)} estimate of £${cfg.budgetClaude}`,
     line: worst > 1 ? 'over budget' : worst > 0.8 ? 'close to budget' : 'within budget',
     google: { spent: money.google, budget: cfg.budgetGoogle },
     claude: { spent: money.claude, budget: cfg.budgetClaude },
@@ -90,7 +92,8 @@ export function billingTile(b, money, cfg, now = new Date()) {
   return {
     tone,
     title,
-    line: `${said} · Claude £${Math.round(money.claude)} of £${cfg.budgetClaude}`,
+    // Claude is still our ledger's estimate until its own billing is read.
+    line: `${said} · Claude £${Math.round(money.claude)} estimate of £${cfg.budgetClaude}`,
     google: { spent: thisMonth ? b.usageGbp : null, budget: cfg.budgetGoogle, credit: b.creditGbp, creditExpires: b.creditExpires, source: b.source },
     claude: { spent: money.claude, budget: cfg.budgetClaude },
   };
