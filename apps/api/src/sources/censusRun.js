@@ -1185,30 +1185,29 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
   // What the run asked is read from its own slices. A tile's `censused_at` is
   // shared by every run that ever takes the square, so an older paused run
   // would have claimed districts a later one censused (Codex, 28 Sep 2026).
-  // A slice carries its run's id from migration 263 on; one from before it
-  // carries none, and is the run's if it was asked of the run's square while
-  // the run was going — one run works at a time, so the window is the run's
-  // own — which keeps a run that spans the migration whole (Codex, same day).
-  // And the same filter when districts are named as well as the run: asking
-  // for a run by name is asking what *it* found (Codex, same day).
-  const askedByRun = `exists (select 1 from census_slices s
-                               where s.area_slug = t.grid_key
-                                 and (s.census_run_id = $1
-                                      or (s.census_run_id is null and s.ran_at >= r.started_at
-                                          and s.ran_at <= coalesce(r.finished_at, now()))))`;
+  // A slice carries its run's id from migration 263 on, and only an id says
+  // whose a slice is: a slice from before it cannot be pinned to a run by
+  // time, because a paused run's lifetime encloses whatever ran while it slept
+  // (Codex, same day). So a run with id-stamped slices is judged by those
+  // alone, and a run with none — every one of them from before 263, and every
+  // one of those finished (28 Sep 2026: none spans the migration) — keeps the
+  // whole plan it always rolled. And the same filter when districts are named
+  // as well as the run: asking for a run by name is asking what *it* found.
+  const { rows: [stamped] } = runId
+    ? await query('select exists (select 1 from census_slices where census_run_id = $1) as any', [runId])
+    : { rows: [{ any: false }] };
+  const named = outcodes?.length ? outcodes.map((c) => String(c).toUpperCase()) : null;
   const codes = runId
     ? (await query(
-      `select distinct c.code from census_tiles t
+      `select distinct upper(c.code) as code from census_tiles t
          join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1
-         join census_runs r on r.id = m.run_id
          cross join lateral unnest(t.outcodes) as c(code)
-        where t.censused_at is not null and ${askedByRun}
-          ${outcodes?.length ? 'and upper(c.code) = any($2::text[])' : ''}`,
-      outcodes?.length ? [runId, outcodes.map((c) => String(c).toUpperCase())] : [runId])).rows.map((r) => String(r.code).toUpperCase())
-    : outcodes?.length
-      ? outcodes.map((c) => String(c).toUpperCase())
-      : (await query(
-        'select distinct unnest(t.outcodes) as code from census_tiles t where t.censused_at is not null')).rows.map((r) => r.code);
+        where t.censused_at is not null
+          ${stamped.any ? 'and exists (select 1 from census_slices s where s.census_run_id = $1 and s.area_slug = t.grid_key)' : ''}
+          ${named ? 'and upper(c.code) = any($2::text[])' : ''}`,
+      named ? [runId, named] : [runId])).rows.map((r) => r.code)
+    : named ?? (await query(
+      'select distinct unnest(t.outcodes) as code from census_tiles t where t.censused_at is not null')).rows.map((r) => r.code);
   if (!codes.length) return { outcodes: 0, rows: 0, unattributed: 0 };
 
   // Every sector there is. The verdict is a nearest-sector test, and it has to

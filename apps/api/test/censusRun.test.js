@@ -1643,8 +1643,10 @@ test('a run rolls up the districts it censused, not the fresh ones it walked pas
     ref: 'google:walked_new', slice: '50.1150,-2.0450,50.1250,-2.0350', gridKey: 'test/walked/1',
   });
 
-  // And a square it asked before its slices carried its id (migration 263):
-  // a run that spans the migration is still one run.
+  // And a square with a slice nobody's id is on, asked while this run was
+  // alive. It could be this run's or one that ran while this one slept, and
+  // only an id can say which (Codex, 28 Sep 2026) — so a run with id-stamped
+  // slices does not claim it.
   await query(
     `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, saturated)
      values ('test/walked/2', 50.16, -2.10, 50.24, -1.98, array['ZZ7C'], 'done', now(), 0)
@@ -1668,8 +1670,15 @@ test('a run rolls up the districts it censused, not the fresh ones it walked pas
   assert.deepEqual(await counts(), [['zz7a', 999]], 'naming a district the run walked past does not roll it up under the run');
 
   await rollUpOutcodes({ runId: run.id });
-  assert.deepEqual(await counts(), [['zz7a', 999], ['zz7b', 1], ['zz7c', 1]],
-    'the district it walked past keeps its count; the ones it asked, before and after its slices carried its id, are rolled up');
+  assert.deepEqual(await counts(), [['zz7a', 999], ['zz7b', 1]],
+    'the district it walked past keeps its count, one it cannot prove it asked is left alone, and the one it asked is rolled up');
+
+  // A run from before slices carried an id has none at all, and keeps the
+  // whole plan it always rolled.
+  const old = await startTestRun({ label: 'test before 263' });
+  await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'test/walked/2') on conflict do nothing`, [old.id]);
+  await rollUpOutcodes({ runId: old.id });
+  assert.deepEqual(await counts(), [['zz7a', 999], ['zz7b', 1], ['zz7c', 1]], 'an unstamped run rolls its plan, as it always did');
   t.after(() => query(`delete from area_counts where area_slug = 'zz7c'`));
 });
 
