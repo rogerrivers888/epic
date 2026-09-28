@@ -136,7 +136,11 @@ export async function decide(now = new Date()) {
   const cutShort = (r) => r.state === 'stopped' && /^planning cut short/.test(r.problem ?? '');
   const days = runs.filter((r) => !cutShort(r)).length;
   const bills = await billedByDay(pacificDay(runs[0].started_at));
-  const over = bills.find((b) => b.google_gbp > DAY_ALERT_GBP);
+  // Any export day over £5, and any quota day of the programme over £5 across
+  // the two London days it spans — £3 and £3 is £6 (Codex, 29 Sep 2026). The
+  // two overlap at the edges, which errs towards stopping.
+  const over = bills.find((b) => b.google_gbp > DAY_ALERT_GBP)
+    ?? runs.map((r) => billedFor(bills, pacificDay(r.started_at))).find((b) => b && b.google_gbp > DAY_ALERT_GBP);
   if (over) return { action: 'halted', runs, latest, bills, over };
   // Done is complete only if no square was given up on: a run finishes with
   // its failed squares set aside, and the UK is not done while they are

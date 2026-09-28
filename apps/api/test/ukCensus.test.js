@@ -361,3 +361,14 @@ test('the report bills a day across both London days, as the decision does', asy
   const st = await uk.status(new Date('2026-09-29T23:00:00Z'));
   assert.equal(st.days[0].billed?.censusGbp, 0.02, 'a charge that landed on the next London day is still day 1\'s');
 });
+
+test('a quota day over £5 across its two London days stops the census', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  await billed('2026-09-28', 'google-pro', 3);
+  await billed('2026-09-29', 'google-pro', 3);
+  const r = recorder();
+  const out = await uk.tick({ now: new Date('2026-09-29T09:00:00Z'), start: r.start, stop: async () => {} });
+  assert.equal(out.action, 'halted');
+  assert.equal(out.over.google_gbp, 6);
+});
