@@ -483,6 +483,12 @@ export async function questionFor({ householdId, ref, visitId = null }) {
   if (!cfg.askPerVisit) return [];
   const { rows: [visited] } = await query('select 1 from visits where household_id = $1 and venue_ref = $2 limit 1', [householdId, ref]);
   if (!visited) return []; // someone who hasn't been can't answer
+  // A named visit must be this household's visit to this place, or any fresh
+  // id would buy a fresh batch (Codex, 28 Sep 2026).
+  if (visitId) {
+    const { rows: [own] } = await query('select 1 from visits where id = $1 and household_id = $2 and venue_ref = $3', [visitId, householdId, ref]);
+    if (!own) return [];
+  }
   const { rows: members } = await query('select birth_year, birth_date, is_minor from members where household_id = $1', [householdId]);
   const year = new Date().getFullYear();
   const ages = members.map((m) => (m.birth_date ? year - new Date(m.birth_date).getFullYear() : m.birth_year ? year - m.birth_year : m.is_minor ? 8 : 35));
@@ -497,7 +503,8 @@ export async function questionFor({ householdId, ref, visitId = null }) {
             exists (select 1 from family_answers f where f.household_id = x.household_id and f.venue_ref = x.venue_ref and f.attribute_key = x.attribute_key) as answered
        from family_asks x join place_attributes pa on pa.key = x.attribute_key
       where x.household_id = $1 and x.venue_ref = $2
-        and (case when $3::uuid is null then x.asked_at > now() - interval '1 day' else x.visit_id = $3::uuid end)`,
+        and (case when $3::uuid is null then x.asked_at > now() - interval '1 day' else x.visit_id = $3::uuid end)
+      order by x.asked_at, x.attribute_key`,
     [householdId, ref, visitId]);
   if (already.length) {
     return already.filter((a) => !a.answered).slice(0, cfg.askPerVisit)
@@ -522,10 +529,13 @@ export async function questionFor({ householdId, ref, visitId = null }) {
   };
   const rank = (r) => (r.state === 'conflict' ? 0 : r.disputed_before ? 1 : r.state == null || r.state === 'dont_know' ? 2 : 3);
   const pick = rows.filter((r) => matters(r.label)).sort((a, b) => rank(a) - rank(b)).slice(0, cfg.askPerVisit);
-  for (const p of pick) {
+  // Stamped a millisecond apart in the order they were ranked, so a repeat
+  // hands the batch back in the same order.
+  for (const [i, p] of pick.entries()) {
     await query(
-      `insert into family_asks (household_id, venue_ref, attribute_key, visit_id) values ($1, $2, $3, $4) on conflict do nothing`,
-      [householdId, ref, p.attribute_key, visitId]);
+      `insert into family_asks (household_id, venue_ref, attribute_key, visit_id, asked_at)
+       values ($1, $2, $3, $4, now() + make_interval(secs => $5::double precision / 1000)) on conflict do nothing`,
+      [householdId, ref, p.attribute_key, visitId, i]);
   }
   return pick.map((p) => ({ fact: p.attribute_key, label: p.label, answers: ['Yes', 'No', 'Didn’t notice'] }));
 }

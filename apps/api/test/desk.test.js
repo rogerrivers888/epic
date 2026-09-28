@@ -461,9 +461,10 @@ test('families: two agreeing settle a fact, two saying a shown fact is wrong hid
 
 test('a visit carries at most askPerVisit questions, however often it is asked for', async () => {
   const { rows: [h] } = await query(`insert into households (name) values ('Desk three') returning id`);
-  await query(`insert into visits (household_id, venue_ref, venue_label, visited_on) values ($1, 'desk:visit', 'Desk visit', current_date)`, [h.id]);
+  const { rows: [{ id: visit }] } = await query(`insert into visits (household_id, venue_ref, venue_label, visited_on) values ($1, 'desk:visit', 'Desk visit', current_date) returning id`, [h.id]);
   await query(`insert into place_index (venue_ref, subcategory) values ('desk:visit', 'desk-water') on conflict (venue_ref) do update set subcategory = 'desk-water'`);
-  const visit = '00000000-0000-4000-8000-00000000d351';
+  assert.deepEqual(await pipeline.questionFor({ householdId: h.id, ref: 'desk:visit', visitId: '00000000-0000-4000-8000-00000000d351' }), [],
+    'a visit id that is not this household’s visit here buys nothing');
   const first = await pipeline.questionFor({ householdId: h.id, ref: 'desk:visit', visitId: visit });
   const cap = (await settings.settings()).values.askPerVisit;
   assert.ok(first.length > 0 && first.length <= cap);
