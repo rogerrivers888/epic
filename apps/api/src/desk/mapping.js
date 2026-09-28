@@ -50,7 +50,7 @@ export function answerOf({ decision, targets = [] }) {
 // Reading
 
 /** Every word's targets, primary first. */
-async function targetsByWord(run = query) {
+export async function targetsByWord(run = query) {
   const { rows } = await run(
     `select t.word, t.subcategory_key, t.is_primary, s.label, s.category_key, s.active
        from word_targets t join shelf_subcategories s on s.key = t.subcategory_key
@@ -116,16 +116,19 @@ export async function bringsAndAffected(run = query) {
     -- every word bring nought: found on the live site, 28 Sep 2026).
     words as (select venue_ref, label from ${PLACE_WORDS} w
     ),
+    -- place_words holds each (place, word) once (migration 281), so a word's
+    -- places are its rows and each place's in-Epic words are a window over
+    -- the table's own order — no sort, no self-join (round 3 PERF: 450 ms
+    -- to under 200 on the dev database).
     carried as (
-      select w.venue_ref, w.label, (w.label in (select label from inepic)) as in_epic from words w
-    ),
-    kept as (
-      select venue_ref, count(*) filter (where in_epic) as inepic_words from carried group by venue_ref
+      select w.venue_ref, w.label, (w.label in (select label from inepic)) as in_epic,
+             count(*) filter (where w.label in (select label from inepic)) over (partition by w.venue_ref) as inepic_words
+        from words w
     )
     select substr(c.label, 8) as word,
-           count(distinct c.venue_ref)::int as brings,
-           count(distinct c.venue_ref) filter (where k.inepic_words <= (case when c.in_epic then 1 else 0 end))::int as affected
-      from carried c join kept k on k.venue_ref = c.venue_ref
+           count(*)::int as brings,
+           count(*) filter (where c.inepic_words <= (case when c.in_epic then 1 else 0 end))::int as affected
+      from carried c
      group by c.label`);
   return new Map(rows.map((r) => [r.word, { brings: r.brings, affected: r.affected }]));
 }
@@ -151,16 +154,30 @@ export async function everOpened(run = query) {
   return new Map(rows.map((r) => [r.word, r.n]));
 }
 
-/** The facts each word carries. */
+/**
+ * The facts each word carries, with the value where the fact is one of a
+ * list: a chip reads "Cuisine: Indian", never just "Cuisine" (owner, round 3,
+ * 29 Sep 2026). `value` is null for a yes-or-no.
+ */
 async function carriesByWord(run = query) {
   const { rows } = await run(
-    `select c.key as word, a.key, a.label
+    `select c.key as word, a.key, a.label, a.kind, c.choice
        from taxonomy_label_carries c join place_attributes a on a.key = c.attribute_key
       where c.namespace = $1 and a.active order by a.label`, [NS]);
   const out = new Map();
-  for (const r of rows) out.set(r.word, [...(out.get(r.word) ?? []), { key: r.key, label: r.label }]);
+  for (const r of rows) out.set(r.word, [...(out.get(r.word) ?? []), carryOut(r)]);
   return out;
 }
+
+/** A carried fact as a chip names it. */
+export function carryOut({ key, label, kind = 'yesno', choice = null }) {
+  const value = kind === 'oneof' && choice ? choice : null;
+  return { key, label: value ? `${label}: ${value}` : label, name: label, kind, value };
+}
+
+/** A snapshot's fact entry: a yes-or-no is its key; one of a list is `{ key, choice }`. */
+const factKey = (f) => (typeof f === 'string' ? f : f?.key);
+const factChoice = (f) => (typeof f === 'string' ? null : f?.choice ?? null);
 
 /** The last decision on each word, for Not in Epic's "Decided by · When". */
 async function lastDecisionByWord(run = query) {
@@ -199,7 +216,13 @@ export async function mappingState() {
   // Epic"); a repoint counts the places that would actually move.
   for (const p of proposals) {
     if (p.action === 'narrow' && NARROWING_SQL[p.change_to?.condition]) p.narrowed = await narrowCounts(p.word, p.change_to.condition);
-    if (p.action === 'repoint' && p.change_to?.subcategory) p.moving = await movingCount(p.word, p.change_to.subcategory);
+    if (p.action === 'repoint' && p.change_to?.subcategory) {
+      // Where the primary stays and only a secondary is added (brewpub), the
+      // places affected are the ones the added drawer gains.
+      const primaryNow = targets.get(p.word)?.find((t) => t.primary)?.key ?? null;
+      const gains = primaryNow === p.change_to.subcategory && p.change_to.also?.length ? p.change_to.also[0] : p.change_to.subcategory;
+      p.moving = await movingCount(p.word, gains);
+    }
   }
 
   const inEpic = []; const needs = []; const notInEpic = [];
@@ -347,13 +370,14 @@ async function snapshot(c, word) {
   const { rows: [rule] } = await c.query(
     `select id, subcategory, reason, taught_by from shelf_rules where scope = 'labels' and subject = $1`, [`${NS}:${word}`]);
   const { rows: f } = await c.query(
-    `select attribute_key from taxonomy_label_carries where namespace = $1 and key = $2 order by attribute_key`, [NS, word]);
+    `select attribute_key, choice from taxonomy_label_carries where namespace = $1 and key = $2 order by attribute_key`, [NS, word]);
   return {
     decision: w.decision, pointsAt: w.points_at, active: w.active,
     targets: t, rule: rule ? { subcategory: rule.subcategory, reason: rule.reason, by: rule.taught_by } : null,
     // The facts the word carries (the README's `labels`): part of what a
     // decision puts back, so a picker's fact tick is undone like any other.
-    facts: f.map((r) => r.attribute_key),
+    // A value (Cuisine: Indian) is part of the fact and is put back with it.
+    facts: f.map((r) => (r.choice != null ? { key: r.attribute_key, choice: r.choice } : r.attribute_key)),
   };
 }
 
@@ -429,11 +453,29 @@ async function apply(c, word, state, who) {
   // Facts are restored only when the state names them: a snapshot written
   // before facts were part of one (undefined) leaves the carries alone.
   if (Array.isArray(state.facts)) {
-    await c.query('delete from taxonomy_label_carries where namespace = $1 and key = $2 and not (attribute_key = any($3))', [NS, word, state.facts]);
+    const keys = state.facts.map(factKey).filter(Boolean);
+    await c.query('delete from taxonomy_label_carries where namespace = $1 and key = $2 and not (attribute_key = any($3))', [NS, word, keys]);
+    const { rows: kinds } = keys.length
+      ? await c.query('select key, kind from place_attributes where key = any($1)', [keys])
+      : { rows: [] };
+    const kindOf = new Map(kinds.map((r) => [r.key, r.kind]));
     for (const f of state.facts) {
-      await c.query(
-        `insert into taxonomy_label_carries (namespace, key, attribute_key, yesno) values ($1, $2, $3, true)
-         on conflict (namespace, key, attribute_key) do nothing`, [NS, word, f]);
+      const key = factKey(f);
+      const choice = factChoice(f);
+      if (choice != null) {
+        // One value a fact, for a word: choosing another replaces it.
+        await c.query(
+          `insert into taxonomy_label_carries (namespace, key, attribute_key, choice) values ($1, $2, $3, $4)
+           on conflict (namespace, key, attribute_key) do update set choice = excluded.choice, yesno = null`, [NS, word, key, choice]);
+      } else if (kindOf.get(key) === 'yesno') {
+        await c.query(
+          `insert into taxonomy_label_carries (namespace, key, attribute_key, yesno) values ($1, $2, $3, true)
+           on conflict (namespace, key, attribute_key) do nothing`, [NS, word, key]);
+      }
+      // A bare key for a fact that is not a yes or no (a snapshot written
+      // before values were part of one) keeps the row it has: the insert
+      // would be refused by the shape trigger, which fires before the
+      // conflict is found — so repointing any cuisine word failed.
     }
   }
   await narrowRules(c, word);
@@ -452,9 +494,11 @@ export async function refreshNarrowings() {
 async function pointsLabel(c, state) {
   if (state.decision && WHY_OUT[state.decision]) return 'Not in Epic';
   const { rows: fr } = state.facts?.length
-    ? await c.query('select key, label from place_attributes where key = any($1)', [state.facts])
+    ? await c.query('select key, label from place_attributes where key = any($1)', [state.facts.map(factKey)])
     : { rows: [] };
-  const facts = fr.map((r) => `fact: ${r.label}`);
+  const labelOf = new Map(fr.map((r) => [r.key, r.label]));
+  const facts = (state.facts ?? []).filter((f) => labelOf.has(factKey(f)))
+    .map((f) => `fact: ${labelOf.get(factKey(f))}${factChoice(f) != null ? `: ${factChoice(f)}` : ''}`);
   if (!state.targets?.length) return [state.decision === 'generic' ? 'Fact only' : 'Not answered', ...facts].join(' · ');
   const { rows } = await c.query('select key, label from shelf_subcategories where key = any($1)', [state.targets.map((t) => t.sub)]);
   const label = new Map(rows.map((r) => [r.key, r.label]));
@@ -526,20 +570,73 @@ export async function setTargets({ word, subs, primary = null, why = null, who }
  * edit, so it is a Repointed decision (README: "Picker edits … are logged as
  * Repointed and are undoable"), with the word's subcategories left as they are.
  */
-export async function setFact({ word, fact, on = true, why = null, who }) {
+export async function setFact({ word, fact, value = null, on = true, why = null, who }) {
   return decide({
     word, kind: 'Repointed', why, who,
     next: async (before, c) => {
-      const { rows: [a] } = await c.query('select key, label, kind from place_attributes where key = $1 and active', [fact]);
+      const { rows: [a] } = await c.query('select key, label, kind, options from place_attributes where key = $1 and active', [fact]);
       if (!a) throw bad(`${fact} is not one of our facts.`);
-      if (a.kind !== 'yesno') throw bad(`${a.label} is not a yes or no; a word can only carry a yes.`);
-      const facts = on ? [...new Set([...before.facts, fact])] : before.facts.filter((f) => f !== fact);
+      // A yes-or-no is carried as a yes; one of a list (Cuisine, Dining
+      // style) is carried with one of its values, and choosing another value
+      // replaces the one it had. A range cannot be said by a word.
+      if (a.kind !== 'yesno' && a.kind !== 'oneof') throw bad(`${a.label} is a range; a word can carry a yes or one value of a list.`);
+      const v = value == null ? null : String(value).trim();
+      if (a.kind === 'oneof' && on) {
+        if (!v) throw bad(`${a.label} needs a value — which one?`);
+        if (!(a.options ?? []).includes(v)) throw bad(`${v} is not one of ${a.label}'s values; add it first.`);
+      }
+      const rest = before.facts.filter((f) => factKey(f) !== fact);
+      const facts = !on ? rest : a.kind === 'oneof' ? [...rest, { key: fact, choice: v }] : [...rest, fact];
       return {
         decision: before.decision, active: before.active, rule: before.rule, facts,
         targets: before.targets.map((t) => ({ sub: t.sub, primary: t.primary, condition: t.condition })),
       };
     },
   });
+}
+
+/**
+ * "+ Add a value" in the picker's Fact tab: a new value for a fact that is
+ * one of a list (a cuisine Google has no word for). Added to the list, never
+ * carried by anything until a person picks it; logged in Changes, and its
+ * Undo takes the value away again while nothing uses it.
+ */
+export async function addFactValue({ fact, value, who }) {
+  if (!who) throw bad('A change says who made it.');
+  const v = String(value ?? '').trim().replace(/\s+/g, ' ');
+  if (!v) throw bad('Name the value.');
+  if (v.length > 60) throw bad('A value is a word or two, not a sentence.');
+  const out = await withTransaction(async (c) => {
+    const { rows: [a] } = await c.query('select key, label, kind, options from place_attributes where key = $1 and active for update', [fact]);
+    if (!a) throw bad(`${fact} is not one of our facts.`);
+    if (a.kind !== 'oneof') throw bad(`${a.label} is not one of a list; it has no values to add to.`);
+    const had = (a.options ?? []).find((o) => o.toLowerCase() === v.toLowerCase());
+    if (had) return { fact, value: had, added: false, change: null };
+    await c.query('update place_attributes set options = coalesce(options, \'{}\'::text[]) || array[$2::text], updated_at = now() where key = $1', [fact, v]);
+    const change = await logChange({
+      client: c, who, area: 'Facts', what: `Value added · ${a.label}: ${v}`, before: '—', after: `${a.label}: ${v}`,
+      subjectType: 'fact_value', subjectId: `${fact}:${v}`, undo: { kind: 'fact_value', fact, value: v },
+    });
+    return { fact, value: v, added: true, change };
+  });
+  forgetAll();
+  return out;
+}
+
+/** Undo "+ Add a value": the value goes while nothing carries, answers or defaults to it. */
+export async function undoFactValue({ change, who }) {
+  const { fact, value } = change.undo ?? {};
+  await withTransaction(async (c) => {
+    const { rows: [used] } = await c.query(`
+      select exists (select 1 from taxonomy_label_carries where attribute_key = $1 and choice = $2)
+          or exists (select 1 from place_attribute_values where attribute_key = $1 and choice = $2)
+          or exists (select 1 from shelf_subcategory_attributes where attribute_key = $1 and choice = $2)
+          or exists (select 1 from attribute_brings where brings_key = $1 and choice = $2) as used`, [fact, value]);
+    if (used?.used) throw bad(`${value} is in use now; take it off what carries it first.`);
+    await c.query('update place_attributes set options = array_remove(options, $2::text), updated_at = now() where key = $1', [fact, value]);
+    await markUndone({ client: c, id: change.id, who });
+  });
+  forgetAll();
 }
 
 /** Exclude: the word's places leave Epic unless another word carries them. */
@@ -611,8 +708,20 @@ export async function decideProposal({ id, action, why = null, who }) {
         if (p.change_to?.newSub && await createSubcategory(c, p.change_to.newSub, who)) created.sub = p.change_to.newSub.key;
         if (p.change_to?.newFact && await createFact(c, p.change_to.newFact, who)) created.fact = p.change_to.newFact.key;
         await subExists(c, sub);
+        // A proposal may keep or add secondaries (`also`: brewery keeps Pubs
+        // & bars); one retired since it was raised is left out, not refused.
+        const also = [];
+        for (const k of p.change_to?.also ?? []) {
+          if (k === sub || also.includes(k)) continue;
+          const { rows: [x] } = await c.query('select active from shelf_subcategories where key = $1', [k]);
+          if (x?.active) also.push(k);
+        }
         const facts = p.change_to?.fact ? [...new Set([...before.facts, p.change_to.fact])] : before.facts;
-        return { decision: null, active: true, targets: [{ sub, primary: true, condition }], rule: before.rule, facts, created: Object.keys(created).length ? created : null };
+        return {
+          decision: null, active: true,
+          targets: [{ sub, primary: true, condition }, ...also.map((k) => ({ sub: k, primary: false }))],
+          rule: before.rule, facts, created: Object.keys(created).length ? created : null,
+        };
       },
     });
     return out;

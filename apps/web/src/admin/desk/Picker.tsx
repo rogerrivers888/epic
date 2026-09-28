@@ -29,7 +29,8 @@ const noOutline = web ? ({ outlineStyle: 'none' } as object) : null;
 export type Catalogue = {
   categories: { key: string; label: string }[];
   subcategories: { key: string; label: string; category: string }[];
-  facts: { key: string; label: string; kind: string; standard?: boolean }[];
+  /** A fact that is one of a list (Cuisine, Dining style) comes with its values. */
+  facts: { key: string; label: string; kind: string; standard?: boolean; options?: string[] | null }[];
 };
 
 // ---------------------------------------------------------------------------
@@ -142,6 +143,8 @@ export type WordPickerProps = {
   primary: string | null;
   /** The facts the word carries. */
   facts: string[];
+  /** The value a carried fact has, where it is one of a list: { cuisine: 'Indian' }. */
+  values?: Record<string, string | null>;
   query: string;
   onQuery: (q: string) => void;
   /** The tab and the category on show: part of the address (`ptab`, `cat`). */
@@ -152,6 +155,13 @@ export type WordPickerProps = {
   onToggleSub: (key: string) => void;
   onMakePrimary: (key: string) => void;
   onToggleFact: (key: string) => void;
+  /** A value picked for a fact that is one of a list; picking the value it has takes the fact off. */
+  onSetValue?: (fact: string, value: string) => void;
+  /** "+ Add a value": a new value for that fact, which the word then takes. */
+  onAddValue?: (fact: string, value: string) => void;
+  /** The list fact opened to its values: part of the address (`pfact`). */
+  openFact?: string | null;
+  onOpenFact?: (fact: string | null) => void;
   /** "Yes · make it a subcategory": name and category, after the question. */
   onCreate: (label: string, category: string) => void;
   onClose: () => void;
@@ -184,8 +194,12 @@ export function WordPicker(p: WordPickerProps) {
     for (const s of p.catalogue.subcategories) m.set(s.category, [...(m.get(s.category) ?? []), s]);
     return m;
   }, [p.catalogue.subcategories]);
-  // A word can only carry a yes: the Fact tab offers yes-or-no facts.
+  // A word carries a yes, or one value of a list: the Fact tab offers the
+  // yes-or-no facts, then the list facts that are not standard (Cuisine,
+  // Dining style), each opening to its values (round 3, 29 Sep 2026).
   const yesno = useMemo(() => p.catalogue.facts.filter((f) => f.kind === 'yesno'), [p.catalogue.facts]);
+  const lists = useMemo(() => p.catalogue.facts.filter((f) => f.kind === 'oneof' && !f.standard && f.options), [p.catalogue.facts]);
+  const valueOf = (key: string) => p.values?.[key] ?? null;
   const primaryName = p.catalogue.subcategories.find((s) => s.key === p.primary)?.label ?? null;
   const catName = p.catalogue.categories.find((c) => c.key === cat)?.label ?? '';
 
@@ -193,6 +207,9 @@ export function WordPicker(p: WordPickerProps) {
     ...p.catalogue.categories.filter((c) => match(q)(c.label)).map((c) => ({ key: `c:${c.key}`, name: c.label, kind: 'category', on: c.key === primaryCat, go: () => { setCat(c.key); setTab('cat'); p.onQuery(''); } })),
     ...p.catalogue.subcategories.filter((s) => match(q)(s.label)).map((s) => ({ key: `s:${s.key}`, name: s.label, kind: 'subcategory', on: p.subs.includes(s.key), go: () => p.onToggleSub(s.key) })),
     ...yesno.filter((f) => match(q)(f.label)).map((f) => ({ key: `f:${f.key}`, name: f.label, kind: 'fact', on: p.facts.includes(f.key), go: () => p.onToggleFact(f.key) })),
+    ...lists.flatMap((f) => (f.options ?? []).filter((v) => match(q)(v) || match(q)(f.label)).map((v) => ({
+      key: `v:${f.key}:${v}`, name: `${f.label}: ${v}`, kind: 'value', on: valueOf(f.key) === v, go: () => p.onSetValue?.(f.key, v),
+    }))).slice(0, 30),
   ] : [];
 
   return (
@@ -279,7 +296,22 @@ export function WordPicker(p: WordPickerProps) {
               </View>
             </>
           ) : (
-            <TickGrid items={yesno} isOn={(k) => p.facts.includes(k)} onToggle={p.onToggleFact} narrow={narrow} />
+            <>
+              <TickGrid items={yesno} isOn={(k) => p.facts.includes(k)} onToggle={p.onToggleFact} narrow={narrow} />
+              {lists.map((f) => (
+                <ListFact
+                  key={f.key}
+                  label={f.label}
+                  options={f.options ?? []}
+                  value={valueOf(f.key)}
+                  open={p.openFact === f.key}
+                  onOpen={() => p.onOpenFact?.(p.openFact === f.key ? null : f.key)}
+                  onPick={(v) => p.onSetValue?.(f.key, v)}
+                  onAdd={p.onAddValue ? (v) => p.onAddValue?.(f.key, v) : undefined}
+                  narrow={narrow}
+                />
+              ))}
+            </>
           )}
         </>
       )}
@@ -316,6 +348,56 @@ export function WordPicker(p: WordPickerProps) {
             </Press>
           </View>
         </View>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * A fact that is one of a list, in the Fact tab: its name and the value the
+ * word carries, opening to every value as ticks and "+ Add a value" last.
+ * Picking the value it has takes the fact off the word.
+ */
+function ListFact({ label, options, value, open, onOpen, onPick, onAdd, narrow }: {
+  label: string; options: string[]; value: string | null; open: boolean; onOpen: () => void;
+  onPick: (v: string) => void; onAdd?: (v: string) => void; narrow: boolean;
+}) {
+  const [adding, setAdding] = useState('');
+  const sorted = useMemo(() => [...options].sort((a, b) => a.localeCompare(b)), [options]);
+  const add = () => { const v = adding.trim(); if (v && onAdd) { onAdd(v); setAdding(''); } };
+  return (
+    <View style={{ borderTopWidth: 1, borderTopColor: desk.rule }}>
+      <Press effect="none" onPress={onOpen} accessibilityLabel={`${label}: ${open ? 'close' : 'open'} its values`}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, paddingHorizontal: 20 }}>
+          <Mark on={Boolean(value)} />
+          <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: value ? '700' : '500', color: value ? LIME : desk.ink }}>
+            {value ? `${label}: ${value}` : label}
+          </Text>
+          <Text style={{ fontFamily: fonts.body, fontSize: 11.5, color: desk.inkDim }}>{options.length} values</Text>
+          <View style={{ flex: 1 }} />
+          <Icon name={open ? 'collapse' : 'expand'} size={13} color={desk.inkDim} />
+        </View>
+      </Press>
+      {open ? (
+        <>
+          <TickGrid items={sorted.map((v) => ({ key: v, label: v }))} isOn={(v) => v === value} onToggle={onPick} narrow={narrow} />
+          {onAdd ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap', paddingVertical: 9, paddingHorizontal: 20, borderTopWidth: 1, borderTopColor: desk.rule }}>
+              <View style={{ width: 14, alignItems: 'center' }}><Icon name="add" size={13} color={desk.inkDim} /></View>
+              <TextInput
+                value={adding}
+                onChangeText={setAdding}
+                onSubmitEditing={add}
+                placeholder="Add a value"
+                placeholderTextColor={desk.inkDim}
+                style={[{ width: 220, maxWidth: '100%', backgroundColor: desk.well, borderWidth: 1, borderColor: desk.ruleStrong, color: desk.ink, fontFamily: fonts.body, fontSize: 13, fontWeight: '600', paddingVertical: 6, paddingHorizontal: 9 }, noOutline]}
+              />
+              <Press effect="none" disabled={!adding.trim()} onPress={add}>
+                <Text style={{ backgroundColor: adding.trim() ? LIME : desk.off, color: adding.trim() ? ON_LIME : desk.inkDim, paddingVertical: 7, paddingHorizontal: 14, fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700' }}>Add</Text>
+              </Press>
+            </View>
+          ) : null}
+        </>
       ) : null}
     </View>
   );

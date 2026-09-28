@@ -52,13 +52,15 @@ test('All facts: an ignored fact names where it is ignored and has no count; one
   assert.equal(wave.places, null, 'no count, never a 0 that means unknown');
 });
 
-test('a fact page says how far a gathering subcategory has got', async () => {
+test('a fact page leaves a gathering subcategory blank and counts the Active one', async () => {
   await seed();
   const page = await facts.factPage('dfx-sauna');
   assert.equal(page.status, 'active');
   assert.equal(page.needed, 2);
   const play = page.subcategories.find((s) => s.key === 'dfx-play');
-  assert.equal(play.note, 'Confirmed at 1 of 2 places needed · first seen 19 Sep');
+  // Blank for Gathering evidence (owner, round 3, 29 Sep 2026).
+  assert.equal(play.note, null);
+  assert.equal(play.places, null);
   const water = page.subcategories.find((s) => s.key === 'dfx-water');
   assert.equal(water.note, null);
   assert.equal(water.places, 2);

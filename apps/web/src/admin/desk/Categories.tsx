@@ -21,8 +21,8 @@ import { Press } from '../../components/press';
 import { useViewport } from '../../hooks/useViewport';
 import { useCrumbs, useDeskGo, useDeskParam } from './Desk';
 import {
-  Dropdown, LIME, LocationFilter, Muted, ON_LIME, RED, SearchBox, THead, Table, Tick, deskApi, desk, fonts,
-  locParams, n, saidOf, sortRows, tabular, useLocation, useToast, type SortState, type TCol,
+  AMBER, Dropdown, LIME, LocationFilter, Muted, ON_LIME, RED, SearchBox, SideToggle, THead, Table, TextLink, Tick, deskApi, desk, fonts,
+  locParams, n, onSide, saidOf, sortRows, tabular, useLocation, useSide, useToast, type SortState, type TCol,
 } from './kit';
 import { Count, FACT_ORDER, Failed, HowTip, PillBar, count, factName, undoChanges, type Change, type Option } from './categories/shared';
 import { HoverTitle } from './facts/shared';
@@ -62,6 +62,7 @@ export function Categories({ canManage = false }: { canManage?: boolean }) {
   const [fact] = useDeskParam('fact');
   const [view] = useDeskParam('view');
   if (view === 'new') return <NewFacts canManage={canManage} />;
+  if (view === 'gaps') return <GapReport />;
   if (sub && fact && view === 'review') return <Review sub={sub} fact={fact} />;
   if (sub && fact) return <FactAtSub sub={sub} fact={fact} canManage={canManage} />;
   if (sub) return <SubPage sub={sub} canManage={canManage} />;
@@ -99,6 +100,7 @@ function SubList({ canManage }: { canManage: boolean }) {
   const { loc, setAnswer } = useLocation();
   const [q, setQ] = useDeskParam('q');
   const [cat, setCat] = useDeskParam('cat');
+  const [side] = useSide();
   const [data, setData] = useState<ListResponse | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [tick, setTick] = useState(0);
@@ -140,6 +142,7 @@ function SubList({ canManage }: { canManage: boolean }) {
   const all = data?.rows ?? [];
   const shown = useMemo(() => {
     const f = all
+      .filter((r) => onSide(side, [r.category]))
       .filter((r) => !cat || r.category === cat)
       .filter((r) => !needle || r.label.toLowerCase().includes(needle) || r.categoryLabel.toLowerCase().includes(needle) || (r.terms ?? '').includes(needle));
     if (sorted === 'review') {
@@ -149,8 +152,8 @@ function SubList({ canManage }: { canManage: boolean }) {
     return sortRows(f, sort, (r, k) => (
       k === 'name' ? r.label : k === 'cat' ? r.categoryLabel : k === 'places' ? r.places : k === 'facts' ? r.facts : r.related.length
     ), (r) => r.label);
-  }, [all, cat, needle, sortRaw]); // eslint-disable-line react-hooks/exhaustive-deps
-  const filtered = Boolean(needle || cat);
+  }, [all, cat, needle, sortRaw, side]); // eslint-disable-line react-hooks/exhaustive-deps
+  const filtered = Boolean(needle || cat || side);
 
   const cols: TCol<ColKey>[] = [
     { key: 'name', name: 'Subcategory', width: 240 },
@@ -158,7 +161,7 @@ function SubList({ canManage }: { canManage: boolean }) {
     { key: 'places', name: within ? 'Within reach' : 'Places', width: 80, first: 'asc' },
     {
       key: 'facts', name: 'Facts', width: 80, first: 'desc',
-      tip: 'The facts Epic finds out about every place in this subcategory, automatically, from its own sources — for Water parks: wave machine, toddler pool, flumes. Click the number to see them.',
+      tip: 'The facts our own sources have confirmed at places in this subcategory — Active at 2 or more, Gathering evidence at 1 — for Water parks: wave machine, toddler pool, flumes. The same links as Subcategories on Facts. Click the number to see them.',
     },
     {
       key: 'related', name: 'Related', width: 400, first: 'desc',
@@ -202,13 +205,18 @@ function SubList({ canManage }: { canManage: boolean }) {
         </View>
       </View>
 
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 14 }}>
+        <SideToggle />
+        <TextLink onPress={() => go('categories', { view: 'gaps' })}>Gap report</TextLink>
+      </View>
+
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 14, zIndex: 42 }}>
         <SearchBox value={text} onChange={setText} placeholder="Search every subcategory" width={narrow ? Math.min(280, width - 32) : 280} />
         <Dropdown
           label={cat ? data?.categories.find((c) => c.key === cat)?.label ?? 'All categories' : 'All categories'}
           value={cat || 'all'}
           width={240}
-          options={[{ key: 'all', name: 'All categories' }, ...(data?.categories ?? []).map((c) => ({ key: c.key, name: c.label }))]}
+          options={[{ key: 'all', name: 'All categories' }, ...(data?.categories ?? []).filter((c) => onSide(side, [c.key])).map((c) => ({ key: c.key, name: c.label }))]}
           onChange={(v) => setCat(v === 'all' ? '' : v, { replace: true })}
         />
         {filtered && data ? <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>{shown.length} of {data.rows.length}</Text> : null}
@@ -250,7 +258,7 @@ function SubList({ canManage }: { canManage: boolean }) {
               ticked={ticked.includes(r.key)}
               onTick={() => setTicked((t) => (t.includes(r.key) ? t.filter((x) => x !== r.key) : [...t, r.key]))}
               open={() => go('categories', { sub: r.key })}
-              openFacts={() => go('categories', { sub: r.key, state: 'active' })}
+              openFacts={() => go('categories', { sub: r.key })}
               openOther={(k) => go('categories', { sub: k })}
               adding={adding === r.key}
               toggleAdd={() => setAdding((a) => (a === r.key ? null : r.key))}
@@ -497,6 +505,120 @@ function BulkBar({ subs, facts, onClear, onDone }: {
           </Press>
         </View>
       ) : null}
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The gap report (`view=gaps`, round 3, 29 Sep 2026)
+// ---------------------------------------------------------------------------
+
+type GapWord = { word: string; primary: boolean; brings: number };
+type GapRow = {
+  key: string; label: string; category: string; categoryLabel: string; places: number;
+  words: GapWord[]; noWord: boolean;
+  /** Null where the category cannot say (too few drawers, a median of nought); `thinWhy` says why. */
+  thin: boolean | null; thinWhy: string | null; median: number | null;
+  suggest: { word: string; brings: number; state: 'undecided' | 'proposed' }[];
+};
+type GapResponse = { rows: GapRow[]; counts: { subcategories: number; noWord: number; thin: number; flagged: number } };
+
+/**
+ * Every subcategory with the Google words feeding it (primary and secondary)
+ * and its places; flagged where no word points at it, or where it holds
+ * under a quarter of its category's median. Beside a flag, the unanswered
+ * words whose names fit it — a door to that word in Mapping, never a change
+ * made from here.
+ */
+function GapReport() {
+  const go = useDeskGo();
+  const [side] = useSide();
+  const narrow = useViewport().width < 900;
+  const [data, setData] = useState<GapResponse | null>(null);
+  const [err, setErr] = useState<unknown>(null);
+  useCrumbs([{ name: 'Categories', go: () => go('categories') }, { name: 'Gap report' }], []);
+  useEffect(() => {
+    let live = true;
+    deskApi.get<GapResponse>('/categories/gaps').then((d) => { if (live) setData(d); }).catch((e) => { if (live) setErr(e); });
+    return () => { live = false; };
+  }, []);
+  const rows = useMemo(() => {
+    const on = (data?.rows ?? []).filter((r) => onSide(side, [r.category]));
+    // The flagged first — no word at all, then thin — each in the list's own order.
+    const rank = (r: GapRow) => (r.noWord ? 0 : r.thin ? 1 : 2);
+    return on.map((r, i) => ({ r, i })).sort((a, b) => rank(a.r) - rank(b.r) || a.i - b.i).map(({ r }) => r);
+  }, [data, side]);
+  const GAP = 18;
+  const cols: TCol[] = [
+    { key: 'name', name: 'Subcategory', width: 220, sortable: false },
+    { key: 'cat', name: 'Category', width: 120, sortable: false },
+    { key: 'places', name: 'Places', width: 80, sortable: false },
+    { key: 'words', name: 'Google words feeding it', width: 340, sortable: false, tip: 'Every Google word pointing here, as its primary or as a secondary. Primary words are lime.' },
+    { key: 'flag', name: 'Flag', width: 200, sortable: false, tip: 'No word points here; or thin — fewer than a quarter of the median places of the subcategories in its category.' },
+    { key: 'suggest', name: 'Words that might fit', width: 240, sortable: false, tip: 'Google words nobody has placed yet, or with a proposal waiting, whose names match this subcategory. Opens the word in Mapping.' },
+  ];
+  const tableW = GAP * (cols.length - 1) + cols.reduce((a, c) => a + c.width, 0) + 16;
+  const shownFlagged = rows.filter((r) => r.noWord || r.thin === true).length;
+  return (
+    <View style={{ gap: 14 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'space-between', gap: 24, paddingBottom: 4 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <Text style={{ fontFamily: fonts.heading, fontWeight: '800', fontSize: 31, letterSpacing: -1.085, lineHeight: 32, color: desk.ink }}>Gap report</Text>
+          <HowTip text="Which subcategories no Google word feeds, and which hold far fewer places than the others in their category. A suggested word opens in Mapping, where a person decides." />
+        </View>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', gap: 30 }}>
+          <Count label="Subcategories" n={data ? n(rows.length) : '—'} />
+          <Count label="No word" n={data ? n(rows.filter((r) => r.noWord).length) : '—'} />
+          <Count label="Thin" n={data ? n(rows.filter((r) => r.thin === true).length) : '—'} />
+        </View>
+      </View>
+      <SideToggle />
+      {err ? <Failed err={err} /> : !data ? <Muted>Counting every subcategory’s words and places</Muted> : (
+        <>
+          <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>{n(shownFlagged)} flagged of {n(rows.length)}, flagged first</Text>
+          <Table width={tableW}>
+            <THead cols={cols} gap={GAP} />
+            {rows.length === 0 ? <Muted>No subcategories on this side.</Muted> : null}
+            {rows.map((r) => (
+              <View key={r.key} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: GAP, paddingVertical: 12, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: desk.rule }}>
+                <View style={{ width: 220 }}>
+                  <Press effect="none" onPress={() => go('categories', { sub: r.key })}>
+                    <Text style={{ fontFamily: fonts.body, fontSize: 13.5, fontWeight: '700', color: desk.ink }}>{r.label}</Text>
+                  </Press>
+                </View>
+                <Text style={{ width: 120, fontFamily: fonts.body, fontSize: 13, color: desk.inkMuted }}>{r.categoryLabel}</Text>
+                <Text style={[{ width: 80, fontFamily: fonts.body, fontSize: 13.5, color: r.places ? desk.ink : RED }, tabular]}>{n(r.places)}</Text>
+                <View style={{ width: 340, flexDirection: 'row', flexWrap: 'wrap', columnGap: 12, rowGap: 4 }}>
+                  {r.words.length ? r.words.map((w) => (
+                    <Press key={w.word} effect="none" onPress={() => go('mapping', { word: w.word })}>
+                      <Text style={[{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: w.primary ? '700' : '500', color: w.primary ? LIME : desk.inkMuted }, tabular]}>
+                        {w.word} {n(w.brings)}
+                      </Text>
+                    </Press>
+                  )) : <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>none</Text>}
+                </View>
+                <View style={{ width: 200 }}>
+                  {r.noWord ? <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: RED }}>No word points here</Text>
+                    : r.thin ? <Text style={[{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: AMBER }, tabular]}>Thin · {r.categoryLabel}’s median is {n(r.median)}</Text>
+                      : r.thin === null ? <Text style={{ fontFamily: fonts.body, fontSize: 12, color: desk.inkDim }}>{r.thinWhy ?? '—'}</Text>
+                        : <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>—</Text>}
+                </View>
+                <View style={{ width: 240, flexDirection: 'row', flexWrap: 'wrap', columnGap: 12, rowGap: 4 }}>
+                  {r.suggest.map((w) => (
+                    <Press key={w.word} effect="none" onPress={() => go('mapping', w.state === 'proposed' ? { view: 'needs' } : { word: w.word })}>
+                      <Text style={[{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: desk.ink, borderBottomWidth: 1, borderBottomColor: desk.ruleStrong }, tabular]}>
+                        {w.word}{w.state === 'proposed' ? ' (proposed)' : ''} {n(w.brings)}
+                      </Text>
+                    </Press>
+                  ))}
+                  {!r.suggest.length && (r.noWord || r.thin) ? <Text style={{ fontFamily: fonts.body, fontSize: 12, color: desk.inkDim }}>no unplaced word fits</Text> : null}
+                </View>
+              </View>
+            ))}
+          </Table>
+          {narrow ? <Text style={{ fontFamily: fonts.body, fontSize: 12, color: desk.inkDim }}>the table scrolls sideways</Text> : null}
+        </>
+      )}
     </View>
   );
 }

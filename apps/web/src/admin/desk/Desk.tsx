@@ -29,6 +29,7 @@ import { asText, useQueryState, useRouter } from '../../router';
 import { filingTabOf, type FilingTab } from '../../routes';
 import { LIME, desk, fonts } from '../../theme';
 import { LocationProvider, ToastLine, ToastProvider } from './kit';
+import { SIDE_KEY, SIDE_TABS } from './side';
 import { Overview } from './Overview';
 import { Categories } from './Categories';
 import { Facts } from './Facts';
@@ -60,6 +61,8 @@ export const DESK_KEYS = [
   'sub', 'cat', 'fact', 'q', 'view', 'ftab', 'places', 'acc', 'key', 'src', 'word', 'collection', 'place', 'area', 'who', 'state', 'period', 'chart', 'by', 'kind', 'run',
   // Mapping's filters and its picker's tab (agent C, 28 Sep; `sort` below).
   'filters', 'ptab',
+  // The picker's list fact opened to its values (round 3, 29 Sep).
+  'pfact',
   'sort', 'country', 'county', 'feature',
   // A fact drill-down's postcode filter (agent B, fix pass 28 Sep).
   'pc',
@@ -90,6 +93,9 @@ export function useDeskGo() {
   const { setQuery } = useRouter();
   return useCallback((tab: Tab | null, query: Partial<Record<(typeof DESK_KEYS)[number], string | null>> = {}, replace = false) => {
     const cleared = Object.fromEntries(DESK_KEYS.map((k) => [k, null])) as Record<string, string | null>;
+    // `side` (Food & drink · Things to do) is shared by the four tabs that
+    // draw the toggle, so a move between them keeps it; anywhere else it goes.
+    if (!SIDE_TABS.includes(tab ?? 'overview')) cleared[SIDE_KEY] = null;
     // A move pushes, a filter replaces: the router replaces unless told not to.
     setQuery({ ...cleared, ...query, tab: asTab.write(tab) }, { replace });
   }, [setQuery]);

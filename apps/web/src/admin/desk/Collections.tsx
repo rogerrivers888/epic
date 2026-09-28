@@ -28,8 +28,8 @@ import { useRouter } from '../../router';
 import { CREAM, INK, LIME, ON_LIME, PALETTES, desk, fonts } from '../../theme';
 import { useCrumbs, useDeskParam } from './Desk';
 import {
-  Dropdown, InfoTip, Kicker, LocationFilter, Muted, RED, Seg, T, TCell, THead, TRow, Table,
-  deskApi, locParams, n, saidOf, sortRows, tableWidth, tabular, useLocation, useToast,
+  Dropdown, InfoTip, Kicker, LocationFilter, Muted, RED, Seg, SideToggle, T, TCell, THead, TRow, Table,
+  deskApi, locParams, n, saidOf, sortRows, tableWidth, tabular, useLocation, useSide, useToast,
   type SortState, type TCol,
 } from './kit';
 import { RulePicker, type Catalogue, type RuleKind } from './Picker';
@@ -119,7 +119,9 @@ function CollectionList({ canManage }: { canManage: boolean }) {
   }, [sortRaw]);
   const setSort = (next: SortState<ColKey>) => setSortRaw(next && !(next.key === 'title' && next.dir === 'asc') ? `${next.key}.${next.dir}` : '', { replace: true });
 
-  const params = useMemo(() => locParams(loc), [loc]);
+  // Food & drink · Things to do (round 3): the API keeps the collections whose rule gathers from that side.
+  const [side] = useSide();
+  const params = useMemo(() => ({ ...locParams(loc), ...(side ? { side } : {}) }), [loc, side]);
   const load = useCallback(async () => {
     try {
       const out = await deskApi.get<List>('/collections', params);
@@ -187,6 +189,7 @@ function CollectionList({ canManage }: { canManage: boolean }) {
         </View>
       </View>
 
+      <SideToggle />
       <LocationFilter />
 
       {editorOpen && catalogue ? (

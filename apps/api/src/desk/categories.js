@@ -50,8 +50,12 @@ export const FILED_SQL = `
   select pi.venue_ref, pi.subcategory as sub, true as is_primary
     from place_index pi
    where pi.subcategory is not null and pi.not_in_epic_at is null
-  union
-  select pil.venue_ref, t.subcategory_key as sub, false as is_primary
+  -- The same set as a plain union, without sorting the whole index to find
+  -- duplicates it cannot have: a place is primary in one drawer (its key),
+  -- and the secondary half is never primary. Only the secondary half can
+  -- repeat itself — two words filing one place in one drawer (round 3 PERF).
+  union all
+  select distinct pil.venue_ref, t.subcategory_key as sub, false as is_primary
     from ${PLACE_WORDS} pil
     join word_targets t on t.namespace = 'google' and 'google:' || t.word = pil.label and not t.is_primary
     join place_index pi on pi.venue_ref = pil.venue_ref
@@ -85,15 +89,25 @@ export const effective = (status, n, needed, includeAnyway = false) =>
   (status === 'active' && !includeAnyway && (n ?? 0) < needed ? 'gathering' : status);
 
 /**
+ * Places confirmed to have each fact in each subcategory: `sub`,
+ * `attribute_key`, `n`. The one count a link's status is judged on — by the
+ * screens (factsWithCounts) and by the machine that makes a link Active
+ * (pipeline.add) — so the number beside a status is the number that decided
+ * it (round 3, 29 Sep 2026). $1 narrows to a subcategory, $2 to a fact.
+ */
+export const CONFIRMED_SQL = `
+  with f as (select distinct x.venue_ref, x.sub from (${FILED_SQL}) x where ($1::text is null or x.sub = $1)),
+       h as (select * from (${HAS_SQL}) z where ($2::text is null or z.attribute_key = $2))
+  select f.sub, h.attribute_key, count(distinct h.venue_ref)::int n from h join f on f.venue_ref = h.venue_ref group by 1, 2`;
+
+/**
  * Every fact a subcategory looks for (or once looked for), with the places
  * confirmed to have it there and its status as the screens must show it.
  */
 export async function factsWithCounts({ sub = null, fact = null, standard = false } = {}) {
   const needed = (await settings()).values.addPlaces ?? 2;
   const { rows } = await query(
-    `with f as (select distinct x.venue_ref, x.sub from (${FILED_SQL}) x where ($1::text is null or x.sub = $1)),
-          h as (select * from (${HAS_SQL}) z where ($2::text is null or z.attribute_key = $2)),
-          c as (select f.sub, h.attribute_key, count(distinct h.venue_ref)::int n from h join f on f.venue_ref = h.venue_ref group by 1, 2)
+    `with c as (${CONFIRMED_SQL})
      select sf.*, a.label, a.standard, s.label as sub_label, s.category_key, sc.label as category_label, coalesce(c.n, 0)::int as places_with
        from subcategory_facts sf
        join place_attributes a on a.key = sf.attribute_key and a.active
@@ -112,9 +126,9 @@ export async function factsWithCounts({ sub = null, fact = null, standard = fals
       stored: r.status,
       status,
       demoted,
-      // Confirmed so far: our own count where the machine had it Active, its
-      // counter while it is still gathering.
-      confirmed: demoted ? r.places_with : r.verified_places,
+      // Confirmed so far: the same count the status is judged on, never a
+      // stored counter that may lag it.
+      confirmed: r.places_with,
       isNew: status === 'active' && Boolean(r.active_since) && Date.now() - new Date(r.active_since).getTime() < month,
       needed,
     };
@@ -127,7 +141,9 @@ async function placeCounts(refs = null) {
   let where = '';
   if (refs) { args.push([...refs]); where = 'where f.venue_ref = any($1)'; }
   const { rows } = await query(
-    `select f.sub, count(distinct f.venue_ref)::int n from (${FILED_SQL}) f ${where} group by f.sub`, args);
+    // Distinct pairs first, then a plain count: the same number as
+    // count(distinct) per drawer, hashed rather than sorted (round 3 PERF).
+    `select f.sub, count(*)::int n from (select distinct f.venue_ref, f.sub from (${FILED_SQL}) f ${where}) f group by f.sub`, args);
   return new Map(rows.map((r) => [r.sub, r.n]));
 }
 
@@ -136,7 +152,7 @@ async function distinctPlaces(refs = null) {
   const args = [];
   let where = '';
   if (refs) { args.push([...refs]); where = 'where f.venue_ref = any($1)'; }
-  const { rows: [r] } = await query(`select count(distinct f.venue_ref)::int n from (${FILED_SQL}) f ${where}`, args);
+  const { rows: [r] } = await query(`select count(*)::int n from (select distinct f.venue_ref from (${FILED_SQL}) f ${where}) f`, args);
   return r.n;
 }
 
@@ -147,9 +163,13 @@ async function distinctPlaces(refs = null) {
  */
 async function relatedPairs() {
   const [{ rows: derived }, { rows: linked }] = await Promise.all([
-    query(`with f as (${FILED_SQL})
+    // Only a place with a secondary filing is in two drawers (a place's
+    // primary is one row), so the pairs are looked for among those alone
+    // rather than by joining the whole index to itself (round 3 PERF).
+    query(`with f as (${FILED_SQL}),
+                two as (select * from f where venue_ref in (select venue_ref from f where not is_primary))
            select a.sub as a, b.sub as b, count(*)::int n
-             from f a join f b on a.venue_ref = b.venue_ref and a.sub < b.sub
+             from two a join two b on a.venue_ref = b.venue_ref and a.sub < b.sub
             group by 1, 2 having count(*) >= 2`),
     query('select a, b, added_by, added_at from subcategory_links'),
   ]);
@@ -164,16 +184,34 @@ async function relatedPairs() {
   return out;
 }
 
-/** Live and new facts per subcategory, as the screens count them (standard facts are not counted here). */
-async function factCounts() {
-  const out = new Map();
-  for (const f of await factsWithCounts()) {
-    const r = out.get(f.subcategory_key) ?? { live: 0, fresh: 0 };
-    if (f.status === 'active') r.live += 1;
-    if (f.isNew) r.fresh += 1;
-    out.set(f.subcategory_key, r);
+/**
+ * The one tally of fact links that Categories and Facts both read (round 3,
+ * 29 Sep 2026: Categories said 0 facts everywhere while Facts listed 69, each
+ * "looked for" in 3–11 subcategories — Categories counted only Active links,
+ * Facts counted Active and Gathering evidence). A link is looked for when it
+ * is Active or Gathering evidence; Ignored is not looked for. Per subcategory:
+ * `looking`, `live` (Active), `fresh` (new in 30 days); per fact: `looking`,
+ * `live`. Standard facts are not links and are not counted here.
+ */
+export function tallyLinks(links) {
+  const bySub = new Map();
+  const byFact = new Map();
+  for (const f of links) {
+    if (f.standard || f.status === 'ignored') continue;
+    const s = bySub.get(f.subcategory_key) ?? { looking: 0, live: 0, fresh: 0 };
+    const x = byFact.get(f.attribute_key) ?? { looking: 0, live: 0 };
+    s.looking += 1; x.looking += 1;
+    if (f.status === 'active') { s.live += 1; x.live += 1; }
+    if (f.isNew) s.fresh += 1;
+    bySub.set(f.subcategory_key, s);
+    byFact.set(f.attribute_key, x);
   }
-  return out;
+  return { bySub, byFact };
+}
+
+/** Fact links per subcategory, as the screens count them. */
+export async function factCounts() {
+  return tallyLinks(await factsWithCounts());
 }
 
 /** Does a subcategory's name, category or synonyms match what was typed? */
@@ -221,7 +259,9 @@ export async function subcategoryList({ cat = null, q = null, loc = null } = {})
       category: s.category_key,
       categoryLabel: s.category_label,
       ...(() => { const r = reach(counts.get(s.key) ?? 0, s.key, s.category_key); return { places: r.n, atLeast: r.atLeast, speaks: r.speaks }; })(),
-      facts: facts.get(s.key)?.live ?? 0,
+      // Facts looked for here, Active or Gathering evidence — the same links
+      // Facts' Subcategories column counts (tallyLinks).
+      facts: facts.bySub.get(s.key)?.looking ?? 0,
       // Person-set defaults most of its confirmed places contradict (C49):
       // `?sort=review` puts these first.
       contradicted: flags.get(s.key) ?? 0,
@@ -236,8 +276,10 @@ export async function subcategoryList({ cat = null, q = null, loc = null } = {})
   const defaultFacts = STANDARD.filter((k) => attrOf.has(k)).map((k) => ({
     key: k, label: factWord(k, attrOf.get(k).label), options: optionsOf(attrOf.get(k), cfg).map(({ key, label }) => ({ key, label })),
   }));
-  const factsTotal = [...facts.values()].reduce((n, f) => n + f.live, 0);
-  const newFacts = [...facts.values()].reduce((n, f) => n + f.fresh, 0);
+  // Distinct facts looked for anywhere: each fact once, however many
+  // subcategories look for it — the non-standard rows of All facts that have a subcategory.
+  const factsTotal = facts.byFact.size;
+  const newFacts = [...facts.bySub.values()].reduce((n, f) => n + f.fresh, 0);
   return {
     counts: { subcategories: subs.length, places: total, within: refs ? countOf(within, loc).n : null, facts: factsTotal, newFacts },
     rows,
@@ -880,8 +922,10 @@ export async function copyFacts({ to, from, who }) {
     const added = [];
     for (const f of live) {
       const { rowCount } = await c.query(
-        `insert into subcategory_facts (subcategory_key, attribute_key, status, first_seen, verified_places, updated_at)
-         values ($1, $2, 'gathering', now(), 0, now()) on conflict do nothing`, [to, f.attribute_key]);
+        // Marked as a person's: the machine detaches a link nothing confirms
+        // (pipeline.add), but never one a person asked for.
+        `insert into subcategory_facts (subcategory_key, attribute_key, status, first_seen, verified_places, updated_at, added_by)
+         values ($1, $2, 'gathering', now(), 0, now(), $3) on conflict do nothing`, [to, f.attribute_key, who]);
       if (rowCount) added.push(f);
     }
     if (!added.length) throw bad(`${name.get(to)} already looks for every fact ${name.get(from)} has.`);
@@ -915,4 +959,145 @@ export async function link({ a, b, who, on = true }) {
       undo: { kind: 'link', a: x, b: y, on: !on },
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// Food & drink · Things to do (round 3, 29 Sep 2026): one toggle on
+// Categories, Facts, Mapping and Collections. Things to do is every category
+// that is not Food & drink.
+
+/** The Food & drink category's key. */
+export const FOOD_CATEGORY = 'food';
+/** The toggle's values, as the address spells them; '' is All. */
+export const SIDES = ['food', 'todo'];
+export const sideOf = (categoryKey) => (categoryKey === FOOD_CATEGORY ? 'food' : 'todo');
+/**
+ * Whether something filed in `cats` belongs on a side. Something that names
+ * no category (a standard fact, a collection asking only for a fact) is not
+ * narrowed to either, so it is on both.
+ */
+export const onSide = (side, cats) => !SIDES.includes(side) || !cats?.length || cats.some((c) => sideOf(c) === side);
+
+/** The categories each fact is looked for in, however it stands there (Facts' toggle). */
+export async function factCategories() {
+  const out = new Map();
+  for (const f of await factsWithCounts({ standard: true })) {
+    out.set(f.attribute_key, [...new Set([...(out.get(f.attribute_key) ?? []), f.category_key])]);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// The gap report (`view=gaps`, round 3, 29 Sep 2026): every subcategory, the
+// Google words feeding it and its place count; flagged where no word points
+// at it, or where it is far thinner than the drawers beside it, with the
+// unanswered words whose names fit it.
+
+/** Words that say nothing about which drawer a place belongs in. */
+const GENERIC_TOKENS = new Set(['and', 'the', 'of', 'you', 'can', 'see', 'your', 'own', 'with', 'for', 'a', 'to',
+  'restaurant', 'shop', 'store', 'service', 'center', 'centre', 'house', 'club', 'area', 'place', 'venue', 'location']);
+
+/** A crude stem, enough to meet breweries with brewery and parks with park. */
+export const stem = (t) => {
+  const w = String(t).toLowerCase().replace(/[^a-z]/g, '');
+  if (w.length > 4 && w.endsWith('ies')) return `${w.slice(0, -3)}y`;
+  if (w.length > 4 && /(ches|shes|sses|xes)$/.test(w)) return w.slice(0, -2);
+  if (w.length > 3 && w.endsWith('s') && !w.endsWith('ss')) return w.slice(0, -1);
+  return w;
+};
+const tokens = (text) => String(text ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^A-Za-z]+/).map(stem).filter((t) => t.length >= 3 && !GENERIC_TOKENS.has(t));
+
+/** A subcategory's own words: its label, its key and its search synonyms. */
+export const subTokens = (s) => new Set([...tokens(s.label), ...tokens(String(s.key).replace(/-/g, ' ')), ...tokens(SEARCH_TERMS[s.key])]);
+
+/** Whether a Google word's name fits a subcategory's words. */
+export const wordFits = (word, subWords) => tokens(String(word).replace(/_/g, ' ')).some((t) => subWords.has(t));
+
+/** The median of a list of numbers, or null for an empty one. */
+export const median = (xs) => {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+
+/** Fewer drawers than this in a category and "thinner than the others" cannot speak. */
+export const THIN_NEEDS = 3;
+
+/**
+ * Flag a category's rows. Thin is a place count under a quarter of the
+ * category's median; with fewer than THIN_NEEDS drawers, or a median of
+ * nought, there is nothing to be thin beside, so `thin` is null with why.
+ */
+export function flagThin(rows) {
+  const byCat = new Map();
+  for (const r of rows) byCat.set(r.category, [...(byCat.get(r.category) ?? []), r]);
+  for (const list of byCat.values()) {
+    const med = median(list.map((r) => r.places));
+    for (const r of list) {
+      r.median = med;
+      if (list.length < THIN_NEEDS) { r.thin = null; r.thinWhy = `Only ${list.length} ${list.length === 1 ? 'subcategory' : 'subcategories'} in ${r.categoryLabel}: too few to compare`; }
+      else if (!med) { r.thin = null; r.thinWhy = `${r.categoryLabel}'s median is nought: nothing to be thin beside`; }
+      else { r.thin = r.places < med / 4; r.thinWhy = null; }
+    }
+  }
+  return rows;
+}
+
+export async function gapReport() {
+  const { targetsByWord, labelRulePointers, bringsAndAffected } = await import('./mapping.js');
+  const [{ rows: subs }, counts, targets, ruled, brings, { rows: words }, { rows: open }] = await Promise.all([
+    query(`select s.key, s.label, s.category_key, c.label as category_label
+             from shelf_subcategories s join shelf_categories c on c.key = s.category_key
+            where s.active and c.active order by c.position, s.position, s.label`),
+    placeCounts(null),
+    targetsByWord(),
+    labelRulePointers(),
+    bringsAndAffected(),
+    query(`select key, decision, active from taxonomy_labels where namespace = 'google'`),
+    query(`select word, change_to from word_proposals where namespace = 'google' and state = 'open'`),
+  ]);
+  const proposed = new Map(open.map((p) => [p.word, p.change_to ?? {}]));
+  // What feeds each drawer: every target of every word, primary or not, and
+  // a word's own labels rule where it has no targets and no answer.
+  const feeding = new Map();
+  const add = (sub, w) => feeding.set(sub, [...(feeding.get(sub) ?? []), w]);
+  const undecided = [];
+  for (const w of words) {
+    const t = targets.get(w.key) ?? [];
+    const r = !t.length && !w.decision ? ruled.get(w.key) : null;
+    const b = brings.get(w.key)?.brings ?? 0;
+    for (const x of t) add(x.key, { word: w.key, primary: Boolean(x.primary), brings: b });
+    if (r) add(r.key, { word: w.key, primary: true, brings: b });
+    // Unanswered, or with a proposal open: the words a person still has to place.
+    if (proposed.has(w.key)) undecided.push({ word: w.key, brings: b, state: 'proposed', proposal: proposed.get(w.key) });
+    else if (!t.length && !r && !w.decision && w.active !== false) undecided.push({ word: w.key, brings: b, state: 'undecided' });
+  }
+  const rows = subs.map((s) => {
+    const feeds = (feeding.get(s.key) ?? []).sort((a, b) => Number(b.primary) - Number(a.primary) || b.brings - a.brings || a.word.localeCompare(b.word));
+    const own = subTokens(s);
+    const suggest = undecided
+      .filter((u) => wordFits(u.word, own) || u.proposal?.subcategory === s.key || (u.proposal?.also ?? []).includes(s.key))
+      .filter((u) => !feeds.some((f) => f.word === u.word))
+      .sort((a, b) => b.brings - a.brings || a.word.localeCompare(b.word))
+      .slice(0, 8)
+      .map(({ word, brings: b, state }) => ({ word, brings: b, state }));
+    return {
+      key: s.key, label: s.label, category: s.category_key, categoryLabel: s.category_label,
+      places: counts.get(s.key) ?? 0,
+      words: feeds,
+      noWord: feeds.length === 0,
+      suggest,
+    };
+  });
+  flagThin(rows);
+  return {
+    rows,
+    counts: {
+      subcategories: rows.length,
+      noWord: rows.filter((r) => r.noWord).length,
+      thin: rows.filter((r) => r.thin === true).length,
+      flagged: rows.filter((r) => r.noWord || r.thin === true).length,
+    },
+  };
 }

@@ -47,9 +47,6 @@ const REASON: Record<string, string> = {
   on_nearly_every_place: 'On nearly every place', an_opinion: 'An opinion', a_condition: 'A condition', removed_by_a_person: 'Removed by a person',
 };
 
-/** "19 Sep" — three letters, as the prototype writes it (en-GB would say "Sept"). */
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const shortDate = (at: string) => { const d = new Date(at); return `${d.getDate()} ${MONTHS[d.getMonth()]}`; };
 
 export function SubPage({ sub, canManage }: { sub: string; canManage: boolean }) {
   const go = useDeskGo();
@@ -111,9 +108,8 @@ export function SubPage({ sub, canManage }: { sub: string; canManage: boolean })
 
   const count = (k: Pill) => data.facts.filter((f) => k === 'all' || f.status === k).length;
   const facts = data.facts.filter((f) => pill === 'all' || f.status === pill);
-  const needed = data.needed;
-  const progress = (f: FactRow) => (needed == null ? '—'
-    : `Confirmed at ${f.verifiedPlaces} of ${needed} places needed${f.firstSeen ? ` · first seen ${shortDate(f.firstSeen)}` : ''}`);
+  // Gathering evidence shows no count (owner, round 3, 29 Sep 2026: no
+  // "Confirmed at 0 of 2"); only Active has places to show.
   const why = (f: FactRow) => (f.reason === 'removed_by_a_person' ? `Removed by ${f.removedBy ?? 'a person'}` : (f.reason ? REASON[f.reason] ?? 'Ignored' : 'Ignored'));
 
   // Defaults: 150 · 130 · 150 · 280+ · 170 on a 24px gap (the prototype's grid).
@@ -302,7 +298,7 @@ export function SubPage({ sub, canManage }: { sub: string; canManage: boolean })
             <View style={{ width: fW[2] }}>
               {f.status === 'active'
                 ? <Text style={[{ fontFamily: fonts.body, fontSize: 13.5, fontWeight: '800', color: desk.ink }, tabular]}>{n(f.placesWith)}</Text>
-                : <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>{f.status === 'gathering' ? progress(f) : why(f)}</Text>}
+                : <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>{f.status === 'gathering' ? '' : why(f)}</Text>}
             </View>
           </View>
         ))}

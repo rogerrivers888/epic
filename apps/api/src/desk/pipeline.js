@@ -15,7 +15,7 @@
  *   - Add, Re-check and Families work on our own tables.
  */
 
-import { FILED_SQL } from './categories.js';
+import { FILED_SQL, CONFIRMED_SQL } from './categories.js';
 import { query, withTransaction } from '../db.js';
 import { settings } from './settings.js';
 import * as osmLocal from '../sources/osmExtract.js';
@@ -417,8 +417,19 @@ export async function answerPlace(ref) {
     select pa.key, pa.label, pa.kind, pa.access, pa.age, pa.dietary
       from place_attributes pa
      where pa.active and pa.kind = 'yesno'
-       and (pa.standard or exists (select 1 from subcategory_facts sf join subs on subs.sub = sf.subcategory_key
-                                    where sf.attribute_key = pa.key and sf.status = 'active'))
+       -- The standard facts; the facts attached here, Active or still
+       -- gathering evidence (a second confirmed place is what makes one
+       -- Active); and the old sheets' candidates for this drawer, detached
+       -- until found (282) — asked of our own sources, which is how a fact
+       -- earns its link (C33). A person's removal or an opinion is not asked.
+       and (pa.standard
+            or exists (select 1 from subcategory_facts sf join subs on subs.sub = sf.subcategory_key
+                        where sf.attribute_key = pa.key and sf.status in ('active', 'gathering'))
+            or exists (select 1 from subcategory_facts_detached d join subs on subs.sub = d.subcategory_key
+                        where d.attribute_key = pa.key
+                          and coalesce(d.reason, '') not in ('removed_by_a_person', 'an_opinion', 'a_condition')
+                          and not exists (select 1 from subcategory_facts sf where sf.subcategory_key = d.subcategory_key
+                                           and sf.attribute_key = d.attribute_key and sf.status = 'ignored')))
        and not exists (select 1 from place_fact_answers a where a.venue_ref = $1 and a.attribute_key = pa.key
                         and (a.recheck_due is null or a.recheck_due > now()))`, [ref]);
   if (!wanted.length) return { ref, answered: 0 };
@@ -507,36 +518,72 @@ export async function dropExpired() {
 // 3. Add
 
 /**
- * Work out each subcategory's facts from what has been verified at its places
- * (5.2 step 3): verified at ≥ addPlaces places → Active; on more than shareMax
- * of places → Ignored as on nearly every place (access and age facts exempt);
- * seen at fewer → Gathering evidence. A fact a person removed stays removed,
- * and one a person included anyway stays included.
+ * Work out each subcategory's facts from what our sources have confirmed at
+ * its places (5.2 step 3, C33), counted by the one rule every screen reads
+ * (categories.js CONFIRMED_SQL: the places filed there, primary or
+ * secondary, that have the fact):
+ *
+ *   - confirmed at ≥ addPlaces places → Active — the only way a fact joins a
+ *     subcategory;
+ *   - on more than shareMax of its places → Ignored as on nearly every place
+ *     (access and age facts exempt);
+ *   - confirmed at fewer (1) → Gathering evidence, and an Active link that
+ *     has fallen below addPlaces goes back to Gathering evidence;
+ *   - confirmed at none → the machine's link is detached (round 3, 29 Sep
+ *     2026: 452 links carried over from the old fact sheets had never been
+ *     found anywhere). The fact stays in the vocabulary; spot and verify
+ *     still look for it.
+ *
+ * A fact a person removed stays removed, one a person included anyway stays
+ * included, and a link a person asked for (Copy facts, `added_by`) is never
+ * detached by the machine.
  */
 export async function add() {
   const cfg = (await settings()).values;
+  const needed = cfg.addPlaces ?? 2;
   const { rows } = await query(`
-    with filed as (select venue_ref, subcategory as sub from place_index where subcategory is not null and not_in_epic_at is null),
-    sizes as (select sub, count(*)::int n from filed group by sub),
-    verified as (
-      select f.sub, a.attribute_key, count(distinct a.venue_ref)::int v
-        from filed f join place_fact_answers a on a.venue_ref = f.venue_ref and a.state = 'yes' and a.hidden_at is null and not exists (select 1 from fact_unknowns u where u.venue_ref = a.venue_ref and u.attribute_key = a.attribute_key)
-        join place_attributes pa on pa.key = a.attribute_key and pa.active and not pa.standard and pa.kind = 'yesno'
-       group by f.sub, a.attribute_key)
-    select v.sub, v.attribute_key, v.v, s.n, pa.access, pa.age,
-           sf.status, sf.reason, sf.include_anyway
-      from verified v join sizes s on s.sub = v.sub join place_attributes pa on pa.key = v.attribute_key
-      join shelf_subcategories sc on sc.key = v.sub and sc.active
-      left join subcategory_facts sf on sf.subcategory_key = v.sub and sf.attribute_key = v.attribute_key`);
+    with c as (${CONFIRMED_SQL}),
+    sizes as (select x.sub, count(distinct x.venue_ref)::int n from (${FILED_SQL}) x group by x.sub),
+    -- Every link that exists, and every fact confirmed somewhere with no link yet.
+    pairs as (
+      select subcategory_key as sub, attribute_key from subcategory_facts
+      union
+      select c.sub, c.attribute_key from c)
+    select p.sub, p.attribute_key, coalesce(c.n, 0)::int v, coalesce(s.n, 0)::int n, pa.access, pa.age,
+           sf.status, sf.reason, sf.include_anyway, sf.added_by
+      from pairs p
+      join place_attributes pa on pa.key = p.attribute_key and pa.active and not pa.standard and pa.kind = 'yesno'
+      join shelf_subcategories sc on sc.key = p.sub and sc.active
+      left join c on c.sub = p.sub and c.attribute_key = p.attribute_key
+      left join sizes s on s.sub = p.sub
+      left join subcategory_facts sf on sf.subcategory_key = p.sub and sf.attribute_key = p.attribute_key`, [null, null]);
   let changed = 0;
+  let detached = 0;
   for (const r of rows) {
-    if (r.reason === 'removed_by_a_person') continue;
+    // A person's removal stands, and an opinion or a condition is never a fact.
+    if (['removed_by_a_person', 'an_opinion', 'a_condition'].includes(r.reason)) continue;
+    // Nothing confirmed here: a machine link goes; a person's stays as it is.
+    if (!r.v) {
+      if (r.status && r.status !== 'ignored' && !r.include_anyway && !r.added_by) {
+        await query(
+          `delete from subcategory_facts where subcategory_key = $1 and attribute_key = $2
+              and status <> 'ignored' and not include_anyway and added_by is null`, [r.sub, r.attribute_key]);
+        detached += 1;
+      } else if (r.status === 'active' && !r.include_anyway) {
+        await query(`update subcategory_facts set status = 'gathering', verified_places = 0, updated_at = now()
+                      where subcategory_key = $1 and attribute_key = $2 and status = 'active' and not include_anyway`, [r.sub, r.attribute_key]);
+        changed += 1;
+      } else if (r.status) {
+        await query('update subcategory_facts set verified_places = 0 where subcategory_key = $1 and attribute_key = $2 and verified_places <> 0', [r.sub, r.attribute_key]);
+      }
+      continue;
+    }
     let status; let reason = null;
     const share = r.n ? (r.v / r.n) * 100 : 0;
     if (r.include_anyway) status = 'active';
-    else if (r.v >= cfg.addPlaces && share > cfg.shareMax && !r.access && !r.age) { status = 'ignored'; reason = 'on_nearly_every_place'; }
-    else if (r.v >= cfg.addPlaces) status = 'active';
-    else status = r.status === 'active' ? 'active' : 'gathering';
+    else if (r.v >= needed && share > cfg.shareMax && !r.access && !r.age) { status = 'ignored'; reason = 'on_nearly_every_place'; }
+    else if (r.v >= needed) status = 'active';
+    else status = 'gathering';
     if (r.status === status && (r.reason ?? null) === reason) {
       await query('update subcategory_facts set verified_places = $3 where subcategory_key = $1 and attribute_key = $2 and verified_places <> $3', [r.sub, r.attribute_key, r.v]);
       continue;
@@ -551,7 +598,7 @@ export async function add() {
       [r.sub, r.attribute_key, status, reason, r.v]);
     changed += 1;
   }
-  return { changed };
+  return { changed, detached };
 }
 
 // ---------------------------------------------------------------------------
@@ -843,8 +890,11 @@ export async function prewarm({ cell, mode = 'driving', minutes = 30, research =
   }
   const queueResearch = research ?? (await import('../sources/own.js')).queueEnrichment;
   for (const ref of refs) {
+    // Answered now from whatever is already held, and again once the free
+    // research has landed: queued side by side, the answer ran first and
+    // read nothing for a place researched for the first time.
     enqueue('answer', ref);
-    queueResearch(ref);
+    queueResearch(ref, { onDone: () => enqueue('answer', ref) });
   }
   return { places: refs.size };
 }

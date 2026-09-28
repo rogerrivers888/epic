@@ -77,5 +77,7 @@ test('the list carries the bulk bar\'s ten facts with their value pills', async 
   if (cost) assert.deepEqual(cost.options.map((o) => o.label), ['Free', 'Cheap', 'Mid', 'Dear']);
   const water = list.rows.find((r) => r.key === 'dc-water');
   assert.equal(water.places, 4);
-  assert.equal(water.facts, 1);
+  // Looked for here, Active or Gathering evidence — the same links Facts
+  // counts (round 3, 29 Sep 2026: one tally for both screens).
+  assert.equal(water.facts, 2);
 });

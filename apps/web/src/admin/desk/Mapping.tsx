@@ -33,8 +33,8 @@ import { paths } from '../../routes';
 import { LIME, ON_LIME, desk, fonts } from '../../theme';
 import { useDeskParam } from './Desk';
 import {
-  Muted, RED, Seg, T, TCell, THead, TRow, Table, ago, deskApi, n, saidOf, sortRows, tableWidth, tabular, useToast,
-  type SortState, type TCol,
+  Muted, RED, Seg, SideToggle, T, TCell, THead, TRow, Table, ago, deskApi, n, onSide, saidOf, sortRows, tableWidth, tabular, useSide, useToast,
+  type Side, type SortState, type TCol,
 } from './kit';
 import { WordPicker, type Catalogue } from './Picker';
 
@@ -44,11 +44,13 @@ import { WordPicker, type Catalogue } from './Picker';
 type Target = { key: string; label: string; category: string; primary: boolean; active: boolean };
 type Proposal = {
   id: string | null; group: string; action: string; changeTo: string | null;
-  affected: number | null; pointsAtNow?: string | null;
+  affected: number | null; pointsAtNow?: string | null; target?: string | null;
 };
+/** A carried fact: `label` reads "Cuisine: Indian" where it has a value, `name` is the fact's own. */
+type Carried = { key: string; label: string; name?: string; kind?: string; value?: string | null };
 type Word = {
-  word: string; brings: number; opened: number | null; answer: string; decision: string | null;
-  targets: Target[]; facts: { key: string; label: string }[];
+  word: string; group?: string | null; brings: number; opened: number | null; answer: string; decision: string | null;
+  targets: Target[]; facts: Carried[];
   proposal?: Proposal; why?: string | null; decidedBy?: string | null; decidedAt?: string | null;
 };
 type MappingState = {
@@ -74,6 +76,8 @@ const asView = (v: string): View_ => (VIEWS.some((x) => x.key === v) ? (v as Vie
 const GROUPS: { key: string; name: string }[] = [
   { key: 'not_places', name: 'Not places people visit' },
   { key: 'fold', name: 'Fold into a bigger subcategory' },
+  // Round 3: a word pointed at a drawer nothing fed, keeping where it files as a secondary.
+  { key: 'fill', name: 'Point at an empty subcategory' },
   { key: 'narrow', name: 'Narrow to the ones worth visiting' },
   { key: 'stop_filing', name: 'Stop filing by this word' },
   { key: 'no_suggestion', name: 'No suggestion — choose where it goes' },
@@ -99,6 +103,20 @@ const SHADOW: ViewStyle = web ? ({ boxShadow: '0 12px 32px rgba(0,0,0,.5)' } as 
 /** A flexible column: what is left of the page, held between two widths. */
 const flex = (avail: number, others: number, min: number, max: number) => Math.max(min, Math.min(max, avail - others));
 
+/**
+ * The categories a word is on, for Food & drink · Things to do: its primary
+ * drawer's; else the drawer its proposal names; else, for a word nobody has
+ * placed, Google's own group (Food and Drink is food). None is both sides.
+ */
+const wordCats = (w: Word, catOf: (sub: string) => string | null): (string | null)[] => {
+  const primary = w.targets.find((t) => t.primary) ?? w.targets[0];
+  if (primary) return [primary.category];
+  const t = w.proposal?.target;
+  if (t) return [catOf(t)];
+  if (w.group) return [w.group === 'Food and Drink' ? 'food' : 'other'];
+  return [];
+};
+
 const pointsOf = (w: Word) => (w.targets[0]?.label ?? (w.answer === 'secondary' ? 'kept as a fact' : w.answer === 'notinepic' ? 'Not in Epic' : 'not answered'));
 
 // ---------------------------------------------------------------------------
@@ -116,6 +134,8 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
   const [sortRaw, setSortRaw] = useDeskParam('sort');
   const [ptab, setPtab] = useDeskParam('ptab');
   const [pcat, setPcat] = useDeskParam('cat');
+  const [pfact, setPfact] = useDeskParam('pfact');
+  const [side] = useSide();
   const view = asView(viewRaw);
   // What the page has to draw a flexible column in: the width the desk gives
   // this screen, measured (the admin shell's sidebar is not ours to know), or
@@ -164,9 +184,9 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
   // A move to a view or to a word's picker is a step, so it pushes.
   const go = (v: View_, extra: { word?: string | null } = {}) => {
     setMenu(null); setRowMenu(null);
-    setQuery({ view: v === 'inepic' ? null : v, word: extra.word ?? null, q: null, kind: null, ptab: null, cat: null }, { replace: false });
+    setQuery({ view: v === 'inepic' ? null : v, word: extra.word ?? null, q: null, kind: null, ptab: null, cat: null, pfact: null }, { replace: false });
   };
-  const openWord = (w: string | null) => setQuery({ view: null, word: w, q: null, ptab: null, cat: null }, { replace: false });
+  const openWord = (w: string | null) => setQuery({ view: null, word: w, q: null, ptab: null, cat: null, pfact: null }, { replace: false });
 
   // A failure is said in the red error line, in one plain sentence — never
   // in the lime toast, which is for what worked (audit, 28 Sep 2026).
@@ -197,6 +217,8 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
   const enc = encodeURIComponent;
   const labelOf = (key: string) => catalogue?.subcategories.find((s) => s.key === key)?.label ?? key;
   const factLabel = (key: string) => catalogue?.facts.find((f) => f.key === key)?.label ?? key;
+  const catOfSub = (key: string) => catalogue?.subcategories.find((s) => s.key === key)?.category ?? null;
+  const onThisSide = (w: Word) => onSide(side, wordCats(w, catOfSub));
 
   const exclude = (w: string, why = 'Excluded by a person') =>
     write(() => deskApi.post<Written>(`/mapping/${enc(w)}/exclude`, { why }), `${w} excluded`);
@@ -238,6 +260,31 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
       `${name} ${on ? 'on' : 'off'} ${w}`,
     );
   };
+  // One of a list (Cuisine, Dining style): pick a value; the value it has takes it off.
+  const setValue = (w: string, fact: string, value: string) => {
+    const cur = find(w); if (!cur) return;
+    const had = cur.facts.find((f) => f.key === fact)?.value ?? null;
+    const name = factLabel(fact);
+    const on = had !== value;
+    void write(
+      () => deskApi.put<Written>(`/mapping/${enc(w)}/facts`, { fact, value: on ? value : null, on, why: on ? `${name}: ${value}` : `${name}: ${value} removed` }),
+      on ? `${w} · ${name}: ${value}` : `${name} off ${w}`,
+    );
+  };
+  // "+ Add a value": the value joins the list (its own change, undoable),
+  // then the word takes it.
+  const addValue = async (w: string, fact: string, value: string) => {
+    if (!canManage) { setError(NOT_YOURS); return; }
+    try {
+      const out = await deskApi.post<{ value: string; added: boolean }>(`/mapping/facts/${enc(fact)}/values`, { value });
+      if (out.added) setCatalogue(await deskApi.get<Catalogue>('/mapping/picker'));
+      const name = factLabel(fact);
+      await write(
+        () => deskApi.put<Written>(`/mapping/${enc(w)}/facts`, { fact, value: out.value, on: true, why: `${name}: ${out.value}${out.added ? ' (new value)' : ''}` }),
+        `${out.added ? `${name}: ${out.value} added · ` : ''}${w} · ${name}: ${out.value}`,
+      );
+    } catch (err) { setError(saidOf(err)); }
+  };
   const create = async (w: string, label: string, category: string) => {
     if (!canManage) { setError(NOT_YOURS); return; }
     try {
@@ -265,7 +312,7 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
   // --- The table views -----------------------------------------------------
   const tableWords = useMemo(() => {
     if (!state) return [];
-    let list = view === 'notinepic' ? state.notInEpic : state.inEpic;
+    let list = (view === 'notinepic' ? state.notInEpic : state.inEpic).filter(onThisSide);
     for (const key of filterKeys) {
       const [k, v] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)];
       if (k === 'state') {
@@ -288,7 +335,7 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
       if (w) return [w, ...sorted];
     }
     return sorted;
-  }, [state, view, word, filterKeys, sort]);
+  }, [state, view, word, filterKeys, sort, side, catalogue]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filterOptions = useMemo(() => {
     if (!state || !catalogue) return [];
@@ -355,6 +402,7 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
         <View style={{ maxWidth: '100%', flexShrink: 1 }}>
           <Seg options={VIEWS.map((v) => ({ key: v.key, name: v.name }))} value={view} onChange={(v) => go(v)} pad={16} />
         </View>
+        <SideToggle />
         <ToolButton
           icon="filters"
           label={filters.length ? `${filters.length} ${filters.length === 1 ? 'filter' : 'filters'}` : 'Filter'}
@@ -428,7 +476,7 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
       {error ? <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: RED }}>{error}</Text> : null}
 
       {view === 'needs' ? (
-        <NeedsView state={state} avail={avail} onDecide={decide} onChoose={(w) => openWord(w)} onExclude={(w) => void exclude(w)} />
+        <NeedsView state={state} words={state.needs.filter(onThisSide)} side={side} avail={avail} onDecide={decide} onChoose={(w) => openWord(w)} onExclude={(w) => void exclude(w)} />
       ) : null}
 
       {view === 'decided' ? (
@@ -464,6 +512,11 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
               subs={w.targets.map((t) => t.key)}
               primary={w.targets.find((t) => t.primary)?.key ?? null}
               facts={w.facts.map((f) => f.key)}
+              values={Object.fromEntries(w.facts.filter((f) => f.value).map((f) => [f.key, f.value ?? null]))}
+              onSetValue={(f, v) => setValue(w.word, f, v)}
+              onAddValue={(f, v) => void addValue(w.word, f, v)}
+              openFact={pfact || null}
+              onOpenFact={(f) => setPfact(f ?? '')}
               query={q}
               onQuery={(v) => setQ(v, { replace: true })}
               tab={ptab === 'fact' ? 'fact' : 'cat'}
@@ -686,12 +739,13 @@ function Chip({ name, primary, fact }: { name: string; primary?: boolean; fact?:
 // ---------------------------------------------------------------------------
 // Needs a decision
 
-function NeedsView({ state, avail, onDecide, onChoose, onExclude }: {
-  state: MappingState; avail: number;
+function NeedsView({ state, words, side, avail, onDecide, onChoose, onExclude }: {
+  state: MappingState; words: Word[]; side: Side; avail: number;
   onDecide: (w: Word, action: 'apply' | 'keep', group: string) => void;
   onChoose: (w: string) => void; onExclude: (w: string) => void;
 }) {
   if (!state.needs.length) return <Muted>Nothing needs a decision.</Muted>;
+  if (!words.length) return <Muted>Nothing on {side === 'food' ? 'Food & drink' : 'Things to do'} needs a decision.</Muted>;
   // Change to is the one flexible column: 260 to 560, as the prototype's
   // grid (`minmax(260px, 560px)`).
   const toW = flex(avail, 180 + 200 + 130 + 180 + 24 * 4 + 16, 260, 560);
@@ -706,7 +760,7 @@ function NeedsView({ state, avail, onDecide, onChoose, onExclude }: {
   return (
     <View style={{ gap: 18 }}>
       {GROUPS.map((g) => {
-        const rows = state.needs.filter((w) => (w.proposal?.group ?? 'no_suggestion') === g.key);
+        const rows = words.filter((w) => (w.proposal?.group ?? 'no_suggestion') === g.key);
         if (!rows.length) return null;
         const none = g.key === 'no_suggestion';
         return (

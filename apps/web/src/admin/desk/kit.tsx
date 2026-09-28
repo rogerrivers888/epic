@@ -23,6 +23,9 @@ import { useViewport } from '../../hooks/useViewport';
 import { LIME, ON_LIME, desk, fonts } from '../../theme';
 import { api } from '../../api';
 import { useRouter } from '../../router';
+import { SIDE_KEY, SIDE_OPTIONS, asSide, type Side } from './side';
+
+export { FOOD_CATEGORY, SIDE_KEY, SIDE_OPTIONS, SIDE_TABS, asSide, onSide, sideOfCategory, sideParam, type Side } from './side';
 
 export const AMBER = desk.amber;
 export const RED = desk.warn;
@@ -684,6 +687,28 @@ export function LocationFilter() {
       {filled && answer && !answer.known ? (
         <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>Not a place we know yet — try a town or the first part of a postcode</Text>
       ) : null}
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Food & drink · Things to do (round 3, 29 Sep 2026)
+// ---------------------------------------------------------------------------
+
+/** The toggle's value and its setter, from the address. */
+export function useSide(): [Side, (s: Side) => void] {
+  const { query, setQuery } = useRouter();
+  const side = asSide(query.get(SIDE_KEY));
+  const set = useCallback((s: Side) => setQuery({ [SIDE_KEY]: s || null }, { replace: true }), [setQuery]);
+  return [side, set];
+}
+
+/** All · Food & drink · Things to do, drawn as the desk's segmented control. */
+export function SideToggle() {
+  const [side, setSide] = useSide();
+  return (
+    <View style={{ maxWidth: '100%', flexShrink: 1 }}>
+      <Seg options={SIDE_OPTIONS} value={side} onChange={setSide} pad={16} size={12.5} />
     </View>
   );
 }

@@ -71,7 +71,9 @@ test('a fact confirmed at fewer than addPlaces places is Gathering evidence ever
   assert.equal(page.fresh, 1);
 
   const list = await categories.subcategoryList({});
-  assert.equal(list.rows.find((r) => r.key === 'fxb-pools').facts, 1);
+  // The list counts every link looked for, Active or Gathering evidence, as
+  // Facts does (round 3, 29 Sep 2026); LOOKING FOR above is Active only.
+  assert.equal(list.rows.find((r) => r.key === 'fxb-pools').facts, 2);
 
   const fresh = await categories.newFacts();
   assert.deepEqual(fresh.rows.filter((r) => r.sub.startsWith('fxb-')).map((r) => r.fact), ['fxb-wave']);
@@ -80,10 +82,12 @@ test('a fact confirmed at fewer than addPlaces places is Gathering evidence ever
   const s = all.rows.find((r) => r.fact === 'fxb-sauna');
   assert.equal(s.status, 'gathering');
   assert.equal(s.statusText, 'Gathering evidence');
-  assert.equal(s.places, 1, 'demoted from Active, so its count stands');
+  // Gathering evidence has no count, demoted or not (owner, round 3, 29 Sep
+  // 2026: "leave Places with it blank for Gathering evidence rows").
+  assert.equal(s.places, null);
   const fp = await facts.factPage('fxb-sauna');
   assert.equal(fp.status, 'gathering');
-  assert.equal(fp.subcategories[0].note.startsWith('Confirmed at 1 of 2 places needed'), true);
+  assert.equal(fp.subcategories[0].note, null);
 });
 
 test('Places with it counts only where the fact is looked for, and an Ignored fact says why', async () => {

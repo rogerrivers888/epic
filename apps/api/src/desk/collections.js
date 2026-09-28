@@ -168,7 +168,52 @@ export function legacyWords(pred, names = {}) {
 }
 
 /** Whether a place fits a collection: its new rule, or its legacy predicate exactly. */
-export const fits = (c, p) => (c.legacy ? matchesPredicate(c.legacy, p) : matches(c.rule, p));
+export const fits = (c, p) => (c.legacy ? legacyTest(c.legacy)(p) : matches(c.rule, p));
+
+/**
+ * A legacy predicate as a test, built once per predicate object and answering
+ * exactly as `matchesPredicate` does (round 3 PERF: asked of every place for
+ * every legacy row, the recursive walk was most of the list's time).
+ */
+function legacyTest(pred) {
+  if (pred === lastPred) return lastPredTest;
+  let test = compiledPreds.get(pred);
+  if (!test) { test = compilePredicate(pred); compiledPreds.set(pred, test); }
+  lastPred = pred; lastPredTest = test;
+  return test;
+}
+const compiledPreds = new WeakMap();
+let lastPred = null;
+let lastPredTest = null;
+
+function compilePredicate(pred) {
+  if (!pred || typeof pred !== 'object') return () => true;
+  if (Array.isArray(pred.all)) { const xs = pred.all.map(compilePredicate); return (p) => { for (const x of xs) if (!x(p)) return false; return true; }; }
+  if (Array.isArray(pred.any)) { const xs = pred.any.map(compilePredicate); return (p) => { for (const x of xs) if (x(p)) return true; return false; }; }
+  if (pred.not) { const x = compilePredicate(pred.not); return (p) => !x(p); }
+  if (pred.overlaps && pred.attribute === 'suits-ages') { const [lo, hi] = pred.overlaps; return (p) => Boolean(p.ages) && p.ages[0] <= hi && p.ages[1] >= lo; }
+  if (Array.isArray(pred.subcategory)) { const xs = pred.subcategory; return (p) => xs.some((s) => p.subs.includes(s)); }
+  if (Array.isArray(pred.category)) { const xs = pred.category; return (p) => xs.some((c) => p.cats.includes(c)); }
+  if (pred.attribute && typeof pred.yes === 'boolean') { const k = pred.attribute; return pred.yes ? (p) => p.facts.has(k) : (p) => p.no?.has(k) ?? false; }
+  if (pred.attribute === 'cost-band' && pred.choice) { const w = COST_WORD[pred.choice]; return (p) => Boolean(p.cost) && p.cost === w; }
+  return () => false;
+}
+
+/**
+ * Every place in a place index that fits a collection, worked out once per
+ * index: the list, a household's shelves and the preview all ask the same
+ * rules of the same snapshot within its minute (round 3 PERF). The answer is
+ * the snapshot's own, never older than the index it came from.
+ */
+export function placesFitting(c, idx) {
+  const key = c.legacy ? `L${JSON.stringify(c.legacy)}` : `R${JSON.stringify(c.rule)}`;
+  let hit = idx.fitting?.get(key);
+  if (!hit) {
+    hit = idx.places.filter((p) => fits(c, p));
+    idx.fitting?.set(key, hit);
+  }
+  return hit;
+}
 
 /** The audience a rule implies (D11), in the words the list uses. */
 export function audienceOf(rule) {
@@ -184,32 +229,64 @@ export function audienceOf(rule) {
 /** The top of an age range as it is read: 60 or more is "60+". */
 export const ageTop = (hi) => (hi >= 60 ? '60+' : String(hi));
 
-/** Whether a place fits a rule. */
+/**
+ * Whether a place fits a rule. The rule is compiled once — its groups split
+ * into what it asks for and what it refuses — and kept against the rule
+ * object, because a list or a household's shelf asks it of every place in
+ * Epic for every collection: forty collections over 130,000 places took the
+ * best part of a second splitting the same groups again each time (round 3
+ * PERF, 29 Sep 2026). Same answers as before, place for place.
+ */
 export function matches(rule, p) {
-  const group = (items, has) => {
-    if (!items.length) return true;
-    const pos = items.filter((i) => !i.not);
-    const neg = items.filter((i) => i.not);
-    if (neg.some((i) => has(i.id))) return false;
-    return !pos.length || pos.some((i) => has(i.id));
+  if (rule !== lastRule) {
+    lastTest = compiledRules.get(rule);
+    if (!lastTest) { lastTest = compileRule(rule); compiledRules.set(rule, lastTest); }
+    lastRule = rule;
+  }
+  return lastTest(p);
+}
+const compiledRules = new WeakMap();
+// The rule asked last: a list asks one rule of every place in turn.
+let lastRule = null;
+let lastTest = null;
+
+/** A rule as a test of one place. */
+function compileRule(rule) {
+  const split = (items) => ({ pos: items.filter((i) => !i.not).map((i) => i.id), neg: items.filter((i) => i.not).map((i) => i.id) });
+  const cats = split(rule.cats);
+  const subs = split(rule.subs);
+  const facts = split(rule.facts);
+  // Any positive matches and no negative matches; an empty group holds.
+  const holds = (g, has) => {
+    for (const id of g.neg) if (has(id)) return false;
+    if (!g.pos.length) return true;
+    for (const id of g.pos) if (has(id)) return true;
+    return false;
   };
-  if (!group(rule.cats, (id) => p.cats.includes(id))) return false;
-  if (!group(rule.subs, (id) => p.subs.includes(id))) return false;
-  if (!group(rule.facts, (id) => p.facts.has(id))) return false;
-  if (rule.primaryCat && p.primaryCat !== rule.primaryCat) return false;
-  if (rule.ages) {
-    if (!p.ages) return false;
-    const [lo, hi] = rule.ages;
-    if (rule.ageSpan ? !(p.ages[0] <= lo && p.ages[1] >= hi) : !(p.ages[0] <= hi && p.ages[1] >= lo)) return false;
-  }
-  if (rule.dur) {
-    if (p.hours == null) return false;
-    if (p.hours < rule.dur[0] || p.hours > rule.dur[1]) return false;
-  }
-  if (rule.cost.length) {
-    if (!p.cost || !rule.cost.includes(p.cost)) return false;
-  }
-  return true;
+  const primaryCat = rule.primaryCat;
+  const ages = rule.ages;
+  const ageSpan = rule.ageSpan;
+  const dur = rule.dur;
+  const cost = rule.cost;
+  return (p) => {
+    if ((cats.pos.length || cats.neg.length) && !holds(cats, (id) => p.cats.includes(id))) return false;
+    if ((subs.pos.length || subs.neg.length) && !holds(subs, (id) => p.subs.includes(id))) return false;
+    if ((facts.pos.length || facts.neg.length) && !holds(facts, (id) => p.facts.has(id))) return false;
+    if (primaryCat && p.primaryCat !== primaryCat) return false;
+    if (ages) {
+      if (!p.ages) return false;
+      const [lo, hi] = ages;
+      if (ageSpan ? !(p.ages[0] <= lo && p.ages[1] >= hi) : !(p.ages[0] <= hi && p.ages[1] >= lo)) return false;
+    }
+    if (dur) {
+      if (p.hours == null) return false;
+      if (p.hours < dur[0] || p.hours > dur[1]) return false;
+    }
+    if (cost.length) {
+      if (!p.cost || !cost.includes(p.cost)) return false;
+    }
+    return true;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -218,7 +295,11 @@ export function matches(rule, p) {
 let cache = null;
 let cachedAt = 0;
 const TTL_MS = 60_000;
-export const forget = () => { cache = null; };
+// One read at a time: Overview and the Collections tab land together, and two
+// cold reads of the whole index would each pay for it (round 3 PERF).
+let building = null;
+let generation = 0;
+export const forget = () => { cache = null; building = null; named = null; generation += 1; };
 
 /**
  * Every place in Epic with its subcategories, categories and facts. A fact
@@ -226,7 +307,25 @@ export const forget = () => { cache = null; };
  * where it has none, a person-set default for its subcategory stands (C49).
  */
 export async function placeIndex() {
-  if (cache && Date.now() - cachedAt < TTL_MS) return cache;
+  const age = Date.now() - cachedAt;
+  if (cache && age < TTL_MS) {
+    // Past two-thirds of its minute, read it again behind the answer, so a
+    // desk in use rarely waits for a cold read — and nothing is ever served
+    // older than the minute it always could be.
+    if (age > REFRESH_MS && !building) void rebuild().catch(() => {});
+    return cache;
+  }
+  return building ?? rebuild();
+}
+const REFRESH_MS = 40_000;
+
+async function rebuild() {
+  const run = buildPlaceIndex(generation);
+  building = run;
+  try { return await run; } finally { if (building === run) building = null; }
+}
+
+async function buildPlaceIndex(asOf) {
   const [{ rows: filed }, { rows: subs }, { rows: also }, { rows: own }, { rows: verified }, { rows: defaults }, { rows: unknowns }] = await Promise.all([
     query(`select pi.venue_ref, pi.subcategory as sub, true as primary_ from place_index pi
             where pi.subcategory is not null and pi.not_in_epic_at is null
@@ -251,7 +350,7 @@ export async function placeIndex() {
   const places = new Map();
   for (const f of filed) {
     if (!catOf.has(f.sub)) continue;
-    const p = places.get(f.venue_ref) ?? { ref: f.venue_ref, primarySub: null, primaryCat: null, subs: [], cats: [], answers: new Map() };
+    const p = places.get(f.venue_ref) ?? { ref: f.venue_ref, primarySub: null, primaryCat: null, subs: [], cats: [], facts: null, no: null, ages: null, hours: null, durRange: null, cost: null };
     if (f.primary_) { p.primarySub = f.sub; p.primaryCat = catOf.get(f.sub); }
     if (!p.subs.includes(f.sub)) p.subs.push(f.sub);
     for (const c of [catOf.get(f.sub), ...(alsoIn.get(f.sub) ?? [])]) if (c && !p.cats.includes(c)) p.cats.push(c);
@@ -263,18 +362,23 @@ export async function placeIndex() {
     defaultBy.set(`${d.subcategory_key}|${d.attribute_key}`, d);
     defaultsOfSub.set(d.subcategory_key, [...(defaultsOfSub.get(d.subcategory_key) ?? []), d]);
   }
-  for (const v of verified) places.get(v.venue_ref)?.answers.set(v.attribute_key, v.state === 'no' && v.yesno == null ? { ...v, yesno: false } : v);
+  // Each place's answers are held beside it, not on it: a property deleted
+  // from 130,000 objects turns every one into a slow dictionary, and every
+  // collection's pass over them took twenty times as long (round 3 PERF).
+  const answersOf = new Map([...places.keys()].map((ref) => [ref, new Map()]));
+  for (const v of verified) answersOf.get(v.venue_ref)?.set(v.attribute_key, v.state === 'no' && v.yesno == null ? { ...v, yesno: false } : v);
   // A person's Don't know is an answer too — nobody can tell — so no default
   // stands in for it and the place neither has nor lacks the fact (Codex).
-  for (const u of unknowns) places.get(u.venue_ref)?.answers.set(u.attribute_key, { unknown: true, yesno: null, from_value: null, to_value: null, choice: null });
-  for (const v of own) places.get(v.venue_ref)?.answers.set(v.attribute_key, v); // a person's answer wins
+  for (const u of unknowns) answersOf.get(u.venue_ref)?.set(u.attribute_key, { unknown: true, yesno: null, from_value: null, to_value: null, choice: null });
+  for (const v of own) answersOf.get(v.venue_ref)?.set(v.attribute_key, v); // a person's answer wins
   for (const p of places.values()) {
-    const get = (k) => p.answers.get(k) ?? (p.primarySub ? defaultBy.get(`${p.primarySub}|${k}`) : null) ?? null;
+    const answers = answersOf.get(p.ref);
+    const get = (k) => answers.get(k) ?? (p.primarySub ? defaultBy.get(`${p.primarySub}|${k}`) : null) ?? null;
     p.facts = new Set();
     p.no = new Set();
-    for (const [k, v] of p.answers) { if (v.yesno === true) p.facts.add(k); else if (v.yesno === false) p.no.add(k); }
-    for (const d of defaultsOfSub.get(p.primarySub) ?? []) if (d.yesno === false && !p.answers.has(d.attribute_key)) p.no.add(d.attribute_key);
-    for (const d of defaultsOfSub.get(p.primarySub) ?? []) if (d.yesno === true && !p.answers.has(d.attribute_key)) p.facts.add(d.attribute_key);
+    for (const [k, v] of answers) { if (v.yesno === true) p.facts.add(k); else if (v.yesno === false) p.no.add(k); }
+    for (const d of defaultsOfSub.get(p.primarySub) ?? []) if (d.yesno === false && !answers.has(d.attribute_key)) p.no.add(d.attribute_key);
+    for (const d of defaultsOfSub.get(p.primarySub) ?? []) if (d.yesno === true && !answers.has(d.attribute_key)) p.facts.add(d.attribute_key);
     const ages = get('suits-ages');
     p.ages = ages && (ages.from_value != null || ages.to_value != null) ? [ages.from_value ?? 0, ages.to_value ?? 99] : null;
     const dur = get('duration');
@@ -285,11 +389,12 @@ export async function placeIndex() {
     p.durRange = dur && (dur.from_value != null || dur.to_value != null) ? [h(dur.from_value), h(dur.to_value)] : null;
     const cost = get('cost-band');
     p.cost = cost?.choice ? COST_WORD[cost.choice] ?? null : null;
-    delete p.answers;
   }
-  cache = { places: [...places.values()], catOf };
-  cachedAt = Date.now();
-  return cache;
+  const built = { places: [...places.values()], catOf, fitting: new Map() };
+  // A forget() while this was being read means it may already be out of date:
+  // hand it to whoever asked, but do not keep it.
+  if (asOf === generation) { cache = built; cachedAt = Date.now(); }
+  return built;
 }
 
 // ---------------------------------------------------------------------------
@@ -331,26 +436,48 @@ async function ruleNames(run = query) {
 }
 
 /** The list: Collection · Places (or within reach) · Shown to · Shown · Opened · Hearted. */
-export async function collectionList({ loc = null } = {}) {
-  const [{ rows }, idx, eng, names] = await Promise.all([
+/**
+ * The categories a collection's rule gathers from: the categories it asks
+ * for, the categories of the subcategories it asks for, and its primary
+ * category — "not" never counts. Empty where the rule names none (a
+ * collection over a fact alone), which is on both sides of the toggle.
+ */
+export function ruleCategories(rule, catOfSub) {
+  const out = new Set();
+  for (const c of rule.cats ?? []) if (!c.not) out.add(c.id);
+  for (const x of rule.subs ?? []) if (!x.not && catOfSub.get(x.id)) out.add(catOfSub.get(x.id));
+  if (rule.primaryCat) out.add(rule.primaryCat);
+  return [...out];
+}
+
+/** The toggle's filter (round 3): `side` is 'food' (Food & drink) or 'todo' (everything else). */
+export const collectionOnSide = (side, cats) => !['food', 'todo'].includes(side) || !cats.length
+  || cats.some((c) => (side === 'food' ? c === 'food' : c !== 'food'));
+
+export async function collectionList({ loc = null, side = null } = {}) {
+  const [{ rows: allRows }, idx, eng, names, { rows: subCats }] = await Promise.all([
     // A retired collection (275: its meaning needed a graded axis) is kept
     // with why, and listed nowhere.
     query('select * from browse_rows where retired_at is null order by position, title'),
     placeIndex(),
     engagement(),
     ruleNames(),
+    query('select key, category_key from shelf_subcategories'),
   ]);
+  const catOfSub = new Map(subCats.map((x) => [x.key, x.category_key]));
+  const rows = allRows.map((r) => [r, toCollection(r)])
+    .map(([r, c]) => [r, c, ruleCategories(c.rule, catOfSub)])
+    .filter(([, , cats]) => collectionOnSide(side, cats));
   const refs = loc && !loc.unknown ? loc.refs : null;
-  const pool = refs ? idx.places.filter((p) => refs.has(p.ref)) : idx.places;
-  const list = rows.map((r) => {
-    const c = toCollection(r);
+  const list = rows.map(([r, c, ruleCats]) => {
     const e = eng.by.get(r.key);
     // Within a location, the count says what it can: null where the filter
     // cannot speak (drawn "—"), a floor where it is one (drawn "N+").
-    const raw = !c.legacy && ruleIsEmpty(c.rule) ? 0 : pool.filter((p) => fits(c, p)).length;
+    const raw = !c.legacy && ruleIsEmpty(c.rule) ? 0 : refs ? placesFitting(c, idx).filter((p) => refs.has(p.ref)).length : placesFitting(c, idx).length;
     const said = refs ? countOf(raw, loc) : { n: raw, atLeast: false };
     return {
       ...c,
+      ruleCats,
       legacyText: c.legacy && !c.legacyExact ? legacyWords(c.legacy, names) : null,
       places: said.n,
       placesAtLeast: said.atLeast,
@@ -359,7 +486,7 @@ export async function collectionList({ loc = null } = {}) {
       hearted: eng.speaks ? (eng.hearts.get(r.key) ?? 0) : null,
     };
   });
-  return { rows: list, count: list.length, engagementSpeaks: eng.speaks, atLeast: list.some((r) => r.placesAtLeast) };
+  return { rows: list, count: list.length, total: allRows.length, engagementSpeaks: eng.speaks, atLeast: list.some((r) => r.placesAtLeast) };
 }
 
 /** How many of a subcategory's places the example search looks through. */
@@ -372,13 +499,33 @@ const NAME_SEARCH = 5000;
  */
 async function namedAmong(refs, limit) {
   if (!refs.length || limit <= 0) return [];
+  const has = await namedRefs();
+  const out = [];
+  for (const ref of refs) {
+    if (!has.has(ref)) continue;
+    out.push(ref);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/**
+ * Every ref with a name we hold — place_records' name, an atlas attraction by
+ * its venue_ref or its own atlas ref — read once and kept as long as the
+ * place index is. A household's shelves asked it once per collection, forty
+ * round trips of up to five thousand lookups each (round 3 PERF).
+ */
+let named = null;
+let namedAt = 0;
+async function namedRefs() {
+  if (named && Date.now() - namedAt < TTL_MS) return named;
   const { rows } = await query(
-    `select r.ref from unnest($1::text[]) with ordinality as r(ref, ord)
-      where exists (select 1 from place_records pr where pr.venue_ref = r.ref and pr.name is not null)
-         or exists (select 1 from attractions x where x.venue_ref = r.ref)
-         or exists (select 1 from attractions x where 'atlas:' || x.id::text = r.ref)
-      order by r.ord limit $2`, [refs, limit]);
-  return rows.map((r) => r.ref);
+    `select venue_ref as ref from place_records where name is not null
+     union select venue_ref from attractions where venue_ref is not null
+     union select 'atlas:' || id::text from attractions`);
+  named = new Set(rows.map((r) => r.ref));
+  namedAt = Date.now();
+  return named;
 }
 
 /**
@@ -391,7 +538,7 @@ export async function preview({ rule: raw, loc = null, examples = true }) {
   if (ruleIsEmpty(rule)) return { count: 0, anywhere: 0, examples: [] };
   const idx = await placeIndex();
   const refs = loc && !loc.unknown ? loc.refs : null;
-  const everywhere = idx.places.filter((p) => matches(rule, p));
+  const everywhere = placesFitting({ legacy: null, rule }, idx);
   const hits = refs ? everywhere.filter((p) => refs.has(p.ref)) : everywhere;
   // Pushed, not spread: a copy per place made a big drawer quadratic.
   const bySub = new Map();
@@ -710,7 +857,7 @@ async function judge(householdId, { hearts: given = null, reachFor = householdRe
   const min = cfg.collectionMinPlaces;
   const judged = rows.filter((r) => r.active).map((r) => {
     const c = toCollection(r);
-    const all = !c.legacy && ruleIsEmpty(c.rule) ? [] : idx.places.filter((p) => fits(c, p));
+    const all = !c.legacy && ruleIsEmpty(c.rule) ? [] : placesFitting(c, idx);
     // Within the household's own reach; with no reach, nothing is near and
     // the count cannot speak (null, never a nought).
     const hits = reach ? all.filter((p) => reach.refs.has(p.ref)) : [];

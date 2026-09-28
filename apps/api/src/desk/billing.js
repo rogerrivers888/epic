@@ -37,12 +37,16 @@ export const meterOf = (sku) => METER_OF.find(([re]) => re.test(String(sku ?? ''
  * row's `google-pro` requests were Place Details, whose free allowance is
  * separate from Text Search's (googleEstimate).
  */
+// Every reader passes the month as $1: the range keeps it to the month's
+// rows instead of reading the whole ledger (perf, round 3).
 const LEDGER_METERS = `
   select p.id, to_char(p.created_at at time zone 'Europe/London', 'YYYY-MM') as month,
          (p.created_at at time zone 'Europe/London')::date as day,
          case when m.key = 'google' then 'google-legacy' else m.key end as meter, (m.value)::numeric as n
     from provider_calls p, jsonb_each_text(p.units) m
-   where jsonb_typeof(p.units) = 'object' and m.value ~ '^[0-9.]+$'
+   where p.created_at >= (($1::text || '-01')::date::timestamp at time zone 'Europe/London')
+     and p.created_at < ((($1::text || '-01')::date + interval '1 month')::timestamp at time zone 'Europe/London')
+     and jsonb_typeof(p.units) = 'object' and m.value ~ '^[0-9.]+$'
      and (m.key like 'google-%'
           or (m.key = 'google' and not exists (select 1 from jsonb_object_keys(p.units) k where k like 'google-%')))
   union all
@@ -50,14 +54,17 @@ const LEDGER_METERS = `
          (p.created_at at time zone 'Europe/London')::date,
          case when p.provider ~* 'route' then 'google-routes' else 'google-legacy' end, (p.units #>> '{}')::numeric
     from provider_calls p
-   where jsonb_typeof(p.units) in ('number', 'string') and p.provider ~* 'google' and (p.units #>> '{}') ~ '^[0-9.]+$'`;
+   where p.created_at >= (($1::text || '-01')::date::timestamp at time zone 'Europe/London')
+     and p.created_at < ((($1::text || '-01')::date + interval '1 month')::timestamp at time zone 'Europe/London')
+     and jsonb_typeof(p.units) in ('number', 'string') and p.provider ~* 'google' and (p.units #>> '{}') ~ '^[0-9.]+$'`;
 
 /** How many of a month's `google-pro` requests were marked as Place Details. */
 const PRO_DETAILS = `
   select coalesce(sum((p.units->>'pro-details')::numeric), 0)::float as n
     from provider_calls p
    where jsonb_typeof(p.units) = 'object' and (p.units->>'pro-details') ~ '^[0-9.]+$'
-     and to_char(p.created_at at time zone 'Europe/London', 'YYYY-MM') = $1`;
+     and p.created_at >= (($1::text || '-01')::date::timestamp at time zone 'Europe/London')
+     and p.created_at < ((($1::text || '-01')::date + interval '1 month')::timestamp at time zone 'Europe/London')`;
 
 /**
  * The ledger's Google estimate for a month, as Google would bill it: per

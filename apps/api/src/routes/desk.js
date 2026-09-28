@@ -93,6 +93,7 @@ deskRoutes.post('/undo/:id', requires('manage_library'), async (req, res, next) 
     else if (u.kind === 'subcategory_fact') await categories.undoFact({ change, who: by });
     else if (u.kind === 'correction') await facts.undoCorrection({ change, who: by });
     else if (u.kind === 'collection') await collections.undoCollection({ change, who: by });
+    else if (u.kind === 'fact_value') await mapping.undoFactValue({ change, who: by });
     else if (u.kind === 'carry') {
       if (u.on) await query(`insert into taxonomy_label_carries (namespace, key, attribute_key, yesno) values ('google', $1, $2, true) on conflict do nothing`, [u.word, u.fact]);
       else await query(`delete from taxonomy_label_carries where namespace = 'google' and key = $1 and attribute_key = $2`, [u.word, u.fact]);
@@ -151,7 +152,10 @@ deskRoutes.get('/mapping/picker', requires('view_library'), async (_req, res, ne
     const [{ rows: cats }, { rows: subs }, { rows: facts_ }] = await Promise.all([
       query('select key, label from shelf_categories where active order by position, label'),
       query('select key, label, category_key from shelf_subcategories where active order by position, label'),
-      query('select key, label, kind, standard from place_attributes where active order by label'),
+      // A fact that is one of a list comes with its values (Cuisine: Indian …),
+      // which the picker's Fact tab opens to (round 3, 29 Sep 2026).
+      query(`select key, label, kind, standard, case when kind = 'oneof' then options end as options
+               from place_attributes where active order by label`),
     ]);
     res.json({ categories: cats, subcategories: subs.map((s) => ({ key: s.key, label: s.label, category: s.category_key })), facts: facts_ });
   } catch (err) { next(err); }
@@ -172,9 +176,15 @@ deskRoutes.put('/mapping/:word/facts', requires('manage_library'), async (req, r
     // Repointed and are undoable") through the same decision path, so it is
     // in Decided as well as Changes and its Undo is the decision's.
     res.json(await mapping.setFact({
-      word: String(req.params.word), fact: String(req.body?.fact ?? ''), on: req.body?.on !== false, why: str(req.body?.why), who: who(req),
+      word: String(req.params.word), fact: String(req.body?.fact ?? ''), value: str(req.body?.value),
+      on: req.body?.on !== false, why: str(req.body?.why), who: who(req),
     }));
   } catch (err) { next(err); }
+});
+
+/** "+ Add a value" in the picker: a new value for a fact that is one of a list. Logged in Changes, undoable. */
+deskRoutes.post('/mapping/facts/:fact/values', requires('manage_library'), async (req, res, next) => {
+  try { res.json(await mapping.addFactValue({ fact: String(req.params.fact), value: req.body?.value, who: who(req) })); } catch (err) { next(err); }
 });
 
 deskRoutes.post('/mapping/:word/exclude', requires('manage_library'), async (req, res, next) => {
@@ -224,6 +234,11 @@ deskRoutes.get('/categories', requires('view_library'), async (req, res, next) =
     const { rows: cats } = await query('select key, label from shelf_categories where active order by position');
     res.json({ ...out, filter, categories: cats, reaches: REACHES, modes: MODES });
   } catch (err) { next(err); }
+});
+
+/** The gap report (`view=gaps`): every subcategory, the words feeding it, its places, and what is thin or unfed. */
+deskRoutes.get('/categories/gaps', requires('view_library'), async (_req, res, next) => {
+  try { res.json(await categories.gapReport()); } catch (err) { next(err); }
 });
 
 deskRoutes.get('/categories/impact', requires('view_library'), async (req, res, next) => {
@@ -279,7 +294,15 @@ deskRoutes.post('/subcategories/:key/related', requires('manage_library'), async
 
 deskRoutes.get('/facts', requires('view_library'), async (req, res, next) => {
   try {
-    res.json(await facts.allFacts({ q: str(req.query.q), cat: str(req.query.cat), sub: str(req.query.sub), status: str(req.query.status) }));
+    const out = await facts.allFacts({ q: str(req.query.q), cat: str(req.query.cat), sub: str(req.query.sub), status: str(req.query.status) });
+    // Food & drink · Things to do (round 3): a fact is on a side when it is
+    // looked for in a subcategory of it; a standard fact is on both.
+    const side = str(req.query.side);
+    if (categories.SIDES.includes(side)) {
+      const cats = await categories.factCategories();
+      out.rows = out.rows.filter((r) => r.standard || categories.onSide(side, cats.get(r.fact) ?? []));
+    }
+    res.json(out);
   } catch (err) { next(err); }
 });
 
@@ -358,7 +381,7 @@ deskRoutes.get('/accuracy/:kind/:key/disagreements', requires('view_library'), a
 deskRoutes.get('/collections', requires('view_library'), async (req, res, next) => {
   try {
     const { loc: l, filter } = await loc(req);
-    res.json({ ...(await collections.collectionList({ loc: l && !l.unknown ? l : null })), filter, reaches: REACHES, modes: MODES });
+    res.json({ ...(await collections.collectionList({ loc: l && !l.unknown ? l : null, side: str(req.query.side) })), filter, reaches: REACHES, modes: MODES });
   } catch (err) { next(err); }
 });
 
@@ -428,6 +451,46 @@ deskRoutes.get('/billing/reconcile', requires('view_library'), async (req, res, 
     const { reconcile } = await import('../desk/billing.js');
     const { configured } = await import('../sources/billingExport.js');
     res.json({ configured: configured(), ...(await reconcile(month)) });
+  } catch (err) { next(err); }
+});
+
+/**
+ * The pilot (owner, 29 Sep 2026) — an owner-invoked one-off, not a button:
+ * the ring's top 20 in every category plus the reference set, through the
+ * whole fact pipeline, for the caller's household on the caller's session
+ * (the paid gate attributes it there; an agent session waits for a grant).
+ * `paid: false` is the sign-up pre-warm. Starting it again resumes an
+ * unfinished run from the first place not done.
+ */
+deskRoutes.post('/pilot', requires('manage_settings'), async (req, res, next) => {
+  try {
+    const { runPilot } = await import('../desk/pilot.js');
+    const minutes = Number(req.body?.minutes ?? 30);
+    if (![20, 30, 60, 90].includes(minutes)) throw bad('minutes is one of 20, 30, 60 or 90');
+    if (req.body?.paid != null && typeof req.body.paid !== 'boolean') throw bad('paid is true or false');
+    let householdId = req.account?.household_id ?? null;
+    if (!householdId) {
+      const { firstHousehold } = await import('../repositories/households.js');
+      householdId = (await firstHousehold())?.id ?? null;
+    }
+    const out = await runPilot({
+      householdId, sessionId: req.session?.id ?? null,
+      where: str(req.body?.where) ?? (str(req.body?.cell) ? null : 'SL5 0JD'), cell: str(req.body?.cell), minutes,
+      paid: req.body?.paid === true, who: who(req),
+    });
+    res.status(out.alreadyRunning ? 200 : 202).json(out);
+  } catch (err) { next(err); }
+});
+
+/** GET /pilot[?run=<id>] — a run's progress and results: the latest run when none is named. */
+deskRoutes.get('/pilot', requires('view_library'), async (req, res, next) => {
+  try {
+    const { status } = await import('../desk/pilot.js');
+    const run = str(req.query.run);
+    if (run && !/^[0-9a-f-]{36}$/i.test(run)) throw bad('run is a run id');
+    const out = await status(run);
+    if (!out) return res.status(404).json({ error: 'no_run', message: 'No pilot has been run.' });
+    res.json(out);
   } catch (err) { next(err); }
 });
 

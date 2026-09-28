@@ -942,6 +942,10 @@ function pump() {
     queued.delete(job.venueRef);
     running += 1;
     withDeadline(enrich(job.venueRef, job), job.venueRef)
+      // `onDone`: whoever queued this wants to read the record once the
+      // research has landed — the pre-warm answers the place's facts then,
+      // not before (an answer queued beside the research read nothing).
+      .then((out) => (typeof job.onDone === 'function' ? job.onDone(out) : null))
       .catch((err) => console.warn(`own: ${job.venueRef} failed: ${err.message}`))
       .finally(() => { running -= 1; pump(); });
   }

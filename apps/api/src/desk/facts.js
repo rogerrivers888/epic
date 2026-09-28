@@ -11,7 +11,7 @@
 import { query, withTransaction } from '../db.js';
 import { logChange } from './changes.js';
 import { settings } from './settings.js';
-import { FILED_SQL, HAS_SQL, STANDARD, wordOf, answerOptionsOf, factsWithCounts, factWord } from './categories.js';
+import { FILED_SQL, HAS_SQL, STANDARD, wordOf, answerOptionsOf, factsWithCounts, factWord, tallyLinks } from './categories.js';
 import { describe, SOURCE_WORD, sourcesWord } from './places.js';
 import { forget as forgetCollections } from './collections.js';
 import { forget as forgetAttributes } from '../repositories/placeAttributes.js';
@@ -19,7 +19,7 @@ import { forget as forgetAttributes } from '../repositories/placeAttributes.js';
 const bad = (message) => Object.assign(new Error(message), { status: 400, code: 'bad_request' });
 const missing = (message) => Object.assign(new Error(message), { status: 404, code: 'not_found' });
 
-const STATUS_WORD = { active: 'Active', gathering: 'Gathering evidence', ignored: 'Ignored' };
+const STATUS_WORD = { active: 'Active', gathering: 'Gathering evidence', ignored: 'Ignored', unattached: 'Not found yet' };
 const REASON_WORD = {
   on_nearly_every_place: 'On nearly every place',
   an_opinion: 'An opinion',
@@ -37,26 +37,48 @@ const day = (t) => { const d = new Date(t); return `${d.getUTCDate()} ${MONTHS[d
 /**
  * Places with a fact, counted where Epic looks for it (README "a place
  * counted once even if several subcategories share it"): for a subcategory
- * fact, places filed in a subcategory that has it Active (as stored — a fact
- * the screens show as Gathering evidence because it was confirmed at too few
- * places still counts what it has); for a standard fact, every place in
- * Epic. Keyed by fact.
+ * fact, places filed in a subcategory where the link is Active as the
+ * screens judge it (factsWithCounts: confirmed at addPlaces places, or
+ * included anyway) — the same evidence the status is judged on, never a
+ * stored status that may lag it; for a standard fact, every place in Epic.
+ * Keyed by fact. `links` is factsWithCounts' rows, read once by the caller.
  */
-async function placesWith(key = null) {
+async function placesWith(key = null, links = null) {
+  const live = (links ?? await factsWithCounts({ fact: key })).filter((l) => l.status === 'active' && !l.standard);
   const { rows } = await query(
     `with f as (select distinct venue_ref, sub from (${FILED_SQL}) x),
-          h as (select * from (${HAS_SQL}) z where ($1::text is null or z.attribute_key = $1))
+          h as (select * from (${HAS_SQL}) z where ($1::text is null or z.attribute_key = $1)),
+          l as (select * from unnest($2::text[], $3::text[]) as l(sub, attribute_key))
      select h.attribute_key, count(distinct h.venue_ref)::int n
        from h join f on f.venue_ref = h.venue_ref
-       join subcategory_facts sf on sf.subcategory_key = f.sub and sf.attribute_key = h.attribute_key and sf.status = 'active'
-       join place_attributes a on a.key = h.attribute_key and not a.standard
+       join l on l.sub = f.sub and l.attribute_key = h.attribute_key
       group by 1
      union all
      select h.attribute_key, count(distinct h.venue_ref)::int n
        from h join place_attributes a on a.key = h.attribute_key and a.standard
       where h.venue_ref in (select venue_ref from f)
-      group by 1`, [key]);
+      group by 1`, [key, live.map((l) => l.subcategory_key), live.map((l) => l.attribute_key)]);
   return new Map(rows.map((r) => [r.attribute_key, r.n]));
+}
+
+/**
+ * The facts Epic knows but no subcategory has confirmed yet (round 3, 29 Sep
+ * 2026): yes/no facts that were looked for once — asked by a question set,
+ * attached and detached, made a fact in Mapping — or that our sources have
+ * seen at a place. They stay the vocabulary spot and verify look for; a
+ * subcategory takes one on only when our sources confirm it there.
+ */
+async function vocabularyKeys() {
+  const { rows } = await query(
+    `select a.key from place_attributes a
+      where a.active and not a.standard and a.kind = 'yesno'
+        and (exists (select 1 from subcategory_facts where attribute_key = a.key)
+          or exists (select 1 from subcategory_facts_detached where attribute_key = a.key)
+          or exists (select 1 from questions where attribute_key = a.key and active)
+          or exists (select 1 from place_fact_answers where attribute_key = a.key)
+          or exists (select 1 from fact_suggestions where feature = a.key)
+          or exists (select 1 from bo_changes where area = 'Facts' and subject_type = 'fact' and subject_id = a.key and undone_at is null))`);
+  return new Set(rows.map((r) => r.key));
 }
 
 /**
@@ -78,17 +100,21 @@ async function askedAbout(key, sub = null) {
 
 /** Every fact, one row each (C46): Fact · Subcategories · Places with it · Status. */
 export async function allFacts({ q = null, cat = null, sub = null, status = null } = {}) {
-  const [{ rows: attrs }, uses, has, { rows: asked }] = await Promise.all([
+  const links = await factsWithCounts();
+  const [{ rows: attrs }, has, { rows: asked }, vocab] = await Promise.all([
     query(`select key, label, kind, standard from place_attributes where active order by label`),
-    factsWithCounts(),
-    placesWith(),
+    placesWith(null, links),
     query(`select attribute_key, count(distinct venue_ref)::int n from (
              select venue_ref, attribute_key from place_fact_answers
              union select venue_ref, attribute_key from place_fact_evidence
              union select venue_ref, attribute_key from place_attribute_values where set_by is not null
              union select venue_ref, attribute_key from fact_unknowns) q
             where attribute_key = any($1) group by 1`, [STANDARD]),
+    vocabularyKeys(),
   ]);
+  const uses = links;
+  // The same tally Categories reads (categories.js tallyLinks).
+  const { byFact } = tallyLinks(links);
   const usesBy = new Map();
   for (const u of uses) usesBy.set(u.attribute_key, [...(usesBy.get(u.attribute_key) ?? []), u]);
   const askedBy = new Map(asked.map((r) => [r.attribute_key, r.n]));
@@ -97,12 +123,13 @@ export async function allFacts({ q = null, cat = null, sub = null, status = null
   const rows = [];
   for (const a of attrs) {
     const u = usesBy.get(a.key) ?? [];
-    if (!a.standard && !u.length) continue; // looked for nowhere: not a fact Epic looks for
+    // Neither linked anywhere nor in the vocabulary: a label, not a fact.
+    if (!a.standard && !u.length && !vocab.has(a.key)) continue;
     const active = u.filter((x) => x.status === 'active');
     const gathering = u.filter((x) => x.status === 'gathering');
     const ignored = u.filter((x) => x.status === 'ignored');
-    const demoted = u.some((x) => x.demoted);
-    const st = a.standard || active.length ? 'active' : gathering.length ? 'gathering' : 'ignored';
+    const st = a.standard || active.length ? 'active' : gathering.length ? 'gathering' : ignored.length ? 'ignored' : 'unattached';
+    const looking = byFact.get(a.key)?.looking ?? 0;
     const isNew = !a.standard && active.some((x) => x.isNew);
     const label = factWord(a.key, a.label);
     const reason = st === 'ignored' ? ignored[0]?.reason ?? null : null;
@@ -111,13 +138,13 @@ export async function allFacts({ q = null, cat = null, sub = null, status = null
       label,
       standard: a.standard,
       // Ignored names where it is ignored (C46); otherwise how many look for it.
-      subcategories: a.standard ? 'All' : st === 'ignored' ? ignored.map((x) => x.sub_label).sort().join(', ') : String(active.length + gathering.length),
-      subcategoryCount: a.standard ? null : st === 'ignored' ? 0 : active.length + gathering.length,
-      // A count only where there is one to give: nothing for Ignored, nothing
-      // for a fact still gathering evidence unless it was Active and fell back
-      // (the prototype), nothing for a standard fact nobody has asked about.
+      subcategories: a.standard ? 'All' : st === 'ignored' ? ignored.map((x) => x.sub_label).sort().join(', ') : st === 'unattached' ? '—' : String(looking),
+      subcategoryCount: a.standard ? null : looking,
+      // A count only where there is one to give (owner, round 3): Active
+      // only. Nothing for Ignored, for Gathering evidence, for a fact no
+      // subcategory has yet, or for a standard fact nobody has asked about.
       places: a.standard ? (askedBy.get(a.key) ? has.get(a.key) ?? 0 : null)
-        : st === 'ignored' || (st === 'gathering' && !demoted) ? null : has.get(a.key) ?? 0,
+        : st === 'active' ? has.get(a.key) ?? 0 : null,
       status: st,
       statusText: st === 'active' ? (isNew ? 'New' : '') : st === 'ignored' ? ignoredText(reason) : STATUS_WORD[st],
       isNew,
@@ -137,6 +164,7 @@ export async function allFacts({ q = null, cat = null, sub = null, status = null
       active: rows.filter((r) => r.status === 'active').length,
       gathering: rows.filter((r) => r.status === 'gathering').length,
       ignored: rows.filter((r) => r.status === 'ignored').length,
+      unattached: rows.filter((r) => r.status === 'unattached').length,
     },
     rows: filtered.map(({ cats, subs, ...r }) => r),
   };
@@ -167,11 +195,11 @@ export async function factPage(key) {
     };
   }
   const needed = cfg.addPlaces ?? 2;
-  const [subs, has, conflicts] = await Promise.all([factsWithCounts({ fact: key }), placesWith(key), conflictsOf(key)]);
+  const subs = await factsWithCounts({ fact: key });
+  const [has, conflicts] = await Promise.all([placesWith(key, subs), conflictsOf(key)]);
   const active = subs.filter((s) => s.status === 'active');
-  const st = active.length ? 'active' : subs.some((s) => s.status === 'gathering') ? 'gathering' : 'ignored';
-  const demoted = subs.some((s) => s.demoted);
   const ignored = subs.filter((s) => s.status === 'ignored');
+  const st = active.length ? 'active' : subs.some((s) => s.status === 'gathering') ? 'gathering' : ignored.length ? 'ignored' : 'unattached';
   return {
     fact: a.key,
     label,
@@ -180,16 +208,16 @@ export async function factPage(key) {
     status: st,
     statusText: st === 'ignored' ? ignoredText(ignored[0]?.reason) : STATUS_WORD[st],
     isNew: st === 'active' && active.some((s) => s.isNew),
-    places: st === 'ignored' || (st === 'gathering' && !demoted) ? null : has.get(key) ?? 0,
+    places: st === 'active' ? has.get(key) ?? 0 : null,
     needed,
     subcategories: subs.filter((s) => s.status !== 'ignored').sort((x, y) => x.sub_label.localeCompare(y.sub_label)).map((s) => ({
-      key: s.subcategory_key, label: s.sub_label, category: s.category_label, categoryKey: s.category_key, places: s.places_with, status: s.status,
+      key: s.subcategory_key, label: s.sub_label, category: s.category_label, categoryKey: s.category_key,
+      // Blank for Gathering evidence (owner, round 3, 29 Sep 2026: no
+      // "Confirmed at 0 of 2"): a count is shown only where it is Active.
+      places: s.status === 'active' ? s.places_with : null,
+      status: s.status,
       isNew: s.isNew,
-      // What a row that is not yet Active says instead of a count (README
-      // "Gathering evidence": "Confirmed at 1 of 2 places needed · first seen 19 Sep").
-      note: s.status === 'gathering'
-        ? `Confirmed at ${s.confirmed ?? 0} of ${needed} places needed${s.first_seen ? ` · first seen ${day(s.first_seen)}` : ''}`
-        : null,
+      note: null,
     })),
     conflicts,
     conflictLine: conflicts ? `${conflicts} place${conflicts === 1 ? '' : 's'} where our sources disagree — families will be asked` : null,
@@ -257,6 +285,55 @@ function withFamilies(how, word) {
   return parts.includes(SOURCE_WORD.families) ? `${how} · ${word}` : [...parts, SOURCE_WORD.families, word].join(' · ');
 }
 
+/** A link to what an open-map ref names: "osm:node/123", "way/45". */
+export function osmUrl(ref) {
+  const m = /^(?:osm:)?(node|way|relation)\/(\d+)$/.exec(String(ref ?? '').trim());
+  return m ? `https://www.openstreetmap.org/${m[1]}/${m[2]}` : null;
+}
+
+/** Only a web address is linked: anything else held in a url column is not. */
+const webUrl = (u) => (/^https?:\/\//i.test(String(u ?? '')) ? String(u) : null);
+
+/**
+ * The evidence behind a fact at each place, from our own sources only
+ * (place_fact_evidence: the venue's page, the open map, Wikipedia,
+ * Wikidata, the hygiene register): each source that said yes, its quote as
+ * stored, and a link — the one kept with the evidence, else the page we hold
+ * for that source (the venue's website, its Wikipedia article, its open-map
+ * element, its Wikidata item). A source with no page held has no link,
+ * never a guessed one. Google is never a source here (C3, C22).
+ */
+export async function evidenceOf(key, refs) {
+  if (!refs.length) return new Map();
+  const { rows } = await query(
+    `select e.venue_ref, e.source, e.quote, e.url, e.checked_at,
+            r.website, r.wikipedia_url, r.osm_ref, r.wikidata_id
+       from place_fact_evidence e
+       left join place_records r on r.venue_ref = e.venue_ref
+      where e.attribute_key = $1 and e.says = 'yes' and e.venue_ref = any($2::text[])`, [key, refs]);
+  const RANK = ['site', 'osm', 'wikipedia', 'wikidata', 'fsa'];
+  const out = new Map();
+  for (const r of rows) {
+    const held = {
+      site: webUrl(r.website),
+      wikipedia: webUrl(r.wikipedia_url),
+      osm: osmUrl(r.osm_ref),
+      wikidata: /^Q\d+$/.test(String(r.wikidata_id ?? '')) ? `https://www.wikidata.org/wiki/${r.wikidata_id}` : null,
+    };
+    const list = out.get(r.venue_ref) ?? [];
+    list.push({
+      source: r.source,
+      word: SOURCE_WORD[r.source] ?? r.source,
+      quote: r.quote ? String(r.quote).trim() || null : null,
+      url: webUrl(r.url) ?? held[r.source] ?? null,
+      checkedAt: r.checked_at,
+    });
+    out.set(r.venue_ref, list);
+  }
+  for (const list of out.values()) list.sort((x, y) => RANK.indexOf(x.source) - RANK.indexOf(y.source));
+  return out;
+}
+
 /**
  * The drill-down: only places that have the fact. Place · Area · How we know ·
  * Edit, with country, county and postcode filters and a search; footer "Looked
@@ -270,10 +347,15 @@ export async function factPlaces(key, { sub = null, country = null, county = nul
   if (!a) throw missing(`${key} is not one of our facts.`);
   const label = factWord(a.key, a.label);
   // Where it is looked for: the named subcategory; else, for a subcategory
-  // fact, the subcategories that have it Active; for a standard fact, Epic.
+  // fact, the subcategories where it is Active as the screens judge it (the
+  // same links placesWith counts); for a standard fact, Epic.
+  const live = !sub && !a.standard
+    ? (await factsWithCounts({ fact: key })).filter((l) => l.status === 'active').map((l) => l.subcategory_key)
+    : null;
   const scope = `select distinct f.venue_ref from (${FILED_SQL}) f
-     ${!sub && !a.standard ? `join subcategory_facts sf on sf.subcategory_key = f.sub and sf.attribute_key = $1 and sf.status = 'active'` : ''}
-     where ($2::text is null or f.sub = $2) and $1::text is not null`;
+     where ($2::text is null or f.sub = $2) and $1::text is not null
+       ${live ? 'and f.sub = any($3::text[])' : ''}`;
+  const scopeArgs = live ? [key, sub, live] : [key, sub];
   const { rows } = await query(
     `with s as (${scope})
      select h.venue_ref,
@@ -284,8 +366,9 @@ export async function factPlaces(key, { sub = null, country = null, county = nul
        from (select distinct venue_ref, attribute_key from (${HAS_SQL}) z where z.attribute_key = $1) h
        left join place_attribute_values v on v.venue_ref = h.venue_ref and v.attribute_key = h.attribute_key and v.set_by is not null
        left join place_fact_answers x on x.venue_ref = h.venue_ref and x.attribute_key = h.attribute_key
-      where h.venue_ref in (select venue_ref from s)`, [key, sub]);
+      where h.venue_ref in (select venue_ref from s)`, scopeArgs);
   const described = await describe(rows.map((r) => r.venue_ref));
+  const evidence = await evidenceOf(key, rows.map((r) => r.venue_ref));
   // What families said, as counts per place and never who (the visit
   // question, 28 Sep 2026): "Families · 3 said yes". Didn't notice is not counted.
   const { rows: fam } = await query(
@@ -316,6 +399,10 @@ export async function factPlaces(key, { sub = null, country = null, county = nul
       answer,
       // The option the place holds now, so Edit can light it.
       current: options.find((o) => o.label === word)?.key ?? null,
+      // What each of our sources said and where (owner, round 3): the
+      // source, the words it used, and a link to it where we hold one.
+      evidence: evidence.get(r.venue_ref) ?? [],
+      families: families.get(r.venue_ref) ?? null,
     };
   }).sort((x, y) => String(x.name ?? '~').localeCompare(String(y.name ?? '~')));
   const out = all
@@ -331,7 +418,7 @@ export async function factPlaces(key, { sub = null, country = null, county = nul
   let lookedFor;
   if (a.standard) lookedFor = await askedAbout(key, sub);
   else {
-    const { rows: [{ n }] } = await query(`with s as (${scope}) select count(*)::int n from s`, [key, sub]);
+    const { rows: [{ n }] } = await query(`with s as (${scope}) select count(*)::int n from s`, scopeArgs);
     lookedFor = n;
   }
   let subLabel = null;

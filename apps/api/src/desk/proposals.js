@@ -50,7 +50,35 @@ export const SEEDS = [
     text: '{target} — only churches with a Wikipedia/Wikidata entry or heritage listing',
   },
   { word: 'tourist_attraction', grp: 'stop_filing', action: 'make_fact', text: 'Keep as a fact only (stop filing by it)' },
+  // Two Food & drink drawers read nought because no Google word pointed at
+  // them (owner, round 3, 29 Sep 2026). Google's Table A has brewery, brewpub,
+  // winery and tea_house and no distillery or afternoon tea; winery already
+  // points at Breweries. Each keeps where it files today as a secondary
+  // (`also`), so nothing leaves Cafés or Pubs & bars — those counts include
+  // secondary filing (categories.js FILED_SQL).
+  {
+    word: 'brewery', grp: 'fill', action: 'repoint', subcategory: 'breweries-distilleries', also: ['pubs-bars'],
+    text: 'Food & drink › Breweries, wineries & distilleries (primary) · Pubs & bars stays as a secondary',
+  },
+  {
+    word: 'brewpub', grp: 'fill', action: 'repoint', subcategory: 'pubs-bars', also: ['breweries-distilleries'],
+    text: 'Also in Food & drink › Breweries, wineries & distilleries · Pubs & bars stays primary',
+  },
+  {
+    word: 'tea_house', grp: 'fill', action: 'repoint', subcategory: 'afternoon-tea', also: ['cafes'],
+    text: 'Food & drink › Afternoon tea (primary) · Cafés stays as a secondary',
+  },
 ];
+
+/**
+ * Where a proposal's words would point, primary first: its own drawer and any
+ * it keeps or adds as secondaries (`also`) that exist and are live.
+ */
+export function proposedTargets(seed, subs) {
+  const primary = seed.subcategory;
+  const also = (seed.also ?? []).filter((k) => k !== primary && (!subs || subs.get(k)?.active));
+  return [primary, ...also];
+}
 
 /**
  * Words the owner said must never be folded into other subcategories
@@ -91,6 +119,12 @@ export function changesSomething(seed, word) {
   }
   if (seed.action === 'repoint') {
     if (out) return false;
+    // With secondaries named, it changes something while the primary differs
+    // or any of them is not yet a target of the word.
+    if (seed.also?.length) {
+      const has = new Set(word.targets ?? []);
+      return !targets.includes(word.points_at) || seed.also.some((k) => !has.has(k));
+    }
     return !targets.includes(word.points_at);
   }
   return false;
@@ -101,17 +135,24 @@ export function changesSomething(seed, word) {
  * run at boot and daily. Returns what it did, for the log line.
  */
 export async function refreshProposals() {
-  const [{ rows: words }, { rows: kept }, { rows: open }, { rows: narrowed }, counts, { rows: subRows }] = await Promise.all([
+  const [{ rows: words }, { rows: kept }, { rows: open }, { rows: narrowed }, counts, { rows: subRows }, { rows: allTargets }, { rows: decidedRows }] = await Promise.all([
     query(`select key, decision, points_at, active from taxonomy_labels where namespace = 'google'`),
     query(`select word from word_proposals where state = 'kept'`),
     query(`select id, word from word_proposals where state = 'open'`),
     query(`select word, subcategory_key from word_targets where condition is not null and is_primary`),
     bringsAndAffected(),
     query(`select s.key, s.label, s.active, c.label as cat from shelf_subcategories s left join shelf_categories c on c.key = s.category_key`),
+    query(`select word, subcategory_key from word_targets where namespace = 'google'`),
+    query(`select distinct word from word_decisions where namespace = 'google' and undone_at is null`),
   ]);
+  // A word a person has decided anything about since is theirs: a proposal
+  // that only fills an empty drawer is not raised over it (a later picker
+  // edit taking Pubs & bars off brewery is not reversed by the next run).
+  const decidedSet = new Set(decidedRows.map((r) => r.word));
   const subs = new Map(subRows.map((r) => [r.key, r]));
   const byWord = new Map(words.map((w) => [w.key, w]));
   for (const n of narrowed) { const w = byWord.get(n.word); if (w) w.narrowedTo = n.subcategory_key; }
+  for (const t of allTargets) { const w = byWord.get(t.word); if (w) (w.targets ??= []).push(t.subcategory_key); }
   const keptSet = new Set(kept.map((k) => k.word));
   const openSet = new Set(open.map((o) => o.word));
   let raised = 0; let retired = 0;
@@ -126,9 +167,13 @@ export async function refreshProposals() {
       ...seed,
       subcategory: target.key,
       text: seed.text.replace('{target}', target.label ?? ''),
+      ...(seed.also ? { also: proposedTargets({ ...seed, subcategory: target.key }, subs).slice(1) } : {}),
     };
-    const wanted = s !== null && changesSomething(s, w);
-    const changeTo = s && JSON.stringify({ text: s.text, subcategory: s.subcategory ?? null, newSub: s.newSub ?? null, fact: s.fact ?? null, newFact: s.newFact ?? null, condition: s.condition ?? null });
+    const wanted = s !== null && changesSomething(s, w) && !(seed.grp === 'fill' && decidedSet.has(seed.word) && !openSet.has(seed.word));
+    const changeTo = s && JSON.stringify({
+      text: s.text, subcategory: s.subcategory ?? null, newSub: s.newSub ?? null, fact: s.fact ?? null, newFact: s.newFact ?? null, condition: s.condition ?? null,
+      ...(s.also ? { also: s.also } : {}),
+    });
     if (wanted && openSet.has(s.word)) {
       // Keep an open proposal saying what the seed says today (a drawer
       // renamed, a target that now exists): the owner decides what is shown.

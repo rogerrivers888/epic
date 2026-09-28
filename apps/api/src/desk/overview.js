@@ -197,9 +197,16 @@ export async function overview() {
 
   // ---- Growth
   const [placesSeries, factsSeries, householdsSeries] = await Promise.all([
-    weekly(`select to_char(date_trunc('week', g), 'YYYY-MM-DD') as week,
-                   (select count(*) from place_index where subcategory is not null and not_in_epic_at is null and first_seen < g + interval '7 days') as n
-              from generate_series(date_trunc('week', now()) - interval '6 weeks', date_trunc('week', now()), interval '1 week') g`),
+    // Places counted once by the week they arrived, then summed up to each
+    // week — one pass over the index, not seven (round 3 PERF). A place first
+    // seen before the end of week g is one whose own week starts on or before g.
+    weekly(`with arrived as materialized (
+              select date_trunc('week', first_seen) as wk, count(*) as c from place_index
+               where subcategory is not null and not_in_epic_at is null group by 1)
+            select to_char(date_trunc('week', g), 'YYYY-MM-DD') as week,
+                   (select coalesce(sum(c), 0) from arrived where wk <= g) as n
+              from generate_series(date_trunc('week', now()) - interval '6 weeks', date_trunc('week', now()), interval '1 week') g
+             order by g`),
     weekly(`select to_char(date_trunc('week', g), 'YYYY-MM-DD') as week,
                    (select count(*) from fact_checks where outcome = 'verified' and at >= g and at < g + interval '7 days') as n
               from generate_series(date_trunc('week', now()) - interval '6 weeks', date_trunc('week', now()), interval '1 week') g`),

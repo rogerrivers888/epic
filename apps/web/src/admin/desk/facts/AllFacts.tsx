@@ -10,14 +10,15 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { Text, View } from 'react-native';
+import { Linking, Text, View } from 'react-native';
 
+import { Icon } from '../../../components/Icon';
 import { Press } from '../../../components/press';
 import { useViewport } from '../../../hooks/useViewport';
 import { useCrumbs, useDeskGo, useDeskParam, type Crumb } from '../Desk';
 import {
   Dropdown, HeadCount, Kicker, LIME, Muted, PageTitle, RED, SearchBox, T, TCell, THead, TRow, Table,
-  deskApi, desk, fonts, n, sortRows, tableWidth, tabular, type SortState, type TCol,
+  SideToggle, deskApi, desk, fonts, n, sortRows, tableWidth, tabular, useSide, type SortState, type TCol,
 } from '../kit';
 import { OptPill } from '../categories/shared';
 import { FactTabs, HoverTitle, LoadLine, Title, nameWidth, plural, useDebounced, useDesk, useWrite } from './shared';
@@ -26,12 +27,12 @@ import { FactTabs, HoverTitle, LoadLine, Title, nameWidth, plural, useDebounced,
 // Shapes (apps/api/src/desk/facts.js)
 // ---------------------------------------------------------------------------
 
-type Status = 'active' | 'gathering' | 'ignored';
+type Status = 'active' | 'gathering' | 'ignored' | 'unattached';
 type FactRow = {
   fact: string; label: string; standard: boolean; subcategories: string; subcategoryCount: number | null;
   places: number | null; status: Status; statusText: string; isNew: boolean; reason: string | null;
 };
-type AllFactsResp = { counts: { facts: number; active: number; gathering: number; ignored: number }; rows: FactRow[] };
+type AllFactsResp = { counts: { facts: number; active: number; gathering: number; ignored: number; unattached?: number }; rows: FactRow[] };
 type Catalogue = { categories: { key: string; label: string }[]; subcategories: { key: string; label: string; category: string }[] };
 
 type Band = { name: string; means: string };
@@ -40,13 +41,17 @@ type FactPageResp = {
   fact: string; label: string; kind: string; standard: boolean; status: Status; statusText: string; isNew: boolean;
   places: number | null; needed?: number;
   definition?: { shape: string; line: string | null; bands?: Band[]; cost?: CostRow[] };
-  subcategories?: { key: string; label: string; category: string; categoryKey: string; places: number; status: Status; isNew: boolean; note: string | null }[];
+  subcategories?: { key: string; label: string; category: string; categoryKey: string; places: number | null; status: Status; isNew: boolean; note: string | null }[];
   conflicts: number; conflictLine: string | null;
 };
 type PlaceRow = {
   ref: string; name: string | null; area: string | null; county: string | null; country: string | null; postcode: string | null;
   how: string | null; answer: string | null; current: string | null;
+  /** Our own sources that said yes, each with the words it used and a link where one is held. */
+  evidence?: Evidence[];
+  families?: string | null;
 };
+type Evidence = { source: string; word: string; quote: string | null; url: string | null };
 export type PlacesResp = {
   fact: string; label: string; kind: string; standard: boolean; sub: string | null; subLabel: string | null; categoryLabel: string | null;
   options: { key: string; label: string }[]; rows: PlaceRow[]; total: number;
@@ -60,8 +65,9 @@ export type PlacesResp = {
 
 const STATUS_OPTS: { key: string; name: string }[] = [
   { key: '', name: 'All statuses' }, { key: 'active', name: 'Active' }, { key: 'gathering', name: 'Gathering evidence' }, { key: 'ignored', name: 'Ignored' },
+  { key: 'unattached', name: 'Not found yet' },
 ];
-const ORDER: Record<Status, number> = { active: 0, gathering: 1, ignored: 2 };
+const ORDER: Record<Status, number> = { active: 0, gathering: 1, ignored: 2, unattached: 3 };
 
 // ---------------------------------------------------------------------------
 // All facts
@@ -83,7 +89,9 @@ export function AllFacts() {
     : { key: 'name', dir: 'asc' };
   const setSort = (s: SortState) => setSortRaw(!s || (s.key === 'name' && s.dir === 'asc') ? '' : `${s.dir === 'desc' ? '-' : ''}${s.key}`, { replace: true });
 
-  const load = useDesk<AllFactsResp>('/facts', { q: q || null, cat: cat || null, sub: sub || null, status: state || null });
+  // Food & drink · Things to do (round 3): the API keeps the facts looked for on that side.
+  const [side] = useSide();
+  const load = useDesk<AllFactsResp>('/facts', { q: q || null, cat: cat || null, sub: sub || null, status: state || null, side: side || null });
   const cata = useDesk<Catalogue>('/mapping/picker');
   useCrumbs([{ name: 'Facts' }], []);
 
@@ -109,14 +117,16 @@ export function AllFacts() {
     <>
       <FactTabs on="all" />
       <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 24, flexWrap: 'wrap', paddingBottom: 4, zIndex: 20 }}>
-        <PageTitle tip="Every fact Epic looks for, once each. Active means we’re finding it at places; Gathering evidence means we’ve seen it mentioned but not confirmed enough yet; Ignored means it tells a family nothing.">All facts</PageTitle>
+        <PageTitle tip="Every fact Epic looks for, once each. Active means our sources confirmed it at 2 or more places in a subcategory; Gathering evidence means confirmed at 1; Not found yet means no subcategory has it yet, though we still look for it; Ignored means it tells a family nothing.">All facts</PageTitle>
         <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 26, flexWrap: 'wrap' }}>
           <HeadCount label="Facts" n={n(counts?.facts)} />
           <HeadCount label="Active" n={n(counts?.active)} tone={LIME} />
           <HeadCount label="Gathering evidence" n={n(counts?.gathering)} tone={desk.inkMuted} />
           <HeadCount label="Ignored" n={n(counts?.ignored)} tone={desk.inkDim} />
+          <HeadCount label="Not found yet" n={n(counts?.unattached)} tone={desk.inkDim} />
         </View>
       </View>
+      <View style={{ marginTop: 12 }}><SideToggle /></View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 12, zIndex: 15 }}>
         <SearchBox value={text} onChange={setText} placeholder="Search facts" width={260} />
         <Dropdown
@@ -416,7 +426,7 @@ export function PlacesDrill({ fact, sub, canManage, crumbs }: {
                   <TCell width={placeW}><T weight="700">{p.name ?? 'A place we cannot name'}</T></TCell>
                   {multi ? <TCell width={110}><T size={13} weight="700">{p.answer ?? '—'}</T></TCell> : null}
                   <TCell width={160}><T size={13} tone={desk.inkMuted}>{p.area ?? '—'}</T></TCell>
-                  <TCell width={HOW_MIN} grow><T size={12.5} tone={desk.inkMuted}>{p.how ?? '—'}</T></TCell>
+                  <TCell width={HOW_MIN} grow><HowWeKnow how={p.how} evidence={p.evidence ?? []} /></TCell>
                   {/* Sized to its pills when open, so "Don't know" stays on one line (audit, 28 Sep 2026). */}
                   <View style={{ minWidth: EDIT_W, maxWidth: editMax, flexShrink: 0, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>
                     {!canManage ? null : open ? d.options.map((o) => (
@@ -475,5 +485,38 @@ export function PlacesDrill({ fact, sub, canManage, crumbs }: {
         </View>
       </View>
     </>
+  );
+}
+
+/**
+ * How we know, for one place (owner, round 3, 29 Sep 2026): the sources in
+ * one line, then each source's own words — italic, one line, the whole of it
+ * on a press — and a link to the page it came from where we hold one. Only
+ * our own sources are here; Families are counted in the line, never quoted.
+ */
+function HowWeKnow({ how, evidence }: { how: string | null; evidence: Evidence[] }) {
+  const [open, setOpen] = useState<string | null>(null);
+  return (
+    <View style={{ gap: 4, minWidth: 0 }}>
+      <T size={12.5} tone={desk.inkMuted}>{how ?? '—'}</T>
+      {evidence.filter((e) => e.quote || e.url).map((e) => {
+        const isOpen = open === e.source;
+        return (
+          <View key={e.source} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, minWidth: 0 }}>
+            <Text style={{ fontFamily: fonts.body, fontSize: 11.5, fontWeight: '700', color: desk.inkDim }}>{e.word}</Text>
+            {e.quote ? (
+              <Press effect="none" onPress={() => setOpen(isOpen ? null : e.source)} style={{ flex: 1, minWidth: 0 }} accessibilityLabel={isOpen ? 'Show one line' : 'Show the whole quote'}>
+                <Text numberOfLines={isOpen ? undefined : 1} style={{ fontFamily: fonts.body, fontSize: 12, fontStyle: 'italic', color: desk.inkMuted }}>{`“${e.quote}”`}</Text>
+              </Press>
+            ) : <View style={{ flex: 1 }} />}
+            {e.url ? (
+              <Press effect="none" onPress={() => { void Linking.openURL(e.url!); }} accessibilityRole="link" accessibilityLabel={`Open the ${e.word} page`}>
+                <Icon name="external" size={13} color={desk.inkDim} />
+              </Press>
+            ) : null}
+          </View>
+        );
+      })}
+    </View>
   );
 }
