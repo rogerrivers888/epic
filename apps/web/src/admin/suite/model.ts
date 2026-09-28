@@ -37,7 +37,18 @@ export type Period = {
 };
 
 /** A label with a figure, and how long its bar is as a share of the biggest. */
-export type Row = { label: string; value: number | string | null; pct?: number | null; of?: number | null };
+export type Row = {
+  label: string; value: number | string | null; pct?: number | null; of?: number | null;
+  /** A cost row: the dollars a dollar-billing supplier charged, and the basis the pounds are on. */
+  usd?: number | null; basis?: CostBasis | null;
+};
+
+/**
+ * What a cost figure is read from (desk/supplierCost.js): a bill, a bill to a
+ * cutoff and an estimate after it, the ledger's estimate, or — for an
+ * expectation only — the budget.
+ */
+export type CostBasis = 'billed' | 'billed+estimate' | 'estimate' | 'budget';
 
 export type Measure = {
   key: string;
@@ -117,12 +128,30 @@ export type SupplierRow = {
    * Cloudflare R2, the app stores. Nought would read as free.
    */
   spend: number | null;
+  /** The same spend in dollars, for a supplier that bills in dollars. */
+  spendUsd?: number | null;
+  basis?: CostBasis | null;
+  /** Where a billed figure was read — "Google billing export", "Anthropic console". */
+  source?: string | null;
+  /** When a console figure was read. */
+  at?: string | null;
+  note?: string | null;
+  /** Part of a month, shared by the ledger. */
+  apportioned?: boolean;
+  billsIn?: Currency;
+  /** Last month's bill, else a real estimate, else the budget — never a nought nobody billed. */
   expected: number | null;
+  expectedUsd?: number | null;
+  expectedBasis?: CostBasis | null;
   share: number | null;
   series: number[] | null;
   status: string;
   adapterState: string;
   costClass: string | null;
+  /** Inside another supplier's bill — Routes is in Google's. */
+  within?: string | null;
+  /** Ledger rows no supplier on the register answers for: counted, not a supplier. */
+  residue?: boolean;
   /** Why there is no spend figure, where there isn't one. */
   gap?: string | null;
 };
@@ -158,7 +187,16 @@ export type SupplierRecord = {
     unobserved?: number | null;
     healthGap?: string | null;
     spend: number | null;
+    spendUsd?: number | null;
+    basis?: CostBasis | null;
+    source?: string | null;
+    at?: string | null;
+    note?: string | null;
+    apportioned?: boolean;
+    billsIn?: Currency;
     expected: number | null;
+    expectedUsd?: number | null;
+    expectedBasis?: CostBasis | null;
     variance: number | null;
     variancePct: number | null;
     /** Why there is no comparison, where the figure itself is real. */
@@ -282,6 +320,7 @@ export type Suite = {
       total: number | null; allocated: number | null; byKind: Row[]; byClass: Row[];
       byPurpose?: { label: string; value: number; cls: string; calls: number }[];
       research: number | null; delta?: number | null; classDerived?: boolean;
+      basis?: CostBasis | null; apportioned?: boolean;
     };
     perSubscriber: { subscription: number; hotel: number; hosting: number; activity: number; total: number; out: number; kept: number } | null;
     perSubscriberGap?: string;
@@ -305,7 +344,8 @@ export type Suite = {
   };
   subscriptions: Subscriptions;
   suppliers: {
-    rows: SupplierRow[]; total: number; expected: number;
+    rows: SupplierRow[]; total: number; expected: number | null;
+    basis?: CostBasis | null; expectedMonths?: string[];
     expectedNextMonth: number | null; expectedNextMonthDeltaPct: number | null;
     expectedNextMonthGap?: string | null;
     largest: SupplierRow | null;
@@ -415,6 +455,37 @@ export function formatter({ currency = 'gbp', perSub = null }: { currency?: Curr
   };
 
   return { currency, perSub, money, count, delta };
+}
+
+/**
+ * A cost in pounds with the dollars in brackets, for a supplier that bills in
+ * dollars (owner, 29 Sep 2026: "£ throughout, $ in brackets") — "£87 ($117.02)".
+ */
+export function withDollars(fmt: Fmt, gbp: number | null | undefined, usd?: number | null): string | null {
+  const pounds = fmt.money(gbp);
+  if (pounds == null) return null;
+  if (usd == null || fmt.perSub) return pounds;
+  const dollars = formatter({ currency: 'usd' }).money(usd);
+  return dollars ? `${pounds} (${dollars})` : pounds;
+}
+
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * The basis a figure is on, in the words under it: "billed · Google billing
+ * export", "console, 29 Sep", "billed + estimate", "estimate", "budget".
+ */
+export function basisWords(basis: CostBasis | null | undefined, source?: string | null, at?: string | null, apportioned?: boolean): string | null {
+  if (!basis) return null;
+  const part = apportioned ? ' · part month' : '';
+  if (basis === 'estimate' || basis === 'budget') return `${basis}${part}`;
+  const d = at ? new Date(at) : null;
+  const when = d && !Number.isNaN(d.getTime()) ? `${d.getUTCDate()} ${SHORT_MONTHS[d.getUTCMonth()]}` : null;
+  const from = source && /console/i.test(source)
+    ? (when ? `console, ${when}` : 'console')
+    : source && /export/i.test(source) ? 'billed · Google billing export'
+      : source ? `billed · ${source}` : 'billed';
+  return `${basis === 'billed+estimate' ? `${from} + estimate` : from}${part}`;
 }
 
 /** Which currency each half of the model is measured in. */

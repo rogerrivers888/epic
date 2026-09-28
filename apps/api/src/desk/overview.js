@@ -61,11 +61,16 @@ async function spend() {
   return { google: g.gbp, claude: usd * USD_TO_GBP, claudeUsd: usd, claudeFrom: 'estimate' };
 }
 
-/** Claude in the tile's words: dollars first, as Anthropic bills, pounds beside. */
+/**
+ * Claude in the tile's words: pounds first, the one currency the desk speaks,
+ * with the dollars Anthropic billed in brackets (owner, 29 Sep 2026: "£
+ * throughout, $ in brackets"). "estimate" only where no console figure has
+ * been read for the month.
+ */
 export function claudeWords(money, cfg) {
   const usd = money.claudeUsd ?? money.claude / USD_TO_GBP;
   const est = money.claudeFrom === 'console' ? '' : ' estimate';
-  return `Claude $${usd.toFixed(2)} (£${Math.round(money.claude)})${est} of £${cfg.budgetClaude}`;
+  return `Claude £${Math.round(money.claude)} ($${usd.toFixed(2)})${est} of £${cfg.budgetClaude}`;
 }
 const claudeOf = (money, cfg) => ({
   spent: money.claude, spentUsd: money.claudeUsd ?? null, from: money.claudeFrom ?? 'estimate',

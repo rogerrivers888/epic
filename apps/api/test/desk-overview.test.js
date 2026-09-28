@@ -57,7 +57,7 @@ test('spend reads close to budget above 80% and over budget above 100%', async (
   o = await overview();
   assert.equal(o.health.spend.tone, 'red');
   assert.equal(o.health.spend.line, 'over budget');
-  assert.match(o.health.spend.title, new RegExp(`^Google £\\d+ estimate of £\\d+ · Claude \\$[\\d.]+ \\(£\\d+\\) estimate of £${budget}$`));
+  assert.match(o.health.spend.title, new RegExp(`^Google £\\d+ estimate of £\\d+ · Claude £\\d+ \\(\\$[\\d.]+\\) estimate of £${budget}$`));
   await query(`delete from provider_calls where purpose = 'desk-overview-test'`);
 });
 

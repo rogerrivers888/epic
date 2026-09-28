@@ -109,7 +109,11 @@ export function HouseholdRecordView({ record, error, gaps, onBack, controls, kic
           gap={s.marginGap}
           sub={s.costUsd == null
             ? `${pence(s.earnedPence)} earned`
-            : `${pence(s.earnedPence)} earned · $${s.costUsd.toFixed(2)} to serve`}
+            // Pounds first with the dollars the ledger recorded in brackets,
+            // and an estimate: a household's list-price share, not a bill.
+            : s.costGbp != null
+              ? `${pence(s.earnedPence)} earned · £${Number(s.costGbp).toFixed(2)} ($${Number(s.costUsd).toFixed(2)}) estimate to serve`
+              : `${pence(s.earnedPence)} earned · $${Number(s.costUsd).toFixed(2)} estimate to serve`}
         />
       </View>
 

@@ -35,7 +35,7 @@ import { Plot } from './MetricDrill';
 import { buildDrill, type DrillView, type RunRate } from './drill';
 import { asOneOf, useQueryState } from '../../router';
 import { useFormatters } from './useSuite';
-import { formatter, type Currency, type PeriodKey, type Suite, type SupplierRecord as Record_ } from './model';
+import { basisWords, formatter, withDollars, type Currency, type PeriodKey, type Suite, type SupplierRecord as Record_ } from './model';
 
 /**
  * The counterparties that are search sources, and therefore have an estate
@@ -121,8 +121,8 @@ export function SupplierRecord({
 
   const s = record.supplier;
   const h = record.health;
-  // The health panel's own currency: metered spend is in dollars because that is
-  // what the ledger recorded, and the mock estate is a British business in pounds.
+  // The health panel's own currency: pounds, the shared cost figure's, with the
+  // dollars beside them for a supplier that bills in dollars.
   const spend = formatter({ currency: (h.currency ?? 'gbp') as Currency, perSub: null });
 
   const drill = buildDrill({
@@ -302,8 +302,13 @@ export function SupplierRecord({
               value={`${h.unobserved.toLocaleString()} ${h.unobserved === 1 ? 'call' : 'calls'}`}
             />
           ) : null}
-          <Kv label="Spend" value={spend.money(h.spend)} gap={h.gap} strong />
-          <Kv label="Expected" value={spend.money(h.expected)} gap={h.gap} />
+          <Kv label="Spend" value={withDollars(spend, h.spend, h.spendUsd)} gap={h.gap} strong />
+          {h.spend != null && h.basis ? <Kv label="Read from" value={basisWords(h.basis, h.source, h.at, h.apportioned)} /> : null}
+          <Kv
+            label={h.expectedBasis ? `Expected · ${basisWords(h.expectedBasis)}` : 'Expected'}
+            value={withDollars(spend, h.expected, h.expectedUsd)}
+            gap={h.gap ?? '—'}
+          />
           <Kv
             label="Variance"
             value={h.variance == null ? null : `${h.variance < 0 ? '−' : ''}${spend.money(Math.abs(h.variance))} (${h.variancePct == null ? '—' : `${h.variancePct < 0 ? '−' : ''}${Math.abs(h.variancePct)}%`})`}

@@ -29,7 +29,7 @@ import {
 } from './pieces';
 import { SuiteControls, suiteKicker, useFormatters, useSuite, useSuiteControls } from './useSuite';
 import { MetricDrill } from './MetricDrill';
-import type { Row, Stream, Suite } from './model';
+import { basisWords, withDollars, type Row, type Stream, type Suite } from './model';
 
 const STREAMS = ['subscriptions', 'hotel', 'hosting', 'activity'] as const;
 type StreamKey = typeof STREAMS[number];
@@ -169,12 +169,14 @@ export function Money({ canSeeMoney }: { canSeeMoney: boolean }) {
              * library and office unnamed, which reads as arithmetic that has
              * gone wrong (epic-59's visual pass, 20 Sep 2026).
              */
-            sub: suite.money.costToServe.byClass?.length
-              ? suite.money.costToServe.byClass
+            // What the figure is read from first — billed, or "estimate" where
+            // it is the ledger — then the classes it is shared across.
+            sub: [
+              basisWords(suite.money.costToServe.basis),
+              ...(suite.money.costToServe.byClass ?? [])
                 .filter((c) => typeof c.value === 'number' && c.value > 0)
-                .map((c) => `${fmt.cost.money(c.value as number)} ${c.label.toLowerCase()}`)
-                .join(' · ') || undefined
-              : undefined,
+                .map((c) => `${fmt.cost.money(c.value as number)} ${c.label.toLowerCase()}`),
+            ].filter(Boolean).join(' · ') || undefined,
           },
         ]}
       />
@@ -548,8 +550,10 @@ function Breakdown({ suite, fmt, stream }: { suite: Suite; fmt: Fmt; stream: str
           {rows('costs')!.map((r, i, all) => (
             <Kv
               key={r.label}
-              label={r.label}
-              value={typeof r.value === 'number' ? fmt.cost.money(r.value) : money(r.value)}
+              // A ledger figure says so; a billed one needs no word.
+              label={r.basis === 'estimate' ? `${r.label} · estimate` : r.label}
+              value={typeof r.value === 'number' ? withDollars(fmt.cost, r.value, r.usd) : money(r.value)}
+              wide
               strong={i === all.length - 1}
               lime={i === all.length - 1}
               last={i === all.length - 1}

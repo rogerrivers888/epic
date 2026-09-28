@@ -44,8 +44,8 @@ test('a month by caller: tokens and dollars per purpose, what failed, and who wa
 
 test('the tile shows Claude in dollars with pounds beside, and "estimate" only for the ledger', () => {
   const cfg = { budgetClaude: 100, budgetGoogle: 50 };
-  assert.equal(overview.claudeWords({ claude: 87, claudeUsd: 117.02, claudeFrom: 'console' }, cfg), 'Claude $117.02 (£87) of £100');
-  assert.equal(overview.claudeWords({ claude: 121, claudeUsd: 153.16, claudeFrom: 'estimate' }, cfg), 'Claude $153.16 (£121) estimate of £100');
+  assert.equal(overview.claudeWords({ claude: 87, claudeUsd: 117.02, claudeFrom: 'console' }, cfg), 'Claude £87 ($117.02) of £100');
+  assert.equal(overview.claudeWords({ claude: 121, claudeUsd: 153.16, claudeFrom: 'estimate' }, cfg), 'Claude £121 ($153.16) estimate of £100');
 });
 
 test('the console figure is a setting seeded from what the owner read (284), and a bad one is refused', async () => {

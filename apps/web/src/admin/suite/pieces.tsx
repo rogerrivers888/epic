@@ -669,7 +669,9 @@ export function SuiteTable<T extends { id?: string }>({ columns, rows, sort, dir
     : { width: c.width ?? 80, flexShrink: 0, paddingLeft: c.pad ?? 0 });
 
   const body = (
-    <View style={{ minWidth: width >= WIDE ? undefined : 720 }}>
+    // On a phone the table scrolls sideways, at least as wide as its columns
+    // ask for — Suppliers' two-line money columns need more than the 720 floor.
+    <View style={{ minWidth: width >= WIDE ? undefined : Math.max(720, cols.reduce((n, c) => n + (c.grow ? 140 : c.width ?? 80) + (c.pad ?? 0), 0)) }}>
       <View style={styles.thead}>
         {cols.map((c) => {
           const on = !!c.sort && sort === c.sort;
@@ -761,6 +763,33 @@ export function Cell({ children, strong, muted, lime, alarm, gap, left }: {
 }
 
 /** Two lines in one cell — a household's name over its area. */
+/**
+ * A money cell with what it is read from under it — "£87 ($117.02)" over
+ * "console, 29 Sep" — right-aligned like every figure. A missing figure is
+ * its gap, or a dash, never nought.
+ */
+export function MoneyCell({ top, bottom, strong, muted, lime, gap }: {
+  top: string | null | undefined; bottom?: string | null; strong?: boolean; muted?: boolean; lime?: boolean; gap?: string | null;
+}) {
+  if (top == null) return gap ? <Gap says={gap} small /> : <Text style={styles.td}>—</Text>;
+  return (
+    <View style={{ minWidth: 0, width: '100%' }}>
+      <Text
+        numberOfLines={1}
+        style={[
+          styles.td,
+          strong && { fontWeight: '700', color: colors.ink },
+          muted && { color: colors.inkMuted },
+          lime && { color: colors.accent, fontWeight: '700' },
+        ]}
+      >
+        {top}
+      </Text>
+      {bottom ? <Text numberOfLines={1} style={[styles.tdSub, { textAlign: 'right' }]}>{bottom}</Text> : null}
+    </View>
+  );
+}
+
 export function TwoLine({ top, bottom, muted }: { top: string; bottom?: string | null; muted?: boolean }) {
   return (
     // Always left: this is the row's name, and a name is the one thing on a

@@ -564,8 +564,16 @@ export function fixtures() {
     // Suppliers
     // -----------------------------------------------------------------------
     suppliers: {
-      rows: SUPPLIERS,
+      // The mock estate is a British business billed in pounds, every figure
+      // read off a bill — the same shape the real reading gives (basis, the
+      // dollars beside a dollar bill, where the expectation came from).
+      rows: SUPPLIERS.map((r) => ({
+        ...r, spendUsd: null, basis: r.spend == null ? null : 'billed', source: r.spend == null ? null : 'invoice', at: null, note: null,
+        apportioned: false, billsIn: 'gbp', expectedUsd: null, expectedBasis: r.expected == null ? null : 'billed', within: null,
+      })),
       total: 2926,
+      basis: 'billed',
+      currency: 'gbp',
       expected: 2640,
       expectedNextMonth: 3180,
       expectedNextMonthDeltaPct: 8.7,
@@ -819,7 +827,16 @@ export function fixtureSupplier(key, period) {
       lastFault: base.failed ? 'http_429' : null,
       healthGap: null,
       spend,
+      spendUsd: null,
+      basis: spend == null ? null : 'billed',
+      source: spend == null ? null : 'invoice',
+      at: null,
+      note: null,
+      apportioned: false,
+      billsIn: 'gbp',
       expected,
+      expectedUsd: null,
+      expectedBasis: expected == null ? null : 'billed',
       variance: spend == null || expected == null ? null : Math.round((spend - expected) * 100) / 100,
       variancePct: spend == null || !expected ? null : Math.round(((spend - expected) / expected) * 1000) / 10,
       currency: 'gbp',

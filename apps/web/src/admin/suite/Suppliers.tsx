@@ -1,12 +1,18 @@
 /**
  * Suppliers — who Epic pays, what for, and against what.
  *
- * The one column worth explaining is **expected**. It is the same length of
- * window immediately before this one, not a monthly average, because a
- * comparison against an average makes every three-month view look like a
- * threefold overspend. Variance is then computed from the two visible columns,
- * so the row reconciles on the face of it: `£70 (7%)` is `this period −
- * expected`, with no plus signs and a minus only where it applies.
+ * Every figure is the shared cost figure (desk/supplierCost.js): pounds, with
+ * the dollars in brackets for a supplier that bills in dollars, and under it
+ * what it is read from — a bill, the console, or "estimate" where it is the
+ * ledger (owner, 29 Sep 2026).
+ *
+ * The one column worth explaining is **expected**: the same number of whole
+ * months immediately before this window, each at its bill — else its
+ * estimate where that is above nought, else the supplier's budget — and a
+ * dash where there is none of those, never a nought nobody billed. Variance
+ * is computed from the two visible columns, so the row reconciles on the face
+ * of it: `£70 (7%)` is `this period − expected`, with no plus signs and a
+ * minus only where it applies.
  *
  * A row opens that supplier's spend chart — the same drill as everywhere else.
  */
@@ -16,12 +22,12 @@ import { Text, View } from 'react-native';
 import { asOneOf, useQueryState, useStickyQuery } from '../../router';
 import { spacing, type } from '../../theme';
 import {
-  Cell, Chip, ChipGroup, FilterBar, Standing, SuiteHead, SuitePage, SuiteTable, TwoLine,
+  Cell, Chip, ChipGroup, FilterBar, MoneyCell, Standing, SuiteHead, SuitePage, SuiteTable, TwoLine,
   Trouble, Waiting, type Col,
 } from './pieces';
 import { SuiteControls, suiteKicker, useFormatters, useSuite, useSuiteControls } from './useSuite';
 import { SupplierRecord } from './SupplierRecord';
-import { sortRows, type SupplierRow } from './model';
+import { basisWords, sortRows, withDollars, type SupplierRow } from './model';
 
 const DIRECTIONS = ['all', 'cost', 'revenue'] as const;
 // Every header sorts (handoff §5: "sortable headers"). The chips are the
@@ -160,8 +166,27 @@ export function Suppliers({ canSeeMoney, canManage }: {
      * are em dashes, which is what "there is nothing here to compare" looks
      * like once the reason has already been said.
      */
-    { key: 'spend', label: 'This period', width: 98, sort: 'spend', cell: (r) => <Cell strong gap={r.gap}>{fmt.cost.money(r.spend)}</Cell> },
-    { key: 'expected', label: 'Expected', width: 88, sort: 'expected', cell: (r) => <Cell muted>{r.expected == null ? '—' : fmt.cost.money(r.expected)}</Cell> },
+    {
+      key: 'spend', label: 'This period', width: 150, sort: 'spend',
+      cell: (r) => (
+        <MoneyCell
+          strong
+          top={withDollars(fmt.cost, r.spend, r.spendUsd)}
+          bottom={basisWords(r.basis, r.source, r.at, r.apportioned)}
+          gap={r.gap}
+        />
+      ),
+    },
+    {
+      key: 'expected', label: 'Expected', width: 130, sort: 'expected',
+      cell: (r) => (
+        <MoneyCell
+          muted
+          top={r.expected == null ? null : withDollars(fmt.cost, r.expected, r.expectedUsd)}
+          bottom={basisWords(r.expectedBasis)}
+        />
+      ),
+    },
     {
       key: 'variance', label: 'Variance', width: 112, sort: 'variance',
       // Lime at fifteen per cent or more over: the one figure on this screen
@@ -171,7 +196,7 @@ export function Suppliers({ canSeeMoney, canManage }: {
     { key: 'share', label: 'Share', width: 74, sort: 'share', cell: (r) => <Cell muted>{r.share == null ? '—' : `${r.share}%`}</Cell> },
   ];
 
-  const largest = [...priced].filter((r) => r.spend != null).sort((a, b) => (b.spend ?? 0) - (a.spend ?? 0))[0];
+  const largest = [...priced].filter((r) => r.spend != null && !r.residue).sort((a, b) => (b.spend ?? 0) - (a.spend ?? 0))[0];
 
   return (
     <SuitePage>
@@ -202,14 +227,16 @@ export function Suppliers({ canSeeMoney, canManage }: {
           sort={sort}
           dir={dir === 'down' ? -1 : 1}
           onSort={onSort}
-          onRow={(r) => setSupplier(r.key)}
+          // The residue is not a supplier and has no record to open.
+          onRow={(r) => { if (!r.residue) setSupplier(r.key); }}
           foot={{
             name: <Text style={[type.h2, { fontSize: 15 }]}>{`${priced.length} ${priced.length === 1 ? 'supplier' : 'suppliers'}`}</Text>,
-            spend: <Cell strong>{fmt.cost.money(suite.suppliers.total)}</Cell>,
-            expected: <Cell muted>{fmt.cost.money(suite.suppliers.expected)}</Cell>,
+            spend: <MoneyCell strong top={fmt.cost.money(suite.suppliers.total)} bottom={basisWords(suite.suppliers.basis)} />,
+            expected: <Cell muted>{suite.suppliers.expected == null ? '—' : fmt.cost.money(suite.suppliers.expected)}</Cell>,
             variance: (
               <Cell strong lime>
                 {(() => {
+                  if (suite.suppliers.expected == null) return '—';
                   const d = Math.round((suite.suppliers.total - suite.suppliers.expected) * 100) / 100;
                   const p = suite.suppliers.expected ? Math.round((d / suite.suppliers.expected) * 100) : 0;
                   const money = fmt.cost.money(Math.abs(d));
@@ -228,6 +255,7 @@ export function Suppliers({ canSeeMoney, canManage }: {
           {
             label: 'Spend this period',
             value: fmt.cost.money(suite.suppliers.total),
+            sub: basisWords(suite.suppliers.basis),
             delta: (() => {
               const d = suite.suppliers.expected ? ((suite.suppliers.total / suite.suppliers.expected) - 1) * 100 : null;
               return d == null ? undefined : fmt.cost.delta(d) ?? undefined;
@@ -235,7 +263,8 @@ export function Suppliers({ canSeeMoney, canManage }: {
           },
           {
             label: largest ? `Largest supplier · ${largest.name}` : 'Largest supplier',
-            value: fmt.cost.money(largest?.spend),
+            value: withDollars(fmt.cost, largest?.spend, largest?.spendUsd),
+            sub: basisWords(largest?.basis, largest?.source, largest?.at, largest?.apportioned),
             delta: largest?.variancePct ? `${largest.variancePct < 0 ? '−' : '+'}${Math.abs(largest.variancePct)}%` : undefined,
           },
           {

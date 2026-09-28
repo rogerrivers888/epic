@@ -30,6 +30,11 @@ import { classExpression } from '../domain/costClass.js';
 import { monthBuckets } from '../domain/reportingPeriods.js';
 import { listCounterparties, rateHistory } from './counterparties.js';
 import { annualPence, readBenefits, readChannels, readTiers } from './pricing.js';
+import {
+  BILLS_IN_USD, combineBasis, expectedMonths, residueOf, supplierExpected, supplierKind, supplierMonth, supplierWindow,
+} from '../desk/supplierCost.js';
+import { settings as deskSettings } from '../desk/settings.js';
+import { USD_TO_GBP } from '../domain/providerPrices.js';
 
 /**
  * The gaps, in the words the screens say out loud.
@@ -63,6 +68,9 @@ export const GAPS = {
   // What a supplier we are invoiced by costs is on an invoice nobody has
   // entered. Not nought — unread.
   invoiced: 'Invoiced, not metered',
+  // Routes, photos and the census are one Google bill: the register's Routes
+  // entry is inside the Google row, never a second copy of it.
+  withinGoogle: 'In Google’s bill',
   channels: 'No payment provider — the channel a subscription came through is not recorded',
 };
 
@@ -401,8 +409,110 @@ async function cost(from, to) {
       group by 1, 2 order by 4 desc`,
     [from, to],
   );
+  // The same rows by who answers for them (desk/supplierCost.js claims), so a
+  // supplier's corrected figure can be shared across the classes and purposes
+  // its own rows fall in — never a figure it did not bill.
+  const { rows: owned } = await query(
+    `select ${cls} as class, c.purpose, c.provider,
+            (c.provider ~* 'anthropic|claude' or c.provider = 'scout') as claude,
+            (provider_call_bills_google(c.units, c.provider) or c.provider ~* 'google') as google,
+            (coalesce(jsonb_typeof(c.units) = 'object' and (c.units->>'tripadvisor') ~ '^[0-9.]+$', false)
+               or c.provider = 'tripadvisor') as ta,
+            coalesce(sum(c.estimated_cost_usd), 0)::float as usd
+       from provider_calls c
+      where c.created_at >= $1 and c.created_at < $2
+      group by 1, 2, 3, 4, 5, 6`,
+    [from, to],
+  );
   const total = byProvider.reduce((n, p) => n + p.usd, 0);
-  return { total, byClass, byProvider, byPurpose };
+  return { total, byClass, byProvider, byPurpose, owned };
+}
+
+// ---------------------------------------------------------------------------
+// the shared cost figure — every supplier as it billed, or said to be an estimate
+// ---------------------------------------------------------------------------
+
+const r2 = (v) => (v == null ? null : Math.round(v * 100) / 100);
+
+/** The monthly budgets the desk holds, by supplier kind: Google's and Claude's. */
+async function budgets() {
+  const v = (await deskSettings()).values;
+  return { google: Number(v.budgetGoogle) || null, claude: Number(v.budgetClaude) || null };
+}
+
+/**
+ * Every supplier's cost over a window and its expected figure, on the figure
+ * the desk shares (desk/supplierCost.js): in pounds, with the dollars a
+ * dollar-billing supplier charged beside them, and the basis each is on.
+ * The residue — ledger rows no register entry answers for — is kept as its
+ * own line so the total is every pound once.
+ */
+async function supplierCosts(register, period, { now = new Date(), cache = new Map() } = {}) {
+  const residue = residueOf(register);
+  const all = [...register, residue];
+  const b = await budgets();
+  const months = expectedMonths(period);
+  const [win, prev, exp] = await Promise.all([
+    Promise.all(all.map((c) => supplierWindow(c, period.from, period.to, { now, cache }))),
+    Promise.all(all.map((c) => supplierWindow(c, period.prevFrom, period.prevTo, { now, cache }))),
+    Promise.all(register.map((c) => supplierExpected(c, months, { cache, budgets: b }))),
+  ]);
+  const of = new Map(all.map((c, i) => [c.key, { win: win[i], prev: prev[i], exp: exp[i] ?? { gbp: null, nativeUsd: null, basis: null } }]));
+  const sum = (xs) => xs.reduce((n, x) => n + (x?.gbp ?? 0), 0);
+  return {
+    of: (key) => of.get(key),
+    residue,
+    total: sum(win),
+    prevTotal: sum(prev),
+    basis: combineBasis(win.filter((w) => w.gbp != null && (w.gbp > 0 || w.basis !== 'estimate')).map((w) => w.basis)) ?? 'estimate',
+    expectedMonths: months,
+    cache,
+  };
+}
+
+/**
+ * Which supplier answers for a group of ledger rows — the same order of claim
+ * as desk/supplierCost.js: Claude, then Google, then Tripadvisor, then the
+ * register entry named by the provider, else the residue.
+ */
+function ownerOf(register, r) {
+  if (r.claude) return register.find((c) => supplierKind(c) === 'anthropic')?.key ?? 'several';
+  if (r.google) return register.find((c) => supplierKind(c) === 'google')?.key ?? 'several';
+  if (r.ta) return register.find((c) => supplierKind(c) === 'tripadvisor')?.key ?? 'several';
+  const c = register.find((x) => x.providerKey && x.providerKey === r.provider && supplierKind(x) === 'ledger');
+  return c?.key ?? 'several';
+}
+
+/**
+ * The window's corrected cost shared across classes and purposes: each
+ * supplier's figure split over its own ledger rows by their list price. What
+ * a supplier billed with no ledger row to carry it is "Not classified".
+ */
+function apportion(register, costs, owned) {
+  const ledgerBy = new Map();
+  for (const r of owned) {
+    const k = ownerOf(register, r);
+    ledgerBy.set(k, (ledgerBy.get(k) ?? 0) + r.usd);
+  }
+  const factor = new Map();
+  let unplaced = 0;
+  for (const c of [...register, costs.residue]) {
+    const gbp = costs.of(c.key)?.win?.gbp ?? 0;
+    const led = ledgerBy.get(c.key) ?? 0;
+    if (led > 0) factor.set(c.key, gbp / led);
+    else unplaced += gbp;
+  }
+  const byClass = new Map();
+  const byPurpose = new Map();
+  for (const r of owned) {
+    const gbp = r.usd * (factor.get(ownerOf(register, r)) ?? 0);
+    byClass.set(r.class, (byClass.get(r.class) ?? 0) + gbp);
+    const pk = `${r.purpose}|${r.class}`;
+    const p = byPurpose.get(pk) ?? { label: r.purpose, cls: r.class, value: 0 };
+    p.value += gbp;
+    byPurpose.set(pk, p);
+  }
+  return { byClass, byPurpose: [...byPurpose.values()], unplaced };
 }
 
 // ---------------------------------------------------------------------------
@@ -661,24 +771,25 @@ async function history(now) {
   };
 }
 
-/** Twelve months of spend for each provider, for the supplier drill. */
-async function supplierHistory(now) {
+/**
+ * Twelve months of spend for each supplier, for the supplier drill — each
+ * month on the shared figure (supplierMonth), in pounds. A supplier with no
+ * figure of its own (invoiced, or inside Google's bill) has no series.
+ */
+async function supplierHistory(now, register, { cache = new Map(), residue = true } = {}) {
   const months = monthBuckets(now);
-  const { rows } = await query(
-    `select c.provider, to_char(date_trunc('month', c.created_at), 'YYYY-MM') as month,
-            coalesce(sum(c.estimated_cost_usd), 0)::float as usd,
-            count(*)::int as calls
-       from provider_calls c
-      where c.created_at >= $1
-      group by 1, 2`,
-    [months[0].from],
-  );
-  const out = new Map();
-  for (const r of rows) {
-    if (!out.has(r.provider)) out.set(r.provider, new Map());
-    out.get(r.provider).set(r.month, r.usd);
-  }
-  return { months, of: (provider) => months.map((m) => out.get(provider)?.get(m.key) ?? 0) };
+  const all = residue ? [...register, residueOf(register)] : register;
+  const series = new Map(await Promise.all(all.map(async (c) => {
+    const kind = c.kind === 'residue' ? 'residue' : supplierKind(c);
+    if (kind === 'invoiced' || kind === 'within') return [c.key, null];
+    const figs = await Promise.all(months.map((m) => (kind === 'residue'
+      ? supplierWindow(c, m.from, m.to, { now, cache })
+      : supplierMonth(c, m.key, { cache }))));
+    return [c.key, figs.map((f) => r2(f.gbp ?? 0))];
+  })));
+  // The estate's cost a month is every supplier's, once — the residue included.
+  const total = months.map((_, i) => r2([...series.values()].reduce((n, s) => n + (s ? s[i] : 0), 0)));
+  return { months, of: (key) => series.get(key) ?? null, total };
 }
 
 // ---------------------------------------------------------------------------
@@ -1094,31 +1205,60 @@ async function eventsPanels(period) {
  * credential. None of them is on the ledger — they arrive as invoices — so their
  * spend is `null` with a reason rather than nought, which would read as free.
  */
-function suppliersFrom(register, costNow, costPrev, supHist, total) {
+function suppliersFrom(register, costNow, costs, supHist) {
+  const total = costs.total;
   const rows = register.map((c) => {
+    const kind = supplierKind(c);
     const now = c.providerKey ? costNow.byProvider.find((p) => p.provider === c.providerKey) : null;
-    const before = c.providerKey ? costPrev.byProvider.find((p) => p.provider === c.providerKey) : null;
-    const metered = !!c.providerKey;
-    const spend = metered ? Math.round((now?.usd ?? 0) * 100) / 100 : null;
+    const { win, exp } = costs.of(c.key);
+    const priced = win.gbp != null;
+    const usd = BILLS_IN_USD.has(c.key);
     return {
       key: c.key,
       name: c.name,
       direction: c.direction === 'outbound_revenue' ? 'revenue' : 'cost',
       unitName: c.unitName ?? '—',
       unitCost: c.rate?.says ?? null,
-      volume: metered ? (now?.calls ?? 0) : null,
-      spend,
-      expected: metered ? Math.round((before?.usd ?? 0) * 100) / 100 : null,
+      volume: c.providerKey ? (now?.calls ?? 0) : null,
+      // Pounds, on the shared figure; the dollars beside them for a supplier
+      // that bills in dollars, and the basis the figure is on.
+      spend: priced ? r2(win.gbp) : null,
+      spendUsd: priced && usd ? r2(win.nativeUsd ?? win.gbp / USD_TO_GBP) : null,
+      basis: priced ? win.basis : null,
+      source: priced ? win.source ?? null : null,
+      at: priced ? win.at ?? null : null,
+      note: win.note ?? null,
+      apportioned: !!win.apportioned,
+      billsIn: usd ? 'usd' : 'gbp',
+      // Last month's bill, else its estimate where it is above nought, else
+      // the budget, else nothing — never a nought nobody billed.
+      expected: r2(exp.gbp),
+      expectedUsd: exp.gbp != null && usd ? r2(exp.nativeUsd) : null,
+      expectedBasis: exp.basis,
       // Share of the whole bill, worked out from the two visible columns so the
       // foot adds to a hundred rather than to whatever was typed in.
-      share: metered && total ? Math.round(((now?.usd ?? 0) / total) * 1000) / 10 : null,
-      series: metered ? supHist.of(c.providerKey) : null,
+      share: priced && total ? Math.round((win.gbp / total) * 1000) / 10 : null,
+      series: supHist.of(c.key),
       status: c.status,
       adapterState: c.adapterState,
       costClass: c.costClass,
-      gap: metered ? null : GAPS.invoiced,
+      within: kind === 'within' ? 'google-places' : null,
+      gap: kind === 'invoiced' ? GAPS.invoiced : kind === 'within' ? GAPS.withinGoogle : null,
     };
   });
+  // The residue, when there is any: ledger rows no register entry answers for
+  // (a search that asked several sources at once, a source not on the
+  // register). Counted, and said to be the ledger's figure; not a supplier.
+  const res = costs.of(costs.residue.key).win;
+  if (res.gbp > 0.005) {
+    rows.push({
+      key: costs.residue.key, name: costs.residue.name, direction: 'cost', unitName: '—', unitCost: null, volume: null,
+      spend: r2(res.gbp), spendUsd: r2(res.gbp / USD_TO_GBP), basis: 'estimate', source: null, at: null, note: 'ledger, at list price',
+      apportioned: !!res.apportioned, billsIn: 'usd', expected: null, expectedUsd: null, expectedBasis: null,
+      share: total ? Math.round((res.gbp / total) * 1000) / 10 : null, series: supHist.of(costs.residue.key),
+      status: 'live', adapterState: 'n/a', costClass: null, within: null, gap: null, residue: true,
+    });
+  }
   return rows;
 }
 
@@ -1130,19 +1270,15 @@ function suppliersFrom(register, costNow, costPrev, supHist, total) {
  * Those are summed into one row named for what they are, so the panel does not
  * invent a supplier called `fixtures+osm+google+ticketmaster`.
  */
-function costByCounterparty(register, byProvider) {
-  const named = new Map();
-  let other = 0;
-  for (const p of byProvider) {
-    const c = register.find((x) => x.providerKey && x.providerKey === p.provider);
-    if (c) named.set(c.name, (named.get(c.name) ?? 0) + p.usd);
-    else other += p.usd;
-  }
-  const rows = [...named.entries()]
-    .map(([label, usd]) => row(label, Math.round(usd * 100) / 100))
+function costByCounterparty(register, costs) {
+  const rows = register
+    .map((c) => ({ c, w: costs.of(c.key).win }))
+    .filter(({ w }) => w.gbp != null)
+    .map(({ c, w }) => ({ ...row(c.name, r2(w.gbp)), basis: w.basis, usd: BILLS_IN_USD.has(c.key) ? r2(w.nativeUsd ?? w.gbp / USD_TO_GBP) : null }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 6);
-  if (other > 0) rows.push(row('Several sources at once', Math.round(other * 100) / 100));
+  const other = costs.of(costs.residue.key).win.gbp;
+  if (other > 0.005) rows.push({ ...row(costs.residue.name, r2(other)), basis: 'estimate', usd: r2(other / USD_TO_GBP) });
   return rows;
 }
 
@@ -1206,26 +1342,33 @@ export async function readSupplierRecord(key, period) {
   if (!c) return null;
 
   const metered = !!c.providerKey;
+  const kind = supplierKind(c);
   let now = { calls: 0, usd: 0 };
-  let before = { calls: 0, usd: 0 };
   let series = null;
+  let win = { gbp: null, nativeUsd: null, basis: null };
+  let exp = { gbp: null, nativeUsd: null, basis: null };
 
   let health = null;
   if (metered) {
-    const [a, b, hist, h] = await Promise.all([
+    // The same figure the table draws (supplierCosts), for this one supplier.
+    const cache = new Map();
+    const [a, hist, h, w, b] = await Promise.all([
       cost(period.from, period.to),
-      cost(period.prevFrom, period.prevTo),
-      supplierHistory(new Date()),
+      supplierHistory(new Date(), [c], { cache, residue: false }),
       providerHealth(c.providerKey, period),
+      supplierWindow(c, period.from, period.to, { cache }),
+      budgets(),
     ]);
     health = h;
     now = a.byProvider.find((p) => p.provider === c.providerKey) ?? now;
-    before = b.byProvider.find((p) => p.provider === c.providerKey) ?? before;
-    series = hist.of(c.providerKey);
+    series = hist.of(c.key);
+    win = w;
+    exp = await supplierExpected(c, expectedMonths(period), { cache, budgets: b });
   }
 
-  const spend = metered ? Math.round(now.usd * 100) / 100 : null;
-  const expected = metered ? Math.round(before.usd * 100) / 100 : null;
+  const usd = BILLS_IN_USD.has(c.key);
+  const spend = r2(win.gbp);
+  const expected = r2(exp.gbp);
 
   return {
     supplier: {
@@ -1262,7 +1405,16 @@ export async function readSupplierRecord(key, period) {
       unobserved: health?.unobserved ?? null,
       healthGap: health?.observed ? null : GAPS.providerHealth,
       spend,
+      spendUsd: spend != null && usd ? r2(win.nativeUsd ?? win.gbp / USD_TO_GBP) : null,
+      basis: spend != null ? win.basis : null,
+      source: win.source ?? null,
+      at: win.at ?? null,
+      note: win.note ?? null,
+      apportioned: !!win.apportioned,
+      billsIn: usd ? 'usd' : 'gbp',
       expected,
+      expectedUsd: expected != null && usd ? r2(exp.nativeUsd) : null,
+      expectedBasis: exp.basis,
       /**
        * Derived from the two rows above it, so the panel reconciles on its face
        * — and **absent where there is no window to compare with**.
@@ -1277,9 +1429,9 @@ export async function readSupplierRecord(key, period) {
       variance: spend == null || !expected ? null : Math.round((spend - expected) * 100) / 100,
       variancePct: spend == null || !expected ? null : Math.round(((spend - expected) / expected) * 1000) / 10,
       /** Why there is no comparison, where the figure itself is real. */
-      varianceGap: spend != null && !expected ? 'No window before this one to compare with' : null,
-      currency: metered ? 'usd' : 'gbp',
-      gap: metered ? null : GAPS.invoiced,
+      varianceGap: spend != null && !expected ? 'No bill or budget to compare with' : null,
+      currency: 'gbp',
+      gap: kind === 'invoiced' ? GAPS.invoiced : kind === 'within' ? GAPS.withinGoogle : null,
     },
     series,
   };
@@ -1333,7 +1485,11 @@ async function subscriptions() {
  * it is measured.
  */
 export async function readSuite(period, { now = new Date() } = {}) {
-  const [est, subNow, subPrev, mrrRows, bookNow, bookPrev, costNow, costPrev, hist, supHist, register, subs] = await Promise.all([
+  const registerP = listCounterparties();
+  // One cache for the request: a supplier's month is read once however many
+  // windows, series and expectations ask for it.
+  const cache = new Map();
+  const [est, subNow, subPrev, mrrRows, bookNow, bookPrev, costNow, hist, supHist, costs, register, subs] = await Promise.all([
     estate(period),
     subscriptionRevenue(period.from, period.to),
     subscriptionRevenue(period.prevFrom, period.prevTo),
@@ -1341,12 +1497,14 @@ export async function readSuite(period, { now = new Date() } = {}) {
     bookings(period.from, period.to),
     bookings(period.prevFrom, period.prevTo),
     cost(period.from, period.to),
-    cost(period.prevFrom, period.prevTo),
     history(now),
-    supplierHistory(now),
-    listCounterparties(),
+    registerP.then((r) => supplierHistory(now, r, { cache })),
+    registerP.then((r) => supplierCosts(r, period, { now, cache })),
+    registerP,
     subscriptions(),
   ]);
+  // The drill's cost series is the shared figure too, never the ledger's.
+  hist.series.cost = supHist.total;
 
   const base = await activeBase(period);
   const [shares, surfaces, visitRows, back, rates, list] = await Promise.all([
@@ -1392,14 +1550,21 @@ export async function readSuite(period, { now = new Date() } = {}) {
     [period.from, period.to, period.prevFrom, period.prevTo],
   );
 
-  const supplierRows = suppliersFrom(register, costNow, costPrev, supHist, costNow.total);
+  const supplierRows = suppliersFrom(register, costNow, costs, supHist);
   const mrrPence = mrrRows.reduce((n, p) => n + p.pence, 0);
   const revenue = subNow.pence / 100;
-  const cost$ = costNow.total;
-  const research = costNow.byClass.find((c) => c.class === 'research')?.usd ?? 0;
-  const serve = costNow.byClass.find((c) => c.class === 'serve')?.usd ?? 0;
-  const library = costNow.byClass.find((c) => c.class === 'library')?.usd ?? 0;
-  const office = costNow.byClass.find((c) => c.class === 'office')?.usd ?? 0;
+  // Cost is the shared figure, in pounds: what each supplier billed, or its
+  // estimate said to be one (desk/supplierCost.js).
+  const cost$ = costs.total;
+  const shared = apportion(register, costs, costNow.owned);
+  const research = shared.byClass.get('research') ?? 0;
+  const serve = shared.byClass.get('serve') ?? 0;
+  // Every priced row has an expectation, or the foot has none: a total
+  // expected that silently leaves a supplier out is not the window's.
+  const spending = supplierRows.filter((r) => r.spend != null && r.spend > 0.005);
+  const expectedTotal = spending.length && spending.every((r) => r.expected != null)
+    ? r2(supplierRows.reduce((n, r) => n + (r.expected ?? 0), 0))
+    : null;
 
   // Only subscriptions has revenue, and cost is not classified by stream, so
   // margin exists for the estate and not for a stream. Stated rather than
@@ -1562,7 +1727,7 @@ export async function readSuite(period, { now = new Date() } = {}) {
            * register knows keeps its name; everything else is folded into one
            * honest row.
            */
-          costs: bars(costByCounterparty(register, costNow.byProvider)),
+          costs: bars(costByCounterparty(register, costs)),
         },
         hotel: { gap: GAPS.hotel },
         hosting: {
@@ -1593,8 +1758,9 @@ export async function readSuite(period, { now = new Date() } = {}) {
       refunds: bookNow.count ? bookNow.refundedPence / 100 : null,
       costToServe: {
         total: cost$,
-        allocated: serve,
-        byKind: bars(costNow.byProvider.map((p) => row(p.provider, Math.round(p.usd * 100) / 100))),
+        allocated: r2(serve),
+        byKind: bars(costByCounterparty(register, costs)),
+        basis: costs.basis,
         /**
          * The classes, and **whatever is not in one of them**.
          *
@@ -1608,23 +1774,30 @@ export async function readSuite(period, { now = new Date() } = {}) {
          * classify it.
          */
         byClass: (() => {
-          const of = (cls) => costNow.byClass.find((c) => c.class === cls)?.usd ?? 0;
+          // The shared figure, split over each supplier's own rows by their
+          // list price (apportion); what no row carries is not classified.
+          const of = (cls) => shared.byClass.get(cls) ?? 0;
           const named = ['library', 'serve', 'office', 'research'];
           const rows = [
-            row('Library', Math.round(of('library') * 100) / 100),
-            row('Serving households', Math.round(of('serve') * 100) / 100),
-            row('Back office', Math.round(of('office') * 100) / 100),
-            row('Research', Math.round(of('research') * 100) / 100),
+            row('Library', r2(of('library'))),
+            row('Serving households', r2(of('serve'))),
+            row('Back office', r2(of('office'))),
+            row('Research', r2(of('research'))),
           ];
-          const rest = costNow.byClass
-            .filter((c) => !named.includes(c.class))
-            .reduce((n, c) => n + c.usd, 0);
-          if (rest > 0) rows.push(row('Not classified', Math.round(rest * 100) / 100));
+          const rest = [...shared.byClass.entries()]
+            .filter(([k]) => !named.includes(k))
+            .reduce((n, [, v]) => n + v, 0) + shared.unplaced;
+          if (rest > 0.005) rows.push(row('Not classified', r2(rest)));
           return rows;
         })(),
-        byPurpose: costNow.byPurpose.map((p) => ({ label: p.purpose, value: Math.round(p.usd * 100) / 100, cls: p.class, calls: p.calls })),
-        research: Math.round(research * 100) / 100,
-        delta: change(cost$, costPrev.total),
+        byPurpose: costNow.byPurpose.map((p) => ({
+          label: p.purpose,
+          value: r2(shared.byPurpose.filter((x) => x.label === p.purpose && x.cls === p.class).reduce((n, x) => n + x.value, 0)),
+          cls: p.class, calls: p.calls,
+        })).sort((a, b) => b.value - a.value),
+        research: r2(research),
+        apportioned: true,
+        delta: change(cost$, costs.prevTotal),
         // Said on the screen, not just here: the class is worked out when the
         // ledger is read, because `provider_calls.class` is not a column yet.
         classDerived: true,
@@ -1667,16 +1840,18 @@ export async function readSuite(period, { now = new Date() } = {}) {
 
     suppliers: {
       rows: supplierRows,
-      total: Math.round(cost$ * 100) / 100,
-      expected: Math.round(costPrev.total * 100) / 100,
+      total: r2(cost$),
+      basis: costs.basis,
+      expected: expectedTotal,
+      expectedMonths: costs.expectedMonths,
       // A forecast of next month's bill needs a trend nobody has enough of yet:
       // the ledger began in September. Named rather than extrapolated from one
       // month, which would be a run rate through a single point.
       expectedNextMonth: null,
       expectedNextMonthDeltaPct: null,
       expectedNextMonthGap: 'Needs more than one month of ledger',
-      largest: [...supplierRows].filter((r) => r.spend != null).sort((a, b) => b.spend - a.spend)[0] ?? null,
-      currency: 'usd',
+      largest: [...supplierRows].filter((r) => r.spend != null && !r.residue).sort((a, b) => b.spend - a.spend)[0] ?? null,
+      currency: 'gbp',
     },
 
     behaviour: {
@@ -1875,6 +2050,10 @@ export async function readHousehold(id, period, { now = new Date() } = {}) {
       previousYearPence: null,
       earnedPence: subscriptionPence,
       costUsd,
+      // In pounds beside it, and an estimate: a household's share of the
+      // ledger at list price, not anything a supplier billed.
+      costGbp: costUsd == null ? null : r2(Number(costUsd) * USD_TO_GBP),
+      costBasis: 'estimate',
       costPence: null,
       marginPence: null,
       marginGap: 'Revenue is in pounds and provider cost in dollars — no exchange rate is set',

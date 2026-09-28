@@ -9,7 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildDrill, changeText, compounded, toQuarters } from '../src/admin/suite/drill.ts';
-import { formatter, share, sortRows, trendable } from '../src/admin/suite/model.ts';
+import { basisWords, formatter, share, sortRows, trendable, withDollars } from '../src/admin/suite/model.ts';
 
 const LABELS = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'];
 const KEYS = ['2025-10', '2025-11', '2025-12', '2026-01', '2026-02', '2026-03',
@@ -234,4 +234,17 @@ test('a column sorts both ways, and a gap always sinks', () => {
   // A missing figure is never sorted to the top as if it were the largest.
   assert.equal(sortRows(rows, 'n', -1)[2].n, null);
   assert.deepEqual(sortRows(rows, 's', 1).map((r) => r.s), ['a', 'b', 'c']);
+});
+
+test('a cost is pounds first with the dollars in brackets, and says what it is read from', () => {
+  const gbp = formatter({ currency: 'gbp' });
+  assert.equal(withDollars(gbp, 87, 117.02), '£87 ($117.02)');
+  assert.equal(withDollars(gbp, 40.61, null), '£40.61');
+  assert.equal(withDollars(gbp, null, 5), null, 'no figure is no figure, never nought');
+  assert.equal(basisWords('billed', 'Anthropic console, Epic organisation', '2026-09-29T12:00:00Z'), 'console, 29 Sep');
+  assert.equal(basisWords('billed', 'Google billing export', null), 'billed · Google billing export');
+  assert.equal(basisWords('billed+estimate', 'Google billing export', null), 'billed · Google billing export + estimate');
+  assert.equal(basisWords('estimate'), 'estimate');
+  assert.equal(basisWords('budget'), 'budget');
+  assert.equal(basisWords(null), null);
 });
