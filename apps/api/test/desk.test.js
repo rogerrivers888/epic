@@ -594,3 +594,30 @@ test('Include anyway stays Active; a person’s Don’t know is skipped by every
   assert.equal(await has(), 0);
   await query(`delete from place_fact_answers where venue_ref = 'desk:dk'`);
 });
+
+test('a Don’t know stops a default standing in for it in collections, leaves the conflict count, and is logged as the before', async () => {
+  const col = await import('../src/desk/collections.js');
+  await seedTaxonomy();
+  await query(`insert into place_index (venue_ref, subcategory) values ('desk:dk5', 'desk-water') on conflict (venue_ref) do update set subcategory = 'desk-water', not_in_epic_at = null`);
+  await query(`delete from shelf_subcategory_attributes where subcategory_key = 'desk-water' and attribute_key = 'toilets'`);
+  await query(`insert into shelf_subcategory_attributes (subcategory_key, attribute_key, yesno, origin) values ('desk-water', 'toilets', true, 'person')`);
+  await query(`delete from fact_unknowns where venue_ref = 'desk:dk5'`);
+  await query(`delete from place_attribute_values where venue_ref = 'desk:dk5'`);
+  await query(`insert into place_fact_answers (venue_ref, attribute_key, state, source) values ('desk:dk5', 'toilets', 'conflict', 'osm')
+               on conflict (venue_ref, attribute_key) do update set state = 'conflict', hidden_at = null`);
+  col.forget();
+  await facts.correct({ ref: 'desk:dk5', fact: 'toilets', option: 'dont_know', who: WHO });
+  col.forget();
+  const idx = await col.placeIndex();
+  const p = (idx.places ?? idx).get ? (idx.places ?? idx).get('desk:dk5') : (idx.places ?? idx).find((x) => x.ref === 'desk:dk5');
+  assert.ok(p, 'the place is indexed');
+  assert.equal(p.facts.has('toilets'), false, 'the default does not stand in for a Don’t know');
+  const page = await facts.factPage('toilets');
+  assert.ok(!String(page.conflictLine ?? '').includes('1 place'), 'the Don’t know place is not a conflict');
+  const yes = await facts.correct({ ref: 'desk:dk5', fact: 'toilets', option: 'yes', who: WHO });
+  const { rows: [ch] } = await query('select before from bo_changes where id = $1', [yes.change ?? yes.changeId ?? yes.id]);
+  assert.equal(ch.before, 'Don’t know');
+  await query(`delete from shelf_subcategory_attributes where subcategory_key = 'desk-water' and attribute_key = 'toilets'`);
+  await query(`delete from place_attribute_values where venue_ref = 'desk:dk5'`);
+  await query(`delete from place_fact_answers where venue_ref = 'desk:dk5'`);
+});

@@ -146,7 +146,8 @@ async function conflictsOf(key) {
   const { rows: [{ n }] } = await query(
     `select count(*)::int n from place_fact_answers x
       where x.attribute_key = $1 and x.state = 'conflict' and x.hidden_at is null
-        and not exists (select 1 from place_attribute_values v where v.venue_ref = x.venue_ref and v.attribute_key = x.attribute_key and v.set_by is not null)`,
+        and not exists (select 1 from place_attribute_values v where v.venue_ref = x.venue_ref and v.attribute_key = x.attribute_key and v.set_by is not null)
+        and not exists (select 1 from fact_unknowns u where u.venue_ref = x.venue_ref and u.attribute_key = x.attribute_key)`,
     [key]);
   return n;
 }
@@ -424,7 +425,7 @@ export async function correct({ ref, fact, option, why = null, who }) {
         [ref, fact, o.value.yesno ? 'yes' : 'no', machine?.state ?? null, machine?.source ?? null, sub?.subcategory ?? null, who]);
     }
     const d = (await describe([ref])).get(ref);
-    const before = was?.set_by ? wordOf(a, { yesno: was.yesno, from: was.from_value, to: was.to_value, choice: was.choice }, cfg)
+    const before = unknownWas ? 'Don’t know' : was?.set_by ? wordOf(a, { yesno: was.yesno, from: was.from_value, to: was.to_value, choice: was.choice }, cfg)
       : machine && !machine.hidden_at ? (machine.state === 'yes' || machine.state === 'no' ? wordOf(a, { yesno: machine.yesno, from: machine.from_value, to: machine.to_value, choice: machine.choice }, cfg) ?? (machine.state === 'no' ? 'No' : 'Yes') : 'Don’t know') : 'Don’t know';
     return logChange({
       client: c, who, area: 'Facts', what: `Answer corrected · ${label} · ${d?.name ?? ref}`,
@@ -438,7 +439,9 @@ export async function correct({ ref, fact, option, why = null, who }) {
 
 /** Undo a correction: the place goes back to exactly what it held. */
 export async function undoCorrection({ change, who }) {
-  const { ref, fact, was, unknownWas = null } = change.undo;
+  // `hid` is from before a Don't know stopped hiding answers (e749d6a): a
+  // change recorded then still unhides what it hid.
+  const { ref, fact, was, unknownWas = null, hid = false } = change.undo;
   await withTransaction(async (c) => {
 
     // A Don't know that stood before is put back; one this correction made goes.
@@ -455,6 +458,7 @@ export async function undoCorrection({ change, who }) {
            to_value = excluded.to_value, choice = excluded.choice, reason = excluded.reason, set_by = excluded.set_by, updated_at = now()`,
         [ref, fact, was.yesno, was.from, was.to, was.choice, was.reason, was.set_by]);
     }
+    if (hid) await c.query('update place_fact_answers set hidden_at = null where venue_ref = $1 and attribute_key = $2', [ref, fact]);
     await c.query('update bo_changes set undone_at = now(), undone_by = $2 where id = $1', [change.id, who]);
   });
   forgetAttributes();

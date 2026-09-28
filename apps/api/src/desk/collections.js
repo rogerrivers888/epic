@@ -211,7 +211,7 @@ export const forget = () => { cache = null; };
  */
 export async function placeIndex() {
   if (cache && Date.now() - cachedAt < TTL_MS) return cache;
-  const [{ rows: filed }, { rows: subs }, { rows: also }, { rows: own }, { rows: verified }, { rows: defaults }] = await Promise.all([
+  const [{ rows: filed }, { rows: subs }, { rows: also }, { rows: own }, { rows: verified }, { rows: defaults }, { rows: unknowns }] = await Promise.all([
     query(`select pi.venue_ref, pi.subcategory as sub, true as primary_ from place_index pi
             where pi.subcategory is not null and pi.not_in_epic_at is null
            union
@@ -224,6 +224,7 @@ export async function placeIndex() {
     query('select venue_ref, attribute_key, yesno, from_value, to_value, choice from place_attribute_values where set_by is not null'),
     query(`select venue_ref, attribute_key, state, yesno, from_value, to_value, choice from place_fact_answers a where state in ('yes','no') and hidden_at is null and not exists (select 1 from fact_unknowns u where u.venue_ref = a.venue_ref and u.attribute_key = a.attribute_key)`),
     query(`select subcategory_key, attribute_key, yesno, from_value, to_value, choice from shelf_subcategory_attributes where origin = 'person' or settled`),
+    query('select venue_ref, attribute_key from fact_unknowns'),
   ]);
   const catOf = new Map(subs.map((s) => [s.key, s.category_key]));
   const alsoIn = new Map();
@@ -244,6 +245,9 @@ export async function placeIndex() {
     defaultsOfSub.set(d.subcategory_key, [...(defaultsOfSub.get(d.subcategory_key) ?? []), d]);
   }
   for (const v of verified) places.get(v.venue_ref)?.answers.set(v.attribute_key, v.state === 'no' && v.yesno == null ? { ...v, yesno: false } : v);
+  // A person's Don't know is an answer too — nobody can tell — so no default
+  // stands in for it and the place neither has nor lacks the fact (Codex).
+  for (const u of unknowns) places.get(u.venue_ref)?.answers.set(u.attribute_key, { unknown: true, yesno: null, from_value: null, to_value: null, choice: null });
   for (const v of own) places.get(v.venue_ref)?.answers.set(v.attribute_key, v); // a person's answer wins
   for (const p of places.values()) {
     const get = (k) => p.answers.get(k) ?? (p.primarySub ? defaultBy.get(`${p.primarySub}|${k}`) : null) ?? null;
