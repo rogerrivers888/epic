@@ -13,6 +13,7 @@ import { logChange } from './changes.js';
 import { settings } from './settings.js';
 import { FILED_SQL, HAS_SQL, STANDARD, wordOf, answerOptionsOf, factsWithCounts, factWord } from './categories.js';
 import { describe, SOURCE_WORD, sourcesWord } from './places.js';
+import { forget as forgetCollections } from './collections.js';
 import { forget as forgetAttributes } from '../repositories/placeAttributes.js';
 
 const bad = (message) => Object.assign(new Error(message), { status: 400, code: 'bad_request' });
@@ -434,6 +435,7 @@ export async function correct({ ref, fact, option, why = null, who }) {
     });
   });
   forgetAttributes();
+  forgetCollections(); // a Don't know changes what a collection returns
   return out;
 }
 
@@ -458,10 +460,13 @@ export async function undoCorrection({ change, who }) {
            to_value = excluded.to_value, choice = excluded.choice, reason = excluded.reason, set_by = excluded.set_by, updated_at = now()`,
         [ref, fact, was.yesno, was.from, was.to, was.choice, was.reason, was.set_by]);
     }
-    if (hid) await c.query('update place_fact_answers set hidden_at = null where venue_ref = $1 and attribute_key = $2', [ref, fact]);
+    // Only the hide that correction made (same transaction, same moment): a
+    // later family hide stands (Codex, 28 Sep 2026).
+    if (hid) await c.query('update place_fact_answers set hidden_at = null where venue_ref = $1 and attribute_key = $2 and hidden_at <= $3', [ref, fact, change.at]);
     await c.query('update bo_changes set undone_at = now(), undone_by = $2 where id = $1', [change.id, who]);
   });
   forgetAttributes();
+  forgetCollections(); // a Don't know changes what a collection returns
 }
 
 /** Excluded facts: Feature · Subcategory · Why, with what can put each back. */
