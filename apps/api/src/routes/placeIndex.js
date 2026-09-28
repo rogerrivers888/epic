@@ -19,6 +19,7 @@
 
 import express from 'express';
 import { timingSafeEqual } from 'node:crypto';
+import { looksLikeHash, verifyResumeKey } from '../domain/resumeKey.js';
 import { can, requires } from '../access.js';
 import { query, withTransaction } from '../db.js';
 import * as index from '../repositories/placeIndex.js';
@@ -3608,18 +3609,52 @@ router.post('/census/run/:id/stop', requires('manage_library'), async (req, res,
  *     only, and the endpoint says so rather than implying a lock that is not
  *     there.
  */
+/**
+ * Which guard is on the resume: `hash`, `plain` or `none` — never the value.
+ * `hashMalformed` says a hash is set that this server cannot read, which
+ * refuses every resume until it is fixed. Read-only, for the owner to confirm
+ * each step of moving to the hash (G10).
+ */
+export function resumeGuard(env = process.env) {
+  const hash = env.EPIC_CENSUS_RESUME_KEY_HASH?.trim();
+  if (hash) return { kind: 'hash', value: hash, malformed: !looksLikeHash(hash) };
+  const plain = env.EPIC_CENSUS_RESUME_KEY?.trim();
+  if (plain) return { kind: 'plain', value: plain, malformed: false };
+  return { kind: 'none', value: null, malformed: false };
+}
+
+/** Whether what the caller sent opens this guard. Constant time either way. */
+export function resumeKeyAccepted(guard, given) {
+  if (guard.kind === 'none') return true;
+  const typed = String(given ?? '');
+  if (guard.kind === 'hash') return verifyResumeKey(typed, guard.value);
+  const a = Buffer.from(typed, 'utf8');
+  const b = Buffer.from(guard.value, 'utf8');
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+router.get('/census/resume-guard', requires('manage_library'), (_req, res) => {
+  const g = resumeGuard();
+  res.json({
+    guard: g.kind,
+    hashMalformed: g.malformed,
+    plainKeyStillSet: Boolean(process.env.EPIC_CENSUS_RESUME_KEY?.trim()),
+  });
+});
+
 router.post('/census/run/:id/resume', requires('manage_library'), async (req, res, next) => {
   try {
     const { rows: [run] } = await query('select id, label, state from census_runs where id = $1', [String(req.params.id)]);
     if (!run) throw bad('no such run');
 
-    const key = process.env.EPIC_CENSUS_RESUME_KEY?.trim();
+    // The hash first (G10, 28 Sep 2026): the plain key could be read by any
+    // session with the Railway CLI, so it withheld nothing from an agent. The
+    // plain key is honoured only while no hash is set, so the switch-over has
+    // no gap (domain/resumeKey.js).
+    const guard = resumeGuard();
+    const key = guard.kind !== 'none';
     if (key) {
-      const given = String(req.body?.key ?? '');
-      const a = Buffer.from(given, 'utf8');
-      const b = Buffer.from(key, 'utf8');
-      const ok = a.length === b.length && timingSafeEqual(a, b);
-      if (!ok) {
+      if (!resumeKeyAccepted(guard, req.body?.key)) {
         return res.status(403).json({
           error: 'resume_key',
           message: 'Resuming a census needs the key the owner set for it.',
