@@ -14,10 +14,20 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { googleSource } from '../src/sources/google.js';
-import { tileOf, planTiles, startRun, advance, requestStop, resume, resumeInterrupted, rollUpOutcodes, retryRollUps, nextUtcMidnight, report } from '../src/sources/censusRun.js';
-import { slicePlan } from '../src/sources/census.js';
-import { query, pool } from '../src/db.js';
+import { testDatabase } from './helpers/db.js';
+
+// A database of this file's own, built from the committed migrations — not the
+// development database, whose schema is whatever somebody last migrated it to.
+// Run against that, the census ledger's write failed on a column a newer
+// migration had added (api_sessions.kind), the census wrote nothing down, the
+// day's budget never filled, and three day-budget tests could only pass while
+// somebody else's Google rows for the Pacific day happened to be there (F14,
+// 28 Sep 2026). `testDatabase` sets DATABASE_URL, so everything is imported
+// after it.
+const { query, pool } = await testDatabase();
+const { googleSource } = await import('../src/sources/google.js');
+const { tileOf, planTiles, startRun, advance, requestStop, resume, resumeInterrupted, rollUpOutcodes, retryRollUps, nextUtcMidnight, report } = await import('../src/sources/censusRun.js');
+const { slicePlan } = await import('../src/sources/census.js');
 
 test.after(() => pool.end());
 
@@ -27,11 +37,29 @@ const withCensus = async (impl, run) => {
   try { return await run(); } finally { googleSource.censusSlice = was; }
 };
 
+/**
+ * Count a request on the meter the way Google's `call()` does, before it
+ * answers. The census ledgers what the meter says it asked, and the day's
+ * budget reads the ledger: a stub that answered without moving the meter
+ * wrote nothing down, so a run's day never filled and the day-budget tests
+ * could only pass on whatever other Google rows happened to be in the
+ * database for the Pacific day — green while a neighbour's rows were there,
+ * red after the Pacific midnight emptied the window (F14, 28 Sep 2026).
+ */
+const metered = (meter, n = 1) => {
+  if (!meter) return;
+  meter.google = (meter.google ?? 0) + n;
+  meter['google-essentials'] = (meter['google-essentials'] ?? 0) + n;
+};
+
 /** One place, the way IDs Only answers: an id and where it came in the answer. */
-const answers = (n = 1) => async () => ({
-  places: Array.from({ length: n }, (_, i) => ({ id: `ChIJrun_test_${Math.random().toString(36).slice(2, 8)}_${i}`, rank: i + 1 })),
-  requests: 1, saturated: false, problem: null,
-});
+const answers = (n = 1) => async ({ meter } = {}) => {
+  metered(meter);
+  return {
+    places: Array.from({ length: n }, (_, i) => ({ id: `ChIJrun_test_${Math.random().toString(36).slice(2, 8)}_${i}`, rank: i + 1 })),
+    requests: 1, saturated: false, problem: null,
+  };
+};
 
 /**
  * Everything this test made, gone, whatever it found.
@@ -53,6 +81,10 @@ const clean = async () => {
   await query(`delete from census_run_tiles where grid_key like 'test/%'`);
   await query(`delete from census_tiles where grid_key like 'test/%'`);
   await query(`delete from census_runs where label like 'test %'`);
+  // What the metered stubs ledgered: census rows on no household, from a run
+  // of this file — never the day's real rows in a shared database, which carry
+  // a household or a named session and are not written by these fixtures.
+  await query(`delete from provider_calls where purpose = 'census.slice' and household_id is null and created_at > now() - interval '1 hour' and (units->>'google')::int < 100`);
 };
 
 const seedTile = async (run, gridKey) => {
@@ -230,6 +262,9 @@ test('two runs over the same ground are refused, because free work is still work
 // ---------------------------------------------------------------------------
 
 test('a tile census is reported by outcode, and a box across the edge is neither in nor out', async (t) => {
+  // Out at sea, a degree south, where no real sector or postcode is near: the
+  // test database holds every sector in Britain (migration 248), and a fixture
+  // district drawn over Windsor or Bloomsbury lost its places to the real one.
   await clean();
   t.after(async () => {
     await query(`delete from area_counts where area_slug in ('zz9a', 'zz9b')`);
@@ -242,14 +277,14 @@ test('a tile census is reported by outcode, and a box across the edge is neither
   // Two outcodes, far enough apart that a box can sit wholly in one.
   await query(
     `insert into geo_cells (code, scheme, label, outcode, lat, lng, source) values
-       ('ZZ9A 1', 'sector', 'ZZ9A 1', 'ZZ9A', 51.41, -0.68, 'test'),
-       ('ZZ9A 2', 'sector', 'ZZ9A 2', 'ZZ9A', 51.42, -0.66, 'test'),
-       ('ZZ9B 1', 'sector', 'ZZ9B 1', 'ZZ9B', 51.46, -0.60, 'test'),
-       ('ZZ9B 2', 'sector', 'ZZ9B 2', 'ZZ9B', 51.47, -0.59, 'test')
+       ('ZZ9A 1', 'sector', 'ZZ9A 1', 'ZZ9A', 50.41, -0.68, 'test'),
+       ('ZZ9A 2', 'sector', 'ZZ9A 2', 'ZZ9A', 50.42, -0.66, 'test'),
+       ('ZZ9B 1', 'sector', 'ZZ9B 1', 'ZZ9B', 50.46, -0.60, 'test'),
+       ('ZZ9B 2', 'sector', 'ZZ9B 2', 'ZZ9B', 50.47, -0.59, 'test')
      on conflict (code) do update set outcode = excluded.outcode, lat = excluded.lat, lng = excluded.lng`);
   await query(
     `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, saturated)
-     values ('test/rollup', 51.40, -0.72, 51.48, -0.56, array['ZZ9A','ZZ9B'], 'done', now(), 0)
+     values ('test/rollup', 50.40, -0.72, 50.48, -0.56, array['ZZ9A','ZZ9B'], 'done', now(), 0)
      on conflict (grid_key) do update set outcodes = excluded.outcodes, state = 'done', censused_at = now()`);
 
   // One place in a small box inside ZZ9A, one in a box that spans both.
@@ -263,8 +298,8 @@ test('a tile census is reported by outcode, and a box across the edge is neither
        values ($1, 'sport', 'golf', 'golf_course', 'test/rollup', now(), now())
        on conflict (venue_ref, subcategory, coalesce(area_slug, '')) do nothing`, [ref]);
   };
-  await place('google:rollup_inside', '51.4050,-0.6900,51.4250,-0.6600');
-  await place('google:rollup_across', '51.4000,-0.7200,51.4800,-0.5600');
+  await place('google:rollup_inside', '50.4050,-0.6900,50.4250,-0.6600');
+  await place('google:rollup_across', '50.4000,-0.7200,50.4800,-0.5600');
 
   const out = await rollUpOutcodes({ outcodes: ['ZZ9A', 'ZZ9B'] });
   assert.ok(out.rows > 0, 'the outcodes got their counts');
@@ -569,7 +604,7 @@ test('a run stops itself at the day\'s allowance and comes back at the reset', a
   t.after(clean);
   const { rows: [run] } = await query(
     `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, daily_cap, day, day_requests)
-     values ('test daily cap', array['ZZ'], 0.08, 0.12, 100000, 0, 30, 3, (now() at time zone 'utc')::date, 0)
+     values ('test daily cap', array['ZZ'], 0.08, 0.12, 100000, 0, 30, 3, (now() at time zone 'America/Los_Angeles')::date, 0)
      returning *`);
   await seedTile(run, 'test/dailycap');
 
@@ -676,7 +711,7 @@ test('the day\'s budget is the project\'s, not the region\'s', async (t) => {
 
   const { rows: [run] } = await query(
     `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, daily_cap, day, day_requests)
-     values ('test other region', array['ZZ'], 0.08, 0.12, 100000, 0, 30, 41, (now() at time zone 'utc')::date, 0)
+     values ('test other region', array['ZZ'], 0.08, 0.12, 100000, 0, 30, 41, (now() at time zone 'America/Los_Angeles')::date, 0)
      returning *`);
   await seedTile(run, 'test/dayscope');
 
@@ -771,13 +806,14 @@ test('a tile may not spend more than the day has left', async (t) => {
      values ((select id from api_sessions where token_hash = 'service:unattributed-before-2026-09-26'), 'google', 'census.slice', '{"google": 39, "google-essentials": 39}'::jsonb, -4244, now())`);
   const { rows: [run] } = await query(
     `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, daily_cap, day, day_requests)
-     values ('test tile budget', array['ZZ'], 0.08, 0.12, 100000, 0, 30, 40, (now() at time zone 'utc')::date, 0)
+     values ('test tile budget', array['ZZ'], 0.08, 0.12, 100000, 0, 30, 40, (now() at time zone 'America/Los_Angeles')::date, 0)
      returning *`);
   await seedTile(run, 'test/tilebudget');
 
   let asked = 0;
-  await withCensus(async () => {
+  await withCensus(async ({ meter } = {}) => {
     asked += 1;
+    metered(meter);
     return { places: [{ id: `ChIJrun_test_b${asked}`, rank: 1 }], requests: 1, saturated: false, problem: null };
   }, () => advance({ runId: run.id, budgetMs: 20_000 }));
 
@@ -847,6 +883,9 @@ test('a tile part way through is reconciled too, and the signature waits for the
 });
 
 test('how a drawer was found is read from the places inside the outcode, not beside it', async (t) => {
+  // Out at sea, a degree south, where no real sector or postcode is near: the
+  // test database holds every sector in Britain (migration 248), and a fixture
+  // district drawn over Windsor or Bloomsbury lost its places to the real one.
   await clean();
   t.after(async () => {
     await query(`delete from area_counts where area_slug in ('zz8a', 'zz8b')`);
@@ -856,12 +895,12 @@ test('how a drawer was found is read from the places inside the outcode, not bes
   });
   await query(
     `insert into geo_cells (code, scheme, label, outcode, lat, lng, source) values
-       ('ZZ8A 1', 'sector', 'ZZ8A 1', 'ZZ8A', 51.41, -0.68, 'test'),
-       ('ZZ8B 1', 'sector', 'ZZ8B 1', 'ZZ8B', 51.47, -0.59, 'test')
+       ('ZZ8A 1', 'sector', 'ZZ8A 1', 'ZZ8A', 50.41, -0.68, 'test'),
+       ('ZZ8B 1', 'sector', 'ZZ8B 1', 'ZZ8B', 50.47, -0.59, 'test')
      on conflict (code) do update set outcode = excluded.outcode, lat = excluded.lat, lng = excluded.lng`);
   await query(
     `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, started_at)
-     values ('test/sourced', 51.40, -0.72, 51.48, -0.56, array['ZZ8A','ZZ8B'], 'done', now(), now() - interval '1 minute')
+     values ('test/sourced', 50.40, -0.72, 50.48, -0.56, array['ZZ8A','ZZ8B'], 'done', now(), now() - interval '1 minute')
      on conflict (grid_key) do update set outcodes = excluded.outcodes, state = 'done', censused_at = now()`);
 
   // One place in each district: the one in ZZ8A was found by a typed question,
@@ -878,10 +917,10 @@ test('how a drawer was found is read from the places inside the outcode, not bes
        on conflict (venue_ref, subcategory, coalesce(area_slug, '')) do update set sourced = excluded.sourced`,
       [ref, foundBy, sourced]);
   };
-  await place('google:sourced_typed', '51.4050,-0.6900,51.4250,-0.6600', 'type', 'museum');
+  await place('google:sourced_typed', '50.4050,-0.6900,50.4250,-0.6600', 'type', 'museum');
   // Fenced words, not bare text: since 25 Sep 2026 a text-sourced surfacing
   // only counts while its drawer is still asked in text, and none is.
-  await place('google:sourced_text', '51.4600,-0.6000,51.4750,-0.5800', 'words', 'historical_place');
+  await place('google:sourced_text', '50.4600,-0.6000,50.4750,-0.5800', 'words', 'historical_place');
 
   await rollUpOutcodes({ outcodes: ['ZZ8A', 'ZZ8B'] });
 
@@ -1072,6 +1111,9 @@ test('the quota day turns over at midnight in Los Angeles, whatever the clocks a
 });
 
 test('a boundary place is counted in exactly one neighbour, never two and never none', async (t) => {
+  // Out at sea, a degree south, where no real sector or postcode is near: the
+  // test database holds every sector in Britain (migration 248), and a fixture
+  // district drawn over Windsor or Bloomsbury lost its places to the real one.
   await clean();
   t.after(async () => {
     await query(`delete from area_counts where area_slug in ('zz4a', 'zz4b')`);
@@ -1083,22 +1125,22 @@ test('a boundary place is counted in exactly one neighbour, never two and never 
   // which every census box straddles the line.
   await query(
     `insert into geo_cells (code, scheme, label, outcode, lat, lng, source) values
-       ('ZZ4A 1', 'sector', 'ZZ4A 1', 'ZZ4A', 51.5200, -0.1300, 'test'),
-       ('ZZ4B 1', 'sector', 'ZZ4B 1', 'ZZ4B', 51.5200, -0.1200, 'test')
+       ('ZZ4A 1', 'sector', 'ZZ4A 1', 'ZZ4A', 50.5200, -0.1300, 'test'),
+       ('ZZ4B 1', 'sector', 'ZZ4B 1', 'ZZ4B', 50.5200, -0.1200, 'test')
      on conflict (code) do update set outcode = excluded.outcode, lat = excluded.lat, lng = excluded.lng`);
   await query(
     `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, started_at)
-     values ('test/boundary', 51.51, -0.14, 51.53, -0.11, array['ZZ4A','ZZ4B'], 'done', now(), now() - interval '1 minute')
+     values ('test/boundary', 50.51, -0.14, 50.53, -0.11, array['ZZ4A','ZZ4B'], 'done', now(), now() - interval '1 minute')
      on conflict (grid_key) do update set outcodes = excluded.outcodes, state = 'done', censused_at = now()`);
   // Six places, all in boxes about four hundred metres wide that sit on the
   // line between the two — some just west of it, some just east, one dead on.
   const boxes = [
-    ['google:boundary_w1', '51.5180,-0.1290,51.5220,-0.1250'], // centre -0.1270: nearer A
-    ['google:boundary_w2', '51.5170,-0.1300,51.5210,-0.1260'], // -0.1280: A
-    ['google:boundary_e1', '51.5180,-0.1240,51.5220,-0.1200'], // -0.1220: B
-    ['google:boundary_e2', '51.5190,-0.1230,51.5230,-0.1190'], // -0.1210: B
-    ['google:boundary_mid', '51.5180,-0.1270,51.5220,-0.1230'], // -0.1250: dead centre, one of them
-    ['google:boundary_wide', '51.5100,-0.1400,51.5300,-0.1100'], // 2 km wide: still unresolved
+    ['google:boundary_w1', '50.5180,-0.1290,50.5220,-0.1250'], // centre -0.1270: nearer A
+    ['google:boundary_w2', '50.5170,-0.1300,50.5210,-0.1260'], // -0.1280: A
+    ['google:boundary_e1', '50.5180,-0.1240,50.5220,-0.1200'], // -0.1220: B
+    ['google:boundary_e2', '50.5190,-0.1230,50.5230,-0.1190'], // -0.1210: B
+    ['google:boundary_mid', '50.5180,-0.1270,50.5220,-0.1230'], // -0.1250: dead centre, one of them
+    ['google:boundary_wide', '50.5100,-0.1400,50.5300,-0.1100'], // 2 km wide: still unresolved
   ];
   for (const [ref, slice] of boxes) {
     await query(
@@ -1124,6 +1166,9 @@ test('a boundary place is counted in exactly one neighbour, never two and never 
 });
 
 test('a place on the edge of a tile that was never tagged with its district is still counted there, once', async (t) => {
+  // Out at sea, a degree south, where no real sector or postcode is near: the
+  // test database holds every sector in Britain (migration 248), and a fixture
+  // district drawn over Windsor or Bloomsbury lost its places to the real one.
   // Codex, 25 Sep 2026: a tile is tagged with the districts it was planned
   // from, and a box on its edge can sit nearest a sector of a district it was
   // never tagged with. Rolling each district up from only the tiles that named
@@ -1138,15 +1183,15 @@ test('a place on the edge of a tile that was never tagged with its district is s
   });
   await query(
     `insert into geo_cells (code, scheme, label, outcode, lat, lng, source) values
-       ('ZZ5A 1', 'sector', 'ZZ5A 1', 'ZZ5A', 51.5200, -0.1300, 'test'),
-       ('ZZ5B 1', 'sector', 'ZZ5B 1', 'ZZ5B', 51.5200, -0.1200, 'test')
+       ('ZZ5A 1', 'sector', 'ZZ5A 1', 'ZZ5A', 50.5200, -0.1300, 'test'),
+       ('ZZ5B 1', 'sector', 'ZZ5B 1', 'ZZ5B', 50.5200, -0.1200, 'test')
      on conflict (code) do update set outcode = excluded.outcode, lat = excluded.lat, lng = excluded.lng`);
   // Tile T reaches past the midline (-0.125) but was tagged with ZZ5A only;
   // tile U names both.
   await query(
     `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, started_at) values
-       ('test/edge-t', 51.51, -0.14, 51.53, -0.121, array['ZZ5A'], 'done', now(), now() - interval '1 minute'),
-       ('test/edge-u', 51.51, -0.121, 51.53, -0.10, array['ZZ5A','ZZ5B'], 'done', now(), now() - interval '1 minute')
+       ('test/edge-t', 50.51, -0.14, 50.53, -0.121, array['ZZ5A'], 'done', now(), now() - interval '1 minute'),
+       ('test/edge-u', 50.51, -0.121, 50.53, -0.10, array['ZZ5A','ZZ5B'], 'done', now(), now() - interval '1 minute')
      on conflict (grid_key) do update set outcodes = excluded.outcodes, state = 'done', censused_at = now(), started_at = excluded.started_at`);
   const place = async (ref, tile, slice) => {
     await query(
@@ -1158,9 +1203,9 @@ test('a place on the edge of a tile that was never tagged with its district is s
        on conflict (venue_ref, subcategory, coalesce(area_slug, '')) do nothing`, [ref, tile]);
   };
   // Surfaced by T, centre at -0.124: nearest ZZ5B, which T does not name.
-  await place('google:edge_strayed', 'test/edge-t', '51.5180,-0.1260,51.5220,-0.1220');
+  await place('google:edge_strayed', 'test/edge-t', '50.5180,-0.1260,50.5220,-0.1220');
   // And one plainly in ZZ5A, surfaced by T, so T's district is not empty.
-  await place('google:edge_home', 'test/edge-t', '51.5180,-0.1340,51.5220,-0.1300');
+  await place('google:edge_home', 'test/edge-t', '50.5180,-0.1340,50.5220,-0.1300');
 
   // Each district rolled up on its own — the order and the separation are the
   // point: neither roll-up may depend on the other having run.
