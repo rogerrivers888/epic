@@ -50,6 +50,9 @@ export function parseHash(stored) {
   if (![n, r, p].every((x) => Number.isInteger(x) && x > 0)) return null;
   if ((n & (n - 1)) !== 0 || n < LIMITS.minN || n > LIMITS.maxN || r > LIMITS.maxR || p > LIMITS.maxP) return null;
   if (128 * n * r > LIMITS.maxMem) return null;
+  // scrypt's own rule, N < 2^(16·r): N 65536 with r 1 is well formed and
+  // cannot be computed, so the report must not call it healthy (Codex, 28 Sep 2026).
+  if (n >= 2 ** (16 * r)) return null;
   if (!/^[\w-]+$/.test(parts[4]) || !/^[\w-]+$/.test(parts[5])) return null;
   const salt = Buffer.from(parts[4], 'base64url');
   const hash = Buffer.from(parts[5], 'base64url');
@@ -69,9 +72,14 @@ export function parseHash(stored) {
 export async function verifyResumeKey(given, stored) {
   const h = parseHash(stored);
   if (!h) return false;
+  // `scrypt` throws synchronously on parameters it rejects, before any
+  // callback: caught here, so a value the parser missed still fails closed
+  // rather than becoming a server error.
   const got = await new Promise((resolve) => {
-    scrypt(String(given ?? '').normalize('NFC'), h.salt, KEYLEN, { N: h.n, r: h.r, p: h.p, maxmem: maxmem(h.n, h.r) },
-      (err, key) => resolve(err ? null : key));
+    try {
+      scrypt(String(given ?? '').normalize('NFC'), h.salt, KEYLEN, { N: h.n, r: h.r, p: h.p, maxmem: maxmem(h.n, h.r) },
+        (err, key) => resolve(err ? null : key));
+    } catch { resolve(null); }
   });
   return Boolean(got) && timingSafeEqual(got, h.hash);
 }

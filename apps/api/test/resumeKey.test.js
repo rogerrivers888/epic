@@ -78,12 +78,17 @@ test('the report and the check read a hash the same way, and an impractical cost
     hugeMemory: `scrypt$1048576$32$1$${salt}$${hash}`,
     tooManyP: `scrypt$32768$8$16$${salt}$${hash}`,
     tooCheap: `scrypt$1024$8$1$${salt}$${hash}`,
+    // Well formed, and impossible for scrypt: N must be below 2^(16·r).
+    impossible: `scrypt$65536$1$1$${salt}$${hash}`,
   };
   for (const [why, value] of Object.entries(cases)) {
     assert.equal(looksLikeHash(value), false, why);
     assert.equal(resumeGuard({ EPIC_CENSUS_RESUME_KEY_HASH: value }).malformed, true, why);
     assert.equal(await verifyResumeKey(PHRASE, value), false, why);
   }
+  // And the guard fails closed on it, never throwing.
+  const g = resumeGuard({ EPIC_CENSUS_RESUME_KEY_HASH: cases.impossible });
+  assert.equal(await resumeKeyAccepted(g, PHRASE), false);
 });
 
 test('the key has its own attempt limit, and a check never holds the request thread', async () => {
