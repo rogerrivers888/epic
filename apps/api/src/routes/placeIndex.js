@@ -3624,13 +3624,41 @@ export function resumeGuard(env = process.env) {
 }
 
 /** Whether what the caller sent opens this guard. Constant time either way. */
-export function resumeKeyAccepted(guard, given) {
+export async function resumeKeyAccepted(guard, given) {
   if (guard.kind === 'none') return true;
   const typed = String(given ?? '');
   if (guard.kind === 'hash') return verifyResumeKey(typed, guard.value);
   const a = Buffer.from(typed, 'utf8');
   const b = Buffer.from(guard.value, 'utf8');
   return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/**
+ * The attempts on the key, limited apart from the API's general limiter: a
+ * credential check is not a page load, and a burst of guesses at a slow hash
+ * would otherwise be the easiest way to occupy the server (Codex, 28 Sep
+ * 2026). Five wrong keys a session in fifteen minutes, and no more than two
+ * checks running at once; past either, refused without hashing anything.
+ */
+const RESUME_TRIES = 5;
+const RESUME_WINDOW_MS = 15 * 60_000;
+const resumeMisses = new Map();
+let resumeChecking = 0;
+export function resumeAttemptAllowed(sessionId, now = Date.now()) {
+  if (resumeChecking >= 2) return false;
+  const misses = (resumeMisses.get(sessionId) ?? []).filter((t) => now - t < RESUME_WINDOW_MS);
+  resumeMisses.set(sessionId, misses);
+  return misses.length < RESUME_TRIES;
+}
+export function noteResumeMiss(sessionId, now = Date.now()) {
+  const misses = resumeMisses.get(sessionId) ?? [];
+  misses.push(now);
+  resumeMisses.set(sessionId, misses);
+  if (resumeMisses.size > 1000) resumeMisses.clear();
+}
+async function checkResumeKey(guard, given, sessionId) {
+  resumeChecking += 1;
+  try { return await resumeKeyAccepted(guard, given); } finally { resumeChecking -= 1; }
 }
 
 router.get('/census/resume-guard', requires('manage_library'), (_req, res) => {
@@ -3654,7 +3682,13 @@ router.post('/census/run/:id/resume', requires('manage_library'), async (req, re
     const guard = resumeGuard();
     const key = guard.kind !== 'none';
     if (key) {
-      if (!resumeKeyAccepted(guard, req.body?.key)) {
+      const who = req.session?.id ?? 'no-session';
+      if (!resumeAttemptAllowed(who)) {
+        return res.status(429).json({ error: 'resume_key_attempts', message: 'Too many tries at the resume key. Wait fifteen minutes.' });
+      }
+      const accepted = await checkResumeKey(guard, req.body?.key, who);
+      if (!accepted) noteResumeMiss(who);
+      if (!accepted) {
         return res.status(403).json({
           error: 'resume_key',
           message: 'Resuming a census needs the key the owner set for it.',

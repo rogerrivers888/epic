@@ -17,7 +17,7 @@
  * Imports nothing but node:crypto, so the route and the local command share it.
  */
 
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { randomBytes, scrypt, scryptSync, timingSafeEqual } from 'node:crypto';
 
 const N = 2 ** 15;
 const R = 8;
@@ -61,15 +61,19 @@ export function parseHash(stored) {
  * Whether `given` is the passphrase behind `stored`. False, never a throw, for
  * a stored value that does not parse: a mistyped Doppler value must refuse
  * every resume, not open them all.
+ *
+ * Asynchronous: the hash is slow on purpose, and on the request thread every
+ * wrong guess would stall the whole API while it ran (Codex, 28 Sep 2026).
+ * `scrypt` runs on the thread pool; the route also limits the attempts.
  */
-export function verifyResumeKey(given, stored) {
+export async function verifyResumeKey(given, stored) {
   const h = parseHash(stored);
   if (!h) return false;
-  let got;
-  try {
-    got = scryptSync(String(given ?? '').normalize('NFC'), h.salt, KEYLEN, { N: h.n, r: h.r, p: h.p, maxmem: maxmem(h.n, h.r) });
-  } catch { return false; }
-  return timingSafeEqual(got, h.hash);
+  const got = await new Promise((resolve) => {
+    scrypt(String(given ?? '').normalize('NFC'), h.salt, KEYLEN, { N: h.n, r: h.r, p: h.p, maxmem: maxmem(h.n, h.r) },
+      (err, key) => resolve(err ? null : key));
+  });
+  return Boolean(got) && timingSafeEqual(got, h.hash);
 }
 
 /** Whether a stored value is a hash this module can check — for the guard's own report. */

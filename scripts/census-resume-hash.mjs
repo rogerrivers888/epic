@@ -49,7 +49,7 @@ try {
   const again = await ask('Again: ');
   if (again !== first) throw new Error('The two did not match. Nothing was made.');
   const hash = hashResumeKey(first);
-  if (!verifyResumeKey(first, hash)) throw new Error('The hash did not check against the passphrase. Nothing was made.');
+  if (!(await verifyResumeKey(first, hash))) throw new Error('The hash did not check against the passphrase. Nothing was made.');
   process.stdout.write(`\nEPIC_CENSUS_RESUME_KEY_HASH=${hash}\n`);
 } catch (err) {
   process.stderr.write(`${err.message}\n`);
