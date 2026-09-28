@@ -1039,6 +1039,8 @@ async function spentSince(startedAt) {
  * reset clock never wakes it, because tomorrow is a new run of its own.
  */
 export const ONE_DAY_RUNS = 'Epic — the UK census, a day at a time';
+/** And what they are called, day 1 — started by hand — included. */
+export const ONE_DAY_LABEL = 'The rest of the UK — day';
 
 /**
  * A one-day run that met the shared daily cap, or a refusal, before its own
@@ -1191,14 +1193,15 @@ export async function resumeInterrupted() {
         -- Never a run somebody has asked to stop (Codex, 28 Sep 2026).
         and not stop_requested
         -- Never a one-day run: its day ends where it stops, and tomorrow is a
-        -- new run of its own (sources/ukCensus.js; Codex, 28 Sep 2026).
-        and coalesce(started_by, '') <> $1
+        -- new run of its own (sources/ukCensus.js; Codex, 28 Sep 2026) — by
+        -- who started it or by its label, since day 1 was started by hand.
+        and coalesce(started_by, '') <> $1 and label not like $2
         -- Never into a region somebody else is working. Starting refuses while
         -- a run waits, so this should not arise — but a clock that wakes a run
         -- regardless of what else is going is the half of the pair that turns a
         -- refused start into two live runs (Codex, 21 Sep 2026).
         and not exists (select 1 from census_runs other where other.state = 'running')
-      returning id, label`, [ONE_DAY_RUNS]);
+      returning id, label`, [ONE_DAY_RUNS, `${ONE_DAY_LABEL} %`]);
 
   const { rows } = await query(
     `select id, label, last_seen_at from census_runs

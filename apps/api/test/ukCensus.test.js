@@ -165,3 +165,18 @@ test('two ticks at once start the day once', async (t) => {
   assert.equal(r.calls.length, 1, 'one start, however many ticks');
   assert.deepEqual(outs.map((o) => o.action).sort(), ['busy', 'start']);
 });
+
+test('a day ended just after the reset still belongs to the day it met the cap in, and day 1 is never woken either', async (t) => {
+  await clean(); t.after(clean);
+  const { resumeInterrupted } = await import('../src/sources/censusRun.js');
+  // Day 1 was started by hand: known by its label, not who started it.
+  const run = await dayOne({ state: 'waiting', problem: 'Google refused: 429', finished: null });
+  await query(`update census_runs set started_by = 'the owner (passcode)', resume_after = now() - interval '1 minute', day = '2026-09-28' where id = $1`, [run.id]);
+  const woke = await resumeInterrupted();
+  assert.ok(!(woke.runs ?? []).some((r) => r.id === run.id), 'day 1 is not woken into day 2');
+  // Closed off at 00:20 Pacific on the 29th, having asked its last on the 28th.
+  await query(`update census_runs set state = 'paused', problem = 'ended for the day: Google refused: 429', finished_at = '2026-09-29T07:20:00Z' where id = $1`, [run.id]);
+  const r = recorder();
+  const out = await uk.tick({ now: new Date('2026-09-29T09:00:00Z'), start: r.start });
+  assert.equal(out.action, 'start', 'the 29th still gets its own run');
+});

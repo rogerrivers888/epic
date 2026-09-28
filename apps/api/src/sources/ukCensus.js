@@ -42,7 +42,7 @@ export const UK_AREAS = [
   'ZE',
 ];
 
-export const LABEL = 'The rest of the UK — day';
+export const LABEL = censusRun.ONE_DAY_LABEL;
 export const DAY_REQUESTS = 70_000;
 /** "£0 (or pennies)": under a pound of census cost on a day is pennies. */
 export const PENNIES_GBP = 1;
@@ -61,7 +61,9 @@ export const pacificDay = (at) => new Intl.DateTimeFormat('en-CA', {
 /** The programme's runs, oldest first. */
 export async function programme() {
   const { rows } = await query(
-    `select * from census_runs where label like $1 order by started_at`, [`${LABEL} %`]);
+    // `day` is the quota day the run last asked in (rollDay keeps it), which
+    // is when its day ended — not when somebody closed it off (Codex).
+    `select *, to_char(day, 'YYYY-MM-DD') as quota_day from census_runs where label like $1 order by started_at`, [`${LABEL} %`]);
   return rows;
 }
 
@@ -113,8 +115,10 @@ export async function decide(now = new Date()) {
   if (latest.state === 'done') return { action: 'complete', runs, latest, bills };
   if (['running', 'waiting'].includes(latest.state)) return { action: 'working', runs, latest, bills };
   if (!(latest.state === 'paused' && DAY_ENDED.test(latest.problem ?? ''))) return { action: 'stopped', runs, latest, bills };
-  const ended = latest.finished_at ?? latest.last_seen_at ?? latest.started_at;
-  if (pacificDay(ended) >= pacificDay(now)) return { action: 'today', runs, latest, bills };
+  // The quota day it last asked in: a run ended for the day just after the
+  // reset still belongs to the day it met the cap in (Codex, 28 Sep 2026).
+  const lastDay = latest.quota_day ?? pacificDay(latest.finished_at ?? latest.last_seen_at ?? latest.started_at);
+  if (lastDay >= pacificDay(now)) return { action: 'today', runs, latest, bills };
   const yesterday = bills.find((b) => b.day === pacificDay(latest.started_at));
   if (yesterday && yesterday.census_gbp >= PENNIES_GBP) return { action: 'held', runs, latest, bills, yesterday };
   return { action: 'start', runs, latest, bills, yesterday: yesterday ?? null, day: runs.length + 1 };
