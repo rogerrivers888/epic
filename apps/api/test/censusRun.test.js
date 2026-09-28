@@ -2061,3 +2061,31 @@ test('a stale square a run reset and never reached adds nothing to its partial c
   const { rows: [r] } = await query(`select census_count, complete from area_counts where area_slug = 'zz0b' and subcategory = 'golf'`);
   assert.deepEqual([r?.census_count, r?.complete], [0, false], 'the old find is not this census\'s evidence');
 });
+
+test('a new run keeps the drawers a half-asked square answered, and not its spending', async (t) => {
+  await clean();
+  t.after(clean);
+  // Yesterday's run stopped half way through this square (Codex, 28 Sep 2026).
+  await query(
+    `insert into geo_cells (code, scheme, label, outcode, lat, lng, source)
+     values ('ZZ0C 1', 'sector', 'ZZ0C 1', 'ZZ0C', 48.44, -5.94, 'test')
+     on conflict (code) do update set outcode = excluded.outcode, lat = excluded.lat, lng = excluded.lng`);
+  t.after(() => query(`delete from geo_cells where code like 'ZZ0C%'`));
+  const tiles = await planTiles({ outcodes: ['ZZ0C'], padKm: 0 });
+  const [tile] = tiles;
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, started_at, done_subcategories, requests)
+     values ($1, $2, $3, $4, $5, array['ZZ0C'], 'doing', null, now() - interval '20 hours', array['golf','museums'], 400)
+     on conflict (grid_key) do update set state = 'doing', censused_at = null, started_at = excluded.started_at,
+       done_subcategories = excluded.done_subcategories, requests = 400`,
+    [tile.gridKey, tile.minLat, tile.minLng, tile.maxLat, tile.maxLng]);
+  const run = await startRun({ label: 'test next day', outcodes: ['ZZ0C'], padKm: 0 });
+  t.after(async () => {
+    await query(`delete from census_run_tiles where grid_key = $1`, [tile.gridKey]);
+    await query(`delete from census_tiles where grid_key = $1`, [tile.gridKey]);
+  });
+  const { rows: [after] } = await query(
+    'select state, done_subcategories, started_at is not null as swept, requests from census_tiles where grid_key = $1', [tile.gridKey]);
+  assert.deepEqual([after.state, after.done_subcategories, after.swept, after.requests], ['todo', ['golf', 'museums'], true, 0]);
+  await query(`update census_runs set state = 'done' where id = $1`, [run.id]);
+});

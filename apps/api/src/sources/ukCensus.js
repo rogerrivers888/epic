@@ -75,11 +75,15 @@ export async function programme() {
  */
 export async function billedByDay(fromDay) {
   const { rows } = await query(
+    // The census is the Text Search IDs Only / Essentials SKU alone — the
+    // `google-essentials` meter also carries Place Details Essentials — and
+    // the £5 stop is every line the export billed that day, mapped to a meter
+    // or not: a new SKU nobody has mapped yet is still money (Codex, 28 Sep 2026).
     `select to_char(day, 'YYYY-MM-DD') as day,
-            coalesce(sum(cost) filter (where meter = 'google-essentials'), 0)::float as census_gbp,
+            coalesce(sum(cost) filter (where sku ~* 'text search' and sku ~* '(essentials|ids only)'), 0)::float as census_gbp,
             coalesce(sum(cost), 0)::float as google_gbp
        from billing_days
-      where meter is not null and day >= $1::date
+      where day >= $1::date
       group by 1 order by 1`, [fromDay]);
   return rows;
 }

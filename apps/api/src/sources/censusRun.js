@@ -337,6 +337,12 @@ export async function startRun({
   // once and used in every branch below, because ON CONFLICT DO UPDATE has no
   // FROM clause to hang a computed value on.
   const FRESH = "census_tiles.censused_at is not null and census_tiles.censused_at > now() - ($8 || ' days')::interval";
+  // A square half asked inside the window — a day's run that stopped in it —
+  // keeps the drawers it has answered and the sweep they belong to, so the
+  // next run asks only the rest. Clearing them made every day repeat the same
+  // drawers, and a costly square might never finish (Codex, 28 Sep 2026). Its
+  // spending is still the last run's, and is not carried.
+  const PARTIAL = "census_tiles.censused_at is null and census_tiles.started_at > now() - ($8 || ' days')::interval";
   for (const t of tiles) {
     await query(
       `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, run_id, state)
@@ -347,7 +353,7 @@ export async function startRun({
               -- A tile censused inside the freshness window keeps its state, so
               -- the run walks past it. One outside it is work again.
               state    = case when ${FRESH} then census_tiles.state else 'todo' end,
-              done_subcategories = case when ${FRESH} then census_tiles.done_subcategories else '{}'::text[] end,
+              done_subcategories = case when ${FRESH} or ${PARTIAL} then census_tiles.done_subcategories else '{}'::text[] end,
               -- And a tile that is work again starts its accounting again.
               --
               -- Taking the tile over while keeping the last run's requests,
@@ -361,7 +367,7 @@ export async function startRun({
               saturated  = case when ${FRESH} then census_tiles.saturated else 0 end,
               failures   = case when ${FRESH} then census_tiles.failures else 0 end,
               problem    = case when ${FRESH} then census_tiles.problem else null end,
-              started_at = case when ${FRESH} then census_tiles.started_at else null end`,
+              started_at = case when ${FRESH} or ${PARTIAL} then census_tiles.started_at else null end`,
       [t.gridKey, t.minLat, t.minLng, t.maxLat, t.maxLng, t.outcodes, run.id, String(freshDays)]);
     // Membership is its own fact. `run_id` is the run that last claimed the
     // square, which is what the loop needs; this is the ground this run was

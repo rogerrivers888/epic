@@ -32,10 +32,16 @@ const dayOne = async (over = {}) => {
       over.started ?? DAY1, over.finished ?? '2026-09-28T21:49:00Z']);
   return r;
 };
+const SKU = {
+  'google-essentials': 'Text Search Essentials (IDs Only)',
+  'google-pro': 'Place Details Pro',
+  'details-essentials': 'Place Details Essentials',
+  unmapped: 'Something Google has not told us about',
+};
 const billed = (day, meter, cost) => query(
   `insert into billing_days (invoice_month, day, service, sku, sku_id, meter, usage, unit, cost, credits, promo, currency)
    values ('202609', $1, 'Places API', $2, 'x', $3, 1, 'count', $4, 0, 0, 'GBP')`,
-  [day, `test ${meter} ${Math.random()}`, meter, cost]);
+  [day, `test ${SKU[meter]} ${Math.random()}`, meter === 'unmapped' ? null : meter === 'details-essentials' ? 'google-essentials' : meter, cost]);
 
 /** A stand-in for startRun: records what it was asked and returns a row. */
 const recorder = () => {
@@ -179,4 +185,19 @@ test('a day ended just after the reset still belongs to the day it met the cap i
   const r = recorder();
   const out = await uk.tick({ now: new Date('2026-09-29T09:00:00Z'), start: r.start });
   assert.equal(out.action, 'start', 'the 29th still gets its own run');
+});
+
+test('the census cost is its own SKU, and the £5 stop is every line billed', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  // Place Details Essentials shares the census's meter, and is not the census
+  // (Codex, 28 Sep 2026): £2 of it holds nothing.
+  await billed('2026-09-28', 'details-essentials', 2);
+  const r = recorder();
+  assert.equal((await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start })).action, 'start');
+  // A line the mapping does not know is still money: over £5 stops the census.
+  await clean();
+  await dayOne();
+  await billed('2026-09-28', 'unmapped', 6);
+  assert.equal((await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start, stop: async () => {} })).action, 'halted');
 });
