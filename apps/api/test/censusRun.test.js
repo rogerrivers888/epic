@@ -1559,6 +1559,13 @@ const seaDistrict = async ({ outcode, sectors, ref, slice, gridKey }) => {
      on conflict (venue_ref, subcategory, coalesce(area_slug, '')) do nothing`, [ref, gridKey]);
 };
 
+/** A slice this run asked of a square: the run's own record of having been there. */
+const askedBy = (run, gridKey) => query(
+  `insert into census_slices (area_slug, min_lat, min_lng, max_lat, max_lng, category, subcategory,
+                              google_type, query, returned, new_ids, saturated, depth, requests, ran_at, census_run_id)
+   values ($1, 50, -2, 50.1, -1.9, 'sport', 'golf', 'golf_course', 'golf course', 1, 1, false, 0, 1, now(), $2)`,
+  [gridKey, run.id]);
+
 test('a district with a square still to do reads as partial, not complete', async (t) => {
   await clean();
   t.after(async () => {
@@ -1592,7 +1599,7 @@ test('a district with a square still to do reads as partial, not complete', asyn
   for (const k of ['test/partial/0', 'test/partial/1']) {
     await query(`insert into census_run_tiles (run_id, grid_key) values ($1, $2) on conflict do nothing`, [run.id, k]);
   }
-  await query(`update census_tiles set censused_at = now() where grid_key = 'test/partial/0'`);
+  await askedBy(run, 'test/partial/0');
   await rollUpOutcodes({ runId: run.id });
   assert.equal((await read()).complete, false, 'a run stopped part-way publishes the district as partial');
 
@@ -1609,10 +1616,13 @@ test('a run rolls up the districts it censused, not the fresh ones it walked pas
     await query(`delete from place_index where venue_ref like 'google:walked_%'`);
     await clean();
   });
-  // A square censused two days ago on a finer, better census — kept by this
-  // run as fresh and walked past — and a square this run asked itself. The
-  // standing count on the first is what a kilometre re-census wrote, and
-  // rolling it up again from this run's coarser ground would undo it.
+  // A square censused on a finer, better census — kept by this run as fresh
+  // and walked past — and a square this run asked itself. The standing count
+  // on the first is what a kilometre re-census wrote, and rolling it up again
+  // from this run's coarser ground would undo it. The first square's
+  // `censused_at` is *after* this run began: another run took it in the
+  // meantime, which is the case a timestamp could not tell apart (Codex,
+  // 28 Sep 2026). Only the run's own slices say where it asked.
   await query(
     `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, complete)
      values ('zz7a', 'sport', 'golf', 999, 999, true)
@@ -1620,12 +1630,13 @@ test('a run rolls up the districts it censused, not the fresh ones it walked pas
   const run = await startTestRun({ label: 'test walked past' });
   await query(
     `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, saturated) values
-       ('test/walked/0', 50.00, -2.10, 50.08, -1.98, array['ZZ7A'], 'done', now() - interval '2 days', 0),
+       ('test/walked/0', 50.00, -2.10, 50.08, -1.98, array['ZZ7A'], 'done', now(), 0),
        ('test/walked/1', 50.08, -2.10, 50.16, -1.98, array['ZZ7B'], 'done', now(), 0)
      on conflict (grid_key) do update set state = 'done', censused_at = excluded.censused_at, outcodes = excluded.outcodes`);
   for (const k of ['test/walked/0', 'test/walked/1']) {
     await query(`insert into census_run_tiles (run_id, grid_key) values ($1, $2) on conflict do nothing`, [run.id, k]);
   }
+  await askedBy(run, 'test/walked/1');
   await seaDistrict({ outcode: 'ZZ7A', sectors: [['ZZ7A 1', 50.04, -2.04]] });
   await seaDistrict({
     outcode: 'ZZ7B', sectors: [['ZZ7B 1', 50.12, -2.04]],

@@ -1176,17 +1176,26 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
   // plan touched. A run's plan keeps the fresh tiles it walked past as members,
   // so a whole-country run holds London's eight-kilometre squares — and rolling
   // inner London up again from those alone would put back the wide-box counts
-  // the kilometre re-census replaced (28 Sep 2026). A tile this run censused
-  // has its `censused_at` after the run began; one it walked past does not.
+  // the kilometre re-census replaced (28 Sep 2026). What the run asked is read
+  // from its own slices, which carry its id and never change hands; a tile's
+  // `censused_at` is shared by every run that ever takes the square, so an
+  // older paused run would have claimed districts a later one censused
+  // (Codex, 28 Sep 2026). A run from before its slices carried an id
+  // (migration 263) has no such record, and keeps the plan it always rolled.
+  const { rows: [asked] } = runId
+    ? await query('select exists (select 1 from census_slices where census_run_id = $1) as any', [runId])
+    : { rows: [{ any: false }] };
   const codes = outcodes?.length
     ? outcodes.map((c) => String(c).toUpperCase())
     : (await query(
-      runId
+      runId && asked.any
         ? `select distinct unnest(t.outcodes) as code from census_tiles t
              join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1
-             join census_runs r on r.id = m.run_id
-            where t.censused_at is not null and t.censused_at >= r.started_at`
-        : `select distinct unnest(t.outcodes) as code from census_tiles t where t.censused_at is not null`,
+            where t.censused_at is not null
+              and exists (select 1 from census_slices s where s.census_run_id = $1 and s.area_slug = t.grid_key)`
+        : `select distinct unnest(t.outcodes) as code from census_tiles t
+             ${runId ? 'join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1' : ''}
+            where t.censused_at is not null`,
       runId ? [runId] : [])).rows.map((r) => r.code);
   if (!codes.length) return { outcodes: 0, rows: 0, unattributed: 0 };
 
