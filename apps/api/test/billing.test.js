@@ -180,3 +180,38 @@ test('Place Details Pro past its own allowance is priced at its own rate', async
   assert.ok(Math.abs(est.gbp - 1000 * 0.017 * USD_TO_GBP) < 1e-9, 'at $0.017, not Text Search’s $0.032');
   await query(`delete from provider_calls where purpose = 'billing-dpro'`);
 });
+
+test('an export with no rows yet cannot say, and leaves the tile’s console figures and the billed rows as they were', async () => {
+  const { generateKeyPairSync } = await import('node:crypto');
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  process.env.GCP_BILLING_SA_JSON = JSON.stringify({ client_email: 'x@y', private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }) });
+  const seed = { month: '2026-09', usageGbp: 40.61, paidGbp: 0, creditGbp: 180.15, creditTotalGbp: 220.76, creditExpires: '2026-12-20', source: 'Google Cloud console', at: '2026-09-29T12:00:00Z' };
+  await query(`insert into bo_settings (key, value, updated_by) values ('billing', $1, 'test') on conflict (key) do update set value = excluded.value`, [JSON.stringify(seed)]);
+  // A row billed earlier stays billed.
+  await query(`delete from provider_calls where purpose = 'billing-empty'`);
+  const { rows: [pc] } = await query(`insert into provider_calls (provider, purpose, units, estimated_cost_usd, billed_gbp, billed_at, created_at)
+    values ('google', 'billing-empty', '{"google-pro": 1}', 0.03, 0.02, now(), now()) returning id`);
+  const saved = globalThis.fetch;
+  // Every query answers as a real, empty table does: a schema and no rows —
+  // a count(*) answers 0.
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).includes('oauth2')) return { ok: true, json: async () => ({ access_token: 'te', expires_in: 3600 }) };
+    const sql = JSON.parse(opts?.body ?? '{}').query ?? '';
+    const counted = /count\(\*\)/.test(sql);
+    return { ok: true, json: async () => ({ jobComplete: true, jobReference: { jobId: 'E' },
+      schema: { fields: [{ name: 'n' }, { name: 'usage' }, { name: 'paid' }, { name: 'currency' }, { name: 'used' }] },
+      rows: counted ? [{ f: [{ v: '0' }, { v: null }, { v: null }, { v: null }, { v: null }] }] : [] }) };
+  };
+  try {
+    const snap = await exportReader.snapshot({ month: '2026-09', creditTotalGbp: 220.76 });
+    assert.equal(snap.speaks, false);
+    assert.match(snap.why, /no rows/);
+    await billing.billingDaily(new Date('2026-09-28T12:00:00Z'));
+  } finally { globalThis.fetch = saved; delete process.env.GCP_BILLING_SA_JSON; }
+  const { rows: [s] } = await query(`select value from bo_settings where key = 'billing'`);
+  assert.equal(s.value.usageGbp, 40.61, 'the console figure stands');
+  assert.equal(s.value.creditGbp, 180.15);
+  const { rows: [after] } = await query(`select billed_gbp::float g from provider_calls where id = $1`, [pc.id]);
+  assert.equal(after.g, 0.02, 'a month the export has nothing for is not re-attributed to nothing');
+  await query(`delete from provider_calls where purpose = 'billing-empty'`);
+});

@@ -22,11 +22,17 @@ import { query } from '../db.js';
 import { USD_TO_GBP, PRICE_PER_UNIT_USD } from '../domain/providerPrices.js';
 import { OTHER_PURSE } from '../constants.js';
 import { googleEstimate } from './billing.js';
-import { settings } from './settings.js';
 
 /** London's month of an instant, as the ledger groups it. */
 export const londonMonth = (d = new Date()) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit' }).format(d);
+
+/**
+ * The rows tripadvisorMonth prices — and exactly those, so the rest of the
+ * purse can leave out these and no others (Codex: a row it cannot price
+ * must stay at its ledger figure, never vanish).
+ */
+const TA_PRICED = `coalesce(jsonb_typeof(units) = 'object' and (units->>'tripadvisor') ~ '^[0-9.]+$', false) or provider = 'tripadvisor'`;
 
 const RANGE = `created_at >= (($1::text || '-01')::date::timestamp at time zone 'Europe/London')
            and created_at < ((($1::text || '-01')::date + interval '1 month')::timestamp at time zone 'Europe/London')`;
@@ -36,30 +42,33 @@ const RANGE = `created_at >= (($1::text || '-01')::date::timestamp at time zone 
  * `basis` is 'billed' (all of it read from a bill), 'billed+estimate' (a bill
  * up to `cutoff` and an estimate after), or 'estimate'.
  */
-export async function googleMonth(month) {
-  const { rows: [b] } = await query(
+export async function googleMonth(month, { q = query } = {}) {
+  const { rows: [b] } = await q(
     `select coalesce(sum(cost), 0)::float as gbp, max(day) as last, count(*)::int as n
        from billing_days where meter is not null and to_char(day, 'YYYY-MM') = $1`, [month]);
   let billedGbp = null; let cutoff = null; let source = null;
   if (b?.n) {
     billedGbp = b.gbp;
     // The export is by usage day: everything up to the end of its last day.
-    const { rows: [c] } = await query(`select (($1::date + 1)::timestamp at time zone 'Europe/London') as t`, [b.last]);
+    const { rows: [c] } = await q(`select (($1::date + 1)::timestamp at time zone 'Europe/London') as t`, [b.last]);
     cutoff = c.t; source = 'Google billing export';
   } else {
-    const seed = (await settings()).values.billing;
+    // Read from the table, not the settings cache: on the caller's client,
+    // and never a figure older than the row.
+    const { rows: [row] } = await q(`select value from bo_settings where key = 'billing'`);
+    const seed = row?.value ?? null;
     if (seed?.month === month && Number.isFinite(Number(seed.usageGbp))) {
       billedGbp = Number(seed.usageGbp);
       cutoff = seed.at ? new Date(seed.at) : null;
       source = seed.source ?? 'Google Cloud console';
     }
   }
-  const all = await googleEstimate(month);
+  const all = await googleEstimate(month, { q });
   if (billedGbp == null) return { gbp: all.gbp, billedGbp: null, estimateGbp: all.gbp, cutoff: null, basis: 'estimate', source: null };
   // A bill with no instant cannot say what came after it: it is taken as the
   // whole month so far, and said so.
   if (!cutoff) return { gbp: billedGbp, billedGbp, estimateGbp: 0, cutoff: null, basis: 'billed', source };
-  const before = await googleEstimate(month, { until: cutoff });
+  const before = await googleEstimate(month, { until: cutoff, q });
   const after = Math.max(0, all.gbp - before.gbp);
   return { gbp: billedGbp + after, billedGbp, estimateGbp: after, cutoff, basis: after > 0 ? 'billed+estimate' : 'billed', source };
 }
@@ -69,17 +78,17 @@ export async function googleMonth(month) {
  * (owner, 29 Sep 2026). The ledger's figure for a row is list price times the
  * locations it returned, so the locations are read back from it.
  */
-export async function tripadvisorMonth(month) {
+export async function tripadvisorMonth(month, { q = query } = {}) {
   // Locations from the meter wherever a row carries one — a browse writes
   // `google+tripadvisor` with the count under `units.tripadvisor` (Codex) —
   // and, for a Tripadvisor row with no meter, read back from its list price.
   const price = PRICE_PER_UNIT_USD.tripadvisor;
-  const { rows: [r] } = await query(
+  const { rows: [r] } = await q(
     `select coalesce(sum(case
               when jsonb_typeof(units) = 'object' and (units->>'tripadvisor') ~ '^[0-9.]+$' then (units->>'tripadvisor')::numeric
               when provider = 'tripadvisor' and $2::numeric > 0 then round(coalesce(estimated_cost_usd, 0) / $2::numeric)
               else 0 end), 0)::float as locations
-       from provider_calls where ${RANGE} and (provider ~* 'tripadvisor' or (jsonb_typeof(units) = 'object' and units ? 'tripadvisor'))`,
+       from provider_calls where ${RANGE} and (${TA_PRICED})`,
     [month, price ?? 0]);
   const locations = Math.round(r.locations);
   const billable = Math.max(0, locations - 1000);
@@ -94,16 +103,15 @@ export async function tripadvisorMonth(month) {
  * it never counts less than has happened, only no longer counts what Google
  * and Tripadvisor never charge.
  */
-export async function collectPurse(month = londonMonth()) {
+export async function collectPurse(month = londonMonth(), { q = query } = {}) {
   const [g, ta, { rows: [o] }] = await Promise.all([
-    googleMonth(month),
-    tripadvisorMonth(month),
-    query(
+    googleMonth(month, { q }),
+    tripadvisorMonth(month, { q }),
+    q(
       `select coalesce(sum(estimated_cost_usd), 0)::float as usd from provider_calls
         where ${RANGE} and provider <> all ($2::text[])
-          -- Tripadvisor's money is tripadvisorMonth's, wherever the row names it
-          -- (coalesce: a row with no units is null here, and NOT NULL would drop it)
-          and provider !~* 'tripadvisor' and not coalesce(jsonb_typeof(units) = 'object' and units ? 'tripadvisor', false)
+          -- Tripadvisor's money is tripadvisorMonth's, for the rows it prices
+          and not (${TA_PRICED})
           -- a Google row the meters cannot read (no units) stays here at its
           -- ledger figure: counted, never dropped
           and not provider_call_bills_google(units, provider)`, [month, OTHER_PURSE]),

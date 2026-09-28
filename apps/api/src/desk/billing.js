@@ -90,7 +90,9 @@ export const PRO_DETAILS = `
 // dearer rate; the estimate of a bill does not.
 const PLACE_DETAILS_PRO_USD = 0.017;
 
-export async function googleEstimate(month, { until = null } = {}) {
+// `q`: the query function to read with — a transaction's own client where a
+// caller holds a lock (routes/placeIndex.js roomToSpend), else the pool.
+export async function googleEstimate(month, { until = null, q = query } = {}) {
   const { LINES } = await import('../sources/pricing.js');
   // Text Search Pro and Place Details Pro are two SKUs with a free allowance
   // each, not pooled (Codex, 29 Sep 2026). A request marked `pro-details` is
@@ -100,8 +102,8 @@ export async function googleEstimate(month, { until = null } = {}) {
   const [{ rows }, { rows: [{ n: proDetails = 0 } = {}] }] = await Promise.all([
     // `until`: only the rows before an instant — what a bill read up to that
     // instant has not yet covered is the rest (desk/supplierCost.js).
-    query(`select meter, sum(n)::float as units from (${LEDGER_METERS}) x where month = $1 and ($2::timestamptz is null or at < $2) group by 1`, [month, until]),
-    query(`${PRO_DETAILS} and ($2::timestamptz is null or p.created_at < $2)`, [month, until]),
+    q(`select meter, sum(n)::float as units from (${LEDGER_METERS}) x where month = $1 and ($2::timestamptz is null or at < $2) group by 1`, [month, until]),
+    q(`${PRO_DETAILS} and ($2::timestamptz is null or p.created_at < $2)`, [month, until]),
   ]);
   const units = new Map(rows.map((r) => [r.meter === 'google-legacy' ? 'google' : r.meter, r.units]));
   const counted = [];
@@ -128,6 +130,9 @@ export async function googleEstimate(month, { until = null } = {}) {
 export async function readMonth(month) {
   const got = await monthBySkuDay(month);
   if (!got.speaks) return got;
+  // No rows is an export not filled yet, not a month with no usage: what was
+  // read before is kept, never replaced by nothing (29 Sep 2026).
+  if (!got.rows.length) return { speaks: true, month, rows: 0, empty: true };
   await withTransaction(async (c) => {
     // The invoice month's import is replaced whole — the export is read by
     // invoice month, so it is kept and replaced by invoice month (278).
@@ -218,16 +223,20 @@ export async function billingDaily(now = new Date()) {
   // row a refresh removes still leaves its month to be re-attributed (Codex).
   const { rows: before } = await query(
     `select distinct to_char(day, 'YYYY-MM') as m from billing_days where invoice_month = any($1)`, [read]);
+  const empty = new Set();
   for (const m of read) {
     const r = await readMonth(m);
     if (!r.speaks) return { speaks: false, why: r.why };
+    if (r.empty) empty.add(m);
     out.push({ month: m, ...r });
   }
   // Attribute every usage month those invoices touched — including an
   // earlier month whose late usage a later invoice carried.
   const { rows: after } = await query(
     `select distinct to_char(day, 'YYYY-MM') as m from billing_days where invoice_month = any($1)`, [read]);
-  const usageMonths = [...new Set([...before, ...after].map((r) => r.m))].sort();
+  // A month the export has nothing for yet is not attributed: attributing
+  // clears billed_gbp first, and there is nothing to put back.
+  const usageMonths = [...new Set([...before, ...after].map((r) => r.m))].filter((m) => !empty.has(m)).sort();
   for (const m of usageMonths) out.push({ month: m, attributed: true, ...(await attribute(m)) });
   // The tile: usage before credit this month, and the credit left.
   const cfg = (await settings()).values;

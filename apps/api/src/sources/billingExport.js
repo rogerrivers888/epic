@@ -154,11 +154,17 @@ export async function monthBySkuDay(month, fetcher = fetch) {
 export async function snapshot({ month, creditTotalGbp, grantedMonth = '202608' } = {}, fetcher = fetch) {
   try {
     const [m] = await run(`
-      select sum(cost) as usage, sum(cost) + sum((select coalesce(sum(c.amount), 0) from unnest(credits) c)) as paid, any_value(currency) as currency
+      select count(*) as n, sum(cost) as usage, sum(cost) + sum((select coalesce(sum(c.amount), 0) from unnest(credits) c)) as paid, any_value(currency) as currency
         from \`${TABLE}\` where invoice.month = @month`, { month: month.replace('-', '') }, fetcher);
+    // An export with no rows for the month has not been filled yet — Google
+    // fills it within a day of switching it on. That is "cannot say", never a
+    // month that cost nothing: read as £0 it overwrote the console figure on
+    // the tile (29 Sep 2026).
+    if (!Number(m?.n)) return { speaks: false, why: `The billing export has no rows for ${month} yet — Google fills it within a day of switching it on.` };
     const [p] = await run(`
-      select -sum((select coalesce(sum(c.amount), 0) from unnest(credits) c where c.type = 'PROMOTION')) as used
+      select count(*) as n, -sum((select coalesce(sum(c.amount), 0) from unnest(credits) c where c.type = 'PROMOTION')) as used
         from \`${TABLE}\` where invoice.month >= @since`, { since: grantedMonth }, fetcher);
+    if (!Number(p?.n)) return { speaks: false, why: 'The billing export has no rows since the credit was granted yet.' };
     return {
       speaks: true, month, currency: m?.currency ?? null,
       usageGbp: Number(m?.usage ?? 0), paidGbp: Math.max(0, Number(m?.paid ?? 0)),
