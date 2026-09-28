@@ -1774,3 +1774,49 @@ test('a run that pauses at its ceiling publishes what it reached, as partial', a
   assert.equal(rows[0].complete, false, 'and the district says it is partial');
   assert.ok(new Date(rows[0].at).getUTCFullYear() >= 2026, 'dated from when its sweep began, not 1970');
 });
+
+test('a district asked again and stopped part-way reads as partial, dated from the new sweep', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from area_counts where area_slug in ('zz4c', 'zz4d')`);
+    await query(`delete from geo_cells where code like 'ZZ4C%' or code like 'ZZ4D%'`);
+    await query(`delete from place_index where venue_ref like 'google:again_%'`);
+    await clean();
+  });
+  // ZZ4C was counted whole by an earlier census. A new run takes its square
+  // again, asks one drawer, finds nothing, and stops: no drawer row is
+  // written, and the old rows went on saying complete (Codex, 28 Sep 2026).
+  await seaDistrict({ outcode: 'ZZ4C', sectors: [['ZZ4C 1', 49.64, -4.54]] });
+  await query(
+    `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, complete, censused_at)
+     values ('zz4c', 'sport', 'golf', 7, 7, true, now() - interval '40 days')
+     on conflict (area_slug, category, subcategory) do update set complete = true, census_count = 7`);
+  const run = await startTestRun({ label: 'test asked again' });
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, run_id, state, censused_at, started_at)
+     values ('test/again/0', 49.60, -4.60, 49.68, -4.48, array['ZZ4C'], $1, 'doing', now() - interval '40 days', now())
+     on conflict (grid_key) do update set state = 'doing', censused_at = excluded.censused_at, started_at = excluded.started_at`, [run.id]);
+  await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'test/again/0') on conflict do nothing`, [run.id]);
+  await askedBy(run, 'test/again/0');
+  await rollUpOutcodes({ runId: run.id });
+  const { rows: [c] } = await query(`select complete from area_counts where area_slug = 'zz4c' and subcategory = 'golf'`);
+  assert.equal(c.complete, false, 'the whole count it had is now a partial one, because its ground is being asked again');
+
+  // ZZ4D: a square asked again that has found something, dated from the new
+  // sweep rather than the census forty days ago.
+  await seaDistrict({
+    outcode: 'ZZ4D', sectors: [['ZZ4D 1', 49.72, -4.54]],
+    ref: 'google:again_found', slice: '49.7150,-4.5450,49.7250,-4.5350', gridKey: 'test/again/1',
+  });
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, run_id, state, censused_at, started_at)
+     values ('test/again/1', 49.68, -4.60, 49.76, -4.48, array['ZZ4D'], $1, 'doing', now() - interval '40 days', now() - interval '1 minute')
+     on conflict (grid_key) do update set state = 'doing', censused_at = excluded.censused_at, started_at = excluded.started_at`, [run.id]);
+  await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'test/again/1') on conflict do nothing`, [run.id]);
+  await askedBy(run, 'test/again/1');
+  await rollUpOutcodes({ runId: run.id });
+  const { rows: [d] } = await query(`select census_count, complete, censused_at from area_counts where area_slug = 'zz4d' and subcategory = 'golf'`);
+  assert.equal(d.census_count, 1);
+  assert.equal(d.complete, false);
+  assert.ok(Date.now() - new Date(d.censused_at).getTime() < 3600_000, 'dated from the sweep asking it now');
+});

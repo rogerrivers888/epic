@@ -1450,9 +1450,13 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
       if (answered) drawer.set(key, { category: r.category, subcategory: r.subcategory });
     }
 
-    // A square still being asked has no `censused_at`; its sweep began at
-    // `started_at`, and a null read as a date would put the district in 1970.
-    const censusedAt = own.map((t) => new Date(t.censused_at ?? t.started_at).getTime()).sort((x, y) => x - y);
+    // A square still being asked is dated from the sweep that is asking it:
+    // `started_at`. Its `censused_at` is null on a first census — read as a
+    // date, 1970 — and the last census's on a re-census, weeks old (Codex,
+    // 28 Sep 2026).
+    const censusedAt = own
+      .map((t) => new Date(t.state === 'done' ? (t.censused_at ?? t.started_at) : (t.started_at ?? t.censused_at)).getTime())
+      .sort((x, y) => x - y);
     const saturatedTiles = own.filter((t) => Number(t.saturated) > 0).length;
     const grids = new Set(own.map((t) => gridOf(t.grid_key)));
     const complete = own.every((t) => t.state === 'done')
@@ -1486,6 +1490,13 @@ export async function rollUpOutcodes({ outcodes = null, runId = null } = {}) {
           kinds.length === 1 ? kinds[0] : 'mixed', b.fromText.get(key)?.size ?? 0]);
       written += 1;
     }
+    // Partial is a fact about the district, not about the drawers this pass
+    // happened to write. A sweep stopped in its first drawer, having found
+    // nothing yet, writes no row at all — and a district counted whole by an
+    // earlier census went on reading whole while it was being asked again
+    // (Codex, 28 Sep 2026). So every row it has says so. A district with no
+    // rows reads as not looked at, which is a floor already.
+    if (!complete) await query('update area_counts set complete = false where area_slug = $1 and complete', [code.toLowerCase()]);
   }
   // Places that fell in a district their tile was never tagged with: counted
   // there all the same, and reported so the tagging can be judged. And what
