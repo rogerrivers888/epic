@@ -74,6 +74,13 @@ const money = (pence) => `£${(Math.max(0, pence) / 100).toFixed(2)}`;
  * left rather than half-done.
  */
 export async function roomToSpend(pence, { holder = null, reserve = true } = {}) {
+  // What has been spent is read before the ceiling's lock is taken, on
+  // connections of its own: read inside the transaction it would need a
+  // second connection while holding the lock, and enough callers at once
+  // would hold every connection waiting for it (Codex, 29 Sep 2026). The lock
+  // serialises the claims, which are still read under it; the ledger is
+  // written by calls as they land, never by the lock's holder.
+  const purse = await collectPurse();
   return withTransaction(async (client) => {
     // The lock is on the setting the ceiling is written in, taken before it is
     // read. Two runs asking at once are then serialised on it, so the second
@@ -102,7 +109,7 @@ export async function roomToSpend(pence, { holder = null, reserve = true } = {})
     // real spend is about £130"): Google past each SKU's free allowance, read
     // from its bill where there is one; Tripadvisor past its 1,000 a month
     // (desk/supplierCost.js). Read under the ceiling's lock, as before.
-    const purse = await collectPurse();
+    // (`purse` is read before the lock, below.)
     const { rows: [held] } = await client.query(
       'select coalesce(sum(pence), 0)::int as pence from spend_reservations');
     // The ledger is in dollars; the ceiling is the owner's, in pounds.

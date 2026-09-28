@@ -70,12 +70,20 @@ export async function googleMonth(month) {
  * locations it returned, so the locations are read back from it.
  */
 export async function tripadvisorMonth(month) {
-  const { rows: [r] } = await query(
-    `select coalesce(sum(estimated_cost_usd), 0)::float as usd from provider_calls where provider = 'tripadvisor' and ${RANGE}`, [month]);
+  // Locations from the meter wherever a row carries one — a browse writes
+  // `google+tripadvisor` with the count under `units.tripadvisor` (Codex) —
+  // and, for a Tripadvisor row with no meter, read back from its list price.
   const price = PRICE_PER_UNIT_USD.tripadvisor;
-  const locations = price ? Math.round(r.usd / price) : 0;
+  const { rows: [r] } = await query(
+    `select coalesce(sum(case
+              when jsonb_typeof(units) = 'object' and (units->>'tripadvisor') ~ '^[0-9.]+$' then (units->>'tripadvisor')::numeric
+              when provider = 'tripadvisor' and $2::numeric > 0 then round(coalesce(estimated_cost_usd, 0) / $2::numeric)
+              else 0 end), 0)::float as locations
+       from provider_calls where ${RANGE} and (provider ~* 'tripadvisor' or (jsonb_typeof(units) = 'object' and units ? 'tripadvisor'))`,
+    [month, price ?? 0]);
+  const locations = Math.round(r.locations);
   const billable = Math.max(0, locations - 1000);
-  return { gbp: billable * price * USD_TO_GBP, locations, billable, ledgerGbp: r.usd * USD_TO_GBP, basis: 'estimate' };
+  return { gbp: billable * price * USD_TO_GBP, locations, billable, basis: 'estimate' };
 }
 
 /**
@@ -92,7 +100,10 @@ export async function collectPurse(month = londonMonth()) {
     tripadvisorMonth(month),
     query(
       `select coalesce(sum(estimated_cost_usd), 0)::float as usd from provider_calls
-        where ${RANGE} and provider <> all ($2::text[]) and provider <> 'tripadvisor'
+        where ${RANGE} and provider <> all ($2::text[])
+          -- Tripadvisor's money is tripadvisorMonth's, wherever the row names it
+          -- (coalesce: a row with no units is null here, and NOT NULL would drop it)
+          and provider !~* 'tripadvisor' and not coalesce(jsonb_typeof(units) = 'object' and units ? 'tripadvisor', false)
           -- a Google row the meters cannot read (no units) stays here at its
           -- ledger figure: counted, never dropped
           and not provider_call_bills_google(units, provider)`, [month, OTHER_PURSE]),

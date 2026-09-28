@@ -78,3 +78,15 @@ test('the export, where it has days, is the bill; the guard and the Runs board s
   assert.equal(board.spentPence, room.spentPence, 'the board and the guard agree');
   await clean();
 });
+
+test('a browse that names Google and Tripadvisor together still counts its Tripadvisor locations', async () => {
+  await clean();
+  await query(`insert into provider_calls (provider, purpose, units, estimated_cost_usd, created_at) values
+    ('google+tripadvisor', 'purse-mixed', '{"google-search": 1, "tripadvisor": 1200}', 18.03, $1)`, [at(10)]);
+  const ta = await cost.tripadvisorMonth(MONTH);
+  assert.equal(ta.locations, 1200);
+  assert.equal(ta.billable, 200);
+  const p = await cost.collectPurse(MONTH);
+  assert.ok(p.tripadvisor.gbp > 0);
+  assert.equal(p.otherGbp, 0, 'not counted twice');
+});
