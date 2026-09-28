@@ -220,7 +220,9 @@ export type Place = {
   name?: string | null;
   lat: number; lng: number; country?: string | null; countryCode?: string | null; locality?: string | null; displayName?: string; formatted?: string; address?: { line1: string | null; area: string | null; town: string | null; region: string | null; postcode: string | null; country: string | null }; matchedBy?: string; approximate?: boolean;
   /** Areas only: which one this is ("Somerset · England · United Kingdom") and what kind ("city"). */
-  where?: string; kindWord?: string | null };
+  where?: string; kindWord?: string | null;
+  /** The open map's own id ("node/123") where the geocoder had one. */
+  sourcePlaceId?: string | null };
 
 /** A bed from the open map, with how it sits against what the household means to do. */
 /**
@@ -5050,7 +5052,7 @@ export type OwnOffer = Experience & {
 export type OfferInput = Partial<{
   shape: OfferShape; title: string | null; description: string | null; whyYou: string | null; includes: string | null; category: string | null;
   photoIds: string[]; videoId: string | null;
-  venue: OfferVenue; venueLabel: string | null; venueArea: string | null; venueLat: number | null; venueLng: number | null; venueCountry: string | null; venueNotes: string | null;
+  venue: OfferVenue; venueRef?: string | null; venueLabel: string | null; venueArea: string | null; venueLat: number | null; venueLng: number | null; venueCountry: string | null; venueNotes: string | null;
   travelRadiusMin: number | null; travelChargePence: number | null; onlinePlatform: string | null;
   durationMin: number | null; minCount: number | null; expectedCount: number | null; maxCount: number | null; partyMax: number | null; ageLimit: number | null;
   priceMode: PriceMode; pricePence: number | null; totalPence: number | null; per: 'person' | 'household'; refundRule: RefundRule;

@@ -377,7 +377,7 @@ function EventStep({ offer: o, save, onSeeded }: { offer: OwnOffer; save: Save; 
         ) : null}
 
         <Field label="Where">
-          <PlaceField value={place} seeded={seeded('venueLabel')} onPick={(p: Place | null) => { setPlace(p); if (p) void save({ venueLabel: p.formatted ?? p.label, venueLat: p.lat, venueLng: p.lng, venueCountry: p.countryCode ?? null, venueArea: p.locality ?? p.address?.town ?? null }); }} placeholder="Abbey ruins, Reading" />
+          <PlaceField value={place} seeded={seeded('venueLabel')} onPick={(p: Place | null) => { setPlace(p); if (p) void save({ venueLabel: p.formatted ?? p.label, venueLat: p.lat, venueLng: p.lng, venueCountry: p.countryCode ?? null, venueArea: p.locality ?? p.address?.town ?? null, venueRef: p.ref ?? (p.sourcePlaceId ? `osm:${p.sourcePlaceId}` : null) }); }} placeholder="Abbey ruins, Reading" />
         </Field>
         <Field label={o.shape === 'oneoff' ? 'Event info' : 'Anything they should know'}>
           <Input value={notes} onChangeText={setNotes} onBlur={() => void save({ description: notes })} multiline placeholder={o.shape === 'oneoff' ? 'Ceremony at one, food at three, carriages at midnight. Parking is in the field by the gate.' : 'Flat walking, about ninety minutes, nothing strenuous.'} seeded={seeded('description')} style={{ fontSize: 15, fontWeight: '500', minHeight: 104, lineHeight: 22 }} />

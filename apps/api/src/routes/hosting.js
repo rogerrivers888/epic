@@ -579,6 +579,9 @@ function offerBody(b, current) {
   set('category', b.category == null ? null : (PASSIONS.includes(b.category) ? b.category : str(b.category, 40)));
   set('categoryKey', str(b.categoryKey, 40)); set('formatKey', str(b.formatKey, 40));
   set('venue', oneOf(VENUES, b.venue) ?? current.venue);
+  // The place it happens, when the host picked a known one — what lets a
+  // family be asked about it after (the visit question, 28 Sep 2026).
+  if (b.venueRef === null || (typeof b.venueRef === 'string' && /^(osm|google|atlas|own):[\w/.:-]{1,200}$/.test(b.venueRef))) set('venueRef', b.venueRef);
   set('venueLabel', str(b.venueLabel, 240)); set('venueArea', str(b.venueArea, 120));
   set('venueLat', b.venueLat == null ? null : Number(b.venueLat)); set('venueLng', b.venueLng == null ? null : Number(b.venueLng));
   set('venueCountry', str(b.venueCountry, 2)?.toUpperCase() ?? null); set('venueNotes', str(b.venueNotes, 600));
@@ -666,7 +669,7 @@ router.patch('/host/offers/:id', async (req, res, next) => {
         // Every trace of a place, not just the label: a retained country still
         // fires the regulated-city question at an offer that no longer happens
         // anywhere (Codex, 13 Sep 2026).
-        patch.venueLabel = null; patch.venueLat = null; patch.venueLng = null;
+        patch.venueLabel = null; patch.venueLat = null; patch.venueLng = null; patch.venueRef = null;
         patch.venueArea = null; patch.venueCountry = null; patch.venueNotes = null;
         patch.travelRadiusMin = null; patch.travelChargePence = null;
       } else if (offer.venue === 'online' && b.venue === undefined) {

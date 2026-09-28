@@ -42,7 +42,9 @@ export async function bookingVisit(householdId, bookingId) {
   if (!b) throw refuse(404, 'not_found', 'That booking is not one of yours.');
   if (!b.venue_ref || !['confirmed', 'attended'].includes(b.state)) return null;
   const on = occurrenceDate(b, b.occurrence);
-  if (!on || on >= today()) return null;
+  // Attended settles that it has happened, so the day itself counts (Codex);
+  // a confirmed booking waits until the day is over.
+  if (!on || on > today() || (on === today() && b.state !== 'attended')) return null;
   const { rows: [had] } = await query(
     'select id from visits where household_id = $1 and venue_ref = $2 and visited_on = $3 order by created_at limit 1', [householdId, b.venue_ref, on]);
   if (had) return { visitId: had.id, placeId: b.venue_ref };

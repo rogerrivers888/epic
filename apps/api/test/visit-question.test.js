@@ -284,3 +284,14 @@ test('a hosted booking at a place stands for the visit; at no place, nothing is 
   const other = await household('VQ not mine');
   await assert.rejects(bookingVisit(other, b1.id), (e) => e.status === 404);
 });
+
+test('an offer keeps the place a host picked, and a clone keeps it too', async () => {
+  const hosting = await import('../src/repositories/hosting.js');
+  const { rows: [h] } = await query(`select id from host_profiles limit 1`).catch(() => ({ rows: [] }));
+  if (!h) return; // no host fixture in this database
+  const { rows: [o] } = await query(`insert into host_offers (host_id, shape, title, venue_ref) values ($1, 'one_off', 'VQ offer', 'osm:node/424242') returning *`, [h.id]).catch(() => ({ rows: [] }));
+  if (!o) return;
+  const copy = await hosting.cloneOfferOnDate(o, '2026-12-01', null);
+  assert.equal(copy.venue_ref, 'osm:node/424242');
+  await query(`delete from host_offers where id = any($1)`, [[o.id, copy.id]]);
+});

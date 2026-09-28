@@ -140,8 +140,12 @@ export function WhoseList({ members, onChoose, palette }: {
 /** Whose list this device is — the answer to the first heart, kept on the device. */
 const WHOSE_KEY = 'epic.collections.whose';
 const canStore = Platform.OS === 'web' && typeof localStorage !== 'undefined';
-const savedWhose = () => (canStore ? localStorage.getItem(WHOSE_KEY) : null);
+// Where the device cannot store it (the phone apps), the answer is still kept
+// for as long as the app is open — never asked again at every heart (Codex).
+let whoseInMemory: string | null = null;
+const savedWhose = () => (canStore ? localStorage.getItem(WHOSE_KEY) : whoseInMemory);
 const saveWhose = (id: string | null) => {
+  whoseInMemory = id;
   if (!canStore) return;
   if (id) localStorage.setItem(WHOSE_KEY, id); else localStorage.removeItem(WHOSE_KEY);
 };

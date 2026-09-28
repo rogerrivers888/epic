@@ -382,10 +382,13 @@ function SwitchRow({ label, hint, value, onChange }: { label: string; hint: stri
 
 function Providers() {
   const [admin, setAdminState] = useState(isAdmin());
-  const { isOwner } = useSession();
+  // The switch is estate-wide and the API asks for manage_settings: the owner,
+  // or any role that holds it (Codex).
+  const { isOwner, access } = useSession();
+  const canSwitch = isOwner || Boolean(access?.capabilities?.includes('manage_settings'));
   return (
     <>
-      <ProvidersTable canSwitch={isOwner} />
+      <ProvidersTable canSwitch={canSwitch} />
       <SectionTitle hint="For judging each provider's data before paying for it. On this device only; households never see it.">Admin</SectionTitle>
       <Card>
         <Row style={{ justifyContent: 'space-between' }}>
