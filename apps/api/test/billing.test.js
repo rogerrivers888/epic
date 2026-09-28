@@ -115,3 +115,17 @@ test('a warning beside a good billing result is not a failure', async () => {
   assert.deepEqual(await exportReader.run('select 2', {}, fake), [{ a: '2' }]);
   delete process.env.GCP_BILLING_SA_JSON;
 });
+
+test('late usage on a later invoice is attributed to the day it was used', async () => {
+  await query(`delete from billing_days where day = '2026-08-30'`);
+  await query(`delete from provider_calls where purpose = 'billing-late'`);
+  await query(`insert into billing_days (invoice_month, day, service, sku, sku_id, meter, usage, cost, credits, promo, currency)
+               values ('2026-09', '2026-08-30', 'Places API', 'Places API Text Search Pro', 'SKU-PRO', 'google-pro', 10, 1.00, 0, 0, 'GBP')`);
+  await query(`insert into provider_calls (provider, purpose, units, estimated_cost_usd, created_at)
+               values ('google', 'billing-late', '{"google-pro": 10}', 0.3, '2026-08-30 10:00+01')`);
+  await billing.attribute('2026-08');
+  const { rows: [r] } = await query(`select billed_gbp::float g from provider_calls where purpose = 'billing-late'`);
+  assert.equal(r.g, 1);
+  await query(`delete from provider_calls where purpose = 'billing-late'`);
+  await query(`delete from billing_days where day = '2026-08-30'`);
+});

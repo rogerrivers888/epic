@@ -73,7 +73,9 @@ export async function attribute(month) {
     const { rowCount } = await c.query(`
       with billed as (
         select day, meter, sum(cost) as cost from billing_days
-         where meter is not null and invoice_month = $1 group by 1, 2),
+         -- by the day it was used, whichever invoice carried it: late usage
+         -- billed on a later invoice still lands on the rows that made it (Codex)
+         where meter is not null and to_char(day, 'YYYY-MM') = $1 group by 1, 2),
       asked as (
         select id, day, meter, n from (${LEDGER_METERS}) x where month = $1 and n > 0),
       totals as (select day, meter, sum(n) as n from asked group by 1, 2),
@@ -125,11 +127,17 @@ export async function billingDaily(now = new Date()) {
   const month = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   const last = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const out = [];
-  for (const m of [month(last), month(now)]) {
-    const read = await readMonth(m);
-    if (!read.speaks) return { speaks: false, why: read.why };
-    out.push({ month: m, ...read, ...(await attribute(m)) });
+  const read = [month(last), month(now)];
+  for (const m of read) {
+    const r = await readMonth(m);
+    if (!r.speaks) return { speaks: false, why: r.why };
+    out.push({ month: m, ...r });
   }
+  // Attribute every usage month those invoices touched — including an
+  // earlier month whose late usage a later invoice carried.
+  const { rows: usageMonths } = await query(
+    `select distinct to_char(day, 'YYYY-MM') as m from billing_days where invoice_month = any($1) order by 1`, [read]);
+  for (const { m } of usageMonths) out.push({ usageMonth: m, ...(await attribute(m)) });
   // The tile: usage before credit this month, and the credit left.
   const cfg = (await settings()).values;
   const prev = cfg.billing ?? {};
