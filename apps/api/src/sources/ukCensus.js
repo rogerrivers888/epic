@@ -50,6 +50,8 @@ export const PENNIES_GBP = 1;
 export const DAY_ALERT_GBP = 5;
 /** Whose decision a daily run is: the programme's — and the reset clock never wakes it. */
 export const STARTED_BY = censusRun.ONE_DAY_RUNS;
+/** Longer than any plan takes to write: a run still built-paused after this was cut short. */
+const PLANNING_MS = 15 * 60_000;
 /** How a day ends: at the run's own ceiling, or ended for the day at the shared cap. */
 const DAY_ENDED = /^(stopped at the \d+-request ceiling|ended for the day)/;
 
@@ -113,6 +115,10 @@ export async function decide(now = new Date()) {
   const runs = await programme();
   if (!runs.length) return { action: 'off', runs };
   const latest = runs[runs.length - 1];
+  // Days are numbered by the runs that were days: a plan cut short and
+  // replaced does not use up a number.
+  const cutShort = (r) => r.state === 'stopped' && /^planning cut short/.test(r.problem ?? '');
+  const days = runs.filter((r) => !cutShort(r)).length;
   const bills = await billedByDay(pacificDay(runs[0].started_at));
   const over = bills.find((b) => b.google_gbp > DAY_ALERT_GBP);
   if (over) return { action: 'halted', runs, latest, bills, over };
@@ -127,6 +133,13 @@ export async function decide(now = new Date()) {
     : { rows: [{ failed: 0 }] };
   if (latest.state === 'done' && !failed) return { action: 'complete', runs, latest, bills };
   if (['running', 'waiting'].includes(latest.state)) return { action: 'working', runs, latest, bills };
+  // A day's run the programme built but never switched on — the process went
+  // while its plan was being written — is not anybody's stop. It is set aside
+  // and the day started again, the same day (Codex, 28 Sep 2026).
+  const unfinishedPlan = latest.state === 'paused' && latest.started_by === STARTED_BY && /^built paused/.test(latest.problem ?? '')
+    && Date.now() - new Date(latest.started_at).getTime() > PLANNING_MS;
+  if (unfinishedPlan) return { action: 'replan', runs, latest, bills, day: days };
+  if (cutShort(latest)) return { action: 'start', runs, latest, bills, yesterday: null, day: days + 1 };
   const dayEnded = (latest.state === 'paused' && DAY_ENDED.test(latest.problem ?? '')) || latest.state === 'done';
   if (!dayEnded) return { action: 'stopped', runs, latest, bills };
   // The quota day it last asked in: a run ended for the day just after the
@@ -135,7 +148,7 @@ export async function decide(now = new Date()) {
   if (lastDay >= pacificDay(now)) return { action: 'today', runs, latest, bills };
   const yesterday = bills.find((b) => b.day === pacificDay(latest.started_at));
   if (yesterday && yesterday.census_gbp >= PENNIES_GBP) return { action: 'held', runs, latest, bills, yesterday };
-  return { action: 'start', runs, latest, bills, yesterday: yesterday ?? null, day: runs.length + 1 };
+  return { action: 'start', runs, latest, bills, yesterday: yesterday ?? null, day: days + 1 };
 }
 
 /**
@@ -170,13 +183,30 @@ async function tickLocked({ now = new Date(), start = censusRun.startRun, stop =
     tell({ kind: 'alert', subject: `Census stopped: Google billed £${d.over.google_gbp.toFixed(2)} on ${d.over.day}`, d });
   }
   if (d.action === 'held') tell({ kind: 'alert', subject: `Census held: the census was billed £${d.yesterday.census_gbp.toFixed(2)} on ${d.yesterday.day}`, d });
-  if (d.action !== 'start') return d;
+  if (d.action === 'replan') {
+    await query(
+      `update census_runs set state = 'stopped', finished_at = now(), problem = 'planning cut short; replaced by the next run'
+        where id = $1 and state = 'paused'`, [d.latest.id]);
+  }
+  if (d.action !== 'start' && d.action !== 'replan') return d;
   const label = `${LABEL} ${d.day}`;
   const sessionId = await sessionFor(label);
+  // Built paused, and switched on only once its plan is whole: a run is
+  // visible to the workers the moment its row exists, and the UK is three
+  // thousand squares to record after that, so a worker could otherwise empty a
+  // half-written plan and call the run done (Codex, 28 Sep 2026). And its own
+  // share of the day as well as its ceiling, which is what makes the engine
+  // advance it one worker at a time under its own lock — two processes could
+  // otherwise each spend the day's remaining allowance (Codex, same day).
   const run = await start({
-    label, areas: UK_AREAS, maxRequests: DAY_REQUESTS, ratePerSec: 5, dailyCap: 75_000,
-    startedBy: STARTED_BY, startedSessionId: sessionId,
+    label, areas: UK_AREAS, maxRequests: DAY_REQUESTS, nightShare: DAY_REQUESTS, ratePerSec: 5, dailyCap: 75_000,
+    startedBy: STARTED_BY, startedSessionId: sessionId, paused: true,
   });
+  if (run?.id) {
+    await query(
+      `update census_runs set state = 'running', problem = null, last_seen_at = now()
+        where id = $1 and state = 'paused' and problem like 'built paused%'`, [run.id]);
+  }
   tell({ kind: 'started', subject: `Census day ${d.day} started`, d, run });
   return { ...d, started: run, sessionId };
 }

@@ -8,6 +8,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { testDatabase } from './helpers/db.js';
 
 const { query, pool } = await testDatabase();
@@ -46,7 +47,7 @@ const billed = (day, meter, cost) => query(
 /** A stand-in for startRun: records what it was asked and returns a row. */
 const recorder = () => {
   const calls = [];
-  const start = async (args) => { calls.push(args); return { id: 'x', label: args.label }; };
+  const start = async (args) => { calls.push(args); return { id: crypto.randomUUID(), label: args.label }; };
   return { calls, start };
 };
 
@@ -73,6 +74,8 @@ test('the day after a run stopped at its ceiling, the next day starts: 70,000, e
   const [a] = r.calls;
   assert.equal(a.label, 'The rest of the UK — day 2');
   assert.equal(a.maxRequests, 70_000);
+  assert.equal(a.nightShare, 70_000, 'its own share of the day, which advances it one worker at a time');
+  assert.equal(a.paused, true, 'built paused, switched on once its plan is whole');
   assert.deepEqual(a.areas, uk.UK_AREAS);
   assert.ok(a.areas.includes('BT') && a.areas.length === 121);
   const { rows: [s] } = await query('select label, kind from api_sessions where id = $1', [a.startedSessionId]);
@@ -216,4 +219,37 @@ test('a run done with a square given up on is not the UK complete: the next day 
   const r = recorder();
   const out = await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start });
   assert.equal(out.action, 'start', 'not complete while a square is unasked');
+});
+
+test('a day\'s run is switched on only once its plan is written, and a plan cut short is replaced the same day', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from census_run_tiles where run_id in (select id from census_runs where label like 'The rest of the UK — day %')`);
+    await query(`delete from geo_cells where code like 'ZZ0D%'`);
+    await clean();
+  });
+  await dayOne();
+  await query(
+    `insert into geo_cells (code, scheme, label, outcode, lat, lng, source) values ('ZZ0D 1', 'sector', 'ZZ0D 1', 'ZZ0D', 48.24, -5.94, 'test')
+     on conflict (code) do update set outcode = excluded.outcode, lat = excluded.lat, lng = excluded.lng`);
+  const { startRun } = await import('../src/sources/censusRun.js');
+  // The real start, on one sea district rather than the UK.
+  let seenWhilePlanning = null;
+  const start = async (args) => {
+    const run = await startRun({ ...args, areas: [], outcodes: ['ZZ0D'], padKm: 0 });
+    seenWhilePlanning = (await query('select state from census_runs where id = $1', [run.id])).rows[0].state;
+    return run;
+  };
+  const out = await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start });
+  assert.equal(seenWhilePlanning, 'paused', 'nobody can work it while it is being planned');
+  const { rows: [on] } = await query('select state, night_share, started_by from census_runs where id = $1', [out.started.id]);
+  assert.deepEqual([on.state, on.night_share], ['running', 70000]);
+  // Now a plan that was cut short: built paused by the programme a while ago.
+  await query(`update census_runs set state = 'paused', problem = 'built paused; resume to start', started_at = now() - interval '20 minutes' where id = $1`, [out.started.id]);
+  const r = recorder();
+  const again = await uk.tick({ now: new Date('2026-09-29T08:30:00Z'), start: r.start });
+  assert.equal(again.action, 'replan');
+  assert.equal(r.calls[0].label, 'The rest of the UK — day 2', 'the same day, the same number');
+  const { rows: [old] } = await query('select state, problem from census_runs where id = $1', [out.started.id]);
+  assert.deepEqual([old.state, old.problem], ['stopped', 'planning cut short; replaced by the next run']);
 });
