@@ -121,7 +121,9 @@ export async function billedByDay(fromDay) {
     // out: the spend tile's own rule, usage not credit (Codex, 29 Sep 2026).
     `select to_char(day, 'YYYY-MM-DD') as day,
             coalesce(sum(cost + credits - promo) filter (where sku ~* 'text search' and sku ~* '(essentials|ids only)'), 0)::float as census_gbp,
-            coalesce(sum(cost + credits - promo), 0)::float as google_gbp,
+            -- After every credit, promotional included: usage paid by credit is
+            -- £0 net (owner, 29 Sep 2026), for the £5 stop as for Places.
+            coalesce(sum(cost + credits), 0)::float as google_gbp,
             -- What Places actually charged: after every credit, promotional
             -- included. Owner, 29 Sep 2026: "if Places spend on
             -- epic-maps-509205 is above £0 for any day … stop and tell me."

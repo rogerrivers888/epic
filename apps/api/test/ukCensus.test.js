@@ -346,17 +346,23 @@ test('a notice is mailed once however many processes say it', async (t) => {
   assert.equal(sent, 1);
 });
 
-test('free-tier credit is not spend; promotional credit is', async (t) => {
+test('usage paid by credit, free-tier or promotional, is £0 net', async (t) => {
   await clean(); t.after(clean);
   await dayOne();
   // £40 of IDs-only usage, all of it free tier: nothing charged, nothing held.
   await billed('2026-09-28', 'google-essentials', 40, { credits: -40, promo: 0 });
   const r = recorder();
   assert.equal((await uk.tick({ now: new Date('2026-09-29T09:00:00Z'), start: r.start })).action, 'start');
-  // £6 of Place Details paid from the promotional credit is still £6 spent.
+  // £6 of Place Details paid from the promotional credit is £0 net too (owner,
+  // 29 Sep 2026: "usage paid by credit counts as £0 net") — not a £5 stop.
   await clean();
   await dayOne();
   await billed('2026-09-28', 'google-pro', 6, { credits: -6, promo: -6 });
+  assert.equal((await uk.tick({ now: new Date('2026-09-29T09:00:00Z'), start: r.start, stop: async () => {} })).action, 'start');
+  // £6 with £5 of credit is £1 net: Places cost money, and it stops.
+  await clean();
+  await dayOne();
+  await billed('2026-09-28', 'google-pro', 6, { credits: -5, promo: -5 });
   assert.equal((await uk.tick({ now: new Date('2026-09-29T09:00:00Z'), start: r.start, stop: async () => {} })).action, 'halted');
 });
 
