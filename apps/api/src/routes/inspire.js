@@ -75,7 +75,7 @@ import { foodNear } from '../repositories/scout.js';
 import { enabledSources } from '../sources/index.js';
 import { needsLookAround, lookAroundOutcome } from '../domain/lookAround.js';
 import { censusForRing, categoryPage, peek, pageKey, ASKED } from '../sources/ringSearch.js';
-import { hiddenAmong } from '../repositories/placeStatus.js';
+import { annotateClosed, hiddenAmong, markedAmong } from '../repositories/placeStatus.js';
 import { boxAround, boxKm, outcodeOfCell } from '../domain/ring.js';
 import * as reach from '../repositories/reach.js';
 import { sectorOf } from '../domain/reach.js';
@@ -456,6 +456,9 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
         [refs])).rows
       : [];
     const byRef = new Map(scores.map((r) => [r.venue_ref, r.epic == null ? null : Number(r.epic)]));
+    // A survivor that is temporarily closed carries its label to the card
+    // (owner, 29 Sep 2026); a permanent one was filtered above.
+    const marks = await markedAmong(refs).catch(() => new Map());
     return { mine, items: mine
       .map((v, i) => {
         const ref = `${v.source}:${v.sourcePlaceId}`;
@@ -491,6 +494,7 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
           // viewport, a row at a time").
           photos: (v.photos ?? []).slice(0, 1),
           website: v.website ?? null,
+          closed: marks.get(ref) ?? null,
         };
       })
       .filter(Boolean)
@@ -1139,6 +1143,9 @@ inspire.get('/near', async (req, res, next) => {
     // atlas ones count here: a dropped food place says nothing about reach.
     atlasCount -= items.filter((i) => i.source === 'atlas' && childToParent.has(i.venueRef)).length;
     items = placeParts.withoutParts(items, childToParent);
+    // A temporarily closed survivor carries its "Temporarily closed" label to
+    // the card, on the near/atlas surface too (owner, 29 Sep 2026).
+    items = await annotateClosed(items, (i) => i.venueRef).catch(() => items);
 
     // The heart on each card: whether this household has already kept, been to
     // or made a special of the place. One query for the lot.

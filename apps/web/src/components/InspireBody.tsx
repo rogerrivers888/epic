@@ -198,6 +198,7 @@ function Card({ item, crowd, travel, onOpen }: { item: InspireItem; crowd?: Crow
   return (
     <MediaCard name={item.name} onPress={onOpen} thumb={<PlaceThumb item={item} width={CARD_W} height={CARD_H} />}>
       {crowd ? <Crowd rating={crowd.rating} count={crowd.ratingCount} empty={crowd.known ? 'No ratings yet' : null} /> : null}
+      {item.closed?.status === 'temporarily_closed' ? <Text style={styles.tempClosed}>Temporarily closed</Text> : null}
       <View style={styles.cardFoot}>
         <Journey item={item} travel={travel} />
         {price ? <Text style={styles.price}>{price}</Text> : null}
@@ -212,6 +213,7 @@ export function CardWide({ item, crowd, travel, onOpen }: { item: InspireItem; c
   return (
     <MediaCard wide name={item.name} onPress={onOpen} thumb={<PlaceThumb item={item} fill />}>
       {crowd ? <Crowd rating={crowd.rating} count={crowd.ratingCount} empty={crowd.known ? 'No ratings yet' : null} /> : null}
+      {item.closed?.status === 'temporarily_closed' ? <Text style={styles.tempClosed}>Temporarily closed</Text> : null}
       <View style={styles.cardFoot}>
         <Journey item={item} travel={travel} />
         {price ? <Text style={styles.price}>{price}</Text> : null}
@@ -276,7 +278,9 @@ export function FoodRow({ item, kind, status, standing, crowd, travel, onOpen }:
         </View>
       </View>
       <Text style={styles.meta} numberOfLines={1}>{bits.join(' · ')}</Text>
-      {status ? <Text style={[styles.status, { color: status.open ? colors.accent : colors.inkMuted }]}>{status.text}</Text> : null}
+      {item.closed?.status === 'temporarily_closed'
+        ? <Text style={styles.tempClosed}>Temporarily closed</Text>
+        : status ? <Text style={[styles.status, { color: status.open ? colors.accent : colors.inkMuted }]}>{status.text}</Text> : null}
     </Press>
   );
 }
@@ -307,6 +311,8 @@ export function EmptyMatch({ title = 'Nothing matches', body, action, onAction }
 }
 
 const styles = StyleSheet.create({
+  // A temporarily closed place stays in the list, said in ink (owner, 29 Sep 2026).
+  tempClosed: { fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: colors.ink },
   section: { gap: spacing.md },
   sectionHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: spacing.md, paddingHorizontal: GUTTER },
   sectionTitle: { fontFamily: fonts.heading, fontSize: 22, fontWeight: '800', letterSpacing: -0.44, color: colors.ink },

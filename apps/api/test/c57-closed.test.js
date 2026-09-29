@@ -1107,3 +1107,62 @@ test('the report splits permanently closed (hidden, reasons sum), temporarily cl
   assert.ok(all.examples.every((x) => x.status === 'permanently_closed'), 'the hidden list is permanent only');
   await query(`delete from place_status where venue_ref like 'google:c57-rep-%'`);
 });
+
+// ---------------------------------------------------------------------------
+// Codex round five (29 Sep 2026)
+// ---------------------------------------------------------------------------
+
+test('an applied temporarily closed place re-proposed permanently closed waits for the owner again', async () => {
+  const ref = 'google:c57-temp-to-perm';
+  await repo.propose({ ref, status: 'temporarily_closed', source: 'google', reason: 'temporarily closed by Google\'s status', evidence: 'Google business status' });
+  await repo.applyProposed({ by: 'test' });
+  assert.equal((await repo.statusFor(ref)).applied, true, 'the temporary closure is applied (labelled)');
+  assert.equal((await repo.hiddenAmong([ref])).has(ref), false, 'but not hidden');
+  // Now it becomes permanently closed: hiding, which needs the owner again.
+  await repo.propose({ ref, status: 'permanently_closed', source: 'wikidata', reason: 'dissolved 2020', evidence: 'P576' });
+  assert.equal((await repo.statusFor(ref)).applied, false, 'permanent hides more: applied reset, waits for the OK');
+  assert.equal((await repo.hiddenAmong([ref])).has(ref), false, 'not hidden until re-applied');
+
+  // Applied permanent, re-proposed permanent, keeps the OK.
+  await repo.applyProposed({ by: 'test' });
+  await repo.propose({ ref, status: 'permanently_closed', source: 'osm', reason: 'demolished', evidence: 'demolished=yes' });
+  assert.equal((await repo.statusFor(ref)).applied, true, 'permanent → permanent: no new OK needed');
+  await query(`delete from place_status where venue_ref = $1`, [ref]);
+});
+
+test('previousClosed is null until a second, older finished check exists', async () => {
+  await query(`delete from closed_checks`);
+  // No finished check at all.
+  assert.equal((await repo.report()).previousClosed, null);
+  // One finished check: still nothing to compare against (rows[0] is itself).
+  const id1 = await repo.startCheck({ by: 'test', dryRun: true });
+  await repo.finishCheck(id1, { counts: { byStatus: { permanently_closed: 200 } } });
+  assert.equal((await repo.report()).previousClosed, null, 'one finished check: no "was"');
+  // A second, newer finished check: now the older one's number is the "was".
+  const id2 = await repo.startCheck({ by: 'test', dryRun: true });
+  await repo.finishCheck(id2, { counts: { byStatus: { permanently_closed: 245 } } });
+  assert.equal((await repo.report()).previousClosed, 200, 'the older finished check\'s permanent count');
+  await query(`delete from closed_checks`);
+});
+
+test('a temporarily closed survivor carries its label on a family search result; a permanent one is gone', async () => {
+  const temp = 'google:c57-search-temp';
+  const perm = 'google:c57-search-perm';
+  await repo.propose({ ref: temp, status: 'temporarily_closed', source: 'google', reason: 'temporarily closed by Google\'s status', evidence: 'Google business status', applied: true, appliedBy: 'test' });
+  await repo.propose({ ref: perm, status: 'permanently_closed', source: 'google', reason: 'permanently closed by Google\'s status', evidence: 'Google business status', applied: true, appliedBy: 'test' });
+  const venues = [
+    { source: 'google', sourcePlaceId: 'c57-search-temp', name: 'The Paused Pub' },
+    { source: 'google', sourcePlaceId: 'c57-search-perm', name: 'The Gone Grill' },
+    { source: 'google', sourcePlaceId: 'c57-search-open', name: 'The Open Arms' },
+  ];
+  const { withoutHidden, annotateClosed } = repo;
+  const refOf = (v) => v.venueRef ?? `${v.source}:${v.sourcePlaceId}`;
+  const shown = await annotateClosed(await withoutHidden(venues, refOf), refOf);
+  const names = shown.map((v) => v.name);
+  assert.ok(!names.includes('The Gone Grill'), 'a permanently closed place is filtered from results');
+  const paused = shown.find((v) => v.name === 'The Paused Pub');
+  assert.equal(paused.closed?.status, 'temporarily_closed', 'the temporary one carries its label');
+  assert.equal(paused.closed?.hidden, false);
+  assert.equal(shown.find((v) => v.name === 'The Open Arms').closed, undefined, 'an open place carries no mark');
+  await query(`delete from place_status where venue_ref = any($1)`, [[temp, perm]]);
+});

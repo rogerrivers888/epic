@@ -5,7 +5,7 @@
 // database (Technical Constraints: rented content is never stored).
 
 import { searchAllSources, optInFrom } from './index.js';
-import { withoutHidden } from '../repositories/placeStatus.js';
+import { annotateClosed, withoutHidden } from '../repositories/placeStatus.js';
 import { observe } from '../repositories/taxonomyLabels.js';
 import { labelsOf } from '../domain/labels.js';
 
@@ -101,8 +101,13 @@ export async function searchCached(params, { refresh = false, onProgress = null,
   // Closed places, once the owner has applied the check, are left out of what
   // a family is handed (C57). The pool keeps everything: the back office asks
   // with `shownOnly: false` and sees what exists.
+  // A family's search: the permanently closed are dropped, and the survivors
+  // that are temporarily closed carry a "Temporarily closed" mark on the card
+  // (owner, 29 Sep 2026 — the label must reach the results, not only the
+  // drawer). The back office (`shownOnly: false`) sees everything, unmarked.
+  const refOf = (v) => v.venueRef ?? `${v.source}:${v.sourcePlaceId}`;
   const shown = async (r) => (shownOnly && r?.venues?.length
-    ? { ...r, venues: await withoutHidden(r.venues, (v) => v.venueRef ?? `${v.source}:${v.sourcePlaceId}`).catch(() => r.venues) }
+    ? { ...r, venues: await annotateClosed(await withoutHidden(r.venues, refOf).catch(() => r.venues), refOf).catch(() => r.venues) }
     : r);
   const key = searchKey(params);
   const hit = kept.get(key);

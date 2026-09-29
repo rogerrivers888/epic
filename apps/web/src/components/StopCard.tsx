@@ -65,6 +65,11 @@ export function StopCard({ stop, mode, baseLabel, previousName, dim, pinned, bus
           </Text>
         ) : null}
 
+        {/* A temporarily closed place stays in the plan, labelled (C57). */}
+        {stop.closed?.status === 'temporarily_closed' ? (
+          <Text style={[type.small, { fontWeight: '700', color: colors.ink }]}>Temporarily closed</Text>
+        ) : null}
+
         {!isAnchor ? (
           stop.rating != null ? (
             <Rating value={stop.rating}>

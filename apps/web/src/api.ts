@@ -407,6 +407,8 @@ export type Review = { text: string; rating: number | null; author: string | nul
 export type VenuePhotoRef = { ref?: string; url?: string; attribution?: string; sig?: string; exp?: number };
 
 export type Venue = {
+  /** A closed mark (C57): a temporarily closed place stays in results, labelled. */
+  closed?: ClosedMark | null;
   /** Set when this place sits inside another's grounds — a ride in a theme park. It belongs in that place's drawer, not beside it in a list. */
   insideRef?: string | null; insideName?: string | null;
   venueRef: string; source: string; sourcePlaceId: string; name: string; category: string; contributingSources?: string[];
@@ -537,6 +539,8 @@ export type Visit = {
 export type PricePoint = 'any' | 'affordable' | 'mid' | 'upmarket';
 
 export type OptionStop = {
+  /** A closed mark on a result card (C57): a temporarily closed place is shown, labelled. */
+  closed?: ClosedMark | null;
   id: string; position: number; venueRef: string; name: string; category: string; lat: number; lng: number;
   dwellMinutes: number; waitMinutes?: number; travelFromPrevMinutes: number; arriveAt?: string; leaveAt?: string;
   reasons: Reason[]; justification: string | null; startsAt: string | null; endsAt: string | null; pinned: boolean; fixed?: boolean; uniqueToThisOption?: boolean;
@@ -1258,6 +1262,8 @@ export type OwnedImage = {
 };
 
 export type InspireItem = {
+  /** A closed mark (C57): a temporarily closed place is shown with a label. */
+  closed?: ClosedMark | null;
   venueRef: string; source: string; name: string; category: string;
   /** One category, in a list — the shape the shelves already draw. */
   moods: MoodKey[];

@@ -110,6 +110,31 @@ export async function withoutHidden(items, refOf = (x) => x?.ref ?? x?.venueRef)
   return hidden.size ? items.filter((x) => !hidden.has(String(refOf(x)))) : items;
 }
 
+/**
+ * The closed *mark* for each of these refs that carries one — a temporarily
+ * closed place, mostly, since a permanent one has already been filtered out of
+ * any family result (owner, 29 Sep 2026: it "must reach the result cards").
+ * The brief the card renders: `{ status, hidden, confirmed, successor }`.
+ */
+export async function markedAmong(refs) {
+  const found = await hiddenStatusesOf(refs);
+  const out = new Map();
+  for (const [ref, st] of found) { const brief = closedBrief(st); if (brief) out.set(ref, brief); }
+  return out;
+}
+
+/**
+ * Annotate a list of results with their closed mark, in place-shaped `.closed`.
+ * A family sees the "Temporarily closed" label on the card, not only once the
+ * drawer is opened. `refOf` reads each item's venue ref.
+ */
+export async function annotateClosed(items, refOf = (x) => x?.venueRef ?? (x?.source && x?.sourcePlaceId ? `${x.source}:${x.sourcePlaceId}` : null)) {
+  if (!items?.length) return items;
+  const marks = await markedAmong(items.map(refOf).filter(Boolean)).catch(() => new Map());
+  if (!marks.size) return items;
+  return items.map((x) => { const c = marks.get(String(refOf(x))); return c ? { ...x, closed: c } : x; });
+}
+
 const shape = (r) => (r ? {
   ref: r.venue_ref, status: r.status, confirmed: r.confirmed, confirmedBy: r.confirmed_by,
   reason: r.reason, source: r.source, evidence: r.evidence, review: r.review,
@@ -236,8 +261,13 @@ export async function statusesFor(refs) {
  * own row is never overwritten by a check.
  */
 export async function propose(row, { client = null, checkId = null } = {}) {
-  const hideNew = `(excluded.status in ('temporarily_closed', 'permanently_closed'))`;
-  const hideOld = `(place_status.status in ('temporarily_closed', 'permanently_closed'))`;
+  // The owner's OK is reset when a row comes to *hide* more than before, and
+  // only a permanent closure hides (owner, 29 Sep 2026). So a place going from
+  // not-hiding (open, unknown, or temporarily closed) to permanently closed
+  // must wait for the owner again (Codex, 29 Sep 2026); going the other way —
+  // permanent to temporary, which un-hides — keeps the OK it already had.
+  const hideNew = `(excluded.status = 'permanently_closed')`;
+  const hideOld = `(place_status.status = 'permanently_closed')`;
   const same = `place_status.status = excluded.status and place_status.confirmed = excluded.confirmed`;
   await on(client)(
     `insert into place_status (venue_ref, wikidata_id, status, confirmed, confirmed_by, reason, source, evidence,
@@ -434,7 +464,10 @@ export async function report({ examples = 20, allClosed = false } = {}) {
   // stored closed count, if there is one. Older runs stored `would_hide` as
   // permanent+temporary combined, so this is named as "was" rather than a
   // like-for-like delta, and is null when there is no prior run (can't-speak).
-  const priorCounts = prevCheck.rows[1]?.counts ?? prevCheck.rows[0]?.counts ?? null;
+  // The row before the current one, if there is a second finished check —
+  // with only one, rows[0] is the current check and there is no "was" to show
+  // (Codex, 29 Sep 2026).
+  const priorCounts = prevCheck.rows[1]?.counts ?? null;
   const previousClosed = priorCounts && typeof priorCounts === 'object'
     ? (priorCounts.byStatus?.permanently_closed ?? null) : null;
   return {
