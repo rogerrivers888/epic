@@ -2836,8 +2836,12 @@ async function buildSubcategorySummary(scope, sub) {
               coalesce(r.opening_hours, d.visit->>'openingHours')             as opening_hours,
               coalesce(r.website, a.website, sp.website)                      as website,
               coalesce(r.summary, a.summary)                                  as summary,
-              -- A picture we own: an approved owned image, or one on the record.
-              case when r.image_url is not null or exists (
+              -- A picture we own: an approved, storable owned image only — the
+              -- exact condition HELD_SQL and readiness use. A record image_url
+              -- can hold an external URL (e.g. a Wikipedia image own.js recorded),
+              -- which is not a picture we own, so counting it would overstate
+              -- coverage against the score (Codex, 29 Sep 2026).
+              case when exists (
                      select 1 from image_links li join image_assets ia on ia.id = li.image_id
                       where ia.may_store and ia.moderation = 'approved'
                         and ((li.subject_type = 'place' and li.subject_id = pi.venue_ref)
@@ -2939,15 +2943,22 @@ router.post('/subcategory-summary/compare-all', requires('manage_library'), asyn
     // page in.
     const held = await alreadyHeld(refs);
     const blind = await nothingToGoOn(refs);
-    // The places still worth a call: not already cached, and something to go on.
-    const uncompared = refs.filter((ref) => !held.has(ref) && !blind.has(ref));
+    // Places we already looked for and Google had no such place: a remembered
+    // miss. `googleMatchFor` returns the cached miss and makes no progress, so
+    // they are excluded from the batch — not merely discounted from the price —
+    // or a miss in the first page is picked every call and the page never
+    // advances (Codex, 29 Sep 2026).
+    const misses = await missesKept(refs, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 });
+    // The places still worth a call: not already cached, not a known miss, and
+    // something to go on.
+    const uncompared = refs.filter((ref) => !held.has(ref) && !blind.has(ref) && !misses.has(ref));
     const batch = uncompared.slice(0, COMPARE_ALL_PAGE);
-    const want = askingCost(batch, await alreadyMatched(batch), held,
-      await missesKept(batch, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 }), blind);
+    const want = askingCost(batch, await alreadyMatched(batch), held, misses, blind);
     const room = await roomToSpend(want, { holder: 'compare-all' });
     if (!room.ok) return overTheCeiling(res, want, room);
     const household = await currentHousehold();
     let fetched = 0;
+    let failed = 0;
     try {
       const named = await index.namesFor(batch);
       const { rows: at } = await query('select venue_ref, lat, lng from place_index where venue_ref = any($1)', [batch]);
@@ -2967,15 +2978,25 @@ router.post('/subcategory-summary/compare-all', requires('manage_library'), asyn
         if (!id) continue;
         // Fills the cache and writes its own attributed ledger row.
         await detailFor('google', id, household.id).catch(() => null);
-        fetched += 1;
+        // Counted only when the detail actually landed in the cache: a timeout,
+        // a provider error or a switched-off source leaves nothing to compare
+        // and must not read as progress (Codex, 29 Sep 2026).
+        if (detailHeld('google', id)) fetched += 1; else failed += 1;
       }
     } finally {
       await releaseSpend(room.reservation);
     }
-    // How many places still have no comparison after this page, so the screen
-    // knows whether to offer "compare the next N".
+    // Best-effort, not a durable ledger. A comparison is display-only — no
+    // Google content is stored (the data policy) — so the only record of one is
+    // the six-hour, 300-entry detail cache. A subcategory larger than that cache
+    // cannot be held whole, so `remaining` may not fall to zero and an evicted
+    // place may be compared again on a later manual page; each such page is a
+    // fresh call the cost quote, the grant and the ceiling all bound, so it is
+    // never a runaway. The summary's opened/total is the honest coverage; this
+    // figure only tells the screen whether to offer "compare the next N"
+    // (Codex, 29 Sep 2026 — the cost of keeping nothing rented).
     const remaining = Math.max(0, uncompared.length - batch.length);
-    res.json({ ...(await head(scope)), ...(await buildSubcategorySummary(scope, sub)), fetched, remaining });
+    res.json({ ...(await head(scope)), ...(await buildSubcategorySummary(scope, sub)), fetched, failed, remaining });
   } catch (err) { next(err); }
 });
 
