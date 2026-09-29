@@ -595,6 +595,8 @@ const saidHere = new Set();
 export const reportTo = () => String(process.env.EPIC_CENSUS_REPORT_TO || 'roger@epic.day')
   .split(',').map((a) => a.trim()).filter(Boolean);
 
+const wentUnlogged = new Set();
+
 export async function notify({ subject, text = null, purpose = 'census_report', send = sendMail, configured = () => mailStatus().configured, to = reportTo() }) {
   if (!saidHere.has(subject)) { saidHere.add(subject); console.log(`epic-api: census — ${subject}`); }
   if (!configured()) return { mailed: false, why: 'no mail sender' };
@@ -620,8 +622,13 @@ export async function notify({ subject, text = null, purpose = 'census_report', 
             where purpose like 'census%' and subject = $1 and lower(to_address) = lower($2)
               and (status not in ('failed', 'sending') or (status = 'sending' and sent_at > now() - interval '15 minutes'))
             limit 1`, [subject.slice(0, 300), address]);
-        if (rows.length) continue;
+        if (rows.length || wentUnlogged.has(`${subject}\n${address}`)) continue;
         const out = await send({ to: address, subject, text: text ?? subject, purpose });
+        // Went, but the log row could not be written: the check above cannot
+        // see it, and would send it again on every tick. Remembered here
+        // instead, for this process's life — once a deploy, never every ten
+        // minutes (30 Sep 2026: production's mail log had no rows at all).
+        if (out.sent && out.logged === false) wentUnlogged.add(`${subject}\n${address}`);
         mailed = mailed || Boolean(out.sent); why = out.sent ? null : out.message;
       }
       return { mailed, why };

@@ -990,3 +990,11 @@ test('a late charge after the finish is on the status, to be looked at and lifte
   await uk.liftHold({ who: 'test' });
   assert.equal((await uk.status(new Date('2026-10-01T09:00:00Z'))).halted, null, 'and gone once lifted');
 });
+
+test('a notice that went but could not be written down is not sent again every tick', async () => {
+  const subject = `Census — unlogged ${Date.now()}`;
+  let sent = 0;
+  const send = async () => { sent += 1; return { sent: true, logged: false, logError: 'no row' }; };
+  for (let i = 0; i < 3; i += 1) await uk.notify({ subject, send, configured: () => true, to: ['roger@epic.day'] });
+  assert.equal(sent, 1);
+});
