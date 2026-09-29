@@ -906,3 +906,19 @@ test('a finished census is not blamed for Places used long after, and the report
   assert.equal(told.length, 0);
   assert.match(uk.reportLine({ day: 1, date: '2026-09-28', requests: 1, newPlaces: 0, billed: { placesNetGbp: 0.003, final: true } }), /£0\.0030 that day$/);
 });
+
+test('a lift written before the new maps still covers what it saw, and a day keeps its new places', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  await billed('2026-09-28', 'google-pro', 0.4);
+  // The old shape: only `seen`, and when.
+  await query(`insert into bo_settings (key, value, updated_by) values ('census:uk-hold-lifted', $1, 'test')`,
+    [JSON.stringify({ seen: { '2026-09-28': 0 }, at: '2026-09-29T09:00:00Z' })]);
+  const r = recorder();
+  assert.equal((await uk.tick({ now: new Date('2026-09-30T08:00:00Z'), start: r.start })).action, 'start', 'not stopped again on a charge already lifted');
+  // A day kept once has its new places stored with it.
+  await uk.status(new Date('2026-09-30T09:00:00Z'));
+  await uk.status(new Date('2026-09-30T09:10:00Z'));
+  const { rows: [k] } = await query(`select value from bo_settings where key like 'census:uk-day:%' limit 1`);
+  assert.equal(typeof k?.value?.newPlaces, 'number');
+});

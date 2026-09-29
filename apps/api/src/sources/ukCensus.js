@@ -198,10 +198,17 @@ export async function decide(now = new Date()) {
   // What a person has looked at and lifted (POST /census/uk/lift): only a
   // figure that has grown since stops it or is said again (Codex, 29 Sep 2026).
   const { rows: [lifted] } = await query(`select value from bo_settings where key = 'census:uk-hold-lifted'`);
-  const seenGoogle = lifted?.value?.seenGoogle ?? {};
-  const seenNet = lifted?.value?.seenNet ?? {};
-  const seenGoogleSpan = lifted?.value?.seenGoogleSpan ?? {};
-  const seenNetSpan = lifted?.value?.seenNetSpan ?? {};
+  // A lift written before these maps existed (its figures under `seen` only)
+  // covers every bill on days up to the day it was made, as it stood then: an
+  // upgrade must not stop the census again on a charge already looked at
+  // (Codex, 29 Sep 2026).
+  const legacyThrough = lifted && !lifted.value?.seenNet && lifted.value?.at ? pacificDay(lifted.value.at) : null;
+  const legacy = (list) => (legacyThrough ? Object.fromEntries(list.filter((b) => b.day <= legacyThrough).map((b) => [b.day, Infinity])) : {});
+  const legacySpans = runs.map((r) => billedFor(bills, pacificDay(r.started_at))).filter(Boolean);
+  const seenGoogle = lifted?.value?.seenGoogle ?? legacy(bills);
+  const seenNet = lifted?.value?.seenNet ?? legacy(bills);
+  const seenGoogleSpan = lifted?.value?.seenGoogleSpan ?? legacy(legacySpans);
+  const seenNetSpan = lifted?.value?.seenNetSpan ?? legacy(legacySpans);
   const EPS = 1e-9;
   const unseen = (b, key, seen, floor) => b[key] > floor + EPS && b[key] > (seen[b.day] ?? -Infinity) + EPS;
   if (finishedFirst) {
@@ -501,11 +508,17 @@ export async function status(now = new Date()) {
       Object.assign(then, value);
     }
     // New to the census: places this day found that no earlier run had.
-    const { rows: [fresh] } = await query(
+    // Counted once when the day is kept and stored with it; only a day still
+    // going is counted live (Codex, 29 Sep 2026: a scan of the whole history
+    // on every look).
+    const { rows: [fresh] } = kept?.value?.newPlaces != null ? { rows: [{ n: kept.value.newPlaces }] } : await query(
       `select count(distinct s.venue_ref)::int as n from census_run_surfacings s
         where s.run_id = $1
           and not exists (select 1 from census_run_surfacings o join census_runs ro on ro.id = o.run_id
                            where o.venue_ref = s.venue_ref and o.run_id <> $1 and ro.started_at < $2)`, [r.id, r.started_at]);
+    if (ended && kept && kept.value.newPlaces == null) {
+      await query(`update bo_settings set value = value || jsonb_build_object('newPlaces', $2::int), updated_at = now() where key = $1`, [key, fresh.n]);
+    }
     const rate = tilesAsked ? requests / tilesAsked : null;
     days.push({
       day: i + 1, date: day, runId: r.id, state: r.state, ended, requests: Number(r.requests ?? 0), places: Number(r.places ?? 0),
