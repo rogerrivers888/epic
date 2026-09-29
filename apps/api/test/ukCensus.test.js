@@ -472,3 +472,13 @@ test('a slow planner still holds off other starts while it beats', async (t) => 
      values ('The rest of the UK — day 2', array['ZZ'], 0.08, 0.12, 70000, 5, 30, 'paused', 'built paused; resume to start', $1, now() - interval '40 minutes', now() - interval '1 minute')`, [ONE_DAY_RUNS]);
   await assert.rejects(() => startRun({ label: 'test by hand', outcodes: ['SL5'], padKm: 0 }), /is being planned/);
 });
+
+test('a person\'s stop on a sleeping day\'s run is not overruled by ending the day', async (t) => {
+  await clean(); t.after(clean);
+  const { endForTheDay } = await import('../src/sources/censusRun.js');
+  const run = await dayOne({ state: 'waiting', problem: '75,000 requests today', finished: null });
+  await query('update census_runs set stop_requested = true where id = $1', [run.id]);
+  assert.equal(await endForTheDay(run.id), false, 'left to the stop');
+  const { rows: [r] } = await query('select state from census_runs where id = $1', [run.id]);
+  assert.equal(r.state, 'waiting');
+});

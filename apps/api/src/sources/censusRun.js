@@ -1126,11 +1126,16 @@ export const ONE_DAY_LABEL = 'The rest of the UK — day';
  * starts a run of its own (Codex, 28 Sep 2026). Only while still waiting.
  */
 export async function endForTheDay(id) {
+  // One statement, so a person's stop cannot land between two and be lost; a
+  // run with a stop asked for is left to that stop (Codex, 29 Sep 2026).
   const { rows: [r] } = await query(
-    `update census_runs set state = 'paused', resume_after = null
-      where id = $1 and state = 'waiting' returning problem`, [id]);
+    `update census_runs
+        set state = 'paused', resume_after = null, finished_at = now(), last_seen_at = now(), stop_requested = false,
+            problem = 'ended for the day: ' || coalesce(problem, 'the quota day')
+      where id = $1 and state = 'waiting' and not stop_requested returning id, started_by`, [id]);
   if (!r) return false;
-  await finish(id, 'paused', `ended for the day: ${r.problem ?? 'the quota day'}`);
+  await refreshProgress(id);
+  await rollUpAndRecount(id, rollUpScope(r));
   return true;
 }
 
