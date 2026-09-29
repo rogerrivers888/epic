@@ -852,3 +852,18 @@ test('a fraction of a penny is above £0, Routes is not Places, and a finished c
   assert.equal((await uk.tick({ now: new Date('2026-10-01T08:00:00Z'), tell: (x) => told.push(x) })).action, 'complete');
   assert.match(told[0]?.subject ?? '', /^Census \(finished\): Places cost £0\.50 after credits/);
 });
+
+test('a charge lifted before the finish is not said again after it, and an old day with no record stays unknown', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne({ state: 'done', problem: null });
+  await billed('2026-09-28', 'google-pro', 0.5);
+  await uk.liftHold({ who: 'test' });
+  await query(`insert into bo_settings (key, value, updated_by) values ('census:uk-complete', '{}', 'test')`);
+  const told = [];
+  assert.equal((await uk.tick({ now: new Date('2026-10-01T08:00:00Z'), tell: (x) => told.push(x) })).action, 'complete');
+  assert.equal(told.length, 0, 'lifted, and not grown: nothing to say');
+  // Seen from two months on with no record kept: not reconstructed.
+  await query(`delete from bo_settings where key like 'census:uk-day:%'`);
+  const st = await uk.status(new Date('2026-12-01T08:00:00Z'));
+  assert.deepEqual([st.days[0].districtsLeft, st.days[0].areasLeft], [null, null]);
+});

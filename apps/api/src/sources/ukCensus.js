@@ -184,13 +184,21 @@ export async function decide(now = new Date()) {
   // one (Codex, 29 Sep 2026).
   const { rows: [finishedFirst] } = await query(`select value from bo_settings where key = 'census:uk-complete'`);
   const bills = await billedByDay(pacificDay(runs[0].started_at));
+  // What a person has looked at and lifted (POST /census/uk/lift): only a
+  // figure that has grown since stops it or is said again (Codex, 29 Sep 2026).
+  const { rows: [lifted] } = await query(`select value from bo_settings where key = 'census:uk-hold-lifted'`);
+  const seenGoogle = lifted?.value?.seenGoogle ?? {};
+  const seenNet = lifted?.value?.seenNet ?? {};
+  const EPS = 1e-9;
+  const unseen = (b, key, seen, floor) => b[key] > floor + EPS && b[key] > (seen[b.day] ?? -Infinity) + EPS;
   if (finishedFirst) {
     // But its own days' bills still count: the last day's arrives after it
     // finished, and a costly one is still said (Codex, 29 Sep 2026).
     const days = runs.map((r) => billedFor(bills, pacificDay(r.started_at))).filter(Boolean);
-    const over = days.find((b) => b.google_gbp > DAY_ALERT_GBP);
-    // And a late Places charge for one of its days, after credits, is said too (Codex, 29 Sep 2026).
-    const net = days.find((b) => b.places_net_gbp > 1e-9);
+    const over = days.find((b) => unseen(b, 'google_gbp', seenGoogle, DAY_ALERT_GBP));
+    // And a late Places charge for one of its days, after credits, is said too
+    // — unless it is one a person already lifted (Codex, 29 Sep 2026).
+    const net = days.find((b) => unseen(b, 'places_net_gbp', seenNet, 0));
     return { action: 'complete', runs, latest, bills, over: over ? { ...over, kind: 'five' } : net ? { ...net, kind: 'net' } : null };
   }
   // Any export day over £5, and any quota day of the programme over £5 across
@@ -202,15 +210,10 @@ export async function decide(now = new Date()) {
   // or the £5/day stop trips, stop and tell me"). Either stops the census for
   // good; a person who has looked lifts it (POST /census/uk/lift), and only a
   // figure that has grown since stops it again.
-  const { rows: [lifted] } = await query(`select value from bo_settings where key = 'census:uk-hold-lifted'`);
-  const seenGoogle = lifted?.value?.seenGoogle ?? {};
-  const seenNet = lifted?.value?.seenNet ?? {};
   const spans = runs.map((r) => billedFor(bills, pacificDay(r.started_at))).filter(Boolean);
   // Any amount at all: above £0 means a fraction of a penny too, and a lifted
   // figure stops it again on any growth (Codex, 29 Sep 2026). The epsilon is
   // only float noise.
-  const EPS = 1e-9;
-  const unseen = (b, key, seen, floor) => b[key] > floor + EPS && b[key] > (seen[b.day] ?? -Infinity) + EPS;
   const five = [...bills, ...spans].find((b) => unseen(b, 'google_gbp', seenGoogle, DAY_ALERT_GBP));
   if (five) return { action: 'halted', runs, latest, bills, over: { ...five, kind: 'five' } };
   const spent = [...bills, ...spans].find((b) => unseen(b, 'places_net_gbp', seenNet, 0));
@@ -433,9 +436,11 @@ export async function status(now = new Date()) {
     // Only while that day's squares cannot yet have been censused again (the
     // freshness window is 30 days): past that, current tiles do not say what
     // was left then, and it stays unknown (Codex, 29 Sep 2026).
-    const recent = Date.now() - new Date(r.finished_at ?? r.started_at).getTime() < 25 * 86_400_000;
-    const canFill = !kept || recent;
-    const { rows: [then] } = kept && (kept.value.districtsLeft != null || !canFill) ? { rows: [kept.value] } : await query(
+    const recent = new Date(now).getTime() - new Date(r.finished_at ?? r.started_at).getTime() < 25 * 86_400_000;
+    const canFill = recent || !ended;
+    const unknown = { districts: null, left: null, districtsLeft: null, areasLeft: null };
+    const { rows: [then] } = kept && (kept.value.districtsLeft != null || !canFill) ? { rows: [kept.value] }
+      : !kept && !canFill ? { rows: [unknown] } : await query(
       `with plan as (
          -- Done means done: a stale square being asked again keeps its old
          -- censused_at but is not done (Codex, 29 Sep 2026). The state is
@@ -451,7 +456,7 @@ export async function status(now = new Date()) {
     // Kept once the day has ended, so a square censused again thirty days on
     // cannot rewrite what that day said (Codex, 29 Sep 2026). In the back
     // office's own settings table, under a key its reader ignores.
-    if (ended && (!kept || (kept.value.districtsLeft == null && canFill))) {
+    if (ended && canFill && (!kept || kept.value.districtsLeft == null)) {
       // Normally written when the run ended (censusRun.keepDayFigures); this
       // is for a day that ended before that existed, or before it carried
       // what was left. What it already said about districts done stands.
