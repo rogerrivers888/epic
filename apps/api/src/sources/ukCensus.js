@@ -186,7 +186,12 @@ export async function decide(now = new Date()) {
   // A day's run the programme built but never switched on — the process went
   // while its plan was being written — is not anybody's stop. It is set aside
   // and the day started again, the same day (Codex, 28 Sep 2026).
-  const unfinishedPlan = latest.state === 'paused' && latest.started_by === STARTED_BY && /^built paused/.test(latest.problem ?? '')
+  // A day's plan written but not switched on — another census was going at
+  // the time — is switched on now, once nothing else is (Codex, 29 Sep 2026).
+  if (latest.state === 'paused' && latest.started_by === STARTED_BY && latest.problem === censusRun.PLAN_WRITTEN) {
+    return { action: 'switch on', runs, latest, bills, day: days };
+  }
+  const unfinishedPlan = latest.state === 'paused' && latest.started_by === STARTED_BY && latest.problem === 'built paused; resume to start'
     && new Date(now).getTime() - new Date(latest.last_seen_at ?? latest.started_at).getTime() > PLANNING_MS;
   if (unfinishedPlan) return { action: 'replan', runs, latest, bills, day: days };
   const dayEnded = (latest.state === 'paused' && DAY_ENDED.test(latest.problem ?? '')) || latest.state === 'done';
@@ -194,6 +199,10 @@ export async function decide(now = new Date()) {
   // A day's run is the quota day it was started in: one run a day, however
   // late the last one was closed off (Codex, 28 Sep 2026).
   if (pacificDay(latest.started_at) >= pacificDay(now)) return { action: 'today', runs, latest, bills };
+  // Any day of the programme, not only the latest: a census bill that
+  // arrives late for an earlier day holds it just the same (Codex, 29 Sep 2026).
+  const pricey = real.map((r) => billedFor(bills, pacificDay(r.started_at))).find((b) => b && b.census_gbp >= PENNIES_GBP);
+  if (pricey) return { action: 'held', runs, latest, bills, yesterday: pricey };
   const yesterday = billedFor(bills, pacificDay(latest.started_at));
   // Held stays held. The owner's rule for the gate (28 Sep 2026): "If it's
   // anything meaningful: stay paused and report the figure." A census that
@@ -205,10 +214,25 @@ export async function decide(now = new Date()) {
   const { rows: other } = await query(
     `select 1 from census_runs
       where state in ('running', 'waiting')
-         or (state = 'paused' and problem like 'built paused%' and coalesce(last_seen_at, started_at) > now() - interval '5 minutes')
+         or (state = 'paused' and problem = 'built paused; resume to start' and coalesce(last_seen_at, started_at) > now() - interval '5 minutes')
       limit 1`);
   if (other.length) return { action: 'waiting on another census', runs, latest, bills };
   return { action: 'start', runs, latest, bills, yesterday: yesterday ?? null, day: days + 1 };
+}
+
+/**
+ * A day's run built paused, switched on — only if nothing else is going: a
+ * census started by hand while this one was being planned is not joined by a
+ * second (Codex, 28 Sep 2026), and under the lock starting and resuming
+ * share, so a resume cannot slip in between the check and the switch (Codex,
+ * 29 Sep 2026). Left as it is otherwise, and tried again next tick.
+ */
+async function switchOn(id) {
+  return censusRun.withStartLock(async (db) => (await db.query(
+    `update census_runs set state = 'running', problem = null, last_seen_at = now()
+      where id = $1 and state = 'paused' and problem like 'built paused%'
+        and not exists (select 1 from census_runs o where o.id <> $1 and o.state in ('running', 'waiting'))`, [id])).rowCount > 0)
+    .catch(() => false);
 }
 
 /**
@@ -248,6 +272,11 @@ async function tickLocked({ now = new Date(), start = censusRun.startRun, stop =
       `update census_runs set max_requests = least(max_requests, requests) where id = $1 and state = 'running'`, [d.latest.id]);
     return d;
   }
+  if (d.action === 'switch on') {
+    const on = await switchOn(d.latest.id);
+    if (on) tell({ kind: 'started', subject: `Census day ${d.day} started`, d, run: d.latest });
+    return { ...d, action: on ? 'switched on' : 'waiting on another census' };
+  }
   if (d.action === 'replan') {
     await query(
       `update census_runs set state = 'stopped', finished_at = now(), problem = 'planning cut short; replaced by the next run'
@@ -267,19 +296,7 @@ async function tickLocked({ now = new Date(), start = censusRun.startRun, stop =
     label, areas: UK_AREAS, maxRequests: DAY_REQUESTS, nightShare: DAY_REQUESTS, ratePerSec: 5, dailyCap: 75_000,
     startedBy: STARTED_BY, startedSessionId: sessionId, paused: true,
   });
-  let on = false;
-  if (run?.id) {
-    // Only if nothing else is going: a census started by hand while this one
-    // was being planned is not joined by a second (Codex, 28 Sep 2026). Left
-    // built-paused, it is replanned once the other is done.
-    // Under the lock starting and resuming share, so a resume cannot slip in
-    // between this check and this switch (Codex, 29 Sep 2026).
-    on = await censusRun.withStartLock(async (db) => (await db.query(
-      `update census_runs set state = 'running', problem = null, last_seen_at = now()
-        where id = $1 and state = 'paused' and problem like 'built paused%'
-          and not exists (select 1 from census_runs o where o.id <> $1 and o.state in ('running', 'waiting'))`, [run.id])).rowCount > 0)
-      .catch(() => false);
-  }
+  const on = run?.id ? await switchOn(run.id) : false;
   // Said only if it is true (Codex, 29 Sep 2026).
   if (!on) return { ...d, action: 'blocked', built: run, sessionId };
   tell({ kind: 'started', subject: `Census day ${d.day} started`, d, run });

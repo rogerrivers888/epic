@@ -254,7 +254,7 @@ test('a day\'s run is switched on only once its plan is written, and a plan cut 
   const { rows: [on] } = await query('select state, night_share, started_by from census_runs where id = $1', [out.started.id]);
   assert.deepEqual([on.state, on.night_share], ['running', 70000]);
   // Now a plan that was cut short: built paused by the programme a while ago.
-  await query(`update census_runs set state = 'paused', problem = 'built paused; resume to start', started_at = now() - interval '20 minutes' where id = $1`, [out.started.id]);
+  await query(`update census_runs set state = 'paused', problem = 'built paused; resume to start', started_at = now() - interval '20 minutes', last_seen_at = now() - interval '20 minutes' where id = $1`, [out.started.id]);
   const r = recorder();
   const again = await uk.tick({ now: new Date('2026-09-29T08:30:00Z'), start: r.start });
   assert.equal(again.action, 'replan');
@@ -586,4 +586,32 @@ test('a notice cut off mid-send is sent again', async (t) => {
   let sent = 0;
   await uk.notify({ subject, send: async () => { sent += 1; return { sent: true }; }, configured: () => true });
   assert.equal(sent, 1);
+});
+
+test('a day\'s plan written while another census went is switched on once that one stops', async (t) => {
+  await clean();
+  t.after(async () => { await query(`delete from census_runs where label = 'test by hand, going'`); await clean(); });
+  const { ONE_DAY_RUNS, PLAN_WRITTEN } = await import('../src/sources/censusRun.js');
+  await dayOne();
+  const { rows: [plan] } = await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state, problem, started_by, started_at)
+     values ('The rest of the UK — day 2', array['ZZ'], 0.08, 0.12, 70000, 5, 30, 'paused', $2, $1, '2026-09-29T07:10:00Z') returning id`,
+    [ONE_DAY_RUNS, PLAN_WRITTEN]);
+  const { rows: [other] } = await query(`insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state) values ('test by hand, going', array['ZZ'], 0.08, 0.12, 10, 5, 30, 'running') returning id`);
+  assert.equal((await uk.tick({ now: new Date('2026-09-29T08:00:00Z') })).action, 'waiting on another census');
+  await query(`update census_runs set state = 'done' where id = $1`, [other.id]);
+  assert.equal((await uk.tick({ now: new Date('2026-09-29T08:10:00Z') })).action, 'switched on');
+  const { rows: [on] } = await query('select state from census_runs where id = $1', [plan.id]);
+  assert.equal(on.state, 'running');
+});
+
+test('a census bill that arrives late for an earlier day holds the programme too', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state, problem, started_at, finished_at)
+     values ('The rest of the UK — day 2', array['ZZ'], 0.08, 0.12, 70000, 5, 30, 'paused', 'stopped at the 70000-request ceiling; resume to carry on', '2026-09-29T07:10:00Z', '2026-09-29T12:00:00Z')`);
+  await billed('2026-09-28', 'google-essentials', 2); // day 1's bill, arriving after day 2 ran
+  const r = recorder();
+  assert.equal((await uk.tick({ now: new Date('2026-09-30T08:00:00Z'), start: r.start })).action, 'held');
 });

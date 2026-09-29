@@ -2117,3 +2117,17 @@ test('a tile being asked stops at the next drawer when its run\'s ceiling is bro
   const perDrawer = Math.max(...(await slicePlan()).map((p) => p.questions.length));
   assert.ok(asked <= perDrawer, `stopped within the drawer it was in (${asked} asked)`);
 });
+
+test('a run built paused can be started the moment its plan is written', async (t) => {
+  await clean();
+  t.after(async () => { await query(`delete from geo_cells where code like 'ZZ0E%'`); await clean(); });
+  await query(
+    `insert into geo_cells (code, scheme, label, outcode, lat, lng, source) values ('ZZ0E 1', 'sector', 'ZZ0E 1', 'ZZ0E', 48.04, -5.94, 'test')
+     on conflict (code) do update set outcode = excluded.outcode, lat = excluded.lat, lng = excluded.lng`);
+  const run = await startRun({ label: 'test built paused', outcodes: ['ZZ0E'], padKm: 0, paused: true });
+  const { PLAN_WRITTEN } = await import('../src/sources/censusRun.js');
+  assert.equal(run.problem, PLAN_WRITTEN);
+  const back = await resume(run.id);
+  assert.equal(back.state, 'running', 'no five-minute wait (Codex, 29 Sep 2026)');
+  t.after(() => query(`delete from census_run_tiles where run_id = $1`, [run.id]));
+});

@@ -313,7 +313,7 @@ export async function startRun({
   const { rows: busy } = await query(
     `select id, label, state from census_runs
       where state in ('running', 'waiting')
-         or (state = 'paused' and problem like 'built paused%' and coalesce(last_seen_at, started_at) > now() - interval '5 minutes')
+         or (state = 'paused' and problem = 'built paused; resume to start' and coalesce(last_seen_at, started_at) > now() - interval '5 minutes')
       limit 1`);
   if (busy.length) throw busyError(busy[0]);
   const tiles = given?.length ? given : await planTiles({ areas, outcodes, dLat, dLng, padKm });
@@ -340,7 +340,7 @@ export async function startRun({
       // would have two planners rewriting the same squares (Codex, 29 Sep 2026).
       `select id, label, state from census_runs
         where state in ('running', 'waiting')
-           or (state = 'paused' and problem like 'built paused%' and coalesce(last_seen_at, started_at) > now() - interval '5 minutes')
+           or (state = 'paused' and problem = 'built paused; resume to start' and coalesce(last_seen_at, started_at) > now() - interval '5 minutes')
         limit 1`);
     if (going.length) throw busyError(going[0]);
     const { rows: [row] } = await db.query(
@@ -417,6 +417,14 @@ export async function startRun({
       [run.id, t.gridKey]);
   }
   await refreshProgress(run.id);
+  // A plan built paused says when it is written, so "being planned" ends the
+  // moment it is — not five minutes of heartbeat later (Codex, 29 Sep 2026).
+  if (paused) {
+    const { rows: [done] } = await query(
+      `update census_runs set problem = $2 where id = $1 and state = 'paused' and problem = 'built paused; resume to start' returning *`,
+      [run.id, PLAN_WRITTEN]);
+    if (done) return done;
+  }
   return run;
 }
 
@@ -481,7 +489,7 @@ export async function resume(id, { sessionId = null } = {}) {
         -- own included: resuming a plan mid-write would set the workers on
         -- half of it (Codex, 29 Sep 2026).
         where (id <> $1 and state = 'running')
-           or (state = 'paused' and problem like 'built paused%' and coalesce(last_seen_at, started_at) > now() - interval '5 minutes')
+           or (state = 'paused' and problem = 'built paused; resume to start' and coalesce(last_seen_at, started_at) > now() - interval '5 minutes')
         limit 1`, [id]);
     if (going.length) {
       throw Object.assign(new Error(going[0].state === 'paused'
@@ -1120,6 +1128,8 @@ async function spentSince(startedAt) {
 export const ONE_DAY_RUNS = 'Epic — the UK census, a day at a time';
 /** And what they are called, day 1 — started by hand — included. */
 export const ONE_DAY_LABEL = 'The rest of the UK — day';
+/** What a run built paused says once its whole plan is written. */
+export const PLAN_WRITTEN = 'built paused; plan written; resume to start';
 
 /**
  * A one-day run that met the shared daily cap, or a refusal, before its own
