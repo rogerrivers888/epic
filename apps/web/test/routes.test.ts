@@ -131,6 +131,49 @@ test('a trip has a chat, a way of getting there, a share sheet and a stop', () =
   assert.equal(isFullBleed(parseRoute('/trips/abc/stop/x')), false);
 });
 
+test('the trip redesign: the feed is one address per tab, the shortlist keeps its own', () => {
+  const trips = { name: 'trips', searching: false, creating: false, tripId: null, section: null, dayId: null, stopRef: null };
+  // The feed carries its tab in the path (owner, 29 Sep 2026: one URL per tab).
+  assert.deepEqual(roundTrip('/trips/abc/ideas/activities'), { ...trips, tripId: 'abc', section: 'ideas', ideasTab: 'activities' });
+  assert.deepEqual(roundTrip('/trips/abc/ideas/food'), { ...trips, tripId: 'abc', section: 'ideas', ideasTab: 'food' });
+  // The bare feed is an alias that normalises to Activities.
+  assert.deepEqual(parseRoute('/trips/abc/ideas'), { ...trips, tripId: 'abc', section: 'ideas', ideasTab: 'activities' });
+  // A tab nobody has heard of is not a page.
+  assert.equal(parseRoute('/trips/abc/ideas/nope').name, 'unknown');
+  assert.equal(parseRoute('/trips/abc/ideas/food/extra').name, 'unknown');
+  assert.equal(paths.tripIdeas('abc'), '/trips/abc/ideas/activities');
+  assert.equal(paths.tripIdeas('abc', 'food'), '/trips/abc/ideas/food');
+  assert.equal(paths.tripShortlist('abc'), '/trips/abc/shortlist');
+  // The detour band is how the feed is set, not which page it is: it is the query.
+  assert.equal(paths.tripIdeas('abc', 'food', 30), '/trips/abc/ideas/food?detour=30');
+  assert.equal(paths.tripIdeas('abc', 'food', 15), '/trips/abc/ideas/food');
+  // Up from the shortlist is the feed; up from the feed is the trip.
+  assert.equal(parentOf(parseRoute('/trips/abc/shortlist')), '/trips/abc/ideas/activities');
+  assert.equal(parentOf(parseRoute('/trips/abc/ideas/food')), '/trips/abc');
+  // Both are Trips, both keep the tab bar, neither is full-bleed.
+  assert.equal(tabOf(parseRoute('/trips/abc/ideas/activities')), 'trips');
+  assert.equal(isFullBleed(parseRoute('/trips/abc/ideas/activities')), false);
+  assert.equal(isFullBleed(parseRoute('/trips/abc/shortlist')), false);
+  assert.equal(isImmersive(parseRoute('/trips/abc/ideas/food'), new URLSearchParams()), false);
+  // A place drawer over either hides the tab bar, the way it does over the map.
+  assert.equal(isImmersive(parseRoute('/trips/abc/shortlist'), new URLSearchParams('place=osm:node/1')), true);
+  assert.equal(titleOf(parseRoute('/trips/abc/ideas/activities')), 'Trip — Ideas · Epic');
+  assert.equal(titleOf(parseRoute('/trips/abc/shortlist')), 'Trip — Shortlist · Epic');
+});
+
+test('the retired pin-search sections redirect to their new homes (owner, 29 Sep 2026)', () => {
+  // Find becomes the ideas feed; the map view becomes the explicit itinerary
+  // (not the bare trip, which would loop through the remembered-section restore).
+  assert.equal(legacyHref('/trips/abc/find', new URLSearchParams()), '/trips/abc/ideas/activities');
+  assert.equal(legacyHref('/trips/abc/map', new URLSearchParams()), '/trips/abc/itinerary');
+  // A place drawer over the old map is kept across the redirect.
+  assert.equal(legacyHref('/trips/abc/map', new URLSearchParams('place=osm:node/1')), '/trips/abc/itinerary?place=osm%3Anode%2F1');
+  // An old Find category picks the feed tab.
+  assert.equal(legacyHref('/trips/abc/find', new URLSearchParams('cat=food')), '/trips/abc/ideas/food');
+  // The shortlist keeps its address — it is not redirected.
+  assert.equal(legacyHref('/trips/abc/shortlist', new URLSearchParams()), null);
+});
+
 test('a trip somebody was sent has an address outside the app', () => {
   assert.deepEqual(roundTrip('/shared/abc123'), { name: 'shared', token: 'abc123' });
   assert.equal(paths.shared('abc123'), '/shared/abc123');
@@ -151,7 +194,9 @@ test('the Trips list draws its own head now, so the shell draws none', () => {
   assert.equal(ownsHeader(parseRoute('/trips/abc/stop/x')), true);
   // The trip itself is full-bleed — no header at all, and the tab bar over it.
   assert.equal(ownsHeader(parseRoute('/trips/abc')), false);
-  assert.equal(ownsHeader(parseRoute('/trips/abc/shortlist')), false);
+  // The redesign's feed and shortlist draw their own heads (owner, 29 Sep 2026).
+  assert.equal(ownsHeader(parseRoute('/trips/abc/ideas/activities')), true);
+  assert.equal(ownsHeader(parseRoute('/trips/abc/shortlist')), true);
   // Places draws its own head at every level (handover v8): lime at the root,
   // cream below it, and the wordmark on both.
   assert.equal(ownsHeader(parseRoute('/places')), true);
@@ -480,7 +525,8 @@ test('every route knows which tab it lights up', () => {
 
 test('Back has somewhere to go for somebody who arrived on a shared link', () => {
   assert.equal(parentOf(parseRoute('/trips/abc/day/d1')), '/trips/abc/day');
-  assert.equal(parentOf(parseRoute('/trips/abc/shortlist')), '/trips/abc');
+  // The shortlist's back arrow goes to the feed now (owner, 29 Sep 2026).
+  assert.equal(parentOf(parseRoute('/trips/abc/shortlist')), '/trips/abc/ideas/activities');
   assert.equal(parentOf(parseRoute('/trips/abc')), '/trips');
   assert.equal(parentOf(parseRoute('/places/GB/London')), '/places/GB');
   assert.equal(parentOf(parseRoute('/places/GB')), '/places');

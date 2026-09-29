@@ -14,18 +14,18 @@ import { MapView, MapPin } from '../components/MapView';
 import { VisitForm, VisitSummary } from './PlacesScreen';
 import { VenueThumb } from '../components/VenueThumb';
 import { TripMapScreen } from './TripMapScreen';
+import { TripExperience, markTripJustCreated } from './TripExperience';
 import { speak as speakRaw, useSpeech } from '../hooks/useSpeech';
 import { Listening } from '../components/Listening';
 import { CategoryIcon, Icon, IconName, Rating, Stars } from '../components/Icon';
-import { ShortlistJourney, TripJourneyDay } from '../components/Journey';
-import { BrowseNear, FindState, emptyFind } from '../components/BrowseNear';
+import { TripJourneyDay } from '../components/Journey';
 import { getSpeakPref } from './SettingsScreen';
 import { SourceDataPanel } from '../components/SourceData';
 import { isAdmin } from '../admin';
 import { recallScreen, rememberScreen } from '../screenState';
 import { conversionAbandoned, conversionHappened } from '../search';
 import { asOneOf, useQueryState, useRouter } from '../router';
-import { paths, TRIP_TABS, type ChatLayer, type Route, type TripSection } from '../routes';
+import { paths, TRIP_TABS, type ChatLayer, type IdeasTab, type Route, type TripSection } from '../routes';
 import { tripName } from './tripName';
 import { TripsList, TripsWhen } from './TripsList';
 import { NewTripSearchScreen } from './NewTripSearchScreen';
@@ -75,7 +75,7 @@ export type TripSeed = {
 // ---------------------------------------------------------------------------
 
 /** Inside a trip: which of Find / Shortlist / The day you were on, per trip. */
-type TripPageMemory = { section: Section };
+type TripPageMemory = { section: Section; ideasTab?: IdeasTab };
 
 /**
  * Nothing rendered; one cleanup.
@@ -176,6 +176,7 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
         key={openId}
         id={openId}
         section={route.section}
+        ideasTab={route.ideasTab ?? 'activities'}
         dayId={route.dayId}
         stopRef={route.stopRef}
         chat={route.chat ?? null}
@@ -236,13 +237,18 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
           onSeedUsed?.();
           setPicked(null);
           await load();
-          navigate(paths.trip(t.trip.id), { replace: true });
+          // `?new=1` runs the X-ray search once when the itinerary opens; the
+          // durable flag is the backstop for the routes that reach it indirectly.
+          markTripJustCreated(t.trip.id);
+          navigate(`${paths.trip(t.trip.id)}?new=1`, { replace: true });
         }}
         onGettingThere={(tripId) => {
-          // The other way out with a trip actually made.
+          // The other way out with a trip actually made. Getting there comes
+          // first, so the scan is held for when the itinerary is finally opened.
           conversionHappened();
           onSeedUsed?.();
           setPicked(null);
+          markTripJustCreated(tripId);
           navigate(paths.tripTravel(tripId), { replace: true });
         }}
       />
@@ -304,10 +310,12 @@ function DeleteTrip({ id, onDeleted }: { id: string; onDeleted: () => Promise<vo
  * puts them ("Shortlist / Group move to the ⋯ menu"). Nothing was taken away:
  * every one of those tabs still has its own address and still opens.
  */
-function TripPage({ id, section: asked, dayId: askedDay, stopRef, chat, household, onBack, refreshHousehold, wide }: {
+function TripPage({ id, section: asked, ideasTab, dayId: askedDay, stopRef, chat, household, onBack, refreshHousehold, wide }: {
   id: string;
   /** Which of the trip's tabs the address names — `/trips/<id>/places` — or null for "wherever this trip is up to". */
   section: Section | null;
+  /** Which tab of the ideas feed the address names — `/trips/<id>/ideas/food`. */
+  ideasTab: IdeasTab;
   /** And which day, when the address names one — `/trips/<id>/day/<dayId>`. */
   dayId: string | null;
   /** And which stop, when it names one — `/trips/<id>/stop/<ref>` (3d). */
@@ -325,7 +333,9 @@ function TripPage({ id, section: asked, dayId: askedDay, stopRef, chat, househol
   const sectionKey = `trip.${id}.section`;
   const section: Section = asked ?? 'itinerary';
   const dayId = askedDay ?? d?.days[0]?.id ?? null;
-  const setSection = (next: Section) => navigate(paths.trip(id, next, next === 'day' ? dayId : null));
+  // The feed's canonical address carries its tab, so an internal jump to it lands
+  // on `/ideas/activities`, not the bare alias `/ideas` (Codex).
+  const setSection = (next: Section) => navigate(next === 'ideas' ? paths.tripIdeas(id) : paths.trip(id, next, next === 'day' ? dayId : null));
   /**
    * The ⋯ menu and the sheets it opens (1c/3b). They are state rather than
    * addresses because they are things opened *over* the trip — the same rule
@@ -338,17 +348,8 @@ function TripPage({ id, section: asked, dayId: askedDay, stopRef, chat, househol
     query.get('menu') ? ('menu' as TripMenuAction) : null,
   );
   const setDayId = (next: string) => navigate(paths.trip(id, 'day', next));
-  useEffect(() => { if (asked) rememberScreen<TripPageMemory>(sectionKey, { section: asked }); }, [sectionKey, asked]);
+  useEffect(() => { if (asked) rememberScreen<TripPageMemory>(sectionKey, { section: asked, ideasTab: asked === 'ideas' ? ideasTab : undefined }); }, [sectionKey, asked, ideasTab]);
   const [menu, setMenu] = useState(false);
-  /**
-   * How Find was set when somebody was sent here — "things to do within 5 km,
-   * free" — which is part of the address too, so the link opens the same list.
-   */
-  const findRadiusKm = Number(query.get('km')) || undefined;
-  const findPrices = query.get('prices')?.split(',').filter(Boolean);
-  const findCat = (['things', 'food', 'events'] as const).find((c) => c === query.get('cat'));
-  // What Find fetched lives with the trip page, so tabbing away and back shows the same list without another fetch.
-  const [find, setFind] = useState<FindState>(() => ({ ...emptyFind(), radiusKm: findRadiusKm ?? emptyFind().radiusKm }));
   const [error, setError] = useState<string | null>(null);
   const first = useRef(true);
   const load = useCallback(async () => {
@@ -360,12 +361,15 @@ function TripPage({ id, section: asked, dayId: askedDay, stopRef, chat, househol
       if (first.current) {
         first.current = false;
         if (!asked) {
-          const remembered = recallScreen<TripPageMemory>(sectionKey)?.data.section ?? null;
-          const start = remembered ?? 'itinerary';
+          const mem = recallScreen<TripPageMemory>(sectionKey)?.data;
+          const start = mem?.section ?? 'itinerary';
           // The query comes with it. `/trips/<id>?pill=food` is a link somebody
           // was sent — the trip, already browsing — and filling in the missing
-          // section must not throw away the part that said what to open.
-          const href = paths.trip(id, start, start === 'day' ? t.days[0]?.id ?? null : null);
+          // section must not throw away the part that said what to open. The
+          // remembered ideas tab is restored too, so Food does not become Activities.
+          const href = start === 'ideas'
+            ? paths.tripIdeas(id, mem?.ideasTab ?? 'activities')
+            : paths.trip(id, start, start === 'day' ? t.days[0]?.id ?? null : null);
           const q = query.toString();
           navigate(q ? `${href}?${q}` : href, { replace: true });
         }
@@ -391,6 +395,88 @@ function TripPage({ id, section: asked, dayId: askedDay, stopRef, chat, househol
   const booked = trip.base && trip.base.kind !== 'centre' && trip.base.kind !== 'home' ? trip.base : null;
   const day = days.find((x) => x.id === dayId) ?? days[0];
   const stopsOn = (dd: TripDay) => dd.slots.reduce((a, s) => a + s.stops.length, 0);
+
+  /**
+   * The ⋯ menu and the sheets it opens, shared by the redesign's trip stage and
+   * the older tab screens below so the working surfaces are reachable from both.
+   * Share has an address of its own and is not here.
+   */
+  const tripTitle = tripName(trip);
+  const menuSheets = (
+    <>
+      {sheet === ('menu' as TripMenuAction) ? (
+        <TripMenuSheet
+          title={tripTitle}
+          isHoliday={isTrip}
+          datesFixed={trip.datesFixed !== false}
+          onClose={() => setSheet(null)}
+          onPick={async (action) => {
+            if (action === 'group' || action === 'places' || action === 'travel' || action === 'stay' || action === 'chat') { setSheet(null); setSection(action); return; }
+            if (action === 'share') { setSheet(null); setSection('share'); return; }
+            if (action === 'date') {
+              setSheet(null);
+              if (trip.datesFixed === false) {
+                try { await api.setTripFlags(id, { datesFixed: true }); await load(); } catch (e: any) { setError(e.message); }
+              }
+              setSection('day');
+              return;
+            }
+            if (action === 'move') {
+              setSheet(null);
+              try { await api.setTripFlags(id, { kind: isTrip ? 'day' : 'holiday' }); await load(); } catch (e: any) { setError(e.message); }
+              return;
+            }
+            setSheet(action);
+          }}
+        />
+      ) : null}
+      {sheet === 'rename' ? (
+        <RenameTripSheet
+          title={tripTitle}
+          onClose={() => setSheet(null)}
+          onSave={async (next) => {
+            try { await api.updateTripV2(id, { title: next }); await load(); } catch (e: any) { setError(e.message); }
+            setSheet(null);
+          }}
+        />
+      ) : null}
+      {sheet === 'delete' ? (
+        <DeleteTripSheet
+          tripId={id}
+          title={tripTitle}
+          onClose={() => setSheet(null)}
+          onConfirm={async () => { await api.deleteTrip(id); await onBack(); }}
+        />
+      ) : null}
+    </>
+  );
+
+  /**
+   * The redesign is the trip experience now (owner, 29 Sep 2026): the trip
+   * itself, the ideas feed and the shortlist are one component so the moves
+   * between them animate. `itinerary` (the bare `/trips/<id>`) is the trip
+   * stage; `ideas` and `shortlist` are its two other addresses. Everything else
+   * — the day planner, Stay, the group, Getting there, the chat — is reached
+   * from the ⋯ menu and keeps its own screen below.
+   */
+  if (section === 'itinerary' || section === 'ideas' || section === 'shortlist') {
+    return (
+      <View style={{ flex: 1 }}>
+        <TripExperience
+          d={d}
+          days={days}
+          household={household}
+          wide={wide}
+          section={section === 'ideas' ? 'ideas' : section === 'shortlist' ? 'shortlist' : null}
+          ideasTab={ideasTab}
+          onBack={onBack}
+          onChanged={async () => { await load(); await loadPlaces(); await refreshHousehold(); }}
+          onMenu={() => setSheet('menu' as TripMenuAction)}
+        />
+        {menuSheets}
+      </View>
+    );
+  }
 
   // Where and when, big; then one short sentence (owner, 4 Sep 2026: "'Bath,
   // 4th of September to 6th of September' in big, bold, and then just 1
@@ -473,36 +559,10 @@ function TripPage({ id, section: asked, dayId: askedDay, stopRef, chat, househol
 
   const body = (
     <>
-      {/* Find is for finding (owner, 5 Sep 2026). The planner used to hang off
-          the bottom of this tab and open a second, older copy of this very
-          list — two browse lists in two formats, one inside the other. It
-          lives on the day now, which is the thing being planned. */}
-      {section === 'find' ? (
-        <BrowseNear d={d} household={household} onChanged={load} find={find} setFind={setFind} initialPrices={findPrices} initialCat={findCat} />
-      ) : null}
-      {section === 'shortlist' && day ? (
-        <View style={{ gap: spacing.md }}>
-          {dayChips}
-          {/* The moment the offer is worth making: they have decided what they
-              are doing and have nowhere to stay, so "near the centre" can become
-              "near these" (owner, 4 Sep 2026). Not shown before there is a
-              shortlist, because before that it is just an advert. */}
-          {isTrip && !booked && shortlist.filter((sl) => sl.lat != null).length >= 2 ? (
-            <Card style={{ borderColor: colors.accent }}>
-              <Row style={{ gap: spacing.sm }}>
-                <Icon name="hotel" size={18} color={colors.accent} />
-                <Text style={[type.h3, { flex: 1 }]}>Somewhere to stay near these?</Text>
-              </Row>
-              <Text style={type.small}>
-                You've got {shortlist.filter((sl) => sl.lat != null).length} things down for {trip.locality ?? 'this trip'} and nowhere to stay yet.
-                We can rank the beds by how much of that is {trip.hasCar ? 'a short drive' : 'a walk'} from the front door.
-              </Text>
-              <Button label="Find somewhere near our plans" icon="hotel" onPress={() => setSection('stay')} />
-            </Card>
-          ) : null}
-          <ShortlistJourney d={d} day={day} household={household} wide={wide} onChanged={load} onFind={() => setSection('find')} onSaved={async () => { await load(); await refreshHousehold(); setSection('itinerary'); }} />
-        </View>
-      ) : null}
+      {/* Find and the old shortlist are the trip redesign now (owner, 29 Sep
+          2026): finding is the ideas feed and the shortlist is its own screen,
+          both at their own addresses and reached through TripExperience above.
+          Day, Stay, Group and Data keep their desks here. */}
       {section === 'day' && day ? (
         <View style={{ gap: spacing.md }}>
           {dayChips}
@@ -510,7 +570,7 @@ function TripPage({ id, section: asked, dayId: askedDay, stopRef, chat, househol
           {household ? <DayPlanner trip={d} day={day} household={household} onChanged={async () => { await load(); await refreshHousehold(); }} /> : null}
         </View>
       ) : null}
-      {section === 'stay' && isTrip ? <StayPanel d={d} household={household} onChanged={load} onFindNear={() => setSection('find')} openSearch={!booked} /> : null}
+      {section === 'stay' && isTrip ? <StayPanel d={d} household={household} onChanged={load} onFindNear={() => setSection('ideas')} openSearch={!booked} /> : null}
       {section === 'group' ? <GroupPanel d={d} onChanged={load} /> : null}
       {section === 'data' ? <SourceDataPanel d={d} /> : null}
     </>
@@ -566,7 +626,6 @@ function TripPage({ id, section: asked, dayId: askedDay, stopRef, chat, househol
    * page and closed again, which is what a sheet is.
    */
   if (TRIP_TABS.includes(section) || section === 'map' || section === 'share') {
-    const name = tripName(trip);
     const closeSheet = () => (section === 'share' ? setSection('itinerary') : setSheet(null));
     return (
       <View style={{ flex: 1 }}>
@@ -584,56 +643,10 @@ function TripPage({ id, section: asked, dayId: askedDay, stopRef, chat, househol
           onOpenStop={(ref) => navigate(paths.tripStop(id, ref))}
         />
 
-        {sheet === ('menu' as TripMenuAction) ? (
-          <TripMenuSheet
-            title={name}
-            isHoliday={isTrip}
-            datesFixed={trip.datesFixed !== false}
-            onClose={() => setSheet(null)}
-            onPick={async (action) => {
-              if (action === 'share') { setSheet(null); setSection('share'); return; }
-              if (action === 'date') {
-                setSheet(null);
-                // An idea has no date to change: fixing one is what the row
-                // offers, and then the day planner is where it is set.
-                if (trip.datesFixed === false) {
-                  try { await api.setTripFlags(id, { datesFixed: true }); await load(); } catch (e: any) { setError(e.message); }
-                }
-                setSection('day');
-                return;
-              }
-              if (action === 'move') {
-                setSheet(null);
-                try { await api.setTripFlags(id, { kind: isTrip ? 'day' : 'holiday' }); await load(); } catch (e: any) { setError(e.message); }
-                return;
-              }
-              setSheet(action);
-            }}
-          />
-        ) : null}
-
-        {sheet === 'rename' ? (
-          <RenameTripSheet
-            title={name}
-            onClose={() => setSheet(null)}
-            onSave={async (next) => {
-              try { await api.updateTripV2(id, { title: next }); await load(); } catch (e: any) { setError(e.message); }
-              setSheet(null);
-            }}
-          />
-        ) : null}
-
-        {sheet === 'delete' ? (
-          <DeleteTripSheet
-            tripId={id}
-            title={name}
-            onClose={() => setSheet(null)}
-            onConfirm={async () => { await api.deleteTrip(id); await onBack(); }}
-          />
-        ) : null}
+        {menuSheets}
 
         {section === 'share' ? (
-          <ShareTripSheet tripId={id} title={name} onClose={closeSheet} onChanged={load} />
+          <ShareTripSheet tripId={id} title={tripTitle} onClose={closeSheet} onChanged={load} />
         ) : null}
       </View>
     );

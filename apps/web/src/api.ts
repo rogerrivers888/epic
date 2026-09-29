@@ -765,6 +765,8 @@ export type Trip = {
   datesFixed?: boolean;
   /** Whether this trip has ever been shared. The link itself is fetched, never listed. */
   shared?: boolean;
+  /** The IANA zone the trip's times are read in (routes/trips.js payload); the household's by default. */
+  timezone?: string | null;
 };
 
 export type TripSummary = Trip & {
@@ -2316,6 +2318,8 @@ export const api = {
    */
   addStopToDay: (tripId: string, dayId: string, body: { venueRef: string; name: string; lat?: number | null; lng?: number | null; category?: string | null; startTime?: string | null; slot?: string; dwellMinutes?: number; shortlistId?: string }) =>
     post<TripDetail>(`/api/trips/${tripId}/days/${dayId}/stops`, body),
+  /** Put one day's stops in the household's order — the redesign timeline's up/down arrows. */
+  reorderDayStops: (tripId: string, dayId: string, stopIds: string[]) => post<TripDetail>(`/api/trips/${tripId}/days/${dayId}/reorder`, { stopIds }),
   createTrip: (body: { title?: string; notes?: string; origin?: Place; originText?: string; destination?: Place; destinationText?: string; departAt: string; returnAt: string; travelMode?: Trip['travelMode']; intensity?: Trip['intensity']; attendingMemberIds?: string[] }) =>
     post<TripDetail>('/api/trips', body),
   updateTrip: (id: string, body: Partial<Pick<Trip, 'title' | 'notes' | 'departAt' | 'returnAt' | 'travelMode' | 'intensity'>>) => patch<TripDetail>(`/api/trips/${id}`, body),

@@ -39,6 +39,21 @@ export const LIME_TINT = '#EAFECB';  // oklch(0.97 0.07 125) — UI only
 export const MOSS = '#446B00';       // oklch(0.48 0.13 130) — UI only
 
 /**
+ * The fixed neutrals the Trips redesign (8a, owner 29 Sep 2026) is drawn on,
+ * named here so its screens never inline a hex (pack rule: every colour comes
+ * from theme.ts). They are the light palette's own greys — the redesign is a
+ * fixed light design — plus the filled-shortlist-heart's lime edge and the card
+ * heart chip's scrim, which have no existing token.
+ */
+export const HAIRLINE = '#D7D3D3';   // a light rule or border (LIGHT.ruleSoft)
+export const INK_MUTED = '#605D5D';  // muted text (LIGHT.inkMuted)
+export const INACTIVE = '#F3F1EC';   // an unselected switch cell (LIGHT.switchOff)
+export const NEUTRAL = '#EAE7E7';    // an empty photo tile or off avatar (LIGHT.bubble)
+export const GHOST = '#9B9797';      // a dashed timeline node (LIGHT.ghost)
+export const LIME_EDGE = '#86BE2E';  // oklch(0.70 0.18 127), the filled shortlist heart's edge
+export const CHIP_SCRIM = 'rgba(32,30,29,0.32)'; // the card heart chip's ground
+
+/**
  * Dark, from the v2 handoff's own table. Not a dimming of the light palette: a
  * deeper ground, a warmer off-white for type, and — the two that matter — a
  * lime tint that is a dark olive rather than a pale wash, and a *lifted* green

@@ -57,8 +57,9 @@ const GLYPH: Record<string, string> = {
  * lighting the ground up rather than sliding a disc across it.
  */
 const SHADE = {
-  light: { fill: '#C8F542', fillOpacity: 0.34, line: '#201E1D', glow: '#FFFDF9', rim: '#201E1D', casing: '#FFFDF9' },
-  dark: { fill: '#C8F542', fillOpacity: 0.14, line: '#FFFDF9', glow: '#C8F542', rim: '#FFFDF9', casing: '#2A2725' },
+  // `zoneEdge` is the redesign's darker lime zone edge (oklch(0.55 0.16 128)).
+  light: { fill: '#C8F542', fillOpacity: 0.34, line: '#201E1D', glow: '#FFFDF9', rim: '#201E1D', casing: '#FFFDF9', zoneEdge: '#5E8C22' },
+  dark: { fill: '#C8F542', fillOpacity: 0.14, line: '#FFFDF9', glow: '#C8F542', rim: '#FFFDF9', casing: '#2A2725', zoneEdge: '#8FBF3F' },
 };
 
 /**
@@ -157,11 +158,24 @@ const KIND: Record<MapMarker['kind'], { size: number; bg: string; border: string
   browse: { size: 26, bg: '#FFFDF9', border: '#201E1D', borderWidth: 2, radius: 0, fg: '#201E1D', glyph: true },
   added: { size: 28, bg: '#201E1D', border: '#FFFDF9', borderWidth: 2, radius: 0, fg: '#FFFDF9', glyph: true },
   saved: { size: 22, bg: '#FFFDF9', border: '#201E1D', borderWidth: BORDER, radius: 0, dashed: true, fg: '#201E1D', glyph: true },
+  pin: { size: 22, bg: '#201E1D', border: '#FFFDF9', borderWidth: 0, radius: 0, fg: '#C8F542', glyph: false },
 };
 
 /** The Epic pin (brand pack): ink, with the hole in lime, drawn at `height` px with its tip at the bottom. */
 const pinSvg = (height: number, selected: boolean) =>
   `<svg width="${Math.round(height * 0.84)}" height="${height}" viewBox="0 0 84 100" style="display:block${selected ? ';filter:drop-shadow(0 0 3px #C8F542)' : ''}"><path d="M42 0 C18 0 0 18 0 42 C0 68 42 100 42 100 C42 100 84 68 84 42 C84 18 66 0 42 0 Z" fill="#201E1D"/><circle cx="42" cy="40" r="15" fill="#C8F542"/></svg>`;
+
+/**
+ * The shortlist's Epic pin (owner, 29 Sep 2026): an ink teardrop with a lime dot
+ * and a cream edge, no label. Selected it grows about 1.5× and turns lime with
+ * an ink dot, so tap-to-locate reads at a glance and the chosen one sits on top.
+ */
+const pinMarkSvg = (height: number, selected: boolean) => {
+  const h = selected ? Math.round(height * 1.5) : height;
+  const body = selected ? '#C8F542' : '#201E1D';
+  const dot = selected ? '#201E1D' : '#C8F542';
+  return `<svg width="${Math.round(h * 0.84)}" height="${h}" viewBox="0 0 84 100" style="display:block"><path d="M42 3 C18 3 3 21 3 42 C3 68 42 97 42 97 C42 97 81 68 81 42 C81 21 66 3 42 3 Z" fill="${body}" stroke="#FFFDF9" stroke-width="6" stroke-linejoin="round"/><circle cx="42" cy="40" r="14" fill="${dot}"/></svg>`;
+};
 
 function markerEl(m: MapMarker): HTMLElement {
   const k = KIND[m.kind];
@@ -199,6 +213,11 @@ function markerEl(m: MapMarker): HTMLElement {
     // The destination is the Epic pin itself, the brand's mark on the map.
     dot.style.cssText = 'display:flex;align-items:flex-end;justify-content:center';
     dot.innerHTML = pinSvg(size, !!m.selected);
+  } else if (m.kind === 'pin' && !m.badge) {
+    // A shortlisted place: the small Epic pin, lime when it is the selected one.
+    dot.style.cssText = 'display:flex;align-items:flex-end;justify-content:center';
+    dot.innerHTML = pinMarkSvg(k.size, !!m.selected);
+    if (m.selected) wrap.style.zIndex = '3';
   } else {
     dot.style.cssText = [
       `width:${size}px`, `height:${size}px`, `border-radius:${k.radius}px`,
@@ -486,16 +505,21 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
       if (!shadeRef.current || m.getLayer('epic-shade-fill')) return;
       // Under the route when there is one, so the road still reads through the band.
       const under = m.getLayer('epic-route-casing') ? 'epic-route-casing' : undefined;
+      // The redesign's detour zone is a stronger lime fill with a solid darker
+      // lime edge; the search band keeps its lighter fill and dashed ink edge.
+      const isZone = !!shadeRef.current?.zone;
       m.addSource('epic-shade', { type: 'geojson', data: bandData(null) });
       m.addSource('epic-lens', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } as any });
       m.addLayer({
         id: 'epic-shade-fill', type: 'fill', source: 'epic-shade',
-        paint: { 'fill-color': tone.fill, 'fill-opacity': tone.fillOpacity },
+        paint: { 'fill-color': tone.fill, 'fill-opacity': isZone ? 0.5 : tone.fillOpacity },
       }, under);
       m.addLayer({
         id: 'epic-shade-line', type: 'line', source: 'epic-shade',
         layout: { 'line-join': 'round' },
-        paint: { 'line-color': tone.line, 'line-width': 1.4, 'line-opacity': 0.4, 'line-dasharray': [4, 3] },
+        paint: isZone
+          ? { 'line-color': tone.zoneEdge, 'line-width': 2, 'line-opacity': 0.9 }
+          : { 'line-color': tone.line, 'line-width': 1.4, 'line-opacity': 0.4, 'line-dasharray': [4, 3] },
       }, under);
       m.addLayer({
         id: 'epic-lens-glow', type: 'fill', source: 'epic-lens',
@@ -568,7 +592,7 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
     };
     // The ring is the whole shape, so its ends and its width are enough to know
     // it has changed — a wider detour moves both.
-  }, [shade ? `${shade.ring.length}:${shade.halfWidthKm}:${shade.ring[0]?.lat},${shade.ring[0]?.lng}:${shade.searching}` : null, dark]);
+  }, [shade ? `${shade.ring.length}:${shade.halfWidthKm}:${shade.ring[0]?.lat},${shade.ring[0]?.lng}:${shade.searching}:${shade.zone}` : null, dark]);
 
   /**
    * Labels that would sit on top of each other, thinned out.
@@ -633,7 +657,7 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
       const existing = drawn.current.get(spec.id);
       if (existing) existing.remove();
       // The pin stands on its point; everything else sits on it.
-      const marker = new maplibregl.Marker({ element: markerEl(spec), anchor: spec.kind === 'dest' && !spec.badge ? 'bottom' : 'center' })
+      const marker = new maplibregl.Marker({ element: markerEl(spec), anchor: (spec.kind === 'dest' || spec.kind === 'pin') && !spec.badge ? 'bottom' : 'center' })
         .setLngLat([spec.lng, spec.lat])
         .addTo(m);
       drawn.current.set(spec.id, marker);

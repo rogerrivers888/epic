@@ -45,7 +45,13 @@ function Sheet({ title, onClose, children }: { title: string; onClose: () => voi
 // the ⋯ menu
 // ---------------------------------------------------------------------------
 
-export type TripMenuAction = 'rename' | 'date' | 'move' | 'share' | 'delete';
+export type TripMenuAction = 'rename' | 'date' | 'move' | 'share' | 'delete'
+  /**
+   * The working surfaces, reached from the ⋯ menu now that the redesign's trip
+   * stage has no segmented tabs (owner, 29 Sep 2026, and 5 Sep 2026 on keeping
+   * the group reachable). Each navigates to its own address.
+   */
+  | 'group' | 'places' | 'travel' | 'stay' | 'chat';
 
 /**
  * Rename · Change date · Move to Holidays · **Share trip**, a 2px ink rule, and
@@ -64,6 +70,10 @@ export function TripMenuSheet({ title, isHoliday, datesFixed, onPick, onClose }:
   onClose: () => void;
 }) {
   const rows: { key: TripMenuAction; icon: IconName; label: string }[] = [
+    { key: 'group', icon: 'household', label: 'Who’s coming' },
+    { key: 'places', icon: 'place', label: 'All the places' },
+    { key: 'chat', icon: 'message', label: 'Trip chat' },
+    ...(isHoliday ? [{ key: 'travel' as TripMenuAction, icon: 'directions' as IconName, label: 'Getting there' }, { key: 'stay' as TripMenuAction, icon: 'hotel' as IconName, label: 'Where you’re staying' }] : []),
     { key: 'rename', icon: 'edit', label: 'Rename trip' },
     { key: 'date', icon: 'calendar', label: datesFixed ? 'Change date' : 'Fix a date' },
     { key: 'move', icon: 'refresh', label: isHoliday ? 'Move to Day trips' : 'Move to Holidays' },

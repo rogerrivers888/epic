@@ -222,11 +222,24 @@ export type TripSection =
   | 'chat' | 'travel' | 'share'
   /** One stop's Ask thread — `/trips/<id>/stop/<ref>` (3d). */
   | 'stop'
+  /**
+   * The trip redesign (owner, 29 Sep 2026). `ideas` is the image-led feed the
+   * X-ray search hands over to — `/trips/<id>/ideas/activities` and
+   * `/trips/<id>/ideas/food`, one address per tab so the back button and a
+   * shared link land on the right one. `shortlist` is the reworked shortlist,
+   * kept at its old address so links do not break. `find` and `map` are the
+   * retired pin-search sections: they still parse (an old link resolves) and
+   * `legacyHref` redirects them to their new homes.
+   */
+  | 'ideas'
   | 'find' | 'shortlist' | 'day' | 'stay' | 'group' | 'data';
 export const TRIP_SECTIONS: TripSection[] = [
   'itinerary', 'places', 'map', 'chat', 'travel', 'share', 'stop',
-  'find', 'shortlist', 'day', 'stay', 'group', 'data',
+  'ideas', 'find', 'shortlist', 'day', 'stay', 'group', 'data',
 ];
+/** The feed's two tabs, each its own address under `…/ideas/`. */
+export const IDEAS_TABS = ['activities', 'food'] as const;
+export type IdeasTab = typeof IDEAS_TABS[number];
 /**
  * The tabs the segmented control draws; the others are reached from the ⋯ menu.
  *
@@ -346,7 +359,7 @@ export type Route =
    * `stopRef` is the source-qualified identifier of the stop whose Ask thread is
    * open — one more layer inside a trip, and one more address (3d).
    */
-  | { name: 'trips'; searching: boolean; creating: boolean; tripId: string | null; section: TripSection | null; dayId: string | null; stopRef: string | null; chat?: ChatLayer }
+  | { name: 'trips'; searching: boolean; creating: boolean; tripId: string | null; section: TripSection | null; dayId: string | null; stopRef: string | null; chat?: ChatLayer; ideasTab?: IdeasTab | null }
   /**
    * `voice` is the spoken layer over one person (voice intake handoff, Option
    * D): `tell` is the recording, `review` the card of what was heard.
@@ -484,6 +497,14 @@ export function parseRoute(path: string): Route {
       };
       // The chat's layers: the list, asking, the bell, one question (Chat screens, 13 Sep 2026).
       if (section === 'chat') return segments[4] ? { name: 'unknown', path } : { ...parsed, chat: chatLayerOf(c) };
+      // The feed's tab is a path segment (owner, 29 Sep 2026: one URL per tab).
+      // The bare `/trips/<id>/ideas` is an alias that normalises to Activities.
+      if (section === 'ideas') {
+        if (segments[4]) return { name: 'unknown', path };
+        const tab = oneOf(IDEAS_TABS, c);
+        if (c && !tab) return { name: 'unknown', path };
+        return { ...parsed, ideasTab: tab ?? 'activities' };
+      }
       return parsed;
     }
 
@@ -650,7 +671,7 @@ export function hrefOf(route: Route): string {
         : route.creating ? '/trips/new'
           : route.tripId == null ? '/trips'
             : buildHref(['trips', route.tripId, route.section,
-              route.section === 'day' ? route.dayId : route.section === 'stop' ? route.stopRef : route.section === 'chat' ? chatSegment(route.chat) : null]);
+              route.section === 'day' ? route.dayId : route.section === 'stop' ? route.stopRef : route.section === 'chat' ? chatSegment(route.chat) : route.section === 'ideas' ? (route.ideasTab ?? 'activities') : null]);
     case 'household': return buildHref(['household', route.memberId, route.memberId ? route.voice : null]);
     case 'host':
       return route.page === 'home' ? '/host'
@@ -713,6 +734,14 @@ export const paths = {
   newTrip: () => '/trips/new',
   trip: (id: string, section?: TripSection | null, dayId?: string | null) =>
     buildHref(['trips', id, section, section === 'day' ? dayId : null]),
+  /**
+   * The trip redesign's three addresses (owner, 29 Sep 2026). The feed carries
+   * its tab in the path; `?detour=` (10/15/30, default 15) is how it is set and
+   * travels as the query. The shortlist keeps its old address.
+   */
+  tripIdeas: (id: string, tab: IdeasTab = 'activities', detour?: number | null) =>
+    buildHref(['trips', id, 'ideas', tab], detour && detour !== 15 ? { detour: String(detour) } : undefined),
+  tripShortlist: (id: string) => buildHref(['trips', id, 'shortlist']),
   /** The three layers the trip rebuild adds, and the Ask thread on one stop. */
   tripChat: (id: string) => buildHref(['trips', id, 'chat']),
   /**
@@ -903,6 +932,10 @@ export function ownsHeader(route: Route): boolean {
      * They keep the tab bar, unlike a full-bleed screen: they are still Trips.
      */
     if (!route.tripId) return true;
+    // The redesign's feed and shortlist draw their own heads — the feed's
+    // "Back to my trip"/"Shortlist" row, the shortlist's floating back button —
+    // so the shell must not draw a lime band over them (owner, 29 Sep 2026).
+    if (route.section === 'ideas' || route.section === 'shortlist') return true;
     return route.section === 'travel' || route.section === 'stop' || route.section === 'share' || route.section === 'chat';
   }
   return false;
@@ -946,6 +979,11 @@ export function isImmersive(route: Route, query?: URLSearchParams): boolean {
   // A question open, asking one, the bell: each has a keyboard or is one thing
   // (Chat screens, 13 Sep 2026). The list keeps the bar — it is still Trips.
   if (route.section === 'chat') return Boolean(route.chat && route.chat.page !== 'list');
+  // The redesign's feed and shortlist keep the tab bar (owner, 29 Sep 2026:
+  // the trip experience lives in Trips, and its bottom bar is the five tabs).
+  // A place drawer opening over either is a place view, and hides the bar the
+  // way it does over the map.
+  if (route.section === 'ideas' || route.section === 'shortlist') return Boolean(query?.get('place'));
   // The bare `/trips/<id>` is the map, and parses with no section at all.
   const onTheMap = route.section == null || route.section === 'map' || route.section === 'itinerary';
   // "Hidden during any trip browse, place view or full view" (handover v8,
@@ -1015,6 +1053,10 @@ export function parentOf(route: Route): string {
       if (route.dayId) return paths.trip(route.tripId!, 'day');
       // Up from a question, from asking or from the bell is the list of questions.
       if (route.section === 'chat' && route.chat && route.chat.page !== 'list') return paths.tripChat(route.tripId!);
+      // Up from the shortlist is the feed; up from the feed is the trip
+      // (owner, 29 Sep 2026: the shortlist's back arrow goes to the feed).
+      if (route.section === 'shortlist') return paths.tripIdeas(route.tripId!);
+      if (route.section === 'ideas') return paths.trip(route.tripId!);
       // Up from a stop's Ask, or from Getting there, is the trip itself.
       if (route.section) return paths.trip(route.tripId!);
       if (route.tripId || route.creating || route.searching) return '/trips';
@@ -1063,9 +1105,11 @@ export function titleOf(route: Route): string {
       if (route.creating) return epic('A new trip');
       if (!route.tripId) return epic('Trips');
       const layer = route.section === 'chat' ? (route.chat?.page === 'topic' ? 'A question' : route.chat?.page === 'ask' ? 'Ask something' : route.chat?.page === 'bell' ? 'What you get told about' : 'Chat')
-        : route.section === 'travel' ? 'Getting there'
-          : route.section === 'share' ? 'Share trip'
-            : route.section === 'stop' ? 'A stop' : null;
+        : route.section === 'ideas' ? 'Ideas'
+          : route.section === 'shortlist' ? 'Shortlist'
+            : route.section === 'travel' ? 'Getting there'
+              : route.section === 'share' ? 'Share trip'
+                : route.section === 'stop' ? 'A stop' : null;
       return epic(layer ? `Trip — ${layer}` : 'Trip');
     }
     case 'household': return epic(route.voice === 'tell' ? 'Tell Epic about them' : route.voice === 'review' ? 'What we heard' : 'You and yours');
@@ -1105,6 +1149,25 @@ export function legacyHref(path: string, query: URLSearchParams): string | null 
   // address is still on phones and in the old `?tab=` links; both land on
   // "You and yours". A person's page (`/household/<id>`) is unchanged.
   if (path === '/household' || path === '/household/') { const q = query.toString(); return q ? `/settings?${q}` : '/settings'; }
+  /**
+   * The trip redesign retires the pin-search sections (owner, 29 Sep 2026:
+   * "point each old find/map URL at its nearest new home with a permanent
+   * redirect"). Find becomes the ideas feed — an old `?cat=food` link lands on
+   * the Food tab — and the map view becomes the trip itself. Map redirects to
+   * the explicit `itinerary`, not the bare trip: the bare trip restores the
+   * last-seen section, which for someone whose last section was `map` would
+   * bounce straight back here in a loop (Codex).
+   */
+  const retired = path.match(/^\/trips\/([^/]+)\/(find|map)\/?$/);
+  if (retired) {
+    if (retired[2] === 'map') {
+      // A map link could carry a place drawer over it; keep it (the trip stage reads ?place).
+      const on = paths.trip(retired[1], 'itinerary');
+      const place = query.get('place');
+      return place ? `${on}?place=${encodeURIComponent(place)}` : on;
+    }
+    return paths.tripIdeas(retired[1], query.get('cat') === 'food' ? 'food' : 'activities');
+  }
   if (path !== '/' && path !== '') return null;
   const join = query.get('join');
   if (join) return paths.join(join);

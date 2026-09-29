@@ -30,8 +30,11 @@ export type Point = { lat: number; lng: number };
  *   browse    26px white, 2px ink border — a candidate you are looking at
  *   added     28px ink — something on the day
  *   saved     22px white, 1.5px dashed ink — on the shortlist, not on the day
+ *   pin       the small Epic pin (ink teardrop, lime dot, cream edge) — a
+ *             shortlisted place on the redesign's shortlist map, no label; when
+ *             selected it grows and turns lime with an ink dot (owner, 29 Sep 2026)
  */
-export type MarkerKind = 'home' | 'origin' | 'base' | 'dest' | 'browse' | 'added' | 'saved';
+export type MarkerKind = 'home' | 'origin' | 'base' | 'dest' | 'browse' | 'added' | 'saved' | 'pin';
 
 export type MapMarker = {
   id: string;
@@ -84,6 +87,12 @@ export type MapShade = {
   halfWidthKm: number;
   /** True while the search is running: the lens sweeps, and the shade opens under it. */
   searching: boolean;
+  /**
+   * The trip redesign's detour zone (owner, 29 Sep 2026): a stronger lime fill
+   * at 50% with a darker lime edge, drawn solid rather than the search band's
+   * dashed ink. Off by default, so Inspire's shaded search band is unchanged.
+   */
+  zone?: boolean;
 };
 
 /**
