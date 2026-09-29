@@ -206,10 +206,13 @@ export async function decide(now = new Date()) {
   // arrives late for an earlier day holds it just the same (Codex, 29 Sep 2026).
   // Except days a person has looked at and lifted the hold over (POST
   // /census/uk/lift): only a bill nobody has seen holds it (Codex, 29 Sep 2026).
+  // A lift records each day's census bill as it was seen; a day holds again
+  // only if its bill has grown since — exports backfill earlier days, and a
+  // date line would wave a late charge through (Codex, 29 Sep 2026).
   const { rows: [lifted] } = await query(`select value from bo_settings where key = 'census:uk-hold-lifted'`);
-  const liftedThrough = lifted?.value?.through ?? '';
+  const seen = lifted?.value?.seen ?? {};
   const pricey = real.map((r) => billedFor(bills, pacificDay(r.started_at)))
-    .find((b) => b && b.census_gbp >= PENNIES_GBP && b.day > liftedThrough);
+    .find((b) => b && b.census_gbp >= PENNIES_GBP && b.census_gbp > (seen[b.day] ?? -1) + 0.005);
   if (pricey) return { action: 'held', runs, latest, bills, yesterday: pricey };
   const yesterday = billedFor(bills, pacificDay(latest.started_at));
   // Held stays held. The owner's rule for the gate (28 Sep 2026): "If it's
@@ -486,14 +489,17 @@ export async function daily(now = new Date()) {
  * lifted it and when.
  */
 export async function liftHold({ who = null, now = new Date() } = {}) {
-  // Through the last day the export actually holds: a bill for an earlier day
-  // that has not arrived yet has not been seen, and must still hold it when it
-  // does (Codex, 29 Sep 2026).
-  const { rows: [{ last }] } = await query(`select to_char(max(day), 'YYYY-MM-DD') as last from billing_days`);
-  const through = last ?? '';
+  // What each programme day was billed for the census, as seen now: only
+  // those amounts are lifted. A bill that arrives later, or grows, holds it
+  // again (Codex, 29 Sep 2026).
+  const runs = await programme();
+  const bills = runs.length ? await billedByDay(pacificDay(runs[0].started_at)) : [];
+  const seen = Object.fromEntries(runs
+    .map((r) => billedFor(bills, pacificDay(r.started_at)))
+    .filter(Boolean).map((b) => [b.day, b.census_gbp]));
   await query(
     `insert into bo_settings (key, value, updated_by) values ('census:uk-hold-lifted', $1, $2)
      on conflict (key) do update set value = excluded.value, updated_by = excluded.updated_by, updated_at = now(), version = bo_settings.version + 1`,
-    [JSON.stringify({ through, at: new Date(now).toISOString() }), who]);
-  return { through };
+    [JSON.stringify({ seen, at: new Date(now).toISOString() }), who]);
+  return { seen };
 }

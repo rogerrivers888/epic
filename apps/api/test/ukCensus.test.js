@@ -41,8 +41,8 @@ const SKU = {
 };
 const billed = (day, meter, cost, { credits = 0, promo = 0 } = {}) => query(
   `insert into billing_days (invoice_month, day, service, sku, sku_id, meter, usage, unit, cost, credits, promo, currency)
-   values ('202609', $1, 'Places API', $2, 'x', $3, 1, 'count', $4, $5, $6, 'GBP')`,
-  [day, `test ${SKU[meter]} ${Math.random()}`, meter === 'unmapped' ? null : meter === 'details-essentials' ? 'google-essentials' : meter, cost, credits, promo]);
+   values ('202609', $1, 'Places API', $2, $7, $3, 1, 'count', $4, $5, $6, 'GBP')`,
+  [day, `test ${SKU[meter]} ${Math.random()}`, meter === 'unmapped' ? null : meter === 'details-essentials' ? 'google-essentials' : meter, cost, credits, promo, `x${Math.random()}`]);
 
 /** A stand-in for startRun: records what it was asked and returns a row. */
 const recorder = () => {
@@ -695,4 +695,19 @@ test('a finished census whose last day comes in costly is still said', async (t)
   const out = await uk.tick({ now: new Date('2026-10-01T08:00:00Z'), tell: (x) => told.push(x) });
   assert.equal(out.action, 'complete');
   assert.match(told[0]?.subject ?? '', /Census \(finished\) was billed £7\.00/);
+});
+
+test('a charge backfilled onto a day already lifted holds it again', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  await billed('2026-09-28', 'google-essentials', 2);
+  await billed('2026-09-30', 'google-pro', 0.1); // the export has reached the 30th
+  await uk.liftHold({ who: 'test' });
+  const r = recorder();
+  // Lifted: £2 on the 28th was seen.
+  const { action } = await uk.decide(new Date('2026-10-01T08:00:00Z'));
+  assert.equal(action, 'start');
+  // Then £1.50 more is backfilled onto the 28th, behind a watermark at the 30th.
+  await billed('2026-09-28', 'google-essentials', 1.5);
+  assert.equal((await uk.tick({ now: new Date('2026-10-01T09:00:00Z'), start: r.start })).action, 'held');
 });
