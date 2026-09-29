@@ -800,3 +800,12 @@ test('a day closed off early keeps its size for the days left and the raise noti
   await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start, tell: (x) => told.push(x), quota: async () => ({ speaks: true, limit: 160000 }) });
   assert.ok(!told.some((x) => /^Census raised/.test(x.subject)), 'not announced again');
 });
+
+test('a Google limit that leaves the census nothing: it waits, and makes nothing', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  const r = recorder();
+  const out = await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start, quota: async () => ({ speaks: true, limit: 4000 }) });
+  assert.equal(out.action, 'no quota for the census');
+  assert.equal(r.calls.length, 0);
+});

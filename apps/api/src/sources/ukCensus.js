@@ -329,6 +329,12 @@ async function tickLocked({ now = new Date(), start = censusRun.startRun, stop =
   // Keep the ended days' figures before this day's plan reuses their squares
   // (Codex, 29 Sep 2026): status() writes each ended day down once.
   await status(now);
+  // Today's size from Google's own limit, read now (at most hourly) — before
+  // anything is made: a limit that leaves the census nothing means wait
+  // (Codex, 29 Sep 2026).
+  const q = await quota();
+  const size = daySize(q);
+  if (size.requests <= 0) return { ...d, action: 'no quota for the census', quota: q };
   const label = `${LABEL} ${d.day}`;
   const sessionId = await sessionFor(label);
   // Built paused, and switched on only once its plan is whole: a run is
@@ -338,9 +344,6 @@ async function tickLocked({ now = new Date(), start = censusRun.startRun, stop =
   // share of the day as well as its ceiling, which is what makes the engine
   // advance it one worker at a time under its own lock — two processes could
   // otherwise each spend the day's remaining allowance (Codex, same day).
-  // Today's size from Google's own limit, read now (at most hourly).
-  const q = await quota();
-  const size = daySize(q);
   const run = await start({
     label, areas: UK_AREAS, maxRequests: size.requests, nightShare: size.requests, ratePerSec: 5, dailyCap: size.cap,
     startedBy: STARTED_BY, startedSessionId: sessionId, paused: true,
