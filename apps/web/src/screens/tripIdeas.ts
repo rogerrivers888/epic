@@ -15,7 +15,7 @@
  * "something sweet" — the nearest owned signal stands in: straight-line
  * proximity for the walk, category/cuisine keywords for the food rows.
  */
-import type { MoodKey, TripAlongPlace, Trip } from '../api';
+import type { MoodKey, TripAlongPlace, Trip, VenuePhotoRef } from '../api';
 
 /**
  * The mood words and the £-band, inlined so this module is self-contained and
@@ -41,9 +41,16 @@ export type IdeasKind = 'activities' | 'food';
 export type FeedCard = {
   ref: string;
   name: string;
-  photoUrl: string | null;
-  /** The credit the photo's licence requires (Google, Data Thistle, …); null for owned/none. */
-  photoAttribution: string | null;
+  /**
+   * The provider's photo reference, kept whole — not flattened to a URL. A Google
+   * photo arrives as a `ref` (plus a signed `sig`/`exp`), never a bare `url`, and
+   * VenueThumb builds the proxied URL from it; reading `.url` alone dropped every
+   * one of them and left the card a grey box (deployed, 29 Sep 2026).
+   */
+  photos: VenuePhotoRef[];
+  /** For the floor icon VenueThumb draws when there is no photo. */
+  category: string | null;
+  experiences: string[];
   /** Always "+N min detour" in 8a (owner: never "N min walk from…", which wraps). */
   fit: string;
   /** "Museum · ★ 4.7", the card's third line. */
@@ -104,8 +111,6 @@ export function bandCount(places: TripAlongPlace[], minutes: number): number {
   return places.filter((p) => p.detourMinutes != null && p.detourMinutes <= minutes).length;
 }
 
-const firstPhoto = (p: TripAlongPlace) => (p.photos ?? []).find((ph) => ph.url) ?? null;
-
 /** The card's third line: what it is, then its rating. */
 function typeLine(p: TripAlongPlace): string {
   const what = (p.subcategory ? p.subcategory.replace(/-/g, ' ') : null) ?? p.category ?? 'Place';
@@ -118,8 +123,9 @@ function toCard(p: TripAlongPlace, kind: IdeasKind): FeedCard {
   return {
     ref: p.venueRef,
     name: p.name,
-    photoUrl: firstPhoto(p)?.url ?? null,
-    photoAttribution: firstPhoto(p)?.attribution ?? null,
+    photos: (p.photos ?? []).slice(0, 1),
+    category: p.category,
+    experiences: p.experiences ?? [],
     fit: mins != null ? `+${Math.round(mins)} min detour` : 'On your way',
     typeR: typeLine(p),
     price: priceMarks(p.priceLevel),

@@ -18,7 +18,7 @@
  * pin-search browse it replaces is gone.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Animated, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { api, DayStop, HouseholdResponse, LegMode, ShortlistItem, ShortlistStatus, TripAlongPlace, TripDay, TripDetail } from '../api';
 import type { BrowseItem } from '../api';
@@ -28,6 +28,7 @@ import { Press } from '../components/press';
 import { MapGL } from '../components/MapGL';
 import type { MapMarker, MapRoute } from '../components/MapGL';
 import { VenueDrawer } from '../components/VenueDrawer';
+import { VenueThumb, MEDIA_RADIUS } from '../components/VenueThumb';
 import { ScanOverlay } from '../components/ScanOverlay';
 import { flyHeart } from '../components/epicHeart';
 import { searchGround } from '../components/searchGround';
@@ -389,7 +390,7 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
         const price = priceOf(p);
         const what = (s.category ?? p?.category ?? 'Place');
         return {
-          ref: s.venueRef, name: s.name, photoUrl: p?.photos?.find((ph) => ph.url)?.url ?? null, photoAttribution: p?.photos?.find((ph) => ph.url)?.attribution ?? null,
+          ref: s.venueRef, name: s.name, photos: (p?.photos ?? []).slice(0, 1), category: s.category ?? p?.category ?? null, experiences: p?.experiences ?? [],
           fit: fitOf(p?.detourMinutes), typeR: p?.rating != null ? `${cap(what)} · ★ ${p.rating.toFixed(1)}${price ? ` · ${price}` : ''}` : cap(what),
           price, kind, onShortlist: true, onDay: stopRefs.has(s.venueRef), status: s.status,
           lat: s.lat ?? p?.lat ?? null, lng: s.lng ?? p?.lng ?? null, place: p as TripAlongPlace,
@@ -406,7 +407,7 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
       const price = priceOf(p);
       const what = p.category ?? 'Place';
       cards.push({
-        ref: r, name: p.name, photoUrl: p.photos?.find((ph) => ph.url)?.url ?? null, photoAttribution: p.photos?.find((ph) => ph.url)?.attribution ?? null,
+        ref: r, name: p.name, photos: (p.photos ?? []).slice(0, 1), category: p.category, experiences: p.experiences ?? [],
         fit: fitOf(p.detourMinutes), typeR: p.rating != null ? `${cap(what)} · ★ ${p.rating.toFixed(1)}${price ? ` · ${price}` : ''}` : cap(what),
         price, kind, onShortlist: true, onDay: stopRefs.has(r), lat: p.lat, lng: p.lng, place: p,
       } as FeedCard);
@@ -906,14 +907,13 @@ function FeedView({ feed, trip, tab, detour, minsOpen, pools, nHearts, shortlist
 function FeedCardView({ card, big, on, onHeart, onOpen }: { card: FeedCard; big: boolean; on: boolean; onHeart: (c: FeedCard, chip?: Element | null) => void; onOpen: (ref: string) => void }) {
   return (
     <View style={{ width: big ? 280 : 160, gap: 8 }}>
-      <Pressable onPress={() => onOpen(card.ref)} style={{ height: big ? 187 : 110, borderRadius: 12, overflow: 'hidden', backgroundColor: NEUTRAL }}>
-        {card.photoUrl ? <Image source={{ uri: card.photoUrl }} style={StyleSheet.absoluteFill as any} resizeMode="cover" /> : null}
+      <VenueThumb name={card.name} photos={card.photos} category={card.category} experiences={card.experiences} width={big ? 280 : 160} height={big ? 187 : 110} rounded={MEDIA_RADIUS} credit={false} onPress={() => onOpen(card.ref)}>
         <Pressable onPress={(e: any) => { e?.stopPropagation?.(); onHeart(card, e?.currentTarget); }} style={styles.heartChipWrap} accessibilityRole="button" accessibilityLabel={on ? 'Remove from shortlist' : 'Add to shortlist'}>
           <CardHeart on={on} />
         </Pressable>
         {card.price ? <View style={styles.priceTag}><Text style={styles.priceTagText}>{card.price}</Text></View> : null}
-        <PhotoCredit text={card.photoUrl ? card.photoAttribution : null} />
-      </Pressable>
+        <PhotoCredit text={card.photos[0]?.attribution ?? null} />
+      </VenueThumb>
       <View style={{ gap: 3 }}>
         <Text style={styles.cardName} numberOfLines={2}>{card.name}</Text>
         <Text style={styles.cardFit}>{card.fit}</Text>
@@ -926,12 +926,11 @@ function FeedCardView({ card, big, on, onHeart, onOpen }: { card: FeedCard; big:
 function ThinCard({ card, on, onHeart, onOpen }: { card: FeedCard; on: boolean; onHeart: (c: FeedCard, chip?: Element | null) => void; onOpen: (ref: string) => void }) {
   return (
     <View style={{ gap: 8 }}>
-      <Pressable onPress={() => onOpen(card.ref)} style={{ aspectRatio: 3 / 2, borderRadius: 12, overflow: 'hidden', backgroundColor: NEUTRAL }}>
-        {card.photoUrl ? <Image source={{ uri: card.photoUrl }} style={StyleSheet.absoluteFill as any} resizeMode="cover" /> : null}
+      <VenueThumb name={card.name} photos={card.photos} category={card.category} experiences={card.experiences} fill rounded={MEDIA_RADIUS} credit={false} onPress={() => onOpen(card.ref)}>
         <Pressable onPress={(e: any) => { e?.stopPropagation?.(); onHeart(card, e?.currentTarget); }} style={styles.heartChipWrap} accessibilityRole="button"><CardHeart on={on} /></Pressable>
         {card.price ? <View style={styles.priceTag}><Text style={styles.priceTagText}>{card.price}</Text></View> : null}
-        <PhotoCredit text={card.photoUrl ? card.photoAttribution : null} />
-      </Pressable>
+        <PhotoCredit text={card.photos[0]?.attribution ?? null} />
+      </VenueThumb>
       <View style={{ gap: 3 }}>
         <Text style={[styles.cardName, { fontSize: 16 }]}>{card.name}</Text>
         <Text style={styles.cardFit}>{card.fit}</Text>
@@ -962,7 +961,9 @@ function ShortlistView({ cards, allCards, show, sel, markers, zone, trip, nStops
         <Press onPress={onBack} style={styles.floatBack} accessibilityRole="button" accessibilityLabel="Back to ideas"><Icon name="back" size={20} color={INK} /></Press>
         {selCard ? (
           <Press onPress={() => onDetails(selCard.ref)} style={styles.callout} accessibilityRole="button">
-            {selCard.photoUrl ? <View><Image source={{ uri: selCard.photoUrl }} style={styles.calloutImg} resizeMode="cover" /><PhotoCredit text={selCard.photoAttribution} /></View> : <View style={styles.calloutImg} />}
+            <VenueThumb name={selCard.name} photos={selCard.photos} category={selCard.category} experiences={selCard.experiences} width={72} height={48} rounded={MEDIA_RADIUS} credit={false}>
+              <PhotoCredit text={selCard.photos[0]?.attribution ?? null} />
+            </VenueThumb>
             <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
               <Text style={styles.calloutName} numberOfLines={1}>{selCard.name}</Text>
               <Text style={styles.cardFit} numberOfLines={1}>{selCard.fit}</Text>
@@ -1001,7 +1002,9 @@ function ShortlistView({ cards, allCards, show, sel, markers, zone, trip, nStops
           const rejected = c.status === 'full' || c.status === 'set_aside';
           return (
             <Pressable key={c.ref} onPress={() => onSelect(c.ref)} style={[styles.shortRow, on && { backgroundColor: LIME_TINT }]}>
-              {c.photoUrl ? <View><Image source={{ uri: c.photoUrl }} style={styles.shortThumb} resizeMode="cover" /><PhotoCredit text={c.photoAttribution} /></View> : <View style={styles.shortThumb} />}
+              <VenueThumb name={c.name} photos={c.photos} category={c.category} experiences={c.experiences} width={96} height={64} rounded={MEDIA_RADIUS} credit={false}>
+                <PhotoCredit text={c.photos[0]?.attribution ?? null} />
+              </VenueThumb>
               <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <Text style={[styles.shortRowName, { flexShrink: 1 }]} numberOfLines={1}>{c.name}</Text>
@@ -1126,7 +1129,7 @@ function poolCard(p: TripAlongPlace, kind: 'activities' | 'food'): FeedCard {
   const what = p.subcategory ? p.subcategory.replace(/-/g, ' ') : p.category ?? 'Place';
   const label = what.charAt(0).toUpperCase() + what.slice(1);
   return {
-    ref: p.venueRef, name: p.name, photoUrl: p.photos?.find((ph) => ph.url)?.url ?? null, photoAttribution: p.photos?.find((ph) => ph.url)?.attribution ?? null,
+    ref: p.venueRef, name: p.name, photos: (p.photos ?? []).slice(0, 1), category: p.category, experiences: p.experiences ?? [],
     fit: fitOf(p.detourMinutes), typeR: p.rating != null ? `${label} · ★ ${p.rating.toFixed(1)}` : label,
     price, kind, onShortlist: p.onShortlist, onDay: p.onDay, lat: p.lat, lng: p.lng, place: p,
   };
@@ -1135,7 +1138,7 @@ function poolCard(p: TripAlongPlace, kind: 'activities' | 'food'): FeedCard {
 /** A day stop, in the feed-card shape — enough for the drawer to open and refetch. */
 function dayStopToCard(s: StopWithSlot): FeedCard {
   return {
-    ref: s.venueRef, name: s.name, photoUrl: null, photoAttribution: null, fit: 'On your trip', typeR: 'A stop on your trip',
+    ref: s.venueRef, name: s.name, photos: [], category: null, experiences: [], fit: 'On your trip', typeR: 'A stop on your trip',
     price: null, kind: 'activities', onShortlist: false, onDay: true,
     lat: s.lat ?? null, lng: s.lng ?? null, place: undefined as unknown as TripAlongPlace,
   };
@@ -1280,7 +1283,10 @@ const styles = StyleSheet.create({
 
   // Feed
   feed: { backgroundColor: CREAM },
-  feedHead: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, paddingTop: 8 },
+  // A screen that owns its header (routes.ownsHeader) gets no top inset from the
+  // shell (App.tsx Edges), so it takes the status bar into its own first row —
+  // else "Back to my trip" sits under the clock (deployed, 29 Sep 2026).
+  feedHead: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, paddingTop: (Platform.OS === 'web' ? 'calc(8px + var(--epic-sat))' : 8) as any },
   backBtn: { flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, backgroundColor: INK, borderWidth: 2, borderColor: INK },
   backBtnText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: CREAM },
   shortBtn: { flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 10, backgroundColor: CREAM, borderWidth: 1, borderColor: GREY },
@@ -1327,7 +1333,9 @@ const styles = StyleSheet.create({
   // Shortlist
   short: { backgroundColor: CREAM },
   shortMap: { height: 300, position: 'relative' },
-  floatBack: { position: 'absolute', left: 16, top: 16, width: 40, height: 40, borderRadius: 8, backgroundColor: CREAM, alignItems: 'center', justifyContent: 'center', shadowColor: INK, shadowOpacity: 0.14, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
+  // Clears the status bar itself — the shortlist owns its header, so the shell
+  // adds no top inset (App.tsx Edges); the map runs under the clock, this must not.
+  floatBack: { position: 'absolute', left: 16, top: (Platform.OS === 'web' ? 'calc(16px + var(--epic-sat))' : 16) as any, width: 40, height: 40, borderRadius: 8, backgroundColor: CREAM, alignItems: 'center', justifyContent: 'center', shadowColor: INK, shadowOpacity: 0.14, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
   callout: { position: 'absolute', left: 12, right: 12, bottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12, padding: 8, backgroundColor: CREAM, shadowColor: INK, shadowOpacity: 0.16, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
   calloutImg: { width: 48, height: 48, borderRadius: 8, backgroundColor: NEUTRAL },
   calloutName: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', color: INK },
