@@ -916,6 +916,9 @@ test('a lift written before the new maps still covers what it saw, and a day kee
     [JSON.stringify({ seen: { '2026-09-28': 0 }, at: '2026-09-29T09:00:00Z' })]);
   const r = recorder();
   assert.equal((await uk.tick({ now: new Date('2026-09-30T08:00:00Z'), start: r.start })).action, 'start', 'not stopped again on a charge already lifted');
+  // Converted to a finite baseline: a later rise on that day still stops it.
+  await billed('2026-09-28', 'google-pro', 0.1);
+  assert.equal((await uk.tick({ now: new Date('2026-09-30T09:00:00Z'), start: r.start, stop: async () => {} })).action, 'halted', 'growth after the lift still stops it');
   // A day kept once has its new places stored with it.
   await uk.status(new Date('2026-09-30T09:00:00Z'));
   await uk.status(new Date('2026-09-30T09:10:00Z'));

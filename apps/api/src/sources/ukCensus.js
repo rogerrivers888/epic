@@ -202,13 +202,23 @@ export async function decide(now = new Date()) {
   // covers every bill on days up to the day it was made, as it stood then: an
   // upgrade must not stop the census again on a charge already looked at
   // (Codex, 29 Sep 2026).
-  const legacyThrough = lifted && !lifted.value?.seenNet && lifted.value?.at ? pacificDay(lifted.value.at) : null;
-  const legacy = (list) => (legacyThrough ? Object.fromEntries(list.filter((b) => b.day <= legacyThrough).map((b) => [b.day, Infinity])) : {});
-  const legacySpans = runs.map((r) => billedFor(bills, pacificDay(r.started_at))).filter(Boolean);
-  const seenGoogle = lifted?.value?.seenGoogle ?? legacy(bills);
-  const seenNet = lifted?.value?.seenNet ?? legacy(bills);
-  const seenGoogleSpan = lifted?.value?.seenGoogleSpan ?? legacy(legacySpans);
-  const seenNetSpan = lifted?.value?.seenNetSpan ?? legacy(legacySpans);
+  // It is converted once, with the amounts on those days now as its baseline —
+  // finite, so a later backfill or rise still stops it (Codex, 29 Sep 2026).
+  if (lifted && !lifted.value?.seenNet && lifted.value?.at) {
+    const through = pacificDay(lifted.value.at);
+    const spansNow = runs.map((r) => billedFor(bills, pacificDay(r.started_at))).filter(Boolean);
+    const upTo = (list, key) => Object.fromEntries(list.filter((b) => b.day <= through).map((b) => [b.day, b[key] ?? 0]));
+    lifted.value = {
+      ...lifted.value,
+      seenGoogle: upTo(bills, 'google_gbp'), seenNet: upTo(bills, 'places_net_gbp'),
+      seenGoogleSpan: upTo(spansNow, 'google_gbp'), seenNetSpan: upTo(spansNow, 'places_net_gbp'),
+    };
+    await query(`update bo_settings set value = $2, updated_at = now() where key = $1`, ['census:uk-hold-lifted', JSON.stringify(lifted.value)]);
+  }
+  const seenGoogle = lifted?.value?.seenGoogle ?? {};
+  const seenNet = lifted?.value?.seenNet ?? {};
+  const seenGoogleSpan = lifted?.value?.seenGoogleSpan ?? {};
+  const seenNetSpan = lifted?.value?.seenNetSpan ?? {};
   const EPS = 1e-9;
   const unseen = (b, key, seen, floor) => b[key] > floor + EPS && b[key] > (seen[b.day] ?? -Infinity) + EPS;
   if (finishedFirst) {
@@ -475,7 +485,9 @@ export async function status(now = new Date()) {
     // Only while that day's squares cannot yet have been censused again (the
     // freshness window is 30 days): past that, current tiles do not say what
     // was left then, and it stays unknown (Codex, 29 Sep 2026).
-    const recent = new Date(now).getTime() - new Date(r.finished_at ?? r.started_at).getTime() < 30 * 86_400_000;
+    // From the run's start: its first squares are eligible again thirty days
+    // after they were asked, before thirty days from its finish (Codex).
+    const recent = new Date(now).getTime() - new Date(r.started_at).getTime() < 30 * 86_400_000;
     const canFill = recent || !ended;
     const unknown = { districts: null, left: null, districtsLeft: null, areasLeft: null };
     const { rows: [then] } = kept && (kept.value.districtsLeft != null || !canFill) ? { rows: [kept.value] }
