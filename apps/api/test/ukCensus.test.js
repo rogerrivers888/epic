@@ -711,3 +711,12 @@ test('a charge backfilled onto a day already lifted holds it again', async (t) =
   await billed('2026-09-28', 'google-essentials', 1.5);
   assert.equal((await uk.tick({ now: new Date('2026-10-01T09:00:00Z'), start: r.start })).action, 'held');
 });
+
+test('the day that ended is kept before the next day starts', async (t) => {
+  await clean(); t.after(clean);
+  const one = await dayOne();
+  const r = recorder();
+  await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start });
+  const { rows } = await query(`select 1 from bo_settings where key = $1`, [`census:uk-day:${one.id}`]);
+  assert.equal(rows.length, 1);
+});

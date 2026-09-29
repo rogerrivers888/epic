@@ -302,6 +302,9 @@ async function tickLocked({ now = new Date(), start = censusRun.startRun, stop =
         where id = $1 and state = 'paused'`, [d.latest.id]);
   }
   if (d.action !== 'start' && d.action !== 'replan') return d;
+  // Keep the ended days' figures before this day's plan reuses their squares
+  // (Codex, 29 Sep 2026): status() writes each ended day down once.
+  await status(now);
   const label = `${LABEL} ${d.day}`;
   const sessionId = await sessionFor(label);
   // Built paused, and switched on only once its plan is whole: a run is
