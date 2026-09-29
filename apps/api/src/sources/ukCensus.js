@@ -341,11 +341,10 @@ export async function status(now = new Date()) {
   let requests = 0; let tilesAsked = 0;
   const counted = d.runs.filter((r) => !(r.state === 'stopped' && /^planning cut short/.test(r.problem ?? '')));
   for (const [i, r] of counted.entries()) {
+    // One aggregation over the run's own slices (its index leads with the
+    // run), not a scan per square every ten minutes (Codex, 29 Sep 2026).
     const { rows: [t] } = await query(
-      `select count(*) filter (where s.n > 0)::int as asked
-         from census_run_tiles m
-         left join lateral (select count(*) n from census_slices s where s.census_run_id = m.run_id and s.area_slug = m.grid_key) s on true
-        where m.run_id = $1`, [r.id]);
+      `select count(distinct area_slug)::int as asked from census_slices where census_run_id = $1`, [r.id]);
     const day = pacificDay(r.started_at);
     const b = billedFor(d.bills ?? [], day);
     requests += Number(r.requests ?? 0); tilesAsked += Number(t.asked ?? 0);
