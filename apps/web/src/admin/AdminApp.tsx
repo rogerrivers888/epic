@@ -272,7 +272,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
       {screen === 'voice' ? <VoiceLab /> : null}
       {screen === 'hosting' ? <Hosting canManage={can('manage_hosting')} /> : null}
       {screen === 'skills' ? <Skills canManage={can('manage_skills')} /> : null}
-      {screen === 'mail' ? <Mail /> : null}
+      {screen === 'mail' ? <Mail canSend={can('manage_settings')} /> : null}
       {screen === 'roles' ? <Roles canManage={can('manage_roles')} /> : null}
       {screen === 'plans' ? <Plans canManage={can('manage_plans')} /> : null}
       {screen === 'audit' ? <Audit /> : null}

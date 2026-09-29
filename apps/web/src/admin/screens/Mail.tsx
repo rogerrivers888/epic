@@ -23,7 +23,7 @@ const FILTERS: { key: string; label: string }[] = [
 ];
 const purposeLabel = (p: string) => { const w = (p || '').replace(/_/g, ' ').trim(); return w ? w[0].toUpperCase() + w.slice(1) : '—'; };
 
-export function Mail() {
+export function Mail({ canSend = false }: { canSend?: boolean } = {}) {
   const [days, setDays] = useState(30);
   const [status, setStatus] = useState('');
   const [data, setData] = useState<AdminMail | null>(null);
@@ -71,7 +71,7 @@ export function Mail() {
       {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
       {data && !data.sender.configured ? <Banner tone="warn">{data.sender.message ?? 'No mail sender is configured.'}</Banner> : null}
       {data && data.sender.configured && !data.sender.events ? <Banner tone="warn">Sends go out, but nothing comes back: add POSTMARK_WEBHOOK_TOKEN in Doppler and give Postmark the webhook address, so deliveries, opens and bounces land here.</Banner> : null}
-      {data?.sender.configured ? (
+      {data?.sender.configured && canSend ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexWrap: 'wrap' }}>
           <TextInput value={testTo} onChangeText={setTestTo} autoCapitalize="none" keyboardType="email-address"
                      accessibilityLabel="Send a test to" style={[type.body, { minWidth: 220, flexShrink: 1, borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted, paddingVertical: 4 }]} />

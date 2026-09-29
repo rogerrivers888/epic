@@ -54,6 +54,11 @@ export const RAISED_DAY = 150_000;
 /** How big today is: 150,000 once Google's limit reads 160,000, else 70,000 — and 70,000 when it cannot be read. */
 export function daySize(quota) {
   if (quota?.speaks && quota.limit >= RAISED_LIMIT) return { requests: RAISED_DAY, cap: Math.min(quota.limit, 1e9) };
+  // A limit read below the old 75,000 is kept to, with the same 5,000 left for
+  // households (Codex, 29 Sep 2026).
+  if (quota?.speaks && Number.isFinite(quota.limit) && quota.limit < 75_000) {
+    return { requests: Math.max(0, Math.min(DAY_REQUESTS, quota.limit - 5_000)), cap: quota.limit };
+  }
   return { requests: DAY_REQUESTS, cap: 75_000 };
 }
 /** "£0 (or pennies)": under a pound of census cost on a day is pennies. */

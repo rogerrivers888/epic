@@ -756,6 +756,7 @@ test('Google\'s limit decides the size of the day: 150,000 once it reads 160,000
   assert.deepEqual(uk.daySize({ speaks: true, limit: 160000 }), { requests: 150000, cap: 160000 });
   assert.deepEqual(uk.daySize({ speaks: true, limit: 75000 }), { requests: 70000, cap: 75000 });
   assert.deepEqual(uk.daySize({ speaks: false, why: 'x' }), { requests: 70000, cap: 75000 });
+  assert.deepEqual(uk.daySize({ speaks: true, limit: 50000 }), { requests: 45000, cap: 50000 }, 'a lower limit is kept to');
 
   await clean(); t.after(clean);
   await dayOne();
