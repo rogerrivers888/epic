@@ -54,7 +54,11 @@ async function read(fetcher) {
     const res = await fetcher(url, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) {
-      return { speaks: false, why: `Google would not say (${res.status}${j?.error?.status ? ` ${j.error.status}` : ''}): the key needs Cloud Quotas Viewer on ${MAPS_PROJECT}` };
+      // Google's own words beside the status: a 403 is the same code for a
+      // missing role and for the Cloud Quotas API not being switched on, and
+      // only the message tells them apart (29 Sep 2026).
+      const reason = j?.error?.details?.find?.((x) => x?.reason)?.reason;
+      return { speaks: false, why: `Google would not say (${res.status}${j?.error?.status ? ` ${j.error.status}` : ''}${reason ? ` ${reason}` : ''}): ${String(j?.error?.message ?? 'no message').slice(0, 300)}` };
     }
     infos.push(...(j.quotaInfos ?? []));
     if (!j.nextPageToken) break;
