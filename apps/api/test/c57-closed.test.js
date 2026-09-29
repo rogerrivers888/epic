@@ -642,3 +642,53 @@ test('a row an earlier check wrote on a rule that is gone is read again, not lef
   assert.equal(s.status, 'unknown');
   assert.equal(s.reason, null);
 });
+
+test('an atlas row known to the open map only through the matching pass is hidden under that osm: ref too (Codex)', async () => {
+  const { lonely } = await fixture();
+  await query(`delete from atlas_osm_matches`);
+  await query(`insert into atlas_osm_matches (attraction_id, osm_ref, osm_name, metres, how) values ($1, 'way/888', 'Hidden Folly', 20, 'same_name')`, [lonely]);
+  await repo.setByPerson(`atlas:${lonely}`, { status: 'permanently_closed', by: 'test' });
+
+  // Listed hidden under the matched name, in both the JS and the SQL forms.
+  assert.ok((await repo.hiddenAmong(['osm:way/888'])).has('osm:way/888'));
+  const { rows } = await query(`select r from unnest($1::text[]) r where ${repo.SHOWN_REF('r')}`, [['osm:way/888', 'osm:way/889']]);
+  assert.deepEqual(rows.map((x) => x.r), ['osm:way/889']);
+
+  // Refused on a trip under that name.
+  const trips = await import('../src/routes/trips.js');
+  await assert.rejects(() => trips.refuseClosed('osm:way/888'), (e) => e.status === 409 && e.code === 'closed');
+
+  // A direct link opens on its closure: the drawer's own read.
+  const s = await repo.statusFor('osm:way/888');
+  assert.equal(s.hidden, true);
+  assert.equal(s.status, 'permanently_closed');
+  const express = (await import('express')).default;
+  const { places } = await import('../src/routes/places.js');
+  const { runAsAccount } = await import('../src/context.js');
+  const { household } = await aHousehold(query, 'c57 osm drawer');
+  const { rows: [account] } = await query(
+    `insert into accounts (household_id, email, name, role, plan, status) values ($1, $2, 'c57', 'customer', 'trial', 'active') returning *`,
+    [household.id, `c57-drawer-${Date.now()}@example.com`]);
+  const app = express();
+  app.use((req, _res, next) => runAsAccount(account, next));
+  app.use('/api/places', places);
+  const server = app.listen(0);
+  await new Promise((r) => server.once('listening', r));
+  try {
+    const body = await (await fetch(`http://127.0.0.1:${server.address().port}/api/places/detail?ref=${encodeURIComponent('osm:way/888')}`)).json();
+    assert.equal(body.openStatus?.hidden, true);
+    assert.equal(body.openStatus?.status, 'permanently_closed');
+    assert.equal(body.venue, null);
+  } finally { server.close(); }
+
+  // The household's list says which kind of hidden it is.
+  const marks = await repo.hiddenStatusesOf(['osm:way/888']);
+  assert.equal(repo.closedBrief(marks.get('osm:way/888')).status, 'permanently_closed');
+  await query(`delete from place_status where venue_ref = $1`, [`atlas:${lonely}`]);
+  await query(`delete from atlas_osm_matches`);
+});
+
+test('the closed mark carries the status, so an unconfirmed place reads as that and not as closed', async () => {
+  const brief = repo.closedBrief({ hidden: true, status: 'unknown', confirmed: false, successor: null });
+  assert.deepEqual(brief, { status: 'unknown', confirmed: false, successor: null });
+});

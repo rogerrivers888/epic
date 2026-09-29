@@ -795,7 +795,12 @@ function PlaceCard({ place, kind, viewer, selected, wide, onPress }: {
   const ours = epicRating(place, viewer);
   const what = typeOf(place, kind);
   // Closed (C57): the row stays — it is somewhere they kept or went — and says so first.
-  const closed = place.closed ? [place.closed.status === 'temporarily_closed' ? 'Temporarily closed' : 'Closed', place.closed.successor?.name ? `Now: ${place.closed.successor.name}` : null].filter(Boolean).join(' · ') : null;
+  // The same three words as the drawer: an unconfirmed place (status unknown,
+  // nothing current says it exists) is not "Closed".
+  const closedWord = !place.closed ? null
+    : place.closed.status === 'permanently_closed' ? 'Closed'
+      : place.closed.status === 'temporarily_closed' ? 'Temporarily closed' : 'Not confirmed open';
+  const closed = closedWord ? [closedWord, place.closed?.successor?.name ? `Now: ${place.closed.successor.name}` : null].filter(Boolean).join(' · ') : null;
   const meta = [closed, what, place.locality].filter(Boolean).join(' · ');
   const when = whenLabel(place.lastOn);
   const experiences = (place.venue as Partial<Venue> | null)?.experiences ?? [];

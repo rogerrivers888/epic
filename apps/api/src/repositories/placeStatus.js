@@ -44,16 +44,20 @@ export const HIDDEN_REFS = `(
     union select m.venue_ref from provider_matches m join hid on hid.venue_ref = 'google:' || m.source_ref
      where m.source = 'google' and not m.missing),
   atlas as (
-    select a.id, a.venue_ref, a.wikidata_id, a.osm_ref from seed join attractions a on seed.ref like 'atlas:%' and a.id::text = substr(seed.ref, 7)
-    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref from seed join attractions a on a.venue_ref = seed.ref
-    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref from seed join attractions a on seed.ref like 'wikidata:%' and a.wikidata_id = substr(seed.ref, 10)
-    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref from seed join attractions a on seed.ref like 'osm:%' and a.osm_ref = substr(seed.ref, 5)
-    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref from seed join attractions a on seed.ref like 'osm:relation/%' and a.osm_ref = substr(seed.ref, 14)),
+    select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, (select m2.osm_ref from atlas_osm_matches m2 where m2.attraction_id = a.id) as matched_osm from seed join attractions a on seed.ref like 'atlas:%' and a.id::text = substr(seed.ref, 7)
+    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, (select m2.osm_ref from atlas_osm_matches m2 where m2.attraction_id = a.id) as matched_osm from seed join attractions a on a.venue_ref = seed.ref
+    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, (select m2.osm_ref from atlas_osm_matches m2 where m2.attraction_id = a.id) as matched_osm from seed join attractions a on seed.ref like 'wikidata:%' and a.wikidata_id = substr(seed.ref, 10)
+    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, (select m2.osm_ref from atlas_osm_matches m2 where m2.attraction_id = a.id) as matched_osm from seed join attractions a on seed.ref like 'osm:%' and a.osm_ref = substr(seed.ref, 5)
+    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, (select m2.osm_ref from atlas_osm_matches m2 where m2.attraction_id = a.id) as matched_osm from seed join attractions a on seed.ref like 'osm:relation/%' and a.osm_ref = substr(seed.ref, 14)
+    -- …and the open-map match the closed check found (migration 299), which is a name the place goes by too.
+    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, m.osm_ref from seed join atlas_osm_matches m on seed.ref like 'osm:%' and m.osm_ref = substr(seed.ref, 5) join attractions a on a.id = m.attraction_id
+    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, m.osm_ref from seed join atlas_osm_matches m on seed.ref like 'osm:relation/%' and m.osm_ref = 'relation/' || substr(seed.ref, 14) join attractions a on a.id = m.attraction_id),
   names as (
     select ref from seed where ref is not null
     union select x.ref from atlas cross join lateral (values
       (atlas.venue_ref), ('atlas:' || atlas.id::text), ('wikidata:' || atlas.wikidata_id),
-      ('osm:' || atlas.osm_ref), (case when atlas.osm_ref ~ '^[0-9]+$' then 'osm:relation/' || atlas.osm_ref end)) x(ref)
+      ('osm:' || atlas.osm_ref), (case when atlas.osm_ref ~ '^[0-9]+$' then 'osm:relation/' || atlas.osm_ref end),
+      ('osm:' || atlas.matched_osm), (case when atlas.matched_osm ~ '^[0-9]+$' then 'osm:relation/' || atlas.matched_osm end)) x(ref)
      where x.ref is not null),
   matched as (
     select 'google:' || m.source_ref as ref from provider_matches m join names n on n.ref = m.venue_ref
@@ -153,16 +157,20 @@ export async function hiddenStatusesOf(refs) {
        union select m.venue_ref, hid.venue_ref from provider_matches m join hid on hid.venue_ref = 'google:' || m.source_ref
         where m.source = 'google' and not m.missing),
      atlas as (
-       select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, seed.origin from seed join attractions a on seed.ref like 'atlas:%' and a.id::text = substr(seed.ref, 7)
-       union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, seed.origin from seed join attractions a on a.venue_ref = seed.ref
-       union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, seed.origin from seed join attractions a on seed.ref like 'wikidata:%' and a.wikidata_id = substr(seed.ref, 10)
-       union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, seed.origin from seed join attractions a on seed.ref like 'osm:%' and a.osm_ref = substr(seed.ref, 5)
-       union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, seed.origin from seed join attractions a on seed.ref like 'osm:relation/%' and a.osm_ref = substr(seed.ref, 14)),
+       select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, (select m2.osm_ref from atlas_osm_matches m2 where m2.attraction_id = a.id) as matched_osm, seed.origin from seed join attractions a on seed.ref like 'atlas:%' and a.id::text = substr(seed.ref, 7)
+       union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, (select m2.osm_ref from atlas_osm_matches m2 where m2.attraction_id = a.id) as matched_osm, seed.origin from seed join attractions a on a.venue_ref = seed.ref
+       union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, (select m2.osm_ref from atlas_osm_matches m2 where m2.attraction_id = a.id) as matched_osm, seed.origin from seed join attractions a on seed.ref like 'wikidata:%' and a.wikidata_id = substr(seed.ref, 10)
+       union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, (select m2.osm_ref from atlas_osm_matches m2 where m2.attraction_id = a.id) as matched_osm, seed.origin from seed join attractions a on seed.ref like 'osm:%' and a.osm_ref = substr(seed.ref, 5)
+       union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, (select m2.osm_ref from atlas_osm_matches m2 where m2.attraction_id = a.id) as matched_osm, seed.origin from seed join attractions a on seed.ref like 'osm:relation/%' and a.osm_ref = substr(seed.ref, 14)
+    -- …and the open-map match the closed check found (migration 299), which is a name the place goes by too.
+    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, m.osm_ref, seed.origin from seed join atlas_osm_matches m on seed.ref like 'osm:%' and m.osm_ref = substr(seed.ref, 5) join attractions a on a.id = m.attraction_id
+    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, m.osm_ref, seed.origin from seed join atlas_osm_matches m on seed.ref like 'osm:relation/%' and m.osm_ref = 'relation/' || substr(seed.ref, 14) join attractions a on a.id = m.attraction_id),
      names as (
        select ref, origin from seed where ref is not null
        union select x.ref, atlas.origin from atlas cross join lateral (values
          (atlas.venue_ref), ('atlas:' || atlas.id::text), ('wikidata:' || atlas.wikidata_id),
-         ('osm:' || atlas.osm_ref), (case when atlas.osm_ref ~ '^[0-9]+$' then 'osm:relation/' || atlas.osm_ref end)) x(ref)
+         ('osm:' || atlas.osm_ref), (case when atlas.osm_ref ~ '^[0-9]+$' then 'osm:relation/' || atlas.osm_ref end),
+      ('osm:' || atlas.matched_osm), (case when atlas.matched_osm ~ '^[0-9]+$' then 'osm:relation/' || atlas.matched_osm end)) x(ref)
         where x.ref is not null),
      matched as (
        select 'google:' || m.source_ref as ref, n.origin from provider_matches m join names n on n.ref = m.venue_ref
