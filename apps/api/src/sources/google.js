@@ -366,6 +366,20 @@ export function toVenue(place, justification = null) {
  * invoice. The Cloud Console billing report is the truth and `sources/pricing.js`
  * links to it.
  */
+// `businessStatus` (decision C57, 29 Sep 2026) rides only on calls already
+// billed at Pro or above — the full detail, the rating, the brief — so it adds
+// nothing to their price. It is read in memory and handed to the one listener
+// registered through `onBusinessStatus` (server.js); only Epic's derived
+// open/closed flag is stored (repositories/placeStatus.js), never Google's value.
+let statusSink = null;
+/** Register the one listener for a fetched place's business status. */
+export function onBusinessStatus(fn) { statusSink = typeof fn === 'function' ? fn : null; }
+/** Hand a fetched place's status over — awaited, so a drawer reads its own answer — and never fail the call over it. */
+async function handStatus(p) {
+  if (!statusSink || !p?.id || !p.businessStatus) return;
+  try { await statusSink(`google:${p.id}`, p.businessStatus); } catch { /* bookkeeping never fails a fetch */ }
+}
+
 export function skuFor(fieldMask, path = '') {
   const mask = String(fieldMask ?? '');
   // A place fetched by its own id is a Place Details request; anything else is
@@ -384,7 +398,7 @@ export function skuFor(fieldMask, path = '') {
   // — all of it billable, which is the correction above.
   const pro = has('displayName') || has('formattedAddress') || has('location') || has('types')
     || has('primaryType') || has('photos') || has('websiteUri') || has('nationalPhoneNumber')
-    || has('utcOffsetMinutes') || has('googleMapsUri');
+    || has('utcOffsetMinutes') || has('googleMapsUri') || has('businessStatus');
   if (pro) return 'google-pro';
   // Essentials: ids only. Free, and it is genuinely only ids.
   return 'google-essentials';
@@ -593,7 +607,8 @@ export const googleSource = {
   /** Full detail including up to 5 reviews (Pro/Enterprise fields). */
   async get(id, { meter = null } = {}) {
     if (off(meter)) return null;
-    const p = await call(`/places/${id}`, { method: 'GET', fieldMask: DETAIL_FIELDS, meter });
+    const p = await call(`/places/${id}`, { method: 'GET', fieldMask: `${DETAIL_FIELDS},businessStatus`, meter });
+    await handStatus(p);
     const v = toVenue(p);
     v.reviews = (p.reviews || []).slice(0, 5).map((r) => ({
       text: r.text?.text ?? r.originalText?.text ?? '', rating: r.rating ?? null, author: r.authorAttribution?.displayName ?? null,
@@ -730,9 +745,10 @@ export const googleSource = {
     // house (domain/visiting.js), and they are read and dropped — only our own
     // conclusion is ever written down.
     const p = await call(`/places/${id}`, {
-      method: 'GET', fieldMask: 'id,rating,userRatingCount,types,primaryType', meter,
+      method: 'GET', fieldMask: 'id,rating,userRatingCount,types,primaryType,businessStatus', meter,
     });
     if (!p) return null;
+    await handStatus(p);
     return {
       rating: p.rating ?? null,
       ratingCount: p.userRatingCount ?? null,
@@ -758,7 +774,8 @@ export const googleSource = {
    */
   async brief(id, { meter = null } = {}) {
     if (off(meter)) return null;
-    const p = await call(`/places/${id}`, { method: 'GET', fieldMask: 'id,displayName,location,websiteUri', meter });
+    const p = await call(`/places/${id}`, { method: 'GET', fieldMask: 'id,displayName,location,websiteUri,businessStatus', meter });
+    await handStatus(p);
     if (!p?.location) return null;
     return {
       name: p.displayName?.text ?? null,
