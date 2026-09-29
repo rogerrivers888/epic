@@ -334,8 +334,6 @@ test('a notice is mailed once however many processes say it', async (t) => {
   const subject = `test notice ${Math.random()}`;
   t.after(() => query(`delete from mail_messages where subject = $1`, [subject]));
   const { recordSend } = await import('../src/repositories/mail.js');
-  const { ownerAccount } = await import('../src/repositories/accounts.js');
-  if (!(await ownerAccount())?.email) return; // no owner in this database: nothing to mail
   let sent = 0;
   const send = async ({ to, subject: s }) => { sent += 1; await new Promise((ok) => setTimeout(ok, 100)); await recordSend({ to, subject: s, purpose: 'census', status: 'sent' }); return { sent: true }; };
   await Promise.all([1, 2, 3].map(() => uk.notify({ subject, send, configured: () => true })));
@@ -581,8 +579,6 @@ test('a notice cut off mid-send is sent again', async (t) => {
   await clean();
   const subject = `test cut off ${Math.random()}`;
   t.after(() => query(`delete from mail_messages where subject = $1`, [subject]));
-  const { ownerAccount } = await import('../src/repositories/accounts.js');
-  if (!(await ownerAccount())?.email) return;
   await query(`insert into mail_messages (to_address, subject, purpose, status, sent_at) values ('x@y', $1, 'census', 'sending', now() - interval '1 hour')`, [subject]);
   let sent = 0;
   await uk.notify({ subject, send: async () => { sent += 1; return { sent: true }; }, configured: () => true });
@@ -635,8 +631,6 @@ test('a notice Postmark refused is tried again at once', async (t) => {
   await clean();
   const subject = `test refused ${Math.random()}`;
   t.after(() => query(`delete from mail_messages where subject = $1`, [subject]));
-  const { ownerAccount } = await import('../src/repositories/accounts.js');
-  if (!(await ownerAccount())?.email) return;
   await query(`insert into mail_messages (to_address, subject, purpose, status, sent_at) values ('x@y', $1, 'census', 'failed', now())`, [subject]);
   let sent = 0;
   await uk.notify({ subject, send: async () => { sent += 1; return { sent: true }; }, configured: () => true });
@@ -739,4 +733,14 @@ test('a day\'s figures are kept the moment its run ends', async (t) => {
   await query(`update census_tiles set state = 'todo' where grid_key = 'uktest/kept'`);
   const { rows: [kept] } = await query(`select value from bo_settings where key = $1`, [`census:uk-day:${run.id}`]);
   assert.deepEqual(kept?.value, { districts: 1, left: 0 });
+});
+
+test('a census notice goes to the report address, logged as a census alert or report', async (t) => {
+  await clean();
+  const subject = `test to ${Math.random()}`;
+  const sent = [];
+  await uk.notify({ subject, purpose: 'census_alert', configured: () => true,
+    send: async (m) => { sent.push(m); return { sent: true }; } });
+  assert.deepEqual(sent.map((m) => [m.to, m.purpose]), [['roger@epic.day', 'census_alert']]);
+  assert.deepEqual(uk.reportTo(), ['roger@epic.day'], 'while Postmark is in test mode, the address Epic owns');
 });

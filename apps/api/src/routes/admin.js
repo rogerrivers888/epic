@@ -33,7 +33,7 @@ import * as providerCalls from '../repositories/providerCalls.js';
 import { currentHousehold } from './household.js';
 import { query } from '../db.js';
 import * as mailRepo from '../repositories/mail.js';
-import { mailStatus } from '../sources/mail.js';
+import { mailStatus, sendMail } from '../sources/mail.js';
 import { STATUS_WORDS } from '../domain/mail.js';
 
 const router = express.Router();
@@ -271,6 +271,22 @@ router.patch('/people/:id/role', requires('manage_roles'), async (req, res, next
  * by status over the window, then the newest rows; `?status=` narrows to one,
  * or to `not_delivered` for everything that did not arrive.
  */
+/**
+ * One test message, to see the sender work end to end (owner, 29 Sep 2026).
+ * Logged on the Mail screen like any other send.
+ */
+router.post('/mail/test', requires('manage_settings'), async (req, res, next) => {
+  try {
+    const to = String(req.body?.to ?? '').trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return res.status(400).json({ error: 'bad_request', message: 'Say who to send it to.' });
+    const out = await sendMail({
+      to, purpose: 'test', subject: 'A test from Epic',
+      text: `This is a test message from Epic, sent from the back office at ${new Date().toISOString()}.`,
+    });
+    res.json(out);
+  } catch (err) { next(err); }
+});
+
 router.get('/mail', requires('view_activity'), async (req, res, next) => {
   try {
     const status = String(req.query.status || '') || null;

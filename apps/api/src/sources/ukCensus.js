@@ -29,7 +29,6 @@ import crypto from 'node:crypto';
 import { query, pool } from '../db.js';
 import * as censusRun from './censusRun.js';
 import { sendMail, mailStatus } from './mail.js';
-import { ownerAccount } from '../repositories/accounts.js';
 
 /** Every UK postcode area, Northern Ireland included (BT). */
 export const UK_AREAS = [
@@ -405,6 +404,8 @@ export async function status(now = new Date()) {
   return {
     action: d.action,
     halted: d.action === 'halted' ? { day: d.over.day, googleGbp: d.over.google_gbp } : null,
+    // What holds it, so the screen can say so beside "Lift the hold".
+    held: d.action === 'held' ? { day: d.yesterday.day, censusGbp: d.yesterday.census_gbp } : null,
     complete: d.action === 'complete',
     districtsWhole: districts.whole,
     tilesLeft: left,
@@ -424,7 +425,15 @@ export async function status(now = new Date()) {
  * Doppler the log and GET /census/uk are all there is, and the status says so.
  */
 const saidHere = new Set();
-export async function notify({ subject, text = null, send = sendMail, configured = () => mailStatus().configured }) {
+/**
+ * Who hears. The owner's own address at Epic, where Postmark delivers while
+ * the account is in test mode (owner, 29 Sep 2026: "only @epic.day addresses
+ * receive mail for now"); a list in EPIC_CENSUS_REPORT_TO overrides it.
+ */
+export const reportTo = () => String(process.env.EPIC_CENSUS_REPORT_TO || 'roger@epic.day')
+  .split(',').map((a) => a.trim()).filter(Boolean);
+
+export async function notify({ subject, text = null, purpose = 'census_report', send = sendMail, configured = () => mailStatus().configured, to = reportTo() }) {
   if (!saidHere.has(subject)) { saidHere.add(subject); console.log(`epic-api: census — ${subject}`); }
   if (!configured()) return { mailed: false, why: 'no mail sender' };
   // The check and the send under one lock, so two processes cannot both find
@@ -440,14 +449,18 @@ export async function notify({ subject, text = null, send = sendMail, configured
         // Sent, or being sent right now — not a send a restart cut off, which
         // would otherwise swallow the notice for good (Codex, 29 Sep 2026).
         `select 1 from mail_messages
-          where purpose = 'census' and subject = $1
+          where purpose like 'census%' and subject = $1
             and (status not in ('failed', 'sending') or (status = 'sending' and sent_at > now() - interval '15 minutes'))
           limit 1`, [subject.slice(0, 300)]);
       if (rows.length) return { mailed: false, why: 'already sent' };
-      const owner = await ownerAccount();
-      if (!owner?.email) return { mailed: false, why: 'no owner address' };
-      const out = await send({ to: owner.email, subject, text: text ?? subject, purpose: 'census' });
-      return { mailed: Boolean(out.sent), why: out.sent ? null : out.message };
+      if (!to.length) return { mailed: false, why: 'nobody to send it to' };
+      // Each send is a row on the Mail screen, as "Census report" or "Census alert".
+      let mailed = false; let why = null;
+      for (const address of to) {
+        const out = await send({ to: address, subject, text: text ?? subject, purpose });
+        mailed = mailed || Boolean(out.sent); if (!out.sent) why = out.message;
+      }
+      return { mailed, why };
     } finally {
       await client.query('select pg_advisory_unlock(hashtext($1))', ['census-notify']);
     }
@@ -471,7 +484,8 @@ export async function daily(now = new Date()) {
   if (out.action === 'off') return out;
   const st = await status(now);
   for (const t of tellings) {
-    await notify({ subject: t.subject, text: `${t.subject}.\n\n${st.days.map((d) => reportLine(d)).join('\n')}` });
+    await notify({ subject: t.subject, purpose: t.kind === 'alert' ? 'census_alert' : 'census_report',
+      text: `${t.subject}.\n\n${st.days.map((d) => reportLine(d)).join('\n')}` });
   }
   // A day's report once its run has stopped for the day (or for good). The
   // billed figure arrives a day or so later, so a report is sent again once
