@@ -79,6 +79,17 @@ const PLANNING_MS = 5 * 60_000;
 /** How a day ends: at the run's own ceiling, or ended for the day at the shared cap. */
 const DAY_ENDED = /^(stopped at the \d+-request ceiling|ended for the day)/;
 
+/**
+ * Pounds as said in an alert: to the penny, or to a hundredth of one when it
+ * is a fraction of a penny — "£0.00" for a stop on 0.3p says nothing, and a
+ * rise within the same penny would be the same subject, swallowed as already
+ * sent (Codex, 29 Sep 2026).
+ */
+export const gbp = (x) => {
+  const n = Number(x ?? 0);
+  return `£${Math.abs(n * 100 - Math.round(n * 100)) < 1e-6 ? n.toFixed(2) : n.toFixed(4)}`;
+};
+
 /** The quota day a moment falls in: Google's day is Los Angeles's. */
 export const pacificDay = (at) => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -189,16 +200,18 @@ export async function decide(now = new Date()) {
   const { rows: [lifted] } = await query(`select value from bo_settings where key = 'census:uk-hold-lifted'`);
   const seenGoogle = lifted?.value?.seenGoogle ?? {};
   const seenNet = lifted?.value?.seenNet ?? {};
+  const seenGoogleSpan = lifted?.value?.seenGoogleSpan ?? {};
+  const seenNetSpan = lifted?.value?.seenNetSpan ?? {};
   const EPS = 1e-9;
   const unseen = (b, key, seen, floor) => b[key] > floor + EPS && b[key] > (seen[b.day] ?? -Infinity) + EPS;
   if (finishedFirst) {
     // But its own days' bills still count: the last day's arrives after it
     // finished, and a costly one is still said (Codex, 29 Sep 2026).
     const days = runs.map((r) => billedFor(bills, pacificDay(r.started_at))).filter(Boolean);
-    const over = days.find((b) => unseen(b, 'google_gbp', seenGoogle, DAY_ALERT_GBP));
+    const over = days.find((b) => unseen(b, 'google_gbp', seenGoogleSpan, DAY_ALERT_GBP));
     // And a late Places charge for one of its days, after credits, is said too
     // — unless it is one a person already lifted (Codex, 29 Sep 2026).
-    const net = days.find((b) => unseen(b, 'places_net_gbp', seenNet, 0));
+    const net = days.find((b) => unseen(b, 'places_net_gbp', seenNetSpan, 0));
     return { action: 'complete', runs, latest, bills, over: over ? { ...over, kind: 'five' } : net ? { ...net, kind: 'net' } : null };
   }
   // Any export day over £5, and any quota day of the programme over £5 across
@@ -214,9 +227,11 @@ export async function decide(now = new Date()) {
   // Any amount at all: above £0 means a fraction of a penny too, and a lifted
   // figure stops it again on any growth (Codex, 29 Sep 2026). The epsilon is
   // only float noise.
-  const five = [...bills, ...spans].find((b) => unseen(b, 'google_gbp', seenGoogle, DAY_ALERT_GBP));
+  const five = bills.find((b) => unseen(b, 'google_gbp', seenGoogle, DAY_ALERT_GBP))
+    ?? spans.find((b) => unseen(b, 'google_gbp', seenGoogleSpan, DAY_ALERT_GBP));
   if (five) return { action: 'halted', runs, latest, bills, over: { ...five, kind: 'five' } };
-  const spent = [...bills, ...spans].find((b) => unseen(b, 'places_net_gbp', seenNet, 0));
+  const spent = bills.find((b) => unseen(b, 'places_net_gbp', seenNet, 0))
+    ?? spans.find((b) => unseen(b, 'places_net_gbp', seenNetSpan, 0));
   if (spent) return { action: 'halted', runs, latest, bills, over: { ...spent, kind: 'net' } };
   // Done is complete only if no square was given up on: a run finishes with
   // its failed squares set aside, and the UK is not done while they are
@@ -334,13 +349,13 @@ async function tickLocked({ now = new Date(), start = censusRun.startRun, stop =
   if (d.action === 'halted') {
     if (['running', 'waiting'].includes(d.latest?.state)) await stop(d.latest.id);
     tell({ kind: 'alert', subject: d.over.kind === 'net'
-      ? `Census stopped: Places cost £${d.over.places_net_gbp.toFixed(2)} after credits on ${d.over.day}`
-      : `Census stopped: Google billed £${d.over.google_gbp.toFixed(2)} on ${d.over.day}`, d });
+      ? `Census stopped: Places cost ${gbp(d.over.places_net_gbp)} after credits on ${d.over.day}`
+      : `Census stopped: Google billed ${gbp(d.over.google_gbp)} on ${d.over.day}`, d });
   }
   if (d.action === 'complete' && d.over) {
     tell({ kind: 'alert', subject: d.over.kind === 'net'
-      ? `Census (finished): Places cost £${d.over.places_net_gbp.toFixed(2)} after credits on ${d.over.day}`
-      : `Census (finished) was billed £${d.over.google_gbp.toFixed(2)} of Google on ${d.over.day}`, d });
+      ? `Census (finished): Places cost ${gbp(d.over.places_net_gbp)} after credits on ${d.over.day}`
+      : `Census (finished) was billed ${gbp(d.over.google_gbp)} of Google on ${d.over.day}`, d });
   }
   if (d.action === 'held') tell({ kind: 'alert', subject: `Census held: the census was billed £${d.yesterday.census_gbp.toFixed(2)} on ${d.yesterday.day}`, d });
   if (d.action === 'overran') {
@@ -619,11 +634,16 @@ export async function liftHold({ who = null, now = new Date() } = {}) {
   const bills = runs.length ? await billedByDay(pacificDay(runs[0].started_at)) : [];
   const spans = runs.map((r) => billedFor(bills, pacificDay(r.started_at))).filter(Boolean);
   const seen = Object.fromEntries(spans.map((b) => [b.day, b.census_gbp]));
-  const seenGoogle = Object.fromEntries([...bills, ...spans].map((b) => [b.day, b.google_gbp]));
-  const seenNet = Object.fromEntries([...bills, ...spans].map((b) => [b.day, b.places_net_gbp ?? 0]));
+  // Export days and quota-day totals kept apart: they share dates, and one
+  // written over the other left a lifted charge stopping it again at once
+  // (Codex, 29 Sep 2026).
+  const seenGoogle = Object.fromEntries(bills.map((b) => [b.day, b.google_gbp]));
+  const seenNet = Object.fromEntries(bills.map((b) => [b.day, b.places_net_gbp ?? 0]));
+  const seenGoogleSpan = Object.fromEntries(spans.map((b) => [b.day, b.google_gbp]));
+  const seenNetSpan = Object.fromEntries(spans.map((b) => [b.day, b.places_net_gbp ?? 0]));
   await query(
     `insert into bo_settings (key, value, updated_by) values ('census:uk-hold-lifted', $1, $2)
      on conflict (key) do update set value = excluded.value, updated_by = excluded.updated_by, updated_at = now(), version = bo_settings.version + 1`,
-    [JSON.stringify({ seen, seenGoogle, seenNet, at: new Date(now).toISOString() }), who]);
-  return { seen, seenGoogle, seenNet };
+    [JSON.stringify({ seen, seenGoogle, seenNet, seenGoogleSpan, seenNetSpan, at: new Date(now).toISOString() }), who]);
+  return { seen, seenGoogle, seenNet, seenGoogleSpan, seenNetSpan };
 }

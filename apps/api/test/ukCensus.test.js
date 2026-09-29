@@ -867,3 +867,16 @@ test('a charge lifted before the finish is not said again after it, and an old d
   const st = await uk.status(new Date('2026-12-01T08:00:00Z'));
   assert.deepEqual([st.days[0].districtsLeft, st.days[0].areasLeft], [null, null]);
 });
+
+test('a lift clears what it saw, export day and quota day alike, and fractions of a penny are said as such', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  await billed('2026-09-28', 'google-pro', 1);
+  await billed('2026-09-29', 'google-pro', 1, { credits: -2 }); // a credit on the next day pulls the quota-day total to £0
+  const r = recorder();
+  assert.equal((await uk.tick({ now: new Date('2026-09-30T08:00:00Z'), start: r.start, stop: async () => {} })).action, 'halted');
+  await uk.liftHold({ who: 'test' });
+  assert.equal((await uk.tick({ now: new Date('2026-09-30T09:00:00Z'), start: r.start })).action, 'start', 'lifted means lifted');
+  assert.equal(uk.gbp(0.003), '£0.0030');
+  assert.equal(uk.gbp(1.2), '£1.20');
+});
