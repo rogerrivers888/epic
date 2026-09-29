@@ -468,7 +468,7 @@ export async function status(now = new Date()) {
     // Only while that day's squares cannot yet have been censused again (the
     // freshness window is 30 days): past that, current tiles do not say what
     // was left then, and it stays unknown (Codex, 29 Sep 2026).
-    const recent = new Date(now).getTime() - new Date(r.finished_at ?? r.started_at).getTime() < 25 * 86_400_000;
+    const recent = new Date(now).getTime() - new Date(r.finished_at ?? r.started_at).getTime() < 30 * 86_400_000;
     const canFill = recent || !ended;
     const unknown = { districts: null, left: null, districtsLeft: null, areasLeft: null };
     const { rows: [then] } = kept && (kept.value.districtsLeft != null || !canFill) ? { rows: [kept.value] }
