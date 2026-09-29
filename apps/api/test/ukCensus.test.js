@@ -956,3 +956,24 @@ test('an old day whose squares were asked again since is not rebuilt', async (t)
   const st = await uk.status(new Date('2026-09-30T09:00:00Z'));
   assert.deepEqual([st.days[0].districts, st.days[0].districtsLeft], [5, null], 'what it said stands; what it did not, stays unknown');
 });
+
+test('a charge lifted before the next day existed is not held against that day, and the day record fills a blank', async (t) => {
+  await clean(); t.after(clean);
+  const one = await dayOne();
+  await billed('2026-09-29', 'google-pro', 0.5); // day 1's second export day
+  await uk.liftHold({ who: 'test' });
+  // Day 2 comes to exist; its quota day spans the 29th too.
+  await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state, problem, started_at, finished_at, night_share)
+     values ('The rest of the UK — day 2', array['ZZ'], 0.08, 0.12, 70000, 5, 30, 'paused', 'stopped at the 70000-request ceiling; resume to carry on', '2026-09-29T07:10:00Z', '2026-09-29T12:00:00Z', 70000)`);
+  const r = recorder();
+  assert.equal((await uk.tick({ now: new Date('2026-09-30T08:00:00Z'), start: r.start })).action, 'start', 'the lifted 50p is not a new charge on day 2');
+  // A blank record written at the very moment the day ended is filled by the day's own record.
+  const { keepDayFigures } = await import('../src/sources/censusRun.js');
+  await query(`insert into bo_settings (key, value, updated_by) values ($1, '{"districts": null, "left": null, "newPlaces": 7}', 'test')
+               on conflict (key) do update set value = excluded.value`, [`census:uk-day:${one.id}`]);
+  await keepDayFigures(one.id);
+  const { rows: [k] } = await query(`select value from bo_settings where key = $1`, [`census:uk-day:${one.id}`]);
+  assert.notEqual(k.value.districts, null);
+  assert.equal(k.value.newPlaces, 7, 'and keeps what else it held');
+});

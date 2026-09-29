@@ -665,7 +665,11 @@ export async function keepDayFigures(runId) {
               'left', (select count(*) filter (where not done) from plan)),
             'the UK census'
        from r
-     on conflict (key) do nothing`, [runId, `${ONE_DAY_LABEL} %`]);
+     -- Fills a record a status read made blank at the moment the day ended,
+     -- keeping what else it holds; never rewrites figures already written
+     -- (Codex, 29 Sep 2026).
+     on conflict (key) do update set value = bo_settings.value || excluded.value, updated_at = now()
+        where bo_settings.value->>'districts' is null`, [runId, `${ONE_DAY_LABEL} %`]);
 }
 
 /**

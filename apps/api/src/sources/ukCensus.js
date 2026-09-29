@@ -222,12 +222,22 @@ export async function decide(now = new Date()) {
   const seenGoogleSpan = lifted?.value?.seenGoogleSpan ?? {};
   const seenNetSpan = lifted?.value?.seenNetSpan ?? {};
   const EPS = 1e-9;
+  // A quota-day total with no lifted figure of its own — a day that did not
+  // exist yet when the lift was made — takes the lifted figures of the export
+  // days it spans (Codex, 29 Sep 2026).
+  const nextDay = (d) => new Date(Date.parse(`${d}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  const spanSeen = (spanMap, dayMap) => new Proxy({}, { get: (_t, day) => {
+    if (typeof day !== 'string') return undefined;
+    if (day in spanMap) return spanMap[day];
+    const d1 = nextDay(day);
+    return day in dayMap || d1 in dayMap ? (dayMap[day] ?? 0) + (dayMap[d1] ?? 0) : undefined;
+  } });
   const unseen = (b, key, seen, floor) => b[key] > floor + EPS && b[key] > (seen[b.day] ?? -Infinity) + EPS;
   if (finishedFirst) {
     // But its own days' bills still count: the last day's arrives after it
     // finished, and a costly one is still said (Codex, 29 Sep 2026).
     const days = runs.map((r) => billedFor(bills, pacificDay(r.started_at))).filter(Boolean);
-    const over = days.find((b) => unseen(b, 'google_gbp', seenGoogleSpan, DAY_ALERT_GBP));
+    const over = days.find((b) => unseen(b, 'google_gbp', spanSeen(seenGoogleSpan, seenGoogle), DAY_ALERT_GBP));
     // And a late Places charge for one of its days, after credits, is said too
     // — unless it is one a person already lifted (Codex, 29 Sep 2026).
     // Each export day on its own as well: a charge offset by the next day's
@@ -239,7 +249,7 @@ export async function decide(now = new Date()) {
       return [d0, new Date(Date.parse(`${d0}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10)];
     }));
     const net = bills.filter((b) => spanned.has(b.day)).find((b) => unseen(b, 'places_net_gbp', seenNet, 0))
-      ?? days.find((b) => unseen(b, 'places_net_gbp', seenNetSpan, 0));
+      ?? days.find((b) => unseen(b, 'places_net_gbp', spanSeen(seenNetSpan, seenNet), 0));
     return { action: 'complete', runs, latest, bills, over: over ? { ...over, kind: 'five' } : net ? { ...net, kind: 'net' } : null };
   }
   // Any export day over £5, and any quota day of the programme over £5 across
@@ -256,10 +266,10 @@ export async function decide(now = new Date()) {
   // figure stops it again on any growth (Codex, 29 Sep 2026). The epsilon is
   // only float noise.
   const five = bills.find((b) => unseen(b, 'google_gbp', seenGoogle, DAY_ALERT_GBP))
-    ?? spans.find((b) => unseen(b, 'google_gbp', seenGoogleSpan, DAY_ALERT_GBP));
+    ?? spans.find((b) => unseen(b, 'google_gbp', spanSeen(seenGoogleSpan, seenGoogle), DAY_ALERT_GBP));
   if (five) return { action: 'halted', runs, latest, bills, over: { ...five, kind: 'five' } };
   const spent = bills.find((b) => unseen(b, 'places_net_gbp', seenNet, 0))
-    ?? spans.find((b) => unseen(b, 'places_net_gbp', seenNetSpan, 0));
+    ?? spans.find((b) => unseen(b, 'places_net_gbp', spanSeen(seenNetSpan, seenNet), 0));
   if (spent) return { action: 'halted', runs, latest, bills, over: { ...spent, kind: 'net' } };
   // Done is complete only if no square was given up on: a run finishes with
   // its failed squares set aside, and the UK is not done while they are
