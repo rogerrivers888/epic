@@ -450,6 +450,9 @@ test('each day reports its own figures, as they stood when it ended', async (t) 
        ('uktest/day/b', 48.08, -6, 48.16, -5.88, array['ZZ8R'], 'todo', null)
      on conflict (grid_key) do update set state = excluded.state, censused_at = excluded.censused_at`);
   await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'uktest/day/a'), ($1, 'uktest/day/b')`, [one.id]);
+  // Written down when it ended, as every run's end does.
+  const { keepDayFigures } = await import('../src/sources/censusRun.js');
+  await keepDayFigures(one.id);
   const before = await uk.status(new Date('2026-09-29T01:00:00Z'));
   assert.deepEqual([before.days[0].districts, before.days[0].tilesLeft], [1, 1]);
   // Day 2 finishes the other square; day 1's line does not change.

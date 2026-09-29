@@ -482,55 +482,23 @@ export async function status(now = new Date()) {
     const { rows: [kept] } = ended
       ? await query('select value from bo_settings where key = $1', [key])
       : { rows: [] };
-    // A day kept before it carried districts and areas left gets them now,
-    // once (29 Sep 2026: the one-line report names what is left).
-    // Only while that day's squares cannot yet have been censused again (the
-    // freshness window is 30 days): past that, current tiles do not say what
-    // was left then, and it stays unknown (Codex, 29 Sep 2026).
-    // From the run's start: its first squares are eligible again thirty days
-    // after they were asked, before thirty days from its finish (Codex).
-    const recent = new Date(now).getTime() - new Date(r.started_at).getTime() < 30 * 86_400_000;
-    const canFill = recent || !ended;
+    // An ended day says what was written down when it ended
+    // (censusRun.keepDayFigures) and nothing rebuilt: today's squares cannot
+    // say what was left then, once any of them may have been asked again.
+    // Only a day still going is read live from its plan. A day kept before a
+    // figure existed shows it as unknown (29 Sep 2026, after several Codex
+    // rounds on rebuilding history — it is simpler, and true, not to).
     const unknown = { districts: null, left: null, districtsLeft: null, areasLeft: null };
-    const { rows: [then] } = kept && (kept.value.districtsLeft != null || !canFill) ? { rows: [kept.value] }
-      : !kept && !canFill ? { rows: [unknown] } : await query(
+    const { rows: [then] } = ended ? { rows: [{ ...unknown, ...(kept?.value ?? {}) }] } : await query(
       `with plan as (
-         -- Done means done: a stale square being asked again keeps its old
-         -- censused_at but is not done (Codex, 29 Sep 2026). The state is
-         -- read when the day is kept, just after it ends.
-         select t.outcodes, (t.state = 'done' and t.censused_at is not null and t.censused_at <= coalesce(r.finished_at, now())) as done
-           from census_run_tiles m join census_tiles t on t.grid_key = m.grid_key join census_runs r on r.id = m.run_id
+         select t.outcodes, (t.state = 'done' and t.censused_at is not null) as done
+           from census_run_tiles m join census_tiles t on t.grid_key = m.grid_key
           where m.run_id = $1)
        , dist as (select c.code, bool_and(done) as whole from plan, unnest(plan.outcodes) c(code) group by c.code)
        select (select count(*) filter (where whole)::int from dist) as districts,
               (select count(*) filter (where not whole)::int from dist) as "districtsLeft",
               (select count(distinct substring(code from '^[A-Z]+')) filter (where not whole)::int from dist) as "areasLeft",
-              (select count(*) filter (where not done)::int from plan) as left,
-              -- Squares of its plan censused again since it finished: if any,
-              -- today's tiles no longer say what was left then (Codex, 29 Sep 2026).
-              (select count(*)::int from census_run_tiles m2 join census_tiles t2 on t2.grid_key = m2.grid_key
-                                    join census_runs r2 on r2.id = m2.run_id
-                where m2.run_id = $1 and r2.finished_at is not null and t2.censused_at > r2.finished_at) as revisited`, [r.id]);
-    // Kept once the day has ended, so a square censused again thirty days on
-    // cannot rewrite what that day said (Codex, 29 Sep 2026). In the back
-    // office's own settings table, under a key its reader ignores.
-    // Rebuilt only if none of its squares has been asked again since it
-    // ended; otherwise what was left then is unknown.
-    if (ended && then.revisited > 0 && (!kept || kept.value.districtsLeft == null)) {
-      Object.assign(then, { districtsLeft: null, areasLeft: null,
-        ...(kept ? { districts: kept.value.districts, left: kept.value.left } : { districts: null, left: null }) });
-    } else if (ended && canFill && (!kept || kept.value.districtsLeft == null)) {
-      // Normally written when the run ended (censusRun.keepDayFigures); this
-      // is for a day that ended before that existed, or before it carried
-      // what was left. What it already said about districts done stands.
-      const value = { districts: kept?.value?.districts ?? then.districts, left: kept?.value?.left ?? then.left,
-        districtsLeft: then.districtsLeft, areasLeft: then.areasLeft };
-      await query(
-        `insert into bo_settings (key, value, updated_by) values ($1, $2, 'the UK census')
-         on conflict (key) do update set value = excluded.value, updated_at = now()`,
-        [key, JSON.stringify(value)]);
-      Object.assign(then, value);
-    }
+              (select count(*) filter (where not done)::int from plan) as left`, [r.id]);
     // New to the census: places this day found that no earlier run had.
     // Counted once when the day is kept and stored with it; only a day still
     // going is counted live (Codex, 29 Sep 2026: a scan of the whole history
