@@ -533,7 +533,15 @@ function UkCensusSection({ canManage, phone = false }: { canManage: boolean; pho
           <Act label={lifting ? 'Lifting…' : 'Lift the hold'} tone="solid" disabled={!canManage || lifting} onPress={lift} />
         </View>
       ) : null}
-      <Ladder columns={columns} rows={[...u.days].reverse()} keyOf={(d) => d.runId} highlight={(d) => !d.ended} />
+      <Ladder columns={columns} rows={[...u.days].reverse()} keyOf={(d) => d.runId} highlight={(d) => !d.ended}
+              phoneRow={(d) => ({
+                name: `Day ${d.day} · ${d.date}`,
+                note: `${d.districts.toLocaleString('en-GB')} districts · ${d.places.toLocaleString('en-GB')} places · ${d.requests.toLocaleString('en-GB')} requests`,
+                chips: [
+                  { key: 'billed', word: d.billed ? `£${d.billed.censusGbp.toFixed(2)}${d.billed.final ? '' : ' so far'}` : 'not billed yet', tip: 'ukCensusBilled' },
+                  ...(d.daysLeft == null ? [] : [{ key: 'left', word: `${d.daysLeft} days left`, tip: 'ukCensusDaysLeft' as const }]),
+                ],
+              })} />
     </View>
   );
 }

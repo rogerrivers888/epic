@@ -29,6 +29,7 @@ import crypto from 'node:crypto';
 import { query, pool } from '../db.js';
 import * as censusRun from './censusRun.js';
 import { sendMail, mailStatus } from './mail.js';
+import { searchTextDailyLimit } from './googleQuota.js';
 
 /** Every UK postcode area, Northern Ireland included (BT). */
 export const UK_AREAS = [
@@ -43,6 +44,18 @@ export const UK_AREAS = [
 
 export const LABEL = censusRun.ONE_DAY_LABEL;
 export const DAY_REQUESTS = 70_000;
+/**
+ * The day once Google raises the limit (owner, 29 Sep 2026: "when the limit
+ * shows 160,000, raise the census to 150,000/day automatically"), leaving ten
+ * thousand of the day for households.
+ */
+export const RAISED_LIMIT = 160_000;
+export const RAISED_DAY = 150_000;
+/** How big today is: 150,000 once Google's limit reads 160,000, else 70,000 — and 70,000 when it cannot be read. */
+export function daySize(quota) {
+  if (quota?.speaks && quota.limit >= RAISED_LIMIT) return { requests: RAISED_DAY, cap: Math.min(quota.limit, 1e9) };
+  return { requests: DAY_REQUESTS, cap: 75_000 };
+}
 /** "£0 (or pennies)": under a pound of census cost on a day is pennies. */
 export const PENNIES_GBP = 1;
 /** "stop and alert me the moment any day shows more than £5." */
@@ -270,7 +283,7 @@ export async function tick(opts = {}) {
 /** The advisory lock's key: "UKCENSUS" folded into an int8. */
 const LOCK = 0x554b43454e535553n.toString();
 
-async function tickLocked({ now = new Date(), start = censusRun.startRun, stop = censusRun.requestStop, tell = () => {}, endDay = censusRun.endForTheDay } = {}) {
+async function tickLocked({ now = new Date(), start = censusRun.startRun, stop = censusRun.requestStop, tell = () => {}, endDay = censusRun.endForTheDay, quota = searchTextDailyLimit } = {}) {
   // A day's run asleep at the shared cap is ended for the day, not carried
   // into tomorrow (Codex, 28 Sep 2026).
   const { rows: asleep } = await query(
@@ -313,15 +326,26 @@ async function tickLocked({ now = new Date(), start = censusRun.startRun, stop =
   // share of the day as well as its ceiling, which is what makes the engine
   // advance it one worker at a time under its own lock — two processes could
   // otherwise each spend the day's remaining allowance (Codex, same day).
+  // Today's size from Google's own limit, read now (at most hourly).
+  const q = await quota();
+  const size = daySize(q);
   const run = await start({
-    label, areas: UK_AREAS, maxRequests: DAY_REQUESTS, nightShare: DAY_REQUESTS, ratePerSec: 5, dailyCap: 75_000,
+    label, areas: UK_AREAS, maxRequests: size.requests, nightShare: size.requests, ratePerSec: 5, dailyCap: size.cap,
     startedBy: STARTED_BY, startedSessionId: sessionId, paused: true,
   });
   const on = run?.id ? await switchOn(run.id) : false;
   // Said only if it is true (Codex, 29 Sep 2026).
   if (!on) return { ...d, action: 'blocked', built: run, sessionId };
   tell({ kind: 'started', subject: `Census day ${d.day} started`, d, run });
-  return { ...d, started: run, sessionId };
+  // The first day at the raised size says so, with the new days remaining
+  // (owner: "tell me the new days-remaining"). Said once: the subject is fixed.
+  if (size.requests === RAISED_DAY) {
+    const st = await status(now);
+    const perTile = st.requestsPerTile;
+    const days = perTile ? Math.max(st.tilesLeft ? 1 : 0, Math.ceil((st.tilesLeft * perTile) / RAISED_DAY)) : null;
+    tell({ kind: 'raised', subject: `Census raised to ${RAISED_DAY.toLocaleString('en-GB')} a day: ${days == null ? 'days left not yet measurable' : `about ${days} day${days === 1 ? '' : 's'} left`}`, d, run });
+  }
+  return { ...d, started: run, sessionId, quota: q };
 }
 
 /**
@@ -384,7 +408,7 @@ export async function status(now = new Date()) {
       tilesAsked: Number(t.asked ?? 0),
       districts: then.districts,
       tilesLeft: then.left,
-      daysLeft: rate == null ? null : Math.max(then.left ? 1 : 0, Math.ceil((then.left * rate) / DAY_REQUESTS)),
+      daysLeft: rate == null ? null : Math.max(then.left ? 1 : 0, Math.ceil((then.left * rate) / (Number(r.max_requests) || DAY_REQUESTS))),
       billed: b ? { censusGbp: b.census_gbp, googleGbp: b.google_gbp, final: b.final } : null,
     });
   }
@@ -412,7 +436,10 @@ export async function status(now = new Date()) {
     requestsPerTile: perTile == null ? null : Math.round(perTile),
     // A floor on the days: the measured rate so far is the rural south-west,
     // and the cities to come split further.
-    daysLeft: d.action === 'complete' ? 0 : perTile == null ? null : Math.max(left ? 1 : 0, Math.ceil((left * perTile) / DAY_REQUESTS)),
+    // At the size of the latest day: 150,000 once Google's limit was raised.
+    daysLeft: d.action === 'complete' ? 0 : perTile == null ? null
+      : Math.max(left ? 1 : 0, Math.ceil((left * perTile) / (Number(latest.max_requests) || DAY_REQUESTS))),
+    dayRequests: Number(latest.max_requests) || DAY_REQUESTS,
     days,
   };
 }
@@ -445,20 +472,22 @@ export async function notify({ subject, text = null, purpose = 'census_report', 
     const { rows: [{ got }] } = await client.query('select pg_try_advisory_lock(hashtext($1)) as got', ['census-notify']);
     if (!got) return { mailed: false, why: 'another process is sending it' };
     try {
-      const { rows } = await client.query(
-        // Sent, or being sent right now — not a send a restart cut off, which
-        // would otherwise swallow the notice for good (Codex, 29 Sep 2026).
-        `select 1 from mail_messages
-          where purpose like 'census%' and subject = $1
-            and (status not in ('failed', 'sending') or (status = 'sending' and sent_at > now() - interval '15 minutes'))
-          limit 1`, [subject.slice(0, 300)]);
-      if (rows.length) return { mailed: false, why: 'already sent' };
       if (!to.length) return { mailed: false, why: 'nobody to send it to' };
-      // Each send is a row on the Mail screen, as "Census report" or "Census alert".
-      let mailed = false; let why = null;
+      // Each recipient on its own: one delivered is not the list delivered, and
+      // a restart between two sends must not skip the second (Codex, 29 Sep
+      // 2026). Sent, or being sent right now — not a send a restart cut off,
+      // which would otherwise swallow the notice for good. Each send is a row
+      // on the Mail screen, as "Census report" or "Census alert".
+      let mailed = false; let why = 'already sent';
       for (const address of to) {
+        const { rows } = await client.query(
+          `select 1 from mail_messages
+            where purpose like 'census%' and subject = $1 and lower(to_address) = lower($2)
+              and (status not in ('failed', 'sending') or (status = 'sending' and sent_at > now() - interval '15 minutes'))
+            limit 1`, [subject.slice(0, 300), address]);
+        if (rows.length) continue;
         const out = await send({ to: address, subject, text: text ?? subject, purpose });
-        mailed = mailed || Boolean(out.sent); if (!out.sent) why = out.message;
+        mailed = mailed || Boolean(out.sent); why = out.sent ? null : out.message;
       }
       return { mailed, why };
     } finally {

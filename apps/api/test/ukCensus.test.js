@@ -744,3 +744,41 @@ test('a census notice goes to the report address, logged as a census alert or re
   assert.deepEqual(sent.map((m) => [m.to, m.purpose]), [['roger@epic.day', 'census_alert']]);
   assert.deepEqual(uk.reportTo(), ['roger@epic.day'], 'while Postmark is in test mode, the address Epic owns');
 });
+
+test('Google\'s limit decides the size of the day: 150,000 once it reads 160,000, 70,000 when it cannot be read', async (t) => {
+  const { limitFrom } = await import('../src/sources/googleQuota.js');
+  const q = (value, extra = {}) => ({ quotaId: 'SearchTextRequestsPerDayPerProject', metric: 'places.googleapis.com/search_text_requests', refreshInterval: 'day', dimensionsInfos: [{ dimensions: {}, details: { value: String(value) } }], ...extra });
+  assert.deepEqual(limitFrom([q(75000)]), { speaks: true, limit: 75000 });
+  assert.deepEqual(limitFrom([q(160000), { quotaId: 'SearchTextRequestsPerMinute', refreshInterval: 'minute', dimensionsInfos: [{ details: { value: '6000' } }] }]), { speaks: true, limit: 160000 });
+  assert.equal(limitFrom([q(-1)]).limit, Infinity);
+  assert.equal(limitFrom([]).speaks, false);
+  assert.deepEqual(uk.daySize({ speaks: true, limit: 160000 }), { requests: 150000, cap: 160000 });
+  assert.deepEqual(uk.daySize({ speaks: true, limit: 75000 }), { requests: 70000, cap: 75000 });
+  assert.deepEqual(uk.daySize({ speaks: false, why: 'x' }), { requests: 70000, cap: 75000 });
+
+  await clean(); t.after(clean);
+  await dayOne();
+  const r = recorder(); const told = [];
+  const out = await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start, tell: (x) => told.push(x), quota: async () => ({ speaks: true, limit: 160000 }) });
+  assert.equal(out.action, 'start');
+  assert.deepEqual([r.calls[0].maxRequests, r.calls[0].nightShare, r.calls[0].dailyCap], [150000, 150000, 160000]);
+  assert.ok(told.some((x) => /^Census raised to 150,000 a day/.test(x.subject)), 'and it says so, with the days left');
+});
+
+test('a limit Google will not tell leaves the day at 70,000', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  const r = recorder();
+  await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start, quota: async () => ({ speaks: false, why: '403' }) });
+  assert.equal(r.calls[0].maxRequests, 70000);
+});
+
+test('a notice goes to every recipient, and one sent does not stand for the rest', async (t) => {
+  await clean();
+  const subject = `test two ${Math.random()}`;
+  t.after(() => query(`delete from mail_messages where subject = $1`, [subject]));
+  await query(`insert into mail_messages (to_address, subject, purpose, status) values ('a@epic.day', $1, 'census_report', 'sent')`, [subject]);
+  const sent = [];
+  await uk.notify({ subject, configured: () => true, to: ['a@epic.day', 'b@epic.day'], send: async (m) => { sent.push(m.to); return { sent: true }; } });
+  assert.deepEqual(sent, ['b@epic.day']);
+});

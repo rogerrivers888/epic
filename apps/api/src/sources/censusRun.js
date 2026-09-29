@@ -1778,6 +1778,9 @@ export async function report(runId = null) {
     ? await query('select * from census_runs where id = $1', [runId])
     : await query("select * from census_runs order by started_at desc limit 1");
   if (!run) return null;
+  // One cutoff for the whole report, from the database's clock: three queries
+  // each reading now() could each see a different slice (Codex, 29 Sep 2026).
+  const cutoff = run.finished_at ?? (await query('select now() as at')).rows[0].at;
 
   // A run still going is bounded by the database's own clock, not this
   // process's: its slices are stamped with Postgres's now(), and when the two
@@ -1841,7 +1844,7 @@ export async function report(runId = null) {
        left join spent sp on sp.grid_key = tt.grid_key
        left join found fo on fo.grid_key = tt.grid_key
       group by tt.area, d.outcodes
-      order by tt.area`, [run.id, run.started_at, CENSUS_MAX_DEPTH, run.finished_at ?? null]);
+      order by tt.area`, [run.id, run.started_at, CENSUS_MAX_DEPTH, cutoff]);
 
   // Every tile once, whatever it touches — and separately, what this run
   // actually asked. A tile still fresh from an earlier census is skipped rather
@@ -1869,7 +1872,7 @@ export async function report(runId = null) {
             coalesce(sum(t.places), 0)::int ground_places
        from census_tiles t
        join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1`,
-    [run.id, run.started_at, run.finished_at ?? null]);
+    [run.id, run.started_at, cutoff]);
 
   // The money, from the ledger and nowhere else.
   const { rows: [spend] } = await query(
@@ -1884,7 +1887,7 @@ export async function report(runId = null) {
       -- an old run's cost grew every time a later one asked Google, which is a
       -- report that changes after the fact (Codex, 21 Sep 2026).
       where purpose = 'census.slice' and created_at >= $1 and created_at <= coalesce($2::timestamptz, now())`,
-    [run.started_at, run.finished_at ?? null]);
+    [run.started_at, cutoff]);
 
   // How the places were found, which is the thing the nine text-query drawers
   // exist to be judged on.
