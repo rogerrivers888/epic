@@ -482,7 +482,9 @@ const gbp = (n: number) => `£${Math.abs(n * 100 - Math.round(n * 100)) < 1e-6 ?
 
 /** What the programme is doing, in a word or two — the detail is behind the tips. */
 const ukWord = (u: UkCensus) => {
-  if (u.complete && u.halted) return `Complete · Places cost ${gbp(u.halted.placesNetGbp)} on ${u.halted.day} after it finished`;
+  if (u.complete && u.halted) return u.halted.kind === 'net'
+    ? `Complete · Places cost ${gbp(u.halted.placesNetGbp)} on ${u.halted.day} after it finished`
+    : `Complete · Google billed ${gbp(u.halted.googleGbp)} on ${u.halted.day} after it finished`;
   if (u.complete) return 'Complete';
   if (u.halted) return u.halted.kind === 'net'
     ? `Stopped: Places cost ${gbp(u.halted.placesNetGbp)} on ${u.halted.day}`
