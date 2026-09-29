@@ -211,8 +211,8 @@ export async function propose(row, { client = null, checkId = null } = {}) {
   const same = `place_status.status = excluded.status and place_status.confirmed = excluded.confirmed`;
   await on(client)(
     `insert into place_status (venue_ref, wikidata_id, status, confirmed, confirmed_by, reason, source, evidence,
-                               successor_ref, successor_name, review, check_id, applied, applied_at, applied_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,case when $13 then now() end,$14)
+                               successor_ref, successor_name, review, review_since, check_id, applied, applied_at, applied_by)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,case when $11 then now() end,$12,$13,case when $13 then now() end,$14)
      on conflict (venue_ref) do update set
        wikidata_id = coalesce(excluded.wikidata_id, place_status.wikidata_id),
        status = excluded.status, confirmed = excluded.confirmed, confirmed_by = excluded.confirmed_by,
@@ -220,6 +220,11 @@ export async function propose(row, { client = null, checkId = null } = {}) {
        successor_ref = coalesce(excluded.successor_ref, place_status.successor_ref),
        successor_name = coalesce(excluded.successor_name, place_status.successor_name),
        review = excluded.review, check_id = excluded.check_id, checked_at = now(),
+       -- When the question was raised (migration 301): set as review turns
+       -- true, kept while it stays true, cleared when it settles.
+       review_since = case when not excluded.review then null
+                           when place_status.review then coalesce(place_status.review_since, now())
+                           else now() end,
        decided_at = case when ${same} then place_status.decided_at else now() end,
        applied = case when excluded.applied then true
                       when ${hideNew} and not (${hideOld} and place_status.applied) then false

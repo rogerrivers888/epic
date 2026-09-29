@@ -880,7 +880,7 @@ test('review settles itself for one place: a family\'s later visit, then Google\
   assert.equal(await checkPlace('google:c57-nothing', stubs), null);
 
   // The question was raised ten days ago; a family went after that.
-  await query(`update place_status set decided_at = now() - interval '10 days' where venue_ref = $1`, [`atlas:${lonely}`]);
+  await query(`update place_status set review_since = now() - interval '10 days' where venue_ref = $1`, [`atlas:${lonely}`]);
   const { household } = await aHousehold(query, 'c57 visit');
   await query(`insert into visits (household_id, venue_ref, venue_label, visited_on) values ($1, 'wikidata:Q900001', 'Hidden Folly', current_date - 2)`, [household.id]);
   const out = await checkPlace('wikidata:Q900001', stubs);
@@ -894,7 +894,7 @@ test('review settles itself for one place: a family\'s later visit, then Google\
 
   // Put it back in question, then Google's details are fetched for its matched id.
   await runClosedCheck({ by: 'test', ...stubs });
-  await query(`update place_status set decided_at = now() where venue_ref = $1`, [`atlas:${lonely}`]);
+  await query(`update place_status set review_since = now() where venue_ref = $1`, [`atlas:${lonely}`]);
   assert.equal((await repo.statusFor(`atlas:${lonely}`)).review, true);
   await query(`delete from provider_matches where venue_ref = 'wikidata:Q900001'`);
   await query(`insert into provider_matches (venue_ref, source, source_ref, confidence) values ('wikidata:Q900001', 'google', 'ChIJ_c57_folly_g', 0.9)`);
@@ -934,4 +934,52 @@ test('the Overview shows the review count only while it grows, and says nothing 
   const o = await overview().catch(() => null);
   assert.ok(o, 'the Overview answers');
   assert.equal(o.closedReview, null, 'no week of counts in a fresh database: nothing shown');
+});
+
+test('a question raised later than the row was decided is measured from when it was raised (Codex)', async () => {
+  const ref = 'google:c57-late-question';
+  // Decided unknown and not a question, twenty days ago…
+  await repo.propose({ ref, status: 'unknown', review: false, source: 'wikipedia', reason: 'history: x', evidence: 'x' });
+  await query(`update place_status set decided_at = now() - interval '20 days' where venue_ref = $1`, [ref]);
+  let { rows: [row] } = await query(`select review_since, decided_at from place_status where venue_ref = $1`, [ref]);
+  assert.equal(row.review_since, null, 'not a question: no date');
+  // …then raised as a question today, with the same status: decided_at stays old.
+  await repo.propose({ ref, status: 'unknown', review: true, source: 'wikipedia', reason: 'written in the past tense', evidence: 'x' });
+  ({ rows: [row] } = await query(`select review_since, decided_at from place_status where venue_ref = $1`, [ref]));
+  assert.ok(new Date(row.decided_at) < new Date(Date.now() - 19 * 86_400_000), 'decided_at did not move');
+  assert.ok(new Date(row.review_since) > new Date(Date.now() - 60_000), 'review_since is when it was raised');
+  // A visit ten days ago — after decided_at, before the question — does not settle it.
+  const tenDaysAgo = new Date(Date.now() - 10 * 86_400_000).toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  assert.equal(S.familyVerdict({ visitedOn: tenDaysAgo, evidence: 'written in the past tense', flaggedAt: row.review_since, today }), null);
+  assert.ok(S.familyVerdict({ visitedOn: tenDaysAgo, evidence: 'written in the past tense', flaggedAt: row.decided_at, today }), 'measured from decided_at it would have — the bug');
+  // Kept while it stays a question; cleared when it settles.
+  const first = row.review_since;
+  await repo.propose({ ref, status: 'unknown', review: true, source: 'wikipedia', reason: 'written in the past tense', evidence: 'x' });
+  ({ rows: [row] } = await query(`select review_since from place_status where venue_ref = $1`, [ref]));
+  assert.equal(new Date(row.review_since).getTime(), new Date(first).getTime());
+  await repo.propose({ ref, status: 'open', review: false, source: 'osm', reason: 'in use', evidence: 'amenity=cafe' });
+  ({ rows: [row] } = await query(`select review_since from place_status where venue_ref = $1`, [ref]));
+  assert.equal(row.review_since, null);
+});
+
+test('checkPlace finds an atlas place by its open-map ref in either spelling (Codex)', async () => {
+  const { osmSpellings, checkPlace } = await import('../src/sources/closedCheck.js');
+  assert.deepEqual(osmSpellings('osm:relation/123'), ['relation/123', '123']);
+  assert.deepEqual(osmSpellings('osm:123'), ['123', 'relation/123']);
+  assert.deepEqual(osmSpellings('osm:way/5'), ['way/5']);
+  const { safari, lonely } = await fixture();
+  await query(`delete from atlas_osm_matches`);
+  await query(`update attractions set osm_ref = '424242' where id = $1`, [safari]);
+  await query(`insert into atlas_osm_matches (attraction_id, osm_ref, metres, how) values ($1, 'relation/515151', 0, 'wikidata_p402')`, [lonely]);
+  // Both in review, so checkPlace has something to do.
+  await repo.propose({ ref: `atlas:${safari}`, status: 'unknown', review: true, source: 'wikipedia', reason: 'q', evidence: 'q' });
+  await repo.propose({ ref: `atlas:${lonely}`, status: 'unknown', review: true, source: 'wikipedia', reason: 'q', evidence: 'q' });
+  const stubs = { today: TODAY, near: async () => [], superclasses: async () => new Map(), fetchLabels: async () => new Map(), fetchClaims: async () => new Map() };
+  // The atlas's bare '424242', asked for as 'osm:relation/424242'.
+  assert.ok(await checkPlace('osm:relation/424242', stubs), 'relation/N finds a bare N');
+  // A match stored as 'relation/515151', asked for by the bare number.
+  assert.ok(await checkPlace('osm:515151', stubs), 'a bare N finds relation/N on the match');
+  assert.equal(await checkPlace('osm:relation/999999', stubs), null);
+  await query(`delete from atlas_osm_matches`);
 });

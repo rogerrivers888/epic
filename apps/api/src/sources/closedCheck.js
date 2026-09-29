@@ -267,7 +267,7 @@ export async function runClosedCheck({
   try {
     const [atlas, records, marked, existing, roots, listed, visited, googleSaid] = await Promise.all([
       atlasRows(only?.atlasIds ?? null), recordRows(only?.recordRefs ?? null), only ? [] : osmMarked(),
-      query(`select venue_ref, status, source, reason, evidence, review, decided_at from place_status`).then((r) => r.rows),
+      query(`select venue_ref, status, source, reason, evidence, review, review_since from place_status`).then((r) => r.rows),
       kindRoots(), listedRefs(), lastVisits(), googleByMatch(),
     ]);
     counts.atlas = atlas.length; counts.records = records.length; counts.osmMarked = marked.length;
@@ -408,7 +408,7 @@ export async function runClosedCheck({
       // current evidence it is open (owner, 29 Sep 2026: review settles
       // itself). Only for a place in review; never over a closure.
       if (v.review) {
-        const went = familyVerdict({ visitedOn: latestVisit(place), evidence: `${v.reason ?? ''} ${v.evidence ?? ''}`, flaggedAt: prior?.review ? prior.decided_at : null, today });
+        const went = familyVerdict({ visitedOn: latestVisit(place), evidence: `${v.reason ?? ''} ${v.evidence ?? ''}`, flaggedAt: prior?.review ? prior.review_since : null, today });
         if (went) { v = { ...v, ...went, successorQid: v.successorQid, successorName: v.successorName }; counts.familySettled = (counts.familySettled ?? 0) + 1; }
       }
       // Always look for a successor, whichever source spoke (owner, item 4):
@@ -511,6 +511,16 @@ export async function onGoogleStatus(ref, businessStatus) {
  *
  * Returns what it did, or null when there was nothing to re-judge.
  */
+/** Both spellings of an open-map ref, without the prefix: 'relation/123' ↔ '123'. */
+export function osmSpellings(ref) {
+  const bare = String(ref ?? '').replace(/^osm:/, '');
+  if (!bare) return [];
+  const rel = /^relation\/(\d+)$/.exec(bare);
+  if (rel) return [bare, rel[1]];
+  if (/^\d+$/.test(bare)) return [bare, `relation/${bare}`];
+  return [bare];
+}
+
 export async function checkPlace(ref, opts = {}) {
   if (!ref) return null;
   const r = String(ref);
@@ -518,7 +528,13 @@ export async function checkPlace(ref, opts = {}) {
     `select a.id, coalesce(a.venue_ref, 'atlas:' || a.id::text) as ref from attractions a
       where a.venue_ref = $1 or 'atlas:' || a.id::text = $1
          or ($1 like 'wikidata:%' and a.wikidata_id = substr($1, 10))
-         or ($1 like 'osm:%' and (a.osm_ref = substr($1, 5) or exists (select 1 from atlas_osm_matches m where m.attraction_id = a.id and m.osm_ref = substr($1, 5))))`, [r]);
+         -- An open-map ref in either spelling: 'osm:relation/123' is the
+         -- atlas's bare '123' (Wikidata's P402), and the reverse — the same
+         -- two forms placeStatus.js expands, on the row and on its match.
+         or ($1 like 'osm:%' and (
+              a.osm_ref = any($2::text[])
+              or exists (select 1 from atlas_osm_matches m where m.attraction_id = a.id and m.osm_ref = any($2::text[]))))`,
+    [r, osmSpellings(r)]);
   const refs = [r, ...atlasHits.map((a) => a.ref)];
   const { rows: [inReview] } = await query(`select 1 from place_status where venue_ref = any($1::text[]) and review limit 1`, [refs]);
   if (!inReview) return null;
