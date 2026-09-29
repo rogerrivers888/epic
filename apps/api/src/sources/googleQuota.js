@@ -13,7 +13,13 @@
  * this says it cannot tell — never a number — so the census stays where it is.
  */
 
-import { accessToken, configured, PROJECT } from './billingExport.js';
+import { accessToken, configured } from './billingExport.js';
+
+/**
+ * The project the Places key belongs to — its own setting, not the billing
+ * export's, which may live in another project (Codex, 29 Sep 2026).
+ */
+export const MAPS_PROJECT = process.env.EPIC_MAPS_PROJECT ?? 'epic-maps-509205';
 
 // The scope Cloud Quotas accepts; it will not take the read-only one (Codex,
 // 29 Sep 2026). What keeps this read-only is the key's grant on the project,
@@ -44,11 +50,11 @@ async function read(fetcher) {
   const infos = [];
   let page = '';
   for (let i = 0; i < 20; i += 1) {
-    const url = `https://cloudquotas.googleapis.com/v1/projects/${PROJECT}/locations/global/services/${SERVICE}/quotaInfos?pageSize=100${page ? `&pageToken=${encodeURIComponent(page)}` : ''}`;
+    const url = `https://cloudquotas.googleapis.com/v1/projects/${MAPS_PROJECT}/locations/global/services/${SERVICE}/quotaInfos?pageSize=100${page ? `&pageToken=${encodeURIComponent(page)}` : ''}`;
     const res = await fetcher(url, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) {
-      return { speaks: false, why: `Google would not say (${res.status}${j?.error?.status ? ` ${j.error.status}` : ''}): the key needs Cloud Quotas Viewer on ${PROJECT}` };
+      return { speaks: false, why: `Google would not say (${res.status}${j?.error?.status ? ` ${j.error.status}` : ''}): the key needs Cloud Quotas Viewer on ${MAPS_PROJECT}` };
     }
     infos.push(...(j.quotaInfos ?? []));
     if (!j.nextPageToken) break;

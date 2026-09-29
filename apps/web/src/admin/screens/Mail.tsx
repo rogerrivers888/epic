@@ -10,9 +10,10 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Text, View } from 'react-native';
+import { Text, TextInput, View } from 'react-native';
 import { api, AdminMail, MailRow } from '../../api';
-import { colors, type } from '../../theme';
+import { colors, spacing, type, BORDER } from '../../theme';
+import { Act } from '../table';
 import { StatusLine } from '../../components/ui';
 import { AdminPage, Banner, DataTable, Dropdown, PageHead, RangePicker, Tile, TileRow, ago } from '../kit';
 
@@ -29,6 +30,17 @@ export function Mail() {
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => { try { setData(await api.adminMail(days, status || null)); setError(null); } catch (e: any) { setError(e.message); } }, [days, status]);
   useEffect(() => { void load(); }, [load]);
+  // One test message, to see the sender work end to end; it lands in the list below.
+  const [testTo, setTestTo] = useState('roger@epic.day');
+  const [testing, setTesting] = useState(false);
+  const [tested, setTested] = useState<string | null>(null);
+  const sendTest = useCallback(async () => {
+    setTesting(true); setTested(null);
+    try {
+      const out = await api.adminMailTest(testTo.trim());
+      setTested(out.sent ? `Sent to ${testTo.trim()}` : (out.message ?? 'Not sent'));
+    } catch (e: any) { setTested(e.message); } finally { setTesting(false); void load(); }
+  }, [testTo, load]);
 
   const c = data?.counts ?? {};
   const n = (k: string) => c[k] ?? 0;
@@ -59,6 +71,14 @@ export function Mail() {
       {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
       {data && !data.sender.configured ? <Banner tone="warn">{data.sender.message ?? 'No mail sender is configured.'}</Banner> : null}
       {data && data.sender.configured && !data.sender.events ? <Banner tone="warn">Sends go out, but nothing comes back: add POSTMARK_WEBHOOK_TOKEN in Doppler and give Postmark the webhook address, so deliveries, opens and bounces land here.</Banner> : null}
+      {data?.sender.configured ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexWrap: 'wrap' }}>
+          <TextInput value={testTo} onChangeText={setTestTo} autoCapitalize="none" keyboardType="email-address"
+                     accessibilityLabel="Send a test to" style={[type.body, { minWidth: 220, flexShrink: 1, borderBottomWidth: BORDER, borderBottomColor: colors.ruleMuted, paddingVertical: 4 }]} />
+          <Act label={testing ? 'Sending…' : 'Send a test'} small tone="secondary" disabled={testing || !testTo.includes('@')} onPress={() => { void sendTest(); }} />
+          {tested ? <Text style={type.small}>{tested}</Text> : null}
+        </View>
+      ) : null}
       <TileRow>
         <Tile label="Sent" value={String(sentAll)} sub={`in ${days} days`} />
         <Tile label="Delivered" value={String(delivered)} sub="accepted by their server" tone="ok" onPress={() => setStatus('delivered')} />
