@@ -9,7 +9,7 @@
 
 import { query } from '../db.js';
 
-export const AREAS = ['Categories', 'Subcategories', 'Facts', 'Mapping', 'Defaults', 'Collections', 'Fact automations'];
+export const AREAS = ['Categories', 'Subcategories', 'Facts', 'Mapping', 'Defaults', 'Collections', 'Fact automations', 'Markets'];
 
 const bad = (message) => Object.assign(new Error(message), { status: 400, code: 'bad_request' });
 const text = (v) => (v == null ? null : String(v));

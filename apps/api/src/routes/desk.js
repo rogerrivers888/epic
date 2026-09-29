@@ -23,6 +23,7 @@ import * as collections from '../desk/collections.js';
 import { overview, spendThisMonth } from '../desk/overview.js';
 import { resolveLocation, chipOf, filterSays, REACHES, MODES } from '../desk/location.js';
 import * as pipeline from '../desk/pipeline.js';
+import * as markets from '../desk/markets.js';
 import { extracts as osmExtracts } from '../sources/osmExtract.js';
 
 export const deskRoutes = Router();
@@ -93,6 +94,7 @@ deskRoutes.post('/undo/:id', requires('manage_library'), async (req, res, next) 
     else if (u.kind === 'subcategory_fact') await categories.undoFact({ change, who: by });
     else if (u.kind === 'correction') await facts.undoCorrection({ change, who: by });
     else if (u.kind === 'collection') await collections.undoCollection({ change, who: by });
+    else if (u.kind === 'wording') await markets.undoWording({ change, who: by });
     else if (u.kind === 'fact_value') await mapping.undoFactValue({ change, who: by });
     else if (u.kind === 'carry') {
       if (u.on) await query(`insert into taxonomy_label_carries (namespace, key, attribute_key, yesno) values ('google', $1, $2, true) on conflict do nothing`, [u.word, u.fact]);
@@ -520,6 +522,49 @@ deskRoutes.get('/claude', requires('view_library'), async (req, res, next) => {
 /** The local open-map extracts, read only: which regions, when, how many places. */
 deskRoutes.get('/osm', requires('view_library'), async (_req, res, next) => {
   try { res.json({ extracts: await osmExtracts(), switchedOn: String(process.env.EPIC_OSM_EXTRACT ?? '') || null }); } catch (err) { next(err); }
+});
+
+/* --------------------------------------------------------------- Markets */
+
+/** The markets list, and the read-only blocked list from the code constant. */
+deskRoutes.get('/markets', requires('view_library'), async (_req, res, next) => {
+  try { res.json({ markets: await markets.listMarkets(), blocked: markets.blockedMarkets() }); } catch (err) { next(err); }
+});
+
+/** One market's page. */
+deskRoutes.get('/markets/:code', requires('view_library'), async (req, res, next) => {
+  try {
+    const m = await markets.getMarket(req.params.code);
+    if (!m) throw Object.assign(new Error('No such market.'), { status: 404 });
+    res.json(m);
+  } catch (err) { next(err); }
+});
+
+/** A namespace's wording, each row with its status. */
+deskRoutes.get('/wording/:namespace', requires('view_library'), async (req, res, next) => {
+  try { res.json({ wording: await markets.listWording(String(req.params.namespace)) }); } catch (err) { next(err); }
+});
+
+/** The unfilled en-US gaps — what the American pass has left to look at. */
+deskRoutes.get('/wording-misses', requires('view_library'), async (_req, res, next) => {
+  try { res.json({ misses: await markets.wordingMisses() }); } catch (err) { next(err); }
+});
+
+/** Write (or clear) an en-US variant (drift is snapshotted). */
+deskRoutes.post('/wording/:namespace/:key', requires('manage_library'), async (req, res, next) => {
+  try {
+    // The field must be present — clearing is `enUS: ""` sent on purpose, never a
+    // request that forgot to include it (which would erase the copy silently).
+    if (!req.body || !('enUS' in req.body)) throw bad('enUS is required (send "" to clear)');
+    res.json(await markets.setEnUs(String(req.params.namespace), String(req.params.key), str(req.body.enUS), who(req)));
+  } catch (err) { next(err); }
+});
+
+/** Edit the en-GB source (bumps the version so a stale en-US shows as drift). */
+deskRoutes.post('/wording/:namespace/:key/source', requires('manage_library'), async (req, res, next) => {
+  try {
+    res.json(await markets.setEnGb(String(req.params.namespace), String(req.params.key), str(req.body?.enGB), who(req)));
+  } catch (err) { next(err); }
 });
 
 export default deskRoutes;
