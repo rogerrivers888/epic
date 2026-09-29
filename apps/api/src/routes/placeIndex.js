@@ -2835,7 +2835,11 @@ async function buildSubcategorySummary(scope, sub) {
               r.postcode                                                      as postcode,
               coalesce(r.opening_hours, d.visit->>'openingHours')             as opening_hours,
               coalesce(r.website, a.website, sp.website)                      as website,
-              coalesce(r.summary, a.summary)                                  as summary,
+              -- Our own description: a written summary, a curated one
+              -- (curation.what, or the legacy curation.summary), else the atlas —
+              -- the same owned description the index and household paths count
+              -- (Codex, 29 Sep 2026).
+              coalesce(r.summary, r.curation->>'what', r.curation->>'summary', a.summary) as summary,
               -- A picture we own: an approved, storable owned image only — the
               -- exact condition HELD_SQL and readiness use. A record image_url
               -- can hold an external URL (e.g. a Wikipedia image own.js recorded),
@@ -2986,16 +2990,19 @@ router.post('/subcategory-summary/compare-all', requires('manage_library'), asyn
     } finally {
       await releaseSpend(room.reservation);
     }
-    // Best-effort, not a durable ledger. A comparison is display-only — no
-    // Google content is stored (the data policy) — so the only record of one is
-    // the six-hour, 300-entry detail cache. A subcategory larger than that cache
-    // cannot be held whole, so `remaining` may not fall to zero and an evicted
-    // place may be compared again on a later manual page; each such page is a
-    // fresh call the cost quote, the grant and the ceiling all bound, so it is
-    // never a runaway. The summary's opened/total is the honest coverage; this
-    // figure only tells the screen whether to offer "compare the next N"
-    // (Codex, 29 Sep 2026 — the cost of keeping nothing rented).
-    const remaining = Math.max(0, uncompared.length - batch.length);
+    // How many are still uncompared, read from the actual cache AFTER the fetch
+    // rather than assumed from the batch size (Codex, 29 Sep 2026): a page whose
+    // calls all failed leaves them uncompared and must keep offering "compare
+    // more", not report done; and a place evicted from the cache is uncompared
+    // again. Best-effort by nature — a comparison is display-only, so its only
+    // record is the six-hour, 300-entry detail cache (the data policy keeps no
+    // Google content), so a subcategory larger than that cache cannot be held
+    // whole and `remaining` may never reach zero. Every page is bound by the cost
+    // quote, the grant and the ceiling, so re-comparing an evicted place on a
+    // later page is a fresh, bounded call, never a runaway. The summary's
+    // opened/total is the honest coverage.
+    const stillHeld = await alreadyHeld(uncompared);
+    const remaining = uncompared.filter((ref) => !stillHeld.has(ref)).length;
     res.json({ ...(await head(scope)), ...(await buildSubcategorySummary(scope, sub)), fetched, failed, remaining });
   } catch (err) { next(err); }
 });
