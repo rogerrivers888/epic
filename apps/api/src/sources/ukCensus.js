@@ -105,7 +105,10 @@ export function billedFor(bills, quotaDay) {
   if (!spans.length) return null;
   // Final only once both export days are in: a report marked billed from one
   // of them would understate the day for good (Codex, 29 Sep 2026).
-  return { day: quotaDay, census_gbp: spans.reduce((n, b) => n + b.census_gbp, 0), google_gbp: spans.reduce((n, b) => n + b.google_gbp, 0), final: spans.length === 2 };
+  // Or once the export holds a later day: a London day with no Google usage
+  // has no row at all, and waiting for both would wait for ever (Codex, 29 Sep 2026).
+  const final = spans.length === 2 || bills.some((b) => b.day > next);
+  return { day: quotaDay, census_gbp: spans.reduce((n, b) => n + b.census_gbp, 0), google_gbp: spans.reduce((n, b) => n + b.google_gbp, 0), final };
 }
 
 /** A service session of the run's own, so every ledger row names the day it belongs to. */
@@ -393,7 +396,12 @@ export async function notify({ subject, text = null, send = sendMail, configured
     if (!got) return { mailed: false, why: 'another process is sending it' };
     try {
       const { rows } = await client.query(
-        `select 1 from mail_messages where purpose = 'census' and subject = $1 and status <> 'failed' limit 1`, [subject.slice(0, 300)]);
+        // Sent, or being sent right now — not a send a restart cut off, which
+        // would otherwise swallow the notice for good (Codex, 29 Sep 2026).
+        `select 1 from mail_messages
+          where purpose = 'census' and subject = $1
+            and (status not in ('failed', 'sending') or sent_at > now() - interval '15 minutes')
+          limit 1`, [subject.slice(0, 300)]);
       if (rows.length) return { mailed: false, why: 'already sent' };
       const owner = await ownerAccount();
       if (!owner?.email) return { mailed: false, why: 'no owner address' };

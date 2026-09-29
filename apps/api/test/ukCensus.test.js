@@ -566,3 +566,24 @@ test('a held programme stays held until a person decides, and a finished one is 
   await billed('2026-10-10', 'google-pro', 9);
   assert.equal((await uk.tick({ now: new Date('2026-10-11T08:00:00Z'), start: r.start, stop: async () => {} })).action, 'complete');
 });
+
+test('a day is billed for good once the export has moved past it, even if a day of it had no usage', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  await billed('2026-09-28', 'google-essentials', 0);
+  await billed('2026-10-01', 'google-pro', 0.1); // the export has moved on; the 29th had no Google at all
+  const st = await uk.status(new Date('2026-10-02T09:00:00Z'));
+  assert.equal(st.days[0].billed.final, true);
+});
+
+test('a notice cut off mid-send is sent again', async (t) => {
+  await clean();
+  const subject = `test cut off ${Math.random()}`;
+  t.after(() => query(`delete from mail_messages where subject = $1`, [subject]));
+  const { ownerAccount } = await import('../src/repositories/accounts.js');
+  if (!(await ownerAccount())?.email) return;
+  await query(`insert into mail_messages (to_address, subject, purpose, status, sent_at) values ('x@y', $1, 'census', 'sending', now() - interval '1 hour')`, [subject]);
+  let sent = 0;
+  await uk.notify({ subject, send: async () => { sent += 1; return { sent: true }; }, configured: () => true });
+  assert.equal(sent, 1);
+});
