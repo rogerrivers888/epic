@@ -540,8 +540,14 @@ export async function status(now = new Date()) {
         where s.run_id = $1
           and not exists (select 1 from census_run_surfacings o join census_runs ro on ro.id = o.run_id
                            where o.venue_ref = s.venue_ref and o.run_id <> $1 and ro.started_at < $2)`, [r.id, r.started_at]);
-    if (ended && kept && kept.value.newPlaces == null) {
-      await query(`update bo_settings set value = value || jsonb_build_object('newPlaces', $2::int), updated_at = now() where key = $1`, [key, fresh.n]);
+    if (ended && (!kept || kept.value.newPlaces == null)) {
+      // Kept with the day, whatever else about it is known or unknown, so it is
+      // counted once (Codex, 29 Sep 2026).
+      await query(
+        `insert into bo_settings (key, value, updated_by) values ($1, $2, 'the UK census')
+         on conflict (key) do update set value = bo_settings.value || jsonb_build_object('newPlaces', $3::int), updated_at = now()`,
+        [key, JSON.stringify({ districts: then.districts ?? null, left: then.left ?? null,
+          districtsLeft: then.districtsLeft ?? null, areasLeft: then.areasLeft ?? null, newPlaces: fresh.n }), fresh.n]);
     }
     const rate = tilesAsked ? requests / tilesAsked : null;
     days.push({

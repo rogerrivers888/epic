@@ -875,6 +875,10 @@ test('a charge lifted before the finish is not said again after it, and an old d
   await query(`delete from bo_settings where key like 'census:uk-day:%'`);
   const st = await uk.status(new Date('2026-12-01T08:00:00Z'));
   assert.deepEqual([st.days[0].districtsLeft, st.days[0].areasLeft], [null, null]);
+  // Its new places are still counted once and kept, with the rest left unknown.
+  const { rows: [k] } = await query(`select value from bo_settings where key like 'census:uk-day:%'`);
+  assert.equal(typeof k?.value?.newPlaces, 'number');
+  assert.equal(k.value.districtsLeft, null);
 });
 
 test('a lift clears what it saw, export day and quota day alike, and fractions of a penny are said as such', async (t) => {
