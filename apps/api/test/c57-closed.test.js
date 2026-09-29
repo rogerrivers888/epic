@@ -223,9 +223,16 @@ test('confirmation: a Google id, a map match, a website or a census sighting —
   assert.deepEqual(S.confirmation({ ref: 'atlas:1' }), { confirmed: false, by: null });
 });
 
-test('hides: nothing hides until applied', () => {
+test('hides: only a permanent closure hides, and only once applied', () => {
   assert.equal(S.hides({ status: 'permanently_closed', confirmed: true, applied: false }), false);
   assert.equal(S.hides({ status: 'permanently_closed', confirmed: true, applied: true }), true);
+  // Temporarily closed never hides — it is shown with a label (owner, 29 Sep 2026).
+  assert.equal(S.hides({ status: 'temporarily_closed', confirmed: true, applied: true }), false);
+  // …but it is a label-worthy mark once applied.
+  assert.equal(S.marked({ status: 'temporarily_closed', applied: true }), true);
+  assert.equal(S.marked({ status: 'temporarily_closed', applied: false }), false);
+  assert.equal(S.marked({ status: 'permanently_closed', applied: true }), true);
+  assert.equal(S.marked({ status: 'open', applied: true }), false);
   // Unconfirmed never hides (owner, 29 Sep 2026): only a closure does.
   assert.equal(S.hides({ status: 'unknown', confirmed: false, applied: true }), false);
   assert.equal(S.hides({ status: 'open', confirmed: true, applied: true }), false);
@@ -313,13 +320,11 @@ test('the check over the Windsor fixture: closed with a successor, unconfirmed f
   await query(`delete from attractions where region_slug = 'c57-surrey'`);
 });
 
-test('a place that comes to hide more waits for the OK again; one that comes back needs nobody', async () => {
+test('a permanent closure hides once applied; reopening shows it at once; a new closure waits for the owner', async () => {
   const ref = 'google:c57-cafe';
-  await repo.propose({ ref, status: 'temporarily_closed', source: 'osm', reason: 'hours', evidence: 'opening_hours=closed' });
+  await repo.propose({ ref, status: 'permanently_closed', source: 'wikidata', reason: 'dissolved 2020', evidence: 'P576' });
   await repo.applyProposed({ by: 'test' });
   assert.equal((await repo.hiddenAmong([ref])).has(ref), true);
-  await repo.propose({ ref, status: 'permanently_closed', source: 'wikidata', reason: 'dissolved 2020', evidence: 'P576' });
-  assert.equal((await repo.statusFor(ref)).applied, true, 'still hidden, now for a firmer reason: no new OK needed');
   await repo.propose({ ref, status: 'open', source: 'osm', reason: 'in use', evidence: 'amenity=cafe' });
   assert.equal((await repo.hiddenAmong([ref])).has(ref), false, 'reopened: shows at once');
   await repo.propose({ ref, status: 'permanently_closed', source: 'osm', reason: 'disused', evidence: 'disused=yes' });
@@ -692,9 +697,14 @@ test('an atlas row known to the open map only through the matching pass is hidde
   await query(`delete from atlas_osm_matches`);
 });
 
-test('the closed mark carries the status, so an unconfirmed place reads as that and not as closed', async () => {
-  const brief = repo.closedBrief({ hidden: true, status: 'unknown', confirmed: false, successor: null });
-  assert.deepEqual(brief, { status: 'unknown', confirmed: false, successor: null });
+test('the closed mark is a closed status only: an unknown/unconfirmed place carries none', () => {
+  // Only a closure marks a family screen now (owner, 29 Sep 2026); unknown/unconfirmed does not.
+  assert.equal(repo.closedBrief({ status: 'unknown', confirmed: false, successor: null }), null);
+  assert.equal(repo.closedBrief({ status: 'open', confirmed: true, successor: null }), null);
+  // A temporary closure carries its status, marked not-hidden; a permanent one, hidden.
+  assert.deepEqual(repo.closedBrief({ status: 'temporarily_closed', confirmed: true, successor: null }),
+    { status: 'temporarily_closed', hidden: false, confirmed: true, successor: null });
+  assert.equal(repo.closedBrief({ status: 'permanently_closed', confirmed: true, successor: null }).hidden, true);
 });
 
 // ---------------------------------------------------------------------------
@@ -786,7 +796,7 @@ test('the check confirms through Wikidata\'s OSM id and website, and records whi
   const rep = await repo.report();
   assert.equal(rep.byReasonSum, rep.closedTotal, 'every closed place is in exactly one reason');
   assert.equal(rep.byReasonAgrees, true);
-  assert.ok(rep.byReason.every((r) => ['permanently_closed', 'temporarily_closed'].includes(r.hidden_as)), 'unconfirmed is not a reason to hide');
+  assert.ok(rep.byReason.every((r) => r.hidden_as === 'permanently_closed'), 'the closed list is permanently closed only');
   await query(`delete from atlas_osm_matches`);
 });
 
@@ -1006,4 +1016,94 @@ test('a family visit recorded under the other spelling of the open-map ref settl
   assert.equal(s.status, 'open');
   assert.equal(s.review, false);
   await query(`delete from visits where household_id = $1`, [household.id]);
+});
+
+// ---------------------------------------------------------------------------
+// round five (owner, 29 Sep 2026): a temporary closure shows, never hides
+// ---------------------------------------------------------------------------
+
+test('CLOSED_TEMPORARILY shows with a label and hides nothing; CLOSED_PERMANENTLY hides', async () => {
+  const temp = 'google:c57-temp';
+  const perm = 'google:c57-perm';
+  await onGoogleStatus(temp, 'CLOSED_TEMPORARILY');
+  await onGoogleStatus(perm, 'CLOSED_PERMANENTLY');
+  await repo.applyProposed({ by: 'test' });
+
+  // Temporarily closed: still in results, carrying a label; permanently closed: hidden.
+  const hidden = await repo.hiddenAmong([temp, perm]);
+  assert.equal(hidden.has(temp), false, 'a temporarily closed place is not hidden');
+  assert.equal(hidden.has(perm), true, 'a permanently closed place is hidden');
+  const { rows } = await query(`select r from unnest($1::text[]) r where ${repo.SHOWN_REF('r')}`, [[temp, perm]]);
+  assert.deepEqual(rows.map((x) => x.r), [temp], 'only the permanent one is filtered out');
+
+  // The label mark, both statuses, with `hidden` telling them apart.
+  const marks = await repo.hiddenStatusesOf([temp, perm]);
+  assert.deepEqual(repo.closedBrief(marks.get(temp)), { status: 'temporarily_closed', hidden: false, confirmed: true, successor: null });
+  assert.equal(repo.closedBrief(marks.get(perm)).status, 'permanently_closed');
+  assert.equal(repo.closedBrief(marks.get(perm)).hidden, true);
+
+  // labelFor: what the drawer/status endpoint attaches.
+  assert.equal(repo.labelFor(await repo.statusFor(temp)).status, 'temporarily_closed');
+  assert.equal(repo.labelFor(await repo.statusFor(temp)).hidden, false);
+  assert.equal(repo.labelFor(await repo.statusFor(perm)).hidden, true);
+
+  // A temporarily closed place is added to a trip freely; the permanent one is refused.
+  const trips = await import('../src/routes/trips.js');
+  await trips.refuseClosed(temp);
+  await assert.rejects(() => trips.refuseClosed(perm), (e) => e.status === 409 && e.code === 'closed');
+  await query(`delete from place_status where venue_ref = any($1)`, [[temp, perm]]);
+});
+
+test('the /api/places/status endpoint labels a temporarily closed place, not only a hidden one', async () => {
+  const express = (await import('express')).default;
+  const { places } = await import('../src/routes/places.js');
+  const { runAsAccount } = await import('../src/context.js');
+  const { household } = await aHousehold(query, 'c57 status ep');
+  const { rows: [account] } = await query(
+    `insert into accounts (household_id, email, name, role, plan, status) values ($1, $2, 'c57', 'customer', 'trial', 'active') returning *`,
+    [household.id, `c57-status-${Date.now()}@example.com`]);
+  await repo.propose({ ref: 'google:c57-status-temp', status: 'temporarily_closed', source: 'google', reason: 'temporarily closed by Google\'s status', evidence: 'Google business status', applied: true, appliedBy: 'test' });
+  const app = express();
+  app.use((req, _res, next) => runAsAccount(account, next));
+  app.use('/api/places', places);
+  const server = app.listen(0);
+  await new Promise((r) => server.once('listening', r));
+  try {
+    const body = await (await fetch(`http://127.0.0.1:${server.address().port}/api/places/status?ref=${encodeURIComponent('google:c57-status-temp')}`)).json();
+    assert.equal(body.openStatus?.status, 'temporarily_closed');
+    assert.equal(body.openStatus?.hidden, false);
+    // An open place carries nothing.
+    const none = await (await fetch(`http://127.0.0.1:${server.address().port}/api/places/status?ref=google:c57-open-none`)).json();
+    assert.equal(none.openStatus, null);
+  } finally { server.close(); }
+  await query(`delete from place_status where venue_ref = 'google:c57-status-temp'`);
+});
+
+test('the report splits permanently closed (hidden, reasons sum), temporarily closed (shown), and reopened', async () => {
+  await query(`delete from place_status where venue_ref like 'google:c57-rep-%'`);
+  await repo.propose({ ref: 'google:c57-rep-perm1', status: 'permanently_closed', source: 'wikidata', reason: 'dissolved 1990', evidence: 'P576' });
+  await repo.propose({ ref: 'google:c57-rep-perm2', status: 'permanently_closed', source: 'osm', reason: 'demolished', evidence: 'demolished=yes' });
+  await repo.propose({ ref: 'google:c57-rep-temp1', status: 'temporarily_closed', source: 'google', reason: 'temporarily closed by Google\'s status', evidence: 'Google business status' });
+  await repo.propose({ ref: 'google:c57-rep-open1', status: 'open', source: 'google', reason: 'open by Google\'s status', evidence: 'Google business status' });
+  await repo.propose({ ref: 'google:c57-rep-open2', status: 'open', source: null, reason: 'a family went', evidence: 'visit recorded 2026-09-20, after 2020-12-31' });
+  // An always-open OSM place is not a reopen.
+  await repo.propose({ ref: 'google:c57-rep-open3', status: 'open', source: 'osm', reason: 'mapped as in use', evidence: 'amenity=cafe' });
+  const rep = await repo.report();
+  assert.ok(rep.permanentlyClosed >= 2);
+  assert.equal(rep.closedTotal, rep.permanentlyClosed, 'closedTotal is the permanent (hidden) number');
+  assert.equal(rep.byReasonSum, rep.permanentlyClosed, 'every reason is a permanent closure, and they sum to it');
+  assert.equal(rep.byReasonAgrees, true);
+  assert.ok(rep.byReason.every((r) => r.hidden_as === 'permanently_closed'));
+  assert.ok(rep.temporarilyClosed >= 1, 'temporarily closed counted on its own');
+  assert.ok(rep.temporarilyClosedExamples.some((x) => x.ref === 'google:c57-rep-temp1'));
+  // Reopened: the family and the Google-operational, not the always-open OSM one.
+  const reopenRefs = rep.reopenedExamples.map((x) => x.ref);
+  assert.ok(reopenRefs.includes('google:c57-rep-open1'), 'Google operational is a reopen');
+  assert.ok(reopenRefs.includes('google:c57-rep-open2'), 'a family visit is a reopen');
+  assert.ok(!reopenRefs.includes('google:c57-rep-open3'), 'always-open OSM is not a reopen (can\'t-speak)');
+  assert.ok(rep.reopened >= 2);
+  // ?closed=all is the permanent (hidden) list only.
+  const all = await repo.report({ allClosed: true });
+  assert.ok(all.examples.every((x) => x.status === 'permanently_closed'), 'the hidden list is permanent only');
+  await query(`delete from place_status where venue_ref like 'google:c57-rep-%'`);
 });

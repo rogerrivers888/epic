@@ -33,7 +33,7 @@ import { fileWhere, upsertHouseholdPlace } from './atlas.js';
 import * as atlasRepo from '../repositories/atlas.js';
 import { googleSource } from '../sources/google.js';
 import { claimPlace, ownedRecord, ownedRecords, enrich, researchOnOpen } from '../sources/own.js';
-import { closedBrief, hiddenAmong, hiddenStatusesOf, statusFor } from '../repositories/placeStatus.js';
+import { closedBrief, hiddenAmong, hiddenStatusesOf, labelFor, statusFor } from '../repositories/placeStatus.js';
 import { onVisitRecorded } from '../sources/closedCheck.js';
 // Somewhere you eat, where the menu is the thing you want on the way in; and
 // the three words a take may be.
@@ -687,7 +687,9 @@ places.get('/status', async (req, res, next) => {
     const { source, id } = splitRef(req.query.ref);
     if (!source || !id) return res.status(400).json({ error: 'ref_required' });
     const s = await statusFor(`${source}:${id}`, { wikidataId: source === 'wikidata' ? id : null, atlasId: source === 'atlas' ? id : null });
-    res.json({ openStatus: s?.hidden ? { status: s.status, hidden: true, confirmed: s.confirmed, reason: s.reason, source: s.source, successor: s.successor } : null });
+    // A closed place — permanently (hidden) or temporarily (shown, labelled) —
+    // carries its status; open, unknown and unapplied carry nothing (C57).
+    res.json({ openStatus: labelFor(s) });
   } catch (err) { next(err); }
 });
 
@@ -704,10 +706,10 @@ places.get('/detail', async (req, res, next) => {
     const open = await statusFor(ref, {
       wikidataId: source === 'wikidata' ? id : null, atlasId: source === 'atlas' ? id : null,
     }).catch(() => null);
-    const openStatus = open ? {
-      status: open.status, hidden: open.hidden, confirmed: open.confirmed, reason: open.reason, source: open.source,
-      successor: open.successor,
-    } : null;
+    // A closed place carries a mark; only a *permanent* one strips the drawer
+    // and takes the place out. A temporarily closed place gets the full drawer
+    // with a "Temporarily closed" label (C57).
+    const openStatus = labelFor(open);
     if (open?.hidden) {
       const [ours, visitRows, status] = await Promise.all([
         ownedRecord(ref).catch(() => null), visitsRepo.visitIdsAt(household.id, ref), householdStatus(household.id, [ref]),
@@ -794,7 +796,7 @@ places.get('/detail', async (req, res, next) => {
     const openNow = source === 'google' && venue ? await statusFor(ref).catch(() => null) : open;
     res.json({
       venueRef: ref, venue: venue ? { ...venue, venueRef: ref } : null, household: status[ref] ?? null, visits: history, menu, ours, sourceError, researching, reviewersMention,
-      openStatus: openNow ? { status: openNow.status, hidden: openNow.hidden, confirmed: openNow.confirmed, reason: openNow.reason, source: openNow.source, successor: openNow.successor } : openStatus,
+      openStatus: labelFor(openNow) ?? openStatus,
     });
   } catch (err) {
     next(err);

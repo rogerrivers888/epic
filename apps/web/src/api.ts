@@ -136,7 +136,7 @@ const qs = (o: Record<string, any>) => {
 /** Open or closed (decision C57). `unknown` is a real answer: nobody has established it either way. */
 export type OpenStatusValue = 'open' | 'temporarily_closed' | 'permanently_closed' | 'unknown';
 /** The two words a household's own list shows for a place that has closed: the status and "Now: …". */
-export type ClosedMark = { status: OpenStatusValue; confirmed: boolean; successor: { ref: string | null; name: string | null } | null };
+export type ClosedMark = { status: OpenStatusValue; hidden?: boolean; confirmed: boolean; successor: { ref: string | null; name: string | null } | null };
 export type PlaceOpenStatusBrief = {
   status: OpenStatusValue; hidden: boolean; confirmed: boolean; reason: string | null;
   source: 'wikidata' | 'osm' | 'wikipedia' | 'listing' | 'google' | 'person' | null;
@@ -153,10 +153,17 @@ export type ClosedExample = {
 };
 export type ClosedReport = {
   running: { id: string; startedAt: string } | null;
-  /** Closures only; the reasons sum to it, and the report says whether they do. */
-  closedTotal?: number; byReasonSum?: number; byReasonAgrees?: boolean; unconfirmedTotal?: number; reviewTotal?: number;
+  /** The hidden number — permanently closed only — and its reasons, which sum to it. */
+  permanentlyClosed?: number; closedTotal?: number; byReasonSum?: number; byReasonAgrees?: boolean;
+  /** Shown with a "Temporarily closed" label, kept in results. */
+  temporarilyClosed?: number; temporarilyClosedExamples?: ClosedExample[];
+  /** Settled back open (a family went, or Google operational). */
+  reopened?: number; reopenedExamples?: ClosedExample[];
+  /** The previous finished check's permanently-closed count, or null (can't-speak). */
+  previousClosed?: number | null;
+  unconfirmedTotal?: number; reviewTotal?: number;
   check: { id: string; state: string; started_at: string; finished_at: string | null; counts: Record<string, unknown>; error: string | null } | null;
-  totals: { would_hide: number; would_hide_closed: number; unconfirmed: number; hidden_now: number; review: number; with_successor: number; history?: number; rows: number };
+  totals: { would_hide: number; permanently_closed: number; temporarily_closed: number; reopened: number; unconfirmed: number; hidden_now: number; review: number; with_successor: number; history?: number; rows: number };
   byStatus: { status: OpenStatusValue; confirmed: boolean; applied: boolean; n: number }[];
   byReason: { hidden_as: string; source: string; reason: string; n: number }[];
   bySource: { source: string; status: OpenStatusValue; n: number }[];

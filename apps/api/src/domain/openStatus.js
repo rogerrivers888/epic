@@ -33,16 +33,25 @@ export const STATUSES = ['open', 'temporarily_closed', 'permanently_closed', 'un
 export const SOURCES = ['wikidata', 'osm', 'wikipedia', 'listing', 'google', 'person'];
 const CLOSED = new Set(['temporarily_closed', 'permanently_closed']);
 
-/** Whether a stored row keeps a place away from families. Nothing hides until it has been applied. */
+/**
+ * Whether a stored row keeps a place away from families. Only a *permanent*
+ * closure hides (owner, 29 Sep 2026: "CLOSED_TEMPORARILY must not hide a
+ * place"); a temporary one stays in results with a label. Nothing hides until
+ * it has been applied.
+ */
 export function hides(row) {
   if (!row || !row.applied) return false;
-  return CLOSED.has(row.status);
+  return row.status === 'permanently_closed';
+}
+
+/** Whether a row carries a closed *label* to a family (temporary or permanent), once applied. */
+export function marked(row) {
+  return Boolean(row?.applied) && CLOSED.has(row?.status);
 }
 
 /** The reason a hidden row is hidden, in the words the report counts by. */
 export function hiddenBecause(row) {
-  if (CLOSED.has(row?.status)) return row.status;
-  if (row?.confirmed === false) return 'unconfirmed';
+  if (row?.status === 'permanently_closed') return 'permanently_closed';
   return null;
 }
 

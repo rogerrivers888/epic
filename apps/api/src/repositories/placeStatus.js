@@ -22,7 +22,18 @@ const on = (client) => (client ? (text, params) => client.query(text, params) : 
 // 'unconfirmed hides a place'. Unconfirmed places stay visible to families;
 // mark them 'unconfirmed' in the back office"). `confirmed` is still kept and
 // counted; it no longer decides anything a family sees.
-export const HIDING = `s.applied and s.status in ('temporarily_closed', 'permanently_closed')`;
+// Only a place Google (or another positive source) says is *permanently*
+// closed is taken out of what families see (owner, 29 Sep 2026:
+// "CLOSED_TEMPORARILY must not hide a place … Only CLOSED_PERMANENTLY (or
+// other positive evidence) hides a place"). A temporarily closed place stays
+// in every result and carries a "Temporarily closed" label instead — that
+// label rides on `MARKED`, not on this.
+export const HIDING = `s.applied and s.status = 'permanently_closed'`;
+// A place that carries a closed *label* to a family: applied, and temporarily
+// or permanently closed. The permanent ones are also hidden (above); the
+// temporary ones are shown with the label. The owner's OK (`applied`) gates
+// both, so nothing a family sees changes before the check is applied.
+export const MARKED = `s.applied and s.status in ('temporarily_closed', 'permanently_closed')`;
 
 /**
  * Every ref a hidden place goes by (Codex, 29 Sep 2026: a closed atlas row
@@ -155,7 +166,7 @@ export async function hiddenStatusesOf(refs) {
   const list = [...new Set((refs ?? []).filter(Boolean).map(String))];
   if (!list.length) return new Map();
   const { rows } = await query(
-    `with hid as (select s.venue_ref, s.wikidata_id from place_status s where ${HIDING}),
+    `with hid as (select s.venue_ref, s.wikidata_id from place_status s where ${MARKED}),
      seed as (
        select venue_ref as ref, venue_ref as origin from hid
        union select 'wikidata:' || wikidata_id, venue_ref from hid where wikidata_id is not null
@@ -186,8 +197,27 @@ export async function hiddenStatusesOf(refs) {
   return new Map(rows.map((r) => [r.asked_ref, shape(r)]));
 }
 
-/** The two words a family screen shows for a closed place: the status and the successor. */
-export const closedBrief = (s) => (s?.hidden ? { status: s.status, confirmed: s.confirmed, successor: s.successor } : null);
+/**
+ * The mark a family screen shows for a closed place: the status (so the row
+ * says "Closed" or "Temporarily closed"), whether it is hidden (permanent
+ * only), and the successor. Null for anything not closed.
+ *
+ * `hiddenStatusesOf` already returns only applied, closed rows (`MARKED`), so
+ * this fires for both temporary and permanent; the caller reads `status`.
+ */
+export const closedBrief = (s) => (s && CLOSED_STATUSES.has(s.status)
+  ? { status: s.status, hidden: s.status === 'permanently_closed', confirmed: s.confirmed, successor: s.successor } : null);
+const CLOSED_STATUSES = new Set(['temporarily_closed', 'permanently_closed']);
+
+/**
+ * The open-status mark an endpoint attaches to a place (the drawer, /status):
+ * a label-worthy status is applied *and* closed. `hidden` (permanent) tells
+ * the client to take the place out and strip the drawer; a temporary one
+ * keeps its drawer and its place in results, and only shows the label.
+ * Null for open, unknown or unapplied — nothing to say.
+ */
+export const labelFor = (s) => (s && s.applied && CLOSED_STATUSES.has(s.status)
+  ? { status: s.status, hidden: s.status === 'permanently_closed', confirmed: s.confirmed, reason: s.reason, source: s.source, successor: s.successor } : null);
 
 /** Statuses for many refs at once, for a back-office list. */
 export async function statusesFor(refs) {
@@ -301,9 +331,20 @@ export async function latestCheck() {
  * first when it is among them, since it is the case that started this.
  */
 export async function report({ examples = 20, allClosed = false } = {}) {
-  // Only a closure hides (owner, 29 Sep 2026); unconfirmed has its own section.
-  const WOULD = `s.status in ('temporarily_closed', 'permanently_closed')`;
-  const CLOSED_NOW = `s.status in ('temporarily_closed', 'permanently_closed')`;
+  // Only a *permanent* closure hides now (owner, 29 Sep 2026: "CLOSED_TEMPORARILY
+  // must not hide a place"). So the closed total, its reasons and the ?closed=all
+  // list are permanent-only; temporarily closed is its own, shown-with-label
+  // number; unconfirmed and review keep their own sections.
+  const PERMANENT = `s.status = 'permanently_closed'`;
+  const TEMPORARY = `s.status = 'temporarily_closed'`;
+  const ANY_CLOSED = `s.status in ('temporarily_closed', 'permanently_closed')`;
+  const WOULD = PERMANENT;
+  const CLOSED_NOW = PERMANENT;
+  // A place settled back open: now open, and carrying a signal that it came
+  // back — a family went, or Google says operational. Not counted: a place
+  // simply mapped open by OSM that was never closed, which can't be told from
+  // an always-open place (can't-speak).
+  const REOPENED = `s.status = 'open' and (s.reason = 'a family went' or s.source = 'google')`;
   // What an unconfirmed place is filed as: our drawer where it has one, else the atlas's own word.
   const FILED = `coalesce(sub.label, a.category, 'unfiled')`;
   const PLACE_JOIN = `
@@ -314,7 +355,7 @@ export async function report({ examples = 20, allClosed = false } = {}) {
              left join place_index pi on pi.venue_ref = s.venue_ref
              left join shelf_subcategories sub on sub.key = pi.subcategory
              left join regions reg on reg.slug = a.region_slug`;
-  const [byStatus, byReason, bySource, totals, sample, reviewSample, unconfirmedByCategory, unconfirmedSample, reviewByReason, matchCount] = await Promise.all([
+  const [byStatus, byReason, bySource, totals, sample, reviewSample, unconfirmedByCategory, unconfirmedSample, reviewByReason, matchCount, temporarilySample, reopenedSample, prevCheck] = await Promise.all([
     query(`select s.status, s.confirmed, s.applied, count(*)::int as n from place_status s group by 1, 2, 3 order by 1, 2, 3`),
     query(`select s.status as hidden_as,
                   coalesce(s.source, 'none') as source,
@@ -323,9 +364,11 @@ export async function report({ examples = 20, allClosed = false } = {}) {
              from place_status s where ${WOULD}
             group by 1, 2, 3 order by n desc`),
     query(`select coalesce(s.source, 'none') as source, s.status, count(*)::int as n from place_status s group by 1, 2 order by 1, 2`),
-    query(`select count(*) filter (where ${WOULD})::int as would_hide,
-                  count(*) filter (where ${WOULD} and s.status in ('temporarily_closed','permanently_closed'))::int as would_hide_closed,
-                  count(*) filter (where not s.confirmed and not (${WOULD}))::int as unconfirmed,
+    query(`select count(*) filter (where ${PERMANENT})::int as would_hide,
+                  count(*) filter (where ${PERMANENT})::int as permanently_closed,
+                  count(*) filter (where ${TEMPORARY})::int as temporarily_closed,
+                  count(*) filter (where ${REOPENED})::int as reopened,
+                  count(*) filter (where not s.confirmed and not (${ANY_CLOSED}))::int as unconfirmed,
                   count(*) filter (where ${HIDING})::int as hidden_now,
                   count(*) filter (where s.review)::int as review,
                   count(*) filter (where s.successor_ref is not null)::int as with_successor,
@@ -361,6 +404,14 @@ export async function report({ examples = 20, allClosed = false } = {}) {
     query(`select coalesce(regexp_replace(s.reason, '\\d{4}', 'YYYY', 'g'), 'none') as reason, coalesce(s.source, 'none') as source, count(*)::int as n
              from place_status s where s.review group by 1, 2 order by n desc`),
     query(`select count(*)::int as n from atlas_osm_matches`),
+    // Temporarily closed — shown with a label, so its own short list.
+    query(`select s.*, ${SUCCESSOR_LABEL}, coalesce(pr.name, a.name) as name, coalesce(reg.name, pr.postcode) as place_where, ${FILED} as filed
+             from place_status s ${PLACE_JOIN} where ${TEMPORARY} order by md5(s.venue_ref) limit $1`, [examples]),
+    // Reopened — the settled-back-open, so the owner can see what came back.
+    query(`select s.*, ${SUCCESSOR_LABEL}, coalesce(pr.name, a.name) as name, coalesce(reg.name, pr.postcode) as place_where, ${FILED} as filed
+             from place_status s ${PLACE_JOIN} where ${REOPENED} order by md5(s.venue_ref) limit $1`, [examples]),
+    // The previous finished check, for "what changed" (owner: against the last 245).
+    query(`select counts from closed_checks where state = 'done' order by finished_at desc nulls last limit 2`),
   ]);
   const ex = (r) => ({
     ref: r.venue_ref, name: r.name ?? null, where: r.place_where ?? null, status: r.status, confirmed: r.confirmed,
@@ -371,13 +422,35 @@ export async function report({ examples = 20, allClosed = false } = {}) {
   // The closed total and its reasons must agree to the place (owner, 29 Sep
   // 2026: "show me the closed list properly"): every closed row is in exactly
   // one reason, so the sum is checked here rather than trusted.
-  const closedTotal = Number(totals.rows[0].would_hide);
+  // closedTotal is the *hidden* number — permanently closed only — and every
+  // reason is one of those rows, so the sum must agree (owner: "show me the
+  // closed list properly").
+  const permanentlyClosed = Number(totals.rows[0].permanently_closed);
+  const temporarilyClosed = Number(totals.rows[0].temporarily_closed);
+  const reopened = Number(totals.rows[0].reopened);
+  const closedTotal = permanentlyClosed;
   const byReasonSum = byReason.rows.reduce((n, r) => n + Number(r.n), 0);
+  // What changed against the last finished check (the 245): the previous run's
+  // stored closed count, if there is one. Older runs stored `would_hide` as
+  // permanent+temporary combined, so this is named as "was" rather than a
+  // like-for-like delta, and is null when there is no prior run (can't-speak).
+  const priorCounts = prevCheck.rows[1]?.counts ?? prevCheck.rows[0]?.counts ?? null;
+  const previousClosed = priorCounts && typeof priorCounts === 'object'
+    ? (priorCounts.byStatus?.permanently_closed ?? null) : null;
   return {
     check: await latestCheck(),
+    // The hidden number (permanently closed) and its reasons, which sum to it.
+    permanentlyClosed,
     closedTotal,
     byReasonSum,
     byReasonAgrees: byReasonSum === closedTotal,
+    // Shown with a label, kept in results.
+    temporarilyClosed,
+    temporarilyClosedExamples: temporarilySample.rows.map(ex),
+    // Settled back open (a family went, or Google operational).
+    reopened,
+    reopenedExamples: reopenedSample.rows.map(ex),
+    previousClosed,
     unconfirmedTotal: Number(totals.rows[0].unconfirmed),
     reviewTotal: Number(totals.rows[0].review),
     totals: totals.rows[0],

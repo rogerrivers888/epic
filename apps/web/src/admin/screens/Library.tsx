@@ -798,18 +798,22 @@ function Closed({ canManage }: { canManage: boolean }) {
   };
 
   const t = data?.totals;
-  const waiting = t ? Number(t.would_hide) - Number(t.hidden_now) : 0;
+  // "Would hide" is the permanent closures only; the temporary ones are shown
+  // with a label and never hidden (owner, 29 Sep 2026).
+  const perm = t ? Number(data?.permanentlyClosed ?? t.permanently_closed) : 0;
+  const waiting = t ? perm - Number(t.hidden_now) : 0;
   return (
     <>
       {error ? <Banner tone="crit">{error}</Banner> : null}
       {done ? <Banner tone="ok">{done}</Banner> : null}
       {t ? (
         <TileRow>
-          <Tile label="Would hide" value={count(Number(t.would_hide))} sub={data?.byReasonAgrees === false ? 'reasons do not add up' : 'closed'} tone={data?.byReasonAgrees === false ? 'crit' : waiting ? 'warn' : 'plain'} />
+          <Tile label="Permanently closed" value={count(perm)} sub={data?.byReasonAgrees === false ? 'reasons do not add up' : data?.previousClosed != null ? `was ${count(Number(data.previousClosed))}` : 'hidden when applied'} tone={data?.byReasonAgrees === false ? 'crit' : waiting ? 'warn' : 'plain'} />
+          <Tile label="Temporarily closed" value={count(Number(t.temporarily_closed ?? data?.temporarilyClosed ?? 0))} sub="shown · labelled" />
+          <Tile label="Reopened" value={count(Number(t.reopened ?? data?.reopened ?? 0))} sub="a family went, or Google says open" />
           <Tile label="Unconfirmed" value={count(Number(t.unconfirmed))} sub="shown · marked here" />
-          <Tile label="Hidden now" value={count(Number(t.hidden_now))} sub="applied" tone={Number(t.hidden_now) ? 'crit' : 'plain'} />
           <Tile label="For review" value={count(Number(t.review))} sub="unsure — never closed on a hunch" />
-          <Tile label="With a successor" value={count(Number(t.with_successor))} sub="Now: …" />
+          <Tile label="Hidden now" value={count(Number(t.hidden_now))} sub="applied" tone={Number(t.hidden_now) ? 'crit' : 'plain'} />
         </TileRow>
       ) : null}
       <Panel
@@ -826,7 +830,7 @@ function Closed({ canManage }: { canManage: boolean }) {
       >
         {data?.byReason?.length ? data.byReason.map((r, i) => (
           <Row key={i} style={styles.closedRow}>
-            <Text style={[type.small, { flex: 1, minWidth: 0 }]} numberOfLines={2}>{`${STATUS_WORD[r.hidden_as] ?? r.hidden_as} · ${r.reason} · ${r.source}`}</Text>
+            <Text style={[type.small, { flex: 1, minWidth: 0 }]} numberOfLines={2}>{`${r.reason} · ${r.source}`}</Text>
             <Text style={[type.small, { fontWeight: '800' }]}>{count(r.n)}</Text>
           </Row>
         )) : <Text style={type.small}>Nothing would be hidden.</Text>}
@@ -851,7 +855,7 @@ function Closed({ canManage }: { canManage: boolean }) {
           ))}
         </Panel>
       ) : null}
-      <Panel title="Closed" sub={data ? `${plural(data.examples.length, 'place')}` : undefined} padded={false}>
+      <Panel title="Permanently closed" sub={data ? `${plural(data.examples.length, 'place')} · hidden when applied` : undefined} padded={false}>
         {(data?.examples ?? []).map((x) => (
           <View key={x.ref} style={styles.closedExample}>
             <Row style={{ gap: spacing.xs, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -876,6 +880,34 @@ function Closed({ canManage }: { canManage: boolean }) {
                 {x.filed ? <Pill label={x.filed} /> : null}
               </Row>
               {x.reason ? <Text style={type.tiny}>{[x.reason, x.source].filter(Boolean).join(' · ')}</Text> : null}
+            </View>
+          ))}
+        </Panel>
+      ) : null}
+      {data?.temporarilyClosedExamples?.length ? (
+        <Panel title="Temporarily closed" sub={`${plural(data.temporarilyClosedExamples.length, 'place')} · shown with a label`} padded={false}>
+          {data.temporarilyClosedExamples.map((x) => (
+            <View key={x.ref} style={styles.closedExample}>
+              <Row style={{ gap: spacing.xs, flexWrap: 'wrap', alignItems: 'center' }}>
+                <Text style={[type.small, { fontWeight: '700' }]}>{x.name ?? x.ref}</Text>
+                {x.where ? <Text style={type.tiny}>{x.where}</Text> : null}
+                <Pill label="Temporarily closed" tone="warn" />
+              </Row>
+              <Text style={type.tiny}>{[x.reason, x.source].filter(Boolean).join(' · ')}</Text>
+            </View>
+          ))}
+        </Panel>
+      ) : null}
+      {data?.reopenedExamples?.length ? (
+        <Panel title="Reopened" sub={`${plural(data.reopenedExamples.length, 'place')} · a family went, or Google says open`} padded={false}>
+          {data.reopenedExamples.map((x) => (
+            <View key={x.ref} style={styles.closedExample}>
+              <Row style={{ gap: spacing.xs, flexWrap: 'wrap', alignItems: 'center' }}>
+                <Text style={[type.small, { fontWeight: '700' }]}>{x.name ?? x.ref}</Text>
+                {x.where ? <Text style={type.tiny}>{x.where}</Text> : null}
+                <Pill label="Open" tone="ok" />
+              </Row>
+              <Text style={type.tiny}>{[x.reason, x.source].filter(Boolean).join(' · ')}</Text>
             </View>
           ))}
         </Panel>

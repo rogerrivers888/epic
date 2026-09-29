@@ -258,7 +258,11 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
   // Closed, or not confirmed, once the owner has applied the check (C57). A
   // family never reaches such a place from a list; an old link opens here on
   // "Closed" — or "Now: …" — rather than on a normal page.
+  // A closed mark: a temporarily closed place shows the label but keeps its
+  // drawer, its heart and its Add button; only a permanent one (`hidden`)
+  // strips the drawer and takes the place away (owner, 29 Sep 2026).
   const [closedAs, setClosedAs] = useState<PlaceOpenStatusBrief | null>(null);
+  const hardClosed = Boolean(closedAs?.hidden);
   const router = useOptionalRouter();
   const [crowd, setCrowd] = useState<{ rating: number | null; ratingCount: number | null; reviews: Venue['reviews']; attribution: string | null } | null>(null);
   /**
@@ -350,7 +354,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
     // No provider holds a `wikidata:` id, so there is no venue to fetch for one.
     if (item.venueRef.startsWith('wikidata:')) {
       setVenue(null);
-      api.placeStatus(item.venueRef).then((d) => { if (live) setClosedAs(d.openStatus?.hidden ? d.openStatus : null); }).catch(() => { /* open is the default a family already sees */ });
+      api.placeStatus(item.venueRef).then((d) => { if (live) setClosedAs(d.openStatus ?? null); }).catch(() => { /* open is the default a family already sees */ });
       return () => { live = false; };
     }
     // Opening a place we never managed to identify sends the researcher out
@@ -381,7 +385,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
       .then((d) => {
         if (!live) return;
         setVenue(d.venue); setMenu(d.menu ?? null); setVisits(d.visits ?? []);
-        setClosedAs(d.openStatus?.hidden ? d.openStatus : null);
+        setClosedAs(d.openStatus ?? null);
         if (d.venue) onVenue?.(d.venue);
         if (d.sourceError) setError(d.sourceError);
         if (d.ours) setOwnRecord(d.ours);
@@ -663,7 +667,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                   <Press onPress={sharePlace} style={styles.heroTile} accessibilityRole="button" accessibilityLabel={`Share ${item.name}`}>
                     <Icon name={shared ? 'check' : 'upload'} size={18} color={INK} />
                   </Press>
-                  {onShortlist && !closedAs ? (
+                  {onShortlist && !hardClosed ? (
                     <Press onPress={keep} style={[styles.heroTile, shortlisted && styles.heroTileOn]} accessibilityRole="button" accessibilityState={{ selected: !!shortlisted }} accessibilityLabel={shortlisted ? `Take ${item.name} off the shortlist` : `Save ${item.name}`}>
                       <Pulse pulse={heartPulse} size={28} color={INK} />
                       <Icon name="shortlist" size={18} color={INK} fill fillColor={shortlisted ? LIME : CREAM} strokeWidth={2} />
@@ -680,7 +684,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
               {/* No photograph, no tiles to sit on: the heart takes the corner
                   beside the title instead, so a swept restaurant or an atlas
                   place with no picture can still be kept (Codex, 8 Sep 2026). */}
-              {!hero && onShortlist && !closedAs ? (
+              {!hero && onShortlist && !hardClosed ? (
                 <Press onPress={keep} style={[styles.heroTile, styles.bareHeart, shortlisted && styles.heroTileOn]} accessibilityRole="button" accessibilityState={{ selected: !!shortlisted }} accessibilityLabel={shortlisted ? `Take ${item.name} off the shortlist` : `Save ${item.name}`}>
                   <Pulse pulse={heartPulse} size={28} color={INK} />
                   <Icon name="shortlist" size={18} color={INK} fill fillColor={shortlisted ? LIME : CREAM} strokeWidth={2} />
@@ -740,8 +744,8 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                 8f): the selected tab's underline sits *on* that rule, which is
                 what makes the tabs part of the page rather than floating above
                 it. Same device as Inspire's own category strip. */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabStrip} style={[styles.tabStripWrap, closedAs ? styles.gone : null]}>
-              {closedAs ? null : tabs.map((t) => (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabStrip} style={[styles.tabStripWrap, hardClosed ? styles.gone : null]}>
+              {hardClosed ? null : tabs.map((t) => (
                 <Press key={t.value} onPress={() => setTab(t.value)} accessibilityRole="tab" accessibilityState={{ selected: t.value === shown }}>
                   <View style={[styles.tabItem, t.value === shown && styles.tabItemOn]}>
                     <Text style={[styles.tabText, { color: t.value === shown ? colors.ink : colors.inkMuted }]}>{t.label}</Text>
@@ -753,8 +757,8 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
             {error ? <Text style={[type.tiny, { color: colors.dislike }]}>{error}</Text> : null}
           </View>
 
-          {closedAs ? (
-            // A closed place the household kept or went to stays theirs: its
+          {hardClosed ? (
+            // A permanently closed place the household kept or went to stays theirs: its
             // history and their own side of it, and nothing to add it to
             // (owner, 29 Sep 2026). For anyone else it is the word "Closed".
             <ScrollView contentContainerStyle={{ gap: spacing.md, padding: spacing.lg }}>
@@ -964,7 +968,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
 
           {/* Pinned, so the one thing to do with a place does not scroll away
               from it. Ink on light, lime on dark — `primary` is already both. */}
-          {onAdd && !closedAs && shown !== 'menu' && shown !== 'order' ? (
+          {onAdd && !hardClosed && shown !== 'menu' && shown !== 'order' ? (
             <View style={styles.footer}>
               {/*
                 Somewhere you eat gets the other thing you do with it beside
