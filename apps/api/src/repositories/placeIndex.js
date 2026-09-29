@@ -406,7 +406,7 @@ export async function setBar(subcategory, facts, who) {
  */
 const HELD_SQL = `
   select x.venue_ref,
-         x.picture, x.what_it_is, x.hours, x.menu, x.prices, x.step_free, x.website, x.oldest_fact
+         x.picture, x.what_it_is, x.where_to_go, x.hours, x.menu, x.prices, x.step_free, x.website, x.oldest_fact
     from (
       select pi.venue_ref,
              -- Approved, not merely keepable. may_store is a licence fact and
@@ -419,6 +419,16 @@ const HELD_SQL = `
                          and ((li.subject_type = 'place' and li.subject_id = pi.venue_ref)
                            or (li.subject_type = 'attraction' and li.subject_id = a.id::text)))) as picture,
              (coalesce(r.summary, a.summary, r.curation->>'summary') is not null)                 as what_it_is,
+             -- Where to go: an owned arrival point — an address or postcode we
+             -- hold, or an owned point (a car park or main entrance, not the
+             -- rented Google centroid on place_index, which is not ours and
+             -- expires). A basic every place needs (owner, 29 Sep 2026), so a
+             -- park with a picture and a sentence but no way to get there is not
+             -- ready. Reviews and rented coordinates never count.
+             ((coalesce(r.address, r.postcode) is not null) or (r.lat is not null and r.lng is not null)) as where_to_go,
+             -- When it's open: any opening answer we hold, which may be a set of
+             -- hours or the words "always open"/"dawn to dusk" — knowing the
+             -- answer is what counts, so open land is not trapped.
              (coalesce(r.opening_hours, d.visit->>'openingHours') is not null)                    as hours,
              (exists (select 1 from place_menus m where m.venue_ref = pi.venue_ref and m.state = 'read')) as menu,
              (r.price_range is not null)                                                          as prices,

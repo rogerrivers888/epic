@@ -19,16 +19,25 @@
  */
 
 /**
- * The facts a bar may ask for. Six, and no more without a decision: every one of
- * them has to be answerable from something we are allowed to keep.
+ * The facts a bar may ask for. Seven, and no more without a decision: every one
+ * of them has to be answerable from something we are allowed to keep.
+ *
+ * `where_to_go` was added by the owner on 29 Sep 2026 as one of the basics a
+ * household needs everywhere (see BASICS): a place cannot be ready with no way
+ * to get to it. It reframed two of the others at the same time — `hours` is
+ * "when it's open", whose answer may be "always open" or "dawn to dusk" so open
+ * land is not trapped, and `where_to_go` is an arrival point (a postcode or a
+ * pin — a car park or a main entrance), not a full postal address.
  */
 export const FACTS = [
   { key: 'picture',    label: 'A picture we own',            short: 'Picture',
     explain: 'A photograph we own outright, not one rented from a provider.' },
   { key: 'what_it_is', label: 'A sentence saying what it is', short: 'What it is',
     explain: 'A sentence describing the place, written by us.' },
-  { key: 'hours',      label: 'Opening hours',                short: 'Hours',
-    explain: 'Opening hours, and when they were last checked.' },
+  { key: 'where_to_go', label: 'Where to go',                short: 'Where to go',
+    explain: 'At least one arrival point — a postcode or a pin for a car park or a main entrance. A basic a household needs for every place, even a common.' },
+  { key: 'hours',      label: "When it's open",              short: 'When open',
+    explain: 'When it is open — a set of hours, or the answer that it is always open or dawn to dusk. Knowing the answer is what is required.' },
   { key: 'menu',       label: 'A menu',                       short: 'Menu',
     explain: 'A menu we could read. Required for somewhere that serves food, never for a playground.' },
   { key: 'prices',     label: 'What it costs',                short: 'Prices',
@@ -39,7 +48,31 @@ export const FACTS = [
 export const FACT_KEYS = FACTS.map((f) => f.key);
 
 /** What each fact is worth when a bar asks for it. */
-export const FACT_WEIGHTS = { picture: 30, what_it_is: 25, hours: 20, menu: 25, prices: 15, step_free: 10 };
+export const FACT_WEIGHTS = { picture: 30, what_it_is: 25, where_to_go: 20, hours: 20, menu: 25, prices: 15, step_free: 10 };
+
+/**
+ * The basics a household needs for *every* place, whatever its kind (owner,
+ * 29 Sep 2026): somewhere to go, when it is open, a picture, and a sentence
+ * saying what it is. A place cannot be ready — nor score 100 — without them,
+ * however lenient its own kind's bar is.
+ *
+ * This is the fix for Windsor Great Park reading 100/Ready on a Commons picture
+ * and a Wikipedia sentence alone: the park bar judges open ground on those two,
+ * which was right for what the *kind* is judged on and wrong as a whole answer.
+ * The basics are required on top of the bar; the bar still adds the kind's own
+ * key facts (a menu for food, a price and step-free for somewhere ticketed).
+ *
+ * It does not trap genuinely open land: "when it's open" is satisfied by the
+ * answer *always open*, and "where to go" by a single arrival point — so a
+ * common with a car park and a known access pattern can be ready, while one we
+ * hold neither for cannot, which is the honest reading.
+ *
+ * Reviews never count towards any of this: `held` is computed from owned sources
+ * only (repositories/placeIndex.js HELD_SQL), and a question's answer only
+ * counts when an owned source confirms it — a rented rating or a review is never
+ * a fact here.
+ */
+export const BASICS = ['picture', 'what_it_is', 'where_to_go', 'hours'];
 
 /**
  * The bar each kind of place starts on.
@@ -93,7 +126,7 @@ export function defaultBars() {
 }
 
 /**
- * One place's score against its own bar.
+ * One place's score against its own bar, over the basics every place needs.
  *
  * `bar` is the rows `ready_bars` holds for that subcategory: `[{fact, weight,
  * required}]`. `held` is which facts we actually have.
@@ -101,30 +134,47 @@ export function defaultBars() {
  * A subcategory with no bar returns `{ set: false }` and is neither ready nor
  * scored — "not set" is a real answer and pretending it is zero would put every
  * place in a new subcategory at the bottom of every list.
+ *
+ * Where a bar *is* set, the facts a place is judged on are the bar's own facts
+ * **plus the basics** (BASICS): a picture, a sentence, where to go and when it
+ * is open, required whatever the kind. So a place cannot read 100 or be ready
+ * on a lenient kind bar alone (owner, 29 Sep 2026) — the fix for a park scoring
+ * 100 on a picture and a sentence with no way to get there and no opening
+ * answer. The weight of a fact is the bar's where the bar names it, else its
+ * default.
  */
 export function scorePlace({ bar = [], held = {} } = {}) {
-  const judged = bar.filter((b) => b.required && FACT_KEYS.includes(b.fact));
-  if (!judged.length) {
-    return { set: false, score: null, ready: false, parts: { judged: [], held: [], missing: [], notCounted: FACT_KEYS.filter((f) => held[f]) } };
+  const barRequired = bar.filter((b) => b.required && FACT_KEYS.includes(b.fact)).map((b) => b.fact);
+  // Whether this kind is judged at all: a subcategory with no bar is "not set",
+  // and the basics do not conjure a bar where nobody has set one (that would put
+  // every place in a brand-new drawer at the bottom of every list).
+  if (!barRequired.length) {
+    return { set: false, score: null, ready: false, parts: { judged: [], held: [], missing: [], missingBasics: [], notCounted: FACT_KEYS.filter((f) => held[f]) } };
   }
-  const total = judged.reduce((n, b) => n + (b.weight ?? FACT_WEIGHTS[b.fact] ?? 0), 0);
-  const have = judged.filter((b) => Boolean(held[b.fact]));
-  const got = have.reduce((n, b) => n + (b.weight ?? FACT_WEIGHTS[b.fact] ?? 0), 0);
-  const missing = judged.filter((b) => !held[b.fact]).map((b) => b.fact);
+  const weightOf = (fact) => bar.find((b) => b.fact === fact)?.weight ?? FACT_WEIGHTS[fact] ?? 0;
+  // The bar's own facts and the basics, each once, in FACT_KEYS order so the
+  // board reads the same way every time.
+  const judgedKeys = FACT_KEYS.filter((f) => barRequired.includes(f) || BASICS.includes(f));
+  const total = judgedKeys.reduce((n, f) => n + weightOf(f), 0);
+  const got = judgedKeys.filter((f) => held[f]).reduce((n, f) => n + weightOf(f), 0);
+  const missing = judgedKeys.filter((f) => !held[f]);
   return {
     set: true,
-    // Weighted completeness over the facts this kind of place needs, 0–100.
+    // Weighted completeness over the facts this place needs — its kind's, and
+    // the basics — 0–100.
     score: total > 0 ? Math.round((got / total) * 100) : 0,
-    // Ready is holding all of them. The bar is the definition, so nothing else
-    // gets to have an opinion about it (BO2k: "every other board must agree").
+    // Ready is holding all of them. Missing one basic is enough to fail it.
     ready: missing.length === 0,
     parts: {
-      judged: judged.map((b) => ({ fact: b.fact, weight: b.weight ?? FACT_WEIGHTS[b.fact] ?? 0, held: Boolean(held[b.fact]) })),
-      held: have.map((b) => b.fact),
+      judged: judgedKeys.map((f) => ({ fact: f, weight: weightOf(f), held: Boolean(held[f]), basic: BASICS.includes(f) })),
+      held: judgedKeys.filter((f) => held[f]),
       missing,
-      // Facts we happen to hold that this kind of place is not judged on. They
-      // are recorded, never counted, and print as `n/a` rather than as a dash.
-      notCounted: FACT_KEYS.filter((f) => held[f] && !judged.some((b) => b.fact === f)),
+      // The basics it is missing, named on their own so the place page can say
+      // exactly which of the four a household needs are not there yet.
+      missingBasics: missing.filter((f) => BASICS.includes(f)),
+      // Facts we happen to hold that this place is not judged on. They are
+      // recorded, never counted, and print as `n/a` rather than as a dash.
+      notCounted: FACT_KEYS.filter((f) => held[f] && !judgedKeys.includes(f)),
     },
   };
 }

@@ -15,30 +15,65 @@ import {
 
 const bar = (...facts) => FACT_KEYS.map((f) => ({ fact: f, weight: FACT_WEIGHTS[f], required: facts.includes(f) }));
 
-test('a playground with all three of its facts scores what a restaurant with all four does', () => {
-  // The whole point of a per-kind bar: "a restaurant is not ready without a
-  // menu; a playground never has one and must not be marked down for it."
+test('a park with only a picture and a sentence is not ready, however lenient its bar', () => {
+  // Windsor Great Park read Data score 100 / Ready: Yes on a Commons picture and
+  // a Wikipedia sentence, with no way to get there and no opening answer (owner,
+  // 29 Sep 2026). The open-ground bar judges parks on those two — right for what
+  // the *kind* is judged on, wrong as a whole answer — so the basics are
+  // required on top of the bar.
+  const park = scorePlace({ bar: bar('picture', 'what_it_is'), held: { picture: true, what_it_is: true } });
+  assert.equal(park.ready, false, 'a picture and a sentence is not the whole of what a household needs');
+  assert.ok(park.score < 100, 'and it cannot read 100');
+  assert.equal(park.score, 58);   // held 30+25 of 30+25+20+20
+  assert.deepEqual(park.parts.missingBasics.sort(), ['hours', 'where_to_go']);
+});
+
+test('the basics are required whatever the kind, even where the bar omits them', () => {
+  // Where to go, when it is open, a picture and a sentence — for every place.
+  const barNoBasics = bar('menu');
+  const out = scorePlace({ bar: barNoBasics, held: { menu: true } });
+  assert.equal(out.ready, false);
+  assert.deepEqual(out.parts.missingBasics.sort(), ['hours', 'picture', 'what_it_is', 'where_to_go']);
+  // A common answers "when it's open" with "always open" and "where to go" with
+  // one arrival point — held is a boolean here — and then it can be ready.
+  const common = scorePlace({ bar: bar('picture', 'what_it_is'), held: { picture: true, what_it_is: true, where_to_go: true, hours: true } });
+  assert.equal(common.ready, true);
+  assert.equal(common.score, 100);
+  assert.deepEqual(common.parts.missingBasics, []);
+});
+
+test('a playground with its basics scores what a restaurant with its basics and a menu does', () => {
+  // The per-kind bar still stands on top of the basics: "a restaurant is not
+  // ready without a menu; a playground never has one and must not be marked
+  // down for it." Both are ready once they hold their basics and their own
+  // key facts.
   const playground = scorePlace({
     bar: bar('picture', 'what_it_is', 'hours'),
-    held: { picture: true, what_it_is: true, hours: true },
+    held: { picture: true, what_it_is: true, where_to_go: true, hours: true },
   });
   const restaurant = scorePlace({
     bar: bar('picture', 'what_it_is', 'hours', 'menu'),
-    held: { picture: true, what_it_is: true, hours: true, menu: true },
+    held: { picture: true, what_it_is: true, where_to_go: true, hours: true, menu: true },
   });
   assert.equal(playground.score, 100);
   assert.equal(restaurant.score, 100);
   assert.equal(playground.ready, true);
   assert.equal(restaurant.ready, true);
+  // A menu the playground never has never enters its bar.
+  assert.ok(!playground.parts.judged.some((j) => j.fact === 'menu'));
+  // A restaurant that holds every basic but no menu is not ready.
+  const noMenu = scorePlace({ bar: bar('picture', 'what_it_is', 'hours', 'menu'), held: { picture: true, what_it_is: true, where_to_go: true, hours: true } });
+  assert.equal(noMenu.ready, false);
+  assert.deepEqual(noMenu.parts.missing, ['menu']);
 });
 
 test('equal completeness scores equally, and the heaviest fact costs most', () => {
-  const b = bar('picture', 'what_it_is', 'hours');   // 30 / 25 / 20
-  const noPicture = scorePlace({ bar: b, held: { what_it_is: true, hours: true } });
-  const noHours = scorePlace({ bar: b, held: { picture: true, what_it_is: true } });
-  // Two of three either way, and the one that is missing decides the number.
-  assert.equal(noPicture.score, 60);
-  assert.equal(noHours.score, 73);
+  const b = bar('picture', 'what_it_is', 'hours');   // judged with basics: picture 30 / what_it_is 25 / where_to_go 20 / hours 20
+  const noPicture = scorePlace({ bar: b, held: { what_it_is: true, where_to_go: true, hours: true } });
+  const noHours = scorePlace({ bar: b, held: { picture: true, what_it_is: true, where_to_go: true } });
+  // Three of four either way, and the one that is missing decides the number.
+  assert.equal(noPicture.score, 68);   // 25+20+20 of 95
+  assert.equal(noHours.score, 79);     // 30+25+20 of 95
   assert.ok(noPicture.score < noHours.score, 'missing the picture must cost more than missing the hours');
 
   // The law the design states: equal inputs produce equal outputs.
@@ -48,11 +83,12 @@ test('equal completeness scores equally, and the heaviest fact costs most', () =
 });
 
 test('a fact this kind of place is not judged on is recorded and never counted', () => {
-  // "Recorded is not the same as required. A playground holds a price but is not
-  // judged on one." So it never moves the score, and it is reported separately
+  // "Recorded is not the same as required." A playground holds a price but is
+  // not judged on one, so it never moves the score and is reported separately
   // so a screen can print `n/a` rather than a dash.
-  const without = scorePlace({ bar: bar('picture', 'what_it_is'), held: { picture: true, what_it_is: true } });
-  const with_ = scorePlace({ bar: bar('picture', 'what_it_is'), held: { picture: true, what_it_is: true, prices: true, step_free: true } });
+  const held = { picture: true, what_it_is: true, where_to_go: true, hours: true };
+  const without = scorePlace({ bar: bar('picture', 'what_it_is', 'hours'), held });
+  const with_ = scorePlace({ bar: bar('picture', 'what_it_is', 'hours'), held: { ...held, prices: true, step_free: true } });
   assert.equal(without.score, with_.score);
   assert.equal(with_.ready, true);
   assert.deepEqual(with_.parts.notCounted.sort(), ['prices', 'step_free']);
@@ -61,7 +97,7 @@ test('a fact this kind of place is not judged on is recorded and never counted',
 
 test('a subcategory nobody has set a bar for is "not set", never nought', () => {
   // A new drawer with no bar must not put every place in it at the bottom of
-  // every list. `set: false` is a state the screen draws as "not set".
+  // every list, and the basics do not conjure a bar where nobody set one.
   const none = scorePlace({ bar: [], held: { picture: true } });
   assert.equal(none.set, false);
   assert.equal(none.score, null);
@@ -70,11 +106,12 @@ test('a subcategory nobody has set a bar for is "not set", never nought', () => 
   assert.deepEqual(none.parts.notCounted, ['picture']);
 });
 
-test('missing names the facts that are missing, and only the judged ones', () => {
+test('missing names the facts that are missing — the kind\'s and the basics', () => {
   const out = scorePlace({ bar: bar('picture', 'what_it_is', 'hours'), held: { hours: true, prices: true } });
-  assert.deepEqual(out.parts.missing.sort(), ['picture', 'what_it_is']);
+  // Judged is the bar's facts and the basics, once each.
+  assert.deepEqual(out.parts.missing.sort(), ['picture', 'what_it_is', 'where_to_go']);
   assert.deepEqual(out.parts.held, ['hours']);
-  assert.equal(out.parts.judged.length, 3);
+  assert.equal(out.parts.judged.length, 4);
 });
 
 test('every seeded bar names facts that exist, and every fact has a weight', () => {
