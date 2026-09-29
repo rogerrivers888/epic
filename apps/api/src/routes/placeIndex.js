@@ -53,6 +53,7 @@ import { recordProviderCall } from '../repositories/visits.js';
 import { googleMatchFor, matchesFor, tripadvisorMatchFor, forgetMisses, triedFor, missesKept } from '../sources/providerMatch.js';
 import { whySourceFailed } from '../sources/why.js';
 import { healthOf } from '../sources/meter.js';
+import { sourceOff } from '../sources/switches.js';
 import { currentHousehold } from './household.js';
 import { enrich } from '../sources/own.js';
 import { crowdBand, countBand } from '../domain/scoring.js';
@@ -67,6 +68,16 @@ const bad = (message, code = 'bad_request') => Object.assign(new Error(message),
 const lower = (s) => String(s ?? '').trim().toLowerCase();
 /** Pence, said as money, so a limit reads as one. */
 const money = (pence) => `£${(Math.max(0, pence) / 100).toFixed(2)}`;
+
+/**
+ * Whether Google can actually be asked: a key AND the Settings switch on.
+ * `googleSource.enabled()` checks only the key, so with a key present but Google
+ * switched off in Settings the adapter's own `off()` guard refuses every call —
+ * the explorer's paid doors must read that up front (quote as `off`, the actions
+ * as 422) rather than advertise a paid op and then return empty (Codex, 29 Sep
+ * 2026).
+ */
+const googleUsable = () => googleSource.enabled() && !sourceOff('google');
 
 /**
  * The ceiling, checked before a call rather than after it.
@@ -2746,7 +2757,7 @@ router.get('/names/quote', requires('view_library'), async (req, res, next) => {
   try {
     const refs = String(req.query.refs ?? '').split(',').map((r) => r.trim()).filter(Boolean).slice(0, 60);
     const google = nameableByGoogle(refs);
-    if (!googleSource.enabled()) return res.json({ refs: refs.length, google: google.length, pence: 0, off: true });
+    if (!googleUsable()) return res.json({ refs: refs.length, google: google.length, pence: 0, off: true });
     res.json({
       refs: refs.length,
       google: google.length,
@@ -2771,7 +2782,7 @@ router.post('/names', requires('manage_library'), async (req, res, next) => {
   try {
     const refs = (Array.isArray(req.body?.refs) ? req.body.refs : []).map(String).filter(Boolean).slice(0, 60);
     if (!refs.length) throw bad('Nothing selected.');
-    if (!googleSource.enabled()) {
+    if (!googleUsable()) {
       return res.status(422).json({
         error: 'not_switched_on',
         message: 'Google is not switched on here. The key is the owner\'s to add in Doppler.',
@@ -2948,7 +2959,7 @@ router.get('/subcategory-summary/quote', requires('view_library'), async (req, r
     const sub = req.query.sub ? String(req.query.sub) : null;
     if (!sub) throw bad('Which subcategory? Pass ?sub=.');
     const refs = await subcategoryRefs(scope, sub);
-    if (!googleSource.enabled()) return res.json({ refs: refs.length, pence: 0, off: true });
+    if (!googleUsable()) return res.json({ refs: refs.length, pence: 0, off: true });
     const held = await alreadyHeld(refs);
     const misses = await missesKept(refs, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 });
     const blind = await nothingToGoOn(refs);
@@ -2978,10 +2989,16 @@ router.post('/subcategory-summary/compare-all', requires('manage_library'), asyn
     if (scope.kind === 'none' || scope.kind === 'unknown') throw bad('Which area? Pass ?where=.');
     const sub = req.body?.sub ? String(req.body.sub) : (req.query.sub ? String(req.query.sub) : null);
     if (!sub) throw bad('Which subcategory? Pass sub.');
-    if (!googleSource.enabled()) {
+    if (!googleUsable()) {
       return res.status(422).json({ error: 'not_switched_on', message: 'Google is not switched on here.' });
     }
     const refs = await subcategoryRefs(scope, sub);
+    // Clear misses older than the staleness window first, so a stale no-match is
+    // actually retried rather than returned from provider_matches as a cached
+    // miss that makes no progress and never leaves `remaining` — the same first
+    // step the ask path takes (Codex, 29 Sep 2026). Fresh misses stay and are
+    // excluded from the batch below.
+    await forgetMisses(refs, 'google', { olderThanMinutes: STALE_MONTHS * 30 * 24 * 60 }).catch(() => null);
     // Bounded, one page at a time. A county or country subcategory holds
     // thousands of places, and comparing each is up to two sequential Google
     // requests — a single request over the whole set would run for hours, time
