@@ -119,7 +119,47 @@ export async function statusFor(ref, { wikidataId = null, atlasId = null } = {})
       where s.venue_ref = $1 or ($2::text is not null and s.wikidata_id = $2) or ($3::text is not null and s.venue_ref = 'atlas:' || $3)
       order by (s.venue_ref = $1) desc, s.applied desc, s.decided_at desc limit 1`,
     [ref ?? null, wikidataId ?? null, atlasId ?? null]);
-  return shape(rows[0]);
+  const own = shape(rows[0]);
+  if (own?.hidden || !ref) return own;
+  // A link under another name the hidden place goes by — its `osm:` ref, or
+  // the atlas row a Google closure reached through Wikidata — opens on the
+  // hidden place's status, exactly as the lists hide it (Codex, third pass).
+  const via = await hiddenOriginOf(ref);
+  return via ?? own;
+}
+
+/**
+ * The hidden place a ref is another name for, or null: the same expansion as
+ * HIDDEN_REFS, carrying which hidden row each name came from. Asked for one
+ * ref, when a direct link is opened — never inside a list.
+ */
+async function hiddenOriginOf(ref) {
+  const { rows: [r] } = await query(
+    `with hid as (select s.venue_ref, s.wikidata_id from place_status s where ${HIDING}),
+     seed as (
+       select venue_ref as ref, venue_ref as origin from hid
+       union select 'wikidata:' || wikidata_id, venue_ref from hid where wikidata_id is not null
+       union select m.venue_ref, hid.venue_ref from provider_matches m join hid on hid.venue_ref = 'google:' || m.source_ref
+        where m.source = 'google' and not m.missing),
+     atlas as (
+       select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, seed.origin from seed join attractions a on seed.ref like 'atlas:%' and a.id::text = substr(seed.ref, 7)
+       union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, seed.origin from seed join attractions a on a.venue_ref = seed.ref
+       union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, seed.origin from seed join attractions a on seed.ref like 'wikidata:%' and a.wikidata_id = substr(seed.ref, 10)
+       union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, seed.origin from seed join attractions a on seed.ref like 'osm:%' and a.osm_ref = substr(seed.ref, 5)
+       union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, seed.origin from seed join attractions a on seed.ref like 'osm:relation/%' and a.osm_ref = substr(seed.ref, 14)),
+     names as (
+       select ref, origin from seed where ref is not null
+       union select x.ref, atlas.origin from atlas cross join lateral (values
+         (atlas.venue_ref), ('atlas:' || atlas.id::text), ('wikidata:' || atlas.wikidata_id),
+         ('osm:' || atlas.osm_ref), (case when atlas.osm_ref ~ '^[0-9]+$' then 'osm:relation/' || atlas.osm_ref end)) x(ref)
+        where x.ref is not null),
+     matched as (
+       select 'google:' || m.source_ref as ref, n.origin from provider_matches m join names n on n.ref = m.venue_ref
+        where m.source = 'google' and not m.missing and m.source_ref is not null),
+     every as (select ref, origin from names union select ref, origin from matched)
+     select s.*, ${SUCCESSOR_LABEL} from every e join place_status s on s.venue_ref = e.origin
+      where e.ref = $1 order by s.decided_at desc limit 1`, [ref]);
+  return r ? shape(r) : null;
 }
 
 /** Statuses for many refs at once, for a back-office list. */

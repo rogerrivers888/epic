@@ -444,5 +444,12 @@ test('a Google closure matched only to wikidata:Q… hides every name the atlas 
   for (const n of names) assert.ok(hidden.has(n), `${n} is hidden`);
   const { rows } = await query(`select r from unnest($1::text[]) r where ${repo.SHOWN_REF('r')}`, [[...names, 'osm:relation/1']]);
   assert.deepEqual(rows.map((x) => x.r), ['osm:relation/1'], 'the SQL form agrees');
+  // A direct link under any of those names opens on the closure (Codex, third pass).
+  for (const n of names) {
+    const st = await repo.statusFor(n);
+    assert.equal(st?.hidden, true, `${n} opens as hidden`);
+    assert.equal(st?.status, 'permanently_closed');
+  }
+  assert.equal((await repo.statusFor('osm:relation/1'))?.hidden ?? false, false, 'an unrelated ref is not');
   await query(`delete from provider_matches where source_ref like 'ChIJ_c57_%'`);
 });
