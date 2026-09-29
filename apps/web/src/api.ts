@@ -1750,6 +1750,24 @@ export type Run = {
   spentPence?: number; tried?: number; read?: number; failed?: number; ours?: number;
   calls?: number; capLeft?: number; capOf?: number; done?: number; places?: number;
 };
+/** One day of the UK census (sources/ukCensus.js), as it stood when it ended. */
+export type UkCensusDay = {
+  day: number; date: string; runId: string; state: string; ended: boolean;
+  requests: number; places: number; tilesAsked: number;
+  districts: number; tilesLeft: number; daysLeft: number | null;
+  /** Google's figure, from the billing export; null until it has written the day. */
+  billed: { censusGbp: number; googleGbp: number; final: boolean } | null;
+};
+export type UkCensus = {
+  action: string;
+  halted: { day: string; googleGbp: number } | null;
+  held: { day: string; censusGbp: number } | null;
+  complete: boolean;
+  districtsWhole: number; tilesLeft: number; requestsPerTile: number | null; daysLeft: number | null;
+  days: UkCensusDay[];
+  mail: string;
+};
+
 export type RunsList = {
   runs: Run[]; running: number; needsLooking: number;
   spentPence: number; calls: number; ceilingPence: number;
@@ -2856,6 +2874,10 @@ export const api = {
 
   /** BO3a / BO3c — the runs that spend, and which of them need looking at. */
   adminRuns: () => request<RunsList>('/api/admin/runs'),
+  /** The census of the rest of the UK, a day at a time: where it stands, and each day's five figures. */
+  adminUkCensus: () => request<UkCensus>('/api/admin/place-index/census/uk'),
+  /** Lift the UK census's billing hold, having looked at the bill. */
+  adminUkCensusLift: () => post<{ seen: Record<string, number> }>('/api/admin/place-index/census/uk/lift', {}),
   /** BO3b — one run's failures, ours kept separate from theirs. */
   adminRunFailures: (key: string) => request<RunFailures>(`/api/admin/runs/${key}/failures`),
   adminRunFailing: (key: string, p: { cause: string; ours?: string }) =>

@@ -22,7 +22,7 @@ import { Icon } from '../../components/Icon';
 import { colors, spacing, type, BORDER } from '../../theme';
 import { useViewport } from '../../hooks/useViewport';
 import { asText, useQueryState, useRouter } from '../../router';
-import { api, type RunsList, type Run, type RunFailures } from '../../api';
+import { api, type RunsList, type Run, type RunFailures, type UkCensus, type UkCensusDay } from '../../api';
 import { AdminPage, ago, day, pounds, since } from '../kit';
 import { AgentSessions } from '../AgentSessions';
 import { Explain } from '../explain';
@@ -184,6 +184,8 @@ function RunsBoard({ canManage, canSetCeiling, onFailures }: {
 
       <Ladder columns={columns} rows={data.runs} keyOf={(r) => r.key}
               highlight={(r) => r.state === 'running'} />
+
+      <UkCensusSection canManage={canManage} />
 
       {/* A rule with nothing under it is a rule for no reason: the footer draws
           only when there is something in it (18 Sep 2026, the separate audit). */}
@@ -432,6 +434,7 @@ function RunsPhone({ canManage, onFailures }: { canManage: boolean; onFailures: 
           <Text style={styles.phoneFact}>{`${data.tripadvisor.left} of ${data.tripadvisor.of} left`}</Text>
         </Explain>
       </View>
+      <UkCensusSection canManage={canManage} phone />
     </AdminPage>
   );
 }
@@ -469,6 +472,71 @@ const word = (n: number) => (['nothing', 'one', 'two', 'three', 'four', 'five', 
 const cap = (w: string) => w.charAt(0).toUpperCase() + w.slice(1);
 
 const Waiting = () => <View style={{ paddingVertical: spacing.xl }}><ActivityIndicator color={colors.accent} /></View>;
+
+// ---------------------------------------------------------------------------
+// The census of the rest of the UK, a day at a time (sources/ukCensus.js)
+// ---------------------------------------------------------------------------
+
+/** What the programme is doing, in a word or two — the detail is behind the tips. */
+const ukWord = (u: UkCensus) => {
+  if (u.complete) return 'Complete';
+  if (u.halted) return `Stopped: Google billed £${u.halted.googleGbp.toFixed(2)} on ${u.halted.day}`;
+  if (u.held) return `Held: the census billed £${u.held.censusGbp.toFixed(2)} on ${u.held.day}`;
+  switch (u.action) {
+    case 'working': case 'switched on': return 'Running';
+    case 'today': return 'Done for today';
+    case 'start': case 'replan': return 'Starting';
+    case 'waiting on another census': return 'Waiting for another census';
+    case 'stopped': return 'Stopped by hand';
+    default: return u.action;
+  }
+};
+
+function UkCensusSection({ canManage, phone = false }: { canManage: boolean; phone?: boolean }) {
+  const [u, setU] = useState<UkCensus | null>(null);
+  const [lifting, setLifting] = useState(false);
+  const load = useCallback(() => { api.adminUkCensus().then(setU).catch(() => setU(null)); }, []);
+  useEffect(load, [load]);
+  // Nothing to show where the programme has never run.
+  if (!u || u.action === 'off') return null;
+
+  const lift = async () => {
+    setLifting(true);
+    try { await api.adminUkCensusLift(); } finally { setLifting(false); load(); }
+  };
+  const columns: Col<UkCensusDay>[] = [
+    { key: 'day', label: 'Day', width: 64, cell: (d) => <Word strong={!d.ended}>{String(d.day)}</Word> },
+    { key: 'date', label: 'Date', width: 110, cell: (d) => <Word muted>{d.date}</Word> },
+    { key: 'districts', label: 'Districts done', tip: 'ukCensusDistricts', width: 130, align: 'right', cell: (d) => <Num n={d.districts} /> },
+    { key: 'places', label: 'Places added', width: 130, align: 'right', cell: (d) => <Num n={d.places} /> },
+    { key: 'requests', label: 'Requests', width: 120, align: 'right', cell: (d) => <Num n={d.requests} /> },
+    { key: 'billed', label: 'Billed', tip: 'ukCensusBilled', width: 140, align: 'right',
+      cell: (d) => (d.billed ? <Word strong={d.billed.final}>{`£${d.billed.censusGbp.toFixed(2)}${d.billed.final ? '' : ' so far'}`}</Word> : <Blank />) },
+    { key: 'left', label: 'Days left', tip: 'ukCensusDaysLeft', width: 110, align: 'right',
+      cell: (d) => (d.daysLeft == null ? <Blank /> : <Num n={d.daysLeft} />) },
+  ];
+  return (
+    <View style={{ gap: spacing.md, marginTop: spacing.xl }}>
+      <View style={phone ? styles.bandPhone : styles.band}>
+        <View style={{ flexGrow: 1, flexBasis: 240, minWidth: 0, gap: 5 }}>
+          <Kicker tip="sectionUkCensus">The rest of the UK</Kicker>
+          <Text style={phone ? styles.titlePhone : styles.title}>{ukWord(u)}</Text>
+        </View>
+        <View style={styles.five}>
+          <Stat label="Districts done" value={u.districtsWhole.toLocaleString('en-GB')} tip="ukCensusDistricts" />
+          <Stat label="Squares left" value={u.tilesLeft.toLocaleString('en-GB')} tip="ukCensusSquares" />
+          <Stat label="Days left" value={u.daysLeft == null ? '—' : String(u.daysLeft)} tip="ukCensusDaysLeft" accent />
+        </View>
+      </View>
+      {u.held ? (
+        <View style={styles.trail}>
+          <Act label={lifting ? 'Lifting…' : 'Lift the hold'} tone="solid" disabled={!canManage || lifting} onPress={lift} />
+        </View>
+      ) : null}
+      <Ladder columns={columns} rows={[...u.days].reverse()} keyOf={(d) => d.runId} highlight={(d) => !d.ended} />
+    </View>
+  );
+}
 
 const styles = StyleSheet.create({
   ceilingWord: { ...type.title, fontSize: 22, fontWeight: '800', color: colors.ink },
