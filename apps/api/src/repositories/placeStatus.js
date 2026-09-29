@@ -333,7 +333,9 @@ export async function report({ examples = 20, allClosed = false } = {}) {
             where ${CLOSED_NOW}
             order by (coalesce(pr.name, a.name) = 'Windsor Safari Park') is true desc,
                      ${allClosed ? `s.source, regexp_replace(s.reason, '\\d{4}', 'YYYY', 'g'), coalesce(pr.name, a.name)` : 'md5(s.venue_ref)'}
-            limit $1`, [allClosed ? 5000 : examples]),
+            -- ?closed=all is every closed row, uncapped (Codex: a capped
+            -- "all" would disagree with closedTotal without saying so).
+            limit $1`, [allClosed ? null : examples]),
     query(`select s.*, coalesce(pr.name, a.name) as name
              from place_status s
              left join place_records pr on pr.venue_ref = s.venue_ref
