@@ -24,8 +24,9 @@
  *
  * And separately, item 3: a place known only from Wikidata/Wikipedia, with no
  * Google id, no OpenStreetMap match, no website and no census sighting, is
- * *unconfirmed* — nothing current says it exists — and is not shown until
- * something does (`confirmation`).
+ * *unconfirmed* — nothing current says it exists (`confirmation`). It is
+ * marked in the back office and counted, and it is *not* hidden: "Only
+ * positive evidence of closure hides a place" (owner, 29 Sep 2026).
  */
 
 export const STATUSES = ['open', 'temporarily_closed', 'permanently_closed', 'unknown'];
@@ -35,7 +36,7 @@ const CLOSED = new Set(['temporarily_closed', 'permanently_closed']);
 /** Whether a stored row keeps a place away from families. Nothing hides until it has been applied. */
 export function hides(row) {
   if (!row || !row.applied) return false;
-  return CLOSED.has(row.status) || row.confirmed === false;
+  return CLOSED.has(row.status);
 }
 
 /** The reason a hidden row is hidden, in the words the report counts by. */
@@ -143,11 +144,25 @@ export const HERITAGE_KINDS = new Set([
   'Q879050', 'Q1802963', 'Q16560', 'Q2087181', // manor house, mansion, palace, historic house museum
   'Q12518',              // tower
   'Q317557', 'Q5116872', // parish church, Church of England parish church (Selby Abbey is one)
+  // Industrial and transport heritage (owner, 29 Sep 2026, after the second
+  // dry run: Geevor Tin Mine, Bitton station and Hengoed Viaduct closed on a
+  // date that is their history). Read back from Wikidata the same day.
+  'Q820477', 'Q819426', 'Q1569871', // mine, mining museum, industrial heritage site
+  'Q55488',                        // railway station
+  'Q12280', 'Q537127', 'Q1210334', 'Q181348', 'Q1068842', // bridge, road bridge, railway bridge, viaduct, footbridge
+  'Q44377', 'Q1311958',            // tunnel, railway tunnel
+  'Q12284',                        // canal
+  'Q39715',                        // lighthouse
+  'Q44494', 'Q185187', 'Q38720',   // mill, watermill, windmill
 ]);
 /** The heritage roots of the atlas's own subclass walk (`place_kinds.root_qid`, sources/wikimedia.js ATTRACTION_ROOTS). */
 export const HERITAGE_ROOTS = new Set(['Q23413', 'Q16560', 'Q2087181', 'Q1802963', 'Q839954', 'Q4989906', 'Q38720', 'Q16970', 'Q2977', 'Q44613', 'Q4663971', 'Q15135589']);
 /** Our own drawers that are heritage. */
-export const HERITAGE_SUBCATEGORIES = new Set(['castles', 'churches', 'historic-houses', 'ruins', 'monuments', 'abbeys', 'cathedrals', 'historic', 'industrial-heritage', 'world-heritage']);
+export const HERITAGE_SUBCATEGORIES = new Set([
+  'castles', 'churches', 'historic-houses', 'ruins', 'monuments', 'monuments-memorials', 'abbeys', 'cathedrals', 'historic',
+  'industrial-heritage', 'world-heritage', 'heritage-railways', 'railway-heritage', 'mining-heritage', 'canals', 'mills',
+  'bridges', 'lighthouses',
+]);
 /** A church, as a building people worship in — a separate question (see `heritageOf`). */
 export const CHURCH_KINDS = new Set(['Q317557', 'Q5116872', 'Q16970', 'Q108325', 'Q2977', 'Q56242215', 'Q1129743', 'Q1370598', 'Q24398318']);
 /** Monastic houses and ruins: their dissolution is history however they are also filed. */
@@ -402,10 +417,17 @@ export function wikipediaVerdict({ text, name, categories = [], source = 'wikipe
   const reopened = REOPENED.test(String(text ?? ''));
   if (site?.heritage) return heritageText({ text, name, cats, all, source, extra, church: Boolean(site.church) });
 
-  // The article's own filing.
-  const defunct = cats.find((c) => /^(Defunct|Demolished|Destroyed)\b/i.test(c) || /\b(demolished|closed|disestablished) in \d{4}\b/i.test(c) && !/establishments/i.test(c) && !/^\d{4} disestablishments/i.test(c));
+  // The article's own filing. A category about the place itself ceasing —
+  // "Defunct tourist attractions", "Demolished buildings", "Zoos
+  // disestablished in the 2020s" — can close. One naming a *former use* —
+  // "Defunct rugby league venues", "Defunct greyhound racing venues",
+  // "Former churches" — cannot: Deepdale and Vicarage Road are stadiums that
+  // no longer hold rugby league or greyhounds, and are open (owner, 29 Sep
+  // 2026). Those only ask a person.
+  const formerUse = cats.find(categoryIsFormerUse);
+  const defunct = cats.find((c) => !categoryIsFormerUse(c) && (/^(Defunct|Demolished|Destroyed)\b/i.test(c) || /\b(demolished|closed|disestablished) in (?:the )?\d{4}s?\b/i.test(c) && !/establishments/i.test(c) && !/^\d{4} disestablishments/i.test(c)));
   const disestablished = cats.find((c) => /^\d{4} disestablishments\b/i.test(c));
-  const former = cats.find((c) => /^Former\b/i.test(c));
+  const former = formerUse;
 
   if (all.length) {
     for (const s of all.slice(0, 4)) {
@@ -436,8 +458,18 @@ export function wikipediaVerdict({ text, name, categories = [], source = 'wikipe
     }
   }
   if (defunct && !reopened) return finding(source, 'permanently_closed', 'filed as ended', `category: ${defunct}`, extra);
-  if (disestablished || former) return finding(source, 'unknown', 'filed as ended, text does not say', `category: ${disestablished ?? former}`, { ...extra, review: true });
+  if (former) return finding(source, 'unknown', 'filed under a former use', `category: ${former}`, { ...extra, review: true });
+  if (disestablished) return finding(source, 'unknown', 'filed as ended, text does not say', `category: ${disestablished}`, { ...extra, review: true });
   return null;
+}
+
+/**
+ * A Wikipedia category that names a use the place once had, not the place
+ * ceasing: "Defunct … venues / grounds / tracks / circuits", "Former …".
+ */
+export function categoryIsFormerUse(c) {
+  const t = String(c ?? '');
+  return /^Former\b/i.test(t) || /^Defunct\b.*\b(venues|grounds|tracks|circuits|stadiums|courses|arenas|rinks)\b/i.test(t);
 }
 
 const NO_REMAINS = /\b(?:no (?:visible )?(?:remains?|trace)|nothing (?:now )?(?:remains|survives|is left)|no longer (?:survives|exists|stands)|was (?:completely|entirely) (?:demolished|destroyed)|(?:demolished|destroyed) (?:completely|entirely))\b/i;
@@ -541,6 +573,24 @@ export function combine(findings) {
  * website of its own, or a census sighting. The first one found is named.
  * An atlas row known only to Wikidata/Wikipedia has none and is unconfirmed.
  */
+/**
+ * The OpenStreetMap element Wikidata links the item to: P402 relation, P11693
+ * node, P10689 way (ids checked against the live API, 29 Sep 2026). The
+ * property travels as `how` so the record says which one confirmed it.
+ */
+export function wikidataOsmRef(entity) {
+  for (const [pid, type] of [['P402', 'relation'], ['P10689', 'way'], ['P11693', 'node']]) {
+    const v = standing(entity?.claims, pid).map((c) => c.mainsnak?.datavalue?.value).find((x) => /^\d+$/.test(String(x ?? '')));
+    if (v) return { ref: `${type}/${v}`, how: `wikidata_${pid.toLowerCase()}` };
+  }
+  return null;
+}
+
+/** The item's official website (P856), where it has one. */
+export function wikidataWebsite(entity) {
+  return standing(entity?.claims, 'P856').map((c) => c.mainsnak?.datavalue?.value).find((x) => /^https?:\/\//i.test(String(x ?? ''))) ?? null;
+}
+
 export function confirmation({ ref = null, googleId = false, osmRef = null, website = null, censused = false } = {}) {
   const head = String(ref ?? '').split(':')[0];
   if (googleId || head === 'google') return { confirmed: true, by: 'google' };

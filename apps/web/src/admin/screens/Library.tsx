@@ -805,7 +805,8 @@ function Closed({ canManage }: { canManage: boolean }) {
       {done ? <Banner tone="ok">{done}</Banner> : null}
       {t ? (
         <TileRow>
-          <Tile label="Would hide" value={count(Number(t.would_hide))} sub={`${count(Number(t.would_hide_closed))} closed · ${count(Number(t.would_hide_unconfirmed))} unconfirmed`} tone={waiting ? 'warn' : 'plain'} />
+          <Tile label="Would hide" value={count(Number(t.would_hide))} sub={data?.byReasonAgrees === false ? 'reasons do not add up' : 'closed'} tone={data?.byReasonAgrees === false ? 'crit' : waiting ? 'warn' : 'plain'} />
+          <Tile label="Unconfirmed" value={count(Number(t.unconfirmed))} sub="shown · marked here" />
           <Tile label="Hidden now" value={count(Number(t.hidden_now))} sub="applied" tone={Number(t.hidden_now) ? 'crit' : 'plain'} />
           <Tile label="For review" value={count(Number(t.review))} sub="unsure — never closed on a hunch" />
           <Tile label="With a successor" value={count(Number(t.with_successor))} sub="Now: …" />

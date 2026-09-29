@@ -153,8 +153,10 @@ export type ClosedExample = {
 };
 export type ClosedReport = {
   running: { id: string; startedAt: string } | null;
+  /** Closures only; the reasons sum to it, and the report says whether they do. */
+  closedTotal?: number; byReasonSum?: number; byReasonAgrees?: boolean; unconfirmedTotal?: number; reviewTotal?: number;
   check: { id: string; state: string; started_at: string; finished_at: string | null; counts: Record<string, unknown>; error: string | null } | null;
-  totals: { would_hide: number; would_hide_closed: number; would_hide_unconfirmed: number; hidden_now: number; review: number; with_successor: number; history?: number; rows: number };
+  totals: { would_hide: number; would_hide_closed: number; unconfirmed: number; hidden_now: number; review: number; with_successor: number; history?: number; rows: number };
   byStatus: { status: OpenStatusValue; confirmed: boolean; applied: boolean; n: number }[];
   byReason: { hidden_as: string; source: string; reason: string; n: number }[];
   bySource: { source: string; status: OpenStatusValue; n: number }[];

@@ -226,7 +226,8 @@ test('confirmation: a Google id, a map match, a website or a census sighting —
 test('hides: nothing hides until applied', () => {
   assert.equal(S.hides({ status: 'permanently_closed', confirmed: true, applied: false }), false);
   assert.equal(S.hides({ status: 'permanently_closed', confirmed: true, applied: true }), true);
-  assert.equal(S.hides({ status: 'unknown', confirmed: false, applied: true }), true);
+  // Unconfirmed never hides (owner, 29 Sep 2026): only a closure does.
+  assert.equal(S.hides({ status: 'unknown', confirmed: false, applied: true }), false);
   assert.equal(S.hides({ status: 'open', confirmed: true, applied: true }), false);
 });
 
@@ -284,22 +285,25 @@ test('the check over the Windsor fixture: closed with a successor, unconfirmed f
   assert.deepEqual(before, ['Hidden Folly', 'Legoland Windsor', 'Windsor Safari Park']);
 
   const rep = await repo.report();
-  assert.equal(rep.totals.would_hide, 2);
+  assert.equal(rep.totals.would_hide, 1, 'the closure only: an unconfirmed place is not hidden');
+  assert.equal(rep.closedTotal, 1);
+  assert.equal(rep.byReasonAgrees, true);
+  assert.ok(rep.unconfirmedTotal >= 1, 'counted in its own section');
   assert.equal(rep.totals.hidden_now, 0);
   assert.equal(rep.examples[0].name, 'Windsor Safari Park', 'the case that started it leads the examples');
   assert.equal(rep.examples[0].successor.name, 'Legoland Windsor');
 
   const applied = await repo.applyProposed({ by: 'test' });
-  assert.equal(applied.applied, 2);
-  const after = (await library.publishedFor(REGION)).map((r) => r.name);
-  assert.deepEqual(after, ['Legoland Windsor']);
+  assert.equal(applied.applied, 1);
+  const after = (await library.publishedFor(REGION)).map((r) => r.name).sort();
+  assert.deepEqual(after, ['Hidden Folly', 'Legoland Windsor'], 'unconfirmed stays visible; only the closure hides');
   const near = (await library.publishedNear({ lat: 51.46, lng: -0.65, km: 10 })).map((r) => r.name);
   assert.ok(near.includes('Legoland Windsor'));
   assert.ok(!near.includes('Windsor Safari Park'));
-  assert.ok(!near.includes('Hidden Folly'));
+  assert.ok(near.includes('Hidden Folly'));
   await library.refreshRegionCounts(REGION);
   const { rows: [reg] } = await query(`select published_count from regions where slug = $1`, [REGION]);
-  assert.equal(Number(reg.published_count), 1);
+  assert.equal(Number(reg.published_count), 2);
 
   // A re-harvest that brings Windsor Safari Park back as a new row is still closed.
   await query(`insert into regions (slug, name, nation, kind) values ('c57-surrey', 'Surrey (C57)', 'England', 'county') on conflict (slug) do nothing`);
@@ -691,4 +695,108 @@ test('an atlas row known to the open map only through the matching pass is hidde
 test('the closed mark carries the status, so an unconfirmed place reads as that and not as closed', async () => {
   const brief = repo.closedBrief({ hidden: true, status: 'unknown', confirmed: false, successor: null });
   assert.deepEqual(brief, { status: 'unknown', confirmed: false, successor: null });
+});
+
+// ---------------------------------------------------------------------------
+// round three: the owner's decisions after the second dry run (29 Sep 2026)
+// ---------------------------------------------------------------------------
+
+test('Deepdale and Vicarage Road: a category naming a former use asks a person, never closes', () => {
+  const deepdale = S.wikipediaVerdict({
+    text: 'Deepdale is a football stadium in the Deepdale area of Preston, England that is the home ground of Preston North End.',
+    name: 'Deepdale', categories: ['Defunct rugby league venues in England', 'Football venues in England'],
+  });
+  assert.equal(deepdale.status, 'unknown');
+  assert.equal(deepdale.review, true);
+  const vicarage = S.wikipediaVerdict({
+    text: 'Vicarage Road is a stadium in Watford, England, and is the home stadium of Championship club Watford.',
+    name: 'Vicarage Road', categories: ['Defunct greyhound racing venues in London', 'Defunct rugby league venues in England'],
+  });
+  assert.equal(vicarage.status, 'unknown');
+  assert.equal(vicarage.review, true);
+  assert.equal(S.categoryIsFormerUse('Former churches in Leeds'), true);
+  assert.equal(S.categoryIsFormerUse('Defunct tourist attractions in England'), false);
+});
+
+test('Bristol Zoo stays closed: the place itself ceased; a current source saying open sends it to a person', () => {
+  const zoo = S.wikipediaVerdict({
+    text: 'Bristol Zoo was a zoo in the city of Bristol in South West England.',
+    name: 'Bristol Zoo', categories: ['2022 disestablishments in England', 'Defunct tourist attractions in England', 'Zoos disestablished in the 2020s'],
+  });
+  assert.equal(zoo.status, 'permanently_closed');
+  assert.equal(S.combine([zoo]).status, 'permanently_closed');
+  // …but an open-map element still tagged as a zoo, or Google operational, is a current word against it.
+  const mapSaysOpen = S.combine([zoo, S.osmVerdict({ tourism: 'zoo', name: 'Bristol Zoo' })]);
+  assert.equal(mapSaysOpen.status, 'unknown');
+  assert.equal(mapSaysOpen.review, true);
+  assert.equal(S.combine([zoo, S.googleVerdict('OPERATIONAL')]).status, 'open');
+});
+
+test('Geevor, Bitton and Hengoed: a mine, a station and a viaduct are heritage, and their closures are history', () => {
+  // Geevor Tin Mine: P3999 1991, now a museum.
+  const geevorSite = S.heritageOf({ kinds: ['Q115154402', 'Q819426', 'Q820477'] });
+  assert.equal(geevorSite.heritage, true);
+  const geevor = S.wikidataVerdict(entity('Q3314843', { P31: ['Q115154402', 'Q819426', 'Q820477'].map((k) => claim(snak(k))), P3999: [claim(time(1991))] }), { today: TODAY, site: geevorSite });
+  assert.equal(geevor.status, 'unknown');
+  assert.equal(geevor.history, true);
+  // Bitton railway station: P5817 decommissioned — a heritage railway's station.
+  const bittonSite = S.heritageOf({ kinds: ['Q55488'], subcategory: 'heritage-railways' });
+  const bitton = S.wikidataVerdict(entity('Q4919146', { P31: [claim(snak('Q55488'))], P5817: [claim(snak('Q11639308'))] }), { today: TODAY, site: bittonSite });
+  assert.equal(bitton.status, 'unknown');
+  assert.equal(bitton.history, true);
+  // Hengoed Viaduct: P5817 decommissioned, filed as a footbridge now.
+  const hengoedSite = S.heritageOf({ kinds: ['Q1068842'] });
+  const hengoed = S.wikidataVerdict(entity('Q17740151', { P31: [claim(snak('Q1068842'))], P5817: [claim(snak('Q11639308'))] }), { today: TODAY, site: hengoedSite });
+  assert.equal(hengoed.status, 'unknown');
+  assert.equal(hengoed.history, true);
+  // Our drawers count too.
+  assert.equal(S.heritageOf({ subcategory: 'heritage-railways' }).heritage, true);
+  assert.equal(S.heritageOf({ kinds: ['Q999'], roots: ['Q181348'] }).heritage, true, 'a kind descending from viaduct');
+});
+
+test('Wikidata links a place to something current: its OSM relation, way or node id, and its official website', () => {
+  const val = (v) => ({ snaktype: 'value', datavalue: { value: v } });
+  assert.deepEqual(S.wikidataOsmRef({ claims: { P402: [claim(val('9976570'))] } }), { ref: 'relation/9976570', how: 'wikidata_p402' });
+  assert.deepEqual(S.wikidataOsmRef({ claims: { P10689: [claim(val('33790963'))] } }), { ref: 'way/33790963', how: 'wikidata_p10689' });
+  assert.deepEqual(S.wikidataOsmRef({ claims: { P11693: [claim(val('1924136691'))] } }), { ref: 'node/1924136691', how: 'wikidata_p11693' });
+  assert.equal(S.wikidataOsmRef({ claims: {} }), null);
+  assert.equal(S.wikidataWebsite({ claims: { P856: [claim(val('https://geevor.com/'))] } }), 'https://geevor.com/');
+  assert.equal(S.wikidataWebsite({ claims: { P856: [claim(val('not a url'))] } }), null);
+});
+
+test('the check confirms through Wikidata\'s OSM id and website, and records which; unconfirmed is counted, not hidden', async () => {
+  const { safari, lonely } = await fixture();
+  await query(`delete from atlas_osm_matches`);
+  const val = (v) => ({ snaktype: 'value', datavalue: { value: v } });
+  const more = new Map(claims);
+  more.set('Q900001', entity('Q900001', { P31: [claim(snak('Q622852'))], P402: [claim(val('555777'))] }));
+  more.set('Q8024695', entity('Q8024695', { P31: [claim(snak('Q1711697'))], P576: [claim(time(1992))], P856: [claim(val('https://old.example/'))] }));
+  const out = await runClosedCheck({
+    by: 'test', today: TODAY, near: async () => [], superclasses: async () => new Map(),
+    fetchClaims: async (ids) => new Map(ids.filter((q) => more.has(q)).map((q) => [q, more.get(q)])),
+  });
+  const { rows: [m] } = await query(`select osm_ref, how from atlas_osm_matches where attraction_id = $1`, [lonely]);
+  assert.deepEqual([m.osm_ref, m.how], ['relation/555777', 'wikidata_p402']);
+  assert.ok(out.confirmedBy.osm >= 1);
+  const windsor = await repo.statusFor(`atlas:${safari}`);
+  assert.equal(windsor.confirmed, true);
+  assert.equal(windsor.confirmedBy, 'website', 'P856 is the venue website the rule accepts');
+  assert.equal(windsor.status, 'permanently_closed');
+
+  const rep = await repo.report();
+  assert.equal(rep.byReasonSum, rep.closedTotal, 'every closed place is in exactly one reason');
+  assert.equal(rep.byReasonAgrees, true);
+  assert.ok(rep.byReason.every((r) => ['permanently_closed', 'temporarily_closed'].includes(r.hidden_as)), 'unconfirmed is not a reason to hide');
+  await query(`delete from atlas_osm_matches`);
+});
+
+test('an applied unconfirmed place is shown and unmarked: only a closure hides', async () => {
+  const ref = 'google:c57-unconfirmed-applied';
+  await repo.propose({ ref, status: 'unknown', confirmed: false, source: null, reason: null, evidence: null, applied: true, appliedBy: 'test' });
+  assert.equal((await repo.hiddenAmong([ref])).size, 0);
+  const { rows } = await query(`select 1 from unnest($1::text[]) r where ${repo.SHOWN_REF('r')}`, [[ref]]);
+  assert.equal(rows.length, 1);
+  assert.equal(repo.closedBrief(await repo.statusFor(ref)), null, 'no "Closed" or "Not confirmed open" on a family screen');
+  const trips = await import('../src/routes/trips.js');
+  await trips.refuseClosed(ref);
 });

@@ -712,7 +712,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                 {closedAs ? (
                   <View style={{ gap: 2 }}>
                     <Text style={styles.closedWord}>
-                      {closedAs.status === 'permanently_closed' ? 'Closed' : closedAs.status === 'temporarily_closed' ? 'Temporarily closed' : 'Not confirmed open'}
+                      {closedAs.status === 'temporarily_closed' ? 'Temporarily closed' : 'Closed'}
                     </Text>
                     {closedAs.successor?.name ? (
                       closedAs.successor.ref && router ? (

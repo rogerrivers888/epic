@@ -17,7 +17,12 @@ import { hides } from '../domain/openStatus.js';
 const on = (client) => (client ? (text, params) => client.query(text, params) : query);
 
 /** A stored row that keeps its place away from families. Alias `s`. */
-export const HIDING = `s.applied and (s.status in ('temporarily_closed', 'permanently_closed') or not s.confirmed)`;
+//
+// Only positive evidence of closure hides a place (owner, 29 Sep 2026: "Drop
+// 'unconfirmed hides a place'. Unconfirmed places stay visible to families;
+// mark them 'unconfirmed' in the back office"). `confirmed` is still kept and
+// counted; it no longer decides anything a family sees.
+export const HIDING = `s.applied and s.status in ('temporarily_closed', 'permanently_closed')`;
 
 /**
  * Every ref a hidden place goes by (Codex, 29 Sep 2026: a closed atlas row
@@ -196,13 +201,13 @@ export async function statusesFor(refs) {
  * Write what a check found.
  *
  * `applied` survives only when the new row hides no more than the old one
- * did: a place that comes to be hidden (newly closed, newly unconfirmed) waits
+ * did: a place that comes to be hidden (newly closed) waits
  * for a person again; a place that comes back needs nobody's OK. A person's
  * own row is never overwritten by a check.
  */
 export async function propose(row, { client = null, checkId = null } = {}) {
-  const hideNew = `(excluded.status in ('temporarily_closed', 'permanently_closed') or not excluded.confirmed)`;
-  const hideOld = `(place_status.status in ('temporarily_closed', 'permanently_closed') or not place_status.confirmed)`;
+  const hideNew = `(excluded.status in ('temporarily_closed', 'permanently_closed'))`;
+  const hideOld = `(place_status.status in ('temporarily_closed', 'permanently_closed'))`;
   const same = `place_status.status = excluded.status and place_status.confirmed = excluded.confirmed`;
   await on(client)(
     `insert into place_status (venue_ref, wikidata_id, status, confirmed, confirmed_by, reason, source, evidence,
@@ -243,22 +248,22 @@ export async function setByPerson(ref, { status, reason = null, successorRef = n
 }
 
 /**
- * The owner's OK: every proposed row that would hide becomes applied. A row
- * flagged for review is `unknown` — never closed on a hunch — so it is applied
- * only for being unconfirmed, if it is.
+ * The owner's OK: every proposed closure becomes applied. A row flagged for
+ * review is `unknown` — never closed on a hunch — and an unconfirmed place is
+ * not hidden at all (owner, 29 Sep 2026), so neither is applied.
  */
 export async function applyProposed({ by, checkId = null } = {}) {
   return withTransaction(async (c) => {
     const { rows } = await c.query(
       `update place_status s set applied = true, applied_at = now(), applied_by = $1
         where not s.applied
-          and (s.status in ('temporarily_closed', 'permanently_closed') or not s.confirmed)
+          and s.status in ('temporarily_closed', 'permanently_closed')
           and ($2::uuid is null or s.check_id = $2)
         returning s.status, s.confirmed`, [by ?? null, checkId]);
     return {
       applied: rows.length,
       closed: rows.filter((r) => r.status !== 'unknown' && r.status !== 'open').length,
-      unconfirmed: rows.filter((r) => !r.confirmed && (r.status === 'unknown' || r.status === 'open')).length,
+      unconfirmed: 0, // never hides now (owner, 29 Sep 2026)
     };
   });
 }
@@ -289,10 +294,9 @@ export async function latestCheck() {
  * confirmed against unconfirmed, and twenty examples — Windsor Safari Park
  * first when it is among them, since it is the case that started this.
  */
-export async function report({ examples = 20 } = {}) {
-  // A row flagged for review is `unknown`, so it would hide only if nothing
-  // current confirms it — the review is about closure, not existence.
-  const WOULD = `(s.status in ('temporarily_closed', 'permanently_closed') or not s.confirmed)`;
+export async function report({ examples = 20, allClosed = false } = {}) {
+  // Only a closure hides (owner, 29 Sep 2026); unconfirmed has its own section.
+  const WOULD = `s.status in ('temporarily_closed', 'permanently_closed')`;
   const CLOSED_NOW = `s.status in ('temporarily_closed', 'permanently_closed')`;
   // What an unconfirmed place is filed as: our drawer where it has one, else the atlas's own word.
   const FILED = `coalesce(sub.label, a.category, 'unfiled')`;
@@ -306,16 +310,16 @@ export async function report({ examples = 20 } = {}) {
              left join regions reg on reg.slug = a.region_slug`;
   const [byStatus, byReason, bySource, totals, sample, reviewSample, unconfirmedByCategory, unconfirmedSample, reviewByReason, matchCount] = await Promise.all([
     query(`select s.status, s.confirmed, s.applied, count(*)::int as n from place_status s group by 1, 2, 3 order by 1, 2, 3`),
-    query(`select case when s.status in ('temporarily_closed','permanently_closed') then s.status else 'unconfirmed' end as hidden_as,
+    query(`select s.status as hidden_as,
                   coalesce(s.source, 'none') as source,
                   coalesce(regexp_replace(s.reason, '\\d{4}', 'YYYY', 'g'), 'no current source') as reason,
                   count(*)::int as n
              from place_status s where ${WOULD}
-            group by 1, 2, 3 order by n desc limit 60`),
+            group by 1, 2, 3 order by n desc`),
     query(`select coalesce(s.source, 'none') as source, s.status, count(*)::int as n from place_status s group by 1, 2 order by 1, 2`),
     query(`select count(*) filter (where ${WOULD})::int as would_hide,
                   count(*) filter (where ${WOULD} and s.status in ('temporarily_closed','permanently_closed'))::int as would_hide_closed,
-                  count(*) filter (where ${WOULD} and s.status not in ('temporarily_closed','permanently_closed'))::int as would_hide_unconfirmed,
+                  count(*) filter (where not s.confirmed and not (${WOULD}))::int as unconfirmed,
                   count(*) filter (where ${HIDING})::int as hidden_now,
                   count(*) filter (where s.review)::int as review,
                   count(*) filter (where s.successor_ref is not null)::int as with_successor,
@@ -327,8 +331,9 @@ export async function report({ examples = 20 } = {}) {
                   coalesce(pr.name, a.name) as name, coalesce(reg.name, pr.postcode) as place_where, ${FILED} as filed
              from place_status s ${PLACE_JOIN}
             where ${CLOSED_NOW}
-            order by (coalesce(pr.name, a.name) = 'Windsor Safari Park') is true desc, md5(s.venue_ref)
-            limit $1`, [examples]),
+            order by (coalesce(pr.name, a.name) = 'Windsor Safari Park') is true desc,
+                     ${allClosed ? `s.source, regexp_replace(s.reason, '\\d{4}', 'YYYY', 'g'), coalesce(pr.name, a.name)` : 'md5(s.venue_ref)'}
+            limit $1`, [allClosed ? 5000 : examples]),
     query(`select s.*, coalesce(pr.name, a.name) as name
              from place_status s
              left join place_records pr on pr.venue_ref = s.venue_ref
@@ -355,8 +360,18 @@ export async function report({ examples = 20 } = {}) {
     successor: r.successor_ref || r.successor_name ? { ref: r.successor_open_ref ?? r.successor_ref, name: r.successor_label ?? r.successor_name } : null,
     applied: r.applied, filed: r.filed ?? null,
   });
+  // The closed total and its reasons must agree to the place (owner, 29 Sep
+  // 2026: "show me the closed list properly"): every closed row is in exactly
+  // one reason, so the sum is checked here rather than trusted.
+  const closedTotal = Number(totals.rows[0].would_hide);
+  const byReasonSum = byReason.rows.reduce((n, r) => n + Number(r.n), 0);
   return {
     check: await latestCheck(),
+    closedTotal,
+    byReasonSum,
+    byReasonAgrees: byReasonSum === closedTotal,
+    unconfirmedTotal: Number(totals.rows[0].unconfirmed),
+    reviewTotal: Number(totals.rows[0].review),
     totals: totals.rows[0],
     byStatus: byStatus.rows,
     byReason: byReason.rows,

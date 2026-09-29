@@ -21,7 +21,7 @@
 
 import { query } from '../db.js';
 import {
-  combine, confirmation, googleVerdict, heritageOf, osmVerdict, successorFromText, wikidataVerdict, wikipediaVerdict,
+  combine, confirmation, googleVerdict, heritageOf, osmVerdict, successorFromText, wikidataOsmRef, wikidataVerdict, wikidataWebsite, wikipediaVerdict,
 } from '../domain/openStatus.js';
 import { metresBetween, normaliseName } from '../domain/matchFence.js';
 import { nearByName } from './osmExtract.js';
@@ -240,7 +240,7 @@ export async function runClosedCheck({ by = null, dryRun = true, fetchClaims = e
   const counts = {
     atlas: 0, records: 0, osmMarked: 0, wikidataAsked: 0, wikidataRead: 0, wikidataUnread: 0,
     written: 0, cleared: 0, byStatus: {}, unconfirmed: 0, review: 0, successors: 0,
-    osmLooked: 0, osmMatched: 0, heritage: 0, history: 0, churchReview: 0,
+    osmLooked: 0, osmMatched: 0, heritage: 0, history: 0, churchReview: 0, confirmedBy: {},
   };
   try {
     const [atlas, records, marked, existing, roots, listed] = await Promise.all([
@@ -251,12 +251,6 @@ export async function runClosedCheck({ by = null, dryRun = true, fetchClaims = e
     counts.atlas = atlas.length; counts.records = records.length; counts.osmMarked = marked.length;
     const held = new Map(existing.map((r) => [r.venue_ref, r]));
 
-    // The matching pass first, so what it finds confirms and is read.
-    const unlinked = atlas.filter((a) => a.source === 'wikidata' && !a.any_osm && !a.matched_osm && !a.venue_ref && !a.any_website);
-    counts.osmLooked = unlinked.length;
-    const matched = await matchAtlasToOpenMap(unlinked, { checkId, near });
-    counts.osmMatched = matched.size;
-    for (const a of atlas) if (matched.has(a.id)) a.matched_osm = matched.get(a.id).ref;
 
     // Wikidata, fifty at a time. A failed batch is unread, not "nothing found".
     const qids = [...new Set([...atlas, ...records].map((r) => r.wikidata_id).filter((q) => /^Q\d+$/.test(String(q ?? ''))))];
@@ -276,6 +270,36 @@ export async function runClosedCheck({ by = null, dryRun = true, fetchClaims = e
       }
       if (pause) await new Promise((r) => setTimeout(r, pause));
     }
+
+    // What Wikidata itself says links the item to something current (owner,
+    // 29 Sep 2026): its OpenStreetMap relation, node or way id (P402, P11693,
+    // P10689 — ids checked against the live API that day) and its official
+    // website (P856). A Wikidata OSM id is written as the atlas row's
+    // open-map match, `how` naming the property, so which one confirmed the
+    // place is on record; a website is `confirmed_by = 'website'`.
+    for (const a of atlas) {
+      const e = a.wikidata_id ? claims.get(a.wikidata_id) : null;
+      if (!e) continue;
+      a.wikidata_website = wikidataWebsite(e);
+      const link = wikidataOsmRef(e);
+      if (link && !a.any_osm && !a.matched_osm) {
+        await query(
+          `insert into atlas_osm_matches (attraction_id, osm_ref, osm_name, metres, how, check_id)
+           values ($1, $2, null, 0, $3, $4)
+           on conflict (attraction_id) do update set osm_ref = excluded.osm_ref, metres = 0, how = excluded.how, check_id = excluded.check_id, matched_at = now()`,
+          [a.id, link.ref, link.how, checkId]);
+        a.matched_osm = link.ref;
+        counts.wikidataOsm = (counts.wikidataOsm ?? 0) + 1;
+      }
+    }
+
+    // Then the matching pass, for what neither the row nor Wikidata links:
+    // what it finds confirms and is read.
+    const unlinked = atlas.filter((a) => a.source === 'wikidata' && !a.any_osm && !a.matched_osm && !a.venue_ref && !a.any_website && !a.wikidata_website);
+    counts.osmLooked = unlinked.length;
+    const matched = await matchAtlasToOpenMap(unlinked, { checkId, near });
+    counts.osmMatched = matched.size;
+    for (const a of atlas) if (matched.has(a.id)) a.matched_osm = matched.get(a.id).ref;
 
     // Heritage by the P279 chain, for kinds on items that carry a closure and
     // that our own walk never filed (a place record's kinds, mostly).
@@ -369,8 +393,9 @@ export async function runClosedCheck({ by = null, dryRun = true, fetchClaims = e
       // Only an atlas place from Wikidata/Wikipedia can be unconfirmed; a place
       // a sweep found through Google, the map or a household is current by birth.
       const confirm = a.source === 'wikidata'
-        ? confirmation({ ref: a.venue_ref, googleId: a.google_id, osmRef: osm, website: a.any_website, censused: a.censused })
+        ? confirmation({ ref: a.venue_ref, googleId: a.google_id, osmRef: osm, website: a.any_website ?? a.wikidata_website, censused: a.censused })
         : { confirmed: true, by: a.source === 'google' ? 'google' : a.source === 'osm' ? 'osm' : null };
+      if (confirm.by) counts.confirmedBy[confirm.by] = (counts.confirmedBy[confirm.by] ?? 0) + 1;
       await settle(a, findings, confirm, { wikidataId: a.wikidata_id ?? null, text: a.summary, site });
     }
     for (const r of records) {

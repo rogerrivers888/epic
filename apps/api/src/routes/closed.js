@@ -1,6 +1,6 @@
 // Closed places (decision C57, owner, 29 Sep 2026).
 //
-//   GET  /api/admin/closed/report          what the check would hide: by status, by reason, confirmed or not, twenty examples
+//   GET  /api/admin/closed/report[?closed=all]  what the check would hide (closures only; the reasons sum to the total), unconfirmed and review in their own sections
 //   POST /api/admin/closed/check           run the check over everything held (free sources only); writes proposals, hides nothing
 //   POST /api/admin/closed/apply           the owner's OK: proposals become applied — a signed-in device only
 //   GET  /api/admin/closed/place?ref=      one place's status, with reason, source and evidence
@@ -26,7 +26,7 @@ const actorOf = (req) => req.account?.email ?? 'the owner (passcode)';
 router.get('/report', async (req, res, next) => {
   try {
     const running = await statusRepo.runningCheck();
-    res.json({ running: running ? { id: running.id, startedAt: running.started_at } : null, ...(await statusRepo.report({ examples: 20 })) });
+    res.json({ running: running ? { id: running.id, startedAt: running.started_at } : null, ...(await statusRepo.report({ examples: 20, allClosed: req.query.closed === 'all' })) });
   } catch (err) { next(err); }
 });
 

@@ -54,7 +54,7 @@ export function OpenStatusFact({ refId, atlasId, wikidataId }: { refId?: string 
                     {!row.confirmed ? <Pill label="Unconfirmed" tone="warn" /> : null}
                     {row.review ? <Pill label="For review" tone="accent" /> : null}
                     {row.hidden ? <Pill label="Hidden from families" tone="crit" />
-                      : (row.status !== 'open' && row.status !== 'unknown') || !row.confirmed ? <Pill label="Not applied" tone="plain" /> : null}
+                      : row.status !== 'open' && row.status !== 'unknown' ? <Pill label="Not applied" tone="plain" /> : null}
                   </Row>
                   <Text style={type.tiny}>
                     {[row.reason, row.source ? SOURCE_WORD[row.source] ?? row.source : null, row.confirmedBy ? `confirmed by ${row.confirmedBy}` : null].filter(Boolean).join(' · ')}
