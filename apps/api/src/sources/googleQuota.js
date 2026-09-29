@@ -7,7 +7,7 @@
  * quota: when the limit shows 160,000, raise the census to 150,000/day
  * automatically."
  *
- * Asked of the Cloud Quotas API with the billing export's key, read-only. That
+ * Asked of the Cloud Quotas API with the billing export's key, which only reads. That
  * key was made for BigQuery, and reading a project's quotas needs its own
  * grant (Cloud Quotas Viewer on the project); without it Google refuses, and
  * this says it cannot tell — never a number — so the census stays where it is.
@@ -15,7 +15,10 @@
 
 import { accessToken, configured, PROJECT } from './billingExport.js';
 
-const READ_ONLY = 'https://www.googleapis.com/auth/cloud-platform.read-only';
+// The scope Cloud Quotas accepts; it will not take the read-only one (Codex,
+// 29 Sep 2026). What keeps this read-only is the key's grant on the project,
+// Cloud Quotas Viewer, not the scope.
+const SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 const SERVICE = 'places.googleapis.com';
 const HOUR = 3600_000;
 
@@ -37,7 +40,7 @@ export const forget = () => { cached = null; };
 
 async function read(fetcher) {
   if (!configured()) return { speaks: false, why: 'no Google key on this server (GCP_BILLING_SA_JSON)' };
-  const token = await accessToken(fetcher, READ_ONLY);
+  const token = await accessToken(fetcher, SCOPE);
   const infos = [];
   let page = '';
   for (let i = 0; i < 20; i += 1) {
