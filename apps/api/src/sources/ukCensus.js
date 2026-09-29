@@ -157,7 +157,17 @@ export async function decide(now = new Date()) {
       `select count(*)::int as failed from census_run_tiles m join census_tiles t on t.grid_key = m.grid_key
         where m.run_id = $1 and t.state <> 'done'`, [latest.id])
     : { rows: [{ failed: 0 }] };
-  if (latest.state === 'done' && !failed) return { action: 'complete', runs, latest, bills };
+  // Complete is said once and kept: the squares a finished UK leaves behind
+  // are reused by later censuses, and reading them again would un-finish it
+  // and start another whole-UK day (Codex, 29 Sep 2026).
+  const { rows: [finished] } = await query(`select value from bo_settings where key = 'census:uk-complete'`);
+  if (finished) return { action: 'complete', runs, latest, bills };
+  if (latest.state === 'done' && !failed) {
+    await query(
+      `insert into bo_settings (key, value, updated_by) values ('census:uk-complete', $1, 'the UK census') on conflict (key) do nothing`,
+      [JSON.stringify({ runId: latest.id, at: new Date(now).toISOString() })]);
+    return { action: 'complete', runs, latest, bills };
+  }
   if (['running', 'waiting'].includes(latest.state)) {
     // Still going after its quota day turned — a late start, an outage — it is
     // not today's run: it is brought to its ceiling where it stands, pauses

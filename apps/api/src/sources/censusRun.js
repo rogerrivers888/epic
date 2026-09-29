@@ -313,8 +313,8 @@ export async function startRun({
   const { rows: busy } = await query(
     `select id, label, state from census_runs
       where state in ('running', 'waiting')
-         or (state = 'paused' and problem like 'built paused%' and started_by = $1 and coalesce(last_seen_at, started_at) > now() - interval '5 minutes')
-      limit 1`, [ONE_DAY_RUNS]);
+         or (state = 'paused' and problem like 'built paused%' and coalesce(last_seen_at, started_at) > now() - interval '5 minutes')
+      limit 1`);
   if (busy.length) throw busyError(busy[0]);
   const tiles = given?.length ? given : await planTiles({ areas, outcodes, dLat, dLng, padKm });
   if (!tiles.length) throw Object.assign(new Error('no postcode sectors in those areas'), { status: 400 });
@@ -335,13 +335,13 @@ export async function startRun({
     // (Codex, 21 Sep 2026).
     // On the lock's own connection: the pool may have nothing else free.
     const { rows: going } = await db.query(
-      // And a day's run of the UK census while its plan is being written: it is
-      // paused until the plan is whole, and a start in that gap would have two
-      // planners rewriting the same squares (Codex, 29 Sep 2026).
+      // And any run whose plan is still being written — built paused, its
+      // heartbeat live — the UK census's or a person's: a start in that gap
+      // would have two planners rewriting the same squares (Codex, 29 Sep 2026).
       `select id, label, state from census_runs
         where state in ('running', 'waiting')
-           or (state = 'paused' and problem like 'built paused%' and started_by = $1 and coalesce(last_seen_at, started_at) > now() - interval '5 minutes')
-        limit 1`, [ONE_DAY_RUNS]);
+           or (state = 'paused' and problem like 'built paused%' and coalesce(last_seen_at, started_at) > now() - interval '5 minutes')
+        limit 1`);
     if (going.length) throw busyError(going[0]);
     const { rows: [row] } = await db.query(
       `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, started_by, tiles_total, daily_cap, day, day_requests, started_session_id,
@@ -479,8 +479,8 @@ export async function resume(id, { sessionId = null } = {}) {
       `select id, label, state from census_runs
         where id <> $1
           and (state = 'running'
-               or (state = 'paused' and problem like 'built paused%' and started_by = $2 and coalesce(last_seen_at, started_at) > now() - interval '5 minutes'))
-        limit 1`, [id, ONE_DAY_RUNS]);
+               or (state = 'paused' and problem like 'built paused%' and coalesce(last_seen_at, started_at) > now() - interval '5 minutes'))
+        limit 1`, [id]);
     if (going.length) {
       throw Object.assign(new Error(going[0].state === 'paused'
         ? `“${going[0].label}” is being planned; try again in a few minutes`

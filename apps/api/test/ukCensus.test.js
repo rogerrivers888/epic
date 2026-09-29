@@ -17,7 +17,7 @@ test.after(() => pool.end());
 
 const DAY1 = '2026-09-28T17:39:00Z';
 const clean = async () => {
-  await query(`delete from bo_settings where key like 'census:uk-day:%'`);
+  await query(`delete from bo_settings where key like 'census:uk-day:%' or key = 'census:uk-complete'`);
   await query(`delete from census_runs where label like 'The rest of the UK — day %'`);
   await query(`delete from billing_days where invoice_month = '202609' and sku like 'test %'`);
   await query(`delete from api_sessions where label like 'census: The rest of the UK — day %'`);
@@ -498,4 +498,34 @@ test('a stale square being asked again is not done in a day\'s figures', async (
   await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'uktest/stale')`, [one.id]);
   const st = await uk.status(new Date('2026-09-28T23:00:00Z'));
   assert.deepEqual([st.days[0].districts, st.days[0].tilesLeft], [0, 1]);
+});
+
+test('the UK once complete stays complete, whatever later censuses do to its squares', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from census_run_tiles where grid_key = 'uktest/whole'`);
+    await query(`delete from census_tiles where grid_key = 'uktest/whole'`);
+    await clean();
+  });
+  const run = await dayOne({ state: 'done', problem: null });
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at)
+     values ('uktest/whole', 48, -6, 48.08, -5.88, array['ZZ6Q'], 'done', now()) on conflict (grid_key) do update set state = 'done'`);
+  await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'uktest/whole')`, [run.id]);
+  const r = recorder();
+  assert.equal((await uk.tick({ now: new Date('2026-10-20T08:00:00Z'), start: r.start })).action, 'complete');
+  // A later census takes the square again.
+  await query(`update census_tiles set state = 'todo' where grid_key = 'uktest/whole'`);
+  assert.equal((await uk.tick({ now: new Date('2026-11-20T08:00:00Z'), start: r.start })).action, 'complete');
+  assert.equal(r.calls.length, 0);
+});
+
+test('a person\'s plan being written holds off the census too', async (t) => {
+  await clean();
+  t.after(async () => { await query(`delete from census_runs where label = 'test planning by hand'`); await clean(); });
+  const { startRun } = await import('../src/sources/censusRun.js');
+  await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state, problem, started_by, last_seen_at)
+     values ('test planning by hand', array['ZZ'], 0.08, 0.12, 10, 5, 30, 'paused', 'built paused; resume to start', 'the owner (passcode)', now())`);
+  await assert.rejects(() => startRun({ label: 'The rest of the UK — day 9', outcodes: ['SL5'], padKm: 0 }), /is being planned/);
 });
