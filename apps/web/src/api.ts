@@ -3032,7 +3032,7 @@ export const api = {
   decideIdCheck: (id: string, decision: 'pass' | 'fail', note: string | null) =>
     post<{ check: OpenIdCheck; stage: string | null }>(`/api/admin/open/checks/${id}/decide`, { decision, note }),
   /** One test message from the back office, logged on the Mail screen like any other. */
-  adminMailTest: (to: string) => post<{ sent: boolean; message?: string }>('/api/admin/mail/test', { to }),
+  adminMailTest: (to: string) => post<{ sent: boolean; message?: string; logged?: boolean; logError?: string }>('/api/admin/mail/test', { to }),
   adminMail: (days: number, status?: string | null) => request<AdminMail>(`/api/admin/mail?days=${days}${status ? `&status=${encodeURIComponent(status)}` : ''}`),
   decideOffer: (id: string, decision: 'live' | 'changes', note: string | null, checklist?: Record<string, string>) => post<{ offer: Experience }>(`/api/admin/hosting/offers/${id}/decide`, { decision, note, checklist }),
   setHostTrust: (id: string, body: { trust?: TrustLevel; checks?: 'running' | 'passed' }) => patch<{ host: OwnHost }>(`/api/admin/hosting/hosts/${id}`, body),

@@ -38,7 +38,9 @@ export function Mail({ canSend = false }: { canSend?: boolean } = {}) {
     setTesting(true); setTested(null);
     try {
       const out = await api.adminMailTest(testTo.trim());
-      setTested(out.sent ? `Sent to ${testTo.trim()}` : (out.message ?? 'Not sent'));
+      setTested(!out.sent ? (out.message ?? 'Not sent')
+        : out.logged === false ? `Sent to ${testTo.trim()}, but not written down here: ${out.logError ?? 'no reason given'}`
+        : `Sent to ${testTo.trim()}`);
     } catch (e: any) { setTested(e.message); } finally { setTesting(false); void load(); }
   }, [testTo, load]);
 
