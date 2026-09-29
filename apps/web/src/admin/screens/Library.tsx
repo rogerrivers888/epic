@@ -33,7 +33,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Linking, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
-import { api, HarvestRun, LibraryAttraction, LibraryVisiting, LibraryVisitingImpact, VisitingPlace, LibraryContributor, LibraryImage, LibraryKind, LibraryOverview, LibraryRegion } from '../../api';
+import { api, ClosedReport, HarvestRun, LibraryAttraction, LibraryVisiting, LibraryVisitingImpact, VisitingPlace, LibraryContributor, LibraryImage, LibraryKind, LibraryOverview, LibraryRegion } from '../../api';
 import { colors, spacing, TARGET, type, BORDER } from '../../theme';
 import { Icon } from '../../components/Icon';
 import { Chip, Row, Wrap } from '../../components/ui';
@@ -44,12 +44,13 @@ import { Reading } from './Reading';
 
 const WIDE = 900;
 
-type Section = 'coverage' | 'attractions' | 'visiting' | 'reading' | 'pictures' | 'uploads' | 'types';
+type Section = 'coverage' | 'attractions' | 'visiting' | 'closed' | 'reading' | 'pictures' | 'uploads' | 'types';
 
 const SECTIONS: { key: Section; label: string; needs?: 'manage' }[] = [
   { key: 'coverage', label: 'Coverage' },
   { key: 'attractions', label: 'Attractions' },
   { key: 'visiting', label: 'Can you visit?' },
+  { key: 'closed', label: 'Closed' },
   { key: 'reading', label: 'Reading' },
   { key: 'pictures', label: 'Pictures' },
   { key: 'uploads', label: 'Uploads' },
@@ -78,7 +79,7 @@ export function Library({ canManage }: { canManage: boolean }) {
   // Which part of the atlas is in the address, so a colleague can be sent the
   // exact page: /admin/library?tab=pictures&region=Somerset.
   const [section, setSection] = useQueryState<Section>(
-    'tab', 'coverage', asOneOf(['coverage', 'attractions', 'visiting', 'reading', 'pictures', 'uploads', 'types'] as const, 'coverage'),
+    'tab', 'coverage', asOneOf(['coverage', 'attractions', 'visiting', 'closed', 'reading', 'pictures', 'uploads', 'types'] as const, 'coverage'),
   );
   const [overview, setOverview] = useState<LibraryOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -152,6 +153,7 @@ export function Library({ canManage }: { canManage: boolean }) {
         <Attractions regions={overview?.coverage ?? []} region={region} onRegion={setRegion} canManage={canManage} wide={wide} />
       ) : null}
       {section === 'visiting' ? <Visiting canManage={canManage} wide={wide} /> : null}
+      {section === 'closed' ? <Closed canManage={canManage} /> : null}
       {section === 'reading' ? <Reading canManage={canManage} /> : null}
       {section === 'pictures' ? <Pictures regions={overview?.coverage ?? []} canManage={canManage} wide={wide} /> : null}
       {section === 'uploads' ? <Uploads canManage={canManage} /> : null}
@@ -751,6 +753,102 @@ function Uploads({ canManage }: { canManage: boolean }) {
  * best-known first — because a place that will never reach a screen is not
  * worth anybody's decision, and the one at the top of this list is.
  */
+// ---------------------------------------------------------------------------
+// closed places (C57)
+// ---------------------------------------------------------------------------
+
+const STATUS_WORD: Record<string, string> = {
+  permanently_closed: 'Permanently closed', temporarily_closed: 'Temporarily closed', unconfirmed: 'Unconfirmed', unknown: 'Unknown', open: 'Open',
+};
+
+/**
+ * The closed check (decision C57, item 4): "Report first — how many would be
+ * hidden, by reason, with 20 examples — and wait for my OK before applying."
+ *
+ * Check runs the free readers over everything held and hides nothing; Apply is
+ * the owner's OK, and only a signed-in device can press it. Both are free: the
+ * check reads Wikidata (keyless), our own open-map copy and the text we hold.
+ */
+function Closed({ canManage }: { canManage: boolean }) {
+  const [data, setData] = useState<ClosedReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<'check' | 'apply' | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    try { setData(await api.closedReport()); setError(null); } catch (e: any) { setError(e.message); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (!data?.running) return;
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
+  }, [data?.running, load]);
+
+  const check = async () => {
+    setBusy('check'); setDone(null);
+    try { await api.closedCheck(); await load(); } catch (e: any) { setError(e.message); } finally { setBusy(null); }
+  };
+  const apply = async () => {
+    setBusy('apply'); setDone(null);
+    try {
+      const r = await api.closedApply(data?.check?.id ?? undefined);
+      setDone(`${plural(r.applied, 'place')} hidden from families`);
+      await load();
+    } catch (e: any) { setError(e.message); } finally { setBusy(null); }
+  };
+
+  const t = data?.totals;
+  const waiting = t ? Number(t.would_hide) - Number(t.hidden_now) : 0;
+  return (
+    <>
+      {error ? <Banner tone="crit">{error}</Banner> : null}
+      {done ? <Banner tone="ok">{done}</Banner> : null}
+      {t ? (
+        <TileRow>
+          <Tile label="Would hide" value={count(Number(t.would_hide))} sub={`${count(Number(t.would_hide_closed))} closed · ${count(Number(t.would_hide_unconfirmed))} unconfirmed`} tone={waiting ? 'warn' : 'plain'} />
+          <Tile label="Hidden now" value={count(Number(t.hidden_now))} sub="applied" tone={Number(t.hidden_now) ? 'crit' : 'plain'} />
+          <Tile label="For review" value={count(Number(t.review))} sub="unsure — never closed on a hunch" />
+          <Tile label="With a successor" value={count(Number(t.with_successor))} sub="Now: …" />
+        </TileRow>
+      ) : null}
+      <Panel
+        title="The check"
+        sub={data?.running ? `Running since ${ago(data.running.startedAt)}`
+          : data?.check ? `Last ${data.check.state} ${ago(data.check.finished_at ?? data.check.started_at)} · free`
+            : 'Never run · free'}
+        right={canManage ? (
+          <Row style={{ gap: spacing.xs, flexWrap: 'wrap' }}>
+            <Button label="Check" icon="refresh" kind="secondary" loading={busy === 'check'} disabled={!!data?.running || !!busy} onPress={check} />
+            <Button label={waiting ? `Apply · hide ${count(waiting)}` : 'Apply'} kind="danger" loading={busy === 'apply'} disabled={!!data?.running || !!busy || !waiting} onPress={apply} />
+          </Row>
+        ) : undefined}
+      >
+        {data?.byReason?.length ? data.byReason.map((r, i) => (
+          <Row key={i} style={styles.closedRow}>
+            <Text style={[type.small, { flex: 1, minWidth: 0 }]} numberOfLines={2}>{`${STATUS_WORD[r.hidden_as] ?? r.hidden_as} · ${r.reason} · ${r.source}`}</Text>
+            <Text style={[type.small, { fontWeight: '800' }]}>{count(r.n)}</Text>
+          </Row>
+        )) : <Text style={type.small}>Nothing would be hidden.</Text>}
+      </Panel>
+      <Panel title="Examples" sub={data ? `${plural(data.examples.length, 'place')}` : undefined} padded={false}>
+        {(data?.examples ?? []).map((x) => (
+          <View key={x.ref} style={styles.closedExample}>
+            <Row style={{ gap: spacing.xs, flexWrap: 'wrap', alignItems: 'center' }}>
+              <Text style={[type.small, { fontWeight: '700' }]}>{x.name ?? x.ref}</Text>
+              {x.where ? <Text style={type.tiny}>{x.where}</Text> : null}
+              <Pill label={STATUS_WORD[x.status === 'unknown' && !x.confirmed ? 'unconfirmed' : x.status] ?? x.status} tone={x.status === 'permanently_closed' ? 'crit' : 'warn'} />
+              {x.applied ? <Pill label="Hidden" tone="crit" /> : null}
+            </Row>
+            <Text style={type.tiny}>{[x.reason, x.source].filter(Boolean).join(' · ')}</Text>
+            {x.evidence ? <Text style={type.tiny} numberOfLines={2}>{x.evidence}</Text> : null}
+            {x.successor?.name ? <Text style={[type.tiny, { fontWeight: '700' }]}>{`Now: ${x.successor.name}`}</Text> : null}
+          </View>
+        ))}
+      </Panel>
+    </>
+  );
+}
+
 function Visiting({ canManage, wide }: { canManage: boolean; wide: boolean }) {
   const [data, setData] = useState<LibraryVisiting | null>(null);
   const [impact, setImpact] = useState<LibraryVisitingImpact | null>(null);
@@ -929,6 +1027,8 @@ function Types({ canManage }: { canManage: boolean }) {
 }
 
 const styles = StyleSheet.create({
+  closedRow: { gap: spacing.sm, alignItems: 'center', paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors.lineSoft },
+  closedExample: { gap: 2, paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderTopWidth: 1, borderTopColor: colors.lineSoft },
   visitRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: colors.lineSoft,

@@ -210,7 +210,7 @@ export async function censusForRing(ring, { mode = 'driving', minutes = 30 } = {
     };
   }
 
-  const inRing = await censusInRing({ cells: ring.band ?? ring.cells ?? [], outcodes });
+  const inRing = await censusInRing({ cells: ring.band ?? ring.cells ?? [], outcodes, shownOnly: true });
   if (ring?.cell) void refreshRing({ cell: ring.cell, mode, minutes }).catch(() => null);
   const unresolved = inRing.unresolved ?? {};
   const partly = byOutcode.partial.length > 0;

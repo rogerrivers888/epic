@@ -275,7 +275,7 @@ shelves.get('/food', requires('view_library'), async (req, res, next) => {
       query: q,
       includeEvents: false,
       deadlineMs: 8000,
-    });
+    }, { shownOnly: false });
     // Only a search that actually asked is billed and logged; a cache hit is free.
     if (fetched) await visitsRepo.recordProviderCall(household.id, sourcesQueried.join('+') || 'none', 'shelves.food', units);
 

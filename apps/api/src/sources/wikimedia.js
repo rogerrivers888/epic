@@ -914,3 +914,22 @@ export async function subclassOf(entity) {
   // filtered away (Codex, 14 Sep 2026).
   return rows.map((r) => ({ qid: qid(r.parent), label: r.parentLabel ?? null })).filter((r) => r.qid);
 }
+
+/**
+ * The claims (and English description) on up to fifty Wikidata items, for the closed check (C57).
+ *
+ * wbgetentities takes fifty ids a call; `paced()` keeps it polite. Returns a
+ * Map of qid → entity, and only for ids the answer actually carried: an id the
+ * answer did not mention is absent, which the caller reads as "could not
+ * speak", never as "no closure".
+ */
+export async function entityClaims(qids) {
+  const ids = [...new Set((qids ?? []).filter((q) => /^Q\d+$/.test(String(q))))].slice(0, 50);
+  const out = new Map();
+  if (!ids.length) return out;
+  const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&props=claims%7Cdescriptions&languages=en&ids=${ids.join('|')}`;
+  const body = await getJson(url);
+  if (!body || typeof body.entities !== 'object' || body.error) throw new Error(`wikidata: ${body?.error?.code ?? 'no entities'}`);
+  for (const [id, e] of Object.entries(body.entities)) if (e && e.claims && !('missing' in e)) out.set(id, e);
+  return out;
+}

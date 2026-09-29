@@ -23,6 +23,7 @@ const MATRIX_MAX = Number(process.env.EPIC_MATRIX_MAX || 60);
 
 // Rows fill while the household is still talking: a smaller, quicker model reads the words so far.
 const PREVIEW_MODEL = process.env.EPIC_PREVIEW_MODEL || 'claude-sonnet-5';
+import { withoutHidden } from '../repositories/placeStatus.js';
 import { searchAllSources, searchCorridor, eventSources, optInFrom, defaultSourceKeys, enabledSources, sourceHasKey, sourceOff, SCREEN_DEADLINE_MS } from '../sources/index.js';
 import { resolvePlace, KNOWN_PLACES } from '../sources/fixtures.js';
 import { geocode, reverseGeocode } from '../sources/geocode.js';
@@ -700,7 +701,9 @@ async function retrieveCorridor({ household, trip, dayTrip, attendees, sessionId
     from: trip.origin_label, to: trip.base_label, mode, minutes: journey.minutes, estimated: journey.estimated !== false,
     stops: [], picked: [], limitMinutes: limit, windowStart: dayTrip.depart_at, windowEnd: dayTrip.return_at, ...extra,
   });
-  const { venues, degraded, sourcesQueried, fetched } = await searchCorridor({ encodedPolyline: polyline, origin, destination, sources, meter });
+  const { venues: along, degraded, sourcesQueried, fetched } = await searchCorridor({ encodedPolyline: polyline, origin, destination, sources, meter });
+  // Closed places, once the owner has applied the check, are not stops (C57).
+  const venues = await withoutHidden(along, (v) => v.venueRef ?? `${v.source}:${v.sourcePlaceId}`);
   if (fetched && sourcesQueried.length) {
     await planSessions.recordSessionCall(household.id, sessionId, sourcesQueried.join('+'), 'plan.corridor', meter).catch(() => null);
   }

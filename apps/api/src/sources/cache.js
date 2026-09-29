@@ -5,6 +5,7 @@
 // database (Technical Constraints: rented content is never stored).
 
 import { searchAllSources, optInFrom } from './index.js';
+import { withoutHidden } from '../repositories/placeStatus.js';
 import { observe } from '../repositories/taxonomyLabels.js';
 import { labelsOf } from '../domain/labels.js';
 
@@ -96,13 +97,19 @@ export const searchOnItsWay = (params) => inFlight.has(searchKey(params));
  * actually asked the sources — that caller logs the provider call; a hit or a
  * joined search logs nothing. `refresh` asks the sources again regardless.
  */
-export async function searchCached(params, { refresh = false, onProgress = null } = {}) {
+export async function searchCached(params, { refresh = false, onProgress = null, shownOnly = true } = {}) {
+  // Closed places, once the owner has applied the check, are left out of what
+  // a family is handed (C57). The pool keeps everything: the back office asks
+  // with `shownOnly: false` and sees what exists.
+  const shown = async (r) => (shownOnly && r?.venues?.length
+    ? { ...r, venues: await withoutHidden(r.venues, (v) => v.venueRef ?? `${v.source}:${v.sourcePlaceId}`).catch(() => r.venues) }
+    : r);
   const key = searchKey(params);
   const hit = kept.get(key);
   // A watcher is told when nothing was asked at all, so a search answered from
   // what is already held says so rather than miming a fetch that never ran.
   const cachedSay = (result) => { try { onProgress?.({ type: 'cached', count: result.venues.length }); } catch { /* not the search */ } };
-  if (fresh(hit) && !refresh) { cachedSay(hit.result); return { ...hit.result, cached: true, fetchedAt: new Date(hit.at).toISOString(), fetched: false }; }
+  if (fresh(hit) && !refresh) { cachedSay(hit.result); return shown({ ...hit.result, cached: true, fetchedAt: new Date(hit.at).toISOString(), fetched: false }); }
   if (inFlight.has(key) && !refresh) {
     // Two people, or two screens, asking the same thing at once. This one waits
     // on the answer the other is already getting — and is told so at once,
@@ -111,7 +118,7 @@ export async function searchCached(params, { refresh = false, onProgress = null 
     try { onProgress?.({ type: 'joining' }); } catch { /* not the search */ }
     const r = await inFlight.get(key);
     cachedSay(r);
-    return { ...r, cached: true, fetchedAt: new Date().toISOString(), fetched: false };
+    return shown({ ...r, cached: true, fetchedAt: new Date().toISOString(), fetched: false });
   }
   const hold = (result) => {
     kept.delete(key);
@@ -140,5 +147,5 @@ export async function searchCached(params, { refresh = false, onProgress = null 
     .finally(() => inFlight.delete(key));
   inFlight.set(key, run);
   const result = await run;
-  return { ...result, cached: false, fetchedAt: new Date().toISOString(), fetched: true };
+  return shown({ ...result, cached: false, fetchedAt: new Date().toISOString(), fetched: true });
 }

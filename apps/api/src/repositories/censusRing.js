@@ -31,6 +31,7 @@
 
 import { query } from '../db.js';
 import { TEXT_QUESTIONS, textStillAsked } from '../sources/censusQuestions.js';
+import { SHOWN_REF } from './placeStatus.js';
 
 /**
  * The widest box that is placed by its centre.
@@ -230,7 +231,7 @@ export function sectorsOfBox(box, universe) {
  * @param cells    the ring's own sectors, from the reachability matrix
  * @param outcodes the districts those sectors sit in — the candidate universe
  */
-export async function censusInRing({ cells = [], outcodes = [] } = {}) {
+export async function censusInRing({ cells = [], outcodes = [], shownOnly = false } = {}) {
   const empty = { counts: {}, unresolved: {}, placed: { own: 0, slice: 0 }, unplaceable: 0, boxes: { inside: 0, outside: 0, across: 0 }, placedBy: null };
   if (!cells.length || !outcodes.length) return empty;
   const slugs = outcodes.map((o) => String(o).toLowerCase());
@@ -267,7 +268,11 @@ export async function censusInRing({ cells = [], outcodes = [] } = {}) {
      where (ps.area_slug = any($1)
         or ps.area_slug in (select grid_key from census_tiles
                              where outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)))
-       and (ps.sourced is distinct from 'text' or ps.subcategory = any($2::text[]))`,
+       and (ps.sourced is distinct from 'text' or ps.subcategory = any($2::text[]))
+       -- What a family is shown leaves out closed and unconfirmed places once
+       -- the owner has applied the check (C57); the back office's census
+       -- boards still count everything that exists.
+       ${shownOnly ? `and ${SHOWN_REF('ps.venue_ref')}` : ''}`,
   [slugs, textDrawers]);
 
   // One verdict per distinct box, not per row: the same slice found hundreds of

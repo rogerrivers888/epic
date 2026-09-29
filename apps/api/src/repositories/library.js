@@ -16,6 +16,7 @@ import { query, withTransaction } from '../db.js';
 import { noteMany } from './placeIndex.js';
 import { judgeVisiting } from '../domain/visiting.js';
 import { osmForWikidata, wikipediaCategories, titleFromUrl } from '../sources/visitingEvidence.js';
+import { SHOWN_ATTRACTION } from './placeStatus.js';
 
 // ---------------------------------------------------------------------------
 // regions
@@ -54,7 +55,8 @@ export async function refreshRegionCounts(slug) {
   await query(
     `update regions r set
        candidate_count = (select count(*) from attractions a where a.region_slug = r.slug),
-       published_count = (select count(*) from attractions a where a.region_slug = r.slug and a.state = 'published'),
+       published_count = (select count(*) from attractions a where a.region_slug = r.slug and a.state = 'published'
+                            and ${SHOWN_ATTRACTION('a')}),
        image_count     = (select count(distinct l.image_id) from attractions a
                             join image_links l on l.subject_type = 'attraction' and l.subject_id = a.id::text
                            where a.region_slug = r.slug),
@@ -511,6 +513,8 @@ export async function publishedFor(slug) {
        left join image_links l on l.subject_type = 'attraction' and l.subject_id = a.id::text and l.role = 'hero'
        left join image_assets i on i.id = l.image_id and i.moderation = 'approved'
       where a.region_slug = $1 and a.state = 'published'
+        -- Closed or unconfirmed, once the owner has applied the check (C57).
+        and ${SHOWN_ATTRACTION('a')}
         -- The same bar as the home screen. A county page is a screen too.
         and a.visiting = 'yes'
       order by a.rank nulls last, a.score desc`, [slug]);
@@ -629,6 +633,8 @@ export async function publishedNear({ lat, lng, km = 25, limit = 60, illustrated
            * is shown it, and OpenStreetMap and Wikipedia keep improving.
            */
           and a.visiting = 'yes'
+          -- Closed or unconfirmed, once the owner has applied the check (C57).
+          and ${SHOWN_ATTRACTION('a')}
           and a.lat between $3 and $4 and a.lng between $5 and $6
           ${illustratedOnly ? 'and i.id is not null' : ''}
      ),

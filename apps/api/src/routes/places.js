@@ -33,6 +33,7 @@ import { fileWhere, upsertHouseholdPlace } from './atlas.js';
 import * as atlasRepo from '../repositories/atlas.js';
 import { googleSource } from '../sources/google.js';
 import { claimPlace, ownedRecord, ownedRecords, enrich, researchOnOpen } from '../sources/own.js';
+import { statusFor } from '../repositories/placeStatus.js';
 // Somewhere you eat, where the menu is the thing you want on the way in; and
 // the three words a take may be.
 import { FOOD_CATEGORIES as EATING, TAKES } from '../constants.js';
@@ -651,6 +652,23 @@ function splitRef(ref) {
   return { source, id: rest.join(':') };
 }
 
+/**
+ * GET /api/places/status?ref=wikidata:Q… — whether a place is closed (C57).
+ *
+ * For the refs the drawer never fetches a detail for (`wikidata:`): an old
+ * link to a closed atlas place still opens on "Closed" / "Now: …". Answers
+ * only once the owner has applied the check; before that, and for an open
+ * place, it is null.
+ */
+places.get('/status', async (req, res, next) => {
+  try {
+    const { source, id } = splitRef(req.query.ref);
+    if (!source || !id) return res.status(400).json({ error: 'ref_required' });
+    const s = await statusFor(`${source}:${id}`, { wikidataId: source === 'wikidata' ? id : null, atlasId: source === 'atlas' ? id : null });
+    res.json({ openStatus: s?.hidden ? { status: s.status, hidden: true, confirmed: s.confirmed, reason: s.reason, source: s.source, successor: s.successor } : null });
+  } catch (err) { next(err); }
+});
+
 /** GET /api/places/detail?ref=osm:node/123 — one place, plus the household's history there. */
 places.get('/detail', async (req, res, next) => {
   try {
@@ -658,6 +676,23 @@ places.get('/detail', async (req, res, next) => {
     const { source, id } = splitRef(req.query.ref);
     if (!source || !id) return res.status(400).json({ error: 'ref_required' });
     const ref = `${source}:${id}`;
+    // Closed or unconfirmed, once the owner has applied the check (C57): a
+    // family never reaches it from a list, and an old link opens on "Closed"
+    // (or "Now: …") rather than a normal page — and buys nothing to say so.
+    const open = await statusFor(ref, {
+      wikidataId: source === 'wikidata' ? id : null, atlasId: source === 'atlas' ? id : null,
+    }).catch(() => null);
+    const openStatus = open ? {
+      status: open.status, hidden: open.hidden, confirmed: open.confirmed, reason: open.reason, source: open.source,
+      successor: open.successor,
+    } : null;
+    if (open?.hidden) {
+      const [ours, visitRows, status] = await Promise.all([
+        ownedRecord(ref).catch(() => null), visitsRepo.visitIdsAt(household.id, ref), householdStatus(household.id, [ref]),
+      ]);
+      const history = await Promise.all(visitRows.map((r) => visitPayload(r.id)));
+      return res.json({ venueRef: ref, venue: null, household: status[ref] ?? null, visits: history, menu: null, ours, sourceError: null, researching: false, reviewersMention: [], openStatus });
+    }
     // A ref the household already holds may be opened whatever the search opted into.
     const src = enabledSources({ includeOptIn: true }).find((s) => s.key === source);
     let venue = recallVenue(ref);
@@ -732,7 +767,13 @@ places.get('/detail', async (req, res, next) => {
       householdStatus(household.id, [ref]),
       menuLookup,
     ]);
-    res.json({ venueRef: ref, venue: venue ? { ...venue, venueRef: ref } : null, household: status[ref] ?? null, visits: history, menu, ours, sourceError, researching, reviewersMention });
+    // Read again after the fetch: a Google detail hands its business status over
+    // in memory (sources/closedCheck.js), and a status learned just now is shown now.
+    const openNow = source === 'google' && venue ? await statusFor(ref).catch(() => null) : open;
+    res.json({
+      venueRef: ref, venue: venue ? { ...venue, venueRef: ref } : null, household: status[ref] ?? null, visits: history, menu, ours, sourceError, researching, reviewersMention,
+      openStatus: openNow ? { status: openNow.status, hidden: openNow.hidden, confirmed: openNow.confirmed, reason: openNow.reason, source: openNow.source, successor: openNow.successor } : openStatus,
+    });
   } catch (err) {
     next(err);
   }

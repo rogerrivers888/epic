@@ -350,7 +350,7 @@ areaRouter.get('/area/:code', async (req, res, next) => {
     const code = String(req.params.code).toUpperCase();
     const area = await scout.areaFor(code);
     if (!area) return res.status(404).json({ error: 'not_swept', message: `Epic has not looked at ${code} yet.` });
-    const rows = await scout.placesIn(code, Math.min(100, Number(req.query.limit) || 25));
+    const rows = await scout.placesIn(code, Math.min(100, Number(req.query.limit) || 25), { shownOnly: true });
     res.json({
       area: { code: area.code, label: area.label, sweptAt: area.swept_at, kept: area.kept },
       places: rows.map((r) => ({

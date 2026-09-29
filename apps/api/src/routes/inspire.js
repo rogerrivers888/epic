@@ -75,6 +75,7 @@ import { foodNear } from '../repositories/scout.js';
 import { enabledSources } from '../sources/index.js';
 import { needsLookAround, lookAroundOutcome } from '../domain/lookAround.js';
 import { censusForRing, categoryPage, peek, pageKey, ASKED } from '../sources/ringSearch.js';
+import { hiddenAmong } from '../repositories/placeStatus.js';
 import { boxAround, boxKm, outcodeOfCell } from '../domain/ring.js';
 import * as reach from '../repositories/reach.js';
 import { sectorOf } from '../domain/reach.js';
@@ -441,7 +442,10 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
   // The fence, the scores and the order, for whatever venues are handed in:
   // one page's, or — for the page after it — the first page's again.
   const rank = async (venues) => {
-    const mine = fenceToBand(venues, { from: start, minutes, mode });
+    const fenced = fenceToBand(venues, { from: start, minutes, mode });
+    // Closed places, once the owner has applied the check, are not shown (C57).
+    const hidden = await hiddenAmong(fenced.map((v) => `${v.source}:${v.sourcePlaceId}`));
+    const mine = hidden.size ? fenced.filter((v) => !hidden.has(`${v.source}:${v.sourcePlaceId}`)) : fenced;
     const refs = mine.map((v) => `${v.source}:${v.sourcePlaceId}`);
     const scores = refs.length
       ? (await query(
@@ -832,7 +836,10 @@ inspire.get('/near', async (req, res, next) => {
     // Around this place, and only around it. A source is free to answer with
     // whatever its index matched, and the fixture set ignores the point it was
     // given entirely, so the ring is enforced here rather than trusted.
+    // Closed places, once the owner has applied the check, are not shown (C57).
+    const closedHere = await hiddenAmong(venues.map((v) => `${v.source}:${v.sourcePlaceId}`));
     const around = venues
+      .filter((v) => !closedHere.has(`${v.source}:${v.sourcePlaceId}`))
       .filter((v) => v.lat != null && v.lng != null && kmBetween(centre, v) <= THINGS_RADIUS_KM + 1)
       .sort((a, b) => weight(b) - weight(a) || kmBetween(centre, a) - kmBetween(centre, b));
 

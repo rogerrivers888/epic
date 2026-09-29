@@ -285,7 +285,7 @@ async function runLookup({ q, minutes, mode }, household, { afford = null, place
     r = await searchCached({
       ...params,
       sources: params.sources.filter((k) => !purse.without.includes(k)),
-    });
+    }, { shownOnly: false });
     if (r.fetched) await visitsRepo.recordProviderCall(household.id, r.sourcesQueried.join('+') || 'none', 'admin.lookup', r.units);
   } finally {
     await purse.release();
@@ -298,7 +298,7 @@ async function runLookup({ q, minutes, mode }, household, { afford = null, place
   const [taught, tax, atlas, sweep, own] = await Promise.all([
     shelfRules(), taxonomy(),
     publishedNear({ lat: centre.lat, lng: centre.lng, km: radiusKm, limit: POOL_LIMIT }),
-    foodNear({ lat: centre.lat, lng: centre.lng, km: radiusKm, limit: POOL_LIMIT }),
+    foodNear({ lat: centre.lat, lng: centre.lng, km: radiusKm, limit: POOL_LIMIT, shownOnly: false }),
     recordsNear(centre.lat, centre.lng, radiusKm, POOL_LIMIT),
   ]);
   const truncated = { atlas: atlas.length >= POOL_LIMIT, sweep: sweep.length >= POOL_LIMIT, own: own.length >= POOL_LIMIT };

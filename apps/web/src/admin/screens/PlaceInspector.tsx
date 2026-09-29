@@ -34,6 +34,7 @@ import { Icon } from '../../components/Icon';
 import { Chip, Row, Wrap } from '../../components/ui';
 import { AdminPage, Button, Banner, Panel, Pill, count, plural } from '../kit';
 import { MOODS } from '../../routes';
+import { OpenStatusFact } from '../OpenStatus';
 
 /** Epic's own eight words, for the fallback when there is no Claude key. */
 const CATEGORIES = ['heritage', 'outdoors', 'museum', 'family', 'arts', 'animals', 'active', 'landmark'];
@@ -106,6 +107,8 @@ export function PlaceInspector({ id, onClose, onChanged }: {
           onSaved={async () => { setEditing(false); await load(); onChanged?.(); }}
         />
       ) : null}
+
+      <OpenStatusFact atlasId={row.id} refId={row.venue_ref ?? `atlas:${row.id}`} wikidataId={row.wikidata_id ?? null} />
 
       <Fact label="Description" value={row.summary ?? null}
             source={row.wikipedia_url ? 'Wikipedia · CC BY-SA' : null}

@@ -32,6 +32,7 @@ import { ringFor, placesWithin } from '../repositories/reach.js';
 import { censusInRing } from '../repositories/censusRing.js';
 import { CAP_MINUTES } from '../domain/reach.js';
 import { heroesForPlaces } from '../repositories/library.js';
+import { SHOWN_REF, statusFor } from '../repositories/placeStatus.js';
 
 /** A heart this old no longer lifts a collection (the existing desk's rule, say.ts). */
 export const FADE_DAYS = 120;
@@ -327,13 +328,17 @@ async function rebuild() {
 
 async function buildPlaceIndex(asOf) {
   const [{ rows: filed }, { rows: subs }, { rows: also }, { rows: own }, { rows: verified }, { rows: defaults }, { rows: unknowns }] = await Promise.all([
+    // Closed or unconfirmed places, once the owner has applied the check, are
+    // in no collection and no count (C57). The desk reads the same index, so
+    // its preview agrees with what a family is shown.
     query(`select pi.venue_ref, pi.subcategory as sub, true as primary_ from place_index pi
-            where pi.subcategory is not null and pi.not_in_epic_at is null
+            where pi.subcategory is not null and pi.not_in_epic_at is null and ${SHOWN_REF('pi.venue_ref')}
            union
            select pil.venue_ref, t.subcategory_key, false from ${PLACE_WORDS} pil
              join word_targets t on 'google:' || t.word = pil.label and not t.is_primary
              join place_index pi on pi.venue_ref = pil.venue_ref
             where pi.subcategory is not null and pi.not_in_epic_at is null and pi.subcategory <> t.subcategory_key
+              and ${SHOWN_REF('pi.venue_ref')}
            -- In a fixed order, so a shelf names the same places from one
            -- request to the next (a union comes back in any order).
            order by 1, 3 desc`),
@@ -596,6 +601,9 @@ export async function placeCard(ref) {
     facts: p ? factLines(p, attrs) : [],
     // At most eight, as the prototype's drawer (audit 2).
     collections: p ? rows_.map(toCollection).filter((c) => (c.legacy || !ruleIsEmpty(c.rule)) && fits(c, p)).slice(0, 8).map((c) => ({ key: c.key, title: c.title })) : [],
+    // Open or closed, with the reason and the source (C57, item 5). The back
+    // office always sees the place; `hidden` says whether families do.
+    openStatus: await statusFor(ref).catch(() => null),
   };
 }
 
@@ -792,7 +800,7 @@ export async function householdReach(h) {
     : { where: h.home_label, minutes, mode: 'driving' }).catch(() => null);
   if (!ring) return null;
   const [placed, within, covered] = await Promise.all([
-    censusInRing({ cells: ring.band ?? ring.cells, outcodes: ring.outcodes }).catch(() => null),
+    censusInRing({ cells: ring.band ?? ring.cells, outcodes: ring.outcodes, shownOnly: true }).catch(() => null),
     placesWithin(ring.cell, { minutes, mode: 'driving', edge: 0 }).catch(() => []),
     censusCovered(ring.outcodes ?? []),
   ]);

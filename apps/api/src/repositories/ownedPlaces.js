@@ -21,6 +21,7 @@
 
 import { query } from '../db.js';
 import { noteMany } from './placeIndex.js';
+import { SHOWN_REF } from './placeStatus.js';
 import { ownedRecordSql, holdsAnOwnedFact } from '../domain/placeIndex.js';
 
 // ---------------------------------------------------------------------------
@@ -505,6 +506,8 @@ export async function ownedNear(householdId, lat, lng, radiusKm, limit = 60) {
          from place_records r
          join household_places hp on hp.venue_ref = r.venue_ref and hp.household_id = $1
         where r.lat is not null and r.lng is not null and r.name is not null
+          -- A trip's shortlist is a family read: closed places, once applied, stay out (C57).
+          and ${SHOWN_REF('r.venue_ref')}
      ) near
       where km <= $4
       order by km

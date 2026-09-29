@@ -7,6 +7,7 @@
 
 import { query, withTransaction } from '../db.js';
 import { noteMany } from './placeIndex.js';
+import { SHOWN_REF } from './placeStatus.js';
 import { causeOf, CAUSES } from '../domain/menuCauses.js';
 import { bandOf } from '../domain/scoring.js';
 
@@ -280,7 +281,7 @@ export async function pruneArea(areaCode, keepRefs, run = query) {
 }
 
 /** An area's selection, best first. This is the query a search should be able to answer from. */
-export async function placesIn(areaCode, limit = 50) {
+export async function placesIn(areaCode, limit = 50, { shownOnly = false } = {}) {
   const { rows } = await query(
     `select p.*, r.address, r.postcode, r.opening_hours, r.summary, r.menu_url, r.enrich_state,
             m.item_count, m.state as menu_state, m.read_at as menu_read_at
@@ -288,6 +289,7 @@ export async function placesIn(areaCode, limit = 50) {
        left join place_records r on r.venue_ref = p.venue_ref
        left join place_menus m on m.venue_ref = p.venue_ref
       where p.area_code = $1
+        ${shownOnly ? `and ${SHOWN_REF('p.venue_ref')}` : ''}
       order by p.rank limit $2`,
     [areaCode, limit],
   );
@@ -765,7 +767,7 @@ export async function menusByOpener() {
  * for somewhere to eat on a Tuesday may well want the Pizza Express, and this
  * is a list to choose from, not a recommendation.
  */
-export async function foodNear({ lat, lng, km = 25, limit = 120 }) {
+export async function foodNear({ lat, lng, km = 25, limit = 120, shownOnly = true }) {
   const dLat = km / 111;
   const dLng = km / Math.max(1, 111 * Math.cos((lat * Math.PI) / 180));
   const { rows } = await query(
@@ -785,6 +787,7 @@ export async function foodNear({ lat, lng, km = 25, limit = 120 }) {
        left join localities l on l.slug = p.locality_slug
        left join place_records r on r.venue_ref = p.venue_ref
       where p.lat between $3 and $4 and p.lng between $5 and $6
+        ${shownOnly ? `and ${SHOWN_REF('p.venue_ref')}` : ''}
       order by p.venue_ref, p.epic_score desc nulls last`,
     [lat, lng, lat - dLat, lat + dLat, lng - dLng, lng + dLng]);
   return rows

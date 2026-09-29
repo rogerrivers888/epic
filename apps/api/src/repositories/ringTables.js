@@ -104,7 +104,7 @@ async function countRing({ cell, kind, minutes }) {
   const band = ring.band ?? ring.cells;
 
   const [placed, seen] = await Promise.all([
-    censusInRing({ cells: band, outcodes: ring.outcodes }),
+    censusInRing({ cells: band, outcodes: ring.outcodes, shownOnly: true }),
     query('select distinct area_slug, category, complete from area_counts where area_slug = any($1)',
       [ring.outcodes.map((o) => o.toLowerCase())]),
   ]);

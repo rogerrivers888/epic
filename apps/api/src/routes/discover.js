@@ -5,6 +5,7 @@ import * as searchLog from '../repositories/searches.js';
 import * as placeIndex from '../repositories/placeIndex.js';
 import * as visitsRepo from '../repositories/visits.js';
 import { searchAllSources } from '../sources/index.js';
+import { withoutHidden } from '../repositories/placeStatus.js';
 import { deriveCatchment, detourMinutes, isTravelMode, reachRadiusKm, TRAVEL_MODES } from '../domain/travel.js';
 import { applyConstraints } from '../domain/ranking.js';
 import { paceOf, travelLimitFor } from '../domain/pace.js';
@@ -52,7 +53,7 @@ router.post('/', async (req, res, next) => {
       : new Set(members.map((m) => m.id));
     const attendees = toAttendees(members.filter((m) => attendingIds.has(m.id)));
 
-    const { venues, degraded, sourcesQueried, units } = await searchAllSources({
+    const { venues: found, degraded, sourcesQueried, units } = await searchAllSources({
       center: origin,
       radiusKm: reachRadiusKm(mode, maxTravelMinutes),
       categories,
@@ -63,6 +64,8 @@ router.post('/', async (req, res, next) => {
     });
     // Every browse is attributed, whichever sources ran (Technical Constraints §14); it used to log Tripadvisor only.
     await visitsRepo.recordProviderCall(household.id, sourcesQueried.join('+') || 'none', 'discover', units);
+    // Closed places, once the owner has applied the check, are not shown (C57).
+    const venues = await withoutHidden(found, (v) => v.venueRef ?? `${v.source}:${v.sourcePlaceId}`);
 
     const pace = paceOf(household);
     let inCatchment = deriveCatchment({ origin, maxTravelMinutes, mode, venues }).filter((v) => v.travelMinutes <= Math.max(maxTravelMinutes, travelLimitFor(pace, v)));

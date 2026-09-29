@@ -143,6 +143,11 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
   return <RouterContext.Provider value={value}>{children}</RouterContext.Provider>;
 }
 
+/** The router where there is one — for a component also drawn outside the app shell (the drawer). */
+export function useOptionalRouter(): RouterValue | null {
+  return useContext(RouterContext);
+}
+
 export function useRouter(): RouterValue {
   const r = useContext(RouterContext);
   if (!r) throw new Error('useRouter outside a RouterProvider');

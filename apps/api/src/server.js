@@ -89,6 +89,9 @@ import * as ground from './sources/groundCounts.js';
 import { resumeCollections } from './routes/placeIndex.js';
 import { resume as resumeSweeps } from './sources/researchSweep.js';
 import * as providerCalls from './repositories/providerCalls.js';
+import closedRoutes from './routes/closed.js';
+import * as googlePlaces from './sources/google.js';
+import { onGoogleStatus } from './sources/closedCheck.js';
 
 const app = express();
 
@@ -286,6 +289,13 @@ app.use('/api/admin/voice', requireDoor('admin'), voiceLabRoutes);
 // The reporting suite: Overview, Money, Customers, Suppliers and Behaviour over
 // one estate model, mock or real (routes/suite.js).
 app.use('/api/admin/suite', requireDoor('admin'), suiteRoutes);
+// Closed places (decision C57): the check, its report, and the owner's OK
+// (routes/closed.js). Nothing is hidden from a family until it is applied.
+app.use('/api/admin/closed', requireDoor('admin'), closedRoutes);
+// Google's business status, handed over in memory when details are fetched;
+// only our derived flag is stored. Optional until google.js carries the hook
+// (/tmp/c57-google.patch), so this line is safe on either side of it.
+googlePlaces.onBusinessStatus?.(onGoogleStatus);
 
 // Telemetry is the household's own — which screen, and still here — and is
 // always written against the session's own household (routes/activity.js).

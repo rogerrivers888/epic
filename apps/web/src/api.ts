@@ -133,6 +133,31 @@ const qs = (o: Record<string, any>) => {
 // Types
 // ---------------------------------------------------------------------------
 
+/** Open or closed (decision C57). `unknown` is a real answer: nobody has established it either way. */
+export type OpenStatusValue = 'open' | 'temporarily_closed' | 'permanently_closed' | 'unknown';
+export type PlaceOpenStatusBrief = {
+  status: OpenStatusValue; hidden: boolean; confirmed: boolean; reason: string | null;
+  source: 'wikidata' | 'osm' | 'wikipedia' | 'listing' | 'google' | 'person' | null;
+  successor: { ref: string | null; name: string | null } | null;
+};
+export type PlaceOpenStatus = PlaceOpenStatusBrief & {
+  ref: string; confirmedBy: string | null; evidence: string | null; review: boolean;
+  decidedAt: string; checkedAt: string; applied: boolean; appliedAt: string | null;
+};
+export type ClosedExample = {
+  ref: string; name: string | null; where: string | null; status: OpenStatusValue; confirmed: boolean; reason: string | null;
+  source: string | null; evidence: string | null; review: boolean; successor: { ref: string | null; name: string | null } | null; applied: boolean;
+};
+export type ClosedReport = {
+  running: { id: string; startedAt: string } | null;
+  check: { id: string; state: string; started_at: string; finished_at: string | null; counts: Record<string, unknown>; error: string | null } | null;
+  totals: { would_hide: number; would_hide_closed: number; would_hide_unconfirmed: number; hidden_now: number; review: number; with_successor: number; rows: number };
+  byStatus: { status: OpenStatusValue; confirmed: boolean; applied: boolean; n: number }[];
+  byReason: { hidden_as: string; source: string; reason: string; n: number }[];
+  bySource: { source: string; status: OpenStatusValue; n: number }[];
+  examples: ClosedExample[];
+  review: ClosedExample[];
+};
 export type ConstraintKind = 'allergen' | 'diet' | 'dislike' | 'like';
 export type Constraint = { id: string; kind: ConstraintKind; value: string; conceptKey: string | null; conceptKind: string | null; maxMinutes?: number | null; favourite?: boolean };
 
@@ -2081,12 +2106,16 @@ export const api = {
    */
   searchPlaces: (p: { q?: string; near?: string; categories?: string; radiusKm?: number; sources?: string; shows?: number }) =>
     request<{ queryId: string | null; near: Place & { how: string }; radiusKm: number; results: Venue[]; sourcesQueried: string[]; degradedSources: { source: string; error: string }[]; attribution: string[] }>(`/api/places/search${qs(p)}`),
+  /** Whether a place is closed (C57) — for the refs the drawer never fetches a detail for. Null unless hidden. */
+  placeStatus: (venueRef: string) => request<{ openStatus: PlaceOpenStatusBrief | null }>(`/api/places/status${qs({ ref: venueRef })}`),
   place: (venueRef: string) =>
     request<{ venueRef: string; venue: Venue | null; household: Venue['household']; visits: Visit[]; menu?: MenuLink | null; ours?: OwnedRecord | null;
       /** Why the source could not answer, already in plain words — never a provider's error text (api/src/sources/why.js). */
       sourceError?: string | null;
       /** Opening it started the research that had not been done. The drawer comes back for the answer. */
-      researching?: boolean }>(`/api/places/detail${qs({ ref: venueRef })}`),
+      researching?: boolean;
+      /** Open or closed (C57). `hidden` only once the owner has applied the check; then the drawer says Closed, or Now: …. */
+      openStatus?: PlaceOpenStatusBrief | null }>(`/api/places/detail${qs({ ref: venueRef })}`),
   /** What Epic owns about these places — no provider is called, and this answer keeps. */
   /**
    * What the crowd made of an atlas place. Matched to Google once and then
@@ -3290,6 +3319,12 @@ export const api = {
     patch<{ kind: LibraryKind }>(`/api/admin/library/kinds/${qid}`, body),
   libraryContributors: () => request<LibraryContributor[]>('/api/admin/library/contributors').then((r: any) => r.contributors ?? r),
   // --- reading a place, and being taught what we got wrong ------------------
+  // --- open or closed (C57) --------------------------------------------------
+  closedPlace: (p: { ref?: string; atlas?: string; wikidata?: string }) =>
+    request<{ status: PlaceOpenStatus | null }>(`/api/admin/closed/place${qs(p)}`),
+  closedReport: () => request<ClosedReport>('/api/admin/closed/report'),
+  closedCheck: () => post<{ started: boolean; checkId: string | null }>('/api/admin/closed/check', {}),
+  closedApply: (checkId?: string) => post<{ applied: number; closed: number; unconfirmed: number }>('/api/admin/closed/apply', { checkId }),
   libraryAttraction: (id: string) =>
     request<{ attraction: LibraryAttractionDetail; facts: AttractionFactsRow | null; contents: PlaceContent[]; lessons: ExtractionLesson[] }>(`/api/admin/library/attractions/${id}`),
   libraryFetchDetail: (id: string, force = false) =>
@@ -3811,7 +3846,7 @@ export type LibraryRegion = {
 
 export type LibraryAttraction = {
   id: string; region_slug: string; region_name: string; nation: string;
-  wikidata_id: string; name: string; slug: string; summary: string | null;
+  wikidata_id: string; venue_ref?: string | null; name: string; slug: string; summary: string | null;
   category: string | null; lat: number | null; lng: number | null;
   wikipedia_url: string | null; website: string | null; heritage: string | null;
   sitelinks: number; pageviews_year: number | null; score: number; rank: number | null;

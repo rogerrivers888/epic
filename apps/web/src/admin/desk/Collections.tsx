@@ -34,7 +34,8 @@ import {
 } from './kit';
 import { RulePicker, type Catalogue, type RuleKind } from './Picker';
 import { CollectionRowView, WhoseList } from '../../components/CollectionRows';
-import type { CollectionRow } from '../../api';
+import type { CollectionRow, PlaceOpenStatus } from '../../api';
+import { OPEN_WORD } from '../OpenStatus';
 
 // ---------------------------------------------------------------------------
 // What the API answers (apps/api/src/desk/collections.js)
@@ -64,6 +65,8 @@ type Preview = { count: number | null; atLeast?: boolean; anywhere?: number; exa
 type Card = {
   ref: string; name: string | null; image: string | null; sub: string | null; town: string | null; sentence: string | null;
   facts: { name: string; value: string | null }[]; collections: { key: string; title: string }[];
+  /** Open or closed (C57), with the reason and the source. */
+  openStatus?: PlaceOpenStatus | null;
 };
 type Saved = { key: string; created: boolean; change?: { id: string } | null };
 
@@ -548,6 +551,16 @@ function PlaceDrawer({ placeRef, onClose }: { placeRef: string; onClose: () => v
                     {where ? <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>{where}</Text> : null}
                   </View>
                   {card.sentence ? <Text style={{ fontFamily: fonts.body, fontSize: 13.5, color: desk.inkMuted, lineHeight: 20.9 }}>{card.sentence}</Text> : null}
+                  {card.openStatus ? (
+                    <View style={{ gap: 2 }}>
+                      <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: desk.ink }}>
+                        {[OPEN_WORD[card.openStatus.status], card.openStatus.confirmed ? null : 'unconfirmed', card.openStatus.hidden ? 'hidden from families' : null].filter(Boolean).join(' · ')}
+                      </Text>
+                      <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }} numberOfLines={3}>
+                        {[card.openStatus.reason, card.openStatus.source, card.openStatus.evidence, card.openStatus.successor?.name ? `Now: ${card.openStatus.successor.name}` : null].filter(Boolean).join(' · ')}
+                      </Text>
+                    </View>
+                  ) : null}
                   <View style={{ marginTop: 4 }}>
                     <View style={{ paddingBottom: 8 }}><Kicker>FACTS</Kicker></View>
                     {card.facts.map((f) => (

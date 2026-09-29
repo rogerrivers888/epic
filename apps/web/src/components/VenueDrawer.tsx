@@ -3,7 +3,8 @@ import { Image, Linking, Modal, NativeScrollEvent, NativeSyntheticEvent, Platfor
 import { Press, Pulse } from './press';
 import { useViewport } from '../hooks/useViewport';
 import { Icon, IconName, IconText, Rating, Stars } from './Icon';
-import { API_URL, api, ownedImageUrl, BrowseItem, MenuLink, OwnedRecord, PlaceInsideItem, Venue, Visit } from '../api';
+import { API_URL, api, ownedImageUrl, BrowseItem, MenuLink, OwnedRecord, PlaceInsideItem, PlaceOpenStatusBrief, Venue, Visit } from '../api';
+import { useOptionalRouter } from '../router';
 import { colors, fonts, radius, spacing, TARGET, type, BORDER, CREAM, INK, LIME } from '../theme';
 import { Button, Chip, Row, Segmented, Wrap, clock, minutes } from './ui';
 import { MenuPanel, OrderPanel, PastMeals, StaffSheet, useMenuOrder } from './MenuOrder';
@@ -254,6 +255,11 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
    * what we already hold and the stars arrive a moment later, because "I don't
    * want there to be any delays. I want it to be snappy."
    */
+  // Closed, or not confirmed, once the owner has applied the check (C57). A
+  // family never reaches such a place from a list; an old link opens here on
+  // "Closed" — or "Now: …" — rather than on a normal page.
+  const [closedAs, setClosedAs] = useState<PlaceOpenStatusBrief | null>(null);
+  const router = useOptionalRouter();
   const [crowd, setCrowd] = useState<{ rating: number | null; ratingCount: number | null; reviews: Venue['reviews']; attribution: string | null } | null>(null);
   /**
    * Every visit this household has made here, with every star given on it —
@@ -300,7 +306,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
 
 
   useEffect(() => {
-    setTab('overview'); setVenue(undefined); setMenu(undefined); setError(null); setSaved(false); setOwnRecord(undefined); setInside(null); setVisits(undefined); setCrowd(null);
+    setTab('overview'); setVenue(undefined); setMenu(undefined); setError(null); setSaved(false); setOwnRecord(undefined); setInside(null); setVisits(undefined); setCrowd(null); setClosedAs(null);
     if (!item) return;
     let live = true;
     // A place the household has never opened has no saved answer of its own, but
@@ -342,7 +348,11 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
         .catch(() => { /* no reviews is not an error worth a message */ });
     }
     // No provider holds a `wikidata:` id, so there is no venue to fetch for one.
-    if (item.venueRef.startsWith('wikidata:')) { setVenue(null); return () => { live = false; }; }
+    if (item.venueRef.startsWith('wikidata:')) {
+      setVenue(null);
+      api.placeStatus(item.venueRef).then((d) => { if (live) setClosedAs(d.openStatus?.hidden ? d.openStatus : null); }).catch(() => { /* open is the default a family already sees */ });
+      return () => { live = false; };
+    }
     // Opening a place we never managed to identify sends the researcher out
     // again (owner, 5 Sep 2026: "we should call the API as soon as a user opens
     // a record to make sure that we get the correct data in"). It takes a few
@@ -371,6 +381,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
       .then((d) => {
         if (!live) return;
         setVenue(d.venue); setMenu(d.menu ?? null); setVisits(d.visits ?? []);
+        setClosedAs(d.openStatus?.hidden ? d.openStatus : null);
         if (d.venue) onVenue?.(d.venue);
         if (d.sourceError) setError(d.sourceError);
         if (d.ours) setOwnRecord(d.ours);
@@ -698,7 +709,22 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                     {ratingCount ? <Text style={styles.reviewsText}>{`· ${ratingCount.toLocaleString()} reviews`}</Text> : null}
                   </View>
                 ) : null}
-                {openNow ? (
+                {closedAs ? (
+                  <View style={{ gap: 2 }}>
+                    <Text style={styles.closedWord}>
+                      {closedAs.status === 'permanently_closed' ? 'Closed' : closedAs.status === 'temporarily_closed' ? 'Temporarily closed' : 'Not confirmed open'}
+                    </Text>
+                    {closedAs.successor?.name ? (
+                      closedAs.successor.ref && router ? (
+                        <Press onPress={() => router.setQuery({ place: closedAs.successor!.ref }, { replace: false })} style={styles.siteRow} accessibilityRole="link" accessibilityLabel={`Now: ${closedAs.successor.name}`}>
+                          <Icon name="more" size={13} color={colors.accent} />
+                          <Text style={styles.siteText} numberOfLines={1}>{`Now: ${closedAs.successor.name}`}</Text>
+                        </Press>
+                      ) : <Text style={styles.meta}>{`Now: ${closedAs.successor.name}`}</Text>
+                    ) : null}
+                  </View>
+                ) : null}
+                {openNow && !closedAs ? (
                   <IconText name={openNow.open === false ? 'full' : 'booked'} color={openNow.open === false ? colors.inkMuted : colors.accent}>
                     <Text style={{ fontWeight: '700', color: colors.ink }}>{openNow.state}</Text>{openNow.detail ? ` · ${openNow.detail}` : ''}
                   </IconText>
@@ -714,8 +740,8 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                 8f): the selected tab's underline sits *on* that rule, which is
                 what makes the tabs part of the page rather than floating above
                 it. Same device as Inspire's own category strip. */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabStrip} style={styles.tabStripWrap}>
-              {tabs.map((t) => (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabStrip} style={[styles.tabStripWrap, closedAs ? styles.gone : null]}>
+              {closedAs ? null : tabs.map((t) => (
                 <Press key={t.value} onPress={() => setTab(t.value)} accessibilityRole="tab" accessibilityState={{ selected: t.value === shown }}>
                   <View style={[styles.tabItem, t.value === shown && styles.tabItemOn]}>
                     <Text style={[styles.tabText, { color: t.value === shown ? colors.ink : colors.inkMuted }]}>{t.label}</Text>
@@ -727,7 +753,9 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
             {error ? <Text style={[type.tiny, { color: colors.dislike }]}>{error}</Text> : null}
           </View>
 
-          {shown === 'menu' ? (
+          {closedAs ? (
+            <View style={{ flex: 1 }} />
+          ) : shown === 'menu' ? (
             <View style={{ flex: 1 }}><MenuPanel ctl={ctl} onOrder={() => setTab('order')} /></View>
           ) : shown === 'order' ? (
             <View style={{ flex: 1 }}><OrderPanel ctl={ctl} onMenu={() => setTab('menu')} /></View>
@@ -930,7 +958,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
 
           {/* Pinned, so the one thing to do with a place does not scroll away
               from it. Ink on light, lime on dark — `primary` is already both. */}
-          {onAdd && shown !== 'menu' && shown !== 'order' ? (
+          {onAdd && !closedAs && shown !== 'menu' && shown !== 'order' ? (
             <View style={styles.footer}>
               {/*
                 Somewhere you eat gets the other thing you do with it beside
@@ -1010,6 +1038,9 @@ const styles = StyleSheet.create({
   footerSecondText: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', color: colors.ink },
   siteRow: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 24 },
   siteText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.accent, flexShrink: 1 },
+  // Closed (C57): said in the ink of every other fact, large, because it is the whole page.
+  closedWord: { fontFamily: fonts.body, fontSize: 18, fontWeight: '800', color: colors.ink },
+  gone: { display: 'none' },
   reviewsText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.accent },
   // CREAM rather than the palette's surface, on purpose: a photograph is a
   // photograph in either theme, and a tile that turns near-black in the dark
