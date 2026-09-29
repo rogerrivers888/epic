@@ -51,6 +51,13 @@ export const DAY_REQUESTS = 70_000;
  */
 export const RAISED_LIMIT = 160_000;
 export const RAISED_DAY = 150_000;
+/**
+ * The size a day's run was given. Its own share of the day, which is set to
+ * the size when it starts and never touched — not its ceiling, which is
+ * brought down to close off a day that ran past midnight (Codex, 29 Sep 2026).
+ */
+export const daySizeOf = (run) => Number(run?.night_share) || DAY_REQUESTS;
+
 /** How big today is: 150,000 once Google's limit reads 160,000, else 70,000 — and 70,000 when it cannot be read. */
 export function daySize(quota) {
   if (quota?.speaks && quota.limit >= RAISED_LIMIT) return { requests: RAISED_DAY, cap: Math.min(quota.limit, 1e9) };
@@ -345,7 +352,7 @@ async function tickLocked({ now = new Date(), start = censusRun.startRun, stop =
   // The first day at the raised size says so, with the new days remaining
   // (owner: "tell me the new days-remaining"). Said once: the subject is fixed.
   // Only on the day it changes: the day before was smaller (Codex, 29 Sep 2026).
-  if (size.requests === RAISED_DAY && Number(d.latest?.max_requests ?? 0) < RAISED_DAY) {
+  if (size.requests === RAISED_DAY && daySizeOf(d.latest) < RAISED_DAY) {
     const st = await status(now);
     const perTile = st.requestsPerTile;
     const days = perTile ? Math.max(st.tilesLeft ? 1 : 0, Math.ceil((st.tilesLeft * perTile) / RAISED_DAY)) : null;
@@ -414,7 +421,7 @@ export async function status(now = new Date()) {
       tilesAsked: Number(t.asked ?? 0),
       districts: then.districts,
       tilesLeft: then.left,
-      daysLeft: rate == null ? null : Math.max(then.left ? 1 : 0, Math.ceil((then.left * rate) / (Number(r.max_requests) || DAY_REQUESTS))),
+      daysLeft: rate == null ? null : Math.max(then.left ? 1 : 0, Math.ceil((then.left * rate) / daySizeOf(r))),
       billed: b ? { censusGbp: b.census_gbp, googleGbp: b.google_gbp, final: b.final } : null,
     });
   }
@@ -444,8 +451,8 @@ export async function status(now = new Date()) {
     // and the cities to come split further.
     // At the size of the latest day: 150,000 once Google's limit was raised.
     daysLeft: d.action === 'complete' ? 0 : perTile == null ? null
-      : Math.max(left ? 1 : 0, Math.ceil((left * perTile) / (Number(latest.max_requests) || DAY_REQUESTS))),
-    dayRequests: Number(latest.max_requests) || DAY_REQUESTS,
+      : Math.max(left ? 1 : 0, Math.ceil((left * perTile) / daySizeOf(latest))),
+    dayRequests: daySizeOf(latest),
     days,
   };
 }

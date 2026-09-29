@@ -789,3 +789,14 @@ test('a notice goes to every recipient, and one sent does not stand for the rest
   await uk.notify({ subject, configured: () => true, to: ['a@epic.day', 'b@epic.day'], send: async (m) => { sent.push(m.to); return { sent: true }; } });
   assert.deepEqual(sent, ['b@epic.day']);
 });
+
+test('a day closed off early keeps its size for the days left and the raise notice', async (t) => {
+  await clean(); t.after(clean);
+  const one = await dayOne();
+  // A 150,000 day brought to its ceiling at 40,000 when it ran past midnight.
+  await query('update census_runs set night_share = 150000, max_requests = 40000, requests = 40000 where id = $1', [one.id]);
+  assert.equal(uk.daySizeOf((await query('select * from census_runs where id = $1', [one.id])).rows[0]), 150000);
+  const r = recorder(); const told = [];
+  await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start, tell: (x) => told.push(x), quota: async () => ({ speaks: true, limit: 160000 }) });
+  assert.ok(!told.some((x) => /^Census raised/.test(x.subject)), 'not announced again');
+});
