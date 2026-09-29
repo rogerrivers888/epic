@@ -183,6 +183,7 @@ function BrowseRow({ item, isPinned, isShortlisted, busy, addLabel, addedLabel, 
             {item.distanceKm != null ? ` · ${item.distanceKm} km` : ''}{item.travelFromBaseMinutes != null ? `, ${item.travelFromBaseMinutes} min` : ''}
             {!isEvent ? ` · about ${minutes(item.dwellMinutes)}` : ''}
           </Text>
+          {item.closed?.status === 'temporarily_closed' ? <Text style={[type.small, { fontWeight: '700', color: colors.ink }]}>Temporarily closed</Text> : null}
           <SourceLine item={item} />
           {item.reasons.length ? <Wrap>{item.reasons.filter((r) => r.kind !== 'chain').slice(0, 3).map((r, i) => <Chip key={i} label={r.text} tone={r.kind === 'dislike' || r.kind === 'diet' ? 'dislike' : r.kind === 'note' ? 'neutral' : 'like'} />)}</Wrap> : null}
           <Text style={[type.tiny, { color: colors.accent }]}>Details, reviews, hours, photos ›</Text>

@@ -440,5 +440,9 @@ export function richFields(s, base) {
     attribution: s.attributionText ?? s.attribution ?? null,
     // One licensed photo reference (never the bytes); the web fetches it through /api/photos.
     photos: (s.photos ?? []).slice(0, 1),
+    // The closed mark carried from the search (C57): a temporarily closed
+    // place stays in the plan and shows a "Temporarily closed" label. The
+    // hide happened upstream, so anything here is a survivor.
+    closed: s.closed ?? null,
   };
 }

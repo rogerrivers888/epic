@@ -703,9 +703,12 @@ async function retrieveCorridor({ household, trip, dayTrip, attendees, sessionId
   });
   const { venues: along, degraded, sourcesQueried, fetched } = await searchCorridor({ encodedPolyline: polyline, origin, destination, sources, meter });
   // Closed places, once the owner has applied the check, are not stops (C57);
-  // a temporarily closed survivor keeps its "Temporarily closed" label.
+  // a temporarily closed survivor keeps its "Temporarily closed" label. The
+  // hide is fail-closed and never caught; only the label is best-effort, and
+  // its catch returns the already-filtered list (Codex, 29 Sep 2026).
   const refOf = (v) => v.venueRef ?? `${v.source}:${v.sourcePlaceId}`;
-  const venues = await annotateClosed(await withoutHidden(along, refOf), refOf).catch(() => along);
+  const kept = await withoutHidden(along, refOf);
+  const venues = await annotateClosed(kept, refOf).catch(() => kept);
   if (fetched && sourcesQueried.length) {
     await planSessions.recordSessionCall(household.id, sessionId, sourcesQueried.join('+'), 'plan.corridor', meter).catch(() => null);
   }

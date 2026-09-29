@@ -105,10 +105,19 @@ export async function searchCached(params, { refresh = false, onProgress = null,
   // that are temporarily closed carry a "Temporarily closed" mark on the card
   // (owner, 29 Sep 2026 — the label must reach the results, not only the
   // drawer). The back office (`shownOnly: false`) sees everything, unmarked.
+  //
+  // Two steps, two failure modes (Codex, 29 Sep 2026): the *hide* is
+  // fail-closed and never caught — a failure fails the search rather than
+  // hand a family an unfiltered, possibly permanently-closed list — while the
+  // *label* is best-effort and, if it throws, shows the already-filtered list
+  // without the mark.
   const refOf = (v) => v.venueRef ?? `${v.source}:${v.sourcePlaceId}`;
-  const shown = async (r) => (shownOnly && r?.venues?.length
-    ? { ...r, venues: await annotateClosed(await withoutHidden(r.venues, refOf).catch(() => r.venues), refOf).catch(() => r.venues) }
-    : r);
+  const shown = async (r) => {
+    if (!shownOnly || !r?.venues?.length) return r;
+    const kept = await withoutHidden(r.venues, refOf);
+    const venues = await annotateClosed(kept, refOf).catch(() => kept);
+    return { ...r, venues };
+  };
   const key = searchKey(params);
   const hit = kept.get(key);
   // A watcher is told when nothing was asked at all, so a search answered from

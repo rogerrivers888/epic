@@ -102,6 +102,7 @@ function WayRow({ stop, busy, onOpen, onPress }: { stop: RouteStop; busy: boolea
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={type.h3}>{stop.name}</Text>
           <Text style={type.small}>{typeLine(stop)}{price ? ` · ${price}` : ''}{stop.rating != null ? ` · ${stop.rating.toFixed(1)}${stop.ratingCount ? ` (${stop.ratingCount.toLocaleString()})` : ''}` : ''}</Text>
+          {stop.closed?.status === 'temporarily_closed' ? <Text style={[type.small, { fontWeight: '700', color: colors.ink }]}>Temporarily closed</Text> : null}
           <Text style={[type.small, { fontWeight: '700', color: colors.ink }]}>
             {stop.chosen && stop.arriveAt ? `${clock(stop.arriveAt)} · ` : ''}{stop.why}
           </Text>

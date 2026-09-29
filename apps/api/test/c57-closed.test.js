@@ -1130,19 +1130,41 @@ test('an applied temporarily closed place re-proposed permanently closed waits f
   await query(`delete from place_status where venue_ref = $1`, [ref]);
 });
 
-test('previousClosed is null until a second, older finished check exists', async () => {
+test('previousClosed: null on the first run, the first as baseline while the second runs, the first after two finish', async () => {
   await query(`delete from closed_checks`);
-  // No finished check at all.
+  // No check at all.
   assert.equal((await repo.report()).previousClosed, null);
-  // One finished check: still nothing to compare against (rows[0] is itself).
+  // The first check, still running: nothing before it.
   const id1 = await repo.startCheck({ by: 'test', dryRun: true });
+  assert.equal((await repo.report()).previousClosed, null, 'first run, nothing before');
   await repo.finishCheck(id1, { counts: { byStatus: { permanently_closed: 200 } } });
+  // One finished check, nothing running: still nothing to compare against.
   assert.equal((await repo.report()).previousClosed, null, 'one finished check: no "was"');
-  // A second, newer finished check: now the older one's number is the "was".
+  // The second check, running: the first (finished) is the baseline, even
+  // though the finished rows do not yet include the running one (Codex).
   const id2 = await repo.startCheck({ by: 'test', dryRun: true });
+  assert.equal((await repo.report()).previousClosed, 200, 'while the second runs, the first is the baseline');
+  // The second finishes: the first is still the prior.
   await repo.finishCheck(id2, { counts: { byStatus: { permanently_closed: 245 } } });
-  assert.equal((await repo.report()).previousClosed, 200, 'the older finished check\'s permanent count');
+  assert.equal((await repo.report()).previousClosed, 200, 'after two finished, the older one is the "was"');
   await query(`delete from closed_checks`);
+});
+
+test('the hide is fail-closed and the label is a separate step: annotation never drops a place', async () => {
+  const perm = 'google:c57-failclosed-perm';
+  await repo.propose({ ref: perm, status: 'permanently_closed', source: 'google', reason: 'permanently closed by Google\'s status', evidence: 'Google business status', applied: true, appliedBy: 'test' });
+  const items = [{ venueRef: perm, name: 'Gone' }, { venueRef: 'google:c57-failclosed-open', name: 'Open' }];
+  // annotateClosed only *labels* — it never removes anything, so it cannot be
+  // the hide. A permanently closed place comes back, marked hidden: which is
+  // exactly why the filter must be its own fail-closed step, never caught
+  // into returning the unfiltered list (Codex, 29 Sep 2026).
+  const annotated = await repo.annotateClosed(items, (v) => v.venueRef);
+  assert.equal(annotated.length, 2, 'annotation removes nothing');
+  assert.equal(annotated.find((v) => v.name === 'Gone').closed.hidden, true);
+  // withoutHidden IS the hide, and it drops the permanent one.
+  const kept = await repo.withoutHidden(items, (v) => v.venueRef);
+  assert.deepEqual(kept.map((v) => v.name), ['Open'], 'the permanently closed place is filtered out');
+  await query(`delete from place_status where venue_ref = $1`, [perm]);
 });
 
 test('a temporarily closed survivor carries its label on a family search result; a permanent one is gone', async () => {

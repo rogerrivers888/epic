@@ -66,8 +66,15 @@ router.post('/', async (req, res, next) => {
     await visitsRepo.recordProviderCall(household.id, sourcesQueried.join('+') || 'none', 'discover', units);
     // Closed places, once the owner has applied the check, are not shown (C57);
     // a temporarily closed survivor carries its label to the card.
+    //
+    // Two steps, two failure modes (Codex, 29 Sep 2026): the *hide* is
+    // fail-closed — if it throws, the request fails rather than hand a family
+    // a permanently closed place — so it is never caught here. Only the
+    // *label* is best-effort: a failure there shows the already-filtered list
+    // without the "Temporarily closed" mark, never the unfiltered one.
     const refOf = (v) => v.venueRef ?? `${v.source}:${v.sourcePlaceId}`;
-    const venues = await annotateClosed(await withoutHidden(found, refOf), refOf).catch(() => found);
+    const kept = await withoutHidden(found, refOf);
+    const venues = await annotateClosed(kept, refOf).catch(() => kept);
 
     const pace = paceOf(household);
     let inCatchment = deriveCatchment({ origin, maxTravelMinutes, mode, venues }).filter((v) => v.travelMinutes <= Math.max(maxTravelMinutes, travelLimitFor(pace, v)));

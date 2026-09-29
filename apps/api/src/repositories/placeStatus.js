@@ -460,18 +460,21 @@ export async function report({ examples = 20, allClosed = false } = {}) {
   const reopened = Number(totals.rows[0].reopened);
   const closedTotal = permanentlyClosed;
   const byReasonSum = byReason.rows.reduce((n, r) => n + Number(r.n), 0);
-  // What changed against the last finished check (the 245): the previous run's
-  // stored closed count, if there is one. Older runs stored `would_hide` as
-  // permanent+temporary combined, so this is named as "was" rather than a
-  // like-for-like delta, and is null when there is no prior run (can't-speak).
-  // The row before the current one, if there is a second finished check —
-  // with only one, rows[0] is the current check and there is no "was" to show
-  // (Codex, 29 Sep 2026).
-  const priorCounts = prevCheck.rows[1]?.counts ?? null;
+  // What changed against the last check (the 245): the *finished* check
+  // immediately before the current one, and null on the first ever run.
+  //
+  // `/report` is polled while a check runs, so the finished rows do not
+  // include the current one until it ends (Codex, 29 Sep 2026). So the
+  // "current" is the latest finished check *only when nothing is running*;
+  // while a check runs, the finished rows[0] is already the prior baseline.
+  const latest = await latestCheck();
+  const runningNow = Boolean(latest && latest.state !== 'done');
+  const priorRow = runningNow ? prevCheck.rows[0] : prevCheck.rows[1];
+  const priorCounts = priorRow?.counts ?? null;
   const previousClosed = priorCounts && typeof priorCounts === 'object'
     ? (priorCounts.byStatus?.permanently_closed ?? null) : null;
   return {
-    check: await latestCheck(),
+    check: latest,
     // The hidden number (permanently closed) and its reasons, which sum to it.
     permanentlyClosed,
     closedTotal,
