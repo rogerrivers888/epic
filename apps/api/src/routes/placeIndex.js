@@ -3754,7 +3754,15 @@ router.get('/census/uk', requires('view_library'), async (_req, res, next) => {
   try {
     const { status } = await import('../sources/ukCensus.js');
     const { mailStatus } = await import('../sources/mail.js');
-    res.json({ ...(await status()), mail: mailStatus().configured ? 'sends' : 'not configured: reports are here and in the log' });
+    const { searchTextDailyLimit } = await import('../sources/googleQuota.js');
+    // Google's daily Text Search limit as the census last read it: 150,000 a
+    // day once it reads 160,000.
+    const quota = await searchTextDailyLimit();
+    res.json({
+      ...(await status()),
+      quota: quota.speaks ? { limit: quota.limit } : { limit: null, why: quota.why },
+      mail: mailStatus().configured ? 'sends' : 'not configured: reports are here and in the log',
+    });
   } catch (err) { next(err); }
 });
 

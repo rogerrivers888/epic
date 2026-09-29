@@ -36,15 +36,22 @@ export const configured = () => Boolean(key());
 
 const b64url = (buf) => Buffer.from(buf).toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
 
-let cached = null;
-async function accessToken(fetcher = fetch) {
+const cachedByScope = new Map();
+const BIGQUERY = 'https://www.googleapis.com/auth/bigquery.readonly';
+/**
+ * A token for the billing key, for one scope. BigQuery for the export; the
+ * census asks the same key, read-only, what Google's quota on the Maps project
+ * is (sources/googleQuota.js).
+ */
+export async function accessToken(fetcher = fetch, scope = BIGQUERY) {
+  const cached = cachedByScope.get(scope);
   if (cached && cached.until > Date.now() + 60_000) return cached.token;
   const k = key();
   if (!k) throw Object.assign(new Error('No billing key (GCP_BILLING_SA_JSON) is set.'), { code: 'no_key' });
   const now = Math.floor(Date.now() / 1000);
   const head = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
   const body = b64url(JSON.stringify({
-    iss: k.client_email, scope: 'https://www.googleapis.com/auth/bigquery.readonly',
+    iss: k.client_email, scope,
     aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600,
   }));
   const sig = b64url(createSign('RSA-SHA256').update(`${head}.${body}`).sign(k.private_key));
@@ -55,8 +62,8 @@ async function accessToken(fetcher = fetch) {
   });
   const j = await res.json().catch(() => ({}));
   if (!res.ok || !j.access_token) throw Object.assign(new Error(`Google refused the billing key (${res.status}).`), { code: 'auth' });
-  cached = { token: j.access_token, until: Date.now() + (j.expires_in ?? 3600) * 1000 };
-  return cached.token;
+  cachedByScope.set(scope, { token: j.access_token, until: Date.now() + (j.expires_in ?? 3600) * 1000 });
+  return j.access_token;
 }
 
 /** One query, parameters named, rows back as plain objects. */
