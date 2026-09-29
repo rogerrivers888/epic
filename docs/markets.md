@@ -144,5 +144,5 @@ Three rules, on the record, with a UI consequence that is **not yet designed** a
 3. Wording table, resolver, miss log (§6 of the brief).
 4. Markets screen, then wording screen.
 5. URLs, hreflang, sitemaps, slug history.
-6. Area input and placement for the US — largest item; may warrant its own brief.
+6. Area input and placement for the US — largest item; may warrant its own brief. **Hard prerequisite (Codex, 29 Sep 2026):** before any non-GB census, `area_counts.country_code` must be threaded through the whole access path, not merely added to the schema (it is, as of migration 300, only an unused column defaulting to `'GB'`). Three parts, all of this step: (1) **fold `country_code` into the primary key** — today it is `(area_slug, category, subcategory)` and every `on conflict` clause assumes that, so two markets whose slugs coincide would silently overwrite each other once the US is censused; (2) **every writer must set `country_code`** to the market being censused rather than lean on the `'GB'` default, or non-GB counts land under GB; (3) **every read must filter by `country_code`**, or counts mix across markets. The `'GB'` default is correct only while the census is Britain-only.
 7. The cross-language alias rule — small; any time before the first foreign extraction.
