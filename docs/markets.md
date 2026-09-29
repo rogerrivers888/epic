@@ -1,0 +1,148 @@
+# Epic — Markets
+
+**Governing for the markets workstream.** Read with `docs/requirements.md`, `docs/technical-constraints.md`, and the build brief *Epic — Markets: build brief* (`Supporting docs/Markets & Translation/Epic Markets & Translation.md`, 29 Sep 2026). Where this doc and the master register (*Epic — Decisions and policies*) disagree, the register wins on policy; this doc is the markets-specific record.
+
+**Not a translation project.** Epic launches UK → US → possibly Ireland, all English. There is no second language for at least a year, no translation screen, no foreign-language app, no right-to-left support (logical CSS properties only), no currency conversion / payments / tax / legal packs, and nothing that spends money in a new market. What markets give Epic is a proper idea of a *country* — currency, units, area shape, administrative levels, timezone, cost bands — and the ability to display a place from a country Epic has not launched in.
+
+---
+
+## 1. Ratified register entries (§13 of the brief; owner, 29 Sep 2026)
+
+All seven ratified.
+
+1. **Market and language are separate things.** A household's language never follows from the country it is browsing.
+2. **Google's place types are a global vocabulary and are never translated.** The Mapping tab is finished for every country. New Google types appear globally and go through the existing "Needs a decision" flow; there is no per-country type mapping.
+3. **Fact keys are canonical English forever; only labels are translated.** Foreign wording resolves as an alias of an English canonical key — the same alias mechanism that resolves `step_free` / `stepFree`. This must be in place *before* the first non-English extraction runs, never after.
+4. **Google's prohibited territories are enforced in code.** No Google call may be issued for a blocked market, and no place from one may be stored. A blocked market fails cleanly and visibly, never as an empty result that reads as "nothing there".
+5. **A place from a groundwork market can be displayed but not marketed to.** No households live there, no marketing, no local sources beyond the ones that exist everywhere. Thin facts read as "don't know", never as "no".
+6. **A missing wording renders the `en-GB` version and logs the miss.** It never renders a key and never renders blank.
+7. **Collection copy is never machine-written**, in any language or variant.
+
+---
+
+## 2. Markets
+
+One row per country. A market holds: code, name, status, currency, distance unit, temperature unit, Google region code, default timezone, area-code shape (name + pattern + search-by), middle-level name, date format, wording locale, cost bands, and which owned sources apply there.
+
+### 2.1 Status
+
+`Live · Soft launch · Groundwork · Blocked`.
+
+- **Live** — households can subscribe; prices in the local currency; places surfaced to local households.
+- **Soft launch** — invited households only.
+- **Groundwork** — Epic shows places *from* here to households elsewhere, but has not launched *in* here. Displayed, not marketed to (register 5).
+- **Blocked** — derived, not set: Google's terms forbid the Maps Platform here. Enforced in code (register 4).
+
+**Seed (owner, 29 Sep 2026 — this supersedes the design mock, which showed UK Live since 14 Sept and Ireland ahead of the US):**
+
+- **GB — soft launch.**
+- **US — groundwork.**
+- **IE — groundwork.**
+- **Groundwork also:** Portugal, Spain, France, Italy, Greece, Netherlands, Turkey, Croatia, Cyprus, Malta, Austria, UAE. These are where British families holiday, so their places display from launch. Spain carries a large share of British holiday volume on one row — the Canaries and Balearics share its country code and currency.
+
+### 2.2 Blocked markets
+
+Google's Maps Platform is forbidden in nine territories: **China, Crimea, Cuba, Donetsk, Iran, Luhansk, North Korea, Syria, Vietnam.** Enforced in code, not by convention. **Vietnam is the one to watch** — a real British holiday destination that someone will search; it must fail cleanly and visibly.
+
+### 2.3 Owned sources vary by market
+
+The schema says which sources apply where, because a missing source and an empty result look identical otherwise. A market that lacks a source says so on its page ("Not in the US"), and that source's facts read "don't know here", never "no".
+
+- **Everywhere:** OpenStreetMap (Geofabrik extract), Wikidata, Wikipedia, venue websites.
+- **Britain only:** FSA food hygiene register, ONS postcode directory, Historic England listings.
+- **Market-specific, not yet connected:** NIAH (Ireland), National Register of Historic Places (US).
+
+---
+
+## 3. What differs between markets
+
+### 3.1 Money
+
+Stored as an **amount plus a currency code**, never a bare number with an implied pound sign.
+
+### 3.2 Distance
+
+Stored in **metres**, formatted at display (miles or kilometres per the market). The reach filter reads in the market's unit.
+
+### 3.3 Cost bands
+
+Cost bands move out of the fact definition and into the market. A band is a **per-market judgement set by a person**, seeded from a starting position and replaced with evidence once a local census has run — never derived from price data.
+
+- **UK (pounds):** Free · Cheap under £10 · Mid £10–25 · Dear over £25, per person.
+- **Ireland (euros):** Free · under €12 · €12–30 · over €30, per person.
+- **US (dollars) — owner starting position, 29 Sep 2026:** Free · under $15 · $15–40 · over $40, per person. Boundaries sit where a real US family's decision changes, not at a conversion of the UK bands. Reference points: children's museums ~$43 for a family of four (~$11/head); regional zoos and science centres $20–30 adult, $15–25 child; mid-size aquariums $30–40; big-name zoos and theme parks $68–100+/head. **Replace with evidence from the actual distribution once a US census has run** — flag when there is enough to do so.
+- **Cost bands are not a prerequisite for groundwork.** A market without them shows cost as "don't know" (the standard honest behaviour). **Portugal and Greece need their own euro bands — they do not inherit Ireland's.** Other eurozone groundwork markets may use Ireland's as a placeholder.
+
+### 3.4 Areas and administrative levels
+
+Three drill levels, each market naming them. Field names stay market-neutral in the schema; display labels come from the market.
+
+- **UK:** Country → County → Postcode district. The UK keeps saying "County".
+- **US:** Country → State → City. The US structurally has four levels (state → county → city → ZIP); **ZIP is dropped as a drill level** — the equivalent of "places in SL5" is "places in Boulder", not "places in 80301". **ZIP stays as a search input on the area filter only.**
+
+The area input accepts a **town or city everywhere** as the common denominator; the code type follows the market (postcode in GB, Eircode in IE, ZIP in US; none when no market is chosen). The ONS postcode dataset and its placement logic are Britain-only and must stop being assumed. This is expected to be the largest single piece of work.
+
+**Where the area copy lives (owner Change 3, 29 Sep 2026):** the family-facing area sentences — the input placeholder and the "not a place we know yet…" message — live in the **wording table (migration B)**, keyed per market and resolved per household locale. `markets.area_code` holds **structure only** (`pattern`, `searchBy`, and the code type's own noun for the wording to interpolate) — no sentences, so the copy cannot fall between the two files or end up hardcoded.
+
+### 3.5 Time
+
+Opening hours and events are held in **UTC plus the place's own timezone** — the place's, never the household's — or every American opening time is wrong for most of the country. A zone is named on screen only when it differs from the household's. Until a place has learned its own zone it falls back to its market's `default_timezone`; because the US spans six zones that market default is only a fallback, and a place's own zone always wins.
+
+### 3.6 Wording (en-GB / en-US)
+
+British and American English are different locales; Google treats them as such. A key-based **wording table**, `en-GB` and `en-US` as the first two entries, everything falling back to `en-GB`. Three namespaces: **Interface · Places & facts · Collection copy**.
+
+- **Wording follows the household, never the market of the place (register 1; owner Change 1, 29 Sep 2026).** A British family browsing Florida reads "car park"; an American browsing Cornwall reads "parking lot". The resolver reads the **household's own locale**, falling back to `en-GB` — never the market of the place being displayed. `markets.default_wording_locale` **only seeds a household registering in that market** and does nothing else; it is never read at display time. The resolver and a test that pins this (fails if it ever reaches for the place's market) land with the wording work (migration B / step 3), where `households` gains its own locale column seeded from `default_wording_locale`.
+- A missing wording renders `en-GB` and logs the miss (register 6).
+- Machine drafts show as a greyed "Suggested: …" placeholder with status *Needs review* until a person types. **Collection copy is never machine-written** (register 7) — a blank `en-US` collection line is the correct state (American households see the British line) until a real American writes theirs. That emptiness must never become a reason to fill them automatically.
+- The mechanical differences (car park → parking lot — the ones with a single right answer) may be drafted for review; collection copy may not.
+
+---
+
+## 4. Displaying a place from a groundwork market
+
+A groundwork market's places display to households elsewhere: local name is the name (English name beneath in grey only where Wikidata has one — never translated by us), cost bands in the local currency, opening times in the place's timezone, distances in the household's units. Facts will be thinner because venue-website extraction has not run there and local registers do not exist — the place still shows, with fewer facts, and per the standing rule that reads as "we don't know yet", never "no" (M3: missing standard facts named once under "Not known yet"; no description rather than filler).
+
+**Provenance is non-negotiable (C3 / C22).** A displayed Google rating (e.g. "4.7 · 61k") is rented, **display-only, never stored, and needs attribution on screen**. The Epic score is ours (derived) and must not carry a Google-shaped review count beside it. A description written from owned sources is fine and says so; Google's editorial summary cannot be stored and needs attribution if shown.
+
+---
+
+## 5. Design decisions ratified (Part 2, owner 29 Sep 2026)
+
+- **The "Not known yet" block** names missing standard facts once — the can't-speak rule done properly. Not per-fact "unknown" rows.
+- **Three wording tabs** (Interface · Places & facts · Collection copy) rather than a namespace list.
+- **Blank `en-US` cell / blank status = "same"**, matching Active on the facts list.
+- **"Suggested:" in grey** for machine drafts; none at all on collection copy.
+- **Per-market area input** with the code type and unknown message following the market.
+- **Cost display (owner DECIDED, 29 Sep 2026 — euros only, no FX):** the card shows the **band symbol alone**; the place page shows the band symbol and the **band's range labelled plainly as the band's range, not the place's price**. No pounds, no conversion, no FX field anywhere. **M2c as drawn ("€12–30 · about £10–26") is superseded** — it implied a place-specific price we do not have, in a currency pair we will not support. The exact final wording comes from Design; the build implements the honest structure (band symbol + band range).
+- **The market page must be built** (missing from the artboards): where cost bands are set, the source list lives, area shape and middle-level label are named, and "what is missing before this can go live" is explained. Build from the brief's description.
+- **A fourth wording status — "not applicable in this market".** A pub-with-a-garden is not a bar-with-a-patio: choosing this status means the subcategory is *not offered* in that market at all, rather than given a local label that leaves a correctly-named but near-empty drawer reading as a coverage failure. Build the minimum: the status, and counts reading "not applicable here" rather than 0. Same logic as "Not known yet".
+- **List-column wording (P2.6):** the cost-bands column must not imply bands are derived from price data — they are a per-market human judgement. The Sources column reads "of the sources that exist for this market" (a varying denominator is correct but must not invite a meaningless cross-market comparison).
+
+---
+
+## 6. Provenance on a displayed place (C3 / C22 — owner confirmed, 29 Sep 2026)
+
+Three rules, on the record, with a UI consequence that is **not yet designed** and must be built:
+
+- **A displayed Google rating ("4.7 · 61k") is Google's:** rented at display, never stored, and it **must carry on-screen Google attribution.** The M1 artboard has none — a visible change flagged back to Design.
+- **The Epic score must never appear next to a Google-shaped review count.** If both ever show on one page they must read as unmistakably separate things.
+- **The description is written from owned sources** — Wikipedia (credit + link), Wikidata, the venue's own page. Google's editorial summary is never stored and never used.
+
+## 7. Settled and closed
+
+- **FX / M2c — DECIDED (a): euros only for launch.** No FX field, no rate source, no conversion anywhere. See §5.
+- **US cost bands** are a starting position pending a US census (§3.3); flag when the distribution can replace them.
+- **Who reads the American copy** — a reader is found nearer launch; not a blocker. Collection copy stays `en-GB`-only until then.
+
+---
+
+## 8. Sequence (brief §11)
+
+1. Census report — type vs text. **Done, 29 Sep 2026: type-driven** (bounding box + `includedType`); the only English strings are the type-fenced `WORD_QUESTIONS` in `apps/api/src/sources/censusQuestions.js` (correctness-safe untranslated) and the currently-empty `TEXT_QUESTIONS`. A new country opens with a bounding box.
+2. Migration for §4/§5 — **migration 300 `a_place_belongs_to_a_market`, built 29 Sep 2026** (markets table + seed; `area_counts.country_code`; `host_offers.currency`+`timezone`; `place_records.timezone`; `provider_calls.language_code`/`region_code`/`field_mask`; blocked list as the code constant `apps/api/src/domain/markets.js`).
+3. Wording table, resolver, miss log (§6 of the brief).
+4. Markets screen, then wording screen.
+5. URLs, hreflang, sitemaps, slug history.
+6. Area input and placement for the US — largest item; may warrant its own brief.
+7. The cross-language alias rule — small; any time before the first foreign extraction.
