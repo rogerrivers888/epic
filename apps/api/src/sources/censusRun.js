@@ -1779,6 +1779,12 @@ export async function report(runId = null) {
     : await query("select * from census_runs order by started_at desc limit 1");
   if (!run) return null;
 
+  // A run still going is bounded by the database's own clock, not this
+  // process's: its slices are stamped with Postgres's now(), and when the two
+  // clocks disagree — a Docker VM's clock drifts after the host sleeps — a
+  // slice written moments ago can sit after "now" in this process and fall
+  // out of its own run's report. That was the census report tests failing
+  // twice in a row and then passing six times (29 Sep 2026).
   // One row per area per tile, *distinct*, before anything is added up: a tile
   // touching SE1 and SE11 is one SE tile, and summing over the outcodes counted
   // its requests twice (21 Sep 2026).
@@ -1812,7 +1818,7 @@ export async function report(runId = null) {
               sum(cs.requests)::int as requests,
               count(*) filter (where cs.saturated and cs.depth >= $3)::int as saturated
          from census_slices cs
-        where cs.ran_at >= $2 and cs.ran_at <= $4
+        where cs.ran_at >= $2 and cs.ran_at <= coalesce($4::timestamptz, now())
           and cs.area_slug in (select grid_key from census_run_tiles where run_id = $1)
         group by 1
      ), found as (
@@ -1835,7 +1841,7 @@ export async function report(runId = null) {
        left join spent sp on sp.grid_key = tt.grid_key
        left join found fo on fo.grid_key = tt.grid_key
       group by tt.area, d.outcodes
-      order by tt.area`, [run.id, run.started_at, CENSUS_MAX_DEPTH, run.finished_at ?? new Date()]);
+      order by tt.area`, [run.id, run.started_at, CENSUS_MAX_DEPTH, run.finished_at ?? null]);
 
   // Every tile once, whatever it touches — and separately, what this run
   // actually asked. A tile still fresh from an earlier census is skipped rather
@@ -1852,18 +1858,18 @@ export async function report(runId = null) {
             -- run's totals and a finished report grew after the fact (Codex,
             -- 23 Sep 2026). The spend query already had it; these did not.
             coalesce((select sum(cs.requests)::int from census_slices cs
-                       where cs.ran_at >= $2 and cs.ran_at <= $3
+                       where cs.ran_at >= $2 and cs.ran_at <= coalesce($3::timestamptz, now())
                          and cs.area_slug in (select grid_key from census_run_tiles where run_id = $1)), 0) as requests,
             coalesce((select count(distinct venue_ref)::int from census_run_surfacings where run_id = $1), 0) as places,
             coalesce((select count(*)::int from census_slices cs
-                       where cs.ran_at >= $2 and cs.ran_at <= $3
+                       where cs.ran_at >= $2 and cs.ran_at <= coalesce($3::timestamptz, now())
                          and cs.area_slug in (select grid_key from census_run_tiles where run_id = $1)), 0) as slices,
             coalesce(sum(t.saturated), 0)::int saturated,
             coalesce(sum(t.requests), 0)::int ground_requests,
             coalesce(sum(t.places), 0)::int ground_places
        from census_tiles t
        join census_run_tiles m on m.grid_key = t.grid_key and m.run_id = $1`,
-    [run.id, run.started_at, run.finished_at ?? new Date()]);
+    [run.id, run.started_at, run.finished_at ?? null]);
 
   // The money, from the ledger and nowhere else.
   const { rows: [spend] } = await query(
@@ -1877,8 +1883,8 @@ export async function report(runId = null) {
       -- Between the run starting and the run ending. Without the second bound
       -- an old run's cost grew every time a later one asked Google, which is a
       -- report that changes after the fact (Codex, 21 Sep 2026).
-      where purpose = 'census.slice' and created_at >= $1 and created_at <= $2`,
-    [run.started_at, run.finished_at ?? new Date()]);
+      where purpose = 'census.slice' and created_at >= $1 and created_at <= coalesce($2::timestamptz, now())`,
+    [run.started_at, run.finished_at ?? null]);
 
   // How the places were found, which is the thing the nine text-query drawers
   // exist to be judged on.

@@ -2131,3 +2131,22 @@ test('a run built paused can be started the moment its plan is written', async (
   assert.equal(back.state, 'running', 'no five-minute wait (Codex, 29 Sep 2026)');
   t.after(() => query(`delete from census_run_tiles where run_id = $1`, [run.id]));
 });
+
+test('a live run\'s report counts what it asked even when this process\'s clock runs behind the database\'s', async (t) => {
+  await clean();
+  t.after(clean);
+  // The census report tests failed twice in a row on 29 Sep 2026 and then
+  // passed six times: the report bounded a live run by this process's clock,
+  // and Postgres (in a Docker VM whose clock drifts after the host sleeps)
+  // stamps slices with its own. Five seconds behind makes it certain.
+  const run = await startTestRun({ label: 'test clock' });
+  await seedTile(run, 'test/clock');
+  await query(
+    `insert into census_slices (area_slug, min_lat, min_lng, max_lat, max_lng, category, subcategory,
+                                google_type, query, returned, new_ids, saturated, depth, requests, ran_at, census_run_id)
+     values ('test/clock', 51.40, -0.70, 51.48, -0.58, 'sport', 'golf', 'golf_course', 'golf course', 20, 20, false, 0, 42, now(), $1)`, [run.id]);
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() - 5000 });
+  const out = await report(run.id);
+  t.mock.timers.reset();
+  assert.equal(out.total.requests, 42);
+});
