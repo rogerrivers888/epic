@@ -925,3 +925,21 @@ test('a lift written before the new maps still covers what it saw, and a day kee
   const { rows: [k] } = await query(`select value from bo_settings where key like 'census:uk-day:%' limit 1`);
   assert.equal(typeof k?.value?.newPlaces, 'number');
 });
+
+test('an old day whose squares were asked again since is not rebuilt', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from census_run_tiles where grid_key = 'uktest/revisit'`);
+    await query(`delete from census_tiles where grid_key = 'uktest/revisit'`);
+    await clean();
+  });
+  const one = await dayOne();
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at)
+     values ('uktest/revisit', 48, -6, 48.08, -5.88, array['ZZ3Q'], 'done', '2026-09-29T10:00:00Z') on conflict (grid_key) do update set state = 'done', censused_at = excluded.censused_at`);
+  await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'uktest/revisit')`, [one.id]);
+  // Its record from before it carried what was left.
+  await query(`insert into bo_settings (key, value, updated_by) values ($1, '{"districts": 5, "left": 3}', 'test')`, [`census:uk-day:${one.id}`]);
+  const st = await uk.status(new Date('2026-09-30T09:00:00Z'));
+  assert.deepEqual([st.days[0].districts, st.days[0].districtsLeft], [5, null], 'what it said stands; what it did not, stays unknown');
+});

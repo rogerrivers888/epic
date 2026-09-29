@@ -503,11 +503,21 @@ export async function status(now = new Date()) {
        select (select count(*) filter (where whole)::int from dist) as districts,
               (select count(*) filter (where not whole)::int from dist) as "districtsLeft",
               (select count(distinct substring(code from '^[A-Z]+')) filter (where not whole)::int from dist) as "areasLeft",
-              (select count(*) filter (where not done)::int from plan) as left`, [r.id]);
+              (select count(*) filter (where not done)::int from plan) as left,
+              -- Squares of its plan censused again since it finished: if any,
+              -- today's tiles no longer say what was left then (Codex, 29 Sep 2026).
+              (select count(*)::int from census_run_tiles m2 join census_tiles t2 on t2.grid_key = m2.grid_key
+                                    join census_runs r2 on r2.id = m2.run_id
+                where m2.run_id = $1 and r2.finished_at is not null and t2.censused_at > r2.finished_at) as revisited`, [r.id]);
     // Kept once the day has ended, so a square censused again thirty days on
     // cannot rewrite what that day said (Codex, 29 Sep 2026). In the back
     // office's own settings table, under a key its reader ignores.
-    if (ended && canFill && (!kept || kept.value.districtsLeft == null)) {
+    // Rebuilt only if none of its squares has been asked again since it
+    // ended; otherwise what was left then is unknown.
+    if (ended && then.revisited > 0 && (!kept || kept.value.districtsLeft == null)) {
+      Object.assign(then, { districtsLeft: null, areasLeft: null,
+        ...(kept ? { districts: kept.value.districts, left: kept.value.left } : { districts: null, left: null }) });
+    } else if (ended && canFill && (!kept || kept.value.districtsLeft == null)) {
       // Normally written when the run ended (censusRun.keepDayFigures); this
       // is for a day that ended before that existed, or before it carried
       // what was left. What it already said about districts done stands.
