@@ -178,7 +178,19 @@ export async function knownPlacesMatching(householdId, q, limit = 4) {
 
 /** Remember which country home is in, so the next search does not ask again. */
 export async function rememberHomeCountry(householdId, countryCode, country) {
-  await query('update households set home_country_code = $2, home_country = $3 where id = $1', [householdId, countryCode, country ?? null]);
+  // Seed the wording locale the first time the country is learned, the same as
+  // updateHousehold does — this is the other path a household's home country
+  // first becomes known, and without it a US household recovered here would
+  // keep the en-GB default (Codex). Only on first establishment; a later change
+  // leaves an established locale alone.
+  await query(
+    `update households
+        set home_country_code = $2, home_country = $3,
+            wording_locale = case when home_country_code is null
+                                  then coalesce((select default_wording_locale from markets where code = upper($2)), wording_locale)
+                                  else wording_locale end
+      where id = $1`,
+    [householdId, countryCode, country ?? null]);
 }
 
 /**

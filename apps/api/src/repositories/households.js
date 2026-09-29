@@ -50,6 +50,20 @@ export async function updateHousehold(id, f) {
             home_lng              = coalesce($8, home_lng),
             home_country_code     = case when $7::numeric is null then home_country_code else $12 end,
             home_country          = case when $7::numeric is null then home_country      else $13 end,
+            -- The household's wording locale follows the market it makes its home
+            -- in — seeded the FIRST time a home is set (old home_country_code was
+            -- null), so a new US household reads American English rather than the
+            -- en-GB default (register 1; the resolver reads this, never a place's
+            -- market). Only the first time: a later move must not overwrite an
+            -- established locale — a British family relocating to the US keeps
+            -- British English (Codex). SET expressions read the pre-update row,
+            -- so home_country_code is null here tests the old value. An unknown
+            -- market keeps the current value.
+            wording_locale        = case
+                                      when $7::numeric is null then wording_locale
+                                      when home_country_code is null
+                                        then coalesce((select default_wording_locale from markets where code = upper($12)), wording_locale)
+                                      else wording_locale end,
             pace                  = coalesce($9::jsonb, pace),
             timezone              = coalesce($10, timezone),
             home_radius_miles     = coalesce($11, home_radius_miles),
