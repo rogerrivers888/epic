@@ -52,6 +52,7 @@ import * as ownedPlaces from '../repositories/ownedPlaces.js';
 import { recordProviderCall } from '../repositories/visits.js';
 import { googleMatchFor, matchesFor, tripadvisorMatchFor, forgetMisses, triedFor, missesKept } from '../sources/providerMatch.js';
 import { whySourceFailed } from '../sources/why.js';
+import { healthOf } from '../sources/meter.js';
 import { currentHousehold } from './household.js';
 import { enrich } from '../sources/own.js';
 import { crowdBand, countBand } from '../domain/scoring.js';
@@ -1082,23 +1083,28 @@ router.get('/places', requires('view_library'), async (req, res, next) => {
     // walked; an area with no ring has no per-place distance and the column is
     // simply not there. Minutes, to match the ring chooser.
     if (scope.kind === 'ring') for (const row of rows) row.distance = scope.minutesByRef.get(row.ref) ?? null;
-    // What we have asked and not found ("don't-knows"), per place — a real
-    // answer, and a different fact from never having asked (C4). Only the
-    // `asked_nothing_found` state counts; Google never writes here (C3), so this
-    // is our own sources having looked and come up empty. `held` is the answers
-    // we do hold, for the "facts as chips" count. One grouped read, defaulting
-    // to nought so a place with no answers reads as none rather than as unknown.
+    // What we have asked and not found ("don't-knows"), and what we hold, per
+    // place — read from place_fact_answers, the SL5 pilot's fact store (owner,
+    // 29 Sep 2026: the explorer reads place_fact_answers). Its key is
+    // (venue_ref, attribute_key), so there is one settled row per fact — counting
+    // rows is counting facts, with no double-count from a fact answered by more
+    // than one source (Codex, 29 Sep 2026). `dont_know` is a real answer and a
+    // different fact from never having asked (C4); `yes`/`no` are the facts we
+    // hold, for the "facts as chips" count; `conflict` is our sources disagreeing.
+    // Google is never a source here (the source check forbids it, C3).
     const answerRefs = rows.map((r) => r.ref);
     if (answerRefs.length) {
       const { rows: ans } = await query(
         `select venue_ref,
-                count(*) filter (where state = 'asked_nothing_found')::int as dont_knows,
-                count(*) filter (where state = 'answered')::int            as held
-           from place_answers where venue_ref = any($1) group by venue_ref`, [answerRefs]);
+                count(*) filter (where state = 'dont_know')::int    as dont_knows,
+                count(*) filter (where state in ('yes', 'no'))::int as held,
+                count(*) filter (where state = 'conflict')::int     as conflicts
+           from place_fact_answers where venue_ref = any($1) group by venue_ref`, [answerRefs]);
       const byRef = new Map(ans.map((a) => [a.venue_ref, a]));
       for (const row of rows) {
         row.dontKnows = byRef.get(row.ref)?.dont_knows ?? 0;
         row.heldAnswers = byRef.get(row.ref)?.held ?? 0;
+        row.conflicts = byRef.get(row.ref)?.conflicts ?? 0;
       }
     }
     // Effective required facts: the stored bar's own, plus the BASICS every
@@ -2779,7 +2785,14 @@ router.post('/names', requires('manage_library'), async (req, res, next) => {
     } finally {
       // One ledger row for the batch, attributed to this session; then the
       // claim goes back, because the calls it covered are now on the ledger.
-      if (Object.keys(meter).length) await recordProviderCall(household.id, 'google', 'admin.places.names', meter, null).catch(() => null);
+      // Recorded when the meter carries units OR a fault: a paid-gate refusal
+      // (daily ceiling, household cap, an ungranted agent session) notes its
+      // fault on a non-enumerable symbol and throws before any unit is bumped,
+      // so `Object.keys` is empty — but the refusal is exactly what the supplier
+      // record must show (owner, 20 Sep 2026; Codex, 29 Sep 2026).
+      if (Object.keys(meter).length || healthOf(meter).failed) {
+        await recordProviderCall(household.id, 'google', 'admin.places.names', meter, null).catch(() => null);
+      }
       await releaseSpend(room.reservation);
     }
     // Priced from what actually billed (the Pro requests the meter counted), so
@@ -2911,10 +2924,16 @@ router.get('/subcategory-summary/quote', requires('view_library'), async (req, r
     const refs = await subcategoryRefs(scope, sub);
     if (!googleSource.enabled()) return res.json({ refs: refs.length, pence: 0, off: true });
     const held = await alreadyHeld(refs);
-    const pence = askingCost(refs, await alreadyMatched(refs), held,
-      await missesKept(refs, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 }),
-      await nothingToGoOn(refs));
-    res.json({ refs: refs.length, toCompare: Math.max(0, refs.length - held.size), pence });
+    const misses = await missesKept(refs, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 });
+    const blind = await nothingToGoOn(refs);
+    const pence = askingCost(refs, await alreadyMatched(refs), held, misses, blind);
+    // The number the button will actually work on: unheld, and something to go
+    // on. A place already compared, a remembered miss or one with no name or
+    // position is not "to compare", so it is excluded here exactly as the action
+    // excludes it — otherwise the quote could promise work the button then does
+    // not do (Codex, 29 Sep 2026).
+    const toCompare = refs.filter((ref) => !held.has(ref) && !misses.has(ref) && !blind.has(ref)).length;
+    res.json({ refs: refs.length, toCompare, pence });
   } catch (err) { next(err); }
 });
 
