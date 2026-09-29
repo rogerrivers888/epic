@@ -313,7 +313,7 @@ export async function startRun({
   const { rows: busy } = await query(
     `select id, label, state from census_runs
       where state in ('running', 'waiting')
-         or (state = 'paused' and problem like 'built paused%' and started_by = $1 and started_at > now() - interval '15 minutes')
+         or (state = 'paused' and problem like 'built paused%' and started_by = $1 and coalesce(last_seen_at, started_at) > now() - interval '5 minutes')
       limit 1`, [ONE_DAY_RUNS]);
   if (busy.length) throw busyError(busy[0]);
   const tiles = given?.length ? given : await planTiles({ areas, outcodes, dLat, dLng, padKm });
@@ -340,7 +340,7 @@ export async function startRun({
       // planners rewriting the same squares (Codex, 29 Sep 2026).
       `select id, label, state from census_runs
         where state in ('running', 'waiting')
-           or (state = 'paused' and problem like 'built paused%' and started_by = $1 and started_at > now() - interval '15 minutes')
+           or (state = 'paused' and problem like 'built paused%' and started_by = $1 and coalesce(last_seen_at, started_at) > now() - interval '5 minutes')
         limit 1`, [ONE_DAY_RUNS]);
     if (going.length) throw busyError(going[0]);
     const { rows: [row] } = await db.query(
@@ -371,7 +371,16 @@ export async function startRun({
   // is half asked all the same (Codex, 29 Sep 2026).
   const PARTIAL = "census_tiles.state <> 'done' and census_tiles.started_at > now() - ($8 || ' days')::interval"
     + " and (census_tiles.censused_at is null or census_tiles.started_at > census_tiles.censused_at)";
+  // A heartbeat while the plan is written: a whole-UK plan is thousands of
+  // rows, and a planner that is slow is not a planner that has gone. Its
+  // "being planned" guard reads last_seen_at, so it holds while this beats
+  // and lapses five minutes after it stops (Codex, 29 Sep 2026).
+  let written = 0;
+  const beat = () => query('update census_runs set last_seen_at = now() where id = $1', [run.id]);
+  await beat();
   for (const t of tiles) {
+    written += 1;
+    if (written % 200 === 0) await beat();
     await query(
       `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, run_id, state)
        values ($1,$2,$3,$4,$5,$6,$7,'todo')
@@ -470,7 +479,7 @@ export async function resume(id, { sessionId = null } = {}) {
       `select id, label, state from census_runs
         where id <> $1
           and (state = 'running'
-               or (state = 'paused' and problem like 'built paused%' and started_by = $2 and started_at > now() - interval '15 minutes'))
+               or (state = 'paused' and problem like 'built paused%' and started_by = $2 and coalesce(last_seen_at, started_at) > now() - interval '5 minutes'))
         limit 1`, [id, ONE_DAY_RUNS]);
     if (going.length) {
       throw Object.assign(new Error(going[0].state === 'paused'

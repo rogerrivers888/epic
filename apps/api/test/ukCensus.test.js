@@ -17,6 +17,7 @@ test.after(() => pool.end());
 
 const DAY1 = '2026-09-28T17:39:00Z';
 const clean = async () => {
+  await query(`delete from bo_settings where key like 'census:uk-day:%'`);
   await query(`delete from census_runs where label like 'The rest of the UK — day %'`);
   await query(`delete from billing_days where invoice_month = '202609' and sku like 'test %'`);
   await query(`delete from api_sessions where label like 'census: The rest of the UK — day %'`);
@@ -445,5 +446,29 @@ test('each day reports its own figures, as they stood when it ended', async (t) 
   await query(`update census_tiles set state = 'done', censused_at = '2026-09-29T20:00:00Z' where grid_key = 'uktest/day/b'`);
   const after = await uk.status(new Date('2026-09-30T01:00:00Z'));
   assert.deepEqual([after.days[0].districts, after.days[0].tilesLeft], [1, 1], 'day 1 says what day 1 knew');
+  // And still, after its done square is censused again a month on.
+  await query(`update census_tiles set censused_at = '2026-10-30T00:00:00Z' where grid_key = 'uktest/day/a'`);
+  const month = await uk.status(new Date('2026-10-30T01:00:00Z'));
+  assert.deepEqual([month.days[0].districts, month.days[0].tilesLeft], [1, 1], 'kept, not recomputed');
   assert.match(uk.reportLine(after.days[0]), /^Day 1 \(2026-09-28\): 1 districts done/);
+});
+
+test('a plan not switched on is not a finished day in the reports', async (t) => {
+  await clean(); t.after(clean);
+  const { ONE_DAY_RUNS } = await import('../src/sources/censusRun.js');
+  await dayOne();
+  await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state, problem, started_by, started_at)
+     values ('The rest of the UK — day 2', array['ZZ'], 0.08, 0.12, 70000, 5, 30, 'paused', 'built paused; resume to start', $1, now())`, [ONE_DAY_RUNS]);
+  const st = await uk.status(new Date('2026-09-29T09:00:00Z'));
+  assert.deepEqual(st.days.map((d) => [d.day, d.ended]), [[1, true], [2, false]]);
+});
+
+test('a slow planner still holds off other starts while it beats', async (t) => {
+  await clean(); t.after(clean);
+  const { startRun, ONE_DAY_RUNS } = await import('../src/sources/censusRun.js');
+  await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state, problem, started_by, started_at, last_seen_at)
+     values ('The rest of the UK — day 2', array['ZZ'], 0.08, 0.12, 70000, 5, 30, 'paused', 'built paused; resume to start', $1, now() - interval '40 minutes', now() - interval '1 minute')`, [ONE_DAY_RUNS]);
+  await assert.rejects(() => startRun({ label: 'test by hand', outcodes: ['SL5'], padKm: 0 }), /is being planned/);
 });

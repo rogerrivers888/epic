@@ -50,8 +50,8 @@ export const PENNIES_GBP = 1;
 export const DAY_ALERT_GBP = 5;
 /** Whose decision a daily run is: the programme's — and the reset clock never wakes it. */
 export const STARTED_BY = censusRun.ONE_DAY_RUNS;
-/** Longer than any plan takes to write: a run still built-paused after this was cut short. */
-const PLANNING_MS = 15 * 60_000;
+/** A plan whose heartbeat has been silent this long was cut short (its writer beats every 200 squares). */
+const PLANNING_MS = 5 * 60_000;
 /** How a day ends: at the run's own ceiling, or ended for the day at the shared cap. */
 const DAY_ENDED = /^(stopped at the \d+-request ceiling|ended for the day)/;
 
@@ -169,7 +169,7 @@ export async function decide(now = new Date()) {
   // while its plan was being written — is not anybody's stop. It is set aside
   // and the day started again, the same day (Codex, 28 Sep 2026).
   const unfinishedPlan = latest.state === 'paused' && latest.started_by === STARTED_BY && /^built paused/.test(latest.problem ?? '')
-    && new Date(now).getTime() - new Date(latest.started_at).getTime() > PLANNING_MS;
+    && new Date(now).getTime() - new Date(latest.last_seen_at ?? latest.started_at).getTime() > PLANNING_MS;
   if (unfinishedPlan) return { action: 'replan', runs, latest, bills, day: days };
   const dayEnded = (latest.state === 'paused' && DAY_ENDED.test(latest.problem ?? '')) || latest.state === 'done';
   if (!dayEnded) return { action: 'stopped', runs, latest, bills };
@@ -286,16 +286,29 @@ export async function status(now = new Date()) {
     // done in all that day, and the squares not yet censused by then are what
     // was left. A square's censused_at only moves when it is censused again,
     // thirty days on, so both stay what they were.
-    const { rows: [then] } = await query(
+    const ended = ['paused', 'done', 'stopped'].includes(r.state) && !/^built paused/.test(r.problem ?? '');
+    const key = `census:uk-day:${r.id}`;
+    const { rows: [kept] } = ended
+      ? await query('select value from bo_settings where key = $1', [key])
+      : { rows: [] };
+    const { rows: [then] } = kept ? { rows: [kept.value] } : await query(
       `with plan as (
          select t.outcodes, (t.censused_at is not null and t.censused_at <= coalesce(r.finished_at, now())) as done
            from census_run_tiles m join census_tiles t on t.grid_key = m.grid_key join census_runs r on r.id = m.run_id
           where m.run_id = $1)
        select (select count(*)::int from (select c.code from plan, unnest(plan.outcodes) c(code) group by c.code having bool_and(done)) x) as districts,
               (select count(*) filter (where not done)::int from plan) as left`, [r.id]);
+    // Kept once the day has ended, so a square censused again thirty days on
+    // cannot rewrite what that day said (Codex, 29 Sep 2026). In the back
+    // office's own settings table, under a key its reader ignores.
+    if (ended && !kept) {
+      await query(
+        `insert into bo_settings (key, value, updated_by) values ($1, $2, 'the UK census') on conflict (key) do nothing`,
+        [key, JSON.stringify({ districts: then.districts, left: then.left })]);
+    }
     const rate = tilesAsked ? requests / tilesAsked : null;
     days.push({
-      day: i + 1, date: day, runId: r.id, state: r.state, requests: Number(r.requests ?? 0), places: Number(r.places ?? 0),
+      day: i + 1, date: day, runId: r.id, state: r.state, ended, requests: Number(r.requests ?? 0), places: Number(r.places ?? 0),
       tilesAsked: Number(t.asked ?? 0),
       districts: then.districts,
       tilesLeft: then.left,
@@ -384,7 +397,10 @@ export async function daily(now = new Date()) {
   // A day's report once its run has stopped for the day (or for good). The
   // billed figure arrives a day or so later, so a report is sent again once
   // Google has written it — a different subject, said once.
-  for (const d of st.days.filter((x) => x.state !== 'running' && x.state !== 'waiting')) {
+  // Only a day that has ended: a plan still being written, or built and not
+  // switched on, is not a day, and its notice would suppress the real one
+  // under the same subject (Codex, 29 Sep 2026).
+  for (const d of st.days.filter((x) => x.ended)) {
     const line = reportLine(d);
     await notify({ subject: `Census — the rest of the UK, day ${d.day}${d.billed?.final ? ', billed' : ''}`, text: line });
   }
