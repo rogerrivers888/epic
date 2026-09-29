@@ -213,7 +213,13 @@ export async function decide(now = new Date()) {
     // — unless it is one a person already lifted (Codex, 29 Sep 2026).
     // Each export day on its own as well: a charge offset by the next day's
     // credit is still a day Places cost money (Codex, 29 Sep 2026).
-    const net = bills.find((b) => unseen(b, 'places_net_gbp', seenNet, 0))
+    // Only the export days the census's own days span: Places used a month
+    // after it finished is not the census's (Codex, 29 Sep 2026).
+    const spanned = new Set(runs.flatMap((r) => {
+      const d0 = pacificDay(r.started_at);
+      return [d0, new Date(Date.parse(`${d0}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10)];
+    }));
+    const net = bills.filter((b) => spanned.has(b.day)).find((b) => unseen(b, 'places_net_gbp', seenNet, 0))
       ?? days.find((b) => unseen(b, 'places_net_gbp', seenNetSpan, 0));
     return { action: 'complete', runs, latest, bills, over: over ? { ...over, kind: 'five' } : net ? { ...net, kind: 'net' } : null };
   }
@@ -603,7 +609,7 @@ export function reportLine(day) {
   const n = (x) => Number(x ?? 0).toLocaleString('en-GB');
   const left = day.districtsLeft == null ? '' : ` · ${n(day.districtsLeft)} districts left in ${n(day.areasLeft)} areas`;
   const money = day.billed
-    ? ` · £${Number(day.billed.placesNetGbp ?? 0).toFixed(2)} that day${day.billed.final ? '' : ' so far'}`
+    ? ` · ${gbp(day.billed.placesNetGbp)} that day${day.billed.final ? '' : ' so far'}`
     : ' · billing export: nothing yet';
   return `Census day ${day.day} (${day.date}): ${n(day.requests)} calls · ${n(day.newPlaces)} new places${left}${money}`;
 }

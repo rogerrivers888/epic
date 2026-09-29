@@ -895,3 +895,14 @@ test('stopped on a bill, lifted, and the next day follows', async (t) => {
   await uk.liftHold({ who: 'test' });
   assert.equal((await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start })).action, 'start', 'the census carries on');
 });
+
+test('a finished census is not blamed for Places used long after, and the report says a fraction of a penny', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne({ state: 'done', problem: null });
+  await query(`insert into bo_settings (key, value, updated_by) values ('census:uk-complete', '{}', 'test')`);
+  await billed('2026-10-28', 'google-pro', 3); // a month on
+  const told = [];
+  await uk.tick({ now: new Date('2026-10-29T08:00:00Z'), tell: (x) => told.push(x) });
+  assert.equal(told.length, 0);
+  assert.match(uk.reportLine({ day: 1, date: '2026-09-28', requests: 1, newPlaces: 0, billed: { placesNetGbp: 0.003, final: true } }), /£0\.0030 that day$/);
+});

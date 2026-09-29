@@ -477,11 +477,14 @@ const Waiting = () => <View style={{ paddingVertical: spacing.xl }}><ActivityInd
 // The census of the rest of the UK, a day at a time (sources/ukCensus.js)
 // ---------------------------------------------------------------------------
 
+/** Pounds to the penny, or to a hundredth of one for a fraction of a penny — which is enough to stop the census. */
+const gbp = (n: number) => `£${Math.abs(n * 100 - Math.round(n * 100)) < 1e-6 ? n.toFixed(2) : n.toFixed(4)}`;
+
 /** What the programme is doing, in a word or two — the detail is behind the tips. */
 const ukWord = (u: UkCensus) => {
   if (u.complete) return 'Complete';
   if (u.halted) return u.halted.kind === 'net'
-    ? `Stopped: Places cost £${u.halted.placesNetGbp.toFixed(2)} on ${u.halted.day}`
+    ? `Stopped: Places cost ${gbp(u.halted.placesNetGbp)} on ${u.halted.day}`
     : `Stopped: Google billed £${u.halted.googleGbp.toFixed(2)} on ${u.halted.day}`;
   if (u.held) return `Held: the census billed £${u.held.censusGbp.toFixed(2)} on ${u.held.day}`;
   switch (u.action) {
@@ -514,7 +517,7 @@ function UkCensusSection({ canManage, phone = false }: { canManage: boolean; pho
     { key: 'areas', label: 'Areas left', tip: 'ukCensusAreasLeft', width: 110, align: 'right', cell: (d) => (d.areasLeft == null ? <Blank /> : <Num n={d.areasLeft} />) },
     { key: 'requests', label: 'Requests', width: 120, align: 'right', cell: (d) => <Num n={d.requests} /> },
     { key: 'billed', label: 'Billed', tip: 'ukCensusBilled', width: 140, align: 'right',
-      cell: (d) => (d.billed ? <Word strong={d.billed.final}>{`£${d.billed.placesNetGbp.toFixed(2)}${d.billed.final ? '' : ' so far'}`}</Word> : <Blank />) },
+      cell: (d) => (d.billed ? <Word strong={d.billed.final}>{`${gbp(d.billed.placesNetGbp)}${d.billed.final ? '' : ' so far'}`}</Word> : <Blank />) },
     { key: 'left', label: 'Days left', tip: 'ukCensusDaysLeft', width: 110, align: 'right',
       cell: (d) => (d.daysLeft == null ? <Blank /> : <Num n={d.daysLeft} />) },
   ];
@@ -541,7 +544,7 @@ function UkCensusSection({ canManage, phone = false }: { canManage: boolean; pho
                 name: `Day ${d.day} · ${d.date}`,
                 note: `${d.requests.toLocaleString('en-GB')} calls · ${d.newPlaces.toLocaleString('en-GB')} new places${d.areasLeft == null ? '' : ` · ${d.areasLeft} areas left`}`,
                 chips: [
-                  { key: 'billed', word: d.billed ? `£${d.billed.placesNetGbp.toFixed(2)}${d.billed.final ? '' : ' so far'}` : 'not billed yet', tip: 'ukCensusBilled' },
+                  { key: 'billed', word: d.billed ? `${gbp(d.billed.placesNetGbp)}${d.billed.final ? '' : ' so far'}` : 'not billed yet', tip: 'ukCensusBilled' },
                   ...(d.daysLeft == null ? [] : [{ key: 'left', word: `${d.daysLeft} days left`, tip: 'ukCensusDaysLeft' as const }]),
                 ],
               })} />
