@@ -2843,13 +2843,15 @@ router.post('/names', requires('manage_library'), async (req, res, next) => {
 async function subcategoryRefs(scope, sub) {
   if (scope.kind === 'ring') {
     const { rows } = await query(
-      'select venue_ref from place_index where venue_ref = any($1) and subcategory = $2', [scope.refs, sub]);
+      // Ordered, so "Compare all" can page by a stable offset cursor rather than
+      // by cache membership (Codex, 29 Sep 2026).
+      'select venue_ref from place_index where venue_ref = any($1) and subcategory = $2 order by venue_ref', [scope.refs, sub]);
     return rows.map((r) => r.venue_ref);
   }
   const { rows } = await query(
     `select pi.venue_ref from place_index pi
        join place_areas pa on pa.venue_ref = pi.venue_ref
-      where pa.area_slug = $1 and pi.subcategory = $2`, [scope.area.slug, sub]);
+      where pa.area_slug = $1 and pi.subcategory = $2 order by pi.venue_ref`, [scope.area.slug, sub]);
   return rows.map((r) => r.venue_ref);
 }
 
@@ -2999,38 +3001,37 @@ router.post('/subcategory-summary/compare-all', requires('manage_library'), asyn
     // step the ask path takes (Codex, 29 Sep 2026). Fresh misses stay and are
     // excluded from the batch below.
     await forgetMisses(refs, 'google', { olderThanMinutes: STALE_MONTHS * 30 * 24 * 60 }).catch(() => null);
-    // Bounded, one page at a time. A county or country subcategory holds
-    // thousands of places, and comparing each is up to two sequential Google
-    // requests — a single request over the whole set would run for hours, time
-    // out mid-flight while still spending, and outlive its own reservation
-    // (Codex, 29 Sep 2026). So this compares at most COMPARE_ALL_PAGE places a
-    // call, reserves for exactly that batch, and returns `remaining` so the
-    // screen asks again — the same shape "Ask" and the not-owned list already
-    // page in.
-    const held = await alreadyHeld(refs);
-    const blind = await nothingToGoOn(refs);
-    // Places we already looked for and Google had no such place: a remembered
-    // miss. `googleMatchFor` returns the cached miss and makes no progress, so
-    // they are excluded from the batch — not merely discounted from the price —
-    // or a miss in the first page is picked every call and the page never
-    // advances (Codex, 29 Sep 2026).
-    const misses = await missesKept(refs, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 });
-    // The places still worth a call: not already cached, not a known miss, and
-    // something to go on.
-    const uncompared = refs.filter((ref) => !held.has(ref) && !blind.has(ref) && !misses.has(ref));
-    const batch = uncompared.slice(0, COMPARE_ALL_PAGE);
-    const want = askingCost(batch, await alreadyMatched(batch), held, misses, blind);
+    // Paged by a stable offset cursor over the ordered ref list, not by cache
+    // membership (Codex, 29 Sep 2026). A subcategory can hold more places than
+    // the 300-entry detail cache, so "the first currently-unheld refs" would
+    // recycle: after a page evicts the previous one, the previous page becomes
+    // "unheld" again and is re-fetched, and later places are never reached. A
+    // `from` offset into `subcategoryRefs`'s stable order advances linearly
+    // through every place instead, so each page is new ground and the walk
+    // completes. Each page is still bounded — at most COMPARE_ALL_PAGE places,
+    // up to two Google requests each — so a single request never runs for hours
+    // or outlives its reservation.
+    const from = Math.max(0, Math.trunc(Number(req.body?.from ?? req.query.from)) || 0);
+    const windowRefs = refs.slice(from, from + COMPARE_ALL_PAGE);
+    const held = await alreadyHeld(windowRefs);
+    const blind = await nothingToGoOn(windowRefs);
+    // A remembered miss makes no progress — googleMatchFor returns it without
+    // calling Google — so it is not worth a call; excluded from what we reserve
+    // and try, but the cursor still steps past it.
+    const misses = await missesKept(windowRefs, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 });
+    const toCall = windowRefs.filter((ref) => !held.has(ref) && !blind.has(ref) && !misses.has(ref));
+    const want = askingCost(toCall, await alreadyMatched(toCall), held, misses, blind);
     const room = await roomToSpend(want, { holder: 'compare-all' });
     if (!room.ok) return overTheCeiling(res, want, room);
     const household = await currentHousehold();
     let fetched = 0;
     let failed = 0;
     try {
-      const named = await index.namesFor(batch);
-      const { rows: at } = await query('select venue_ref, lat, lng from place_index where venue_ref = any($1)', [batch]);
+      const named = await index.namesFor(toCall);
+      const { rows: at } = await query('select venue_ref, lat, lng from place_index where venue_ref = any($1)', [toCall]);
       const point = new Map(at.map((r) => [r.venue_ref, r]));
-      const ids = await matchesFor(batch, 'google');
-      for (const ref of batch) {
+      const ids = await matchesFor(toCall, 'google');
+      for (const ref of toCall) {
         let id = ref.startsWith('google:') ? ref.slice('google:'.length) : ids.get(ref) ?? null;
         if (id && detailHeld('google', id)) continue; // already compared — free
         if (!id) {
@@ -3052,20 +3053,20 @@ router.post('/subcategory-summary/compare-all', requires('manage_library'), asyn
     } finally {
       await releaseSpend(room.reservation);
     }
-    // How many are still uncompared, read from the actual cache AFTER the fetch
-    // rather than assumed from the batch size (Codex, 29 Sep 2026): a page whose
-    // calls all failed leaves them uncompared and must keep offering "compare
-    // more", not report done; and a place evicted from the cache is uncompared
-    // again. Best-effort by nature — a comparison is display-only, so its only
-    // record is the six-hour, 300-entry detail cache (the data policy keeps no
-    // Google content), so a subcategory larger than that cache cannot be held
-    // whole and `remaining` may never reach zero. Every page is bound by the cost
-    // quote, the grant and the ceiling, so re-comparing an evicted place on a
-    // later page is a fresh, bounded call, never a runaway. The summary's
-    // opened/total is the honest coverage.
-    const stillHeld = await alreadyHeld(uncompared);
-    const remaining = uncompared.filter((ref) => !stillHeld.has(ref)).length;
-    res.json({ ...(await head(scope)), ...(await buildSubcategorySummary(scope, sub)), fetched, failed, remaining });
+    // The cursor for the next page, or null when the walk has covered every
+    // place. It advances by the whole window — held, missed and blind places
+    // included — so the walk always completes rather than stalling on places
+    // that need no call. `total` is the whole subcategory; the summary's
+    // opened/total is the honest coverage of what is actually compared (a
+    // comparison is display-only, kept only in the six-hour detail cache, so a
+    // subcategory larger than that cache is never all cached at once — but the
+    // cursor still visits every place).
+    const nextFrom = from + windowRefs.length;
+    const done = nextFrom >= refs.length;
+    res.json({
+      ...(await head(scope)), ...(await buildSubcategorySummary(scope, sub)),
+      fetched, failed, from, nextFrom: done ? null : nextFrom, total: refs.length,
+    });
   } catch (err) { next(err); }
 });
 
