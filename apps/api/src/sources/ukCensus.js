@@ -188,6 +188,14 @@ export async function decide(now = new Date()) {
   if (pacificDay(latest.started_at) >= pacificDay(now)) return { action: 'today', runs, latest, bills };
   const yesterday = billedFor(bills, pacificDay(latest.started_at));
   if (yesterday && yesterday.census_gbp >= PENNIES_GBP) return { action: 'held', runs, latest, bills, yesterday };
+  // Another census live, or a plan being written: wait, rather than make the
+  // day's session and be refused (Codex, 29 Sep 2026).
+  const { rows: other } = await query(
+    `select 1 from census_runs
+      where state in ('running', 'waiting')
+         or (state = 'paused' and problem like 'built paused%' and coalesce(last_seen_at, started_at) > now() - interval '5 minutes')
+      limit 1`);
+  if (other.length) return { action: 'waiting on another census', runs, latest, bills };
   return { action: 'start', runs, latest, bills, yesterday: yesterday ?? null, day: days + 1 };
 }
 

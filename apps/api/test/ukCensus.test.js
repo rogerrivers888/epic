@@ -529,3 +529,24 @@ test('a person\'s plan being written holds off the census too', async (t) => {
      values ('test planning by hand', array['ZZ'], 0.08, 0.12, 10, 5, 30, 'paused', 'built paused; resume to start', 'the owner (passcode)', now())`);
   await assert.rejects(() => startRun({ label: 'The rest of the UK — day 9', outcodes: ['SL5'], padKm: 0 }), /is being planned/);
 });
+
+test('another census going: the day waits, and makes no session', async (t) => {
+  await clean();
+  t.after(async () => { await query(`delete from census_runs where label = 'test by hand, going'`); await clean(); });
+  await dayOne();
+  await query(`insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state) values ('test by hand, going', array['ZZ'], 0.08, 0.12, 10, 5, 30, 'running')`);
+  const r = recorder();
+  const out = await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start });
+  assert.equal(out.action, 'waiting on another census');
+  const { rows } = await query(`select 1 from api_sessions where label like 'census: The rest of the UK — day %'`);
+  assert.equal(rows.length, 0);
+});
+
+test('a plan still being written cannot be resumed, even by name', async (t) => {
+  await clean(); t.after(clean);
+  const { resume } = await import('../src/sources/censusRun.js');
+  const { rows: [p] } = await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state, problem, last_seen_at)
+     values ('The rest of the UK — day 2', array['ZZ'], 0.08, 0.12, 70000, 5, 30, 'paused', 'built paused; resume to start', now()) returning id`);
+  await assert.rejects(() => resume(p.id), /is being planned/);
+});

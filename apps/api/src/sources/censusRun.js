@@ -477,9 +477,11 @@ export async function resume(id, { sessionId = null } = {}) {
     // the UK census is being planned (Codex, 29 Sep 2026).
     const { rows: going } = await db.query(
       `select id, label, state from census_runs
-        where id <> $1
-          and (state = 'running'
-               or (state = 'paused' and problem like 'built paused%' and coalesce(last_seen_at, started_at) > now() - interval '5 minutes'))
+        -- Another run going, or any plan still being written — this one's
+        -- own included: resuming a plan mid-write would set the workers on
+        -- half of it (Codex, 29 Sep 2026).
+        where (id <> $1 and state = 'running')
+           or (state = 'paused' and problem like 'built paused%' and coalesce(last_seen_at, started_at) > now() - interval '5 minutes')
         limit 1`, [id]);
     if (going.length) {
       throw Object.assign(new Error(going[0].state === 'paused'
