@@ -100,7 +100,12 @@ export async function sendMail({ to, subject, text, html, purpose = 'message' })
   // The row first, then the send, with our id in Postmark's metadata: a
   // Delivery event can arrive before Postmark's reply to the send has been
   // read, and it must still find its row (Codex, 13 Sep 2026).
-  const row = await recordSend({ to, subject, purpose, status: 'sending' }).catch(() => null);
+  // A log row that cannot be written is said, not swallowed: the Mail screen
+  // is the record of what went, and a send it does not show is a send nobody
+  // can see (29 Sep 2026: a test that went out left no row, and no reason).
+  let logError = null;
+  const row = await recordSend({ to, subject, purpose, status: 'sending' })
+    .catch((err) => { logError = err.message; console.error(`epic-api: mail — could not log a send: ${err.message}`); return null; });
   try {
     const res = await fetch('https://api.postmarkapp.com/email', {
       method: 'POST',
@@ -116,7 +121,11 @@ export async function sendMail({ to, subject, text, html, purpose = 'message' })
       return { sent: false, reason: 'send_failed', message: failure };
     }
     if (row) await finishSend(row.id, { providerId: body.MessageID ?? null, status: 'sent' }).catch(() => null);
-    return { sent: true, id: row?.id ?? null, providerId: body.MessageID ?? null };
+    // No row before the send: write it now, so what went is on the Mail screen.
+    const late = row ? null : await recordSend({ to, subject, purpose, providerId: body.MessageID ?? null, status: 'sent' })
+      .catch((err) => { logError = `${logError ?? ''} · again: ${err.message}`; return null; });
+    const id = row?.id ?? late?.id ?? null;
+    return { sent: true, id, providerId: body.MessageID ?? null, logged: Boolean(id), ...(id ? {} : { logError }) };
   } catch (err) {
     if (row) await finishSend(row.id, { status: 'failed', failure: err.message }).catch(() => null);
     return { sent: false, reason: 'send_failed', message: err.message };
