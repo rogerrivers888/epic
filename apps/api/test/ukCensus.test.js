@@ -254,7 +254,10 @@ test('a day\'s run is switched on only once its plan is written, and a plan cut 
   const { rows: [on] } = await query('select state, night_share, started_by from census_runs where id = $1', [out.started.id]);
   assert.deepEqual([on.state, on.night_share], ['running', 70000]);
   // Now a plan that was cut short: built paused by the programme a while ago.
-  await query(`update census_runs set state = 'paused', problem = 'built paused; resume to start', started_at = now() - interval '20 minutes', last_seen_at = now() - interval '20 minutes' where id = $1`, [out.started.id]);
+  await query(`update census_runs set state = 'paused', problem = 'built paused; resume to start', started_at = '2026-09-29T08:10:00Z', last_seen_at = '2026-09-29T08:10:00Z' where id = $1`, [out.started.id]);
+  // Twenty minutes before the tick below, on the tick's own clock: aged by the
+  // database's real now(), this went red for good once the wall clock passed
+  // 08:30 on 29 Sep 2026 (epic-4f).
   const r = recorder();
   const again = await uk.tick({ now: new Date('2026-09-29T08:30:00Z'), start: r.start });
   assert.equal(again.action, 'replan');
