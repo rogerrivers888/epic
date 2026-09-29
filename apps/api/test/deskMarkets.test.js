@@ -38,6 +38,40 @@ test('the markets list carries a places count and a go-live checklist', async ()
   assert.equal(pt.ready, false);
 });
 
+test('sources: connected out of the ones that can exist here — Portugal reads 3 of 4', async () => {
+  const list = await m.listMarkets();
+  const pt = list.find((x) => x.code === 'PT');
+  // osm not loaded (notConnected), wikidata/wikipedia/site connected, fsa/ons absent.
+  assert.equal(pt.sourcesConnected, 3, 'three connected');
+  assert.equal(pt.sourcesCanExist, 4, 'out of the four that can exist (absent ones excluded)');
+  assert.equal(pt.checklist.sources, false, 'a not-connected source fails the go-live check');
+  // GB is live with everything connected.
+  const gb = list.find((x) => x.code === 'GB');
+  assert.equal(gb.sourcesConnected, gb.sourcesCanExist, 'GB has everything connected');
+  assert.equal(gb.checklist.sources, true);
+});
+
+test('Connect wires up a not-connected source, and it is undoable', async () => {
+  const before = (await m.getMarket('PT')).sourcesConnected;
+  const res = await m.connectSource('PT', 'osm', 'sarah@epic.day');
+  assert.ok(res.change, 'the change id comes back');
+  const after = await m.getMarket('PT');
+  assert.equal(after.sourcesConnected, before + 1, 'one more connected');
+  assert.equal(after.checklist.sources, true, 'nothing left unconnected');
+  // Absent sources cannot be connected.
+  await assert.rejects(() => m.connectSource('PT', 'fsa', 'sarah@epic.day'), /cannot exist/);
+  // Undo restores the not-connected state.
+  const { rows: [chg] } = await query(`select * from bo_changes where subject_id='PT/source/osm' order by at desc limit 1`);
+  await m.undoMarketSource({ change: chg, who: 'sarah@epic.day' });
+  assert.equal((await m.getMarket('PT')).sourcesConnected, before, 'undo puts it back');
+});
+
+test('cost bands carry who set them and when', async () => {
+  const gb = await m.getMarket('GB');
+  assert.ok(gb.costBandsSetBy, 'the bands say who set them');
+  assert.ok(gb.costBandsAt, 'and when');
+});
+
 test('the blocked list is the code constant, Vietnam included — never rows', async () => {
   const blocked = m.blockedMarkets();
   assert.ok(blocked.some((b) => b.name === 'Vietnam'));

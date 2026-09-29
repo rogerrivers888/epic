@@ -299,7 +299,7 @@ export type AdminScreen =
  * tab. Every old spelling still opens the screen that took its job over — a
  * link somebody was sent last week is still a link — but nothing writes them.
  */
-export const FILING_TABS = ['overview', 'categories', 'facts', 'mapping', 'collections', 'automations', 'changes', 'runs'] as const;
+export const FILING_TABS = ['overview', 'categories', 'facts', 'mapping', 'collections', 'automations', 'changes', 'markets', 'runs'] as const;
 export type FilingTab = typeof FILING_TABS[number];
 const FILING_TAB_WAS: Record<string, FilingTab> = {
   labels: 'facts', rules: 'categories', defaults: 'categories', rows: 'collections', ideas: 'collections',

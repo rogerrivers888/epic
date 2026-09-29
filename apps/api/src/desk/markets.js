@@ -15,9 +15,6 @@ import { logChange } from './changes.js';
 import { BLOCKED_MARKETS } from '../domain/markets.js';
 import { NAMESPACES, hasDrifted } from '../domain/wording.js';
 
-/** The sources that exist in every market — a market is not ready without them. */
-const UNIVERSAL_SOURCES = ['osm', 'wikidata', 'wikipedia', 'site'];
-
 /* ------------------------------------------------------------------ markets */
 
 /** The markets list: every market with its places count. */
@@ -45,6 +42,44 @@ export async function getMarket(code) {
   };
 }
 
+/**
+ * Wire up a source that exists in a market but was not connected yet — the
+ * Connect action on the market page. Absent sources (they cannot exist here)
+ * and already-connected ones are refused. Logged and undoable.
+ */
+export async function connectSource(code, sourceId, who) {
+  if (!who) throw bad('a change says who made it');
+  const c = String(code || '').toUpperCase();
+  return withTransaction(async (client) => {
+    const { rows: [m] } = await client.query('select sources from markets where code = $1 for update', [c]);
+    if (!m) throw bad(`no market ${c}`);
+    const src = (m.sources ?? []).find((s) => s.id === sourceId);
+    if (!src) throw bad(`${c} has no source ${sourceId}`);
+    if (src.state === 'absent') throw bad(`${sourceId} cannot exist in ${c}`);
+    if (src.state === 'connected') return { ok: true, unchanged: true };
+    const next = (m.sources ?? []).map((s) => (s.id === sourceId ? { id: s.id, state: 'connected' } : s));
+    await client.query('update markets set sources = $2, updated_at = now() where code = $1', [c, JSON.stringify(next)]);
+    const change = await logChange({ client, who, area: 'Markets', what: `connected ${sourceId} in ${c}`,
+      before: src.state, after: 'connected', subjectType: 'market', subjectId: `${c}/source/${sourceId}`,
+      undo: { kind: 'market_source', code: c, sourceId, before: src } });
+    return { ok: true, change: change.id };
+  });
+}
+
+/** Undo a source connection — restore its prior state and note. */
+export async function undoMarketSource({ change, who }) {
+  const u = change.undo ?? {};
+  const { markUndone } = await import('./changes.js');
+  return withTransaction(async (client) => {
+    const { rows: [m] } = await client.query('select sources from markets where code = $1 for update', [u.code]);
+    if (m) {
+      const next = (m.sources ?? []).map((s) => (s.id === u.sourceId ? u.before : s));
+      await client.query('update markets set sources = $2, updated_at = now() where code = $1', [u.code, JSON.stringify(next)]);
+    }
+    await markUndone({ id: change.id, who, client });
+  });
+}
+
 /** The nine prohibited territories, from the code constant — never rows. */
 export function blockedMarkets() {
   return BLOCKED_MARKETS.map((m) => ({ code: m.code, name: m.name, note: m.note ?? null }));
@@ -56,15 +91,23 @@ export function blockedMarkets() {
  */
 function marketView(m) {
   const costBands = m.cost_bands ?? null;
+  const sources = m.sources ?? [];
+  // A source absent in a country is not counted against it. Of the ones that
+  // CAN exist here (connected or not-yet-connected), how many are connected.
+  const canExist = sources.filter((s) => s.state !== 'absent');
+  const connected = sources.filter((s) => s.state === 'connected').length;
   const checklist = {
     // Cost bands set (a judgement made), or "don't know" until then.
     costBands: Array.isArray(costBands) && costBands.length > 0,
     // The area shape known (a code type and pattern), or town-only until loaded.
     area: m.area_code != null,
-    // Every source that exists everywhere is present and answering, and nothing
-    // is left unwired.
-    sources: UNIVERSAL_SOURCES.every((id) => (m.sources ?? []).some((s) => s.id === id && s.state === 'here'))
-      && !(m.sources ?? []).some((s) => s.state === 'notConnected'),
+    // The sources that exist everywhere must be present and connected, and
+    // nothing that exists here is left unconnected. An empty or thin source
+    // list is not ready (Codex — do not fail open); a source that cannot exist
+    // here never counts against it (design v2.2).
+    sources: ['osm', 'wikidata', 'wikipedia', 'site'].every(
+      (id) => sources.some((s) => s.id === id && s.state === 'connected'))
+      && !sources.some((s) => s.state === 'notConnected'),
   };
   return {
     code: m.code,
@@ -79,7 +122,13 @@ function marketView(m) {
     defaultTimezone: m.default_timezone,
     defaultWordingLocale: m.default_wording_locale,
     costBands,
-    sources: m.sources ?? [],
+    // Who set the bands and when — a market judgement, made together, so the
+    // first band's attribution is the set's.
+    costBandsSetBy: Array.isArray(costBands) && costBands[0] ? costBands[0].set_by ?? null : null,
+    costBandsAt: Array.isArray(costBands) && costBands[0] ? costBands[0].at ?? null : null,
+    sources,
+    sourcesConnected: connected,
+    sourcesCanExist: canExist.length,
     places: m.places ?? 0,
     statusSetBy: m.status_set_by ?? null,
     statusAt: m.status_at ?? null,

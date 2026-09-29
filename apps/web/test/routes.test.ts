@@ -291,7 +291,10 @@ test('Household, Settings, Prototypes and the back office', () => {
   assert.equal(paths.filing('facts', { set: 'water' }), '/admin/filing?set=water&tab=facts');
   assert.equal(paths.filing('overview'), '/admin/filing');
   assert.equal(paths.filing(null), '/admin/filing');
-  assert.deepEqual(FILING_TABS, ['overview', 'categories', 'facts', 'mapping', 'collections', 'automations', 'changes', 'runs']);
+  assert.deepEqual(FILING_TABS, ['overview', 'categories', 'facts', 'mapping', 'collections', 'automations', 'changes', 'markets', 'runs']);
+  assert.equal(filingTabOf('markets'), 'markets');
+  assert.equal(paths.filing('markets'), '/admin/filing?tab=markets');
+  assert.equal(paths.filing('markets', { market: 'GB' }), '/admin/filing?market=GB&tab=markets');
   assert.equal(filingTabOf('facts'), 'facts');
   assert.equal(filingTabOf('labels'), 'facts');
   // Defaults and Ideas are gone (28 Sep 2026); their old links land where the job went.

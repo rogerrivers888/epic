@@ -37,6 +37,7 @@ import { Mapping } from './Mapping';
 import { Collections } from './Collections';
 import { Automations } from './Automations';
 import { Changes } from './Changes';
+import { Markets } from './Markets';
 import { RunsScreen } from './RunsScreen';
 
 type Tab = FilingTab;
@@ -51,6 +52,7 @@ const TABS: { key: Tab; name: string }[] = [
   { key: 'collections', name: 'Collections' },
   { key: 'automations', name: 'Fact automations' },
   { key: 'changes', name: 'Changes' },
+  { key: 'markets', name: 'Markets' },
 ];
 
 /**
@@ -64,6 +66,8 @@ export const DESK_KEYS = [
   // The picker's list fact opened to its values (round 3, 29 Sep).
   'pfact',
   'sort', 'country', 'county', 'feature',
+  // Markets: the market a page is drilled into (step 4).
+  'market',
   // A fact drill-down's postcode filter (agent B, fix pass 28 Sep).
   'pc',
   // Accuracy's expanded category rows, comma-separated (agent B2, 28 Sep).
@@ -170,6 +174,7 @@ export function Desk({ canManage }: { canManage: boolean }) {
             {tab === 'collections' ? <Collections canManage={canManage} /> : null}
             {tab === 'automations' ? <Automations canManage={canManage} /> : null}
             {tab === 'changes' ? <Changes canManage={canManage} /> : null}
+            {tab === 'markets' ? <Markets canManage={canManage} /> : null}
             {tab === 'runs' ? <RunsScreen /> : null}
           </View>
         </CrumbCtx.Provider>

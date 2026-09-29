@@ -95,6 +95,7 @@ deskRoutes.post('/undo/:id', requires('manage_library'), async (req, res, next) 
     else if (u.kind === 'correction') await facts.undoCorrection({ change, who: by });
     else if (u.kind === 'collection') await collections.undoCollection({ change, who: by });
     else if (u.kind === 'wording') await markets.undoWording({ change, who: by });
+    else if (u.kind === 'market_source') await markets.undoMarketSource({ change, who: by });
     else if (u.kind === 'fact_value') await mapping.undoFactValue({ change, who: by });
     else if (u.kind === 'carry') {
       if (u.on) await query(`insert into taxonomy_label_carries (namespace, key, attribute_key, yesno) values ('google', $1, $2, true) on conflict do nothing`, [u.word, u.fact]);
@@ -529,6 +530,11 @@ deskRoutes.get('/osm', requires('view_library'), async (_req, res, next) => {
 /** The markets list, and the read-only blocked list from the code constant. */
 deskRoutes.get('/markets', requires('view_library'), async (_req, res, next) => {
   try { res.json({ markets: await markets.listMarkets(), blocked: markets.blockedMarkets() }); } catch (err) { next(err); }
+});
+
+/** Connect a source that exists in a market but was not wired up yet. */
+deskRoutes.post('/markets/:code/sources/:id/connect', requires('manage_library'), async (req, res, next) => {
+  try { res.json(await markets.connectSource(String(req.params.code), String(req.params.id), who(req))); } catch (err) { next(err); }
 });
 
 /** One market's page. */
