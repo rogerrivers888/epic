@@ -615,3 +615,17 @@ test('a census bill that arrives late for an earlier day holds the programme too
   const r = recorder();
   assert.equal((await uk.tick({ now: new Date('2026-09-30T08:00:00Z'), start: r.start })).action, 'held');
 });
+
+test('a day\'s written plan is not switched on while another plan is being written', async (t) => {
+  await clean();
+  t.after(async () => { await query(`delete from census_runs where label = 'test planning by hand'`); await clean(); });
+  const { ONE_DAY_RUNS, PLAN_WRITTEN } = await import('../src/sources/censusRun.js');
+  await dayOne();
+  await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state, problem, started_by, started_at)
+     values ('The rest of the UK — day 2', array['ZZ'], 0.08, 0.12, 70000, 5, 30, 'paused', $2, $1, '2026-09-29T07:10:00Z')`, [ONE_DAY_RUNS, PLAN_WRITTEN]);
+  await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state, problem, started_by, last_seen_at)
+     values ('test planning by hand', array['ZZ'], 0.08, 0.12, 10, 5, 30, 'paused', 'built paused; resume to start', 'the owner (passcode)', now())`);
+  assert.equal((await uk.tick({ now: new Date('2026-09-29T08:00:00Z') })).action, 'waiting on another census');
+});

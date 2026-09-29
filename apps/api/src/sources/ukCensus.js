@@ -231,7 +231,12 @@ async function switchOn(id) {
   return censusRun.withStartLock(async (db) => (await db.query(
     `update census_runs set state = 'running', problem = null, last_seen_at = now()
       where id = $1 and state = 'paused' and problem like 'built paused%'
-        and not exists (select 1 from census_runs o where o.id <> $1 and o.state in ('running', 'waiting'))`, [id])).rowCount > 0)
+        and not exists (select 1 from census_runs o where o.id <> $1
+                          and (o.state in ('running', 'waiting')
+                               -- nor while another plan is still being written, as
+                               -- starting and resuming wait (Codex, 29 Sep 2026)
+                               or (o.state = 'paused' and o.problem = 'built paused; resume to start'
+                                   and coalesce(o.last_seen_at, o.started_at) > now() - interval '5 minutes')))`, [id])).rowCount > 0)
     .catch(() => false);
 }
 
