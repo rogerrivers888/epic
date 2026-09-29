@@ -751,6 +751,7 @@ test('Google\'s limit decides the size of the day: 150,000 once it reads 160,000
   assert.deepEqual(limitFrom([q(75000)]), { speaks: true, limit: 75000 });
   assert.deepEqual(limitFrom([q(160000), { quotaId: 'SearchTextRequestsPerMinute', refreshInterval: 'minute', dimensionsInfos: [{ details: { value: '6000' } }] }]), { speaks: true, limit: 160000 });
   assert.equal(limitFrom([q(-1)]).limit, Infinity);
+  assert.deepEqual(limitFrom([q(160000, { refreshInterval: '86400s' })]), { speaks: true, limit: 160000 }, 'a day written as a duration');
   assert.equal(limitFrom([]).speaks, false);
   assert.deepEqual(uk.daySize({ speaks: true, limit: 160000 }), { requests: 150000, cap: 160000 });
   assert.deepEqual(uk.daySize({ speaks: true, limit: 75000 }), { requests: 70000, cap: 75000 });
@@ -763,6 +764,11 @@ test('Google\'s limit decides the size of the day: 150,000 once it reads 160,000
   assert.equal(out.action, 'start');
   assert.deepEqual([r.calls[0].maxRequests, r.calls[0].nightShare, r.calls[0].dailyCap], [150000, 150000, 160000]);
   assert.ok(told.some((x) => /^Census raised to 150,000 a day/.test(x.subject)), 'and it says so, with the days left');
+  // The next raised day says nothing more.
+  await query(`update census_runs set state = 'paused', problem = 'stopped at the 150000-request ceiling; resume to carry on', max_requests = 150000, finished_at = '2026-09-29T20:00:00Z' where label = 'The rest of the UK — day 2'`);
+  const again = [];
+  await uk.tick({ now: new Date('2026-09-30T08:00:00Z'), start: r.start, tell: (x) => again.push(x), quota: async () => ({ speaks: true, limit: 160000 }) });
+  assert.ok(!again.some((x) => /^Census raised/.test(x.subject)), 'said once, on the day it changed');
 });
 
 test('a limit Google will not tell leaves the day at 70,000', async (t) => {

@@ -339,7 +339,8 @@ async function tickLocked({ now = new Date(), start = censusRun.startRun, stop =
   tell({ kind: 'started', subject: `Census day ${d.day} started`, d, run });
   // The first day at the raised size says so, with the new days remaining
   // (owner: "tell me the new days-remaining"). Said once: the subject is fixed.
-  if (size.requests === RAISED_DAY) {
+  // Only on the day it changes: the day before was smaller (Codex, 29 Sep 2026).
+  if (size.requests === RAISED_DAY && Number(d.latest?.max_requests ?? 0) < RAISED_DAY) {
     const st = await status(now);
     const perTile = st.requestsPerTile;
     const days = perTile ? Math.max(st.tilesLeft ? 1 : 0, Math.ceil((st.tilesLeft * perTile) / RAISED_DAY)) : null;

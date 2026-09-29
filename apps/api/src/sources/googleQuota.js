@@ -60,7 +60,10 @@ async function read(fetcher) {
  * project-wide value (no dimensions) or else the largest; -1 is unlimited.
  */
 export function limitFrom(infos) {
-  const daily = infos.filter((q) => /day/i.test(q.refreshInterval ?? '') && /search.?text/i.test(`${q.quotaId ?? ''} ${q.metric ?? ''}`));
+  // A day, however Google spells it: "day", or a duration of 86,400 seconds
+  // (Codex, 29 Sep 2026: the API writes durations).
+  const isDay = (r) => /day/i.test(r ?? '') || /^86400(\.0+)?s$/.test(String(r ?? ''));
+  const daily = infos.filter((q) => isDay(q.refreshInterval) && /search.?text/i.test(`${q.quotaId ?? ''} ${q.metric ?? ''}`));
   if (!daily.length) return { speaks: false, why: 'Google listed no per-day Text Search quota' };
   const values = daily.flatMap((q) => (q.dimensionsInfos ?? []).map((d) => ({
     project: !d.dimensions || !Object.keys(d.dimensions).length,
