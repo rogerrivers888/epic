@@ -983,3 +983,27 @@ test('checkPlace finds an atlas place by its open-map ref in either spelling (Co
   assert.equal(await checkPlace('osm:relation/999999', stubs), null);
   await query(`delete from atlas_osm_matches`);
 });
+
+test('a family visit recorded under the other spelling of the open-map ref settles the review (Codex)', async () => {
+  const { lonely } = await fixture();
+  await query(`delete from atlas_osm_matches`);
+  await query(`update attractions set osm_ref = '737373' where id = $1`, [lonely]);
+  const more = new Map(claims);
+  more.set('Q900001', { ...entity('Q900001', { P31: [claim(snak('Q622852'))] }), descriptions: { en: { value: 'former folly in Berkshire' } } });
+  const stubs = {
+    today: TODAY, near: async () => [], superclasses: async () => new Map(), fetchLabels: async () => new Map(),
+    fetchClaims: async (ids) => new Map(ids.filter((q) => more.has(q)).map((q) => [q, more.get(q)])),
+  };
+  await runClosedCheck({ by: 'test', ...stubs });
+  assert.equal((await repo.statusFor(`atlas:${lonely}`)).review, true);
+  await query(`update place_status set review_since = now() - interval '10 days' where venue_ref = $1`, [`atlas:${lonely}`]);
+  const { household } = await aHousehold(query, 'c57 osm spelling');
+  // The atlas holds the bare '737373'; the family's visit was recorded as the relation.
+  await query(`insert into visits (household_id, venue_ref, venue_label, visited_on) values ($1, 'osm:relation/737373', 'Hidden Folly', current_date - 2)`, [household.id]);
+  const { checkPlace } = await import('../src/sources/closedCheck.js');
+  await checkPlace('osm:relation/737373', stubs);
+  const s = await repo.statusFor(`atlas:${lonely}`);
+  assert.equal(s.status, 'open');
+  assert.equal(s.review, false);
+  await query(`delete from visits where household_id = $1`, [household.id]);
+});

@@ -274,8 +274,11 @@ export async function runClosedCheck({
     const held = new Map(existing.map((r) => [r.venue_ref, r]));
     // Every name a place goes by, for reading its visits.
     const latestVisit = (place) => {
-      const names = [place.ref, place.id ? `atlas:${place.id}` : null, place.wikidata_id ? `wikidata:${place.wikidata_id}` : null,
-        place.any_osm ? `osm:${String(place.any_osm).replace(/^osm:/, '')}` : null, place.matched_osm ? `osm:${place.matched_osm}` : null].filter(Boolean);
+      const osm = [place.any_osm, place.matched_osm].filter(Boolean)
+        // Both spellings of an open-map ref: a visit recorded as
+        // osm:relation/123 is the same place as osm:123 (Codex).
+        .flatMap((r) => osmSpellings(`osm:${String(r).replace(/^osm:/, '')}`).map((x) => `osm:${x}`));
+      const names = [place.ref, place.id ? `atlas:${place.id}` : null, place.wikidata_id ? `wikidata:${place.wikidata_id}` : null, ...osm].filter(Boolean);
       return names.map((n) => visited.get(n)).filter(Boolean).sort().at(-1) ?? null;
     };
 
