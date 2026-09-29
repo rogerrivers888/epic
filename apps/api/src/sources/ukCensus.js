@@ -141,7 +141,12 @@ export async function decide(now = new Date()) {
   const real = runs.filter((r) => !cutShort(r));
   const days = real.length;
   const latest = real[real.length - 1] ?? runs[runs.length - 1];
+  // Complete first: after the UK is done, Google spending on anything else is
+  // not the census's, and must not turn a finished programme into a halted
+  // one (Codex, 29 Sep 2026).
+  const { rows: [finishedFirst] } = await query(`select value from bo_settings where key = 'census:uk-complete'`);
   const bills = await billedByDay(pacificDay(runs[0].started_at));
+  if (finishedFirst) return { action: 'complete', runs, latest, bills };
   // Any export day over £5, and any quota day of the programme over £5 across
   // the two London days it spans — £3 and £3 is £6 (Codex, 29 Sep 2026). The
   // two overlap at the edges, which errs towards stopping.
@@ -187,6 +192,10 @@ export async function decide(now = new Date()) {
   // late the last one was closed off (Codex, 28 Sep 2026).
   if (pacificDay(latest.started_at) >= pacificDay(now)) return { action: 'today', runs, latest, bills };
   const yesterday = billedFor(bills, pacificDay(latest.started_at));
+  // Held stays held. The owner's rule for the gate (28 Sep 2026): "If it's
+  // anything meaningful: stay paused and report the figure." A census that
+  // cost money means the free assumption is wrong, and the next day would
+  // spend it again; only a person lifts it — by starting a run by hand.
   if (yesterday && yesterday.census_gbp >= PENNIES_GBP) return { action: 'held', runs, latest, bills, yesterday };
   // Another census live, or a plan being written: wait, rather than make the
   // day's session and be refused (Codex, 29 Sep 2026).

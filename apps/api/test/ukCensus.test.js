@@ -550,3 +550,19 @@ test('a plan still being written cannot be resumed, even by name', async (t) => 
      values ('The rest of the UK — day 2', array['ZZ'], 0.08, 0.12, 70000, 5, 30, 'paused', 'built paused; resume to start', now()) returning id`);
   await assert.rejects(() => resume(p.id), /is being planned/);
 });
+
+test('a held programme stays held until a person decides, and a finished one is not halted by later spending', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  await billed('2026-09-28', 'google-essentials', 2);
+  const r = recorder();
+  // Days later, still held: "stay paused and report the figure".
+  assert.equal((await uk.tick({ now: new Date('2026-10-02T08:00:00Z'), start: r.start })).action, 'held');
+  assert.equal(r.calls.length, 0);
+  // A finished UK stays finished whatever Google bills after.
+  await clean();
+  await dayOne({ state: 'done', problem: null });
+  await query(`insert into bo_settings (key, value, updated_by) values ('census:uk-complete', '{}', 'test')`);
+  await billed('2026-10-10', 'google-pro', 9);
+  assert.equal((await uk.tick({ now: new Date('2026-10-11T08:00:00Z'), start: r.start, stop: async () => {} })).action, 'complete');
+});
