@@ -629,3 +629,15 @@ test('a day\'s written plan is not switched on while another plan is being writt
      values ('test planning by hand', array['ZZ'], 0.08, 0.12, 10, 5, 30, 'paused', 'built paused; resume to start', 'the owner (passcode)', now())`);
   assert.equal((await uk.tick({ now: new Date('2026-09-29T08:00:00Z') })).action, 'waiting on another census');
 });
+
+test('a notice Postmark refused is tried again at once', async (t) => {
+  await clean();
+  const subject = `test refused ${Math.random()}`;
+  t.after(() => query(`delete from mail_messages where subject = $1`, [subject]));
+  const { ownerAccount } = await import('../src/repositories/accounts.js');
+  if (!(await ownerAccount())?.email) return;
+  await query(`insert into mail_messages (to_address, subject, purpose, status, sent_at) values ('x@y', $1, 'census', 'failed', now())`, [subject]);
+  let sent = 0;
+  await uk.notify({ subject, send: async () => { sent += 1; return { sent: true }; }, configured: () => true });
+  assert.equal(sent, 1);
+});

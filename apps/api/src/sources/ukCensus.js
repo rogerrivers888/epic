@@ -422,7 +422,7 @@ export async function notify({ subject, text = null, send = sendMail, configured
         // would otherwise swallow the notice for good (Codex, 29 Sep 2026).
         `select 1 from mail_messages
           where purpose = 'census' and subject = $1
-            and (status not in ('failed', 'sending') or sent_at > now() - interval '15 minutes')
+            and (status not in ('failed', 'sending') or (status = 'sending' and sent_at > now() - interval '15 minutes'))
           limit 1`, [subject.slice(0, 300)]);
       if (rows.length) return { mailed: false, why: 'already sent' };
       const owner = await ownerAccount();
