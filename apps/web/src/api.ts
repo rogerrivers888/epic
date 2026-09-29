@@ -1808,8 +1808,9 @@ export type Run = {
 export type UkCensusDay = {
   day: number; date: string; runId: string; state: string; ended: boolean;
   requests: number; places: number; tilesAsked: number;
-  districts: number; districtsLeft: number | null; areasLeft: number | null; newPlaces: number;
-  tilesLeft: number; daysLeft: number | null;
+  /** Null where a day ended before the figure was written down. */
+  districts: number | null; districtsLeft: number | null; areasLeft: number | null; newPlaces: number;
+  tilesLeft: number | null; daysLeft: number | null;
   /** Google's figure, from the billing export; null until it has written the day. */
   billed: { censusGbp: number; googleGbp: number; placesNetGbp: number; final: boolean } | null;
 };
