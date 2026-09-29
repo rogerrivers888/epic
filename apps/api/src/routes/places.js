@@ -33,7 +33,7 @@ import { fileWhere, upsertHouseholdPlace } from './atlas.js';
 import * as atlasRepo from '../repositories/atlas.js';
 import { googleSource } from '../sources/google.js';
 import { claimPlace, ownedRecord, ownedRecords, enrich, researchOnOpen } from '../sources/own.js';
-import { statusFor } from '../repositories/placeStatus.js';
+import { hiddenAmong, statusFor } from '../repositories/placeStatus.js';
 // Somewhere you eat, where the menu is the thing you want on the way in; and
 // the three words a take may be.
 import { FOOD_CATEGORIES as EATING, TAKES } from '../constants.js';
@@ -642,7 +642,11 @@ places.get('/suggest', async (req, res, next) => {
       return kind === 'eat' ? FOOD_CATS.has(o.category) : !FOOD_CATS.has(o.category);
     });
     const seen = new Set(oursHere.map((o) => o.placeId).filter(Boolean));
-    res.json({ suggestions: [...oursHere, ...suggestions.filter((x) => !seen.has(x.placeId)).map((x) => ({ ...x, venueRef: `google:${x.placeId}`, mine: false }))] });
+    // A closed place, once the owner has applied the check, cannot be found by
+    // name either (C57; Codex). The household's own saved and visited places
+    // stay: somewhere they have been is theirs, closed or not.
+    const closed = await hiddenAmong(suggestions.map((x) => `google:${x.placeId}`)).catch(() => new Set());
+    res.json({ suggestions: [...oursHere, ...suggestions.filter((x) => !seen.has(x.placeId) && !closed.has(`google:${x.placeId}`)).map((x) => ({ ...x, venueRef: `google:${x.placeId}`, mine: false }))] });
   } catch (err) { next(err); }
 });
 

@@ -105,7 +105,15 @@ function standing(claims, pid) {
   const preferred = all.filter((c) => c.rank === 'preferred');
   return preferred.length ? preferred : all;
 }
-const ended = (c) => (c.qualifiers?.P582 ?? []).some((q) => timeOf(q));
+/**
+ * A statement whose end time has come. A P582 still in the future — a
+ * museum announced to close next spring — is current today (Codex, 29 Sep
+ * 2026); an end time we cannot read says nothing and leaves it current.
+ */
+const endedBy = (c, today) => (c.qualifiers?.P582 ?? []).some((q) => {
+  const d = wikidataDate(timeOf(q));
+  return d != null && d.iso <= today;
+});
 
 /**
  * One Wikidata item, as wbgetentities returns it. `today` is an ISO date so a
@@ -129,6 +137,7 @@ export function wikidataVerdict(entity, { today = new Date().toISOString().slice
   // "Every instance ended": each of its kinds carries an end time, so what it
   // was has stopped being. One kind still current means it was *converted* —
   // a mill that is now a museum is open — and says nothing.
+  const ended = (c) => endedBy(c, today);
   const everyKindEnded = kinds.length > 0 && kinds.every(ended);
   if (everyKindEnded) {
     const years = kinds.flatMap((c) => (c.qualifiers?.P582 ?? []).map((q) => wikidataDate(timeOf(q))?.year)).filter(Boolean);

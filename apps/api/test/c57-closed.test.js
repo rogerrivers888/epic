@@ -12,7 +12,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { testDatabase } from './helpers/db.js';
+import { aHousehold, testDatabase } from './helpers/db.js';
 
 const { query, pool } = await testDatabase();
 const S = await import('../src/domain/openStatus.js');
@@ -88,6 +88,20 @@ test('Wikidata description: "defunct" closes, "former" only asks — Bodmin Jail
   assert.equal(former.review, true);
   assert.equal(S.wikidataVerdict(d('former prison, now a museum')), null);
   assert.equal(S.wikidataVerdict(d('theme park in Windsor, Berkshire')), null);
+});
+
+test('Wikidata: an end time still to come is current (Codex) — both ways, on P31 and on P5817', () => {
+  const until = (y) => ({ qualifiers: { P582: [time(y)] } });
+  // Every kind ends in 2031: still what it is today.
+  assert.equal(S.wikidataVerdict(entity('Q8', { P31: [claim(snak('Q33506'), until(2031))] }), { today: TODAY }), null);
+  // …and in 2019: over.
+  assert.equal(S.wikidataVerdict(entity('Q8', { P31: [claim(snak('Q33506'), until(2019))] }), { today: TODAY }).status, 'permanently_closed');
+  // "Permanently closed" as a state that itself ends in 2031 has not ended: it is today's state.
+  assert.equal(S.wikidataVerdict(entity('Q8', { P5817: [claim(snak('Q104664889'), until(2031))] }), { today: TODAY }).status, 'permanently_closed');
+  // "In use" until 2019 is history, not today: it says nothing.
+  assert.equal(S.wikidataVerdict(entity('Q8', { P5817: [claim(snak('Q55654238'), until(2019))] }), { today: TODAY }), null);
+  // "In use" until 2031 is current.
+  assert.equal(S.wikidataVerdict(entity('Q8', { P5817: [claim(snak('Q55654238'), until(2031))] }), { today: TODAY }).status, 'open');
 });
 
 // ---------------------------------------------------------------------------
@@ -344,4 +358,66 @@ test('the shared predicate: SHOWN_REF and SHOWN_ATTRACTION read the same rows', 
   const { rows: w } = await query(`select 1 from place_status s where s.wikidata_id = 'Q8024695' and ${repo.HIDING}`);
   assert.ok(w.length >= 1, 'the Wikidata id travels with the row');
   assert.equal((await repo.hiddenAmong(['wikidata:Q8024695'])).has('wikidata:Q8024695'), true, 'the Inspire fallback\'s wikidata: refs are matched too');
+});
+
+test('a Google result matched to a closed atlas row is hidden under its Google id (Codex)', async () => {
+  const { safari } = await fixture();
+  await query(`delete from provider_matches where venue_ref in ('wikidata:Q8024695', 'wikidata:Q900001')`);
+  await query(`insert into provider_matches (venue_ref, source, source_ref, confidence) values ('wikidata:Q8024695', 'google', 'ChIJ_c57_safari', 0.9)`);
+  await repo.propose({ ref: `atlas:${safari}`, wikidataId: 'Q8024695', status: 'permanently_closed', confirmed: false, source: 'wikidata', reason: 'dissolved 1992', evidence: 'P576' });
+  assert.equal((await repo.hiddenAmong(['google:ChIJ_c57_safari'])).size, 0, 'nothing hides before the OK');
+  await repo.applyProposed({ by: 'test' });
+  const hidden = await repo.hiddenAmong(['google:ChIJ_c57_safari', 'google:ChIJ_c57_open', 'wikidata:Q8024695']);
+  assert.ok(hidden.has('google:ChIJ_c57_safari'), 'the JS form resolves the alias');
+  assert.ok(hidden.has('wikidata:Q8024695'));
+  assert.ok(!hidden.has('google:ChIJ_c57_open'));
+  const { rows } = await query(`select r from unnest($1::text[]) r where ${repo.SHOWN_REF('r')}`, [['google:ChIJ_c57_safari', 'google:ChIJ_c57_open']]);
+  assert.deepEqual(rows.map((x) => x.r), ['google:ChIJ_c57_open'], 'the SQL form resolves it too');
+
+  // The other way: a Google status closes the Google id, and the atlas row it
+  // is matched to (drawn on Inspire by its Wikidata id) goes with it.
+  await query(`insert into provider_matches (venue_ref, source, source_ref, confidence) values ('wikidata:Q900001', 'google', 'ChIJ_c57_folly', 0.9)`);
+  await repo.propose({ ref: 'google:ChIJ_c57_folly', status: 'permanently_closed', source: 'google', reason: 'g', evidence: 'Google business status' });
+  await repo.applyProposed({ by: 'test' });
+  assert.ok((await repo.hiddenAmong(['wikidata:Q900001'])).has('wikidata:Q900001'));
+  await query(`update place_status set confirmed = true, status = 'unknown' where venue_ref like 'atlas:%'`);
+  assert.ok(!(await library.publishedFor(REGION)).some((r) => r.name === 'Hidden Folly'), 'the atlas row is hidden through the Google match');
+  await query(`delete from provider_matches where source_ref like 'ChIJ_c57_%'`);
+});
+
+test('Places suggest: a hidden Google prediction is not offered by name; the household\'s own saved place still is (Codex)', async () => {
+  const express = (await import('express')).default;
+  const { places } = await import('../src/routes/places.js');
+  const { googleSource } = await import('../src/sources/google.js');
+  const { runAsAccount } = await import('../src/context.js');
+  const { household } = await aHousehold(query, 'c57 suggest');
+  const { rows: [account] } = await query(
+    `insert into accounts (household_id, email, name, role, plan, status) values ($1, $2, 'c57', 'customer', 'trial', 'active') returning *`,
+    [household.id, `c57-${Date.now()}@example.com`]);
+  await query(`insert into household_places (household_id, venue_ref, label, category) values ($1, 'google:ChIJ_c57_mine', 'Safari Lodge Cafe', 'cafe')`, [household.id]);
+  await repo.propose({ ref: 'google:ChIJ_c57_gone', status: 'permanently_closed', source: 'google', reason: 'g', evidence: 'Google business status' });
+  await repo.propose({ ref: 'google:ChIJ_c57_mine', status: 'permanently_closed', source: 'google', reason: 'g', evidence: 'Google business status' });
+  await repo.applyProposed({ by: 'test' });
+
+  const real = googleSource.suggest;
+  googleSource.suggest = async () => [
+    { placeId: 'ChIJ_c57_gone', name: 'Safari Park Windsor', types: ['amusement_park'] },
+    { placeId: 'ChIJ_c57_here', name: 'Safari Zoo', types: ['zoo'] },
+  ];
+  const app = express();
+  app.use((req, _res, next) => runAsAccount(account, next));
+  app.use('/api/places', places);
+  const server = app.listen(0);
+  await new Promise((r) => server.once('listening', r));
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.address().port}/api/places/suggest?q=safari&kind=all`);
+    const body = await res.json();
+    const refs = body.suggestions.map((x) => x.venueRef);
+    assert.ok(refs.includes('google:ChIJ_c57_here'));
+    assert.ok(!refs.includes('google:ChIJ_c57_gone'), 'a closed place cannot be found by name');
+    assert.ok(refs.includes('google:ChIJ_c57_mine'), 'somewhere the household saved stays theirs');
+  } finally {
+    googleSource.suggest = real;
+    server.close();
+  }
 });

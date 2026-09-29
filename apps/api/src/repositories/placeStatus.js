@@ -19,37 +19,61 @@ const on = (client) => (client ? (text, params) => client.query(text, params) : 
 /** A stored row that keeps its place away from families. Alias `s`. */
 export const HIDING = `s.applied and (s.status in ('temporarily_closed', 'permanently_closed') or not s.confirmed)`;
 
-/** The place under `refExpr` is not hidden. */
-export const SHOWN_REF = (refExpr) =>
-  `not exists (select 1 from place_status s where s.venue_ref = ${refExpr} and ${HIDING})`;
+/**
+ * Every ref a hidden place goes by (Codex, 29 Sep 2026: a closed atlas row
+ * stored as `atlas:<id>` came back from a live search as `google:<id>` and
+ * showed). One uncorrelated statement, so Postgres works it out once per
+ * query and hashes it; the hidden rows are few, and every join below is an
+ * equality, never an OR across the atlas.
+ *
+ *   - the row's own ref, and `wikidata:<Q>` when it carries a Wikidata id;
+ *   - for an atlas row: every name the atlas row goes by — its venue ref,
+ *     `atlas:<id>`, `wikidata:<Q>`, and its OpenStreetMap ref;
+ *   - through `provider_matches`, the Google id matched to any of those; and
+ *     the other way, the atlas ref matched to a Google id that is hidden.
+ */
+export const HIDDEN_REFS = `(
+  with hid as (select s.venue_ref, s.wikidata_id from place_status s where ${HIDING}),
+  atlas as (
+    select a.id, a.venue_ref, a.wikidata_id, a.osm_ref from hid join attractions a on hid.venue_ref like 'atlas:%' and a.id::text = substr(hid.venue_ref, 7)
+    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref from hid join attractions a on a.venue_ref = hid.venue_ref
+    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref from hid join attractions a on hid.wikidata_id is not null and a.wikidata_id = hid.wikidata_id),
+  names as (
+    select venue_ref as ref from hid
+    union select 'wikidata:' || wikidata_id from hid where wikidata_id is not null
+    union select x.ref from atlas cross join lateral (values
+      (atlas.venue_ref), ('atlas:' || atlas.id::text), ('wikidata:' || atlas.wikidata_id),
+      ('osm:' || atlas.osm_ref), (case when atlas.osm_ref ~ '^[0-9]+$' then 'osm:relation/' || atlas.osm_ref end)) x(ref)
+     where x.ref is not null),
+  matched as (
+    select 'google:' || m.source_ref as ref from provider_matches m join names n on n.ref = m.venue_ref
+     where m.source = 'google' and not m.missing and m.source_ref is not null
+    union select m.venue_ref from provider_matches m join hid on hid.venue_ref = 'google:' || m.source_ref
+     where m.source = 'google' and not m.missing)
+  select ref from names union select ref from matched
+)`;
+
+/** The place under `refExpr` is not hidden, under any name it goes by. */
+export const SHOWN_REF = (refExpr) => `coalesce(${refExpr}, '') not in (select ref from ${HIDDEN_REFS} h where ref is not null)`;
 
 /**
  * The atlas row under `alias` is not hidden — matched by every name it goes
  * by: its canonical ref, its own `atlas:<id>`, and its Wikidata id, so a
- * closed place a re-harvest brings back as a new row is still closed.
+ * closed place a re-harvest brings back as a new row is still closed. Three
+ * uncorrelated `not in`s, each hashed once per statement, rather than a
+ * correlated lookup that would work the alias set out again for every row.
  */
-export const SHOWN_ATTRACTION = (alias = 'a') => `not exists (
-  select 1 from place_status s
-   where (s.venue_ref = coalesce(${alias}.venue_ref, 'atlas:' || ${alias}.id::text)
-          or s.venue_ref = 'atlas:' || ${alias}.id::text
-          or (${alias}.wikidata_id is not null and s.wikidata_id = ${alias}.wikidata_id))
-     and ${HIDING})`;
+export const SHOWN_ATTRACTION = (alias = 'a') => `(${SHOWN_REF(`coalesce(${alias}.venue_ref, 'atlas:' || ${alias}.id::text)`)}
+  and ${SHOWN_REF(`'atlas:' || ${alias}.id::text`)}
+  and ${SHOWN_REF(`'wikidata:' || ${alias}.wikidata_id`)})`;
 
-/** Which of these refs are hidden. `wikidata:Q…` refs are matched on the id too. */
+/** Which of these refs are hidden, under any name they go by. */
 export async function hiddenAmong(refs, client = null) {
   const list = [...new Set((refs ?? []).filter(Boolean).map(String))];
   if (!list.length) return new Set();
-  const qids = list.map((r) => /^wikidata:(Q\d+)$/.exec(r)?.[1]).filter(Boolean);
   const { rows } = await on(client)(
-    `select s.venue_ref, s.wikidata_id from place_status s
-      where (s.venue_ref = any($1::text[]) or s.wikidata_id = any($2::text[])) and ${HIDING}`,
-    [list, qids]);
-  const out = new Set();
-  for (const r of rows) {
-    if (list.includes(r.venue_ref)) out.add(r.venue_ref);
-    if (r.wikidata_id && list.includes(`wikidata:${r.wikidata_id}`)) out.add(`wikidata:${r.wikidata_id}`);
-  }
-  return out;
+    `select h.ref from ${HIDDEN_REFS} h where h.ref = any($1::text[])`, [list]);
+  return new Set(rows.map((r) => r.ref));
 }
 
 /** Drop hidden places from a list, reading each item's ref with `refOf`. */
