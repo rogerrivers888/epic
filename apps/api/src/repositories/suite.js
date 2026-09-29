@@ -1580,12 +1580,10 @@ export async function readSuite(period, { now = new Date() } = {}) {
   const shared = apportion(register, costs, costNow.owned);
   const research = shared.byClass.get('research') ?? 0;
   const serve = shared.byClass.get('serve') ?? 0;
-  // Every priced row has an expectation, or the foot has none: a total
-  // expected that silently leaves a supplier out is not the window's.
-  const spending = supplierRows.filter((r) => r.spend != null && r.spend > 0.005);
-  const expectedTotal = spending.length && spending.every((r) => r.expected != null)
-    ? r2(supplierRows.reduce((n, r) => n + (r.expected ?? 0), 0))
-    : null;
+  // The foot's expected is the sum of the rows that have one, and says whose
+  // it is (owner, 29 Sep 2026: "sum the rows that have a figure and label it,
+  // e.g. '£150 · budgets for Google and Claude only'").
+  const { expectedTotal, expectedWords, expectedPartial } = expectedFoot(supplierRows);
 
   // Only subscriptions has revenue, and cost is not classified by stream, so
   // margin exists for the estate and not for a stream. Stated rather than
@@ -1864,6 +1862,10 @@ export async function readSuite(period, { now = new Date() } = {}) {
       total: r2(cost$),
       basis: costs.basis,
       expected: expectedTotal,
+      expectedWords,
+      // Some spending supplier has no expected figure: the foot's variance
+      // would compare the whole total with a part of it, so it is not drawn.
+      expectedPartial,
       expectedMonths: costs.expectedMonths,
       // A forecast of next month's bill needs a trend nobody has enough of yet:
       // the ledger began in September. Named rather than extrapolated from one
@@ -2120,4 +2122,43 @@ export async function readHousehold(id, period, { now = new Date() } = {}) {
     },
     cost: { everUsd: life.cost_ever_usd, ninetyUsd: ninety.cost_usd },
   };
+}
+
+
+/** A supplier's short name for a sentence: Google, Claude, Tripadvisor … */
+function shortName(r) {
+  const k = String(r.key ?? r.name ?? '').toLowerCase();
+  if (k.includes('anthropic') || k.includes('claude')) return 'Claude';
+  if (k.includes('google')) return 'Google';
+  if (k.includes('tripadvisor')) return 'Tripadvisor';
+  if (k.includes('openai')) return 'OpenAI';
+  return String(r.name ?? r.key ?? '');
+}
+
+const FOOT_WORD = {
+  budget: ['budget', 'budgets'], billed: ["last month's bill", "last month's bills"],
+  estimate: ["last month's estimate", "last month's estimates"],
+};
+
+/**
+ * The Suppliers foot's expected: the sum of the rows that have a figure,
+ * with words naming whose it is and on what basis — "budgets for Google and
+ * Claude only" — and whether it covers every supplier that spent.
+ */
+export function expectedFoot(rows) {
+  const withIt = rows.filter((r) => r.expected != null && !r.residue);
+  if (!withIt.length) return { expectedTotal: null, expectedWords: null, expectedPartial: false };
+  const spending = rows.filter((r) => r.spend != null && r.spend > 0.005);
+  const partial = spending.some((r) => r.expected == null);
+  const total = Math.round(withIt.reduce((n, r) => n + r.expected, 0) * 100) / 100;
+  const list = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
+  const byBasis = new Map();
+  for (const r of withIt) {
+    const b = FOOT_WORD[r.expectedBasis] ? r.expectedBasis : 'mixed';
+    byBasis.set(b, [...(byBasis.get(b) ?? []), shortName(r)]);
+  }
+  const parts = [...byBasis].map(([b, names]) => (b === 'mixed'
+    ? `${list(names)} mixed`
+    : `${FOOT_WORD[b][names.length > 1 ? 1 : 0]} for ${list(names)}`));
+  return { expectedTotal: total, expectedWords: `${parts.join(' · ')}${partial ? ' only' : ''}`, expectedPartial: partial };
 }

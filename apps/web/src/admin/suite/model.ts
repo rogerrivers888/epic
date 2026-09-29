@@ -345,6 +345,8 @@ export type Suite = {
   subscriptions: Subscriptions;
   suppliers: {
     rows: SupplierRow[]; total: number; expected: number | null;
+    /** Whose expected figures the foot sums: "budgets for Google and Claude only". */
+    expectedWords?: string | null; expectedPartial?: boolean;
     basis?: CostBasis | null; expectedMonths?: string[];
     expectedNextMonth: number | null; expectedNextMonthDeltaPct: number | null;
     expectedNextMonthGap?: string | null;

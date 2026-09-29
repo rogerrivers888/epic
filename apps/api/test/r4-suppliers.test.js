@@ -271,3 +271,23 @@ test('the batched months are the months one at a time', async () => {
   assert.ok(batch.get(`tripadvisor|2026-07`).gbp > 0);
   assert.ok(batch.get(`several|2026-08`).gbp > 0);
 });
+
+test('the foot sums the rows that have an expected figure and says whose, and marks a part-sum', async () => {
+  const { expectedFoot } = await import('../src/repositories/suite.js');
+  const rows = [
+    { key: 'anthropic', name: 'anthropic', spend: 87, expected: 100, expectedBasis: 'budget' },
+    { key: 'google', name: 'google Places (New)', spend: 40.61, expected: 50, expectedBasis: 'budget' },
+    { key: 'openai', name: 'OpenAI · speech', spend: 0.1, expected: null },
+    { key: 'tripadvisor', name: 'tripadvisor', spend: 0, expected: null },
+  ];
+  const f = expectedFoot(rows);
+  assert.equal(f.expectedTotal, 150);
+  assert.equal(f.expectedWords, 'budgets for Claude and Google only');
+  assert.equal(f.expectedPartial, true, 'OpenAI spent and has no expected figure');
+  const whole = expectedFoot(rows.slice(0, 2));
+  assert.equal(whole.expectedWords, 'budgets for Claude and Google');
+  assert.equal(whole.expectedPartial, false);
+  const mixed = expectedFoot([{ key: 'google', spend: 40, expected: 38, expectedBasis: 'billed' }, rows[0]]);
+  assert.equal(mixed.expectedWords, "last month's bill for Google · budget for Claude");
+  assert.equal(expectedFoot([{ key: 'x', spend: 1, expected: null }]).expectedTotal, null);
+});

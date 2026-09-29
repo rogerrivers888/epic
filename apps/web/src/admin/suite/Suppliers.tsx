@@ -232,11 +232,18 @@ export function Suppliers({ canSeeMoney, canManage }: {
           foot={{
             name: <Text style={[type.h2, { fontSize: 15 }]}>{`${priced.length} ${priced.length === 1 ? 'supplier' : 'suppliers'}`}</Text>,
             spend: <MoneyCell strong top={fmt.cost.money(suite.suppliers.total)} bottom={basisWords(suite.suppliers.basis)} />,
-            expected: <Cell muted>{suite.suppliers.expected == null ? '—' : fmt.cost.money(suite.suppliers.expected)}</Cell>,
+            expected: (
+              <MoneyCell
+                muted
+                top={suite.suppliers.expected == null ? null : fmt.cost.money(suite.suppliers.expected)}
+                bottom={suite.suppliers.expectedWords ?? null}
+              />
+            ),
             variance: (
               <Cell strong lime>
                 {(() => {
-                  if (suite.suppliers.expected == null) return '—';
+                  // A part-sum is not the whole total's expectation (owner, 29 Sep).
+                  if (suite.suppliers.expected == null || suite.suppliers.expectedPartial) return '—';
                   const d = Math.round((suite.suppliers.total - suite.suppliers.expected) * 100) / 100;
                   const p = suite.suppliers.expected ? Math.round((d / suite.suppliers.expected) * 100) : 0;
                   const money = fmt.cost.money(Math.abs(d));
