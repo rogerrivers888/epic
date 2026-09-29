@@ -91,7 +91,8 @@ import { resume as resumeSweeps } from './sources/researchSweep.js';
 import * as providerCalls from './repositories/providerCalls.js';
 import closedRoutes from './routes/closed.js';
 import * as googlePlaces from './sources/google.js';
-import { onGoogleStatus } from './sources/closedCheck.js';
+import { onGoogleStatus, onResearched } from './sources/closedCheck.js';
+import * as ownResearch from './sources/own.js';
 
 const app = express();
 
@@ -296,6 +297,9 @@ app.use('/api/admin/closed', requireDoor('admin'), closedRoutes);
 // only our derived flag is stored. Optional until google.js carries the hook
 // (/tmp/c57-google.patch), so this line is safe on either side of it.
 googlePlaces.onBusinessStatus?.(onGoogleStatus);
+// Research landing on a place re-judges it if the closed check had it as a
+// question (C57): review settles itself, and nothing queues for a person.
+ownResearch.onResearched(onResearched);
 
 // Telemetry is the household's own — which screen, and still here — and is
 // always written against the session's own household (routes/activity.js).

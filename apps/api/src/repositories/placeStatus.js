@@ -279,6 +279,7 @@ export async function startCheck({ by, dryRun = true }) {
 export async function finishCheck(id, { counts, error = null }) {
   await query(`update closed_checks set state = $2, finished_at = now(), counts = $3, error = $4 where id = $1`,
     [id, error ? 'failed' : 'done', JSON.stringify(counts ?? {}), error]);
+  await snapshotReview().catch(() => null);
 }
 export async function runningCheck() {
   const { rows } = await query(`select * from closed_checks where state = 'running' and started_at > now() - interval '6 hours' order by started_at desc limit 1`);
@@ -385,4 +386,41 @@ export async function report({ examples = 20, allClosed = false } = {}) {
     unconfirmedExamples: unconfirmedSample.rows.map(ex),
     openMapMatches: matchCount.rows[0]?.n ?? 0,
   };
+}
+
+// ---------------------------------------------------------------------------
+// the review count, by day (migration 297)
+// ---------------------------------------------------------------------------
+
+/** Today's review count, written once a day and kept current through the day. */
+export async function snapshotReview() {
+  const { rows: [r] } = await query(
+    `insert into closed_review_days (day, review)
+     select (now() at time zone 'Europe/London')::date, count(*)::int from place_status where review
+     on conflict (day) do update set review = excluded.review, taken_at = now()
+     returning day::text, review`);
+  return r;
+}
+
+export async function reviewDays(limit = 30) {
+  const { rows } = await query(`select day::text as day, review from closed_review_days order by day desc limit $1`, [limit]);
+  return rows;
+}
+
+/**
+ * The line the Overview shows, or null (owner, 29 Sep 2026: "only if it's
+ * growing"). Today's count against the latest count at least seven days
+ * older; with no count that old it cannot speak, and says nothing.
+ */
+export function reviewGrowthLine(days, today) {
+  const byDay = new Map((days ?? []).map((d) => [String(d.day).slice(0, 10), Number(d.review)]));
+  const now = byDay.get(today);
+  if (now == null) return null;
+  const weekAgo = new Date(`${today}T12:00:00Z`); weekAgo.setUTCDate(weekAgo.getUTCDate() - 7);
+  const cut = weekAgo.toISOString().slice(0, 10);
+  const then = [...byDay.keys()].filter((d) => d <= cut).sort().at(-1);
+  if (!then) return null;
+  const was = byDay.get(then);
+  if (!(now > was)) return null;
+  return { n: now, up: now - was, since: then, line: `Closed-check review: ${now.toLocaleString('en-GB')}, up ${(now - was).toLocaleString('en-GB')} this week` };
 }

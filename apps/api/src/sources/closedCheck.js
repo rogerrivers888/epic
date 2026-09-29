@@ -21,12 +21,12 @@
 
 import { query } from '../db.js';
 import {
-  combine, confirmation, googleVerdict, heritageOf, osmVerdict, successorFromText, wikidataOsmRef, wikidataVerdict, wikidataWebsite, wikipediaVerdict,
+  combine, confirmation, familyVerdict, googleVerdict, heritageOf, osmVerdict, successorFromText, wikidataOsmRef, wikidataVerdict, wikidataWebsite, wikipediaVerdict,
 } from '../domain/openStatus.js';
 import { metresBetween, normaliseName } from '../domain/matchFence.js';
 import { nearByName } from './osmExtract.js';
 import * as statusRepo from '../repositories/placeStatus.js';
-import { entityClaims, sparql } from './wikimedia.js';
+import { entityClaims, entityLabels, sparql } from './wikimedia.js';
 import { HERITAGE_KINDS, HERITAGE_ROOTS } from '../domain/openStatus.js';
 
 const BATCH = 50;
@@ -41,7 +41,7 @@ const km = (a, b) => {
 const plain = (s) => String(s ?? '').toLowerCase().replace(/^the\s+/, '').replace(/[^a-z0-9]+/g, ' ').trim();
 
 /** The atlas, each row with what confirms it (item 3) — read in one statement. */
-async function atlasRows() {
+async function atlasRows(only = null) {
   const { rows } = await query(
     `select a.id, a.name, a.wikidata_id, a.venue_ref, coalesce(a.venue_ref, 'atlas:' || a.id::text) as ref,
             a.summary, a.summary_source, a.osm_ref, a.website, a.source, a.external_ref, a.lat, a.lng, a.region_slug,
@@ -60,18 +60,20 @@ async function atlasRows() {
             coalesce(a.website, (select pr.website from place_records pr where pr.venue_ref = a.venue_ref)) as any_website,
             exists (select 1 from place_index pi where pi.venue_ref = coalesce(a.venue_ref, 'atlas:' || a.id::text)
                        and (pi.censused_at is not null or pi.found_by is not null)) as censused
-       from attractions a`);
+       from attractions a
+      ${only ? 'where a.id = any($1::uuid[])' : ''}`, only ? [only] : []);
   return rows;
 }
 
 /** Owned records with something to read that the atlas has not already covered. */
-async function recordRows() {
+async function recordRows(only = null) {
   const { rows } = await query(
     `select pr.venue_ref as ref, pr.name, pr.wikidata_id, pr.osm_ref, pr.website, pr.summary, pr.summary_source, pr.lat, pr.lng,
             (select pi.subcategory from place_index pi where pi.venue_ref = pr.venue_ref) as subcategory
        from place_records pr
       where (pr.wikidata_id is not null or pr.osm_ref is not null or pr.summary is not null)
-        and not exists (select 1 from attractions a where a.venue_ref = pr.venue_ref)`);
+        and not exists (select 1 from attractions a where a.venue_ref = pr.venue_ref)
+        ${only ? 'and pr.venue_ref = any($1::text[])' : ''}`, only ? [only] : []);
   return rows;
 }
 
@@ -103,6 +105,21 @@ async function tagsFor(osmRefs) {
   const { rows } = await query(`select ref, tags from osm_features where ref = any($1::text[])`, [[...new Set(want.values())]]);
   const byRef = new Map(rows.map((r) => [r.ref, r.tags]));
   return new Map([...want].filter(([, v]) => byRef.has(v)).map(([k, v]) => [k, byRef.get(v)]));
+}
+
+/** Google's derived status, by the ref of the place its id was matched to. */
+async function googleByMatch() {
+  const { rows } = await query(
+    `select m.venue_ref, s.status, s.reason, s.evidence
+       from provider_matches m join place_status s on s.venue_ref = 'google:' || m.source_ref and s.source = 'google'
+      where m.source = 'google' and not m.missing`);
+  return new Map(rows.map((r) => [r.venue_ref, r]));
+}
+
+/** The latest visit any household recorded at each ref. */
+async function lastVisits() {
+  const { rows } = await query(`select venue_ref, max(visited_on)::text as on from visits where visited_on is not null group by venue_ref`);
+  return new Map(rows.map((r) => [r.venue_ref, String(r.on).slice(0, 10)]));
 }
 
 /** Every kind's root in the atlas's own subclass walk (P279*), so heritage can be read off a P31. */
@@ -235,21 +252,32 @@ async function featuresNear(lat, lng, radiusM, stems) {
  * Wikidata or need an extract. Returns the counts the run wrote to
  * `closed_checks`.
  */
-export async function runClosedCheck({ by = null, dryRun = true, fetchClaims = entityClaims, today, pause = 0, near = featuresNear, superclasses = heritageSuperclasses } = {}) {
-  const checkId = await statusRepo.startCheck({ by, dryRun });
+export async function runClosedCheck({
+  by = null, dryRun = true, fetchClaims = entityClaims, today, pause = 0, near = featuresNear, superclasses = heritageSuperclasses,
+  fetchLabels = entityLabels,
+  // One place's rows, for `checkPlace`: no run is recorded, and nothing else is read.
+  only = null,
+} = {}) {
+  const checkId = only ? null : await statusRepo.startCheck({ by, dryRun });
   const counts = {
     atlas: 0, records: 0, osmMarked: 0, wikidataAsked: 0, wikidataRead: 0, wikidataUnread: 0,
     written: 0, cleared: 0, byStatus: {}, unconfirmed: 0, review: 0, successors: 0,
     osmLooked: 0, osmMatched: 0, heritage: 0, history: 0, churchReview: 0, confirmedBy: {},
   };
   try {
-    const [atlas, records, marked, existing, roots, listed] = await Promise.all([
-      atlasRows(), recordRows(), osmMarked(),
-      query(`select venue_ref, status, source, reason, evidence from place_status`).then((r) => r.rows),
-      kindRoots(), listedRefs(),
+    const [atlas, records, marked, existing, roots, listed, visited, googleSaid] = await Promise.all([
+      atlasRows(only?.atlasIds ?? null), recordRows(only?.recordRefs ?? null), only ? [] : osmMarked(),
+      query(`select venue_ref, status, source, reason, evidence, review, decided_at from place_status`).then((r) => r.rows),
+      kindRoots(), listedRefs(), lastVisits(), googleByMatch(),
     ]);
     counts.atlas = atlas.length; counts.records = records.length; counts.osmMarked = marked.length;
     const held = new Map(existing.map((r) => [r.venue_ref, r]));
+    // Every name a place goes by, for reading its visits.
+    const latestVisit = (place) => {
+      const names = [place.ref, place.id ? `atlas:${place.id}` : null, place.wikidata_id ? `wikidata:${place.wikidata_id}` : null,
+        place.any_osm ? `osm:${String(place.any_osm).replace(/^osm:/, '')}` : null, place.matched_osm ? `osm:${place.matched_osm}` : null].filter(Boolean);
+      return names.map((n) => visited.get(n)).filter(Boolean).sort().at(-1) ?? null;
+    };
 
 
     // Wikidata, fifty at a time. A failed batch is unread, not "nothing found".
@@ -315,6 +343,17 @@ export async function runClosedCheck({ by = null, dryRun = true, fetchClaims = e
       counts.lastWalkError = String(err?.message ?? err).slice(0, 160);
     }
 
+    // Successor names for a "replaced by" we do not hold (owner, 29 Sep 2026:
+    // "Dalí Universe's successor shows a name, not an ID"): the English label,
+    // read keyless in batches. A failed batch leaves the Q-id, as before.
+    const heldQids = new Set([...atlas, ...records].map((r) => r.wikidata_id).filter(Boolean));
+    const wanted = [...new Set([...claims.values()].flatMap((e) => (e.claims?.P1366 ?? []).map((c) => c.mainsnak?.datavalue?.value?.id))
+      .filter((q) => /^Q\d+$/.test(String(q ?? '')) && !heldQids.has(q)))];
+    const labels = new Map();
+    for (let i = 0; i < wanted.length; i += BATCH) {
+      try { for (const [k, v] of await fetchLabels(wanted.slice(i, i + BATCH))) labels.set(k, v); } catch (err) { counts.labelsUnread = (counts.labelsUnread ?? 0) + Math.min(BATCH, wanted.length - i); }
+    }
+
     const tags = await tagsFor([
       ...atlas.map((a) => a.any_osm), ...atlas.map((a) => a.matched_osm), ...records.map((r) => r.osm_ref),
     ].filter(Boolean));
@@ -357,10 +396,24 @@ export async function runClosedCheck({ by = null, dryRun = true, fetchClaims = e
       if (prior?.source === 'google') {
         findings.push({ source: prior.source, status: prior.status, reason: prior.reason, evidence: prior.evidence, review: false });
       }
-      const v = combine(findings);
+      let v = combine(findings);
+      // A place in review settles on Google's status for the id it was
+      // matched to (provider_matches), when details were fetched for it. Only
+      // for a question: a match is not trusted to overturn a firm reading.
+      if (v.review) {
+        const g = (place.wikidata_id && googleSaid.get(`wikidata:${place.wikidata_id}`)) || googleSaid.get(place.ref);
+        if (g) { v = combine([...findings, { source: 'google', status: g.status, reason: g.reason, evidence: g.evidence, review: false }]); counts.googleSettled = (counts.googleSettled ?? 0) + 1; }
+      }
+      // A family went, after the evidence that made it a question: that is
+      // current evidence it is open (owner, 29 Sep 2026: review settles
+      // itself). Only for a place in review; never over a closure.
+      if (v.review) {
+        const went = familyVerdict({ visitedOn: latestVisit(place), evidence: `${v.reason ?? ''} ${v.evidence ?? ''}`, flaggedAt: prior?.review ? prior.decided_at : null, today });
+        if (went) { v = { ...v, ...went, successorQid: v.successorQid, successorName: v.successorName }; counts.familySettled = (counts.familySettled ?? 0) + 1; }
+      }
       // Always look for a successor, whichever source spoke (owner, item 4):
       // Wikidata's "replaced by", or "now X" / "converted into X" / "became X".
-      const successorName = v.successorName ?? successorFromText(text);
+      const successorName = v.successorName ?? successorFromText(text) ?? (v.successorQid ? labels.get(v.successorQid) ?? null : null);
       const succ = successorRef(v.successorQid, successorName, place);
       const row = {
         ref: place.ref, wikidataId, status: v.status, confirmed: confirm.confirmed, confirmedBy: confirm.by,
@@ -416,17 +469,17 @@ export async function runClosedCheck({ by = null, dryRun = true, fetchClaims = e
     // closed map places on `end_date`, which is no longer read at all — is
     // read again by today's rules rather than left standing on yesterday's.
     // A person's word and Google's status are not a check's to revisit.
-    const stale = existing.filter((r) => !seen.has(r.venue_ref) && ['osm', 'wikidata', 'wikipedia', 'listing'].includes(r.source));
+    const stale = only ? [] : existing.filter((r) => !seen.has(r.venue_ref) && ['osm', 'wikidata', 'wikipedia', 'listing'].includes(r.source));
     const staleTags = await tagsFor(stale.map((r) => r.venue_ref).filter((r) => r.startsWith('osm:')));
     for (const r of stale) {
       const t = staleTags.get(r.venue_ref);
       await settle({ ref: r.venue_ref }, t ? [osmVerdict(t)] : [], { confirmed: true, by: null });
       counts.reread = (counts.reread ?? 0) + 1;
     }
-    await statusRepo.finishCheck(checkId, { counts });
+    if (checkId) await statusRepo.finishCheck(checkId, { counts });
     return { checkId, ...counts };
   } catch (err) {
-    await statusRepo.finishCheck(checkId, { counts, error: String(err?.message ?? err).slice(0, 300) }).catch(() => null);
+    if (checkId) await statusRepo.finishCheck(checkId, { counts, error: String(err?.message ?? err).slice(0, 300) }).catch(() => null);
     throw err;
   }
 }
@@ -440,4 +493,44 @@ export async function onGoogleStatus(ref, businessStatus) {
   const v = googleVerdict(businessStatus);
   if (!v) return;
   await statusRepo.noteGoogleStatus(ref, v).catch((err) => console.warn(`place_status ${ref}: ${String(err?.message ?? err).slice(0, 120)}`));
+  // The atlas place Google's id was matched to, if it was in review, is
+  // judged again with Google's word in it: operational settles it open, a
+  // closure closes it (owner, 29 Sep 2026). Behind the fetch.
+  if (!String(ref).startsWith('google:')) return;
+  const { rows } = await query(
+    `select venue_ref from provider_matches where source = 'google' and not missing and source_ref = $1`, [String(ref).slice(7)]).catch(() => ({ rows: [] }));
+  for (const r of rows) void onResearched(r.venue_ref);
+}
+
+/**
+ * One place, re-judged from what we hold — for a place in review, when
+ * something new arrives about it (owner, 29 Sep 2026: review items "settle
+ * automatically when the place is researched … or when families answer").
+ * Nothing queues for a person. A place not in review is left alone: this is
+ * how a question settles, not a second check.
+ *
+ * Returns what it did, or null when there was nothing to re-judge.
+ */
+export async function checkPlace(ref, opts = {}) {
+  if (!ref) return null;
+  const r = String(ref);
+  const { rows: atlasHits } = await query(
+    `select a.id, coalesce(a.venue_ref, 'atlas:' || a.id::text) as ref from attractions a
+      where a.venue_ref = $1 or 'atlas:' || a.id::text = $1
+         or ($1 like 'wikidata:%' and a.wikidata_id = substr($1, 10))
+         or ($1 like 'osm:%' and (a.osm_ref = substr($1, 5) or exists (select 1 from atlas_osm_matches m where m.attraction_id = a.id and m.osm_ref = substr($1, 5))))`, [r]);
+  const refs = [r, ...atlasHits.map((a) => a.ref)];
+  const { rows: [inReview] } = await query(`select 1 from place_status where venue_ref = any($1::text[]) and review limit 1`, [refs]);
+  if (!inReview) return null;
+  return runClosedCheck({ ...opts, by: 'checkPlace', only: { atlasIds: atlasHits.map((a) => a.id), recordRefs: [r] } });
+}
+
+/** A family's visit, recorded: the place it was at settles if it was in review. */
+export async function onVisitRecorded(ref) {
+  try { return await checkPlace(ref, { near: async () => [] }); } catch (err) { console.warn(`checkPlace ${ref}: ${String(err?.message ?? err).slice(0, 120)}`); return null; }
+}
+
+/** Research landed for a place: if it was in review, judge it again (sources/own.js onResearched). */
+export async function onResearched(ref) {
+  try { return await checkPlace(ref); } catch (err) { console.warn(`checkPlace ${ref}: ${String(err?.message ?? err).slice(0, 120)}`); return null; }
 }

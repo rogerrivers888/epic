@@ -519,7 +519,24 @@ async function websiteLead(venueRef, householdId) {
  * that, and a Claude search is neither in the estimate nor under the ceiling
  * (Codex, 25 Sep 2026).
  */
-export async function enrich(venueRef, { householdId = null, sessionId = null, seed: given = {}, force = false, replace = force, paid = false, search = paid, hygiene = true } = {}) {
+/**
+ * Whoever wants to know that research on a place has landed — the closed
+ * check re-judges a place in review then (C57, sources/closedCheck.js
+ * `onResearched`, registered in server.js). One listener, called after every
+ * research pass however it was started, and never able to fail the pass.
+ */
+let researchedListener = null;
+export function onResearched(fn) { researchedListener = typeof fn === 'function' ? fn : null; }
+
+export async function enrich(venueRef, opts = {}) {
+  const out = await enrichOnce(venueRef, opts);
+  if (researchedListener) {
+    try { await researchedListener(venueRef, out); } catch { /* the research itself stands */ }
+  }
+  return out;
+}
+
+async function enrichOnce(venueRef, { householdId = null, sessionId = null, seed: given = {}, force = false, replace = force, paid = false, search = paid, hygiene = true } = {}) {
   // Every paid call below is on this household's behalf, and the cap on its
   // calls that can cost money is asked at Google's door — which reads the
   // spender from the context rather than from thirty call sites.

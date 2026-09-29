@@ -20,6 +20,7 @@ import { accuracy } from './accuracy.js';
 import { collectionList } from './collections.js';
 import { FILED_SQL, STANDARD, contradictedDefaults as banded } from './categories.js';
 import { USD_TO_GBP } from '../domain/providerPrices.js';
+import { reviewDays, reviewGrowthLine, snapshotReview } from '../repositories/placeStatus.js';
 
 /**
  * Person-set defaults most confirmed places contradict (C49), compared in
@@ -263,7 +264,17 @@ export async function overview() {
     households: households ? { n: households, line: null, series: householdsSeries } : { n: null, line: 'none yet', series: householdsSeries },
   };
 
-  return { needs, health, collections, growth };
+  // ---- The closed check's review count, only while it grows (C57, owner,
+  // 29 Sep 2026: "don't queue them for me … Show the count on Overview only
+  // if it's growing"). Today's count is written as it is read; with no count
+  // a week old there is nothing to compare, and nothing is shown.
+  let closedReview = null;
+  try {
+    const today = await snapshotReview();
+    closedReview = reviewGrowthLine(await reviewDays(30), today?.day ?? null);
+  } catch { closedReview = null; }
+
+  return { needs, health, collections, growth, closedReview };
 }
 
 function pick(r) { return { key: r.key, title: r.title, shown: r.shown, opened: r.opened, hearted: r.hearted }; }

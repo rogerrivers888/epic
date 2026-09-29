@@ -34,6 +34,7 @@ import * as atlasRepo from '../repositories/atlas.js';
 import { googleSource } from '../sources/google.js';
 import { claimPlace, ownedRecord, ownedRecords, enrich, researchOnOpen } from '../sources/own.js';
 import { closedBrief, hiddenAmong, hiddenStatusesOf, statusFor } from '../repositories/placeStatus.js';
+import { onVisitRecorded } from '../sources/closedCheck.js';
 // Somewhere you eat, where the menu is the thing you want on the way in; and
 // the three words a take may be.
 import { FOOD_CATEGORIES as EATING, TAKES } from '../constants.js';
@@ -983,6 +984,10 @@ visits.post('/', async (req, res, next) => {
       await upsertHouseholdPlace(client, household.id, { venueRef: b.venueRef, label: b.venueLabel, category: b.category, lat: b.lat, lng: b.lng, venue: b.venue, ...where });
       return id;
     });
+
+    // A family went: a place the closed check had as a question is judged
+    // again with that visit in hand (C57). Behind the answer, never waited for.
+    void onVisitRecorded(b.venueRef);
 
     // "We visited it" is the strongest claim there is: research it now and keep
     // it for good, whatever happens to the source's record afterwards.

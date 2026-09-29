@@ -21,6 +21,7 @@ import { Router } from 'express';
 import { currentHousehold } from './household.js';
 import { query } from '../db.js';
 import * as pipeline from '../desk/pipeline.js';
+import { onVisitRecorded } from '../sources/closedCheck.js';
 import { occurrenceDate } from '../domain/hosting.js';
 
 export const familyRoutes = Router();
@@ -55,6 +56,8 @@ export async function bookingVisit(householdId, bookingId) {
      on conflict (client_id) do nothing`,
     [b.id, householdId, b.venue_ref, b.venue_label, b.title, on]);
   const { rows: [v] } = await query('select id from visits where client_id = $1 and household_id = $2', [b.id, householdId]);
+  // A visit recorded: a place the closed check had as a question is judged again (C57).
+  if (v) void onVisitRecorded(b.venue_ref);
   return v ? { visitId: v.id, placeId: b.venue_ref } : null;
 }
 

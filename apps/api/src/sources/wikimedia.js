@@ -933,3 +933,21 @@ export async function entityClaims(qids) {
   for (const [id, e] of Object.entries(body.entities)) if (e && e.claims && !('missing' in e)) out.set(id, e);
   return out;
 }
+
+/**
+ * English labels for up to fifty Wikidata items — a successor we do not hold
+ * is shown by its name (C57, owner, 29 Sep 2026). Keyless, paced. An id the
+ * answer did not carry a label for is absent.
+ */
+export async function entityLabels(qids) {
+  const ids = [...new Set((qids ?? []).filter((q) => /^Q\d+$/.test(String(q))))].slice(0, 50);
+  const out = new Map();
+  if (!ids.length) return out;
+  const body = await getJson(`https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&props=labels&languages=en&ids=${ids.join('|')}`);
+  if (!body || typeof body.entities !== 'object' || body.error) throw new Error(`wikidata: ${body?.error?.code ?? 'no entities'}`);
+  for (const [id, e] of Object.entries(body.entities)) {
+    const label = e?.labels?.en?.value;
+    if (label) out.set(id, label);
+  }
+  return out;
+}

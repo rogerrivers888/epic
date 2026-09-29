@@ -800,3 +800,138 @@ test('an applied unconfirmed place is shown and unmarked: only a closure hides',
   const trips = await import('../src/routes/trips.js');
   await trips.refuseClosed(ref);
 });
+
+// ---------------------------------------------------------------------------
+// round four (owner, 29 Sep 2026): lines and piers, successor names, review
+// that settles itself, and a count that shows only while it grows
+// ---------------------------------------------------------------------------
+
+test('Lynton and Barnstaple, a Ffestiniog-type line, a pier and a canal: their closures are history', () => {
+  const decommissioned = claim(snak('Q11639308'));
+  const lb = ['Q249556', 'Q420962', 'Q1112477'];
+  const lbSite = S.heritageOf({ kinds: lb });
+  assert.equal(lbSite.heritage, true);
+  const lbV = S.wikidataVerdict(entity('Q1219708', { P31: lb.map((k) => claim(snak(k))), P5817: [decommissioned] }), { today: TODAY, site: lbSite });
+  assert.equal(lbV.status, 'unknown');
+  assert.equal(lbV.history, true);
+  const ff = ['Q1112477', 'Q420962'];
+  const ffV = S.wikidataVerdict(entity('Q1410337', { P31: ff.map((k) => claim(snak(k))), P3999: [claim(time(1946))], P5817: [decommissioned] }), { today: TODAY, site: S.heritageOf({ kinds: ff }) });
+  assert.equal(ffV.history, true);
+  const pierV = S.wikidataVerdict(entity('Q6273174', { P31: [claim(snak('Q863454'))], P3999: [claim(time(1986))] }), { today: TODAY, site: S.heritageOf({ kinds: ['Q863454'] }) });
+  assert.equal(pierV.status, 'unknown');
+  assert.equal(pierV.history, true);
+  const canalV = S.wikidataVerdict(entity('Q1412795', { P31: [claim(snak('Q12284'))], P576: [claim(time(1951))] }), { today: TODAY, site: S.heritageOf({ kinds: ['Q12284'] }) });
+  assert.equal(canalV.history, true);
+  assert.equal(S.heritageOf({ kinds: ['Q110009982'] }).heritage, true, 'a tramway');
+  assert.equal(S.heritageOf({ subcategory: 'piers' }).heritage, true);
+});
+
+test('a successor we do not hold is stored by its Wikidata label, and shown without a link', async () => {
+  const { safari } = await fixture();
+  const more = new Map(claims);
+  more.set('Q8024695', entity('Q8024695', { P31: [claim(snak('Q1711697'))], P576: [claim(time(1992))], P1366: [claim(snak('Q999777'))] }));
+  await query(`update attractions set summary = 'Windsor Safari Park was a safari park.' where id = $1`, [safari]);
+  const asked = [];
+  await runClosedCheck({
+    by: 'test', today: TODAY, near: async () => [], superclasses: async () => new Map(),
+    fetchClaims: async (ids) => new Map(ids.filter((q) => more.has(q)).map((q) => [q, more.get(q)])),
+    fetchLabels: async (ids) => { asked.push(...ids); return new Map([['Q999777', 'Dalí Universe Two']]); },
+  });
+  assert.deepEqual(asked, ['Q999777'], 'only the successor we do not hold is asked');
+  const s = await repo.statusFor(`atlas:${safari}`);
+  assert.equal(s.successor.name, 'Dalí Universe Two');
+  assert.equal(s.successor.ref, null, 'not held: a name, no link');
+});
+
+test('review never hides, applied or not', async () => {
+  const ref = 'google:c57-review-visible';
+  await repo.propose({ ref, status: 'unknown', review: true, source: 'wikipedia', reason: 'written in the past tense', evidence: 'x', applied: true, appliedBy: 'test' });
+  assert.equal((await repo.hiddenAmong([ref])).size, 0);
+  assert.equal(S.hides({ status: 'unknown', review: true, applied: true, confirmed: true }), false);
+});
+
+test('a family visit counts only after the evidence that made it a question', () => {
+  // A year in the evidence: the visit must be after that year.
+  assert.equal(S.familyVerdict({ visitedOn: '2026-09-20', evidence: 'Q7 P3999 = 1980', today: TODAY }).status, 'open');
+  assert.equal(S.familyVerdict({ visitedOn: '1979-06-01', evidence: 'Q7 P3999 = 1980', today: TODAY }), null, 'a visit before the closure says nothing');
+  // No year: after the day the check flagged it.
+  assert.equal(S.familyVerdict({ visitedOn: '2026-09-20', evidence: 'written in the past tense', flaggedAt: '2026-09-10T08:00:00Z', today: TODAY }).status, 'open');
+  assert.equal(S.familyVerdict({ visitedOn: '2026-09-05', evidence: 'written in the past tense', flaggedAt: '2026-09-10T08:00:00Z', today: TODAY }), null);
+  // Nothing to measure against: cannot speak.
+  assert.equal(S.familyVerdict({ visitedOn: '2026-09-20', evidence: 'written in the past tense', today: TODAY }), null);
+  // A date in the future is not a visit.
+  assert.equal(S.familyVerdict({ visitedOn: '2027-01-01', evidence: '1980', today: TODAY }), null);
+});
+
+test('review settles itself for one place: a family\'s later visit, then Google\'s status for the matched id', async () => {
+  const { lonely } = await fixture();
+  await query(`delete from atlas_osm_matches`);
+  const more = new Map(claims);
+  more.set('Q900001', { ...entity('Q900001', { P31: [claim(snak('Q622852'))] }), descriptions: { en: { value: 'former folly in Berkshire' } } });
+  const stubs = {
+    today: TODAY, near: async () => [], superclasses: async () => new Map(), fetchLabels: async () => new Map(),
+    fetchClaims: async (ids) => new Map(ids.filter((q) => more.has(q)).map((q) => [q, more.get(q)])),
+  };
+  await runClosedCheck({ by: 'test', ...stubs });
+  let s = await repo.statusFor(`atlas:${lonely}`);
+  assert.equal(s.review, true, 'a "former" description is a question');
+  // Nothing to re-judge for a place not in review.
+  const { checkPlace } = await import('../src/sources/closedCheck.js');
+  assert.equal(await checkPlace('google:c57-nothing', stubs), null);
+
+  // The question was raised ten days ago; a family went after that.
+  await query(`update place_status set decided_at = now() - interval '10 days' where venue_ref = $1`, [`atlas:${lonely}`]);
+  const { household } = await aHousehold(query, 'c57 visit');
+  await query(`insert into visits (household_id, venue_ref, venue_label, visited_on) values ($1, 'wikidata:Q900001', 'Hidden Folly', current_date - 2)`, [household.id]);
+  const out = await checkPlace('wikidata:Q900001', stubs);
+  assert.ok(out, 'it was in review, so it was re-judged');
+  assert.equal(out.checkId, null, 'no run is recorded for one place');
+  s = await repo.statusFor(`atlas:${lonely}`);
+  assert.equal(s.status, 'open');
+  assert.equal(s.review, false);
+  assert.equal(s.reason, 'a family went');
+  await query(`delete from visits where household_id = $1`, [household.id]);
+
+  // Put it back in question, then Google's details are fetched for its matched id.
+  await runClosedCheck({ by: 'test', ...stubs });
+  await query(`update place_status set decided_at = now() where venue_ref = $1`, [`atlas:${lonely}`]);
+  assert.equal((await repo.statusFor(`atlas:${lonely}`)).review, true);
+  await query(`delete from provider_matches where venue_ref = 'wikidata:Q900001'`);
+  await query(`insert into provider_matches (venue_ref, source, source_ref, confidence) values ('wikidata:Q900001', 'google', 'ChIJ_c57_folly_g', 0.9)`);
+  await repo.noteGoogleStatus('google:ChIJ_c57_folly_g', S.googleVerdict('OPERATIONAL'));
+  await checkPlace('wikidata:Q900001', stubs);
+  s = await repo.statusFor(`atlas:${lonely}`);
+  assert.equal(s.status, 'open');
+  assert.equal(s.source, 'google');
+  assert.equal(s.review, false);
+  await query(`delete from provider_matches where venue_ref = 'wikidata:Q900001'`);
+});
+
+test('Google\'s status clears a question on its own id: operational opens it, closed closes it', async () => {
+  const ref = 'google:c57-review-google';
+  await repo.propose({ ref, status: 'unknown', review: true, source: 'wikipedia', reason: 'written in the past tense', evidence: 'x' });
+  await onGoogleStatus(ref, 'OPERATIONAL');
+  let s = await repo.statusFor(ref);
+  assert.deepEqual([s.status, s.review, s.source], ['open', false, 'google']);
+  await onGoogleStatus(ref, 'CLOSED_PERMANENTLY');
+  s = await repo.statusFor(ref);
+  assert.deepEqual([s.status, s.review], ['permanently_closed', false]);
+  assert.equal(s.hidden, false, 'still waits for the owner to apply');
+});
+
+test('the Overview shows the review count only while it grows, and says nothing without a week of counts', async () => {
+  const d = (day, review) => ({ day, review });
+  assert.equal(repo.reviewGrowthLine([d('2026-09-29', 412)], '2026-09-29'), null, 'one day is not a week');
+  assert.equal(repo.reviewGrowthLine([d('2026-09-29', 412), d('2026-09-25', 300)], '2026-09-29'), null, 'four days is not a week');
+  const up = repo.reviewGrowthLine([d('2026-09-29', 412), d('2026-09-22', 384), d('2026-09-15', 500)], '2026-09-29');
+  assert.equal(up.line, 'Closed-check review: 412, up 28 this week');
+  assert.equal(repo.reviewGrowthLine([d('2026-09-29', 380), d('2026-09-22', 384)], '2026-09-29'), null, 'falling: nothing');
+  assert.equal(repo.reviewGrowthLine([d('2026-09-29', 384), d('2026-09-22', 384)], '2026-09-29'), null, 'flat: nothing');
+  assert.equal(repo.reviewGrowthLine([d('2026-09-29', 400), d('2026-09-20', 390)], '2026-09-29').since, '2026-09-20', 'the latest count at least a week old');
+  const today = await repo.snapshotReview();
+  assert.ok(today.day && Number.isInteger(today.review));
+  const { overview } = await import('../src/desk/overview.js');
+  const o = await overview().catch(() => null);
+  assert.ok(o, 'the Overview answers');
+  assert.equal(o.closedReview, null, 'no week of counts in a fresh database: nothing shown');
+});

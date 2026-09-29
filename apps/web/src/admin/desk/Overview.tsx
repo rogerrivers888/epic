@@ -41,6 +41,8 @@ type OverviewData = {
     | { speaks: false }
     | { speaks: true; mostEngaged: CollPick[]; shownNeverOpened: CollPick[]; reachNobody: CollPick[] };
   growth: { places: Growth; facts: Growth; households: Growth };
+  /** The closed check's review count, sent only while it is growing week on week (C57); otherwise null. */
+  closedReview?: { n: number; up: number; since: string; line: string } | null;
 };
 
 const TONE: Record<Tone, string> = { green: LIME, amber: AMBER, red: RED, none: desk.inkFaint };
@@ -172,6 +174,10 @@ export function Overview(_props: { canManage?: boolean }) {
             </Press>
           ))}
         </Grid>
+        {/* Not a queue: a line, and only while the count is rising (C57). */}
+        {data.closedReview ? (
+          <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: desk.ink }}>{data.closedReview.line}</Text>
+        ) : null}
       </View>
 
       {/* COLLECTIONS */}

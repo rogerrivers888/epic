@@ -154,6 +154,14 @@ export const HERITAGE_KINDS = new Set([
   'Q12284',                        // canal
   'Q39715',                        // lighthouse
   'Q44494', 'Q185187', 'Q38720',   // mill, watermill, windmill
+  // Lines, not only their stations (owner, 29 Sep 2026: "Add heritage
+  // railways, tramways, canals and piers … so their closure dates become
+  // history" — the Lynton and Barnstaple closed in 1935 and runs today).
+  // Read back from Wikidata that day.
+  'Q728937', 'Q22667',             // railway line, railway
+  'Q420962', 'Q1112477',           // heritage railway, narrow-gauge railway
+  'Q110009982', 'Q15145593', 'Q27997185', 'Q12162186', // tramway, tram route, tram line, tram transport
+  'Q863454',                       // pier (Q15897166, which the atlas walk calls pier, is a given name)
 ]);
 /** The heritage roots of the atlas's own subclass walk (`place_kinds.root_qid`, sources/wikimedia.js ATTRACTION_ROOTS). */
 export const HERITAGE_ROOTS = new Set(['Q23413', 'Q16560', 'Q2087181', 'Q1802963', 'Q839954', 'Q4989906', 'Q38720', 'Q16970', 'Q2977', 'Q44613', 'Q4663971', 'Q15135589']);
@@ -161,7 +169,7 @@ export const HERITAGE_ROOTS = new Set(['Q23413', 'Q16560', 'Q2087181', 'Q1802963
 export const HERITAGE_SUBCATEGORIES = new Set([
   'castles', 'churches', 'historic-houses', 'ruins', 'monuments', 'monuments-memorials', 'abbeys', 'cathedrals', 'historic',
   'industrial-heritage', 'world-heritage', 'heritage-railways', 'railway-heritage', 'mining-heritage', 'canals', 'mills',
-  'bridges', 'lighthouses',
+  'bridges', 'lighthouses', 'piers', 'tramways', 'railways',
 ]);
 /** A church, as a building people worship in — a separate question (see `heritageOf`). */
 export const CHURCH_KINDS = new Set(['Q317557', 'Q5116872', 'Q16970', 'Q108325', 'Q2977', 'Q56242215', 'Q1129743', 'Q1370598', 'Q24398318']);
@@ -512,6 +520,35 @@ export function googleVerdict(businessStatus) {
     case 'CLOSED_PERMANENTLY': return finding('google', 'permanently_closed', 'permanently closed by Google\'s status', 'Google business status');
     default: return null; // unspecified or absent: cannot speak
   }
+}
+
+// ---------------------------------------------------------------------------
+// a family went
+// ---------------------------------------------------------------------------
+
+/**
+ * A family's recorded visit, as evidence a place in review is open (owner,
+ * 29 Sep 2026: review "settles automatically … when families answer").
+ *
+ * Only a visit *after* the evidence that made it a question counts: going to
+ * a church in 1975 says nothing about the flats it became in 1980. So the
+ * visit must be later than the latest year the evidence names ("P3999 =
+ * 1980", "closed in 1992") — the end of that year — or, where the evidence
+ * names no year, later than the day the check first flagged it. With neither
+ * to measure against it cannot speak, and returns null.
+ */
+export function familyVerdict({ visitedOn, evidence = '', flaggedAt = null, today = new Date().toISOString().slice(0, 10) } = {}) {
+  const on = String(visitedOn ?? '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(on) || on > today) return null;
+  const years = [...String(evidence ?? '').matchAll(/\b(1[5-9]\d\d|20\d\d)\b/g)].map((m) => Number(m[1]));
+  const after = years.length ? `${Math.max(...years)}-12-31` : flaggedAt ? new Date(flaggedAt).toISOString().slice(0, 10) : null;
+  if (!after || on <= after) return null;
+  return {
+    // Kept without a source: the stored column predates a family as one,
+    // and the reason and evidence say whose word it is.
+    source: null, status: 'open', review: false, history: false,
+    reason: 'a family went', evidence: `visit recorded ${on}, after ${after}`,
+  };
 }
 
 // ---------------------------------------------------------------------------
