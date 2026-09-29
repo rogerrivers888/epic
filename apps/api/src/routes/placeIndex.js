@@ -1094,15 +1094,32 @@ router.get('/places', requires('view_library'), async (req, res, next) => {
     // Google is never a source here (the source check forbids it, C3).
     const answerRefs = rows.map((r) => r.ref);
     if (answerRefs.length) {
+      // Only the active machine answers: `hidden_at is null` (a family
+      // disagreement hides an answer until it is due again) and none a person has
+      // marked unknown in `fact_unknowns` — the same suppression every other
+      // reader of our sources applies (Codex, 29 Sep 2026). A person's "don't
+      // know" override is then counted as a don't-know below, so a hidden or
+      // overridden fact never reads as held here while it reads inactive
+      // everywhere else.
       const { rows: ans } = await query(
-        `select venue_ref,
-                count(*) filter (where state = 'dont_know')::int    as dont_knows,
-                count(*) filter (where state in ('yes', 'no'))::int as held,
-                count(*) filter (where state = 'conflict')::int     as conflicts
-           from place_fact_answers where venue_ref = any($1) group by venue_ref`, [answerRefs]);
+        `select pfa.venue_ref,
+                count(*) filter (where pfa.state = 'dont_know')::int    as dont_knows,
+                count(*) filter (where pfa.state in ('yes', 'no'))::int as held,
+                count(*) filter (where pfa.state = 'conflict')::int     as conflicts
+           from place_fact_answers pfa
+          where pfa.venue_ref = any($1) and pfa.hidden_at is null
+            and not exists (select 1 from fact_unknowns u
+                             where u.venue_ref = pfa.venue_ref and u.attribute_key = pfa.attribute_key)
+          group by pfa.venue_ref`, [answerRefs]);
+      // A person's "don't know" correction, counted as a don't-know whether or
+      // not a machine answer sits under it.
+      const { rows: unk } = await query(
+        'select venue_ref, count(*)::int as unknowns from fact_unknowns where venue_ref = any($1) group by venue_ref',
+        [answerRefs]);
       const byRef = new Map(ans.map((a) => [a.venue_ref, a]));
+      const unkBy = new Map(unk.map((u) => [u.venue_ref, u.unknowns]));
       for (const row of rows) {
-        row.dontKnows = byRef.get(row.ref)?.dont_knows ?? 0;
+        row.dontKnows = (byRef.get(row.ref)?.dont_knows ?? 0) + (unkBy.get(row.ref) ?? 0);
         row.heldAnswers = byRef.get(row.ref)?.held ?? 0;
         row.conflicts = byRef.get(row.ref)?.conflicts ?? 0;
       }
