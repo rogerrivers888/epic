@@ -482,3 +482,20 @@ test('a person\'s stop on a sleeping day\'s run is not overruled by ending the d
   const { rows: [r] } = await query('select state from census_runs where id = $1', [run.id]);
   assert.equal(r.state, 'waiting');
 });
+
+test('a stale square being asked again is not done in a day\'s figures', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from census_run_tiles where grid_key = 'uktest/stale'`);
+    await query(`delete from census_tiles where grid_key = 'uktest/stale'`);
+    await clean();
+  });
+  const one = await dayOne({ state: 'running', problem: null, finished: null });
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, started_at)
+     values ('uktest/stale', 48, -6, 48.08, -5.88, array['ZZ7Q'], 'todo', now() - interval '40 days', now() - interval '1 hour')
+     on conflict (grid_key) do update set state = 'todo', censused_at = excluded.censused_at, started_at = excluded.started_at`);
+  await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'uktest/stale')`, [one.id]);
+  const st = await uk.status(new Date('2026-09-28T23:00:00Z'));
+  assert.deepEqual([st.days[0].districts, st.days[0].tilesLeft], [0, 1]);
+});

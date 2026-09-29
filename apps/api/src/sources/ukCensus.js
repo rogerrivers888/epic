@@ -293,7 +293,10 @@ export async function status(now = new Date()) {
       : { rows: [] };
     const { rows: [then] } = kept ? { rows: [kept.value] } : await query(
       `with plan as (
-         select t.outcodes, (t.censused_at is not null and t.censused_at <= coalesce(r.finished_at, now())) as done
+         -- Done means done: a stale square being asked again keeps its old
+         -- censused_at but is not done (Codex, 29 Sep 2026). The state is
+         -- read when the day is kept, just after it ends.
+         select t.outcodes, (t.state = 'done' and t.censused_at is not null and t.censused_at <= coalesce(r.finished_at, now())) as done
            from census_run_tiles m join census_tiles t on t.grid_key = m.grid_key join census_runs r on r.id = m.run_id
           where m.run_id = $1)
        select (select count(*)::int from (select c.code from plan, unnest(plan.outcodes) c(code) group by c.code having bool_and(done)) x) as districts,
