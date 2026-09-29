@@ -97,15 +97,15 @@ test('a census day billed above pennies holds the next day', async (t) => {
   const r = recorder();
   const told = [];
   const out = await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start, tell: (x) => told.push(x) });
-  assert.equal(out.action, 'held');
+  assert.equal(out.action, 'halted');
   assert.equal(r.calls.length, 0);
-  assert.match(told[0].subject, /held/);
+  assert.match(told[0].subject, /^Census stopped: Places cost £1\.20 after credits/);
 });
 
 test('pennies are not a hold', async (t) => {
   await clean(); t.after(clean);
   await dayOne();
-  await billed('2026-09-28', 'google-essentials', 0.04);
+  await billed('2026-09-28', 'google-essentials', 0.04, { credits: -0.04 }); // fully credited: nothing charged
   const r = recorder();
   const out = await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start });
   assert.equal(out.action, 'start');
@@ -140,17 +140,17 @@ test('a person\'s stop is not undone, and a finished UK is complete', async (t) 
   assert.equal(r.calls.length, 0);
 });
 
-test('the report carries the five figures, billed or not yet', async (t) => {
+test('the daily report is one line: calls, new places, areas left, £ that day', async (t) => {
   await clean(); t.after(clean);
   await dayOne();
   const st = await uk.status(new Date('2026-09-28T23:00:00Z'));
   assert.equal(st.days.length, 1);
-  const line = uk.reportLine(st.days[0], 184, 12);
-  assert.match(line, /^Day 1 \(2026-09-28\): 184 districts done, 35,462 places added, 70,000 requests, not billed yet, about 12 days remaining\.$/);
+  const d = { ...st.days[0], newPlaces: 35462, districtsLeft: 1995, areasLeft: 97 };
+  assert.equal(uk.reportLine(d), 'Census day 1 (2026-09-28): 70,000 calls · 35,462 new places · 1,995 districts left in 97 areas · billing export: nothing yet');
   await billed('2026-09-28', 'google-essentials', 0);
   await billed('2026-09-29', 'google-essentials', 0);
   const again = await uk.status(new Date('2026-09-30T23:00:00Z'));
-  assert.match(uk.reportLine(again.days[0], 184, 12), /billed £0\.00 for the census \(Google £0\.00 that day\)/);
+  assert.match(uk.reportLine(again.days[0]), / · £0\.00 that day$/);
 });
 
 test('a day\'s run that met the shared cap is ended for the day, never woken into tomorrow, and tomorrow starts its own', async (t) => {
@@ -206,7 +206,7 @@ test('the census cost is its own SKU, and the £5 stop is every line billed', as
   // (Codex, 28 Sep 2026): £2 of it holds nothing.
   await billed('2026-09-28', 'details-essentials', 2);
   const r = recorder();
-  assert.equal((await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start })).action, 'start');
+  assert.equal((await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start, stop: async () => {} })).action, 'halted', 'any Places spend after credits stops it, whichever SKU (29 Sep 2026)');
   // A line the mapping does not know is still money: over £5 stops the census.
   await clean();
   await dayOne();
@@ -320,7 +320,7 @@ test('a quota day is billed across two London days, and both count', async (t) =
   await billed('2026-09-28', 'google-essentials', 0.6);
   await billed('2026-09-29', 'google-essentials', 0.6);
   const r = recorder();
-  assert.equal((await uk.tick({ now: new Date('2026-09-29T09:00:00Z'), start: r.start })).action, 'held');
+  assert.equal((await uk.tick({ now: new Date('2026-09-29T09:00:00Z'), start: r.start })).action, 'halted');
 });
 
 test('a starting census waits while a day\'s plan is being written', async (t) => {
@@ -364,7 +364,7 @@ test('the report bills a day across both London days, as the decision does', asy
   const st = await uk.status(new Date('2026-09-29T23:00:00Z'));
   assert.equal(st.days[0].billed?.censusGbp, 0.02, 'a charge that landed on the next London day is still day 1\'s');
   assert.equal(st.days[0].billed.final, false, 'one of its two export days is in: billed so far');
-  assert.match(uk.reportLine(st.days[0], 1, 1), /billed so far £0\.02/);
+  assert.match(uk.reportLine(st.days[0]), /£0\.02 that day so far$/);
   await billed('2026-09-28', 'google-essentials', 0);
   const both = await uk.status(new Date('2026-09-30T23:00:00Z'));
   assert.equal(both.days[0].billed.final, true);
@@ -404,7 +404,7 @@ test('a restart after setting a plan aside still passes through the billing gate
   await billed('2026-09-28', 'google-essentials', 2);
   const r = recorder();
   const out = await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start });
-  assert.equal(out.action, 'held');
+  assert.equal(out.action, 'halted');
   assert.equal(r.calls.length, 0);
 });
 
@@ -451,7 +451,8 @@ test('each day reports its own figures, as they stood when it ended', async (t) 
   await query(`update census_tiles set censused_at = '2026-10-30T00:00:00Z' where grid_key = 'uktest/day/a'`);
   const month = await uk.status(new Date('2026-10-30T01:00:00Z'));
   assert.deepEqual([month.days[0].districts, month.days[0].tilesLeft], [1, 1], 'kept, not recomputed');
-  assert.match(uk.reportLine(after.days[0]), /^Day 1 \(2026-09-28\): 1 districts done/);
+  assert.deepEqual([after.days[0].districtsLeft, after.days[0].areasLeft], [1, 1], 'ZZ8R is left, in one area');
+  assert.match(uk.reportLine(after.days[0]), /^Census day 1 \(2026-09-28\): 70,000 calls · \d+ new places · 1 districts left in 1 areas/);
 });
 
 test('a plan not switched on is not a finished day in the reports', async (t) => {
@@ -559,7 +560,7 @@ test('a held programme stays held until a person decides, and a finished one is 
   await billed('2026-09-28', 'google-essentials', 2);
   const r = recorder();
   // Days later, still held: "stay paused and report the figure".
-  assert.equal((await uk.tick({ now: new Date('2026-10-02T08:00:00Z'), start: r.start })).action, 'held');
+  assert.equal((await uk.tick({ now: new Date('2026-10-02T08:00:00Z'), start: r.start })).action, 'halted');
   assert.equal(r.calls.length, 0);
   // A finished UK stays finished whatever Google bills after.
   await clean();
@@ -613,7 +614,7 @@ test('a census bill that arrives late for an earlier day holds the programme too
      values ('The rest of the UK — day 2', array['ZZ'], 0.08, 0.12, 70000, 5, 30, 'paused', 'stopped at the 70000-request ceiling; resume to carry on', '2026-09-29T07:10:00Z', '2026-09-29T12:00:00Z')`);
   await billed('2026-09-28', 'google-essentials', 2); // day 1's bill, arriving after day 2 ran
   const r = recorder();
-  assert.equal((await uk.tick({ now: new Date('2026-09-30T08:00:00Z'), start: r.start })).action, 'held');
+  assert.equal((await uk.tick({ now: new Date('2026-09-30T08:00:00Z'), start: r.start })).action, 'halted');
 });
 
 test('a day\'s written plan is not switched on while another plan is being written', async (t) => {
@@ -665,7 +666,7 @@ test('a person lifts the hold, and only a later bill holds it again', async (t) 
   await dayOne();
   await billed('2026-09-28', 'google-essentials', 2);
   const r = recorder();
-  assert.equal((await uk.tick({ now: new Date('2026-09-30T08:00:00Z'), start: r.start })).action, 'held');
+  assert.equal((await uk.tick({ now: new Date('2026-09-30T08:00:00Z'), start: r.start })).action, 'halted');
   await uk.liftHold({ who: 'test', now: new Date('2026-09-30T09:00:00Z') });
   assert.equal((await uk.tick({ now: new Date('2026-09-30T10:00:00Z'), start: r.start })).action, 'start');
 });
@@ -680,7 +681,7 @@ test('a lift covers only the bills the export held when it was made', async (t) 
   await uk.liftHold({ who: 'test', now: new Date('2026-10-01T09:00:00Z') }); // the export holds the 28th only
   await billed('2026-09-30', 'google-essentials', 3); // day 2's bill arrives after the lift
   const r = recorder();
-  assert.equal((await uk.tick({ now: new Date('2026-10-01T10:00:00Z'), start: r.start })).action, 'held');
+  assert.equal((await uk.tick({ now: new Date('2026-10-01T10:00:00Z'), start: r.start })).action, 'halted');
 });
 
 test('a finished census whose last day comes in costly is still said', async (t) => {
@@ -706,7 +707,7 @@ test('a charge backfilled onto a day already lifted holds it again', async (t) =
   assert.equal(action, 'start');
   // Then £1.50 more is backfilled onto the 28th, behind a watermark at the 30th.
   await billed('2026-09-28', 'google-essentials', 1.5);
-  assert.equal((await uk.tick({ now: new Date('2026-10-01T09:00:00Z'), start: r.start })).action, 'held');
+  assert.equal((await uk.tick({ now: new Date('2026-10-01T09:00:00Z'), start: r.start })).action, 'halted');
 });
 
 test('the day that ended is kept before the next day starts', async (t) => {
@@ -735,7 +736,7 @@ test('a day\'s figures are kept the moment its run ends', async (t) => {
   // A later census takes the square before anybody reads the report.
   await query(`update census_tiles set state = 'todo' where grid_key = 'uktest/kept'`);
   const { rows: [kept] } = await query(`select value from bo_settings where key = $1`, [`census:uk-day:${run.id}`]);
-  assert.deepEqual(kept?.value, { districts: 1, left: 0 });
+  assert.deepEqual(kept?.value, { districts: 1, left: 0, districtsLeft: 0, areasLeft: 0 });
 });
 
 test('a census notice goes to the report address, logged as a census alert or report', async (t) => {
@@ -811,4 +812,22 @@ test('a Google limit that leaves the census nothing: it waits, and makes nothing
   const out = await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start, quota: async () => ({ speaks: true, limit: 4000 }) });
   assert.equal(out.action, 'no quota for the census');
   assert.equal(r.calls.length, 0);
+});
+
+test('Places spend after every credit decides: fully credited runs on, a penny charged stops it', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  // £40.96 of usage, all of it covered by credit, promotional included: £0 net (owner, 29 Sep 2026).
+  await billed('2026-09-28', 'google-pro', 4.96, { credits: -4.96, promo: -4.96 });
+  const r = recorder();
+  assert.equal((await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start })).action, 'start');
+  // A day where credit ran short by 3p.
+  await clean();
+  await dayOne({ state: 'running', problem: null, finished: null });
+  await billed('2026-09-28', 'google-pro', 2, { credits: -1.97 });
+  const told = [];
+  const out = await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start, stop: async () => {}, tell: (x) => told.push(x) });
+  assert.equal(out.action, 'halted');
+  assert.equal(out.over.kind, 'net');
+  assert.match(told[0].subject, /^Census stopped: Places cost £0\.03 after credits on 2026-09-28/);
 });

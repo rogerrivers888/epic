@@ -480,7 +480,9 @@ const Waiting = () => <View style={{ paddingVertical: spacing.xl }}><ActivityInd
 /** What the programme is doing, in a word or two — the detail is behind the tips. */
 const ukWord = (u: UkCensus) => {
   if (u.complete) return 'Complete';
-  if (u.halted) return `Stopped: Google billed £${u.halted.googleGbp.toFixed(2)} on ${u.halted.day}`;
+  if (u.halted) return u.halted.kind === 'net'
+    ? `Stopped: Places cost £${u.halted.placesNetGbp.toFixed(2)} on ${u.halted.day}`
+    : `Stopped: Google billed £${u.halted.googleGbp.toFixed(2)} on ${u.halted.day}`;
   if (u.held) return `Held: the census billed £${u.held.censusGbp.toFixed(2)} on ${u.held.day}`;
   switch (u.action) {
     case 'working': case 'switched on': return 'Running';
@@ -508,10 +510,11 @@ function UkCensusSection({ canManage, phone = false }: { canManage: boolean; pho
     { key: 'day', label: 'Day', width: 64, cell: (d) => <Word strong={!d.ended}>{String(d.day)}</Word> },
     { key: 'date', label: 'Date', width: 110, cell: (d) => <Word muted>{d.date}</Word> },
     { key: 'districts', label: 'Districts done', tip: 'ukCensusDistricts', width: 130, align: 'right', cell: (d) => <Num n={d.districts} /> },
-    { key: 'places', label: 'Places added', width: 130, align: 'right', cell: (d) => <Num n={d.places} /> },
+    { key: 'places', label: 'New places', width: 130, align: 'right', cell: (d) => <Num n={d.newPlaces} /> },
+    { key: 'areas', label: 'Areas left', tip: 'ukCensusAreasLeft', width: 110, align: 'right', cell: (d) => (d.areasLeft == null ? <Blank /> : <Num n={d.areasLeft} />) },
     { key: 'requests', label: 'Requests', width: 120, align: 'right', cell: (d) => <Num n={d.requests} /> },
     { key: 'billed', label: 'Billed', tip: 'ukCensusBilled', width: 140, align: 'right',
-      cell: (d) => (d.billed ? <Word strong={d.billed.final}>{`£${d.billed.censusGbp.toFixed(2)}${d.billed.final ? '' : ' so far'}`}</Word> : <Blank />) },
+      cell: (d) => (d.billed ? <Word strong={d.billed.final}>{`£${d.billed.placesNetGbp.toFixed(2)}${d.billed.final ? '' : ' so far'}`}</Word> : <Blank />) },
     { key: 'left', label: 'Days left', tip: 'ukCensusDaysLeft', width: 110, align: 'right',
       cell: (d) => (d.daysLeft == null ? <Blank /> : <Num n={d.daysLeft} />) },
   ];
@@ -528,7 +531,7 @@ function UkCensusSection({ canManage, phone = false }: { canManage: boolean; pho
           <Stat label="Days left" value={u.daysLeft == null ? '—' : String(u.daysLeft)} tip="ukCensusDaysLeft" accent />
         </View>
       </View>
-      {u.held ? (
+      {u.held || u.halted ? (
         <View style={styles.trail}>
           <Act label={lifting ? 'Lifting…' : 'Lift the hold'} tone="solid" disabled={!canManage || lifting} onPress={lift} />
         </View>
@@ -536,9 +539,9 @@ function UkCensusSection({ canManage, phone = false }: { canManage: boolean; pho
       <Ladder columns={columns} rows={[...u.days].reverse()} keyOf={(d) => d.runId} highlight={(d) => !d.ended}
               phoneRow={(d) => ({
                 name: `Day ${d.day} · ${d.date}`,
-                note: `${d.districts.toLocaleString('en-GB')} districts · ${d.places.toLocaleString('en-GB')} places · ${d.requests.toLocaleString('en-GB')} requests`,
+                note: `${d.requests.toLocaleString('en-GB')} calls · ${d.newPlaces.toLocaleString('en-GB')} new places${d.areasLeft == null ? '' : ` · ${d.areasLeft} areas left`}`,
                 chips: [
-                  { key: 'billed', word: d.billed ? `£${d.billed.censusGbp.toFixed(2)}${d.billed.final ? '' : ' so far'}` : 'not billed yet', tip: 'ukCensusBilled' },
+                  { key: 'billed', word: d.billed ? `£${d.billed.placesNetGbp.toFixed(2)}${d.billed.final ? '' : ' so far'}` : 'not billed yet', tip: 'ukCensusBilled' },
                   ...(d.daysLeft == null ? [] : [{ key: 'left', word: `${d.daysLeft} days left`, tip: 'ukCensusDaysLeft' as const }]),
                 ],
               })} />

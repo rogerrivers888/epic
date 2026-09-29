@@ -654,11 +654,14 @@ export async function keepDayFigures(runId) {
                    and state in ('paused', 'done', 'stopped') and coalesce(problem, '') not like 'built paused%'),
           plan as (
             select t.outcodes, (t.state = 'done' and t.censused_at is not null and t.censused_at <= coalesce(r.finished_at, now())) as done
-              from r join census_run_tiles m on m.run_id = r.id join census_tiles t on t.grid_key = m.grid_key)
+              from r join census_run_tiles m on m.run_id = r.id join census_tiles t on t.grid_key = m.grid_key),
+          dist as (select c.code, bool_and(done) as whole from plan, unnest(plan.outcodes) c(code) group by c.code)
      insert into bo_settings (key, value, updated_by)
      select 'census:uk-day:' || r.id,
             jsonb_build_object(
-              'districts', (select count(*) from (select c.code from plan, unnest(plan.outcodes) c(code) group by c.code having bool_and(done)) x),
+              'districts', (select count(*) filter (where whole) from dist),
+              'districtsLeft', (select count(*) filter (where not whole) from dist),
+              'areasLeft', (select count(distinct substring(code from '^[A-Z]+')) filter (where not whole) from dist),
               'left', (select count(*) filter (where not done) from plan)),
             'the UK census'
        from r

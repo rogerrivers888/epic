@@ -110,7 +110,11 @@ export async function billedByDay(fromDay) {
     // out: the spend tile's own rule, usage not credit (Codex, 29 Sep 2026).
     `select to_char(day, 'YYYY-MM-DD') as day,
             coalesce(sum(cost + credits - promo) filter (where sku ~* 'text search' and sku ~* '(essentials|ids only)'), 0)::float as census_gbp,
-            coalesce(sum(cost + credits - promo), 0)::float as google_gbp
+            coalesce(sum(cost + credits - promo), 0)::float as google_gbp,
+            -- What Places actually charged: after every credit, promotional
+            -- included. Owner, 29 Sep 2026: "if Places spend on
+            -- epic-maps-509205 is above £0 for any day … stop and tell me."
+            coalesce(sum(cost + credits) filter (where meter is not null or service ~* 'places'), 0)::float as places_net_gbp
        from billing_days
       where day >= $1::date
       group by 1 order by 1`, [fromDay]);
@@ -132,7 +136,12 @@ export function billedFor(bills, quotaDay) {
   // Or once the export holds a later day: a London day with no Google usage
   // has no row at all, and waiting for both would wait for ever (Codex, 29 Sep 2026).
   const final = spans.length === 2 || bills.some((b) => b.day > next);
-  return { day: quotaDay, census_gbp: spans.reduce((n, b) => n + b.census_gbp, 0), google_gbp: spans.reduce((n, b) => n + b.google_gbp, 0), final };
+  return {
+    day: quotaDay, final,
+    census_gbp: spans.reduce((n, b) => n + b.census_gbp, 0),
+    google_gbp: spans.reduce((n, b) => n + b.google_gbp, 0),
+    places_net_gbp: spans.reduce((n, b) => n + (b.places_net_gbp ?? 0), 0),
+  };
 }
 
 /** A service session of the run's own, so every ledger row names the day it belongs to. */
@@ -182,9 +191,21 @@ export async function decide(now = new Date()) {
   // Any export day over £5, and any quota day of the programme over £5 across
   // the two London days it spans — £3 and £3 is £6 (Codex, 29 Sep 2026). The
   // two overlap at the edges, which errs towards stopping.
-  const over = bills.find((b) => b.google_gbp > DAY_ALERT_GBP)
-    ?? runs.map((r) => billedFor(bills, pacificDay(r.started_at))).find((b) => b && b.google_gbp > DAY_ALERT_GBP);
-  if (over) return { action: 'halted', runs, latest, bills, over };
+  //
+  // And any day on which Places cost money at all, after every credit (owner,
+  // 29 Sep 2026: "if Places spend on epic-maps-509205 is above £0 for any day,
+  // or the £5/day stop trips, stop and tell me"). Either stops the census for
+  // good; a person who has looked lifts it (POST /census/uk/lift), and only a
+  // figure that has grown since stops it again.
+  const { rows: [lifted] } = await query(`select value from bo_settings where key = 'census:uk-hold-lifted'`);
+  const seenGoogle = lifted?.value?.seenGoogle ?? {};
+  const seenNet = lifted?.value?.seenNet ?? {};
+  const spans = runs.map((r) => billedFor(bills, pacificDay(r.started_at))).filter(Boolean);
+  const unseen = (b, key, seen, floor) => b[key] > floor && b[key] > (seen[b.day] ?? -1) + 0.005;
+  const five = [...bills, ...spans].find((b) => unseen(b, 'google_gbp', seenGoogle, DAY_ALERT_GBP));
+  if (five) return { action: 'halted', runs, latest, bills, over: { ...five, kind: 'five' } };
+  const spent = [...bills, ...spans].find((b) => unseen(b, 'places_net_gbp', seenNet, 0.005));
+  if (spent) return { action: 'halted', runs, latest, bills, over: { ...spent, kind: 'net' } };
   // Done is complete only if no square was given up on: a run finishes with
   // its failed squares set aside, and the UK is not done while they are
   // unasked. A day that ended so is followed by another, which tries them
@@ -233,11 +254,7 @@ export async function decide(now = new Date()) {
   // A lift records each day's census bill as it was seen; a day holds again
   // only if its bill has grown since — exports backfill earlier days, and a
   // date line would wave a late charge through (Codex, 29 Sep 2026).
-  const { rows: [lifted] } = await query(`select value from bo_settings where key = 'census:uk-hold-lifted'`);
-  const seen = lifted?.value?.seen ?? {};
-  const pricey = real.map((r) => billedFor(bills, pacificDay(r.started_at)))
-    .find((b) => b && b.census_gbp >= PENNIES_GBP && b.census_gbp > (seen[b.day] ?? -1) + 0.005);
-  if (pricey) return { action: 'held', runs, latest, bills, yesterday: pricey };
+  // (The old hold on a census bill of £1 is gone: any net Places spend now stops it, above.)
   const yesterday = billedFor(bills, pacificDay(latest.started_at));
   // Held stays held. The owner's rule for the gate (28 Sep 2026): "If it's
   // anything meaningful: stay paused and report the figure." A census that
@@ -304,7 +321,9 @@ async function tickLocked({ now = new Date(), start = censusRun.startRun, stop =
   const d = await decide(now);
   if (d.action === 'halted') {
     if (['running', 'waiting'].includes(d.latest?.state)) await stop(d.latest.id);
-    tell({ kind: 'alert', subject: `Census stopped: Google billed £${d.over.google_gbp.toFixed(2)} on ${d.over.day}`, d });
+    tell({ kind: 'alert', subject: d.over.kind === 'net'
+      ? `Census stopped: Places cost £${d.over.places_net_gbp.toFixed(2)} after credits on ${d.over.day}`
+      : `Census stopped: Google billed £${d.over.google_gbp.toFixed(2)} on ${d.over.day}`, d });
   }
   if (d.action === 'complete' && d.over) {
     tell({ kind: 'alert', subject: `Census (finished) was billed £${d.over.google_gbp.toFixed(2)} of Google on ${d.over.day}`, d });
@@ -398,7 +417,9 @@ export async function status(now = new Date()) {
     const { rows: [kept] } = ended
       ? await query('select value from bo_settings where key = $1', [key])
       : { rows: [] };
-    const { rows: [then] } = kept ? { rows: [kept.value] } : await query(
+    // A day kept before it carried districts and areas left gets them now,
+    // once (29 Sep 2026: the one-line report names what is left).
+    const { rows: [then] } = kept && kept.value.districtsLeft != null ? { rows: [kept.value] } : await query(
       `with plan as (
          -- Done means done: a stale square being asked again keeps its old
          -- censused_at but is not done (Codex, 29 Sep 2026). The state is
@@ -406,26 +427,43 @@ export async function status(now = new Date()) {
          select t.outcodes, (t.state = 'done' and t.censused_at is not null and t.censused_at <= coalesce(r.finished_at, now())) as done
            from census_run_tiles m join census_tiles t on t.grid_key = m.grid_key join census_runs r on r.id = m.run_id
           where m.run_id = $1)
-       select (select count(*)::int from (select c.code from plan, unnest(plan.outcodes) c(code) group by c.code having bool_and(done)) x) as districts,
+       , dist as (select c.code, bool_and(done) as whole from plan, unnest(plan.outcodes) c(code) group by c.code)
+       select (select count(*) filter (where whole)::int from dist) as districts,
+              (select count(*) filter (where not whole)::int from dist) as "districtsLeft",
+              (select count(distinct substring(code from '^[A-Z]+')) filter (where not whole)::int from dist) as "areasLeft",
               (select count(*) filter (where not done)::int from plan) as left`, [r.id]);
     // Kept once the day has ended, so a square censused again thirty days on
     // cannot rewrite what that day said (Codex, 29 Sep 2026). In the back
     // office's own settings table, under a key its reader ignores.
-    if (ended && !kept) {
+    if (ended && (!kept || kept.value.districtsLeft == null)) {
       // Normally written when the run ended (censusRun.keepDayFigures); this
-      // is for a day that ended before that existed.
+      // is for a day that ended before that existed, or before it carried
+      // what was left. What it already said about districts done stands.
+      const value = { districts: kept?.value?.districts ?? then.districts, left: kept?.value?.left ?? then.left,
+        districtsLeft: then.districtsLeft, areasLeft: then.areasLeft };
       await query(
-        `insert into bo_settings (key, value, updated_by) values ($1, $2, 'the UK census') on conflict (key) do nothing`,
-        [key, JSON.stringify({ districts: then.districts, left: then.left })]);
+        `insert into bo_settings (key, value, updated_by) values ($1, $2, 'the UK census')
+         on conflict (key) do update set value = excluded.value, updated_at = now()`,
+        [key, JSON.stringify(value)]);
+      Object.assign(then, value);
     }
+    // New to the census: places this day found that no earlier run had.
+    const { rows: [fresh] } = await query(
+      `select count(distinct s.venue_ref)::int as n from census_run_surfacings s
+        where s.run_id = $1
+          and not exists (select 1 from census_run_surfacings o join census_runs ro on ro.id = o.run_id
+                           where o.venue_ref = s.venue_ref and o.run_id <> $1 and ro.started_at < $2)`, [r.id, r.started_at]);
     const rate = tilesAsked ? requests / tilesAsked : null;
     days.push({
       day: i + 1, date: day, runId: r.id, state: r.state, ended, requests: Number(r.requests ?? 0), places: Number(r.places ?? 0),
       tilesAsked: Number(t.asked ?? 0),
       districts: then.districts,
+      districtsLeft: then.districtsLeft ?? null,
+      areasLeft: then.areasLeft ?? null,
+      newPlaces: fresh.n,
       tilesLeft: then.left,
       daysLeft: rate == null ? null : Math.max(then.left ? 1 : 0, Math.ceil((then.left * rate) / daySizeOf(r))),
-      billed: b ? { censusGbp: b.census_gbp, googleGbp: b.google_gbp, final: b.final } : null,
+      billed: b ? { censusGbp: b.census_gbp, googleGbp: b.google_gbp, placesNetGbp: b.places_net_gbp, final: b.final } : null,
     });
   }
   const { rows: [districts] } = await query(
@@ -443,7 +481,7 @@ export async function status(now = new Date()) {
   const perTile = tilesAsked ? requests / tilesAsked : null;
   return {
     action: d.action,
-    halted: d.action === 'halted' ? { day: d.over.day, googleGbp: d.over.google_gbp } : null,
+    halted: d.action === 'halted' ? { day: d.over.day, kind: d.over.kind, googleGbp: d.over.google_gbp, placesNetGbp: d.over.places_net_gbp ?? 0 } : null,
     // What holds it, so the screen can say so beside "Lift the hold".
     held: d.action === 'held' ? { day: d.yesterday.day, censusGbp: d.yesterday.census_gbp } : null,
     complete: d.action === 'complete',
@@ -513,13 +551,14 @@ export async function notify({ subject, text = null, purpose = 'census_report', 
 }
 
 /** One day's report, in the owner's five figures. */
-export function reportLine(day, whole = day.districts, daysLeft = day.daysLeft) {
-  const billed = day.billed
-    ? `${day.billed.final ? 'billed' : 'billed so far'} £${day.billed.censusGbp.toFixed(2)} for the census (Google £${day.billed.googleGbp.toFixed(2)} that day)`
-    : 'not billed yet';
-  return `Day ${day.day} (${day.date}): ${whole.toLocaleString('en-GB')} districts done, ${day.places.toLocaleString('en-GB')} places added, `
-    + `${day.requests.toLocaleString('en-GB')} requests, ${billed}, `
-    + `${daysLeft == null ? 'days remaining not yet measurable' : `about ${daysLeft} day${daysLeft === 1 ? '' : 's'} remaining`}.`;
+export function reportLine(day) {
+  // One line (owner, 29 Sep 2026): calls made, new places found, areas left, £ that day.
+  const n = (x) => Number(x ?? 0).toLocaleString('en-GB');
+  const left = day.districtsLeft == null ? '' : ` · ${n(day.districtsLeft)} districts left in ${n(day.areasLeft)} areas`;
+  const money = day.billed
+    ? ` · £${Number(day.billed.placesNetGbp ?? 0).toFixed(2)} that day${day.billed.final ? '' : ' so far'}`
+    : ' · billing export: nothing yet';
+  return `Census day ${day.day} (${day.date}): ${n(day.requests)} calls · ${n(day.newPlaces)} new places${left}${money}`;
 }
 
 /** The server's hourly call: the tick, then the report of every day that has ended, then the news. */
@@ -557,12 +596,13 @@ export async function liftHold({ who = null, now = new Date() } = {}) {
   // again (Codex, 29 Sep 2026).
   const runs = await programme();
   const bills = runs.length ? await billedByDay(pacificDay(runs[0].started_at)) : [];
-  const seen = Object.fromEntries(runs
-    .map((r) => billedFor(bills, pacificDay(r.started_at)))
-    .filter(Boolean).map((b) => [b.day, b.census_gbp]));
+  const spans = runs.map((r) => billedFor(bills, pacificDay(r.started_at))).filter(Boolean);
+  const seen = Object.fromEntries(spans.map((b) => [b.day, b.census_gbp]));
+  const seenGoogle = Object.fromEntries([...bills, ...spans].map((b) => [b.day, b.google_gbp]));
+  const seenNet = Object.fromEntries([...bills, ...spans].map((b) => [b.day, b.places_net_gbp ?? 0]));
   await query(
     `insert into bo_settings (key, value, updated_by) values ('census:uk-hold-lifted', $1, $2)
      on conflict (key) do update set value = excluded.value, updated_by = excluded.updated_by, updated_at = now(), version = bo_settings.version + 1`,
-    [JSON.stringify({ seen, at: new Date(now).toISOString() }), who]);
-  return { seen };
+    [JSON.stringify({ seen, seenGoogle, seenNet, at: new Date(now).toISOString() }), who]);
+  return { seen, seenGoogle, seenNet };
 }

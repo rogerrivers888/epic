@@ -1808,13 +1808,15 @@ export type Run = {
 export type UkCensusDay = {
   day: number; date: string; runId: string; state: string; ended: boolean;
   requests: number; places: number; tilesAsked: number;
-  districts: number; tilesLeft: number; daysLeft: number | null;
+  districts: number; districtsLeft: number | null; areasLeft: number | null; newPlaces: number;
+  tilesLeft: number; daysLeft: number | null;
   /** Google's figure, from the billing export; null until it has written the day. */
-  billed: { censusGbp: number; googleGbp: number; final: boolean } | null;
+  billed: { censusGbp: number; googleGbp: number; placesNetGbp: number; final: boolean } | null;
 };
 export type UkCensus = {
   action: string;
-  halted: { day: string; googleGbp: number } | null;
+  /** Stopped: a day over £5 of Google, or any Places spend after credits ('net'). */
+  halted: { day: string; kind: 'five' | 'net'; googleGbp: number; placesNetGbp: number } | null;
   held: { day: string; censusGbp: number } | null;
   complete: boolean;
   districtsWhole: number; tilesLeft: number; requestsPerTile: number | null; daysLeft: number | null;
