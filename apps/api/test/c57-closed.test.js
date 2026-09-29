@@ -416,8 +416,33 @@ test('Places suggest: a hidden Google prediction is not offered by name; the hou
     assert.ok(refs.includes('google:ChIJ_c57_here'));
     assert.ok(!refs.includes('google:ChIJ_c57_gone'), 'a closed place cannot be found by name');
     assert.ok(refs.includes('google:ChIJ_c57_mine'), 'somewhere the household saved stays theirs');
+
+    // The closed lookup failing is "can't speak": no provider suggestion is
+    // offered, and the household's own places still are (Codex).
+    await query('alter table place_status rename to place_status_c57_away');
+    try {
+      const again = await (await fetch(`http://127.0.0.1:${server.address().port}/api/places/suggest?q=safari&kind=all`)).json();
+      assert.deepEqual(again.suggestions.map((x) => x.venueRef), ['google:ChIJ_c57_mine']);
+    } finally {
+      await query('alter table place_status_c57_away rename to place_status');
+    }
   } finally {
     googleSource.suggest = real;
     server.close();
   }
+});
+
+test('a Google closure matched only to wikidata:Q… hides every name the atlas row goes by (Codex)', async () => {
+  const { lonely } = await fixture();
+  await query(`update attractions set osm_ref = '555001' where id = $1`, [lonely]);
+  await query(`delete from provider_matches where source_ref like 'ChIJ_c57_%'`);
+  await query(`insert into provider_matches (venue_ref, source, source_ref, confidence) values ('wikidata:Q900001', 'google', 'ChIJ_c57_only', 0.9)`);
+  await repo.propose({ ref: 'google:ChIJ_c57_only', status: 'permanently_closed', source: 'google', reason: 'g', evidence: 'Google business status' });
+  await repo.applyProposed({ by: 'test' });
+  const names = ['google:ChIJ_c57_only', 'wikidata:Q900001', `atlas:${lonely}`, 'osm:relation/555001', 'osm:555001'];
+  const hidden = await repo.hiddenAmong(names);
+  for (const n of names) assert.ok(hidden.has(n), `${n} is hidden`);
+  const { rows } = await query(`select r from unnest($1::text[]) r where ${repo.SHOWN_REF('r')}`, [[...names, 'osm:relation/1']]);
+  assert.deepEqual(rows.map((x) => x.r), ['osm:relation/1'], 'the SQL form agrees');
+  await query(`delete from provider_matches where source_ref like 'ChIJ_c57_%'`);
 });

@@ -645,8 +645,19 @@ places.get('/suggest', async (req, res, next) => {
     // A closed place, once the owner has applied the check, cannot be found by
     // name either (C57; Codex). The household's own saved and visited places
     // stay: somewhere they have been is theirs, closed or not.
-    const closed = await hiddenAmong(suggestions.map((x) => `google:${x.placeId}`)).catch(() => new Set());
-    res.json({ suggestions: [...oursHere, ...suggestions.filter((x) => !seen.has(x.placeId) && !closed.has(`google:${x.placeId}`)).map((x) => ({ ...x, venueRef: `google:${x.placeId}`, mine: false }))] });
+    //
+    // Fail closed (Codex): if the closed lookup cannot answer, no provider
+    // suggestion is offered — a lookup that failed is "can't speak", never
+    // "none of these is closed". The household's own places are still
+    // offered, so typing a name you know keeps working; the whole request
+    // failing would take those away too, for a fault that is not theirs.
+    let closed;
+    try { closed = await hiddenAmong(suggestions.map((x) => `google:${x.placeId}`)); } catch (err) {
+      console.warn(`places.suggest: closed lookup failed, provider suggestions withheld: ${String(err?.message ?? err).slice(0, 120)}`);
+      closed = null;
+    }
+    const offered = closed ? suggestions.filter((x) => !seen.has(x.placeId) && !closed.has(`google:${x.placeId}`)) : [];
+    res.json({ suggestions: [...oursHere, ...offered.map((x) => ({ ...x, venueRef: `google:${x.placeId}`, mine: false }))] });
   } catch (err) { next(err); }
 });
 

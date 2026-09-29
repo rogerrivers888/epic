@@ -26,30 +26,38 @@ export const HIDING = `s.applied and (s.status in ('temporarily_closed', 'perman
  * query and hashes it; the hidden rows are few, and every join below is an
  * equality, never an OR across the atlas.
  *
- *   - the row's own ref, and `wikidata:<Q>` when it carries a Wikidata id;
- *   - for an atlas row: every name the atlas row goes by — its venue ref,
- *     `atlas:<id>`, `wikidata:<Q>`, and its OpenStreetMap ref;
- *   - through `provider_matches`, the Google id matched to any of those; and
- *     the other way, the atlas ref matched to a Google id that is hidden.
+ *   1. seed: each hidden row's own ref and `wikidata:<Q>`, plus — the other
+ *      way through `provider_matches` — whatever a hidden `google:` ref is
+ *      matched to;
+ *   2. atlas: every attraction any seed ref names, by `atlas:<id>`, venue ref,
+ *      `wikidata:<Q>` or OpenStreetMap ref — so a Google closure matched only
+ *      to `wikidata:Q…` still reaches the row's `atlas:<id>` and `osm:` refs
+ *      (Codex, second pass);
+ *   3. names: the seed and every name those attractions go by;
+ *   4. matched: the Google id `provider_matches` holds for any of the names.
  */
 export const HIDDEN_REFS = `(
   with hid as (select s.venue_ref, s.wikidata_id from place_status s where ${HIDING}),
-  atlas as (
-    select a.id, a.venue_ref, a.wikidata_id, a.osm_ref from hid join attractions a on hid.venue_ref like 'atlas:%' and a.id::text = substr(hid.venue_ref, 7)
-    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref from hid join attractions a on a.venue_ref = hid.venue_ref
-    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref from hid join attractions a on hid.wikidata_id is not null and a.wikidata_id = hid.wikidata_id),
-  names as (
+  seed as (
     select venue_ref as ref from hid
     union select 'wikidata:' || wikidata_id from hid where wikidata_id is not null
+    union select m.venue_ref from provider_matches m join hid on hid.venue_ref = 'google:' || m.source_ref
+     where m.source = 'google' and not m.missing),
+  atlas as (
+    select a.id, a.venue_ref, a.wikidata_id, a.osm_ref from seed join attractions a on seed.ref like 'atlas:%' and a.id::text = substr(seed.ref, 7)
+    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref from seed join attractions a on a.venue_ref = seed.ref
+    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref from seed join attractions a on seed.ref like 'wikidata:%' and a.wikidata_id = substr(seed.ref, 10)
+    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref from seed join attractions a on seed.ref like 'osm:%' and a.osm_ref = substr(seed.ref, 5)
+    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref from seed join attractions a on seed.ref like 'osm:relation/%' and a.osm_ref = substr(seed.ref, 14)),
+  names as (
+    select ref from seed where ref is not null
     union select x.ref from atlas cross join lateral (values
       (atlas.venue_ref), ('atlas:' || atlas.id::text), ('wikidata:' || atlas.wikidata_id),
       ('osm:' || atlas.osm_ref), (case when atlas.osm_ref ~ '^[0-9]+$' then 'osm:relation/' || atlas.osm_ref end)) x(ref)
      where x.ref is not null),
   matched as (
     select 'google:' || m.source_ref as ref from provider_matches m join names n on n.ref = m.venue_ref
-     where m.source = 'google' and not m.missing and m.source_ref is not null
-    union select m.venue_ref from provider_matches m join hid on hid.venue_ref = 'google:' || m.source_ref
-     where m.source = 'google' and not m.missing)
+     where m.source = 'google' and not m.missing and m.source_ref is not null)
   select ref from names union select ref from matched
 )`;
 
