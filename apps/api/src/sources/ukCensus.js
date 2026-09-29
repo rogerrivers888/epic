@@ -149,7 +149,12 @@ export async function decide(now = new Date()) {
   // one (Codex, 29 Sep 2026).
   const { rows: [finishedFirst] } = await query(`select value from bo_settings where key = 'census:uk-complete'`);
   const bills = await billedByDay(pacificDay(runs[0].started_at));
-  if (finishedFirst) return { action: 'complete', runs, latest, bills };
+  if (finishedFirst) {
+    // But its own days' bills still count: the last day's arrives after it
+    // finished, and a costly one is still said (Codex, 29 Sep 2026).
+    const over = runs.map((r) => billedFor(bills, pacificDay(r.started_at))).find((b) => b && b.google_gbp > DAY_ALERT_GBP);
+    return { action: 'complete', runs, latest, bills, over: over ?? null };
+  }
   // Any export day over £5, and any quota day of the programme over £5 across
   // the two London days it spans — £3 and £3 is £6 (Codex, 29 Sep 2026). The
   // two overlap at the edges, which errs towards stopping.
@@ -273,6 +278,9 @@ async function tickLocked({ now = new Date(), start = censusRun.startRun, stop =
   if (d.action === 'halted') {
     if (['running', 'waiting'].includes(d.latest?.state)) await stop(d.latest.id);
     tell({ kind: 'alert', subject: `Census stopped: Google billed £${d.over.google_gbp.toFixed(2)} on ${d.over.day}`, d });
+  }
+  if (d.action === 'complete' && d.over) {
+    tell({ kind: 'alert', subject: `Census (finished) was billed £${d.over.google_gbp.toFixed(2)} of Google on ${d.over.day}`, d });
   }
   if (d.action === 'held') tell({ kind: 'alert', subject: `Census held: the census was billed £${d.yesterday.census_gbp.toFixed(2)} on ${d.yesterday.day}`, d });
   if (d.action === 'overran') {
@@ -478,7 +486,11 @@ export async function daily(now = new Date()) {
  * lifted it and when.
  */
 export async function liftHold({ who = null, now = new Date() } = {}) {
-  const through = pacificDay(now);
+  // Through the last day the export actually holds: a bill for an earlier day
+  // that has not arrived yet has not been seen, and must still hold it when it
+  // does (Codex, 29 Sep 2026).
+  const { rows: [{ last }] } = await query(`select to_char(max(day), 'YYYY-MM-DD') as last from billing_days`);
+  const through = last ?? '';
   await query(
     `insert into bo_settings (key, value, updated_by) values ('census:uk-hold-lifted', $1, $2)
      on conflict (key) do update set value = excluded.value, updated_by = excluded.updated_by, updated_at = now(), version = bo_settings.version + 1`,

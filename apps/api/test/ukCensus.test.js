@@ -672,3 +672,27 @@ test('a person lifts the hold, and only a later bill holds it again', async (t) 
   await uk.liftHold({ who: 'test', now: new Date('2026-09-30T09:00:00Z') });
   assert.equal((await uk.tick({ now: new Date('2026-09-30T10:00:00Z'), start: r.start })).action, 'start');
 });
+
+test('a lift covers only the bills the export held when it was made', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state, problem, started_at, finished_at)
+     values ('The rest of the UK — day 2', array['ZZ'], 0.08, 0.12, 70000, 5, 30, 'paused', 'stopped at the 70000-request ceiling; resume to carry on', '2026-09-30T07:10:00Z', '2026-09-30T12:00:00Z')`);
+  await billed('2026-09-28', 'google-essentials', 2);
+  await uk.liftHold({ who: 'test', now: new Date('2026-10-01T09:00:00Z') }); // the export holds the 28th only
+  await billed('2026-09-30', 'google-essentials', 3); // day 2's bill arrives after the lift
+  const r = recorder();
+  assert.equal((await uk.tick({ now: new Date('2026-10-01T10:00:00Z'), start: r.start })).action, 'held');
+});
+
+test('a finished census whose last day comes in costly is still said', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne({ state: 'done', problem: null });
+  await query(`insert into bo_settings (key, value, updated_by) values ('census:uk-complete', '{}', 'test')`);
+  await billed('2026-09-28', 'google-pro', 7);
+  const told = [];
+  const out = await uk.tick({ now: new Date('2026-10-01T08:00:00Z'), tell: (x) => told.push(x) });
+  assert.equal(out.action, 'complete');
+  assert.match(told[0]?.subject ?? '', /Census \(finished\) was billed £7\.00/);
+});
