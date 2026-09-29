@@ -638,6 +638,31 @@ async function refreshProgress(runId) {
             (select count(distinct venue_ref)::int as places
                from census_run_surfacings where run_id = $1) p
       where r.id = $1`, [runId, CENSUS_MAX_DEPTH]);
+  await keepDayFigures(runId);
+}
+
+/**
+ * A day of the UK census, its figures kept the moment it ends: every way a
+ * run ends passes through refreshProgress, and a later census may reuse its
+ * squares before anybody reads the report (Codex, 29 Sep 2026). Written once;
+ * sources/ukCensus.js reads it back.
+ */
+export async function keepDayFigures(runId) {
+  await query(
+    `with r as (select * from census_runs
+                 where id = $1 and label like $2
+                   and state in ('paused', 'done', 'stopped') and coalesce(problem, '') not like 'built paused%'),
+          plan as (
+            select t.outcodes, (t.state = 'done' and t.censused_at is not null and t.censused_at <= coalesce(r.finished_at, now())) as done
+              from r join census_run_tiles m on m.run_id = r.id join census_tiles t on t.grid_key = m.grid_key)
+     insert into bo_settings (key, value, updated_by)
+     select 'census:uk-day:' || r.id,
+            jsonb_build_object(
+              'districts', (select count(*) from (select c.code from plan, unnest(plan.outcodes) c(code) group by c.code having bool_and(done)) x),
+              'left', (select count(*) filter (where not done) from plan)),
+            'the UK census'
+       from r
+     on conflict (key) do nothing`, [runId, `${ONE_DAY_LABEL} %`]);
 }
 
 /**

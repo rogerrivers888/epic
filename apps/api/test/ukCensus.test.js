@@ -720,3 +720,23 @@ test('the day that ended is kept before the next day starts', async (t) => {
   const { rows } = await query(`select 1 from bo_settings where key = $1`, [`census:uk-day:${one.id}`]);
   assert.equal(rows.length, 1);
 });
+
+test('a day\'s figures are kept the moment its run ends', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from census_run_tiles where grid_key = 'uktest/kept'`);
+    await query(`delete from census_tiles where grid_key = 'uktest/kept'`);
+    await clean();
+  });
+  const { requestStop } = await import('../src/sources/censusRun.js');
+  const run = await dayOne({ state: 'waiting', problem: 'x', finished: null });
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at)
+     values ('uktest/kept', 48, -6, 48.08, -5.88, array['ZZ4Q'], 'done', now() - interval '1 hour') on conflict (grid_key) do update set state = 'done', censused_at = excluded.censused_at`);
+  await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'uktest/kept')`, [run.id]);
+  await requestStop(run.id); // a stop while it slept: it ends here
+  // A later census takes the square before anybody reads the report.
+  await query(`update census_tiles set state = 'todo' where grid_key = 'uktest/kept'`);
+  const { rows: [kept] } = await query(`select value from bo_settings where key = $1`, [`census:uk-day:${run.id}`]);
+  assert.deepEqual(kept?.value, { districts: 1, left: 0 });
+});

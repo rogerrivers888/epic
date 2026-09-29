@@ -373,6 +373,8 @@ export async function status(now = new Date()) {
     // cannot rewrite what that day said (Codex, 29 Sep 2026). In the back
     // office's own settings table, under a key its reader ignores.
     if (ended && !kept) {
+      // Normally written when the run ended (censusRun.keepDayFigures); this
+      // is for a day that ended before that existed.
       await query(
         `insert into bo_settings (key, value, updated_by) values ($1, $2, 'the UK census') on conflict (key) do nothing`,
         [key, JSON.stringify({ districts: then.districts, left: then.left })]);
