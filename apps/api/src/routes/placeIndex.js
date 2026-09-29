@@ -2887,7 +2887,11 @@ async function buildSubcategorySummary(scope, sub) {
               r.phone, r.price_range, r.email, r.socials, r.booking_url,
               r.menu_url, r.menu_label, r.experiences, r.dietary_options,
               r.good_for_children, r.accessibility, r.curation, r.osm_ref,
-              coalesce(r.cuisines, sp.cuisines)                              as cuisines,
+              -- A record's cuisines column defaults to an empty array, which
+              -- coverageByField reads as blank — so an empty record list must
+              -- fall through to the sweep's, as the index query does (Codex,
+              -- 29 Sep 2026).
+              coalesce(nullif(r.cuisines, '[]'::jsonb), sp.cuisines)         as cuisines,
               coalesce(r.wikidata_id, a.wikidata_id)                         as wikidata_id,
               coalesce(r.wikipedia_url, a.wikipedia_url)                     as wikipedia_url,
               coalesce(r.crowd_band, a.crowd_band, sp.crowd_band)           as crowd_band,
