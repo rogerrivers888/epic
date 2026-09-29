@@ -155,6 +155,14 @@ const overTheCeiling = (res, want, room) => {
 export const STALE_MONTHS = 12;
 
 /**
+ * How many places "Compare all" fetches Google detail for in one request. A
+ * subcategory can hold thousands, and each is up to two sequential Google calls,
+ * so the work is paged: this many a call, then the screen asks for the next
+ * (Codex, 29 Sep 2026). Kept in step with the other paging ceilings here.
+ */
+const COMPARE_ALL_PAGE = 60;
+
+/**
  * What asking Google about one place actually costs.
  *
  * Two calls, not one, for a place we have never matched: a Nearby Search to
@@ -2812,9 +2820,50 @@ async function subcategoryRefs(scope, sub) {
  */
 async function buildSubcategorySummary(scope, sub) {
   const refs = await subcategoryRefs(scope, sub);
+  // Our side of each field, from every owned source — the owned record, the
+  // atlas and the sweep, coalesced per field the way the comparison and the
+  // index do (Codex, 29 Sep 2026): a place held only in the atlas or the sweep,
+  // or with an owned picture but no `place_records` row, still counts for name,
+  // website, summary, hours and a picture. Reading `place_records` alone
+  // under-reported all of those for the many indexed places without one.
   const recs = new Map();
   if (refs.length) {
-    const { rows } = await query('select * from place_records where venue_ref = any($1)', [refs]);
+    const { rows } = await query(
+      `select pi.venue_ref,
+              coalesce(r.name, a.name, sp.name)                              as name,
+              r.address                                                       as address,
+              r.postcode                                                      as postcode,
+              coalesce(r.opening_hours, d.visit->>'openingHours')             as opening_hours,
+              coalesce(r.website, a.website, sp.website)                      as website,
+              coalesce(r.summary, a.summary)                                  as summary,
+              -- A picture we own: an approved owned image, or one on the record.
+              case when r.image_url is not null or exists (
+                     select 1 from image_links li join image_assets ia on ia.id = li.image_id
+                      where ia.may_store and ia.moderation = 'approved'
+                        and ((li.subject_type = 'place' and li.subject_id = pi.venue_ref)
+                          or (li.subject_type = 'attraction' and li.subject_id = a.id::text)))
+                   then 'owned' end                                           as image_url,
+              coalesce(r.category, pi.category)                               as category,
+              coalesce(r.lat, a.lat, sp.lat)                                  as lat,
+              coalesce(r.lng, a.lng, sp.lng)                                  as lng,
+              r.phone, r.price_range, r.email, r.socials, r.booking_url,
+              r.menu_url, r.menu_label, r.experiences, r.dietary_options,
+              r.good_for_children, r.accessibility, r.curation, r.osm_ref,
+              coalesce(r.cuisines, sp.cuisines)                              as cuisines,
+              coalesce(r.wikidata_id, a.wikidata_id)                         as wikidata_id,
+              coalesce(r.wikipedia_url, a.wikipedia_url)                     as wikipedia_url,
+              coalesce(r.crowd_band, a.crowd_band, sp.crowd_band)           as crowd_band,
+              coalesce(r.count_band, a.count_band, sp.count_band)           as count_band,
+              coalesce(r.epic_score, a.epic_score, sp.epic_score)           as epic_score
+         from place_index pi
+         left join place_records r on r.venue_ref = pi.venue_ref
+         left join lateral (
+           select a2.* from attractions a2
+            where (a2.venue_ref = pi.venue_ref or 'atlas:' || a2.id::text = pi.venue_ref)
+              and a2.state <> 'hidden' order by a2.last_seen desc, a2.id limit 1) a on true
+         left join lateral (select d2.* from attraction_details d2 where d2.attraction_id = a.id limit 1) d on true
+         left join lateral (select sp2.* from scout_places sp2 where sp2.venue_ref = pi.venue_ref order by sp2.last_seen desc limit 1) sp on true
+        where pi.venue_ref = any($1)`, [refs]);
     for (const r of rows) recs.set(r.venue_ref, r);
   }
   // The Google id per ref: its own, or one a match remembered. Nothing is
@@ -2880,19 +2929,32 @@ router.post('/subcategory-summary/compare-all', requires('manage_library'), asyn
       return res.status(422).json({ error: 'not_switched_on', message: 'Google is not switched on here.' });
     }
     const refs = await subcategoryRefs(scope, sub);
-    const want = askingCost(refs, await alreadyMatched(refs), await alreadyHeld(refs),
-      await missesKept(refs, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 }),
-      await nothingToGoOn(refs));
+    // Bounded, one page at a time. A county or country subcategory holds
+    // thousands of places, and comparing each is up to two sequential Google
+    // requests — a single request over the whole set would run for hours, time
+    // out mid-flight while still spending, and outlive its own reservation
+    // (Codex, 29 Sep 2026). So this compares at most COMPARE_ALL_PAGE places a
+    // call, reserves for exactly that batch, and returns `remaining` so the
+    // screen asks again — the same shape "Ask" and the not-owned list already
+    // page in.
+    const held = await alreadyHeld(refs);
+    const blind = await nothingToGoOn(refs);
+    // The places still worth a call: not already cached, and something to go on.
+    const uncompared = refs.filter((ref) => !held.has(ref) && !blind.has(ref));
+    const batch = uncompared.slice(0, COMPARE_ALL_PAGE);
+    const want = askingCost(batch, await alreadyMatched(batch), held,
+      await missesKept(batch, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 }), blind);
     const room = await roomToSpend(want, { holder: 'compare-all' });
     if (!room.ok) return overTheCeiling(res, want, room);
     const household = await currentHousehold();
     let fetched = 0;
     try {
-      const named = await index.namesFor(refs);
-      const { rows: at } = await query('select venue_ref, lat, lng from place_index where venue_ref = any($1)', [refs]);
+      const named = await index.namesFor(batch);
+      const { rows: at } = await query('select venue_ref, lat, lng from place_index where venue_ref = any($1)', [batch]);
       const point = new Map(at.map((r) => [r.venue_ref, r]));
-      for (const ref of refs) {
-        let id = ref.startsWith('google:') ? ref.slice('google:'.length) : (await matchesFor([ref], 'google')).get(ref) ?? null;
+      const ids = await matchesFor(batch, 'google');
+      for (const ref of batch) {
+        let id = ref.startsWith('google:') ? ref.slice('google:'.length) : ids.get(ref) ?? null;
         if (id && detailHeld('google', id)) continue; // already compared — free
         if (!id) {
           // Match by name and distance, the way the per-place compare does; the
@@ -2910,7 +2972,10 @@ router.post('/subcategory-summary/compare-all', requires('manage_library'), asyn
     } finally {
       await releaseSpend(room.reservation);
     }
-    res.json({ ...(await head(scope)), ...(await buildSubcategorySummary(scope, sub)), fetched });
+    // How many places still have no comparison after this page, so the screen
+    // knows whether to offer "compare the next N".
+    const remaining = Math.max(0, uncompared.length - batch.length);
+    res.json({ ...(await head(scope)), ...(await buildSubcategorySummary(scope, sub)), fetched, remaining });
   } catch (err) { next(err); }
 });
 

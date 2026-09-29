@@ -38,7 +38,7 @@ export const PAIRS = [
   // holds none of these yet, so the rows read as a hole on our column and a
   // value on Google's — which is the comparison's whole point.
   [null, 'primaryType', null], [null, 'parking', null], [null, 'dogsAllowed', null],
-  [null, 'outdoorSeating', null], [null, 'restroom', null], [null, 'dineIn', null], [null, 'takeout', null], [null, 'goodForGroups', null],
+  [null, 'outdoorSeating', null], [null, 'restroom', null], [null, 'dineIn', null], [null, 'takeout', null], [null, 'delivery', null], [null, 'goodForGroups', null],
   [null, null, 'ta_subratings'], [null, null, 'ta_trip_types'], [null, null, 'ta_review_rating_count'], [null, null, 'labels'],
 ];
 
