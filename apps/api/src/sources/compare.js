@@ -31,9 +31,14 @@ export const PAIRS = [
   ['cuisines', 'cuisines', 'cuisines'], ['experiences', 'experiences', 'experiences'], ['dietary_options', 'dietaryOptions', null],
   ['good_for_children', 'goodForChildren', 'goodForChildren'],
   ['booking_url', 'reservable', null], ['menu_url', null, null], ['menu_label', null, null], ['email', null, 'ta_email'], ['socials', null, null],
-  ['accessibility', null, null], ['postcode', null, null], ['osm_ref', null, null], ['wikidata_id', null, null], ['wikipedia_url', null, null],
+  ['accessibility', 'accessibilityOptions', null], ['postcode', null, null], ['osm_ref', null, null], ['wikidata_id', null, null], ['wikipedia_url', null, null],
   ['curation', null, null], ['crowd_band', 'rating', 'rating'], ['epic_score', null, 'ta_ranking_data'],
   [null, 'aiSummary', null], [null, 'reviewSummary', null], [null, 'reviews', 'reviews'], [null, 'openNow', null], [null, 'mapsUrl', 'externalUrl'], [null, 'menuForChildren', null],
+  // Google's amenity, access and parking facts (owner, 28 Sep 2026). Our side
+  // holds none of these yet, so the rows read as a hole on our column and a
+  // value on Google's — which is the comparison's whole point.
+  [null, 'primaryType', null], [null, 'parking', null], [null, 'dogsAllowed', null],
+  [null, 'outdoorSeating', null], [null, 'restroom', null], [null, 'dineIn', null], [null, 'takeout', null], [null, 'goodForGroups', null],
   [null, null, 'ta_subratings'], [null, null, 'ta_trip_types'], [null, null, 'ta_review_rating_count'], [null, null, 'labels'],
 ];
 
@@ -100,6 +105,48 @@ export async function detailFor(provider, id, householdId) {
 }
 
 export const blank = (v) => v == null || v === '' || (Array.isArray(v) && v.length === 0) || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0);
+
+/**
+ * The held detail for this identifier, if one is still in memory — without
+ * asking anybody.
+ *
+ * The subcategory summary (BO, 28 Sep 2026) counts Google's field coverage
+ * across a drawer's places, but only for the ones already opened: "Compare
+ * calls only for places I've opened, unless I press Compare all." So it reads
+ * the same six-hour cache `detailFor` fills, and never itself triggers a paid
+ * call. `null` where nothing is held — a can't-speak state, not an empty place.
+ */
+export function cachedDetail(provider, id) {
+  const held = details.get(`${provider}:${id}`);
+  return held && Date.now() - held.at < DETAIL_TTL_MS ? held.detail : null;
+}
+
+/**
+ * Per field, how many of these places we hold a value for and how many Google
+ * does — the subcategory summary's arithmetic, kept here beside `PAIRS` so the
+ * two cannot drift.
+ *
+ * `places` is `[{ ours, google }]`, each a fields object or `null` (`google`
+ * null where that place has not been compared). A field is counted from the
+ * same paired keys `lineUp` aligns on, so "address" means the same column on
+ * both sides. Pure: no database, no provider, so it is unit-tested directly.
+ */
+export function coverageByField(places) {
+  const out = [];
+  for (const trio of PAIRS) {
+    const [ourKey, googleKey] = trio;
+    if (!ourKey && !googleKey) continue; // a Tripadvisor-only row has nothing to compare here
+    const key = trio.find(Boolean);
+    let ours = 0;
+    let google = 0;
+    for (const p of places) {
+      if (ourKey && p.ours && ourKey in p.ours && !blank(p.ours[ourKey])) ours += 1;
+      if (googleKey && p.google && googleKey in p.google && !blank(p.google[googleKey])) google += 1;
+    }
+    out.push({ key, ourKey: ourKey ?? null, googleKey: googleKey ?? null, ours, google });
+  }
+  return out;
+}
 
 /** The rows: the pairs first, then what only one column has, each cell carrying which key it came from. */
 export function lineUp(fields) {

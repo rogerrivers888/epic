@@ -39,9 +39,9 @@ import { sectorOf, labelOf, CAP_MINUTES, EDGE_MINUTES } from '../domain/reach.js
 import { searchAreas } from '../sources/areas.js';
 import { outcodesFor } from '../sources/localities.js';
 import { travelMode, estimateTravelMinutes } from '../domain/travel.js';
-import { FACTS, FACT_KEYS, FACT_WEIGHTS, scorePlace, faultOf, SHORT_FAULT, holdsAnOwnedFact } from '../domain/placeIndex.js';
+import { FACTS, FACT_KEYS, FACT_WEIGHTS, BASICS, scorePlace, faultOf, SHORT_FAULT, holdsAnOwnedFact } from '../domain/placeIndex.js';
 import { writeAudit } from '../repositories/roles.js';
-import { OUR_LABEL, detailFor, detailHeld, blank, lineUp } from '../sources/compare.js';
+import { OUR_LABEL, detailFor, detailHeld, cachedDetail, coverageByField, blank, lineUp } from '../sources/compare.js';
 import { googleSource } from '../sources/google.js';
 import { tripadvisorSource } from '../sources/tripadvisor.js';
 import { TRIPADVISOR_CAP } from '../repositories/runs.js';
@@ -49,6 +49,7 @@ import { PRICE_PER_UNIT_USD, USD_TO_GBP } from '../domain/providerPrices.js';
 import { OTHER_PURSE } from '../constants.js';
 import * as collectRuns from '../repositories/collectRuns.js';
 import * as ownedPlaces from '../repositories/ownedPlaces.js';
+import { recordProviderCall } from '../repositories/visits.js';
 import { googleMatchFor, matchesFor, tripadvisorMatchFor, forgetMisses, triedFor, missesKept } from '../sources/providerMatch.js';
 import { whySourceFailed } from '../sources/why.js';
 import { currentHousehold } from './household.js';
@@ -277,12 +278,12 @@ async function resolveWhere({ where, within, by }) {
 
   const minutes = Number(within);
   const ring = Number.isFinite(minutes) && minutes > 0 ? Math.min(CAP_MINUTES, minutes) : null;
-  // What a ring is when nobody said: the first band. It used to be thirty, so
-  // a full postcode with nothing said drew half an hour's drive under a
-  // chooser that had not been asked (owner, 20 Sep 2026 — "5 minutes, which
-  // should be the default"). An area with no ring asked for is not a ring at
-  // all and never reaches this.
-  const asked = ring ?? BANDS[0];
+  // What a ring is when nobody said: thirty minutes by car (owner, 29 Sep 2026,
+  // replacing his 20 Sep decision of "5 minutes, which should be the default").
+  // A household reaches for a day out, not a five-minute errand, so the reach
+  // opens on half an hour's drive; the chooser (BANDS) still offers 5/30/60/90.
+  // An area with no ring asked for is not a ring at all and never reaches this.
+  const asked = ring ?? 30;
   const mode = MODES.includes(lower(by)) ? lower(by) : 'drive';
 
   const area = await index.areaBySlug(slug);
@@ -1068,6 +1069,41 @@ router.get('/places', requires('view_library'), async (req, res, next) => {
     const bar = sub ? (await index.bars()).get(sub) ?? [] : [];
     const scoped = { category: req.query.cat ? String(req.query.cat) : '', subcategory: sub ?? '' };
     const stats = await statsOf(scope, scoped);
+    // How far each place is, when the scope is a ring — the design's distance
+    // column (28 Sep 2026). Read straight off the matrix `resolveWhere` already
+    // walked; an area with no ring has no per-place distance and the column is
+    // simply not there. Minutes, to match the ring chooser.
+    if (scope.kind === 'ring') for (const row of rows) row.distance = scope.minutesByRef.get(row.ref) ?? null;
+    // What we have asked and not found ("don't-knows"), per place — a real
+    // answer, and a different fact from never having asked (C4). Only the
+    // `asked_nothing_found` state counts; Google never writes here (C3), so this
+    // is our own sources having looked and come up empty. `held` is the answers
+    // we do hold, for the "facts as chips" count. One grouped read, defaulting
+    // to nought so a place with no answers reads as none rather than as unknown.
+    const answerRefs = rows.map((r) => r.ref);
+    if (answerRefs.length) {
+      const { rows: ans } = await query(
+        `select venue_ref,
+                count(*) filter (where state = 'asked_nothing_found')::int as dont_knows,
+                count(*) filter (where state = 'answered')::int            as held
+           from place_answers where venue_ref = any($1) group by venue_ref`, [answerRefs]);
+      const byRef = new Map(ans.map((a) => [a.venue_ref, a]));
+      for (const row of rows) {
+        row.dontKnows = byRef.get(row.ref)?.dont_knows ?? 0;
+        row.heldAnswers = byRef.get(row.ref)?.held ?? 0;
+      }
+    }
+    // Effective required facts: the stored bar's own, plus the BASICS every
+    // place is judged on whatever its kind (owner, 29 Sep 2026) — so where_to_go
+    // (in no stored bar) and hours (absent from park bars) are not wrongly
+    // greyed as "not counted", nor their missing-filter disabled (Codex P2b).
+    // BASICS facts with no bar row of their own are added so the columns can
+    // explain themselves.
+    const requiredFacts = new Set([...bar.filter((b) => b.required).map((b) => b.fact), ...BASICS]);
+    const effectiveBar = [
+      ...bar.filter((b) => requiredFacts.has(b.fact)).map((b) => ({ ...b, required: true })),
+      ...BASICS.filter((f) => !bar.some((b) => b.fact === f)).map((f) => ({ fact: f, weight: FACT_WEIGHTS[f], required: true })),
+    ];
     res.json({
       ...(await head(scope)),
       stats,
@@ -1076,9 +1112,9 @@ router.get('/places', requires('view_library'), async (req, res, next) => {
       notReady: Math.max(0, stats.known - stats.readyCount),
       rows, facts: FACTS,
       // What this kind of place is judged on, so the column headers can explain
-      // themselves rather than being six flat ticks.
-      bar: bar.filter((b) => b.required),
-      counted: bar.filter((b) => b.required).map((b) => b.fact),
+      // themselves — the stored bar plus the always-judged BASICS.
+      bar: effectiveBar,
+      counted: effectiveBar.map((b) => b.fact),
     });
   } catch (err) { next(err); }
 });
@@ -1472,6 +1508,11 @@ router.get('/place', requires('view_library'), async (req, res, next) => {
       // the score on the same page said it was not (Codex, 17 Sep 2026).
       picture: pictures.some((p) => p.may_store && p.moderation === 'approved'),
       what_it_is: Boolean(rec?.summary ?? att?.summary ?? rec?.curation?.summary),
+      // An owned arrival point (owner, 29 Sep 2026). Matched exactly to HELD_SQL
+      // (repositories/placeIndex.js) — an owned address or postcode, or an owned
+      // point — so this tab's live have/missing cannot contradict the persisted
+      // score (Codex P2a). place_records only, never the rented place_index point.
+      where_to_go: Boolean(rec?.address || rec?.postcode || (rec?.lat != null && rec?.lng != null)),
       hours: Boolean(hoursVal),
       menu: menus[0]?.state === 'read',
       prices: Boolean(rec?.price_range),
@@ -2153,6 +2194,11 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
           // 17 Sep 2026).
           editable: Boolean(key && OURS_FIELDS.includes(key) && !blank(r.cells.ours)
             && !RENTED_FROM.has(String(prov[key]?.source ?? f?.source ?? '').toLowerCase())),
+          // "Where the holes in our data are" (owner, 12 Sep 2026), said per row
+          // rather than left for the eye: a provider holds this and we do not.
+          // Only where a provider column was actually fetched — a row Google was
+          // never asked about is not a gap, it is unknown.
+          gap: (!blank(r.cells.google) || !blank(r.cells.tripadvisor)) && blank(r.cells.ours),
         };
       }),
       ours: OURS_FIELDS,
@@ -2222,6 +2268,11 @@ const FACT_WORD = {
   curation: 'What we wrote', epic_score: 'Our score', category: 'Shelf', reviews: 'Reviews',
   ta_awards: 'Accolades', ta_description: 'What it is', ta_phone: 'Telephone', ta_email: 'E-mail',
   openNow: 'Open now', mapsUrl: 'On their map', aiSummary: 'Their summary', reviewSummary: 'Their summary of reviews',
+  // Google's amenity, access and parking facts (28 Sep 2026), said the way a
+  // family would ask.
+  accessibilityOptions: 'Getting in', primaryType: 'Google’s type', parking: 'Parking',
+  dogsAllowed: 'Dogs welcome', outdoorSeating: 'Outdoor seating', restroom: 'Toilets',
+  dineIn: 'Eat in', takeout: 'Takeaway', delivery: 'Delivery', goodForGroups: 'Good for groups',
 };
 
 /**
@@ -2636,6 +2687,230 @@ router.post('/ask', requires('manage_library'), async (req, res, next) => {
       // covered is in `provider_calls`, which is what the next one counts.
       await releaseSpend(room.reservation);
     }
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// "Show names from Google" — a list of identified-only rows, named live
+// ---------------------------------------------------------------------------
+
+/**
+ * The refs on screen that have no name of their own: the Google-only ones.
+ *
+ * A place the census found is stored as `google:<id>` and nothing else, so its
+ * row is nameless until somebody asks (that nameless row is the finding). Every
+ * other kind of ref already carries a name from a source we own — the atlas,
+ * OpenStreetMap — so it is not in this list and costs nothing.
+ */
+const nameableByGoogle = (refs) => refs.filter((r) => String(r).startsWith('google:'));
+
+/**
+ * What "Show names from Google" would cost, before it is pressed.
+ *
+ * A name and a type are **Pro** fields, not Essentials (Codex, 19 Sep 2026), so
+ * each is one `google-pro` request — about 2.5p, not the free tier the word
+ * "names" suggests. One call per Google-only ref; the rest are free.
+ */
+router.get('/names/quote', requires('view_library'), async (req, res, next) => {
+  try {
+    const refs = String(req.query.refs ?? '').split(',').map((r) => r.trim()).filter(Boolean).slice(0, 60);
+    const google = nameableByGoogle(refs);
+    if (!googleSource.enabled()) return res.json({ refs: refs.length, google: google.length, pence: 0, off: true });
+    res.json({
+      refs: refs.length,
+      google: google.length,
+      // One Pro request each; nothing for refs we already name ourselves.
+      pence: Math.round(google.length * pencePerCall()),
+      perPence: pencePerCall(),
+      tier: 'google-pro',
+    });
+  } catch (err) { next(err); }
+});
+
+/**
+ * Fetch names + primary type for the Google-only rows on screen, live.
+ *
+ * The cheapest mask that reaches a human name (`google.js` `peekName`), billed
+ * at Pro and held to the ceiling and the paid gate like any other paid call.
+ * **Rented, not stored**: the names are handed back so the rows stop being bare
+ * identifiers, and they are never written to a table, a log or a debug field
+ * (Technical Constraints §4; the data policy, 19 Sep 2026).
+ */
+router.post('/names', requires('manage_library'), async (req, res, next) => {
+  try {
+    const refs = (Array.isArray(req.body?.refs) ? req.body.refs : []).map(String).filter(Boolean).slice(0, 60);
+    if (!refs.length) throw bad('Nothing selected.');
+    if (!googleSource.enabled()) {
+      return res.status(422).json({
+        error: 'not_switched_on',
+        message: 'Google is not switched on here. The key is the owner\'s to add in Doppler.',
+      });
+    }
+    const google = nameableByGoogle(refs);
+    if (!google.length) {
+      return res.json({ names: [], calls: 0, spentPence: 0, note: 'These places are already named from our own sources — nothing to ask Google.' });
+    }
+    const want = Math.round(google.length * pencePerCall());
+    const room = await roomToSpend(want, { holder: 'names' });
+    if (!room.ok) return overTheCeiling(res, want, room);
+    const household = await currentHousehold();
+    const meter = {};
+    const names = [];
+    try {
+      for (const ref of google) {
+        const id = ref.slice('google:'.length);
+        try {
+          const got = await googleSource.peekName(id, { meter });
+          names.push({ ref, name: got?.name ?? null, primaryType: got?.primaryType ?? null });
+        } catch (err) {
+          // A place Google could not answer for is said in plain words, and the
+          // rest still return — one refusal does not lose the whole list.
+          names.push({ ref, name: null, primaryType: null, note: whySourceFailed('google', err) });
+        }
+      }
+    } finally {
+      // One ledger row for the batch, attributed to this session; then the
+      // claim goes back, because the calls it covered are now on the ledger.
+      if (Object.keys(meter).length) await recordProviderCall(household.id, 'google', 'admin.places.names', meter, null).catch(() => null);
+      await releaseSpend(room.reservation);
+    }
+    // Priced from what actually billed (the Pro requests the meter counted), so
+    // a switched-off or unanswerable ref is not charged for.
+    const calls = meter['google-pro'] ?? 0;
+    res.json({ names, calls, spentPence: spentOn(calls) });
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// Subcategory summary — per field, how many places Google has vs how many we do
+// ---------------------------------------------------------------------------
+
+/** Every place of this subcategory inside the scope — a ring's refs, or an area. */
+async function subcategoryRefs(scope, sub) {
+  if (scope.kind === 'ring') {
+    const { rows } = await query(
+      'select venue_ref from place_index where venue_ref = any($1) and subcategory = $2', [scope.refs, sub]);
+    return rows.map((r) => r.venue_ref);
+  }
+  const { rows } = await query(
+    `select pi.venue_ref from place_index pi
+       join place_areas pa on pa.venue_ref = pi.venue_ref
+      where pa.area_slug = $1 and pi.subcategory = $2`, [scope.area.slug, sub]);
+  return rows.map((r) => r.venue_ref);
+}
+
+/**
+ * The summary itself: for the subcategory's places, per field, how many we hold
+ * a value for and how many Google does.
+ *
+ * **Free, and it never triggers a paid call.** Google's side is read from the
+ * six-hour compare cache only — the places somebody has already opened (C30's
+ * "compare calls only for places I've opened"). A place that has not been
+ * compared contributes to our own counts and to the total, and simply is not in
+ * Google's — which is why `opened` is returned beside `total`, so "Google has 4"
+ * is read against the four that were looked at, not the forty that exist.
+ */
+async function buildSubcategorySummary(scope, sub) {
+  const refs = await subcategoryRefs(scope, sub);
+  const recs = new Map();
+  if (refs.length) {
+    const { rows } = await query('select * from place_records where venue_ref = any($1)', [refs]);
+    for (const r of rows) recs.set(r.venue_ref, r);
+  }
+  // The Google id per ref: its own, or one a match remembered. Nothing is
+  // fetched here — only the already-held detail is read.
+  const matched = refs.length ? await matchesFor(refs, 'google') : new Map();
+  const places = refs.map((ref) => {
+    const id = ref.startsWith('google:') ? ref.slice('google:'.length) : matched.get(ref) ?? null;
+    return { ours: recs.get(ref) ?? null, google: id ? cachedDetail('google', id) : null };
+  });
+  const opened = places.filter((p) => p.google).length;
+  const fields = coverageByField(places).map((f) => ({ ...f, label: FACT_WORD[f.key] ?? f.key }));
+  return { sub, total: refs.length, opened, fields };
+}
+
+router.get('/subcategory-summary', requires('view_library'), async (req, res, next) => {
+  try {
+    const scope = await resolveWhere(req.query);
+    if (scope.kind === 'none' || scope.kind === 'unknown') throw bad('Which area? Pass ?where=.');
+    const sub = req.query.sub ? String(req.query.sub) : null;
+    if (!sub) throw bad('Which subcategory? Pass ?sub=.');
+    res.json({ ...(await head(scope)), ...(await buildSubcategorySummary(scope, sub)) });
+  } catch (err) { next(err); }
+});
+
+/**
+ * What "Compare all" would cost: one Google detail for every place not already
+ * compared (plus a match where we hold no id). The same arithmetic `/ask` uses,
+ * scoped to the subcategory — so the total is shown before the button is pressed
+ * and the paid-hours grant is spent.
+ */
+router.get('/subcategory-summary/quote', requires('view_library'), async (req, res, next) => {
+  try {
+    const scope = await resolveWhere(req.query);
+    if (scope.kind === 'none' || scope.kind === 'unknown') throw bad('Which area? Pass ?where=.');
+    const sub = req.query.sub ? String(req.query.sub) : null;
+    if (!sub) throw bad('Which subcategory? Pass ?sub=.');
+    const refs = await subcategoryRefs(scope, sub);
+    if (!googleSource.enabled()) return res.json({ refs: refs.length, pence: 0, off: true });
+    const held = await alreadyHeld(refs);
+    const pence = askingCost(refs, await alreadyMatched(refs), held,
+      await missesKept(refs, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 }),
+      await nothingToGoOn(refs));
+    res.json({ refs: refs.length, toCompare: Math.max(0, refs.length - held.size), pence });
+  } catch (err) { next(err); }
+});
+
+/**
+ * "Compare all" — fetch Google's detail, live, for every place of the
+ * subcategory not already compared, so the summary can speak for all of them.
+ *
+ * `manage_library`, ceiling-checked, and **display-only**: it warms the same
+ * six-hour cache the per-place comparison fills (`detailFor`), so nothing from
+ * Google's side is stored — only the id→id join a match remembers, which we may
+ * keep. Then it returns the refreshed summary.
+ */
+router.post('/subcategory-summary/compare-all', requires('manage_library'), async (req, res, next) => {
+  try {
+    const scope = await resolveWhere(req.query);
+    if (scope.kind === 'none' || scope.kind === 'unknown') throw bad('Which area? Pass ?where=.');
+    const sub = req.body?.sub ? String(req.body.sub) : (req.query.sub ? String(req.query.sub) : null);
+    if (!sub) throw bad('Which subcategory? Pass sub.');
+    if (!googleSource.enabled()) {
+      return res.status(422).json({ error: 'not_switched_on', message: 'Google is not switched on here.' });
+    }
+    const refs = await subcategoryRefs(scope, sub);
+    const want = askingCost(refs, await alreadyMatched(refs), await alreadyHeld(refs),
+      await missesKept(refs, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 }),
+      await nothingToGoOn(refs));
+    const room = await roomToSpend(want, { holder: 'compare-all' });
+    if (!room.ok) return overTheCeiling(res, want, room);
+    const household = await currentHousehold();
+    let fetched = 0;
+    try {
+      const named = await index.namesFor(refs);
+      const { rows: at } = await query('select venue_ref, lat, lng from place_index where venue_ref = any($1)', [refs]);
+      const point = new Map(at.map((r) => [r.venue_ref, r]));
+      for (const ref of refs) {
+        let id = ref.startsWith('google:') ? ref.slice('google:'.length) : (await matchesFor([ref], 'google')).get(ref) ?? null;
+        if (id && detailHeld('google', id)) continue; // already compared — free
+        if (!id) {
+          // Match by name and distance, the way the per-place compare does; the
+          // join is remembered, the content is not.
+          const p = point.get(ref);
+          if (!named.get(ref)?.name || p?.lat == null || p?.lng == null) continue;
+          const m = await googleMatchFor({ venueRef: ref, name: named.get(ref).name, lat: p.lat, lng: p.lng, householdId: household.id, strict: true }).catch(() => null);
+          id = m?.id ?? null;
+        }
+        if (!id) continue;
+        // Fills the cache and writes its own attributed ledger row.
+        await detailFor('google', id, household.id).catch(() => null);
+        fetched += 1;
+      }
+    } finally {
+      await releaseSpend(room.reservation);
+    }
+    res.json({ ...(await head(scope)), ...(await buildSubcategorySummary(scope, sub)), fetched });
   } catch (err) { next(err); }
 });
 

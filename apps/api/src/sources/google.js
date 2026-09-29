@@ -41,7 +41,20 @@ const TEXT_SEARCH_FIELDS = `${SEARCH_FIELDS},contextualContents.justifications`;
 // want Google's AI summaries"). They sit in the same Enterprise + Atmosphere
 // tier as `reviews`, which this call already asks for, so they add nothing to
 // the price of it. Rented like everything else here: shown, never stored.
-const DETAIL_FIELDS = 'id,displayName,formattedAddress,location,types,primaryType,rating,userRatingCount,priceLevel,regularOpeningHours.weekdayDescriptions,regularOpeningHours.openNow,currentOpeningHours.openNow,currentOpeningHours.weekdayDescriptions,currentOpeningHours.nextCloseTime,currentOpeningHours.nextOpenTime,utcOffsetMinutes,websiteUri,googleMapsUri,photos.name,photos.authorAttributions,goodForChildren,menuForChildren,servesVegetarianFood,reservable,editorialSummary,reviews,nationalPhoneNumber,generativeSummary,reviewSummary';
+// The amenity, access and parking fields sit in the same Enterprise +
+// Atmosphere tier as `reviews`, which this mask already asks for, so they add
+// nothing to the price of a detail call (owner, 28 Sep 2026: the Places
+// comparison should carry "accessibility, parking, amenities (kids, dogs,
+// outdoor seating, toilets, food)"). Rented like the rest here: shown beside
+// ours, never stored.
+const DETAIL_AMENITY_FIELDS = 'accessibilityOptions,parkingOptions,allowsDogs,outdoorSeating,restroom,dineIn,takeout,delivery,goodForGroups';
+const DETAIL_FIELDS = `id,displayName,formattedAddress,location,types,primaryType,rating,userRatingCount,priceLevel,regularOpeningHours.weekdayDescriptions,regularOpeningHours.openNow,currentOpeningHours.openNow,currentOpeningHours.weekdayDescriptions,currentOpeningHours.nextCloseTime,currentOpeningHours.nextOpenTime,utcOffsetMinutes,websiteUri,googleMapsUri,photos.name,photos.authorAttributions,goodForChildren,menuForChildren,servesVegetarianFood,reservable,editorialSummary,reviews,nationalPhoneNumber,generativeSummary,reviewSummary,${DETAIL_AMENITY_FIELDS}`;
+// The narrowest mask that reaches a *name*. `displayName` and `primaryType`
+// are Pro fields — Google bills them, and `skuFor` files this at `google-pro`
+// (Codex, 19 Sep 2026: a name and a type are not Essentials). So "Show names
+// from Google" is a paid Pro call per place, ~2.5p each, not the free tier the
+// word Essentials suggests. Nothing it returns is written down.
+const PEEK_FIELDS = 'id,displayName,primaryType';
 /** The two figures alone — the Pro tier, a fraction of a full detail — for ranking a place we already know Google's id for. */
 const RATING_FIELDS = 'id,rating,userRatingCount';
 // The census mask: an id, and nothing else.
@@ -249,6 +262,27 @@ function priceLevelNumber(p) {
 }
 
 /**
+ * Google's amenity, access and parking facts, in our own words, keeping only the
+ * ones Google actually returned.
+ *
+ * Google omits a field it has no answer for, so `undefined` means "not asked or
+ * not known" and the key is left off — otherwise `'parking' in venue` would read
+ * true on a search that never bought it, and the compare would draw a firm "no"
+ * over a hole. A real `false` (no dogs, no outdoor seating) is a value and is
+ * kept.
+ */
+function amenityFields(place) {
+  const map = {
+    accessibilityOptions: place.accessibilityOptions, parking: place.parkingOptions,
+    dogsAllowed: place.allowsDogs, outdoorSeating: place.outdoorSeating, restroom: place.restroom,
+    dineIn: place.dineIn, takeout: place.takeout, delivery: place.delivery, goodForGroups: place.goodForGroups,
+  };
+  const out = {};
+  for (const [k, v] of Object.entries(map)) if (v !== undefined) out[k] = v;
+  return out;
+}
+
+/**
  * Exported for `test/takeaway.test.js`, which pins the KFC and Domino's shapes
  * the live API actually returns. Nothing else calls it from outside this file.
  */
@@ -320,6 +354,12 @@ export function toVenue(place, justification = null) {
     // that asks for it needs no cookie — see sources/photoLinks.js.
     photos: stampPhotos((place.photos || []).slice(0, 3).map((p) => ({ ref: p.name, attribution: (p.authorAttributions || []).map((a) => a.displayName).join(', ') }))),
     ticketed: ['movie_theater', 'performing_arts_theater', 'stadium', 'concert_hall'].includes(primary),
+    // Google's own amenity, access and parking facts, for the back-office
+    // comparison and nowhere else — and only the ones the mask actually
+    // returned. A search never asks for them, so they are absent rather than a
+    // firm "no", while a definite `false` (no outdoor seating) is kept. Rented:
+    // shown beside ours, never stored.
+    ...amenityFields(place),
     // Google's own first word for the place. The ring search's shop filter was
     // written against this and it was never set, so the filter never fired
     // and everyone assumed it did (the sign-off, 25 Sep 2026).
@@ -785,6 +825,26 @@ export const googleSource = {
     };
   },
 
+  /**
+   * Just the name and the kind of thing, for one place we already hold the id
+   * for — "Show names from Google" on a list of identified-only rows.
+   *
+   * The cheapest mask that reaches a human name: `id,displayName,primaryType`.
+   * A name and a type are Pro fields (Codex, 19 Sep 2026), so this bills at
+   * `google-pro` (~2.5p) and passes the paid gate like any other paid call —
+   * it is not the free Essentials tier the word "names" might suggest. Read
+   * and shown; nothing here is written down (Technical Constraints §4).
+   */
+  async peekName(id, { meter = null } = {}) {
+    if (off(meter)) return null;
+    const p = await call(`/places/${id}`, { method: 'GET', fieldMask: PEEK_FIELDS, meter });
+    return {
+      id: p.id ?? id,
+      name: p.displayName?.text ?? null,
+      primaryType: p.primaryType ?? null,
+    };
+  },
+
   /** Search along an encoded polyline; results ranked by detour (Technical Constraints §3.1). */
   async searchAlongRoute({ encodedPolyline, query, limit = 20, meter = null }) {
     if (off(meter) || !encodedPolyline) return [];
@@ -957,6 +1017,62 @@ export async function displaySlice({ box, includedType, query, pageToken = null,
     .filter((p) => !LODGING.has(p.primaryType))
     .map((p) => toVenue(p));
   return { venues, nextPageToken: data.nextPageToken ?? null, requests: 1, problem: null };
+}
+
+/**
+ * Google's own top of a subcategory, named — the back office's ranked list
+ * (item 3, 28 Sep 2026: "the ranked Google list + prev/next").
+ *
+ * The cheapest mask that reaches a name: `places.id,places.displayName,
+ * places.primaryType`. A name and a type are Pro fields (Codex, 19 Sep 2026),
+ * so `skuFor` files this at `google-pro` — a paid call, gated and metered
+ * through `call()` like every other. It is *not* a display search: no rating,
+ * no hours, no photos, so it does not bill the Enterprise tier `displaySlice`
+ * does. Google's own POPULARITY order is kept; the caller pages with
+ * `nextPageToken` for "Next 20".
+ *
+ * Rented, like every provider name here: the names are returned for display and
+ * **nothing is written down** — the place index stays id-only (CLAUDE.md, the
+ * data policy). The caller must not persist them.
+ */
+const RANKED_FIELDS = 'places.id,places.displayName,places.primaryType,nextPageToken';
+
+export async function rankedSlice({ box, includedType, query, pageToken = null, pageSize = 20, meter = null } = {}) {
+  const why = unavailable(meter);
+  if (why || !box) return { places: [], nextPageToken: null, requests: 0, problem: why };
+  const body = {
+    textQuery: query || googleTypeWords(includedType) || 'things to do',
+    pageSize: Math.min(20, Math.max(1, pageSize)),
+    languageCode: 'en-GB',
+    rankPreference: 'RELEVANCE',
+    locationRestriction: {
+      rectangle: {
+        low: { latitude: box.minLat, longitude: box.minLng },
+        high: { latitude: box.maxLat, longitude: box.maxLng },
+      },
+    },
+    ...(includedType ? { includedType } : {}),
+    ...(pageToken ? { pageToken } : {}),
+  };
+  let data;
+  try {
+    data = await call('/places:searchText', { fieldMask: RANKED_FIELDS, meter, body });
+  } catch (err) {
+    // The same rule the census and the display slice keep: a type Google does
+    // not have is a rule to fix, not a question to rephrase.
+    return {
+      places: [], nextPageToken: null, requests: 1,
+      problem: /Invalid included_type/i.test(String(err.message)) && includedType
+        ? `Google has no type "${includedType}" — the rule needs a type from Table A`
+        : String(err.message).slice(0, 160),
+    };
+  }
+  // A hotel is not a thing to do, even when Google types it as a restaurant
+  // because it has one — the same fence displaySlice draws.
+  const places = (data.places || [])
+    .filter((p) => !LODGING.has(p.primaryType))
+    .map((p) => ({ id: p.id, name: p.displayName?.text ?? null, primaryType: p.primaryType ?? null }));
+  return { places, nextPageToken: data.nextPageToken ?? null, requests: 1, problem: null };
 }
 
 async function censusSlice({ box, includedType, query, pages = 3, meter = null } = {}) {
