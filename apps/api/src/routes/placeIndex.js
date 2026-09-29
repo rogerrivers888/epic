@@ -2785,11 +2785,18 @@ router.post('/names', requires('manage_library'), async (req, res, next) => {
     const room = await roomToSpend(want, { holder: 'names' });
     if (!room.ok) return overTheCeiling(res, want, room);
     const household = await currentHousehold();
-    const meter = {};
     const names = [];
+    let calls = 0;
     try {
       for (const ref of google) {
         const id = ref.slice('google:'.length);
+        // A fresh meter per call, recorded before the next peekName asks the
+        // paid gate — so the estate's daily ceiling, which reads the ledger and
+        // holds it for only five seconds by design, sees this batch's spend as
+        // it goes and refuses once it is over, rather than being blind to the
+        // whole batch until the end (Codex, 29 Sep 2026). Each is a single Pro
+        // request, so a row a call is the right grain.
+        const meter = {};
         try {
           const got = await googleSource.peekName(id, { meter });
           names.push({ ref, name: got?.name ?? null, primaryType: got?.primaryType ?? null });
@@ -2797,24 +2804,22 @@ router.post('/names', requires('manage_library'), async (req, res, next) => {
           // A place Google could not answer for is said in plain words, and the
           // rest still return — one refusal does not lose the whole list.
           names.push({ ref, name: null, primaryType: null, note: whySourceFailed('google', err) });
+        } finally {
+          // Recorded when the meter carries units OR a fault: a paid-gate
+          // refusal (daily ceiling, household cap, an ungranted agent session)
+          // notes its fault on a non-enumerable symbol and throws before any
+          // unit is bumped, so `Object.keys` is empty — but the refusal is
+          // exactly what the supplier record must show (owner, 20 Sep 2026).
+          if (Object.keys(meter).length || healthOf(meter).failed) {
+            await recordProviderCall(household.id, 'google', 'admin.places.names', meter, null).catch(() => null);
+          }
+          calls += meter['google-pro'] ?? 0;
         }
       }
     } finally {
-      // One ledger row for the batch, attributed to this session; then the
-      // claim goes back, because the calls it covered are now on the ledger.
-      // Recorded when the meter carries units OR a fault: a paid-gate refusal
-      // (daily ceiling, household cap, an ungranted agent session) notes its
-      // fault on a non-enumerable symbol and throws before any unit is bumped,
-      // so `Object.keys` is empty — but the refusal is exactly what the supplier
-      // record must show (owner, 20 Sep 2026; Codex, 29 Sep 2026).
-      if (Object.keys(meter).length || healthOf(meter).failed) {
-        await recordProviderCall(household.id, 'google', 'admin.places.names', meter, null).catch(() => null);
-      }
+      // The claim goes back; every call it covered is now on the ledger.
       await releaseSpend(room.reservation);
     }
-    // Priced from what actually billed (the Pro requests the meter counted), so
-    // a switched-off or unanswerable ref is not charged for.
-    const calls = meter['google-pro'] ?? 0;
     res.json({ names, calls, spentPence: spentOn(calls) });
   } catch (err) { next(err); }
 });
