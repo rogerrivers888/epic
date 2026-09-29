@@ -87,7 +87,10 @@ const DAY_ENDED = /^(stopped at the \d+-request ceiling|ended for the day)/;
  */
 export const gbp = (x) => {
   const n = Number(x ?? 0);
-  return `£${Math.abs(n * 100 - Math.round(n * 100)) < 1e-6 ? n.toFixed(2) : n.toFixed(4)}`;
+  if (Math.abs(n * 100 - Math.round(n * 100)) < 1e-6) return `£${n.toFixed(2)}`;
+  // Google bills to the millionth of a pound; say every figure that can stop
+  // the census, trimmed (Codex, 29 Sep 2026).
+  return `£${n.toFixed(6).replace(/0+$/, '')}`;
 };
 
 /** The quota day a moment falls in: Google's day is Los Angeles's. */
@@ -221,7 +224,8 @@ export async function decide(now = new Date()) {
   const seenNet = lifted?.value?.seenNet ?? {};
   const seenGoogleSpan = lifted?.value?.seenGoogleSpan ?? {};
   const seenNetSpan = lifted?.value?.seenNetSpan ?? {};
-  const EPS = 1e-9;
+  // Below half a millionth of a pound is float noise: Google bills to the millionth.
+  const EPS = 5e-7;
   // A quota-day total with no lifted figure of its own — a day that did not
   // exist yet when the lift was made — takes the lifted figures of the export
   // days it spans (Codex, 29 Sep 2026).

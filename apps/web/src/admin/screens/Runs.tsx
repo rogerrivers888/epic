@@ -478,7 +478,7 @@ const Waiting = () => <View style={{ paddingVertical: spacing.xl }}><ActivityInd
 // ---------------------------------------------------------------------------
 
 /** Pounds to the penny, or to a hundredth of one for a fraction of a penny — which is enough to stop the census. */
-const gbp = (n: number) => `£${Math.abs(n * 100 - Math.round(n * 100)) < 1e-6 ? n.toFixed(2) : n.toFixed(4)}`;
+const gbp = (n: number) => (Math.abs(n * 100 - Math.round(n * 100)) < 1e-6 ? `£${n.toFixed(2)}` : `£${n.toFixed(6).replace(/0+$/, '')}`);
 
 /** What the programme is doing, in a word or two — the detail is behind the tips. */
 const ukWord = (u: UkCensus) => {

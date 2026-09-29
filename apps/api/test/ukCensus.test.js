@@ -893,7 +893,8 @@ test('a lift clears what it saw, export day and quota day alike, and fractions o
   assert.equal((await uk.tick({ now: new Date('2026-09-30T08:00:00Z'), start: r.start, stop: async () => {} })).action, 'halted');
   await uk.liftHold({ who: 'test' });
   assert.equal((await uk.tick({ now: new Date('2026-09-30T09:00:00Z'), start: r.start })).action, 'start', 'lifted means lifted');
-  assert.equal(uk.gbp(0.003), '£0.0030');
+  assert.equal(uk.gbp(0.003), '£0.003');
+  assert.equal(uk.gbp(0.00004), '£0.00004', 'every figure that can stop it is said');
   assert.equal(uk.gbp(1.2), '£1.20');
 });
 
@@ -917,7 +918,7 @@ test('a finished census is not blamed for Places used long after, and the report
   const told = [];
   await uk.tick({ now: new Date('2026-10-29T08:00:00Z'), tell: (x) => told.push(x) });
   assert.equal(told.length, 0);
-  assert.match(uk.reportLine({ day: 1, date: '2026-09-28', requests: 1, newPlaces: 0, billed: { placesNetGbp: 0.003, final: true } }), /£0\.0030 that day$/);
+  assert.match(uk.reportLine({ day: 1, date: '2026-09-28', requests: 1, newPlaces: 0, billed: { placesNetGbp: 0.003, final: true } }), /£0\.003 that day$/);
 });
 
 test('a lift written before the new maps still covers what it saw, and a day keeps its new places', async (t) => {
