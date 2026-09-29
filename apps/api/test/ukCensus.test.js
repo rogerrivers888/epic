@@ -121,7 +121,10 @@ test('any day over £5 of Google stops the census and starts nothing again', asy
     stop: async (id) => { stopped.push(id); }, tell: (x) => told.push(x),
   });
   assert.equal(out.action, 'halted');
-  assert.deepEqual(stopped, [run.id], 'the running day is stopped');
+  // Stopped where it stands, as a day ends: its ceiling brought down to what it has asked.
+  const { rows: [trim] } = await query('select max_requests, requests from census_runs where id = $1', [run.id]);
+  assert.equal(trim.max_requests, trim.requests, 'the running day is stopped');
+  assert.deepEqual(stopped, [], 'not as a person\'s stop');
   assert.match(told[0].subject, /Census stopped: Google billed £5\.01 on 2026-09-28/);
   // And after it is stopped, still nothing starts.
   await query(`update census_runs set state = 'paused', problem = 'stopped at the 70000-request ceiling; resume to carry on' where id = $1`, [run.id]);
@@ -879,4 +882,16 @@ test('a lift clears what it saw, export day and quota day alike, and fractions o
   assert.equal((await uk.tick({ now: new Date('2026-09-30T09:00:00Z'), start: r.start })).action, 'start', 'lifted means lifted');
   assert.equal(uk.gbp(0.003), '£0.0030');
   assert.equal(uk.gbp(1.2), '£1.20');
+});
+
+test('stopped on a bill, lifted, and the next day follows', async (t) => {
+  await clean(); t.after(clean);
+  const run = await dayOne({ state: 'running', problem: null, finished: null });
+  await billed('2026-09-28', 'google-pro', 0.2);
+  const r = recorder();
+  assert.equal((await uk.tick({ now: new Date('2026-09-28T22:00:00Z'), start: r.start })).action, 'halted');
+  // The engine pauses it at the brought-down ceiling, as a day ends.
+  await query(`update census_runs set state = 'paused', problem = 'stopped at the ' || max_requests || '-request ceiling; resume to carry on', finished_at = '2026-09-28T22:05:00Z' where id = $1`, [run.id]);
+  await uk.liftHold({ who: 'test' });
+  assert.equal((await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start })).action, 'start', 'the census carries on');
 });

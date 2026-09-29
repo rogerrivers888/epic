@@ -211,7 +211,10 @@ export async function decide(now = new Date()) {
     const over = days.find((b) => unseen(b, 'google_gbp', seenGoogleSpan, DAY_ALERT_GBP));
     // And a late Places charge for one of its days, after credits, is said too
     // — unless it is one a person already lifted (Codex, 29 Sep 2026).
-    const net = days.find((b) => unseen(b, 'places_net_gbp', seenNetSpan, 0));
+    // Each export day on its own as well: a charge offset by the next day's
+    // credit is still a day Places cost money (Codex, 29 Sep 2026).
+    const net = bills.find((b) => unseen(b, 'places_net_gbp', seenNet, 0))
+      ?? days.find((b) => unseen(b, 'places_net_gbp', seenNetSpan, 0));
     return { action: 'complete', runs, latest, bills, over: over ? { ...over, kind: 'five' } : net ? { ...net, kind: 'net' } : null };
   }
   // Any export day over £5, and any quota day of the programme over £5 across
@@ -347,7 +350,15 @@ async function tickLocked({ now = new Date(), start = censusRun.startRun, stop =
   for (const r of asleep) await endDay(r.id);
   const d = await decide(now);
   if (d.action === 'halted') {
-    if (['running', 'waiting'].includes(d.latest?.state)) await stop(d.latest.id);
+    // Stopped where it stands, as a day ends — not as a person's stop — so that
+    // once the bill is looked at and the hold lifted, the next day follows
+    // (Codex, 29 Sep 2026). A running day is brought to its ceiling and pauses
+    // at the next drawer; a sleeping one is ended for the day.
+    if (d.latest?.state === 'running') {
+      await query(`update census_runs set max_requests = least(max_requests, requests) where id = $1 and state = 'running'`, [d.latest.id]);
+    } else if (d.latest?.state === 'waiting') {
+      await endDay(d.latest.id);
+    }
     tell({ kind: 'alert', subject: d.over.kind === 'net'
       ? `Census stopped: Places cost ${gbp(d.over.places_net_gbp)} after credits on ${d.over.day}`
       : `Census stopped: Google billed ${gbp(d.over.google_gbp)} on ${d.over.day}`, d });
@@ -498,7 +509,7 @@ export async function status(now = new Date()) {
       areasLeft: then.areasLeft ?? null,
       newPlaces: fresh.n,
       tilesLeft: then.left,
-      daysLeft: rate == null ? null : Math.max(then.left ? 1 : 0, Math.ceil((then.left * rate) / daySizeOf(r))),
+      daysLeft: rate == null || then.left == null ? null : Math.max(then.left ? 1 : 0, Math.ceil((then.left * rate) / daySizeOf(r))),
       billed: b ? { censusGbp: b.census_gbp, googleGbp: b.google_gbp, placesNetGbp: b.places_net_gbp, final: b.final } : null,
     });
   }
