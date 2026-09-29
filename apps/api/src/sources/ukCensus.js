@@ -114,7 +114,9 @@ export async function billedByDay(fromDay) {
             -- What Places actually charged: after every credit, promotional
             -- included. Owner, 29 Sep 2026: "if Places spend on
             -- epic-maps-509205 is above £0 for any day … stop and tell me."
-            coalesce(sum(cost + credits) filter (where meter is not null or service ~* 'places'), 0)::float as places_net_gbp
+            -- Places only: its meters or its service, not Routes (Codex, 29 Sep 2026).
+            coalesce(sum(cost + credits) filter (where service ~* 'places'
+              or meter in ('google-essentials', 'google-pro', 'google-search', 'google-details', 'google-photos')), 0)::float as places_net_gbp
        from billing_days
       where day >= $1::date
       group by 1 order by 1`, [fromDay]);
@@ -185,8 +187,11 @@ export async function decide(now = new Date()) {
   if (finishedFirst) {
     // But its own days' bills still count: the last day's arrives after it
     // finished, and a costly one is still said (Codex, 29 Sep 2026).
-    const over = runs.map((r) => billedFor(bills, pacificDay(r.started_at))).find((b) => b && b.google_gbp > DAY_ALERT_GBP);
-    return { action: 'complete', runs, latest, bills, over: over ?? null };
+    const days = runs.map((r) => billedFor(bills, pacificDay(r.started_at))).filter(Boolean);
+    const over = days.find((b) => b.google_gbp > DAY_ALERT_GBP);
+    // And a late Places charge for one of its days, after credits, is said too (Codex, 29 Sep 2026).
+    const net = days.find((b) => b.places_net_gbp > 1e-9);
+    return { action: 'complete', runs, latest, bills, over: over ? { ...over, kind: 'five' } : net ? { ...net, kind: 'net' } : null };
   }
   // Any export day over £5, and any quota day of the programme over £5 across
   // the two London days it spans — £3 and £3 is £6 (Codex, 29 Sep 2026). The
@@ -201,10 +206,14 @@ export async function decide(now = new Date()) {
   const seenGoogle = lifted?.value?.seenGoogle ?? {};
   const seenNet = lifted?.value?.seenNet ?? {};
   const spans = runs.map((r) => billedFor(bills, pacificDay(r.started_at))).filter(Boolean);
-  const unseen = (b, key, seen, floor) => b[key] > floor && b[key] > (seen[b.day] ?? -1) + 0.005;
+  // Any amount at all: above £0 means a fraction of a penny too, and a lifted
+  // figure stops it again on any growth (Codex, 29 Sep 2026). The epsilon is
+  // only float noise.
+  const EPS = 1e-9;
+  const unseen = (b, key, seen, floor) => b[key] > floor + EPS && b[key] > (seen[b.day] ?? -Infinity) + EPS;
   const five = [...bills, ...spans].find((b) => unseen(b, 'google_gbp', seenGoogle, DAY_ALERT_GBP));
   if (five) return { action: 'halted', runs, latest, bills, over: { ...five, kind: 'five' } };
-  const spent = [...bills, ...spans].find((b) => unseen(b, 'places_net_gbp', seenNet, 0.005));
+  const spent = [...bills, ...spans].find((b) => unseen(b, 'places_net_gbp', seenNet, 0));
   if (spent) return { action: 'halted', runs, latest, bills, over: { ...spent, kind: 'net' } };
   // Done is complete only if no square was given up on: a run finishes with
   // its failed squares set aside, and the UK is not done while they are
@@ -326,7 +335,9 @@ async function tickLocked({ now = new Date(), start = censusRun.startRun, stop =
       : `Census stopped: Google billed £${d.over.google_gbp.toFixed(2)} on ${d.over.day}`, d });
   }
   if (d.action === 'complete' && d.over) {
-    tell({ kind: 'alert', subject: `Census (finished) was billed £${d.over.google_gbp.toFixed(2)} of Google on ${d.over.day}`, d });
+    tell({ kind: 'alert', subject: d.over.kind === 'net'
+      ? `Census (finished): Places cost £${d.over.places_net_gbp.toFixed(2)} after credits on ${d.over.day}`
+      : `Census (finished) was billed £${d.over.google_gbp.toFixed(2)} of Google on ${d.over.day}`, d });
   }
   if (d.action === 'held') tell({ kind: 'alert', subject: `Census held: the census was billed £${d.yesterday.census_gbp.toFixed(2)} on ${d.yesterday.day}`, d });
   if (d.action === 'overran') {
@@ -419,7 +430,12 @@ export async function status(now = new Date()) {
       : { rows: [] };
     // A day kept before it carried districts and areas left gets them now,
     // once (29 Sep 2026: the one-line report names what is left).
-    const { rows: [then] } = kept && kept.value.districtsLeft != null ? { rows: [kept.value] } : await query(
+    // Only while that day's squares cannot yet have been censused again (the
+    // freshness window is 30 days): past that, current tiles do not say what
+    // was left then, and it stays unknown (Codex, 29 Sep 2026).
+    const recent = Date.now() - new Date(r.finished_at ?? r.started_at).getTime() < 25 * 86_400_000;
+    const canFill = !kept || recent;
+    const { rows: [then] } = kept && (kept.value.districtsLeft != null || !canFill) ? { rows: [kept.value] } : await query(
       `with plan as (
          -- Done means done: a stale square being asked again keeps its old
          -- censused_at but is not done (Codex, 29 Sep 2026). The state is
@@ -435,7 +451,7 @@ export async function status(now = new Date()) {
     // Kept once the day has ended, so a square censused again thirty days on
     // cannot rewrite what that day said (Codex, 29 Sep 2026). In the back
     // office's own settings table, under a key its reader ignores.
-    if (ended && (!kept || kept.value.districtsLeft == null)) {
+    if (ended && (!kept || (kept.value.districtsLeft == null && canFill))) {
       // Normally written when the run ended (censusRun.keepDayFigures); this
       // is for a day that ended before that existed, or before it carried
       // what was left. What it already said about districts done stands.

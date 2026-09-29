@@ -831,3 +831,24 @@ test('Places spend after every credit decides: fully credited runs on, a penny c
   assert.equal(out.over.kind, 'net');
   assert.match(told[0].subject, /^Census stopped: Places cost £0\.03 after credits on 2026-09-28/);
 });
+
+test('a fraction of a penny is above £0, Routes is not Places, and a finished census still says a late Places charge', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  await billed('2026-09-28', 'google-pro', 0.003); // a single request, a fraction of a penny
+  const r = recorder();
+  assert.equal((await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start, stop: async () => {} })).action, 'halted');
+  await clean();
+  await dayOne();
+  await query(
+    `insert into billing_days (invoice_month, day, service, sku, sku_id, meter, usage, unit, cost, credits, promo, currency)
+     values ('202609', '2026-09-28', 'Routes API', 'test Routes', $1, 'google-routes', 1, 'count', 2, 0, 0, 'GBP')`, [`x${Math.random()}`]);
+  assert.equal((await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start })).action, 'start', 'a Routes charge is not Places spend');
+  await clean();
+  await dayOne({ state: 'done', problem: null });
+  await query(`insert into bo_settings (key, value, updated_by) values ('census:uk-complete', '{}', 'test')`);
+  await billed('2026-09-28', 'google-pro', 0.5);
+  const told = [];
+  assert.equal((await uk.tick({ now: new Date('2026-10-01T08:00:00Z'), tell: (x) => told.push(x) })).action, 'complete');
+  assert.match(told[0]?.subject ?? '', /^Census \(finished\): Places cost £0\.50 after credits/);
+});
