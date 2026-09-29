@@ -2138,6 +2138,10 @@ function shortName(r) {
 const FOOT_WORD = {
   budget: ['budget', 'budgets'], billed: ["last month's bill", "last month's bills"],
   estimate: ["last month's estimate", "last month's estimates"],
+  // A longer window's expectation can mix months of each kind (Codex).
+  'budget+estimate': ['budget + estimate', 'budget + estimate'],
+  'billed+budget': ['bills + budget', 'bills + budget'],
+  'billed+estimate': ['bills + estimate', 'bills + estimate'],
 };
 
 /**
@@ -2154,11 +2158,11 @@ export function expectedFoot(rows) {
   const list = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
   const byBasis = new Map();
   for (const r of withIt) {
-    const b = FOOT_WORD[r.expectedBasis] ? r.expectedBasis : 'mixed';
+    const b = FOOT_WORD[r.expectedBasis] ? r.expectedBasis : 'other';
     byBasis.set(b, [...(byBasis.get(b) ?? []), shortName(r)]);
   }
-  const parts = [...byBasis].map(([b, names]) => (b === 'mixed'
-    ? `${list(names)} mixed`
+  const parts = [...byBasis].map(([b, names]) => (b === 'other'
+    ? `for ${list(names)}`
     : `${FOOT_WORD[b][names.length > 1 ? 1 : 0]} for ${list(names)}`));
   return { expectedTotal: total, expectedWords: `${parts.join(' · ')}${partial ? ' only' : ''}`, expectedPartial: partial };
 }

@@ -290,4 +290,6 @@ test('the foot sums the rows that have an expected figure and says whose, and ma
   const mixed = expectedFoot([{ key: 'google', spend: 40, expected: 38, expectedBasis: 'billed' }, rows[0]]);
   assert.equal(mixed.expectedWords, "last month's bill for Google · budget for Claude");
   assert.equal(expectedFoot([{ key: 'x', spend: 1, expected: null }]).expectedTotal, null);
+  const long = expectedFoot([{ key: 'anthropic', spend: 300, expected: 290, expectedBasis: 'budget+estimate' }]);
+  assert.equal(long.expectedWords, 'budget + estimate for Claude', 'a mixed basis is named, never "mixed"');
 });

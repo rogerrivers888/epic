@@ -264,7 +264,8 @@ export function Suppliers({ canSeeMoney, canManage }: {
             value: fmt.cost.money(suite.suppliers.total),
             sub: basisWords(suite.suppliers.basis),
             delta: (() => {
-              const d = suite.suppliers.expected ? ((suite.suppliers.total / suite.suppliers.expected) - 1) * 100 : null;
+              // Not against a part-sum: the whole total is not the few suppliers' expectation (Codex).
+              const d = suite.suppliers.expected && !suite.suppliers.expectedPartial ? ((suite.suppliers.total / suite.suppliers.expected) - 1) * 100 : null;
               return d == null ? undefined : fmt.cost.delta(d) ?? undefined;
             })(),
           },
