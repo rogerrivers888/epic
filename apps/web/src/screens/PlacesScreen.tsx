@@ -794,7 +794,9 @@ function PlaceCard({ place, kind, viewer, selected, wide, onPress }: {
 }) {
   const ours = epicRating(place, viewer);
   const what = typeOf(place, kind);
-  const meta = [what, place.locality].filter(Boolean).join(' · ');
+  // Closed (C57): the row stays — it is somewhere they kept or went — and says so first.
+  const closed = place.closed ? [place.closed.status === 'temporarily_closed' ? 'Temporarily closed' : 'Closed', place.closed.successor?.name ? `Now: ${place.closed.successor.name}` : null].filter(Boolean).join(' · ') : null;
+  const meta = [closed, what, place.locality].filter(Boolean).join(' · ');
   const when = whenLabel(place.lastOn);
   const experiences = (place.venue as Partial<Venue> | null)?.experiences ?? [];
   const thumb = (

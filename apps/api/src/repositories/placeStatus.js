@@ -134,7 +134,18 @@ export async function statusFor(ref, { wikidataId = null, atlasId = null } = {})
  * ref, when a direct link is opened — never inside a list.
  */
 async function hiddenOriginOf(ref) {
-  const { rows: [r] } = await query(
+  return (await hiddenStatusesOf([ref])).get(ref) ?? null;
+}
+
+/**
+ * For each of these refs that is a name of a hidden place, that place's
+ * status — for the household's own saved list and history, which keep a
+ * closed place and mark it "Closed", with "Now: …" (C57, owner, 29 Sep 2026).
+ */
+export async function hiddenStatusesOf(refs) {
+  const list = [...new Set((refs ?? []).filter(Boolean).map(String))];
+  if (!list.length) return new Map();
+  const { rows } = await query(
     `with hid as (select s.venue_ref, s.wikidata_id from place_status s where ${HIDING}),
      seed as (
        select venue_ref as ref, venue_ref as origin from hid
@@ -157,10 +168,13 @@ async function hiddenOriginOf(ref) {
        select 'google:' || m.source_ref as ref, n.origin from provider_matches m join names n on n.ref = m.venue_ref
         where m.source = 'google' and not m.missing and m.source_ref is not null),
      every as (select ref, origin from names union select ref, origin from matched)
-     select s.*, ${SUCCESSOR_LABEL} from every e join place_status s on s.venue_ref = e.origin
-      where e.ref = $1 order by s.decided_at desc limit 1`, [ref]);
-  return r ? shape(r) : null;
+     select distinct on (e.ref) e.ref as asked_ref, s.*, ${SUCCESSOR_LABEL} from every e join place_status s on s.venue_ref = e.origin
+      where e.ref = any($1::text[]) order by e.ref, s.decided_at desc`, [list]);
+  return new Map(rows.map((r) => [r.asked_ref, shape(r)]));
 }
+
+/** The two words a family screen shows for a closed place: the status and the successor. */
+export const closedBrief = (s) => (s?.hidden ? { status: s.status, confirmed: s.confirmed, successor: s.successor } : null);
 
 /** Statuses for many refs at once, for a back-office list. */
 export async function statusesFor(refs) {
@@ -271,7 +285,18 @@ export async function report({ examples = 20 } = {}) {
   // A row flagged for review is `unknown`, so it would hide only if nothing
   // current confirms it — the review is about closure, not existence.
   const WOULD = `(s.status in ('temporarily_closed', 'permanently_closed') or not s.confirmed)`;
-  const [byStatus, byReason, bySource, totals, sample, reviewSample] = await Promise.all([
+  const CLOSED_NOW = `s.status in ('temporarily_closed', 'permanently_closed')`;
+  // What an unconfirmed place is filed as: our drawer where it has one, else the atlas's own word.
+  const FILED = `coalesce(sub.label, a.category, 'unfiled')`;
+  const PLACE_JOIN = `
+             left join place_records pr on pr.venue_ref = s.venue_ref
+             left join lateral (select a.name, a.region_slug, a.category from attractions a
+                                 where coalesce(a.venue_ref, 'atlas:' || a.id::text) = s.venue_ref
+                                    or (s.wikidata_id is not null and a.wikidata_id = s.wikidata_id) limit 1) a on true
+             left join place_index pi on pi.venue_ref = s.venue_ref
+             left join shelf_subcategories sub on sub.key = pi.subcategory
+             left join regions reg on reg.slug = a.region_slug`;
+  const [byStatus, byReason, bySource, totals, sample, reviewSample, unconfirmedByCategory, unconfirmedSample, reviewByReason, matchCount] = await Promise.all([
     query(`select s.status, s.confirmed, s.applied, count(*)::int as n from place_status s group by 1, 2, 3 order by 1, 2, 3`),
     query(`select case when s.status in ('temporarily_closed','permanently_closed') then s.status else 'unconfirmed' end as hidden_as,
                   coalesce(s.source, 'none') as source,
@@ -286,31 +311,41 @@ export async function report({ examples = 20 } = {}) {
                   count(*) filter (where ${HIDING})::int as hidden_now,
                   count(*) filter (where s.review)::int as review,
                   count(*) filter (where s.successor_ref is not null)::int as with_successor,
+                  count(*) filter (where s.reason like 'history:%')::int as history,
                   count(*)::int as rows
              from place_status s`),
+    // Closed: twenty, the case that started it first.
     query(`select s.*, ${SUCCESSOR_LABEL},
-                  coalesce(pr.name, a.name) as name, coalesce(reg.name, pr.postcode) as place_where
-             from place_status s
-             left join place_records pr on pr.venue_ref = s.venue_ref
-             left join lateral (select a.name, a.region_slug from attractions a
-                                 where coalesce(a.venue_ref, 'atlas:' || a.id::text) = s.venue_ref
-                                    or (s.wikidata_id is not null and a.wikidata_id = s.wikidata_id) limit 1) a on true
-             left join regions reg on reg.slug = a.region_slug
-            where ${WOULD}
-            order by (coalesce(pr.name, a.name) = 'Windsor Safari Park') desc,
-                     (s.status in ('temporarily_closed','permanently_closed')) desc, s.source, md5(s.venue_ref)
+                  coalesce(pr.name, a.name) as name, coalesce(reg.name, pr.postcode) as place_where, ${FILED} as filed
+             from place_status s ${PLACE_JOIN}
+            where ${CLOSED_NOW}
+            order by (coalesce(pr.name, a.name) = 'Windsor Safari Park') is true desc, md5(s.venue_ref)
             limit $1`, [examples]),
     query(`select s.*, coalesce(pr.name, a.name) as name
              from place_status s
              left join place_records pr on pr.venue_ref = s.venue_ref
              left join lateral (select a.name from attractions a where coalesce(a.venue_ref, 'atlas:' || a.id::text) = s.venue_ref limit 1) a on true
             where s.review order by md5(s.venue_ref) limit 10`),
+    // Unconfirmed, by what it is filed as, and twenty spread across the kinds.
+    query(`select ${FILED} as filed, count(*)::int as n
+             from place_status s ${PLACE_JOIN}
+            where not s.confirmed and not (${CLOSED_NOW})
+            group by 1 order by n desc`),
+    query(`select * from (
+             select s.*, coalesce(pr.name, a.name) as name, coalesce(reg.name, pr.postcode) as place_where, ${FILED} as filed,
+                    row_number() over (partition by ${FILED} order by md5(s.venue_ref)) as nth
+               from place_status s ${PLACE_JOIN}
+              where not s.confirmed and not (${CLOSED_NOW})) x
+            order by nth, filed limit $1`, [examples]),
+    query(`select coalesce(regexp_replace(s.reason, '\\d{4}', 'YYYY', 'g'), 'none') as reason, coalesce(s.source, 'none') as source, count(*)::int as n
+             from place_status s where s.review group by 1, 2 order by n desc`),
+    query(`select count(*)::int as n from atlas_osm_matches`),
   ]);
   const ex = (r) => ({
     ref: r.venue_ref, name: r.name ?? null, where: r.place_where ?? null, status: r.status, confirmed: r.confirmed,
     reason: r.reason, source: r.source, evidence: r.evidence, review: r.review,
-    successor: r.successor_ref || r.successor_name ? { ref: r.successor_ref, name: r.successor_label ?? r.successor_name } : null,
-    applied: r.applied,
+    successor: r.successor_ref || r.successor_name ? { ref: r.successor_open_ref ?? r.successor_ref, name: r.successor_label ?? r.successor_name } : null,
+    applied: r.applied, filed: r.filed ?? null,
   });
   return {
     check: await latestCheck(),
@@ -320,5 +355,9 @@ export async function report({ examples = 20 } = {}) {
     bySource: bySource.rows,
     examples: sample.rows.map(ex),
     review: reviewSample.rows.map(ex),
+    reviewByReason: reviewByReason.rows,
+    unconfirmedByCategory: unconfirmedByCategory.rows,
+    unconfirmedExamples: unconfirmedSample.rows.map(ex),
+    openMapMatches: matchCount.rows[0]?.n ?? 0,
   };
 }

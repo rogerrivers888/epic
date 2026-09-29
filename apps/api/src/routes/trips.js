@@ -37,6 +37,7 @@ import { mirrorHealth as overpassHealth } from '../sources/overpass.js';
 import { shelvesForVenue } from '../domain/moods.js';
 import { rules as shelfRules } from '../repositories/shelfRules.js';
 import { taxonomy as shelfTaxonomy } from '../repositories/shelfTaxonomy.js';
+import { hiddenAmong } from '../repositories/placeStatus.js';
 
 const router = Router();
 
@@ -496,6 +497,8 @@ router.post('/', async (req, res, next) => {
     if (!origin) return res.status(400).json({ error: 'origin_required', message: 'Give a starting point, or set a home address in Settings.' });
     let destination = b.destination?.lat != null ? b.destination : null;
     if (!destination && b.destinationText) [destination] = await geocode(b.destinationText, { limit: 1, near: home });
+    // A closed place is not somewhere a new day can be for (C57).
+    if (destination?.ref) await refuseClosed(destination.ref);
 
     /**
      * The day out, as the create screen asks it (5a): a date, the time they
@@ -1869,7 +1872,24 @@ function claimBase(householdId, base, baseKind) {
 }
 
 /** One place onto a trip's shortlist (and into the atlas): the POST route and the Plan screen's Inspire me both come through here. */
+/**
+ * A closed place — once the owner has applied the check — is never added to a
+ * trip (C57, owner, 29 Sep 2026: "block adding them to a new trip"). A refusal,
+ * 409 `closed`, that the screen shows as its one word; it stays in the
+ * household's saved list and history, marked.
+ */
+export async function refuseClosed(venueRef) {
+  if (!venueRef) return;
+  if ((await hiddenAmong([String(venueRef)])).size) {
+    throw Object.assign(new Error('Closed'), { status: 409, code: 'closed' });
+  }
+}
+
 export async function addShortlistItem(trip, household, b) {
+  // Epic's own suggestion of a closed place is dropped rather than refused:
+  // nobody asked for it, and a plan should not fail over it.
+  if (b.suggested && (await hiddenAmong([String(b.venueRef)])).size) return;
+  await refuseClosed(b.venueRef);
   const kind = KINDS.includes(b.kind) ? b.kind : kindOfCategory(b.category);
   const snapshot = b.venue && ['osm', 'fixtures'].includes(String(b.venueRef).split(':')[0]) ? b.venue : null;
   await trips.upsertShortlistItem(trip.id, {
@@ -1941,6 +1961,7 @@ router.post('/:id/days/:dayId/stops', async (req, res, next) => {
       stop = { venueRef: item.venue_ref, name: item.venue_label, lat: item.lat, lng: item.lng, category: item.category, ...b };
     }
     if (!stop.venueRef || !stop.name) return res.status(400).json({ error: 'venue_required' });
+    await refuseClosed(stop.venueRef);
     const slot = SLOTS.includes(b.slot) ? b.slot : b.startTime ? (Number(b.startTime.slice(0, 2)) < 12 ? 'morning' : Number(b.startTime.slice(0, 2)) < 17 ? 'afternoon' : 'evening') : 'morning';
     const position = await trips.nextStopPosition(day.id);
     const dwell = b.dwellMinutes ?? (['restaurant', 'pub'].includes(stop.category) ? household.default_visit_minutes : ['cafe', 'bar'].includes(stop.category) ? 45 : 120);

@@ -33,7 +33,7 @@ import { fileWhere, upsertHouseholdPlace } from './atlas.js';
 import * as atlasRepo from '../repositories/atlas.js';
 import { googleSource } from '../sources/google.js';
 import { claimPlace, ownedRecord, ownedRecords, enrich, researchOnOpen } from '../sources/own.js';
-import { hiddenAmong, statusFor } from '../repositories/placeStatus.js';
+import { closedBrief, hiddenAmong, hiddenStatusesOf, statusFor } from '../repositories/placeStatus.js';
 // Somewhere you eat, where the menu is the thing you want on the way in; and
 // the three words a take may be.
 import { FOOD_CATEGORIES as EATING, TAKES } from '../constants.js';
@@ -657,7 +657,13 @@ places.get('/suggest', async (req, res, next) => {
       closed = null;
     }
     const offered = closed ? suggestions.filter((x) => !seen.has(x.placeId) && !closed.has(`google:${x.placeId}`)) : [];
-    res.json({ suggestions: [...oursHere, ...offered.map((x) => ({ ...x, venueRef: `google:${x.placeId}`, mine: false }))] });
+    // The household's own places too, now (owner, 29 Sep 2026: "stop
+    // suggesting them anywhere"): a closed place stays in their saved list and
+    // history, marked, and is not offered for a new plan. Same fail-closed
+    // rule: a lookup that cannot answer offers none of them.
+    const closedMine = await hiddenAmong(oursHere.map((o) => o.venueRef)).catch(() => null);
+    const mineOffered = closedMine ? oursHere.filter((o) => !closedMine.has(o.venueRef)) : [];
+    res.json({ suggestions: [...mineOffered, ...offered.map((x) => ({ ...x, venueRef: `google:${x.placeId}`, mine: false }))] });
   } catch (err) { next(err); }
 });
 
@@ -996,8 +1002,11 @@ visits.get('/', async (req, res, next) => {
     const params = [household.id];
     const rows = await visitsRepo.visitsFor(household.id, { country, q, memberId, take }, TAKES);
     const facets = await visitsRepo.visitCountries(household.id);
+    // The history keeps a place that has since closed, marked (C57).
+    const closedHere = await hiddenStatusesOf(rows.map((v) => v.venue_ref)).catch(() => new Map());
     res.json({
       visits: rows.map((v) => ({
+        closed: closedBrief(closedHere.get(v.venue_ref)),
         id: v.id, venueRef: v.venue_ref, venueLabel: v.venue_label, category: v.category, lat: v.lat, lng: v.lng,
         visitedOn: v.visited_on, note: v.note, country: v.country, countryCode: v.country_code, locality: v.locality,
         tripId: v.trip_id, attendees: v.attendees ?? [], visitTakes: v.visit_takes ?? [], itemTakes: v.item_takes,

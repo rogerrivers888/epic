@@ -11,6 +11,7 @@
 
 import { query } from '../db.js';
 import { noteMany } from './placeIndex.js';
+import { SHOWN_REF } from './placeStatus.js';
 
 const on = (client) => (client ? (text, params) => client.query(text, params) : query);
 
@@ -380,7 +381,10 @@ export async function atlasForPrompt(householdId, limit = 40) {
     `select hp.label, hp.kind, hp.category, hp.locality, hp.note,
             (select string_agg(distinct l.status::text, ',') from place_ledger l
               where l.household_id = hp.household_id and l.source || ':' || l.source_place_id = hp.venue_ref) as statuses
-       from household_places hp where hp.household_id = $1 order by hp.last_seen desc limit $2`,
+       from household_places hp where hp.household_id = $1
+        -- The planner is a suggestion: a closed place, once applied, is not offered (C57).
+        and ${SHOWN_REF('hp.venue_ref')}
+      order by hp.last_seen desc limit $2`,
     [householdId, limit],
   );
   return rows;
@@ -389,7 +393,9 @@ export async function atlasForPrompt(householdId, limit = 40) {
 /** Every placed thing the household owns, for matching an idea to somewhere they know. */
 export async function placedPlaces(householdId) {
   const { rows } = await query(
-    'select venue_ref, label, kind, category, lat, lng, venue from household_places where household_id = $1 and lat is not null and lng is not null',
+    // Matching an idea to somewhere the household knows is a suggestion too (C57).
+    `select venue_ref, label, kind, category, lat, lng, venue from household_places
+      where household_id = $1 and lat is not null and lng is not null and ${SHOWN_REF('venue_ref')}`,
     [householdId],
   );
   return rows;

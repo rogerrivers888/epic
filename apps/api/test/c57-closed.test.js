@@ -114,8 +114,12 @@ test('OSM: a lifecycle prefix with nothing current closes', () => {
   assert.equal(S.osmVerdict({ 'demolished:building': 'yes', 'demolished:amenity': 'cinema' }).status, 'permanently_closed');
   assert.equal(S.osmVerdict({ amenity: 'pub', disused: 'yes' }).status, 'permanently_closed');
   assert.equal(S.osmVerdict({ shop: 'vacant' }).status, 'permanently_closed');
-  assert.equal(S.osmVerdict({ tourism: 'attraction', end_date: '2019' }, { today: TODAY }).status, 'permanently_closed');
-  assert.equal(S.osmVerdict({ tourism: 'museum', opening_hours: 'closed' }).status, 'temporarily_closed');
+  // end_date is not read any more (owner, 29 Sep 2026): the V&A carries end_date=1862.
+  assert.equal(S.osmVerdict({ tourism: 'museum', end_date: '1862', name: 'Victoria and Albert Museum' }).status, 'open');
+  // opening_hours=closed is a question for a person, not a closure — a Sun in the Wood.
+  const shut = S.osmVerdict({ amenity: 'pub', name: 'Sun in the Wood', opening_hours: 'closed' });
+  assert.equal(shut.status, 'unknown');
+  assert.equal(shut.review, true);
   assert.equal(S.osmVerdict({ 'was:amenity': 'cinema', replaced_by: 'Odeon Luxe' }).successorName, 'Odeon Luxe');
 });
 
@@ -255,7 +259,7 @@ const claims = new Map([
 test('the check over the Windsor fixture: closed with a successor, unconfirmed flagged, nothing hidden until applied', async () => {
   const { safari, lego, lonely } = await fixture();
   const asked = [];
-  const out = await runClosedCheck({ by: 'test', today: TODAY, fetchClaims: async (ids) => { asked.push(...ids); return new Map(ids.filter((q) => claims.has(q)).map((q) => [q, claims.get(q)])); } });
+  const out = await runClosedCheck({ by: 'test', superclasses: async () => new Map(), today: TODAY, fetchClaims: async (ids) => { asked.push(...ids); return new Map(ids.filter((q) => claims.has(q)).map((q) => [q, claims.get(q)])); } });
   assert.ok(asked.includes('Q8024695'));
   assert.equal(out.wikidataUnread, 0);
 
@@ -338,7 +342,7 @@ test('Google status: the drawer hook writes only our flag, and a person is never
 
 test('a Wikidata batch that fails is unread, never "no closure"', async () => {
   await fixture();
-  const out = await runClosedCheck({ by: 'test', today: TODAY, fetchClaims: async () => { throw new Error('429'); } });
+  const out = await runClosedCheck({ by: 'test', superclasses: async () => new Map(), today: TODAY, fetchClaims: async () => { throw new Error('429'); } });
   assert.equal(out.wikidataRead, 0);
   assert.ok(out.wikidataUnread >= 3);
   // The prose still speaks for Windsor on its own.
@@ -385,7 +389,7 @@ test('a Google result matched to a closed atlas row is hidden under its Google i
   await query(`delete from provider_matches where source_ref like 'ChIJ_c57_%'`);
 });
 
-test('Places suggest: a hidden Google prediction is not offered by name; the household\'s own saved place still is (Codex)', async () => {
+test('Places suggest: a hidden place is not offered by name, whether Google\'s or the household\'s own (Codex; owner, 29 Sep 2026)', async () => {
   const express = (await import('express')).default;
   const { places } = await import('../src/routes/places.js');
   const { googleSource } = await import('../src/sources/google.js');
@@ -415,14 +419,14 @@ test('Places suggest: a hidden Google prediction is not offered by name; the hou
     const refs = body.suggestions.map((x) => x.venueRef);
     assert.ok(refs.includes('google:ChIJ_c57_here'));
     assert.ok(!refs.includes('google:ChIJ_c57_gone'), 'a closed place cannot be found by name');
-    assert.ok(refs.includes('google:ChIJ_c57_mine'), 'somewhere the household saved stays theirs');
+    assert.ok(!refs.includes('google:ChIJ_c57_mine'), 'a closed saved place is not suggested either (owner, 29 Sep 2026)');
 
     // The closed lookup failing is "can't speak": no provider suggestion is
     // offered, and the household's own places still are (Codex).
     await query('alter table place_status rename to place_status_c57_away');
     try {
       const again = await (await fetch(`http://127.0.0.1:${server.address().port}/api/places/suggest?q=safari&kind=all`)).json();
-      assert.deepEqual(again.suggestions.map((x) => x.venueRef), ['google:ChIJ_c57_mine']);
+      assert.deepEqual(again.suggestions, [], 'a lookup that cannot answer offers nothing');
     } finally {
       await query('alter table place_status_c57_away rename to place_status');
     }
@@ -452,4 +456,189 @@ test('a Google closure matched only to wikidata:Q… hides every name the atlas 
   }
   assert.equal((await repo.statusFor('osm:relation/1'))?.hidden ?? false, false, 'an unrelated ref is not');
   await query(`delete from provider_matches where source_ref like 'ChIJ_c57_%'`);
+});
+
+// ---------------------------------------------------------------------------
+// the owner's corrections after the first dry run (29 Sep 2026)
+// ---------------------------------------------------------------------------
+
+const ABBEY = 'Q160742'; const PRIORY = 'Q2750108'; const CHURCH = 'Q16970'; const RUINS = 'Q109607';
+
+test('heritage: read from the kinds, the subclass roots, the atlas category, our drawer or a listing', () => {
+  assert.equal(S.heritageOf({ kinds: [ABBEY] }).heritage, true);
+  assert.equal(S.heritageOf({ kinds: ['Q999'], roots: ['Q23413'] }).heritage, true, 'a kind whose P279 root is castle');
+  assert.equal(S.heritageOf({ category: 'heritage' }).heritage, true);
+  assert.equal(S.heritageOf({ subcategory: 'castles' }).heritage, true);
+  assert.equal(S.heritageOf({ listed: true }).heritage, true);
+  assert.equal(S.heritageOf({ kinds: ['Q1711697'], category: 'animals' }).heritage, false, 'a safari park is not heritage');
+  assert.deepEqual(S.heritageOf({ kinds: [CHURCH] }), { heritage: true, church: true });
+  assert.equal(S.heritageOf({ kinds: [ABBEY, CHURCH] }).church, false, 'an abbey church: its dissolution is monastic history');
+});
+
+test('Selby Abbey: P576 1539 on an abbey that is an open church is open, the dissolution kept as history', () => {
+  const kinds = [ABBEY, CHURCH];
+  const site = S.heritageOf({ kinds });
+  const wd = S.wikidataVerdict(entity('Q1394924', { P31: kinds.map((k) => claim(snak(k))), P576: [claim(time(1539))] }), { today: TODAY, site });
+  assert.equal(wd.status, 'unknown');
+  assert.equal(wd.history, true);
+  assert.match(wd.reason, /^history: .*1539/);
+  const v = S.combine([wd, S.osmVerdict({ amenity: 'place_of_worship', building: 'church', name: 'Selby Abbey' })]);
+  assert.equal(v.status, 'open');
+  // Without the map's word it is still not closed: the date stays history.
+  const alone = S.combine([wd]);
+  assert.equal(alone.status, 'unknown');
+  assert.equal(alone.history, true);
+});
+
+test('Chacombe Priory: dissolution in the item and in the prose is history only', () => {
+  const site = S.heritageOf({ kinds: [PRIORY, RUINS] });
+  const wd = S.wikidataVerdict(entity('Q5066850', { P31: [claim(snak(PRIORY))], P576: [claim(time(1536))] }), { today: TODAY, site });
+  const wp = S.wikipediaVerdict({ text: 'Chacombe Priory was an Augustinian priory in Northamptonshire. It was dissolved in 1536 and closed in 1536.', name: 'Chacombe Priory', site });
+  assert.equal(wp.history, true);
+  const v = S.combine([wd, wp]);
+  assert.equal(v.status, 'unknown');
+  assert.equal(v.review, false);
+  assert.equal(v.history, true);
+});
+
+test('a redundant church converted to flats goes to a person; a church closed as a church does too', () => {
+  const site = S.heritageOf({ kinds: [CHURCH] });
+  const wd = S.wikidataVerdict(entity('Q7', { P31: [claim(snak(CHURCH))], P3999: [claim(time(1980))] }), { today: TODAY, site });
+  assert.equal(wd.status, 'unknown');
+  assert.equal(wd.review, true);
+  const wp = S.wikipediaVerdict({ text: "St Mark's Church is a former church in Leeds. It closed in 1980 and was converted into flats.", name: "St Mark's Church", site });
+  assert.equal(wp.review, true);
+  assert.match(wp.reason, /private/);
+  assert.equal(S.combine([wd, wp]).status, 'unknown');
+  assert.equal(S.combine([wd, wp]).review, true);
+});
+
+test('a heritage site closes only on a current signal: nothing remains, or the map says so of the object itself', () => {
+  const site = S.heritageOf({ kinds: ['Q23413'] });
+  const gone = S.wikipediaVerdict({ text: 'Bolton Castle was a castle in Yorkshire. It was demolished in 1650 and nothing remains of it.', name: 'Bolton Castle', site });
+  assert.equal(gone.status, 'permanently_closed');
+  const stands = S.wikipediaVerdict({ text: 'Corfe Castle is a fortification. It was partly demolished in 1646; its ruins are open.', name: 'Corfe Castle', site });
+  assert.notEqual(stands?.status, 'permanently_closed');
+  const history = S.wikidataVerdict(entity('Q8', { P31: [claim(snak('Q23413'))], P576: [claim(time(1646))] }), { today: TODAY, site });
+  const osm = S.osmVerdict({ 'demolished:historic': 'castle', 'demolished:building': 'yes', name: 'Gone Castle' });
+  assert.equal(S.combine([history, osm]).status, 'permanently_closed');
+});
+
+test('OSM: a lifecycle tag counts only on the object itself, never on a route or an area', () => {
+  assert.equal(S.isObjectItself({ building: 'yes', 'disused:amenity': 'pub' }), true);
+  assert.equal(S.isObjectItself({ 'was:tourism': 'theme_park' }), true);
+  assert.equal(S.isObjectItself({ type: 'route', route: 'hiking', 'disused:tourism': 'attraction' }), false);
+  assert.equal(S.osmVerdict({ type: 'route', route: 'hiking', 'disused:tourism': 'attraction' }), null);
+  assert.notEqual(S.osmVerdict({ landuse: 'recreation_ground', 'was:leisure': 'park' })?.status, 'permanently_closed');
+  assert.notEqual(S.osmVerdict({ landuse: 'retail', disused: 'yes' })?.status, 'permanently_closed');
+});
+
+test('successors: "became X", "converted to X", "now X" — a use in lower case is not one', () => {
+  assert.equal(S.successorFromText('In 1996 the park became Legoland Windsor.'), 'Legoland Windsor');
+  assert.equal(S.successorFromText('The chapel was converted to Holloway Arts Centre in 1990.'), 'Holloway Arts Centre');
+  assert.equal(S.successorFromText('The mill is now Riverside Studios.'), 'Riverside Studios');
+  assert.equal(S.successorFromText('It became a museum in 1990.'), null);
+});
+
+test('the matching pass: one agreeing name inside the fence, or nothing', async () => {
+  const { pickMatch, namesMatch, matchFenceM } = await import('../src/sources/closedCheck.js');
+  const here = { name: 'Hidden Folly', lat: 51.45, lng: -0.6 };
+  const at = (m) => ({ lat: 51.45 + m / 111_320, lng: -0.6 });
+  assert.equal(pickMatch(here, [{ ref: 'node/1', name: 'Hidden Folly', tags: { name: 'Hidden Folly' }, ...at(80) }])?.ref, 'node/1');
+  assert.equal(pickMatch(here, [{ ref: 'node/1', tags: { name: 'Hidden Folly' }, ...at(300) }]), null, 'a node is a point: 150 m');
+  assert.equal(pickMatch(here, [{ ref: 'way/1', tags: { name: 'Hidden Folly' }, ...at(300) }])?.ref, 'way/1', 'a way is drawn at its centre: 400 m');
+  assert.equal(pickMatch(here, [{ ref: 'node/1', tags: { name: 'Hidden Folly' }, ...at(20) }, { ref: 'node/2', tags: { name: 'Hidden Folly' }, ...at(40) }]), null, 'two that both match: fail closed');
+  assert.equal(namesMatch('Windsor', 'Windsor Castle'), null);
+  assert.equal(namesMatch('Selby Abbey', 'Selby Abbey Church'), 'name_agrees');
+  assert.equal(matchFenceM('relation/5'), 400);
+});
+
+test('the check matches an unlinked atlas place to the open map, confirms it, and a missing Google match confirms nothing', async () => {
+  const { lonely, safari } = await fixture();
+  await query(`delete from atlas_osm_matches`);
+  await query(`delete from provider_matches where venue_ref = 'wikidata:Q8024695'`);
+  // Asked and nothing found: not a Google id (the first dry run read it as one).
+  await query(`insert into provider_matches (venue_ref, source, source_ref, confidence, missing) values ('wikidata:Q8024695', 'google', '', 0, true)`);
+  const near = async (lat, lng, _r, stems) => (stems.some((x) => /folly/i.test(x))
+    ? [{ ref: 'way/777', name: 'Hidden Folly', lat: lat + 0.0005, lng, tags: { name: 'Hidden Folly', historic: 'folly', building: 'yes' } }] : []);
+  const out = await runClosedCheck({ by: 'test', superclasses: async () => new Map(), today: TODAY, near, fetchClaims: async (ids) => new Map(ids.filter((q) => claims.has(q)).map((q) => [q, claims.get(q)])) });
+  assert.ok(out.osmMatched >= 1);
+  const { rows: [m] } = await query(`select osm_ref, how from atlas_osm_matches where attraction_id = $1`, [lonely]);
+  assert.equal(m.osm_ref, 'way/777');
+  assert.equal(m.how, 'same_name');
+  const folly = await repo.statusFor(`atlas:${lonely}`);
+  assert.ok(!folly || folly.confirmed, 'matched to the open map: confirmed');
+  const windsor = await repo.statusFor(`atlas:${safari}`);
+  assert.equal(windsor.confirmed, false, 'a Google match that found nothing is not a Google id');
+  assert.equal(windsor.successor.name, 'Legoland Windsor');
+  const rep = await repo.report();
+  assert.ok(Array.isArray(rep.unconfirmedByCategory));
+  assert.ok(rep.unconfirmedExamples.some((x) => x.name === 'Windsor Safari Park') || rep.examples.some((x) => x.name === 'Windsor Safari Park'));
+  assert.equal(rep.examples[0].name, 'Windsor Safari Park');
+  await query(`delete from provider_matches where venue_ref = 'wikidata:Q8024695'`);
+});
+
+// ---------------------------------------------------------------------------
+// saved or visited places that close (owner, 29 Sep 2026)
+// ---------------------------------------------------------------------------
+
+test('a closed place stays in the saved list and history, marked, and is never added to a trip', async () => {
+  const trips = await import('../src/routes/trips.js');
+  const tripsRepo = await import('../src/repositories/trips.js');
+  const atlasRepo = await import('../src/repositories/atlas.js');
+  const { household } = await aHousehold(query, 'c57 saved');
+  const shut = 'google:ChIJ_c57_saved_shut';
+  const open = 'google:ChIJ_c57_saved_open';
+  for (const [ref, label] of [[shut, 'The Old Mill'], [open, 'The New Mill']]) {
+    await query(`insert into household_places (household_id, venue_ref, label, category, country_code, locality, lat, lng) values ($1, $2, $3, 'attraction', 'GB', 'Windsor', 51.46, -0.6)`, [household.id, ref, label]);
+  }
+  await repo.setByPerson(shut, { status: 'permanently_closed', by: 'test' });
+
+  // Kept, and marked.
+  const marks = await repo.hiddenStatusesOf([shut, open]);
+  assert.equal(repo.closedBrief(marks.get(shut)).status, 'permanently_closed');
+  assert.equal(marks.get(open), undefined);
+
+  // Not suggested: the planner's reads leave it out.
+  assert.deepEqual((await atlasRepo.placedPlaces(household.id)).map((r) => r.venue_ref), [open]);
+  assert.ok(!(await atlasRepo.atlasForPrompt(household.id)).some((r) => r.label === 'The Old Mill'));
+
+  // Not seeded into a new trip.
+  const trip = (await query(`insert into trips (household_id, title, origin_label, origin_lat, origin_lng, depart_at, return_at, start_date, end_date) values ($1, 'Windsor', 'Home', 51.4, -0.6, now(), now(), '2026-10-04', '2026-10-05') returning *`, [household.id])).rows[0];
+  await tripsRepo.seedShortlistFromAtlas(trip.id, household.id, 'GB', 'Windsor');
+  assert.deepEqual((await tripsRepo.shortlistRefs(trip.id)).map(String).sort(), [open]);
+
+  // Refused when a person tries: 409 closed.
+  await assert.rejects(() => trips.addShortlistItem(trip, household, { venueRef: shut, venueLabel: 'The Old Mill' }), (e) => e.status === 409 && e.code === 'closed');
+  // Epic's own suggestion of it is dropped quietly.
+  await trips.addShortlistItem(trip, household, { venueRef: shut, venueLabel: 'The Old Mill', suggested: true });
+  assert.ok(!(await tripsRepo.shortlistRefs(trip.id)).includes(shut));
+  await tripsRepo.addAskedForPlace(trip.id, shut, 'The Old Mill', 51.46, -0.6, 'asked');
+  assert.ok(!(await tripsRepo.shortlistRefs(trip.id)).includes(shut));
+});
+
+test('a kind our walk never filed is read up its P279 chain: a kind that descends from church building is a church', async () => {
+  const { safari } = await fixture();
+  // Selby Abbey's shape, with a kind nobody filed (its real one, Q5116872, is now named outright).
+  await query(`update attractions set name = 'Selby Abbey', wikidata_id = 'Q1703400', kinds = '{Q999001}', summary = 'Selby Abbey is an Anglican parish church in Selby, North Yorkshire.' where id = $1`, [safari]);
+  const selby = entity('Q1703400', { P31: [claim(snak('Q999001'))], P576: [claim(time(1539))] });
+  const walked = [];
+  await runClosedCheck({
+    by: 'test', today: TODAY, near: async () => [],
+    superclasses: async (kinds) => { walked.push(...kinds); return new Map([['Q999001', ['Q16970', 'Q317557']]]); },
+    fetchClaims: async (ids) => new Map(ids.filter((q) => q === 'Q1703400' || claims.has(q)).map((q) => [q, q === 'Q1703400' ? selby : claims.get(q)])),
+  });
+  assert.ok(walked.includes('Q999001'));
+  const s = await repo.statusFor(`atlas:${safari}`);
+  assert.notEqual(s?.status, 'permanently_closed', 'the 1539 dissolution is history');
+  assert.match(String(s?.reason), /^history:/);
+});
+
+test('a row an earlier check wrote on a rule that is gone is read again, not left standing', async () => {
+  await fixture();
+  await repo.propose({ ref: 'osm:way/c57-va', status: 'permanently_closed', source: 'osm', reason: 'ended 1862', evidence: 'end_date=1862' });
+  await runClosedCheck({ by: 'test', today: TODAY, near: async () => [], superclasses: async () => new Map(), fetchClaims: async () => new Map() });
+  const s = await repo.statusFor('osm:way/c57-va');
+  assert.equal(s.status, 'unknown');
+  assert.equal(s.reason, null);
 });

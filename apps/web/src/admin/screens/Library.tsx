@@ -830,7 +830,27 @@ function Closed({ canManage }: { canManage: boolean }) {
           </Row>
         )) : <Text style={type.small}>Nothing would be hidden.</Text>}
       </Panel>
-      <Panel title="Examples" sub={data ? `${plural(data.examples.length, 'place')}` : undefined} padded={false}>
+      {data?.unconfirmedByCategory?.length ? (
+        <Panel title="Unconfirmed, by kind" sub={`${count(data.openMapMatches ?? 0)} matched to the open map`}>
+          {data.unconfirmedByCategory.map((r) => (
+            <Row key={r.filed} style={styles.closedRow}>
+              <Text style={[type.small, { flex: 1, minWidth: 0 }]} numberOfLines={1}>{r.filed}</Text>
+              <Text style={[type.small, { fontWeight: '800' }]}>{count(r.n)}</Text>
+            </Row>
+          ))}
+        </Panel>
+      ) : null}
+      {data?.reviewByReason?.length ? (
+        <Panel title="For review, by reason">
+          {data.reviewByReason.map((r, i) => (
+            <Row key={i} style={styles.closedRow}>
+              <Text style={[type.small, { flex: 1, minWidth: 0 }]} numberOfLines={2}>{`${r.reason} · ${r.source}`}</Text>
+              <Text style={[type.small, { fontWeight: '800' }]}>{count(r.n)}</Text>
+            </Row>
+          ))}
+        </Panel>
+      ) : null}
+      <Panel title="Closed" sub={data ? `${plural(data.examples.length, 'place')}` : undefined} padded={false}>
         {(data?.examples ?? []).map((x) => (
           <View key={x.ref} style={styles.closedExample}>
             <Row style={{ gap: spacing.xs, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -845,6 +865,20 @@ function Closed({ canManage }: { canManage: boolean }) {
           </View>
         ))}
       </Panel>
+      {data?.unconfirmedExamples?.length ? (
+        <Panel title="Unconfirmed" sub={plural(data.unconfirmedExamples.length, 'place')} padded={false}>
+          {data.unconfirmedExamples.map((x) => (
+            <View key={x.ref} style={styles.closedExample}>
+              <Row style={{ gap: spacing.xs, flexWrap: 'wrap', alignItems: 'center' }}>
+                <Text style={[type.small, { fontWeight: '700' }]}>{x.name ?? x.ref}</Text>
+                {x.where ? <Text style={type.tiny}>{x.where}</Text> : null}
+                {x.filed ? <Pill label={x.filed} /> : null}
+              </Row>
+              {x.reason ? <Text style={type.tiny}>{[x.reason, x.source].filter(Boolean).join(' · ')}</Text> : null}
+            </View>
+          ))}
+        </Panel>
+      ) : null}
     </>
   );
 }

@@ -663,7 +663,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                   <Press onPress={sharePlace} style={styles.heroTile} accessibilityRole="button" accessibilityLabel={`Share ${item.name}`}>
                     <Icon name={shared ? 'check' : 'upload'} size={18} color={INK} />
                   </Press>
-                  {onShortlist ? (
+                  {onShortlist && !closedAs ? (
                     <Press onPress={keep} style={[styles.heroTile, shortlisted && styles.heroTileOn]} accessibilityRole="button" accessibilityState={{ selected: !!shortlisted }} accessibilityLabel={shortlisted ? `Take ${item.name} off the shortlist` : `Save ${item.name}`}>
                       <Pulse pulse={heartPulse} size={28} color={INK} />
                       <Icon name="shortlist" size={18} color={INK} fill fillColor={shortlisted ? LIME : CREAM} strokeWidth={2} />
@@ -680,7 +680,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
               {/* No photograph, no tiles to sit on: the heart takes the corner
                   beside the title instead, so a swept restaurant or an atlas
                   place with no picture can still be kept (Codex, 8 Sep 2026). */}
-              {!hero && onShortlist ? (
+              {!hero && onShortlist && !closedAs ? (
                 <Press onPress={keep} style={[styles.heroTile, styles.bareHeart, shortlisted && styles.heroTileOn]} accessibilityRole="button" accessibilityState={{ selected: !!shortlisted }} accessibilityLabel={shortlisted ? `Take ${item.name} off the shortlist` : `Save ${item.name}`}>
                   <Pulse pulse={heartPulse} size={28} color={INK} />
                   <Icon name="shortlist" size={18} color={INK} fill fillColor={shortlisted ? LIME : CREAM} strokeWidth={2} />
@@ -754,7 +754,13 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
           </View>
 
           {closedAs ? (
-            <View style={{ flex: 1 }} />
+            // A closed place the household kept or went to stays theirs: its
+            // history and their own side of it, and nothing to add it to
+            // (owner, 29 Sep 2026). For anyone else it is the word "Closed".
+            <ScrollView contentContainerStyle={{ gap: spacing.md, padding: spacing.lg }}>
+              {been ? <FamilyVerdict visits={visits ?? []} members={ctl.members} /> : null}
+              {ours}
+            </ScrollView>
           ) : shown === 'menu' ? (
             <View style={{ flex: 1 }}><MenuPanel ctl={ctl} onOrder={() => setTab('order')} /></View>
           ) : shown === 'order' ? (

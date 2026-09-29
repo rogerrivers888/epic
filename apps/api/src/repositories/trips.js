@@ -9,6 +9,7 @@
 
 import { query } from '../db.js';
 import * as providerCalls from './providerCalls.js';
+import { SHOWN_REF } from './placeStatus.js';
 
 /** The transaction's client if there is one, otherwise the pool. */
 const on = (client) => (client ? (text, params) => client.query(text, params) : query);
@@ -371,6 +372,8 @@ export async function seedShortlistFromAtlas(tripId, householdId, countryCode, l
      select $1, hp.venue_ref, hp.label, coalesce(hp.kind, 'other'), hp.category, hp.lat, hp.lng, hp.venue, hp.note
        from household_places hp
       where hp.household_id = $2 and hp.country_code = $3 and coalesce(hp.locality, '') = coalesce($4, '')
+        -- A closed place, once applied, stays in the household's list but seeds no trip (C57).
+        and ${SHOWN_REF('hp.venue_ref')}
         and not exists (select 1 from place_ledger l
                          where l.household_id = $2 and l.source || ':' || l.source_place_id = hp.venue_ref
                            and l.status = 'dismissed' and l.created_at > hp.last_seen)
@@ -633,6 +636,7 @@ export async function seedStayShortlist(tripId, householdId, countryCode, locali
      select $1, hp.venue_ref, hp.label, coalesce(hp.kind, 'other'), hp.category, hp.lat, hp.lng, hp.venue, hp.note
        from household_places hp
       where hp.household_id = $2 and hp.country_code = $3 and coalesce(hp.locality, '') = coalesce($4, '')
+        and ${SHOWN_REF('hp.venue_ref')}
      on conflict (trip_id, venue_ref) do nothing`,
     [tripId, householdId, countryCode, locality],
   );
@@ -642,7 +646,8 @@ export async function seedStayShortlist(tripId, householdId, countryCode, locali
 export async function addAskedForPlace(tripId, venueRef, label, lat, lng, note) {
   await query(
     `insert into trip_shortlist (trip_id, venue_ref, venue_label, kind, category, lat, lng, note, must_do)
-     values ($1,$2,$3,'activity','attraction',$4,$5,$6,true) on conflict (trip_id, venue_ref) do nothing`,
+     select $1,$2,$3,'activity','attraction',$4,$5,$6,true where ${SHOWN_REF('$2::text')}
+     on conflict (trip_id, venue_ref) do nothing`,
     [tripId, venueRef, label, lat, lng, note],
   );
 }
@@ -650,7 +655,8 @@ export async function addAskedForPlace(tripId, venueRef, label, lat, lng, note) 
 export async function addPlannedShortlistItem(tripId, c) {
   await query(
     `insert into trip_shortlist (trip_id, venue_ref, venue_label, kind, category, lat, lng, must_do)
-     values ($1,$2,$3,$4,$5,$6,$7,$8) on conflict (trip_id, venue_ref) do nothing`,
+     select $1,$2,$3,$4,$5,$6,$7,$8 where ${SHOWN_REF('$2::text')}
+     on conflict (trip_id, venue_ref) do nothing`,
     [tripId, c.venueRef, c.name, c.kind, c.category ?? null, c.lat ?? null, c.lng ?? null, c.mustDo],
   );
 }

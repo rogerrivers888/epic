@@ -27,6 +27,7 @@ import { fillRatings, needsRating, ratingKept } from '../sources/rentedRating.js
 import { recordsFor } from '../repositories/ownedPlaces.js';
 import { fileUnder } from '../domain/fileUnder.js';
 import { stampImage } from '../sources/photoLinks.js';
+import { closedBrief, hiddenStatusesOf } from '../repositories/placeStatus.js';
 
 /**
  * A stored picture in the shape a card draws. `credit` travels with it because
@@ -374,6 +375,11 @@ atlas.get('/places', async (req, res, next) => {
     // still the word in the ledger, and still answered, so an address somebody
     // shared last week does not break.
     if (status) places = places.filter((p) => (status === 'special' || status === 'loved' ? p.special : p.status === status));
+    // A saved or visited place that has closed stays in the household's own
+    // list, marked "Closed" with "Now: …" (C57, owner, 29 Sep 2026) — only
+    // once the owner has applied the check.
+    const closedHere = await hiddenStatusesOf(places.map((p) => p.venueRef)).catch(() => new Map());
+    places = places.map((p) => ({ ...p, closed: closedBrief(closedHere.get(p.venueRef)) }));
     // Where a place is, and what kind of place it is, are looked up lazily a few
     // rows per read, after the response has gone; the web asks again shortly
     // while any row is still waiting.

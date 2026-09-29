@@ -135,6 +135,8 @@ const qs = (o: Record<string, any>) => {
 
 /** Open or closed (decision C57). `unknown` is a real answer: nobody has established it either way. */
 export type OpenStatusValue = 'open' | 'temporarily_closed' | 'permanently_closed' | 'unknown';
+/** The two words a household's own list shows for a place that has closed: the status and "Now: …". */
+export type ClosedMark = { status: OpenStatusValue; confirmed: boolean; successor: { ref: string | null; name: string | null } | null };
 export type PlaceOpenStatusBrief = {
   status: OpenStatusValue; hidden: boolean; confirmed: boolean; reason: string | null;
   source: 'wikidata' | 'osm' | 'wikipedia' | 'listing' | 'google' | 'person' | null;
@@ -147,16 +149,21 @@ export type PlaceOpenStatus = PlaceOpenStatusBrief & {
 export type ClosedExample = {
   ref: string; name: string | null; where: string | null; status: OpenStatusValue; confirmed: boolean; reason: string | null;
   source: string | null; evidence: string | null; review: boolean; successor: { ref: string | null; name: string | null } | null; applied: boolean;
+  filed?: string | null;
 };
 export type ClosedReport = {
   running: { id: string; startedAt: string } | null;
   check: { id: string; state: string; started_at: string; finished_at: string | null; counts: Record<string, unknown>; error: string | null } | null;
-  totals: { would_hide: number; would_hide_closed: number; would_hide_unconfirmed: number; hidden_now: number; review: number; with_successor: number; rows: number };
+  totals: { would_hide: number; would_hide_closed: number; would_hide_unconfirmed: number; hidden_now: number; review: number; with_successor: number; history?: number; rows: number };
   byStatus: { status: OpenStatusValue; confirmed: boolean; applied: boolean; n: number }[];
   byReason: { hidden_as: string; source: string; reason: string; n: number }[];
   bySource: { source: string; status: OpenStatusValue; n: number }[];
   examples: ClosedExample[];
   review: ClosedExample[];
+  reviewByReason?: { reason: string; source: string; n: number }[];
+  unconfirmedByCategory?: { filed: string; n: number }[];
+  unconfirmedExamples?: ClosedExample[];
+  openMapMatches?: number;
 };
 export type ConstraintKind = 'allergen' | 'diet' | 'dislike' | 'like';
 export type Constraint = { id: string; kind: ConstraintKind; value: string; conceptKey: string | null; conceptKind: string | null; maxMinutes?: number | null; favourite?: boolean };
@@ -507,6 +514,8 @@ export type VisitTake = { id?: string; memberId: string; member?: string; subjec
  */
 export type VisitTakeInput = { memberId: string; subject: string; take: Take | null; comment: string | null; conceptKey?: string | null; score?: number | null };
 export type Visit = {
+  /** Closed, once the owner has applied the check (C57): the visit stays in the history, marked. */
+  closed?: ClosedMark | null;
   id: string; venueRef: string; venueLabel: string; category: string | null; lat: number | null; lng: number | null;
   visitedOn: string; note: string | null; country: string | null; countryCode: string | null; locality: string | null;
   tripId: string | null; stopId?: string | null;
@@ -675,7 +684,10 @@ export type SearchAnswer = { near: Place; radiusKm: number; results: (Venue & { 
   /** How many of the results are the household's own records, served because they cannot go down. */ storedCount?: number;
   cached?: boolean; fetchedAt?: string; tookMs?: number };
 
-export type AtlasPlace = { venueRef: string; name: string; unnamed?: boolean; kind: 'food' | 'activity' | 'other' | null; category: string | null; lat: number | null; lng: number | null; country: string | null; countryCode: string | null; locality: string | null; venue: Partial<Venue> | null; note: string | null; visits: number; lastOn: string | null; takes: { member: string; take: Take; comment: string | null; on: string }[]; ledger: string | null; onTrips: { id: string; title: string | null; on: string | null }[]; status: 'been' | 'saved' | 'special'; special: boolean; loved: number; notForMe: number;
+export type AtlasPlace = {
+  /** Closed, once the owner has applied the check (C57): kept in the list, marked, never added to a trip. */
+  closed?: ClosedMark | null;
+  venueRef: string; name: string; unnamed?: boolean; kind: 'food' | 'activity' | 'other' | null; category: string | null; lat: number | null; lng: number | null; country: string | null; countryCode: string | null; locality: string | null; venue: Partial<Venue> | null; note: string | null; visits: number; lastOn: string | null; takes: { member: string; take: Take; comment: string | null; on: string }[]; ledger: string | null; onTrips: { id: string; title: string | null; on: string | null }[]; status: 'been' | 'saved' | 'special'; special: boolean; loved: number; notForMe: number;
   /** Each person's latest score out of 5 here. */ scores: { memberId: string; member: string; score: number; on: string }[];
   /** Where it is at a glance: postcode district and the nearest station with its lines; null until looked up. */ postcode: string | null; station: string | null; stationLines: string[]; stationKind: string | null; stationDistanceM: number | null; whereChecked: string | null;
   /** The picture Epic owns for this place, if the ladder found one. */ image?: OwnedImage | null;
