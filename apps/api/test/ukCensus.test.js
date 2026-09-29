@@ -977,3 +977,15 @@ test('a charge lifted before the next day existed is not held against that day, 
   assert.notEqual(k.value.districts, null);
   assert.equal(k.value.newPlaces, 7, 'and keeps what else it held');
 });
+
+test('a late charge after the finish is on the status, to be looked at and lifted', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne({ state: 'done', problem: null });
+  await query(`insert into bo_settings (key, value, updated_by) values ('census:uk-complete', '{}', 'test')`);
+  await billed('2026-09-28', 'google-pro', 0.5);
+  const st = await uk.status(new Date('2026-10-01T08:00:00Z'));
+  assert.equal(st.complete, true);
+  assert.equal(st.halted?.kind, 'net');
+  await uk.liftHold({ who: 'test' });
+  assert.equal((await uk.status(new Date('2026-10-01T09:00:00Z'))).halted, null, 'and gone once lifted');
+});

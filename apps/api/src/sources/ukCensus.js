@@ -555,7 +555,10 @@ export async function status(now = new Date()) {
   const perTile = tilesAsked ? requests / tilesAsked : null;
   return {
     action: d.action,
-    halted: d.action === 'halted' ? { day: d.over.day, kind: d.over.kind, googleGbp: d.over.google_gbp, placesNetGbp: d.over.places_net_gbp ?? 0 } : null,
+    // A stop, or a late charge after the finish — shown either way, so it can
+    // be looked at and lifted from the screen (Codex, 29 Sep 2026).
+    halted: (d.action === 'halted' || (d.action === 'complete' && d.over))
+      ? { day: d.over.day, kind: d.over.kind, googleGbp: d.over.google_gbp, placesNetGbp: d.over.places_net_gbp ?? 0 } : null,
     // What holds it, so the screen can say so beside "Lift the hold".
     held: d.action === 'held' ? { day: d.yesterday.day, censusGbp: d.yesterday.census_gbp } : null,
     complete: d.action === 'complete',
