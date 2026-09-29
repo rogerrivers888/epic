@@ -160,11 +160,9 @@ export async function decide(now = new Date()) {
   // its failed squares set aside, and the UK is not done while they are
   // unasked. A day that ended so is followed by another, which tries them
   // again (Codex, 28 Sep 2026).
-  const { rows: [{ failed }] } = latest.state === 'done'
-    ? await query(
-      `select count(*)::int as failed from census_run_tiles m join census_tiles t on t.grid_key = m.grid_key
-        where m.run_id = $1 and t.state <> 'done'`, [latest.id])
-    : { rows: [{ failed: 0 }] };
+  // Read from the run's own record, written when it finished — not from the
+  // squares, which a later census may already have reused (Codex, 29 Sep 2026).
+  const failed = latest.state === 'done' ? Math.max(0, Number(latest.tiles_total ?? 0) - Number(latest.tiles_done ?? 0)) : 0;
   // Complete is said once and kept: the squares a finished UK leaves behind
   // are reused by later censuses, and reading them again would un-finish it
   // and start another whole-UK day (Codex, 29 Sep 2026).
@@ -381,7 +379,8 @@ export async function status(now = new Date()) {
   const { rows: [l] } = await query(
     `select count(*) filter (where t.state <> 'done')::int as left
        from census_run_tiles m join census_tiles t on t.grid_key = m.grid_key where m.run_id = $1`, [latest.id]);
-  const left = l.left;
+  // Complete is complete: nothing left, whatever later censuses do to the squares.
+  const left = d.action === 'complete' ? 0 : l.left;
   const perTile = tilesAsked ? requests / tilesAsked : null;
   return {
     action: d.action,
@@ -392,7 +391,7 @@ export async function status(now = new Date()) {
     requestsPerTile: perTile == null ? null : Math.round(perTile),
     // A floor on the days: the measured rate so far is the rural south-west,
     // and the cities to come split further.
-    daysLeft: perTile == null ? null : Math.max(left ? 1 : 0, Math.ceil((left * perTile) / DAY_REQUESTS)),
+    daysLeft: d.action === 'complete' ? 0 : perTile == null ? null : Math.max(left ? 1 : 0, Math.ceil((left * perTile) / DAY_REQUESTS)),
     days,
   };
 }

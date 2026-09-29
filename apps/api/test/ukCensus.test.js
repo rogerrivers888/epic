@@ -135,7 +135,7 @@ test('a person\'s stop is not undone, and a finished UK is complete', async (t) 
   const run = await dayOne({ state: 'stopped', problem: null });
   const r = recorder();
   assert.equal((await uk.tick({ now: new Date('2026-09-30T08:00:00Z'), start: r.start })).action, 'stopped');
-  await query(`update census_runs set state = 'done' where id = $1`, [run.id]);
+  await query(`update census_runs set state = 'done', tiles_done = tiles_total where id = $1`, [run.id]);
   assert.equal((await uk.tick({ now: new Date('2026-09-30T08:00:00Z'), start: r.start })).action, 'complete');
   assert.equal(r.calls.length, 0);
 });
@@ -508,6 +508,7 @@ test('the UK once complete stays complete, whatever later censuses do to its squ
     await clean();
   });
   const run = await dayOne({ state: 'done', problem: null });
+  await query('update census_runs set tiles_done = tiles_total where id = $1', [run.id]);
   await query(
     `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at)
      values ('uktest/whole', 48, -6, 48.08, -5.88, array['ZZ6Q'], 'done', now()) on conflict (grid_key) do update set state = 'done'`);
@@ -640,4 +641,24 @@ test('a notice Postmark refused is tried again at once', async (t) => {
   let sent = 0;
   await uk.notify({ subject, send: async () => { sent += 1; return { sent: true }; }, configured: () => true });
   assert.equal(sent, 1);
+});
+
+test('a finished UK reads complete from its own record, and has nothing left', async (t) => {
+  await clean();
+  t.after(async () => {
+    await query(`delete from census_run_tiles where grid_key = 'uktest/reused'`);
+    await query(`delete from census_tiles where grid_key = 'uktest/reused'`);
+    await clean();
+  });
+  const run = await dayOne({ state: 'done', problem: null });
+  await query('update census_runs set tiles_done = tiles_total where id = $1', [run.id]);
+  // Before the tick saw it, a later census took one of its squares again.
+  await query(
+    `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state)
+     values ('uktest/reused', 48, -6, 48.08, -5.88, array['ZZ5Q'], 'todo') on conflict (grid_key) do update set state = 'todo'`);
+  await query(`insert into census_run_tiles (run_id, grid_key) values ($1, 'uktest/reused')`, [run.id]);
+  const r = recorder();
+  assert.equal((await uk.tick({ now: new Date('2026-10-20T08:00:00Z'), start: r.start })).action, 'complete');
+  const st = await uk.status(new Date('2026-10-20T09:00:00Z'));
+  assert.deepEqual([st.complete, st.tilesLeft, st.daysLeft], [true, 0, 0]);
 });
