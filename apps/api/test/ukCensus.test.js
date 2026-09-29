@@ -17,7 +17,7 @@ test.after(() => pool.end());
 
 const DAY1 = '2026-09-28T17:39:00Z';
 const clean = async () => {
-  await query(`delete from bo_settings where key like 'census:uk-day:%' or key = 'census:uk-complete'`);
+  await query(`delete from bo_settings where key like 'census:uk-day:%' or key in ('census:uk-complete', 'census:uk-hold-lifted')`);
   await query(`delete from census_runs where label like 'The rest of the UK — day %'`);
   await query(`delete from billing_days where invoice_month = '202609' and sku like 'test %'`);
   await query(`delete from api_sessions where label like 'census: The rest of the UK — day %'`);
@@ -661,4 +661,14 @@ test('a finished UK reads complete from its own record, and has nothing left', a
   assert.equal((await uk.tick({ now: new Date('2026-10-20T08:00:00Z'), start: r.start })).action, 'complete');
   const st = await uk.status(new Date('2026-10-20T09:00:00Z'));
   assert.deepEqual([st.complete, st.tilesLeft, st.daysLeft], [true, 0, 0]);
+});
+
+test('a person lifts the hold, and only a later bill holds it again', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  await billed('2026-09-28', 'google-essentials', 2);
+  const r = recorder();
+  assert.equal((await uk.tick({ now: new Date('2026-09-30T08:00:00Z'), start: r.start })).action, 'held');
+  await uk.liftHold({ who: 'test', now: new Date('2026-09-30T09:00:00Z') });
+  assert.equal((await uk.tick({ now: new Date('2026-09-30T10:00:00Z'), start: r.start })).action, 'start');
 });

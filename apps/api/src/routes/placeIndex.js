@@ -3758,6 +3758,16 @@ router.get('/census/uk', requires('view_library'), async (_req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/** Lift the UK census's billing hold, having looked at the bill (sources/ukCensus.js). */
+router.post('/census/uk/lift', requires('manage_library'), async (req, res, next) => {
+  try {
+    const { liftHold } = await import('../sources/ukCensus.js');
+    const out = await liftHold({ who: actor(req).actorLabel ?? null });
+    await writeAudit({ ...actor(req), action: 'census.uk.lift', subjectType: 'region', subjectId: 'uk', subjectLabel: 'The rest of the UK', after: out });
+    res.json(out);
+  } catch (err) { next(err); }
+});
+
 router.get('/census/report', requires('view_library'), async (req, res, next) => {
   try {
     const out = await censusRun.report(req.query.runId ? String(req.query.runId) : null);

@@ -199,14 +199,19 @@ export async function decide(now = new Date()) {
   if (pacificDay(latest.started_at) >= pacificDay(now)) return { action: 'today', runs, latest, bills };
   // Any day of the programme, not only the latest: a census bill that
   // arrives late for an earlier day holds it just the same (Codex, 29 Sep 2026).
-  const pricey = real.map((r) => billedFor(bills, pacificDay(r.started_at))).find((b) => b && b.census_gbp >= PENNIES_GBP);
+  // Except days a person has looked at and lifted the hold over (POST
+  // /census/uk/lift): only a bill nobody has seen holds it (Codex, 29 Sep 2026).
+  const { rows: [lifted] } = await query(`select value from bo_settings where key = 'census:uk-hold-lifted'`);
+  const liftedThrough = lifted?.value?.through ?? '';
+  const pricey = real.map((r) => billedFor(bills, pacificDay(r.started_at)))
+    .find((b) => b && b.census_gbp >= PENNIES_GBP && b.day > liftedThrough);
   if (pricey) return { action: 'held', runs, latest, bills, yesterday: pricey };
   const yesterday = billedFor(bills, pacificDay(latest.started_at));
   // Held stays held. The owner's rule for the gate (28 Sep 2026): "If it's
   // anything meaningful: stay paused and report the figure." A census that
   // cost money means the free assumption is wrong, and the next day would
   // spend it again; only a person lifts it — by starting a run by hand.
-  if (yesterday && yesterday.census_gbp >= PENNIES_GBP) return { action: 'held', runs, latest, bills, yesterday };
+  // (The latest day is among those just read, lifted or not.)
   // Another census live, or a plan being written: wait, rather than make the
   // day's session and be refused (Codex, 29 Sep 2026).
   const { rows: other } = await query(
@@ -465,4 +470,18 @@ export async function daily(now = new Date()) {
   }
   if (st.complete) await notify({ subject: 'Census — the rest of the UK is complete', text: st.days.map((d) => reportLine(d)).join('\n') });
   return { ...out, status: st };
+}
+
+/**
+ * A person lifts the hold: every census day billed so far is seen, and only a
+ * later one above pennies holds the programme again. Written down with who
+ * lifted it and when.
+ */
+export async function liftHold({ who = null, now = new Date() } = {}) {
+  const through = pacificDay(now);
+  await query(
+    `insert into bo_settings (key, value, updated_by) values ('census:uk-hold-lifted', $1, $2)
+     on conflict (key) do update set value = excluded.value, updated_by = excluded.updated_by, updated_at = now(), version = bo_settings.version + 1`,
+    [JSON.stringify({ through, at: new Date(now).toISOString() }), who]);
+  return { through };
 }
