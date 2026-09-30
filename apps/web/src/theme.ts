@@ -25,7 +25,6 @@
 // StyleSheet keeps working.
 
 import { Platform } from 'react-native';
-import { storage } from './storage';
 
 export type ThemeName = 'light' | 'dark';
 export type ThemePref = ThemeName | 'system';
@@ -290,9 +289,10 @@ export const colors: typeof LIGHT = isWeb
 
 export const THEME_KEY = 'epic.theme';
 export const getThemePref = (): ThemePref => {
+  if (!isWeb || typeof localStorage === 'undefined') return 'light';
   // A device that last ran under the old name kept this as `roam.theme`;
   // `src/rename.ts` has already moved it by the time anything here runs.
-  const v = storage.getItem(THEME_KEY);
+  const v = localStorage.getItem(THEME_KEY);
   return v === 'dark' || v === 'light' || v === 'system' ? v : 'system';
 };
 const systemTheme = (): ThemeName => (isWeb && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
@@ -316,7 +316,7 @@ export function applyTheme(name: ThemeName = resolveTheme()) {
 }
 
 export function setThemePref(pref: ThemePref) {
-  storage.setItem(THEME_KEY, pref);
+  if (isWeb && typeof localStorage !== 'undefined') localStorage.setItem(THEME_KEY, pref);
   applyTheme(resolveTheme(pref));
 }
 
@@ -331,11 +331,12 @@ export function setThemePref(pref: ThemePref) {
 export type AdminThemePref = ThemeName | 'follow';
 export const ADMIN_THEME_KEY = 'epic.theme.admin';
 export const getAdminThemePref = (): AdminThemePref => {
-  const v = storage.getItem(ADMIN_THEME_KEY);
+  if (!isWeb || typeof localStorage === 'undefined') return 'dark';
+  const v = localStorage.getItem(ADMIN_THEME_KEY);
   return v === 'dark' || v === 'light' || v === 'follow' ? v : 'dark';
 };
 export function setAdminThemePref(pref: AdminThemePref) {
-  storage.setItem(ADMIN_THEME_KEY, pref);
+  if (isWeb && typeof localStorage !== 'undefined') localStorage.setItem(ADMIN_THEME_KEY, pref);
   applyTheme(pref === 'follow' ? resolveTheme() : pref);
 }
 

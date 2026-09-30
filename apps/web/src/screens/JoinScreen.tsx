@@ -79,12 +79,19 @@ export function JoinScreen({ token, preview, onExit }: {
   const { width } = useViewport();
   const { query, href, navigate } = useRouter();
   const [me, setMe] = useState<string | null>(() => (preview ? null : remembered(token)));
-  // Warm the credential from the secure store on the phone, where the sync read
-  // above misses (the Keychain is async). A no-op on the web, where it hit.
+  // On the web the credential above was read synchronously, so the first load can
+  // go straight away; on the phone the Keychain is async, so hold the load until
+  // it has been read — otherwise the public and the participant requests race and
+  // the public one, finishing last, drops them back on the landing.
+  const [credReady, setCredReady] = useState(preview || Platform.OS === 'web');
   useEffect(() => {
-    if (preview || me) return;
+    if (preview || Platform.OS === 'web') return;
     let live = true;
-    secureStorage.getAsync(partKey(token)).then((held) => { if (live && held) setMe(held); });
+    secureStorage.getAsync(partKey(token)).then((held) => {
+      if (!live) return;
+      if (held) setMe(held);
+      setCredReady(true);
+    });
     return () => { live = false; };
   }, [preview, token]); // eslint-disable-line react-hooks/exhaustive-deps
   const [v, setV] = useState<JoinView | null>(null);
@@ -119,7 +126,7 @@ export function JoinScreen({ token, preview, onExit }: {
       else if (!moved && !preview && !r.you && (r.group.closed || (r.invite.placesLeft != null && r.invite.placesLeft <= 0))) setStage('full');
     } catch (e: any) { setError(e.message); }
   }, [token, me, moved]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (credReady) load(); }, [load, credReady]);
 
   const act = async (fn: () => Promise<JoinView>) => {
     setBusy(true);
