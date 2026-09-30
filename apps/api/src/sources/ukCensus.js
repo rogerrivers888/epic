@@ -754,7 +754,9 @@ export async function daily(now = new Date(), { send, ...tickWith } = {}) {
   const runsNow = await programme();
   const latest = runsNow[runsNow.length - 1];
   const running = ['running', 'waiting'].includes(latest?.state);
-  const stopped = ['halted', 'held', 'complete'].includes(out.action);
+  // Stopped on purpose, waiting for a person: said once by its own alert,
+  // never again every day as a missing run (Codex, 30 Sep 2026).
+  const stopped = ['halted', 'held', 'complete', 'stopped'].includes(out.action);
   // A stall: a running day that has not moved for an hour.
   if (latest?.state === 'running' && latest.last_seen_at
       && now.getTime() - new Date(latest.last_seen_at).getTime() > STALL_MINUTES * 60_000) {
@@ -763,11 +765,12 @@ export async function daily(now = new Date(), { send, ...tickWith } = {}) {
   }
   // Or a quota day with no run of its own three hours after it began.
   const todays = latest && pacificDay(latest.started_at) === pacificDay(now);
-  // Not while another process holds the scheduler or is writing today's plan
-  // (Codex, 30 Sep 2026): that is a day being started, not a day missing.
-  const starting = out.action === 'busy'
-    || (latest?.state === 'paused' && /^built paused/.test(latest.problem ?? '')
-        && now.getTime() - new Date(latest.last_seen_at ?? latest.started_at).getTime() < 15 * 60_000);
+  // Not while today's plan is being written — a day being started, not a day
+  // missing (Codex, 30 Sep 2026). Judged by the plan's own heartbeat, not by
+  // the scheduler's lock being held: a lock held by a hung process would
+  // otherwise hide the stall for ever (Codex, same day).
+  const starting = latest?.state === 'paused' && /^built paused/.test(latest.problem ?? '')
+    && now.getTime() - new Date(latest.last_seen_at ?? latest.started_at).getTime() < 15 * 60_000;
   if (!stopped && !running && !todays && !starting && pacificHour(now) >= START_GRACE_HOURS) {
     await tell(`Census stalled: no run for ${pacificDay(now)}`,
       `Google's day ${pacificDay(now)} began ${START_GRACE_HOURS}+ hours ago and the census has not started it. The scheduler says: ${out.action}${out.why ? ` — ${out.why}` : ''}.\n\n${lines}`);

@@ -1142,3 +1142,17 @@ test('the penny alarm and a Google refusal are each a failure, e-mailed once', a
   assert.ok(box2.got.some((m) => /^Census failed/.test(m.subject) && /429 RESOURCE_EXHAUSTED/.test(m.text)), box2.got.map((m) => m.subject).join(' | '));
   void run;
 });
+
+test('a run stopped for a person is not a missing day, day after day', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne({ state: 'paused', started: '2026-09-29T07:05:00Z', finished: '2026-09-29T09:00:00Z',
+    problem: 'stopped on the first penny: the census ledgered $0.0320, and IDs Only is free — something is asking Google for a field the census may not buy' });
+  const box = mailbox();
+  const r = recorder();
+  for (const at of ['2026-09-30T12:00:00Z', '2026-10-01T12:00:00Z']) {
+    const out = await uk.daily(new Date(at), { send: box.send, start: r.start, quota: async () => ({ speaks: true, limit: 75000 }) });
+    assert.equal(out.action, 'stopped');
+  }
+  assert.equal(r.calls.length, 0);
+  assert.ok(!box.got.some((m) => /^Census stalled/.test(m.subject)), box.got.map((m) => m.subject).join(' | '));
+});
