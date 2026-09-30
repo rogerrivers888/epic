@@ -485,9 +485,15 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
     // from TripAdvisor, an event adapter (some synthesise one from ticket
     // prices), or a fixture means something else, so it is not sent — it would
     // read as a Google band it is not (Codex). No Google level → "not known yet".
-    const levelSource = venue?.priceLevel != null ? (venue.provenance?.priceLevel?.source ?? venue.source)
-      : item.priceLevel != null ? (item.provenance?.priceLevel?.source ?? item.source ?? item.venueRef.split(':')[0]) : null;
-    const level = levelSource === 'google' ? (venue?.priceLevel ?? item.priceLevel ?? null) : null;
+    // The first price level whose source is Google, detail before card — not
+    // the detail's level unconditionally: a merged place can load a non-Google
+    // detail while the card still holds a valid Google level, and preferring the
+    // detail's would throw the Google one away and read "not known yet" (Codex).
+    const venueLevelGoogle = venue?.priceLevel != null
+      && (venue.provenance?.priceLevel?.source ?? venue.source) === 'google';
+    const itemLevelGoogle = item.priceLevel != null
+      && (item.provenance?.priceLevel?.source ?? item.source ?? item.venueRef.split(':')[0]) === 'google';
+    const level = venueLevelGoogle ? venue!.priceLevel! : itemLevelGoogle ? item.priceLevel! : null;
     let live = true;
     api.costBand({ country, level }).then((d) => { if (live) setCost(d); }).catch(() => { if (live) setCost(null); });
     return () => { live = false; };
