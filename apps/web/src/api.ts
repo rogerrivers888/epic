@@ -2332,7 +2332,7 @@ export const api = {
   trip: (id: string) => request<TripDetail>(`/api/trips/${id}`),
   tripPlaces: (id: string) => request<{ places: TripPlace[]; counts: { all: number; do: number; eat: number; stay: number } }>(`/api/trips/${id}/places`),
   /** Everywhere you could stop along the way. Nothing is routed: see TripAlongPlace. */
-  tripAlong: (id: string, p: { kind: 'food' | 'things'; maxDetourMin?: number; around?: string; aroundName?: string; q?: string }) =>
+  tripAlong: (id: string, p: { kind: 'food' | 'things'; maxDetourMin?: number; around?: string; aroundName?: string; q?: string; mode?: string }) =>
     request<{ queryId?: string | null; origin: Place; destination: Place | null; mode: string; kind: string; maxDetourMin: number; hasRoute: boolean; around: { lat: number; lng: number; label: string | null } | null; moods?: { key: string; label: string }[]; places: TripAlongPlace[]; counts: { route: number }; beyond: number; corridorKm: number | null; estimated: boolean; degradedSources: { source: string; error: string }[] }>(`/api/trips/${id}/along${qs(p as any)}`),
   /** Who is coming. Tickets, table sizes and the car all follow this (handoff §12). */
   setTripAttendees: (tripId: string, memberIds: string[]) => put<TripDetail>(`/api/trips/${tripId}/attendees`, { memberIds }),

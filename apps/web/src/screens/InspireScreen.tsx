@@ -393,7 +393,12 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
     } finally {
       setLoading(false);
     }
-  }, [centre?.lat, centre?.lng, centre?.label, travelBy, Boolean(chosen)]);
+    // `travel` (the range, in minutes) was missing here, so changing 30 min →
+    // 1 h → 2 h never re-requested the API and the census count stayed on the
+    // first fetch's value — the "changing the time does nothing" regression
+    // (owner, 30 Sep 2026). The minutes are sent (above); a change just never
+    // re-ran the fetch. Mode (`travelBy`) was already a dependency.
+  }, [centre?.lat, centre?.lng, centre?.label, travelBy, travel, Boolean(chosen)]);
 
   useEffect(() => { void load(); }, [load]);
 

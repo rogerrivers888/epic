@@ -35,7 +35,7 @@ import { useViewport } from '../hooks/useViewport';
 import { flyHeart } from '../components/epicHeart';
 import { searchGround } from '../components/searchGround';
 import { paths, withQuery, type IdeasTab } from '../routes';
-import { useQueryState, useRouter, asText } from '../router';
+import { useQueryState, useRouter, asText, asOneOf } from '../router';
 import { buildFeed, bandCount, destShortName, DETOUR_BANDS, type FeedCard } from './tripIdeas';
 
 const GREY = HAIRLINE;
@@ -66,6 +66,13 @@ const detourCodec = {
   read: (raw: string): number | null => ((DETOUR_BANDS as readonly number[]).includes(Number(raw)) ? Number(raw) : null),
   write: (v: number): string | null => (v === 15 ? null : String(v)),
 };
+
+// The three ways of getting about the trip picker offers — car, walking, public
+// transport (owner, 30 Sep 2026). Canonical words, so they match `trip.travelMode`
+// and `modeIcon`; the along-route API normalises them either way.
+const TRIP_MODES = ['driving', 'walking', 'transit'] as const;
+type TripMode = typeof TRIP_MODES[number];
+const MODE_LABEL: Record<TripMode, string> = { driving: 'Drive', walking: 'Walk', transit: 'Public transport' };
 
 // All trip times are worked in wall-clock minutes in the trip's own timezone, so
 // nothing shifts when the device is in another zone (Codex). An ISO timestamp
@@ -151,6 +158,12 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   const trip = d.trip;
   const { navigate, query, setQuery } = useRouter();
   const [detour, setDetour] = useQueryState<number>('detour', 15, detourCodec);
+  // The car / walking / public-transport picker, restored on the trip (owner,
+  // 30 Sep 2026: it "has gone from the Trips tab"). It rides in the address, the
+  // detour zone and the along-route search both use it, and it seeds from the
+  // trip's own mode. `travelMode` normalises the trip's canonical word.
+  const tripModeSeed: TripMode = (TRIP_MODES as readonly string[]).includes(trip.travelMode) ? (trip.travelMode as TripMode) : 'driving';
+  const [by, setBy] = useQueryState<TripMode>('by', tripModeSeed, asOneOf(TRIP_MODES, 'driving'));
   const [place, setPlace] = useQueryState<string | null>('place', null, asText);
   const [showRaw, setShow] = useQueryState<string | null>('show', null, asText);
   // Which day the trip stage shows and adds to; `?day=` on a multi-day trip.
@@ -174,7 +187,7 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   // The search stands until the route, the time or the mode changes; then it
   // runs again on the next visit to the trip (README). A signature of those
   // three, kept per trip, is what tells the difference from a plain reopen.
-  const searchSig = `${trip.origin?.lat},${trip.origin?.lng},${trip.base?.lat},${trip.base?.lng},${trip.destination?.lat},${trip.destination?.lng},${trip.departAt},${trip.travelMode}`;
+  const searchSig = `${trip.origin?.lat},${trip.origin?.lng},${trip.base?.lat},${trip.base?.lng},${trip.destination?.lat},${trip.destination?.lng},${trip.departAt},${by}`;
   // The scan plays only when a trip is genuinely new (`?new=1` from creation) or
   // its route/time/mode has changed since it was last searched — never merely
   // because this browser has no record of it, which would fire a paid search on
@@ -307,9 +320,11 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
     // one, and the retry UI can appear (Codex).
     if (force) { setPools(null); poolQ.current = { activities: null, food: null }; }
     try {
+      // The detour minutes come back computed for the chosen mode, so walking
+      // gives a far smaller pool than driving (owner, 30 Sep 2026).
       const [things, food] = await Promise.all([
-        api.tripAlong(id, { kind: 'things', maxDetourMin: 30 }),
-        api.tripAlong(id, { kind: 'food', maxDetourMin: 30 }),
+        api.tripAlong(id, { kind: 'things', maxDetourMin: 30, mode: by }),
+        api.tripAlong(id, { kind: 'food', maxDetourMin: 30, mode: by }),
       ]);
       const noTransport = (p: TripAlongPlace) => !/station|bus_stop|parking|car_park|taxi/i.test(`${p.category ?? ''} ${p.subcategory ?? ''}`);
       poolQ.current = { activities: things.queryId ?? null, food: food.queryId ?? null };
@@ -321,7 +336,7 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
     } finally {
       loadingRef.current = false;
     }
-  }, [id, pools]);
+  }, [id, pools, by]);
 
   // The band counts for the caption and the trip's "More ideas" line, kept live
   // as the pools arrive during a scan.
@@ -538,10 +553,10 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
     const g = searchGround({
       origin: { lat: start.lat, lng: start.lng as number },
       destination: dest?.lat != null ? { lat: dest.lat, lng: dest.lng as number } : null,
-      around: null, mode: trip.travelMode, maxDetourMin: detour,
+      around: null, mode: by, maxDetourMin: detour,
     });
     return { ...g, searching: false, zone: true };
-  }, [scanning, searched, start?.lat, dest?.lat, trip.travelMode, detour]);
+  }, [scanning, searched, start?.lat, dest?.lat, by, detour]);
 
   const shortMarkers: MapMarker[] = useMemo(() => {
     const out: MapMarker[] = [];
@@ -762,6 +777,7 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
         {feed ? (
           <FeedView
             feed={feed} trip={trip} tab={lastTab} detour={detour} minsOpen={minsOpen} pools={livePools}
+            by={by} onBy={setBy}
             nHearts={nHearts} shortlistBtnRef={shortlistBtnRef}
             heartOf={(ref) => activeRefs.has(ref)}
             onBackToTrip={() => navigate(tripHref())}
@@ -857,9 +873,9 @@ function ScanBox({ minutes, act, food, onDone }: { minutes: number; act: number;
 // ---------------------------------------------------------------------------
 // The feed
 // ---------------------------------------------------------------------------
-function FeedView({ feed, trip, tab, detour, minsOpen, pools, nHearts, shortlistBtnRef, heartOf, onBackToTrip, onShortlist, onTab, onDetour, onToggleMins, onHeart, onOpen }: {
+function FeedView({ feed, trip, tab, detour, by, onBy, minsOpen, pools, nHearts, shortlistBtnRef, heartOf, onBackToTrip, onShortlist, onTab, onDetour, onToggleMins, onHeart, onOpen }: {
   feed: NonNullable<ReturnType<typeof buildFeed>>;
-  trip: TripDetail['trip']; tab: IdeasTab; detour: number; minsOpen: boolean; pools: { activities: TripAlongPlace[]; food: TripAlongPlace[] } | null;
+  trip: TripDetail['trip']; tab: IdeasTab; detour: number; by: TripMode; onBy: (m: TripMode) => void; minsOpen: boolean; pools: { activities: TripAlongPlace[]; food: TripAlongPlace[] } | null;
   nHearts: number; shortlistBtnRef: React.RefObject<any>;
   heartOf: (ref: string) => boolean;
   onBackToTrip: () => void; onShortlist: () => void; onTab: (t: IdeasTab) => void; onDetour: (m: number) => void; onToggleMins: () => void;
@@ -889,9 +905,21 @@ function FeedView({ feed, trip, tab, detour, minsOpen, pools, nHearts, shortlist
         ))}
       </View>
 
+      {/* The car / walking / public-transport picker, restored (owner, 30 Sep
+          2026). Changing it re-searches and recomputes the detour zone and the
+          times for that mode, so walking shows far fewer than driving. */}
+      <View style={styles.modeRow}>
+        {TRIP_MODES.map((m) => (
+          <Press key={m} onPress={() => onBy(m)} style={[styles.way, by === m && styles.wayOn]} accessibilityRole="button" accessibilityState={{ selected: by === m }} accessibilityLabel={MODE_LABEL[m]}>
+            <Icon name={modeIcon(m)} size={15} color={INK} />
+            <Text style={[styles.wayText, by === m && styles.wayTextOn]}>{MODE_LABEL[m]}</Text>
+          </Press>
+        ))}
+      </View>
+
       <View style={styles.filterLine}>
         <Press onPress={onToggleMins} style={[styles.filterChip, minsOpen && { backgroundColor: LIME }]} accessibilityRole="button">
-          <Icon name={modeIcon(trip.travelMode)} size={16} color={INK} />
+          <Icon name={modeIcon(by)} size={16} color={INK} />
           <Text style={styles.filterChipText}>Within {detour} min of your trip</Text>
           <Icon name="expand" size={12} color={INK} />
         </Press>
@@ -1398,6 +1426,13 @@ const styles = StyleSheet.create({
   filterLine: { paddingHorizontal: 20, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderBottomWidth: 1, borderBottomColor: GREY, position: 'relative', zIndex: 5 },
   filterChip: { flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: -8, marginVertical: -6, paddingHorizontal: 8, paddingVertical: 6 },
   filterChipText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: INK },
+  // The car / walking / public-transport picker — three equal cells, the chosen
+  // one filled lime tint, the same idea as Inspire's mode row.
+  modeRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, paddingTop: 12 },
+  way: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 8, backgroundColor: INACTIVE },
+  wayOn: { backgroundColor: LIME_TINT },
+  wayText: { fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: MUTED },
+  wayTextOn: { color: INK },
   minsMenu: { position: 'absolute', left: 12, top: '100%', marginTop: 4, minWidth: 250, backgroundColor: CREAM, borderWidth: 1, borderColor: GREY, zIndex: 6, shadowColor: INK, shadowOpacity: 0.16, shadowRadius: 28, shadowOffset: { width: 0, height: 12 } },
   minsHead: { fontFamily: fonts.body, fontSize: 11, fontWeight: '600', letterSpacing: 0.88, textTransform: 'uppercase', color: MUTED, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 6 },
   minsRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 16, paddingHorizontal: 14, paddingVertical: 12 },

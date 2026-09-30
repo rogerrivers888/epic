@@ -546,7 +546,10 @@ inspire.get('/around', async (req, res, next) => {
   try {
     const started = Date.now();
     const household = await currentHousehold();
-    const minutes = Math.min(90, Math.max(5, Math.trunc(Number(req.query.minutes)) || 30));
+    // Up to 2 h (owner, 30 Sep 2026: "30 min → 1 h → 2 h"). The reach matrix is
+    // built to a 90-min horizon (+10 edge), so 2 h reads the full matrix rather
+    // than truly two hours; clamping at 90 made 1 h and 2 h identical.
+    const minutes = Math.min(120, Math.max(5, Math.trunc(Number(req.query.minutes)) || 30));
     const mode = travelMode(req.query.mode);
     const wanted = String(req.query.cat ?? '').trim();
 
@@ -564,6 +567,20 @@ inspire.get('/around', async (req, res, next) => {
     // Counted properly: one place once per category, box-tested, with the
     // straddlers beside it (owner, 24 Sep 2026). Not the outcode sum.
     const census = await censusForRing(ring, { mode, minutes });
+
+    // A count-only caller wants the census for the reach and nothing bought:
+    // no display search, no provider, no cost (owner, 30 Sep 2026 — so the
+    // reach-check can read the real counts for a time and a mode for free, and
+    // the count that never changed can be seen to change). `?count=1`.
+    if (String(req.query.count ?? '') === '1') {
+      const counts = census.counts ?? {};
+      return res.json({
+        where: ring.label, minutes, mode,
+        total: Object.values(counts).reduce((a, n) => a + (Number(n) || 0), 0),
+        counts, unresolved: census.unresolved ?? {},
+        cells: ring.cells.length, outcodes: ring.outcodes.length, notCensused: census.missing.length,
+      });
+    }
 
     const taught = await shelfRules();
     const tax = await taxonomy();
@@ -705,7 +722,10 @@ inspire.get('/near', async (req, res, next) => {
     // Everything below it — the atlas pool, the sweep's food, the look-around —
     // is what happens outside that: abroad, or in a country whose matrix has
     // not been built. It is kept for exactly that, and for nothing else.
-    const minutes = Math.min(90, Math.max(5, Math.trunc(Number(req.query.minutes)) || 30));
+    // Up to 2 h (owner, 30 Sep 2026: "30 min → 1 h → 2 h"). The reach matrix is
+    // built to a 90-min horizon (+10 edge), so 2 h reads the full matrix rather
+    // than truly two hours; clamping at 90 made 1 h and 2 h identical.
+    const minutes = Math.min(120, Math.max(5, Math.trunc(Number(req.query.minutes)) || 30));
     const ring = await ringFrom({ ...req.query, lat: centre.lat, lng: centre.lng, label }, { minutes, mode });
     if (ring) {
       ring.bandBox = boxAround(ring.bandPoints ?? ring.points);

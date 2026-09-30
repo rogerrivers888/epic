@@ -21,7 +21,7 @@ import { bedsNear, OSM_ATTRIBUTION, LITEAPI_ATTRIBUTION } from '../sources/stays
 import { stationsNear } from '../sources/where.js';
 import { rankStays, middleOf, partyForStay } from '../domain/stays.js';
 import { occupanciesFor, liteapiEnabled, liteapiKeyKind } from '../sources/liteapi.js';
-import { kmBetween, detourMinutes, estimateTravelMinutes, reachRadiusKm } from '../domain/travel.js';
+import { kmBetween, detourMinutes, estimateTravelMinutes, reachRadiusKm, travelMode, isTravelMode } from '../domain/travel.js';
 import { currentHousehold } from './household.js';
 import * as searchLog from '../repositories/searches.js';
 import * as placeIndex from '../repositories/placeIndex.js';
@@ -924,7 +924,11 @@ router.get('/:id/along', async (req, res, next) => {
   try {
     const household = await currentHousehold();
     const trip = await loadTrip(req.params.id);
-    const mode = trip.travel_mode || 'driving';
+    // Honour the mode the screen asks for (owner, 30 Sep 2026: the car / walk /
+    // public-transport picker drives the detour and the times), falling back to
+    // the trip's own mode when none is sent. Without this, walking and driving
+    // returned the same list because the estimate always used the trip's mode.
+    const mode = isTravelMode(req.query.mode) ? travelMode(req.query.mode) : (trip.travel_mode || 'driving');
     const origin = { lat: trip.base_lat ?? trip.origin_lat, lng: trip.base_lng ?? trip.origin_lng, label: trip.base_label ?? trip.origin_label };
     // Where the day is *for*: the destination on a day out, the town on a trip.
     const destination = trip.destination_lat != null
