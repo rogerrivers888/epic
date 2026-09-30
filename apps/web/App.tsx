@@ -817,15 +817,20 @@ const styles = StyleSheet.create({
    * labels need and nothing more; on one that has none, 8px is enough to keep
    * them off the edge.
    */
+  // Reserving the whole safe-area inset read as a centimetre of dead app under
+  // the labels (owner, 30 Sep 2026, third time: "much lower down"). Dropping them
+  // to the very edge put them into the indicator's strip, though (Codex), so the
+  // owner picked the middle: about half a centimetre lower, keeping ~18px of
+  // clearance on the common 34px inset — under the labels, above the pill.
   tabs: {
     flexDirection: 'row', borderTopWidth: BORDER, borderTopColor: colors.line, backgroundColor: colors.tabbar,
-    paddingBottom: (Platform.OS === 'web' ? 'max(8px, var(--epic-sab))' : 8) as any,
+    paddingBottom: (Platform.OS === 'web' ? 'max(12px, calc(var(--epic-sab) - 16px))' : 8) as any,
   },
   // Floating over the map, and clear of the home indicator on a phone that has
   // one — the map runs under the indicator, the labels must not.
   tabsOver: {
     position: 'absolute', left: 0, right: 0, bottom: 0,
-    paddingBottom: (Platform.OS === 'web' ? 'calc(4px + var(--epic-sab))' : 20) as any,
+    paddingBottom: (Platform.OS === 'web' ? 'max(12px, calc(var(--epic-sab) - 16px))' : 20) as any,
   },
   // A 44pt target with no slack around it: the icon and its label are 37 of
   // those 44, and the ten extra were another few millimetres of nothing.

@@ -54,8 +54,10 @@ test('the two ends of the app each apply the inset once', () => {
   // and a bottom inset only when there is no tab bar to carry it.
   assert.match(app, /ownHeader \? null : \{ paddingTop: 'var\(--epic-sat\)'/);
   assert.match(app, /ownFooter \? null : \{ paddingBottom: 'var\(--epic-sab\)'/);
-  // And the tab bar is the thing that carries it when there is one.
-  assert.match(app, /paddingBottom: \(Platform\.OS === 'web' \? 'max\(8px, var\(--epic-sab\)\)'/);
+  // And the tab bar is the thing that carries it when there is one — dropped
+  // about half a centimetre past the inset (owner, 30 Sep 2026), keeping ~18px of
+  // clearance so the labels sit above the home indicator, not in it.
+  assert.match(app, /paddingBottom: \(Platform\.OS === 'web' \? 'max\(12px, calc\(var\(--epic-sab\) - 16px\)\)'/);
   // Inspire draws its own head, so it takes the top inset itself.
   assert.match(read('src/components/InspireHeader.tsx'), /max\(16px, calc\(var\(--epic-sat\) \+ 10px\)\)/);
 });
