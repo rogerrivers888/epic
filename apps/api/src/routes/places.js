@@ -13,7 +13,9 @@ import { ratingsFor, reviewsFor } from '../sources/providerMatch.js';
 import { rules as shelfRules } from '../repositories/shelfRules.js';
 import { taxonomy } from '../repositories/shelfTaxonomy.js';
 import { shelvesForVenue } from '../domain/moods.js';
-import { withTransaction } from '../db.js';
+import { withTransaction, query } from '../db.js';
+import { resolve as resolveWording, localeOfHousehold } from '../repositories/wording.js';
+import { scaleFor, bandIndexForLevel, rangeText } from '../domain/costBand.js';
 import * as visitsRepo from '../repositories/visits.js';
 import * as menusRepo from '../repositories/menus.js';
 import { enabledSources, recallVenue, optInFrom } from '../sources/index.js';
@@ -261,6 +263,55 @@ async function visitPayload(id) {
  * trip location, "near", where we're staying). With `near`, matches inside that
  * area come first and the search never leaves `country`.
  */
+/**
+ * The place-page cost scale + definition (M5/M6). Given the place's country and
+ * Google price level, returns the four-step scale, the band it fills, and a
+ * money definition from that market's own bands. The country is named only when
+ * it is not the household's own market — the same rule as time zones.
+ *
+ * No level → "not known yet": a place with no price signal never renders Free
+ * (owner, 30 Sep 2026). The strings go through `resolve` so the wording keys
+ * register and the wording screen can curate their American forms.
+ */
+places.get('/cost-band', async (req, res, next) => {
+  try {
+    const country = (String(req.query.country || '').toUpperCase()) || 'GB';
+    const household = await currentHousehold().catch(() => null);
+    const locale = household ? await localeOfHousehold(household.id) : 'en-GB';
+    const t = (key, fallback) => resolveWording('places', key, { locale, fallback });
+
+    const levelRaw = req.query.level;
+    const index = bandIndexForLevel(levelRaw === '' || levelRaw == null ? null : Number(levelRaw));
+    if (index == null) {
+      return res.json({ known: false, label: await t('cost.unknown', 'Not known yet') });
+    }
+
+    const { rows: [m] } = await query('select name, currency, cost_bands from markets where code = $1', [country]);
+    // A country Epic has no market for: we do not know its currency, so we do
+    // not fabricate a £ scale — it reads "not known yet" (Codex).
+    if (!m) return res.json({ known: false, label: await t('cost.unknown', 'Not known yet') });
+    const currency = m.currency;
+    const scale = scaleFor(currency);
+    const band = scale[index];
+    const range = rangeText(m?.cost_bands ?? null, index, currency);
+
+    // The country is named only abroad — when the place's market is not the
+    // household's own (same rule as time zones in M1).
+    const nameMarket = Boolean(household?.home_country_code)
+      && String(household.home_country_code).toUpperCase() !== country;
+
+    let definition = null;
+    if (range) {
+      definition = nameMarket
+        ? (await t('cost.definition.abroad', 'In {market}, {band} means {range} a person'))
+          .replace('{market}', m?.name ?? country).replace('{band}', band).replace('{range}', range)
+        : (await t('cost.definition', '{band} means {range} a person'))
+          .replace('{band}', band).replace('{range}', range);
+    }
+    res.json({ known: true, scale, index, band, currency, range, definition });
+  } catch (err) { next(err); }
+});
+
 places.get('/geocode', async (req, res, next) => {
   try {
     const household = await currentHousehold();
