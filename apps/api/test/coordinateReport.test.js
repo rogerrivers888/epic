@@ -55,8 +55,11 @@ test('files each place under the best point held for it, and counts old rented p
   assert.equal(idx.over30Days, 2);
   assert.equal(idx.undated, 2, 'a point with no clock is undated, not old');
   assert.equal(r.rented.find((x) => x.table === 'place_index (other providers)').held, 1, 'tripadvisor on its own line');
-  assert.equal(r.rented.find((x) => x.table === 'place_cells').over30Days, 1);
-  assert.equal(r.rentedOver30Days, 3);
+  const cells = r.rented.find((x) => x.table === 'place_cells');
+  assert.equal(cells.held, 1);
+  assert.equal(cells.undated, 1, 'its index point is gone, so its age cannot be told');
+  assert.equal(cells.over30Days, 0);
+  assert.equal(r.rentedOver30Days, 2);
   assert.equal(r.pointsByTable.place_index.google, 4, 'matched, old, fresh, undated — the raw prefix spread');
   assert.equal(r.pointsByTable.place_cells.google, 1);
   assert.equal(r.pointsByTable.attractions.atlas, 2, 'the castle and the maze, keyed atlas:<id>');

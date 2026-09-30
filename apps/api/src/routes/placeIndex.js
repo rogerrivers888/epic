@@ -3883,7 +3883,22 @@ export async function coordinateReport() {
     // thirty days ago beside it, which is context and not an age.
     const ROWS = (first) => `count(*)::int held, null::int over30, count(*)::int undated, min(${first}) oldest,
                              count(*) filter (where ${first} < now() - interval '30 days')::int rows_over30`;
-    await count('place_cells', 'at', `select ${OVER('at')} from place_cells where lat is not null and venue_ref like 'google:%'`);
+    // A cell is a copy of a point: dated by the index point it was stamped
+    // from (its own clock is when the stamp was made, not how old the point
+    // is), and not Google's at all where its point is one we own (Codex, 30
+    // Sep 2026). A cell whose point matches no dated index point is undated.
+    const NEAR = (x) => `abs(${x}.lat - c.lat) <= 0.0005 and abs(${x}.lng - c.lng) <= 0.0005`;
+    await count('place_cells', 'the index point it copies',
+      `select count(*)::int held,
+              count(*) filter (where pi.coords_at < now() - interval '30 days')::int over30,
+              count(*) filter (where pi.coords_at is null)::int undated,
+              min(pi.coords_at) oldest
+         from place_cells c
+         left join place_index pi on pi.venue_ref = c.venue_ref and pi.lat is not null and ${NEAR('pi')}
+        where c.lat is not null and c.venue_ref like 'google:%'
+          and coalesce(pi.coords_from, 'google') not in ('osm', 'atlas', 'own', 'wikidata')
+          and not exists (select 1 from scout_places s where s.venue_ref = c.venue_ref and coalesce(s.from_sources, '[]'::jsonb) ? 'osm' and s.lat is not null and ${NEAR('s')})
+          and not exists (select 1 from place_records r where r.venue_ref = c.venue_ref and r.osm_ref is not null and r.lat is not null and ${NEAR('r')})`);
     await count('scout_places', 'first_seen (row)', `select ${ROWS('first_seen')} from scout_places where lat is not null and venue_ref like 'google:%' and not (coalesce(from_sources, '[]'::jsonb) ? 'osm')`);
     await count('attractions', 'first_seen (row)', `select ${ROWS('first_seen')} from attractions where lat is not null and display_source = 'google'`);
     await count('household_places', 'first_seen (row)', `select ${ROWS('first_seen')} from household_places where lat is not null and venue_ref like 'google:%'`);
