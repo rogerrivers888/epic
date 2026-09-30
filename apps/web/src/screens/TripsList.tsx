@@ -125,6 +125,8 @@ export function TripsList({ trips, bookings, loading, error, span, when, onSpan,
   const hostsLive = (bookings ?? []).filter((b) => b.state !== 'cancelled' || b.paymentStatus === 'refunded');
   const noun = span === 'holiday' ? 'holiday' : 'day trip';
   const nothing = !upcoming.length && !ideas.length && !past.length && !hostsLive.length;
+  // A deep link to bookings (?when=hosts) focuses the list on them (Codex).
+  const focusHosts = when === 'hosts';
   const row = (t: TripSummary) => <TripRow key={t.id} trip={t} onPress={() => onOpen(t)} onHold={() => onHold(t)} />;
 
   return (
@@ -143,22 +145,35 @@ export function TripsList({ trips, bookings, loading, error, span, when, onSpan,
         {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
         {loading && !trips ? <Text style={type.small}>Loading…</Text> : null}
 
-        {upcoming.length ? (
-          <View style={styles.section}><SectionHeader title="Coming up" count={upcoming.length} />{upcoming.map(row)}</View>
-        ) : null}
-        {ideas.length ? (
-          <View style={styles.section}><SectionHeader title="Ideas" count={ideas.length} />{ideas.map(row)}</View>
-        ) : null}
-        {past.length ? (
-          <View style={styles.section}><SectionHeader title="Past" count={past.length} />{past.map(row)}</View>
-        ) : null}
-        {hostsLive.length ? (
-          <View style={styles.section}><SectionHeader title="Booked with hosts" count={hostsLive.length} /><BookingRows bookings={bookings ?? []} onOpen={(b) => onOpenBooking?.(b)} /></View>
-        ) : null}
+        {/* A deep link to the bookings (paths.bookings() → ?when=hosts, and the
+            "Your bookings" actions on a booking) focuses this list on what is
+            booked with hosts, rather than burying it under the trip sections
+            (Codex). Without it, the sections read newest-first as normal. */}
+        {focusHosts ? (
+          <View style={styles.section}>
+            <SectionHeader title="Booked with hosts" count={hostsLive.length} />
+            <BookingRows bookings={bookings ?? []} onOpen={(b) => onOpenBooking?.(b)} />
+          </View>
+        ) : (
+          <>
+            {upcoming.length ? (
+              <View style={styles.section}><SectionHeader title="Coming up" count={upcoming.length} />{upcoming.map(row)}</View>
+            ) : null}
+            {ideas.length ? (
+              <View style={styles.section}><SectionHeader title="Ideas" count={ideas.length} />{ideas.map(row)}</View>
+            ) : null}
+            {past.length ? (
+              <View style={styles.section}><SectionHeader title="Past" count={past.length} />{past.map(row)}</View>
+            ) : null}
+            {hostsLive.length ? (
+              <View style={styles.section}><SectionHeader title="Booked with hosts" count={hostsLive.length} /><BookingRows bookings={bookings ?? []} onOpen={(b) => onOpenBooking?.(b)} /></View>
+            ) : null}
 
-        {trips && nothing ? (
-          <Text style={styles.blank}>{`Nothing here yet. Tap the mic and say where you're going, and your ${noun}s land here.`}</Text>
-        ) : null}
+            {trips && nothing ? (
+              <Text style={styles.blank}>{`Nothing here yet. Tap the mic and say where you're going, and your ${noun}s land here.`}</Text>
+            ) : null}
+          </>
+        )}
       </ScrollView>
     </View>
   );
