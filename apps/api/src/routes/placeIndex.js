@@ -3973,8 +3973,9 @@ export async function coordinateReport() {
       pointsByTable[table] = Object.fromEntries(rows.map((r) => [r.source, r.n]));
     }
 
-    // Where: the index's rented points over thirty days by postcode area, off
-    // the cell each still has.
+    // Where: the index's Google points over thirty days by postcode area, off
+    // the cell each still has — Google's, as asked ("how many and where"); the
+    // other providers' are counted on their own line above.
     const { rows: where } = await query(
       `select coalesce(substring(upper(split_part(replace(cell, 'sector:', ''), ' ', 1)) from '^[A-Z]+'), '?') as area,
               count(*)::int as over30
@@ -4001,7 +4002,7 @@ export async function coordinateReport() {
       // Only where a point has a date: null elsewhere is "cannot say", never nought.
       rentedOver30Days: rented.reduce((n, r) => n + (r.over30Days ?? 0), 0),
       rentedUndated: rented.reduce((n, r) => n + r.undated, 0),
-      indexOver30DaysByArea: where,
+      indexGoogleOver30DaysByArea: where,
   };
 }
 

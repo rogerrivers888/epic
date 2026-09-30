@@ -75,5 +75,5 @@ test('files each place under the best point held for it, and counts old rented p
   assert.equal(r.pointsByTable.place_cells.google, 1);
   assert.equal(r.pointsByTable.attractions.atlas, 3, 'the castle, the maze and the zoo, keyed atlas:<id>');
   assert.equal(r.rented.length, 11);
-  assert.deepEqual(r.indexOver30DaysByArea, [{ area: 'TR', over30: 1 }], 'SL\'s was the open map\'s point');
+  assert.deepEqual(r.indexGoogleOver30DaysByArea, [{ area: 'TR', over30: 1 }], 'SL\'s was the open map\'s point');
 });
