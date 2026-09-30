@@ -1156,6 +1156,10 @@ router.get('/:id/along', async (req, res, next) => {
         cuisines: v.cuisines ?? [], experiences: v.experiences ?? [],
         moods: shelf.shelves, subcategory: shelf.subcategory ?? null,
         rating: v.rating ?? null, ratingCount: v.ratingCount ?? null, priceLevel: v.priceLevel ?? null,
+        // Which source each merged field came from, so the drawer credits a
+        // Google rating to Google and maps only a Google price level onto the
+        // bands even when the place's identity is OSM (Codex).
+        provenance: v.provenance ?? null,
         openingHours: v.openingHours ?? null, phone: v.phone ?? null, website: v.website ?? null,
         address: typeof v.address === 'string' ? v.address : v.address?.line1 ?? null,
         /**

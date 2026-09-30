@@ -421,6 +421,13 @@ export type Venue = {
   /** Today's hours where the place is — "12:00 – 11:00 PM", or "Closed". */
   hoursToday?: string | null; hoursDay?: string | null; closesAt?: string | null; opensAt?: string | null;
   summary?: string | null; mapsUrl?: string | null; externalUrl?: string | null; reviews?: Review[]; chain?: boolean; brand?: string | null;
+  /**
+   * Which source each merged field came from (sources/index.js). A place matched
+   * across OSM and Google keeps one identity in `source` but its rating and
+   * price level can be Google's — this says so per field, so the drawer credits
+   * Google's rating to Google and only maps Google's price level onto the bands.
+   */
+  provenance?: Record<string, { source: string; expiresAt?: string | null }>;
   /** What the source said about how the food is served: `fast-food`, `takeaway`. */
   styles?: string[];
   /** Where the taxonomy files it — the same answer the home screen and the back office give. */
@@ -551,6 +558,8 @@ export type OptionStop = {
   address?: string | null; website?: string | null; summary?: string | null; openingHours?: string | null;
   distanceKm?: number | null; travelFromBaseMinutes?: number | null; attribution?: string | null; reservable?: boolean | null; mapsUrl?: string | null;
   photos?: VenuePhotoRef[];
+  /** Per-field source for a merged place — see Venue.provenance. */
+  provenance?: Record<string, { source: string; expiresAt?: string | null }>;
 };
 
 /** One thing inside a place with grounds — a ride, an animal house, a café. Ours: OSM, Wikidata, Wikipedia. */
