@@ -18,11 +18,13 @@ import type { SyncStore } from './storage.web';
 
 export type { SyncStore } from './storage.web';
 
-let mmkv: { getString(k: string): string | undefined; set(k: string, v: string): void; delete(k: string): void } | null = null;
+// react-native-mmkv v4 (Nitro) exports a `createMMKV` factory, not an `MMKV`
+// constructor, and its instance removes a key with `remove`, not `delete`.
+let mmkv: { getString(k: string): string | undefined; set(k: string, v: string): void; remove(k: string): void } | null = null;
 try {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { MMKV } = require('react-native-mmkv');
-  mmkv = new MMKV({ id: 'epic' });
+  const { createMMKV } = require('react-native-mmkv');
+  mmkv = createMMKV({ id: 'epic' });
 } catch {
   // The dev build has not linked it yet (or it is Expo Go): fall back to nothing
   // rather than crash. State simply does not persist until a dev build is run.
@@ -37,6 +39,6 @@ export const storage: SyncStore = {
     try { mmkv?.set(key, value); } catch { /* noop */ }
   },
   removeItem(key) {
-    try { mmkv?.delete(key); } catch { /* noop */ }
+    try { mmkv?.remove(key); } catch { /* noop */ }
   },
 };
