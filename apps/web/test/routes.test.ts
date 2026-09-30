@@ -694,6 +694,19 @@ test('first run and the two-minute set-up', () => {
   assert.equal(parentOf(parseRoute('/setup')), '/welcome');
 });
 
+test('the opening: the postcards opener and four intro screens', () => {
+  assert.deepEqual(roundTrip('/opening'), { name: 'opening' });
+  // The step is a filter, not a layer, so the address is the same page.
+  assert.equal(paths.opening(), '/opening');
+  assert.equal(paths.opening(0), '/opening');
+  assert.equal(paths.opening(3), '/opening?step=3');
+  // A segment after it is nothing Epic has.
+  assert.equal(parseRoute('/opening/3').name, 'unknown');
+  assert.equal(ownsHeader(parseRoute('/opening')), true, 'the opening draws its own head');
+  assert.equal(isImmersive(parseRoute('/opening'), new URLSearchParams()), true, 'no tab bar on the opening');
+  assert.equal(parentOf(parseRoute('/opening')), '/inspire');
+});
+
 test('telling Epic about one person, and reviewing what it heard', () => {
   assert.deepEqual(roundTrip('/household/m1/tell'), { name: 'household', memberId: 'm1', voice: 'tell' });
   assert.deepEqual(roundTrip('/household/m1/review'), { name: 'household', memberId: 'm1', voice: 'review' });

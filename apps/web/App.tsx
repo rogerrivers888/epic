@@ -21,6 +21,7 @@ import { StepsScreen } from './src/screens/voice/StepsScreen';
 import { HeardScreen } from './src/screens/voice/HeardScreen';
 import { AskScreen } from './src/screens/voice/AskScreen';
 import { WelcomeScreen, wasWelcomed } from './src/screens/voice/WelcomeScreen';
+import { OpeningScreen } from './src/screens/OpeningScreen';
 import { SetupScreen } from './src/screens/voice/SetupScreen';
 import { TellScreen } from './src/screens/voice/TellScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
@@ -554,6 +555,8 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
       {route.name === 'say' && route.intakeId && !route.ask ? <HeardScreen intakeId={route.intakeId} household={household} onOpenTrip={(id) => openTrip(id)} /> : null}
       {route.name === 'say' && route.intakeId && route.ask ? <AskScreen intakeId={route.intakeId} household={household} /> : null}
       {route.name === 'welcome' ? <WelcomeScreen /> : null}
+      {/* The opening (Welcome screens, 1h): the postcards opener and four intro screens, shown once after sign-up. */}
+      {route.name === 'opening' ? <OpeningScreen /> : null}
       {route.name === 'setup' ? <SetupScreen household={household} refresh={refreshHousehold} /> : null}
       {route.name === 'settings' ? <SettingsScreen data={household} refresh={refreshHousehold} route={route} /> : null}
       {route.name === 'prototypes' ? <PrototypesScreen route={route} /> : null}

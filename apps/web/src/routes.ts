@@ -62,6 +62,7 @@
  *   /say/<intakeId>                       …here's what we heard, the fact card (C3 / B4 / R3)
  *   /say/<intakeId>/ask                   …a gap question (C4; ?n=)
  *   /welcome                           first run, two doors (C0)
+ *   /opening                           the opening: postcards + four intro screens (1h; ?step=0..4)
  *   /setup                             set up my family first, five steps (O1–O5; ?step=)
  *   /settings, /settings/providers     settings, and its two halves
  *   /prototypes, /prototypes/trips     the mock-ups, filed by part of the app
@@ -412,6 +413,14 @@ export type Route =
   | { name: 'say'; intakeId: string | null; steps: boolean; ask: boolean }
   /** First run: two doors (C0). */
   | { name: 'welcome' }
+  /**
+   * The opening (Welcome screens handoff, 1h). The postcards opener and the four
+   * intro screens — day or trip, your crew, book an expert, host it — shown once
+   * after sign-up and before crew set-up. Which of the five is on is `?step=0..4`,
+   * a filter the screen reads rather than a layer in the path: the page is the
+   * opening, and a step is how it is set (the same shape `/setup` uses).
+   */
+  | { name: 'opening' }
   /** "Set up my family first" — five steps, `?step=1..5` (row O). */
   | { name: 'setup' }
   | { name: 'join'; token: string }
@@ -570,6 +579,9 @@ export function parseRoute(path: string): Route {
     case 'welcome':
       return a ? { name: 'unknown', path } : { name: 'welcome' };
 
+    case 'opening':
+      return a ? { name: 'unknown', path } : { name: 'opening' };
+
     case 'setup':
       return a ? { name: 'unknown', path } : { name: 'setup' };
 
@@ -703,6 +715,7 @@ export function hrefOf(route: Route): string {
         : route.intakeId ? buildHref(['say', route.intakeId, route.ask ? 'ask' : null])
           : '/say';
     case 'welcome': return '/welcome';
+    case 'opening': return '/opening';
     case 'setup': return '/setup';
     case 'settings': return route.section === 'preferences' ? '/settings' : buildHref(['settings', route.section]);
     case 'prototypes': return buildHref(['prototypes', route.section]);
@@ -838,6 +851,8 @@ export const paths = {
   heard: (intakeId: string) => buildHref(['say', intakeId]),
   ask: (intakeId: string, n?: number) => `${buildHref(['say', intakeId, 'ask'])}${n && n > 1 ? `?n=${n}` : ''}`,
   welcome: () => '/welcome',
+  /** The opening sequence, at a given screen. Step 0 (the opener) is the default and is not written down. */
+  opening: (step?: number) => (step && step > 0 ? `/opening?step=${step}` : '/opening'),
   setup: (step?: number) => (step && step > 1 ? `/setup?step=${step}` : '/setup'),
   settings: (section?: SettingsSection) => (section && section !== 'preferences' ? buildHref(['settings', section]) : '/settings'),
   prototypes: (section?: PrototypeSection | null) => buildHref(['prototypes', section]),
@@ -895,6 +910,10 @@ export function ownsHeader(route: Route): boolean {
   // title, or the wordmark on the two doors (handoff boards, 8 Sep 2026); the
   // shell's lime band above them would be a second header on every one.
   if (route.name === 'say' || route.name === 'welcome' || route.name === 'setup') return true;
+  // The opening draws every pixel itself — a full-bleed opener and four intro
+  // screens, each with its own head — so the shell's band over it would be a
+  // second heading (Welcome screens, 1h).
+  if (route.name === 'opening') return true;
   if (route.name === 'household' && route.voice) return true;
   /**
    * The Host tab draws the same head as Trips — the wordmark and one control
@@ -964,6 +983,8 @@ export function isImmersive(route: Route, query?: URLSearchParams): boolean {
   // The voice intake's screens are one thing each — a mic, a card, a question —
   // drawn to the handoff's boards, which have no tab bar (8 Sep 2026).
   if (route.name === 'say' || route.name === 'welcome' || route.name === 'setup') return true;
+  // The opening is one thing at a time, drawn to the edges: no tab bar (1h).
+  if (route.name === 'opening') return true;
   if (route.name === 'household' && route.voice) return true;
   // Becoming a host, the offer wizard and the recorder are forms; an offer's
   // dashboard and a booking are one thing each. The tab itself keeps the bar.
@@ -1078,6 +1099,7 @@ export function parentOf(route: Route): string {
     // Up from the questions is the card; up from the card or the wizard is the mic; up from the mic is home.
     case 'say': return route.ask ? paths.heard(route.intakeId!) : route.intakeId || route.steps ? '/say' : '/inspire';
     case 'welcome': return '/inspire';
+    case 'opening': return '/inspire';
     case 'setup': return '/welcome';
     case 'admin': return route.screen === 'reporting' ? '/inspire' : '/admin/reporting';
     default: return '/inspire';
@@ -1115,6 +1137,7 @@ export function titleOf(route: Route): string {
     case 'household': return epic(route.voice === 'tell' ? 'Tell Epic about them' : route.voice === 'review' ? 'What we heard' : 'You and yours');
     case 'say': return epic(route.ask ? 'One more thing' : route.intakeId ? 'Here’s what we heard' : route.steps ? 'One at a time' : 'Just say it');
     case 'welcome': return epic('Plan less. Live more.');
+    case 'opening': return epic('Welcome to Epic');
     case 'setup': return epic('Set up your family');
     case 'settings': return epic(route.section === 'notifications' ? 'Notifications' : 'You and yours');
     case 'host': return epic(route.page === 'questions' ? 'Questions' : route.chat ? (route.chat.page === 'topic' ? 'A question' : route.chat.page === 'ask' ? 'Say something' : route.chat.page === 'bell' ? 'What you get told about' : 'Chat') : route.page === 'start' || route.page === 'profile' ? 'Host on Epic' : route.page === 'new' || route.page === 'edit' ? 'Your offer' : route.page === 'video' ? 'Your video' : route.page === 'offer' ? 'Your experience' : route.page === 'shape' ? 'How it works' : route.page === 'examples' || route.page === 'example' ? 'What people host' : route.page === 'who' ? 'Who can come' : 'Host');
