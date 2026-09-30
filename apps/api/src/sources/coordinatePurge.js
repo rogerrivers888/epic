@@ -96,7 +96,12 @@ export async function purgeRented({ days = 30, force = false } = {}) {
   // point matches no point the place still holds anywhere.
   const { rowCount: cells } = await query(
     `delete from place_cells c
-      where ${RENTED_REF('c.venue_ref')} and c.lat is not null
+      where (${RENTED_REF('c.venue_ref')}
+             -- An atlas reference on an unmatched activity-sweep row is Google's point too.
+             or exists (select 1 from attractions g
+                         where g.id = (case when c.venue_ref ~ '^atlas:[0-9a-f-]{36}$' then substr(c.venue_ref, 7)::uuid end)
+                           and (g.display_source = 'google' or (g.source = 'google' and g.osm_ref is null))))
+        and c.lat is not null
         and c.at < now() - ${age}
         and not exists (select 1 from place_index pi where pi.venue_ref = c.venue_ref and pi.lat is not null
                           and abs(pi.lat - c.lat) <= 0.0005 and abs(pi.lng - c.lng) <= 0.0005)
