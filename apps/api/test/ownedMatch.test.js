@@ -268,3 +268,17 @@ test('OS Open Names loads from its zip: named features in, roads and postcodes o
   const names = (await query(`select name from os_names where load_id = (select live_load from owned_source_loads where source = 'os-open-names') order by name`)).rows.map((r) => r.name);
   assert.deepEqual(names, ['Snow Hill, The', 'Windsor Great Park']);
 });
+
+test('two names that point at two different places is no match', async () => {
+  await fsaRow(91060, 'The Plough', 51.0500, -0.1500);
+  await fsaRow(91061, 'Harrow Inn', 51.0505, -0.1508);
+  const out = await m.matchPlace({ ref: 'google:two-names', names: ['The Plough', 'Harrow Inn'], point: { lat: 51.0502, lng: -0.1503 } });
+  assert.match(out.none, /different places/);
+});
+
+test('an owned point for a place the index has not met puts it on the index', async () => {
+  const { recordOwnedPoint } = await import('../src/sources/ownedPoints.js');
+  const ref = `atlas:${randomUUID()}`;
+  await recordOwnedPoint({ ref, lat: 51.2, lng: -0.2, source: 'osm', sourceRef: 'way/1', method: 'the activity sweep matched it' });
+  assert.deepEqual((await query('select lat, coords_from from place_index where venue_ref = $1', [ref])).rows[0], { lat: 51.2, coords_from: 'osm' });
+});

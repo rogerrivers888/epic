@@ -70,13 +70,16 @@ export async function recordOwnedPoint({ ref, lat, lng, source, sourceRef = null
      returning venue_ref`,
     [ref, Number(lat), Number(lng), source, sourceRef, LICENCES[source], method, distanceM, ORDER]);
   if (!kept) return { written: false, why: 'a better source already holds it' };
+  // Into the index, whether or not it knew the place yet (Codex, 30 Sep 2026).
   await client.query(
-    `update place_index
-        set lat = $2, lng = $3, coords_from = $4, coords_at = now(),
+    `insert into place_index (venue_ref, lat, lng, coords_from, coords_at)
+     values ($1, $2, $3, $4, now())
+     on conflict (venue_ref) do update
+        set lat = excluded.lat, lng = excluded.lng, coords_from = excluded.coords_from, coords_at = now(),
             -- A new position is a new cell and a new ring: back to the settler.
-            cell = case when lat is distinct from $2 or lng is distinct from $3 then null else cell end,
-            placed_at = case when lat is distinct from $2 or lng is distinct from $3 then null else placed_at end
-      where venue_ref = $1`, [ref, Number(lat), Number(lng), source]);
+            cell = case when place_index.lat is distinct from excluded.lat or place_index.lng is distinct from excluded.lng then null else place_index.cell end,
+            placed_at = case when place_index.lat is distinct from excluded.lat or place_index.lng is distinct from excluded.lng then null else place_index.placed_at end,
+            last_seen = now()`, [ref, Number(lat), Number(lng), source]);
   // Every copy goes back through the trigger, which gives each the owned
   // point as it now stands — whatever it held before (Codex, 30 Sep 2026).
   for (const table of ['household_places', 'trip_shortlist', 'trip_stops', 'visits', 'scout_places', 'place_records']) {

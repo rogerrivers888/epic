@@ -136,16 +136,23 @@ export async function matchPlace(place) {
   if (!near) return { none: 'no point or box to match near' };
   const strict = !place.point;
   for (const source of ['fsa', 'historic-england', 'os-open-names', 'osm']) {
+    // Every name the place is held under asked of this source: two names that
+    // point at two different places is no match, not the first one's (Codex).
+    const hits = [];
     for (const name of names) {
       const hit = await candidateIn(source, name, strict ? near : { ...near, radiusM: RULES[source].radiusM }, { strict });
-      if (hit) {
-        return {
-          source, lat: hit.lat, lng: hit.lng, sourceRef: hit.id,
-          method: strict ? 'name, alone in its census box' : 'name+distance',
-          distanceM: place.point ? Math.round(hit.distanceM) : null,
-        };
-      }
+      if (hit) hits.push(hit);
     }
+    if (!hits.length) continue;
+    const first = hits[0];
+    const disagree = hits.some((h) => h.id !== first.id && metresBetween({ lat: h.lat, lng: h.lng }, { lat: first.lat, lng: first.lng }) > 50);
+    if (disagree) return { none: `its names point at different places in ${source}` };
+    const hit = hits.reduce((x, y) => (y.score > x.score ? y : x));
+    return {
+      source, lat: hit.lat, lng: hit.lng, sourceRef: hit.id,
+      method: strict ? 'name, alone in its census box' : 'name+distance',
+      distanceM: place.point ? Math.round(hit.distanceM) : null,
+    };
   }
   return { none: 'no owned source knows it' };
 }
