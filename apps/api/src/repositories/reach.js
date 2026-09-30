@@ -549,9 +549,14 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
   // mode? — not from whether `within` has rows: an incremental build can leave a
   // cell with reverse edges from its neighbours while it is not itself built,
   // and that partial ring must not pass as a matrix one (Codex).
-  if (travelMode(mode) !== 'driving' && !(await originBuilt(cell, travelMode(mode)))) {
+  const wantHorizon = Math.min(HORIZON_MINUTES, minutes + EDGE_MINUTES);
+  if (travelMode(mode) !== 'driving' && !(await originBuilt(cell, travelMode(mode), wantHorizon))) {
     method = 'straight-line';
-    within = await cellsWithinKmForMode(cell, travelMode(mode), minutes + EDGE_MINUTES);
+    // Centre the estimate on the requested point when there is one, so the count
+    // ring and the display search (which centres on the origin) cover the same
+    // ground rather than the sector's centroid (Codex).
+    const origin = lat != null && lng != null ? { lat: Number(lat), lng: Number(lng) } : null;
+    within = await cellsWithinKmForMode(cell, travelMode(mode), wantHorizon, origin);
   }
   const codes = [...new Set([cell, ...within.map((c) => c.to_cell)])];
   // The band itself, without the finder's allowance.
@@ -597,10 +602,14 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
 // beside it describe the same reach. Per minute, for the minutes → km and back.
 const kmPerMinute = (mode) => straightLineReachKm(mode, 60) / 60;
 
-/** Has this origin cell been built into the matrix for this mode? (cell_builds,
- *  not stray reverse edges.) */
-async function originBuilt(cell, mode) {
-  const { rows } = await query('select 1 from cell_builds where from_cell = $1 and mode = $2 limit 1', [cell, travelMode(mode)]);
+/** Has this origin cell been built into the matrix for this mode, out to at
+ *  least the horizon this request needs? A build to a shorter cap does not cover
+ *  a longer request, and serving it would freeze the ring past that cap (Codex). */
+async function originBuilt(cell, mode, wantMinutes = 0) {
+  const { rows } = await query(
+    'select 1 from cell_builds where from_cell = $1 and mode = $2 and cap_minutes >= $3 limit 1',
+    [cell, travelMode(mode), wantMinutes],
+  );
   return rows.length > 0;
 }
 
@@ -609,18 +618,24 @@ async function originBuilt(cell, mode) {
  * minutes and `method: 'straight-line'`. Shaped like `reachableCells` so the
  * ring builds the same way whether the minutes are real or estimated.
  */
-async function cellsWithinKmForMode(cell, mode, minutes) {
-  const { rows: [home] } = await query('select lat, lng from geo_cells where code = $1', [cell]);
-  if (!home) return [];
+async function cellsWithinKmForMode(cell, mode, minutes, origin = null) {
+  // Centre on the requested point when given, else the sector's own centroid, so
+  // the count ring matches the display search's centre (Codex).
+  let centre = origin;
+  if (!centre) {
+    const { rows: [home] } = await query('select lat, lng from geo_cells where code = $1', [cell]);
+    if (!home) return [];
+    centre = { lat: Number(home.lat), lng: Number(home.lng) };
+  }
   const perMin = kmPerMinute(mode);
   const km = Math.max(0.5, perMin * Math.max(0, minutes));
   const dLat = km / 111;
-  const dLng = km / (111 * Math.max(0.3, Math.cos((Number(home.lat) * Math.PI) / 180)));
+  const dLng = km / (111 * Math.max(0.3, Math.cos((centre.lat * Math.PI) / 180)));
   const { rows } = await query(
     'select code, lat, lng from geo_cells where lat between $1 and $2 and lng between $3 and $4',
-    [Number(home.lat) - dLat, Number(home.lat) + dLat, Number(home.lng) - dLng, Number(home.lng) + dLng],
+    [centre.lat - dLat, centre.lat + dLat, centre.lng - dLng, centre.lng + dLng],
   );
-  const at = { lat: Number(home.lat), lng: Number(home.lng) };
+  const at = centre;
   return rows
     .filter((r) => r.code !== cell)
     .map((r) => ({ to_cell: r.code, km: kmBetween(at, { lat: Number(r.lat), lng: Number(r.lng) }) }))
