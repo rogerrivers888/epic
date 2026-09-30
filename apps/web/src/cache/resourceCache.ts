@@ -130,6 +130,12 @@ export function peekCache<T>(key: string): { data: T | undefined; fetchedAt: num
 /** Mark a key stale so the next read refreshes it. */
 export function invalidate(key: string) { const e = store.get(key); if (e) e.fetchedAt = 0; }
 
+/** Mark every key with this prefix stale — e.g. all Inspire rings at once when
+ * a place is saved or removed, wherever that happened. */
+export function invalidatePrefix(prefix: string) {
+  for (const [k, e] of store) if (k.startsWith(prefix)) e.fetchedAt = 0;
+}
+
 /**
  * A heart tapped on one screen has to still read as kept when you come back to
  * that screen from another tab. The screen's own `useState` cannot carry it —
@@ -137,8 +143,13 @@ export function invalidate(key: string) { const e = store.get(key); if (e) e.fet
  * provider's pre-save copy, so the heart would spring back (Codex, D13). These
  * overrides live here instead, keyed by the place's ref, so they outlive the
  * unmount; they are this session's own acts, cleared the moment it ends.
+ *
+ * Each carries *when* it was made, so it wins only over pool data older than it.
+ * A later read — a refresh after the save, or a change made in another tab that
+ * invalidated the ring — is fresher than the override and supersedes it, so the
+ * heart cannot get stuck disagreeing with the server (Codex, D13).
  */
-export const savedOverrides = new Map<string, boolean>();
+export const savedOverrides = new Map<string, { val: boolean; at: number }>();
 
 /** Drop everything. Called on any session change, and available to tests. */
 export function clearResourceCache() {

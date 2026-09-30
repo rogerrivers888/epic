@@ -150,9 +150,15 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
     if (data.trips.some((t) => t.id === id)) { checkedMissing.current = null; return; }
     if (checkedMissing.current === id) return;
     checkedMissing.current = id;
+    const before = peekCache<Awaited<ReturnType<typeof api.trips>>>(TRIPS_KEY)?.fetchedAt ?? 0;
     void load().then(() => {
-      const now = peekCache<Awaited<ReturnType<typeof api.trips>>>(TRIPS_KEY)?.data;
-      if (openNow.current === id && now && !now.trips.some((t) => t.id === id)) navigate(paths.trips(), { replace: true });
+      const now = peekCache<Awaited<ReturnType<typeof api.trips>>>(TRIPS_KEY);
+      // Only act on a refresh that actually landed: a failed fetch resolves too
+      // (the cache keeps the old rows), and redirecting off that stale list
+      // could throw away a valid trip during an API blip (Codex, D13). A raised
+      // timestamp is the proof the list is fresh; let the next render retry.
+      if (!now || now.fetchedAt <= before) { checkedMissing.current = null; return; }
+      if (openNow.current === id && now.data && !now.data.trips.some((t) => t.id === id)) navigate(paths.trips(), { replace: true });
     });
   }, [data, navigate, load]);
 

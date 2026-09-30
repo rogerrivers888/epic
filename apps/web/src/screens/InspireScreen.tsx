@@ -1,10 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
 import { Press } from '../components/press';
 import { api, Experience, BrowseItem, HouseholdResponse, InspireItem, InspireNear, MoodKey, OwnedImage, Place, VenuePhotoRef, Intake } from '../api';
 import { useHere } from '../hooks/useHere';
 import { colors, fonts, spacing, TARGET, type } from '../theme';
-import { useCachedResource, runFetch, invalidate, inspireNearKey, INSPIRE_DEFAULT_MINUTES, TEN_MINUTES, ATLAS_KEY, savedOverrides, useScrollMemory } from '../cache/resourceCache';
+import { useCachedResource, runFetch, invalidate, invalidatePrefix, peekCache, inspireNearKey, INSPIRE_DEFAULT_MINUTES, TEN_MINUTES, ATLAS_KEY, savedOverrides, useScrollMemory } from '../cache/resourceCache';
 import { Icon } from '../components/Icon';
 import { AskRow, IntakeStrip } from '../components/voice/IntakeStrip';
 import { MOOD_LABEL, VIBE_MOOD } from '../moods';
@@ -822,14 +822,22 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
    * keep that", not "not for us". A place the household has been to cannot be
    * removed, and the API says so; the heart is then put back.
    */
-  // Seeded from the session's heart overrides (cache/resourceCache) so a heart
-  // tapped here before switching tabs still reads as kept on the way back — the
-  // cached pool the screen re-reads holds the provider's pre-save copy, and this
-  // is what corrects it without a flash.
-  const [kept, setKept] = useState<Record<string, boolean>>(() => Object.fromEntries(savedOverrides));
+  // The heart reads from the session's saved-overrides (cache/resourceCache) so
+  // a place hearted here still reads as kept when you come back from another
+  // tab — the cached pool the screen re-reads holds the provider's pre-save
+  // copy. An override wins only while it is newer than the pool on screen: once
+  // a read that reflects the change lands (a refresh after the save, or a change
+  // made in Places that invalidated the ring), the pool's own ledger takes over,
+  // so the heart never gets stuck disagreeing with the server (Codex, D13).
+  const [, bumpKept] = useReducer((n: number) => n + 1, 0);
   const [notice, setNotice] = useState<string | null>(null);
-  const isKept = (i: InspireItem) => kept[i.venueRef] ?? ['saved', 'special'].includes(i.household?.ledger ?? '');
-  const mark = (ref: string, val: boolean) => { savedOverrides.set(ref, val); setKept((k) => ({ ...k, [ref]: val })); };
+  const nearFetchedAt = nearKey ? (peekCache(nearKey)?.fetchedAt ?? 0) : 0;
+  const isKept = (i: InspireItem) => {
+    const ov = savedOverrides.get(i.venueRef);
+    if (ov && ov.at > nearFetchedAt) return ov.val;
+    return ['saved', 'special'].includes(i.household?.ledger ?? '');
+  };
+  const mark = (ref: string, val: boolean) => { savedOverrides.set(ref, { val, at: Date.now() }); bumpKept(); };
   const keep = async (i: InspireItem) => {
     const now = !isKept(i);
     mark(i.venueRef, now);
@@ -839,10 +847,12 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
         noteSearchEvent('inspire', 'save', i.venueRef);
       }
       else await api.deleteAtlasPlace(i.venueRef);
-      // Saving or removing a place changes the atlas — its country, city and
-      // unplaced counts — so the cached atlas must be re-read next time Places
-      // opens rather than served stale within the ten-minute window (Codex, D13).
+      // Saving or removing a place changes the atlas (its country, city and
+      // unplaced counts) and the ring pools (a place's ledger); both are
+      // invalidated so neither is served stale inside the ten-minute window,
+      // and the fresh read then supersedes the override above (Codex, D13).
       invalidate(ATLAS_KEY);
+      invalidatePrefix('inspire:near:');
     } catch (e: any) {
       mark(i.venueRef, !now);
       setNotice(e?.message ?? 'That could not be saved just now.');
