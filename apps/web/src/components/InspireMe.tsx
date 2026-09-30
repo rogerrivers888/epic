@@ -151,6 +151,7 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
   // up with the form still open — owner, 4 Sep 2026.)
   const [formChoice, setFormChoice] = useState<boolean | null>(null);
   const [drawer, setDrawer] = useState<BrowseItem | null>(null);
+  const [drawerCountry, setDrawerCountry] = useState<string | null>(null);
   // The defaults are the answer most days want, on one line, so they need no
   // attention (owner, 4 Sep 2026): an hour from home, any budget, everyone.
   const [cap, setCap] = useState<number | null>(held?.data.cap ?? 60);
@@ -347,10 +348,15 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
       lat: idea.place.lat, lng: idea.place.lng, dwellMinutes: 120, reasons: [], justification: idea.why,
       startsAt: null, endsAt: null, pinned: false,
       rating: head?.rating ?? null, ratingCount: head?.ratingCount ?? null, priceLevel: head?.priceLevel ?? null,
+      // Which source each merged field came from, so a Google price level or
+      // rating merged onto an OSM identity reads as Google's in the drawer (Codex).
+      provenance: head?.provenance,
       photos: head?.photos ?? [], summary: head?.summary ?? null, attribution: head?.attribution ?? null,
       distanceKm: head?.distanceKm ?? idea.distanceKm ?? null, travelFromBaseMinutes: idea.travelMinutes ?? null,
       source: ref.split(':')[0],
     });
+    // The idea's own country, so a place abroad reads its own currency (Codex).
+    setDrawerCountry(idea.place.countryCode ?? null);
   };
 
   /**
@@ -727,7 +733,7 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
           place, so an open-and-close — the ordinary way somebody reads an idea
           and moves on — measured nothing at all and left the timer standing
           (Codex, 18 Sep 2026). */}
-      <VenueDrawer item={drawer} onClose={() => {
+      <VenueDrawer item={drawer} country={drawerCountry} onClose={() => {
         if (drawer) noteSearchEvent('plan', 'close', drawer.venueRef || drawer.id);
         setDrawer(null);
       }} />

@@ -1685,6 +1685,9 @@ function bestNameMatch(venues, label, center) {
     venueRef: `${best.source}:${best.sourcePlaceId}`, name: best.name, category: best.category,
     experiences: best.experiences ?? [],
     rating: best.rating ?? null, ratingCount: best.ratingCount ?? null, priceLevel: best.priceLevel ?? null,
+    // Which source each merged field came from, so the drawer reads a Google
+    // price level or rating merged onto an OSM identity as Google's (Codex).
+    provenance: best.provenance ?? null,
     photos: (best.photos ?? []).slice(0, 1), distanceKm: Number(kmBetween(center, best).toFixed(1)),
     summary: best.summary ?? null, attribution: best.attributionText ?? best.attribution ?? null,
   };
