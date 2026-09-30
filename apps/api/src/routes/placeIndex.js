@@ -3861,7 +3861,7 @@ export async function coordinateReport() {
        -- An atlas:<id> whose row the activity sweep named from Google holds
        -- Google's point, whatever its reference says (Codex, 30 Sep 2026).
        ix as (
-         select pi.venue_ref, pi.lat,
+         select pi.venue_ref, pi.lat, pi.lng,
                 case when pi.lat is null then null else ${IX_TRUE_SRC('pi')} end as src
            from place_index pi),
        -- Every copy of a rented point, with whose it is: Google's, or another
