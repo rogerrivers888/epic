@@ -3776,6 +3776,150 @@ router.post('/census/uk/lift', requires('manage_library'), async (req, res, next
   } catch (err) { next(err); }
 });
 
+/**
+ * Where every place's coordinates come from, and how old the rented ones are.
+ * Read only (owner, 29 Sep 2026: "for every place we hold, where do its
+ * coordinates come from? … Is any Google latitude/longitude older than 30
+ * days still stored? If so, say how many and where").
+ *
+ * A place is a place_index row, filed under the best point held for it
+ * anywhere: the open map (a place record matched to OSM, or the index's own
+ * osm point), then the atlas (Wikidata/Commons, not a row the activity sweep
+ * named from Google), then a household's own pin. FSA, Historic England and
+ * OS keep no coordinates yet and are said to hold none, not nought found.
+ * Google-only is a place whose only point anywhere is on a rented reference;
+ * none is a place with no point at all.
+ *
+ * Rented points are counted table by table. Only place_index dates its point;
+ * every other table is judged by the newest clock the row keeps, so "over 30
+ * days" there is a floor — a row touched last week may carry a point that is
+ * older, and is not counted.
+ */
+export async function coordinateReport() {
+    const { rows: sources } = await query(
+      `with rec as (
+         select venue_ref, (lat is not null and osm_ref is not null) as osm
+           from place_records),
+       -- Keyed as the index rebuild keys them: an attraction with no reference
+       -- of its own is atlas:<id> (Codex, 30 Sep 2026).
+       atl as (
+         select coalesce(venue_ref, 'atlas:' || id::text) as venue_ref, bool_or(osm_ref is not null) as osm
+           from attractions
+          where lat is not null and display_source is distinct from 'google'
+          group by 1),
+       -- The index's own point, with the source it was stamped with or, where
+       -- a rebuild wrote it without one, the source its reference names.
+       -- An atlas:<id> whose row the activity sweep named from Google holds
+       -- Google's point, whatever its reference says (Codex, 30 Sep 2026).
+       ix as (
+         select pi.venue_ref, pi.lat,
+                coalesce(pi.coords_from,
+                         case when g.id is not null then 'google' else split_part(pi.venue_ref, ':', 1) end) as src
+           from place_index pi
+           left join attractions g
+             on pi.venue_ref like 'atlas:%' and g.id::text = substr(pi.venue_ref, 7) and g.display_source = 'google'),
+       rented as (
+         select venue_ref from place_cells where lat is not null and venue_ref like 'google:%'
+         union select venue_ref from scout_places where lat is not null and venue_ref like 'google:%'
+         union select venue_ref from household_places where lat is not null and venue_ref like 'google:%'
+         union select venue_ref from trip_stops where lat is not null and venue_ref like 'google:%'
+         union select venue_ref from trip_shortlist where lat is not null and venue_ref like 'google:%'
+         union select venue_ref from visits where lat is not null and venue_ref like 'google:%'
+         union select venue_ref from place_records where lat is not null and osm_ref is null and venue_ref like 'google:%'),
+       p as (
+         select case
+                  when coalesce(r.osm, false) or coalesce(a.osm, false) or (pi.lat is not null and pi.src = 'osm') then 'osm'
+                  when a.venue_ref is not null or (pi.lat is not null and pi.src in ('atlas', 'wikidata')) then 'atlas'
+                  when pi.lat is not null and pi.src = 'own' then 'own'
+                  -- Rented, named by whose it is: Google, or any other provider.
+                  when pi.lat is not null then 'rented:' || pi.src
+                  when x.venue_ref is not null then 'rented:google'
+                  else 'none' end as source
+           from ix pi
+           left join rec r on r.venue_ref = pi.venue_ref
+           left join atl a on a.venue_ref = pi.venue_ref
+           left join rented x on x.venue_ref = pi.venue_ref)
+       select source, count(*)::int as n from p group by source`);
+
+    const of = (k) => sources.find((r) => r.source === k)?.n ?? 0;
+    const rented = [];
+    const count = async (table, clock, sql, params = []) => {
+      const { rows: [r] } = await query(sql, params);
+      rented.push({ table, clock, held: r.held, over30Days: r.over30, undated: r.undated, oldest: r.oldest });
+    };
+    // Undated is its own count, never "over thirty days": a point with no
+    // clock cannot be said to be old (the can't-speak rule).
+    const OVER = (c) => `count(*)::int held, count(*) filter (where ${c} < now() - interval '30 days')::int over30,
+                         count(*) filter (where ${c} is null)::int undated, min(${c}) oldest`;
+    // Every point that is not ours — the same keep-list the hourly expiry
+    // uses, less wikidata, which that list wrongly treats as rented and is
+    // reported here as the atlas's. A point a rebuild wrote with no source is
+    // judged by its reference, and counted undated (Codex, 30 Sep 2026).
+    const RENTED_IX = `lat is not null and coalesce(coords_from,
+        case when place_index.venue_ref like 'atlas:%' and exists (select 1 from attractions g
+                   where g.id::text = substr(place_index.venue_ref, 7) and g.display_source = 'google') then 'google'
+             else split_part(place_index.venue_ref, ':', 1) end) not in ('osm', 'atlas', 'own', 'wikidata')`;
+    await count('place_index', 'coords_at', `select ${OVER('coords_at')} from place_index where ${RENTED_IX}`);
+    await count('place_cells', 'at', `select ${OVER('at')} from place_cells where lat is not null and venue_ref like 'google:%'`);
+    await count('scout_places', 'last_seen', `select ${OVER('last_seen')} from scout_places where lat is not null and venue_ref like 'google:%'`);
+    await count('attractions', 'updated_at or last_seen', `select ${OVER('coalesce(updated_at, last_seen)')} from attractions where lat is not null and display_source = 'google'`);
+    await count('household_places', 'last_seen', `select ${OVER('last_seen')} from household_places where lat is not null and venue_ref like 'google:%'`);
+    await count('trip_stops', 'created_at', `select ${OVER('created_at')} from trip_stops where lat is not null and venue_ref like 'google:%'`);
+    await count('trip_shortlist', 'added_at', `select ${OVER('added_at')} from trip_shortlist where lat is not null and venue_ref like 'google:%'`);
+    await count('visits', 'created_at', `select ${OVER('created_at')} from visits where lat is not null and venue_ref like 'google:%'`);
+    await count('place_records', 'updated_at', `select ${OVER('updated_at')} from place_records where lat is not null and osm_ref is null and venue_ref like 'google:%'`);
+    // The tenth: what is inside a place. Its items come from OSM and Wikidata;
+    // one on a Google reference would be a copy, and is counted as one.
+    await count('place_contents', 'updated_at', `select ${OVER('updated_at')} from place_contents where lat is not null and item_ref like 'google:%'`);
+
+    // Every point in every table, by the source its reference names — the
+    // whole estate at a glance, beside the per-place filing above.
+    const TABLES = [['place_index', 'venue_ref'], ['place_cells', 'venue_ref'], ['scout_places', 'venue_ref'], ['attractions', 'coalesce(venue_ref, \'atlas:\' || id::text)'],
+      ['household_places', 'venue_ref'], ['trip_stops', 'venue_ref'], ['trip_shortlist', 'venue_ref'], ['visits', 'venue_ref'],
+      ['place_records', 'venue_ref'], ['place_contents', 'item_ref']];
+    const pointsByTable = {};
+    for (const [table, ref] of TABLES) {
+      const { rows } = await query(
+        `select coalesce(nullif(split_part(${ref}, ':', 1), ''), 'none') as source, count(*)::int as n
+           from ${table} where lat is not null group by 1 order by 2 desc`);
+      pointsByTable[table] = Object.fromEntries(rows.map((r) => [r.source, r.n]));
+    }
+
+    // Where: the index's rented points over thirty days by postcode area, off
+    // the cell each still has.
+    const { rows: where } = await query(
+      `select coalesce(substring(upper(split_part(replace(cell, 'sector:', ''), ' ', 1)) from '^[A-Z]+'), '?') as area,
+              count(*)::int as over30
+         from place_index
+        where ${RENTED_IX} and coords_at < now() - interval '30 days'
+        group by 1 order by 2 desc`);
+
+  return {
+      places: {
+        total: sources.reduce((n, r) => n + r.n, 0),
+        owned: { osm: of('osm'), atlas: of('atlas'), own: of('own') },
+        notYetHeld: ['fsa', 'historic-england', 'os'],
+        googleOnly: of('rented:google'),
+        // Rented from anybody else, by provider — never folded into Google.
+        otherRented: Object.fromEntries(sources.filter((r) => r.source.startsWith('rented:') && r.source !== 'rented:google')
+          .map((r) => [r.source.slice(7), r.n])),
+        none: of('none'),
+      },
+      rented,
+      // By the reference's prefix — the one label every table has. Where a
+      // table records a truer source (place_index.coords_from, attractions.
+      // display_source) the filing above uses it; this is the raw spread.
+      pointsByTable,
+      rentedOver30Days: rented.reduce((n, r) => n + r.over30Days, 0),
+      rentedUndated: rented.reduce((n, r) => n + r.undated, 0),
+      indexOver30DaysByArea: where,
+  };
+}
+
+router.get('/coordinates', requires('view_library'), async (_req, res, next) => {
+  try { res.json(await coordinateReport()); } catch (err) { next(err); }
+});
+
 router.get('/census/report', requires('view_library'), async (req, res, next) => {
   try {
     const out = await censusRun.report(req.query.runId ? String(req.query.runId) : null);
