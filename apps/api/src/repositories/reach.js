@@ -665,6 +665,17 @@ async function originBuilt(cell, mode, wantMinutes = 0) {
 }
 
 /**
+ * Whether this mode has a real reach matrix for this origin, out to the horizon
+ * a request of `minutes` needs. The one signal that says a ring is matrix-backed
+ * rather than straight-line, so a caller can trust a stored count for a matrix
+ * mode and refresh only a matrix-less one (Codex) — the same test `ringFor` uses
+ * to choose between the two.
+ */
+export async function hasMatrix(cell, mode, minutes = 0) {
+  return originBuilt(cell, travelMode(mode), Math.min(HORIZON_MINUTES, minutes + EDGE_MINUTES));
+}
+
+/**
  * The cells within a straight-line reach of a home cell, each with an estimated
  * minutes and `method: 'straight-line'`. Shaped like `reachableCells` so the
  * ring builds the same way whether the minutes are real or estimated.

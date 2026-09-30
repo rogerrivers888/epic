@@ -60,17 +60,19 @@ export const stopReason = (err) => (err?.code && STOPS[err.code] ? STOPS[err.cod
 
 /** Where the ring is drawn from: a cell named, the place said, or the household's home. */
 async function cellFor({ cell, where, householdId, minutes, mode }) {
-  if (cell) return { cell, label: where ?? cell };
+  if (cell) return { cell, label: where ?? cell, lat: null, lng: null };
   const { ringFor, cellAt } = await import('../repositories/reach.js');
   if (where) {
+    // The ring's own point, so a matrix-less pilot centres on the searched place
+    // rather than its sector centroid (Codex).
     const ring = await ringFor({ where, minutes, mode }).catch(() => null);
-    if (ring?.cell) return { cell: ring.cell, label: where };
+    if (ring?.cell) return { cell: ring.cell, label: where, lat: ring.at?.lat ?? null, lng: ring.at?.lng ?? null };
   }
   if (householdId) {
     const { rows: [h] } = await query('select home_lat, home_lng, home_label from households where id = $1', [householdId]);
     if (h?.home_lat != null) {
       const at = await cellAt({ lat: Number(h.home_lat), lng: Number(h.home_lng) }).catch(() => null);
-      if (at?.code) return { cell: at.code, label: where ?? h.home_label ?? at.code };
+      if (at?.code) return { cell: at.code, label: where ?? h.home_label ?? at.code, lat: Number(h.home_lat), lng: Number(h.home_lng) };
     }
   }
   return null;
@@ -81,17 +83,21 @@ async function cellFor({ cell, where, householdId, minutes, mode }) {
  * if nobody has counted it — free, from the IDs-only census already held),
  * then the reference set's places not already picked.
  */
-export async function pickPlaces({ cell, mode = 'driving', minutes = 30, top = TOP, refresh = null, reference: withReference = true } = {}) {
+export async function pickPlaces({ cell, lat = null, lng = null, mode = 'driving', minutes = 30, top = TOP, refresh = null, reference: withReference = true } = {}) {
   const ring = await import('../repositories/ringTables.js');
+  const { hasMatrix } = await import('../repositories/reach.js');
   let counted = await ring.countsFor({ cell, mode, minutes });
   let refreshed = false;
   let live = null;
-  // A non-driving mode may be matrix-less, and any stored count it has is a legacy
-  // home-sector row this change purges — so it is refreshed rather than trusted,
-  // which clears the legacy row and returns the live estimate to rank from. Only
-  // the matrix mode (driving) trusts a stored count and skips the refresh (Codex).
-  if (counted == null || travelMode(mode) !== 'driving') {
-    live = await (refresh ?? ring.refreshRing)({ cell, mode, minutes });
+  // Trust a stored count only when the mode actually has a matrix for this cell.
+  // A matrix-less mode's stored count is a legacy home-sector row this change
+  // purges, so it is refreshed — which clears the legacy row and returns the live
+  // estimate to rank from, centred on the household coordinate where there is one.
+  // A mode whose matrix has since been built is trusted and pays no refresh
+  // (Codex, matrix-availability from cell_builds, not mode name).
+  const matrixed = await hasMatrix(cell, mode, minutes).catch(() => false);
+  if (counted == null || !matrixed) {
+    live = await (refresh ?? ring.refreshRing)({ cell, lat, lng, mode, minutes });
     refreshed = true;
     counted = await ring.countsFor({ cell, mode, minutes });
   }
@@ -334,7 +340,7 @@ export async function runPilot({ householdId, sessionId = null, cell = null, whe
       `update pilot_runs set state = 'running', waiting_why = null, session_id = coalesce($2, session_id), updated_at = now() where id = $1 returning *`,
       [run.id, sessionId]));
   } else {
-    const picked = await pickPlaces({ cell: at.cell, mode, minutes, top, refresh: given?.refreshRing ?? null, reference });
+    const picked = await pickPlaces({ cell: at.cell, lat: at.lat, lng: at.lng, mode, minutes, top, refresh: given?.refreshRing ?? null, reference });
     ({ rows: [run] } = await query(
       `insert into pilot_runs (household_id, session_id, where_label, cell, mode, minutes, paid, started_by, places)
        values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning *`,
