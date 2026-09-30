@@ -145,13 +145,19 @@ export function peekCache<T>(key: string): { data: T | undefined; fetchedAt: num
   return e ? { data: e.data as T | undefined, fetchedAt: e.fetchedAt } : undefined;
 }
 
+// Mark an entry stale, and tell anyone watching. The emit is what makes a
+// *mounted* screen react: a write that invalidates the ring it is looking at has
+// to make it re-check and refresh in the background, not wait for a remount
+// (Codex, D13). `useCachedResource` re-checks freshness on every emit.
+function staleEntry(e: Entry<unknown>) { e.fetchedAt = 0; e.gen++; emit(e); }
+
 /** Mark a key stale so the next read refreshes it. */
-export function invalidate(key: string) { const e = store.get(key); if (e) { e.fetchedAt = 0; e.gen++; } }
+export function invalidate(key: string) { const e = store.get(key); if (e) staleEntry(e); }
 
 /** Mark every key with this prefix stale — e.g. all Inspire rings at once when
  * a place is saved or removed, wherever that happened. */
 export function invalidatePrefix(prefix: string) {
-  for (const [k, e] of store) if (k.startsWith(prefix)) { e.fetchedAt = 0; e.gen++; }
+  for (const [k, e] of store) if (k.startsWith(prefix)) staleEntry(e);
 }
 
 /**
@@ -227,12 +233,19 @@ export function useCachedResource<T>(
   useEffect(() => {
     if (!enabled || !key) return;
     const e = entryFor(key);
-    const listener = () => bump();
+    // Fetch if there is nothing yet or what there is has gone stale — and do it
+    // on every emit, not only on mount, so an invalidation while this screen is
+    // mounted makes it refresh in the background rather than wait for a remount
+    // (Codex, D13). `runFetch` dedupes, so an emit mid-flight starts nothing.
+    const ensure = () => {
+      const age = e.fetchedAt ? Date.now() - e.fetchedAt : Infinity;
+      if (!e.promise && (e.data === undefined || age > staleMs)) {
+        void runFetch(key, () => fetcherRef.current());
+      }
+    };
+    const listener = () => { bump(); ensure(); };
     e.listeners.add(listener);
-    const age = e.fetchedAt ? Date.now() - e.fetchedAt : Infinity;
-    if (!e.promise && (e.data === undefined || age > staleMs)) {
-      void runFetch(key, () => fetcherRef.current());
-    }
+    ensure();
     return () => { e.listeners.delete(listener); };
   }, [key, enabled, staleMs]);
 
