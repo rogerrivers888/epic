@@ -17,7 +17,9 @@ const on = (client) => (client ? (text, params) => client.query(text, params) : 
 // ---------------------------------------------------------------------------
 
 export async function visitById(id) {
-  const { rows } = await query('select * from visits where id = $1', [id]);
+  // The place's point as a reader sees it (migration 307), over the row's own.
+  const { rows } = await query(`select *, epic_point_lat(venue_ref, lat, point_from) as lat, epic_point_lng(venue_ref, lng, point_from) as lng
+                                  from visits where id = $1`, [id]);
   return rows[0] ?? null;
 }
 
@@ -124,7 +126,7 @@ export async function visitsFor(householdId, f = {}, takes = []) {
     where.push(`exists (select 1 from ratings r where r.visit_id = v.id and r.subject = 'visit' and r.take = $${params.length}::take)`);
   }
   const { rows } = await query(
-    `select v.*,
+    `select v.*, epic_point_lat(v.venue_ref, v.lat, v.point_from) as lat, epic_point_lng(v.venue_ref, v.lng, v.point_from) as lng,
             (select json_agg(json_build_object('member', m.name, 'memberId', m.id, 'take', r.take, 'comment', r.comment, 'score', r.score))
                from ratings r join members m on m.id = r.member_id where r.visit_id = v.id and r.subject = 'visit') as visit_takes,
             (select count(*)::int from ratings r where r.visit_id = v.id and r.subject <> 'visit') as item_takes,

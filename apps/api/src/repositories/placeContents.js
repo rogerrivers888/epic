@@ -31,8 +31,12 @@ export async function markResearching(parentRef, name, lat, lng) {
   await query(
     `insert into place_records (venue_ref, name, lat, lng, contents_state)
      values ($1,$2,$3,$4,'pending')
-     on conflict (venue_ref) do update set contents_state = 'pending'`,
-    [parentRef, rented ? null : (name ?? null), rented ? null : lat, rented ? null : lng],
+     on conflict (venue_ref) do update set contents_state = 'pending',
+       -- A name an earlier look wrote from the drawer is Google's, and goes;
+       -- one our own research composed says so in its provenance, and stays.
+       name = case when $5 and not (coalesce(place_records.provenance ->> 'name', '') = any(epic_owned_sources()))
+                   then null else place_records.name end`,
+    [parentRef, rented ? null : (name ?? null), rented ? null : lat, rented ? null : lng, rented],
   );
 }
 

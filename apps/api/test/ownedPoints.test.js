@@ -138,3 +138,39 @@ test('the ring re-stamp never picks up a rented copy', async () => {
   const seen = await reach.unstamped(100000);
   assert.ok(!seen.some((r) => r.ref === g), 'a Google-only sweep point is not stamped');
 });
+
+test('a copy of Google\'s point written before the trigger is never read back once the index\'s has gone', async () => {
+  const hh = await household();
+  const ref = `google:legacy-${randomUUID()}`;
+  await query('alter table household_places disable trigger keep_owned_point');
+  try {
+    await query(`insert into household_places (household_id, venue_ref, label, lat, lng) values ($1, $2, $2, 51.5, -0.1)`, [hh, ref]);
+  } finally { await query('alter table household_places enable trigger keep_owned_point'); }
+  const read = async () => (await query('select epic_point_lat(venue_ref, lat, point_from) as lat from household_places where venue_ref = $1', [ref])).rows[0].lat;
+  assert.equal(await read(), null, 'no index point, and the legacy copy is not read');
+  await query(`insert into place_index (venue_ref, lat, lng, coords_from, coords_at) values ($1, 51.51, -0.11, 'google', now())`, [ref]);
+  assert.equal(await read(), 51.51, 'the index\'s current point, while it holds one');
+  // An open-map place's own unlabelled point is still read.
+  const osm = `osm:node/${Date.now()}1`;
+  await query('alter table household_places disable trigger keep_owned_point');
+  try {
+    await query(`insert into household_places (household_id, venue_ref, label, lat, lng) values ($1, $2, $2, 51.6, -0.2)`, [hh, osm]);
+  } finally { await query('alter table household_places enable trigger keep_owned_point'); }
+  assert.equal((await query('select epic_point_lat(venue_ref, lat, point_from) as lat from household_places where venue_ref = $1', [osm])).rows[0].lat, 51.6);
+});
+
+test('looking inside a Google place again clears a Google name an earlier look wrote', async () => {
+  const { markResearching } = await import('../src/repositories/placeContents.js');
+  const g = `google:inside-again-${randomUUID()}`;
+  await query('alter table place_records disable trigger keep_owned_point');
+  try {
+    await query(`insert into place_records (venue_ref, name) values ($1, 'Google''s name')`, [g]);
+  } finally { await query('alter table place_records enable trigger keep_owned_point'); }
+  await markResearching(g, 'Google\'s name', 51.5, -0.1);
+  assert.equal((await query('select name from place_records where venue_ref = $1', [g])).rows[0].name, null);
+  // One our research composed from the open map stays.
+  const o = `google:inside-owned-${randomUUID()}`;
+  await query(`insert into place_records (venue_ref, name, provenance) values ($1, 'The Open Map''s', '{"name":"osm"}')`, [o]);
+  await markResearching(o, 'Google\'s name', 51.5, -0.1);
+  assert.equal((await query('select name from place_records where venue_ref = $1', [o])).rows[0].name, 'The Open Map\'s');
+});
