@@ -255,7 +255,8 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
   const [buying, setBuying] = useState<string | null>(null);
   const [spent, setSpent] = useState<Record<string, number>>({});
   const [price, setPrice] = useQueryState<string>('price', 'any', asOneOf(PRICE_KEYS, 'any'));
-  const [sort, setSort] = useQueryState<InspireSort>('sort', 'rating', asOneOf(SORT_KEYS, 'rating'));
+  // Sort was dropped with its control (owner, 30 Sep 2026): no state, so the
+  // address never carries a ?sort= the page can't apply or clear (Codex).
   const [who] = useQueryState<string[]>('who', [], asList);
   /**
    * The layer inside an open category or kind: nothing (the list of drawers),
@@ -1040,7 +1041,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                   {layer === 'subs' ? (
                     <View>
                       {mode === 'food' ? (
-                        <SubRow label={`All ${label(pick).toLowerCase()} · by rating`} count={inPick.length} onPress={() => { setSort('rating'); setWithin(ALL, { replace: false }); }} />
+                        <SubRow label={`All ${label(pick).toLowerCase()} · by rating`} count={inPick.length} onPress={() => setWithin(ALL, { replace: false })} />
                       ) : null}
                       {subRows.map((r) => (
                         <SubRow key={r.key} label={r.label} count={r.count} onPress={() => setWithin(r.key, { replace: false })} />

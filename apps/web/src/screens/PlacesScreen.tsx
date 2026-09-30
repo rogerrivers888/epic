@@ -553,7 +553,8 @@ function useListState(places: AtlasPlace[], viewer: string | null) {
   const [list, setList] = useQueryState<ListKey>('list', 'been', asOneOf(LIST_KEYS, 'been'));
   const [typeF, setTypeF] = useQueryState<string | null>('type', null, asText);
   const [moodF, setMoodF] = useQueryState<string | null>('mood', null, asText);
-  const [sort, setSort] = useQueryState<PlaceSort>('sort', 'recent', asOneOf(PLACE_SORT_KEYS, 'recent'));
+  // No sort state (owner, 30 Sep 2026): the list holds its default order, so the
+  // address never carries a ?sort= the head can't apply or clear (Codex).
   // An older address said `status=`; it still means what it meant.
   useEffect(() => {
     const legacy = query.get('status');
@@ -595,8 +596,6 @@ function useListState(places: AtlasPlace[], viewer: string | null) {
     { key: '', label: 'Any', count: inShowing.filter(matchesType).length, on: !moodF },
     ...MOODS.filter((m) => moodCounts.has(m)).map((m) => ({ key: m, label: cap(m), count: moodCounts.get(m)!, on: moodF === m })),
   ];
-  const sortOptions: PopoverOption[] = PLACE_SORTS.map((s) => ({ key: s.key, label: s.label, on: sort === s.key }));
-
   const rows = useMemo(
     // Sort dropped from the head (owner, 30 Sep 2026): the list holds its
     // default order, never a hidden stale ?sort= with no way to change it (Codex).
@@ -606,8 +605,8 @@ function useListState(places: AtlasPlace[], viewer: string | null) {
 
   return {
     kind, shown, hasStay, counts, setKind, list: showing, setList, listCounts, inShowing,
-    typeF, setTypeF, moodF, setMoodF, moodShown, sort, setSort,
-    typeOptions, moodOptions, sortOptions, rows,
+    typeF, setTypeF, moodF, setMoodF, moodShown,
+    typeOptions, moodOptions, rows,
   };
 }
 type ListState = ReturnType<typeof useListState>;
