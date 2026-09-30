@@ -595,8 +595,6 @@ const saidHere = new Set();
 export const reportTo = () => String(process.env.EPIC_CENSUS_REPORT_TO || 'roger@epic.day')
   .split(',').map((a) => a.trim()).filter(Boolean);
 
-const wentUnlogged = new Set();
-
 export async function notify({ subject, text = null, purpose = 'census_report', send = sendMail, configured = () => mailStatus().configured, to = reportTo() }) {
   if (!saidHere.has(subject)) { saidHere.add(subject); console.log(`epic-api: census — ${subject}`); }
   if (!configured()) return { mailed: false, why: 'no mail sender' };
@@ -617,27 +615,44 @@ export async function notify({ subject, text = null, purpose = 'census_report', 
       // on the Mail screen, as "Census report" or "Census alert".
       let mailed = false; let why = 'already sent';
       for (const address of to) {
+        // The census's own ledger of what it sent, in bo_settings — not the
+        // mail log. The log is the Mail screen's record and can fail to write
+        // (it did on production for a whole night: 30 Sep 2026, "day 1" and
+        // "day 2" were each sent 14 times, every ten minutes, because the
+        // check read a log that had no rows). Written before the send and
+        // marked sent after it; a refusal clears it so it is tried again.
+        const key = (prefix) => `${prefix}${crypto.createHash('sha256').update(`${subject}\n${address.toLowerCase()}`).digest('hex').slice(0, 32)}`;
+        const mark = key('census:mailed:');
+        const { rows: ledger } = await client.query(
+          `select 1 from bo_settings
+            where (key = $1 and (value->>'state' = 'sent' or (updated_at > now() - interval '15 minutes')))
+               or key = $2
+            limit 1`, [mark, key('census:mailed-unlogged:')]);
+        if (ledger.length) continue;
+        // Sent before the ledger existed, and logged: the Mail screen's rows
+        // still count (Codex, 29 Sep 2026).
         const { rows } = await client.query(
           `select 1 from mail_messages
             where purpose like 'census%' and subject = $1 and lower(to_address) = lower($2)
               and (status not in ('failed', 'sending') or (status = 'sending' and sent_at > now() - interval '15 minutes'))
             limit 1`, [subject.slice(0, 300), address]);
-        const mark = `census:mailed-unlogged:${crypto.createHash('sha256').update(`${subject}\n${address.toLowerCase()}`).digest('hex').slice(0, 32)}`;
-        if (rows.length || wentUnlogged.has(mark)) continue;
-        // Every process's marker, not only this one's (Codex, 30 Sep 2026).
-        const { rows: marked } = await client.query('select 1 from bo_settings where key = $1', [mark]).catch(() => ({ rows: [] }));
-        if (marked.length) continue;
+        if (rows.length) continue;
+        // No ledger, no send: a notice the census cannot write down is one it
+        // cannot tell it has sent, and would send again next tick.
+        const wrote = await client.query(
+          `insert into bo_settings (key, value, updated_by, updated_at) values ($1, $2, 'the UK census', now())
+           on conflict (key) do update set value = excluded.value, updated_at = now()`,
+          [mark, JSON.stringify({ subject, to: address, state: 'sending', at: new Date().toISOString() })],
+        ).then(() => true).catch((err) => { console.error(`epic-api: census — could not write the send down, so not sending: ${err.message}`); return false; });
+        if (!wrote) { why = 'could not write the send down'; continue; }
         const out = await send({ to: address, subject, text: text ?? subject, purpose });
-        // Went, but the log row could not be written: the check above cannot
-        // see it, and would send it again on every tick. Remembered here
-        // instead, for this process's life — once a deploy, never every ten
-        // minutes (30 Sep 2026: production's mail log had no rows at all).
-        if (out.sent && out.logged === false) {
-          wentUnlogged.add(mark);
+        if (out.sent) {
           await client.query(
-            `insert into bo_settings (key, value, updated_by) values ($1, $2, 'the UK census') on conflict (key) do nothing`,
-            [mark, JSON.stringify({ subject, to: address, at: new Date().toISOString(), logError: out.logError ?? null })],
-          ).catch((err) => console.error(`epic-api: census — could not mark an unlogged send: ${err.message}`));
+            `update bo_settings set value = value || $2::jsonb, updated_at = now() where key = $1`,
+            [mark, JSON.stringify({ state: 'sent', sentAt: new Date().toISOString(), providerId: out.providerId ?? null, logged: out.logged !== false })],
+          ).catch((err) => console.error(`epic-api: census — sent, but could not mark it sent: ${err.message}`));
+        } else {
+          await client.query('delete from bo_settings where key = $1', [mark]).catch(() => null);
         }
         mailed = mailed || Boolean(out.sent); why = out.sent ? null : out.message;
       }
@@ -659,27 +674,114 @@ export function reportLine(day) {
   return `Census day ${day.day} (${day.date}): ${n(day.requests)} calls · ${n(day.newPlaces)} new places${left}${money}`;
 }
 
-/** The server's hourly call: the tick, then the report of every day that has ended, then the news. */
-export async function daily(now = new Date()) {
+/**
+ * What is e-mailed (owner, 30 Sep 2026, C58 amended): "no daily emails and no
+ * 'day started' emails. Send one weekly summary on Monday morning: calls, new
+ * places, areas left, days to finish, £ spent, billing export status.
+ * Otherwise email me only when I need to act or know: a stop has tripped, any
+ * net spend, a failure or stall, the billing export still empty after Fri 2
+ * Oct, or the census has finished. Keep the daily line on the Runs page."
+ *
+ * So a day starting, a day ending and the day size rising are said in the
+ * server log and on the Runs page only. Every subject below is fixed for what
+ * it says, and notify() sends each subject once.
+ */
+export const BILLING_EXPORT_DEADLINE = '2026-10-03'; // the day after Friday 2 Oct, London
+const STALL_MINUTES = 60; // a running day that has not moved for an hour
+const START_GRACE_HOURS = 3; // a quota day with no run three hours after it began
+
+const londonParts = (now) => Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false, weekday: 'short',
+}).formatToParts(now).map((x) => [x.type, x.value]));
+const londonDay = (now) => { const p = londonParts(now); return `${p.year}-${p.month}-${p.day}`; };
+const pacificHour = (now) => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: '2-digit', hour12: false }).format(now)) % 24;
+
+/** The week's figures, as one e-mail: the owner's six things, then each day's line. */
+export function weeklySummary(st, bills, now = new Date()) {
+  const today = londonDay(now);
+  const from = new Date(Date.parse(`${today}T12:00:00Z`) - 7 * 86_400_000).toISOString().slice(0, 10);
+  const week = st.days.filter((d) => d.date >= from && d.date < today);
+  const n = (x) => Number(x ?? 0).toLocaleString('en-GB');
+  const calls = week.reduce((t, d) => t + Number(d.requests ?? 0), 0);
+  const places = week.reduce((t, d) => t + Number(d.newPlaces ?? 0), 0);
+  const withLeft = [...st.days].reverse().find((d) => d.areasLeft != null);
+  const billed = week.filter((d) => d.billed);
+  const spent = billed.reduce((t, d) => t + Number(d.billed.placesNetGbp ?? 0), 0);
+  const lastBilled = bills.length ? bills[bills.length - 1].day : null;
+  const lines = [
+    `Calls: ${n(calls)} over ${week.length} day${week.length === 1 ? '' : 's'}`,
+    `New places: ${n(places)}`,
+    `Areas left: ${withLeft ? `${n(withLeft.areasLeft)} (${n(withLeft.districtsLeft)} districts)` : `not measured yet · ${n(st.tilesLeft)} squares left`}`,
+    `Days to finish: ${st.complete ? 'finished' : st.daysLeft == null ? 'not measurable yet' : `about ${st.daysLeft} at ${n(st.dayRequests)} a day`}`,
+    `£ spent (Places, after credits): ${billed.length ? `${gbp(spent)} on ${billed.length} of ${week.length} days billed so far` : 'nothing billed yet'}`,
+    `Billing export: ${lastBilled ? `rows up to ${lastBilled}` : 'empty — nothing delivered yet'}`,
+  ];
+  return {
+    subject: `Census — weekly summary, week to ${today}`,
+    text: `${lines.join('\n')}\n\n${week.map((d) => reportLine(d)).join('\n') || 'No census days this week.'}`,
+  };
+}
+
+/** The server's ten-minute call: the tick, then only what the owner needs to act on or know. */
+export async function daily(now = new Date(), { send, ...tickWith } = {}) {
+  const tell = (subject, text, purpose = 'census_alert') => notify({ subject, text, purpose, ...(send ? { send, configured: () => true } : {}) });
   const tellings = [];
-  const out = await tick({ now, tell: (t) => tellings.push(t) });
+  let out;
+  try {
+    out = await tick({ ...tickWith, now, tell: (t) => tellings.push(t) });
+  } catch (err) {
+    // A failure is said once a day, in its own words.
+    const msg = String(err?.message ?? err).slice(0, 120);
+    console.error(`epic-api: census — the tick failed: ${msg}`);
+    await tell(`Census failed on ${londonDay(now)}: ${msg}`, `The census scheduler could not run:\n\n${msg}`).catch(() => null);
+    return { action: 'failed', error: msg };
+  }
   if (out.action === 'off') return out;
   const st = await status(now);
+  const lines = st.days.map((d) => reportLine(d)).join('\n');
+  // A stop tripped, any net spend, a charge after the finish: the alerts.
+  // A day started or the size raised is logged by notify's caller, not mailed.
   for (const t of tellings) {
-    await notify({ subject: t.subject, purpose: t.kind === 'alert' ? 'census_alert' : 'census_report',
-      text: `${t.subject}.\n\n${st.days.map((d) => reportLine(d)).join('\n')}` });
+    if (t.kind === 'alert') await tell(t.subject, `${t.subject}.\n\n${lines}`);
+    else console.log(`epic-api: census — ${t.subject}`);
   }
-  // A day's report once its run has stopped for the day (or for good). The
-  // billed figure arrives a day or so later, so a report is sent again once
-  // Google has written it — a different subject, said once.
-  // Only a day that has ended: a plan still being written, or built and not
-  // switched on, is not a day, and its notice would suppress the real one
-  // under the same subject (Codex, 29 Sep 2026).
-  for (const d of st.days.filter((x) => x.ended)) {
-    const line = reportLine(d);
-    await notify({ subject: `Census — the rest of the UK, day ${d.day}${d.billed?.final ? ', billed' : ''}`, text: line });
+  // Read again after the tick: a day it has just started is the latest now,
+  // not the one decide() saw.
+  const runsNow = await programme();
+  const latest = runsNow[runsNow.length - 1];
+  const running = ['running', 'waiting'].includes(latest?.state);
+  const stopped = ['halted', 'held', 'complete'].includes(out.action);
+  // A stall: a running day that has not moved for an hour.
+  if (latest?.state === 'running' && latest.last_seen_at
+      && now.getTime() - new Date(latest.last_seen_at).getTime() > STALL_MINUTES * 60_000) {
+    await tell(`Census stalled: day ${st.days.length} has not moved since ${new Date(latest.last_seen_at).toISOString().slice(0, 16).replace('T', ' ')} UTC`,
+      `The day's run is marked running but has not advanced for over ${STALL_MINUTES} minutes.\n\n${lines}`);
   }
-  if (st.complete) await notify({ subject: 'Census — the rest of the UK is complete', text: st.days.map((d) => reportLine(d)).join('\n') });
+  // Or a quota day with no run of its own three hours after it began.
+  const todays = latest && pacificDay(latest.started_at) === pacificDay(now);
+  if (!stopped && !running && !todays && pacificHour(now) >= START_GRACE_HOURS) {
+    await tell(`Census stalled: no run for ${pacificDay(now)} (${out.action})`,
+      `Google's day ${pacificDay(now)} began ${START_GRACE_HOURS}+ hours ago and the census has not started it. The scheduler says: ${out.action}${out.why ? ` — ${out.why}` : ''}.\n\n${lines}`);
+  }
+  // A run that ended in failure.
+  if (latest?.state === 'failed') {
+    await tell(`Census failed: day ${st.days.length} — ${String(latest.problem ?? 'no reason given').slice(0, 100)}`, lines);
+  }
+  // The billing export still empty after Friday 2 October.
+  const bills = await billedByDay(pacificDay(runsNow[0].started_at)).catch(() => null);
+  if (bills && !bills.length && londonDay(now) >= BILLING_EXPORT_DEADLINE) {
+    await tell('Census: the billing export is still empty after Friday 2 October',
+      'Google has not delivered any billing rows, so the census cannot check what it has cost. It carries on under the current rule until you say otherwise.');
+  }
+  // Monday morning, the week's summary — once, and not after a finish already said.
+  const p = londonParts(now);
+  const finishedAt = st.complete ? (await query(`select value->>'at' as at from bo_settings where key = 'census:uk-complete'`)).rows[0]?.at : null;
+  const finishedLongAgo = finishedAt && now.getTime() - Date.parse(finishedAt) > 7 * 86_400_000;
+  if (p.weekday === 'Mon' && Number(p.hour) >= 7 && !finishedLongAgo) {
+    const w = weeklySummary(st, bills ?? [], now);
+    await tell(w.subject, w.text, 'census_report');
+  }
+  if (st.complete) await tell('Census — the rest of the UK is complete', lines, 'census_report');
   return { ...out, status: st };
 }
 

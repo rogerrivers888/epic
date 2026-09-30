@@ -17,7 +17,7 @@ test.after(() => pool.end());
 
 const DAY1 = '2026-09-28T17:39:00Z';
 const clean = async () => {
-  await query(`delete from bo_settings where key like 'census:uk-day:%' or key in ('census:uk-complete', 'census:uk-hold-lifted')`);
+  await query(`delete from bo_settings where key like 'census:uk-day:%' or key like 'census:mailed%' or key in ('census:uk-complete', 'census:uk-hold-lifted')`);
   await query(`delete from census_runs where label like 'The rest of the UK — day %'`);
   await query(`delete from billing_days where invoice_month = '202609' and sku like 'test %'`);
   await query(`delete from api_sessions where label like 'census: The rest of the UK — day %'`);
@@ -996,8 +996,94 @@ test('a notice that went but could not be written down is not sent again every t
   let sent = 0;
   const send = async () => { sent += 1; return { sent: true, logged: false, logError: 'no row' }; };
   for (let i = 0; i < 3; i += 1) await uk.notify({ subject, send, configured: () => true, to: ['roger@epic.day'] });
-  assert.equal(sent, 1);
-  // And another process, which does not share this one's memory, finds the mark.
-  const { rows } = await query(`select value from bo_settings where key like 'census:mailed-unlogged:%' and value->>'subject' = $1`, [subject]);
-  assert.equal(rows.length, 1);
+  assert.equal(sent, 1, 'the census keeps its own ledger, and does not read the mail log to know');
+  const { rows } = await query(`select value from bo_settings where key like 'census:mailed:%' and value->>'subject' = $1`, [subject]);
+  assert.equal(rows[0]?.value.state, 'sent');
+});
+
+test('a notice refused by the sender is cleared from the ledger and tried again', async (t) => {
+  await clean(); t.after(clean);
+  const subject = `Census — refused ${Date.now()}`;
+  let tries = 0;
+  const send = async () => { tries += 1; return tries === 1 ? { sent: false, message: 'refused' } : { sent: true }; };
+  await uk.notify({ subject, send, configured: () => true, to: ['roger@epic.day'] });
+  await uk.notify({ subject, send, configured: () => true, to: ['roger@epic.day'] });
+  await uk.notify({ subject, send, configured: () => true, to: ['roger@epic.day'] });
+  assert.equal(tries, 2);
+});
+
+test('the legacy mark from the night of 30 Sep still counts as sent', async (t) => {
+  await clean(); t.after(clean);
+  const crypto = await import('node:crypto');
+  const subject = 'Census — the rest of the UK, day 1';
+  const key = `census:mailed-unlogged:${crypto.createHash('sha256').update(`${subject}\nroger@epic.day`).digest('hex').slice(0, 32)}`;
+  await query(`insert into bo_settings (key, value, updated_by) values ($1, '{}', 'test')`, [key]);
+  let sent = 0;
+  await uk.notify({ subject, send: async () => { sent += 1; return { sent: true }; }, configured: () => true, to: ['roger@epic.day'] });
+  assert.equal(sent, 0);
+});
+
+// Owner, 30 Sep 2026 (C58 amended): no daily e-mails, no "day started"; a
+// Monday summary; otherwise only what needs acting on or knowing.
+const mailbox = () => { const got = []; return { got, send: async (m) => { got.push(m); return { sent: true }; } }; };
+
+test('a day ending or starting is not e-mailed', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  const r = recorder(); const box = mailbox();
+  // Tuesday 29 Sep, 09:10 London: day 1 has ended, day 2 starts.
+  await uk.daily(new Date('2026-09-29T08:10:00Z'), { send: box.send, start: r.start, quota: async () => ({ speaks: true, limit: 75000 }) });
+  assert.equal(r.calls.length, 1, 'day 2 was started');
+  assert.deepEqual(box.got.map((m) => m.subject), [], 'and nobody was e-mailed about either');
+});
+
+test('Monday morning brings one weekly summary with the six figures', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  const r = recorder(); const box = mailbox();
+  const q = async () => ({ speaks: true, limit: 75000 });
+  // Monday 5 Oct, 06:30 London: not yet.
+  await uk.daily(new Date('2026-10-05T05:30:00Z'), { send: box.send, start: r.start, quota: q });
+  assert.ok(!box.got.some((m) => /weekly summary/.test(m.subject)), 'not before seven');
+  for (const at of ['2026-10-05T07:10:00Z', '2026-10-05T07:20:00Z', '2026-10-05T11:00:00Z']) {
+    await uk.daily(new Date(at), { send: box.send, start: r.start, quota: q });
+  }
+  const weekly = box.got.filter((m) => /weekly summary/.test(m.subject));
+  assert.equal(weekly.length, 1, 'once');
+  assert.equal(weekly[0].subject, 'Census — weekly summary, week to 2026-10-05');
+  for (const word of ['Calls:', 'New places:', 'Areas left:', 'Days to finish:', '£ spent', 'Billing export:']) {
+    assert.ok(weekly[0].text.includes(word), word);
+  }
+});
+
+test('an empty billing export after Friday 2 October is said once', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  const r = recorder(); const box = mailbox();
+  const q = async () => ({ speaks: true, limit: 75000 });
+  await uk.daily(new Date('2026-10-02T12:00:00Z'), { send: box.send, start: r.start, quota: q });
+  assert.ok(!box.got.some((m) => /billing export is still empty/.test(m.subject)), 'not on the Friday');
+  await uk.daily(new Date('2026-10-03T09:00:00Z'), { send: box.send, start: r.start, quota: q });
+  await uk.daily(new Date('2026-10-03T09:10:00Z'), { send: box.send, start: r.start, quota: q });
+  assert.equal(box.got.filter((m) => /billing export is still empty/.test(m.subject)).length, 1);
+});
+
+test('a running day that has not moved for an hour is a stall, said once', async (t) => {
+  await clean(); t.after(clean);
+  const run = await dayOne({ state: 'running', started: '2026-09-29T07:05:00Z', finished: null });
+  await query(`update census_runs set last_seen_at = '2026-09-29T09:00:00Z', max_requests = 70000, requests = 1000, night_share = 70000 where id = $1`, [run.id]);
+  const box = mailbox();
+  await uk.daily(new Date('2026-09-29T10:30:00Z'), { send: box.send, start: recorder().start, quota: async () => ({ speaks: true, limit: 75000 }) });
+  await uk.daily(new Date('2026-09-29T10:40:00Z'), { send: box.send, start: recorder().start, quota: async () => ({ speaks: true, limit: 75000 }) });
+  assert.equal(box.got.filter((m) => /^Census stalled/.test(m.subject)).length, 1);
+});
+
+test('a net Places charge stops it and is e-mailed', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  await billed('2026-09-28', 'google-essentials', 0.02);
+  const box = mailbox();
+  const out = await uk.daily(new Date('2026-09-29T08:10:00Z'), { send: box.send, start: recorder().start, quota: async () => ({ speaks: true, limit: 75000 }) });
+  assert.equal(out.action, 'halted');
+  assert.ok(box.got.some((m) => /^Census stopped: Places cost/.test(m.subject)));
 });
