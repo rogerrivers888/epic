@@ -597,7 +597,13 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
         style={[StyleSheet.absoluteFill, { opacity: feedIn.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }]}
       >
         <Animated.View style={[styles.tripMap, { transform: [{ scale: feedIn.interpolate({ inputRange: [0, 1], outputRange: [1, 0.8] }) }] }]}>
-          <MapGL markers={tripMarkers} routes={routeLine} shade={scanning || searched ? zone : null} fitKey={`trip-${searched}-${tripMarkers.map((mk) => mk.id).join(',')}`} padding={{ top: 40, bottom: 40, left: 30, right: 30 }} />
+          {/* The map is drawn under the status bar and the destination's label
+              chip hangs above its pin, so the fit is padded well clear of the top
+              — else the destination sits under the clock and reads cut off
+              (owner, 30 Sep 2026). The generous padding also zooms the fit out a
+              step so home, the destination and the zone between them are all in
+              view, "the full area". */}
+          <MapGL markers={tripMarkers} routes={routeLine} shade={scanning || searched ? zone : null} fitKey={`trip-${searched}-${tripMarkers.map((mk) => mk.id).join(',')}`} padding={{ top: 104, bottom: 64, left: 48, right: 48 }} />
           {stage === 'search' ? <ScanBox minutes={detour} act={poolCounts.act} food={poolCounts.food} onDone={onScanDone} /> : null}
         </Animated.View>
 
@@ -894,7 +900,7 @@ function FeedView({ feed, trip, tab, detour, minsOpen, pools, nHearts, shortlist
                 {row.sub ? <Text style={styles.metaText}>{row.sub}</Text> : null}
               </View>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rowScroll}>
-                {row.items.map((c) => <FeedCardView key={c.ref} card={c} big={row.big} on={heartOf(c.ref)} onHeart={onHeart} onOpen={onOpen} />)}
+                {row.items.map((c) => <FeedCardView key={c.ref} card={c} on={heartOf(c.ref)} onHeart={onHeart} onOpen={onOpen} />)}
               </ScrollView>
             </View>
           ))
@@ -904,10 +910,15 @@ function FeedView({ feed, trip, tab, detour, minsOpen, pools, nHearts, shortlist
   );
 }
 
-function FeedCardView({ card, big, on, onHeart, onOpen }: { card: FeedCard; big: boolean; on: boolean; onHeart: (c: FeedCard, chip?: Element | null) => void; onOpen: (ref: string) => void }) {
+// Every card is the large top-row size now (owner, 30 Sep 2026: "all the images
+// the same size as the top row"). The 160-wide small card is gone; each row is
+// the same 280×187 picture, whichever shelf it is.
+const CARD_W = 280;
+const CARD_H = 187;
+function FeedCardView({ card, on, onHeart, onOpen }: { card: FeedCard; on: boolean; onHeart: (c: FeedCard, chip?: Element | null) => void; onOpen: (ref: string) => void }) {
   return (
-    <View style={{ width: big ? 280 : 160, gap: 8 }}>
-      <VenueThumb name={card.name} photos={card.photos} category={card.category} experiences={card.experiences} width={big ? 280 : 160} height={big ? 187 : 110} rounded={MEDIA_RADIUS} credit={false} onPress={() => onOpen(card.ref)}>
+    <View style={{ width: CARD_W, gap: 8 }}>
+      <VenueThumb name={card.name} photos={card.photos} category={card.category} experiences={card.experiences} width={CARD_W} height={CARD_H} rounded={MEDIA_RADIUS} credit={false} onPress={() => onOpen(card.ref)}>
         <Pressable onPress={(e: any) => { e?.stopPropagation?.(); onHeart(card, e?.currentTarget); }} style={styles.heartChipWrap} accessibilityRole="button" accessibilityLabel={on ? 'Remove from shortlist' : 'Add to shortlist'}>
           <CardHeart on={on} />
         </Pressable>
@@ -925,8 +936,11 @@ function FeedCardView({ card, big, on, onHeart, onOpen }: { card: FeedCard; big:
 
 function ThinCard({ card, on, onHeart, onOpen }: { card: FeedCard; on: boolean; onHeart: (c: FeedCard, chip?: Element | null) => void; onOpen: (ref: string) => void }) {
   return (
-    <View style={{ gap: 8 }}>
-      <VenueThumb name={card.name} photos={card.photos} category={card.category} experiences={card.experiences} fill rounded={MEDIA_RADIUS} credit={false} onPress={() => onOpen(card.ref)}>
+    <View style={{ width: CARD_W, gap: 8 }}>
+      {/* The thin-results list uses the same picture as every shelf, so "all
+          images the same size" holds in the low-result state too (owner, 30 Sep
+          2026; Codex). */}
+      <VenueThumb name={card.name} photos={card.photos} category={card.category} experiences={card.experiences} width={CARD_W} height={CARD_H} rounded={MEDIA_RADIUS} credit={false} onPress={() => onOpen(card.ref)}>
         <Pressable onPress={(e: any) => { e?.stopPropagation?.(); onHeart(card, e?.currentTarget); }} style={styles.heartChipWrap} accessibilityRole="button"><CardHeart on={on} /></Pressable>
         {card.price ? <View style={styles.priceTag}><Text style={styles.priceTagText}>{card.price}</Text></View> : null}
         <PhotoCredit text={card.photos[0]?.attribution ?? null} />

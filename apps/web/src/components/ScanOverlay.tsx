@@ -82,15 +82,6 @@ export function ScanOverlay({ width, height, minutes, act, food, dur = 4400, hol
     ? `${act} things to do and ${food} places to eat nearby`
     : `${a} things to do · ${f} places to eat`;
 
-  // The 15-minute marker, out from the destination zone toward the zone edge.
-  // Positioned in the upper-middle where a destination usually fits on the map;
-  // it fades in once the sweep is past halfway.
-  const markerIn = done ? 1 : cl((t - dur * 0.5) / (dur * 0.22));
-  const my = height * 0.44;
-  const mx0 = width * 0.36;
-  const mx1 = width * 0.64;
-  const tagW = 52;
-
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
       <Svg width={width} height={height} style={StyleSheet.absoluteFill}>
@@ -112,22 +103,10 @@ export function ScanOverlay({ width, height, minutes, act, food, dur = 4400, hol
         <Rect x={0} y={y - 80} width={width} height={80} fill="url(#scanGlow)" opacity={la} />
         <Rect x={0} y={y - 2} width={width} height={4} fill={LIME} opacity={la} />
         <Rect x={0} y={y - 0.6} width={width} height={1.2} fill={INK} opacity={0.7 * la} />
-        {/* The 15-minute marker: an ink line to the edge of the zone with an end
-            tick, fading in once the sweep has passed the destination zone. */}
-        {markerIn > 0 ? (
-          <>
-            <Rect x={mx0} y={my - 0.75} width={mx1 - mx0} height={1.5} fill={INK} opacity={markerIn} />
-            <Rect x={mx1 - 1.5} y={my - 5} width={1.5} height={10} fill={INK} opacity={markerIn} />
-          </>
-        ) : null}
+        {/* The "15 min" ruler the design drew across the zone is gone: the owner
+            asked for it off the map (30 Sep 2026), the caption already says the
+            band's width in words. The sweep line and the counting caption stay. */}
       </Svg>
-
-      {/* The marker's tag: "N min" in lime on ink. */}
-      {markerIn > 0 ? (
-        <View style={[styles.minTag, { top: my - 10, left: mx0 - tagW }, { opacity: markerIn }]}>
-          <Text style={styles.minTagText}>{minutes} min</Text>
-        </View>
-      ) : null}
 
       {/* The caption card, 16px from the bottom of the map. */}
       <View style={styles.caption}>
@@ -153,6 +132,4 @@ const styles = StyleSheet.create({
   chip: { backgroundColor: INK, paddingHorizontal: 6, paddingVertical: 2 },
   chipText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '800', color: LIME },
   count: { fontFamily: fonts.heading, fontSize: 17, fontWeight: '800', letterSpacing: -0.34, color: INK },
-  minTag: { position: 'absolute', backgroundColor: INK, paddingHorizontal: 6, paddingVertical: 3 },
-  minTagText: { fontFamily: fonts.body, fontSize: 11, fontWeight: '700', color: LIME },
 });
