@@ -594,8 +594,10 @@ function useListState(places: AtlasPlace[], viewer: string | null) {
   const sortOptions: PopoverOption[] = PLACE_SORTS.map((s) => ({ key: s.key, label: s.label, on: sort === s.key }));
 
   const rows = useMemo(
-    () => sortPlaces(inShowing.filter((p) => matchesType(p) && matchesMood(p)), sort, viewer),
-    [inShowing, typeF, moodF, moodShown, sort, viewer, shown],
+    // Sort dropped from the head (owner, 30 Sep 2026): the list holds its
+    // default order, never a hidden stale ?sort= with no way to change it (Codex).
+    () => sortPlaces(inShowing.filter((p) => matchesType(p) && matchesMood(p)), 'recent', viewer),
+    [inShowing, typeF, moodF, moodShown, viewer, shown],
   );
 
   return {

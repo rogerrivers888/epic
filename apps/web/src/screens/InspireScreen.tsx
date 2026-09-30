@@ -505,8 +505,11 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
   const active = activeCount(filters, pick);
   /** The pool, narrowed by every filter and put in order. One pass, no calls. */
   const shown = useMemo(
-    () => sortItems([...inMode].sort((a, b) => forWhoever(a) - forWhoever(b)).filter((i) => keeps(i, filters, crowdOf)), sort, crowdOf, typeOf),
-    [inMode, travel, rating, price, sort, crowdOf, typeOf, minorComing],
+    // Sort was dropped from the context row (owner, 30 Sep 2026), so the list
+    // always holds its default order — never a hidden ?sort= or a stale sticky
+    // value with no control to change it (Codex).
+    () => sortItems([...inMode].sort((a, b) => forWhoever(a) - forWhoever(b)).filter((i) => keeps(i, filters, crowdOf)), 'rating', crowdOf, typeOf),
+    [inMode, travel, rating, price, crowdOf, typeOf, minorComing],
   );
 
   /**

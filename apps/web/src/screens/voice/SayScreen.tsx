@@ -156,6 +156,9 @@ export function SayScreen({ household }: { household: HouseholdResponse | null }
           </View>
         ) : null}
         <View style={{ flex: 1 }} />
+        {/* The band no longer carries the mic toggle, so the way back to voice
+            lives in the body (Codex). */}
+        {!off && (speech.supported || recordingSupported()) ? <TextLink label="Use the mic instead" tone="grey" onPress={() => { setTyping(false); startMic(); }} /> : null}
         {!off ? <PrimaryCta label={door === 'trip' ? 'Plan it' : 'Show me plans'} onPress={() => text.trim() && submit(text.trim(), 'typed')} disabled={!text.trim()} busy={!!busy} /> : null}
         </VoiceScreen>
       </View>
@@ -181,6 +184,9 @@ export function SayScreen({ household }: { household: HouseholdResponse | null }
         </View>
       )}
       {!off ? <TypeInstead onPress={() => setTyping(true)} /> : null}
+      {/* The compact band drops the header's right slot, so the step-by-step
+          intake keeps its way in from the body (Codex). */}
+      {!door && !off ? <TextLink label="Answer one at a time ›" tone="grey" onPress={() => navigate(paths.saySteps())} /> : null}
       {busy ? <StatusLine>{busy}</StatusLine> : null}
       {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
       </VoiceScreen>

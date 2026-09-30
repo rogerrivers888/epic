@@ -263,7 +263,9 @@ const styles = StyleSheet.create({
   chatRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.ruleSoft },
   chatTile: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.lime },
   page: { flex: 1, padding: spacing.lg, gap: spacing.md, backgroundColor: colors.bg },
-  scroll: { paddingHorizontal: 20, paddingTop: (Platform.OS === 'web' ? 'max(16px, calc(var(--epic-sat) + 10px))' : 16) as any, paddingBottom: 60, gap: spacing.sm },
+  // The compact band owns the status-bar inset now, so the scroll starts at a
+  // plain 16px — no second safe-area gap below the ink menu (Codex).
+  scroll: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 60, gap: spacing.sm },
   wide: { maxWidth: 720, alignSelf: 'center', width: '100%' },
   fieldLabel: { fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: colors.ink },
   review: { marginTop: spacing.md, padding: spacing.md, gap: spacing.sm, backgroundColor: colors.warm },

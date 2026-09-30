@@ -116,9 +116,11 @@ export function OfferWizard({ offerId, home, onChanged }: { offerId: string; hom
   return (
     <View style={k.page}>
       <View style={wide ? k.wide : undefined}>
-        {/* New navigation (owner, 30 Sep 2026): a finish-flow — the compact band
-            with a ✕ and no mic, because the whole screen is the flow. */}
-        <CompactBand title={chrome ? chrome.title : live ? (o.title ?? 'Who is invited') : step === 'done' ? 'All set' : 'Host on Epic'} onClose={() => (chrome ? chrome.back() : live ? navigate(paths.hostOffer(o.id), { replace: true }) : step === 'done' ? navigate(paths.host(), { replace: true }) : at > 0 ? go(steps[at - 1]) : back(paths.host()))} />
+        {/* New navigation (owner, 30 Sep 2026): the compact band, no mic. The
+            leading control steps back through the wizard (and out at the first
+            step), so it is the back chevron, not a ✕ — a ✕ that steps back
+            rather than closing reads as a lie (Codex). */}
+        <CompactBand title={chrome ? chrome.title : live ? (o.title ?? 'Who is invited') : step === 'done' ? 'All set' : 'Host on Epic'} onBack={() => (chrome ? chrome.back() : live ? navigate(paths.hostOffer(o.id), { replace: true }) : step === 'done' ? navigate(paths.host(), { replace: true }) : at > 0 ? go(steps[at - 1]) : back(paths.host()))} />
         {cur > 0 && !live && !chrome ? (
           <View style={k.prog}>
             <View style={k.progRow}><Text style={[t.small, { fontWeight: '600', lineHeight: 15 }]}>{TITLE[step] ?? ''}</Text><Text style={[t.small, { fontSize: 11.5, lineHeight: 15 }]} numberOfLines={1}>{count}</Text></View>
