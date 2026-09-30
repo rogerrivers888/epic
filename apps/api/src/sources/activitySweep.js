@@ -287,7 +287,7 @@ async function upsertSwept(slug, p, osm, owned) {
   }
   // Without a name we can show, there is nothing to publish yet — but the
   // pointer is still worth keeping, because it is what a later pass researches.
-  const { rowCount } = await query(
+  const { rowCount, rows: [saved] } = await query(
     `insert into attractions
        (region_slug, source, external_ref, wikidata_id, name, slug, category, kinds,
         lat, lng, website, osm_ref, display_source, crowd_band, count_band, found_by,
@@ -303,7 +303,8 @@ async function upsertSwept(slug, p, osm, owned) {
        display_source = excluded.display_source,
        crowd_band = excluded.crowd_band,
        count_band = excluded.count_band,
-       last_seen = now(), updated_at = now()`,
+       last_seen = now(), updated_at = now()
+     returning id`,
     [slug, ref,
      osm?.tags?.wikidata ?? null,
      name ?? `(${p.matchedQuery})`,
@@ -322,6 +323,13 @@ async function upsertSwept(slug, p, osm, owned) {
      JSON.stringify(owned
        ? [{ source: 'OpenStreetMap', licence: 'ODbL', url: 'https://www.openstreetmap.org/copyright' }]
        : [{ source: 'Google', licence: 'place identifier only — display fetched live', note: 'Powered by Google' }])]);
+  // Matched to the open map: that is the place's owned point now, under both
+  // the references the index knows it by (Codex, 30 Sep 2026).
+  if (owned && saved?.id && Number.isFinite(Number(osm?.lat)) && Number.isFinite(Number(osm?.lng))) {
+    for (const r of [ref, `atlas:${saved.id}`]) {
+      await recordOwnedPoint({ ref: r, lat: Number(osm.lat), lng: Number(osm.lng), source: 'osm', sourceRef: osm.ref ?? null, method: 'the activity sweep matched it' });
+    }
+  }
   return rowCount > 0;
 }
 
