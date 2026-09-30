@@ -624,23 +624,14 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
    * a source with no prose (Wikidata) carry no external credit. Google's
    * editorial summary is never shown, so Google is never a source here.
    */
-  // Google's editorial summary is rented prose — read in memory for vocabulary,
-  // never shown as a description (data policy). google.js fills venue.summary
-  // from editorialSummary, so a summary whose source is Google is dropped here:
-  // the description is the owned one (Wikipedia, the venue's page, the atlas), or
-  // nothing at all — owned facts only (Codex).
-  // The best summary that is NOT Google's editorial (rented prose, read for
-  // vocabulary and never shown as a description): the detail's, then the owned
-  // record's, then the card's — each only when its source is not Google — and
-  // otherwise nothing at all, owned facts only. Dropping the detail's Google
-  // summary must not also drop a perfectly good atlas Wikipedia one on the card
-  // (an OSM-backed atlas entry with no place_records summary) (Codex).
-  const notGoogle = (text: string | null | undefined, src: string | undefined) =>
-    (text != null && src !== 'google') ? text : null;
-  const shownSummary = notGoogle(v?.summary, v?.provenance?.summary?.source ?? v?.source)
-    ?? ownRecord?.summary
-    ?? notGoogle(item.summary, item.provenance?.summary?.source ?? item.source)
-    ?? null;
+  // The description shown, as it was before this batch: the detail's summary,
+  // then the card's. Dropping Google's editorial summary from here — it is rented
+  // prose the data policy reads for vocabulary only — is a visible change to what
+  // customers see and is HELD OUT of the place-page batch (owner, 30 Sep 2026):
+  // it is the owner's call to make deliberately, not a side effect of the M7
+  // description credit. See docs/markets-followups.md. When it is decided, the
+  // suppression is the `notGoogle`-per-source form in this file's history.
+  const shownSummary = v?.summary ?? item.summary ?? null;
   // A credit is only correct if the prose on screen is one whose source we know,
   // and its source is written down in several shapes: own.js stores
   // `summary_source` as the literal "wikipedia", as a venue URL, or as a full
