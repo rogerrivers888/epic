@@ -83,11 +83,14 @@ export async function refreshRing({ cell, lat = null, lng = null, mode = 'drivin
   // A straight-line ring depends on the exact point, not just the sector, and its
   // live rankings and uncensused districts are consumed directly — so two homes in
   // one sector must not share an in-flight count and receive each other's, centred
-  // on the wrong place (Codex). The coordinate joins the key ONLY for a matrix-less
-  // ring: a matrix ring's persisted geometry is the same for the whole sector, and
-  // a coordinate-specific key would let two homes there delete-and-insert the same
-  // rows concurrently and collide on the unique key (Codex).
-  const estimated = lat != null && lng != null && !(await hasMatrix(cell, kind, minutes).catch(() => false));
+  // on the wrong place (Codex). The coordinate joins the key ONLY for a ring that
+  // ringFor can actually treat as straight-line — a non-driving mode with no
+  // matrix. Driving is always matrix-backed even before it is built (its empty
+  // ring is "can't speak", never a straight line), and its persisted geometry is
+  // the same across the sector, so a coordinate-specific key there would let two
+  // homes delete-and-insert the same rows concurrently and collide (Codex).
+  const estimated = kind !== 'driving' && lat != null && lng != null
+    && !(await hasMatrix(cell, kind, minutes).catch(() => false));
   const key = ringKey({ cell, mode: kind, minutes })
     + (estimated ? `@${Number(lat)},${Number(lng)}` : '');
   const going = inFlight.get(key);

@@ -539,6 +539,17 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
     name = label ?? at?.code ?? null;
   }
   if (!cell) return null;
+  if (originLat == null && said) {
+    // A full postcode (SL5 0JD) matches `sectorOf` and set the sector cell above,
+    // so its own point was never resolved and a straight-line circle would centre
+    // on the sector centroid rather than the postcode. Look the postcode up and
+    // centre on it (Codex). Normalised to the ONS `pcds` form — one space before
+    // the three-character inward code.
+    const raw = said.toUpperCase().replace(/\s+/g, '');
+    const pcds = raw.length > 3 ? `${raw.slice(0, -3)} ${raw.slice(-3)}` : raw;
+    const { rows: [pc] } = await query('select lat, lng from postcodes where pcds = $1 limit 1', [pcds]).catch(() => ({ rows: [] }));
+    if (pc?.lat != null) { originLat = Number(pc.lat); originLng = Number(pc.lng); }
+  }
   let within = await reachableCells(cell, { minutes, mode });
   // No matrix rows for this mode — walking and public transport, until OSRM and
   // a GTFS routing table are built (owner, 30 Sep 2026) — would otherwise
