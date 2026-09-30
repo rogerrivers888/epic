@@ -546,10 +546,13 @@ inspire.get('/around', async (req, res, next) => {
   try {
     const started = Date.now();
     const household = await currentHousehold();
-    // Up to 2 h (owner, 30 Sep 2026: "30 min → 1 h → 2 h"). The reach matrix is
-    // built to a 90-min horizon (+10 edge), so 2 h reads the full matrix rather
-    // than truly two hours; clamping at 90 made 1 h and 2 h identical.
-    const minutes = Math.min(120, Math.max(5, Math.trunc(Number(req.query.minutes)) || 30));
+    // The reach matrix is built to 90 minutes, so 90 is the honest ceiling: a
+    // "2 h" request cannot include a place the matrix never measured at 100–120
+    // min. Clamp to what can actually be answered rather than return minutes:120
+    // over a 90-minute reach (owner wants 30 → 1 h → 2 h to rise; 2 h is the
+    // full 90-min matrix, which is more than 1 h, so it does — Codex). Extending
+    // to a real two hours is rebuilding the matrix with a higher cap.
+    const minutes = Math.min(90, Math.max(5, Math.trunc(Number(req.query.minutes)) || 30));
     const mode = travelMode(req.query.mode);
     const wanted = String(req.query.cat ?? '').trim();
 
@@ -726,10 +729,13 @@ inspire.get('/near', async (req, res, next) => {
     // Everything below it — the atlas pool, the sweep's food, the look-around —
     // is what happens outside that: abroad, or in a country whose matrix has
     // not been built. It is kept for exactly that, and for nothing else.
-    // Up to 2 h (owner, 30 Sep 2026: "30 min → 1 h → 2 h"). The reach matrix is
-    // built to a 90-min horizon (+10 edge), so 2 h reads the full matrix rather
-    // than truly two hours; clamping at 90 made 1 h and 2 h identical.
-    const minutes = Math.min(120, Math.max(5, Math.trunc(Number(req.query.minutes)) || 30));
+    // The reach matrix is built to 90 minutes, so 90 is the honest ceiling: a
+    // "2 h" request cannot include a place the matrix never measured at 100–120
+    // min. Clamp to what can actually be answered rather than return minutes:120
+    // over a 90-minute reach (owner wants 30 → 1 h → 2 h to rise; 2 h is the
+    // full 90-min matrix, which is more than 1 h, so it does — Codex). Extending
+    // to a real two hours is rebuilding the matrix with a higher cap.
+    const minutes = Math.min(90, Math.max(5, Math.trunc(Number(req.query.minutes)) || 30));
     const ring = await ringFrom({ ...req.query, lat: centre.lat, lng: centre.lng, label }, { minutes, mode });
     if (ring) {
       ring.bandBox = boxAround(ring.bandPoints ?? ring.points);

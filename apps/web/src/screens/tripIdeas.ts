@@ -158,7 +158,7 @@ function primaryMood(p: TripAlongPlace): MoodKey | null {
  * row is inside the band. A place appears in only one of Picked / Right by / On
  * the way; the category rows below may repeat them.
  */
-export function buildFeed(opts: { places: TripAlongPlace[]; kind: IdeasKind; trip: Trip; minutes: number; moodLabels?: Record<string, string> }): Feed {
+export function buildFeed(opts: { places: TripAlongPlace[]; kind: IdeasKind; trip: Trip; minutes: number; mode?: Trip['travelMode']; moodLabels?: Record<string, string> }): Feed {
   const { places, kind, trip, minutes } = opts;
   const moodLabel = (k: string) => opts.moodLabels?.[k] ?? MOOD_LABEL[k] ?? k.charAt(0).toUpperCase() + k.slice(1);
 
@@ -211,7 +211,7 @@ export function buildFeed(opts: { places: TripAlongPlace[]; kind: IdeasKind; tri
     .sort((a, b) => (a.detourMinutes ?? 0) - (b.detourMinutes ?? 0));
   if (picked.length) rows.push({ key: 'pick', title: 'Picked for your household', sub: null, big: true, items: picked.map((p) => toCard(p, kind)) });
   if (nearPlaces.length) rows.push({ key: 'near', title: `Right by ${short}`, sub: 'Within a 10-minute walk', big: false, items: nearPlaces.map((p) => toCard(p, kind)) });
-  if (wayPlaces.length) rows.push({ key: 'way', title: 'On the way', sub: alongSub(trip.travelMode), big: false, items: wayPlaces.map((p) => toCard(p, kind)) });
+  if (wayPlaces.length) rows.push({ key: 'way', title: 'On the way', sub: alongSub(opts.mode ?? trip.travelMode), big: false, items: wayPlaces.map((p) => toCard(p, kind)) });
 
   // Category rows: the same shelves as Inspire, ordered by how many the band has,
   // and free to repeat a place already shown above.

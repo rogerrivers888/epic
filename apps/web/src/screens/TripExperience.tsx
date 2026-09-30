@@ -241,6 +241,8 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   const [poolError, setPoolError] = useState(false);
   const [poolCounts, setPoolCounts] = useState<{ act: number; food: number }>({ act: 0, food: 0 });
   const loadingRef = useRef(false);
+  // Which pool request is the latest — only it commits (Codex, mode-switch race).
+  const poolToken = useRef(0);
 
   const stage: Stage = section === 'ideas' ? 'feed' : section === 'shortlist' ? 'short' : scanning ? 'search' : 'trip';
 
@@ -325,8 +327,13 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   const destStop = useMemo(() => dayStops.find(isSeededDest) ?? null, [dayStops, isSeededDest]);
 
   const loadPools = useCallback(async (force = false) => {
-    if (loadingRef.current) return;
     if (pools && !force) return;
+    // A non-forced load waits behind one in flight; a forced one (a mode change)
+    // supersedes it — the token below makes the latest request the one that
+    // commits, so selecting Walk then Drive can never leave Walk's pool under a
+    // Drive-selected picker (Codex).
+    if (loadingRef.current && !force) return;
+    const token = ++poolToken.current;
     loadingRef.current = true;
     setPoolError(false);
     // A forced search follows a changed route/time/mode: drop the old journey's
@@ -340,15 +347,16 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
         api.tripAlong(id, { kind: 'things', maxDetourMin: 30, mode: by }),
         api.tripAlong(id, { kind: 'food', maxDetourMin: 30, mode: by }),
       ]);
+      if (token !== poolToken.current) return; // a newer mode/search superseded this one
       const noTransport = (p: TripAlongPlace) => !/station|bus_stop|parking|car_park|taxi/i.test(`${p.category ?? ''} ${p.subcategory ?? ''}`);
       poolQ.current = { activities: things.queryId ?? null, food: food.queryId ?? null };
       setPools({ activities: things.places.filter(noTransport), food: food.places.filter(noTransport) });
     } catch {
       // Leave the pools unset on failure and mark the error, so the feed offers
       // a retry rather than pinning an empty feed or a permanent spinner (Codex).
-      setPoolError(true);
+      if (token === poolToken.current) setPoolError(true);
     } finally {
-      loadingRef.current = false;
+      if (token === poolToken.current) loadingRef.current = false;
     }
   }, [id, pools, by]);
 
@@ -371,8 +379,10 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   useEffect(() => {
     if (lastModeRef.current === by) return;
     lastModeRef.current = by;
-    if (pools) loadPools(true);
-  }, [by, pools, loadPools]);
+    // Force regardless of whether a pool is present or a load is mid-flight —
+    // the token in loadPools makes this latest mode the one that commits.
+    loadPools(true);
+  }, [by, loadPools]);
 
   // Landing on the feed or the shortlist — a shared link, say — is discovery
   // already done: mark it so the trip does not force a scan on Back to my trip
@@ -424,8 +434,8 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
     const kind = lastTab;
     // Set-aside places are already out of livePools, so the next search never
     // brings a set-aside place straight back into the feed (owner).
-    return buildFeed({ places: kind === 'food' ? livePools.food : livePools.activities, kind, trip, minutes: detour });
-  }, [livePools, lastTab, trip, detour]);
+    return buildFeed({ places: kind === 'food' ? livePools.food : livePools.activities, kind, trip, minutes: detour, mode: by });
+  }, [livePools, lastTab, trip, detour, by]);
 
   const shortlistCards: FeedCard[] = useMemo(() => {
     // Everything on the shortlist, with its detour if the search knows it.

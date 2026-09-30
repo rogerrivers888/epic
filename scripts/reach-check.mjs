@@ -12,7 +12,7 @@
 
 const BASE = (process.argv[2] || process.env.EPIC_BASE || 'https://epic.day').replace(/\/$/, '');
 const PASSCODE = process.argv[3] || process.env.EPIC_PASSCODE || process.env.ROAM_PASSCODE;
-const WHERE = process.env.EPIC_WHERE || 'sl5'; // Sunningdale
+const WHERE = process.env.EPIC_WHERE || 'SL5 0JD'; // Sunningdale — a full postcode resolves to a sector; a bare outcode may not
 const MINUTES = [30, 60, 120];
 const MODES = ['drive', 'walk', 'transit'];
 
