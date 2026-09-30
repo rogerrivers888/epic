@@ -79,7 +79,7 @@ export async function purgeRented({ days = 30, force = false } = {}) {
   for (const t of TABLES) {
     const { rowCount } = await query(
       `update ${t.table} set point_from = point_from
-        where (${t.rented}) and ${t.first} < now() - ${age}`, [RENTED_SOURCES]);
+        where (${t.rented}) and ${t.first} < now() - ${age}`, t.rented.includes('$1') ? [RENTED_SOURCES] : []);
     out.tables[t.table] = rowCount;
   }
 
