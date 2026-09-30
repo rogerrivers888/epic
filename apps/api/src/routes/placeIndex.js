@@ -3779,7 +3779,7 @@ router.post('/census/uk/lift', requires('manage_library'), async (req, res, next
 // The licensed providers whose points are rented: Google and the other
 // place providers, and the event feeds that hand us identifiers — all counted
 // here, each under its own name (Codex, 30 Sep 2026).
-const RENTED_SOURCES = ['google', 'tripadvisor', 'yelp', 'foursquare', 'ticketmaster', 'seatgeek', 'predicthq', 'datathistle'];
+const RENTED_SOURCES = ['google', 'tripadvisor', 'yelp', 'foursquare', 'liteapi', 'ticketmaster', 'seatgeek', 'predicthq', 'datathistle'];
 
 // An activity-sweep row under an atlas reference: Google's point, unless the
 // copy sits where the open map later put it (OWNED_AT). Matched or not, and
