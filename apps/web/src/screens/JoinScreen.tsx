@@ -87,9 +87,10 @@ export function JoinScreen({ token, preview, onExit }: {
   useEffect(() => {
     if (preview || Platform.OS === 'web') return;
     let live = true;
+    setCredReady(false); // a different invite holds the load again until its own credential is read
     secureStorage.getAsync(partKey(token)).then((held) => {
       if (!live) return;
-      if (held) setMe(held);
+      setMe(held ?? null); // clear the previous invite's credential when this one has none
       setCredReady(true);
     });
     return () => { live = false; };

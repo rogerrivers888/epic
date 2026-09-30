@@ -34,17 +34,29 @@ try {
 // The synchronous face of the store: a cache the reads come from.
 const cache = new Map<string, string | null>();
 
+// One mutation at a time per key, in call order. Sign-in then sign-out fire two
+// async Keychain writes back to back; without ordering the earlier set could
+// land after the delete and leave the token on disk, so it comes back after a
+// restart. Chaining each key's writes makes the last call the last to persist.
+// Errors are swallowed inside the chain so one failure never stalls the next.
+const chains = new Map<string, Promise<void>>();
+const enqueue = (key: string, op: () => Promise<unknown>): Promise<void> => {
+  const next = (chains.get(key) ?? Promise.resolve()).then(() => op().then(() => {}, () => {}));
+  chains.set(key, next);
+  return next;
+};
+
 export const secureStorage: SecureStore = {
   getItem(key) {
     return cache.has(key) ? (cache.get(key) ?? null) : null;
   },
   setItem(key, value) {
     cache.set(key, value);
-    SecureStoreModule?.setItemAsync(key, value).catch(() => { /* keep the cached value */ });
+    if (SecureStoreModule) void enqueue(key, () => SecureStoreModule!.setItemAsync(key, value));
   },
   removeItem(key) {
     cache.set(key, null);
-    SecureStoreModule?.deleteItemAsync(key).catch(() => { /* noop */ });
+    if (SecureStoreModule) void enqueue(key, () => SecureStoreModule!.deleteItemAsync(key));
   },
   async hydrate(keys) {
     if (!SecureStoreModule) return;
@@ -59,10 +71,10 @@ export const secureStorage: SecureStore = {
   },
   async setAsync(key, value) {
     cache.set(key, value);
-    try { await SecureStoreModule?.setItemAsync(key, value); } catch { /* keep the cached value */ }
+    if (SecureStoreModule) await enqueue(key, () => SecureStoreModule!.setItemAsync(key, value));
   },
   async removeAsync(key) {
     cache.set(key, null);
-    try { await SecureStoreModule?.deleteItemAsync(key); } catch { /* noop */ }
+    if (SecureStoreModule) await enqueue(key, () => SecureStoreModule!.deleteItemAsync(key));
   },
 };
