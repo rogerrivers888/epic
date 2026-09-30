@@ -261,7 +261,7 @@ export async function reviewsFor({ venueRef, name, lat, lng, householdId = null 
 
   const id = await googleRefFor({ venueRef, name, lat, lng, householdId });
   if (!id) {
-    const value = { rating: null, ratingCount: null, reviews: [], attribution: null, matched: false };
+    const value = { rating: null, ratingCount: null, reviews: [], priceLevel: null, mapsUrl: null, attribution: null, matched: false };
     kept.set(venueRef, { at: Date.now(), value });
     return value;
   }
@@ -272,6 +272,13 @@ export async function reviewsFor({ venueRef, name, lat, lng, householdId = null 
     rating: v?.rating ?? null,
     ratingCount: v?.ratingCount ?? null,
     reviews: v?.reviews ?? [],
+    // The price level and the Google Maps link come back too, so an atlas place
+    // whose rating this match supplies also shows its Google cost band and a
+    // linked Google Maps attribution. Rented and display-only like the rating —
+    // shown in memory, never stored, and this path is absent from
+    // offline/policy.ts so none of it reaches a device.
+    priceLevel: v?.priceLevel ?? null,
+    mapsUrl: v?.mapsUrl ?? null,
     // Showing a provider's reviews carries their credit; it is a condition of
     // being allowed to show them, not a courtesy.
     attribution: v ? (googleSource.attribution?.text ?? 'Powered by Google') : null,

@@ -2184,7 +2184,7 @@ export const api = {
         points: rows.map((r) => `${r.lat},${r.lng}`).join('|'),
       })}`),
   placeReviews: (q: { ref: string; name: string; lat: number; lng: number }) =>
-    request<{ rating: number | null; ratingCount: number | null; reviews: { text: string; rating: number | null; author: string | null; authorUri: string | null; when: string | null }[]; attribution: string | null; matched: boolean }>(`/api/places/reviews${qs(q)}`),
+    request<{ rating: number | null; ratingCount: number | null; reviews: { text: string; rating: number | null; author: string | null; authorUri: string | null; when: string | null }[]; priceLevel: number | null; mapsUrl: string | null; attribution: string | null; matched: boolean }>(`/api/places/reviews${qs(q)}`),
   placeRecords: (venueRefs: string[]) => request<{ records: Record<string, OwnedRecord>; missing: string[] }>(`/api/places/record${qs({ refs: venueRefs.join(',') })}`),
   /** The cost scale for a place: the band Google's price level fills, and a money definition from the place's market. `known: false` = not known yet. */
   costBand: (q: { country?: string | null; level: number | null }) =>

@@ -302,7 +302,7 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
   const [closedAs, setClosedAs] = useState<PlaceOpenStatusBrief | null>(null);
   const hardClosed = Boolean(closedAs?.hidden);
   const router = useOptionalRouter();
-  const [crowd, setCrowd] = useState<{ rating: number | null; ratingCount: number | null; reviews: Venue['reviews']; attribution: string | null } | null>(null);
+  const [crowd, setCrowd] = useState<{ rating: number | null; ratingCount: number | null; reviews: Venue['reviews']; priceLevel: number | null; mapsUrl: string | null; attribution: string | null } | null>(null);
   // The cost scale — the band Google's price level fills and a money definition
   // from the place's market. Fetched beside the drawer; "not known yet" when
   // there is no price signal (never Free).
@@ -390,7 +390,7 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
      */
     if ((item.source === 'atlas' || item.source === 'scout') && item.lat != null && item.lng != null) {
       api.placeReviews({ ref: item.venueRef, name: item.name, lat: item.lat, lng: item.lng })
-        .then((d) => { if (live && d.matched) setCrowd({ rating: d.rating, ratingCount: d.ratingCount, reviews: d.reviews, attribution: d.attribution }); })
+        .then((d) => { if (live && d.matched) setCrowd({ rating: d.rating, ratingCount: d.ratingCount, reviews: d.reviews, priceLevel: d.priceLevel, mapsUrl: d.mapsUrl, attribution: d.attribution }); })
         .catch(() => { /* no reviews is not an error worth a message */ });
     }
     // No provider holds a `wikidata:` id, so there is no venue to fetch for one.
@@ -493,7 +493,11 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
       && (venue.provenance?.priceLevel?.source ?? venue.source) === 'google';
     const itemLevelGoogle = item.priceLevel != null
       && (item.provenance?.priceLevel?.source ?? item.source ?? item.venueRef.split(':')[0]) === 'google';
-    const level = venueLevelGoogle ? venue!.priceLevel! : itemLevelGoogle ? item.priceLevel! : null;
+    // The crowd match is always Google, so its price level is a Google one — the
+    // atlas place's own cost band, from the same lookup that gave it its rating.
+    const level = venueLevelGoogle ? venue!.priceLevel!
+      : itemLevelGoogle ? item.priceLevel!
+        : crowd?.priceLevel != null ? crowd.priceLevel : null;
     let live = true;
     // A failed lookup — offline (this endpoint is not in offline/policy.ts, so it
     // is never cached), or a transient error — settles to the honest unknown
@@ -511,7 +515,7 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
     // carries the Google provenance — so every field the request reads is here
     // (Codex).
   }, [item?.venueRef, item?.priceLevel, item?.source, item?.provenance?.priceLevel?.source,
-      country, venue?.priceLevel, venue?.source, venue?.provenance?.priceLevel?.source]);
+      country, venue?.priceLevel, venue?.source, venue?.provenance?.priceLevel?.source, crowd?.priceLevel]);
   const onHeroScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (!heroW) return;
     const i = Math.round(e.nativeEvent.contentOffset.x / heroW);
@@ -541,7 +545,10 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
   const reviews = [...(v?.reviews ?? crowd?.reviews ?? [])].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
   const hours = (v?.openingHours ?? item.openingHours ?? '').split(' · ').filter(Boolean);
   const website = v?.website ?? ownRecord?.website ?? item.website;
-  const mapsUrl = v?.mapsUrl ?? item.mapsUrl;
+  // The crowd match is Google, so its Google Maps link is used when an atlas
+  // place has no card or detail one of its own — so a Google rating there links
+  // to its source rather than falling to the unlinked branch (Codex).
+  const mapsUrl = v?.mapsUrl ?? item.mapsUrl ?? crowd?.mapsUrl ?? null;
   const externalUrl = v?.externalUrl ?? item.externalUrl;
   // Ours first, then the card's, then the crowd's — an atlas place has neither
   // of the first two and is the whole reason the third is fetched.
