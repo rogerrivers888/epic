@@ -59,7 +59,11 @@ const TABLES = {
 export async function candidateIn(source, name, near, { strict = false } = {}) {
   const t = TABLES[source];
   const radiusM = near.radiusM ?? RULES[source].radiusM;
-  const [a, b, c, d] = box(near.lat, near.lng, radiusM);
+  // A census box is searched as the rectangle it is, never a circle round its
+  // centre that reaches over its edges (Codex, 30 Sep 2026).
+  const [a, b, c, d] = near.bounds
+    ? [near.bounds.minLat, near.bounds.maxLat, near.bounds.minLng, near.bounds.maxLng]
+    : box(near.lat, near.lng, radiusM);
   // Narrowed by the name's own stems in the database, so a city's census box
   // is not cut short at an arbitrary row: every candidate that could be this
   // place, or a rival to it, is read. A list that still reaches the cap cannot
@@ -76,7 +80,7 @@ export async function candidateIn(source, name, near, { strict = false } = {}) {
   const need = strict ? BOX_SCORE : RULES[source].score;
   const good = rows
     .map((r) => ({ ...r, score: nameScore(name, r.name), distanceM: metresBetween({ lat: near.lat, lng: near.lng }, { lat: r.lat, lng: r.lng }) }))
-    .filter((r) => r.score >= need && r.distanceM <= radiusM);
+    .filter((r) => r.score >= need && (near.bounds ? true : r.distanceM <= radiusM));
   if (!good.length) return null;
   good.sort((x, y) => y.score - x.score || x.distanceM - y.distanceM);
   // Two that are both clearly it — a chain's branches in one box — is no match.
@@ -197,7 +201,10 @@ const boxOf = (slice) => {
   const b = String(slice ?? '').split(',').map(Number);
   if (b.length !== 4 || b.some((x) => !Number.isFinite(x))) return null;
   const lat = (b[0] + b[2]) / 2, lng = (b[1] + b[3]) / 2;
-  return { lat, lng, radiusM: Math.round(metresBetween({ lat: b[0], lng: b[1] }, { lat: b[2], lng: b[3] }) / 2) };
+  return {
+    lat, lng, radiusM: Math.round(metresBetween({ lat: b[0], lng: b[1] }, { lat: b[2], lng: b[3] }) / 2),
+    bounds: { minLat: Math.min(b[0], b[2]), maxLat: Math.max(b[0], b[2]), minLng: Math.min(b[1], b[3]), maxLng: Math.max(b[1], b[3]) },
+  };
 };
 
 /**

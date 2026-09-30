@@ -228,3 +228,12 @@ test('an open-map point already on the index stands against a Google one arrivin
   await index.noteMany([{ ref, lat: 51.5, lng: -0.1, coordsFrom: 'google' }], { source: 'google' });
   assert.deepEqual((await query('select lat, coords_from from place_index where venue_ref = $1', [ref])).rows[0], { lat: 51.45, coords_from: 'osm' });
 });
+
+test('a census box is searched as its rectangle, not a circle round its centre', async () => {
+  // Just outside the box's east edge, but inside its half-diagonal from the centre.
+  await fsaRow(91050, 'The Lonely Heron', 51.30, -0.4990);
+  const bounds = { minLat: 51.28, maxLat: 51.32, minLng: -0.52, maxLng: -0.50 };
+  const out = await m.matchPlace({ ref: 'google:heron', names: ['The Lonely Heron'], point: null,
+    box: { lat: 51.30, lng: -0.51, radiusM: 2500, bounds } });
+  assert.ok(out.none, 'outside the box is not in the box');
+});
