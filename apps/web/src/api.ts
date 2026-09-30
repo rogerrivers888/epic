@@ -6,19 +6,28 @@ import { invalidateTabData } from './cache/resourceCache';
 
 // Path prefixes whose writes change what the Inspire, Places or Trips tab caches
 // hold: saving/removing/naming a place (`/api/places/save`, `/api/atlas/*`),
-// logging a visit (`/api/visits`), recording a meal (`/api/orders/:id/eaten`
-// makes a visit and a household place), any trip write (`/api/trips`), a host
-// booking (`/api/bookings`, shown under Trips) and the home or household
-// (`/api/household`, which moves the Inspire ring and the atlas home). Telemetry
-// and the back office are deliberately absent — see the note at the call site.
-// The planner's trip-makers are listed one by one on purpose: `/api/plan/commit`
-// and the two one-tap makers create a trip, but most `/api/plan/*` paths —
-// preview, refine, start — run live while someone is planning and must never
-// invalidate, or the tabs would re-fetch on every keystroke.
+// logging a visit (`/api/visits`), any trip write (`/api/trips`), a host booking
+// (`/api/bookings`, shown under Trips) and the home or household (`/api/household`,
+// which moves the Inspire ring and the atlas home). Telemetry and the back office
+// are deliberately absent — see the note at the call site. The planner's
+// trip-makers are listed one by one on purpose: `/api/plan/commit` and the two
+// one-tap makers create a trip, but most `/api/plan/*` paths — preview, refine,
+// start — run live while someone is planning and must never invalidate, or the
+// tabs would re-fetch on every keystroke.
 const TAB_DATA_WRITE = [
-  '/api/places/', '/api/atlas/', '/api/visits', '/api/orders', '/api/trips', '/api/bookings', '/api/household',
+  '/api/places/', '/api/atlas/', '/api/visits', '/api/trips', '/api/bookings', '/api/household',
   '/api/plan/commit', '/api/plan/inspire/trip', '/api/plan/tastes/trip',
 ];
+// Orders are the one that needs more than a prefix: only *completing* a meal
+// (`/api/orders/:id/eaten`) makes a visit and a household place. The basket
+// writes under `/api/orders` — save, clear, rate a dish — change nothing the
+// tabs show, and invalidating on those would reload a provider-backed Inspire
+// search on every dish edited (Codex, D13).
+const EATEN = /^\/api\/orders\/[^/]+\/eaten$/;
+const changesTabData = (path: string): boolean => {
+  const p = path.split('?')[0];
+  return TAB_DATA_WRITE.some((w) => p.startsWith(w)) || EATEN.test(p);
+};
 import { flush as flushOutbox, queue as queueWrite, refreshOutbox } from './offline/outbox';
 import { copyHolder, deviceLabel, holderOf, sessionExpired, sessionToken, setCopyHolder, setSessionToken } from './session';
 
@@ -88,7 +97,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // from the path, so it is the same answer whether the write comes back with a
   // body or an empty 204 (the atlas and trip DELETE routes answer 204) — both
   // must stale the caches (Codex, D13).
-  const isTabWrite = !readOnly && TAB_DATA_WRITE.some((p) => path.startsWith(p));
+  const isTabWrite = !readOnly && changesTabData(path);
   const token = sessionToken();
   try {
     const res = await fetch(`${API_URL}${path}`, {
