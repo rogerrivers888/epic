@@ -204,3 +204,11 @@ test('a household\'s own photo pin is never moved onto a feature that shares its
   const out = await m.matchPlace({ ref: `photo:${randomUUID()}`, names: ['Granny\'s Kitchen'], point: { lat: 51.1001, lng: -0.2001 } });
   assert.equal(out.none, 'its point is already ours');
 });
+
+test('an open-map point already on the index stands against a Google one arriving', async () => {
+  const index = await import('../src/repositories/placeIndex.js');
+  const ref = `google:twin-stands-${randomUUID()}`;
+  await index.noteMany([{ ref, lat: 51.45, lng: -0.55, coordsFrom: 'osm' }]);
+  await index.noteMany([{ ref, lat: 51.5, lng: -0.1, coordsFrom: 'google' }], { source: 'google' });
+  assert.deepEqual((await query('select lat, coords_from from place_index where venue_ref = $1', [ref])).rows[0], { lat: 51.45, coords_from: 'osm' });
+});

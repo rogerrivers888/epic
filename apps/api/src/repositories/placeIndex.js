@@ -1616,9 +1616,14 @@ export async function noteMany(places = [], { source = null, countryCode = null,
     // search's Google point never displaces an FSA one.
     const values = rows.map((_, i) => {
       const r = `$${i * 7 + 1}`, lat = `$${i * 7 + 2}::double precision`, lng = `$${i * 7 + 3}::double precision`;
-      const oLat = `(select o.lat from owned_points o where o.venue_ref = ${r})`;
-      const oLng = `(select o.lng from owned_points o where o.venue_ref = ${r})`;
-      const oSrc = `(select o.source from owned_points o where o.venue_ref = ${r})`;
+      // And an owned point the index already holds (an open-map twin, say)
+      // stands against a rented one arriving (Codex, 30 Sep 2026).
+      const rentedIn = `($${i * 7 + 7}::text = any(epic_rented_sources()))`;
+      const held = (col) => `(select p.${col} from place_index p where p.venue_ref = ${r} and p.lat is not null and p.lng is not null
+                               and p.coords_from = any(epic_owned_sources()))`;
+      const oLat = `coalesce((select o.lat from owned_points o where o.venue_ref = ${r}), case when ${rentedIn} then ${held('lat')} end)`;
+      const oLng = `coalesce((select o.lng from owned_points o where o.venue_ref = ${r}), case when ${rentedIn} then ${held('lng')} end)`;
+      const oSrc = `coalesce((select o.source from owned_points o where o.venue_ref = ${r}), case when ${rentedIn} then ${held('coords_from')} end)`;
       return `(${r}, coalesce(${oLat}, ${lat}), case when ${oLat} is not null then ${oLng} else ${lng} end, $${i * 7 + 4},$${i * 7 + 5}, now(), $${i * 7 + 6}::text[],
         case when coalesce(${oLat}, ${lat}) is not null then now() end,
         case when ${oLat} is not null then ${oSrc} when ${lat} is not null then $${i * 7 + 7}::text end)`;
