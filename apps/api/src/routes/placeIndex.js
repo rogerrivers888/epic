@@ -3196,6 +3196,17 @@ router.post('/owned-points/load', requires('manage_library'), async (req, res, n
   } catch (err) { next(err); }
 });
 
+// The purge (C59 step 5): every rented point over thirty days, wherever it is,
+// logged by table. It runs on the hour by itself once the backfill is done;
+// this runs it now, and `force` runs it even before the backfill has read the
+// copies it removes.
+router.post('/owned-points/purge', requires('manage_library'), async (req, res, next) => {
+  try {
+    const { purgeRented } = await import('../sources/coordinatePurge.js');
+    res.json(await purgeRented({ force: req.body?.force === true }));
+  } catch (err) { next(err); }
+});
+
 router.post('/owned-points/match', requires('manage_library'), async (req, res, next) => {
   try {
     const kind = req.body?.kind === 'weekly' ? 'weekly' : 'backfill';

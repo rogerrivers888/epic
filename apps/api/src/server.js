@@ -81,7 +81,6 @@ import { refresh as refreshReach } from './repositories/reach.js';
 import { buildIfEmpty, checkBars, seedBars, settleNew } from './repositories/placeIndex.js';
 import { health } from './health.js';
 import { noteInvariantRun } from './repositories/settings.js';
-import { expireRentedCoordinates } from './sources/census.js';
 import * as censusRun from './sources/censusRun.js';
 import * as ringTables from './repositories/ringTables.js';
 import { refreshIfDue as refreshPostcodesIfDue } from './sources/postcodeRefresh.js';
@@ -640,8 +639,18 @@ const sweep = async () => {
   // terms by up to another day depending on the time it was written. A point
   // from the open map is ODbL and is not touched — `coords_from` is what tells
   // them apart (migration 184).
-  const stale = await expireRentedCoordinates().catch(() => null);
+  //
+  // And every copy of one the index never knew about, once the owned points'
+  // backfill has read them (owner, C59 step 5, 30 Sep 2026): the sweep, the
+  // activity sweep, research records, saved and planned places, visits, and
+  // the cells stamped from them — each purge written down by table.
+  const purged = await import('./sources/coordinatePurge.js').then(({ purgeRented }) => purgeRented())
+    .catch((err) => { console.error(`epic-api: places — the purge failed: ${err.message}`); return null; });
+  const stale = purged?.index;
   if (stale?.expired) console.log(`epic-api: places — ${stale.expired} rented coordinate(s) expired, ${stale.cells} cell row(s) with them`);
+  for (const [table, n] of Object.entries(purged?.tables ?? {})) {
+    if (n) console.log(`epic-api: places — ${n} rented point(s) purged from ${table}`);
+  }
 };
 
 // The index is derived, so on an installation that predates it there is nothing
