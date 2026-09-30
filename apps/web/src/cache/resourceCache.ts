@@ -268,6 +268,12 @@ export function useCachedResource<T>(
     const listener = () => { bump(); ensure(false); };
     e.listeners.add(listener);
     ensure(true);
+    // The entry may have moved between this render and this effect — a prefetch
+    // resolving in that window emits before the listener above exists, and would
+    // otherwise be missed, leaving a screen on its skeleton though the data has
+    // arrived (Codex, D13). One bump now re-reads the current state and closes
+    // that window; every later change comes through the listener.
+    bump();
     return () => { e.listeners.delete(listener); };
   }, [key, enabled, staleMs]);
 
