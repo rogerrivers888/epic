@@ -43,17 +43,21 @@ const RENTED_REF = (col) => `(split_part(${col}, ':', 1) = any($1::text[]) or ep
 
 /**
  * Each table: the rows still holding a rented copy older than thirty days,
- * and how to touch them. `first` is the row's own first clock.
+ * and how to touch them. `first` is the row's own first clock. A row the
+ * trigger has already given an owned point is not touched again (Codex).
  */
 export const TABLES = [
   { table: 'scout_places', first: 'first_seen',
     // Google's point and Google's name, on a row the open map never gave.
-    rented: `(lat is not null or name is not null) and ${RENTED_REF('venue_ref')} and not (coalesce(from_sources, '[]'::jsonb) ? 'osm')` },
+    rented: `(lat is not null or name is not null) and ${RENTED_REF('venue_ref')} and not (coalesce(from_sources, '[]'::jsonb) ? 'osm')
+             and (point_from is null or not (point_from = any(epic_owned_sources())))` },
   { table: 'attractions', first: 'first_seen',
-    rented: `lat is not null and (display_source = 'google' or (source = 'google' and osm_ref is null))` },
+    rented: `lat is not null and (display_source = 'google' or (source = 'google' and osm_ref is null))
+             and (point_from is null or not (point_from = any(epic_owned_sources())))` },
   { table: 'place_records', first: 'coalesce(first_owned, updated_at)',
     rented: `lat is not null and ${RENTED_REF('venue_ref')} and osm_ref is null
-             and not (coalesce(provenance ->> 'lat', '') = any(epic_owned_sources()))` },
+             and not (coalesce(provenance ->> 'lat', '') = any(epic_owned_sources()))
+             and (point_from is null or not (point_from = any(epic_owned_sources())))` },
   { table: 'household_places', first: 'first_seen',
     rented: `lat is not null and ${RENTED_REF('venue_ref')} and (point_from is null or point_from = any($1::text[]))` },
   { table: 'trip_shortlist', first: 'added_at',

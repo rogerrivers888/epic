@@ -165,6 +165,8 @@ export async function matchPlace(place) {
 // every id in the table to text.
 const ATLAS_ID = `(case when pi.venue_ref like 'atlas:%' then epic_try_uuid(substr(pi.venue_ref, 7)) end)`;
 
+const TRUSTED_WD = (a) => `(${a}.source is distinct from 'google' or (${a}.osm_ref is not null and ${a}.display_source is null))`;
+
 async function pageOfPlaces(after, limit, { weekly }) {
   const { rows } = await query(
     `select pi.venue_ref as ref, pi.slice,
@@ -185,8 +187,11 @@ async function pageOfPlaces(after, limit, { weekly }) {
             ], null) as names,
             epic_ref_true_source(pi.venue_ref) = any(epic_rented_sources()) as rented,
             coalesce((select r.wikidata_id from place_records r where r.venue_ref = pi.venue_ref),
-                     (select a.wikidata_id from attractions a where a.venue_ref = pi.venue_ref and a.wikidata_id is not null limit 1),
-                     (select a.wikidata_id from attractions a where a.id = ${ATLAS_ID}),
+                     -- Only an identifier the atlas vouches for: a harvested row,
+                     -- or an activity-sweep match it accepted — never one it
+                     -- saw on a candidate it turned down (Codex, 30 Sep 2026).
+                     (select a.wikidata_id from attractions a where a.venue_ref = pi.venue_ref and a.wikidata_id is not null and ${TRUSTED_WD('a')} limit 1),
+                     (select a.wikidata_id from attractions a where a.id = ${ATLAS_ID} and ${TRUSTED_WD('a')}),
                      case when pi.venue_ref like 'wikidata:%' then substr(pi.venue_ref, 10) end) as wikidata_id
        from place_index pi
        left join lateral (
