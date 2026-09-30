@@ -292,14 +292,8 @@ const ringFrom = (q, { minutes, mode }) => reach.ringFor({
 const PAGE = 20;
 
 async function placesFor({ ring, category, page, meter, taught, tax, householdId, minutes = 30, mode = 'driving', from = null }) {
-  // A straight-line ring (walk/transit with no matrix) counts, searches and
-  // fences around ONE centre — the ring's own point — so the provider box, the
-  // cards and the count all describe the same circle. In /near the journey
-  // origin can differ from the searched place, and using it here would search
-  // one circle and count another (Codex). A matrix ring uses the journey origin
-  // and the journey-time bound as before.
+  const start = from ?? ring.at ?? null;
   const straight = ring.method === 'straight-line';
-  const start = (straight ? ring.at : from) ?? ring.at ?? null;
   const reachKm = straight ? straightLineReachKm(mode, minutes) : boundKm(minutes, mode);
   const searchBox = start
     ? {
@@ -455,20 +449,24 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
     // journey-time fence intersected with a circle, which would drop a venue the
     // count kept at the cycling overhead (Codex). A matrix ring fences by the
     // journey-time estimate the card itself prints.
-    let fenced;
-    if (straight && (ring.at ?? start)) {
-      // Centre on `ring.at`, the exact point the count circle is centred on
-      // (censusForRing), not on `start` — in /near the journey origin can differ
-      // from the ring's centre, and the cards must be the same circle as the
-      // count, never a second one (Codex).
-      const c = ring.at ?? start;
-      const centre = { lat: Number(c.lat), lng: Number(c.lng) };
+    let fenced = fenceToBand(venues, { from: start, minutes, mode });
+    // A straight-line ring (walk/transit with no matrix) has two things to
+    // honour, and they meet at an intersection (Codex):
+    //   · the band invariant — nothing over the minutes is shown, measured from
+    //     the journey origin the card itself prints from — which fenceToBand
+    //     above already enforces; and
+    //   · the counted reach — the conservative straight-line circle the count is
+    //     taken over — so no card lies past the reach the count claims.
+    // A card must satisfy both, so cap the band by that circle. Centred on
+    // `start`, the same origin the band is measured from, so the two never
+    // contradict; when the search centre and the origin coincide (the ordinary
+    // case) this circle is exactly the count's.
+    if (straight && start) {
+      const centre = { lat: Number(start.lat), lng: Number(start.lng) };
       const limitKm = straightLineReachKm(mode, minutes);
-      fenced = (venues ?? []).filter((v) =>
+      fenced = fenced.filter((v) =>
         v?.lat != null && v?.lng != null
         && kmBetween(centre, { lat: Number(v.lat), lng: Number(v.lng) }) <= limitKm);
-    } else {
-      fenced = fenceToBand(venues, { from: start, minutes, mode });
     }
     // Closed places, once the owner has applied the check, are not shown (C57).
     const hidden = await hiddenAmong(fenced.map((v) => `${v.source}:${v.sourcePlaceId}`));

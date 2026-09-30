@@ -596,10 +596,19 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
       const dLat = reachKm / 111;
       const dLng = reachKm / (111 * Math.max(0.3, Math.cos((centre.lat * Math.PI) / 180)));
       const { rows: near } = await query(
-        `select distinct upper(outcode) as outcode from geo_cells
+        `select upper(outcode) as outcode, lat, lng from geo_cells
           where outcode is not null and lat between $1 and $2 and lng between $3 and $4`,
         [centre.lat - dLat, centre.lat + dLat, centre.lng - dLng, centre.lng + dLng]);
-      outcodes = [...new Set([...outcodes, ...near.map((r) => r.outcode).filter(Boolean)])];
+      // The box is a square; its corners reach reachKm·√2. An uncensused outcode
+      // whose only nearby sector sits in a corner beyond reachKm would otherwise
+      // be added and make censusForRing read every category as a floor and
+      // inflate notCensused (Codex). Keep only outcodes with a sector genuinely
+      // within the circle.
+      const reached = near
+        .filter((r) => kmBetween(centre, { lat: Number(r.lat), lng: Number(r.lng) }) <= reachKm)
+        .map((r) => r.outcode)
+        .filter(Boolean);
+      outcodes = [...new Set([...outcodes, ...reached])];
     }
   }
   return {
