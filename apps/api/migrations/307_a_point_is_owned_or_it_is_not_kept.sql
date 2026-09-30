@@ -155,12 +155,18 @@ begin
   -- of our own (Codex, 30 Sep 2026).
   if NEW.lat is not null and NEW.lng is not null and src = any(epic_rented_sources())
      and (TG_OP = 'INSERT' or NEW.lat is distinct from OLD.lat or NEW.lng is distinct from OLD.lng) then
+    -- Only where the index holds no point at all, and never a census box's
+    -- centre copied from another table: a local copy must not overwrite the
+    -- index's point or start its thirty days again (Codex, 30 Sep 2026).
     insert into place_index (venue_ref, lat, lng, coords_from, coords_at)
     values (ref, NEW.lat, NEW.lng, src, now())
     on conflict (venue_ref) do update
        set lat = excluded.lat, lng = excluded.lng, coords_from = excluded.coords_from, coords_at = now(),
            cell = null, placed_at = null
-     where place_index.lat is null or not (coalesce(place_index.coords_from, '') = any(epic_owned_sources()));
+     where place_index.lat is null
+       and not (place_index.slice ~ '^-?[0-9.]+,-?[0-9.]+,-?[0-9.]+,-?[0-9.]+$'
+                and abs((split_part(place_index.slice, ',', 1)::double precision + split_part(place_index.slice, ',', 3)::double precision) / 2 - excluded.lat) < 1e-9
+                and abs((split_part(place_index.slice, ',', 2)::double precision + split_part(place_index.slice, ',', 4)::double precision) / 2 - excluded.lng) < 1e-9);
   end if;
 
   -- 4. Google's name for a place the open map never gave is rented like its

@@ -224,3 +224,13 @@ test('a rented point refused by a table is left on the index for its thirty days
   assert.deepEqual((await query('select lat, coords_from from place_index where venue_ref = $1', [ref])).rows[0], { lat: 51.47, coords_from: 'google' });
   assert.equal((await query('select epic_point_lat(venue_ref, lat, point_from) as lat from trip_stops where venue_ref = $1', [ref])).rows[0].lat, 51.47);
 });
+
+test('a census box copied between tables never becomes the index\'s point', async () => {
+  const hh = await household();
+  const ref = `google:box-copy-${randomUUID()}`;
+  await query(`insert into place_index (venue_ref, lat, lng, coords_from, coords_at, slice) values ($1, 51.4123, -0.6011, 'google', now() - interval '5 days', '51.40,-0.62,51.48,-0.50')`, [ref]);
+  // The saved row holds the box centre; copying it on must not touch the index.
+  await query(`update place_index set lat = null, lng = null where venue_ref = $1`, [ref]);
+  await saved(hh, ref, 51.44, -0.56);
+  assert.deepEqual((await query('select lat, coords_from from place_index where venue_ref = $1', [ref])).rows[0], { lat: null, coords_from: 'google' });
+});

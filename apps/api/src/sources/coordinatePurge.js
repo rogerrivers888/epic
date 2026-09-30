@@ -142,7 +142,9 @@ export async function purgeRented({ days = 30, force = false } = {}) {
                          where g.id = (case when c.venue_ref like 'atlas:%' then epic_try_uuid(substr(c.venue_ref, 7)) end)
                            and (g.display_source = 'google' or (g.source = 'google' and g.osm_ref is null))))
         and c.lat is not null
-        and c.at < now() - ${age}
+        -- Whatever its stamp time: a cell is a copy of a point, and one whose
+        -- point the index and the owned points no longer hold is an orphan
+        -- (Codex, 30 Sep 2026).
         and not exists (select 1 from place_index pi where pi.venue_ref = c.venue_ref and pi.lat is not null
                           and abs(pi.lat - c.lat) <= 0.0005 and abs(pi.lng - c.lng) <= 0.0005)
         and not exists (select 1 from owned_points o where o.venue_ref = c.venue_ref
