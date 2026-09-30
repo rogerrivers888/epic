@@ -3799,7 +3799,8 @@ const OWNED_AT = (x) => `(exists (select 1 from place_records r where r.venue_re
    or exists (select 1 from attractions a
                where (a.venue_ref = ${x}.venue_ref or a.id = (case when ${x}.venue_ref ~ '^atlas:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then substr(${x}.venue_ref, 7)::uuid end))
                  and a.lat is not null and a.lng is not null
-                 and not (a.display_source = 'google' or (a.source = 'google' and a.osm_ref is null))
+                 -- Null-safe: a Wikidata row has no display_source at all (Codex).
+                 and not (coalesce(a.display_source, '') = 'google' or (coalesce(a.source, '') = 'google' and a.osm_ref is null))
                  and abs(a.lat - ${x}.lat) <= 0.0005 and abs(a.lng - ${x}.lng) <= 0.0005))`;
 
 // A rented copy: a provider's reference or a Google-named atlas row, and not
