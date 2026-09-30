@@ -858,6 +858,17 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
     if (map.current && ready.current) { map.current.resize(); layout.current(); }
   }, [pad.bottom]);
 
+  // The container's own height can change under it — the shortlist's map grows
+  // when you engage it and shrinks when you go back to the list (owner, 30 Sep
+  // 2026) — so watch the box and keep the GL canvas and the labels in step.
+  useEffect(() => {
+    const el = host.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => { if (map.current && ready.current) { map.current.resize(); layout.current(); } });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.surfaceMuted }}>
       <div ref={host} style={{ position: 'absolute', inset: 0 }} />

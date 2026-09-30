@@ -31,6 +31,7 @@ import type { MapMarker, MapRoute } from '../components/MapGL';
 import { VenueDrawer } from '../components/VenueDrawer';
 import { VenueThumb, MEDIA_RADIUS } from '../components/VenueThumb';
 import { ScanOverlay } from '../components/ScanOverlay';
+import { useViewport } from '../hooks/useViewport';
 import { flyHeart } from '../components/epicHeart';
 import { searchGround } from '../components/searchGround';
 import { paths, withQuery, type IdeasTab } from '../routes';
@@ -993,6 +994,24 @@ function ShortlistView({ cards, allCards, aside, show, sel, markers, zone, trip,
   onBack: () => void; onShow: (v: ShortTab) => void; onSelect: (ref: string) => void; onDetails: (ref: string) => void; onAdd: (c: FeedCard) => void; onBringBack: (ref: string) => void; inTrip: (ref: string) => boolean; onViewTrip: () => void;
 }) {
   const [asideOpen, setAsideOpen] = useState(false);
+  // The map grows when you are working it and shrinks when you go back to the
+  // list (owner, 30 Sep 2026: "when I click on a pin the card covers the other
+  // pins and I scroll in a very small area"). Big is at least half the frame, so
+  // the callout has room above it; the list gets the space back on a scroll.
+  const { height: frameH } = useViewport();
+  const MAP_SMALL = 260;
+  // At least half the frame, but always leaving room for the handle, the title,
+  // the tabs and some list — so a short viewport (a phone in landscape) can never
+  // push the shortlist off the bottom (Codex). On a tiny frame it does not grow.
+  const MAP_BIG = Math.max(MAP_SMALL, Math.min(Math.round(frameH * 0.58), frameH - 240));
+  const [mapBig, setMapBig] = useState(false);
+  const mapH = useRef(new Animated.Value(MAP_SMALL)).current;
+  useEffect(() => {
+    Animated.timing(mapH, { toValue: mapBig ? MAP_BIG : MAP_SMALL, duration: 260, useNativeDriver: false }).start();
+  }, [mapBig, MAP_BIG, mapH]);
+  // Selecting a pin is working the map: give it room rather than dropping a card
+  // over the pins you were choosing between.
+  useEffect(() => { if (sel) setMapBig(true); }, [sel]);
   const selCard = sel ? cards.find((c) => c.ref === sel) ?? null : null;
   const tabs: { key: ShortTab; label: string; n: number }[] = [
     { key: 'all', label: 'All', n: allCards.length },
@@ -1001,8 +1020,8 @@ function ShortlistView({ cards, allCards, aside, show, sel, markers, zone, trip,
   ];
   return (
     <>
-      <View style={styles.shortMap}>
-        <MapGL markers={markers} routes={[]} shade={zone} focusId={sel} fitKey={`short-${markers.map((mk) => mk.id).join(',')}`} padding={{ top: 60, bottom: 40, left: 30, right: 30 }} />
+      <Animated.View style={[styles.shortMap, { height: mapH }]}>
+        <MapGL markers={markers} routes={[]} shade={zone} focusId={sel} fitKey={`short-${markers.map((mk) => mk.id).join(',')}`} padding={{ top: 60, bottom: selCard ? 96 : 40, left: 30, right: 30 }} />
         <Press onPress={onBack} style={styles.floatBack} accessibilityRole="button" accessibilityLabel="Back to ideas"><Icon name="back" size={20} color={INK} /></Press>
         {selCard ? (
           <Press onPress={() => onDetails(selCard.ref)} style={styles.callout} accessibilityRole="button">
@@ -1016,7 +1035,13 @@ function ShortlistView({ cards, allCards, aside, show, sel, markers, zone, trip,
             <View style={styles.calloutDetails}><Text style={styles.calloutDetailsText}>Details</Text><Icon name="more" size={16} color={INK} /></View>
           </Press>
         ) : null}
-      </View>
+      </Animated.View>
+
+      {/* The divider between map and list is the handle: tap to grow the map to
+          work it, tap again to give the list the room back (owner, 30 Sep 2026). */}
+      <Press onPress={() => setMapBig((v) => !v)} style={styles.mapGrab} accessibilityRole="button" accessibilityLabel={mapBig ? 'Shrink the map, more list' : 'Expand the map'}>
+        <View style={styles.mapGrabBar} />
+      </Press>
 
       <View style={styles.shortTitleRow}>
         <Text style={styles.shortTitle}>Shortlist</Text>
@@ -1032,7 +1057,7 @@ function ShortlistView({ cards, allCards, aside, show, sel, markers, zone, trip,
         ))}
       </View>
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 96 }} showsVerticalScrollIndicator={false}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 96 }} showsVerticalScrollIndicator={false} onScrollBeginDrag={() => setMapBig(false)}>
         {!cards.length ? (
           <View style={styles.shortEmpty}>
             <Text style={styles.emptyTitle}>{!allCards.length ? 'Nothing on your shortlist yet' : show === 'food' ? 'No places to eat on your shortlist yet' : 'No activities on your shortlist yet'}</Text>
@@ -1401,7 +1426,9 @@ const styles = StyleSheet.create({
 
   // Shortlist
   short: { backgroundColor: CREAM },
-  shortMap: { height: 300, position: 'relative' },
+  shortMap: { height: 300, position: 'relative', overflow: 'hidden' },
+  mapGrab: { alignItems: 'center', justifyContent: 'center', paddingVertical: 8 },
+  mapGrabBar: { width: 40, height: 4, borderRadius: 2, backgroundColor: GREY },
   // Clears the status bar itself — the shortlist owns its header, so the shell
   // adds no top inset (App.tsx Edges); the map runs under the clock, this must not.
   floatBack: { position: 'absolute', left: 16, top: (Platform.OS === 'web' ? 'calc(16px + var(--epic-sat))' : 16) as any, width: 40, height: 40, borderRadius: 8, backgroundColor: CREAM, alignItems: 'center', justifyContent: 'center', shadowColor: INK, shadowOpacity: 0.14, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
