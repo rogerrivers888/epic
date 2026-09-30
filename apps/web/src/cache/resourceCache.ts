@@ -315,11 +315,12 @@ export function useScrollMemory(key: string, ready: boolean) {
     if (restored.current === key) return;
     restored.current = key;
     const y = readScroll(key);
-    if (y > 0) {
-      const raf = requestAnimationFrame(() => ref.current?.scrollTo({ y, animated: false }));
-      return () => cancelAnimationFrame(raf);
-    }
-    return undefined;
+    // Always scroll — to 0 as well as to a saved offset. When one ScrollView is
+    // reused across keys (an Inspire category, a Places area), skipping the y===0
+    // case would leave it at the previous page's offset, opening a fresh page
+    // halfway down instead of at its top (Codex, D13).
+    const raf = requestAnimationFrame(() => ref.current?.scrollTo({ y, animated: false }));
+    return () => cancelAnimationFrame(raf);
   }, [key, ready]);
 
   // A new key is a new page: allow its restore to run.
