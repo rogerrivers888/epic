@@ -1087,3 +1087,25 @@ test('a net Places charge stops it and is e-mailed', async (t) => {
   assert.equal(out.action, 'halted');
   assert.ok(box.got.some((m) => /^Census stopped: Places cost/.test(m.subject)));
 });
+
+test('the weekly £ is the export\'s own days, each counted once', () => {
+  const day = (n, date) => ({ day: n, date, requests: 70000, newPlaces: 100, billed: { placesNetGbp: 0.3, final: true } });
+  const st = { days: [day(1, '2026-09-28'), day(2, '2026-09-29')], tilesLeft: 10, daysLeft: 3, dayRequests: 70000, complete: false };
+  // Three London days, 10p each: the two quota days' figures overlap on the 29th.
+  const bills = ['2026-09-28', '2026-09-29', '2026-09-30'].map((d) => ({ day: d, places_net_gbp: 0.1 }));
+  const w = uk.weeklySummary(st, bills, new Date('2026-10-05T07:10:00Z'));
+  assert.match(w.text, /£ spent \(Places, after credits\): £0\.30 /);
+  assert.match(w.text, /Billing export: rows up to 2026-09-30/);
+});
+
+test('a day whose plan is being written is not a stall', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state, problem, started_by, started_at, last_seen_at)
+     values ('The rest of the UK — day 2', array['ZZ'], 0.08, 0.12, 70000, 5, 30, 'paused', 'built paused; plan written; resume to start', $1, '2026-09-28T23:00:00Z', '2026-09-29T11:55:00Z')`,
+    [(await import('../src/sources/censusRun.js')).ONE_DAY_RUNS]);
+  const box = mailbox();
+  await uk.daily(new Date('2026-09-29T12:00:00Z'), { send: box.send, start: recorder().start, switchOn: async () => false, quota: async () => ({ speaks: true, limit: 75000 }) });
+  assert.ok(!box.got.some((m) => /^Census stalled/.test(m.subject)), box.got.map((m) => m.subject).join(' | '));
+});

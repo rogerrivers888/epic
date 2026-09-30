@@ -706,7 +706,9 @@ export function weeklySummary(st, bills, now = new Date()) {
   const places = week.reduce((t, d) => t + Number(d.newPlaces ?? 0), 0);
   const withLeft = [...st.days].reverse().find((d) => d.areasLeft != null);
   const billed = week.filter((d) => d.billed);
-  const spent = billed.reduce((t, d) => t + Number(d.billed.placesNetGbp ?? 0), 0);
+  // From the export's own London days, each once: a quota day's figure spans
+  // two of them, and two neighbouring days share one (Codex, 30 Sep 2026).
+  const spent = bills.filter((b) => b.day >= from && b.day < today).reduce((t, b) => t + Number(b.places_net_gbp ?? 0), 0);
   const lastBilled = bills.length ? bills[bills.length - 1].day : null;
   const lines = [
     `Calls: ${n(calls)} over ${week.length} day${week.length === 1 ? '' : 's'}`,
@@ -759,7 +761,12 @@ export async function daily(now = new Date(), { send, ...tickWith } = {}) {
   }
   // Or a quota day with no run of its own three hours after it began.
   const todays = latest && pacificDay(latest.started_at) === pacificDay(now);
-  if (!stopped && !running && !todays && pacificHour(now) >= START_GRACE_HOURS) {
+  // Not while another process holds the scheduler or is writing today's plan
+  // (Codex, 30 Sep 2026): that is a day being started, not a day missing.
+  const starting = out.action === 'busy'
+    || (latest?.state === 'paused' && /^built paused/.test(latest.problem ?? '')
+        && now.getTime() - new Date(latest.last_seen_at ?? latest.started_at).getTime() < 15 * 60_000);
+  if (!stopped && !running && !todays && !starting && pacificHour(now) >= START_GRACE_HOURS) {
     await tell(`Census stalled: no run for ${pacificDay(now)} (${out.action})`,
       `Google's day ${pacificDay(now)} began ${START_GRACE_HOURS}+ hours ago and the census has not started it. The scheduler says: ${out.action}${out.why ? ` — ${out.why}` : ''}.\n\n${lines}`);
   }
