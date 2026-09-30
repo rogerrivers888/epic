@@ -51,19 +51,20 @@ test('files each place under the best point held for it, and counts old rented p
   assert.equal(sp.over30Days, null, 'a table that does not date its points cannot say how old they are');
   assert.equal(sp.undated, 1);
   const idx = r.rented.find((x) => x.table === 'place_index');
-  assert.equal(idx.held, 5, 'matched, old, fresh, undated, the Google atlas row — Google\'s alone');
-  assert.equal(idx.over30Days, 2);
+  // google:matched's point is its OSM-matched record's point exactly: the open
+  // map's, whatever the index's label said.
+  assert.equal(idx.held, 4, 'old, fresh, undated, the Google atlas row — Google\'s alone');
+  assert.equal(idx.over30Days, 1);
   assert.equal(idx.undated, 2, 'a point with no clock is undated, not old');
   assert.equal(r.rented.find((x) => x.table === 'place_index (other providers)').held, 1, 'tripadvisor on its own line');
   const cells = r.rented.find((x) => x.table === 'place_cells');
   assert.equal(cells.held, 1);
   assert.equal(cells.undated, 1, 'its index point is gone, so its age cannot be told');
   assert.equal(cells.over30Days, 0);
-  assert.equal(r.rentedOver30Days, 2);
+  assert.equal(r.rentedOver30Days, 1);
   assert.equal(r.pointsByTable.place_index.google, 4, 'matched, old, fresh, undated — the raw prefix spread');
   assert.equal(r.pointsByTable.place_cells.google, 1);
   assert.equal(r.pointsByTable.attractions.atlas, 2, 'the castle and the maze, keyed atlas:<id>');
   assert.equal(r.rented.length, 11);
-  assert.deepEqual(r.indexOver30DaysByArea, [{ area: 'SL', over30: 1 }, { area: 'TR', over30: 1 }]
-    .sort((a, b) => b.over30 - a.over30));
+  assert.deepEqual(r.indexOver30DaysByArea, [{ area: 'TR', over30: 1 }], 'SL\'s was the open map\'s point');
 });

@@ -3777,24 +3777,31 @@ router.post('/census/uk/lift', requires('manage_library'), async (req, res, next
 });
 
 /**
- * Where every place's coordinates come from, and how old the rented ones are.
- * Read only (owner, 29 Sep 2026: "for every place we hold, where do its
- * coordinates come from? … Is any Google latitude/longitude older than 30
- * days still stored? If so, say how many and where").
- *
- * A place is a place_index row, filed under the best point held for it
- * anywhere: the open map (a place record matched to OSM, or the index's own
- * osm point), then the atlas (Wikidata/Commons, not a row the activity sweep
- * named from Google), then a household's own pin. FSA, Historic England and
- * OS keep no coordinates yet and are said to hold none, not nought found.
- * Google-only is a place whose only point anywhere is on a rented reference;
- * none is a place with no point at all.
- *
- * Rented points are counted table by table. Only place_index dates its point;
- * every other table is judged by the newest clock the row keeps, so "over 30
- * days" there is a floor — a row touched last week may carry a point that is
- * older, and is not counted.
+ * Whose an index point really is. Provenance was never written by the rebuild
+ * (the fourth hole), so a label can be stale either way: the point is judged
+ * by what it matches — an OSM-backed record or sweep row, or an atlas row, at
+ * the same place — and a label is believed only on a reference of our own
+ * kind. Everything else is rented: Google's on a Google reference or a
+ * Google-named atlas row, the reference's provider otherwise (Codex, 30 Sep
+ * 2026, twice).
  */
+const IX_TRUE_SRC = (x) => `(case
+  when exists (select 1 from place_records r where r.venue_ref = ${x}.venue_ref and r.osm_ref is not null and r.lat is not null
+                 and abs(r.lat - ${x}.lat) <= 0.0005 and abs(r.lng - ${x}.lng) <= 0.0005) then 'osm'
+  when exists (select 1 from scout_places s where s.venue_ref = ${x}.venue_ref and coalesce(s.from_sources, '[]'::jsonb) ? 'osm' and s.lat is not null
+                 and abs(s.lat - ${x}.lat) <= 0.0005 and abs(s.lng - ${x}.lng) <= 0.0005) then 'osm'
+  when exists (select 1 from attractions a where (a.venue_ref = ${x}.venue_ref or a.id = (case when ${x}.venue_ref ~ '^atlas:[0-9a-f-]{36}$' then substr(${x}.venue_ref, 7)::uuid end))
+                 and a.source = 'google' and a.osm_ref is not null and a.display_source is distinct from 'google' and a.lat is not null
+                 and abs(a.lat - ${x}.lat) <= 0.0005 and abs(a.lng - ${x}.lng) <= 0.0005) then 'osm'
+  when exists (select 1 from attractions a where (a.venue_ref = ${x}.venue_ref or a.id = (case when ${x}.venue_ref ~ '^atlas:[0-9a-f-]{36}$' then substr(${x}.venue_ref, 7)::uuid end))
+                 and a.source is distinct from 'google' and a.display_source is distinct from 'google' and a.lat is not null
+                 and abs(a.lat - ${x}.lat) <= 0.0005 and abs(a.lng - ${x}.lng) <= 0.0005) then 'atlas'
+  when ${x}.venue_ref like 'atlas:%' and exists (select 1 from attractions g where g.id = (case when ${x}.venue_ref ~ '^atlas:[0-9a-f-]{36}$' then substr(${x}.venue_ref, 7)::uuid end)
+                 and (g.display_source = 'google' or (g.source = 'google' and g.osm_ref is null))) then 'google'
+  when split_part(${x}.venue_ref, ':', 1) in ('osm', 'atlas', 'wikidata', 'own', 'photo', 'fixtures')
+       and coalesce(${x}.coords_from, split_part(${x}.venue_ref, ':', 1)) in ('osm', 'atlas', 'wikidata', 'own', 'household', 'photo', 'fixtures') then coalesce(${x}.coords_from, split_part(${x}.venue_ref, ':', 1))
+  else split_part(${x}.venue_ref, ':', 1) end)`;
+
 export async function coordinateReport() {
     const { rows: sources } = await query(
       `with rec as (
@@ -3815,15 +3822,16 @@ export async function coordinateReport() {
           group by 1),
        -- The index's own point, with the source it was stamped with or, where
        -- a rebuild wrote it without one, the source its reference names.
+       -- A sweep row the open map twinned holds OSM's point, whatever the index says.
+       sco as (
+         select distinct venue_ref from scout_places
+          where lat is not null and coalesce(from_sources, '[]'::jsonb) ? 'osm'),
        -- An atlas:<id> whose row the activity sweep named from Google holds
        -- Google's point, whatever its reference says (Codex, 30 Sep 2026).
        ix as (
          select pi.venue_ref, pi.lat,
-                coalesce(pi.coords_from,
-                         case when g.id is not null then 'google' else split_part(pi.venue_ref, ':', 1) end) as src
-           from place_index pi
-           left join attractions g
-             on pi.venue_ref like 'atlas:%' and g.id::text = substr(pi.venue_ref, 7) and g.display_source = 'google'),
+                case when pi.lat is null then null else ${IX_TRUE_SRC('pi')} end as src
+           from place_index pi),
        rented as (
          select venue_ref from place_cells where lat is not null and venue_ref like 'google:%'
          -- A sweep row twinned with the open map keeps OSM's point under
@@ -3838,9 +3846,9 @@ export async function coordinateReport() {
          union select venue_ref from place_records where lat is not null and osm_ref is null and venue_ref like 'google:%'),
        p as (
          select case
-                  when coalesce(r.osm, false) or coalesce(a.osm, false) or (pi.lat is not null and pi.src = 'osm') then 'osm'
+                  when coalesce(r.osm, false) or coalesce(a.osm, false) or sc.venue_ref is not null or (pi.lat is not null and pi.src = 'osm') then 'osm'
                   when a.venue_ref is not null or (pi.lat is not null and pi.src in ('atlas', 'wikidata')) then 'atlas'
-                  when pi.lat is not null and pi.src = 'own' then 'own'
+                  when pi.lat is not null and pi.src in ('own', 'household', 'photo', 'fixtures') then 'own'
                   -- Rented, named by whose it is: Google, or any other provider.
                   when pi.lat is not null then 'rented:' || pi.src
                   when x.venue_ref is not null then 'rented:google'
@@ -3848,6 +3856,7 @@ export async function coordinateReport() {
            from ix pi
            left join rec r on r.venue_ref = pi.venue_ref
            left join atl a on a.venue_ref = pi.venue_ref
+           left join sco sc on sc.venue_ref = pi.venue_ref
            left join rented x on x.venue_ref = pi.venue_ref)
        select source, count(*)::int as n from p group by source`);
 
@@ -3866,16 +3875,13 @@ export async function coordinateReport() {
     // uses, less wikidata, which that list wrongly treats as rented and is
     // reported here as the atlas's. A point a rebuild wrote with no source is
     // judged by its reference, and counted undated (Codex, 30 Sep 2026).
-    const IX_SRC = `coalesce(coords_from,
-        case when place_index.venue_ref like 'atlas:%' and exists (select 1 from attractions g
-                   where g.id::text = substr(place_index.venue_ref, 7) and g.display_source = 'google') then 'google'
-             else split_part(place_index.venue_ref, ':', 1) end)`;
+    const IX_SRC = IX_TRUE_SRC('place_index');
     // Google's alone, as asked; any other provider's on a line of its own
     // (Codex, 30 Sep 2026).
     const RENTED_IX = `lat is not null and ${IX_SRC} = 'google'`;
     await count('place_index', 'coords_at', `select ${OVER('coords_at')} from place_index where ${RENTED_IX}`);
     await count('place_index (other providers)', 'coords_at',
-      `select ${OVER('coords_at')} from place_index where lat is not null and ${IX_SRC} not in ('osm', 'atlas', 'own', 'wikidata', 'google')`);
+      `select ${OVER('coords_at')} from place_index where lat is not null and ${IX_SRC} not in ('osm', 'atlas', 'own', 'wikidata', 'household', 'photo', 'fixtures', 'google')`);
     // Only the index and the cells date their points. Every other table's
     // clocks move with unrelated writes — a save again, an edit — so a point
     // in them has no age this report can speak to (Codex, 30 Sep 2026): each
