@@ -261,6 +261,9 @@ export function BrowseNear({ d, household, onChanged, find, setFind, initialPric
     photos: v.photos ?? [], distanceKm: v.distanceKm ?? null, chain: v.chain, brand: v.brand ?? null, goodForChildren: v.goodForChildren ?? null, menuForChildren: v.menuForChildren ?? null,
     address: v.address ?? null, website: v.website ?? null, openingHours: v.openingHours ?? null, summary: v.summary ?? null, mapsUrl: v.mapsUrl ?? null, attribution: v.attribution ?? null,
     source: v.source, contributingSources: v.contributingSources, ratingSource: v.source, shortlisted: shortlisted.has(v.venueRef),
+    // Which source each merged field came from, so a Google rating or price
+    // level on an OSM identity is read as Google's in the drawer (Codex).
+    provenance: v.provenance,
   });
   const add = async (v: FindResult) => {
     await api.addToShortlist(trip.id, {

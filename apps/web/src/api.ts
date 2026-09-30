@@ -560,6 +560,8 @@ export type OptionStop = {
   photos?: VenuePhotoRef[];
   /** Per-field source for a merged place — see Venue.provenance. */
   provenance?: Record<string, { source: string; expiresAt?: string | null }>;
+  /** The atlas's own Wikipedia link, so a wikidata: place (which loads no owned record) can still credit its summary. */
+  wikipediaUrl?: string | null;
 };
 
 /** One thing inside a place with grounds — a ride, an animal house, a café. Ours: OSM, Wikidata, Wikipedia. */
@@ -1286,6 +1288,8 @@ export type InspireItem = {
   contains?: string[];
   experiences: string[]; cuisines: string[];
   rating: number | null; ratingCount: number | null; priceLevel: number | null;
+  /** Per-field source for a merged place — see Venue.provenance. */
+  provenance?: Record<string, { source: string; expiresAt?: string | null }>;
   goodForChildren: boolean | null;
   /** What its drawer says (back office › Shelves): indoors or out, and for children. Null is "it depends". */
   indoor?: boolean | null; forKids?: boolean | null;

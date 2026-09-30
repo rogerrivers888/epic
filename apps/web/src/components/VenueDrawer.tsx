@@ -609,20 +609,25 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
    * editorial summary is never shown, so Google is never a source here.
    */
   const shownSummary = v?.summary ?? item.summary ?? null;
-  // A credit is only correct if the prose on screen is the owned one it names.
-  // A source's own summary (were one ever shown) must never be labelled "From
-  // Wikipedia"; so the credit stands only when the shown text is the record's.
-  const descriptionSource = shownSummary && ownRecord?.summary && shownSummary.trim() === ownRecord.summary.trim()
-    ? ownRecord.summarySource
-    : null;
-  const descriptionCredit: { label: string; url: string | null } | null =
-    !descriptionSource || descriptionSource === 'ours'
-      ? null
-      : descriptionSource === 'wikipedia'
-        ? { label: 'From Wikipedia · CC BY-SA', url: ownRecord?.wikipediaUrl ?? null }
-        : /^https?:\/\//i.test(descriptionSource)
-          ? { label: `From ${item.name}'s own page`, url: descriptionSource }
-          : null;
+  // A credit is only correct if the prose on screen is one whose source we know.
+  // A source's own summary must never be labelled "From Wikipedia", so the credit
+  // stands only for the owned record's summary — or, for a wikidata: atlas place
+  // (which loads no owned record), the item's own summary, which the atlas draws
+  // from Wikipedia alone and carries a wikipediaUrl for (Codex).
+  const descriptionCredit: { label: string; url: string | null } | null = (() => {
+    if (!shownSummary) return null;
+    if (ownRecord?.summary && shownSummary.trim() === ownRecord.summary.trim()) {
+      const src = ownRecord.summarySource;
+      if (!src || src === 'ours') return null;
+      if (src === 'wikipedia') return { label: 'From Wikipedia · CC BY-SA', url: ownRecord.wikipediaUrl ?? null };
+      if (/^https?:\/\//i.test(src)) return { label: `From ${item.name}'s own page`, url: src };
+      return null;
+    }
+    if (item.venueRef.startsWith('wikidata:') && item.summary && shownSummary.trim() === item.summary.trim() && item.wikipediaUrl) {
+      return { label: 'From Wikipedia · CC BY-SA', url: item.wikipediaUrl };
+    }
+    return null;
+  })();
   /** "20 min drive" reads better than "20 min driving"; the sheet's own words. */
   const travelWord = 'drive';
   /**

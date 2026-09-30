@@ -703,6 +703,11 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
     image: item.image ?? null,
     photos: item.photos,
     summary: item.summary ?? null, attribution: item.attribution.join(' · ') || null,
+    // Per-field source, so a Google price level or rating merged onto an atlas
+    // identity is read as Google's; and the atlas's own Wikipedia link, so its
+    // summary carries the adjacent CC BY-SA credit where no owned record loads
+    // (a wikidata: place never fetches one) (Codex).
+    provenance: item.provenance, wikipediaUrl: item.wikipediaUrl ?? null,
     distanceKm: item.distanceKm, travelFromBaseMinutes: item.travelMinutes,
     source: item.source,
   } as BrowseItem);
