@@ -576,8 +576,12 @@ inspire.get('/around', async (req, res, next) => {
       const counts = census.counts ?? {};
       return res.json({
         where: ring.label, minutes, mode,
-        total: Object.values(counts).reduce((a, n) => a + (Number(n) || 0), 0),
+        // Per category, each a distinct count within its own drawer — the real
+        // census count for the reach. The sum is category *memberships*, not
+        // distinct places (a place can sit in more than one drawer), so it is
+        // named as such and used only as a "does the reach grow?" figure (Codex).
         counts, unresolved: census.unresolved ?? {},
+        categoryMemberships: Object.values(counts).reduce((a, n) => a + (Number(n) || 0), 0),
         cells: ring.cells.length, outcodes: ring.outcodes.length, notCensused: census.missing.length,
       });
     }

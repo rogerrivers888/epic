@@ -34,7 +34,11 @@ const countFor = async (token, minutes, mode) => {
   const r = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
   if (!r.ok) throw new Error(`around ${minutes}/${mode} ${r.status}: ${(await r.text()).slice(0, 200)}`);
   const j = await r.json();
-  return j.total ?? 0;
+  // Category memberships within the reach (a place can sit in more than one
+  // drawer), not distinct places — the census counts once per drawer. It is a
+  // faithful "does the reach grow with time and mode?" figure, which is the
+  // question. The per-category `counts` beside it are the real per-drawer count.
+  return j.categoryMemberships ?? 0;
 };
 
 const main = async () => {
@@ -45,7 +49,7 @@ const main = async () => {
     for (const m of MINUTES) grid[mode][m] = await countFor(token, m, mode);
   }
   const pad = (s, n) => String(s).padStart(n);
-  console.log(`\nPlaces within reach of ${WHERE.toUpperCase()} — census count (free), ${BASE}\n`);
+  console.log(`\nCensus reach of ${WHERE.toUpperCase()} — category memberships (free count-only), ${BASE}\n`);
   console.log(`  ${pad('mode', 9)} ${MINUTES.map((m) => pad(`${m}m`, 8)).join('')}`);
   for (const mode of MODES) {
     console.log(`  ${pad(mode, 9)} ${MINUTES.map((m) => pad(grid[mode][m], 8)).join('')}`);

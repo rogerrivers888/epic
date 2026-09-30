@@ -355,8 +355,15 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
       .catch(() => { if (live) setHosted([]); });
     return () => { live = false; };
   }, [centre?.lat, centre?.lng, travel]);
+  const loadToken = useRef(0);
   const load = useCallback(async (refresh = false) => {
-    if (!centre) { setPool(null); setLoading(false); return; }
+    // Only the latest request commits. Changing the range fires a new fetch
+    // before the last returns; without this token a slow earlier response
+    // (say, the 30-min one) could land after the 2 h one and overwrite the
+    // count for the range that is actually showing (Codex).
+    const token = ++loadToken.current;
+    const live = () => token === loadToken.current;
+    if (!centre) { if (live()) { setPool(null); setLoading(false); } return; }
     setLoading(true);
     setError(null);
     try {
@@ -383,15 +390,17 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
         // read the refusal back out of the search cache (Codex, 12 Sep 2026).
         refresh: refresh ? 1 : undefined,
       });
+      if (!live()) return;
       setPool(r);
       // The home screen is a search too, and what happens next to each card is
       // the click stream Demand counts (search.ts).
       heldSearch('inspire', (r as any).queryId, (r.items ?? []).map((i: any) => i.venueRef));
     } catch (e: any) {
+      if (!live()) return;
       setPool(null);
       setError(e?.message ?? 'Epic could not look around just now.');
     } finally {
-      setLoading(false);
+      if (live()) setLoading(false);
     }
     // `travel` (the range, in minutes) was missing here, so changing 30 min →
     // 1 h → 2 h never re-requested the API and the census count stayed on the

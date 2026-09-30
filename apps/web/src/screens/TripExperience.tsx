@@ -70,9 +70,14 @@ const detourCodec = {
 // The three ways of getting about the trip picker offers — car, walking, public
 // transport (owner, 30 Sep 2026). Canonical words, so they match `trip.travelMode`
 // and `modeIcon`; the along-route API normalises them either way.
+// The picker offers the three the owner named — car, walking, public transport
+// — like Inspire. `cycling` is not a button, but it is a valid mode a trip can
+// already be, so it stays a legal value: a cycling trip seeds and searches as
+// cycling rather than being forced to driving (Codex), with no button lit.
 const TRIP_MODES = ['driving', 'walking', 'transit'] as const;
-type TripMode = typeof TRIP_MODES[number];
-const MODE_LABEL: Record<TripMode, string> = { driving: 'Drive', walking: 'Walk', transit: 'Public transport' };
+const MODE_VALUES = ['driving', 'walking', 'transit', 'cycling'] as const;
+type TripMode = typeof MODE_VALUES[number];
+const MODE_LABEL: Record<TripMode, string> = { driving: 'Drive', walking: 'Walk', transit: 'Public transport', cycling: 'Cycle' };
 
 // All trip times are worked in wall-clock minutes in the trip's own timezone, so
 // nothing shifts when the device is in another zone (Codex). An ISO timestamp
@@ -162,11 +167,11 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   // 30 Sep 2026: it "has gone from the Trips tab"). It rides in the address, the
   // detour zone and the along-route search both use it, and it seeds from the
   // trip's own mode. `travelMode` normalises the trip's canonical word.
-  const tripModeSeed: TripMode = (TRIP_MODES as readonly string[]).includes(trip.travelMode) ? (trip.travelMode as TripMode) : 'driving';
+  const tripModeSeed: TripMode = (MODE_VALUES as readonly string[]).includes(trip.travelMode) ? (trip.travelMode as TripMode) : 'driving';
   // The codec's fallback is the trip's own mode, so an absent `?by` means the
   // trip's mode and picking a *different* mode writes it down — otherwise Drive
   // on a walking trip serialised to nothing and snapped straight back (Codex).
-  const [by, setBy] = useQueryState<TripMode>('by', tripModeSeed, asOneOf(TRIP_MODES, tripModeSeed));
+  const [by, setBy] = useQueryState<TripMode>('by', tripModeSeed, asOneOf(MODE_VALUES, tripModeSeed));
   const [place, setPlace] = useQueryState<string | null>('place', null, asText);
   const [showRaw, setShow] = useQueryState<string | null>('show', null, asText);
   // Which day the trip stage shows and adds to; `?day=` on a multi-day trip.
@@ -193,7 +198,10 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   // The search stands until the route, the time or the mode changes; then it
   // runs again on the next visit to the trip (README). A signature of those
   // three, kept per trip, is what tells the difference from a plain reopen.
-  const searchSig = `${trip.origin?.lat},${trip.origin?.lng},${trip.base?.lat},${trip.base?.lng},${trip.destination?.lat},${trip.destination?.lng},${trip.departAt},${by}`;
+  // Keyed on the trip's own route, time and mode — NOT the browse picker `by`.
+  // The picker refetches the pools itself (below); folding it in here marked a
+  // rescan that then replayed the X-ray scan on "Back to my trip" (Codex).
+  const searchSig = `${trip.origin?.lat},${trip.origin?.lng},${trip.base?.lat},${trip.base?.lng},${trip.destination?.lat},${trip.destination?.lng},${trip.departAt},${trip.travelMode}`;
   // The scan plays only when a trip is genuinely new (`?new=1` from creation) or
   // its route/time/mode has changed since it was last searched — never merely
   // because this browser has no record of it, which would fire a paid search on
