@@ -18,7 +18,7 @@
  */
 
 import { query, pool } from '../db.js';
-import { nameScore, metresBetween } from './openMatch.js';
+import { nameScore, metresBetween, significantStems } from './openMatch.js';
 import { recordOwnedPoint } from './ownedPoints.js';
 
 /** How far from the point each source's twin may be, and how alike the names must be. */
@@ -57,7 +57,17 @@ export async function candidateIn(source, name, near, { strict = false } = {}) {
   const t = TABLES[source];
   const radiusM = near.radiusM ?? RULES[source].radiusM;
   const [a, b, c, d] = box(near.lat, near.lng, radiusM);
-  const { rows } = await query(`${t.sql} lat between $1 and $2 and lng between $3 and $4 limit 2000`, [a, b, c, d]);
+  // Narrowed by the name's own stems in the database, so a city's census box
+  // is not cut short at an arbitrary row: every candidate that could be this
+  // place, or a rival to it, is read. A list that still reaches the cap cannot
+  // show a match is alone, and is no match (Codex, 30 Sep 2026).
+  const CAP = 5000;
+  const stems = significantStems(name).map((x) => x.replace(/[^\p{L}\p{N}]/gu, '')).filter(Boolean);
+  const params = [a, b, c, d];
+  if (stems.length) params.push(`(${stems.join('|')})`);
+  const { rows } = await query(
+    `${t.sql} lat between $1 and $2 and lng between $3 and $4 ${stems.length ? 'and name ~* $5' : ''} limit ${CAP + 1}`, params);
+  if (rows.length > CAP) return null;
   const need = strict ? BOX_SCORE : RULES[source].score;
   const good = rows
     .map((r) => ({ ...r, score: nameScore(name, r.name), distanceM: metresBetween({ lat: near.lat, lng: near.lng }, { lat: r.lat, lng: r.lng }) }))
@@ -203,6 +213,14 @@ export async function run({ kind = 'backfill', who = 'Epic', pageSize = 500, fet
 }
 
 async function runLocked({ kind, who, pageSize, fetcher, resume }) {
+  // Not before every owned source has a live load and the open map's copy is
+  // in: a backfill run against empty tables would finish, and let the purge
+  // throw away the names and points it should have matched (Codex, 30 Sep 2026).
+  const { rows: missing } = await query(
+    `select source from owned_source_loads where live_load is null
+      union all
+     select 'osm' where not exists (select 1 from osm_extracts where state = 'done')`);
+  if (missing.length) return { waiting: `not yet loaded: ${missing.map((m) => m.source).join(', ')}` };
   // A run a deploy cut off, or one that failed part-way, carries on from its
   // checkpoint rather than starting again (Codex, 30 Sep 2026).
   let r = null;

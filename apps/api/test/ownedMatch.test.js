@@ -93,8 +93,24 @@ test('Wikidata comes first, by reference', async () => {
   assert.deepEqual([hit.source, hit.method, hit.sourceRef], ['wikidata', 'reference', 'Q42646']);
 });
 
+const everythingLoaded = async () => {
+  for (const source of ['fsa', 'historic-england', 'os-open-names']) {
+    await query(`update owned_source_loads set live_load = coalesce(live_load, $2) where source = $1`, [source, randomUUID()]);
+  }
+  await query(`insert into osm_extracts (region, url, state) values ('great-britain', 'x', 'done') on conflict (region) do update set state = 'done'`);
+};
+
+test('the backfill waits until every owned source is loaded', async () => {
+  await query('delete from owned_point_runs');
+  await query(`update owned_source_loads set live_load = null where source = 'os-open-names'`);
+  const out = await m.run({ kind: 'backfill', who: 'test', fetcher: async () => json({ entities: {} }) });
+  assert.match(out.waiting, /os-open-names/);
+  assert.equal((await query('select count(*)::int as n from owned_point_runs')).rows[0].n, 0, 'no run was started, so none can finish');
+});
+
 test('the backfill writes owned points, counts what it could not key, and resumes', async () => {
   await query('delete from owned_point_runs');
+  await everythingLoaded();
   const named = `google:bf-named-${randomUUID()}`;
   const bare = `google:bf-bare-${randomUUID()}`;
   await fsaRow(91010, 'The Crooked Billet', 51.4000, -0.5000);
@@ -140,6 +156,7 @@ test('a second load of a source already loading is refused, not raced', async ()
 
 test('a run that failed part-way carries on from its checkpoint', async () => {
   await query('delete from owned_point_runs');
+  await everythingLoaded();
   const { rows: [r] } = await query(`insert into owned_point_runs (kind, state, after, looked, problem) values ('backfill', 'failed', 'zzzz', 7, 'Wikidata answered 503') returning id`);
   const out = await m.run({ kind: 'backfill', who: 'test', fetcher: async () => json({ entities: {} }) });
   assert.equal(out.id, r.id, 'the same run');

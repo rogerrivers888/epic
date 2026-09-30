@@ -183,12 +183,17 @@ create or replace function epic_point_lat(ref text, lat double precision, point_
 language sql stable as $$
   select case when lat is not null and point_from = any(epic_owned_sources()) then lat
               else coalesce((select pi.lat from place_index pi where pi.venue_ref = ref and pi.lat is not null and pi.lng is not null),
-                            case when (point_from = 'census-box' or (point_from is null and not (coalesce(epic_ref_true_source(ref), '') = any(epic_rented_sources())))) then lat end) end $$;
+                            case when (point_from = 'census-box' or (point_from is null and not (coalesce(epic_ref_true_source(ref), '') = any(epic_rented_sources())))) then lat end,
+                            -- The census box as it stands now, learned after the copy was written (Codex).
+                            (select (split_part(pi.slice, ',', 1)::double precision + split_part(pi.slice, ',', 3)::double precision) / 2
+                               from place_index pi where pi.venue_ref = ref and pi.slice ~ '^-?[0-9.]+,-?[0-9.]+,-?[0-9.]+,-?[0-9.]+$')) end $$;
 create or replace function epic_point_lng(ref text, lng double precision, point_from text) returns double precision
 language sql stable as $$
   select case when lng is not null and point_from = any(epic_owned_sources()) then lng
               else coalesce((select pi.lng from place_index pi where pi.venue_ref = ref and pi.lat is not null and pi.lng is not null),
-                            case when (point_from = 'census-box' or (point_from is null and not (coalesce(epic_ref_true_source(ref), '') = any(epic_rented_sources())))) then lng end) end $$;
+                            case when (point_from = 'census-box' or (point_from is null and not (coalesce(epic_ref_true_source(ref), '') = any(epic_rented_sources())))) then lng end,
+                            (select (split_part(pi.slice, ',', 2)::double precision + split_part(pi.slice, ',', 4)::double precision) / 2
+                               from place_index pi where pi.venue_ref = ref and pi.slice ~ '^-?[0-9.]+,-?[0-9.]+,-?[0-9.]+,-?[0-9.]+$')) end $$;
 
 alter table coordinate_expiries add column if not exists table_name text;
 alter table coordinate_expiries add column if not exists detail jsonb;
