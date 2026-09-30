@@ -540,7 +540,11 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
   // always be told apart from one from real journey times; transit uses a
   // conservative speed so it is never overstated.
   let method = 'matrix';
-  if (!within.length) {
+  // Only the matrix-less modes fall back — walking, cycling, public transport.
+  // Driving has (and needs) a real matrix; an empty driving ring is "can't
+  // speak", not something to paper over with a straight line, and papering over
+  // it would also change every ring in a test that seeds no matrix (Codex).
+  if (!within.length && travelMode(mode) !== 'driving') {
     method = 'straight-line';
     within = await cellsWithinKmForMode(cell, travelMode(mode), minutes + EDGE_MINUTES);
   }
