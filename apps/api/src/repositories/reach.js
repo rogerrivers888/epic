@@ -579,37 +579,45 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
   // district in the world, and every count over the ring came back empty
   // (20 Sep 2026).
   let outcodes = [...new Set(codes.map(outcodeOfCell).filter(Boolean))];
-  if (method === 'straight-line') {
-    // The candidate outcodes must cover every sector the count circle touches,
-    // not only the ones whose centroid fell inside the ring: a large rural
-    // sector can hold a place inside a short walk while its centroid sits well
-    // outside, and if its outcode never reaches censusInRing the place is
-    // silently dropped and the count still reads complete (Codex). Gather every
-    // outcode within the circle plus a sector's own radius; the exact per-place
-    // circle test in censusInRing then filters precisely, so over-including one
-    // is harmless and under-including one loses places.
-    const centre = lat != null && lng != null
-      ? { lat: Number(lat), lng: Number(lng) }
-      : home ? { lat: Number(home.lat), lng: Number(home.lng) } : null;
-    if (centre) {
-      const reachKm = straightLineReachKm(travelMode(mode), minutes) + 5;
-      const dLat = reachKm / 111;
-      const dLng = reachKm / (111 * Math.max(0.3, Math.cos((centre.lat * Math.PI) / 180)));
-      const { rows: near } = await query(
-        `select upper(outcode) as outcode, lat, lng from geo_cells
-          where outcode is not null and lat between $1 and $2 and lng between $3 and $4`,
-        [centre.lat - dLat, centre.lat + dLat, centre.lng - dLng, centre.lng + dLng]);
-      // The box is a square; its corners reach reachKm·√2. An uncensused outcode
-      // whose only nearby sector sits in a corner beyond reachKm would otherwise
-      // be added and make censusForRing read every category as a floor and
-      // inflate notCensused (Codex). Keep only outcodes with a sector genuinely
-      // within the circle.
-      const reached = near
-        .filter((r) => kmBetween(centre, { lat: Number(r.lat), lng: Number(r.lng) }) <= reachKm)
-        .map((r) => r.outcode)
-        .filter(Boolean);
-      outcodes = [...new Set([...outcodes, ...reached])];
+  const at = lat != null && lng != null
+    ? { lat: Number(lat), lng: Number(lng) }
+    : home ? { lat: Number(home.lat), lng: Number(home.lng) } : null;
+  // A straight-line ring is a circle round `at`; census consumers judge each
+  // place against it rather than against the quantised sector set (Codex).
+  const circle = method === 'straight-line' && at
+    ? { lat: at.lat, lng: at.lng, km: straightLineReachKm(travelMode(mode), minutes) }
+    : null;
+  // The floor set: outcodes whose ground genuinely lies within the circle, used
+  // for "is a district of the reach uncensused?". Starts as the matrix outcodes.
+  let reachOutcodes = outcodes;
+  if (circle) {
+    // Two different questions, two different sets (Codex):
+    //  · which outcodes might hold a place inside the circle — the candidate
+    //    universe censusInRing searches. A large rural sector can hold a place
+    //    inside a short walk while its centroid sits well outside, so this is
+    //    generous (the exact per-place circle test then filters precisely); a
+    //    tight set here would silently drop that place.
+    //  · which outcodes the reach actually covers — the floor set. An uncensused
+    //    district several kilometres beyond a short urban walk must not make the
+    //    count read as a floor, so this is the outcodes with a sector truly
+    //    within the circle.
+    const genKm = circle.km + 5;
+    const dLat = genKm / 111;
+    const dLng = genKm / (111 * Math.max(0.3, Math.cos((circle.lat * Math.PI) / 180)));
+    const { rows: near } = await query(
+      `select upper(outcode) as outcode, lat, lng from geo_cells
+        where outcode is not null and lat between $1 and $2 and lng between $3 and $4`,
+      [circle.lat - dLat, circle.lat + dLat, circle.lng - dLng, circle.lng + dLng]);
+    const candidate = new Set(outcodes);
+    const reach = new Set(outcodes);
+    for (const r of near) {
+      if (!r.outcode) continue;
+      const d = kmBetween(circle, { lat: Number(r.lat), lng: Number(r.lng) });
+      if (d <= genKm) candidate.add(r.outcode);
+      if (d <= circle.km) reach.add(r.outcode);
     }
+    outcodes = [...candidate];
+    reachOutcodes = [...reach];
   }
   return {
     cell,
@@ -617,6 +625,12 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
     cells: codes,
     band,
     outcodes,
+    // The reach's own districts, for the floor: the same as `outcodes` for a
+    // matrix ring, a tighter set for a straight-line one.
+    reachOutcodes,
+    // The circle a straight-line ring is counted over (null for a matrix ring),
+    // so every census consumer counts the same shape Inspire does.
+    circle,
     points: rows,
     bandPoints: bandPoints.length ? bandPoints : rows,
     // 'matrix' from real (estimated) journey times in the reach table;
@@ -624,9 +638,7 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
     // distance-and-speed estimate. Callers surface this so a count is never
     // dressed as a journey-time one.
     method,
-    at: lat != null && lng != null
-      ? { lat: Number(lat), lng: Number(lng) }
-      : home ? { lat: Number(home.lat), lng: Number(home.lng) } : null,
+    at,
   };
 }
 

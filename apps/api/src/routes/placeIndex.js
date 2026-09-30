@@ -1147,18 +1147,23 @@ router.get('/census-ring', requires('view_library'), async (req, res, next) => {
     // room, and it is the number the owner makes collection decisions from
     // (20 Sep 2026). The finder's allowance exists to stop us hiding reachable
     // places while searching; it has no business in a count of what is there.
+    // The floor — an uncensused district of the reach — is asked of the reach's
+    // own districts, tighter than the generous candidate set for a straight-line
+    // ring, so a district beyond the circle does not flag the count (Codex).
+    const reachOutcodes = ring.reachOutcodes ?? ring.outcodes;
     const [now, before, seen] = await Promise.all([
-      censusInRing({ cells: ring.band ?? ring.cells, outcodes: ring.outcodes }),
+      // A matrix-less mode counts over its circle, the same shape Inspire does.
+      censusInRing({ cells: ring.band ?? ring.cells, outcodes: ring.outcodes, circle: ring.circle ?? null }),
       censusByOutcodeSum(ring.outcodes),
       query('select area_slug, bool_and(complete) as whole from area_counts where area_slug = any($1) group by area_slug',
-        [ring.outcodes.map((o) => o.toLowerCase())]),
+        [reachOutcodes.map((o) => o.toLowerCase())]),
     ]);
     // A district nobody has censused contributes nought, and nought is not an
     // answer — it is the absence of one. So it makes every count in this ring a
     // floor, exactly as an unresolved box does. And one a run stopped part-way
     // across is a floor too (Codex, 28 Sep 2026).
     const censused = new Set(seen.rows.map((r) => r.area_slug));
-    const notCensused = ring.outcodes.filter((o) => !censused.has(o.toLowerCase()));
+    const notCensused = reachOutcodes.filter((o) => !censused.has(o.toLowerCase()));
     const partial = seen.rows.filter((r) => !r.whole).map((r) => r.area_slug);
     const keys = [...new Set([...Object.keys(before), ...Object.keys(now.counts)])].sort();
     res.json({

@@ -30,7 +30,6 @@
 
 import { query } from '../db.js';
 import { censusInRing } from '../repositories/censusRing.js';
-import { straightLineReachKm } from '../domain/travel.js';
 import { displaySlice } from './google.js';
 import { outcodeOfCell } from '../domain/ring.js';
 import * as placeIndex from '../repositories/placeIndex.js';
@@ -180,7 +179,12 @@ export async function censusForRing(ring, { mode = 'driving', minutes = 30 } = {
   // time, never computed while the household waits"). Only a ring nobody has
   // counted yet is counted live, and that one is written down behind the
   // screen so the next look reads it.
-  const byOutcode = await censusCounts(outcodes);
+  //
+  // The floor — is a district of the reach uncensused? — is asked of the reach's
+  // own districts, which for a straight-line ring is a tighter set than the
+  // generous candidate universe, so a district beyond a short walk's circle does
+  // not make its count read as a floor (Codex).
+  const byOutcode = await censusCounts(ring?.reachOutcodes ?? outcodes);
   // A straight-line ring is never read from or written to `ring_counts`: those
   // rows are keyed only by (cell, mode, minutes) and were computed from the old
   // matrix/home-sector geometry, so trusting one would freeze the very count
@@ -217,14 +221,12 @@ export async function censusForRing(ring, { mode = 'driving', minutes = 30 } = {
   }
 
   // A straight-line ring is counted over the SAME circle the display cards are
-  // fenced by (`straightLineReachKm`, centred on the ring's origin), not over its
+  // fenced by (`ring.circle`, centred on the ring's origin), not over its
   // quantised sectors — so a short walk's count rises smoothly with the minutes
   // instead of sticking on the origin sector, and the count and the cards
-  // describe one reach (Codex, 30 Sep 2026). A matrix ring counts by its sectors.
-  const circle = estimated && ring?.at
-    ? { lat: Number(ring.at.lat), lng: Number(ring.at.lng), km: straightLineReachKm(mode, minutes) }
-    : null;
-  const inRing = await censusInRing({ cells: ring.band ?? ring.cells ?? [], outcodes, shownOnly: true, circle });
+  // describe one reach (Codex, 30 Sep 2026). A matrix ring has no circle and
+  // counts by its sectors.
+  const inRing = await censusInRing({ cells: ring.band ?? ring.cells ?? [], outcodes, shownOnly: true, circle: ring?.circle ?? null });
   if (ring?.cell && !estimated) void refreshRing({ cell: ring.cell, mode, minutes }).catch(() => null);
   const unresolved = inRing.unresolved ?? {};
   const partly = byOutcode.partial.length > 0;

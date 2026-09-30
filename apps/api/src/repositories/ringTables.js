@@ -101,10 +101,17 @@ async function countRing({ cell, kind, minutes }) {
   const { rows: [{ at: startedAt }] } = await query('select now() as at');
   const ring = await ringFor({ cell, minutes, mode: kind });
   if (!ring) return null;
+  // `ring_counts` is keyed on (cell, mode, minutes) with no room for the reach's
+  // method, so a straight-line estimate written here would later be read as a
+  // matrix count once the mode's matrix is built — freezing the very count the
+  // fallback exists to move. censusForRing already recomputes an estimated ring
+  // live and never reads this table for one, so a straight-line ring is not
+  // persisted at all (Codex).
+  if (ring.method === 'straight-line') return null;
   const band = ring.band ?? ring.cells;
 
   const [placed, seen] = await Promise.all([
-    censusInRing({ cells: band, outcodes: ring.outcodes, shownOnly: true }),
+    censusInRing({ cells: band, outcodes: ring.outcodes, shownOnly: true, circle: ring.circle ?? null }),
     query('select distinct area_slug, category, complete from area_counts where area_slug = any($1)',
       [ring.outcodes.map((o) => o.toLowerCase())]),
   ]);

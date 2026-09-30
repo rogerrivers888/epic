@@ -161,7 +161,9 @@ export async function planEdge({ lat = null, lng = null, cell = null, minutes = 
   const ring = await ringFor({ lat, lng, cell, minutes, mode: kind });
   if (!ring) return null;
   const band = ring.band ?? ring.cells ?? [];
-  const placed = await censusInRing({ cells: band, outcodes: ring.outcodes ?? [] });
+  // A matrix-less mode returns a straight-line ring; count it over its circle,
+  // the same shape Inspire does, not over the quantised sector set (Codex).
+  const placed = await censusInRing({ cells: band, outcodes: ring.outcodes ?? [], circle: ring.circle ?? null });
   const across = placed.acrossBoxes ?? [];
   const bare = squaresUnder(across);
   if (!bare.length) {
