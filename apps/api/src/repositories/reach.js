@@ -627,21 +627,26 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
       const inCircle = 'power((lat - $5) * 111.0, 2) + power((lng - $6) * $7, 2) <= power($8, 2)';
       const args = [circle.lat - dLat, circle.lat + dLat, circle.lng - dLng, circle.lng + dLng, circle.lat, circle.lng, kx, km];
       const box = 'lat between $1 and $2 and lng between $3 and $4';
-      const pc = await query(
-        `select distinct upper(outcode) as outcode from postcodes where ${box} and ${inCircle} and outcode is not null`, args);
-      const rows = pc.rows.length ? pc.rows : (await query(
-        `select distinct upper(outcode) as outcode from geo_cells where outcode is not null and ${box} and ${inCircle}`, args)).rows;
+      // The union of real postcodes and sector centroids within the circle: the
+      // postcodes are exact where they are loaded, and the sector centroids catch a
+      // sparse rural district the circle crosses that happens to have no postcode
+      // point inside it — a district with ground inside the circle but neither is
+      // one with nothing a place could stand on there (Codex).
+      const { rows } = await query(
+        `select distinct upper(outcode) as outcode from postcodes where ${box} and ${inCircle} and outcode is not null
+         union select distinct upper(outcode) as outcode from geo_cells where outcode is not null and ${box} and ${inCircle}`,
+        args);
       return rows.map((r) => r.outcode).filter(Boolean);
     };
     const originOutcode = outcodeOfCell(cell);
-    // The intersecting districts, cushioned: the candidate universe (finder codes
-    // plus these) and the floor (these plus the origin's own district) share them,
-    // so a sparse rural district the circle crosses is flagged as a possible floor
-    // rather than dropped — but a finder-only district, ten minutes past the reach,
-    // never makes the count read as a floor (Codex).
-    const near = await outcodesWithin(circle.km + 2);
-    outcodes = [...new Set([...outcodes, ...near])];
-    reachOutcodes = [...new Set([originOutcode, ...near].filter(Boolean))];
+    // Two circles, two questions (Codex): the candidate universe is cushioned by
+    // 2 km so a place between two postcodes or on the very edge is never dropped
+    // from the count; the floor — is a district of the reach uncensused? — is the
+    // circle exactly, so an uncensused neighbour wholly beyond a short walk never
+    // marks the count a floor or triggers a needless census. The finder codes are
+    // in the candidate set but not the floor: they lie ten minutes past the reach.
+    outcodes = [...new Set([...outcodes, ...(await outcodesWithin(circle.km + 2))])];
+    reachOutcodes = [...new Set([originOutcode, ...(await outcodesWithin(circle.km))].filter(Boolean))];
   }
   return {
     cell,
