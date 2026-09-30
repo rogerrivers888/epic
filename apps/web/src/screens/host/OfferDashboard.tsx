@@ -25,7 +25,7 @@ import { paths, type ChatLayer } from '../../routes';
 import { ChatScreen } from '../../components/chat/ChatScreen';
 import { hostOfferDoor } from '../../components/chat/door';
 import { HostFace, Kicker, SHAPE_LABEL, STATE_LABEL, StandingBar, dateOnly, dayShort, durationWords, money, priceWords } from '../../components/hosting';
-import { CompactBand, MicTile } from '../../components/Band';
+import { CompactBand } from '../../components/Band';
 import { InkMenu } from '../../components/InkMenu';
 import { SectionHeader } from '../../components/NavRows';
 
@@ -76,12 +76,14 @@ export function OfferDashboard({ offerId, hostName, chat = null }: { offerId: st
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      {/* New navigation (30 Sep 2026): the compact band carries the title and a one-line summary, the mic is the general voice intake. */}
+      {/* New navigation (30 Sep 2026): the compact band carries the title and a
+          one-line summary. No mic — a host managing an offer has no voice scope
+          (the intake is Inspire/new-trip only), so a tile here would run an
+          unrelated Inspire search (Codex). */}
       <CompactBand
         title={o.title ?? 'Untitled'}
         context={[SHAPE_LABEL[o.shape], priceWords(o), STATE_LABEL[o.state].toLowerCase()].join(' · ')}
         onBack={() => back(paths.host())}
-        right={<MicTile onPress={() => navigate(paths.say({ for: 'inspire' }))} />}
       />
       {/* Bookings and Questions are the offer's two views; Questions is its chat, on its own address. */}
       <InkMenu

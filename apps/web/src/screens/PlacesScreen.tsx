@@ -20,7 +20,7 @@ import { VisitQuestion } from '../components/VisitQuestion';
 import { getViewer, onViewerChange } from '../viewer';
 import { isAdmin } from '../admin';
 import { TOP_INSET } from '../components/InspireHeader';
-import { TallBand, CompactBand, MicTile } from '../components/Band';
+import { TallBand, CompactBand } from '../components/Band';
 import { InkMenu } from '../components/InkMenu';
 import { ContextRow } from '../components/NavRows';
 import { Popover, PopoverGroup, PopoverList, type PopoverOption } from '../components/ControlRow';
@@ -320,14 +320,18 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
           {/* New navigation (owner, 30 Sep 2026): the tall band at the root,
               the compact band once you have drilled into an area. No title on
               the home — the tab bar says where you are. */}
+          {/* No mic on Places yet: the voice route only scopes to Inspire or a
+              new trip, and routing a Places search into the Inspire flow drops
+              the area you are in (Codex). The band shows it once a place-scoped
+              voice exists; until then the tab home carries the wordmark alone
+              and a drilled area its back + title. */}
           {!sel ? (
-            <TallBand right={<MicTile onPress={() => navigate(paths.say({ for: 'inspire' }))} />} />
+            <TallBand />
           ) : crumb ? (
             <CompactBand
               title={crumb.title}
               context={crumb.sub ?? undefined}
               onBack={() => navigate(crumb.back)}
-              right={<MicTile onPress={() => navigate(paths.say({ for: 'inspire' }))} />}
             />
           ) : null}
           {inArea && (city || home) ? <ListHead st={st} ui={ui} onLandedShown={() => setLanded(null)} /> : null}
