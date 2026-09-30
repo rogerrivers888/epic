@@ -20,6 +20,7 @@ import { Text, View } from 'react-native';
 
 import { Press } from '../../components/press';
 import { useDeskGo, useDeskParam, useCrumbs } from './Desk';
+import { Wording } from './Wording';
 import {
   AMBER, LIME, Muted, deskApi, desk, fonts, useToast,
   InfoTip, Kicker, PageTitle, SectionTitle, T,
@@ -336,6 +337,23 @@ function MarketPage({ code, canManage }: { code: string; canManage: boolean }) {
 // ---------------------------------------------------------------------------
 
 export function Markets({ canManage }: { canManage: boolean }) {
+  const go = useDeskGo();
   const [market] = useDeskParam('market');
-  return market ? <MarketPage code={market} canManage={canManage} /> : <MarketsList />;
+  const [ns] = useDeskParam('ns');
+  const wording = !!ns;
+  return (
+    <View style={{ gap: 16 }}>
+      {/* Markets | Wording — the two views of this tab (design v2.2). */}
+      <View style={{ flexDirection: 'row', gap: 0, borderWidth: 1, borderColor: desk.ruleStrong, alignSelf: 'flex-start' }}>
+        {[['Markets', !wording, () => go('markets')], ['Wording', wording, () => go('markets', { ns: 'interface' })]].map(([label, on, onPress], i) => (
+          <Press key={label as string} onPress={onPress as () => void}>
+            <View style={{ paddingVertical: 6, paddingHorizontal: 14, backgroundColor: on ? LIME : 'transparent', borderLeftWidth: i ? 1 : 0, borderColor: desk.ruleStrong }}>
+              <T tone={on ? '#201e1d' : desk.inkDim} weight={on ? '700' : '600'}>{label as string}</T>
+            </View>
+          </Press>
+        ))}
+      </View>
+      {wording ? <Wording canManage={canManage} /> : market ? <MarketPage code={market} canManage={canManage} /> : <MarketsList />}
+    </View>
+  );
 }

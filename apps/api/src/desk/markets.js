@@ -142,37 +142,172 @@ function marketView(m) {
 const nsOk = (ns) => { if (!NAMESPACES.includes(ns)) throw bad(`${ns} is not a wording namespace`); };
 const bad = (message) => Object.assign(new Error(message), { status: 400, code: 'bad_request' });
 
+/** The US subcategory a `sub.<key>` wording key stands for; null otherwise. */
+const subOf = (key) => (key.startsWith('sub.') ? key.slice('sub.'.length) : null);
+
 /**
- * A namespace's wording, with a status per row the screen renders:
- *   same         — no en-US: an assertion the two are identical (the normal state)
- *   changed      — an en-US is written and current
- *   needs-review — a machine suggestion waiting for a person
- *   drift        — the English moved on since the en-US was written
+ * A namespace's wording, each row with the status the screen renders. Blank
+ * means one thing only — someone looked and judged the two the same; an
+ * untouched key is "not-looked-at", never blank (design v2.2).
+ *   not-applicable — a subcategory not offered in the US at all (sub. keys)
+ *   drift          — the English moved on since the en-US was written
+ *   needs-review   — a machine suggestion waiting for a person
+ *   changed        — an en-US written and current
+ *   same           — looked at and left identical
+ *   not-looked-at  — nobody has judged it; Americans see the British line
+ *
+ * `usCount` accompanies subcategory keys: how many US places are in it — a real
+ * "0 places in the US" (look harder) is a different thing from "not applicable
+ * here", and reads differently.
  */
 export async function listWording(namespace) {
   nsOk(namespace);
   const { rows } = await query(
     `select namespace, key, en_gb, en_us, suggestion, machine_allowed,
-            en_gb_version, en_gb_version_when_us_written, set_by, at
+            en_gb_version, en_gb_version_when_us_written, set_by, at, looked_at, looked_at_by
        from market_wording where namespace = $1 order by key`, [namespace]);
-  return rows.map((r) => ({
-    namespace: r.namespace,
-    key: r.key,
-    enGB: r.en_gb,
-    enUS: r.en_us,
-    suggestion: r.suggestion,
-    machineAllowed: r.machine_allowed,
-    setBy: r.set_by,
-    at: r.at,
-    status: wordingStatus(r),
-  }));
+
+  // Subcategory keys carry a US not-applicable flag and a US place count.
+  const subs = rows.map((r) => subOf(r.key)).filter(Boolean);
+  const naSet = new Set();
+  const usCount = new Map();
+  if (subs.length) {
+    const { rows: na } = await query(
+      `select subcategory from market_subcategories where market_code = 'US' and applicable = false and subcategory = any($1)`, [subs]);
+    na.forEach((x) => naSet.add(x.subcategory));
+    // Places filed under the subcategory as their primary shelf, in the US. This
+    // counts primary filing; full membership (a place also filed here as a
+    // secondary) would join place_subcategories, which matters once the US holds
+    // real places — today it is groundwork and this is ~0 either way.
+    const { rows: cnt } = await query(
+      `select subcategory, count(*)::int n from place_index where upper(country_code) = 'US' and subcategory = any($1) group by subcategory`, [subs]);
+    cnt.forEach((x) => usCount.set(x.subcategory, x.n));
+  }
+
+  return rows.map((r) => {
+    const sub = subOf(r.key);
+    const notApplicable = sub != null && naSet.has(sub);
+    const status = wordingStatus(r, notApplicable);
+    return {
+      namespace: r.namespace,
+      key: r.key,
+      subcategory: sub,
+      enGB: r.en_gb,
+      enUS: r.en_us,
+      suggestion: r.suggestion,
+      machineAllowed: r.machine_allowed,
+      setBy: r.set_by,
+      at: r.at,
+      status,
+      // What is left to look at — the "Only what's left" filter, and the
+      // "N left" on each namespace tab.
+      left: status === 'not-looked-at' || status === 'needs-review' || status === 'drift',
+      // Only subcategory keys carry a US count.
+      usCount: sub != null ? (usCount.get(sub) ?? 0) : null,
+    };
+  });
 }
 
-function wordingStatus(r) {
+function wordingStatus(r, notApplicable) {
+  if (notApplicable) return 'not-applicable';
   if (hasDrifted(r)) return 'drift';
-  if (r.en_us != null && r.en_us !== '') return 'changed';
   if (r.suggestion) return 'needs-review';
-  return 'same';
+  if (r.en_us != null && r.en_us !== '') return 'changed';
+  // Looked at and left the same, or never examined at all.
+  return r.looked_at != null ? 'same' : 'not-looked-at';
+}
+
+/**
+ * "Same in both" — a person looked and judged the two identical. Records that it
+ * was looked at (en-US stays blank), so it stops reading "not looked at".
+ */
+export async function markSame(namespace, key, who) {
+  nsOk(namespace);
+  if (!who) throw bad('a change says who made it');
+  return withTransaction(async (client) => {
+    const { rows: [prev] } = await client.query(
+      `select looked_at, looked_at_by, suggestion, en_us, en_gb_version_when_us_written
+         from market_wording where namespace = $1 and key = $2 for update`, [namespace, key]);
+    if (!prev) throw bad(`no wording ${namespace}/${key}`);
+    if (prev.looked_at != null && prev.suggestion == null && prev.en_us == null) return { ok: true, unchanged: true };
+    // "Same in both" means the two ARE identical: it looks the key over, clears
+    // any separate American form and its drift snapshot, and dismisses any
+    // machine suggestion (the reject path).
+    await client.query(
+      `update market_wording
+          set looked_at = now(), looked_at_by = $3, suggestion = null,
+              en_us = null, en_gb_version_when_us_written = null, updated_at = now()
+        where namespace = $1 and key = $2`, [namespace, key, who]);
+    const change = await logChange({ client, who, area: 'Markets', what: `wording same in both: ${key}`,
+      before: prev.en_us, after: 'looked at · same in both', subjectType: 'wording', subjectId: `${namespace}/${key}`,
+      // Undo restores the prior looked-at state, any en-US and its snapshot, and
+      // any suggestion this dismissed.
+      undo: { kind: 'wording_looked', namespace, key, lookedAt: prev.looked_at, lookedAtBy: prev.looked_at_by,
+        suggestion: prev.suggestion, enUs: prev.en_us, writtenAgainst: prev.en_gb_version_when_us_written } });
+    return { ok: true, change: change.id };
+  });
+}
+
+/** Undo a "Same in both": the key goes back to "not looked at". */
+export async function undoWordingLooked({ change, who }) {
+  const u = change.undo ?? {};
+  const { markUndone } = await import('./changes.js');
+  return withTransaction(async (client) => {
+    await client.query(
+      `update market_wording set looked_at = $3, looked_at_by = $4, suggestion = $5,
+              en_us = $6::text, en_gb_version_when_us_written = $7, updated_at = now()
+        where namespace = $1 and key = $2`,
+      [u.namespace, u.key, u.lookedAt ?? null, u.lookedAtBy ?? null, u.suggestion ?? null, u.enUs ?? null, u.writtenAgainst ?? null]);
+    await markUndone({ id: change.id, who, client });
+  });
+}
+
+/**
+ * "Not applicable here" — a subcategory Epic does not offer in the US at all
+ * (not relabelled). Marks it in `market_subcategories`; the customer app then
+ * omits it, and its US count reads "not applicable here", never 0. Undoable.
+ */
+export async function markNotApplicable(subcategory, who, applicable = false) {
+  if (!who) throw bad('a change says who made it');
+  if (!subcategory) throw bad('a subcategory is needed');
+  return withTransaction(async (client) => {
+    const { rows: [prev] } = await client.query(
+      'select applicable, set_by, at from market_subcategories where market_code = $1 and subcategory = $2', ['US', subcategory]);
+    const was = prev ? prev.applicable : true;
+    if (was === applicable) return { ok: true, unchanged: true };
+    await client.query(
+      `insert into market_subcategories (market_code, subcategory, applicable, set_by, at)
+       values ('US', $1, $2, $3, now())
+       on conflict (market_code, subcategory) do update set applicable = excluded.applicable, set_by = excluded.set_by, at = now()`,
+      [subcategory, applicable, who]);
+    const change = await logChange({ client, who, area: 'Markets',
+      what: applicable ? `${subcategory} applies in the US again` : `${subcategory} not applicable in the US`,
+      before: was ? 'applicable' : 'not applicable', after: applicable ? 'applicable' : 'not applicable',
+      subjectType: 'market_subcategory', subjectId: `US/${subcategory}`,
+      // The whole prior row, so undo is exact — including whether it existed at
+      // all (a subcategory is applicable by default, with no row).
+      undo: { kind: 'market_subcategory', subcategory, existed: !!prev, applicable: was, setBy: prev?.set_by ?? null, at: prev?.at ?? null } });
+    return { ok: true, change: change.id };
+  });
+}
+
+/** Undo a not-applicable decision — restore the prior row exactly, or remove it
+ *  if there was none (the subcategory was applicable by default). */
+export async function undoNotApplicable({ change, who }) {
+  const u = change.undo ?? {};
+  const { markUndone } = await import('./changes.js');
+  return withTransaction(async (client) => {
+    if (u.existed) {
+      await client.query(
+        `insert into market_subcategories (market_code, subcategory, applicable, set_by, at)
+         values ('US', $1, $2, $3, $4)
+         on conflict (market_code, subcategory) do update set applicable = excluded.applicable, set_by = excluded.set_by, at = excluded.at`,
+        [u.subcategory, u.applicable ?? true, u.setBy ?? null, u.at ?? null]);
+    } else {
+      await client.query('delete from market_subcategories where market_code = $1 and subcategory = $2', ['US', u.subcategory]);
+    }
+    await markUndone({ id: change.id, who, client });
+  });
 }
 
 /**
@@ -213,7 +348,7 @@ export async function setEnUs(namespace, key, text, who) {
   const value = (text ?? '').trim() || null;
   return withTransaction(async (client) => {
     const { rows: [prev] } = await client.query(
-      `select en_us, suggestion, en_gb_version, en_gb_version_when_us_written, set_by, at
+      `select en_us, suggestion, en_gb_version, en_gb_version_when_us_written, set_by, at, looked_at, looked_at_by
          from market_wording where namespace = $1 and key = $2 for update`, [namespace, key]);
     if (!prev) throw bad(`no wording ${namespace}/${key}`);
     // Re-submitting the same en-US against newer English is the design's "Still
@@ -227,6 +362,9 @@ export async function setEnUs(namespace, key, text, who) {
       `update market_wording
           set en_us = $3::text,
               en_gb_version_when_us_written = case when $3::text is null then null else en_gb_version end,
+              -- Editing the en-US — writing one or deliberately clearing it — is
+              -- looking at the key: it stops reading "not looked at".
+              looked_at = now(), looked_at_by = $4,
               suggestion = null, set_by = $4, at = now(), updated_at = now()
         where namespace = $1 and key = $2`, [namespace, key, value, who]);
     const change = await logChange({ client, who, area: 'Markets', what: `wording en-US: ${key}`,
@@ -235,7 +373,7 @@ export async function setEnUs(namespace, key, text, who) {
       // English version it was written against, and any suggestion (Codex).
       undo: { kind: 'wording', namespace, key, field: 'en_us',
         value: prev.en_us, writtenAgainst: prev.en_gb_version_when_us_written, suggestion: prev.suggestion,
-        setBy: prev.set_by, at: prev.at } });
+        setBy: prev.set_by, at: prev.at, lookedAt: prev.looked_at, lookedAtBy: prev.looked_at_by } });
     // The change id, so the screen can offer an immediate Undo toast (Codex).
     return { ok: true, change: change.id };
   });
@@ -255,14 +393,20 @@ export async function setEnGb(namespace, key, text, who) {
   if (!text) throw bad('en-GB is the source and cannot be blank');
   return withTransaction(async (client) => {
     const { rows: [prev] } = await client.query(
-      'select en_gb, en_gb_version from market_wording where namespace = $1 and key = $2 for update', [namespace, key]);
+      'select en_gb, en_gb_version, looked_at, looked_at_by from market_wording where namespace = $1 and key = $2 for update', [namespace, key]);
     // Re-saving the same English changes nothing — and must not make a matching
     // en-US look drifted (Codex).
     if (prev && prev.en_gb === text) return { ok: true, unchanged: true };
     await client.query(
       `insert into market_wording (namespace, key, en_gb, machine_allowed) values ($1, $2, $3, $4)
        on conflict (namespace, key) do update
-          set en_gb = excluded.en_gb, en_gb_version = market_wording.en_gb_version + 1, updated_at = now()`,
+          set en_gb = excluded.en_gb, en_gb_version = market_wording.en_gb_version + 1,
+              -- A key judged "same in both" was judged against the OLD English;
+              -- once the English changes it must be looked at again. A key with
+              -- an en-US is handled by drift (the version snapshot) instead.
+              looked_at = case when market_wording.en_us is null then null else market_wording.looked_at end,
+              looked_at_by = case when market_wording.en_us is null then null else market_wording.looked_at_by end,
+              updated_at = now()`,
       // Collection copy is handwritten only, so a collection row is never
       // machine-allowed (the DB constraint enforces it too).
       [namespace, key, text, namespace !== 'collection']);
@@ -271,7 +415,7 @@ export async function setEnGb(namespace, key, text, who) {
       // Undo of an edit restores the old English AND its version, so a matching
       // en-US un-drifts (Codex); undo of a create removes the row.
       undo: prev
-        ? { kind: 'wording', namespace, key, field: 'en_gb', value: prev.en_gb, version: prev.en_gb_version }
+        ? { kind: 'wording', namespace, key, field: 'en_gb', value: prev.en_gb, version: prev.en_gb_version, lookedAt: prev.looked_at, lookedAtBy: prev.looked_at_by }
         : { kind: 'wording', namespace, key, field: 'en_gb', created: true } });
     return { ok: true, created: !prev, change: change.id };
   });
@@ -294,16 +438,16 @@ export async function undoWording({ change, who }) {
       await client.query(
         `update market_wording
             set en_us = $3::text, en_gb_version_when_us_written = $4, suggestion = $5,
-                set_by = $6, at = $7, updated_at = now()
+                set_by = $6, at = $7, looked_at = $8, looked_at_by = $9, updated_at = now()
           where namespace = $1 and key = $2`,
         [u.namespace, u.key, u.value ?? null, u.writtenAgainst ?? null, u.suggestion ?? null,
-          u.setBy ?? null, u.at ?? null]);
+          u.setBy ?? null, u.at ?? null, u.lookedAt ?? null, u.lookedAtBy ?? null]);
     } else {
       // Restore the English and its version, so an en-US written against it is
       // no longer read as drifted.
       await client.query(
-        `update market_wording set en_gb = $3, en_gb_version = $4, updated_at = now()
-          where namespace = $1 and key = $2`, [u.namespace, u.key, u.value, u.version ?? 1]);
+        `update market_wording set en_gb = $3, en_gb_version = $4, looked_at = $5, looked_at_by = $6, updated_at = now()
+          where namespace = $1 and key = $2`, [u.namespace, u.key, u.value, u.version ?? 1, u.lookedAt ?? null, u.lookedAtBy ?? null]);
     }
     await markUndone({ id: change.id, who, client });
   });

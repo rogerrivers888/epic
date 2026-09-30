@@ -17,13 +17,13 @@ test.after(() => pool.end());
 const m = await import('../src/desk/markets.js');
 
 const seedWord = (namespace, key, en_gb, en_us = null, extra = {}) => query(
-  `insert into market_wording (namespace, key, en_gb, en_us, suggestion, machine_allowed, en_gb_version, en_gb_version_when_us_written)
-   values ($1,$2,$3,$4,$5,$6,$7,$8)
+  `insert into market_wording (namespace, key, en_gb, en_us, suggestion, machine_allowed, en_gb_version, en_gb_version_when_us_written, looked_at)
+   values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
    on conflict (namespace, key) do update set en_gb = excluded.en_gb, en_us = excluded.en_us,
      suggestion = excluded.suggestion, en_gb_version = excluded.en_gb_version,
-     en_gb_version_when_us_written = excluded.en_gb_version_when_us_written`,
+     en_gb_version_when_us_written = excluded.en_gb_version_when_us_written, looked_at = excluded.looked_at`,
   [namespace, key, en_gb, en_us, extra.suggestion ?? null, extra.machine ?? true,
-    extra.version ?? 1, extra.writtenAgainst ?? null]);
+    extra.version ?? 1, extra.writtenAgainst ?? null, extra.looked ? new Date() : null]);
 
 test('the markets list carries a places count and a go-live checklist', async () => {
   const list = await m.listMarkets();
@@ -89,16 +89,87 @@ test('a market page carries its not-applicable subcategories', async () => {
   assert.ok(us.notApplicable.includes('soft-play'), 'a not-applicable subcategory is listed');
 });
 
-test('wording status: same, changed, needs-review, drift', async () => {
-  await seedWord('interface', 'w.same', 'Trips', null);
-  await seedWord('places', 'w.changed', 'Car park', 'Parking lot', { version: 2, writtenAgainst: 2 });
+test('wording status: not-looked-at, same, changed, needs-review, drift', async () => {
+  await seedWord('interface', 'w.notlooked', 'Trips', null);                                   // untouched
+  await seedWord('interface', 'w.same', 'Places', null, { looked: true });                     // looked, judged same
+  await seedWord('places', 'w.changed', 'Car park', 'Parking lot', { version: 2, writtenAgainst: 2, looked: true });
   await seedWord('interface', 'w.suggested', 'Nappy change', null, { suggestion: 'Diaper changing' });
-  await seedWord('places', 'w.drifted', 'Football pitch', 'Soccer field', { version: 3, writtenAgainst: 2 });
+  await seedWord('places', 'w.drifted', 'Football pitch', 'Soccer field', { version: 3, writtenAgainst: 2, looked: true });
   const byKey = Object.fromEntries((await m.listWording('interface')).concat(await m.listWording('places')).map((w) => [w.key, w.status]));
+  assert.equal(byKey['w.notlooked'], 'not-looked-at', 'an untouched key is not blank');
   assert.equal(byKey['w.same'], 'same');
   assert.equal(byKey['w.changed'], 'changed');
   assert.equal(byKey['w.suggested'], 'needs-review');
   assert.equal(byKey['w.drifted'], 'drift');
+});
+
+test('"Same in both" marks a key looked at, undoably; typing also counts as looking', async () => {
+  await seedWord('interface', 'w.mark', 'Toilets', null);
+  assert.equal((await m.listWording('interface')).find((w) => w.key === 'w.mark').status, 'not-looked-at');
+  const res = await m.markSame('interface', 'w.mark', 'sarah@epic.day');
+  assert.ok(res.change);
+  assert.equal((await m.listWording('interface')).find((w) => w.key === 'w.mark').status, 'same');
+  // Undo → back to not looked at.
+  const { rows: [chg] } = await query(`select * from bo_changes where subject_id='interface/w.mark' order by at desc limit 1`);
+  await m.undoWordingLooked({ change: chg, who: 'sarah@epic.day' });
+  assert.equal((await m.listWording('interface')).find((w) => w.key === 'w.mark').status, 'not-looked-at');
+});
+
+test('changing the English un-looks a key judged "same" — it must be looked at again', async () => {
+  await seedWord('interface', 'w.wassame', 'Lift', null, { looked: true });
+  assert.equal((await m.listWording('interface')).find((w) => w.key === 'w.wassame').status, 'same');
+  const res = await m.setEnGb('interface', 'w.wassame', 'Lift (goods)', 'sarah@epic.day');
+  assert.equal((await m.listWording('interface')).find((w) => w.key === 'w.wassame').status, 'not-looked-at',
+    'the "same" judgement was against the old English');
+  // Undo restores both the English and the looked-at state it cleared.
+  const { rows: [chg] } = await query('select * from bo_changes where id = $1', [res.change]);
+  await m.undoWording({ change: chg, who: 'sarah@epic.day' });
+  const back = (await m.listWording('interface')).find((w) => w.key === 'w.wassame');
+  assert.equal(back.enGB, 'Lift');
+  assert.equal(back.status, 'same', 'looked-at comes back on undo');
+});
+
+test('"Same in both" clears an existing American form, undoably', async () => {
+  await seedWord('places', 'w.wasch', 'Car park', 'Parking lot', { version: 1, writtenAgainst: 1, looked: true });
+  assert.equal((await m.listWording('places')).find((w) => w.key === 'w.wasch').status, 'changed');
+  const res = await m.markSame('places', 'w.wasch', 'sarah@epic.day');
+  const row = (await m.listWording('places')).find((w) => w.key === 'w.wasch');
+  assert.equal(row.status, 'same');
+  assert.equal(row.enUS, null, 'the American form is gone');
+  const { rows: [chg] } = await query('select * from bo_changes where id = $1', [res.change]);
+  await m.undoWordingLooked({ change: chg, who: 'sarah@epic.day' });
+  assert.equal((await m.listWording('places')).find((w) => w.key === 'w.wasch').enUS, 'Parking lot', 'undo restores it');
+});
+
+test('"Same in both" dismisses a machine suggestion — the reject path', async () => {
+  await seedWord('interface', 'w.reject', 'Nappy change', null, { suggestion: 'Diaper changing' });
+  assert.equal((await m.listWording('interface')).find((w) => w.key === 'w.reject').status, 'needs-review');
+  const res = await m.markSame('interface', 'w.reject', 'sarah@epic.day');
+  const row = (await m.listWording('interface')).find((w) => w.key === 'w.reject');
+  assert.equal(row.status, 'same', 'looked at and the British line kept');
+  assert.equal(row.suggestion, null, 'the suggestion is gone');
+  // Undo restores the dismissed suggestion.
+  const { rows: [chg] } = await query('select * from bo_changes where id = $1', [res.change]);
+  await m.undoWordingLooked({ change: chg, who: 'sarah@epic.day' });
+  const back = (await m.listWording('interface')).find((w) => w.key === 'w.reject');
+  assert.equal(back.suggestion, 'Diaper changing', 'the suggestion comes back on undo');
+  assert.equal(back.status, 'needs-review');
+});
+
+test('a subcategory key carries a US count and a "not applicable here" state', async () => {
+  await seedWord('places', 'sub.softplay', 'Soft play', null);
+  // No US places → an amber real zero, and status not-looked-at (not blank).
+  let row = (await m.listWording('places')).find((w) => w.key === 'sub.softplay');
+  assert.equal(row.subcategory, 'softplay');
+  assert.equal(row.usCount, 0, 'a real zero, distinct from not applicable');
+  // Mark it not applicable in the US → status flips, undoable.
+  const res = await m.markNotApplicable('softplay', 'sarah@epic.day');
+  assert.ok(res.change);
+  row = (await m.listWording('places')).find((w) => w.key === 'sub.softplay');
+  assert.equal(row.status, 'not-applicable');
+  const { rows: [chg] } = await query(`select * from bo_changes where subject_id='US/softplay' order by at desc limit 1`);
+  await m.undoNotApplicable({ change: chg, who: 'sarah@epic.day' });
+  assert.equal((await m.listWording('places')).find((w) => w.key === 'sub.softplay').status, 'not-looked-at');
 });
 
 test('setEnUs writes the American form, snapshots the version, clears the suggestion, logs it', async () => {

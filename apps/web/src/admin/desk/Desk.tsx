@@ -66,8 +66,8 @@ export const DESK_KEYS = [
   // The picker's list fact opened to its values (round 3, 29 Sep).
   'pfact',
   'sort', 'country', 'county', 'feature',
-  // Markets: the market a page is drilled into (step 4).
-  'market',
+  // Markets: the market a page is drilled into, and the wording namespace (step 4).
+  'market', 'ns',
   // A fact drill-down's postcode filter (agent B, fix pass 28 Sep).
   'pc',
   // Accuracy's expanded category rows, comma-separated (agent B2, 28 Sep).

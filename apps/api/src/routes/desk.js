@@ -95,7 +95,9 @@ deskRoutes.post('/undo/:id', requires('manage_library'), async (req, res, next) 
     else if (u.kind === 'correction') await facts.undoCorrection({ change, who: by });
     else if (u.kind === 'collection') await collections.undoCollection({ change, who: by });
     else if (u.kind === 'wording') await markets.undoWording({ change, who: by });
+    else if (u.kind === 'wording_looked') await markets.undoWordingLooked({ change, who: by });
     else if (u.kind === 'market_source') await markets.undoMarketSource({ change, who: by });
+    else if (u.kind === 'market_subcategory') await markets.undoNotApplicable({ change, who: by });
     else if (u.kind === 'fact_value') await mapping.undoFactValue({ change, who: by });
     else if (u.kind === 'carry') {
       if (u.on) await query(`insert into taxonomy_label_carries (namespace, key, attribute_key, yesno) values ('google', $1, $2, true) on conflict do nothing`, [u.word, u.fact]);
@@ -563,6 +565,21 @@ deskRoutes.post('/wording/:namespace/:key', requires('manage_library'), async (r
     // request that forgot to include it (which would erase the copy silently).
     if (!req.body || !('enUS' in req.body)) throw bad('enUS is required (send "" to clear)');
     res.json(await markets.setEnUs(String(req.params.namespace), String(req.params.key), str(req.body.enUS), who(req)));
+  } catch (err) { next(err); }
+});
+
+/** "Same in both" — looked at and judged identical (en-US stays blank). */
+deskRoutes.post('/wording/:namespace/:key/same', requires('manage_library'), async (req, res, next) => {
+  try { res.json(await markets.markSame(String(req.params.namespace), String(req.params.key), who(req))); } catch (err) { next(err); }
+});
+
+/** "Not applicable here" for a subcategory key — the subcategory is not offered in the US. */
+deskRoutes.post('/wording/:namespace/:key/not-applicable', requires('manage_library'), async (req, res, next) => {
+  try {
+    const key = String(req.params.key);
+    if (!['interface', 'places', 'collection'].includes(String(req.params.namespace))) throw bad('unknown wording namespace');
+    if (!key.startsWith('sub.')) throw bad('not applicable applies to a subcategory key only');
+    res.json(await markets.markNotApplicable(key.slice('sub.'.length), who(req), req.body?.applicable === true));
   } catch (err) { next(err); }
 });
 
