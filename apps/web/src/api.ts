@@ -2,6 +2,15 @@
 // key ever reaches this bundle (Technical Constraints §13.7).
 
 import { forgetCopy, recall, remember, servingSaved, warm, warmQuietly } from './offline/cache';
+import { invalidateTabData } from './cache/resourceCache';
+
+// Path prefixes whose writes change what the Inspire, Places or Trips tab caches
+// hold: saving/removing/naming a place (`/api/places/save`, `/api/atlas/*`),
+// logging a visit (`/api/visits`), any trip write (`/api/trips`), a host booking
+// (`/api/bookings`, shown under Trips) and the home or household (`/api/household`,
+// which moves the Inspire ring and the atlas home). Telemetry and the back office
+// are deliberately absent — see the note at the call site.
+const TAB_DATA_WRITE = ['/api/places/', '/api/atlas/', '/api/visits', '/api/trips', '/api/bookings', '/api/household'];
 import { flush as flushOutbox, queue as queueWrite, refreshOutbox } from './offline/outbox';
 import { copyHolder, deviceLabel, holderOf, sessionExpired, sessionToken, setCopyHolder, setSessionToken } from './session';
 
@@ -96,6 +105,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     servingSaved(false);
     if (readOnly) void remember(path, body);
+    // A write to household data — a place saved, a visit logged, a trip made,
+    // the home moved — can change what the cached Inspire/Places/Trips tabs
+    // hold, so those caches are marked stale here, at the one door every write
+    // goes through, rather than at each call site (Codex, D13). It is an
+    // allowlist of the prefixes that touch that data, not "every write", on
+    // purpose: telemetry (`/api/discover/*`, `/api/activity`) and the back
+    // office post constantly during ordinary browsing, and invalidating on those
+    // would make every tab return re-fetch — the exact thing this change removes.
+    // A mutation missed here only goes stale for the ten-minute window; a
+    // telemetry write wrongly included would defeat the zero-request tab switch.
+    else if (TAB_DATA_WRITE.some((p) => path.startsWith(p))) invalidateTabData();
     return body as T;
   } catch (err) {
     if (err instanceof ApiError) throw err;

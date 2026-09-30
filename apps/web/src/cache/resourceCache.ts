@@ -30,13 +30,15 @@
  */
 
 import { useCallback, useEffect, useReducer, useRef } from 'react';
-import { onSessionChange } from '../session';
 
 type Entry<T> = {
   data?: T;
   error?: unknown;
-  /** When the current `data` landed. 0 means never loaded. */
+  /** When the current `data` landed. 0 means never loaded, or invalidated. */
   fetchedAt: number;
+  /** Bumped by every invalidation. A fetch that finishes on a generation older
+   * than the one it started on cannot mark its (pre-mutation) response fresh. */
+  gen: number;
   /** The in-flight fetch, so two mounts of the same key share one request. */
   promise?: Promise<void>;
   listeners: Set<() => void>;
@@ -61,7 +63,7 @@ export function inspireNearKey(p: { lat: number; lng: number; mode: string; minu
 
 function entryFor(key: string): Entry<unknown> {
   let e = store.get(key);
-  if (!e) { e = { fetchedAt: 0, listeners: new Set() }; store.set(key, e); }
+  if (!e) { e = { fetchedAt: 0, gen: 0, listeners: new Set() }; store.set(key, e); }
   return e;
 }
 
@@ -73,10 +75,23 @@ function emit(e: Entry<unknown>) { e.listeners.forEach((l) => l()); }
 // never blanks a page the family is already reading.
 function start<T>(key: string, fetcher: () => Promise<T>, after?: Promise<unknown>): Promise<void> {
   const e = entryFor(key);
-  const p = (after ? after.catch(() => {}) : Promise.resolve())
+  // The generation the moment the request begins. For a plain read that is now,
+  // synchronously — an invalidate() the caller runs right after must count as
+  // "during" this fetch. For a chained refetch the request only begins once
+  // `after` has settled, so the generation is re-read at that point. Either way,
+  // a write that invalidates the key mid-flight is not undone when the older
+  // request lands (Codex, D13).
+  let genAtStart = e.gen;
+  const p = (after ? after.catch(() => {}).then(() => { genAtStart = e.gen; }) : Promise.resolve())
     .then(() => fetcher())
     .then(
-      (data) => { e.data = data; e.error = undefined; e.fetchedAt = Date.now(); },
+      (data) => {
+        e.data = data;
+        e.error = undefined;
+        // Only mark fresh if nothing invalidated the key mid-flight; otherwise
+        // the rows may predate the mutation, so leave them stale to be re-read.
+        e.fetchedAt = e.gen === genAtStart ? Date.now() : 0;
+      },
       (err) => { e.error = err; },
     )
     // Only clear the in-flight marker if it is still this run's — a forced
@@ -128,12 +143,27 @@ export function peekCache<T>(key: string): { data: T | undefined; fetchedAt: num
 }
 
 /** Mark a key stale so the next read refreshes it. */
-export function invalidate(key: string) { const e = store.get(key); if (e) e.fetchedAt = 0; }
+export function invalidate(key: string) { const e = store.get(key); if (e) { e.fetchedAt = 0; e.gen++; } }
 
 /** Mark every key with this prefix stale — e.g. all Inspire rings at once when
  * a place is saved or removed, wherever that happened. */
 export function invalidatePrefix(prefix: string) {
-  for (const [k, e] of store) if (k.startsWith(prefix)) e.fetchedAt = 0;
+  for (const [k, e] of store) if (k.startsWith(prefix)) { e.fetchedAt = 0; e.gen++; }
+}
+
+/**
+ * The three tab resources a household write can change — the atlas (areas, trip
+ * and been counts), the trips list, and every Inspire ring (a place's ledger).
+ * A write goes through one door (`api.request`), so invalidating all three there
+ * means no screen serves its own data stale after a mutation, wherever the
+ * mutation was made — a trip recorded, a visit logged, a place saved — without
+ * every call site having to know which caches it touches (Codex, D13). Reads are
+ * untouched, so a plain tab switch still makes no request.
+ */
+export function invalidateTabData() {
+  invalidate(ATLAS_KEY);
+  invalidate(TRIPS_KEY);
+  invalidatePrefix('inspire:near:');
 }
 
 /**
@@ -151,16 +181,16 @@ export function invalidatePrefix(prefix: string) {
  */
 export const savedOverrides = new Map<string, { val: boolean; at: number }>();
 
-/** Drop everything. Called on any session change, and available to tests. */
+/**
+ * Drop everything. Wired to `onSessionChange` in App.tsx: a change of session —
+ * out, timed out, or a different person in — must not let the last session's
+ * rented content survive in memory (see the header).
+ */
 export function clearResourceCache() {
   store.clear();
   scrollStore.clear();
   savedOverrides.clear();
 }
-
-// A change of session — out, timed out, or a different person in — must not let
-// the last session's rented content survive in memory (see the header).
-onSessionChange(() => { clearResourceCache(); });
 
 type Resource<T> = {
   data: T | undefined;

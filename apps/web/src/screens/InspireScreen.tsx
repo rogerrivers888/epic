@@ -4,7 +4,7 @@ import { Press } from '../components/press';
 import { api, Experience, BrowseItem, HouseholdResponse, InspireItem, InspireNear, MoodKey, OwnedImage, Place, VenuePhotoRef, Intake } from '../api';
 import { useHere } from '../hooks/useHere';
 import { colors, fonts, spacing, TARGET, type } from '../theme';
-import { useCachedResource, runFetch, invalidate, invalidatePrefix, peekCache, inspireNearKey, INSPIRE_DEFAULT_MINUTES, TEN_MINUTES, ATLAS_KEY, savedOverrides, useScrollMemory } from '../cache/resourceCache';
+import { useCachedResource, runFetch, peekCache, inspireNearKey, INSPIRE_DEFAULT_MINUTES, TEN_MINUTES, savedOverrides, useScrollMemory } from '../cache/resourceCache';
 import { Icon } from '../components/Icon';
 import { AskRow, IntakeStrip } from '../components/voice/IntakeStrip';
 import { MOOD_LABEL, VIBE_MOOD } from '../moods';
@@ -847,12 +847,10 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
         noteSearchEvent('inspire', 'save', i.venueRef);
       }
       else await api.deleteAtlasPlace(i.venueRef);
-      // Saving or removing a place changes the atlas (its country, city and
-      // unplaced counts) and the ring pools (a place's ledger); both are
-      // invalidated so neither is served stale inside the ten-minute window,
-      // and the fresh read then supersedes the override above (Codex, D13).
-      invalidate(ATLAS_KEY);
-      invalidatePrefix('inspire:near:');
+      // Saving or removing a place invalidates the atlas and the ring pools — but
+      // that happens centrally now, on the write itself (api.request), so the
+      // fresh read supersedes the override above without this screen arranging
+      // it (Codex, D13).
     } catch (e: any) {
       mark(i.venueRef, !now);
       setNotice(e?.message ?? 'That could not be saved just now.');

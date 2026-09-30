@@ -13,7 +13,7 @@ import type { TripSeed } from './TripsScreen';
 import { asOneOf, asText, useQueryState, useRouter, useStickyQuery } from '../router';
 import { MOODS, paths, type Route } from '../routes';
 import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
-import { useCachedResource, useScrollMemory, invalidatePrefix, ATLAS_KEY, TEN_MINUTES } from '../cache/resourceCache';
+import { useCachedResource, useScrollMemory, ATLAS_KEY, TEN_MINUTES } from '../cache/resourceCache';
 import { Button, Card, Chip, Row, StatusLine, Wrap } from '../components/ui';
 import { SourcePicker } from '../components/SourcePicker';
 import { BeenCapture, VenueRow, VisitForm, VisitSummary, rowsForVisit } from '../components/Visits';
@@ -285,10 +285,10 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
     return () => clearTimeout(t);
   }, [wherePending, places]);
 
-  // Saving, loving or removing a place here changes what its heart should read
-  // on Inspire too, so the ring pools are invalidated — the fresh read Inspire
-  // then makes supersedes any save-override held for it (Codex, D13).
-  const refreshAll = async () => { invalidatePrefix('inspire:near:'); await loadAtlas(); await loadPlaces(); await refreshHousehold(); };
+  // The place writes behind this (save, love, remove) invalidate the Inspire
+  // ring and the atlas centrally, on the write itself (api.request), so this
+  // only has to re-read what this screen shows (Codex, D13).
+  const refreshAll = async () => { await loadAtlas(); await loadPlaces(); await refreshHousehold(); };
   const st = useListState(places, viewer);
   const ui: ListUi = { menu, setMenu, adding, setAdding, mode: add, setMode: (m) => setAdd(m, { replace: true }) };
 

@@ -6,7 +6,12 @@ import { Platform, StyleSheet, Text, View, useWindowDimensions } from 'react-nat
 import { Press } from './src/components/press';
 import { StatusBar } from 'expo-status-bar';
 import { api, API_URL, HouseholdResponse } from './src/api';
-import { prefetch, inspireNearKey, INSPIRE_DEFAULT_MINUTES, ATLAS_KEY, TRIPS_KEY } from './src/cache/resourceCache';
+import { prefetch, clearResourceCache, inspireNearKey, INSPIRE_DEFAULT_MINUTES, ATLAS_KEY, TRIPS_KEY } from './src/cache/resourceCache';
+
+// A change of session — signing out, a token timing out, or a different person
+// signing in on this browser — clears the shared in-memory cache, so the last
+// session's rented content is never handed to the next one (cache/resourceCache).
+onSessionChange(() => { clearResourceCache(); });
 import { colors, radius, spacing, TARGET, type, BORDER, INK } from './src/theme';
 import { useTheme } from './src/hooks/useTheme';
 import { getViewer, onViewerChange } from './src/viewer';
@@ -47,7 +52,7 @@ import { useViewport, ViewportProvider } from './src/hooks/useViewport';
 import { useOffline } from './src/hooks/useOffline';
 import { useOutbox } from './src/hooks/useOutbox';
 import { useSession } from './src/hooks/useSession';
-import { hydrateSession } from './src/session';
+import { hydrateSession, onSessionChange } from './src/session';
 import { Icon, IconName } from './src/components/Icon';
 import { RouterProvider, rememberedAddress, useRememberedAddress, useRouter } from './src/router';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
