@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { withTransaction } from '../db.js';
 import * as trips from '../repositories/trips.js';
 import { computeBudget, INTENSITY_TARGETS } from '../domain/budget.js';
-import { isTravelMode } from '../domain/travel.js';
+import { isTravelMode, travelMode } from '../domain/travel.js';
 import { dayAsTrip, datesBetween, slotFor } from '../domain/days.js';
 import { DEFAULT_TZ, wallToUtc } from '../domain/time.js';
 import { geocode, reverseGeocode } from '../sources/geocode.js';
@@ -21,7 +21,7 @@ import { bedsNear, OSM_ATTRIBUTION, LITEAPI_ATTRIBUTION } from '../sources/stays
 import { stationsNear } from '../sources/where.js';
 import { rankStays, middleOf, partyForStay } from '../domain/stays.js';
 import { occupanciesFor, liteapiEnabled, liteapiKeyKind } from '../sources/liteapi.js';
-import { kmBetween, detourMinutes, estimateTravelMinutes, reachRadiusKm, travelMode, isTravelMode } from '../domain/travel.js';
+import { kmBetween, detourMinutes, estimateTravelMinutes, reachRadiusKm } from '../domain/travel.js';
 import { currentHousehold } from './household.js';
 import * as searchLog from '../repositories/searches.js';
 import * as placeIndex from '../repositories/placeIndex.js';
