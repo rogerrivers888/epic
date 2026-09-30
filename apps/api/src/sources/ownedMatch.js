@@ -315,9 +315,13 @@ async function runLocked({ kind, who, pageSize, fetcher, resume }) {
  * carried on rather than waiting a week.
  */
 export async function weeklyDue({ now = Date.now() } = {}) {
+  // The one-off backfill first: started by the schedule once every source is
+  // in (run() waits until then), and carried on after a deploy took it part-way
+  // — nothing else would ever start it again (Codex, 30 Sep 2026).
   const { rows: [back] } = await query(`select 1 from owned_point_runs where kind = 'backfill' and state = 'done' limit 1`);
-  if (!back) return null;
-  const { rows: [open] } = await query(`select 1 from owned_point_runs where kind = 'weekly' and state = 'running' limit 1`);
+  if (!back) return run({ kind: 'backfill', who: 'Epic (the one-off backfill)' });
+  // A weekly run left running or failed carries on, whatever the calendar says.
+  const { rows: [open] } = await query(`select 1 from owned_point_runs where kind = 'weekly' and state in ('running', 'failed') limit 1`);
   const { rows: [last] } = await query(`select max(finished_at) as at from owned_point_runs where kind = 'weekly' and state = 'done'`);
   if (!open && last?.at && now - new Date(last.at).getTime() < 7 * 86_400_000) return null;
   return run({ kind: 'weekly', who: 'Epic (weekly)' });

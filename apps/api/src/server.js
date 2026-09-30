@@ -758,7 +758,11 @@ const osmDaily = () => {
     .then((out) => { for (const r of out ?? []) console.log(r.error ? `owned source ${r.source}: ${r.error}` : `owned source ${r.source}: ${r.rows} rows`); })
     .catch((err) => console.error('owned sources', err.message))
     .then(() => import('./sources/ownedMatch.js')).then(({ weeklyDue }) => weeklyDue())
-    .then((out) => { if (out) console.log(`owned points, weekly: ${out.matched} of ${out.looked} matched`); })
+    .then((out) => {
+      if (!out) return;
+      if (out.waiting || out.busy) console.log(`owned points: ${out.waiting ?? out.busy}`);
+      else console.log(`owned points, ${out.kind}: ${out.matched} of ${out.looked} matched`);
+    })
     .catch((err) => console.error('owned points weekly', err.message));
 };
 void indexBuilt.then(osmDaily);

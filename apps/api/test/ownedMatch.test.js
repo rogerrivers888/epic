@@ -282,3 +282,21 @@ test('an owned point for a place the index has not met puts it on the index', as
   await recordOwnedPoint({ ref, lat: 51.2, lng: -0.2, source: 'osm', sourceRef: 'way/1', method: 'the activity sweep matched it' });
   assert.deepEqual((await query('select lat, coords_from from place_index where venue_ref = $1', [ref])).rows[0], { lat: 51.2, coords_from: 'osm' });
 });
+
+test('the schedule starts the backfill itself, and carries on one a deploy cut short', async () => {
+  await query('delete from owned_point_runs');
+  await everythingLoaded();
+  const { rows: [r] } = await query(`insert into owned_point_runs (kind, state, after, looked) values ('backfill', 'running', 'zzzz', 3) returning id`);
+  const out = await m.weeklyDue();
+  assert.equal(out.id, r.id, 'the same backfill, carried on');
+  assert.equal((await query('select state from owned_point_runs where id = $1', [r.id])).rows[0].state, 'done');
+});
+
+test('a failed weekly run carries on even in a week that already had one', async () => {
+  await query('delete from owned_point_runs');
+  await everythingLoaded();
+  await query(`insert into owned_point_runs (kind, state, finished_at) values ('backfill', 'done', now()), ('weekly', 'done', now() - interval '1 day')`);
+  const { rows: [f] } = await query(`insert into owned_point_runs (kind, state, after, looked) values ('weekly', 'failed', 'zzzz', 5) returning id`);
+  const out = await m.weeklyDue();
+  assert.equal(out.id, f.id);
+});
