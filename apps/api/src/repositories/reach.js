@@ -25,7 +25,7 @@
 
 import { pool, query } from '../db.js';
 import { CAP_MINUTES, EDGE_MINUTES, HORIZON_MINUTES, cellCode, labelOf, nearestCell, outcodeOf, reachFrom, recentre, sectorOf } from '../domain/reach.js';
-import { kmBetween, travelMode } from '../domain/travel.js';
+import { kmBetween, travelMode, straightLineReachKm } from '../domain/travel.js';
 import { outcodesFor } from '../sources/localities.js';
 import { outcodeOfCell } from '../domain/ring.js';
 import * as providerCalls from './providerCalls.js';
@@ -592,18 +592,10 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
   };
 }
 
-// Effective door-to-door speeds for the straight-line fallback, km/h with a
-// road/route detour factor. Conservative on purpose — especially transit, which
-// waits and rarely runs point-to-point, so it must not be overstated (owner,
-// 30 Sep 2026). A real reach comes from OSRM (walking/cycling) and a GTFS
-// router (transit); this is the honest floor until those exist.
-const FALLBACK_SPEED = {
-  walking: { kmh: 4.8, factor: 1.15 },
-  cycling: { kmh: 15, factor: 1.2 },
-  transit: { kmh: 12, factor: 1.4 },
-  driving: { kmh: 32.5, factor: 1.4 },
-};
-export const kmPerMinute = (mode) => { const p = FALLBACK_SPEED[mode] ?? FALLBACK_SPEED.transit; return (p.kmh / 60) / p.factor; };
+// The straight-line reach comes from ONE estimator (`straightLineReachKm` in
+// domain/travel.js), shared with the display fence so a count and the cards
+// beside it describe the same reach. Per minute, for the minutes → km and back.
+const kmPerMinute = (mode) => straightLineReachKm(mode, 60) / 60;
 
 /** Has this origin cell been built into the matrix for this mode? (cell_builds,
  *  not stray reverse edges.) */

@@ -58,7 +58,7 @@ import * as visitsRepo from '../repositories/visits.js';
 import { currentHousehold, loadMembers, toAttendees } from './household.js';
 import { householdStatus } from './places.js';
 import { thingsAround, THINGS_RADIUS_KM } from './plan.js';
-import { estimateTravelMinutes, kmBetween, searchRadiusKm, travelMode } from '../domain/travel.js';
+import { estimateTravelMinutes, kmBetween, searchRadiusKm, straightLineReachKm, travelMode } from '../domain/travel.js';
 import { searchPlan, mergeWide, alternate, googleId, NEAR_KM } from '../domain/wideSearch.js';
 import { fenceToBand, minutesTo } from '../domain/band.js';
 import { boundKm } from '../domain/reach.js';
@@ -293,7 +293,11 @@ const PAGE = 20;
 
 async function placesFor({ ring, category, page, meter, taught, tax, householdId, minutes = 30, mode = 'driving', from = null }) {
   const start = from ?? ring.at ?? null;
-  const reachKm = boundKm(minutes, mode);
+  // A straight-line ring (walk/transit with no matrix) fences the display to the
+  // SAME conservative reach it counted, so the cards never reach past the count
+  // (Codex). A matrix ring uses the journey-time bound as before.
+  const straight = ring.method === 'straight-line';
+  const reachKm = straight ? straightLineReachKm(mode, minutes) : boundKm(minutes, mode);
   const searchBox = start
     ? {
       minLat: start.lat - reachKm / 111.32,
@@ -313,7 +317,7 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
   // two are merged. A short trip's fence never reaches past it and costs
   // nothing extra; food's popular places are in the centre anyway, so food
   // asks once.
-  const plan = searchPlan({ searchKm: searchRadiusKm(mode, minutes), categories: [category] });
+  const plan = searchPlan({ searchKm: straight ? straightLineReachKm(mode, minutes) : searchRadiusKm(mode, minutes), categories: [category] });
   // Every page, not only the first, and ten of each rather than twenty: a
   // merged page is then twenty, the size of the page the screen keeps, and
   // there is never an overflow to carry forward or lose. Google bills a

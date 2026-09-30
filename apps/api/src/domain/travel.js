@@ -216,3 +216,16 @@ export function reachRadiusKm(mode, minutes) {
   const usable = Math.max(0, minutes - profile.fixedOverheadMinutes);
   return Math.max(0.5, (usable / 60) * profile.kmh / profile.detourFactor);
 }
+
+// A deliberately conservative straight-line reach for a mode with no routing
+// table yet (walk, cycle, transit). Transit especially is held down — it waits
+// and rarely runs point to point — so a count from it is never overstated
+// (owner, 30 Sep 2026). ONE estimator, used by both the reach fallback and the
+// display fence, so the count and the cards beside it describe the same reach.
+const STRAIGHT_LINE_KMH = { walking: 4.8, cycling: 15, transit: 12, driving: 32.5 };
+export function straightLineReachKm(mode, minutes) {
+  const m = travelMode(mode);
+  const kmh = STRAIGHT_LINE_KMH[m] ?? STRAIGHT_LINE_KMH.transit;
+  const factor = (MODE_PROFILE[m] || MODE_PROFILE.driving).detourFactor;
+  return Math.max(0.5, (Math.max(0, minutes) / 60) * kmh / factor);
+}
