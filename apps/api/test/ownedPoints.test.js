@@ -202,3 +202,14 @@ test('an unrelated update leaves a legacy row\'s point and name for the backfill
   await query('update scout_places set rank = 2 where venue_ref = $1', [g]);
   assert.deepEqual((await query('select name, lat from scout_places where venue_ref = $1', [g])).rows[0], { name: 'Google\'s name', lat: 51.5 });
 });
+
+test('food near here still finds a Google-only sweep row through the index\'s point', async () => {
+  const { foodNear } = await import('../src/repositories/scout.js');
+  await query(`insert into scout_areas (code, lat, lng) values ('ZZ5', 50.1, -5.1) on conflict do nothing`);
+  const g = `google:food-${randomUUID()}`;
+  await query(`insert into scout_places (area_code, venue_ref, rank, lat, lng, from_sources) values ('ZZ5', $1, 1, 50.1, -5.1, '["google"]')`, [g]);
+  assert.equal((await query('select lat from scout_places where venue_ref = $1', [g])).rows[0].lat, null, 'the row keeps no Google point');
+  await query(`insert into place_index (venue_ref, lat, lng, coords_from, coords_at) values ($1, 50.1, -5.1, 'google', now())`, [g]);
+  const near = await foodNear({ lat: 50.1, lng: -5.1, km: 2, shownOnly: false });
+  assert.ok(near.some((r) => r.venue_ref === g && r.lat === 50.1));
+});
