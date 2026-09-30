@@ -287,8 +287,11 @@ export async function scheduleRetry(venueRef, at) {
  */
 export async function seedFromHousehold(venueRef) {
   const { rows } = await query(
-    `select label, category, lat, lng, venue, locality from household_places
-      where venue_ref = $1 and lat is not null order by last_seen desc limit 1`,
+    // The place's point as a reader sees it (migration 307): owned, the
+    // index's current one, or its census box.
+    `select label, category, epic_point_lat(venue_ref, lat, point_from) as lat, epic_point_lng(venue_ref, lng, point_from) as lng, venue, locality
+       from household_places
+      where venue_ref = $1 and epic_point_lat(venue_ref, lat, point_from) is not null order by last_seen desc limit 1`,
     [venueRef],
   );
   return rows[0] ?? null;
@@ -296,8 +299,9 @@ export async function seedFromHousehold(venueRef) {
 
 export async function seedFromShortlist(venueRef) {
   const { rows } = await query(
-    `select venue_label as label, category, lat, lng, venue from trip_shortlist
-      where venue_ref = $1 and lat is not null order by added_at desc limit 1`,
+    `select venue_label as label, category, epic_point_lat(venue_ref, lat, point_from) as lat, epic_point_lng(venue_ref, lng, point_from) as lng, venue
+       from trip_shortlist
+      where venue_ref = $1 and epic_point_lat(venue_ref, lat, point_from) is not null order by added_at desc limit 1`,
     [venueRef],
   );
   return rows[0] ?? null;

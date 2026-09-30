@@ -16,13 +16,23 @@ import { SHOWN_REF } from './placeStatus.js';
 const on = (client) => (client ? (text, params) => client.query(text, params) : query);
 
 /**
+ * Where a saved place is: its owned point, the index's current one, or its
+ * census box (migration 307). The row refers to the place rather than keeping
+ * a copy of Google's point (C59, 30 Sep 2026).
+ */
+const HP_LAT = 'epic_point_lat(hp.venue_ref, hp.lat, hp.point_from)';
+const HP_LNG = 'epic_point_lng(hp.venue_ref, hp.lng, hp.point_from)';
+const LAT = 'epic_point_lat(venue_ref, lat, point_from)';
+const LNG = 'epic_point_lng(venue_ref, lng, point_from)';
+
+/**
  * Great-circle miles between a row and a point, for "close to home".
  *
  * Postgres without PostGIS: the spherical law of cosines, clamped so rounding
  * cannot hand `acos()` a number outside its domain.
  */
 const MILES_FROM = (latParam, lngParam) => `(3958.7613 * acos(least(1, greatest(-1,
-  sin(radians(${latParam})) * sin(radians(hp.lat)) + cos(radians(${latParam})) * cos(radians(hp.lat)) * cos(radians(hp.lng) - radians(${lngParam}))
+  sin(radians(${latParam})) * sin(radians(${HP_LAT})) + cos(radians(${latParam})) * cos(radians(${HP_LAT})) * cos(radians(${HP_LNG}) - radians(${lngParam}))
 ))))`;
 
 // ---------------------------------------------------------------------------
@@ -227,7 +237,7 @@ export async function areaPictureRefs(householdId, per = 10) {
 export async function homeCountryCode(householdId, lat, lng, radiusMiles) {
   const { rows } = await query(
     `select hp.country_code, count(*)::int as n from household_places hp
-      where hp.household_id = $1 and hp.country_code is not null and hp.lat is not null and hp.lng is not null
+      where hp.household_id = $1 and hp.country_code is not null and ${HP_LAT} is not null and ${HP_LNG} is not null
         and ${MILES_FROM('$2', '$3')} <= $4
       group by hp.country_code order by n desc limit 1`,
     [householdId, lat, lng, radiusMiles],
@@ -239,7 +249,7 @@ export async function homeCountryCode(householdId, lat, lng, radiusMiles) {
 export async function nearHomePictureRefs(householdId, lat, lng, radiusMiles, limit = 10) {
   const { rows } = await query(
     `select hp.venue_ref from household_places hp
-      where hp.household_id = $1 and hp.lat is not null and hp.lng is not null and ${MILES_FROM('$2', '$3')} <= $4
+      where hp.household_id = $1 and ${HP_LAT} is not null and ${HP_LNG} is not null and ${MILES_FROM('$2', '$3')} <= $4
       order by hp.last_seen desc nulls last limit $5`,
     [householdId, lat, lng, radiusMiles, limit],
   );
@@ -264,8 +274,8 @@ export async function citiesWithoutPlaces(householdId) {
 /** A centre for each city derived from its places, for "add a place here". */
 export async function cityCentres(householdId) {
   const { rows } = await query(
-    `select country_code, coalesce(locality, 'Elsewhere') as locality, avg(lat) as lat, avg(lng) as lng
-       from household_places where household_id = $1 and lat is not null
+    `select country_code, coalesce(locality, 'Elsewhere') as locality, avg(${LAT}) as lat, avg(${LNG}) as lng
+       from household_places where household_id = $1 and ${LAT} is not null
       group by country_code, locality`,
     [householdId],
   );
@@ -284,7 +294,7 @@ export async function nearHomeCounts(householdId, lat, lng, radiusMiles) {
             count(*) filter (where exists (select 1 from visits v where v.household_id = hp.household_id and v.venue_ref = hp.venue_ref))::int as been,
             count(*) filter (where exists (select 1 from place_ledger l where l.household_id = hp.household_id and l.source || ':' || l.source_place_id = hp.venue_ref and l.status = 'special'))::int as special
        from household_places hp
-      where hp.household_id = $1 and hp.lat is not null and hp.lng is not null and ${MILES_FROM('$2', '$3')} <= $4`,
+      where hp.household_id = $1 and ${HP_LAT} is not null and ${HP_LNG} is not null and ${MILES_FROM('$2', '$3')} <= $4`,
     [householdId, lat, lng, radiusMiles],
   );
   return rows[0];
@@ -303,7 +313,7 @@ export async function placesIn(householdId, f = {}, home = null) {
   const where = ['hp.household_id = $1'];
   if (f.nearHome) {
     params.push(home.lat, home.lng, home.radiusMiles);
-    where.push(`hp.lat is not null and hp.lng is not null and ${MILES_FROM(`$${params.length - 2}`, `$${params.length - 1}`)} <= $${params.length}`);
+    where.push(`${HP_LAT} is not null and ${HP_LNG} is not null and ${MILES_FROM(`$${params.length - 2}`, `$${params.length - 1}`)} <= $${params.length}`);
   }
   if (f.country && !f.nearHome) { params.push(String(f.country).toUpperCase()); where.push(`hp.country_code = $${params.length}`); }
   if (f.city && !f.nearHome) { params.push(String(f.city)); where.push(`coalesce(hp.locality, 'Elsewhere') = $${params.length}`); }
@@ -311,7 +321,7 @@ export async function placesIn(householdId, f = {}, home = null) {
   if (f.q) { params.push(`%${String(f.q).toLowerCase()}%`); where.push(`(lower(hp.label) like $${params.length} or lower(coalesce(hp.note,'')) like $${params.length})`); }
 
   const { rows } = await query(
-    `select hp.*,
+    `select hp.*, ${HP_LAT} as lat, ${HP_LNG} as lng,
             case when hp.label = hp.venue_ref then coalesce(
               (select v.venue_label from visits v where v.household_id = hp.household_id and v.venue_ref = hp.venue_ref and v.venue_label <> hp.venue_ref order by v.created_at desc limit 1),
               (select s.venue_label from trip_shortlist s join trips t on t.id = s.trip_id where t.household_id = hp.household_id and s.venue_ref = hp.venue_ref and s.venue_label <> hp.venue_ref order by s.added_at desc limit 1),
@@ -394,8 +404,8 @@ export async function atlasForPrompt(householdId, limit = 40) {
 export async function placedPlaces(householdId) {
   const { rows } = await query(
     // Matching an idea to somewhere the household knows is a suggestion too (C57).
-    `select venue_ref, label, kind, category, lat, lng, venue from household_places
-      where household_id = $1 and lat is not null and lng is not null and ${SHOWN_REF('venue_ref')}`,
+    `select venue_ref, label, kind, category, ${LAT} as lat, ${LNG} as lng, venue from household_places
+      where household_id = $1 and ${LAT} is not null and ${LNG} is not null and ${SHOWN_REF('venue_ref')}`,
     [householdId],
   );
   return rows;

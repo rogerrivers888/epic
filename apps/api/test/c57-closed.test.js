@@ -599,6 +599,9 @@ test('a closed place stays in the saved list and history, marked, and is never a
   const shut = 'google:ChIJ_c57_saved_shut';
   const open = 'google:ChIJ_c57_saved_open';
   for (const [ref, label] of [[shut, 'The Old Mill'], [open, 'The New Mill']]) {
+    // As the save path writes it: the place's point on the index, where a
+    // Google point lives for thirty days (migration 307), not on the row.
+    await query(`insert into place_index (venue_ref, lat, lng, coords_from, coords_at) values ($1, 51.46, -0.6, 'google', now()) on conflict (venue_ref) do update set lat = 51.46, lng = -0.6`, [ref]);
     await query(`insert into household_places (household_id, venue_ref, label, category, country_code, locality, lat, lng) values ($1, $2, $3, 'attraction', 'GB', 'Windsor', 51.46, -0.6)`, [household.id, ref, label]);
   }
   await repo.setByPerson(shut, { status: 'permanently_closed', by: 'test' });

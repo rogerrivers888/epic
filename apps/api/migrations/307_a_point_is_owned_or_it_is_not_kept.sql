@@ -150,5 +150,22 @@ create trigger keep_owned_point before insert or update on attractions for each 
 drop trigger if exists keep_owned_point on place_records;
 create trigger keep_owned_point before insert or update on place_records for each row execute function epic_keep_owned_point('store');
 
+-- Where a saved, planned or visited place is, for whoever reads it: the
+-- table's own point where it is owned; otherwise the index's current point,
+-- which is either owned or Google's for at most thirty days (the hourly expiry
+-- sees to that); otherwise the table's census box. The tables refer to the
+-- place rather than keeping a copy of Google's point (C59), and a place a
+-- family looked at this month still sits where it is, not in the middle of
+-- its box. Both halves from the same source, never a latitude from one and a
+-- longitude from another.
+create or replace function epic_point_lat(ref text, lat double precision, point_from text) returns double precision
+language sql stable as $$
+  select case when lat is not null and point_from = any(epic_owned_sources()) then lat
+              else coalesce((select pi.lat from place_index pi where pi.venue_ref = ref and pi.lat is not null and pi.lng is not null), lat) end $$;
+create or replace function epic_point_lng(ref text, lng double precision, point_from text) returns double precision
+language sql stable as $$
+  select case when lng is not null and point_from = any(epic_owned_sources()) then lng
+              else coalesce((select pi.lng from place_index pi where pi.venue_ref = ref and pi.lat is not null and pi.lng is not null), lng) end $$;
+
 alter table coordinate_expiries add column if not exists table_name text;
 alter table coordinate_expiries add column if not exists detail jsonb;

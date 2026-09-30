@@ -18,6 +18,17 @@ const on = (client) => (client ? (text, params) => client.query(text, params) : 
 // the trip itself
 // ---------------------------------------------------------------------------
 
+
+/**
+ * Where a shortlisted or planned place is: its owned point, the index's
+ * current one (owned, or Google's for thirty days at most), or its census box
+ * (migration 307). The row refers to the place rather than keeping a copy of
+ * Google's point (C59, 30 Sep 2026). Named last in a select so it stands over
+ * the row's own columns.
+ */
+const POINT_OF = (a) => `epic_point_lat(${a}.venue_ref, ${a}.lat, ${a}.point_from) as lat, epic_point_lng(${a}.venue_ref, ${a}.lng, ${a}.point_from) as lng`;
+const POINT = 'epic_point_lat(venue_ref, lat, point_from) as lat, epic_point_lng(venue_ref, lng, point_from) as lng';
+
 export async function tripById(id) {
   const { rows } = await query('select * from trips where id = $1', [id]);
   return rows[0] ?? null;
@@ -279,7 +290,7 @@ export async function setDayEndpoint(tripId, dayId, which, point) {
 
 export async function shortlistOf(tripId) {
   const { rows } = await query(
-    'select * from trip_shortlist where trip_id = $1 order by position nulls last, must_do desc, added_at',
+    `select *, ${POINT} from trip_shortlist where trip_id = $1 order by position nulls last, must_do desc, added_at`,
     [tripId],
   );
   return rows;
@@ -291,14 +302,14 @@ export async function shortlistRefs(tripId) {
 }
 
 export async function shortlistItem(itemId, tripId) {
-  const { rows } = await query('select * from trip_shortlist where id = $1 and trip_id = $2', [itemId, tripId]);
+  const { rows } = await query(`select *, ${POINT} from trip_shortlist where id = $1 and trip_id = $2`, [itemId, tripId]);
   return rows[0] ?? null;
 }
 
 /** What the household means to do, with a point on the map, for ranking beds. */
 export async function shortlistAnchors(tripId) {
   const { rows } = await query(
-    `select venue_ref, venue_label, lat, lng from trip_shortlist
+    `select venue_ref, venue_label, ${POINT} from trip_shortlist
       where trip_id = $1 and lat is not null and status <> 'dropped'`,
     [tripId],
   );
@@ -387,7 +398,7 @@ export async function seedShortlistFromAtlas(tripId, householdId, countryCode, l
 // ---------------------------------------------------------------------------
 
 export async function stopsOf(tripId) {
-  const { rows } = await query('select * from trip_stops where trip_id = $1 order by position', [tripId]);
+  const { rows } = await query(`select *, ${POINT} from trip_stops where trip_id = $1 order by position`, [tripId]);
   return rows;
 }
 
@@ -431,7 +442,7 @@ export async function setStopPosition(dayId, stopId, position, client, tripId = 
 /** One stop with the date of the day it sits on, for recording a visit. */
 export async function stopWithDate(stopId, tripId) {
   const { rows } = await query(
-    `select s.*, d.date as day_date from trip_stops s
+    `select s.*, ${POINT_OF('s')}, d.date as day_date from trip_stops s
        left join trip_days d on d.id = s.day_id
       where s.id = $1 and s.trip_id = $2`,
     [stopId, tripId],
@@ -510,7 +521,7 @@ export async function dayIdsInOrder(tripId) {
  */
 export async function runningShortlist(tripId, dayId) {
   const { rows } = await query(
-    `select * from trip_shortlist
+    `select *, ${POINT} from trip_shortlist
       where trip_id = $1 and (day_id = $2 or day_id is null) and status in ('to_call','booked','no_booking')
       order by position nulls last, must_do desc, added_at`,
     [tripId, dayId],
@@ -530,7 +541,7 @@ export async function setAsideShortlist(tripId, dayId) {
 }
 
 export async function stopsOnDay(tripId, dayId) {
-  const { rows } = await query('select * from trip_stops where trip_id = $1 and day_id = $2 order by position', [tripId, dayId]);
+  const { rows } = await query(`select *, ${POINT} from trip_stops where trip_id = $1 and day_id = $2 order by position`, [tripId, dayId]);
   return rows;
 }
 
