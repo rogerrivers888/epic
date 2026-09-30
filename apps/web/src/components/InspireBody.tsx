@@ -2,7 +2,7 @@ import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from './press';
 import { InspireItem } from '../api';
-import { colors, fonts, spacing, TARGET } from '../theme';
+import { colors, fonts, spacing, TARGET, MOSS, MUTED } from '../theme';
 import { Icon, IconName } from './Icon';
 import { CARD_H, CARD_W, MEDIA_RADIUS, VenueThumb } from './VenueThumb';
 import { briefly, priceMarks } from '../screens/inspireList';
@@ -150,19 +150,22 @@ export function SectionHead({ title, count, floor, onAll }: { title: string; cou
    * figure is one and should read as one.
    */
   const said = `${count.toLocaleString('en-GB')}${floor ? '+' : ''}`;
-  const right = (
-    <View style={styles.allLink}>
-      <Text style={styles.meta}>{said}</Text>
-      {onAll ? <Icon name="more" size={16} color={colors.inkMuted} /> : null}
+  // New navigation (owner, 30 Sep 2026, §6): title case, the count beside the
+  // title in muted, and "See all ›" right-aligned in moss — not a count and a
+  // chevron on the right.
+  const left = (
+    <View style={styles.sectionLeft}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      <Text style={styles.sectionCount}>{said}</Text>
     </View>
   );
   if (!onAll) {
-    return <View style={styles.sectionHead}><Text style={styles.sectionTitle}>{title}</Text>{right}</View>;
+    return <View style={styles.sectionHead}>{left}</View>;
   }
   return (
-    <Press onPress={onAll} style={styles.sectionHead} accessibilityRole="button" accessibilityLabel={`${title}, ${said}`}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {right}
+    <Press onPress={onAll} style={styles.sectionHead} accessibilityRole="button" accessibilityLabel={`See all ${title}, ${said}`}>
+      {left}
+      <Text style={styles.seeAll}>See all ›</Text>
     </Press>
   );
 }
@@ -315,7 +318,10 @@ const styles = StyleSheet.create({
   tempClosed: { fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: colors.ink },
   section: { gap: spacing.md },
   sectionHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: spacing.md, paddingHorizontal: GUTTER },
-  sectionTitle: { fontFamily: fonts.heading, fontSize: 22, fontWeight: '800', letterSpacing: -0.44, color: colors.ink },
+  sectionLeft: { flexDirection: 'row', alignItems: 'baseline', gap: 8, flexShrink: 1 },
+  sectionTitle: { fontFamily: fonts.heading, fontSize: 20, fontWeight: '800', letterSpacing: -0.4, color: colors.ink },
+  sectionCount: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: MUTED },
+  seeAll: { fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: MOSS },
   allLink: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   carousel: { gap: 12, paddingHorizontal: GUTTER },
   card: { width: CARD_W, gap: 7 },

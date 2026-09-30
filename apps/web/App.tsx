@@ -697,11 +697,11 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
           <View style={[styles.tabs, fullBleed && styles.tabsOver]} accessibilityRole="tablist">
             {tabs.map((t) => (
               <Press key={t.key} onPress={() => navigate(t.href)} style={styles.tab} accessibilityRole="tab" accessibilityState={{ selected: tab === t.key }}>
-                {/* "Active (Inspire) ink text with lime-filled icon; inactive
-                    grey-700 for both label and icon" — so the glyph itself is
-                    lime, and the label is the type colour. Grey 500 is never
-                    used here: it fails contrast at 11px. */}
-                <Icon name={t.icon} size={22} color={tab === t.key ? colors.selected : colors.inkMuted} fill={tab === t.key} />
+                {/* New navigation (owner, 30 Sep 2026, §8): the active tab is
+                    ink, not lime — lime is the header and nothing else. The
+                    weight is carried by a heavier stroke (2.4 vs 1.8) and a
+                    bolder label, never a fill. */}
+                <Icon name={t.icon} size={22} color={tab === t.key ? colors.ink : colors.inkMuted} strokeWidth={tab === t.key ? 2.4 : 1.8} />
                 <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
               </Press>
             ))}
@@ -843,7 +843,9 @@ const styles = StyleSheet.create({
   // owner picked the middle: about half a centimetre lower, keeping ~18px of
   // clearance on the common 34px inset — under the labels, above the pill.
   tabs: {
-    flexDirection: 'row', borderTopWidth: BORDER, borderTopColor: colors.line, backgroundColor: colors.tabbar,
+    // §8: a 1px soft rule, not the 2px ink one — the bar is the ground with a
+    // hairline on it, cream in light and the dark ground in dark.
+    flexDirection: 'row', borderTopWidth: 1, borderTopColor: colors.ruleSoft, backgroundColor: colors.tabbar,
     paddingBottom: (Platform.OS === 'web' ? 'max(12px, calc(var(--epic-sab) - 16px))' : 8) as any,
   },
   // Floating over the map, and clear of the home indicator on a phone that has
@@ -855,6 +857,6 @@ const styles = StyleSheet.create({
   // A 44pt target with no slack around it: the icon and its label are 37 of
   // those 44, and the ten extra were another few millimetres of nothing.
   tab: { flex: 1, minHeight: TARGET, alignItems: 'center', justifyContent: 'center', gap: 2, paddingTop: 4 },
-  tabText: { fontSize: 11, fontWeight: '600', color: colors.inkMuted },  // grey 700, both modes
-  tabTextActive: { color: colors.ink },
+  tabText: { fontSize: 10, fontWeight: '500', color: colors.inkMuted },  // §8: inactive 500, grey 700 both modes
+  tabTextActive: { color: colors.ink, fontWeight: '700' },              // §8: active 700 ink
 });

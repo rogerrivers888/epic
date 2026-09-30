@@ -16,14 +16,16 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from '../../components/press';
 import { api, HostHome, OfferShape, OpenHome, OpenMatch, Visibility } from '../../api';
-import { colors, fonts, type, INK, LIME } from '../../theme';
+import { colors, fonts, type, INK, LIME, CREAM } from '../../theme';
 import { Button } from '../../components/ui';
 import { Icon } from '../../components/Icon';
-import { ScreenTop } from '../../components/InspireHeader';
+import { TallBand, HostPhoto } from '../../components/Band';
+import { InkMenu } from '../../components/InkMenu';
+import { SectionHeader } from '../../components/NavRows';
 import { useViewport } from '../../hooks/useViewport';
 import { useRouter } from '../../router';
 import { paths, type Route } from '../../routes';
-import { SHAPE_ICON, SHAPE_LABEL, STATE_LABEL, TRUST_LABEL, TYPE_CHIP, VISIBILITY_CHIP, mediaUrl, money, priceWords } from '../../components/hosting';
+import { SHAPE_ICON, SHAPE_LABEL, STATE_LABEL, TRUST_LABEL, TYPE_CHIP, VISIBILITY_CHIP, dateOnly, mediaUrl, money, priceWords } from '../../components/hosting';
 import { Tag, k, t } from '../../components/hostKit';
 import { LearnExample, LearnExamples, LearnHome, LearnShape, LearnWho } from './Learn';
 import { OfferWizard } from './OfferWizard';
@@ -40,6 +42,8 @@ export function HostScreen({ route }: { route: Extract<Route, { name: 'host' }> 
   const { navigate, query } = useRouter();
   const [home, setHome] = useState<HostHome | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The ink menu's two views (New navigation, 30 Sep 2026): the offers dashboard and the bookings across them.
+  const [tab, setTab] = useState<'offers' | 'bookings'>('offers');
 
   const load = useCallback(async () => {
     try { setHome(await api.hostHome()); setError(null); } catch (e: any) { setError(e.message); }
@@ -76,16 +80,48 @@ export function HostScreen({ route }: { route: Extract<Route, { name: 'host' }> 
   if (!home) return <View style={styles.centre}><Text style={t.sub}>{error ?? 'Loading…'}</Text></View>;
   if (!home.host || !home.offers.length) return <LearnHome wide={wide} />;
 
+  // Every booking across every offer, so the tab can carry its count and the Bookings view can list them.
+  const bookingCount = home.offers.reduce((n, o) => n + o.bookings.filter((b) => b.state !== 'cancelled').length, 0);
+
   return (
     <View style={k.page}>
       <View style={wide ? k.wide : undefined}>
-        <ScreenTop>
-          <Press onPress={() => navigate(paths.hostMe())} accessibilityRole="button" accessibilityLabel="You, as a host" style={styles.menu}><Icon name="menu" size={16} color={colors.ink} strokeWidth={2} /></Press>
-        </ScreenTop>
+        <TallBand right={<HostPhoto uri={mediaUrl(home.host.photo) ?? undefined} onPress={() => navigate(paths.hostMe())} />} />
+        <InkMenu
+          tabs={[{ key: 'offers' as const, label: 'Your offers' }, { key: 'bookings' as const, label: 'Bookings', count: bookingCount }]}
+          selected={tab}
+          onSelect={setTab}
+        />
       </View>
       <ScrollView contentContainerStyle={[styles.body, wide && k.wide]}>
-        <Dashboard home={home} onReset={async () => { await load(); navigate(paths.host(), { replace: true }); }} />
+        {tab === 'offers'
+          ? <Dashboard home={home} onReset={async () => { await load(); navigate(paths.host(), { replace: true }); }} />
+          : <BookingsList home={home} />}
       </ScrollView>
+    </View>
+  );
+}
+
+/** Every booking across every offer, newest first — the Bookings tab (New navigation, 30 Sep 2026). */
+function BookingsList({ home }: { home: HostHome }) {
+  const rows = home.offers
+    .flatMap((o) => o.bookings.filter((b) => b.state !== 'cancelled').map((b) => ({ b, o })))
+    .sort((a, z) => z.b.bookedAt.localeCompare(a.b.bookedAt));
+  return (
+    <View style={{ paddingTop: 16 }}>
+      <SectionHeader title="Bookings" count={rows.length} />
+      <View style={[k.gutter, { paddingTop: 8 }]}>
+        {rows.length ? rows.map(({ b, o }) => (
+          <View key={b.id} style={styles.bookingRow}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[t.body, { fontWeight: '700', lineHeight: 18 }]} numberOfLines={1}>{b.name ?? 'A guest'}</Text>
+              <Text style={t.tiny} numberOfLines={1}>{[o.title ?? 'Untitled', `${b.heads} ${b.heads === 1 ? 'person' : 'people'}`, money(b.amountPence)].join(' · ')}</Text>
+              {b.state === 'pending' ? <Text style={t.tiny}>Held until the minimum</Text> : b.state === 'waitlisted' ? <Text style={t.tiny}>Waiting list</Text> : null}
+            </View>
+            <Text style={t.tiny}>{dateOnly(b.bookedAt.slice(0, 10))}</Text>
+          </View>
+        )) : <Text style={[t.small, { lineHeight: 18 }]}>No bookings yet. When someone books one of your offers, they show here.</Text>}
+      </View>
     </View>
   );
 }
@@ -118,8 +154,9 @@ function Dashboard({ home, onReset }: { home: HostHome; onReset: () => Promise<v
         </View>
       </View>
 
-      <View style={[k.gutter, { paddingTop: 16, gap: 8 }]}>
-        <Text style={t.kicker}>Your offers</Text>
+      <View style={{ paddingTop: 16 }}>
+        <SectionHeader title="Offers" count={offers.length} />
+        <View style={[k.gutter, { paddingTop: 8, gap: 8 }]}>
         <View>
           {offers.map((o, i) => (
             <Press key={o.id} onPress={() => navigate(o.state === 'draft' ? paths.hostOfferEdit(o.id, 'plan') : paths.hostOffer(o.id))} accessibilityRole="button" style={[styles.offer, k.rule, i === 0 && k.ruleTop]}>
@@ -139,8 +176,8 @@ function Dashboard({ home, onReset }: { home: HostHome; onReset: () => Promise<v
           ))}
         </View>
         <Press onPress={() => navigate(paths.hostNewOffer())} accessibilityRole="button" style={styles.addBar}>
-          <Text style={[t.body, { fontSize: 15, fontWeight: '700', color: INK }]}>Add another thing you do</Text>
-          <Icon name="add" size={18} color={INK} strokeWidth={2} />
+          <Text style={[t.body, { fontSize: 15, fontWeight: '700', color: CREAM }]}>Add another thing you do</Text>
+          <Icon name="add" size={18} color={CREAM} strokeWidth={2} />
         </Press>
         <UpFor />
         {asks.length ? (
@@ -154,6 +191,7 @@ function Dashboard({ home, onReset }: { home: HostHome; onReset: () => Promise<v
           <Text style={[t.small, { lineHeight: 18, marginTop: 8 }]}>{h.checks === 'running' ? 'Your checks are running; the profile says so until they pass. ' : ''}{!h.introVideo ? 'No intro video yet — people book the person. Record one from your profile.' : ''}</Text>
         ) : null}
         <DeleteAll onDone={onReset} />
+        </View>
       </View>
     </View>
   );
@@ -238,12 +276,14 @@ function Stat({ n, label }: { n: string; label: string }) {
 const styles = StyleSheet.create({
   centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   body: { paddingBottom: 40 },
-  menu: { width: 36, height: 36, borderWidth: 1, borderColor: colors.ruleSoft, alignItems: 'center', justifyContent: 'center' },
+  bookingRow: { flexDirection: 'row', gap: 12, alignItems: 'center', paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
   stat: { flex: 1, backgroundColor: colors.surfaceMuted, paddingVertical: 12, paddingHorizontal: 10 },
   statLabel: { fontFamily: fonts.body, fontSize: 10.5, fontWeight: '600', color: colors.inkMuted, lineHeight: 14 },
   offer: { flexDirection: 'row', gap: 12, alignItems: 'center', paddingVertical: 11 },
   thumb: { width: 74, height: 56, borderRadius: 8, backgroundColor: colors.warm, alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' },
-  addBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, height: 50, backgroundColor: LIME, marginTop: 6 },
+  // §1: lime is the header and nothing else — an action bar below the band is
+  // ink, not lime (cream type on ink).
+  addBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, height: 50, backgroundColor: INK, marginTop: 6 },
   deleteBox: { padding: 14, gap: 10, borderWidth: 2, borderColor: colors.overrun, marginTop: 8 },
   introRow: { flexDirection: 'row', gap: 11, alignItems: 'center', paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
 });

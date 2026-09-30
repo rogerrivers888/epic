@@ -8,7 +8,7 @@ import { MonthCalendar, DatesCaption, nightsBetween, ymd } from '../components/M
 import { StatusLine } from '../components/ui';
 import { VenueThumb } from '../components/VenueThumb';
 import { useViewport } from '../hooks/useViewport';
-import { TOP_INSET } from '../components/InspireHeader';
+import { CompactBand } from '../components/Band';
 import { firstName } from '../components/Faces';
 import { WhereYouAreStayingScreen, StayChoice } from './WhereYouAreStayingScreen';
 
@@ -251,6 +251,7 @@ export function CreateTripScreen({ household, seed, onClose, onCreated, onGettin
 
   return (
     <View style={[styles.page, wide && styles.wide]}>
+      <CompactBand title="New trip" onClose={onClose} />
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <View style={styles.head}>
           <View style={styles.titleRow}>
@@ -271,9 +272,6 @@ export function CreateTripScreen({ household, seed, onClose, onCreated, onGettin
                 <Icon name="edit" size={18} color={colors.inkMuted} strokeWidth={2.2} />
               </Press>
             )}
-            <Press onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close">
-              <Icon name="close" size={20} color={colors.ink} strokeWidth={2.4} />
-            </Press>
           </View>
 
           {/* The place the trip is for. It bled past the gutter with square
@@ -534,7 +532,7 @@ const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.bg },
   wide: { maxWidth: 720, alignSelf: 'center', width: '100%' },
   scroll: { paddingBottom: 12 },
-  head: { paddingTop: TOP_INSET, gap: 16 },
+  head: { paddingTop: 12, gap: 16 },
   titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 20 },
   titleTap: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10 },
   title: { flexShrink: 1, fontFamily: fonts.heading, fontSize: 32, fontWeight: '800', letterSpacing: -0.96, lineHeight: 36, color: colors.ink },

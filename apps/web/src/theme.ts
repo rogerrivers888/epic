@@ -54,6 +54,20 @@ export const LIME_EDGE = '#86BE2E';  // oklch(0.70 0.18 127), the filled shortli
 export const CHIP_SCRIM = 'rgba(32,30,29,0.32)'; // the card heart chip's ground
 
 /**
+ * The navigation system (New navigation, owner 30 Sep 2026): one header/chrome
+ * treatment across every screen. Like the Trips redesign above it is a fixed
+ * light design — the band is always lime with ink type, and the ink menu is
+ * always an ink bar, in either mode — so its colours are named as fixed
+ * constants rather than palette tokens. Lime is the header and nothing else
+ * (§1); everything under the band is cream.
+ */
+export const MIC_TILE = '#AEDF3C';      // oklch(0.84 0.19 125), the band's mic tile — one step darker than lime
+export const MUTED = '#7D7979';         // a section-header count, the Filters control, a tab-bar label off
+export const TAB_UNSELECTED = '#A8A4A2';// the ink menu's unselected tab label (cream is 800/selected)
+export const MENU_DIVIDER = '#55514F';  // the 1px rule between two ink-menu cells
+export const DEEP_GREEN = '#335200';    // oklch(0.40 0.11 130), the compact band's context line on lime
+
+/**
  * Dark, from the v2 handoff's own table. Not a dimming of the light palette: a
  * deeper ground, a warmer off-white for type, and — the two that matter — a
  * lime tint that is a dark olive rather than a pale wash, and a *lifted* green

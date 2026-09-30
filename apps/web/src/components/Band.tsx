@@ -1,0 +1,120 @@
+import React from 'react';
+import { Image, StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
+import { Icon } from './Icon';
+import { Wordmark } from './Wordmark';
+import { LIME, INK, MIC_TILE, DEEP_GREEN, fonts } from '../theme';
+import { TOP_INSET } from './InspireHeader';
+
+/**
+ * The lime band (New navigation, owner 30 Sep 2026, §2–§4). One of two shapes
+ * sits at the top of almost every screen, and lime is the header and nothing
+ * else — nothing below the band is ever lime again.
+ *
+ * The band takes the status bar into itself: the lime runs from the very top of
+ * the screen, so its ground is padded by the safe-area inset (`TOP_INSET`, the
+ * same one every own-header screen already uses) and the OS draws its ink
+ * glyphs over the lime. The mockup's painted "9:41" is that real status bar.
+ */
+
+/**
+ * The band's right-hand control (§4): a 44×44 tile one step darker than the
+ * band, no border and no radius, with the mic glyph in ink. Never a solid ink
+ * box — that competed with the wordmark. Tapping it opens the voice screen
+ * scoped to wherever it was tapped.
+ */
+export function MicTile({ onPress, accessibilityLabel = 'Speak' }: { onPress: () => void; accessibilityLabel?: string }) {
+  return (
+    <Press onPress={onPress} style={styles.mic} accessibilityRole="button" accessibilityLabel={accessibilityLabel}>
+      <Icon name="mic" size={22} color={INK} strokeWidth={2.2} />
+    </Press>
+  );
+}
+
+/**
+ * Host's right-hand slot is the host's photo, not the mic (§4): a 44px circle
+ * with a 2px ink ring, opening their host profile. There is no ellipsis.
+ */
+export function HostPhoto({ uri, onPress }: { uri?: string; onPress: () => void }) {
+  return (
+    <Press onPress={onPress} style={styles.photo} accessibilityRole="button" accessibilityLabel="Your host profile">
+      {uri ? (
+        <Image source={{ uri }} style={styles.photoImg} accessibilityIgnoresInvertColors />
+      ) : (
+        <View style={styles.photoImg}><Icon name="host" size={22} color={INK} strokeWidth={2} /></View>
+      )}
+    </Press>
+  );
+}
+
+/**
+ * The tall band (§2): the home of a tab. The 40px wordmark on the left and the
+ * one action for that tab on the right, aligned to the wordmark's centre. No
+ * title and no subtitle — the tab bar says where you are. The pin's hole is
+ * filled with lime, not cream, so it reads as a hole in the band.
+ */
+export function TallBand({ right }: { right?: React.ReactNode }) {
+  return (
+    <View style={styles.limeTop}>
+      <View style={styles.tallRow}>
+        <Wordmark height={40} ground={LIME} />
+        {right ?? null}
+      </View>
+    </View>
+  );
+}
+
+/**
+ * The compact band (§3): everything below a home. Back, a one-line title, an
+ * optional context line, and the mic. On a flow you finish (`close`) the back
+ * chevron becomes a ✕ and the mic is dropped, because that screen is the mic.
+ * This is the one back treatment in the app — the old "‹ Trips" link is now
+ * just this band's arrow.
+ */
+export function CompactBand({ title, context, onBack, onClose, right }: {
+  title: string;
+  /** e.g. "Sat 20 Sep · 4 people · 3 stops". */
+  context?: string;
+  onBack?: () => void;
+  /** A finish-flow: draws ✕ instead of back and omits the mic. */
+  onClose?: () => void;
+  /** The mic (or nothing). Ignored on a finish-flow. */
+  right?: React.ReactNode;
+}) {
+  const finishing = !!onClose;
+  return (
+    <View style={styles.limeTop}>
+      <View style={styles.compactRow}>
+        <Press
+          onPress={onClose ?? onBack ?? (() => {})}
+          style={styles.lead}
+          accessibilityRole="button"
+          accessibilityLabel={finishing ? 'Close' : 'Back'}
+        >
+          <Icon name={finishing ? 'close' : 'previous'} size={26} color={INK} strokeWidth={2.4} />
+        </Press>
+        <View style={styles.titleWrap}>
+          <Text numberOfLines={1} style={styles.title}>{title}</Text>
+          {context ? <Text numberOfLines={1} style={styles.context}>{context}</Text> : null}
+        </View>
+        {finishing ? null : right ?? null}
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  limeTop: { backgroundColor: LIME, paddingTop: TOP_INSET },
+  // §2: the wordmark row, 22 above and 26 below, the control centred on it.
+  tallRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 22, paddingBottom: 26 },
+  // §3: back · title+line · mic, 14 above and 16 below, 12 between.
+  compactRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 16 },
+  // A 32×44 hit area pulled 6px left so the chevron optically aligns to the gutter.
+  lead: { width: 32, height: 44, alignItems: 'flex-start', justifyContent: 'center', marginLeft: -6 },
+  titleWrap: { flex: 1, minWidth: 0 },
+  title: { fontFamily: fonts.heading, fontWeight: '800', fontSize: 22, letterSpacing: -22 * 0.03, lineHeight: 24, color: INK },
+  context: { fontSize: 12.5, color: DEEP_GREEN, marginTop: 2 },
+  mic: { width: 44, height: 44, backgroundColor: MIC_TILE, alignItems: 'center', justifyContent: 'center' },
+  photo: { width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: INK, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+  photoImg: { width: 40, height: 40, borderRadius: 20, backgroundColor: LIME, alignItems: 'center', justifyContent: 'center' },
+});

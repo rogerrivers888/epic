@@ -19,8 +19,11 @@ import { BeenCapture, VenueRow, VisitForm, VisitSummary, rowsForVisit } from '..
 import { VisitQuestion } from '../components/VisitQuestion';
 import { getViewer, onViewerChange } from '../viewer';
 import { isAdmin } from '../admin';
-import { CategoryStrip, PairSwitch, TOP_INSET } from '../components/InspireHeader';
-import { ControlButton, ControlRow, CrumbHead, Popover, PopoverGroup, PopoverList, type PopoverOption } from '../components/ControlRow';
+import { TOP_INSET } from '../components/InspireHeader';
+import { TallBand, CompactBand, MicTile } from '../components/Band';
+import { InkMenu } from '../components/InkMenu';
+import { ContextRow } from '../components/NavRows';
+import { Popover, PopoverGroup, PopoverList, type PopoverOption } from '../components/ControlRow';
 import { Crowd, MediaCard } from '../components/InspireBody';
 import { EMPTY_LIST, LIST_KEYS, LISTS, PLACE_SORTS, PLACE_SORT_KEYS, epicRating, foodType, inList, sortPlaces, whenLabel, type ListKey, type PlaceSort } from './placesRows';
 import { PhotoAdd, type PhotoLanded } from '../components/PhotoAdd';
@@ -313,19 +316,19 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
             toggle does not throw the screen's state away (CLAUDE.md). The head
             is lime at the root only; below it the ground is cream, so the lime
             switch inside a list keeps its selected state. */}
-        <View style={[styles.head, !sel && styles.headLime]} onLayout={(e) => setHeadH(e.nativeEvent.layout.height)}>
-          <View style={styles.top}>
-            <Wordmark height={30} ground={!sel ? colors.lime : colors.bg} />
-          </View>
+        <View style={styles.head} onLayout={(e) => setHeadH(e.nativeEvent.layout.height)}>
+          {/* New navigation (owner, 30 Sep 2026): the tall band at the root,
+              the compact band once you have drilled into an area. No title on
+              the home — the tab bar says where you are. */}
           {!sel ? (
-            <View style={styles.rootTitle}>
-              <Text style={styles.rootTitleText}>Places</Text>
-              <Text style={styles.rootSub}>Everywhere you've been, loved and shortlisted</Text>
-            </View>
+            <TallBand right={<MicTile onPress={() => navigate(paths.say({ for: 'inspire' }))} />} />
           ) : crumb ? (
-            <View style={styles.crumbWrap}>
-              <CrumbHead size={24} onBack={() => navigate(crumb.back)} title={crumb.title} sub={crumb.sub} />
-            </View>
+            <CompactBand
+              title={crumb.title}
+              context={crumb.sub ?? undefined}
+              onBack={() => navigate(crumb.back)}
+              right={<MicTile onPress={() => navigate(paths.say({ for: 'inspire' }))} />}
+            />
           ) : null}
           {inArea && (city || home) ? <ListHead st={st} ui={ui} onLandedShown={() => setLanded(null)} /> : null}
         </View>
@@ -522,7 +525,7 @@ function tripWhen(t: TripBrief): string {
 // Inside a town, or near home: the place list
 // ---------------------------------------------------------------------------
 
-type ListMenu = null | 'type' | 'mood' | 'sort';
+type ListMenu = null | 'list' | 'filters';
 /** How a place is being added: by name, or from a photograph. In the address as `?add=`. */
 type AddMode = 'search' | 'photo' | null;
 type ListUi = { menu: ListMenu; setMenu: (m: ListMenu) => void; adding: boolean; setAdding: (v: boolean) => void; mode: AddMode; setMode: (m: AddMode) => void };
@@ -605,34 +608,30 @@ type ListState = ReturnType<typeof useListState>;
 
 /** Inside the head: the switch, the band, and the control row. */
 function ListHead({ st, ui, onLandedShown }: { st: ListState; ui: ListUi; onLandedShown: () => void }) {
-  const close = () => ui.setMenu(null);
   const toggle = (m: Exclude<ListMenu, null>) => () => ui.setMenu(ui.menu === m ? null : m);
-  const typeLabel = st.typeF ?? (st.shown === 'eat' ? 'Cuisine' : 'Type');
-  const moodLabel = st.moodF ? cap(st.moodF) : 'Mood';
-  const sortLabel = `Sort: ${PLACE_SORTS.find((s) => s.key === st.sort)?.label ?? 'Most recent'}`;
+  // The Been / Loved / Shortlisted axis is the context-row dropdown now (6d,
+  // "Been and liked ▾"), not a second lime strip — there is only ever one menu
+  // on a screen. Type and mood fold into Filters; sort is dropped to match the
+  // signed-off mockups (owner, 30 Sep 2026).
+  const listLabel = LISTS.find((l) => l.key === st.list)?.label ?? 'Been and liked';
   return (
     <View style={styles.chrome}>
-      <PairSwitch
-        value={st.shown}
-        options={[
-          { value: 'do' as Kind, label: 'Activities' },
-          { value: 'eat' as Kind, label: 'Food & drink' },
+      <InkMenu
+        tabs={[
+          { key: 'do', label: 'Activities' },
+          { key: 'eat', label: 'Food & drink' },
           // Only where the household has kept somewhere to sleep: a hotel
           // saved on a trip must not become unreachable.
-          ...(st.hasStay ? [{ value: 'stay' as Kind, label: 'Stays' }] : []),
+          ...(st.hasStay ? [{ key: 'stay', label: 'Stays' }] : []),
         ]}
-        onPick={(k) => { st.setKind(k); st.setTypeF(null); if (k !== 'do') st.setMoodF(null); close(); onLandedShown(); }}
+        selected={st.shown}
+        onSelect={(k) => { st.setKind(k as Kind); st.setTypeF(null); if (k !== 'do') st.setMoodF(null); ui.setMenu(null); onLandedShown(); }}
       />
-      <CategoryStrip
-        light
-        items={LISTS.map((l) => ({ key: l.key, label: `${l.label} · ${st.listCounts[l.key]}` }))}
-        value={st.list}
-        onPick={(k) => { st.setList(k as ListKey); st.setTypeF(null); close(); onLandedShown(); }}
-      />
-      <ControlRow
-        left={<ControlButton label={typeLabel} set={!!st.typeF} open={ui.menu === 'type'} onPress={toggle('type')} />}
-        centre={st.moodShown ? <ControlButton label={moodLabel} set={!!st.moodF} open={ui.menu === 'mood'} onPress={toggle('mood')} /> : null}
-        right={<ControlButton label={sortLabel} set={st.sort !== 'recent'} open={ui.menu === 'sort'} onPress={toggle('sort')} />}
+      <ContextRow
+        label={listLabel}
+        icon={null}
+        onPress={toggle('list')}
+        onFilters={toggle('filters')}
       />
     </View>
   );
@@ -643,24 +642,27 @@ function ListMenus({ st, ui, top }: { st: ListState; ui: ListUi; top: number }) 
   const close = () => ui.setMenu(null);
   return (
     <>
-      <Popover open={ui.menu === 'type'} top={top} onClose={close} align="left">
+      <Popover open={ui.menu === 'list'} top={top} onClose={close} align="left">
+        <PopoverGroup title="Show">
+          <PopoverList
+            options={LISTS.map((l) => ({ key: l.key, label: `${l.label} · ${st.listCounts[l.key]}`, on: st.list === l.key }))}
+            onPick={(k) => { st.setList(k as ListKey); st.setTypeF(null); close(); }}
+          />
+        </PopoverGroup>
+      </Popover>
+      <Popover open={ui.menu === 'filters'} top={top} onClose={close} align="right">
         <PopoverGroup title={st.shown === 'eat' ? 'Cuisine' : st.shown === 'stay' ? 'Kind of stay' : 'Type'}>
           {st.typeOptions.length > 1
             ? <PopoverList options={st.typeOptions} onPick={(k) => { st.setTypeF(k || null); close(); }} />
             : <Text style={styles.panelNote}>{st.inShowing.length ? 'Nothing here has said what kind of thing it is yet.' : 'Nothing on this list yet, so there is nothing to narrow.'}</Text>}
         </PopoverGroup>
-      </Popover>
-      <Popover open={ui.menu === 'mood' && st.moodShown} top={top} onClose={close} align="centre">
-        <PopoverGroup title="Mood">
-          {st.moodOptions.length > 1
-            ? <PopoverList options={st.moodOptions} onPick={(k) => { st.setMoodF(k || null); close(); }} />
-            : <Text style={styles.panelNote}>Nothing here has been given a mood yet.</Text>}
-        </PopoverGroup>
-      </Popover>
-      <Popover open={ui.menu === 'sort'} top={top} onClose={close} align="right">
-        <PopoverGroup title="Sort by">
-          <PopoverList options={st.sortOptions} onPick={(k) => { st.setSort(k as PlaceSort); close(); }} />
-        </PopoverGroup>
+        {st.moodShown ? (
+          <PopoverGroup title="Mood">
+            {st.moodOptions.length > 1
+              ? <PopoverList options={st.moodOptions} onPick={(k) => { st.setMoodF(k || null); close(); }} />
+              : <Text style={styles.panelNote}>Nothing here has been given a mood yet.</Text>}
+          </PopoverGroup>
+        ) : null}
       </Popover>
     </>
   );

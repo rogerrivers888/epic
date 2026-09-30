@@ -37,7 +37,8 @@ import { useQueryState, useRouter } from '../../router';
 import { paths } from '../../routes';
 import { pickPhotoBlob } from '../../components/pickPhoto';
 import { dayShort, money as pounds, weekdayName } from '../../components/hosting';
-import { Avatar, Bullet, CheckBox, Cta, Field, Input, Nav, PickChip, Picker, PlaceField, Segments, StatCell, Tick, UnitBox, Weekdays, k, t } from '../../components/hostKit';
+import { Avatar, Bullet, CheckBox, Cta, Field, Input, PickChip, Picker, PlaceField, Segments, StatCell, Tick, UnitBox, Weekdays, k, t } from '../../components/hostKit';
+import { CompactBand } from '../../components/Band';
 import { KindChooser } from './ProfileScreen';
 import { PickedTag, TagPicker, fromOfferSkills } from '../../components/TagPicker';
 import { HostSkillsSetup, SkillFormat } from '../../api';
@@ -114,8 +115,10 @@ export function OfferWizard({ offerId, home, onChanged }: { offerId: string; hom
 
   return (
     <View style={k.page}>
-      <View style={[wide && k.wide, { paddingTop: TOP }]}>
-        <Nav title={chrome ? chrome.title : live ? (o.title ?? 'Who is invited') : step === 'done' ? 'All set' : 'Host on Epic'} onBack={() => (chrome ? chrome.back() : live ? navigate(paths.hostOffer(o.id), { replace: true }) : step === 'done' ? navigate(paths.host(), { replace: true }) : at > 0 ? go(steps[at - 1]) : back(paths.host()))} />
+      <View style={wide ? k.wide : undefined}>
+        {/* New navigation (owner, 30 Sep 2026): a finish-flow — the compact band
+            with a ✕ and no mic, because the whole screen is the flow. */}
+        <CompactBand title={chrome ? chrome.title : live ? (o.title ?? 'Who is invited') : step === 'done' ? 'All set' : 'Host on Epic'} onClose={() => (chrome ? chrome.back() : live ? navigate(paths.hostOffer(o.id), { replace: true }) : step === 'done' ? navigate(paths.host(), { replace: true }) : at > 0 ? go(steps[at - 1]) : back(paths.host()))} />
         {cur > 0 && !live && !chrome ? (
           <View style={k.prog}>
             <View style={k.progRow}><Text style={[t.small, { fontWeight: '600', lineHeight: 15 }]}>{TITLE[step] ?? ''}</Text><Text style={[t.small, { fontSize: 11.5, lineHeight: 15 }]} numberOfLines={1}>{count}</Text></View>

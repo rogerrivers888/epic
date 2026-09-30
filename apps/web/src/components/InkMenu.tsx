@@ -1,0 +1,83 @@
+import React from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { Press } from './press';
+import { LIME, INK, CREAM, TAB_UNSELECTED, MENU_DIVIDER, fonts } from '../theme';
+
+/**
+ * The ink menu (New navigation, owner 30 Sep 2026, §5): the one treatment for
+ * every set of sibling views — a trip's Activities · Food · Stays · Shortlist,
+ * Inspire's Activities · Food & drink, a place's Overview · Reviews · Visit, an
+ * offer's Bookings · Questions. It replaces the old lime switch cells and the
+ * lime category strip; there is never a second menu on a screen.
+ *
+ * It sits flush under the band, edge to edge, with no margins and no gap. The
+ * bar is ink in either mode; a bold grey label reads as disabled, so unselected
+ * tabs are regular-weight grey and *bold* is what says "you are here" (rule 5c).
+ *
+ * `selected == null` is the "nothing selected" state (a trip on arrival, 6a):
+ * every cell is cream at one weight with no marker, so all options read as
+ * equal. Tapping the selected tab again is the caller's job — pass `null` back.
+ */
+export type InkTab<T extends string> = { key: T; label: string; count?: number };
+
+export function InkMenu<T extends string>({ tabs, selected, onSelect }: {
+  tabs: InkTab<T>[];
+  selected: T | null;
+  onSelect: (key: T) => void;
+}) {
+  // §5: 2 tabs at 16px, 3–4 tabs at 15px.
+  const fs = tabs.length <= 2 ? 16 : 15;
+  const nothing = selected == null;
+  return (
+    <View style={styles.bar} accessibilityRole="tablist">
+      {tabs.map((t, i) => {
+        const on = !nothing && t.key === selected;
+        // A count shows only while a tab is not the selected one — "Shortlist · 5"
+        // — and drops when selected, because the bold label needs the room and the
+        // drawer header already carries it (§5, Counts).
+        const label = t.count != null && !on ? `${t.label} · ${t.count}` : t.label;
+        return (
+          <React.Fragment key={t.key}>
+            {i > 0 ? <View style={[styles.divider, nothing ? styles.dividerFlush : styles.dividerNudged]} /> : null}
+            <Press
+              onPress={() => onSelect(t.key)}
+              style={[styles.cell, nothing ? styles.cellFlat : (on ? styles.cellOn : styles.cellOff)]}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: on }}
+            >
+              <Text
+                numberOfLines={1}
+                style={[
+                  styles.label,
+                  { fontSize: fs, letterSpacing: fs * (on && tabs.length <= 2 ? -0.02 : -0.01) },
+                  nothing ? styles.labelFlat : (on ? styles.labelOn : styles.labelOff),
+                ]}
+              >
+                {label}
+              </Text>
+            </Press>
+          </React.Fragment>
+        );
+      })}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  bar: { flexDirection: 'row', backgroundColor: INK, width: '100%' },
+  // §5: flex 1, centred, 15 above, 12 below, a 4px transparent marker line.
+  cell: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, paddingTop: 15, paddingBottom: 12, borderBottomWidth: 4, borderBottomColor: 'transparent' },
+  cellOn: { borderBottomColor: LIME },
+  cellOff: {},
+  // Nothing selected: no marker at all, so the bottom pad takes the 4px back.
+  cellFlat: { paddingBottom: 15, borderBottomWidth: 0 },
+  label: { fontFamily: fonts.heading, textAlign: 'center' },
+  labelOn: { fontWeight: '800', color: CREAM },
+  labelOff: { fontWeight: '500', color: TAB_UNSELECTED },
+  labelFlat: { fontWeight: '600', color: CREAM },
+  // A 1px × 20px rule between every pair, vertically centred; nudged up 4px to
+  // sit on the text rather than the marker when one is showing.
+  divider: { width: 1, height: 20, backgroundColor: MENU_DIVIDER, alignSelf: 'center' },
+  dividerNudged: { marginTop: -4 },
+  dividerFlush: { marginTop: 0 },
+});

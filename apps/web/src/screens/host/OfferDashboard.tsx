@@ -24,7 +24,10 @@ import { useRouter } from '../../router';
 import { paths, type ChatLayer } from '../../routes';
 import { ChatScreen } from '../../components/chat/ChatScreen';
 import { hostOfferDoor } from '../../components/chat/door';
-import { HostFace, Kicker, SHAPE_LABEL, StandingBar, StateChip, dateOnly, dayShort, durationWords, metaLine, money, priceWords } from '../../components/hosting';
+import { HostFace, Kicker, SHAPE_LABEL, STATE_LABEL, StandingBar, dateOnly, dayShort, durationWords, money, priceWords } from '../../components/hosting';
+import { CompactBand, MicTile } from '../../components/Band';
+import { InkMenu } from '../../components/InkMenu';
+import { SectionHeader } from '../../components/NavRows';
 
 /** A tile says £0, never "Free": it is a sum, not a price. */
 const cash = (p: number) => (p ? money(p) : '£0');
@@ -68,17 +71,21 @@ export function OfferDashboard({ offerId, hostName, chat = null }: { offerId: st
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      {/* New navigation (30 Sep 2026): the compact band carries the title and a one-line summary, the mic is the general voice intake. */}
+      <CompactBand
+        title={o.title ?? 'Untitled'}
+        context={[SHAPE_LABEL[o.shape], priceWords(o), STATE_LABEL[o.state].toLowerCase()].join(' · ')}
+        onBack={() => back(paths.host())}
+        right={<MicTile onPress={() => navigate(paths.say({ for: 'inspire' }))} />}
+      />
+      {/* Bookings and Questions are the offer's two views; Questions is its chat, on its own address. */}
+      <InkMenu
+        tabs={[{ key: 'bookings' as const, label: 'Bookings', count: live.length }, { key: 'questions' as const, label: 'Questions' }]}
+        selected="bookings"
+        onSelect={(key) => { if (key === 'questions') navigate(paths.hostOfferChat(o.id)); }}
+      />
       <ScrollView contentContainerStyle={[styles.scroll, wide && styles.wide]} keyboardShouldPersistTaps="handled">
-        <Row style={{ justifyContent: 'space-between' }}>
-          <Press onPress={() => back(paths.host())} accessibilityRole="button" hitSlop={8}><Row><Icon name="back" size={18} /><Text style={type.h3}>Hosting</Text></Row></Press>
-          <Press onPress={() => navigate(paths.hostOfferEdit(o.id))} accessibilityRole="button" hitSlop={8}><Text style={[type.small, { color: colors.accent, fontWeight: '700' }]}>Edit</Text></Press>
-        </Row>
-        <Text style={type.title}>{o.title ?? 'Untitled'}</Text>
-        <Row style={{ flexWrap: 'wrap' }}>
-          <StateChip state={o.state} pausedUntil={o.pausedUntil} />
-          <Text style={type.small}>{SHAPE_LABEL[o.shape]} · {metaLine(o)}</Text>
-        </Row>
-        <Text style={type.small}>{priceWords(o)}{o.money === 'epic' ? ' · Epic collects' : o.money === 'direct' ? ' · paid to you directly' : ''}</Text>
+        <Press onPress={() => navigate(paths.hostOfferEdit(o.id))} accessibilityRole="button" hitSlop={8} style={{ alignSelf: 'flex-end' }}><Text style={[type.small, { color: colors.accent, fontWeight: '700' }]}>Edit offer</Text></Press>
 
         {/* In review: what we read, and what we said. */}
         {o.state === 'in_review' ? (
@@ -153,7 +160,7 @@ export function OfferDashboard({ offerId, hostName, chat = null }: { offerId: st
 
         {/* Who is coming: people and bookings counted separately. */}
         <View style={styles.block}>
-          <Kicker>WHO IS COMING · {heads} IN {live.length} BOOKING{live.length === 1 ? '' : 'S'}</Kicker>
+          <View style={styles.sectionEdge}><SectionHeader title="Who is coming" count={`${heads} in ${live.length} booking${live.length === 1 ? '' : 's'}`} /></View>
           {live.length ? live.slice(0, 8).map((b) => (
             <Row key={b.id} style={styles.person}>
               <HostFace host={{ name: b.name ?? 'Guest', photo: null }} size={36} />
@@ -170,7 +177,7 @@ export function OfferDashboard({ offerId, hostName, chat = null }: { offerId: st
 
         {o.broadcasts.length ? (
           <View style={styles.block}>
-            <Kicker>WHAT YOU HAVE SAID TO THEM</Kicker>
+            <View style={styles.sectionEdge}><SectionHeader title="What you have said to them" /></View>
             {o.broadcasts.slice(0, 3).map((b) => <Text key={b.id} style={type.small}><Text style={{ color: colors.ink }}>{dateOnly(b.at.slice(0, 10))}</Text> · {b.body}</Text>)}
           </View>
         ) : null}
@@ -251,6 +258,8 @@ function Tile({ label, value, sub, red }: { label: string; value: string; sub?: 
 }
 
 const styles = StyleSheet.create({
+  // A section header owns its own 20px gutter; this cancels the ScrollView's so it lands at the true edge.
+  sectionEdge: { marginHorizontal: -20 },
   chatRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.ruleSoft },
   chatTile: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.lime },
   page: { flex: 1, padding: spacing.lg, gap: spacing.md, backgroundColor: colors.bg },

@@ -3,7 +3,9 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from '../components/press';
 import { Booking, TripSummary } from '../api';
 import { colors, fonts, type } from '../theme';
-import { CategoryStrip, MenuBar, ScreenTop, PairSwitch, TopControl } from '../components/InspireHeader';
+import { TallBand, MicTile } from '../components/Band';
+import { InkMenu } from '../components/InkMenu';
+import { SectionHeader } from '../components/NavRows';
 import { VenueThumb } from '../components/VenueThumb';
 import { StatusLine } from '../components/ui';
 // The name the household wrote is what a row says (1a: "Windsor Saturday",
@@ -110,65 +112,53 @@ export function TripsList({ trips, bookings, loading, error, span, when, onSpan,
    * itself. One rule, and it is the line the switch is drawn on.
    */
   const inSpan = (t: TripSummary) => (span === 'holiday' ? t.nights > 0 : t.nights === 0);
-  const inWhen = (t: TripSummary) =>
-    (when === 'hosts' ? false
-      : when === 'ideas' ? t.datesFixed === false
-        : t.datesFixed !== false && (when === 'past' ? t.isPast : !t.isPast));
 
-  const counts = useMemo(() => {
-    const mine = all.filter(inSpan);
-    return {
-      upcoming: mine.filter((t) => t.datesFixed !== false && !t.isPast).length,
-      past: mine.filter((t) => t.datesFixed !== false && t.isPast).length,
-      ideas: mine.filter((t) => t.datesFixed === false).length,
-      hosts: (bookings ?? []).filter((b) => b.state !== 'cancelled' || b.paymentStatus === 'refunded').length,
-    };
-  }, [all, span, bookings]);
-
-  const shown = all
-    .filter((t) => inSpan(t) && inWhen(t))
-    .sort((a, b) => (when === 'past' ? +startOf(b) - +startOf(a) : +startOf(a) - +startOf(b)));
-
+  // New navigation (owner, 30 Sep 2026, 4c): the ink menu is only Day trips /
+  // Holidays. The old Upcoming · Past · Ideas · Hosts strip is gone — those are
+  // section headings you scroll past now, so there is only ever one menu on the
+  // screen. `when`/`onWhen` are kept in the props for the caller but no longer
+  // drive a control.
+  const mine = useMemo(() => all.filter(inSpan), [all, span]);
+  const upcoming = mine.filter((t) => t.datesFixed !== false && !t.isPast).sort((a, b) => +startOf(a) - +startOf(b));
+  const ideas = mine.filter((t) => t.datesFixed === false);
+  const past = mine.filter((t) => t.datesFixed !== false && t.isPast).sort((a, b) => +startOf(b) - +startOf(a));
+  const hostsLive = (bookings ?? []).filter((b) => b.state !== 'cancelled' || b.paymentStatus === 'refunded');
   const noun = span === 'holiday' ? 'holiday' : 'day trip';
-  const count = counts[when];
+  const nothing = !upcoming.length && !ideas.length && !past.length && !hostsLive.length;
+  const row = (t: TripSummary) => <TripRow key={t.id} trip={t} onPress={() => onOpen(t)} onHold={() => onHold(t)} />;
 
   return (
     <View style={{ flex: 1 }}>
       <View style={wide ? styles.wide : undefined}>
-        <ScreenTop>
-          <TopControl label="New trip" icon="add" onPress={onNew} accessibilityLabel="Start a new trip" />
-        </ScreenTop>
-
-        {/* The same menu bar as Inspire, with this tab's two words in it: the
-            head is shared so that the tabs cannot drift apart. */}
-        <MenuBar>
-          <PairSwitch value={span} options={SPANS} onPick={onSpan} />
-          <CategoryStrip items={WHENS.map((w) => ({ key: w.key, label: w.label }))} value={when} onPick={(k) => onWhen(k as TripsWhen)} />
-        </MenuBar>
-
-        <Text style={styles.count}>
-          {when === 'hosts'
-            ? (count === 0 ? 'Nothing booked with a host yet' : `${count} booked with hosts`)
-            : count === 0
-              ? `No ${noun}s ${when === 'ideas' ? 'noted down' : when}`
-              : `${count} ${when === 'ideas' ? (count === 1 ? 'idea' : 'ideas') : when}`}
-        </Text>
+        {/* The Trips mic starts a new trip by voice (§4). */}
+        <TallBand right={<MicTile onPress={onNew} accessibilityLabel="Start a new trip" />} />
+        <InkMenu
+          tabs={[{ key: 'day', label: 'Day trips' }, { key: 'holiday', label: 'Holidays' }]}
+          selected={span}
+          onSelect={(s) => onSpan(s as 'day' | 'holiday')}
+        />
       </View>
 
       <ScrollView contentContainerStyle={[styles.body, wide && styles.wideBody]} keyboardShouldPersistTaps="handled">
         {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
         {loading && !trips ? <Text style={type.small}>Loading…</Text> : null}
-        {when === 'hosts' ? <BookingRows bookings={bookings ?? []} onOpen={(b) => onOpenBooking?.(b)} /> : null}
-        {when !== 'hosts' && trips && !shown.length ? (
-          <Text style={styles.blank}>
-            {when === 'ideas'
-              ? 'Nothing on the list yet. Save a trip without a date and it waits here until you fix one.'
-              : when === 'past'
-                ? `No ${noun}s behind you yet.`
-                : `Nothing coming up. Tap New trip and say where you're going.`}
-          </Text>
+
+        {upcoming.length ? (
+          <View style={styles.section}><SectionHeader title="Coming up" count={upcoming.length} />{upcoming.map(row)}</View>
         ) : null}
-        {when !== 'hosts' ? shown.map((t) => <TripRow key={t.id} trip={t} onPress={() => onOpen(t)} onHold={() => onHold(t)} />) : null}
+        {ideas.length ? (
+          <View style={styles.section}><SectionHeader title="Ideas" count={ideas.length} />{ideas.map(row)}</View>
+        ) : null}
+        {past.length ? (
+          <View style={styles.section}><SectionHeader title="Past" count={past.length} />{past.map(row)}</View>
+        ) : null}
+        {hostsLive.length ? (
+          <View style={styles.section}><SectionHeader title="Booked with hosts" count={hostsLive.length} /><BookingRows bookings={bookings ?? []} onOpen={(b) => onOpenBooking?.(b)} /></View>
+        ) : null}
+
+        {trips && nothing ? (
+          <Text style={styles.blank}>{`Nothing here yet. Tap the mic and say where you're going, and your ${noun}s land here.`}</Text>
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -252,6 +242,8 @@ const styles = StyleSheet.create({
   count: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.inkMuted, paddingHorizontal: 20, paddingTop: 14 },
 
   body: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 24 },
+  // 24px from the top (context) to the first header, 22px between sections (§6).
+  section: { marginTop: 22 },
   blank: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted, lineHeight: 19, paddingTop: 12 },
 
   row: { flexDirection: 'row', gap: 14, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },

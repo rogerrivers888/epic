@@ -5,7 +5,7 @@ import { api, Place, TripSearchAnswer } from '../api';
 import { colors, fonts, BORDER, TARGET, type } from '../theme';
 import { Icon } from './../components/Icon';
 import { useViewport } from '../hooks/useViewport';
-import { TOP_INSET } from '../components/InspireHeader';
+import { CompactBand } from '../components/Band';
 
 /**
  * Where are you going? (trip rebuild, 7 Sep 2026, screen 3a).
@@ -69,13 +69,8 @@ export function NewTripSearchScreen({ onClose, onPick }: {
 
   return (
     <View style={[styles.page, wide && styles.wide]}>
+      <CompactBand title="New trip" onClose={onClose} />
       <View style={styles.head}>
-        <View style={styles.titleRow}>
-          <Text style={styles.title}>New trip</Text>
-          <Press onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel="Close">
-            <Icon name="close" size={20} color={colors.ink} strokeWidth={2.4} />
-          </Press>
-        </View>
         {country ? (
           <Press onPress={() => setCountry(null)} style={styles.crumb} accessibilityRole="button">
             <Icon name="back" size={14} color={colors.accent} strokeWidth={2.4} />
@@ -146,10 +141,7 @@ function Row({ title, says, onPress }: { title: string; says: string; onPress: (
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.bg },
   wide: { maxWidth: 720, alignSelf: 'center', width: '100%' },
-  head: { paddingHorizontal: 20, paddingTop: TOP_INSET, gap: 16 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  title: { fontFamily: fonts.heading, fontSize: 28, fontWeight: '800', letterSpacing: -0.84, color: colors.ink },
-  close: { width: TARGET, height: TARGET, alignItems: 'center', justifyContent: 'center' },
+  head: { paddingHorizontal: 20, paddingTop: 12, gap: 16 },
   crumb: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   crumbText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.accent },
   field: {

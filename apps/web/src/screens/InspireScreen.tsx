@@ -14,9 +14,11 @@ import { PlacePicker } from '../components/PlacePicker';
 import { useViewport } from '../hooks/useViewport';
 import { asList, asNumber, asOneOf, useQueryState, useRouter, useStickyQuery } from '../router';
 import { paths, withQuery, ACTIVITY_CATEGORIES, FOOD_CATEGORIES, type Route } from '../routes';
-import { CategoryStrip, InspireTop, MenuBar, ModeSwitch } from '../components/InspireHeader';
+import { TallBand, MicTile } from '../components/Band';
+import { InkMenu } from '../components/InkMenu';
+import { ContextRow } from '../components/NavRows';
 import { ExperienceCard } from '../components/hosting';
-import { BoxRow, ControlButton, ControlRow, CrumbHead, Popover, PopoverFooter, PopoverGroup, PopoverList, type PopoverOption } from '../components/ControlRow';
+import { BoxRow, CrumbHead, Popover, PopoverFooter, PopoverGroup, PopoverList, type PopoverOption } from '../components/ControlRow';
 import { CardWide, Carousel, EmptyMatch, FoodRow, SubRow, TRAVEL } from '../components/InspireBody';
 import { Button } from '../components/ui';
 import { CollectionRowView, CollectionsHead, useCollections, WhoseList } from '../components/CollectionRows';
@@ -781,7 +783,6 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
   const whereLabel = unknown ? 'Set your location' : whereName ? `${howFarShort(travel)} · ${whereName}${fromHere ? ' (you)' : ''}` : howFarShort(travel);
   const whereSpoken = unknown ? 'Set your location' : `Within ${howFarShort(travel)} of ${whereName}, ${travelBy === 'walk' ? 'on foot' : travelBy === 'transit' ? 'by public transport' : 'driving'}`;
   const filtersLabel = active ? `Filters (${active})` : 'Filters';
-  const sortLabel = SORTS[mode].find((s) => s.key === sort)?.label ?? 'Rating';
   const clearFilters = () => { setMenu(null); navigate(withQuery(paths.inspire() + hereQuery(), { rating: null, price: null, within: null, place: null }, paths.inspireMode(mode, null))); };
 
   /** The counts in the Filters panel: live, and each one cross-filtered by the other two. */
@@ -855,32 +856,21 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
             the control row. Sticky, because the strip is how you move around
             this tab and it should not scroll away from you. */}
         <View style={styles.header} onLayout={(e) => setHeadH(e.nativeEvent.layout.height)}>
-          <InspireTop />
-          <MenuBar>
-            {/* Switching halves puts the filters and the order back to their
-                defaults — a £ band chosen for lunch is not a £ band for a
-                castle — and keeps where you are looking. */}
-            <ModeSwitch mode={mode} onMode={(m) => goTo(m, null, true)} />
-            <CategoryStrip
-              items={stripItems}
-              value={pick && pickIsCategory ? pick : ALL}
-              onPick={(k) => goTo(mode, k === ALL ? null : k)}
-              align={mode === 'food' ? 'left' : 'centre'}
-            />
-          </MenuBar>
-          <ControlRow
-            left={(
-              <ControlButton
-                icon={travelDraw.icon}
-                label={whereLabel}
-                spoken={whereSpoken}
-                set={unknown || travel !== HOW_FAR_DEFAULT}
-                open={menu === 'where'}
-                onPress={toggle('where')}
-              />
-            )}
-            centre={<ControlButton label={filtersLabel} set={active > 0} open={menu === 'filters'} onPress={toggle('filters')} />}
-            right={<ControlButton label={`Sort: ${sortLabel}`} set={sort !== 'rating'} open={menu === 'sort'} onPress={toggle('sort')} />}
+          {/* New navigation (owner, 30 Sep 2026): the tall band with the mic,
+              the ink menu of the two halves, and the context row. The old lime
+              category strip is gone — categories are the section headings you
+              scroll past, reached with "See all ›". */}
+          <TallBand right={<MicTile onPress={() => navigate(paths.say({ for: 'inspire' }))} />} />
+          <InkMenu
+            tabs={[{ key: 'activities', label: 'Activities' }, { key: 'food', label: 'Food & drink' }]}
+            selected={mode}
+            onSelect={(m) => goTo(m as typeof mode, null, true)}
+          />
+          <ContextRow
+            label={whereLabel}
+            icon={travelDraw.icon}
+            onPress={toggle('where')}
+            onFilters={toggle('filters')}
           />
         </View>
 
@@ -1185,11 +1175,8 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
         {active ? <PopoverFooter label="Clear filters" onPress={clearFilters} /> : null}
       </Popover>
 
-      <Popover open={menu === 'sort'} top={headH} onClose={close} align="right">
-        <PopoverGroup title="Sort by">
-          <PopoverList options={SORTS[mode].map((s) => ({ key: s.key, label: s.label, on: sort === s.key }))} onPick={(k) => { setSort(k as InspireSort); close(); }} dense />
-        </PopoverGroup>
-      </Popover>
+      {/* Sort was dropped from the context row to match the signed-off nav
+          mockups (owner, 30 Sep 2026); the list holds its default order. */}
 
       <VenueDrawer
         item={drawer}

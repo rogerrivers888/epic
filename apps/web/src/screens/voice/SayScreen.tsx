@@ -27,6 +27,7 @@ import { useSpeech } from '../../hooks/useSpeech';
 import { recordingSupported } from '../../voice/recorder';
 import { loadVoiceLimits, voiceConfigured } from '../../voice/settings';
 import { Captions, ChipGroup, Example, FactChip, ListRow, MicControl, MicTile, PrimaryCta, SentenceField, TextLink, TypeInstead, VoiceHeader, VoiceScreen, clock } from '../../components/voice/kit';
+import { CompactBand } from '../../components/Band';
 import { Icon } from '../../components/Icon';
 import { colors, type } from '../../theme';
 import { StatusLine } from '../../components/ui';
@@ -52,6 +53,9 @@ export function SayScreen({ household }: { household: HouseholdResponse | null }
   const [typing, setTyping] = useQueryState<boolean>('type', false, asFlag);
   const flow: IntakeFlow = door === 'trip' ? 'returning' : door === 'inspire' ? 'inspire' : 'first';
   const copy = COPY[door ?? 'first'];
+  // New navigation (owner, 30 Sep 2026, 6g): the finish-flow band. "New trip"
+  // on Trips' door; otherwise the prompt this door already showed.
+  const bandTitle = door === 'trip' ? 'New trip' : copy.title;
   const [preface, setPreface] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -135,8 +139,9 @@ export function SayScreen({ household }: { household: HouseholdResponse | null }
   if (typing) {
     const list = recents();
     return (
-      <VoiceScreen>
-        <VoiceHeader onBack={() => (door ? back(door === 'trip' ? paths.trips() : paths.inspire()) : back(paths.inspire()))} right={<MicTile onPress={() => { setTyping(false); startMic(); }} />} title={copy.title} />
+      <View style={{ flex: 1, backgroundColor: colors.bg }}>
+        <CompactBand title={bandTitle} onClose={() => (door ? back(door === 'trip' ? paths.trips() : paths.inspire()) : back(paths.inspire()))} />
+        <VoiceScreen>
         {known.length ? <KnownChips chips={known} /> : null}
         <Example>{copy.example}</Example>
         {!off ? <SentenceField value={text} onChange={setText} onSubmit={() => text.trim() && submit(text.trim(), 'typed')} placeholder={copy.placeholder} /> : null}
@@ -152,19 +157,17 @@ export function SayScreen({ household }: { household: HouseholdResponse | null }
         ) : null}
         <View style={{ flex: 1 }} />
         {!off ? <PrimaryCta label={door === 'trip' ? 'Plan it' : 'Show me plans'} onPress={() => text.trim() && submit(text.trim(), 'typed')} disabled={!text.trim()} busy={!!busy} /> : null}
-      </VoiceScreen>
+        </VoiceScreen>
+      </View>
     );
   }
 
   // --- C1 / R1 / R5: the mic ---------------------------------------------------------
   const supported = recordingSupported() || speech.supported;
   return (
-    <VoiceScreen>
-      <VoiceHeader
-        onBack={() => (door === 'trip' ? back(paths.trips()) : back(paths.inspire()))}
-        right={!door ? <TextLink label="Answer one at a time ›" tone="grey" onPress={() => navigate(paths.saySteps())} /> : null}
-        title={copy.title}
-      />
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      <CompactBand title={bandTitle} onClose={() => (door === 'trip' ? back(paths.trips()) : back(paths.inspire()))} />
+      <VoiceScreen>
       {known.length ? <KnownChips chips={known} /> : null}
       <Example>{copy.example}</Example>
       {off ? <VoiceOff door={door} onSearch={() => navigate(paths.tripsSearch())} /> : null}
@@ -180,7 +183,8 @@ export function SayScreen({ household }: { household: HouseholdResponse | null }
       {!off ? <TypeInstead onPress={() => setTyping(true)} /> : null}
       {busy ? <StatusLine>{busy}</StatusLine> : null}
       {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
-    </VoiceScreen>
+      </VoiceScreen>
+    </View>
   );
 }
 
