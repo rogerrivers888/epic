@@ -794,11 +794,16 @@ async function watch(now, tell, tellings, out) {
   // A run that ended in failure. Runs never reach a 'failed' state (Codex,
   // 30 Sep 2026): what fails is the penny alarm, which pauses the run, and
   // Google refusing it, which is kept on the run and sleeps it till the reset.
-  const refused = latest?.refused_at && new Date(latest.refused_at) >= new Date(latest.started_at);
-  const penny = /^stopped on the first penny/.test(latest?.problem ?? '');
-  if (penny || refused) {
-    await tell(`Census failed: day ${st.days.length}`,
-      `${penny ? latest.problem : `Google refused the census: ${String(latest.refusal ?? 'no words given')}`}\n\n${lines}`);
+  // Every day's run, not only the latest: a refusal just before the reset is
+  // on yesterday's run by the time the next day has started (Codex, 30 Sep
+  // 2026). The ledger says each once.
+  const realDays = runsNow.filter((r) => !(r.state === 'stopped' && /^planning cut short/.test(r.problem ?? '')));
+  for (const [i, r] of realDays.entries()) {
+    const refused = r.refused_at && new Date(r.refused_at) >= new Date(r.started_at);
+    const penny = /^stopped on the first penny/.test(r.problem ?? '');
+    if (!penny && !refused) continue;
+    await tell(`Census failed: day ${i + 1}`,
+      `${penny ? r.problem : `Google refused the census: ${String(r.refusal ?? 'no words given')}`}\n\n${lines}`);
   }
   // The billing export still empty after Friday 2 October.
   const bills = await billedByDay(pacificDay(runsNow[0].started_at)).catch(() => null);

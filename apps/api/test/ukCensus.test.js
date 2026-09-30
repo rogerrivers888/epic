@@ -1173,3 +1173,13 @@ test('a plan that hung while being written today, and could not be written again
   await uk.daily(new Date('2026-09-29T12:00:00Z'), { send: box.send, start: async () => null, quota: async () => ({ speaks: true, limit: 75000 }) });
   assert.ok(box.got.some((m) => m.subject === 'Census stalled: no run for 2026-09-29'), box.got.map((m) => m.subject).join(' | '));
 });
+
+test('a refusal on yesterday\'s run is still said once the next day has started', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne({ state: 'waiting', started: '2026-09-28T07:05:00Z', finished: null });
+  await query(`update census_runs set refused_at = '2026-09-29T06:50:00Z', refusal = '429 RESOURCE_EXHAUSTED' where label like 'The rest of the UK — day 1%'`);
+  const r = recorder(); const box = mailbox();
+  await uk.daily(new Date('2026-09-29T08:10:00Z'), { send: box.send, start: r.start, quota: async () => ({ speaks: true, limit: 75000 }) });
+  assert.equal(r.calls.length, 1, 'the next day started');
+  assert.ok(box.got.some((m) => m.subject === 'Census failed: day 1' && /429/.test(m.text)), box.got.map((m) => m.subject).join(' | '));
+});
