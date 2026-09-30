@@ -174,9 +174,10 @@ begin
        set lat = excluded.lat, lng = excluded.lng, coords_from = excluded.coords_from, coords_at = now(),
            cell = null, placed_at = null
      where place_index.lat is null
-       and not (place_index.slice ~ '^-?[0-9.]+,-?[0-9.]+,-?[0-9.]+,-?[0-9.]+$'
+       -- False, not null, where there is no box (Codex, 30 Sep 2026).
+       and not coalesce(place_index.slice ~ '^-?[0-9.]+,-?[0-9.]+,-?[0-9.]+,-?[0-9.]+$'
                 and abs((split_part(place_index.slice, ',', 1)::double precision + split_part(place_index.slice, ',', 3)::double precision) / 2 - excluded.lat) < 1e-9
-                and abs((split_part(place_index.slice, ',', 2)::double precision + split_part(place_index.slice, ',', 4)::double precision) / 2 - excluded.lng) < 1e-9);
+                and abs((split_part(place_index.slice, ',', 2)::double precision + split_part(place_index.slice, ',', 4)::double precision) / 2 - excluded.lng) < 1e-9, false);
   end if;
 
   -- 4. Google's name for a place the open map never gave is rented like its

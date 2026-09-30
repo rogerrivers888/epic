@@ -249,3 +249,11 @@ test('a legacy row with half a point is read as having none', async () => {
   const r = (await query('select epic_point_lat(venue_ref, lat, lng, point_from) as lat, epic_point_lng(venue_ref, lat, lng, point_from) as lng from household_places where venue_ref = $1', [ref])).rows[0];
   assert.deepEqual(r, { lat: null, lng: null });
 });
+
+test('a rented point reaches an index row that has neither point nor box', async () => {
+  const hh = await household();
+  const ref = `google:no-box-${randomUUID()}`;
+  await query('insert into place_index (venue_ref) values ($1)', [ref]);
+  await saved(hh, ref, 51.33, -0.44);
+  assert.deepEqual((await query('select lat, coords_from from place_index where venue_ref = $1', [ref])).rows[0], { lat: 51.33, coords_from: 'google' });
+});
