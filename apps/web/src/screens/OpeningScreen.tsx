@@ -224,23 +224,32 @@ function Opener({ width, height, reduced, onStart, onHaveAccount }: {
   const tag = useRef(new Animated.Value(0)).current;
   const cta = useRef(new Animated.Value(0)).current;
 
-  // Where each tile starts, piles and jitters — fixed per mount so a re-render
-  // does not reshuffle mid-flight.
+  // The random part of each tile's flight is drawn once and kept, so a re-render
+  // — the CTA measuring its height a frame in, which nudges tileH — recomputes
+  // only the grid-dependent geometry and never reshuffles a tile onto a new
+  // random trajectory mid-flight (Codex).
+  const seeds = useRef(PHOTOS.map(() => ({
+    a: Math.random() * Math.PI * 2,
+    jpx: Math.random() - 0.5,
+    jpy: Math.random() - 0.5,
+    r1: (Math.random() - 0.5) * 120,
+    r2: (Math.random() - 0.5) * 36,
+  }))).current;
   const geom = useMemo(() => PHOTOS.map((_, i) => {
     const col = i % cols, row = Math.floor(i / cols);
     const cx = width / 2, cy = height * 0.5;
     const tx = col * tileW + tileW / 2, ty = row * tileH + tileH / 2;
-    const a = Math.random() * Math.PI * 2;
+    const s = seeds[i];
     const jx = (tileW / 130), jy = (tileH / 169);
     return {
-      sx: Math.cos(a) * width * 1.7 + (cx - tx),
-      sy: Math.sin(a) * height * 1.1 + (cy - ty),
-      px: (cx - tx) + (Math.random() - 0.5) * 70 * jx,
-      py: (cy * 0.976 - ty) + (Math.random() - 0.5) * 90 * jy,
-      r1: (Math.random() - 0.5) * 120,
-      r2: (Math.random() - 0.5) * 36,
+      sx: Math.cos(s.a) * width * 1.7 + (cx - tx),
+      sy: Math.sin(s.a) * height * 1.1 + (cy - ty),
+      px: (cx - tx) + s.jpx * 70 * jx,
+      py: (cy * 0.976 - ty) + s.jpy * 90 * jy,
+      r1: s.r1,
+      r2: s.r2,
     };
-  }), [width, height, tileW, tileH]);
+  }), [width, height, tileW, tileH, seeds]);
 
   useEffect(() => {
     confetti.current?.reset();
