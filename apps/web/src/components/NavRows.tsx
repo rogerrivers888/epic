@@ -18,8 +18,11 @@ import { colors, fonts, TARGET } from '../theme';
  * 0`. The car is Lucide `car`, side-on. The control is regular weight — it is a
  * setting, not a heading.
  */
-export function ContextRow({ label, icon = 'driving', onPress, onFilters, filtersLabel = 'Filters', filtersActive = false }: {
+export function ContextRow({ label, spoken, icon = 'driving', onPress, onFilters, filtersLabel = 'Filters', filtersActive = false }: {
   label: string;
+  /** What a screen reader hears, where the visual label is an abbreviation —
+   *  "Within 30 min of Sunningdale, driving" for "30 min · Sunningdale". */
+  spoken?: string;
   /** A leading icon, or `null` for none (the "Been and liked ▾" list dropdown). */
   icon?: IconName | null;
   onPress: () => void;
@@ -37,7 +40,7 @@ export function ContextRow({ label, icon = 'driving', onPress, onFilters, filter
     <View style={styles.ctxRow}>
       {/* A thin row by design, but each control is a full 44px to the finger
           (minHeight on the press), with a little slop besides (Codex). */}
-      <Press onPress={onPress} style={styles.ctl} accessibilityRole="button" accessibilityLabel={label} hitSlop={{ top: 8, bottom: 8, left: 4, right: 6 }}>
+      <Press onPress={onPress} style={styles.ctl} accessibilityRole="button" accessibilityLabel={spoken ?? label} hitSlop={{ top: 8, bottom: 8, left: 4, right: 6 }}>
         {icon ? <Icon name={icon} size={17} color={colors.ink} strokeWidth={2} /> : null}
         <Text numberOfLines={1} style={styles.ctlText}>{label}</Text>
         <Icon name="expand" size={14} color={colors.inkMuted} strokeWidth={2.4} />

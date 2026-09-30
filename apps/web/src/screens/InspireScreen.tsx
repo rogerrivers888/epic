@@ -883,6 +883,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
           />
           <ContextRow
             label={whereLabel}
+            spoken={whereSpoken}
             icon={travelDraw.icon}
             onPress={toggle('where')}
             onFilters={toggle('filters')}
