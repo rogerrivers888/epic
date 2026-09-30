@@ -1122,3 +1122,23 @@ test('a scheduler failure is one e-mail a day, whatever its words', async (t) =>
   assert.deepEqual(box.got.map((m) => m.subject), ['Census failed on 2026-09-29']);
   assert.match(box.got[0].text, /planning broke at tile 1/);
 });
+
+test('the penny alarm and a Google refusal are each a failure, e-mailed once', async (t) => {
+  await clean(); t.after(clean);
+  const q = async () => ({ speaks: true, limit: 75000 });
+  const run = await dayOne({ state: 'paused', started: '2026-09-29T07:05:00Z', finished: '2026-09-29T09:00:00Z',
+    problem: 'stopped on the first penny: the census ledgered $0.0320, and IDs Only is free — something is asking Google for a field the census may not buy' });
+  const box = mailbox();
+  await uk.daily(new Date('2026-09-29T10:00:00Z'), { send: box.send, start: recorder().start, quota: q });
+  await uk.daily(new Date('2026-09-29T10:10:00Z'), { send: box.send, start: recorder().start, quota: q });
+  assert.equal(box.got.filter((m) => /^Census failed: day 1$/.test(m.subject)).length, 1);
+  assert.match(box.got.find((m) => /^Census failed/.test(m.subject)).text, /first penny/);
+
+  await clean();
+  await dayOne({ state: 'waiting', started: '2026-09-29T07:05:00Z', finished: null });
+  await query(`update census_runs set refused_at = '2026-09-29T09:00:00Z', refusal = '429 RESOURCE_EXHAUSTED' where label like 'The rest of the UK — day 1%'`);
+  const box2 = mailbox();
+  await uk.daily(new Date('2026-09-29T10:00:00Z'), { send: box2.send, start: recorder().start, quota: q });
+  assert.ok(box2.got.some((m) => /^Census failed/.test(m.subject) && /429 RESOURCE_EXHAUSTED/.test(m.text)), box2.got.map((m) => m.subject).join(' | '));
+  void run;
+});

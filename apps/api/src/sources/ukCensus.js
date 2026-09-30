@@ -772,9 +772,14 @@ export async function daily(now = new Date(), { send, ...tickWith } = {}) {
     await tell(`Census stalled: no run for ${pacificDay(now)}`,
       `Google's day ${pacificDay(now)} began ${START_GRACE_HOURS}+ hours ago and the census has not started it. The scheduler says: ${out.action}${out.why ? ` — ${out.why}` : ''}.\n\n${lines}`);
   }
-  // A run that ended in failure.
-  if (latest?.state === 'failed') {
-    await tell(`Census failed: day ${st.days.length}`, `${String(latest.problem ?? 'no reason given')}\n\n${lines}`);
+  // A run that ended in failure. Runs never reach a 'failed' state (Codex,
+  // 30 Sep 2026): what fails is the penny alarm, which pauses the run, and
+  // Google refusing it, which is kept on the run and sleeps it till the reset.
+  const refused = latest?.refused_at && new Date(latest.refused_at) >= new Date(latest.started_at);
+  const penny = /^stopped on the first penny/.test(latest?.problem ?? '');
+  if (penny || refused) {
+    await tell(`Census failed: day ${st.days.length}`,
+      `${penny ? latest.problem : `Google refused the census: ${String(latest.refusal ?? 'no words given')}`}\n\n${lines}`);
   }
   // The billing export still empty after Friday 2 October.
   const bills = await billedByDay(pacificDay(runsNow[0].started_at)).catch(() => null);
