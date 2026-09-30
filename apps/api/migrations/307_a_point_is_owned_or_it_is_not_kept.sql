@@ -81,6 +81,7 @@ declare
   -- centre, because a box centre read as a point beats the box it came from.
   mode   text := TG_ARGV[0];
   ref    text;
+  ext    text;
   said   text;
   src    text;
   op     record;
@@ -99,6 +100,9 @@ begin
   -- so one CASE across tables fails on the columns another table lacks.
   if TG_TABLE_NAME = 'attractions' then
     ref := coalesce(NEW.venue_ref, 'atlas:' || NEW.id::text);
+    -- An activity-sweep row is also known by its Google reference, and its
+    -- owned point may be recorded under that one (Codex, 30 Sep 2026).
+    ext := NEW.external_ref;
     -- The activity sweep's unmatched Google rows are Google's point; a matched
     -- one holds OSM's; every other attraction is the atlas (Wikidata/Commons).
     if NEW.display_source = 'google' or (NEW.source = 'google' and NEW.osm_ref is null) then src := 'google';
@@ -125,7 +129,9 @@ begin
   -- 1. A place's owned point, where one has landed, is its one point: every
   -- copy takes it, so a correction or a better source reaches them all (Codex,
   -- 30 Sep 2026). A household's own pin on a photo place has none, and keeps its own.
-  select o.lat, o.lng, o.source into op from owned_points o where o.venue_ref = ref;
+  select o.lat, o.lng, o.source into op from owned_points o
+   where o.venue_ref = ref or (ext is not null and o.venue_ref = ext)
+   order by (o.venue_ref = ref) desc limit 1;
   if found then
     NEW.lat := op.lat; NEW.lng := op.lng; NEW.point_from := op.source;
     if TG_TABLE_NAME = 'scout_places' and src = any(epic_rented_sources()) then NEW.name := null; end if;
