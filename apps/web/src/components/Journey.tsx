@@ -215,6 +215,9 @@ const asBrowseItem = (s: ShortlistItem): BrowseItem => ({
   dwellMinutes: s.dwellMinutes ?? 0, reasons: [], justification: null, startsAt: null, endsAt: null, pinned: false,
   cuisines: (s.venue?.cuisines as string[]) ?? [], experiences: (s.venue?.experiences as string[]) ?? [], rating: s.venue?.rating ?? null, ratingCount: s.venue?.ratingCount ?? null,
   priceLevel: s.venue?.priceLevel ?? null, photos: s.venue?.photos ?? [], address: s.venue?.address ?? null, website: s.venue?.website ?? null, openingHours: s.venue?.openingHours ?? null,
+  // The source each merged field came from, so a Google price level or rating on
+  // an OSM identity reads as Google's in the drawer rather than "not known yet" (Codex).
+  provenance: s.venue?.provenance, mapsUrl: s.venue?.mapsUrl ?? null,
   source: s.venueRef.split(':')[0],
 });
 

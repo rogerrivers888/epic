@@ -153,6 +153,12 @@ function venueToBrowseItem(v: Venue): BrowseItem {
     dwellMinutes: 0, reasons: [], justification: null, startsAt: null, endsAt: null, pinned: false, source,
     cuisines: v.cuisines ?? [], experiences: v.experiences ?? [], address: typeof v.address === 'string' ? v.address : null,
     website: v.website ?? null, openingHours: v.openingHours ?? null,
+    // The rating, the price level and the source each field came from, so a
+    // freshly searched place shows its rating, its Google Maps attribution and
+    // its cost band at once instead of flashing "not known yet" (Codex).
+    rating: v.rating ?? null, ratingCount: v.ratingCount ?? null, priceLevel: v.priceLevel ?? null,
+    provenance: v.provenance, mapsUrl: v.mapsUrl ?? null, summary: v.summary ?? null,
+    photos: v.photos ?? [], attribution: v.attribution ?? null,
   };
 }
 
