@@ -1388,7 +1388,13 @@ export type InspireNear = {
     /** Outcodes in the ring the census has never been run in: "we have not looked" is not "nothing here". */
     notCensused: number;
     box: { across: number; down: number } | null;
+    /** 'matrix' = real (estimated) journey times; 'straight-line' = a distance-and-speed
+     *  estimate for a mode with no reach matrix yet (walk/transit). */
+    method?: 'matrix' | 'straight-line';
   };
+  /** True when the reach is a straight-line estimate rather than journey times — so the
+   *  count can be shown as an estimate, not dressed as a measured one. */
+  estimated?: boolean;
   /** What drawing this board spent, said plainly. */
   spent?: { displaySearches: number };
   /**

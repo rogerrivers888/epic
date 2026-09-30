@@ -180,9 +180,14 @@ export async function censusForRing(ring, { mode = 'driving', minutes = 30 } = {
   // counted yet is counted live, and that one is written down behind the
   // screen so the next look reads it.
   const byOutcode = await censusCounts(outcodes);
-  // `null` is a ring nobody has counted; `{}` is a ring counted and empty, and
-  // that one is not counted again on every look.
-  const stored = ring?.cell ? await countsFor({ cell: ring.cell, mode, minutes }).catch(() => null) : null;
+  // A straight-line ring is never read from or written to `ring_counts`: those
+  // rows are keyed only by (cell, mode, minutes) and were computed from the old
+  // matrix/home-sector geometry, so trusting one would freeze the very count
+  // this fallback exists to move (Codex). It is counted live over the estimated
+  // band each time — correct now; a `method` column on `ring_counts` could cache
+  // it later. `null` is a ring nobody has counted; `{}` is counted and empty.
+  const estimated = ring?.method === 'straight-line';
+  const stored = ring?.cell && !estimated ? await countsFor({ cell: ring.cell, mode, minutes }).catch(() => null) : null;
   if (stored) {
     const counts = Object.fromEntries(Object.entries(stored).map(([k, v]) => [k, v.places]));
     const unresolved = Object.fromEntries(Object.entries(stored).map(([k, v]) => [k, v.unresolved]));
@@ -211,7 +216,7 @@ export async function censusForRing(ring, { mode = 'driving', minutes = 30 } = {
   }
 
   const inRing = await censusInRing({ cells: ring.band ?? ring.cells ?? [], outcodes, shownOnly: true });
-  if (ring?.cell) void refreshRing({ cell: ring.cell, mode, minutes }).catch(() => null);
+  if (ring?.cell && !estimated) void refreshRing({ cell: ring.cell, mode, minutes }).catch(() => null);
   const unresolved = inRing.unresolved ?? {};
   const partly = byOutcode.partial.length > 0;
   return {
