@@ -272,16 +272,26 @@ async function runLocked({ kind, who, pageSize, fetcher, resume }) {
           box: boxOf(p.slice), wikidataId: p.wikidata_id, wikidataPoint: wd.get(p.wikidata_id) ?? null,
           rented: p.rented,
         });
-        looked += 1;
-        if (out.none) { if (/no name|no point/.test(out.none)) noKey += 1; } else {
-          const w = await recordOwnedPoint({ ref: p.ref, ...out });
-          if (w.written) { matched += 1; bySource[out.source] = (bySource[out.source] ?? 0) + 1; }
-        }
-        // After every place, so a resume neither looks again nor counts twice (Codex).
-        after = p.ref;
-        await query(
-          `update owned_point_runs set after = $2, looked = $3, matched = $4, by_source = $5, no_key = $6 where id = $1`,
-          [r.id, after, looked, matched, JSON.stringify(bySource), noKey]);
+        // The point and the checkpoint in one transaction: a resume neither
+        // looks at a place again nor counts it twice (Codex, 30 Sep 2026).
+        const client = await pool.connect();
+        try {
+          await client.query('begin');
+          let nLooked = looked + 1, nMatched = matched, nNoKey = noKey;
+          const nBy = { ...bySource };
+          if (out.none) { if (/no name|no point/.test(out.none)) nNoKey += 1; } else {
+            const w = await recordOwnedPoint({ ref: p.ref, ...out }, client);
+            if (w.written) { nMatched += 1; nBy[out.source] = (nBy[out.source] ?? 0) + 1; }
+          }
+          await client.query(
+            `update owned_point_runs set after = $2, looked = $3, matched = $4, by_source = $5, no_key = $6 where id = $1`,
+            [r.id, p.ref, nLooked, nMatched, JSON.stringify(nBy), nNoKey]);
+          await client.query('commit');
+          after = p.ref; looked = nLooked; matched = nMatched; noKey = nNoKey; Object.assign(bySource, nBy);
+        } catch (err) {
+          await client.query('rollback').catch(() => null);
+          throw err;
+        } finally { client.release(); }
       }
     }
     await query(`update owned_point_runs set state = 'done', finished_at = now() where id = $1`, [r.id]);

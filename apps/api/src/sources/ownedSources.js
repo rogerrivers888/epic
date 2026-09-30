@@ -13,7 +13,10 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { inflateRawSync } from 'node:zlib';
+import { inflateRaw } from 'node:zlib';
+import { promisify } from 'node:util';
+
+const inflate = promisify(inflateRaw);
 import { query, pool } from '../db.js';
 
 export const SOURCES = ['fsa', 'historic-england', 'os-open-names'];
@@ -218,8 +221,14 @@ export async function loadOsNames(loadId, fetcher = fetch) {
   if (!res.ok) throw new Error(`OS Open Names answered ${res.status}`);
   const zip = Buffer.from(await res.arrayBuffer());
   let total = 0;
-  for (const { name, data } of zipEntries(zip)) {
+  // One file at a time, inflated off the event loop, with a yield between
+  // files: the archive is ~100 MB and its files are a few MB each, so the API
+  // keeps answering while a load runs (Codex, 30 Sep 2026).
+  for (const entry of zipEntries(zip)) {
+    const { name } = entry;
     if (!/\.csv$/i.test(name) || /header/i.test(name)) continue;
+    const data = entry.method === 8 ? await inflate(entry.raw) : entry.raw;
+    await new Promise((ok) => setImmediate(ok));
     const rows = [];
     for (const line of data.toString('utf8').split(/\r?\n/)) {
       if (!line) continue;
@@ -282,9 +291,9 @@ export function* zipEntries(buf) {
     const lExtraLen = buf.readUInt16LE(local + 28);
     const start = local + 30 + lNameLen + lExtraLen;
     const raw = buf.subarray(start, start + compressed);
-    if (method === 0) yield { name, data: raw };
-    else if (method === 8) yield { name, data: inflateRawSync(raw) };
-    else throw new Error(`${name}: a zip method (${method}) this reader does not know`);
+    // Handed over compressed; the caller inflates, asynchronously.
+    if (method !== 0 && method !== 8) throw new Error(`${name}: a zip method (${method}) this reader does not know`);
+    yield { name, method, raw };
   }
 }
 

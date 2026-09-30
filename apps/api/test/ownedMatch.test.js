@@ -237,3 +237,34 @@ test('a census box is searched as its rectangle, not a circle round its centre',
     box: { lat: 51.30, lng: -0.51, radiusM: 2500, bounds } });
   assert.ok(out.none, 'outside the box is not in the box');
 });
+
+/** A zip of one deflated file, written by hand: local header, data, central directory, end record. */
+const zipOf = async (name, text) => {
+  const { deflateRawSync, crc32 } = await import('node:zlib');
+  const data = Buffer.from(text, 'utf8');
+  const comp = deflateRawSync(data);
+  const crc = typeof crc32 === 'function' ? crc32(data) : 0;
+  const n = Buffer.from(name);
+  const local = Buffer.alloc(30); local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(8, 8);
+  local.writeUInt32LE(crc, 14); local.writeUInt32LE(comp.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(n.length, 26);
+  const central = Buffer.alloc(46); central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6); central.writeUInt16LE(8, 10);
+  central.writeUInt32LE(crc, 16); central.writeUInt32LE(comp.length, 20); central.writeUInt32LE(data.length, 24); central.writeUInt16LE(n.length, 28); central.writeUInt32LE(0, 42);
+  const cdStart = local.length + n.length + comp.length;
+  const end = Buffer.alloc(22); end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(1, 8); end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(central.length + n.length, 12); end.writeUInt32LE(cdStart, 16);
+  return Buffer.concat([local, n, comp, central, n, end]);
+};
+
+test('OS Open Names loads from its zip: named features in, roads and postcodes out', async () => {
+  const csv = [
+    'osgb1,x,Windsor Great Park,eng,,,landcover,Woodland Or Forest,497000,172000',
+    'osgb2,x,High Street,eng,,,transportNetwork,Named Road,497100,176800',
+    'osgb3,x,"Snow Hill, The",eng,,,landform,Hill Or Mountain,497300,173400',
+  ].join('\n');
+  const zip = await zipOf('DATA/SU97.csv', csv);
+  await query(`update owned_source_loads set state = 'never' where source = 'os-open-names'`);
+  const out = await src.loadSource('os-open-names', { fetcher: async () => ({ ok: true, status: 200, arrayBuffer: async () => zip }) });
+  assert.equal(out.rows, 2);
+  const names = (await query(`select name from os_names where load_id = (select live_load from owned_source_loads where source = 'os-open-names') order by name`)).rows.map((r) => r.name);
+  assert.deepEqual(names, ['Snow Hill, The', 'Windsor Great Park']);
+});
