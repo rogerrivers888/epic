@@ -17,7 +17,6 @@
  * selecting a country must not become a count over every row at page load.
  */
 
-import { pointSourceOfRef } from '../sources/ownedPoints.js';
 import { pool, query, withTransaction } from '../db.js';
 import { shelvesForAtlas, shelvesForVenue } from '../domain/moods.js';
 import { labelsOf, labelsOfAtlas } from '../domain/labels.js';
@@ -1622,7 +1621,7 @@ export async function noteMany(places = [], { source = null, countryCode = null,
       const r = `$${i * 7 + 1}`, lat = `$${i * 7 + 2}::double precision`, lng = `$${i * 7 + 3}::double precision`;
       // And an owned point the index already holds (an open-map twin, say)
       // stands against a rented one arriving (Codex, 30 Sep 2026).
-      const rentedIn = `($${i * 7 + 7}::text = any(epic_rented_sources()))`;
+      const rentedIn = `(coalesce($${i * 7 + 7}::text, epic_ref_true_source(${r})) = any(epic_rented_sources()))`;
       const held = (col) => `(select p.${col} from place_index p where p.venue_ref = ${r} and p.lat is not null and p.lng is not null
                                and p.coords_from = any(epic_owned_sources()))`;
       const oLat = `coalesce((select o.lat from owned_points o where o.venue_ref = ${r}), case when ${rentedIn} then ${held('lat')} end)`;
@@ -1630,7 +1629,7 @@ export async function noteMany(places = [], { source = null, countryCode = null,
       const oSrc = `coalesce((select o.source from owned_points o where o.venue_ref = ${r}), case when ${rentedIn} then ${held('coords_from')} end)`;
       return `(${r}, coalesce(${oLat}, ${lat}), case when ${oLat} is not null then ${oLng} else ${lng} end, $${i * 7 + 4},$${i * 7 + 5}, now(), $${i * 7 + 6}::text[],
         case when coalesce(${oLat}, ${lat}) is not null then now() end,
-        case when ${oLat} is not null then ${oSrc} when ${lat} is not null then $${i * 7 + 7}::text end)`;
+        case when ${oLat} is not null then ${oSrc} when ${lat} is not null then coalesce($${i * 7 + 7}::text, epic_ref_true_source(${r})) end)`;
     }).join(',');
     await exec(
       `insert into place_index (venue_ref, lat, lng, country_code, ownership, last_seen, google_types, coords_at, coords_from)
@@ -1706,7 +1705,9 @@ export async function noteMany(places = [], { source = null, countryCode = null,
       rows.flatMap((p) => [p.ref, p.lat ?? null, p.lng ?? null, p.countryCode ?? countryCode, p.ownership ?? ownership ?? 'identified', p.types?.length ? p.types : null,
         // The row's own word, then the caller's where it names a source of
         // points, then the reference (Codex, 30 Sep 2026).
-        p.coordsFrom ?? (POINT_SOURCES_BY_CALLER[source] ?? pointSourceOfRef(p.ref))]));
+        // Nobody said: the database judges by the reference, knowing an atlas
+        // row can stand in for a Google place (epic_ref_true_source, Codex).
+        p.coordsFrom ?? POINT_SOURCES_BY_CALLER[source] ?? null]));
     // Who has returned each place, which may be more than one of them.
     //
     // A sweep result is often Google *and* OpenStreetMap, and the sweep keeps
@@ -3003,7 +3004,9 @@ export async function household(areaSlug, {
     -- The same two places the readiness bar counts hours in, so the tick here
     -- and the tick on the index board are about the same fact.
     coalesce(r.opening_hours, d.visit->>'openingHours') as opening_hours,
-    coalesce(r.lat, sp.lat, a.lat) as lat, coalesce(r.lng, sp.lng, a.lng) as lng,
+    -- And the index's own, last: where an activity-sweep row keeps no Google
+    -- point of its own (migration 307), the index holds it (Codex).
+    coalesce(r.lat, sp.lat, a.lat, pi.lat) as lat, coalesce(r.lng, sp.lng, a.lng, pi.lng) as lng,
     (select upper(pa.area_slug) from place_areas pa join localities l on l.slug = pa.area_slug
       where pa.venue_ref = pi.venue_ref and l.kind = 'postcode' limit 1) as outcode,
     (select li.image_id from image_links li join image_assets ia on ia.id = li.image_id

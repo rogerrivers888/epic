@@ -33,7 +33,7 @@
  * another name.
  */
 
-import { query } from '../db.js';
+import { query, pool } from '../db.js';
 import { expireRentedCoordinates } from './census.js';
 import { RENTED_SOURCES } from './ownedPoints.js';
 
@@ -79,10 +79,21 @@ export async function purgeRented({ days = 30, force = false } = {}) {
   const age = `(${days} || ' days')::interval`;
 
   for (const t of TABLES) {
-    const { rowCount } = await query(
-      `update ${t.table} set point_from = point_from
-        where (${t.rented}) and ${t.first} < now() - ${age}`, t.rented.includes('$1') ? [RENTED_SOURCES] : []);
-    out.tables[t.table] = rowCount;
+    // Said to be the purge, for this transaction only: migration 307's trigger
+    // otherwise leaves a legacy row's unchanged point for the backfill.
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      await client.query(`select set_config('epic.purging', 'on', true)`);
+      const { rowCount } = await client.query(
+        `update ${t.table} set point_from = point_from
+          where (${t.rented}) and ${t.first} < now() - ${age}`, t.rented.includes('$1') ? [RENTED_SOURCES] : []);
+      await client.query('commit');
+      out.tables[t.table] = rowCount;
+    } catch (err) {
+      await client.query('rollback').catch(() => null);
+      throw err;
+    } finally { client.release(); }
   }
 
   // A research record's Google name, where no owned source gave its name: the

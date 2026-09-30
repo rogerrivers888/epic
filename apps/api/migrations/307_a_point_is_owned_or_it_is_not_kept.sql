@@ -120,25 +120,38 @@ begin
     src := coalesce(said, epic_ref_true_source(ref));
   end if;
 
-  -- Google's name for a place the open map never gave is rented like its
+  -- 1. A place's owned point, where one has landed, is its one point: every
+  -- copy takes it, so a correction or a better source reaches them all (Codex,
+  -- 30 Sep 2026). A household's own pin on a photo place has none, and keeps its own.
+  select o.lat, o.lng, o.source into op from owned_points o where o.venue_ref = ref;
+  if found then
+    NEW.lat := op.lat; NEW.lng := op.lng; NEW.point_from := op.source;
+    if TG_TABLE_NAME = 'scout_places' and src = any(epic_rented_sources()) then NEW.name := null; end if;
+    return NEW;
+  end if;
+
+  -- 2. A point we may keep, kept.
+  if NEW.lat is not null and NEW.lng is not null and not (src = any(epic_rented_sources())) then
+    NEW.point_from := src;
+    return NEW;
+  end if;
+
+  -- 3. A row written before this migration, touched by something that does
+  -- not move its point (a score, a label), keeps its point and name until the
+  -- purge takes them: the backfill reads them once, to find the place's owned
+  -- twin, and an unrelated update must not throw that away first (Codex, 30
+  -- Sep 2026). The purge says it is the purge (sources/coordinatePurge.js).
+  if TG_OP = 'UPDATE' and OLD.point_from is null and OLD.lat is not null
+     and NEW.lat is not distinct from OLD.lat and NEW.lng is not distinct from OLD.lng
+     and coalesce(current_setting('epic.purging', true), '') <> 'on' then
+    return NEW;
+  end if;
+
+  -- 4. Google's name for a place the open map never gave is rented like its
   -- point (owner, 30 Sep 2026: "Google names fall under the same rule: don't
   -- keep them"). Every reader already refuses to show or search it.
   if TG_TABLE_NAME = 'scout_places' and src = any(epic_rented_sources()) then
     NEW.name := null;
-  end if;
-
-  -- A place's owned point, where one has landed, is its one point: every copy
-  -- takes it, so a correction or a better source reaches them all (Codex, 30
-  -- Sep 2026). A household's own pin on a photo place has none, and keeps its own.
-  select o.lat, o.lng, o.source into op from owned_points o where o.venue_ref = ref;
-  if found then
-    NEW.lat := op.lat; NEW.lng := op.lng; NEW.point_from := op.source;
-    return NEW;
-  end if;
-
-  if NEW.lat is not null and NEW.lng is not null and not (src = any(epic_rented_sources())) then
-    NEW.point_from := src;
-    return NEW;
   end if;
 
   -- A saved or visited place keeps working through its census box until its

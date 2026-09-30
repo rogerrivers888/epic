@@ -505,11 +505,17 @@ export async function setAttractionState(id, { state, pinned, note, by }) {
 /** What a device asks for: one region's published list, hero image and all. */
 export async function publishedFor(slug) {
   const { rows } = await query(
-    `select a.id, a.name, a.slug, a.summary, a.category, a.lat, a.lng, a.rank,
+    `select a.id, a.name, a.slug, a.summary, a.category, coalesce(a.lat, ip.lat) as lat, coalesce(a.lng, ip.lng) as lng, a.rank,
             a.website, a.wikipedia_url, a.osm_ref, a.heritage, a.venue_ref, a.attribution,
             i.id as image_id, i.lqip, i.credit_line, i.licence, i.licence_url, i.source_page_url,
             i.attribution_required, i.width as image_width, i.height as image_height
        from attractions a
+       -- An unmatched activity-sweep row keeps no Google point of its own
+       -- (migration 307); the index holds it for its thirty days (Codex).
+       left join lateral (
+         select ip0.lat, ip0.lng from place_index ip0
+          where a.lat is null and ip0.venue_ref in (a.external_ref, 'atlas:' || a.id::text)
+            and ip0.lat is not null and ip0.lng is not null limit 1) ip on true
        left join image_links l on l.subject_type = 'attraction' and l.subject_id = a.id::text and l.role = 'hero'
        left join image_assets i on i.id = l.image_id and i.moderation = 'approved'
       where a.region_slug = $1 and a.state = 'published'
@@ -603,15 +609,21 @@ export async function publishedNear({ lat, lng, km = 25, limit = 60, illustrated
   const dLng = km / Math.max(1, 111 * Math.cos((lat * Math.PI) / 180));
   const { rows } = await query(
     `with candidates as (
-       select a.id, a.name, a.slug, a.summary, a.category, a.kinds, a.lat, a.lng, a.rank, a.region_slug, a.pinned,
+       select a.id, a.name, a.slug, a.summary, a.category, a.kinds, coalesce(a.lat, ip.lat) as lat, coalesce(a.lng, ip.lng) as lng, a.rank, a.region_slug, a.pinned,
               a.outcode,
               a.website, a.wikipedia_url, a.wikidata_id, a.osm_ref, a.heritage, a.venue_ref,
               a.attribution, a.score, r.name as region_name,
               i.id as image_id, i.lqip, i.credit_line, i.licence, i.licence_url,
               i.source_page_url, i.attribution_required,
-              sqrt(power((a.lat - $1) * 111.0, 2)
-                 + power((a.lng - $2) * 111.0 * cos(radians($1)), 2)) as km
+              sqrt(power((coalesce(a.lat, ip.lat) - $1) * 111.0, 2)
+                 + power((coalesce(a.lng, ip.lng) - $2) * 111.0 * cos(radians($1)), 2)) as km
          from attractions a
+         -- An unmatched activity-sweep row keeps no Google point of its own
+       -- (migration 307); the index holds it for its thirty days (Codex).
+       left join lateral (
+         select ip0.lat, ip0.lng from place_index ip0
+          where a.lat is null and ip0.venue_ref in (a.external_ref, 'atlas:' || a.id::text)
+            and ip0.lat is not null and ip0.lng is not null limit 1) ip on true
          join regions r on r.slug = a.region_slug
          left join image_links l on l.subject_type = 'attraction' and l.subject_id = a.id::text and l.role = 'hero'
          left join image_assets i on i.id = l.image_id and i.moderation = 'approved'
@@ -635,7 +647,7 @@ export async function publishedNear({ lat, lng, km = 25, limit = 60, illustrated
           and a.visiting = 'yes'
           -- Closed or unconfirmed, once the owner has applied the check (C57).
           and ${SHOWN_ATTRACTION('a')}
-          and a.lat between $3 and $4 and a.lng between $5 and $6
+          and coalesce(a.lat, ip.lat) between $3 and $4 and coalesce(a.lng, ip.lng) between $5 and $6
           ${illustratedOnly ? 'and i.id is not null' : ''}
      ),
      -- One place, once, whichever counties file it. The illustrated copy wins,

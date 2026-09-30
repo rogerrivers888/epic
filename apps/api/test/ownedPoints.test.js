@@ -191,3 +191,14 @@ test('an atlas reference standing in for an unmatched Google row keeps neither G
   const hh = await household();
   assert.deepEqual(await saved(hh, ref, 51.5, -0.1), { lat: null, lng: null, point_from: null });
 });
+
+test('an unrelated update leaves a legacy row\'s point and name for the backfill', async () => {
+  await query(`insert into scout_areas (code, lat, lng) values ('ZZ6', 51.4, -0.6) on conflict do nothing`);
+  const g = `google:legacy-scout-${randomUUID()}`;
+  await query('alter table scout_places disable trigger keep_owned_point');
+  try {
+    await query(`insert into scout_places (area_code, venue_ref, name, rank, lat, lng, from_sources) values ('ZZ6', $1, 'Google''s name', 1, 51.5, -0.1, '["google"]')`, [g]);
+  } finally { await query('alter table scout_places enable trigger keep_owned_point'); }
+  await query('update scout_places set rank = 2 where venue_ref = $1', [g]);
+  assert.deepEqual((await query('select name, lat from scout_places where venue_ref = $1', [g])).rows[0], { name: 'Google\'s name', lat: 51.5 });
+});
