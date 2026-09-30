@@ -3905,11 +3905,19 @@ export async function coordinateReport() {
          ) o order by venue_ref),
        p as (
          select case
-                  when coalesce(r.osm, false) or coalesce(a.osm, false) or sc.venue_ref is not null or (pi.lat is not null and pi.lng is not null and pi.src = 'osm') then 'osm'
-                  when a.venue_ref is not null or (pi.lat is not null and pi.lng is not null and pi.src in ('atlas', 'wikidata')) then 'atlas'
-                  when pi.lat is not null and pi.lng is not null and pi.src in ('own', 'household', 'photo', 'fixtures') then 'own'
-                  -- Rented, named by whose it is: Google, or any other provider.
-                  when pi.lat is not null and pi.lng is not null then 'rented:' || pi.src
+                  -- Where the index holds a point, what that point is judged to
+                  -- be decides (IX_TRUE_SRC matches it against every owned
+                  -- store); an owned row elsewhere at another spot does not
+                  -- make it ours (Codex, 30 Sep 2026).
+                  when pi.lat is not null and pi.lng is not null then
+                    case when pi.src = 'osm' then 'osm'
+                         when pi.src in ('atlas', 'wikidata') then 'atlas'
+                         when pi.src in ('own', 'household', 'photo', 'fixtures') then 'own'
+                         -- Rented, named by whose it is: Google, or any other provider.
+                         else 'rented:' || pi.src end
+                  -- Only where the index holds none do the other stores speak.
+                  when coalesce(r.osm, false) or coalesce(a.osm, false) or sc.venue_ref is not null then 'osm'
+                  when a.venue_ref is not null then 'atlas'
                   when x.venue_ref is not null then 'rented:' || x.provider
                   when oc.kind = 'osm' then 'osm'
                   when oc.kind in ('atlas', 'wikidata') then 'atlas'
@@ -3966,15 +3974,16 @@ export async function coordinateReport() {
     // is), and not Google's at all where its point is one we own (Codex, 30
     // Sep 2026). A cell whose point matches no dated index point is undated.
     const NEAR = (x) => `abs(${x}.lat - c.lat) <= 0.0005 and abs(${x}.lng - c.lng) <= 0.0005`;
+    const CELL_CLOCK = `(case when pi.coords_at is not null and pi.coords_from is not distinct from ${IX_TRUE_SRC('pi')} then pi.coords_at end)`;
     await count('place_cells', 'the index point it copies',
       // With no dated index point, the cell's own stamp is a floor: the point
       // it copied was there when it was stamped, so a cell stamped over thirty
       // days ago holds a point at least that old (Codex, 30 Sep 2026).
+      // And the index's clock only where it is this point's own (as above).
       `select count(*)::int held,
-              count(*) filter (where pi.coords_at < now() - interval '30 days'
-                                  or (pi.coords_at is null and c.at < now() - interval '30 days'))::int over30,
-              count(*) filter (where pi.coords_at is null and not (c.at < now() - interval '30 days'))::int undated,
-              min(coalesce(pi.coords_at, c.at)) oldest
+              count(*) filter (where coalesce(${CELL_CLOCK}, c.at) < now() - interval '30 days')::int over30,
+              count(*) filter (where ${CELL_CLOCK} is null and not (c.at < now() - interval '30 days'))::int undated,
+              min(coalesce(${CELL_CLOCK}, c.at)) oldest
          from place_cells c
          left join place_index pi on pi.venue_ref = c.venue_ref and pi.lat is not null and pi.lng is not null and ${NEAR('pi')}
         where c.lat is not null and c.lng is not null
