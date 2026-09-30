@@ -809,6 +809,7 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
       {drawerItem ? (
         <VenueDrawer
           item={drawerItem}
+          country={trip.countryCode ?? trip.destination?.countryCode ?? null}
           baseLabel={destShortName(trip)}
           onClose={() => setPlace(null)}
           onAdd={drawerCard ? () => { addToTrip(drawerCard); } : undefined}

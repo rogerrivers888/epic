@@ -452,7 +452,7 @@ export function ShortlistJourney({ d, day, household, onChanged, onSaved, onFind
 
       {openItem && household ? (
         <VenueDrawer
-          item={asBrowseItem(openItem)} baseLabel={journey?.home.label} onClose={() => { setOpenId(null); setVenue(null); }} onVenue={setVenue}
+          item={asBrowseItem(openItem)} country={d.trip.countryCode ?? d.trip.destination?.countryCode ?? null} baseLabel={journey?.home.label} onClose={() => { setOpenId(null); setVenue(null); }} onVenue={setVenue}
           ours={<BookingControl trip={d} item={openItem} venue={venue} dwell={stops.find((s) => s.id === openItem.id)?.dwellMinutes ?? openItem.dwellMinutes ?? 60} onChanged={onChanged} onSetAside={async () => { await setStatus(openItem.id, openItem.status === 'set_aside' ? 'to_call' : 'set_aside'); setOpenId(null); }} />}
         />
       ) : null}

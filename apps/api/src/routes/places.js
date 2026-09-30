@@ -15,7 +15,7 @@ import { taxonomy } from '../repositories/shelfTaxonomy.js';
 import { shelvesForVenue } from '../domain/moods.js';
 import { withTransaction, query } from '../db.js';
 import { resolve as resolveWording, localeOfHousehold } from '../repositories/wording.js';
-import { scaleFor, bandIndexForLevel, rangeText } from '../domain/costBand.js';
+import { costBandFor } from '../domain/costBand.js';
 import * as visitsRepo from '../repositories/visits.js';
 import * as menusRepo from '../repositories/menus.js';
 import { enabledSources, recallVenue, optInFrom } from '../sources/index.js';
@@ -286,19 +286,16 @@ places.get('/cost-band', async (req, res, next) => {
       || (household?.home_country_code ? String(household.home_country_code).toUpperCase() : 'GB');
 
     const levelRaw = req.query.level;
-    const index = bandIndexForLevel(levelRaw === '' || levelRaw == null ? null : Number(levelRaw));
-    if (index == null) {
+    const { rows: [m] } = await query('select name, currency, cost_bands from markets where code = $1', [country]);
+    // The whole "is the cost knowable" decision — no level, no market, or a
+    // market with no bands set — is one pure function (domain/costBand.js), so
+    // "never a guess" is testable and the route only adds the wording. A country
+    // Epic has no market for, and a market (Portugal, Greece, Turkey, the UAE)
+    // seeded with null bands, both read "not known yet" here (Codex).
+    const cost = costBandFor(m ?? null, levelRaw === '' || levelRaw == null ? null : Number(levelRaw));
+    if (!cost.known) {
       return res.json({ known: false, label: await t('cost.unknown', 'Not known yet') });
     }
-
-    const { rows: [m] } = await query('select name, currency, cost_bands from markets where code = $1', [country]);
-    // A country Epic has no market for: we do not know its currency, so we do
-    // not fabricate a £ scale — it reads "not known yet" (Codex).
-    if (!m) return res.json({ known: false, label: await t('cost.unknown', 'Not known yet') });
-    const currency = m.currency;
-    const scale = scaleFor(currency);
-    const band = scale[index];
-    const range = rangeText(m?.cost_bands ?? null, index, currency);
 
     // The country is named only abroad — when the place's market is not the
     // household's own (same rule as time zones in M1).
@@ -306,14 +303,14 @@ places.get('/cost-band', async (req, res, next) => {
       && String(household.home_country_code).toUpperCase() !== country;
 
     let definition = null;
-    if (range) {
+    if (cost.range) {
       definition = nameMarket
         ? (await t('cost.definition.abroad', 'In {market}, {band} means {range} a person'))
-          .replace('{market}', m?.name ?? country).replace('{band}', band).replace('{range}', range)
+          .replace('{market}', m?.name ?? country).replace('{band}', cost.band).replace('{range}', cost.range)
         : (await t('cost.definition', '{band} means {range} a person'))
-          .replace('{band}', band).replace('{range}', range);
+          .replace('{band}', cost.band).replace('{range}', cost.range);
     }
-    res.json({ known: true, scale, index, band, currency, range, definition });
+    res.json({ known: true, scale: cost.scale, index: cost.index, band: cost.band, currency: cost.currency, range: cost.range, definition });
   } catch (err) { next(err); }
 });
 

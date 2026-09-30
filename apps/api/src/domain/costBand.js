@@ -40,6 +40,26 @@ export function money(minor, currency) {
 }
 
 /**
+ * The whole cost decision for a place, from its market and Google's price level.
+ * Everything the display needs except the wording, which is the route's to
+ * resolve. It is "known" only when there is a level AND a market AND that market
+ * has its absolute money bands set: no level, no market, or a market with no
+ * bands (Portugal, Greece, Turkey, the UAE are all seeded null) each reads "not
+ * known yet" rather than a symbol scale with no monetary meaning (Codex;
+ * docs/markets.md, "never a guess"). Free returns a null range — a known band
+ * with no money sentence — which is not the same as unknown.
+ */
+export function costBandFor(market, level) {
+  const index = bandIndexForLevel(level);
+  if (index == null || !market) return { known: false };
+  const bands = Array.isArray(market.cost_bands) ? market.cost_bands : null;
+  if (!bands || !bands.length) return { known: false };
+  const currency = market.currency;
+  const scale = scaleFor(currency);
+  return { known: true, scale, index, band: scale[index], currency, range: rangeText(bands, index, currency) };
+}
+
+/**
  * The money range for a band — "under £10", "£10–25", "over £25" — from the
  * market's own cost bands. Free and a bandless market both return null (no
  * money sentence to make).

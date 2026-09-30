@@ -373,6 +373,7 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
 
       <VenueDrawer
         item={newVenue ? venueToBrowseItem(newVenue) : open ? atlasToBrowseItem(open) : null}
+        country={open?.countryCode ?? null}
         baseLabel={city?.name ?? (home ? 'home' : null)}
         // The close carries the dwell — see InspireMe. Without it a place
         // that was opened and closed reported the open and nothing else.

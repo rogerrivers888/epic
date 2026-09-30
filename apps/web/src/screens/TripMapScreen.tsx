@@ -1473,6 +1473,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
 
       <VenueDrawer
         item={drawer}
+        country={trip.countryCode ?? trip.destination?.countryCode ?? null}
         baseLabel={trip.locality ?? trip.origin.label.split(',')[0]}
         /* Closing is what ends the look, and the close is what carries the
            dwell — opening and closing, which is the ordinary way somebody reads

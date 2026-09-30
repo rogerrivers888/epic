@@ -226,8 +226,16 @@ function InsideList({ inside, busy, full = false }: { inside: PlaceInsideItem[] 
   );
 }
 
-export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon, onShortlist, added, shortlisted, ours, capture, onVenue, gettingThere }: {
+export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel, addIcon, onShortlist, added, shortlisted, ours, capture, onVenue, gettingThere }: {
   item: BrowseItem | null;
+  /**
+   * The place's own country (ISO code), for the cost scale's currency and money
+   * bands — a place in France reads euros, not the household's pounds. Callers
+   * that know where the place is (the atlas, a trip's destination) pass it;
+   * where it is unknown the server falls back to the household's own market,
+   * which is right for a place at home.
+   */
+  country?: string | null;
   baseLabel?: string | null;
   onClose: () => void;
   onAdd?: (item: BrowseItem) => void;
@@ -464,10 +472,9 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
   const strip = useRef<ScrollView | null>(null);
   useEffect(() => { setHeroAt(0); strip.current?.scrollTo({ x: 0, animated: false }); }, [item?.venueRef]);
   // The cost scale. The band comes from Google's (rented) price level; the
-  // currency and money bands come from the place's market, which the server
-  // reads from the household's own until a place carries its own country (the
-  // drawer holds no country field yet — Markets increment 4). A place with no
-  // level reads "not known yet", never Free.
+  // currency and money bands come from the place's own market when the caller
+  // knows its country, and the household's own otherwise — right for a place at
+  // home. A place with no level reads "not known yet", never Free.
   useEffect(() => {
     // Clear first, so a newly opened drawer never shows the last place's band
     // while this request is in flight (Codex).
@@ -475,9 +482,9 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
     if (!item) return;
     const level = venue?.priceLevel ?? item.priceLevel ?? null;
     let live = true;
-    api.costBand({ level }).then((d) => { if (live) setCost(d); }).catch(() => { if (live) setCost(null); });
+    api.costBand({ country, level }).then((d) => { if (live) setCost(d); }).catch(() => { if (live) setCost(null); });
     return () => { live = false; };
-  }, [item, venue?.priceLevel]);
+  }, [item, country, venue?.priceLevel]);
   const onHeroScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (!heroW) return;
     const i = Math.round(e.nativeEvent.contentOffset.x / heroW);
