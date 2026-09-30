@@ -193,7 +193,15 @@ export async function loadHeritage(loadId, fetcher = fetch) {
       // a field a layer lacks is refused outright ("'outFields' parameter is
       // invalid", checked against the live service 30 Sep 2026). A polygon
       // layer returns its centroid without its geometry (checked the same day).
-      const page = await getJson(`${NHLE}/${L.id}/query?where=1%3D1&outFields=*&${geo}&outSR=4326&orderByFields=OBJECTID&resultOffset=${offset}&resultRecordCount=2000&f=json`, fetcher);
+      const ask = (g) => getJson(`${NHLE}/${L.id}/query?where=1%3D1&outFields=*&${g}&outSR=4326&orderByFields=OBJECTID&resultOffset=${offset}&resultRecordCount=2000&f=json`, fetcher);
+      let page = await ask(geo);
+      // Should a polygon page ever come back without its centroids, it is asked
+      // again with its geometry and each centre worked out from the outline
+      // (Codex, 30 Sep 2026 — though the live service does send them).
+      if (!L.points && (page.features ?? []).some((f) => !f.centroid)) {
+        page = await ask('returnGeometry=true');
+        for (const f of page.features ?? []) if (!f.centroid) f.centroid = ringCentre(f.geometry);
+      }
       const features = page.features ?? [];
       const rows = [];
       for (const f of features) {
@@ -262,6 +270,15 @@ export async function loadOsNames(loadId, fetcher = fetch) {
     total += rows.length;
   }
   return total;
+}
+
+/** The centre of a polygon's outer ring, as the average of its corners: a place's middle, near enough. */
+export function ringCentre(geometry) {
+  const ring = geometry?.rings?.[0];
+  if (!Array.isArray(ring) || !ring.length) return null;
+  const pts = ring.filter((p) => Number.isFinite(p?.[0]) && Number.isFinite(p?.[1]));
+  if (!pts.length) return null;
+  return { x: pts.reduce((t, p) => t + p[0], 0) / pts.length, y: pts.reduce((t, p) => t + p[1], 0) / pts.length };
 }
 
 /** A CSV line, with quoted fields and doubled quotes inside them. */

@@ -311,3 +311,20 @@ test('a higher source that cannot tell is not overruled by a lower one', async (
   const out = await m.matchPlace({ ref: 'google:mill', names: ['The Mill House'], point: { lat: 50.9, lng: -0.1007 } });
   assert.match(out.none, /fsa holds more than one place/);
 });
+
+test('a polygon page without centroids is asked again with its outline', async () => {
+  let asked = [];
+  const fetcher = async (url) => {
+    asked.push(url);
+    if (url.includes('returnCountOnly')) return json({ count: 1 });
+    const layer = Number(url.match(/FeatureServer\/(\d+)\//)[1]);
+    if (layer === 0) return json({ features: [{ attributes: { ListEntry: 5, Name: 'A Barn', Grade: 'II' }, geometry: { points: [[-0.6, 51.48]] } }] });
+    if (url.includes('returnGeometry=true')) return json({ features: [{ attributes: { ListEntry: 10 + layer, Name: `Layer ${layer}` }, geometry: { rings: [[[-1, 51], [-1, 52], [0, 52], [0, 51]]] } }] });
+    return json({ features: [{ attributes: { ListEntry: 10 + layer, Name: `Layer ${layer}` } }] });
+  };
+  await query(`update owned_source_loads set state = 'never' where source = 'historic-england'`);
+  const out = await src.loadSource('historic-england', { fetcher });
+  assert.equal(out.rows, 5);
+  const { rows: [c] } = await query(`select lat, lng from heritage_entries where list_entry = 16 and load_id = (select live_load from owned_source_loads where source = 'historic-england')`);
+  assert.deepEqual(c, { lat: 51.5, lng: -0.5 });
+});
