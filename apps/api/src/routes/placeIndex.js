@@ -3872,10 +3872,12 @@ export async function coordinateReport() {
        rented as (
          -- One provider per place (Codex).
          select distinct on (venue_ref) venue_ref, provider from (
-         select venue_ref,
-                case when venue_ref ~ '^atlas:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-                     then coalesce((select g.display_source from attractions g where g.id::text = substr(venue_ref, 7)), 'google')
-                     else split_part(venue_ref, ':', 1) end as provider from (
+         -- Qualified: an unqualified venue_ref inside the lookup would be the
+         -- attraction's own, not this copy's (Codex, 30 Sep 2026).
+         select r.venue_ref,
+                case when r.venue_ref ~ '^atlas:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                     then coalesce((select g.display_source from attractions g where g.id::text = substr(r.venue_ref, 7)), 'google')
+                     else split_part(r.venue_ref, ':', 1) end as provider from (
            select venue_ref from place_cells where lat is not null and lng is not null and not (split_part(venue_ref, ':', 1) = any($1::text[]))
            -- A sweep row twinned with the open map keeps OSM's point under
            -- Google's reference: only the rows the open map never gave are rented.
