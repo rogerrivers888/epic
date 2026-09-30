@@ -35,13 +35,17 @@ test('files each place under the best point held for it, and counts old rented p
   await query(`insert into place_index (venue_ref, lat, lng, cell) values ($1, 51.5, -0.1, 'sector:TR1 1'), ('tripadvisor:9', 51.5, -0.1, 'sector:TR1 1')`, [`atlas:${gs.id}`]);
   await query(`insert into place_records (venue_ref, lat, lng, osm_ref) values ('google:matched', 51.5, -0.1, 'node/9')`);
   await query(`insert into place_cells (venue_ref, lat, lng, at) values ('google:elsewhere', 51.5, -0.1, $1)`, [at(40)]);
+  // A sweep row the open map twinned keeps OSM's point, and is not rented.
+  await query(`insert into scout_areas (code, lat, lng) values ('SL5', 51.4, -0.6) on conflict do nothing`);
+  await query(`insert into scout_places (area_code, venue_ref, lat, lng, rank, from_sources) values ('SL5', 'google:matched', 51.5, -0.1, 1, '["osm","google"]'), ('SL5', 'google:nothing', 51.5, -0.1, 2, '["google"]')`);
 
   const r = await coordinateReport();
   assert.equal(r.places.total, 13);
   assert.deepEqual(r.places.owned, { osm: 4, atlas: 2, own: 0 });
-  assert.equal(r.places.googleOnly, 5, 'the Google-named atlas row is Google\'s');
+  assert.equal(r.places.googleOnly, 6, 'the Google-named atlas row is Google\'s, and so is the sweep row the open map never gave');
   assert.deepEqual(r.places.otherRented, { tripadvisor: 1 });
-  assert.equal(r.places.none, 1);
+  assert.equal(r.places.none, 0, 'google:nothing has a rented point in the sweep');
+  assert.equal(r.rented.find((x) => x.table === 'scout_places').held, 1, 'only the untwinned row');
   const idx = r.rented.find((x) => x.table === 'place_index');
   assert.equal(idx.held, 5, 'matched, old, fresh, undated, the Google atlas row — Google\'s alone');
   assert.equal(idx.over30Days, 2);

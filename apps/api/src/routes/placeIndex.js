@@ -3823,7 +3823,11 @@ export async function coordinateReport() {
              on pi.venue_ref like 'atlas:%' and g.id::text = substr(pi.venue_ref, 7) and g.display_source = 'google'),
        rented as (
          select venue_ref from place_cells where lat is not null and venue_ref like 'google:%'
-         union select venue_ref from scout_places where lat is not null and venue_ref like 'google:%'
+         -- A sweep row twinned with the open map keeps OSM's point under
+         -- Google's reference: only the rows the open map never gave are
+         -- rented (Codex, 30 Sep 2026).
+         union select venue_ref from scout_places where lat is not null and venue_ref like 'google:%' and not (coalesce(from_sources, '[]'::jsonb) ? 'osm')
+         union select coalesce(venue_ref, 'atlas:' || id::text) from attractions where lat is not null and display_source = 'google'
          union select venue_ref from household_places where lat is not null and venue_ref like 'google:%'
          union select venue_ref from trip_stops where lat is not null and venue_ref like 'google:%'
          union select venue_ref from trip_shortlist where lat is not null and venue_ref like 'google:%'
@@ -3869,7 +3873,7 @@ export async function coordinateReport() {
     await count('place_index (other providers)', 'coords_at',
       `select ${OVER('coords_at')} from place_index where lat is not null and ${IX_SRC} not in ('osm', 'atlas', 'own', 'wikidata', 'google')`);
     await count('place_cells', 'at', `select ${OVER('at')} from place_cells where lat is not null and venue_ref like 'google:%'`);
-    await count('scout_places', 'last_seen', `select ${OVER('last_seen')} from scout_places where lat is not null and venue_ref like 'google:%'`);
+    await count('scout_places', 'last_seen', `select ${OVER('last_seen')} from scout_places where lat is not null and venue_ref like 'google:%' and not (coalesce(from_sources, '[]'::jsonb) ? 'osm')`);
     await count('attractions', 'updated_at or last_seen', `select ${OVER('coalesce(updated_at, last_seen)')} from attractions where lat is not null and display_source = 'google'`);
     await count('household_places', 'last_seen', `select ${OVER('last_seen')} from household_places where lat is not null and venue_ref like 'google:%'`);
     await count('trip_stops', 'created_at', `select ${OVER('created_at')} from trip_stops where lat is not null and venue_ref like 'google:%'`);
@@ -3900,7 +3904,7 @@ export async function coordinateReport() {
               count(*)::int as over30
          from place_index
         where ${RENTED_IX} and coords_at < now() - interval '30 days'
-        group by 1 order by 2 desc`);
+        group by 1 order by 2 desc, 1`);
 
   return {
       places: {
