@@ -459,7 +459,7 @@ function TripPage({ id, section: asked, ideasTab, dayId: askedDay, stopRef, chat
    * — the day planner, Stay, the group, Getting there, the chat — is reached
    * from the ⋯ menu and keeps its own screen below.
    */
-  if (section === 'itinerary' || section === 'ideas' || section === 'shortlist') {
+  if (section === 'itinerary' || section === 'ideas' || section === 'shortlist' || section === 'stays') {
     return (
       <View style={{ flex: 1 }}>
         <TripExperience
@@ -467,7 +467,7 @@ function TripPage({ id, section: asked, ideasTab, dayId: askedDay, stopRef, chat
           days={days}
           household={household}
           wide={wide}
-          section={section === 'ideas' ? 'ideas' : section === 'shortlist' ? 'shortlist' : null}
+          section={section === 'ideas' ? 'ideas' : section === 'shortlist' ? 'shortlist' : section === 'stays' ? 'stays' : null}
           ideasTab={ideasTab}
           onBack={onBack}
           onChanged={async () => { await load(); await loadPlaces(); await refreshHousehold(); }}
@@ -1143,7 +1143,7 @@ function partyWords(p: StayPricing) {
  * Booking is not here. LiteAPI can take one, and that spends money and settles
  * it — the owner's to switch on with a payment route and a cap (CLAUDE.md).
  */
-function StayPanel({ d, household, onChanged, onFindNear, openSearch }: {
+export function StayPanel({ d, household, onChanged, onFindNear, openSearch }: {
   d: TripDetail; household: HouseholdResponse | null; onChanged: () => Promise<void>; onFindNear: () => void; openSearch?: boolean;
 }) {
   const { trip, shortlist } = d;

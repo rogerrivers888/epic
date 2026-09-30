@@ -18,12 +18,16 @@ import { CREAM, INK, LIME, fonts } from '../theme';
  * still 0 the caption simply counts to 0 and the payoff line lands when they
  * arrive. `onDone` fires once, after the hold.
  */
-export function ScanOverlay({ width, height, minutes, act, food, dur = 4400, hold = 1600, onDone }: {
+export function ScanOverlay({ width, height, minutes, act, food, ready = true, dur = 2200, hold = 800, onDone }: {
   width: number;
   height: number;
   minutes: number;
   act: number;
   food: number;
+  /** Whether the search has returned. The scan keeps sweeping until it has, so a
+   *  slow load reads as a scan running on rather than a spinner (owner, 30 Sep). */
+  ready?: boolean;
+  /** ~3s total (sweep + hold) — short enough for something every new trip sees. */
   dur?: number;
   hold?: number;
   onDone: () => void;
@@ -34,18 +38,24 @@ export function ScanOverlay({ width, height, minutes, act, food, dur = 4400, hol
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const doneCb = useRef(onDone);
   doneCb.current = onDone;
+  const readyRef = useRef(ready);
+  readyRef.current = ready;
+  const frozenAt = useRef<number | null>(null);
 
   useEffect(() => {
     const t0 = performance.now();
     const step = (now: number) => {
       const el = now - t0;
-      if (el >= dur) {
-        setT(dur);
+      setT(el);
+      // Hand over only once the minimum sweep has run AND the data is in; until
+      // both, the line keeps looping so a slow search is a scan running on.
+      if (el >= dur && readyRef.current && frozenAt.current == null) {
+        frozenAt.current = el;
         setDone(true);
         holdTimer.current = setTimeout(() => doneCb.current(), hold);
-        return;
+        // Keep the frames coming (no early return) so the line and dim fade out
+        // over the hold rather than snapping off when onDone unmounts it (Codex).
       }
-      setT(el);
       raf.current = requestAnimationFrame(step);
     };
     raf.current = requestAnimationFrame(step);
@@ -70,11 +80,13 @@ export function ScanOverlay({ width, height, minutes, act, food, dur = 4400, hol
   const eio = (x: number) => (x < 0.5 ? 2 * x * x : 1 - (-2 * x + 2) ** 2 / 2);
   const cl = (x: number) => Math.max(0, Math.min(1, x));
 
-  const sp = cl(t / (dur * 0.8));
+  // The sweep runs once, then loops down the map while we wait for the data;
+  // once done it freezes at the bottom.
+  const sp = done ? 1 : cl((t % dur) / (dur * 0.8));
   const y = -20 + (height + 40) * eio(sp);
-  const la = 1 - cl((t - dur * 0.8) / (dur * 0.1)); // the line and dim fade out at the end
-  const passed = spots.filter((s) => s.y < y).length;
-  const fr = done ? 1 : spots.length ? passed / spots.length : 0;
+  const la = done ? 1 - cl((t - (frozenAt.current ?? t)) / (dur * 0.1)) : 1;
+  // Counts ramp up over the first sweep, then hold at the live band count.
+  const fr = done ? 1 : cl(t / dur);
 
   const a = Math.round(act * fr);
   const f = Math.round(food * fr);

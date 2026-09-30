@@ -71,8 +71,11 @@ export function TallBand({ right }: { right?: React.ReactNode }) {
  * This is the one back treatment in the app — the old "‹ Trips" link is now
  * just this band's arrow.
  */
-export function CompactBand({ title, context, onBack, onClose, right }: {
+export function CompactBand({ title, titleLines = 1, context, onBack, onClose, right }: {
   title: string;
+  /** How many lines the title may take. A trip name wraps to two and is never
+   *  cut off (CANONICAL, 30 Sep 2026); every other screen keeps one. */
+  titleLines?: number;
   /** e.g. "Sat 20 Sep · 4 people · 3 stops". */
   context?: string;
   onBack?: () => void;
@@ -84,7 +87,7 @@ export function CompactBand({ title, context, onBack, onClose, right }: {
   const finishing = !!onClose;
   return (
     <View style={styles.limeTop}>
-      <View style={styles.compactRow}>
+      <View style={[styles.compactRow, titleLines > 1 && { alignItems: 'flex-start' }]}>
         <Press
           onPress={onClose ?? onBack ?? (() => {})}
           style={styles.lead}
@@ -94,7 +97,7 @@ export function CompactBand({ title, context, onBack, onClose, right }: {
           <Icon name={finishing ? 'close' : 'previous'} size={26} color={INK} strokeWidth={2.4} />
         </Press>
         <View style={styles.titleWrap}>
-          <Text numberOfLines={1} style={styles.title}>{title}</Text>
+          <Text numberOfLines={titleLines} style={styles.title}>{title}</Text>
           {context ? <Text numberOfLines={1} style={styles.context}>{context}</Text> : null}
         </View>
         {finishing ? null : right ?? null}

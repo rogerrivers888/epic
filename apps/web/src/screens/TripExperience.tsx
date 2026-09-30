@@ -18,7 +18,7 @@
  * pin-search browse it replaces is gone.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Animated, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { api, DayStop, HouseholdResponse, LegMode, ShortlistItem, ShortlistStatus, TripAlongPlace, TripDay, TripDetail } from '../api';
 import type { BrowseItem } from '../api';
@@ -31,17 +31,26 @@ import type { MapMarker, MapRoute } from '../components/MapGL';
 import { VenueDrawer } from '../components/VenueDrawer';
 import { VenueThumb, MEDIA_RADIUS } from '../components/VenueThumb';
 import { ScanOverlay } from '../components/ScanOverlay';
+import { CompactBand, MicTile } from '../components/Band';
+import { InkMenu } from '../components/InkMenu';
 import { useViewport } from '../hooks/useViewport';
 import { flyHeart } from '../components/epicHeart';
 import { searchGround } from '../components/searchGround';
 import { paths, withQuery, type IdeasTab } from '../routes';
 import { useQueryState, useRouter, asText, asOneOf } from '../router';
 import { buildFeed, bandCount, destShortName, DETOUR_BANDS, type FeedCard } from './tripIdeas';
+// The Stays tab exposes the same accommodation workflow the old `stay` menu route
+// used; StayPanel lives in TripsScreen and is rendered here in the tab's drawer. The
+// import is a runtime cycle (TripsScreen renders TripExperience), safe because it is
+// only referenced inside the component body, by when both modules have evaluated.
+import { StayPanel } from './TripsScreen';
 
 const GREY = HAIRLINE;
 const MUTED = INK_MUTED;
 
 type Stage = 'trip' | 'search' | 'feed' | 'short';
+/** The four peer tabs on a trip (nav 6a–6c): the map's ink menu. */
+type TripTab = IdeasTab | 'stays' | 'shortlist';
 type ShortTab = 'all' | 'activities' | 'food';
 type StopWithSlot = DayStop & { slot: 'morning' | 'afternoon' | 'evening' };
 const SLOT_ORDER = ['morning', 'afternoon', 'evening'];
@@ -153,7 +162,7 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   days: TripDay[];
   household: HouseholdResponse | null;
   wide: boolean;
-  section: 'ideas' | 'shortlist' | null;
+  section: 'ideas' | 'shortlist' | 'stays' | null;
   ideasTab: IdeasTab;
   onBack: () => void;
   onChanged: () => Promise<void>;
@@ -185,7 +194,15 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   // The picked mode travels with the moves between stages too, or switching
   // Activities/Food or opening the shortlist would drop it back to the trip's
   // own mode (Codex).
-  const carried = () => ({ detour: detour !== 15 ? String(detour) : null, day: dayId && dayId !== days[0]?.id ? dayId : null, by: by !== tripModeSeed ? by : null });
+  // The new-trip marker rides along every move until the scan consumes it: after a
+  // refresh `?new=1` is the only durable creation signal, and opening Stays or the
+  // Shortlist first would otherwise drop it and lose the first-search scan (Codex).
+  const carried = () => ({
+    detour: detour !== 15 ? String(detour) : null,
+    day: dayId && dayId !== days[0]?.id ? dayId : null,
+    by: by !== tripModeSeed ? by : null,
+    new: (query.get('new') === '1' || justCreatedTrips.has(id)) ? '1' : null,
+  });
   const feedHref = (tab: IdeasTab) => withQuery(paths.tripIdeas(id, tab), carried());
   const shortHref = () => withQuery(paths.tripShortlist(id), carried());
   const tripHref = () => withQuery(paths.trip(id), carried());
@@ -193,6 +210,11 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   const searchedKey = `epic.trip.${id}.searched`;
   const collapsedKey = `epic.trip.${id}.ideasCollapsed`;
   const sigKey = `epic.trip.${id}.searchSig`;
+  // A durable record that this trip is still awaiting its first scan. `?new=1` and the
+  // in-memory marker are both lost once the user leaves the trip and reloads, so on
+  // their own the promised first-search scan is skipped for good on return; this flag
+  // survives in storage and is cleared only when the scan actually runs (Codex).
+  const newKey = `epic.trip.${id}.new`;
   const [searched, setSearched] = useState(() => seededFlag(searchedKey));
 
   // The search stands until the route, the time or the mode changes; then it
@@ -209,19 +231,44 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   // Just created, so the scan should run once when the itinerary first opens:
   // `?new=1` on the direct route, or the in-memory marker for the ones that
   // reach the itinerary indirectly (e.g. via Getting there), on either platform.
-  const justCreated = query.get('new') === '1' || justCreatedTrips.has(id);
+  const justCreated = query.get('new') === '1' || justCreatedTrips.has(id) || seededFlag(newKey);
+  // Persist the creation marker the first time it is seen, so it outlives `?new` and
+  // the in-memory set across a leave-and-reload (Codex). onScanDone clears it.
+  useEffect(() => { if (justCreated && !seededFlag(newKey)) setFlag(newKey, true); }, [justCreated, newKey]);
   const [needsRescan, setNeedsRescan] = useState(false);
+  // The scan only ever runs where there is a route to search along.
+  const canSearch = Boolean(trip.origin?.lat != null || trip.base?.lat != null);
   useEffect(() => {
     // The signature is kept in memory as well as the device store, so a
     // route/time/mode change is caught even where storage is blocked (Codex).
     let prev: string | null = searchSigs.get(id) ?? null;
     if (prev == null) prev = storage.getItem(sigKey);
     if (prev === searchSig) return;
-    searchSigs.set(id, searchSig);
-    storage.setItem(sigKey, searchSig);
-    // A change from a known signature is a re-search; a first sighting is not.
-    if (prev != null) { setSearched(false); setFlag(searchedKey, false); setNeedsRescan(true); }
-  }, [searchSig, sigKey, searchedKey, id]);
+    if (prev == null) {
+      // A first sighting is not a re-search: baseline the signature so a *later*
+      // change is caught, raising no pending scan. But NOT while the trip is still
+      // awaiting its first scan (`justCreated`) — baselining then would record it as
+      // searched and skip that scan if the marker is later lost; onScanDone commits
+      // the signature once the scan has run (Codex).
+      if (!justCreated) { searchSigs.set(id, searchSig); storage.setItem(sigKey, searchSig); }
+      return;
+    }
+    // A known signature changed → a re-search is pending. Do NOT store the new
+    // signature yet: the scan is deferred until an ideas tab is opened, and if the
+    // bare trip is reloaded first the stored (old) signature must still differ so
+    // this fires again. onScanDone commits the signature once the scan runs (Codex).
+    setSearched(false); setFlag(searchedKey, false); setNeedsRescan(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchSig, sigKey, searchedKey, id, justCreated]);
+  // Whether a scan is pending, read SYNCHRONOUSLY during render — never from the
+  // `needsRescan` state alone, which the signature effect only queues and so lags a
+  // render behind. Comparing the stored signature to the trip's current one here means
+  // a route/time/mode change is known on the very first render, so a direct ideas
+  // route or a refreshed interrupted scan starts the scan instead of being marked
+  // searched (Codex). A pending scan is a genuinely new trip, or such a change.
+  const storedSig = searchSigs.get(id) ?? storage.getItem(sigKey);
+  const sigChanged = storedSig != null && storedSig !== searchSig;
+  const scanPending = canSearch && (justCreated || needsRescan || sigChanged);
   const [scanning, setScanning] = useState(false);
   const [ideasCollapsed, setIdeasCollapsed] = useState(() => seededFlag(collapsedKey));
   const [minsOpen, setMinsOpen] = useState(false);
@@ -370,7 +417,17 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   // The feed and shortlist need the pools; the searched trip stage needs them
   // too, so the "Back to ideas" bar shows real counts rather than 0; and a
   // ?place= deep link needs them to resolve the place it names (Codex).
-  useEffect(() => { if (section === 'ideas' || section === 'shortlist' || place || (section == null && searched)) loadPools(); }, [section, searched, place, loadPools]);
+  // While a scan is pending the scan's own forced load is the only one that runs;
+  // the generic load stands aside for EVERY section, not just ideas. On a pending
+  // trip, loading here would either show pools computed for a route/mode that is
+  // about to be re-searched, or — after a Shortlist visit populated them — be
+  // repeated by the forced load a scan then starts, since a forced load bypasses the
+  // in-flight guard and fires both requests again (Codex). It resumes once the scan
+  // has run and cleared the pending signal.
+  useEffect(() => {
+    if (scanPending) return;
+    if (section === 'ideas' || section === 'shortlist' || place || (section == null && searched)) loadPools();
+  }, [section, searched, place, scanPending, loadPools]);
 
   // A new mode is a new pool: the detour minutes come back computed for it, so
   // the cards, counts and zone must all be refetched, not just re-filtered — a
@@ -384,32 +441,51 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
     loadPools(true);
   }, [by, loadPools]);
 
-  // Landing on the feed or the shortlist — a shared link, say — is discovery
-  // already done: mark it so the trip does not force a scan on Back to my trip
-  // (Codex). The route/time/mode signature is still what re-runs it later.
+  // Reaching an ideas route with nothing already running. A scan selectTab started
+  // is navigating through here too; `!scanning` stands aside for it. Otherwise there
+  // are two cases (Codex):
+  //  - a scan is PENDING (a genuinely new trip, or a changed route/time/mode) that
+  //    arrived here directly — a shared link, or a refresh mid-scan that reset
+  //    `scanning` to false: run it here rather than marking the trip searched, or
+  //    the required search is skipped for good;
+  //  - nothing pending — landing here is discovery already done, so mark it searched
+  //    and do not replay the scan. Shortlist is never marked: opening it first must
+  //    not skip the scan a later Activities/Food open still needs.
   useEffect(() => {
-    if ((section === 'ideas' || section === 'shortlist') && !searched) { setSearched(true); setFlag(searchedKey, true); }
-  }, [section, searched, searchedKey]);
+    if (section !== 'ideas' || searched || scanning) return;
+    if (scanPending) { setScanning(true); loadPools(true); }
+    else { setSearched(true); setFlag(searchedKey, true); }
+  }, [section, searched, scanning, scanPending, searchedKey, loadPools]);
 
-  // First arrival after a trip is created, or after its route/time/mode changed:
-  // run the scan once. Not on a plain reopen, not on the back button (owner,
-  // 29 Sep 2026). `?new=1` is consumed so a refresh does not replay it.
+  // A new trip arrives on 6a with nothing selected (nav). The scan runs the first
+  // time an Activities/Food tab is OPENED (selectTab), inside the map — not on
+  // arrival — so the "new" marker must survive arrival and be consumed only when
+  // the scan actually completes (onScanDone). A trip that can't be searched will
+  // never scan, so clear its marker here rather than leave `?new` in the address.
   useEffect(() => {
-    if (section == null && (justCreated || needsRescan) && !scanning) {
-      setScanning(true);
-      loadPools(true);
-      setNeedsRescan(false);
-      // Consume both markers so a refresh or a return does not replay the scan.
+    if (section == null && justCreated && !canSearch) {
       justCreatedTrips.delete(id);
+      setFlag(newKey, false);
       if (query.get('new')) setQuery({ new: null }, { replace: true });
     }
-  }, [section, justCreated, needsRescan, scanning, loadPools, setQuery, id, query]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [section, justCreated, canSearch, id, newKey]);
 
   const onScanDone = () => {
+    // The scan plays inside the map while the drawer rises (nav 6e); when it ends
+    // the tab is already open, so there is nothing to navigate to — just stop, and
+    // retire the pending signal so it does not replay on the next tab-open or return.
     setScanning(false);
     setSearched(true);
     setFlag(searchedKey, true);
-    navigate(feedHref('activities'));
+    setNeedsRescan(false);
+    // Commit the signature only now the scan for it has actually run, so a reload
+    // before the scan still sees the old signature and re-arms the rescan (Codex).
+    searchSigs.set(id, searchSig);
+    storage.setItem(sigKey, searchSig);
+    justCreatedTrips.delete(id);
+    setFlag(newKey, false);
+    if (query.get('new')) setQuery({ new: null }, { replace: true });
   };
 
   // --- transitions -------------------------------------------------------
@@ -658,57 +734,216 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   // reconcile loop, which still has to know a set-aside place is a server row.
   const activeRefs = useMemo(() => { const s = new Set(shortlistRefs); for (const r of asideRefs) s.delete(r); return s; }, [shortlistRefs, asideRefs]);
   const nHearts = activeRefs.size;
-  const canSearch = Boolean(trip.origin?.lat != null || trip.base?.lat != null);
   // The destination counts once: as a day stop if it was seeded, else as its own row.
   const nStops = addedStops.length + (dest ? 1 : 0);
+
+  // ---- the trip tab, the shrinking map and the drawer (nav 6a–6c / 7b) -------
+  // One screen. The selected tab is read from the address so a link lands on it;
+  // nothing selected (a bare trip) is 6a. Tapping a tab moves the marker, shrinks
+  // the map and raises the drawer; tapping it again returns to 6a.
+  const sel: TripTab | null = section === 'ideas' ? lastTab : section === 'shortlist' ? 'shortlist' : section === 'stays' ? 'stays' : null;
+  const browsing = sel != null;
+  const staysHref = () => withQuery(paths.trip(id, 'stays'), carried());
+  const tripContextLine = [
+    dateLabel(trip.startDate ?? trip.departAt, trip.timezone),
+    d.attendees.length ? `${d.attendees.length} ${d.attendees.length === 1 ? 'person' : 'people'}` : null,
+    `${nStops} ${nStops === 1 ? 'stop' : 'stops'}`,
+  ].filter(Boolean).join(' · ');
+  const selectTab = useCallback((t: TripTab) => {
+    if (t === sel) { navigate(tripHref()); return; }             // tap the selected tab again → 6a
+    // The scan runs inside the map while the drawer rises (6e), but only on a real
+    // pending signal — a genuinely new trip, or a route/time/mode change — and only
+    // for the two tabs that use the pools. An existing trip with no pending signal
+    // (a plain reopen, a new device, storage off) must NOT rescan (Codex); and Stays
+    // consumes no pool, so opening it first must not fire the activities-and-food search.
+    if (scanPending && !scanning && (t === 'activities' || t === 'food')) {
+      setScanning(true); loadPools(true);
+    }
+    navigate(t === 'shortlist' ? shortHref() : t === 'stays' ? staysHref() : feedHref(t));
+    // `by` is here because the hrefs carry it (carried()); without it a tab tapped
+    // after a mode change serialises the stale mode and reverts the pick (Codex).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel, scanPending, scanning, navigate, id, detour, dayId, by, loadPools]);
+
+  // The drawer snaps between three heights; the map shows through the strip above
+  // it (MapGL fits its pins into that strip via `coverBottom`). Dragging it to its
+  // lowest point deselects the tab and returns to The day (owner, 30 Sep 2026).
+  const [areaH, setAreaH] = useState(0);
+  // The three detents, always inside the measured area and always leaving a strip
+  // of map above the drawer. A phone in landscape can be shorter than the natural
+  // sizes, so each is capped at `areaH - STRIP`; the absolutely-positioned drawer
+  // must never grow past the area and cover the ink menu, nor hand MapGL a bottom
+  // padding larger than its own height (Codex). Before the first layout (areaH 0)
+  // they fall back to 224 so the drawer opens at its collapsed height, not zero.
+  const STRIP = 96;                                          // 7b/7c: the minimum map strip
+  const FULL = areaH > 0 ? Math.max(0, areaH - STRIP) : 224; // tallest the drawer goes
+  const COLLAPSED = Math.min(224, FULL);                     // 6a: The day; map large
+  const DEFAULT = Math.min(Math.max(COLLAPSED, areaH - 210), FULL); // 6b/6c: map ~210px
+  const drawerH = useRef(new Animated.Value(COLLAPSED)).current;
+  const drawerHNow = useRef(COLLAPSED);
+  const snapRef = useRef({ COLLAPSED, DEFAULT, FULL, browsing });
+  snapRef.current = { COLLAPSED, DEFAULT, FULL, browsing };
+  // Held in a ref so the retained PanResponder / snapTo always return to The day
+  // with the current detour and day in the address, not the ones from first
+  // render (Codex): dragging the drawer closed must not reset those choices.
+  const backToDay = useRef(() => {});
+  backToDay.current = () => navigate(tripHref());
+  const [coverBottom, setCoverBottom] = useState(COLLAPSED);
+  // The covered height tracks the drawer through drags AND snap animations, not just
+  // at the settled detent, so the map's fit and its labels keep clear of the drawer
+  // as it moves rather than jumping when the gesture ends (Codex). Rounded to the
+  // fit's own 24px step so it re-renders/refits at most once a step, not once a frame.
+  useEffect(() => {
+    const l = drawerH.addListener(({ value }) => {
+      drawerHNow.current = value;
+      setCoverBottom((prev) => (Math.round(prev / 24) === Math.round(value / 24) ? prev : value));
+    });
+    return () => drawerH.removeListener(l);
+  }, [drawerH]);
+  const snapTo = useCallback((h: number, mayDeselect = false) => {
+    Animated.spring(drawerH, { toValue: h, useNativeDriver: false, bounciness: 1, speed: 18 }).start();
+    // The listener above tracks the covered height as the spring runs; set the exact
+    // final value here too so it lands precisely on the detent.
+    setCoverBottom(h);
+    if (mayDeselect && h <= snapRef.current.COLLAPSED + 1 && snapRef.current.browsing) backToDay.current();
+  }, [drawerH]);
+  // Rise when a tab opens, settle to The day when none is selected.
+  useEffect(() => { if (areaH > 0) snapTo(browsing ? DEFAULT : COLLAPSED); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [browsing, areaH]);
+  // The height at the start of a drag; `g.dy` is cumulative, so it is subtracted
+  // from this fixed value, not from the live (already-moved) height (Codex).
+  const dragStartH = useRef(COLLAPSED);
+  const pan = useRef(PanResponder.create({
+    onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 5 && Math.abs(g.dy) > Math.abs(g.dx),
+    onPanResponderGrant: () => { drawerH.stopAnimation((v) => { dragStartH.current = v; }); dragStartH.current = drawerHNow.current; },
+    onPanResponderMove: (_e, g) => { const { COLLAPSED: c, FULL: f } = snapRef.current; drawerH.setValue(Math.max(c, Math.min(f, dragStartH.current - g.dy))); },
+    onPanResponderRelease: () => {
+      const { COLLAPSED: c, DEFAULT: d2, FULL: f } = snapRef.current;
+      const h = Math.max(c, Math.min(f, drawerHNow.current));
+      const nearest = [c, d2, f].reduce((a, b) => (Math.abs(b - h) < Math.abs(a - h) ? b : a), c);
+      snapTo(nearest, true);
+    },
+  })).current;
+
+  // Pins follow the drawer (owner, 30 Sep 2026): the map shows a small window of
+  // the cards near where the drawer is scrolled — never all of them at once —
+  // and the window slides as you scroll. The order is the list the drawer draws.
+  const WINDOW = 5;
+  const [winStart, setWinStart] = useState(0);
+  useEffect(() => { setWinStart(0); }, [sel]);
+  const onDrawerScroll = useCallback((y: number, vh: number, ch: number) => {
+    const n = browseOrderRef.current.length;
+    if (n <= WINDOW) { setWinStart(0); return; }
+    const f = ch > vh ? Math.max(0, Math.min(1, y / (ch - vh))) : 0;
+    setWinStart(Math.round(f * (n - WINDOW)));
+  }, []);
+  // A shelf scrolled sideways: start the pin window at that card, so on the horizontal
+  // shelves the pins track what is on screen and not only the vertical position (Codex).
+  const onCardFocus = useCallback((ref: string) => {
+    const order = browseOrderRef.current;
+    const i = order.findIndex((c) => c.ref === ref);
+    if (i >= 0) setWinStart(Math.min(i, Math.max(0, order.length - WINDOW)));
+  }, []);
+  // (a ref lets the scroll handler read the order's length without being rebuilt.)
+  const browseOrderRef = useRef<FeedCard[]>([]);
+  const browseOrder = useMemo<FeedCard[]>(() => {
+    if (sel === 'shortlist') return shownShort;
+    if (sel === 'activities' || sel === 'food') {
+      // A thin band (fewer than five) puts its cards in `feed.thin.items` and
+      // leaves `feed.rows` empty, so read that too or those pins go missing (Codex).
+      if (feed?.thin) return feed.thin.items;
+      const seen = new Set<string>(); const out: FeedCard[] = [];
+      for (const r of feed?.rows ?? []) for (const c of r.items) if (!seen.has(c.ref)) { seen.add(c.ref); out.push(c); }
+      return out;
+    }
+    return [];
+  }, [sel, feed, shownShort]);
+  browseOrderRef.current = browseOrder;
+  // When the shown order shrinks without the tab changing — a narrower shortlist
+  // filter, a smaller detour, a walking mode — a high `winStart` from an earlier
+  // scroll would slice past the end and show no pins at all. Clamp it back inside
+  // the new length so the window still lands on visible cards (Codex).
+  useEffect(() => {
+    setWinStart((s) => Math.min(s, Math.max(0, browseOrder.length - WINDOW)));
+  }, [browseOrder.length]);
+  // Every browse pin — activities, food and shortlist alike — opens the place's
+  // details drawer, and the open place is what the map highlights and focuses. In
+  // the drawer the shortlist has no map callout of its own and its rows open details
+  // directly, so a pin that only tinted a row would do nothing useful (Codex); one
+  // action, `place`, keeps rows, pins and focus consistent across all four tabs.
+  const browseSel = place;
+  const browseMarkers = useMemo<MapMarker[]>(() =>
+    browseOrder.slice(winStart, winStart + WINDOW)
+      .filter((c) => c.lat != null && c.lng != null)
+      .map((c) => ({
+        id: c.ref, lat: c.lat as number, lng: c.lng as number, kind: 'pin' as const,
+        selected: c.ref === browseSel,
+        onPress: () => setPlace(c.ref),
+      })),
+    [browseOrder, winStart, browseSel]);
+  // On the map: the full trip on arrival (home, destination, stops); while
+  // browsing, home and destination plus the drawer's current window of pins.
+  const mapMarkers = useMemo<MapMarker[]>(() => {
+    if (!browsing) return tripMarkers;
+    return [...tripMarkers.filter((m) => m.id === 'start' || m.id === 'dest'), ...browseMarkers];
+  }, [browsing, tripMarkers, browseMarkers]);
 
   // =======================================================================
   return (
     <View ref={frameRef} style={styles.frame} collapsable={false}>
-      {/* ---- Trip stage: the map and the timeline ---- */}
-      <Animated.View
-        pointerEvents={stage === 'trip' || stage === 'search' ? 'auto' : 'none'}
-        style={[StyleSheet.absoluteFill, { opacity: feedIn.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }]}
-      >
-        <Animated.View style={[styles.tripMap, { transform: [{ scale: feedIn.interpolate({ inputRange: [0, 1], outputRange: [1, 0.8] }) }] }]}>
-          {/* The map is drawn under the status bar and the destination's label
-              chip hangs above its pin, so the fit is padded well clear of the top
-              — else the destination sits under the clock and reads cut off
-              (owner, 30 Sep 2026). The generous padding also zooms the fit out a
-              step so home, the destination and the zone between them are all in
-              view, "the full area". */}
-          <MapGL markers={tripMarkers} routes={routeLine} shade={scanning || searched ? zone : null} fitKey={`trip-${searched}-${tripMarkers.map((mk) => mk.id).join(',')}`} padding={{ top: 104, bottom: 64, left: 48, right: 48 }} />
-          {stage === 'search' ? <ScanBox minutes={detour} act={poolCounts.act} food={poolCounts.food} onDone={onScanDone} /> : null}
-        </Animated.View>
-
-        <Animated.View style={[styles.tripSheet, { transform: [{ translateY: feedIn.interpolate({ inputRange: [0, 1], outputRange: [0, 1000] }) }] }]}>
-          <ScrollView contentContainerStyle={styles.sheetInner} showsVerticalScrollIndicator={false}>
-            <View style={styles.grab} />
-            <View style={styles.tripHead}>
-              <Press onPress={onBack} style={styles.headBtn} accessibilityRole="button" accessibilityLabel="Trips"><Icon name="back" size={20} color={INK} /></Press>
-              <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
-                <Text style={styles.tripName} numberOfLines={2}>{trip.title ?? destShortName(trip)}</Text>
-                <View style={styles.tripMeta}>
-                  <Text style={styles.metaText}>{dateLabel(trip.startDate ?? trip.departAt, trip.timezone)} ·</Text>
-                  <Icon name={modeIcon(trip.travelMode)} size={14} color={MUTED} />
-                  {trip.journey?.minutes ? <Text style={styles.metaText}>{trip.journey.minutes} min each way</Text> : null}
-                </View>
-              </View>
-              {onMenu ? <Press onPress={onMenu} style={styles.headBtn} accessibilityRole="button" accessibilityLabel="More"><Icon name="menu" size={20} color={INK} /></Press> : null}
+      {/* ---- The trip (nav 6a–6c): band · ink menu · map · drawer ---- */}
+      <CompactBand
+        title={trip.title ?? destShortName(trip)}
+        titleLines={2}
+        context={tripContextLine}
+        onBack={onBack}
+        right={<MicTile onPress={() => navigate(paths.say({ for: 'trip' }))} />}
+      />
+      <InkMenu<TripTab>
+        tabs={[
+          { key: 'activities', label: 'Activities' },
+          { key: 'food', label: 'Food' },
+          { key: 'stays', label: 'Stays' },
+          { key: 'shortlist', label: 'Shortlist', count: nHearts || undefined },
+        ]}
+        selected={sel}
+        onSelect={selectTab}
+      />
+      <View style={styles.mapDrawerArea} onLayout={(e) => setAreaH(e.nativeEvent.layout.height)}>
+        <View style={StyleSheet.absoluteFill}>
+          <MapGL
+            markers={mapMarkers}
+            routes={routeLine}
+            shade={browsing || scanning || searched ? zone : null}
+            focusId={browsing ? browseSel : place}
+            // The drawer covers the bottom, so the fit reserves that much plus a
+            // margin — else the pins land behind the drawer and the strip is blank
+            // (Codex). The detent is in the key so it refits when the drawer moves.
+            fitKey={`trip-${sel ?? 'day'}-${Math.round(coverBottom / 24)}-${mapMarkers.map((mk) => mk.id).join(',')}`}
+            padding={{ top: 24, bottom: coverBottom + 24, left: 44, right: 44 }}
+            coverBottom={coverBottom}
+          />
+          {/* The X-ray scan plays inside the strip of map above the drawer (6e). */}
+          {scanning ? (
+            <View style={[styles.scanArea, { bottom: coverBottom }]} pointerEvents="none">
+              <ScanBox minutes={detour} act={poolCounts.act} food={poolCounts.food} ready={pools != null || poolError} onDone={onScanDone} />
             </View>
+          ) : null}
+        </View>
 
-            {d.attendees.length ? (
-              <View style={styles.whoRow}>
-                <View style={{ flexDirection: 'row' }}>
-                  {d.attendees.slice(0, 4).map((a, i) => (
-                    <View key={a.id} style={[styles.avatar, { backgroundColor: i === 0 ? LIME : NEUTRAL, marginLeft: i ? -6 : 0 }]}>
-                      <Text style={styles.avatarText}>{a.name.slice(0, 1).toUpperCase()}</Text>
-                    </View>
-                  ))}
-                </View>
-                <Text style={styles.whoText}>{whoLine(d.attendees, household)}</Text>
-              </View>
+        <Animated.View style={[styles.drawer, { height: drawerH }]}>
+          <View style={styles.handleWrap} {...pan.panHandlers}>
+            <View style={styles.grab} />
+            {/* Drag the drawer down to its lowest point to return to The day; the
+                handle names it so people know it is there (owner, 30 Sep 2026). */}
+            {browsing ? (
+              <Press onPress={() => navigate(tripHref())} style={styles.handleHint} accessibilityRole="button" accessibilityLabel="Back to The day">
+                <Icon name="collapse" size={12} color={MUTED} /><Text style={styles.handleHintText}>The day</Text>
+              </Press>
             ) : null}
+          </View>
+
+          {sel == null ? (
+            <ScrollView contentContainerStyle={styles.dayInner} showsVerticalScrollIndicator={false}>
 
             {days.length > 1 ? (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dayStrip}>
@@ -725,7 +960,17 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
                 })}
               </ScrollView>
             ) : null}
-            <Text style={styles.dayKicker}>{days.length > 1 && day ? dateLabel(day.date) : 'The day'} · {nStops} {nStops === 1 ? 'stop' : 'stops'}</Text>
+            <View style={styles.dayKickerRow}>
+              <Text style={styles.dayKicker}>{days.length > 1 && day ? dateLabel(day.date) : 'The day'} · {nStops} {nStops === 1 ? 'stop' : 'stops'}</Text>
+              {/* The trip's secondary actions — who's coming, getting there, share,
+                  delete — live behind this one control (owner: a ⋯ menu home). The
+                  mic in the band is voice; this is the menu, each doing what it says. */}
+              {onMenu ? (
+                <Press onPress={onMenu} style={styles.dayMore} accessibilityRole="button" accessibilityLabel="More trip actions">
+                  <Icon name="menu" size={18} color={MUTED} />
+                </Press>
+              ) : null}
+            </View>
             <View style={styles.timeline}>
               <View style={styles.spine} />
               {timeline.rows.map((r) => (
@@ -768,92 +1013,65 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
                 )
               ))}
             </View>
-          </ScrollView>
-
-          {/* Back to ideas bar / the collapsed Ideas button. It is the entry to
-              the feed, so it shows whenever the trip can be searched; its counts
-              appear once the search has run. */}
-          {canSearch && !ideasCollapsed ? (
-            <View style={styles.ideasBar}>
-              {/* Never searched: this is the discovery moment, so run the X-ray
-                  scan first; once searched, it goes straight back to the feed. */}
-              <Press onPress={() => { if (!searched && !scanning) { setScanning(true); loadPools(true); } else navigate(feedHref(lastTab)); }} style={styles.ideasMain} accessibilityRole="button">
-                <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-                  <Text style={styles.ideasTitle}>{searched ? 'Back to ideas' : 'See ideas nearby'}</Text>
-                  <Text style={styles.ideasSub} numberOfLines={1}>{searched ? `${poolCounts.act} things to do · ${poolCounts.food} places to eat` : 'Things to do and places to eat near your trip'}</Text>
-                </View>
-                {nHearts ? (
-                  <View style={styles.ideasHearts}>
-                    <Svg width={16} height={16} viewBox="0 0 24 24"><Path d={HEART_PATH} fill={LIME} stroke={LIME} strokeWidth={2.2} strokeLinejoin="round" /></Svg>
-                    <Text style={styles.ideasHeartsN}>{nHearts}</Text>
-                  </View>
-                ) : null}
-                <Icon name="forward" size={18} color={CREAM} />
-              </Press>
-              <Press onPress={() => { setIdeasCollapsed(true); setFlag(collapsedKey, true); }} style={styles.ideasDone} accessibilityRole="button">
-                <Text style={styles.ideasDoneText}>Done</Text><Icon name="expand" size={14} color={CREAM} />
-              </Press>
+            </ScrollView>
+          ) : sel === 'shortlist' ? (
+            <ShortlistView
+              drawer onScroll={onDrawerScroll}
+              cards={shownShort} allCards={shortlistCards.filter((c) => c.status !== 'set_aside')} aside={asideCards} show={show} sel={place} markers={shortMarkers} zone={zone}
+              trip={trip} nStops={nStops} homeBy={homeBy} homeWord={fromBase ? 'back' : 'home'}
+              onBack={() => navigate(tripHref())}
+              onShow={(v) => setShow(v === 'all' ? null : v)}
+              onSelect={(ref) => setShortSel((s) => (s === ref ? null : ref))}
+              onDetails={(ref) => setPlace(ref)}
+              onAdd={addToTrip}
+              onBringBack={bringBack}
+              inTrip={(ref) => stopRefs.has(ref)}
+              onViewTrip={() => navigate(tripHref())}
+            />
+          ) : sel === 'stays' ? (
+            <ScrollView
+              contentContainerStyle={styles.staysInner}
+              showsVerticalScrollIndicator={false}
+              scrollEventThrottle={16}
+              onScroll={(e) => onDrawerScroll(e.nativeEvent.contentOffset.y, e.nativeEvent.layoutMeasurement.height, e.nativeEvent.contentSize.height)}
+            >
+              <StayPanel
+                d={d}
+                household={household}
+                onChanged={onChanged}
+                onFindNear={() => navigate(feedHref('activities'))}
+                openSearch={!(trip.base && trip.base.kind !== 'centre')}
+              />
+            </ScrollView>
+          ) : feed ? (
+            <FeedView
+              drawer onScroll={onDrawerScroll} onCardFocus={onCardFocus}
+              feed={feed} trip={trip} tab={sel as IdeasTab} detour={detour} minsOpen={minsOpen} pools={livePools}
+              by={by} onBy={setBy}
+              nHearts={nHearts} shortlistBtnRef={shortlistBtnRef}
+              heartOf={(ref) => activeRefs.has(ref)}
+              onBackToTrip={() => navigate(tripHref())}
+              onShortlist={() => navigate(shortHref())}
+              onTab={(t) => navigate(feedHref(t))}
+              onDetour={(m) => { setDetour(m); setMinsOpen(false); }}
+              onToggleMins={() => setMinsOpen((v) => !v)}
+              onHeart={toggleHeart}
+              onOpen={(ref) => setPlace(ref)}
+            />
+          ) : (
+            <View style={styles.loading}>
+              {poolError ? (
+                <>
+                  <Text style={styles.metaText}>We couldn't find places just now.</Text>
+                  <Press onPress={() => loadPools(true)} style={styles.retryBtn} accessibilityRole="button"><Icon name="refresh" size={16} color={CREAM} /><Text style={styles.retryText}>Try again</Text></Press>
+                </>
+              ) : (
+                <Text style={styles.metaText}>Finding places near your trip…</Text>
+              )}
             </View>
-          ) : null}
-          {canSearch && ideasCollapsed ? (
-            <Press onPress={() => { setIdeasCollapsed(false); setFlag(collapsedKey, false); }} style={styles.ideasMini} accessibilityRole="button">
-              <Icon name="inspire" size={15} color={INK} /><Text style={styles.ideasMiniText}>Ideas</Text><Icon name="collapse" size={13} color={INK} />
-            </Press>
-          ) : null}
+          )}
         </Animated.View>
-      </Animated.View>
-
-      {/* ---- Feed stage ---- */}
-      <Animated.View
-        pointerEvents={stage === 'feed' ? 'auto' : 'none'}
-        style={[StyleSheet.absoluteFill, styles.feed, { opacity: feedIn }]}
-      >
-        {feed ? (
-          <FeedView
-            feed={feed} trip={trip} tab={lastTab} detour={detour} minsOpen={minsOpen} pools={livePools}
-            by={by} onBy={setBy}
-            nHearts={nHearts} shortlistBtnRef={shortlistBtnRef}
-            heartOf={(ref) => activeRefs.has(ref)}
-            onBackToTrip={() => navigate(tripHref())}
-            onShortlist={() => navigate(shortHref())}
-            onTab={(t) => navigate(feedHref(t))}
-            onDetour={(m) => { setDetour(m); setMinsOpen(false); }}
-            onToggleMins={() => setMinsOpen((v) => !v)}
-            onHeart={toggleHeart}
-            onOpen={(ref) => setPlace(ref)}
-          />
-        ) : (
-          <View style={styles.loading}>
-            {poolError ? (
-              <>
-                <Text style={styles.metaText}>We couldn't find ideas just now.</Text>
-                <Press onPress={() => loadPools(true)} style={styles.retryBtn} accessibilityRole="button"><Icon name="refresh" size={16} color={CREAM} /><Text style={styles.retryText}>Try again</Text></Press>
-              </>
-            ) : (
-              <Text style={styles.metaText}>Finding ideas near your trip…</Text>
-            )}
-          </View>
-        )}
-      </Animated.View>
-
-      {/* ---- Shortlist stage ---- */}
-      <Animated.View
-        pointerEvents={stage === 'short' ? 'auto' : 'none'}
-        style={[StyleSheet.absoluteFill, styles.short, { transform: [{ translateX: shortIn.interpolate({ inputRange: [0, 1], outputRange: [wide ? 0 : 500, 0] }) }], opacity: shortIn }]}
-      >
-        <ShortlistView
-          cards={shownShort} allCards={shortlistCards.filter((c) => c.status !== 'set_aside')} aside={asideCards} show={show} sel={shortSel} markers={shortMarkers} zone={zone}
-          trip={trip} nStops={nStops} homeBy={homeBy} homeWord={fromBase ? 'back' : 'home'}
-          onBack={() => navigate(feedHref(lastTab))}
-          onShow={(v) => setShow(v === 'all' ? null : v)}
-          onSelect={(ref) => setShortSel((s) => (s === ref ? null : ref))}
-          onDetails={(ref) => setPlace(ref)}
-          onAdd={addToTrip}
-          onBringBack={bringBack}
-          inTrip={(ref) => stopRefs.has(ref)}
-          onViewTrip={() => navigate(tripHref())}
-        />
-      </Animated.View>
+      </View>
 
       {/* ---- Details / place drawer ---- */}
       {drawerItem ? (
@@ -895,11 +1113,11 @@ function PhotoCredit({ text }: { text: string | null }) {
 }
 
 /** The scan, sized to its own box so it can measure the map area it draws over. */
-function ScanBox({ minutes, act, food, onDone }: { minutes: number; act: number; food: number; onDone: () => void }) {
+function ScanBox({ minutes, act, food, ready, onDone }: { minutes: number; act: number; food: number; ready: boolean; onDone: () => void }) {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   return (
     <View style={StyleSheet.absoluteFill} onLayout={(e) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })} pointerEvents="none">
-      {size ? <ScanOverlay width={size.w} height={size.h} minutes={minutes} act={act} food={food} onDone={onDone} /> : null}
+      {size ? <ScanOverlay width={size.w} height={size.h} minutes={minutes} act={act} food={food} ready={ready} onDone={onDone} /> : null}
     </View>
   );
 }
@@ -907,10 +1125,19 @@ function ScanBox({ minutes, act, food, onDone }: { minutes: number; act: number;
 // ---------------------------------------------------------------------------
 // The feed
 // ---------------------------------------------------------------------------
-function FeedView({ feed, trip, tab, detour, by, onBy, minsOpen, pools, nHearts, shortlistBtnRef, heartOf, onBackToTrip, onShortlist, onTab, onDetour, onToggleMins, onHeart, onOpen }: {
+function FeedView({ feed, trip, tab, detour, by, onBy, minsOpen, pools, nHearts, shortlistBtnRef, drawer, onScroll, onCardFocus, heartOf, onBackToTrip, onShortlist, onTab, onDetour, onToggleMins, onHeart, onOpen }: {
   feed: NonNullable<ReturnType<typeof buildFeed>>;
   trip: TripDetail['trip']; tab: IdeasTab; detour: number; by: TripMode; onBy: (m: TripMode) => void; minsOpen: boolean; pools: { activities: TripAlongPlace[]; food: TripAlongPlace[] } | null;
   nHearts: number; shortlistBtnRef: React.RefObject<any>;
+  /** In the trip drawer (nav 6b): the band, the toggle and the Back/Shortlist row
+   *  are gone — the trip's own band and ink menu do those jobs — so only the
+   *  context row and the shelves are drawn. */
+  drawer?: boolean;
+  onScroll?: (y: number, viewportH: number, contentH: number) => void;
+  /** A shelf scrolled horizontally: the ref of its first fully-visible card, so the
+   *  map's pin window follows the cards actually on screen, not just the vertical
+   *  scroll position (Codex). */
+  onCardFocus?: (ref: string) => void;
   heartOf: (ref: string) => boolean;
   onBackToTrip: () => void; onShortlist: () => void; onTab: (t: IdeasTab) => void; onDetour: (m: number) => void; onToggleMins: () => void;
   onHeart: (card: FeedCard, chip?: Element | null) => void; onOpen: (ref: string) => void;
@@ -919,6 +1146,7 @@ function FeedView({ feed, trip, tab, detour, by, onBy, minsOpen, pools, nHearts,
   const count = feed.count;
   return (
     <>
+      {drawer ? null : (
       <View style={styles.feedHead}>
         <Press onPress={onBackToTrip} style={styles.backBtn} accessibilityRole="button"><Icon name="back" size={18} color={CREAM} /><Text style={styles.backBtnText}>Back to my trip</Text></Press>
         <Press ref={shortlistBtnRef} onPress={onShortlist} style={styles.shortBtn} accessibilityRole="button">
@@ -929,8 +1157,10 @@ function FeedView({ feed, trip, tab, detour, by, onBy, minsOpen, pools, nHearts,
           <View style={styles.shortCount}><Text style={styles.shortCountText}>{nHearts}</Text></View>
         </Press>
       </View>
-      <Text style={styles.feedKicker}>{(trip.title ?? destShortName(trip))} · {dateLabel(trip.startDate ?? trip.departAt, trip.timezone)}</Text>
+      )}
+      {drawer ? null : <Text style={styles.feedKicker}>{(trip.title ?? destShortName(trip))} · {dateLabel(trip.startDate ?? trip.departAt, trip.timezone)}</Text>}
 
+      {drawer ? null : (
       <View style={styles.tabs}>
         {(['activities', 'food'] as IdeasTab[]).map((t) => (
           <Press key={t} onPress={() => onTab(t)} style={[styles.tab, { backgroundColor: tab === t ? LIME : INACTIVE }]} accessibilityRole="button" accessibilityState={{ selected: tab === t }}>
@@ -938,6 +1168,7 @@ function FeedView({ feed, trip, tab, detour, by, onBy, minsOpen, pools, nHearts,
           </Press>
         ))}
       </View>
+      )}
 
       {/* The car / walking / public-transport picker, restored (owner, 30 Sep
           2026). Changing it re-searches and recomputes the detour zone and the
@@ -974,7 +1205,13 @@ function FeedView({ feed, trip, tab, detour, by, onBy, minsOpen, pools, nHearts,
         ) : null}
       </View>
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 28 }} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: 28 }}
+        showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={onScroll ? (e) => onScroll(e.nativeEvent.contentOffset.y, e.nativeEvent.layoutMeasurement.height, e.nativeEvent.contentSize.height) : undefined}
+      >
         {feed.thin ? (
           <View style={styles.thinWrap}>
             <Text style={styles.thinTitle}>Only {feed.thin.count} {noun(tab)} within {detour} minutes of your trip</Text>
@@ -993,7 +1230,19 @@ function FeedView({ feed, trip, tab, detour, by, onBy, minsOpen, pools, nHearts,
                 <Text style={styles.rowTitle}>{row.title}</Text>
                 {row.sub ? <Text style={styles.metaText}>{row.sub}</Text> : null}
               </View>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rowScroll}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.rowScroll}
+                scrollEventThrottle={16}
+                onScroll={onCardFocus ? (e) => {
+                  // Card step is the 280px card plus the 12px shelf gap; the first
+                  // card in view is the one the pin window should start from.
+                  const i = Math.round(e.nativeEvent.contentOffset.x / (CARD_W + 12));
+                  const c = row.items[Math.max(0, Math.min(row.items.length - 1, i))];
+                  if (c) onCardFocus(c.ref);
+                } : undefined}
+              >
                 {row.items.map((c) => <FeedCardView key={c.ref} card={c} on={heartOf(c.ref)} onHeart={onHeart} onOpen={onOpen} />)}
               </ScrollView>
             </View>
@@ -1051,9 +1300,14 @@ function ThinCard({ card, on, onHeart, onOpen }: { card: FeedCard; on: boolean; 
 // ---------------------------------------------------------------------------
 // The shortlist
 // ---------------------------------------------------------------------------
-function ShortlistView({ cards, allCards, aside, show, sel, markers, zone, trip, nStops, homeBy, homeWord, onBack, onShow, onSelect, onDetails, onAdd, onBringBack, inTrip, onViewTrip }: {
+function ShortlistView({ cards, allCards, aside, show, sel, markers, zone, trip, nStops, homeBy, homeWord, drawer, onScroll, onBack, onShow, onSelect, onDetails, onAdd, onBringBack, inTrip, onViewTrip }: {
   cards: FeedCard[]; allCards: FeedCard[]; aside: FeedCard[]; show: ShortTab; sel: string | null; markers: MapMarker[]; zone: any;
   trip: TripDetail['trip']; nStops: number; homeBy: string; homeWord: string;
+  /** In the trip drawer (nav 6c): the shortlist's own map and its "View my trip"
+   *  bar are gone — the trip map above shows the pins and the ink menu does the
+   *  navigation — so only the header and the list are drawn. */
+  drawer?: boolean;
+  onScroll?: (y: number, viewportH: number, contentH: number) => void;
   onBack: () => void; onShow: (v: ShortTab) => void; onSelect: (ref: string) => void; onDetails: (ref: string) => void; onAdd: (c: FeedCard) => void; onBringBack: (ref: string) => void; inTrip: (ref: string) => boolean; onViewTrip: () => void;
 }) {
   const [asideOpen, setAsideOpen] = useState(false);
@@ -1083,6 +1337,7 @@ function ShortlistView({ cards, allCards, aside, show, sel, markers, zone, trip,
   ];
   return (
     <>
+      {drawer ? null : (
       <Animated.View style={[styles.shortMap, { height: mapH }]}>
         <MapGL markers={markers} routes={[]} shade={zone} focusId={sel} fitKey={`short-${markers.map((mk) => mk.id).join(',')}`} padding={{ top: 60, bottom: selCard ? 96 : 40, left: 30, right: 30 }} />
         <Press onPress={onBack} style={styles.floatBack} accessibilityRole="button" accessibilityLabel="Back to ideas"><Icon name="back" size={20} color={INK} /></Press>
@@ -1099,17 +1354,20 @@ function ShortlistView({ cards, allCards, aside, show, sel, markers, zone, trip,
           </Press>
         ) : null}
       </Animated.View>
+      )}
 
-      {/* The divider between map and list is the handle: tap to grow the map to
-          work it, tap again to give the list the room back (owner, 30 Sep 2026). */}
+      {drawer ? null : (
       <Press onPress={() => setMapBig((v) => !v)} style={styles.mapGrab} accessibilityRole="button" accessibilityLabel={mapBig ? 'Shrink the map, more list' : 'Expand the map'}>
         <View style={styles.mapGrabBar} />
       </Press>
+      )}
 
+      {drawer ? null : (
       <View style={styles.shortTitleRow}>
         <Text style={styles.shortTitle}>Shortlist</Text>
         <Text style={styles.metaText}>{allCards.length} {allCards.length === 1 ? 'place' : 'places'} · {trip.title ?? destShortName(trip)}</Text>
       </View>
+      )}
 
       <View style={styles.shortTabs}>
         {tabs.map((t) => (
@@ -1120,7 +1378,14 @@ function ShortlistView({ cards, allCards, aside, show, sel, markers, zone, trip,
         ))}
       </View>
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 96 }} showsVerticalScrollIndicator={false} onScrollBeginDrag={() => setMapBig(false)}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: drawer ? 24 : 96 }}
+        showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScrollBeginDrag={() => setMapBig(false)}
+        onScroll={onScroll ? (e) => onScroll(e.nativeEvent.contentOffset.y, e.nativeEvent.layoutMeasurement.height, e.nativeEvent.contentSize.height) : undefined}
+      >
         {!cards.length ? (
           <View style={styles.shortEmpty}>
             <Text style={styles.emptyTitle}>{!allCards.length ? 'Nothing on your shortlist yet' : show === 'food' ? 'No places to eat on your shortlist yet' : 'No activities on your shortlist yet'}</Text>
@@ -1134,7 +1399,10 @@ function ShortlistView({ cards, allCards, aside, show, sel, markers, zone, trip,
           // the day: adding it would reverse that decision (Codex).
           const rejected = c.status === 'full' || c.status === 'set_aside';
           return (
-            <Pressable key={c.ref} onPress={() => onSelect(c.ref)} style={[styles.shortRow, on && { backgroundColor: LIME_TINT }]}>
+            // In the drawer the shortlist has no map callout, so the row itself is
+            // the way into the place — its details, booking and status. Elsewhere a
+            // tap highlights the row and its pin, and the callout opens details (Codex).
+            <Pressable key={c.ref} onPress={() => (drawer ? onDetails(c.ref) : onSelect(c.ref))} style={[styles.shortRow, on && { backgroundColor: LIME_TINT }]}>
               <VenueThumb name={c.name} photos={c.photos} category={c.category} experiences={c.experiences} width={96} height={64} rounded={MEDIA_RADIUS} credit={false}>
                 <PhotoCredit text={c.photos[0]?.attribution ?? null} />
               </VenueThumb>
@@ -1183,6 +1451,7 @@ function ShortlistView({ cards, allCards, aside, show, sel, markers, zone, trip,
         ) : null}
       </ScrollView>
 
+      {drawer ? null : (
       <Press onPress={onViewTrip} style={styles.viewTripBar} accessibilityRole="button">
         <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
           <Text style={styles.ideasTitle}>View my trip</Text>
@@ -1190,6 +1459,7 @@ function ShortlistView({ cards, allCards, aside, show, sel, markers, zone, trip,
         </View>
         <Icon name="forward" size={18} color={CREAM} />
       </Press>
+      )}
     </>
   );
 }
@@ -1398,7 +1668,18 @@ const styles = StyleSheet.create({
   tripMap: { height: 400, position: 'relative' },
   tripSheet: { position: 'absolute', left: 0, right: 0, top: 400, bottom: 0, backgroundColor: CREAM },
   sheetInner: { paddingHorizontal: 20, paddingTop: 6, paddingBottom: 180 },
-  grab: { alignSelf: 'center', width: 40, height: 4, backgroundColor: GREY, marginTop: 4, marginBottom: 8 },
+  grab: { alignSelf: 'center', width: 40, height: 4, backgroundColor: GREY, marginTop: 4, marginBottom: 8, borderRadius: 2 },
+  // The trip (nav 6a–6c): the map fills this area and the drawer covers its
+  // bottom; the map shows through the strip above (MapGL coverBottom).
+  mapDrawerArea: { flex: 1, position: 'relative', backgroundColor: NEUTRAL },
+  scanArea: { position: 'absolute', left: 0, right: 0, top: 0 },
+  // The drawer: a bottom sheet with 18px top corners (nav §9), over the map.
+  drawer: { position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: CREAM, borderTopLeftRadius: 18, borderTopRightRadius: 18, shadowColor: INK, shadowOpacity: 0.16, shadowRadius: 18, shadowOffset: { width: 0, height: -6 }, overflow: 'hidden' },
+  handleWrap: { alignItems: 'center', paddingTop: 8, paddingBottom: 4 },
+  handleHint: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  handleHintText: { fontFamily: fonts.body, fontSize: 12, fontWeight: '600', color: MUTED },
+  dayInner: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 28 },
+  staysInner: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 28 },
   tripHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   headBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', marginTop: -2 },
   tripName: { fontFamily: fonts.heading, fontSize: 24, fontWeight: '800', letterSpacing: -0.72, lineHeight: 26, color: INK },
@@ -1408,7 +1689,9 @@ const styles = StyleSheet.create({
   avatar: { width: 26, height: 26, borderRadius: 13, borderWidth: 2, borderColor: CREAM, alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontFamily: fonts.body, fontSize: 11, fontWeight: '700', color: INK },
   whoText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: INK },
-  dayKicker: { fontFamily: fonts.body, fontSize: 11, fontWeight: '600', letterSpacing: 0.88, textTransform: 'uppercase', color: MUTED, marginTop: 18, marginBottom: 8 },
+  dayKickerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 18, marginBottom: 8 },
+  dayKicker: { fontFamily: fonts.body, fontSize: 11, fontWeight: '600', letterSpacing: 0.88, textTransform: 'uppercase', color: MUTED },
+  dayMore: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', marginRight: -6 },
   dayStrip: { gap: 8, marginTop: 16 },
   dayChip: { paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: GREY, gap: 2 },
   dayChipOn: { borderColor: INK, backgroundColor: LIME_TINT },

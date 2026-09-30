@@ -233,10 +233,12 @@ export type TripSection =
    * `legacyHref` redirects them to their new homes.
    */
   | 'ideas'
-  | 'find' | 'shortlist' | 'day' | 'stay' | 'group' | 'data';
+  // `stays` is the trip's fourth tab (nav 6a–6c, 30 Sep 2026): places to stay
+  // along the trip. Distinct from the ⋯-menu `stay` panel it is folding in.
+  | 'find' | 'shortlist' | 'stays' | 'day' | 'stay' | 'group' | 'data';
 export const TRIP_SECTIONS: TripSection[] = [
   'itinerary', 'places', 'map', 'chat', 'travel', 'share', 'stop',
-  'ideas', 'find', 'shortlist', 'day', 'stay', 'group', 'data',
+  'ideas', 'find', 'shortlist', 'stays', 'day', 'stay', 'group', 'data',
 ];
 /** The feed's two tabs, each its own address under `…/ideas/`. */
 export const IDEAS_TABS = ['activities', 'food'] as const;
@@ -905,11 +907,10 @@ export function isFullBleed(route: Route): boolean {
   // the notch and the home indicator into its own padding, the way a trip does.
   if (route.name === 'opening') return true;
   if (route.name !== 'trips' || route.creating || route.tripId == null) return false;
-  // The chat used to be the map collapsed to a strip (5e). It is a list of
-  // questions with a head of its own now (Chat screens D3, 13 Sep 2026), so it
-  // keeps the chrome like the other layers; it is not in TRIP_TABS because it
-  // is not a tab.
-  return route.section == null || TRIP_TABS.includes(route.section);
+  // The rebuilt trip is not full-bleed (nav, 30 Sep 2026): its compact band is
+  // the header and the map sits below it, not to every edge. Only the retired
+  // map-pin screen's sections (places/map/group) keep the full-bleed layout.
+  return route.section === 'places' || route.section === 'map' || route.section === 'group';
 }
 
 /**
@@ -967,10 +968,10 @@ export function ownsHeader(route: Route): boolean {
      * They keep the tab bar, unlike a full-bleed screen: they are still Trips.
      */
     if (!route.tripId) return true;
-    // The redesign's feed and shortlist draw their own heads — the feed's
-    // "Back to my trip"/"Shortlist" row, the shortlist's floating back button —
-    // so the shell must not draw a lime band over them (owner, 29 Sep 2026).
-    if (route.section === 'ideas' || route.section === 'shortlist') return true;
+    // The rebuilt trip draws its own compact lime band for all its tab states —
+    // 6a (nothing selected), Activities/Food/Stays and Shortlist — so the shell
+    // draws none over it (nav, 30 Sep 2026).
+    if (route.section == null || route.section === 'itinerary' || route.section === 'ideas' || route.section === 'shortlist' || route.section === 'stays') return true;
     return route.section === 'travel' || route.section === 'stop' || route.section === 'share' || route.section === 'chat';
   }
   return false;
@@ -1020,7 +1021,9 @@ export function isImmersive(route: Route, query?: URLSearchParams): boolean {
   // the trip experience lives in Trips, and its bottom bar is the five tabs).
   // A place drawer opening over either is a place view, and hides the bar the
   // way it does over the map.
-  if (route.section === 'ideas' || route.section === 'shortlist') return Boolean(query?.get('place'));
+  // The trip's browse tabs take the phone whole (nav 6b, 30 Sep 2026: "the tab
+  // bar hides while you browse"). 6a — nothing selected — keeps it.
+  if (route.section === 'ideas' || route.section === 'shortlist' || route.section === 'stays') return true;
   // The bare `/trips/<id>` is the map, and parses with no section at all.
   const onTheMap = route.section == null || route.section === 'map' || route.section === 'itinerary';
   // "Hidden during any trip browse, place view or full view" (handover v8,

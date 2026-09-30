@@ -150,13 +150,14 @@ test('the trip redesign: the feed is one address per tab, the shortlist keeps it
   // Up from the shortlist is the feed; up from the feed is the trip.
   assert.equal(parentOf(parseRoute('/trips/abc/shortlist')), '/trips/abc/ideas/activities');
   assert.equal(parentOf(parseRoute('/trips/abc/ideas/food')), '/trips/abc');
-  // Both are Trips, both keep the tab bar, neither is full-bleed.
+  // Both are Trips and neither is full-bleed (the band is the header). Browsing
+  // a tab takes the tab bar with it now (nav 6b, 30 Sep 2026: "the tab bar hides
+  // while you browse"); 6a — nothing selected — keeps it.
   assert.equal(tabOf(parseRoute('/trips/abc/ideas/activities')), 'trips');
   assert.equal(isFullBleed(parseRoute('/trips/abc/ideas/activities')), false);
   assert.equal(isFullBleed(parseRoute('/trips/abc/shortlist')), false);
-  assert.equal(isImmersive(parseRoute('/trips/abc/ideas/food'), new URLSearchParams()), false);
-  // A place drawer over either hides the tab bar, the way it does over the map.
-  assert.equal(isImmersive(parseRoute('/trips/abc/shortlist'), new URLSearchParams('place=osm:node/1')), true);
+  assert.equal(isImmersive(parseRoute('/trips/abc/ideas/food'), new URLSearchParams()), true);
+  assert.equal(isImmersive(parseRoute('/trips/abc/shortlist'), new URLSearchParams()), true);
   assert.equal(titleOf(parseRoute('/trips/abc/ideas/activities')), 'Trip — Ideas · Epic');
   assert.equal(titleOf(parseRoute('/trips/abc/shortlist')), 'Trip — Shortlist · Epic');
 });
@@ -192,11 +193,12 @@ test('the Trips list draws its own head now, so the shell draws none', () => {
   assert.equal(ownsHeader(parseRoute('/trips/new')), true);
   assert.equal(ownsHeader(parseRoute('/trips/abc/travel')), true);
   assert.equal(ownsHeader(parseRoute('/trips/abc/stop/x')), true);
-  // The trip itself is full-bleed — no header at all, and the tab bar over it.
-  assert.equal(ownsHeader(parseRoute('/trips/abc')), false);
-  // The redesign's feed and shortlist draw their own heads (owner, 29 Sep 2026).
+  // The rebuilt trip draws its own compact lime band (nav, 30 Sep 2026), so the
+  // shell draws none — on 6a and on every tab state.
+  assert.equal(ownsHeader(parseRoute('/trips/abc')), true);
   assert.equal(ownsHeader(parseRoute('/trips/abc/ideas/activities')), true);
   assert.equal(ownsHeader(parseRoute('/trips/abc/shortlist')), true);
+  assert.equal(ownsHeader(parseRoute('/trips/abc/stays')), true);
   // Places draws its own head at every level (handover v8): lime at the root,
   // cream below it, and the wordmark on both.
   assert.equal(ownsHeader(parseRoute('/places')), true);
@@ -643,18 +645,20 @@ test('the sheet’s three detents fit the screen they are on', async () => {
  * wrong strands somebody on a screen with no way out, so both are pinned to the
  * addresses they belong to rather than to a screen's own idea of itself.
  */
-test('the trip is full-bleed; configuring its group is immersive', () => {
+test('the trip draws its own band; its browse tabs take the tab bar', () => {
   const trip = parseRoute('/trips/abc');
   const group = parseRoute('/trips/abc/group');
   const shortlist = parseRoute('/trips/abc/shortlist');
   const newTrip = parseRoute('/trips/new');
 
-  assert.ok(isFullBleed(trip) && isFullBleed(group), 'the trip and its group are the map, edge to edge');
+  // The rebuilt trip is not full-bleed — the compact band is its header (nav, 30
+  // Sep 2026); only the retired map-pin group screen still runs edge to edge.
+  assert.ok(!isFullBleed(trip) && isFullBleed(group), 'the trip has a band; group is the old map');
   assert.ok(!isFullBleed(shortlist) && !isFullBleed(newTrip), 'the working surfaces keep the chrome');
 
-  // Only the group gives up the tab bar, and only inside a trip.
-  assert.ok(isImmersive(group));
-  assert.ok(!isImmersive(trip) && !isImmersive(shortlist) && !isImmersive(newTrip));
+  // 6a keeps the tab bar; browsing a tab takes it, as the group form does.
+  assert.ok(isImmersive(group) && isImmersive(shortlist));
+  assert.ok(!isImmersive(trip) && !isImmersive(newTrip));
   assert.ok(!isImmersive(parseRoute('/places/home')));
 
   // And a browse, which is in the query rather than the path: the page is
