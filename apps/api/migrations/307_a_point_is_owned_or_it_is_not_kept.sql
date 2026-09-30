@@ -36,10 +36,12 @@ create index if not exists owned_points_source_idx on owned_points (source);
 create or replace function epic_owned_sources() returns text[] language sql immutable as
 $$ select array['osm', 'atlas', 'wikidata', 'own', 'household', 'fsa', 'historic-england', 'os-open-names', 'fixtures'] $$;
 
--- The licensed providers whose points are rented: Google, and the others the
--- data policy names. A reference from anywhere else is not judged here.
+-- The licensed providers whose points are rented: Google, the other place
+-- providers, and every feed the source catalogue marks identifiers-only or
+-- no retention — the event feeds and the hotel rates (sources/catalogue.js;
+-- Codex, 30 Sep 2026). A reference from anywhere else is not judged here.
 create or replace function epic_rented_sources() returns text[] language sql immutable as
-$$ select array['google', 'tripadvisor', 'yelp', 'foursquare'] $$;
+$$ select array['google', 'tripadvisor', 'yelp', 'foursquare', 'liteapi', 'ticketmaster', 'seatgeek', 'predicthq', 'datathistle'] $$;
 
 -- Whose a reference's own point is, by the reference: the fallback when the
 -- row does not say. A photo place is a household's own pin.

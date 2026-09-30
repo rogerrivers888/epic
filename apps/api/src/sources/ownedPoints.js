@@ -19,7 +19,7 @@
 import { query } from '../db.js';
 
 export const OWNED_SOURCES = ['osm', 'atlas', 'wikidata', 'own', 'household', 'fsa', 'historic-england', 'os-open-names', 'fixtures'];
-export const RENTED_SOURCES = ['google', 'tripadvisor', 'yelp', 'foursquare'];
+export const RENTED_SOURCES = ['google', 'tripadvisor', 'yelp', 'foursquare', 'liteapi', 'ticketmaster', 'seatgeek', 'predicthq', 'datathistle'];
 
 /** What each owned source is licensed under, written beside every point. */
 export const LICENCES = {
