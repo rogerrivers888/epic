@@ -3781,10 +3781,13 @@ router.post('/census/uk/lift', requires('manage_library'), async (req, res, next
 // here, each under its own name (Codex, 30 Sep 2026).
 const RENTED_SOURCES = ['google', 'tripadvisor', 'yelp', 'foursquare', 'ticketmaster', 'seatgeek', 'predicthq', 'datathistle'];
 
-// An unmatched activity-sweep row: Google's point under an atlas reference.
+// An activity-sweep row under an atlas reference: Google's point, unless the
+// copy sits where the open map later put it (OWNED_AT). Matched or not, and
+// wherever a rematch moved it, a copy elsewhere is the old Google point
+// (Codex, 30 Sep 2026).
 const ATLAS_GOOGLE = (ref) => `exists (select 1 from attractions g
    where g.id = (case when ${ref} ~ '^atlas:[0-9a-f-]{36}$' then substr(${ref}, 7)::uuid end)
-     and (g.display_source = 'google' or (g.source = 'google' and g.osm_ref is null)))`;
+     and (g.source = 'google' or g.display_source = 'google'))`;
 
 // A copy whose point is one of ours: the same place's OSM-backed record or
 // sweep row, or its atlas row, at the same spot.
@@ -3792,7 +3795,9 @@ const OWNED_AT = (x) => `(exists (select 1 from place_records r where r.venue_re
                                  and abs(r.lat - ${x}.lat) <= 0.0005 and abs(r.lng - ${x}.lng) <= 0.0005)
    or exists (select 1 from scout_places s where s.venue_ref = ${x}.venue_ref and coalesce(s.from_sources, '[]'::jsonb) ? 'osm' and s.lat is not null
                  and abs(s.lat - ${x}.lat) <= 0.0005 and abs(s.lng - ${x}.lng) <= 0.0005)
-   or exists (select 1 from attractions a where a.venue_ref = ${x}.venue_ref and a.lat is not null
+   or exists (select 1 from attractions a
+               where (a.venue_ref = ${x}.venue_ref or a.id = (case when ${x}.venue_ref ~ '^atlas:[0-9a-f-]{36}$' then substr(${x}.venue_ref, 7)::uuid end))
+                 and a.lat is not null
                  and not (a.display_source = 'google' or (a.source = 'google' and a.osm_ref is null))
                  and abs(a.lat - ${x}.lat) <= 0.0005 and abs(a.lng - ${x}.lng) <= 0.0005))`;
 
@@ -3820,8 +3825,10 @@ const IX_TRUE_SRC = (x) => `(case
   when exists (select 1 from attractions a where (a.venue_ref = ${x}.venue_ref or a.id = (case when ${x}.venue_ref ~ '^atlas:[0-9a-f-]{36}$' then substr(${x}.venue_ref, 7)::uuid end))
                  and a.source is distinct from 'google' and a.display_source is distinct from 'google' and a.lat is not null
                  and abs(a.lat - ${x}.lat) <= 0.0005 and abs(a.lng - ${x}.lng) <= 0.0005) then 'atlas'
+  -- A sweep row under an atlas reference whose point matched nothing above is
+  -- the old Google point, rematched or not.
   when ${x}.venue_ref like 'atlas:%' and exists (select 1 from attractions g where g.id = (case when ${x}.venue_ref ~ '^atlas:[0-9a-f-]{36}$' then substr(${x}.venue_ref, 7)::uuid end)
-                 and (g.display_source = 'google' or (g.source = 'google' and g.osm_ref is null))) then 'google'
+                 and (g.source = 'google' or g.display_source = 'google')) then 'google'
   when split_part(${x}.venue_ref, ':', 1) in ('osm', 'atlas', 'wikidata', 'own', 'photo', 'fixtures')
        and coalesce(${x}.coords_from, split_part(${x}.venue_ref, ':', 1)) in ('osm', 'atlas', 'wikidata', 'own', 'household', 'photo', 'fixtures') then coalesce(${x}.coords_from, split_part(${x}.venue_ref, ':', 1))
   else split_part(${x}.venue_ref, ':', 1) end)`;
@@ -3930,13 +3937,14 @@ export async function coordinateReport() {
          left join place_index pi on pi.venue_ref = c.venue_ref and pi.lat is not null and ${NEAR('pi')}
         where c.lat is not null
           and (split_part(c.venue_ref, ':', 1) = any($1::text[])
-               -- An atlas reference on an unmatched activity-sweep row is Google's point too.
-               or exists (select 1 from attractions g
-                           where g.id = (case when c.venue_ref ~ '^atlas:[0-9a-f-]{36}$' then substr(c.venue_ref, 7)::uuid end)
-                             and (g.display_source = 'google' or (g.source = 'google' and g.osm_ref is null))))
+               -- An activity-sweep row's atlas reference is Google's point too,
+               -- unless the cell sits where the open map put it (below).
+               or ${ATLAS_GOOGLE('c.venue_ref')})
           and (pi.venue_ref is null or ${IX_TRUE_SRC('pi')} = any($1::text[]))
-          and not exists (select 1 from attractions a where a.venue_ref = c.venue_ref and a.source = 'google' and a.osm_ref is not null
-                            and a.display_source is distinct from 'google' and a.lat is not null and ${NEAR('a')})
+          and not exists (select 1 from attractions a
+                           where (a.venue_ref = c.venue_ref or a.id = (case when c.venue_ref ~ '^atlas:[0-9a-f-]{36}$' then substr(c.venue_ref, 7)::uuid end))
+                             and a.source = 'google' and a.osm_ref is not null
+                             and a.display_source is distinct from 'google' and a.lat is not null and ${NEAR('a')})
           and not exists (select 1 from scout_places s where s.venue_ref = c.venue_ref and coalesce(s.from_sources, '[]'::jsonb) ? 'osm' and s.lat is not null and ${NEAR('s')})
           and not exists (select 1 from place_records r where r.venue_ref = c.venue_ref and r.osm_ref is not null and r.lat is not null and ${NEAR('r')})`, [RENTED_SOURCES]);
     await count('scout_places', 'first_seen (row)', `select ${ROWS('first_seen')} from scout_places where lat is not null and split_part(venue_ref, ':', 1) = any($1::text[]) and not (coalesce(from_sources, '[]'::jsonb) ? 'osm')`, [RENTED_SOURCES]);
