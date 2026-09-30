@@ -147,6 +147,20 @@ begin
     return NEW;
   end if;
 
+  -- A rented point arriving is refused here but not lost: it goes to the index,
+  -- the one place Google's point may live, for its thirty days, where every
+  -- reader looks (epic_point_lat/lng) — unless the index already holds a point
+  -- of our own (Codex, 30 Sep 2026).
+  if NEW.lat is not null and NEW.lng is not null and src = any(epic_rented_sources())
+     and (TG_OP = 'INSERT' or NEW.lat is distinct from OLD.lat or NEW.lng is distinct from OLD.lng) then
+    insert into place_index (venue_ref, lat, lng, coords_from, coords_at)
+    values (ref, NEW.lat, NEW.lng, src, now())
+    on conflict (venue_ref) do update
+       set lat = excluded.lat, lng = excluded.lng, coords_from = excluded.coords_from, coords_at = now(),
+           cell = null, placed_at = null
+     where place_index.lat is null or not (coalesce(place_index.coords_from, '') = any(epic_owned_sources()));
+  end if;
+
   -- 4. Google's name for a place the open map never gave is rented like its
   -- point (owner, 30 Sep 2026: "Google names fall under the same rule: don't
   -- keep them"). Every reader already refuses to show or search it.

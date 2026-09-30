@@ -54,7 +54,10 @@ export const TABLES = [
   { table: 'attractions', first: 'first_seen',
     rented: `lat is not null and (display_source = 'google' or (source = 'google' and osm_ref is null))
              and (point_from is null or not (point_from = any(epic_owned_sources())))` },
-  { table: 'place_records', first: 'coalesce(first_owned, updated_at)',
+  // A research record keeps no clock that unrelated updates cannot move, and
+  // no rented point can be written to one any more (migration 307): what it
+  // still holds is a legacy copy, and goes whatever its apparent age (Codex).
+  { table: 'place_records', first: "coalesce(first_owned, '-infinity'::timestamptz)",
     rented: `lat is not null and ${RENTED_REF('venue_ref')} and osm_ref is null
              and not (coalesce(provenance ->> 'lat', '') = any(epic_owned_sources()))
              and (point_from is null or not (point_from = any(epic_owned_sources())))` },
@@ -117,7 +120,7 @@ export async function purgeRented({ days = 30, force = false } = {}) {
     `update place_records set name = null
       where name is not null and ${RENTED_REF('venue_ref')}
         and not (coalesce(provenance ->> 'name', '') = any(epic_owned_sources()))
-        and coalesce(first_owned, updated_at) < now() - ${age}`, [RENTED_SOURCES]);
+        and coalesce(first_owned, '-infinity'::timestamptz) < now() - ${age}`, [RENTED_SOURCES]);
 
   // The index's own undated rented points: written by the rebuild before it
   // recorded a source, so the hourly expiry could never see them. Before the
