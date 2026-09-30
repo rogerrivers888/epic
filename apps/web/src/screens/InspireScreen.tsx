@@ -4,7 +4,7 @@ import { Press } from '../components/press';
 import { api, Experience, BrowseItem, HouseholdResponse, InspireItem, InspireNear, MoodKey, OwnedImage, Place, VenuePhotoRef, Intake } from '../api';
 import { useHere } from '../hooks/useHere';
 import { colors, fonts, spacing, TARGET, type } from '../theme';
-import { useCachedResource, runFetch, inspireNearKey, INSPIRE_DEFAULT_MINUTES, TEN_MINUTES, useScrollMemory } from '../cache/resourceCache';
+import { useCachedResource, runFetch, invalidate, inspireNearKey, INSPIRE_DEFAULT_MINUTES, TEN_MINUTES, ATLAS_KEY, savedOverrides, useScrollMemory } from '../cache/resourceCache';
 import { Icon } from '../components/Icon';
 import { AskRow, IntakeStrip } from '../components/voice/IntakeStrip';
 import { MOOD_LABEL, VIBE_MOOD } from '../moods';
@@ -822,20 +822,29 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
    * keep that", not "not for us". A place the household has been to cannot be
    * removed, and the API says so; the heart is then put back.
    */
-  const [kept, setKept] = useState<Record<string, boolean>>({});
+  // Seeded from the session's heart overrides (cache/resourceCache) so a heart
+  // tapped here before switching tabs still reads as kept on the way back — the
+  // cached pool the screen re-reads holds the provider's pre-save copy, and this
+  // is what corrects it without a flash.
+  const [kept, setKept] = useState<Record<string, boolean>>(() => Object.fromEntries(savedOverrides));
   const [notice, setNotice] = useState<string | null>(null);
   const isKept = (i: InspireItem) => kept[i.venueRef] ?? ['saved', 'special'].includes(i.household?.ledger ?? '');
+  const mark = (ref: string, val: boolean) => { savedOverrides.set(ref, val); setKept((k) => ({ ...k, [ref]: val })); };
   const keep = async (i: InspireItem) => {
     const now = !isKept(i);
-    setKept((k) => ({ ...k, [i.venueRef]: now }));
+    mark(i.venueRef, now);
     try {
       if (now) {
         await api.savePlace(i.venueRef, 'saved', { label: i.name, category: i.category, lat: i.lat, lng: i.lng });
         noteSearchEvent('inspire', 'save', i.venueRef);
       }
       else await api.deleteAtlasPlace(i.venueRef);
+      // Saving or removing a place changes the atlas — its country, city and
+      // unplaced counts — so the cached atlas must be re-read next time Places
+      // opens rather than served stale within the ten-minute window (Codex, D13).
+      invalidate(ATLAS_KEY);
     } catch (e: any) {
-      setKept((k) => ({ ...k, [i.venueRef]: !now }));
+      mark(i.venueRef, !now);
       setNotice(e?.message ?? 'That could not be saved just now.');
     }
   };

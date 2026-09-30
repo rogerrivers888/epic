@@ -5,7 +5,7 @@ import { useViewport } from '../hooks/useViewport';
 import { GroupPanel } from '../components/GroupPanel';
 import { api, Booking, HouseholdResponse, OwnedImage, Place, PlanAction, PlanResponse, Stay, StayPricing, TripDay, TripDetail, TripPlace, VenuePhotoRef, DayStop } from '../api';
 import { colors, fonts, memberColors, radius, spacing, TARGET, type, BORDER } from '../theme';
-import { useCachedResource, TRIPS_KEY, TEN_MINUTES } from '../cache/resourceCache';
+import { useCachedResource, peekCache, TRIPS_KEY, TEN_MINUTES } from '../cache/resourceCache';
 import { Button, Card, Chip, Row, Segmented, StatusLine, Stepper, Wrap, clock, minutes } from '../components/ui';
 import { SourcePicker, TripSpendLine } from '../components/SourcePicker';
 import { TimeBar } from '../components/TimeBar';
@@ -137,10 +137,24 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
     { staleMs: TEN_MINUTES },
   );
   useEffect(() => { if (tripsErr) setError((tripsErr as any)?.message ?? 'Could not load your trips.'); }, [tripsErr]);
-  // A trip deleted since you last looked should not reopen as an error page.
+  // A trip deleted since you last looked should not reopen as an error page —
+  // but the cached list may have been prefetched before a trip was made
+  // elsewhere (the voice flow, Inspire's "Create trip"), and that trip is
+  // legitimately absent from it. So a trip missing from what we hold is
+  // confirmed gone with a fresh read before redirecting, or a just-created trip
+  // would be bounced straight back off (Codex, D13).
+  const checkedMissing = useRef<string | null>(null);
   useEffect(() => {
-    if (data && openNow.current && !data.trips.some((t) => t.id === openNow.current)) navigate(paths.trips(), { replace: true });
-  }, [data, navigate]);
+    const id = openNow.current;
+    if (!id || !data) return;
+    if (data.trips.some((t) => t.id === id)) { checkedMissing.current = null; return; }
+    if (checkedMissing.current === id) return;
+    checkedMissing.current = id;
+    void load().then(() => {
+      const now = peekCache<Awaited<ReturnType<typeof api.trips>>>(TRIPS_KEY)?.data;
+      if (openNow.current === id && now && !now.trips.some((t) => t.id === id)) navigate(paths.trips(), { replace: true });
+    });
+  }, [data, navigate, load]);
 
   /**
    * Where the trip being made is going, when it was answered on the search

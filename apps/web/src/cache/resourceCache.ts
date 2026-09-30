@@ -67,22 +67,46 @@ function entryFor(key: string): Entry<unknown> {
 
 function emit(e: Entry<unknown>) { e.listeners.forEach((l) => l()); }
 
+// Start a fetch for `key`, optionally only once `after` has settled. On success
+// the rows and their timestamp replace what was there; on failure the error is
+// recorded but any previous rows are kept, so a background refresh that fails
+// never blanks a page the family is already reading.
+function start<T>(key: string, fetcher: () => Promise<T>, after?: Promise<unknown>): Promise<void> {
+  const e = entryFor(key);
+  const p = (after ? after.catch(() => {}) : Promise.resolve())
+    .then(() => fetcher())
+    .then(
+      (data) => { e.data = data; e.error = undefined; e.fetchedAt = Date.now(); },
+      (err) => { e.error = err; },
+    )
+    // Only clear the in-flight marker if it is still this run's — a forced
+    // refetch may have chained a newer one on top.
+    .finally(() => { if (e.promise === p) e.promise = undefined; emit(e); });
+  e.promise = p;
+  emit(e);
+  return p;
+}
+
 /**
- * Run `fetcher` for `key` now, keeping one request in flight at a time. On
- * success the rows and their timestamp replace what was there; on failure the
- * error is recorded but any previous rows are kept, so a background refresh that
- * fails never blanks a page the family is already reading.
+ * Read `key`: if a request is already in flight, join it rather than start a
+ * second — the shared, deduped path a mount takes.
  */
 export function runFetch<T>(key: string, fetcher: () => Promise<T>): Promise<void> {
   const e = entryFor(key);
   if (e.promise) return e.promise;
-  const p = fetcher().then(
-    (data) => { e.data = data; e.error = undefined; e.fetchedAt = Date.now(); },
-    (err) => { e.error = err; },
-  ).finally(() => { e.promise = undefined; emit(e); });
-  e.promise = p;
-  emit(e);
-  return p;
+  return start(key, fetcher);
+}
+
+/**
+ * Force a fresh read, whose response is guaranteed to have *begun after this
+ * call* — the path a write takes. If a stale-refresh or prefetch is already in
+ * flight, this chains a new request after it rather than handing back that older
+ * one, so a refresh run right after a mutation never repopulates the cache with
+ * pre-write rows and marks them fresh (Codex, D13).
+ */
+export function refetch<T>(key: string, fetcher: () => Promise<T>): Promise<void> {
+  const e = entryFor(key);
+  return start(key, fetcher, e.promise);
 }
 
 /**
@@ -106,10 +130,21 @@ export function peekCache<T>(key: string): { data: T | undefined; fetchedAt: num
 /** Mark a key stale so the next read refreshes it. */
 export function invalidate(key: string) { const e = store.get(key); if (e) e.fetchedAt = 0; }
 
+/**
+ * A heart tapped on one screen has to still read as kept when you come back to
+ * that screen from another tab. The screen's own `useState` cannot carry it —
+ * the screen unmounted — and the cached pool it re-reads still holds the
+ * provider's pre-save copy, so the heart would spring back (Codex, D13). These
+ * overrides live here instead, keyed by the place's ref, so they outlive the
+ * unmount; they are this session's own acts, cleared the moment it ends.
+ */
+export const savedOverrides = new Map<string, boolean>();
+
 /** Drop everything. Called on any session change, and available to tests. */
 export function clearResourceCache() {
   store.clear();
   scrollStore.clear();
+  savedOverrides.clear();
 }
 
 // A change of session — out, timed out, or a different person in — must not let
@@ -159,8 +194,7 @@ export function useCachedResource<T>(
   const e = enabled && key ? store.get(key) : undefined;
   const refresh = useCallback(async () => {
     if (!key) return;
-    invalidate(key);
-    await runFetch(key, () => fetcherRef.current());
+    await refetch(key, () => fetcherRef.current());
   }, [key]);
 
   return {
