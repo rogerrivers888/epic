@@ -92,11 +92,21 @@ export async function loadSource(source, { who = 'Epic', fetcher = fetch } = {})
     // Live first, then the old loads go: the matcher reads the live load only.
     // Only while this load is still the one claimed — a load that ran so long
     // another took over publishes nothing and deletes nothing (Codex, 30 Sep 2026).
-    const { rowCount: mine } = await query(
-      `update owned_source_loads set state = 'done', rows = $2, live_load = $3, finished_at = now()
-        where source = $1 and load_id = $3 and state = 'loading'`, [source, rows, loadId]);
-    if (!mine) throw new Error(`${source}: another load took over while this one ran`);
-    await query(`delete from ${table} where load_id <> $1`, [loadId]);
+    // One transaction: the live pointer moves and the old rows go together,
+    // or neither does (Codex, 30 Sep 2026).
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      const { rowCount: mine } = await client.query(
+        `update owned_source_loads set state = 'done', rows = $2, live_load = $3, finished_at = now()
+          where source = $1 and load_id = $3 and state = 'loading'`, [source, rows, loadId]);
+      if (!mine) throw new Error(`${source}: another load took over while this one ran`);
+      await client.query(`delete from ${table} where load_id <> $1`, [loadId]);
+      await client.query('commit');
+    } catch (err) {
+      await client.query('rollback').catch(() => null);
+      throw err;
+    } finally { client.release(); }
     return { source, rows };
   } catch (err) {
     await query(`update owned_source_loads set state = 'failed', problem = $2, finished_at = now() where source = $1 and load_id = $3`, [source, String(err.message).slice(0, 500), loadId]);

@@ -41,6 +41,7 @@ import { normalise, metresBetween } from './openMatch.js';
 import * as lib from '../repositories/library.js';
 import { query } from '../db.js';
 import { noteMany } from '../repositories/placeIndex.js';
+import { recordOwnedPoint } from './ownedPoints.js';
 
 /**
  * What a family might do on a Saturday, in the words somebody would type.
@@ -431,6 +432,12 @@ export async function rematchRegion(slug, { onLine } = {}) {
       [r.id, o.name, slugify(o.name), o.lat, o.lng,
        o.tags?.website ?? o.tags?.['contact:website'] ?? null, o.ref,
        JSON.stringify([{ source: 'OpenStreetMap', licence: 'ODbL', url: 'https://www.openstreetmap.org/copyright' }])]);
+    // The open map's point is the place's owned point now, under both the
+    // references the index knows it by, so the index and every saved copy
+    // move off the Google point they were reading (Codex, 30 Sep 2026).
+    for (const ref of [r.external_ref, `atlas:${r.id}`].filter(Boolean)) {
+      await recordOwnedPoint({ ref, lat: o.lat, lng: o.lng, source: 'osm', sourceRef: o.ref, method: 'point, alone within 120 m', distanceM: Math.round(metresBetween(r, o)) });
+    }
     matched += 1;
   }
   onLine?.(`${region.name}: ${matched} of ${rows.length} are ours now`);
