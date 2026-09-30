@@ -44,7 +44,7 @@
 
 import { query, withTransaction } from '../db.js';
 import { censusInRing } from './censusRing.js';
-import { ringFor, cellAt } from './reach.js';
+import { ringFor, cellAt, hasMatrix } from './reach.js';
 import { travelMode } from '../domain/travel.js';
 
 /**
@@ -83,9 +83,13 @@ export async function refreshRing({ cell, lat = null, lng = null, mode = 'drivin
   // A straight-line ring depends on the exact point, not just the sector, and its
   // live rankings and uncensused districts are consumed directly — so two homes in
   // one sector must not share an in-flight count and receive each other's, centred
-  // on the wrong place (Codex). The coordinate joins the key when there is one.
+  // on the wrong place (Codex). The coordinate joins the key ONLY for a matrix-less
+  // ring: a matrix ring's persisted geometry is the same for the whole sector, and
+  // a coordinate-specific key would let two homes there delete-and-insert the same
+  // rows concurrently and collide on the unique key (Codex).
+  const estimated = lat != null && lng != null && !(await hasMatrix(cell, kind, minutes).catch(() => false));
   const key = ringKey({ cell, mode: kind, minutes })
-    + (lat != null && lng != null ? `@${Number(lat)},${Number(lng)}` : '');
+    + (estimated ? `@${Number(lat)},${Number(lng)}` : '');
   const going = inFlight.get(key);
   if (going && !force) return going;
   const run = (going ?? Promise.resolve()).catch(() => null).then(() => countRing({ cell, lat, lng, kind, minutes }));

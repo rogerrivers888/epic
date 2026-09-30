@@ -516,6 +516,12 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
   // must draw exactly the ring the row is about, not the nearest to a point.
   let cell = given ? String(given) : sector ? `sector:${sector}` : null;
   let name = given ? labelOf(given) : sector ? said.toUpperCase() : null;
+  // The point the ring is actually about, kept so a straight-line circle centres
+  // on it and not on the sector centroid. Given outright, or resolved from a
+  // named locality below — a bare sector or cell has no point and uses the
+  // centroid (Codex).
+  let originLat = lat != null ? Number(lat) : null;
+  let originLng = lng != null ? Number(lng) : null;
   if (!cell && slug) {
     const { rows: [area] } = await query(
       'select name, lat, lng from localities where slug = $1 and lat is not null limit 1', [slug]);
@@ -523,6 +529,8 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
       const at = await cellAt({ lat: Number(area.lat), lng: Number(area.lng) }).catch(() => null);
       cell = at?.code ?? null;
       name = area.name ?? said.toUpperCase();
+      originLat = Number(area.lat);
+      originLng = Number(area.lng);
     }
   }
   if (!cell && lat != null && lng != null) {
@@ -555,7 +563,7 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
     // Centre the estimate on the requested point when there is one, so the count
     // ring and the display search (which centres on the origin) cover the same
     // ground rather than the sector's centroid (Codex).
-    const origin = lat != null && lng != null ? { lat: Number(lat), lng: Number(lng) } : null;
+    const origin = originLat != null && originLng != null ? { lat: originLat, lng: originLng } : null;
     within = await cellsWithinKmForMode(cell, travelMode(mode), wantHorizon, origin);
   }
   const codes = [...new Set([cell, ...within.map((c) => c.to_cell)])];
@@ -579,8 +587,8 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
   // district in the world, and every count over the ring came back empty
   // (20 Sep 2026).
   let outcodes = [...new Set(codes.map(outcodeOfCell).filter(Boolean))];
-  const at = lat != null && lng != null
-    ? { lat: Number(lat), lng: Number(lng) }
+  const at = originLat != null && originLng != null
+    ? { lat: originLat, lng: originLng }
     : home ? { lat: Number(home.lat), lng: Number(home.lng) } : null;
   // A straight-line ring is a circle round `at`; census consumers judge each
   // place against it rather than against the quantised sector set (Codex).
