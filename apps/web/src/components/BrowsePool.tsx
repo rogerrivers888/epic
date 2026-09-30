@@ -47,10 +47,12 @@ export function admissionOf(b: Pick<BrowseItem, 'category' | 'experiences' | 'pr
 const PRICE_ORDER = ['Free', '£', '££', '£££', '££££', 'No price given'];
 const priceBand = (b: BrowseItem) => priceMarks(b.priceLevel) ?? 'No price given';
 
-export function BrowsePool({ items, eventsSource, baseLabel, pinned, busy, addLabel = 'Add to plan', addedLabel = 'In the plan', initialPrices, onAdd, onRemove, onDislike, onShortlist, shortlistedRefs }: {
+export function BrowsePool({ items, eventsSource, baseLabel, country, pinned, busy, addLabel = 'Add to plan', addedLabel = 'In the plan', initialPrices, onAdd, onRemove, onDislike, onShortlist, shortlistedRefs }: {
   items: BrowseItem[];
   eventsSource: string | null | undefined;
   baseLabel: string;
+  /** The country the pool is for, so a place abroad reads its own currency. */
+  country?: string | null;
   pinned: Set<string>;
   busy: boolean;
   addLabel?: string;
@@ -155,7 +157,7 @@ export function BrowsePool({ items, eventsSource, baseLabel, pinned, busy, addLa
       ))}
       {list.length > shown ? <Button label={`Show ${Math.min(15, list.length - shown)} more of ${list.length}`} kind="ghost" onPress={() => setShown((n) => n + 15)} /> : null}
 
-      <VenueDrawer item={open} baseLabel={baseLabel} onClose={() => setOpen(null)} onAdd={(b) => { onAdd(b); }} onShortlist={onShortlist} added={open ? pinned.has(open.id) : false} shortlisted={open ? !!shortlistedRefs?.has(open.venueRef) : false} />
+      <VenueDrawer item={open} country={country ?? null} baseLabel={baseLabel} onClose={() => setOpen(null)} onAdd={(b) => { onAdd(b); }} onShortlist={onShortlist} added={open ? pinned.has(open.id) : false} shortlisted={open ? !!shortlistedRefs?.has(open.venueRef) : false} />
     </View>
   );
 }

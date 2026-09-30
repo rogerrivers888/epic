@@ -1194,6 +1194,9 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
 
       <VenueDrawer
         item={drawer}
+        // The area being viewed decides the cost's currency and bands: where the
+        // household said, else home. A place abroad reads its own money, not ours.
+        country={centre?.countryCode ?? null}
         baseLabel={placeName}
         onClose={closeDrawer}
         addLabel="Create trip"

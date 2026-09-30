@@ -328,6 +328,10 @@ export function PlanScreen({ household, onOpenTrip }: { household: HouseholdResp
     if (plan?.trip) act({ type: 'set', attendingMemberIds: [...next] });
   };
   const baseLabel = plan?.journey?.to ?? plan?.trip?.destination?.label ?? plan?.trip?.origin.label ?? 'here';
+  // Where the day is, so a stop's cost reads in that country's currency and
+  // bands rather than the household's own — the destination when there is one,
+  // else where the day starts; null (home market) when there is no trip yet.
+  const planCountry = plan?.trip?.destination?.countryCode ?? plan?.trip?.origin?.countryCode ?? null;
   const picks = plan?.options?.find((o) => o.id === 'pinned') ?? null;
   // Keep "viewing" in step with the pager so "the first one" means what's on screen.
   const onPagerScroll = (e: any) => {
@@ -702,6 +706,7 @@ export function PlanScreen({ household, onOpenTrip }: { household: HouseholdResp
         <Card>
           <OnTheWay
             route={plan.route}
+            country={planCountry}
             busy={busy === 'updating'}
             onAdd={(s) => act({ type: 'route_add', stopId: s.id })}
             onDrop={(s) => act({ type: 'route_drop', stopId: s.id })}
@@ -718,6 +723,7 @@ export function PlanScreen({ household, onOpenTrip }: { household: HouseholdResp
             items={plan!.browse ?? []}
             eventsSource={plan!.eventsSource}
             baseLabel={baseLabel}
+            country={planCountry}
             pinned={new Set(plan!.selection?.pinned ?? [])}
             busy={busy === 'updating'}
             addLabel="+ Add to plan"

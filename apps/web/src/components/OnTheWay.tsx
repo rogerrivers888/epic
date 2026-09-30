@@ -23,8 +23,10 @@ import { Icon } from './Icon';
  * Choosing a stop moves the time they leave home; it never eats the time they
  * asked for at the destination.
  */
-export function OnTheWay({ route, busy, onAdd, onDrop }: {
+export function OnTheWay({ route, country, busy, onAdd, onDrop }: {
   route: PlanRoute;
+  /** The country the route is in, so a stop abroad reads its own currency. */
+  country?: string | null;
   busy: boolean;
   onAdd: (s: RouteStop) => void;
   onDrop: (s: RouteStop) => void;
@@ -88,7 +90,7 @@ export function OnTheWay({ route, busy, onAdd, onDrop }: {
         </>
       ) : null}
 
-      <VenueDrawer item={open} baseLabel={route.to} onClose={() => setOpen(null)} onAdd={(b) => onAdd(b as RouteStop)} added={open?.chosen ?? false} />
+      <VenueDrawer item={open} country={country ?? null} baseLabel={route.to} onClose={() => setOpen(null)} onAdd={(b) => onAdd(b as RouteStop)} added={open?.chosen ?? false} />
     </View>
   );
 }
