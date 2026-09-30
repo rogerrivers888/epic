@@ -855,7 +855,7 @@ export const paths = {
    * The opening sequence, at a given screen. Step 0 (the opener) is the default
    * and is not written down. `replay` marks a launch from Settings, so the
    * opening returns there on exit rather than marking a household welcomed and
-   * sending it into first-run crew set-up.
+   * taking it into the app the way first-run does.
    */
   opening: (step?: number, replay?: boolean) => {
     const q = new URLSearchParams();

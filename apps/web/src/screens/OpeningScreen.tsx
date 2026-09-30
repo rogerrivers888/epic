@@ -129,18 +129,17 @@ export function OpeningScreen() {
   const [box, setBox] = useState({ w: view.width, h: view.height });
   const s = Math.max(0, Math.min(4, Math.round(step)));
 
-  // A replay from Settings just goes back there on any exit, and leaves the
-  // welcomed marker alone. Otherwise this is first-run: every way out marks the
-  // opening seen, so it shows once (App.tsx reads `wasWelcomed`) — skipping and
-  // "I already have an account" go into the app, and finishing the tour hands on
-  // to crew set-up, which is where the opening sits (handoff: "before crew set-up").
-  const exitTo = (firstRunDest: string) => {
+  // Every way out ends the same. A replay from Settings returns there and leaves
+  // the welcomed marker alone; a first-run exit — Skip, "I already have an
+  // account" or "Let's go" — marks the opening seen (so it shows once; App.tsx
+  // reads `wasWelcomed`) and lands in the app. It deliberately does not push on
+  // to crew set-up: that would leave set-up's Back pointed at the retired
+  // /welcome. Set-up is offered in the app instead, by the Settings banner.
+  const leave = () => {
     if (replay) { navigate(paths.settings(), { replace: true }); return; }
     markWelcomed();
-    navigate(firstRunDest, { replace: true });
+    navigate(paths.inspire(), { replace: true });
   };
-  const leave = () => exitTo(paths.inspire());
-  const finish = () => exitTo(paths.setup());
   // The opening is one once-through sequence, not a stack of pages: each step
   // replaces the last, so it lives in a single history entry and Back leaves the
   // whole sequence (to wherever it was opened from) rather than stepping back
@@ -156,7 +155,7 @@ export function OpeningScreen() {
     : s === 1 ? <DayOrTrip key="s1" {...common} onNext={next} />
     : s === 2 ? <YourCrew key="s2" {...common} onNext={next} />
     : s === 3 ? <CardScreen key="s3" {...common} title="Book an expert." sub="Local specialists who make the day. You just turn up." cards={EXPERTS} ctaLabel="Next" onNext={next} showSkip />
-    : <CardScreen key="s4" {...common} title="Host it." sub="A weekend for friends and family, or a proper event: a craft fair, a 3-day course, a weekly workshop." cards={HOSTS} ctaLabel="Let's go" onNext={finish} showSkip={false} />;
+    : <CardScreen key="s4" {...common} title="Host it." sub="A weekend for friends and family, or a proper event: a craft fair, a 3-day course, a weekly workshop." cards={HOSTS} ctaLabel="Let's go" onNext={leave} showSkip={false} />;
 
   return (
     <View
