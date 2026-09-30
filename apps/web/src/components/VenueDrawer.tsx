@@ -618,21 +618,28 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
     ? (v.provenance?.summary?.source ?? v.source) === 'google'
     : item.summary != null ? (item.provenance?.summary?.source ?? item.source) === 'google' : false;
   const shownSummary = rawSummaryIsGoogle ? (ownRecord?.summary ?? null) : rawSummary;
-  // A credit is only correct if the prose on screen is one whose source we know.
-  // A source's own summary must never be labelled "From Wikipedia", so the credit
-  // stands only for the owned record's summary — or, for a wikidata: atlas place
-  // (which loads no owned record), the item's own summary, which the atlas draws
-  // from Wikipedia alone and carries a wikipediaUrl for (Codex).
+  // A credit is only correct if the prose on screen is one whose source we know,
+  // and its source is written down in several shapes: own.js stores
+  // `summary_source` as the literal "wikipedia", as a venue URL, or as a full
+  // attribution string ("Wikipedia — …, CC BY-SA 4.0"); the atlas carries a
+  // Wikipedia summary and a `wikipediaUrl` under either a wikidata: or an osm:
+  // reference. So Wikipedia is recognised by any of those, a venue page by a
+  // URL, and Google is never a source here (its summary is not shown at all).
+  const asUrl = (s: string) => (/^https?:\/\//i.test(s) ? s : null);
+  const isWiki = (s?: string | null) => !!s && /wikipedia|cc[\s-]?by[\s-]?sa/i.test(s);
   const descriptionCredit: { label: string; url: string | null } | null = (() => {
     if (!shownSummary) return null;
+    // The owned record's summary, when that is what is shown.
     if (ownRecord?.summary && shownSummary.trim() === ownRecord.summary.trim()) {
       const src = ownRecord.summarySource;
       if (!src || src === 'ours') return null;
-      if (src === 'wikipedia') return { label: 'From Wikipedia · CC BY-SA', url: ownRecord.wikipediaUrl ?? null };
-      if (/^https?:\/\//i.test(src)) return { label: `From ${item.name}'s own page`, url: src };
+      if (isWiki(src)) return { label: 'From Wikipedia · CC BY-SA', url: ownRecord.wikipediaUrl ?? asUrl(src) ?? item.wikipediaUrl ?? null };
+      if (asUrl(src)) return { label: `From ${item.name}'s own page`, url: src };
       return null;
     }
-    if (item.venueRef.startsWith('wikidata:') && item.summary && shownSummary.trim() === item.summary.trim() && item.wikipediaUrl) {
+    // An atlas summary, which the atlas draws from Wikipedia alone and carries a
+    // wikipediaUrl for — under either reference shape (Codex).
+    if (item.wikipediaUrl && item.summary && shownSummary.trim() === item.summary.trim()) {
       return { label: 'From Wikipedia · CC BY-SA', url: item.wikipediaUrl };
     }
     return null;
