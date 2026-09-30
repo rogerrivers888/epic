@@ -3893,6 +3893,16 @@ export async function coordinateReport() {
          -- Google first where a place's copies name more than one — it is the
          -- provider C59 asks about — then the others by name (Codex, 30 Sep 2026).
          ) one order by venue_ref, (provider = 'google') desc, provider),
+       -- A point of our own held only on a saved, planned or visited copy — a
+       -- household's pin on a photo place, an open-map place's own point —
+       -- filed by whose it is (Codex, 30 Sep 2026).
+       ownc as (
+         select distinct on (venue_ref) venue_ref, split_part(venue_ref, ':', 1) as kind from (
+           select x.venue_ref from household_places x where x.lat is not null and x.lng is not null and not ${RENTED_COPY('x')}
+           union select x.venue_ref from trip_stops x where x.lat is not null and x.lng is not null and not ${RENTED_COPY('x')}
+           union select x.venue_ref from trip_shortlist x where x.lat is not null and x.lng is not null and not ${RENTED_COPY('x')}
+           union select x.venue_ref from visits x where x.lat is not null and x.lng is not null and not ${RENTED_COPY('x')}
+         ) o order by venue_ref),
        p as (
          select case
                   when coalesce(r.osm, false) or coalesce(a.osm, false) or sc.venue_ref is not null or (pi.lat is not null and pi.lng is not null and pi.src = 'osm') then 'osm'
@@ -3901,12 +3911,16 @@ export async function coordinateReport() {
                   -- Rented, named by whose it is: Google, or any other provider.
                   when pi.lat is not null and pi.lng is not null then 'rented:' || pi.src
                   when x.venue_ref is not null then 'rented:' || x.provider
+                  when oc.kind = 'osm' then 'osm'
+                  when oc.kind in ('atlas', 'wikidata') then 'atlas'
+                  when oc.venue_ref is not null then 'own'
                   else 'none' end as source
            from ix pi
            left join rec r on r.venue_ref = pi.venue_ref
            left join atl a on a.venue_ref = pi.venue_ref
            left join sco sc on sc.venue_ref = pi.venue_ref
-           left join rented x on x.venue_ref = pi.venue_ref)
+           left join rented x on x.venue_ref = pi.venue_ref
+           left join ownc oc on oc.venue_ref = pi.venue_ref)
        select source, count(*)::int as n from p group by source`, [OURS_BY_REF]);
 
     const of = (k) => sources.find((r) => r.source === k)?.n ?? 0;

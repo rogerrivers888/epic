@@ -42,13 +42,17 @@ test('files each place under the best point held for it, and counts old rented p
   const { rows: [gz] } = await query(`insert into attractions (region_slug, slug, name, lat, lng, display_source) values ('cornwall', 'a-zoo-cell', '(zoo)', 51.5, -0.1, 'google') returning id`);
   await query(`insert into place_cells (venue_ref, lat, lng, at) values ($1, 51.5, -0.1, now())`, [`atlas:${gz.id}`]);
   await query(`insert into household_places (household_id, venue_ref, label, lat, lng) values ($1, $2, 'The zoo', 51.5, -0.1)`, [hh.id, `atlas:${gz.id}`]);
+  // A household's own pin on a photo place, held only on the saved row.
+  const pin = `photo:${Date.now()}`;
+  await query(`insert into place_index (venue_ref) values ($1)`, [pin]);
+  await query(`insert into household_places (household_id, venue_ref, label, lat, lng) values ($1, $2, 'Our spot', 51.6, -0.2)`, [hh.id, pin]);
   // A sweep row the open map twinned keeps OSM's point, and is not rented.
   await query(`insert into scout_areas (code, lat, lng) values ('SL5', 51.4, -0.6) on conflict do nothing`);
   await query(`insert into scout_places (area_code, venue_ref, lat, lng, rank, from_sources) values ('SL5', 'google:matched', 51.5, -0.1, 1, '["osm","google"]'), ('SL5', 'google:nothing', 51.5, -0.1, 2, '["google"]')`);
 
   const r = await coordinateReport();
-  assert.equal(r.places.total, 13);
-  assert.deepEqual(r.places.owned, { osm: 4, atlas: 2, own: 0 });
+  assert.equal(r.places.total, 14);
+  assert.deepEqual(r.places.owned, { osm: 4, atlas: 2, own: 1 }, 'the photo pin is the household\'s own');
   assert.equal(r.places.googleOnly, 6, 'the Google-named atlas row is Google\'s, and so is the sweep row the open map never gave');
   assert.deepEqual(r.places.otherRented, { tripadvisor: 1 });
   assert.equal(r.places.none, 0, 'google:nothing has a rented point in the sweep');
