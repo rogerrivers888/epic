@@ -16,7 +16,7 @@
  * the two to each other.
  */
 
-import { query } from '../db.js';
+import { query, pool } from '../db.js';
 
 export const OWNED_SOURCES = ['osm', 'atlas', 'wikidata', 'own', 'household', 'fsa', 'historic-england', 'os-open-names', 'fixtures'];
 export const RENTED_SOURCES = ['google', 'tripadvisor', 'yelp', 'foursquare', 'liteapi', 'ticketmaster', 'seatgeek', 'predicthq', 'datathistle'];
@@ -57,7 +57,23 @@ export async function ownedPoint(ref, client = { query }) {
  */
 export const ORDER = ['wikidata', 'fsa', 'historic-england', 'os-open-names', 'osm', 'household'];
 
-export async function recordOwnedPoint({ ref, lat, lng, source, sourceRef = null, method, distanceM = null }, client = { query }) {
+export async function recordOwnedPoint(args, client = null) {
+  if (client) return recordIn(args, client);
+  // One transaction, so the owned point, the index and every copy move together
+  // or not at all (Codex, 30 Sep 2026).
+  const c = await pool.connect();
+  try {
+    await c.query('begin');
+    const out = await recordIn(args, c);
+    await c.query('commit');
+    return out;
+  } catch (err) {
+    await c.query('rollback').catch(() => null);
+    throw err;
+  } finally { c.release(); }
+}
+
+async function recordIn({ ref, lat, lng, source, sourceRef = null, method, distanceM = null }, client) {
   if (!ref || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return { written: false, why: 'no point' };
   if (!LICENCES[source]) throw new Error(`not an owned source: ${source}`);
   const { rows: [kept] } = await client.query(
@@ -67,9 +83,11 @@ export async function recordOwnedPoint({ ref, lat, lng, source, sourceRef = null
         set lat = excluded.lat, lng = excluded.lng, source = excluded.source, source_ref = excluded.source_ref,
             licence = excluded.licence, method = excluded.method, distance_m = excluded.distance_m, matched_at = now()
       where array_position($9::text[], excluded.source) <= array_position($9::text[], owned_points.source)
-     returning venue_ref`,
+     returning lat, lng, source`,
     [ref, Number(lat), Number(lng), source, sourceRef, LICENCES[source], method, distanceM, ORDER]);
   if (!kept) return { written: false, why: 'a better source already holds it' };
+  // What is passed on is the row that won, read back, not the arguments.
+  ({ lat, lng, source } = kept);
   // Into the index, whether or not it knew the place yet (Codex, 30 Sep 2026).
   await client.query(
     `insert into place_index (venue_ref, lat, lng, coords_from, coords_at)
