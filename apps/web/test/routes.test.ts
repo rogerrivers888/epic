@@ -700,6 +700,9 @@ test('the opening: the postcards opener and four intro screens', () => {
   assert.equal(paths.opening(), '/opening');
   assert.equal(paths.opening(0), '/opening');
   assert.equal(paths.opening(3), '/opening?step=3');
+  // A replay launched from Settings carries a flag so it returns there on exit.
+  assert.equal(paths.opening(0, true), '/opening?replay=1');
+  assert.equal(paths.opening(2, true), '/opening?step=2&replay=1');
   // A segment after it is nothing Epic has.
   assert.equal(parseRoute('/opening/3').name, 'unknown');
   assert.equal(ownsHeader(parseRoute('/opening')), true, 'the opening draws its own head');

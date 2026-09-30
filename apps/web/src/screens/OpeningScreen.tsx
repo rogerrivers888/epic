@@ -19,7 +19,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, Image, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useRouter, useQueryState, asNumber } from '../router';
+import { useRouter, useQueryState, asNumber, asFlag } from '../router';
 import { paths } from '../routes';
 import { useViewport } from '../hooks/useViewport';
 import { Icon } from '../components/Icon';
@@ -117,6 +117,10 @@ function useReducedMotion(): boolean {
 export function OpeningScreen() {
   const { navigate } = useRouter();
   const [step, setStep] = useQueryState<number>('step', 0, asNumber(0));
+  // A replay launched from Settings (its "Play the welcome screens" button). An
+  // already-set-up household must not be marked welcomed again or dropped into
+  // crew set-up when it finishes watching — every exit just returns to Settings.
+  const [replay] = useQueryState<boolean>('replay', false, asFlag);
   const reduced = useReducedMotion();
   const view = useViewport();
   // The opener fills its own box exactly — the phone frame at 390, the content
@@ -125,12 +129,18 @@ export function OpeningScreen() {
   const [box, setBox] = useState({ w: view.width, h: view.height });
   const s = Math.max(0, Math.min(4, Math.round(step)));
 
-  // Any way out marks the opening seen, so first-run shows it once (App.tsx
-  // reads `wasWelcomed`). Skipping and "I already have an account" go straight
-  // into the app; finishing the tour hands on to crew set-up, which is where the
-  // opening sits in the sequence (handoff: "before crew set-up").
-  const leave = () => { markWelcomed(); navigate(paths.inspire(), { replace: true }); };
-  const finish = () => { markWelcomed(); navigate(paths.setup(), { replace: true }); };
+  // A replay from Settings just goes back there on any exit, and leaves the
+  // welcomed marker alone. Otherwise this is first-run: every way out marks the
+  // opening seen, so it shows once (App.tsx reads `wasWelcomed`) — skipping and
+  // "I already have an account" go into the app, and finishing the tour hands on
+  // to crew set-up, which is where the opening sits (handoff: "before crew set-up").
+  const exitTo = (firstRunDest: string) => {
+    if (replay) { navigate(paths.settings(), { replace: true }); return; }
+    markWelcomed();
+    navigate(firstRunDest, { replace: true });
+  };
+  const leave = () => exitTo(paths.inspire());
+  const finish = () => exitTo(paths.setup());
   // The opening is one once-through sequence, not a stack of pages: each step
   // replaces the last, so it lives in a single history entry and Back leaves the
   // whole sequence (to wherever it was opened from) rather than stepping back

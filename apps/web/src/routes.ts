@@ -851,8 +851,19 @@ export const paths = {
   heard: (intakeId: string) => buildHref(['say', intakeId]),
   ask: (intakeId: string, n?: number) => `${buildHref(['say', intakeId, 'ask'])}${n && n > 1 ? `?n=${n}` : ''}`,
   welcome: () => '/welcome',
-  /** The opening sequence, at a given screen. Step 0 (the opener) is the default and is not written down. */
-  opening: (step?: number) => (step && step > 0 ? `/opening?step=${step}` : '/opening'),
+  /**
+   * The opening sequence, at a given screen. Step 0 (the opener) is the default
+   * and is not written down. `replay` marks a launch from Settings, so the
+   * opening returns there on exit rather than marking a household welcomed and
+   * sending it into first-run crew set-up.
+   */
+  opening: (step?: number, replay?: boolean) => {
+    const q = new URLSearchParams();
+    if (step && step > 0) q.set('step', String(step));
+    if (replay) q.set('replay', '1');
+    const qs = q.toString();
+    return qs ? `/opening?${qs}` : '/opening';
+  },
   setup: (step?: number) => (step && step > 1 ? `/setup?step=${step}` : '/setup'),
   settings: (section?: SettingsSection) => (section && section !== 'preferences' ? buildHref(['settings', section]) : '/settings'),
   prototypes: (section?: PrototypeSection | null) => buildHref(['prototypes', section]),

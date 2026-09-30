@@ -295,7 +295,7 @@ function YouAndYours({ data, refresh }: { data: HouseholdResponse; refresh: () =
       {/* A way to see the opening again on a phone (Welcome screens, 1h): the
           postcards opener and four intro screens play from the start. */}
       <SectionTitle hint="The postcards opener and the four intro screens, played from the start so you can watch them on a phone.">Welcome screens</SectionTitle>
-      <Button label="Play the welcome screens" kind="secondary" onPress={() => navigate(paths.opening())} />
+      <Button label="Play the welcome screens" kind="secondary" onPress={() => navigate(paths.opening(0, true))} />
       <SectionTitle hint="One passcode for the household, and which devices are using it. Anything written without signal waits here until it can be sent.">Account</SectionTitle>
       <AccountCard />
       <SectionTitle hint="What Epic keeps on this phone so it works with no signal, and what it has researched and owns outright.">On this device</SectionTitle>
