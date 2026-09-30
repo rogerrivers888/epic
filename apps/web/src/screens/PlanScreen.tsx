@@ -328,20 +328,14 @@ export function PlanScreen({ household, onOpenTrip }: { household: HouseholdResp
     if (plan?.trip) act({ type: 'set', attendingMemberIds: [...next] });
   };
   const baseLabel = plan?.journey?.to ?? plan?.trip?.destination?.label ?? plan?.trip?.origin.label ?? 'here';
-  // Where the day is, so a stop's cost reads in that country's currency. Country
-  // is an area-level fact here — a place carries no country of its own — so:
-  //   • the browse pool sits at one base, and reads that base's country;
-  //   • the route can cross a border, and a stop carries no country to tell one
-  //     side from the other, so it reads the route's country only when origin
-  //     and destination agree, and otherwise falls back to the household's own
-  //     market rather than asserting the destination's on a stop the other side
-  //     of the border (Codex). True per-stop currency needs a per-place country
-  //     the data model does not hold.
-  const originCountry = plan?.trip?.origin?.countryCode ?? null;
-  const destCountry = plan?.trip?.destination?.countryCode ?? null;
-  const poolCountry = destCountry ?? originCountry;
-  const routeCountry = destCountry == null ? originCountry
-    : (destCountry === originCountry || originCountry == null ? destCountry : null);
+  // Where the day is, so a stop's cost reads in that country's currency. The
+  // planner exposes the market only as the trip's own `countryCode`; its origin
+  // and destination carry a label and coordinates but no country (Codex). So
+  // both the browse pool and the route read the trip's country. A truly
+  // cross-border route would want each stop in its own side's currency, but a
+  // stop carries no country of its own and the planner gives no per-endpoint
+  // country to tell the sides apart, so that refinement waits for that data.
+  const planCountry = plan?.trip?.countryCode ?? null;
   const picks = plan?.options?.find((o) => o.id === 'pinned') ?? null;
   // Keep "viewing" in step with the pager so "the first one" means what's on screen.
   const onPagerScroll = (e: any) => {
@@ -716,7 +710,7 @@ export function PlanScreen({ household, onOpenTrip }: { household: HouseholdResp
         <Card>
           <OnTheWay
             route={plan.route}
-            country={routeCountry}
+            country={planCountry}
             busy={busy === 'updating'}
             onAdd={(s) => act({ type: 'route_add', stopId: s.id })}
             onDrop={(s) => act({ type: 'route_drop', stopId: s.id })}
@@ -733,7 +727,7 @@ export function PlanScreen({ household, onOpenTrip }: { household: HouseholdResp
             items={plan!.browse ?? []}
             eventsSource={plan!.eventsSource}
             baseLabel={baseLabel}
-            country={poolCountry}
+            country={planCountry}
             pinned={new Set(plan!.selection?.pinned ?? [])}
             busy={busy === 'updating'}
             addLabel="+ Add to plan"

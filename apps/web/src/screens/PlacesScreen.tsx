@@ -375,10 +375,12 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
         item={newVenue ? venueToBrowseItem(newVenue) : open ? atlasToBrowseItem(open) : null}
         // The place's own country, so its cost reads in its own currency: the
         // atlas place carries it; a search result (newVenue) takes the browsed
-        // area's — the country whose towns you are looking at, or, at the root
-        // where the search looks from where you are standing, that location's
-        // country (abroad, not home), and only then home. (Codex.)
-        country={open?.countryCode ?? country?.country ?? here.place?.countryCode ?? homeCode ?? null}
+        // area's — the country whose towns you are looking at. The Near home
+        // scope is anchored to home, so it uses the home market even after a
+        // location lookup abroad; only the root, which searches from where you
+        // are standing, takes the current location's country before home (Codex).
+        country={open?.countryCode ?? country?.country
+          ?? (atHome ? homeCode : (here.place?.countryCode ?? homeCode)) ?? null}
         baseLabel={city?.name ?? (home ? 'home' : null)}
         // The close carries the dwell — see InspireMe. Without it a place
         // that was opened and closed reported the open and nothing else.
