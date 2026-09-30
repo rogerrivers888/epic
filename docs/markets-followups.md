@@ -100,16 +100,49 @@ today. The next feature that adds a drawer surface will hit it again; a single s
 `toBrowseItem` serializer (server) and a required `country` on the drawer's own resolution
 would close it for good.
 
-## 4. Places-tab atlas entries fetch no Google data (a spend decision)
+## 4. The back-office atlas shows a different cost from what households get (owner, 30 Sep 2026)
 
-A place opened from the **Places** tab comes through `atlasToBrowseItem`, whose reference
-is `osm:`/`wikidata:`, so the drawer's crowd lookup — which only fires for `atlas`/`scout`
-sources — never runs for it. These entries therefore show **no Google rating and no Google
-cost** (the cost reads "not known yet"), where the same place opened from **Inspire**
-(source `atlas`) does fetch both. This is pre-existing — the cost line only made it
-visible — and fixing it means firing a **paid** Google Place Details call per Places-atlas
-open (as Inspire already does). That is consistent with the data policy ("for activities,
-get the reviews always from Google") but it is a spend and product decision — a new paid
-surface — and should be taken deliberately, not slipped in behind the cost line. The fix
-is small (mark these items so the crowd lookup fires, as Inspire's do); the decision is
-whether Places should spend the way Inspire does.
+**Why this matters more than a footnote.** The back-office atlas is the screen the owner
+uses to judge what households are being served. A place opened from the **Places** tab
+comes through `atlasToBrowseItem`, whose reference is `osm:`/`wikidata:`, so the drawer's
+crowd lookup — which only fires for `atlas`/`scout` sources — never runs for it. These
+entries therefore show **no Google rating and no Google cost** ("not known yet"), where the
+*same place* opened from **Inspire** (source `atlas`) fetches both. So the atlas view reads
+"not known yet" for cost while the app shows a populated band — the owner would be judging
+the product by a view that does not reflect it. Pre-existing; the cost line only made it
+visible.
+
+**What populating it would cost.** Firing the crowd lookup is one Google **Place Details**
+call per place (`googleSource.get(id)` in `reviewsFor`). At the paid tier the sweep used
+(`google-pro`, **2.5p/call**, data bench 19 Sep 2026):
+
+- **Per place: ~2.5p**, where Epic already holds the place's Google id — which it does for
+  census places, so for the atlas this is the normal case. A place with no stored id would
+  add one match call (search), ~5p total, but that is the exception here.
+- **The 252 SL5 places: ~£6.30** for a full pass (252 × 2.5p), less for any already matched
+  and cached within the six-hour window. One-off per place until the rating/price cache
+  expires; it is rented, so it is re-fetched on the cadence the app already uses, not stored.
+
+**The decision** is not the code (the fix is small — mark these items so the crowd lookup
+fires, as Inspire's do) but whether the **back office should spend** to mirror the app, and
+if so whether on demand (only when a place is opened in the atlas) or as a warm-up pass. It
+ties to item 5 below: the same £6.30 pass is what produces the price-level coverage figure.
+
+## 5. The 252 SL5 places — "not known yet" has two causes that look identical
+
+The cost line shows "not known yet" for **both** a place with no Google price level **and** a
+market whose bands are not set — and they render the same, but need different fixes. For the
+**252 SL5 places** specifically (SL5 is in the UK):
+
+- **Unset-bands cause: 0 of 252.** SL5 is GB, and GB has its bands set (Free · <£10 · £10–25
+  · >£25, verified live). The unset-bands cause only bites in Portugal, Greece, Turkey and
+  the UAE, which have no places in SL5. So none of the 252 are "not known yet" for want of
+  bands — that is purely a PT/GR/TR/AE problem the cost-band editor closes.
+- **No-price-level cause: the rest, count TBD.** The remaining "not known yet" among the 252
+  are places Google has no price level for. The exact number can only be had by asking
+  Google (the same ~£6.30 pass as item 4) — so **the coverage figure and the atlas
+  population are one job**, to be produced with the cost-band editor as agreed.
+
+So on screen the two are indistinguishable, but for SL5 the split is "0 from bands, all the
+rest from no price level"; for a Portuguese outcode it would be the reverse until the editor
+sets PT's bands.

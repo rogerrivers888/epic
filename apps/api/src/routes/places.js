@@ -15,7 +15,7 @@ import { taxonomy } from '../repositories/shelfTaxonomy.js';
 import { shelvesForVenue } from '../domain/moods.js';
 import { withTransaction, query } from '../db.js';
 import { resolve as resolveWording, localeOfHousehold } from '../repositories/wording.js';
-import { costBandFor } from '../domain/costBand.js';
+import { costBandFor, fillDefinition } from '../domain/costBand.js';
 import * as visitsRepo from '../repositories/visits.js';
 import * as menusRepo from '../repositories/menus.js';
 import { enabledSources, recallVenue, optInFrom } from '../sources/index.js';
@@ -304,11 +304,13 @@ places.get('/cost-band', async (req, res, next) => {
 
     let definition = null;
     if (cost.range) {
-      definition = nameMarket
-        ? (await t('cost.definition.abroad', 'In {market}, {band} means {range} a person'))
-          .replace('{market}', m?.name ?? country).replace('{band}', cost.band).replace('{range}', cost.range)
-        : (await t('cost.definition', '{band} means {range} a person'))
-          .replace('{band}', cost.band).replace('{range}', cost.range);
+      // fillDefinition, not chained .replace: a $-currency band ("$$") is mangled
+      // to "$" by String.replace's replacement-string escaping (owner
+      // verification, 30 Sep 2026 — US read "$ means $15–40").
+      const template = nameMarket
+        ? await t('cost.definition.abroad', 'In {market}, {band} means {range} a person')
+        : await t('cost.definition', '{band} means {range} a person');
+      definition = fillDefinition(template, { market: m?.name ?? country, band: cost.band, range: cost.range });
     }
     res.json({ known: true, scale: cost.scale, index: cost.index, band: cost.band, currency: cost.currency, range: cost.range, definition });
   } catch (err) { next(err); }

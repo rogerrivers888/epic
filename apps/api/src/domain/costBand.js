@@ -65,6 +65,21 @@ export function costBandFor(market, level) {
 }
 
 /**
+ * Fill a definition template's {market}/{band}/{range} tokens. Done by
+ * split/join, not String.replace: a band or range symbol is a currency sign,
+ * and `$$` in a String.replace *replacement* is the escape for a single `$`, so
+ * `'{band}'.replace('{band}', '$$')` silently produced "$" — "In United States,
+ * $ means $15–40" instead of "$$ means …" on the live site (owner verification,
+ * 30 Sep 2026). split/join treats every value as a literal.
+ */
+export function fillDefinition(template, { market, band, range }) {
+  return String(template)
+    .split('{market}').join(market ?? '')
+    .split('{band}').join(band ?? '')
+    .split('{range}').join(range ?? '');
+}
+
+/**
  * The money range for a band — "under £10", "£10–25", "over £25" — from the
  * market's own cost bands. Free and a bandless market both return null (no
  * money sentence to make).

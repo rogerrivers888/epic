@@ -8,7 +8,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { scaleFor, bandIndexForLevel, rangeText, money, costBandFor } from '../src/domain/costBand.js';
+import { scaleFor, bandIndexForLevel, rangeText, money, costBandFor, fillDefinition } from '../src/domain/costBand.js';
 
 test('the scale is Free and three currency symbols', () => {
   assert.deepEqual(scaleFor('GBP'), ['Free', '£', '££', '£££']);
@@ -67,6 +67,24 @@ test('costBandFor: known only with a level AND a market AND that market\'s bands
   // seeded null) → not known yet, never a symbol scale with no meaning (Codex).
   assert.deepEqual(costBandFor({ name: 'Portugal', currency: 'EUR', cost_bands: null }, 2), { known: false });
   assert.deepEqual(costBandFor({ name: 'Greece', currency: 'EUR', cost_bands: [] }, 2), { known: false });
+});
+
+test('fillDefinition keeps a $-currency band whole (the live US "$$"→"$" bug)', () => {
+  // A $-currency band is the case String.replace mangled: "$$" in a replacement
+  // string is the escape for a single "$". split/join keeps it literal.
+  assert.equal(
+    fillDefinition('In {market}, {band} means {range} a person', { market: 'United States', band: '$$', range: '$15–40' }),
+    'In United States, $$ means $15–40 a person');
+  assert.equal(
+    fillDefinition('{band} means {range} a person', { band: '$$$', range: 'over $40' }),
+    '$$$ means over $40 a person');
+  // And it still fills the £/€ markets it always did.
+  assert.equal(
+    fillDefinition('{band} means {range} a person', { band: '££', range: '£10–25' }),
+    '££ means £10–25 a person');
+  assert.equal(
+    fillDefinition('In {market}, {band} means {range} a person', { market: 'Ireland', band: '€€', range: '€12–30' }),
+    'In Ireland, €€ means €12–30 a person');
 });
 
 test('money formats minor units in the market currency', () => {
