@@ -101,12 +101,17 @@ export function whereBoxSits(box, { cells, universe }) {
  * across its edge — the circle being the estimated reach a matrix-less mode
  * (walk, cycle, transit) is counted over (owner, 30 Sep 2026).
  *
- * The same five points as the sector test — four corners and the middle — but
- * judged by distance to the circle's centre rather than by nearest sector, so
- * the count is over the identical circle the display cards are fenced by and
- * the two cannot disagree (Codex). A box under the fine width is placed by its
+ * Judged by distance to the circle's centre rather than by nearest sector, so
+ * the count is over the identical circle the display cards are fenced by and the
+ * two cannot disagree (Codex). A box under the fine width is placed by its
  * centre, exactly as the sector test places it; a wider one really can straddle
  * the edge and is left unresolved.
+ *
+ * For a wide box the test is exact rather than sampled: an axis-aligned box and
+ * a circle overlap iff the box's nearest point to the centre is within the
+ * radius, and the box is wholly inside iff its farthest point (a corner) is. A
+ * five-point sample would miss a small circle sitting inside a large box, or one
+ * that crosses an edge between two corners, and read it as outside (Codex).
  */
 export function whereBoxSitsInCircle(box, { lat, lng, km }) {
   if (!box) return 'nowhere';
@@ -115,12 +120,15 @@ export function whereBoxSitsInCircle(box, { lat, lng, km }) {
     const mid = { lat: (box.minLat + box.maxLat) / 2, lng: (box.minLng + box.maxLng) / 2 };
     return kmBetween(at, mid) <= km ? 'inside' : 'outside';
   }
-  let ins = 0;
-  const pts = cornersOf(box);
-  for (const p of pts) if (kmBetween(at, p) <= km) ins += 1;
-  if (ins === pts.length) return 'inside';
-  if (ins === 0) return 'outside';
-  return 'across';
+  // Nearest point of the rectangle to the centre: the centre clamped into it.
+  const nearest = {
+    lat: Math.min(Math.max(lat, box.minLat), box.maxLat),
+    lng: Math.min(Math.max(lng, box.minLng), box.maxLng),
+  };
+  if (kmBetween(at, nearest) > km) return 'outside';
+  // Farthest point of a rectangle from any centre is one of its four corners.
+  const farthest = Math.max(...cornersOf(box).slice(0, 4).map((p) => kmBetween(at, p)));
+  return farthest <= km ? 'inside' : 'across';
 }
 
 /**

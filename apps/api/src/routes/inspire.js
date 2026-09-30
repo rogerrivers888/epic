@@ -453,11 +453,17 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
     // count kept at the cycling overhead (Codex). A matrix ring fences by the
     // journey-time estimate the card itself prints.
     let fenced;
-    if (straight && start) {
+    if (straight && (ring.at ?? start)) {
+      // Centre on `ring.at`, the exact point the count circle is centred on
+      // (censusForRing), not on `start` — in /near the journey origin can differ
+      // from the ring's centre, and the cards must be the same circle as the
+      // count, never a second one (Codex).
+      const c = ring.at ?? start;
+      const centre = { lat: Number(c.lat), lng: Number(c.lng) };
       const limitKm = straightLineReachKm(mode, minutes);
       fenced = (venues ?? []).filter((v) =>
         v?.lat != null && v?.lng != null
-        && kmBetween(start, { lat: Number(v.lat), lng: Number(v.lng) }) <= limitKm);
+        && kmBetween(centre, { lat: Number(v.lat), lng: Number(v.lng) }) <= limitKm);
     } else {
       fenced = fenceToBand(venues, { from: start, minutes, mode });
     }

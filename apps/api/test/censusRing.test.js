@@ -243,4 +243,9 @@ test('whereBoxSitsInCircle: centre for a fine box, corners for a wide one', () =
   assert.equal(whereBoxSitsInCircle(wide, { ...at, km: 2 }), 'across');
   assert.equal(whereBoxSitsInCircle(wide, { ...at, km: 40 }), 'inside');
   assert.equal(whereBoxSitsInCircle(null, { ...at, km: 5 }), 'nowhere');
+  // A small circle that sits inside a large box near one corner: every corner
+  // and the midpoint is far, but the circle still overlaps the box, so it is
+  // across, not outside — the case a five-point sample would have dropped.
+  const small = { lat: 51.505, lng: -0.10, km: 0.3 };
+  assert.equal(whereBoxSitsInCircle(wide, small), 'across', 'the circle overlaps the box between its corners');
 });
