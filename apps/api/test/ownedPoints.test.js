@@ -257,3 +257,11 @@ test('a rented point reaches an index row that has neither point nor box', async
   await saved(hh, ref, 51.33, -0.44);
   assert.deepEqual((await query('select lat, coords_from from place_index where venue_ref = $1', [ref])).rows[0], { lat: 51.33, coords_from: 'google' });
 });
+
+test('a name our research took from Wikipedia survives a look inside', async () => {
+  const { markResearching } = await import('../src/repositories/placeContents.js');
+  const g = `google:wiki-named-${randomUUID()}`;
+  await query(`insert into place_records (venue_ref, name, provenance) values ($1, 'St Mary''s Church', '{"name":"wikipedia"}')`, [g]);
+  await markResearching(g, 'Google\'s name', 51.5, -0.1);
+  assert.equal((await query('select name from place_records where venue_ref = $1', [g])).rows[0].name, 'St Mary\'s Church');
+});

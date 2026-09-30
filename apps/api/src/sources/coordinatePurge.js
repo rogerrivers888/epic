@@ -119,7 +119,7 @@ export async function purgeRented({ days = 30, force = false } = {}) {
   await step('place_records (names)',
     `update place_records set name = null
       where name is not null and ${RENTED_REF('venue_ref')}
-        and not (coalesce(provenance ->> 'name', '') = any(epic_owned_sources()))
+        and (provenance ->> 'name') is null
         and coalesce(first_owned, '-infinity'::timestamptz) < now() - ${age}`, [RENTED_SOURCES]);
 
   // The index's own undated rented points: written by the rebuild before it

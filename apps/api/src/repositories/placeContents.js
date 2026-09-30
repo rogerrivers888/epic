@@ -37,7 +37,7 @@ export async function markResearching(parentRef, name, lat, lng) {
      on conflict (venue_ref) do update set contents_state = 'pending',
        -- A name an earlier look wrote from the drawer is Google's, and goes;
        -- one our own research composed says so in its provenance, and stays.
-       name = case when $5 and not (coalesce(place_records.provenance ->> 'name', '') = any(epic_owned_sources()))
+       name = case when $5 and (place_records.provenance ->> 'name') is null
                    then null else place_records.name end`,
     [parentRef, rented ? null : (name ?? null), rented ? null : lat, rented ? null : lng, rented],
   );
