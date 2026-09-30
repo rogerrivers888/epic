@@ -115,6 +115,16 @@ export async function purgeRented({ days = 30, force = false } = {}) {
         and not (coalesce(provenance ->> 'name', '') = any(epic_owned_sources()))
         and coalesce(first_owned, updated_at) < now() - ${age}`, [RENTED_SOURCES]);
 
+  // The index's own undated rented points: written by the rebuild before it
+  // recorded a source, so the hourly expiry could never see them. Before the
+  // cells, so a cell copied from one goes in the same pass (Codex).
+  await step('place_index (undated)',
+    `update place_index set lat = null, lng = null, cell = null, coords_at = null, coords_from = null, placed_at = null
+      where lat is not null and (coords_from is null or coords_at is null)
+        and ${RENTED_REF('venue_ref')}
+        and not exists (select 1 from owned_points o where o.venue_ref = place_index.venue_ref)
+        and first_seen < now() - ${age}`, [RENTED_SOURCES]);
+
   // Cells stamped from a copy that is gone: a rented reference's cell whose
   // point matches no point the place still holds anywhere.
   await step('place_cells',
@@ -130,15 +140,6 @@ export async function purgeRented({ days = 30, force = false } = {}) {
                           and abs(pi.lat - c.lat) <= 0.0005 and abs(pi.lng - c.lng) <= 0.0005)
         and not exists (select 1 from owned_points o where o.venue_ref = c.venue_ref
                           and abs(o.lat - c.lat) <= 0.0005 and abs(o.lng - c.lng) <= 0.0005)`, [RENTED_SOURCES]);
-
-  // The index's own undated rented points: written by the rebuild before it
-  // recorded a source, so the hourly expiry could never see them.
-  await step('place_index (undated)',
-    `update place_index set lat = null, lng = null, cell = null, coords_at = null, coords_from = null, placed_at = null
-      where lat is not null and (coords_from is null or coords_at is null)
-        and ${RENTED_REF('venue_ref')}
-        and not exists (select 1 from owned_points o where o.venue_ref = place_index.venue_ref)
-        and first_seen < now() - ${age}`, [RENTED_SOURCES]);
 
   return out;
 }
