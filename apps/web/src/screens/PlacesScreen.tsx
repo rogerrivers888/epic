@@ -365,7 +365,7 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
         ) : null}
       </ScrollView>
 
-      {inArea && (city || home) ? <ListMenus st={st} ui={ui} top={headH} /> : null}
+      {inArea && (city || home) ? <ListMenus st={st} ui={ui} top={headH} onLandedShown={() => setLanded(null)} /> : null}
 
       <VenueDrawer
         item={newVenue ? venueToBrowseItem(newVenue) : open ? atlasToBrowseItem(open) : null}
@@ -640,7 +640,7 @@ function ListHead({ st, ui, onLandedShown }: { st: ListState; ui: ListUi; onLand
 }
 
 /** The panels, anchored under the head. */
-function ListMenus({ st, ui, top }: { st: ListState; ui: ListUi; top: number }) {
+function ListMenus({ st, ui, top, onLandedShown }: { st: ListState; ui: ListUi; top: number; onLandedShown: () => void }) {
   const close = () => ui.setMenu(null);
   return (
     <>
@@ -648,7 +648,7 @@ function ListMenus({ st, ui, top }: { st: ListState; ui: ListUi; top: number }) 
         <PopoverGroup title="Show">
           <PopoverList
             options={LISTS.map((l) => ({ key: l.key, label: `${l.label} · ${st.listCounts[l.key]}`, on: st.list === l.key }))}
-            onPick={(k) => { st.setList(k as ListKey); st.setTypeF(null); close(); }}
+            onPick={(k) => { st.setList(k as ListKey); st.setTypeF(null); onLandedShown(); close(); }}
           />
         </PopoverGroup>
       </Popover>

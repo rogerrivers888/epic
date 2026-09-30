@@ -23,7 +23,7 @@ import { TallBand, HostPhoto } from '../../components/Band';
 import { InkMenu } from '../../components/InkMenu';
 import { SectionHeader } from '../../components/NavRows';
 import { useViewport } from '../../hooks/useViewport';
-import { useRouter } from '../../router';
+import { useRouter, useQueryState, asOneOf } from '../../router';
 import { paths, type Route } from '../../routes';
 import { SHAPE_ICON, SHAPE_LABEL, STATE_LABEL, TRUST_LABEL, TYPE_CHIP, VISIBILITY_CHIP, dateOnly, mediaUrl, money, priceWords } from '../../components/hosting';
 import { Tag, k, t } from '../../components/hostKit';
@@ -42,8 +42,10 @@ export function HostScreen({ route }: { route: Extract<Route, { name: 'host' }> 
   const { navigate, query } = useRouter();
   const [home, setHome] = useState<HostHome | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // The ink menu's two views (New navigation, 30 Sep 2026): the offers dashboard and the bookings across them.
-  const [tab, setTab] = useState<'offers' | 'bookings'>('offers');
+  // The ink menu's two views (New navigation, 30 Sep 2026): the offers dashboard
+  // and the bookings across them. Held in the address (every page has one), so a
+  // reload, a shared link and Back all land where you were (Codex).
+  const [tab, setTab] = useQueryState<'offers' | 'bookings'>('view', 'offers', asOneOf(['offers', 'bookings'] as const, 'offers'));
 
   const load = useCallback(async () => {
     try { setHome(await api.hostHome()); setError(null); } catch (e: any) { setError(e.message); }

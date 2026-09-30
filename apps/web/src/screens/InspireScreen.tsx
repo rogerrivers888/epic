@@ -14,11 +14,11 @@ import { PlacePicker } from '../components/PlacePicker';
 import { useViewport } from '../hooks/useViewport';
 import { asList, asNumber, asOneOf, useQueryState, useRouter, useStickyQuery } from '../router';
 import { paths, withQuery, ACTIVITY_CATEGORIES, FOOD_CATEGORIES, type Route } from '../routes';
-import { TallBand, MicTile } from '../components/Band';
+import { TallBand, CompactBand, MicTile } from '../components/Band';
 import { InkMenu } from '../components/InkMenu';
 import { ContextRow } from '../components/NavRows';
 import { ExperienceCard } from '../components/hosting';
-import { BoxRow, CrumbHead, Popover, PopoverFooter, PopoverGroup, PopoverList, type PopoverOption } from '../components/ControlRow';
+import { BoxRow, Popover, PopoverFooter, PopoverGroup, PopoverList, type PopoverOption } from '../components/ControlRow';
 import { CardWide, Carousel, EmptyMatch, FoodRow, SubRow, TRAVEL } from '../components/InspireBody';
 import { Button } from '../components/ui';
 import { CollectionRowView, CollectionsHead, useCollections, WhoseList } from '../components/CollectionRows';
@@ -862,8 +862,20 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
           {/* New navigation (owner, 30 Sep 2026): the tall band with the mic,
               the ink menu of the two halves, and the context row. The old lime
               category strip is gone — categories are the section headings you
-              scroll past, reached with "See all ›". */}
-          <TallBand right={<MicTile onPress={() => navigate(paths.say({ for: 'inspire' }))} />} />
+              scroll past, reached with "See all ›". Drilling into one category
+              ("See all") is a screen below the home, so it takes the compact
+              band with the category as its title — one nav system, not a tall
+              band plus a crumb (Codex). */}
+          {pick ? (
+            <CompactBand
+              title={listTitle}
+              context={listCount ? `${listCount} place${listCount === 1 ? '' : 's'}` : undefined}
+              onBack={() => goTo(mode, null)}
+              right={<MicTile onPress={() => navigate(paths.say({ for: 'inspire' }))} />}
+            />
+          ) : (
+            <TallBand right={<MicTile onPress={() => navigate(paths.say({ for: 'inspire' }))} />} />
+          )}
           <InkMenu
             tabs={[{ key: 'activities', label: 'Activities' }, { key: 'food', label: 'Food & drink' }]}
             selected={mode}
@@ -1017,16 +1029,11 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                 </View>
               ) : null}
 
-              {/* Inside a category or a kind: the section title row, then the
-                  drawers or the places. The back arrow always returns to All. */}
+              {/* Inside a category or a kind: the drawers or the places. The
+                  category title and its back to All are the compact band now
+                  (§1, Codex) — no second crumb in the body. */}
               {pick ? (
                 <View style={styles.drill}>
-                  <CrumbHead
-                    onBack={() => goTo(mode, null)}
-                    backLabel="All"
-                    title={listTitle}
-                    aside={listCount ? `${listCount} place${listCount === 1 ? '' : 's'}` : null}
-                  />
                   {layer === 'subs' ? (
                     <View>
                       {mode === 'food' ? (
