@@ -106,8 +106,15 @@ async function countRing({ cell, kind, minutes }) {
   // matrix count once the mode's matrix is built — freezing the very count the
   // fallback exists to move. censusForRing already recomputes an estimated ring
   // live and never reads this table for one, so a straight-line ring is not
-  // persisted at all (Codex).
-  if (ring.method === 'straight-line') return null;
+  // persisted at all — and any legacy row for this key (a walk/transit count
+  // written under the old home-sector geometry, before this fallback) is deleted
+  // here, so the periodic refresh purges it and it can never be read as a matrix
+  // count when a real matrix later appears (Codex).
+  if (ring.method === 'straight-line') {
+    await query('delete from ring_counts where cell = $1 and mode = $2 and minutes = $3', [cell, kind, minutes]);
+    await query('delete from ring_rankings where cell = $1 and mode = $2 and minutes = $3', [cell, kind, minutes]);
+    return null;
+  }
   const band = ring.band ?? ring.cells;
 
   const [placed, seen] = await Promise.all([

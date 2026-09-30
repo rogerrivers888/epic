@@ -295,12 +295,19 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
   const start = from ?? ring.at ?? null;
   const straight = ring.method === 'straight-line';
   const reachKm = straight ? straightLineReachKm(mode, minutes) : boundKm(minutes, mode);
-  const searchBox = start
+  // A straight-line ring's cards are capped to the counted circle (`ring.circle`,
+  // centred on the searched place), so the provider box must cover that circle —
+  // not one round the journey origin, which in /near can be a different point and
+  // would search one area while counting another (Codex). The journey-origin band
+  // fence below still trims for the "nothing over the minutes" invariant. A matrix
+  // ring searches round the journey origin as before.
+  const boxCentre = straight && ring.circle ? ring.circle : start;
+  const searchBox = boxCentre
     ? {
-      minLat: start.lat - reachKm / 111.32,
-      maxLat: start.lat + reachKm / 111.32,
-      minLng: start.lng - reachKm / (111.32 * Math.cos((start.lat * Math.PI) / 180) || 1),
-      maxLng: start.lng + reachKm / (111.32 * Math.cos((start.lat * Math.PI) / 180) || 1),
+      minLat: boxCentre.lat - reachKm / 111.32,
+      maxLat: boxCentre.lat + reachKm / 111.32,
+      minLng: boxCentre.lng - reachKm / (111.32 * Math.cos((boxCentre.lat * Math.PI) / 180) || 1),
+      maxLng: boxCentre.lng + reachKm / (111.32 * Math.cos((boxCentre.lat * Math.PI) / 180) || 1),
     }
     : ring.bandBox ?? ring.box;
 
@@ -455,15 +462,15 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
     //   · the band invariant — nothing over the minutes is shown, measured from
     //     the journey origin the card itself prints from — which fenceToBand
     //     above already enforces; and
-    //   · the counted reach — the conservative straight-line circle the count is
-    //     taken over — so no card lies past the reach the count claims.
-    // A card must satisfy both, so cap the band by that circle. Centred on
-    // `start`, the same origin the band is measured from, so the two never
-    // contradict; when the search centre and the origin coincide (the ordinary
-    // case) this circle is exactly the count's.
-    if (straight && start) {
-      const centre = { lat: Number(start.lat), lng: Number(start.lng) };
-      const limitKm = straightLineReachKm(mode, minutes);
+    //   · the counted reach — `ring.circle`, the exact circle the count was taken
+    //     over — so no card lies past the reach the count claims, and none inside
+    //     it is dropped.
+    // A card must satisfy both, so cap the band by `ring.circle` itself, never a
+    // second circle round another point; when the searched place and the journey
+    // origin coincide (the ordinary case) the two are one.
+    if (straight && ring.circle) {
+      const centre = { lat: Number(ring.circle.lat), lng: Number(ring.circle.lng) };
+      const limitKm = ring.circle.km;
       fenced = fenced.filter((v) =>
         v?.lat != null && v?.lng != null
         && kmBetween(centre, { lat: Number(v.lat), lng: Number(v.lng) }) <= limitKm);
