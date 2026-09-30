@@ -341,3 +341,9 @@ test('an owned point reaches an activity-sweep row keyed on its Google reference
   await recordOwnedPoint({ ref: ext, lat: 51.2, lng: -1.2, source: 'fsa', sourceRef: '9', method: 'name+distance' });
   assert.equal((await query('select lat from attractions where external_ref = $1', [ext])).rows[0].lat, 51.2);
 });
+
+test('an activity-sweep row with no name is matched by its point alone, as the sweep matches its own', async () => {
+  await query(`insert into osm_features (ref, name, lat, lng, tags, region, load_id) values ('way/424242', 'Lonely Lido', 50.6000, -3.9000, '{}', 'great-britain', $1) on conflict (ref) do nothing`, [randomUUID()]);
+  const hit = await m.matchPlace({ ref: 'google:swept-lido', names: ['(swimming pool)'], point: { lat: 50.6003, lng: -3.9002 }, swept: true });
+  assert.deepEqual([hit.source, hit.sourceRef, hit.method], ['osm', 'way/424242', 'point, alone within 120 m']);
+});

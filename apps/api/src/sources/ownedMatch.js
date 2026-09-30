@@ -133,7 +133,22 @@ export async function matchPlace(place) {
   // never moved onto somebody else's feature by a name (Codex, 30 Sep 2026).
   if (!(place.rented ?? RENTED_SOURCES.includes(prefix))) return { none: 'its point is already ours' };
   const names = [...new Set((place.names ?? []).filter((n) => n && !/^\(.*\)$/.test(n) && n !== place.ref))];
-  if (!names.length) return { none: 'no name to match on' };
+  if (!names.length) {
+    // The activity sweep's rule for its own rows, which carry no name we keep:
+    // one named open-map place within 120 m, and only one (activitySweep.js,
+    // rematchRegion), asked of our own copy of the map.
+    if (place.swept && place.point) {
+      const [a, b, c, d] = box(place.point.lat, place.point.lng, 120);
+      const { rows } = await query(
+        `select ref, lat, lng from osm_features where lat between $1 and $2 and lng between $3 and $4 limit 3`, [a, b, c, d]);
+      const near = rows.filter((r) => metresBetween(place.point, { lat: r.lat, lng: r.lng }) <= 120);
+      if (near.length === 1) {
+        return { source: 'osm', lat: near[0].lat, lng: near[0].lng, sourceRef: near[0].ref, method: 'point, alone within 120 m',
+          distanceM: Math.round(metresBetween(place.point, near[0])) };
+      }
+    }
+    return { none: 'no name to match on' };
+  }
   const near = place.point ?? place.box;
   if (!near) return { none: 'no point or box to match near' };
   const strict = !place.point;
@@ -193,6 +208,9 @@ async function pageOfPlaces(after, limit, { weekly }) {
                union select v.venue_label from visits v where v.venue_ref = pi.venue_ref and v.venue_label <> v.venue_ref
              ) labels where n is not null) as names,
             epic_ref_true_source(pi.venue_ref) = any(epic_rented_sources()) as rented,
+            -- An activity-sweep row: Google gave it no name we keep, so it is
+            -- matched as the sweep's own rematch matches it, by its point alone.
+            exists (select 1 from attractions a where (a.external_ref = pi.venue_ref or a.id = ${ATLAS_ID}) and a.source = 'google') as swept,
             coalesce((select r.wikidata_id from place_records r where r.venue_ref = pi.venue_ref),
                      -- Only an identifier the atlas vouches for: a harvested row,
                      -- or an activity-sweep match it accepted — never one it
@@ -208,6 +226,10 @@ async function pageOfPlaces(after, limit, { weekly }) {
            union all select h.lat, h.lng, 2 from household_places h
                       where h.venue_ref = pi.venue_ref and h.lat is not null and h.lng is not null and h.point_from is distinct from 'census-box'
            union all select r.lat, r.lng, 3 from place_records r where r.venue_ref = pi.venue_ref and r.lat is not null and r.lng is not null
+           -- And an activity-sweep row's legacy point, until the purge (Codex).
+           union all select a.lat, a.lng, 4 from attractions a
+                      where (a.venue_ref = pi.venue_ref or a.external_ref = pi.venue_ref or a.id = ${ATLAS_ID})
+                        and a.lat is not null and a.lng is not null
          ) x order by x.k limit 1) pt on true
       where ($1::text is null or pi.venue_ref > $1)
         -- Weekly: the unmatched (C59: "re-match unmatched places against all
@@ -293,7 +315,7 @@ async function runLocked({ kind, who, pageSize, fetcher, resume }) {
           ref: p.ref, names: p.names,
           point: p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : null,
           box: boxOf(p.slice), wikidataId: p.wikidata_id, wikidataPoint: wd.get(p.wikidata_id) ?? null,
-          rented: p.rented,
+          rented: p.rented, swept: p.swept,
         });
         // The point and the checkpoint in one transaction: a resume neither
         // looks at a place again nor counts it twice (Codex, 30 Sep 2026).
