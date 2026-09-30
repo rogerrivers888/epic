@@ -3855,7 +3855,8 @@ export async function coordinateReport() {
     const rented = [];
     const count = async (table, clock, sql, params = []) => {
       const { rows: [r] } = await query(sql, params);
-      rented.push({ table, clock, held: r.held, over30Days: r.over30, undated: r.undated, oldest: r.oldest });
+      rented.push({ table, clock, held: r.held, over30Days: r.over30, undated: r.undated, oldest: r.oldest,
+        ...(r.rows_over30 === undefined ? {} : { rowsFirstSeenOver30Days: r.rows_over30 }) });
     };
     // Undated is its own count, never "over thirty days": a point with no
     // clock cannot be said to be old (the can't-speak rule).
@@ -3875,17 +3876,24 @@ export async function coordinateReport() {
     await count('place_index', 'coords_at', `select ${OVER('coords_at')} from place_index where ${RENTED_IX}`);
     await count('place_index (other providers)', 'coords_at',
       `select ${OVER('coords_at')} from place_index where lat is not null and ${IX_SRC} not in ('osm', 'atlas', 'own', 'wikidata', 'google')`);
+    // Only the index and the cells date their points. Every other table's
+    // clocks move with unrelated writes — a save again, an edit — so a point
+    // in them has no age this report can speak to (Codex, 30 Sep 2026): each
+    // is counted undated, with how many of its rows were first seen over
+    // thirty days ago beside it, which is context and not an age.
+    const ROWS = (first) => `count(*)::int held, null::int over30, count(*)::int undated, min(${first}) oldest,
+                             count(*) filter (where ${first} < now() - interval '30 days')::int rows_over30`;
     await count('place_cells', 'at', `select ${OVER('at')} from place_cells where lat is not null and venue_ref like 'google:%'`);
-    await count('scout_places', 'last_seen', `select ${OVER('last_seen')} from scout_places where lat is not null and venue_ref like 'google:%' and not (coalesce(from_sources, '[]'::jsonb) ? 'osm')`);
-    await count('attractions', 'updated_at or last_seen', `select ${OVER('coalesce(updated_at, last_seen)')} from attractions where lat is not null and display_source = 'google'`);
-    await count('household_places', 'last_seen', `select ${OVER('last_seen')} from household_places where lat is not null and venue_ref like 'google:%'`);
-    await count('trip_stops', 'created_at', `select ${OVER('created_at')} from trip_stops where lat is not null and venue_ref like 'google:%'`);
-    await count('trip_shortlist', 'added_at', `select ${OVER('added_at')} from trip_shortlist where lat is not null and venue_ref like 'google:%'`);
-    await count('visits', 'created_at', `select ${OVER('created_at')} from visits where lat is not null and venue_ref like 'google:%'`);
-    await count('place_records', 'updated_at', `select ${OVER('updated_at')} from place_records where lat is not null and osm_ref is null and venue_ref like 'google:%'`);
+    await count('scout_places', 'first_seen (row)', `select ${ROWS('first_seen')} from scout_places where lat is not null and venue_ref like 'google:%' and not (coalesce(from_sources, '[]'::jsonb) ? 'osm')`);
+    await count('attractions', 'first_seen (row)', `select ${ROWS('first_seen')} from attractions where lat is not null and display_source = 'google'`);
+    await count('household_places', 'first_seen (row)', `select ${ROWS('first_seen')} from household_places where lat is not null and venue_ref like 'google:%'`);
+    await count('trip_stops', 'created_at (row)', `select ${ROWS('created_at')} from trip_stops where lat is not null and venue_ref like 'google:%'`);
+    await count('trip_shortlist', 'added_at (row)', `select ${ROWS('added_at')} from trip_shortlist where lat is not null and venue_ref like 'google:%'`);
+    await count('visits', 'created_at (row)', `select ${ROWS('created_at')} from visits where lat is not null and venue_ref like 'google:%'`);
+    await count('place_records', 'first_owned (row)', `select ${ROWS('coalesce(first_owned, updated_at)')} from place_records where lat is not null and osm_ref is null and venue_ref like 'google:%'`);
     // The tenth: what is inside a place. Its items come from OSM and Wikidata;
     // one on a Google reference would be a copy, and is counted as one.
-    await count('place_contents', 'updated_at', `select ${OVER('updated_at')} from place_contents where lat is not null and item_ref like 'google:%'`);
+    await count('place_contents', 'updated_at (row)', `select ${ROWS('updated_at')} from place_contents where lat is not null and item_ref like 'google:%'`);
 
     // Every point in every table, by the source its reference names — the
     // whole estate at a glance, beside the per-place filing above.
@@ -3925,7 +3933,8 @@ export async function coordinateReport() {
       // table records a truer source (place_index.coords_from, attractions.
       // display_source) the filing above uses it; this is the raw spread.
       pointsByTable,
-      rentedOver30Days: rented.reduce((n, r) => n + r.over30Days, 0),
+      // Only where a point has a date: null elsewhere is "cannot say", never nought.
+      rentedOver30Days: rented.reduce((n, r) => n + (r.over30Days ?? 0), 0),
       rentedUndated: rented.reduce((n, r) => n + r.undated, 0),
       indexOver30DaysByArea: where,
   };

@@ -47,6 +47,9 @@ test('files each place under the best point held for it, and counts old rented p
   assert.deepEqual(r.places.otherRented, { tripadvisor: 1 });
   assert.equal(r.places.none, 0, 'google:nothing has a rented point in the sweep');
   assert.equal(r.rented.find((x) => x.table === 'scout_places').held, 1, 'only the untwinned row');
+  const sp = r.rented.find((x) => x.table === 'scout_places');
+  assert.equal(sp.over30Days, null, 'a table that does not date its points cannot say how old they are');
+  assert.equal(sp.undated, 1);
   const idx = r.rented.find((x) => x.table === 'place_index');
   assert.equal(idx.held, 5, 'matched, old, fresh, undated, the Google atlas row — Google\'s alone');
   assert.equal(idx.over30Days, 2);
