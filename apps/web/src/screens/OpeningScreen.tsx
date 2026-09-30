@@ -206,8 +206,12 @@ function Opener({ width, height, reduced, onStart, onHaveAccount }: {
 }) {
   const confetti = useRef<ConfettiHandle | null>(null);
   const cols = 3, rows = 5;
+  // The two doors sit below the grid, not over it, so both rows below the band
+  // are seen (owner, 30 Sep 2026: "2 rows of images underneath the Epic logo, but
+  // we've only got 1"). The grid fills the room left above the measured CTA.
+  const [ctaH, setCtaH] = useState(150);
   const tileW = width / cols;
-  const tileH = height / rows;
+  const tileH = (height - ctaH) / rows;
   const bandTop = tileH * 2;
   const bandH = tileH;
   const letterFS = Math.round(tileH * 0.66); // ≈ the board's 112px at a 390×844 frame
@@ -339,7 +343,7 @@ function Opener({ width, height, reduced, onStart, onHaveAccount }: {
       </Animated.View>
 
       {/* The two doors. */}
-      <Animated.View style={[styles.openerCta, { opacity: cta, transform: [{ translateY: cta.interpolate({ inputRange: [0, 1], outputRange: [160, 0] }) }] }]}>
+      <Animated.View onLayout={(e) => setCtaH(e.nativeEvent.layout.height)} style={[styles.openerCta, { opacity: cta, transform: [{ translateY: cta.interpolate({ inputRange: [0, 1], outputRange: [160, 0] }) }] }]}>
         <Pressable onPress={onStart} accessibilityRole="button" style={styles.ctaBar}>
           <Text style={styles.ctaLabel}>Get started</Text>
           <Icon name="forward" size={20} color={CREAM} strokeWidth={2.4} />
@@ -433,7 +437,10 @@ function DayOrTrip({ stepIndex, reduced, onSkip, onNext }: IntroProps) {
     <IntroFrame stepIndex={stepIndex} showSkip onSkip={onSkip} onNext={onNext} ctaLabel="Next"
       title="One day. Or ten." sub="Plan a Saturday out or a week away. Same app, same crew.">
       <View style={{ flex: 1, justifyContent: 'center', gap: 18 }}>
-        <View style={styles.switch} onLayout={(e) => setCellW(e.nativeEvent.layout.width / 2)}>
+        {/* Slide the indicator by an inner half-width (less the 2px border each
+            side), so at "Trip" its right edge stops inside the frame's right rule
+            instead of sitting on top of it and hiding it (owner, 30 Sep 2026). */}
+        <View style={styles.switch} onLayout={(e) => setCellW((e.nativeEvent.layout.width - 4) / 2)}>
           <Animated.View style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '50%', backgroundColor: LIME, transform: [{ translateX: indX }] }} />
           <View style={styles.switchCell}><Text style={styles.switchText}>Day out</Text></View>
           <View style={[styles.switchCell, { borderLeftWidth: 2, borderLeftColor: INK }]}><Text style={styles.switchText}>Trip</Text></View>
@@ -628,11 +635,14 @@ function CardScreen({ stepIndex, reduced, onSkip, onNext, title, sub, cards, cta
 // own top and bottom padding.
 const introTop = Platform.OS === 'web' ? ('calc(64px + var(--epic-sat))' as unknown as number) : 64;
 const bottomPad = Platform.OS === 'web' ? ('calc(40px + var(--epic-sab))' as unknown as number) : 40;
+// The opener's doors sit closer to the bottom edge than the intro screens' CTA
+// (owner, 30 Sep 2026: move them down about a centimetre).
+const openerBottom = Platform.OS === 'web' ? ('calc(18px + var(--epic-sab))' as unknown as number) : 18;
 
 const styles = StyleSheet.create({
   glyph: { fontFamily: fonts.heading, fontWeight: '800', letterSpacing: -6, color: INK, includeFontPadding: false },
   openerTag: { fontSize: 17, fontWeight: '700', color: INK },
-  openerCta: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 20, paddingTop: 20, paddingBottom: bottomPad, backgroundColor: CREAM, borderTopWidth: 2, borderTopColor: INK, gap: 16, zIndex: 35 },
+  openerCta: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 20, paddingTop: 12, paddingBottom: openerBottom, backgroundColor: CREAM, borderTopWidth: 2, borderTopColor: INK, gap: 10, zIndex: 35 },
   ctaBar: { height: 56, backgroundColor: INK, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20 },
   ctaLabel: { color: CREAM, fontSize: 17, fontWeight: '700' },
   haveAccount: { fontSize: 16, fontWeight: '600', color: INK },
