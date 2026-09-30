@@ -4,6 +4,7 @@ import { Press } from '../components/press';
 import { api, Experience, BrowseItem, HouseholdResponse, InspireItem, InspireNear, MoodKey, OwnedImage, Place, VenuePhotoRef, Intake } from '../api';
 import { useHere } from '../hooks/useHere';
 import { colors, fonts, spacing, TARGET, type } from '../theme';
+import { useCachedResource, runFetch, inspireNearKey, INSPIRE_DEFAULT_MINUTES, TEN_MINUTES, useScrollMemory } from '../cache/resourceCache';
 import { Icon } from '../components/Icon';
 import { AskRow, IntakeStrip } from '../components/voice/IntakeStrip';
 import { MOOD_LABEL, VIBE_MOOD } from '../moods';
@@ -63,7 +64,7 @@ const ACROSS = 12;
 /** What `/api/places/ratings` will answer about at once. */
 const BATCH = 24;
 /** The How far the screen opens on. */
-const HOW_FAR_DEFAULT = 60;
+const HOW_FAR_DEFAULT = INSPIRE_DEFAULT_MINUTES;
 
 /** Where a drawer says "it depends", the place's own words decide whether it keeps the rain off, or suits children. */
 const INDOOR_WORDS = /\b(museum|gallery|galleries|cinema|bowling|arcade|soft play|play ?centre|trampoline|climbing|bouldering|swimming|pool|leisure centre|aquarium|theatre|library|escape room|ice rink|skating|laser|indoor|shopping|market hall|cathedral|abbey|church|castle|palace|house|hall)\b/i;
@@ -192,6 +193,47 @@ const OTHER = 'other';
 /** Everything in the category, as one list — the food "All restaurants · by rating" row, and an activities category with no drawers. */
 const ALL = 'all';
 
+/**
+ * The page's shape while the first-ever pool is still loading — no spinner
+ * (owner, D13, "No spinners on Inspire"). A few shelves, each a heading bar and
+ * a row of card placeholders (image, then two lines), so the family sees the
+ * home they are landing on rather than a spinning wheel. Square corners and the
+ * soft line colour, so it reads as "drawing", not "broken". Every visit after
+ * the first is served from the cache and never reaches here.
+ */
+function HomeSkeleton({ wide }: { wide: boolean }) {
+  const cards = wide ? 4 : 2;
+  return (
+    <View style={sk.wrap} accessibilityRole="progressbar" accessibilityLabel="Looking around">
+      {[0, 1, 2].map((s) => (
+        <View key={s} style={sk.shelf}>
+          <View style={sk.title} />
+          <View style={sk.row}>
+            {Array.from({ length: cards }).map((_, i) => (
+              <View key={i} style={sk.card}>
+                <View style={sk.image} />
+                <View style={sk.lineWide} />
+                <View style={sk.lineNarrow} />
+              </View>
+            ))}
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+const sk = StyleSheet.create({
+  wrap: { gap: spacing.xl, paddingTop: spacing.sm },
+  shelf: { gap: spacing.sm },
+  title: { width: 140, height: 18, backgroundColor: colors.lineSoft },
+  row: { flexDirection: 'row', gap: spacing.md },
+  card: { flex: 1, gap: spacing.xs },
+  image: { width: '100%', height: 120, backgroundColor: colors.lineSoft },
+  lineWide: { width: '80%', height: 12, backgroundColor: colors.lineSoft },
+  lineNarrow: { width: '50%', height: 12, backgroundColor: colors.lineSoft },
+});
+
 export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreateTrip }: {
   /** Which layer of Inspire the address asks for: the shelves, one shelf opened, or the search. */
   route: Extract<Route, { name: 'inspire' }>;
@@ -298,8 +340,6 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
     navigate(withQuery(paths.inspire() + hereQuery(), patch, base));
   };
 
-  const [pool, setPool] = useState<InspireNear | null>(null);
-  const [loading, setLoading] = useState(true);
   /**
    * People hosting near here (Events & Hosts, 12 Sep 2026): experience cards
    * on Inspire, with the door to the passion-led surface. Asked for beside the
@@ -307,7 +347,6 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
    * is where a guest finds them.
    */
   const [hosted, setHosted] = useState<Experience[]>([]);
-  const [error, setError] = useState<string | null>(null);
 
   // Where the phone is, when the browser will say without being asked.
   //
@@ -355,61 +394,60 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
       .catch(() => { if (live) setHosted([]); });
     return () => { live = false; };
   }, [centre?.lat, centre?.lng, travel]);
-  const loadToken = useRef(0);
-  const load = useCallback(async (refresh = false) => {
-    // Only the latest request commits. Changing the range fires a new fetch
-    // before the last returns; without this token a slow earlier response
-    // (say, the 30-min one) could land after the 2 h one and overwrite the
-    // count for the range that is actually showing (Codex).
-    const token = ++loadToken.current;
-    const live = () => token === loadToken.current;
-    if (!centre) { if (live()) { setPool(null); setLoading(false); } return; }
-    setLoading(true);
-    setError(null);
-    try {
-      const r = await api.inspireNear({
+  // Everything that changes what the search returns — where you are looking
+  // from, how you are getting there and how far — with two notes kept from when
+  // this was one imperative fetch:
+  //  · From a searched town the journeys are measured from it, not home (owner,
+  //    12 Sep 2026); from home nothing is sent and the API measures from home.
+  //  · Minutes, not kilometres: the API draws the ring out of the reachability
+  //    matrix (owner, 20 Sep 2026), not a circle.
+  const nearParams = centre
+    ? {
         lat: centre.lat, lng: centre.lng,
         label: centre.label, locality: centre.locality ?? null,
-        // How you are getting there is what the travel times are *of* — and
-        // where from. Somebody who has said "Bristol", or is standing in it,
-        // is asking how far things are from Bristol; without this the API
-        // measured every journey from home, and a town two hours away had
-        // nothing "within 1 hr" however much was there (owner, 12 Sep 2026).
-        // From home, nothing is sent and the API measures from home as before.
         from: chosen ? `${centre.lat},${centre.lng}` : null,
         mode: travelBy,
-        // How far, in minutes, because that is what the family said.
-        //
-        // This used to be sent as kilometres — the minutes times 0.8 — and a
-        // circle was searched. A circle is not a drive: a place twenty-five
-        // minutes up the motorway sat outside it and a field eight miles
-        // across country sat inside. The API draws the ring out of the
-        // reachability matrix now (owner, 20 Sep 2026).
         minutes: travel ?? HOW_FAR_DEFAULT,
-        // "Try again" after a source refused must ask the source again, not
-        // read the refusal back out of the search cache (Codex, 12 Sep 2026).
-        refresh: refresh ? 1 : undefined,
-      });
-      if (!live()) return;
-      setPool(r);
-      // The home screen is a search too, and what happens next to each card is
-      // the click stream Demand counts (search.ts).
-      heldSearch('inspire', (r as any).queryId, (r.items ?? []).map((i: any) => i.venueRef));
-    } catch (e: any) {
-      if (!live()) return;
-      setPool(null);
-      setError(e?.message ?? 'Epic could not look around just now.');
-    } finally {
-      if (live()) setLoading(false);
-    }
-    // `travel` (the range, in minutes) was missing here, so changing 30 min →
-    // 1 h → 2 h never re-requested the API and the census count stayed on the
-    // first fetch's value — the "changing the time does nothing" regression
-    // (owner, 30 Sep 2026). The minutes are sent (above); a change just never
-    // re-ran the fetch. Mode (`travelBy`) was already a dependency.
-  }, [centre?.lat, centre?.lng, centre?.label, travelBy, travel, Boolean(chosen)]);
+      }
+    : null;
+  // Read through the shared in-memory cache (cache/resourceCache) rather than
+  // fetching on mount: coming back from another tab finds the pool already
+  // there — no refetch, no spinner — and a copy older than ten minutes is
+  // refreshed silently behind the rows already on screen. Nothing here is
+  // written to disk; the pool is rented provider content (offline/policy.ts).
+  //
+  // The range lives in the key (`minutes`), so changing 30 min → 1 h → 2 h is a
+  // new key and re-requests — the "changing the time does nothing" regression
+  // stays fixed (owner, 30 Sep 2026) — and a slow earlier response lands under
+  // its own key, never overwriting the range now on screen, so the latest-wins
+  // token the imperative fetch needed is not needed here (Codex).
+  const nearKey = nearParams ? inspireNearKey(nearParams) : null;
+  const { data: pool, loading, error: nearError } = useCachedResource<InspireNear>(
+    nearKey,
+    () => api.inspireNear({ ...(nearParams as NonNullable<typeof nearParams>) }),
+    { staleMs: TEN_MINUTES, enabled: !!nearParams },
+  );
+  const error = nearError ? ((nearError as any)?.message ?? 'Epic could not look around just now.') : null;
+  // "Try again" after a source refused must ask the source again, bypassing the
+  // server's search cache (Codex, 12 Sep 2026) — a hard refresh (refresh:1)
+  // does that, and writes the fresh pool straight into the cache.
+  const load = useCallback(
+    (hard = false): Promise<void> => nearKey
+      ? runFetch(nearKey, () => api.inspireNear({ ...(nearParams as NonNullable<typeof nearParams>), refresh: hard ? 1 : undefined }))
+      : Promise.resolve(),
+    [nearKey], // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
-  useEffect(() => { void load(); }, [load]);
+  // The home screen is a search too, and what happens next to each card is the
+  // click stream Demand counts (search.ts). Held whenever a fresh pool lands.
+  useEffect(() => {
+    if (pool) heldSearch('inspire', (pool as any).queryId, (pool.items ?? []).map((i: any) => i.venueRef));
+  }, [pool && (pool as any).queryId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep the scroll position too, keyed by the full address so the home list and
+  // a category drilled into each keep their own place; restored once the rows
+  // are in (owner, D13: "come back … and it is as you left it").
+  const scroll = useScrollMemory(`inspire:${href}`, !!pool);
 
   const placeName = shortPlace(pool?.place.locality ?? centre?.locality ?? centre?.label);
   /** The town, and only the town — never "near" (owner, 8 Sep 2026). */
@@ -878,7 +916,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
 
   return (
     <View style={styles.fill}>
-      <ScrollView style={styles.fill} contentContainerStyle={styles.scroll} stickyHeaderIndices={[0]} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={scroll.ref as any} onScroll={scroll.onScroll} scrollEventThrottle={scroll.scrollEventThrottle} style={styles.fill} contentContainerStyle={styles.scroll} stickyHeaderIndices={[0]} keyboardShouldPersistTaps="handled">
         {/* The head of the screen: the mark, which half, which category, and
             the control row. Sticky, because the strip is how you move around
             this tab and it should not scroll away from you. */}
@@ -925,12 +963,12 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
           ) : (
             <AskRow onPress={() => navigate(paths.say({ for: 'inspire' }))} />
           )}
-          {loading && !pool ? (
-            <View style={styles.waiting}>
-              <ActivityIndicator color={colors.icon} />
-              <Text style={type.small}>Looking around {placeName}…</Text>
-            </View>
-          ) : null}
+          {/* No spinner on Inspire (owner, D13). A first-ever load with nothing
+              yet to show draws the page's shape — the shelves and their cards as
+              empty placeholders — so the family sees the home they are landing
+              on, not a spinning wheel. Every later visit is served from the
+              cache and never reaches here. */}
+          {loading ? <HomeSkeleton wide={wide} /> : null}
 
           {unknown && !loading ? (
             <EmptyMatch
@@ -941,7 +979,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
             />
           ) : null}
 
-          {error ? <EmptyMatch title={`Nothing came back for ${placeName}`} body={error} action="Try again" onAction={load} /> : null}
+          {error ? <EmptyMatch title={`Nothing came back for ${placeName}`} body={error} action="Try again" onAction={() => void load(true)} /> : null}
 
           {/* "Use my location" failing used to close the panel and change
               nothing (owner, 12 Sep 2026: "the 'Your location' option didn't

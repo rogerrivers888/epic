@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from '../components/press';
 import { Booking, TripSummary } from '../api';
 import { colors, fonts, type } from '../theme';
+import { useScrollMemory } from '../cache/resourceCache';
 import { TallBand, MicTile } from '../components/Band';
 import { InkMenu } from '../components/InkMenu';
 import { SectionHeader } from '../components/NavRows';
@@ -129,6 +130,9 @@ export function TripsList({ trips, bookings, loading, error, span, when, onSpan,
   const focusHosts = when === 'hosts';
   const row = (t: TripSummary) => <TripRow key={t.id} trip={t} onPress={() => onOpen(t)} onHold={() => onHold(t)} />;
 
+  // Keep the scroll position across tab switches, per span/when view.
+  const scroll = useScrollMemory(`trips:${span}:${when}`, trips != null);
+
   return (
     <View style={{ flex: 1 }}>
       <View style={wide ? styles.wide : undefined}>
@@ -144,7 +148,7 @@ export function TripsList({ trips, bookings, loading, error, span, when, onSpan,
         />
       </View>
 
-      <ScrollView contentContainerStyle={[styles.body, wide && styles.wideBody]} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={scroll.ref as any} onScroll={scroll.onScroll} scrollEventThrottle={scroll.scrollEventThrottle} contentContainerStyle={[styles.body, wide && styles.wideBody]} keyboardShouldPersistTaps="handled">
         {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
         {loading && !trips ? <Text style={type.small}>Loading…</Text> : null}
 

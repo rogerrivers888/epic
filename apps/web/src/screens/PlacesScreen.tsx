@@ -13,6 +13,7 @@ import type { TripSeed } from './TripsScreen';
 import { asOneOf, asText, useQueryState, useRouter, useStickyQuery } from '../router';
 import { MOODS, paths, type Route } from '../routes';
 import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
+import { useCachedResource, useScrollMemory, ATLAS_KEY, TEN_MINUTES } from '../cache/resourceCache';
 import { Button, Card, Chip, Row, StatusLine, Wrap } from '../components/ui';
 import { SourcePicker } from '../components/SourcePicker';
 import { BeenCapture, VenueRow, VisitForm, VisitSummary, rowsForVisit } from '../components/Visits';
@@ -197,8 +198,7 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
 }) {
   const { width } = useViewport();
   const wide = width >= 900;
-  const { query, navigate, setQuery } = useRouter();
-  const [data, setData] = useState<{ countries: AtlasCountry[]; unplaced: number; home: AtlasHome | null } | null>(null);
+  const { href, query, navigate, setQuery } = useRouter();
   const [error, setError] = useState<string | null>(null);
   // Which layer the path asks for.
   const sel = route.scope;
@@ -247,8 +247,23 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
   const [viewer, setViewer] = useState<string | null>(null);
   useEffect(() => { setViewer(getViewer(members)); return onViewerChange(setViewer); }, [members.map((m) => m.id).join(',')]);
 
-  const loadAtlas = useCallback(async () => { try { setData(await api.atlas()); } catch (e: any) { setError(e.message); } }, []);
-  useEffect(() => { loadAtlas(); }, [loadAtlas]);
+  // The atlas is read through the shared in-memory cache (cache/resourceCache),
+  // so coming back to Places from another tab finds it already there — instant,
+  // no reload — and a copy older than ten minutes refreshes silently behind it.
+  // The atlas is our own data, so the offline layer still persists it too; this
+  // only removes the on-mount refetch. `loadAtlas` is a hard refresh for the
+  // pull-to-refresh path.
+  const { data: atlas, error: atlasErr, refresh: loadAtlas } = useCachedResource<{ countries: AtlasCountry[]; unplaced: number; home: AtlasHome | null }>(
+    ATLAS_KEY,
+    () => api.atlas(),
+    { staleMs: TEN_MINUTES },
+  );
+  // `| null`, not `| undefined`, so it drops straight into the props and reads
+  // built here before (the shapes downstream expect null for "not loaded yet").
+  const data = atlas ?? null;
+  useEffect(() => { if (atlasErr) setError((atlasErr as any)?.message ?? 'Could not load your atlas.'); }, [atlasErr]);
+  // Keep the scroll position across tab switches, keyed by the full address.
+  const scroll = useScrollMemory(`places:${href}`, !!data);
 
   const countryRow = country ? data?.countries.find((c) => c.code === country.country) ?? null : null;
   const city = countryRow && country?.city ? countryRow.cities.find((c) => c.name === country.city) ?? null : null;
@@ -317,7 +332,7 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
 
   return (
     <View style={styles.fill}>
-      <ScrollView style={styles.fill} contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" stickyHeaderIndices={[0]}>
+      <ScrollView ref={scroll.ref as any} onScroll={scroll.onScroll} scrollEventThrottle={scroll.scrollEventThrottle} style={styles.fill} contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled" stickyHeaderIndices={[0]}>
         {/* One tree, whichever layer the address asks for, so the Web / Mobile
             toggle does not throw the screen's state away (CLAUDE.md). The head
             is lime at the root only; below it the ground is cream, so the lime

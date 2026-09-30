@@ -6,6 +6,7 @@ import { Platform, StyleSheet, Text, View, useWindowDimensions } from 'react-nat
 import { Press } from './src/components/press';
 import { StatusBar } from 'expo-status-bar';
 import { api, API_URL, HouseholdResponse } from './src/api';
+import { prefetch, inspireNearKey, INSPIRE_DEFAULT_MINUTES, ATLAS_KEY, TRIPS_KEY } from './src/cache/resourceCache';
 import { colors, radius, spacing, TARGET, type, BORDER, INK } from './src/theme';
 import { useTheme } from './src/hooks/useTheme';
 import { getViewer, onViewerChange } from './src/viewer';
@@ -493,6 +494,27 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
     const t = setTimeout(() => { void api.keepDeviceCopyFresh(); }, 8000);
     return () => clearTimeout(t);
   }, []);
+
+  // No spinner on the first arrival either (owner, D13: "start loading Inspire's
+  // data the moment login succeeds, and on app open when already logged in").
+  // The Shell only mounts once a session is in hand — a sign-in or an app open
+  // that was already signed in — so the moment the household is known, warm the
+  // three tabs' data into the shared in-memory cache, in parallel, and the page
+  // is ready when the family lands on it. Inspire is warmed for the home ring at
+  // the defaults the screen opens on (home, driving, an hour); a searched town
+  // is a genuine miss and draws the skeleton, never a spinner. `prefetch` skips
+  // anything already fresh, so a household refresh does not re-fetch. Nothing
+  // here is written to disk — the Inspire pool is rented (offline/policy.ts).
+  useEffect(() => {
+    if (!household) return;
+    const home = household.household.home;
+    if (home) {
+      const p = { lat: home.lat, lng: home.lng, label: home.label, locality: home.locality ?? null, from: null, mode: 'drive' as const, minutes: INSPIRE_DEFAULT_MINUTES };
+      prefetch(inspireNearKey(p), () => api.inspireNear(p));
+    }
+    prefetch(ATLAS_KEY, () => api.atlas());
+    prefetch(TRIPS_KEY, () => api.trips());
+  }, [household]);
 
   /** Somewhere to eat is Places' question, and it arrives there already asked. */
   const openFood = () => navigate(`${paths.placesHome()}?kind=eat`);

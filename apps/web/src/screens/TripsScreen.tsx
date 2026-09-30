@@ -5,6 +5,7 @@ import { useViewport } from '../hooks/useViewport';
 import { GroupPanel } from '../components/GroupPanel';
 import { api, Booking, HouseholdResponse, OwnedImage, Place, PlanAction, PlanResponse, Stay, StayPricing, TripDay, TripDetail, TripPlace, VenuePhotoRef, DayStop } from '../api';
 import { colors, fonts, memberColors, radius, spacing, TARGET, type, BORDER } from '../theme';
+import { useCachedResource, TRIPS_KEY, TEN_MINUTES } from '../cache/resourceCache';
 import { Button, Card, Chip, Row, Segmented, StatusLine, Stepper, Wrap, clock, minutes } from '../components/ui';
 import { SourcePicker, TripSpendLine } from '../components/SourcePicker';
 import { TimeBar } from '../components/TimeBar';
@@ -101,7 +102,6 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
   const { width } = useViewport();
   const wide = width >= 1000;
   const { navigate, back, query } = useRouter();
-  const [data, setData] = useState<Awaited<ReturnType<typeof api.trips>> | null>(null);
   const creating = route.creating;
   const openId = route.tripId;
   /**
@@ -125,15 +125,22 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
   // does not count as a reason to go and fetch the list again.
   const openNow = useRef(openId);
   openNow.current = openId;
-  const load = useCallback(async () => {
-    try {
-      const next = await api.trips();
-      setData(next);
-      // A trip deleted since you last looked should not reopen as an error page.
-      if (openNow.current && !next.trips.some((t) => t.id === openNow.current)) navigate(paths.trips(), { replace: true });
-    } catch (e: any) { setError(e.message); }
-  }, [navigate]);
-  useEffect(() => { load(); }, [load]);
+  // The trips list is read through the shared in-memory cache
+  // (cache/resourceCache), so coming back to Trips from another tab finds it
+  // already there — instant, no reload — and a copy older than ten minutes
+  // refreshes silently behind it. Trips are our own data, persisted by the
+  // offline layer too; this only removes the on-mount refetch. `load` is a hard
+  // refresh, used after making, renaming or deleting a trip.
+  const { data, error: tripsErr, refresh: load } = useCachedResource<Awaited<ReturnType<typeof api.trips>>>(
+    TRIPS_KEY,
+    () => api.trips(),
+    { staleMs: TEN_MINUTES },
+  );
+  useEffect(() => { if (tripsErr) setError((tripsErr as any)?.message ?? 'Could not load your trips.'); }, [tripsErr]);
+  // A trip deleted since you last looked should not reopen as an error page.
+  useEffect(() => {
+    if (data && openNow.current && !data.trips.some((t) => t.id === openNow.current)) navigate(paths.trips(), { replace: true });
+  }, [data, navigate]);
 
   /**
    * Where the trip being made is going, when it was answered on the search
