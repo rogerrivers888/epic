@@ -495,7 +495,13 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
       && (item.provenance?.priceLevel?.source ?? item.source ?? item.venueRef.split(':')[0]) === 'google';
     const level = venueLevelGoogle ? venue!.priceLevel! : itemLevelGoogle ? item.priceLevel! : null;
     let live = true;
-    api.costBand({ country, level }).then((d) => { if (live) setCost(d); }).catch(() => { if (live) setCost(null); });
+    // A failed lookup — offline (this endpoint is not in offline/policy.ts, so it
+    // is never cached), or a transient error — settles to the honest unknown
+    // state rather than removing the cost row: we could not find out, which is
+    // exactly what "not known yet" says (Codex).
+    api.costBand({ country, level })
+      .then((d) => { if (live) setCost(d); })
+      .catch(() => { if (live) setCost({ known: false, label: 'Not known yet' }); });
     return () => { live = false; };
     // Stable scalar dependencies, not the whole `item`: a caller can rebuild the
     // item object on every parent render (Inspire's asDrawerItem) without the
