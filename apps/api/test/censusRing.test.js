@@ -18,7 +18,7 @@ import assert from 'node:assert/strict';
 import { testDatabase } from './helpers/db.js';
 
 const { query, pool } = await testDatabase();
-const { censusInRing } = await import('../src/repositories/censusRing.js');
+const { censusInRing, whereBoxSitsInCircle } = await import('../src/repositories/censusRing.js');
 
 test.after(() => pool.end());
 
@@ -201,4 +201,46 @@ test('a box the size of the fine tile is placed by its centre', async () => {
   assert.equal(nearestSector({ lat: 51.555, lng: -0.0525 }, universe).code, 'sector:E5 8', 'the centre is E5\'s');
   assert.equal(whereBoxSits(tile, { cells: ['sector:E5 8'], universe }), 'inside', 'placed by its centre, which is E5');
   assert.equal(whereBoxSits(tile, { cells: ['sector:N16 7'], universe }), 'outside');
+});
+
+// The straight-line fallback (owner, 30 Sep 2026): a matrix-less mode is
+// counted over a circle round the origin, the SAME circle the display cards are
+// fenced by, rather than over the ring's quantised sectors. So a place is
+// counted by its distance to the origin, not by which sector it is nearest, and
+// a short reach smaller than a sector still resolves place by place.
+const AT = { lat: 50.150, lng: -1.700 }; // the ZR1 1 sector's own point in the fixture
+
+test('a circle ring counts by distance to the origin, not by sector', async () => {
+  await seed();
+  // Two kilometres reaches RING-OWN and RING-BOTH (both on the origin) and
+  // RING-SLICE (a 400 m box at the origin), and nothing else: RING-WIDE's box
+  // is wholly outside two km, RING-OUTSIDE is ~30 km away, RING-ACROSS's box is
+  // far larger than the circle.
+  const near = await censusInRing({ outcodes: OUTCODES, circle: { ...AT, km: 2 } });
+  assert.equal(near.placedBy, 'circle', 'the count says it was placed by the circle');
+  assert.equal(near.counts.fun, 3, 'RING-OWN, RING-BOTH and RING-SLICE, by distance');
+  assert.equal(near.counts.sport, 1, 'and the same place in Sport');
+});
+
+test('a circle ring grows with its radius, the way a longer reach must', async () => {
+  await seed();
+  const near = await censusInRing({ outcodes: OUTCODES, circle: { ...AT, km: 2 } });
+  const far = await censusInRing({ outcodes: OUTCODES, circle: { ...AT, km: 40 } });
+  // At forty kilometres the wide box is wholly inside, the across box resolves,
+  // and the place out by ZR2 is now within reach — the count must rise.
+  assert.ok(far.counts.fun > near.counts.fun, `fun rose ${near.counts.fun} -> ${far.counts.fun}`);
+  assert.equal(far.counts.fun, 6, 'every fun place is within forty km');
+});
+
+test('whereBoxSitsInCircle: centre for a fine box, corners for a wide one', () => {
+  const at = { lat: 51.52, lng: -0.12 };
+  // A 400 m box 300 m from the centre is inside a 1 km circle, outside a 100 m one.
+  const fine = { minLat: 51.5218, minLng: -0.1218, maxLat: 51.5222, maxLng: -0.1212 };
+  assert.equal(whereBoxSitsInCircle(fine, { ...at, km: 1 }), 'inside');
+  assert.equal(whereBoxSitsInCircle(fine, { ...at, km: 0.1 }), 'outside');
+  // A wide box astride the edge is unresolved; the same box wholly within is in.
+  const wide = { minLat: 51.50, minLng: -0.15, maxLat: 51.54, maxLng: -0.09 };
+  assert.equal(whereBoxSitsInCircle(wide, { ...at, km: 2 }), 'across');
+  assert.equal(whereBoxSitsInCircle(wide, { ...at, km: 40 }), 'inside');
+  assert.equal(whereBoxSitsInCircle(null, { ...at, km: 5 }), 'nowhere');
 });
