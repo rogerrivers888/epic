@@ -71,6 +71,33 @@ test('invalidating during an in-flight read stops that read marking itself fresh
   assert.equal(e?.fetchedAt, 0);     // …but not counted fresh, so a read re-fetches
 });
 
+test('a failure from a superseded generation is not the standing error, so the refresh still runs', async () => {
+  fresh();
+  let rej: (e: unknown) => void = () => {};
+  const slow = new Promise<string>((_, r) => { rej = r; });
+  const p = runFetch('k', () => slow);
+  invalidate('k');                 // a write supersedes the in-flight read
+  rej(new Error('late failure'));
+  await p.catch(() => {});
+  // The superseded failure must not block the retry the invalidation asked for.
+  assert.equal(peekCache('k')?.error, undefined);
+  assert.equal(peekCache('k')?.fetchedAt, 0);
+});
+
+test('a current-generation failure is recorded, and a fresh attempt clears it before it resolves', async () => {
+  fresh();
+  await refetch('k', () => Promise.reject(new Error('down'))).catch(() => {});
+  assert.notEqual(peekCache('k')?.error, undefined);
+  // Starting a new attempt drops the old error at once (skeleton, not skeleton + error).
+  let resolve: (v: string) => void = () => {};
+  const slow = new Promise<string>((r) => { resolve = r; });
+  const p = refetch('k', () => slow);
+  assert.equal(peekCache('k')?.error, undefined);
+  resolve('ok');
+  await p;
+  assert.equal(peekCache<string>('k')?.data, 'ok');
+});
+
 test('invalidateTabData stales the atlas, the trips list, every inspire ring and every places area', async () => {
   fresh();
   const ring = inspireNearKey({ lat: 51.5, lng: -0.1, mode: 'drive', minutes: 60, from: null });

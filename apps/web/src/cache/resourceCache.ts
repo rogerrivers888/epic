@@ -95,7 +95,14 @@ function start<T>(key: string, fetcher: () => Promise<T>, after?: Promise<unknow
         // the rows may predate the mutation, so leave them stale to be re-read.
         e.fetchedAt = e.gen === genAtStart ? Date.now() : 0;
       },
-      (err) => { e.error = err; },
+      (err) => {
+        // Only a failure of the *current* generation is the standing error that
+        // stops retries. A failure from a request an invalidation has already
+        // superseded must not block the refresh that invalidation asked for —
+        // it is a reason for one more current-generation fetch, not a dead end
+        // (Codex, D13). Leaving `error` unset lets the emit below trigger it.
+        if (e.gen === genAtStart) e.error = err;
+      },
     )
     // Only clear the in-flight marker if it is still this run's — a forced
     // refetch may have chained a newer one on top.
@@ -144,9 +151,9 @@ export function prefetch<T>(key: string, fetcher: () => Promise<T>, staleMs = TE
 }
 
 /** Read what is in the cache without subscribing or triggering a fetch. */
-export function peekCache<T>(key: string): { data: T | undefined; fetchedAt: number } | undefined {
+export function peekCache<T>(key: string): { data: T | undefined; fetchedAt: number; error: unknown } | undefined {
   const e = store.get(key);
-  return e ? { data: e.data as T | undefined, fetchedAt: e.fetchedAt } : undefined;
+  return e ? { data: e.data as T | undefined, fetchedAt: e.fetchedAt, error: e.error } : undefined;
 }
 
 // Mark an entry stale, and tell anyone watching. The emit is what makes a

@@ -314,6 +314,14 @@ function Routed() {
 function Gate({ route }: { route: Route }) {
   const { query, setQuery, navigate } = useRouter();
   const { state, isOwner, access, recheck } = useSession();
+  // A change of session identity — signing out, a timeout, or a different person
+  // signing in on this browser — remounts the app below the gate, so no hook is
+  // left showing the previous household's cached rows. The in-memory cache is
+  // cleared at the same moment (App.tsx onSessionChange); this is the other half,
+  // rebinding every reader. Keyed by an epoch that bumps on each token change,
+  // because a direct token→token swap does not change `state` (Codex, D13).
+  const [sessionEpoch, setSessionEpoch] = useState(0);
+  useEffect(() => onSessionChange(() => setSessionEpoch((n) => n + 1)), []);
   /**
    * A magic link (?signin=<token>) is how everybody except the owner gets in.
    *
@@ -370,9 +378,9 @@ function Gate({ route }: { route: Route }) {
   if (route.name === 'admin') {
     if (accessUnknown) return <NotHere title="The back office is busy — try again in a moment" body="Trying again by itself every few seconds." href={paths.inspire()} />;
     if (!mayAdminister) return <NotHere title="That is not a page you can open" body="The back office needs an account with the admin door." href={paths.inspire()} />;
-    return <AdminApp access={access} screen={route.screen} onScreen={(s) => navigate(s === 'filing' ? paths.filing('categories') : paths.admin(s))} onLeave={() => navigate(paths.inspire())} />;
+    return <AdminApp key={sessionEpoch} access={access} screen={route.screen} onScreen={(s) => navigate(s === 'filing' ? paths.filing('categories') : paths.admin(s))} onLeave={() => navigate(paths.inspire())} />;
   }
-  return <Shell route={route} isOwner={isOwner} mayAdminister={mayAdminister} />;
+  return <Shell key={sessionEpoch} route={route} isOwner={isOwner} mayAdminister={mayAdminister} />;
 }
 
 /** An address that is not a page — mistyped, or one Epic used to have and no longer does. */
