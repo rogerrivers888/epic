@@ -94,3 +94,5 @@ create index if not exists household_places_venue_ref_idx on household_places (v
 create index if not exists trip_shortlist_venue_ref_idx on trip_shortlist (venue_ref);
 create index if not exists trip_stops_venue_ref_idx on trip_stops (venue_ref);
 create index if not exists visits_venue_ref_idx on visits (venue_ref);
+-- An activity-sweep row is found by its Google reference as well as its own.
+create index if not exists attractions_external_ref_idx on attractions (external_ref) where external_ref is not null;

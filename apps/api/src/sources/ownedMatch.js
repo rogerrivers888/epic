@@ -182,7 +182,8 @@ async function pageOfPlaces(after, limit, { weekly }) {
             pt.lat, pt.lng,
             array_remove(array[
               (select r.name from place_records r where r.venue_ref = pi.venue_ref),
-              coalesce((select a.name from attractions a where a.venue_ref = pi.venue_ref limit 1),
+              -- An activity-sweep row is keyed on its Google reference (Codex).
+              coalesce((select a.name from attractions a where (a.venue_ref = pi.venue_ref or a.external_ref = pi.venue_ref) limit 1),
                        (select a.name from attractions a where a.id = ${ATLAS_ID})),
               (select s.name from scout_places s where s.venue_ref = pi.venue_ref and s.name is not null limit 1),
               (select h.label from household_places h where h.venue_ref = pi.venue_ref and h.label <> h.venue_ref limit 1),
@@ -195,7 +196,7 @@ async function pageOfPlaces(after, limit, { weekly }) {
                      -- Only an identifier the atlas vouches for: a harvested row,
                      -- or an activity-sweep match it accepted — never one it
                      -- saw on a candidate it turned down (Codex, 30 Sep 2026).
-                     (select a.wikidata_id from attractions a where a.venue_ref = pi.venue_ref and a.wikidata_id is not null and ${TRUSTED_WD('a')} limit 1),
+                     (select a.wikidata_id from attractions a where (a.venue_ref = pi.venue_ref or a.external_ref = pi.venue_ref) and a.wikidata_id is not null and ${TRUSTED_WD('a')} limit 1),
                      (select a.wikidata_id from attractions a where a.id = ${ATLAS_ID} and ${TRUSTED_WD('a')}),
                      case when pi.venue_ref like 'wikidata:%' then substr(pi.venue_ref, 10) end) as wikidata_id
        from place_index pi
