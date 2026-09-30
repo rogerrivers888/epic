@@ -1094,7 +1094,10 @@ test('the weekly £ is the export\'s own days, each counted once', () => {
   // Three London days, 10p each: the two quota days' figures overlap on the 29th.
   const bills = ['2026-09-28', '2026-09-29', '2026-09-30'].map((d) => ({ day: d, places_net_gbp: 0.1 }));
   const w = uk.weeklySummary(st, bills, new Date('2026-10-05T07:10:00Z'));
-  assert.match(w.text, /£ spent \(Places, after credits\): £0\.30 /);
+  assert.match(w.text, /£ spent \(Places, after credits\): £0\.30 over 3 billed days/);
+  // A week with no census days still says what the export billed.
+  const idle = uk.weeklySummary({ ...st, days: [] }, bills, new Date('2026-10-05T07:10:00Z'));
+  assert.match(idle.text, /£ spent \(Places, after credits\): £0\.30 over 3 billed days/);
   assert.match(w.text, /Billing export: rows up to 2026-09-30/);
 });
 

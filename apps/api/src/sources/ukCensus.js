@@ -705,17 +705,19 @@ export function weeklySummary(st, bills, now = new Date()) {
   const calls = week.reduce((t, d) => t + Number(d.requests ?? 0), 0);
   const places = week.reduce((t, d) => t + Number(d.newPlaces ?? 0), 0);
   const withLeft = [...st.days].reverse().find((d) => d.areasLeft != null);
-  const billed = week.filter((d) => d.billed);
   // From the export's own London days, each once: a quota day's figure spans
   // two of them, and two neighbouring days share one (Codex, 30 Sep 2026).
-  const spent = bills.filter((b) => b.day >= from && b.day < today).reduce((t, b) => t + Number(b.places_net_gbp ?? 0), 0);
+  const weekBills = bills.filter((b) => b.day >= from && b.day < today);
+  const spent = weekBills.reduce((t, b) => t + Number(b.places_net_gbp ?? 0), 0);
   const lastBilled = bills.length ? bills[bills.length - 1].day : null;
   const lines = [
     `Calls: ${n(calls)} over ${week.length} day${week.length === 1 ? '' : 's'}`,
     `New places: ${n(places)}`,
     `Areas left: ${withLeft ? `${n(withLeft.areasLeft)} (${n(withLeft.districtsLeft)} districts)` : `not measured yet · ${n(st.tilesLeft)} squares left`}`,
     `Days to finish: ${st.complete ? 'finished' : st.daysLeft == null ? 'not measurable yet' : `about ${st.daysLeft} at ${n(st.dayRequests)} a day`}`,
-    `£ spent (Places, after credits): ${billed.length ? `${gbp(spent)} on ${billed.length} of ${week.length} days billed so far` : 'nothing billed yet'}`,
+    // From the export's rows for the week, whether or not the census ran on
+    // those days (Codex, 30 Sep 2026).
+    `£ spent (Places, after credits): ${weekBills.length ? `${gbp(spent)} over ${weekBills.length} billed day${weekBills.length === 1 ? '' : 's'}` : 'nothing billed yet'}`,
     `Billing export: ${lastBilled ? `rows up to ${lastBilled}` : 'empty — nothing delivered yet'}`,
   ];
   return {
