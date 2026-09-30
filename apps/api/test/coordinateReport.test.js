@@ -11,7 +11,19 @@ const { coordinateReport } = await import('../src/routes/placeIndex.js');
 
 test.after(() => pool.end());
 
+// The fixtures stand for rows written before migration 307, whose trigger now
+// refuses a rented point on the way in: they are written with it paused.
+const TRIGGERED = ['household_places', 'trip_shortlist', 'trip_stops', 'visits', 'scout_places', 'attractions', 'place_records'];
+const setTriggers = (on) => query(`do $$ declare t text; begin
+  foreach t in array array['${TRIGGERED.join("','")}'] loop
+    if exists (select 1 from pg_trigger where tgname = 'keep_owned_point' and tgrelid = t::regclass) then
+      execute format('alter table %I ${on ? 'enable' : 'disable'} trigger keep_owned_point', t);
+    end if;
+  end loop; end $$`);
+
 test('files each place under the best point held for it, and counts old rented points', async () => {
+  await setTriggers(false);
+  try {
   const at = (days) => new Date(Date.now() - days * 86400_000).toISOString();
   await query(
     `insert into place_index (venue_ref, lat, lng, coords_from, coords_at, cell) values
@@ -80,4 +92,5 @@ test('files each place under the best point held for it, and counts old rented p
   assert.equal(r.pointsByTable.attractions.atlas, 3, 'the castle, the maze and the zoo, keyed atlas:<id>');
   assert.equal(r.rented.length, 11);
   assert.deepEqual(r.indexGoogleOver30DaysByArea, [{ area: 'TR', over30: 1 }], 'SL\'s was the open map\'s point');
+  } finally { await setTriggers(true); }
 });
