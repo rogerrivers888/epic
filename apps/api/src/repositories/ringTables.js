@@ -85,7 +85,7 @@ export async function refreshRing({ cell, lat = null, lng = null, mode = 'drivin
   // one sector must not share an in-flight count and receive each other's, centred
   // on the wrong place (Codex). The coordinate joins the key when there is one.
   const key = ringKey({ cell, mode: kind, minutes })
-    + (lat != null && lng != null ? `@${Number(lat).toFixed(3)},${Number(lng).toFixed(3)}` : '');
+    + (lat != null && lng != null ? `@${Number(lat)},${Number(lng)}` : '');
   const going = inFlight.get(key);
   if (going && !force) return going;
   const run = (going ?? Promise.resolve()).catch(() => null).then(() => countRing({ cell, lat, lng, kind, minutes }));

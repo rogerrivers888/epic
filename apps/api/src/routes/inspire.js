@@ -300,7 +300,10 @@ const PAGE = 20;
 async function placesFor({ ring, category, page, meter, taught, tax, householdId, minutes = 30, mode = 'driving', from = null }) {
   const start = from ?? ring.at ?? null;
   const straight = ring.method === 'straight-line';
-  const reachKm = straight ? straightLineReachKm(mode, minutes) : boundKm(minutes, mode);
+  // The provider box needs a floor so a very short walk does not ask for a
+  // degenerate half-nothing box; the reach itself (the fence, below) keeps its
+  // true, unfloored value, so nothing past the real reach is shown (Codex).
+  const reachKm = straight ? Math.max(0.5, straightLineReachKm(mode, minutes)) : boundKm(minutes, mode);
   // The cards — the box that fetches them, the fence that keeps them and the
   // minute they print — are all measured from the journey origin, so a walk or
   // transit search around one place while travelling from another keeps the
@@ -327,7 +330,7 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
   // two are merged. A short trip's fence never reaches past it and costs
   // nothing extra; food's popular places are in the centre anyway, so food
   // asks once.
-  const plan = searchPlan({ searchKm: straight ? straightLineReachKm(mode, minutes) : searchRadiusKm(mode, minutes), categories: [category] });
+  const plan = searchPlan({ searchKm: straight ? Math.max(0.5, straightLineReachKm(mode, minutes)) : searchRadiusKm(mode, minutes), categories: [category] });
   // Every page, not only the first, and ten of each rather than twenty: a
   // merged page is then twenty, the size of the page the screen keeps, and
   // there is never an overflow to carry forward or lose. Google bills a

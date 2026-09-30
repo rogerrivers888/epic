@@ -227,5 +227,10 @@ export function straightLineReachKm(mode, minutes) {
   const m = travelMode(mode);
   const kmh = STRAIGHT_LINE_KMH[m] ?? STRAIGHT_LINE_KMH.transit;
   const factor = (MODE_PROFILE[m] || MODE_PROFILE.driving).detourFactor;
-  return Math.max(0.5, (Math.max(0, minutes) / 60) * kmh / factor);
+  // The true reach, with no floor: a five-minute walk is about 350 m, and a
+  // half-kilometre floor would count and display a place 500 m away as a
+  // five-minute walk it is not (Codex). The half-kilometre minimum a provider
+  // search needs so its box is not degenerate belongs to the search radius, not
+  // to the reach geometry, and is applied there.
+  return (Math.max(0, minutes) / 60) * kmh / factor;
 }
