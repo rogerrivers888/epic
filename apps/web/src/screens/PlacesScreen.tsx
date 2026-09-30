@@ -373,7 +373,10 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
 
       <VenueDrawer
         item={newVenue ? venueToBrowseItem(newVenue) : open ? atlasToBrowseItem(open) : null}
-        country={open?.countryCode ?? null}
+        // The place's own country, so its cost reads in its own currency: the
+        // atlas place carries it; a search result (newVenue) takes the browsed
+        // area's — the country whose towns you are looking at, or home. (Codex.)
+        country={open?.countryCode ?? country?.country ?? homeCode ?? null}
         baseLabel={city?.name ?? (home ? 'home' : null)}
         // The close carries the dwell — see InspireMe. Without it a place
         // that was opened and closed reported the open and nothing else.

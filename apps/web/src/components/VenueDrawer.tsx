@@ -480,7 +480,14 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
     // while this request is in flight (Codex).
     setCost(null);
     if (!item) return;
-    const level = venue?.priceLevel ?? item.priceLevel ?? null;
+    // Only Google's price level maps onto the market bands: its 0–4 is the
+    // relative, food-weighted judgement the bands are drawn against. A level
+    // from TripAdvisor, an event adapter (some synthesise one from ticket
+    // prices), or a fixture means something else, so it is not sent — it would
+    // read as a Google band it is not (Codex). No Google level → "not known yet".
+    const levelSource = venue?.priceLevel != null ? venue.source
+      : item.priceLevel != null ? (item.source ?? item.venueRef.split(':')[0]) : null;
+    const level = levelSource === 'google' ? (venue?.priceLevel ?? item.priceLevel ?? null) : null;
     let live = true;
     api.costBand({ country, level }).then((d) => { if (live) setCost(d); }).catch(() => { if (live) setCost(null); });
     return () => { live = false; };
