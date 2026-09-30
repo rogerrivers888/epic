@@ -80,9 +80,9 @@ test('sorting: unknowns last, ties keep the pool\'s own order', () => {
 test('an empty reach offers the next wider How far that has anything in it (C9)', () => {
   const rows = [item({ name: 'a', travelMinutes: 75 }), item({ name: 'b', travelMinutes: 90 }), item({ name: 'c', travelMinutes: 200 })];
   const f = { travel: 60, price: 'any', rating: 0 } as any;
-  assert.deepEqual(nextWider(rows, f, none), { minutes: 120, count: 2 });
-  // From 20 minutes, the first step with anything is still 2 hours, not 30 minutes.
-  assert.deepEqual(nextWider(rows, { ...f, travel: 20 }, none), { minutes: 120, count: 2 });
+  assert.deepEqual(nextWider(rows, f, none), { minutes: 90, count: 2 });
+  // From 20 minutes, the first step with anything is still the 90-min ceiling, not 30 minutes.
+  assert.deepEqual(nextWider(rows, { ...f, travel: 20 }, none), { minutes: 90, count: 2 });
 });
 
 test('when the widest reach is empty too, the reach is not the problem', () => {
@@ -92,5 +92,5 @@ test('when the widest reach is empty too, the reach is not the problem', () => {
 
 test('the wider step honours the other filters, so it never offers places a £ band will then hide', () => {
   const rows = [item({ name: 'a', travelMinutes: 75, priceLevel: 4 }), item({ name: 'b', travelMinutes: 75, priceLevel: 1 })];
-  assert.deepEqual(nextWider(rows, { travel: 60, price: String(bandOf(1)), rating: 0 } as any, none), { minutes: 120, count: 1 });
+  assert.deepEqual(nextWider(rows, { travel: 60, price: String(bandOf(1)), rating: 0 } as any, none), { minutes: 90, count: 1 });
 });
