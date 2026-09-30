@@ -457,14 +457,16 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
     refreshHousehold();
   }, [refreshHousehold]);
 
-  // First run (C0): a household with no home and nobody in it yet is shown the
-  // two doors, once. Anyone who has already set anything up has been here.
+  // First run: a household with no home and nobody in it yet is shown the
+  // opening once — the postcards opener and the four intro screens (Welcome
+  // screens, 1h) — and marked welcomed on the way out, so it is seen once.
+  // Anyone who has already set anything up has been here.
   const welcomedOnce = useRef(false);
   useEffect(() => {
     if (welcomedOnce.current || !household || route.name !== 'inspire' || wasWelcomed()) return;
     if (household.household.home || household.members.length) return;
     welcomedOnce.current = true;
-    navigate(paths.welcome(), { replace: true });
+    navigate(paths.opening(), { replace: true });
   }, [household, route.name, navigate]);
 
   // Keep the device's copy fresh without being asked (owner, 4 Sep 2026: they

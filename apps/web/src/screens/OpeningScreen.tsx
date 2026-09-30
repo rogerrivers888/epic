@@ -25,6 +25,7 @@ import { useViewport } from '../hooks/useViewport';
 import { Icon } from '../components/Icon';
 import { Pin } from '../components/Wordmark';
 import { Confetti, ConfettiHandle } from '../components/Confetti';
+import { markWelcomed } from './voice/WelcomeScreen';
 import { LIME, LIME_TINT, INK, CREAM, MOSS, HAIRLINE, INK_MUTED, NEUTRAL, fonts } from '../theme';
 
 // The todo (not-yet-reached) progress bar and card rules are a soft warm grey.
@@ -124,7 +125,12 @@ export function OpeningScreen() {
   const [box, setBox] = useState({ w: view.width, h: view.height });
   const s = Math.max(0, Math.min(4, Math.round(step)));
 
-  const leave = () => navigate(paths.inspire(), { replace: true });
+  // Any way out marks the opening seen, so first-run shows it once (App.tsx
+  // reads `wasWelcomed`). Skipping and "I already have an account" go straight
+  // into the app; finishing the tour hands on to crew set-up, which is where the
+  // opening sits in the sequence (handoff: "before crew set-up").
+  const leave = () => { markWelcomed(); navigate(paths.inspire(), { replace: true }); };
+  const finish = () => { markWelcomed(); navigate(paths.setup(), { replace: true }); };
   // The opening is one once-through sequence, not a stack of pages: each step
   // replaces the last, so it lives in a single history entry and Back leaves the
   // whole sequence (to wherever it was opened from) rather than stepping back
@@ -140,7 +146,7 @@ export function OpeningScreen() {
     : s === 1 ? <DayOrTrip key="s1" {...common} onNext={next} />
     : s === 2 ? <YourCrew key="s2" {...common} onNext={next} />
     : s === 3 ? <CardScreen key="s3" {...common} title="Book an expert." sub="Local specialists who make the day. You just turn up." cards={EXPERTS} ctaLabel="Next" onNext={next} showSkip />
-    : <CardScreen key="s4" {...common} title="Host it." sub="A weekend for friends and family, or a proper event: a craft fair, a 3-day course, a weekly workshop." cards={HOSTS} ctaLabel="Let's go" onNext={leave} showSkip={false} />;
+    : <CardScreen key="s4" {...common} title="Host it." sub="A weekend for friends and family, or a proper event: a craft fair, a 3-day course, a weekly workshop." cards={HOSTS} ctaLabel="Let's go" onNext={finish} showSkip={false} />;
 
   return (
     <View
