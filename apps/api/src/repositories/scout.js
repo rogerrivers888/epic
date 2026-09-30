@@ -773,9 +773,15 @@ export async function menusByOpener() {
 export async function foodNear({ lat, lng, km = 25, limit = 120, shownOnly = true }) {
   const dLat = km / 111;
   const dLng = km / Math.max(1, 111 * Math.cos((lat * Math.PI) / 180));
+  // The sweep row's own point where it keeps one (the open map's), otherwise
+  // the index's — which holds a Google point for its thirty days, so a place
+  // the sweep keeps no point for is still found near here while Google's
+  // point may be kept (migration 307, Codex 30 Sep 2026). Both halves from one.
+  const LAT = '(case when p.lat is not null and p.lng is not null then p.lat else ix.lat end)';
+  const LNG = '(case when p.lat is not null and p.lng is not null then p.lng else ix.lng end)';
   const { rows } = await query(
     `select distinct on (p.venue_ref)
-            p.venue_ref, p.name, p.lat, p.lng, p.website, p.cuisines, p.cuisine_group, p.secondary,
+            p.venue_ref, p.name, ${LAT} as lat, ${LNG} as lng, p.website, p.cuisines, p.cuisine_group, p.secondary,
             p.accolades, p.crowd_band, p.count_band, p.chain, p.chain_scale, p.epic_score,
             p.from_sources,
             -- What kind of place, from the sweep first and the open map second.
@@ -784,12 +790,13 @@ export async function foodNear({ lat, lng, km = 25, limit = 120, shownOnly = tru
             -- six months' time.
             coalesce(p.category, r.category) as category,
             l.name as locality_name,
-            sqrt(power((p.lat - $1) * 111.0, 2)
-               + power((p.lng - $2) * 111.0 * cos(radians($1)), 2)) as km
+            sqrt(power((${LAT} - $1) * 111.0, 2)
+               + power((${LNG} - $2) * 111.0 * cos(radians($1)), 2)) as km
        from scout_places p
        left join localities l on l.slug = p.locality_slug
        left join place_records r on r.venue_ref = p.venue_ref
-      where p.lat between $3 and $4 and p.lng between $5 and $6
+       left join place_index ix on ix.venue_ref = p.venue_ref
+      where ${LAT} between $3 and $4 and ${LNG} between $5 and $6
         ${shownOnly ? `and ${SHOWN_REF('p.venue_ref')}` : ''}
       order by p.venue_ref, p.epic_score desc nulls last`,
     [lat, lng, lat - dLat, lat + dLat, lng - dLng, lng + dLng]);
