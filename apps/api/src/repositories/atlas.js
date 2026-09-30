@@ -20,10 +20,10 @@ const on = (client) => (client ? (text, params) => client.query(text, params) : 
  * census box (migration 307). The row refers to the place rather than keeping
  * a copy of Google's point (C59, 30 Sep 2026).
  */
-const HP_LAT = 'epic_point_lat(hp.venue_ref, hp.lat, hp.point_from)';
-const HP_LNG = 'epic_point_lng(hp.venue_ref, hp.lng, hp.point_from)';
-const LAT = 'epic_point_lat(venue_ref, lat, point_from)';
-const LNG = 'epic_point_lng(venue_ref, lng, point_from)';
+const HP_LAT = 'epic_point_lat(hp.venue_ref, hp.lat, hp.lng, hp.point_from)';
+const HP_LNG = 'epic_point_lng(hp.venue_ref, hp.lat, hp.lng, hp.point_from)';
+const LAT = 'epic_point_lat(venue_ref, lat, lng, point_from)';
+const LNG = 'epic_point_lng(venue_ref, lat, lng, point_from)';
 
 /**
  * Great-circle miles between a row and a point, for "close to home".

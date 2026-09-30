@@ -26,8 +26,8 @@ const on = (client) => (client ? (text, params) => client.query(text, params) : 
  * Google's point (C59, 30 Sep 2026). Named last in a select so it stands over
  * the row's own columns.
  */
-const POINT_OF = (a) => `epic_point_lat(${a}.venue_ref, ${a}.lat, ${a}.point_from) as lat, epic_point_lng(${a}.venue_ref, ${a}.lng, ${a}.point_from) as lng`;
-const POINT = 'epic_point_lat(venue_ref, lat, point_from) as lat, epic_point_lng(venue_ref, lng, point_from) as lng';
+const POINT_OF = (a) => `epic_point_lat(${a}.venue_ref, ${a}.lat, ${a}.lng, ${a}.point_from) as lat, epic_point_lng(${a}.venue_ref, ${a}.lat, ${a}.lng, ${a}.point_from) as lng`;
+const POINT = 'epic_point_lat(venue_ref, lat, lng, point_from) as lat, epic_point_lng(venue_ref, lat, lng, point_from) as lng';
 
 export async function tripById(id) {
   const { rows } = await query('select * from trips where id = $1', [id]);
@@ -310,7 +310,7 @@ export async function shortlistItem(itemId, tripId) {
 export async function shortlistAnchors(tripId) {
   const { rows } = await query(
     `select venue_ref, venue_label, ${POINT} from trip_shortlist
-      where trip_id = $1 and epic_point_lat(venue_ref, lat, point_from) is not null and status <> 'dropped'`,
+      where trip_id = $1 and epic_point_lat(venue_ref, lat, lng, point_from) is not null and status <> 'dropped'`,
     [tripId],
   );
   return rows;
@@ -799,19 +799,19 @@ export async function placesOfTrip(tripId) {
   const { rows } = await query(
     `with touched as (
        select s.venue_ref, s.venue_name as label, null::text as category,
-              epic_point_lat(s.venue_ref, s.lat, s.point_from) as lat, epic_point_lng(s.venue_ref, s.lng, s.point_from) as lng,
+              epic_point_lat(s.venue_ref, s.lat, s.lng, s.point_from) as lat, epic_point_lng(s.venue_ref, s.lat, s.lng, s.point_from) as lng,
               d.date as on_date, s.dwell_minutes, 'stop' as via, s.booking_status
          from trip_stops s left join trip_days d on d.id = s.day_id
         where s.trip_id = $1
        union all
        select sl.venue_ref, sl.venue_label, sl.category,
-              epic_point_lat(sl.venue_ref, sl.lat, sl.point_from), epic_point_lng(sl.venue_ref, sl.lng, sl.point_from),
+              epic_point_lat(sl.venue_ref, sl.lat, sl.lng, sl.point_from), epic_point_lng(sl.venue_ref, sl.lat, sl.lng, sl.point_from),
               d.date, sl.dwell_minutes, 'shortlist', sl.status
          from trip_shortlist sl left join trip_days d on d.id = sl.day_id
         where sl.trip_id = $1
        union all
        select v.venue_ref, v.venue_label, v.category,
-              epic_point_lat(v.venue_ref, v.lat, v.point_from), epic_point_lng(v.venue_ref, v.lng, v.point_from),
+              epic_point_lat(v.venue_ref, v.lat, v.lng, v.point_from), epic_point_lng(v.venue_ref, v.lat, v.lng, v.point_from),
               v.visited_on, null::integer, 'visit', null::text
          from visits v where v.trip_id = $1
      )

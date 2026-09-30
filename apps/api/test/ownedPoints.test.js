@@ -146,7 +146,7 @@ test('a copy of Google\'s point written before the trigger is never read back on
   try {
     await query(`insert into household_places (household_id, venue_ref, label, lat, lng) values ($1, $2, $2, 51.5, -0.1)`, [hh, ref]);
   } finally { await query('alter table household_places enable trigger keep_owned_point'); }
-  const read = async () => (await query('select epic_point_lat(venue_ref, lat, point_from) as lat from household_places where venue_ref = $1', [ref])).rows[0].lat;
+  const read = async () => (await query('select epic_point_lat(venue_ref, lat, lng, point_from) as lat from household_places where venue_ref = $1', [ref])).rows[0].lat;
   assert.equal(await read(), null, 'no index point, and the legacy copy is not read');
   await query(`insert into place_index (venue_ref, lat, lng, coords_from, coords_at) values ($1, 51.51, -0.11, 'google', now())`, [ref]);
   assert.equal(await read(), 51.51, 'the index\'s current point, while it holds one');
@@ -156,7 +156,7 @@ test('a copy of Google\'s point written before the trigger is never read back on
   try {
     await query(`insert into household_places (household_id, venue_ref, label, lat, lng) values ($1, $2, $2, 51.6, -0.2)`, [hh, osm]);
   } finally { await query('alter table household_places enable trigger keep_owned_point'); }
-  assert.equal((await query('select epic_point_lat(venue_ref, lat, point_from) as lat from household_places where venue_ref = $1', [osm])).rows[0].lat, 51.6);
+  assert.equal((await query('select epic_point_lat(venue_ref, lat, lng, point_from) as lat from household_places where venue_ref = $1', [osm])).rows[0].lat, 51.6);
 });
 
 test('looking inside a Google place again clears a Google name an earlier look wrote', async () => {
@@ -222,7 +222,7 @@ test('a rented point refused by a table is left on the index for its thirty days
   await query(`insert into trip_stops (trip_id, venue_ref, venue_name, lat, lng, position, dwell_minutes) values ($1, $2, 'x', 51.47, -0.61, 1, 60)`, [trip.id, ref]);
   assert.equal((await query('select lat from trip_stops where venue_ref = $1', [ref])).rows[0].lat, null);
   assert.deepEqual((await query('select lat, coords_from from place_index where venue_ref = $1', [ref])).rows[0], { lat: 51.47, coords_from: 'google' });
-  assert.equal((await query('select epic_point_lat(venue_ref, lat, point_from) as lat from trip_stops where venue_ref = $1', [ref])).rows[0].lat, 51.47);
+  assert.equal((await query('select epic_point_lat(venue_ref, lat, lng, point_from) as lat from trip_stops where venue_ref = $1', [ref])).rows[0].lat, 51.47);
 });
 
 test('a census box copied between tables never becomes the index\'s point', async () => {
@@ -233,4 +233,15 @@ test('a census box copied between tables never becomes the index\'s point', asyn
   await query(`update place_index set lat = null, lng = null where venue_ref = $1`, [ref]);
   await saved(hh, ref, 51.44, -0.56);
   assert.deepEqual((await query('select lat, coords_from from place_index where venue_ref = $1', [ref])).rows[0], { lat: null, coords_from: 'google' });
+});
+
+test('a legacy row with half a point is read as having none', async () => {
+  const hh = await household();
+  const ref = `osm:node/${Date.now()}9`;
+  await query('alter table household_places disable trigger keep_owned_point');
+  try {
+    await query(`insert into household_places (household_id, venue_ref, label, lat, lng) values ($1, $2, $2, 51.5, null)`, [hh, ref]);
+  } finally { await query('alter table household_places enable trigger keep_owned_point'); }
+  const r = (await query('select epic_point_lat(venue_ref, lat, lng, point_from) as lat, epic_point_lng(venue_ref, lat, lng, point_from) as lng from household_places where venue_ref = $1', [ref])).rows[0];
+  assert.deepEqual(r, { lat: null, lng: null });
 });

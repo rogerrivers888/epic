@@ -328,3 +328,8 @@ test('a polygon page without centroids is asked again with its outline', async (
   const { rows: [c] } = await query(`select lat, lng from heritage_entries where list_entry = 16 and load_id = (select live_load from owned_source_loads where source = 'historic-england')`);
   assert.deepEqual(c, { lat: 51.5, lng: -0.5 });
 });
+
+test('a heritage layer that gives no count is not loaded', async () => {
+  await query(`update owned_source_loads set state = 'never' where source = 'historic-england'`);
+  await assert.rejects(() => src.loadSource('historic-england', { fetcher: async () => json({ error: { code: 400 } }) }), /gave no count/);
+});
