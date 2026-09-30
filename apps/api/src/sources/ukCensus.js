@@ -622,13 +622,23 @@ export async function notify({ subject, text = null, purpose = 'census_report', 
             where purpose like 'census%' and subject = $1 and lower(to_address) = lower($2)
               and (status not in ('failed', 'sending') or (status = 'sending' and sent_at > now() - interval '15 minutes'))
             limit 1`, [subject.slice(0, 300), address]);
-        if (rows.length || wentUnlogged.has(`${subject}\n${address}`)) continue;
+        const mark = `census:mailed-unlogged:${crypto.createHash('sha256').update(`${subject}\n${address.toLowerCase()}`).digest('hex').slice(0, 32)}`;
+        if (rows.length || wentUnlogged.has(mark)) continue;
+        // Every process's marker, not only this one's (Codex, 30 Sep 2026).
+        const { rows: marked } = await client.query('select 1 from bo_settings where key = $1', [mark]).catch(() => ({ rows: [] }));
+        if (marked.length) continue;
         const out = await send({ to: address, subject, text: text ?? subject, purpose });
         // Went, but the log row could not be written: the check above cannot
         // see it, and would send it again on every tick. Remembered here
         // instead, for this process's life — once a deploy, never every ten
         // minutes (30 Sep 2026: production's mail log had no rows at all).
-        if (out.sent && out.logged === false) wentUnlogged.add(`${subject}\n${address}`);
+        if (out.sent && out.logged === false) {
+          wentUnlogged.add(mark);
+          await client.query(
+            `insert into bo_settings (key, value, updated_by) values ($1, $2, 'the UK census') on conflict (key) do nothing`,
+            [mark, JSON.stringify({ subject, to: address, at: new Date().toISOString(), logError: out.logError ?? null })],
+          ).catch((err) => console.error(`epic-api: census — could not mark an unlogged send: ${err.message}`));
+        }
         mailed = mailed || Boolean(out.sent); why = out.sent ? null : out.message;
       }
       return { mailed, why };

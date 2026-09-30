@@ -997,4 +997,7 @@ test('a notice that went but could not be written down is not sent again every t
   const send = async () => { sent += 1; return { sent: true, logged: false, logError: 'no row' }; };
   for (let i = 0; i < 3; i += 1) await uk.notify({ subject, send, configured: () => true, to: ['roger@epic.day'] });
   assert.equal(sent, 1);
+  // And another process, which does not share this one's memory, finds the mark.
+  const { rows } = await query(`select value from bo_settings where key like 'census:mailed-unlogged:%' and value->>'subject' = $1`, [subject]);
+  assert.equal(rows.length, 1);
 });
