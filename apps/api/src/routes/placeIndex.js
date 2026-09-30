@@ -3870,7 +3870,7 @@ export async function coordinateReport() {
        -- Every copy of a rented point, with whose it is: Google's, or another
        -- licensed provider's, never folded into Google (Codex, 30 Sep 2026).
        rented as (
-         -- One provider per place, whichever copy named it first (Codex).
+         -- One provider per place (Codex).
          select distinct on (venue_ref) venue_ref, provider from (
          select venue_ref,
                 case when venue_ref ~ '^atlas:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
@@ -3888,7 +3888,9 @@ export async function coordinateReport() {
          ) r
          -- Whichever provider the row is displayed from, under its own name.
          union select coalesce(venue_ref, 'atlas:' || id::text), display_source from attractions where lat is not null and lng is not null and display_source is not null
-         ) one order by venue_ref, provider),
+         -- Google first where a place's copies name more than one — it is the
+         -- provider C59 asks about — then the others by name (Codex, 30 Sep 2026).
+         ) one order by venue_ref, (provider = 'google') desc, provider),
        p as (
          select case
                   when coalesce(r.osm, false) or coalesce(a.osm, false) or sc.venue_ref is not null or (pi.lat is not null and pi.lng is not null and pi.src = 'osm') then 'osm'
