@@ -18,7 +18,7 @@
  * pin-search browse it replaces is gone.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Animated, Linking, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { api, DayStop, HouseholdResponse, LegMode, ShortlistItem, ShortlistStatus, TripAlongPlace, TripDay, TripDetail } from '../api';
 import type { BrowseItem } from '../api';
@@ -925,6 +925,7 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
             fitKey={`trip-${sel ?? 'day'}-${Math.round(coverBottom / 24)}-${mapMarkers.map((mk) => mk.id).join(',')}`}
             padding={{ top: 24, bottom: coverBottom + 24, left: 44, right: 44 }}
             coverBottom={coverBottom}
+            hideAttribution
           />
           {/* The X-ray scan plays inside the strip of map above the drawer (6e). */}
           {scanning ? (
@@ -1091,6 +1092,12 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
               )}
             </View>
           )}
+          {/* The map credit, off the map face (owner) but reachable on every tab and
+              linking to the licence, as the interactive control it replaces did — a
+              faint corner link over the drawer's bottom padding (Codex). */}
+          <Press onPress={() => Linking.openURL('https://www.openstreetmap.org/copyright')} style={styles.mapCredit} accessibilityRole="link" accessibilityLabel="Map data © OpenStreetMap contributors">
+            <Text style={styles.mapCreditText}>© OpenStreetMap</Text>
+          </Press>
         </Animated.View>
       </View>
 
@@ -1729,6 +1736,8 @@ const styles = StyleSheet.create({
   handleHint: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   handleHintText: { fontFamily: fonts.body, fontSize: 12, fontWeight: '600', color: MUTED },
   dayInner: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 28 },
+  mapCredit: { position: 'absolute', right: 10, bottom: 6, paddingHorizontal: 4, paddingVertical: 2 },
+  mapCreditText: { fontFamily: fonts.body, fontSize: 10, color: MUTED, opacity: 0.7 },
   staysInner: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 28 },
   tripHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   headBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', marginTop: -2 },

@@ -152,6 +152,14 @@ export type MapGLProps = {
   shade?: MapShade | null;
   onMapPress?: () => void;
   dark?: boolean;
+  /**
+   * Take the OpenStreetMap credit off the map face. The trip map is a small strip
+   * under the ink menu with a drawer over it, and the owner asked for the ⓘ
+   * "somewhere completely unnoticeable" (30 Sep 2026); the caller then shows the
+   * credit itself — at the foot of The day — so it stays reachable. Off by default,
+   * so every other map keeps its corner ⓘ.
+   */
+  hideAttribution?: boolean;
 };
 
 export function MapGL({ markers }: MapGLProps) {

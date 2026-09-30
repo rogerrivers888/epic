@@ -319,7 +319,7 @@ function markerEl(m: MapMarker): HTMLElement {
   return wrap;
 }
 
-export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, focusId, shade = null, caliper = null, coverBottom, onMapPress, dark }: MapGLProps) {
+export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, focusId, shade = null, caliper = null, coverBottom, onMapPress, dark, hideAttribution = false }: MapGLProps) {
   const host = useRef<HTMLDivElement | null>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const drawn = useRef(new Map<string, maplibregl.Marker>());
@@ -352,7 +352,9 @@ export function MapGL({ markers, routes = [], padding, fitKey, fitToMarkers, foc
     // The credit goes top-right, because the bottom of the map is under the
     // sheet and OpenStreetMap's credit being visible is a condition of using
     // the tiles, not a decoration that may be covered up.
-    m.addControl(new maplibregl.AttributionControl({ compact: true }), 'top-right');
+    // The trip map takes the credit off its face and shows it itself, at the foot of
+    // The day (owner, 30 Sep 2026); every other map keeps the corner ⓘ.
+    if (!hideAttribution) m.addControl(new maplibregl.AttributionControl({ compact: true }), 'top-right');
     /**
      * Collapsed to its ⓘ, and kept that way until somebody taps it.
      *
