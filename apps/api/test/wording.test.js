@@ -78,6 +78,38 @@ test('a genuinely absent key logs a miss; intentionally-shared wording never doe
   assert.equal(await resolve('interface', 'never.registered', { locale: 'en-US', fallback: 'Registered', logMiss: false }), 'Registered');
 });
 
+test('resolve registers a wired key from its en-GB fallback, once, without clobbering a curated American form', async () => {
+  await query(`delete from market_wording where namespace='places' and key='cost.unknown'`);
+  await query(`delete from wording_misses where namespace='places' and key='cost.unknown'`);
+  // Wiring resolve() with the en-GB literal registers the key — the same act.
+  assert.equal(await resolve('places', 'cost.unknown', { locale: 'en-GB', fallback: 'Not known yet' }), 'Not known yet');
+  const { rows: reg } = await query(
+    `select en_gb, en_us, machine_allowed from market_wording where namespace='places' and key='cost.unknown'`);
+  assert.equal(reg.length, 1, 'the key now has a row the wording desk can offer for curation');
+  assert.equal(reg[0].en_gb, 'Not known yet');
+  assert.equal(reg[0].en_us, null, 'blank American form means "same" until someone writes it — not a miss');
+  assert.equal(reg[0].machine_allowed, true, 'a places key may carry a machine draft');
+  // A registered key is no longer a logged miss, in either locale.
+  assert.equal(await resolve('places', 'cost.unknown', { locale: 'en-US', fallback: 'Not known yet' }), 'Not known yet');
+  const { rows: miss } = await query(`select 1 from wording_misses where namespace='places' and key='cost.unknown'`);
+  assert.equal(miss.length, 0, 'a registered key is not a miss');
+  // Registration is idempotent: a later resolve must not overwrite a curated
+  // American form (on conflict do nothing), nor the en-GB.
+  await query(`update market_wording set en_us='Cost unknown' where namespace='places' and key='cost.unknown'`);
+  assert.equal(await resolve('places', 'cost.unknown', { locale: 'en-US', fallback: 'Not known yet' }), 'Cost unknown',
+    'the curated American form stands; register did not clobber it');
+});
+
+test('a key referenced with no fallback has nothing to register and stays a miss', async () => {
+  await query(`delete from market_wording where namespace='places' and key='cost.nofallback'`);
+  await query(`delete from wording_misses where namespace='places' and key='cost.nofallback'`);
+  await resolve('places', 'cost.nofallback', { locale: 'en-US' });
+  const { rows: reg } = await query(`select 1 from market_wording where namespace='places' and key='cost.nofallback'`);
+  assert.equal(reg.length, 0, 'no en-GB literal to seed the NOT NULL column, so no row is registered');
+  const { rows: miss } = await query(`select 1 from wording_misses where namespace='places' and key='cost.nofallback'`);
+  assert.equal(miss.length, 1, 'it is the "referenced but never added" gap, and stays a logged miss');
+});
+
 test('collection copy is handwritten only — the constraint refuses a machine draft', async () => {
   await assert.rejects(
     () => query(`insert into market_wording (namespace, key, en_gb, machine_allowed) values ('collection','row.rain','It is raining again', true)`),

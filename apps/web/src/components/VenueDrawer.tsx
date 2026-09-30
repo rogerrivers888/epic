@@ -12,7 +12,7 @@ import { FamilyVerdict } from './FamilyVerdict';
 import { OwnedFacts } from './OwnedFacts';
 import { useOffline } from '../hooks/useOffline';
 import { savedRecord } from '../offline/cache';
-import { SOURCE_LABEL, priceMarks, typeLine } from './StopCard';
+import { SOURCE_LABEL, typeLine } from './StopCard';
 import { MEDIA_RADIUS, MEDIA_RATIO, PHOTO_W, VenueThumb } from './VenueThumb';
 
 /**
@@ -116,6 +116,36 @@ function Hero({ uri, attribution }: { uri: string | null; attribution: string | 
     <View>
       <Image source={{ uri }} style={styles.hero} onError={() => setFailed(true)} onLoad={() => setReady(true)} accessibilityIgnoresInvertColors />
       {attribution ? <Text style={type.tiny}>{attribution}</Text> : null}
+    </View>
+  );
+}
+
+/**
+ * The cost as a four-step scale — Free · £ · ££ · £££ — with one step filled,
+ * and a money definition from the place's market beneath (M5/M6). A place with
+ * no price signal reads "not known yet", never Free. Never the place's own
+ * price — the band is a relative Google signal, the range is the market's.
+ */
+function CostScale({ cost }: { cost: Awaited<ReturnType<typeof api.costBand>> | null }) {
+  if (!cost) return null;
+  if (!cost.known) {
+    return (
+      <View style={{ gap: 4 }}>
+        <Text style={type.tiny}>COST</Text>
+        <Text style={type.body}>{cost.label}</Text>
+      </View>
+    );
+  }
+  return (
+    <View style={{ gap: 6 }}>
+      <View style={{ flexDirection: 'row', gap: 6 }}>
+        {cost.scale.map((s, i) => (
+          <View key={s} style={{ paddingVertical: 4, paddingHorizontal: 12, borderWidth: 1.5, borderColor: colors.ink, backgroundColor: i === cost.index ? colors.ink : 'transparent' }}>
+            <Text style={{ fontFamily: fonts.body, fontWeight: '700', fontSize: 13, color: i === cost.index ? CREAM : colors.inkFaint }}>{s}</Text>
+          </View>
+        ))}
+      </View>
+      {cost.definition ? <Text style={type.tiny}>{cost.definition}</Text> : null}
     </View>
   );
 }
@@ -265,6 +295,10 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
   const hardClosed = Boolean(closedAs?.hidden);
   const router = useOptionalRouter();
   const [crowd, setCrowd] = useState<{ rating: number | null; ratingCount: number | null; reviews: Venue['reviews']; attribution: string | null } | null>(null);
+  // The cost scale — the band Google's price level fills and a money definition
+  // from the place's market. Fetched beside the drawer; "not known yet" when
+  // there is no price signal (never Free).
+  const [cost, setCost] = useState<Awaited<ReturnType<typeof api.costBand>> | null>(null);
   /**
    * Every visit this household has made here, with every star given on it —
    * the place itself and each plate on the table (routes/places.js
@@ -429,6 +463,18 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
   const [heroW, setHeroW] = useState(0);
   const strip = useRef<ScrollView | null>(null);
   useEffect(() => { setHeroAt(0); strip.current?.scrollTo({ x: 0, animated: false }); }, [item?.venueRef]);
+  // The cost scale. The band comes from Google's (rented) price level; the
+  // currency and money bands come from the place's market, which the server
+  // reads from the household's own until a place carries its own country (the
+  // drawer holds no country field yet — Markets increment 4). A place with no
+  // level reads "not known yet", never Free.
+  useEffect(() => {
+    if (!item) { setCost(null); return; }
+    const level = venue?.priceLevel ?? item.priceLevel ?? null;
+    let live = true;
+    api.costBand({ level }).then((d) => { if (live) setCost(d); }).catch(() => { if (live) setCost(null); });
+    return () => { live = false; };
+  }, [item, venue?.priceLevel]);
   const onHeroScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (!heroW) return;
     const i = Math.round(e.nativeEvent.contentOffset.x / heroW);
@@ -460,7 +506,6 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
   const website = v?.website ?? ownRecord?.website ?? item.website;
   const mapsUrl = v?.mapsUrl ?? item.mapsUrl;
   const externalUrl = v?.externalUrl ?? item.externalUrl;
-  const price = priceMarks(v?.priceLevel ?? item.priceLevel);
   // Ours first, then the card's, then the crowd's — an atlas place has neither
   // of the first two and is the whole reason the third is fetched.
   const rating = v?.rating ?? item.rating ?? crowd?.rating ?? null;
@@ -524,6 +569,28 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
     v?.attribution ?? item.attribution ?? null,
     crowd?.attribution ?? null,
   ].flatMap((a) => (a ? String(a).split(' · ') : [])))].join(' · ');
+  /**
+   * The description's own credit (M7), to sit directly beneath it: the source
+   * the prose was read from, with its licence. Wikipedia carries CC BY-SA; the
+   * venue's own page is named and linked; an owned or curated line ('ours') and
+   * a source with no prose (Wikidata) carry no external credit. Google's
+   * editorial summary is never shown, so Google is never a source here.
+   */
+  const shownSummary = v?.summary ?? item.summary ?? null;
+  // A credit is only correct if the prose on screen is the owned one it names.
+  // A source's own summary (were one ever shown) must never be labelled "From
+  // Wikipedia"; so the credit stands only when the shown text is the record's.
+  const descriptionSource = shownSummary && ownRecord?.summary && shownSummary.trim() === ownRecord.summary.trim()
+    ? ownRecord.summarySource
+    : null;
+  const descriptionCredit: { label: string; url: string | null } | null =
+    !descriptionSource || descriptionSource === 'ours'
+      ? null
+      : descriptionSource === 'wikipedia'
+        ? { label: 'From Wikipedia · CC BY-SA', url: ownRecord?.wikipediaUrl ?? null }
+        : /^https?:\/\//i.test(descriptionSource)
+          ? { label: `From ${item.name}'s own page`, url: descriptionSource }
+          : null;
   /** "20 min drive" reads better than "20 min driving"; the sheet's own words. */
   const travelWord = 'drive';
   /**
@@ -595,7 +662,8 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
       ? { icon: 'children', title: 'Good for children', sub: null }
       : null,
     item.reservable ? { icon: 'calendar', title: 'Takes bookings', sub: null } : null,
-    price ? { icon: 'money', title: price, sub: 'Typical spend, as the source bands it' } : null,
+    // Cost is no longer a highlight tile — it is the four-step scale below, with
+    // a money definition from the place's market (M5/M6).
     item.dwellMinutes > 0 ? { icon: 'duration', title: `Allow ${minutes(item.dwellMinutes)}`, sub: null } : null,
   ] satisfies (Highlight | null)[]).filter((h) => h !== null).slice(0, 3);
 
@@ -695,7 +763,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                 {/* One line, in the handoff's own order: what it is, where, and
                     what stopping there costs the day. */}
                 <Text style={styles.meta} numberOfLines={2}>
-                  {[typeLine(item), price, item.travelFromBaseMinutes != null ? `+${item.travelFromBaseMinutes} min detour` : null]
+                  {[typeLine(item), item.travelFromBaseMinutes != null ? `+${item.travelFromBaseMinutes} min detour` : null]
                     .filter(Boolean).join(' · ')}
                 </Text>
                 {/* Their own page, named by its domain — for anywhere you might
@@ -706,12 +774,29 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                     <Text style={styles.siteText} numberOfLines={1}>{hostOf((v?.website ?? item.website) as string)}</Text>
                   </Press>
                 ) : null}
+                {/* The rating is Google's, and Google's policy for showing its
+                    place data without a map is a "Google Maps" attribution that
+                    links to the place on Google Maps (googleMapsUri). The artboard
+                    wrote "Google"; we follow Google's own current wording — the
+                    divergence is flagged to the owner. When there is no maps URI
+                    to link to, the attribution still stands, unlinked. */}
                 {rating != null ? (
-                  <View style={styles.ratingBit}>
-                    <Icon name="favourite" size={14} color={colors.accent} fill />
-                    <Text style={styles.ratingValue}>{rating.toFixed(1)}</Text>
-                    {ratingCount ? <Text style={styles.reviewsText}>{`· ${ratingCount.toLocaleString()} reviews`}</Text> : null}
-                  </View>
+                  mapsUrl ? (
+                    <Press onPress={() => Linking.openURL(mapsUrl)} style={styles.ratingBit} accessibilityRole="link" accessibilityLabel={`${rating.toFixed(1)} — see on Google Maps`}>
+                      <Icon name="favourite" size={14} color={colors.accent} fill />
+                      <Text style={styles.ratingValue}>{rating.toFixed(1)}</Text>
+                      {ratingCount ? <Text style={styles.reviewsText}>{`· ${ratingCount.toLocaleString()} reviews`}</Text> : null}
+                      <Text style={[styles.reviewsText, { textDecorationLine: 'underline' }]}>· Google Maps</Text>
+                      <Icon name="external" size={12} color={colors.accent} />
+                    </Press>
+                  ) : (
+                    <View style={styles.ratingBit}>
+                      <Icon name="favourite" size={14} color={colors.accent} fill />
+                      <Text style={styles.ratingValue}>{rating.toFixed(1)}</Text>
+                      {ratingCount ? <Text style={styles.reviewsText}>{`· ${ratingCount.toLocaleString()} reviews`}</Text> : null}
+                      <Text style={styles.reviewsText}>· Google Maps</Text>
+                    </View>
+                  )
                 ) : null}
                 {closedAs ? (
                   <View style={{ gap: 2 }}>
@@ -808,7 +893,17 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                     </View>
                   ) : null}
 
+                  <CostScale cost={cost} />
+
                   {v?.summary ?? item.summary ? <Text style={type.body}>{v?.summary ?? item.summary}</Text> : null}
+                  {/* The description credit, directly beneath it and linked (M7): the
+                      encyclopaedia or the venue's own page, with the licence. Google's
+                      editorial summary is never shown, so it never appears here. */}
+                  {(v?.summary ?? item.summary) && descriptionCredit ? (
+                    descriptionCredit.url
+                      ? <Press onPress={() => Linking.openURL(descriptionCredit.url as string)} accessibilityRole="link"><Text style={[type.tiny, { textDecorationLine: 'underline' }]}>{descriptionCredit.label}</Text></Press>
+                      : <Text style={type.tiny}>{descriptionCredit.label}</Text>
+                  ) : null}
                   {item.reasons.length ? <Wrap>{item.reasons.filter((r) => r.kind !== 'chain').map((r, i) => <Chip key={i} label={r.text} tone={r.kind === 'dislike' || r.kind === 'diet' ? 'dislike' : r.kind === 'note' ? 'neutral' : 'like'} />)}</Wrap> : null}
                   {(v?.address ?? item.address) && !highlights.some((h) => h.title === 'Where it is')
                     ? <IconText name="address">{v?.address ?? item.address}</IconText> : null}

@@ -275,10 +275,15 @@ async function visitPayload(id) {
  */
 places.get('/cost-band', async (req, res, next) => {
   try {
-    const country = (String(req.query.country || '').toUpperCase()) || 'GB';
     const household = await currentHousehold().catch(() => null);
     const locale = household ? await localeOfHousehold(household.id) : 'en-GB';
     const t = (key, fallback) => resolveWording('places', key, { locale, fallback });
+    // The place's own country when the caller knows it; otherwise the household's
+    // own market. This is a currency choice (which symbols, which money bands),
+    // never a cost guess — the band below still comes only from a real price
+    // level, and a country Epic has no market for still reads "not known yet".
+    const country = (String(req.query.country || '').toUpperCase())
+      || (household?.home_country_code ? String(household.home_country_code).toUpperCase() : 'GB');
 
     const levelRaw = req.query.level;
     const index = bandIndexForLevel(levelRaw === '' || levelRaw == null ? null : Number(levelRaw));

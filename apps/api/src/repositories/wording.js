@@ -40,12 +40,40 @@ export async function localeOfHousehold(householdId) {
 export async function resolve(namespace, key, { locale = DEFAULT_LOCALE, fallback = null, logMiss = true } = {}) {
   const { rows } = await query(
     'select en_gb, en_us from market_wording where namespace = $1 and key = $2', [namespace, key]);
+  // Registration via resolve() (owner, 29 Sep 2026): a key wired into a screen
+  // with its en-GB literal — the `fallback` — earns a row the first time it is
+  // resolved, so the wording desk can see it and offer its American form. This
+  // is how "wiring resolve() into a screen" and "registering the key" become the
+  // same act; the count of registered keys grows as screens are wired. It is
+  // idempotent (on conflict do nothing) so a key registers once and every later
+  // resolve is a pure read, and it only fires when we actually hold the en-GB to
+  // register — a key referenced with no fallback has nothing to seed the NOT NULL
+  // en_gb from, so it stays a logged miss (the "referenced but never added" gap).
+  if (!rows[0]?.en_gb && fallback != null) {
+    await registerKey(namespace, key, fallback);
+    return fallback;
+  }
   const picked = pickWording(rows[0], locale);
   if (picked.miss && logMiss) await recordMiss(namespace, key, locale);
   // A key with a row renders itself; a genuinely absent key renders the caller's
   // own en-GB default so nothing ever renders blank or the key (register 6). The
   // fallback is the en-GB literal the call site already holds.
   return picked.text ?? fallback;
+}
+
+/**
+ * Register a key from the en-GB literal a screen already holds, once. Idempotent
+ * — on conflict it does nothing, so it never overwrites a curated en-GB, bumps a
+ * version, or touches an American form; it only fills the gap where no row
+ * existed. `machine_allowed` follows the namespace rule (false for collection,
+ * whose copy is handwritten in every variant — register 7).
+ */
+async function registerKey(namespace, key, enGb) {
+  await query(
+    `insert into market_wording (namespace, key, en_gb, machine_allowed)
+       values ($1, $2, $3, $4)
+     on conflict (namespace, key) do nothing`,
+    [namespace, key, enGb, namespace !== 'collection']).catch(() => null);
 }
 
 /** One up-to-the-minute record of a locale asking for a key we did not have. */
