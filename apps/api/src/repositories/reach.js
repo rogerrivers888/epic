@@ -574,16 +574,40 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
   const home = rows.find((r) => r.code === cell) ?? null;
   const inBand = new Set(band);
   const bandPoints = rows.filter((r) => inBand.has(r.code));
+  // `outcodeOf` takes a sector *label* — "SL5 0" — and a cell is a code:
+  // "sector:SL5 0". Handed the code it answered "sector:SL5", which matches no
+  // district in the world, and every count over the ring came back empty
+  // (20 Sep 2026).
+  let outcodes = [...new Set(codes.map(outcodeOfCell).filter(Boolean))];
+  if (method === 'straight-line') {
+    // The candidate outcodes must cover every sector the count circle touches,
+    // not only the ones whose centroid fell inside the ring: a large rural
+    // sector can hold a place inside a short walk while its centroid sits well
+    // outside, and if its outcode never reaches censusInRing the place is
+    // silently dropped and the count still reads complete (Codex). Gather every
+    // outcode within the circle plus a sector's own radius; the exact per-place
+    // circle test in censusInRing then filters precisely, so over-including one
+    // is harmless and under-including one loses places.
+    const centre = lat != null && lng != null
+      ? { lat: Number(lat), lng: Number(lng) }
+      : home ? { lat: Number(home.lat), lng: Number(home.lng) } : null;
+    if (centre) {
+      const reachKm = straightLineReachKm(travelMode(mode), minutes) + 5;
+      const dLat = reachKm / 111;
+      const dLng = reachKm / (111 * Math.max(0.3, Math.cos((centre.lat * Math.PI) / 180)));
+      const { rows: near } = await query(
+        `select distinct upper(outcode) as outcode from geo_cells
+          where outcode is not null and lat between $1 and $2 and lng between $3 and $4`,
+        [centre.lat - dLat, centre.lat + dLat, centre.lng - dLng, centre.lng + dLng]);
+      outcodes = [...new Set([...outcodes, ...near.map((r) => r.outcode).filter(Boolean)])];
+    }
+  }
   return {
     cell,
     label: name ?? cell,
     cells: codes,
     band,
-    // `outcodeOf` takes a sector *label* — "SL5 0" — and a cell is a code:
-    // "sector:SL5 0". Handed the code it answered "sector:SL5", which matches
-    // no district in the world, and every count over the ring came back empty
-    // (20 Sep 2026).
-    outcodes: [...new Set(codes.map(outcodeOfCell).filter(Boolean))],
+    outcodes,
     points: rows,
     bandPoints: bandPoints.length ? bandPoints : rows,
     // 'matrix' from real (estimated) journey times in the reach table;

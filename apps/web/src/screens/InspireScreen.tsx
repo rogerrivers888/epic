@@ -1109,6 +1109,10 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                   // (owner, 24 Sep 2026). The shelf itself is the five bought.
                   count={pool?.moods.find((m) => m.key === sh.key)?.count ?? sh.items.length}
                   floor={pool?.moods.find((m) => m.key === sh.key)?.floor ?? false}
+                  // Walk/transit with no matrix are counted over a straight-line
+                  // estimate; the `~` says so rather than reading as a measured
+                  // journey-time count (Codex, owner 30 Sep 2026).
+                  estimated={pool?.estimated ?? false}
                   items={sh.items.slice(0, ACROSS)}
                   onAll={() => goTo('activities', sh.key)}
                   onOpen={open}

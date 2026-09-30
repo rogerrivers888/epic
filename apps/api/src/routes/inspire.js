@@ -292,11 +292,14 @@ const ringFrom = (q, { minutes, mode }) => reach.ringFor({
 const PAGE = 20;
 
 async function placesFor({ ring, category, page, meter, taught, tax, householdId, minutes = 30, mode = 'driving', from = null }) {
-  const start = from ?? ring.at ?? null;
-  // A straight-line ring (walk/transit with no matrix) fences the display to the
-  // SAME conservative reach it counted, so the cards never reach past the count
-  // (Codex). A matrix ring uses the journey-time bound as before.
+  // A straight-line ring (walk/transit with no matrix) counts, searches and
+  // fences around ONE centre — the ring's own point — so the provider box, the
+  // cards and the count all describe the same circle. In /near the journey
+  // origin can differ from the searched place, and using it here would search
+  // one circle and count another (Codex). A matrix ring uses the journey origin
+  // and the journey-time bound as before.
   const straight = ring.method === 'straight-line';
+  const start = (straight ? ring.at : from) ?? ring.at ?? null;
   const reachKm = straight ? straightLineReachKm(mode, minutes) : boundKm(minutes, mode);
   const searchBox = start
     ? {

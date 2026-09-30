@@ -138,7 +138,7 @@ export function MediaCard({ thumb, name, muted, wide, selected, onPress, childre
  * A shelf's title, with "All N ›" opposite — the door into the whole of it.
  * One component so the shelves and the drill-down cannot drift apart.
  */
-export function SectionHead({ title, count, floor, onAll }: { title: string; count: number; floor?: boolean; onAll?: () => void }) {
+export function SectionHead({ title, count, floor, estimated, onAll }: { title: string; count: number; floor?: boolean; estimated?: boolean; onAll?: () => void }) {
   /**
    * The census count for the reach, read as the floor it is.
    *
@@ -148,8 +148,13 @@ export function SectionHead({ title, count, floor, onAll }: { title: string; cou
    * display." The trailing mark says the number is a floor — places straddle
    * the reach's edge, or an outcode has never been censused — because every
    * figure is one and should read as one.
+   *
+   * A leading `~` says the reach itself is an estimate: walking and public
+   * transport have no journey-time matrix yet, so the count is taken over a
+   * conservative straight-line circle rather than real routes (owner, 30 Sep
+   * 2026). It must not read as a measured journey-time count when it is not.
    */
-  const said = `${count.toLocaleString('en-GB')}${floor ? '+' : ''}`;
+  const said = `${estimated ? '~' : ''}${count.toLocaleString('en-GB')}${floor ? '+' : ''}`;
   // New navigation (owner, 30 Sep 2026, §6): title case, the count beside the
   // title in muted, and "See all ›" right-aligned in moss — not a count and a
   // chevron on the right.
@@ -171,8 +176,8 @@ export function SectionHead({ title, count, floor, onAll }: { title: string; cou
 }
 
 /** All: one category's worth, across. The title is a door into the whole of it. */
-export function Carousel({ title, count, floor, items, onAll, onOpen, crowdOf, travel }: {
-  title: string; count: number; floor?: boolean; items: InspireItem[];
+export function Carousel({ title, count, floor, estimated, items, onAll, onOpen, crowdOf, travel }: {
+  title: string; count: number; floor?: boolean; estimated?: boolean; items: InspireItem[];
   onAll: () => void; onOpen: (i: InspireItem) => void;
   /** What the crowd made of it, once Google has answered for this one. */
   crowdOf?: (i: InspireItem) => Crowd;
@@ -181,7 +186,7 @@ export function Carousel({ title, count, floor, items, onAll, onOpen, crowdOf, t
   if (!items.length) return null;
   return (
     <View style={styles.section}>
-      <SectionHead title={title} count={count} floor={floor} onAll={onAll} />
+      <SectionHead title={title} count={count} floor={floor} estimated={estimated} onAll={onAll} />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carousel}>
         {items.map((i) => (
           <Card key={i.venueRef} item={i} crowd={crowdOf?.(i)} travel={travel} onOpen={() => onOpen(i)} />
