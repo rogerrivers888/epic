@@ -206,7 +206,11 @@ async function pageOfPlaces(after, limit, { weekly }) {
            union all select r.lat, r.lng, 3 from place_records r where r.venue_ref = pi.venue_ref and r.lat is not null and r.lng is not null
          ) x order by x.k limit 1) pt on true
       where ($1::text is null or pi.venue_ref > $1)
-        ${weekly ? 'and not exists (select 1 from owned_points o where o.venue_ref = pi.venue_ref)' : ''}
+        -- Weekly: the unmatched (C59: "re-match unmatched places against all
+        -- owned sources each time"), and the matched whose point is not yet
+        -- the best there is, so a corrected or better source can land; the
+        -- order in recordOwnedPoint decides whether it does (Codex).
+        ${weekly ? `and not exists (select 1 from owned_points o where o.venue_ref = pi.venue_ref and o.source = 'wikidata')` : ''}
       order by pi.venue_ref
       limit $2`, [after, limit]);
   return rows;
