@@ -469,7 +469,10 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
   // drawer holds no country field yet — Markets increment 4). A place with no
   // level reads "not known yet", never Free.
   useEffect(() => {
-    if (!item) { setCost(null); return; }
+    // Clear first, so a newly opened drawer never shows the last place's band
+    // while this request is in flight (Codex).
+    setCost(null);
+    if (!item) return;
     const level = venue?.priceLevel ?? item.priceLevel ?? null;
     let live = true;
     api.costBand({ level }).then((d) => { if (live) setCost(d); }).catch(() => { if (live) setCost(null); });
@@ -511,6 +514,15 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
   const rating = v?.rating ?? item.rating ?? crowd?.rating ?? null;
   const ratingCount = v?.ratingCount ?? item.ratingCount ?? crowd?.ratingCount ?? null;
   const source = item.source ?? item.venueRef.split(':')[0];
+  // Whose rating this is — the same precedence `rating` was picked by — so only
+  // a Google rating carries Google's attribution and links to Google Maps. A
+  // TripAdvisor, fixture or open-data rating is never labelled Google (Codex).
+  // The crowd match is always Google (the reviews endpoint matches to it).
+  const ratingSource = v?.rating != null ? (v.source ?? source)
+    : item.rating != null ? (item.ratingSource ?? item.source ?? source)
+      : crowd?.rating != null ? 'google'
+        : null;
+  const ratingIsGoogle = ratingSource === 'google';
   /** Ours outright: the atlas researched it, and there is no provider behind it. */
   // …or the household's own, made from a photograph they took (routes/placePhotos.js).
   const ours0wn = source === 'atlas' || source === 'photo' || item.venueRef.startsWith('wikidata:');
@@ -781,7 +793,7 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                     divergence is flagged to the owner. When there is no maps URI
                     to link to, the attribution still stands, unlinked. */}
                 {rating != null ? (
-                  mapsUrl ? (
+                  ratingIsGoogle && mapsUrl ? (
                     <Press onPress={() => Linking.openURL(mapsUrl)} style={styles.ratingBit} accessibilityRole="link" accessibilityLabel={`${rating.toFixed(1)} — see on Google Maps`}>
                       <Icon name="favourite" size={14} color={colors.accent} fill />
                       <Text style={styles.ratingValue}>{rating.toFixed(1)}</Text>
@@ -794,7 +806,9 @@ export function VenueDrawer({ item, baseLabel, onClose, onAdd, addLabel, addIcon
                       <Icon name="favourite" size={14} color={colors.accent} fill />
                       <Text style={styles.ratingValue}>{rating.toFixed(1)}</Text>
                       {ratingCount ? <Text style={styles.reviewsText}>{`· ${ratingCount.toLocaleString()} reviews`}</Text> : null}
-                      <Text style={styles.reviewsText}>· Google Maps</Text>
+                      {/* Only a Google rating names Google; others carry their own
+                          source's attribution in the credits line and panels below. */}
+                      {ratingIsGoogle ? <Text style={styles.reviewsText}>· Google Maps</Text> : null}
                     </View>
                   )
                 ) : null}
