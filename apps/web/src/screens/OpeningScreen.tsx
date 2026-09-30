@@ -18,7 +18,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Image, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AccessibilityInfo, Animated, Easing, Image, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter, useQueryState, asNumber, asFlag } from '../router';
 import { paths } from '../routes';
 import { useViewport } from '../hooks/useViewport';
@@ -100,12 +100,20 @@ const HOSTS = [
 function useReducedMotion(): boolean {
   const [reduced, setReduced] = useState(false);
   useEffect(() => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined' || !window.matchMedia) return;
-    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    setReduced(mq.matches);
-    const on = () => setReduced(mq.matches);
-    mq.addEventListener?.('change', on);
-    return () => mq.removeEventListener?.('change', on);
+    // The web reads the CSS media query; iOS and Android read the OS setting
+    // through AccessibilityInfo. Either way, a change flips the flag live.
+    if (Platform.OS === 'web') {
+      if (typeof window === 'undefined' || !window.matchMedia) return;
+      const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+      setReduced(mq.matches);
+      const on = () => setReduced(mq.matches);
+      mq.addEventListener?.('change', on);
+      return () => mq.removeEventListener?.('change', on);
+    }
+    let mounted = true;
+    AccessibilityInfo.isReduceMotionEnabled?.().then((v) => { if (mounted) setReduced(!!v); }).catch(() => {});
+    const sub = AccessibilityInfo.addEventListener?.('reduceMotionChanged', (v: boolean) => setReduced(!!v));
+    return () => { mounted = false; sub?.remove?.(); };
   }, []);
   return reduced;
 }
