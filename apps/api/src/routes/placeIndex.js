@@ -3803,7 +3803,10 @@ export async function coordinateReport() {
        -- Keyed as the index rebuild keys them: an attraction with no reference
        -- of its own is atlas:<id> (Codex, 30 Sep 2026).
        atl as (
-         select coalesce(venue_ref, 'atlas:' || id::text) as venue_ref, bool_or(osm_ref is not null) as osm
+         -- OSM's point only where the sweep matched and replaced it: a Wikidata
+         -- row's osm_ref is just its P402 id, and its point is still the
+         -- atlas's (Codex, 30 Sep 2026).
+         select coalesce(venue_ref, 'atlas:' || id::text) as venue_ref, bool_or(osm_ref is not null and wikidata_id is null) as osm
            from attractions
           where lat is not null and display_source is distinct from 'google'
           group by 1),
@@ -3855,11 +3858,16 @@ export async function coordinateReport() {
     // uses, less wikidata, which that list wrongly treats as rented and is
     // reported here as the atlas's. A point a rebuild wrote with no source is
     // judged by its reference, and counted undated (Codex, 30 Sep 2026).
-    const RENTED_IX = `lat is not null and coalesce(coords_from,
+    const IX_SRC = `coalesce(coords_from,
         case when place_index.venue_ref like 'atlas:%' and exists (select 1 from attractions g
                    where g.id::text = substr(place_index.venue_ref, 7) and g.display_source = 'google') then 'google'
-             else split_part(place_index.venue_ref, ':', 1) end) not in ('osm', 'atlas', 'own', 'wikidata')`;
+             else split_part(place_index.venue_ref, ':', 1) end)`;
+    // Google's alone, as asked; any other provider's on a line of its own
+    // (Codex, 30 Sep 2026).
+    const RENTED_IX = `lat is not null and ${IX_SRC} = 'google'`;
     await count('place_index', 'coords_at', `select ${OVER('coords_at')} from place_index where ${RENTED_IX}`);
+    await count('place_index (other providers)', 'coords_at',
+      `select ${OVER('coords_at')} from place_index where lat is not null and ${IX_SRC} not in ('osm', 'atlas', 'own', 'wikidata', 'google')`);
     await count('place_cells', 'at', `select ${OVER('at')} from place_cells where lat is not null and venue_ref like 'google:%'`);
     await count('scout_places', 'last_seen', `select ${OVER('last_seen')} from scout_places where lat is not null and venue_ref like 'google:%'`);
     await count('attractions', 'updated_at or last_seen', `select ${OVER('coalesce(updated_at, last_seen)')} from attractions where lat is not null and display_source = 'google'`);

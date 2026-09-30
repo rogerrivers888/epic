@@ -43,15 +43,16 @@ test('files each place under the best point held for it, and counts old rented p
   assert.deepEqual(r.places.otherRented, { tripadvisor: 1 });
   assert.equal(r.places.none, 1);
   const idx = r.rented.find((x) => x.table === 'place_index');
-  assert.equal(idx.held, 6, 'matched, old, fresh, undated, the Google atlas row, tripadvisor — not wikidata or an unstamped osm point');
+  assert.equal(idx.held, 5, 'matched, old, fresh, undated, the Google atlas row — Google\'s alone');
   assert.equal(idx.over30Days, 2);
-  assert.equal(idx.undated, 3, 'a point with no clock is undated, not old');
+  assert.equal(idx.undated, 2, 'a point with no clock is undated, not old');
+  assert.equal(r.rented.find((x) => x.table === 'place_index (other providers)').held, 1, 'tripadvisor on its own line');
   assert.equal(r.rented.find((x) => x.table === 'place_cells').over30Days, 1);
   assert.equal(r.rentedOver30Days, 3);
   assert.equal(r.pointsByTable.place_index.google, 4, 'matched, old, fresh, undated — the raw prefix spread');
   assert.equal(r.pointsByTable.place_cells.google, 1);
   assert.equal(r.pointsByTable.attractions.atlas, 2, 'the castle and the maze, keyed atlas:<id>');
-  assert.equal(r.rented.length, 10);
+  assert.equal(r.rented.length, 11);
   assert.deepEqual(r.indexOver30DaysByArea, [{ area: 'SL', over30: 1 }, { area: 'TR', over30: 1 }]
     .sort((a, b) => b.over30 - a.over30));
 });
