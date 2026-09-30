@@ -3931,10 +3931,14 @@ export async function coordinateReport() {
     // Sep 2026). A cell whose point matches no dated index point is undated.
     const NEAR = (x) => `abs(${x}.lat - c.lat) <= 0.0005 and abs(${x}.lng - c.lng) <= 0.0005`;
     await count('place_cells', 'the index point it copies',
+      // With no dated index point, the cell's own stamp is a floor: the point
+      // it copied was there when it was stamped, so a cell stamped over thirty
+      // days ago holds a point at least that old (Codex, 30 Sep 2026).
       `select count(*)::int held,
-              count(*) filter (where pi.coords_at < now() - interval '30 days')::int over30,
-              count(*) filter (where pi.coords_at is null)::int undated,
-              min(pi.coords_at) oldest
+              count(*) filter (where pi.coords_at < now() - interval '30 days'
+                                  or (pi.coords_at is null and c.at < now() - interval '30 days'))::int over30,
+              count(*) filter (where pi.coords_at is null and not (c.at < now() - interval '30 days'))::int undated,
+              min(coalesce(pi.coords_at, c.at)) oldest
          from place_cells c
          left join place_index pi on pi.venue_ref = c.venue_ref and pi.lat is not null and pi.lng is not null and ${NEAR('pi')}
         where c.lat is not null and c.lng is not null

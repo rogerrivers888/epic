@@ -68,9 +68,9 @@ test('files each place under the best point held for it, and counts old rented p
   assert.equal(hp.held, 1);
   const cells = r.rented.find((x) => x.table === 'place_cells');
   assert.equal(cells.held, 2, 'google:elsewhere, and the atlas row Google named');
-  assert.equal(cells.undated, 2, 'neither has a dated index point, so their age cannot be told');
-  assert.equal(cells.over30Days, 0);
-  assert.equal(r.rentedOver30Days, 1);
+  assert.equal(cells.over30Days, 1, 'google:elsewhere was stamped forty days ago: its point is at least that old');
+  assert.equal(cells.undated, 1, 'the zoo\'s was stamped today, and its point may be older or not');
+  assert.equal(r.rentedOver30Days, 2);
   assert.equal(r.pointsByTable.place_index.google, 4, 'matched, old, fresh, undated — the raw prefix spread');
   assert.equal(r.pointsByTable.place_cells.google, 1);
   assert.equal(r.pointsByTable.attractions.atlas, 3, 'the castle, the maze and the zoo, keyed atlas:<id>');
