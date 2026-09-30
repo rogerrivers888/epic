@@ -101,6 +101,10 @@ function start<T>(key: string, fetcher: () => Promise<T>, after?: Promise<unknow
     // refetch may have chained a newer one on top.
     .finally(() => { if (e.promise === p) e.promise = undefined; emit(e); });
   e.promise = p;
+  // A new attempt drops the last failure now, not only if this one succeeds, so
+  // a "Try again" (or a remount after a failed load) shows the skeleton alone
+  // rather than the skeleton beside the old error message (Codex, D13).
+  e.error = undefined;
   emit(e);
   return p;
 }

@@ -11,7 +11,14 @@ import { invalidateTabData } from './cache/resourceCache';
 // booking (`/api/bookings`, shown under Trips) and the home or household
 // (`/api/household`, which moves the Inspire ring and the atlas home). Telemetry
 // and the back office are deliberately absent — see the note at the call site.
-const TAB_DATA_WRITE = ['/api/places/', '/api/atlas/', '/api/visits', '/api/orders', '/api/trips', '/api/bookings', '/api/household'];
+// The planner's trip-makers are listed one by one on purpose: `/api/plan/commit`
+// and the two one-tap makers create a trip, but most `/api/plan/*` paths —
+// preview, refine, start — run live while someone is planning and must never
+// invalidate, or the tabs would re-fetch on every keystroke.
+const TAB_DATA_WRITE = [
+  '/api/places/', '/api/atlas/', '/api/visits', '/api/orders', '/api/trips', '/api/bookings', '/api/household',
+  '/api/plan/commit', '/api/plan/inspire/trip', '/api/plan/tastes/trip',
+];
 import { flush as flushOutbox, queue as queueWrite, refreshOutbox } from './offline/outbox';
 import { copyHolder, deviceLabel, holderOf, sessionExpired, sessionToken, setCopyHolder, setSessionToken } from './session';
 
