@@ -182,3 +182,19 @@ test('an open-map place\'s copies follow its owned point when it is corrected', 
   await recordOwnedPoint({ ref, lat: 51.52, lng: -0.12, source: 'wikidata', sourceRef: 'Q9', method: 'reference' });
   assert.deepEqual((await query('select lat, point_from from household_places where venue_ref = $1', [ref])).rows[0], { lat: 51.52, point_from: 'wikidata' });
 });
+
+test('a display search\'s Google point never displaces an owned one on the index', async () => {
+  const { recordOwnedPoint } = await import('../src/sources/ownedPoints.js');
+  const index = await import('../src/repositories/placeIndex.js');
+  const ref = `google:keep-owned-${randomUUID()}`;
+  await query('insert into place_index (venue_ref) values ($1)', [ref]);
+  await recordOwnedPoint({ ref, lat: 51.45, lng: -0.55, source: 'fsa', sourceRef: '7', method: 'name+distance' });
+  await index.noteMany([{ ref, lat: 51.5, lng: -0.1, coordsFrom: 'google' }], { source: 'google' });
+  assert.deepEqual((await query('select lat, lng, coords_from from place_index where venue_ref = $1', [ref])).rows[0], { lat: 51.45, lng: -0.55, coords_from: 'fsa' });
+});
+
+test('an accented name is found by its plain stem', async () => {
+  await fsaRow(91030, 'Café Rouge', 51.2000, -0.3000);
+  const hit = await m.matchPlace({ ref: 'google:cr', names: ['Cafe Rouge'], point: { lat: 51.2001, lng: -0.3001 } });
+  assert.equal(hit.sourceRef, '91030');
+});

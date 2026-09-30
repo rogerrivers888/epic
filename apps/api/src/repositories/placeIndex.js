@@ -1605,7 +1605,19 @@ export async function noteMany(places = [], { source = null, countryCode = null,
     // row twinned with the open map carries OSM's point under Google's
     // reference, and a photo place is a household's own pin — and the
     // reference's only where nobody says.
-    const values = rows.map((_, i) => `($${i * 7 + 1},$${i * 7 + 2}::double precision,$${i * 7 + 3}::double precision,$${i * 7 + 4},$${i * 7 + 5}, now(), $${i * 7 + 6}::text[], case when $${i * 7 + 2}::double precision is not null then now() end, case when $${i * 7 + 2}::double precision is not null then $${i * 7 + 7}::text end)`).join(',');
+    //
+    // And a place's owned point, where one has landed, is the position that
+    // stands, whatever the caller brings (Codex, 30 Sep 2026): a display
+    // search's Google point never displaces an FSA one.
+    const values = rows.map((_, i) => {
+      const r = `$${i * 7 + 1}`, lat = `$${i * 7 + 2}::double precision`, lng = `$${i * 7 + 3}::double precision`;
+      const oLat = `(select o.lat from owned_points o where o.venue_ref = ${r})`;
+      const oLng = `(select o.lng from owned_points o where o.venue_ref = ${r})`;
+      const oSrc = `(select o.source from owned_points o where o.venue_ref = ${r})`;
+      return `(${r}, coalesce(${oLat}, ${lat}), case when ${oLat} is not null then ${oLng} else ${lng} end, $${i * 7 + 4},$${i * 7 + 5}, now(), $${i * 7 + 6}::text[],
+        case when coalesce(${oLat}, ${lat}) is not null then now() end,
+        case when ${oLat} is not null then ${oSrc} when ${lat} is not null then $${i * 7 + 7}::text end)`;
+    }).join(',');
     await exec(
       `insert into place_index (venue_ref, lat, lng, country_code, ownership, last_seen, google_types, coords_at, coords_from)
        values ${values}

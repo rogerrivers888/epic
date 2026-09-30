@@ -79,8 +79,13 @@ export async function recordOwnedPoint({ ref, lat, lng, source, sourceRef = null
       where venue_ref = $1`, [ref, Number(lat), Number(lng), source]);
   // Every copy goes back through the trigger, which gives each the owned
   // point as it now stands — whatever it held before (Codex, 30 Sep 2026).
-  for (const table of ['household_places', 'trip_shortlist', 'trip_stops', 'visits']) {
+  for (const table of ['household_places', 'trip_shortlist', 'trip_stops', 'visits', 'scout_places', 'place_records']) {
     await client.query(`update ${table} set point_from = null where venue_ref = $1`, [ref]);
   }
+  // And the atlas row itself, keyed by its reference or its own id.
+  await client.query(
+    `update attractions set point_from = null
+      where venue_ref = $1
+         or id = (case when $1 ~ '^atlas:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then substr($1, 7)::uuid end)`, [ref]);
   return { written: true };
 }

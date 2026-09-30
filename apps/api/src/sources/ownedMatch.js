@@ -31,6 +31,9 @@ export const RULES = {
 // Where all a place has is its census box, the whole box is searched, and only
 // a name that is the same word for word, and alone in the box, is taken.
 const BOX_SCORE = 0.99;
+// Accented letters folded to their plain ones, for the stem prefilter.
+const FOLD_FROM = 'áàâäãåāéèêëēíìîïīóòôöõøōúùûüūçñýÿœæ';
+const FOLD_TO = 'aaaaaaaeeeeeiiiiiooooooouuuuucnyyoa';
 
 const box = (lat, lng, radiusM) => {
   const dLat = radiusM / 111_320;
@@ -66,7 +69,9 @@ export async function candidateIn(source, name, near, { strict = false } = {}) {
   const params = [a, b, c, d];
   if (stems.length) params.push(`(${stems.join('|')})`);
   const { rows } = await query(
-    `${t.sql} lat between $1 and $2 and lng between $3 and $4 ${stems.length ? 'and name ~* $5' : ''} limit ${CAP + 1}`, params);
+    // Accents folded as the stems were, so a Café is found by "cafe" (Codex).
+    `${t.sql} lat between $1 and $2 and lng between $3 and $4
+       ${stems.length ? `and translate(lower(name), '${FOLD_FROM}', '${FOLD_TO}') ~ $5` : ''} limit ${CAP + 1}`, params);
   if (rows.length > CAP) return null;
   const need = strict ? BOX_SCORE : RULES[source].score;
   const good = rows
