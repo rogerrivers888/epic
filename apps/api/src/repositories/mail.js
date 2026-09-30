@@ -3,10 +3,16 @@
 import { query } from '../db.js';
 import { applyEvent } from '../domain/mail.js';
 
-export async function recordSend({ to, subject, purpose, providerId, status, failure }) {
+export async function recordSend({ id = null, to, subject, purpose, providerId, status, failure }) {
+  // An id chosen by the caller makes a retry idempotent: an insert that
+  // committed but whose answer was lost is found again, not written twice
+  // (Codex, 30 Sep 2026).
   const { rows } = await query(
-    `insert into mail_messages (to_address, subject, purpose, provider_id, status, failure) values ($1, $2, $3, $4, $5, $6) returning *`,
-    [to, subject.slice(0, 300), purpose ?? 'message', providerId ?? null, status, failure ?? null],
+    `insert into mail_messages (id, to_address, subject, purpose, provider_id, status, failure)
+     values (coalesce($7::uuid, gen_random_uuid()), $1, $2, $3, $4, $5, $6)
+     on conflict (id) do update set id = excluded.id
+     returning *`,
+    [to, subject.slice(0, 300), purpose ?? 'message', providerId ?? null, status, failure ?? null, id],
   );
   return rows[0];
 }

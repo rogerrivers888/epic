@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { APP_URL, configuredAppUrl } from '../origins.js';
 import { deployed } from '../auth.js';
 /**
@@ -107,7 +108,8 @@ export async function sendMail({ to, subject, text, html, purpose = 'message' })
   // would miss any event that beat it home, and a bounce it missed would not
   // suppress the next send (Codex, 30 Sep 2026).
   let logError = null;
-  const log = () => recordSend({ to, subject, purpose, status: 'sending' })
+  const id = randomUUID();
+  const log = () => recordSend({ id, to, subject, purpose, status: 'sending' })
     .catch((err) => { logError = logError ? `${logError} · again: ${err.message}` : err.message; return null; });
   const row = (await log()) ?? (await log());
   if (!row) console.error(`epic-api: mail — could not log a send: ${logError}`);
