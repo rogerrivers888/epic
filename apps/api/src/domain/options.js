@@ -425,6 +425,10 @@ export function richFields(s, base) {
     ratingCount: s.ratingCount ?? null,
     ratingSource: s.rating != null ? (s.provenance?.rating?.source ?? s.source) : null,
     priceLevel: s.priceLevel ?? null,
+    // Which source each merged field came from, so the drawer maps only a
+    // Google price level onto the market bands and credits a Google rating to
+    // Google even when the place's identity is OSM (Codex).
+    provenance: s.provenance ?? null,
     chain: Boolean(s.chain),
     brand: s.brand ?? null,
     goodForChildren: s.goodForChildren ?? null,
