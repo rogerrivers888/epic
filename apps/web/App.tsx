@@ -846,13 +846,16 @@ const styles = StyleSheet.create({
     // §8: a 1px soft rule, not the 2px ink one — the bar is the ground with a
     // hairline on it, cream in light and the dark ground in dark.
     flexDirection: 'row', borderTopWidth: 1, borderTopColor: colors.ruleSoft, backgroundColor: colors.tabbar,
-    paddingBottom: (Platform.OS === 'web' ? 'max(12px, calc(var(--epic-sab) - 16px))' : 8) as any,
+    // Raised ~5mm off the very bottom (owner, 30 Sep 2026: the tabs sat "just a
+    // bit too close to the bottom"). Floor lifts 12→31 and the home-indicator
+    // case (sab − 16) → (sab + 3), ~19px up either way.
+    paddingBottom: (Platform.OS === 'web' ? 'max(31px, calc(var(--epic-sab) + 3px))' : 27) as any,
   },
   // Floating over the map, and clear of the home indicator on a phone that has
   // one — the map runs under the indicator, the labels must not.
   tabsOver: {
     position: 'absolute', left: 0, right: 0, bottom: 0,
-    paddingBottom: (Platform.OS === 'web' ? 'max(12px, calc(var(--epic-sab) - 16px))' : 20) as any,
+    paddingBottom: (Platform.OS === 'web' ? 'max(31px, calc(var(--epic-sab) + 3px))' : 39) as any,
   },
   // A 44pt target with no slack around it: the icon and its label are 37 of
   // those 44, and the ten extra were another few millimetres of nothing.
