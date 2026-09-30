@@ -119,8 +119,6 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
   // Booked with hosts (Events v4, G2): the experiences this household has booked, beside its trips.
   const [bookings, setBookings] = useState<Booking[] | null>(null);
   useEffect(() => { api.bookings().then((r) => setBookings(r.bookings)).catch(() => setBookings([])); }, [openId, when]);
-  const [error, setError] = useState<string | null>(null);
-
   // Which trip the address has open, for the loader — as a ref, so opening one
   // does not count as a reason to go and fetch the list again.
   const openNow = useRef(openId);
@@ -136,7 +134,10 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
     () => api.trips(),
     { staleMs: TEN_MINUTES },
   );
-  useEffect(() => { if (tripsErr) setError((tripsErr as any)?.message ?? 'Could not load your trips.'); }, [tripsErr]);
+  // Derived, not stamped into state, so a successful retry after a failed
+  // prefetch clears the warning on its own rather than leaving it beside a list
+  // that did load (Codex, D13).
+  const error = tripsErr ? ((tripsErr as any)?.message ?? 'Could not load your trips.') : null;
   // A trip deleted since you last looked should not reopen as an error page —
   // but the cached list may have been prefetched before a trip was made
   // elsewhere (the voice flow, Inspire's "Create trip"), and that trip is
@@ -208,7 +209,7 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
         stopRef={route.stopRef}
         chat={route.chat ?? null}
         household={household}
-        onBack={async () => { back(paths.trips()); await load(); }}
+        onBack={async () => { back(paths.trips()); }}
         refreshHousehold={refreshHousehold}
         wide={wide}
       />
@@ -263,7 +264,9 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
           conversionHappened();
           onSeedUsed?.();
           setPicked(null);
-          await load();
+          // Creating the trip (a /api/trips write) invalidated the list, and this
+          // screen is mounted, so it refreshes itself — no explicit reload here,
+          // which would only fetch the list a second time (Codex, D13).
           // `?new=1` runs the X-ray search once when the itinerary opens; the
           // durable flag is the backstop for the routes that reach it indirectly.
           markTripJustCreated(t.trip.id);

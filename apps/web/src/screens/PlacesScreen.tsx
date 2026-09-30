@@ -199,7 +199,6 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
   const { width } = useViewport();
   const wide = width >= 900;
   const { href, query, navigate, setQuery } = useRouter();
-  const [error, setError] = useState<string | null>(null);
   // Which layer the path asks for.
   const sel = route.scope;
   const atHome = !!sel && 'home' in sel;
@@ -274,7 +273,11 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
   // `| null`, not `| undefined`, so it drops straight into the props and reads
   // built here before (the shapes downstream expect null for "not loaded yet").
   const data = atlas ?? null;
-  useEffect(() => { if (atlasErr) setError((atlasErr as any)?.message ?? 'Could not load your atlas.'); }, [atlasErr]);
+  // Derived, so a successful cache retry clears the warning on its own rather
+  // than leaving it beside rows that did load (Codex, D13).
+  const error = atlasErr
+    ? ((atlasErr as any)?.message ?? 'Could not load your atlas.')
+    : placesErr ? ((placesErr as any)?.message ?? 'Could not load these places.') : null;
   // Keep the scroll position across tab switches, keyed by the full address.
   // Restored only once the content that gives the page its height is in: the
   // area rows on a home/city list, the atlas summary on the root or a country —
@@ -285,7 +288,6 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
   const city = countryRow && country?.city ? countryRow.cities.find((c) => c.name === country.city) ?? null : null;
   const home = atHome ? data?.home ?? null : null;
 
-  useEffect(() => { if (placesErr) setError((placesErr as any)?.message ?? 'Could not load these places.'); }, [placesErr]);
   useEffect(() => { refills.current = 0; }, [areaKey]);
   // Postcode, station, pictures and ratings are looked up in the background
   // after the first read; ask again a few times while any row is waiting.
