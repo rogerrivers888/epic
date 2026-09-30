@@ -113,7 +113,23 @@ async function countRing({ cell, kind, minutes }) {
   if (ring.method === 'straight-line') {
     await query('delete from ring_counts where cell = $1 and mode = $2 and minutes = $3', [cell, kind, minutes]);
     await query('delete from ring_rankings where cell = $1 and mode = $2 and minutes = $3', [cell, kind, minutes]);
-    return null;
+    // Its counts are not persisted, but a home move or registration on a
+    // matrix-less mode must still discover which districts of the reach the
+    // census has never looked at, or a new walk/transit household in an
+    // uncensused area never triggers the automatic census and stays empty
+    // (Codex). So return the discovery metadata, drawn from the reach's own
+    // districts, with no counts to store.
+    const discover = ring.reachOutcodes ?? ring.outcodes ?? [];
+    const { rows: unseen } = discover.length
+      ? await query('select distinct area_slug from area_counts where area_slug = any($1)',
+        [discover.map((o) => o.toLowerCase())])
+      : { rows: [] };
+    const reached = new Set(unseen.map((r) => r.area_slug));
+    const notCensusedOutcodes = discover.filter((o) => !reached.has(o.toLowerCase()));
+    return {
+      cell, mode: kind, minutes, counts: [], ranked: 0, estimated: true,
+      notCensused: notCensusedOutcodes.length, computedAt: startedAt, notCensusedOutcodes,
+    };
   }
   const band = ring.band ?? ring.cells;
 
