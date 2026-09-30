@@ -272,6 +272,7 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   const [scanning, setScanning] = useState(false);
   const [ideasCollapsed, setIdeasCollapsed] = useState(() => seededFlag(collapsedKey));
   const [minsOpen, setMinsOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   // The tab the feed is on, kept while you step away so "Back to ideas" returns
   // to the same one (the feed layer stays mounted, so the scroll is kept too).
   const [lastTab, setLastTab] = useState<IdeasTab>(ideasTab);
@@ -1068,15 +1069,16 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
           ) : feed ? (
             <FeedView
               drawer onScroll={onDrawerScroll} onCardFocus={onCardFocus}
-              feed={feed} trip={trip} tab={sel as IdeasTab} detour={detour} minsOpen={minsOpen} pools={livePools}
-              by={by} onBy={setBy}
+              feed={feed} trip={trip} tab={sel as IdeasTab} detour={detour} minsOpen={minsOpen} filtersOpen={filtersOpen} pools={livePools}
+              by={by} onBy={(m) => { setBy(m); setFiltersOpen(false); }}
               nHearts={nHearts} shortlistBtnRef={shortlistBtnRef}
               heartOf={(ref) => activeRefs.has(ref)}
               onBackToTrip={() => navigate(tripHref())}
               onShortlist={() => navigate(shortHref())}
               onTab={(t) => navigate(feedHref(t))}
               onDetour={(m) => { setDetour(m); setMinsOpen(false); }}
-              onToggleMins={() => setMinsOpen((v) => !v)}
+              onToggleMins={() => { setMinsOpen((v) => !v); setFiltersOpen(false); }}
+              onToggleFilters={() => { setFiltersOpen((v) => !v); setMinsOpen(false); }}
               onHeart={toggleHeart}
               onOpen={(ref) => setPlace(ref)}
             />
@@ -1153,9 +1155,9 @@ function ScanBox({ minutes, act, food, ready, onDone }: { minutes: number; act: 
 // ---------------------------------------------------------------------------
 // The feed
 // ---------------------------------------------------------------------------
-function FeedView({ feed, trip, tab, detour, by, onBy, minsOpen, pools, nHearts, shortlistBtnRef, drawer, onScroll, onCardFocus, heartOf, onBackToTrip, onShortlist, onTab, onDetour, onToggleMins, onHeart, onOpen }: {
+function FeedView({ feed, trip, tab, detour, by, onBy, minsOpen, filtersOpen, pools, nHearts, shortlistBtnRef, drawer, onScroll, onCardFocus, heartOf, onBackToTrip, onShortlist, onTab, onDetour, onToggleMins, onToggleFilters, onHeart, onOpen }: {
   feed: NonNullable<ReturnType<typeof buildFeed>>;
-  trip: TripDetail['trip']; tab: IdeasTab; detour: number; by: TripMode; onBy: (m: TripMode) => void; minsOpen: boolean; pools: { activities: TripAlongPlace[]; food: TripAlongPlace[] } | null;
+  trip: TripDetail['trip']; tab: IdeasTab; detour: number; by: TripMode; onBy: (m: TripMode) => void; minsOpen: boolean; filtersOpen: boolean; pools: { activities: TripAlongPlace[]; food: TripAlongPlace[] } | null;
   nHearts: number; shortlistBtnRef: React.RefObject<any>;
   /** In the trip drawer (nav 6b): the band, the toggle and the Back/Shortlist row
    *  are gone — the trip's own band and ink menu do those jobs — so only the
@@ -1167,11 +1169,13 @@ function FeedView({ feed, trip, tab, detour, by, onBy, minsOpen, pools, nHearts,
    *  scroll position (Codex). */
   onCardFocus?: (ref: string) => void;
   heartOf: (ref: string) => boolean;
-  onBackToTrip: () => void; onShortlist: () => void; onTab: (t: IdeasTab) => void; onDetour: (m: number) => void; onToggleMins: () => void;
+  onBackToTrip: () => void; onShortlist: () => void; onTab: (t: IdeasTab) => void; onDetour: (m: number) => void; onToggleMins: () => void; onToggleFilters: () => void;
   onHeart: (card: FeedCard, chip?: Element | null) => void; onOpen: (ref: string) => void;
 }) {
   const noun = (k: IdeasTab) => (k === 'food' ? 'places to eat' : 'things to do');
-  const count = feed.count;
+  // The trip's own mode is the default; anything else is an active filter to surface.
+  const seedMode: TripMode = (MODE_VALUES as readonly string[]).includes(trip.travelMode) ? (trip.travelMode as TripMode) : 'driving';
+  const modeActive = by !== seedMode;
   return (
     <>
       {drawer ? null : (
@@ -1198,25 +1202,23 @@ function FeedView({ feed, trip, tab, detour, by, onBy, minsOpen, pools, nHearts,
       </View>
       )}
 
-      {/* The car / walking / public-transport picker, restored (owner, 30 Sep
-          2026). Changing it re-searches and recomputes the detour zone and the
-          times for that mode, so walking shows far fewer than driving. */}
-      <View style={styles.modeRow}>
-        {TRIP_MODES.map((m) => (
-          <Press key={m} onPress={() => onBy(m)} style={[styles.way, by === m && styles.wayOn]} accessibilityRole="button" accessibilityState={{ selected: by === m }} accessibilityLabel={MODE_LABEL[m]}>
-            <Icon name={modeIcon(m)} size={15} color={INK} />
-            <Text style={[styles.wayText, by === m && styles.wayTextOn]}>{MODE_LABEL[m]}</Text>
-          </Press>
-        ))}
-      </View>
-
+      {/* The context row (nav §6): "Up to N min detour ▾" on the left, "Filters" on
+          the right. Travel mode is NOT a row of its own — the owner's design keeps
+          the three ways of getting about inside Filters, so they live in that
+          dropdown, not on the drawer. */}
       <View style={styles.filterLine}>
-        <Press onPress={onToggleMins} style={[styles.filterChip, minsOpen && { backgroundColor: LIME }]} accessibilityRole="button">
-          <Icon name={modeIcon(by)} size={16} color={INK} />
-          <Text style={styles.filterChipText}>Within {detour} min of your trip</Text>
-          <Icon name="expand" size={12} color={INK} />
+        <Press onPress={onToggleMins} style={styles.ctxLeft} hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }} accessibilityRole="button" accessibilityState={{ expanded: minsOpen }}>
+          <Icon name="duration" size={17} color={INK} />
+          <Text style={styles.ctxLeftText}>Up to {detour} min detour</Text>
+          <Icon name={minsOpen ? 'collapse' : 'expand'} size={14} color={INK} />
         </Press>
-        <Text style={styles.metaText}>{count} {noun(tab)}</Text>
+        {/* "Filters" names the active travel mode once it is off the trip's default, so
+            a feed filtered by walking or transit is never silently different (CLAUDE.md:
+            a non-default filter must say so). Default mode → plain grey "Filters". */}
+        <Press onPress={onToggleFilters} style={styles.ctxFilters} hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }} accessibilityRole="button" accessibilityState={{ expanded: filtersOpen }} accessibilityLabel={modeActive ? `Filters — ${MODE_LABEL[by]}` : 'Filters'}>
+          <Icon name="filters" size={16} color={modeActive ? INK : MUTED} />
+          <Text style={[styles.ctxFiltersText, modeActive && styles.ctxFiltersActive]}>{modeActive ? MODE_LABEL[by] : 'Filters'}</Text>
+        </Press>
         {minsOpen ? (
           <View style={styles.minsMenu}>
             <Text style={styles.minsHead}>Added to your journey</Text>
@@ -1229,6 +1231,20 @@ function FeedView({ feed, trip, tab, detour, by, onBy, minsOpen, pools, nHearts,
                 </Press>
               );
             })}
+          </View>
+        ) : null}
+        {filtersOpen ? (
+          <View style={styles.filtersMenu}>
+            <Text style={styles.minsHead}>How you're getting about</Text>
+            {TRIP_MODES.map((m) => (
+              <Press key={m} onPress={() => onBy(m)} style={[styles.minsRow, by === m && { backgroundColor: LIME_TINT }]} accessibilityRole="button" accessibilityState={{ selected: by === m }}>
+                <View style={styles.filterModeLabel}>
+                  <Icon name={modeIcon(m)} size={16} color={INK} />
+                  <Text style={[styles.minsLabel, { fontWeight: by === m ? '600' : '400' }]}>{MODE_LABEL[m]}</Text>
+                </View>
+                {by === m ? <Icon name="check" size={16} color={INK} /> : null}
+              </Press>
+            ))}
           </View>
         ) : null}
       </View>
@@ -1807,16 +1823,17 @@ const styles = StyleSheet.create({
   tab: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 12, paddingHorizontal: 8 },
   tabText: { fontFamily: fonts.heading, fontSize: 20, fontWeight: '800', letterSpacing: -0.6 },
   filterLine: { paddingHorizontal: 20, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderBottomWidth: 1, borderBottomColor: GREY, position: 'relative', zIndex: 5 },
-  filterChip: { flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: -8, marginVertical: -6, paddingHorizontal: 8, paddingVertical: 6 },
-  filterChipText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: INK },
-  // The car / walking / public-transport picker — three equal cells, the chosen
-  // one filled lime tint, the same idea as Inspire's mode row.
-  modeRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, paddingTop: 12 },
-  way: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 8, backgroundColor: INACTIVE },
-  wayOn: { backgroundColor: LIME_TINT },
-  wayText: { fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: MUTED },
-  wayTextOn: { color: INK },
+  // §6 context row: left control 13.5px/400 (17px leading icon, 14px chevron), and
+  // "Filters" on the right at 13px/600 grey with the sliders icon. Travel mode lives
+  // inside Filters, per the owner's design — never a row of its own.
+  ctxLeft: { flexDirection: 'row', alignItems: 'center', gap: 6, marginVertical: -6, paddingVertical: 6 },
+  ctxLeftText: { fontFamily: fonts.body, fontSize: 13.5, fontWeight: '400', color: INK },
+  ctxFilters: { flexDirection: 'row', alignItems: 'center', gap: 5, marginVertical: -6, paddingVertical: 6 },
+  ctxFiltersText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: MUTED },
+  ctxFiltersActive: { color: INK },
+  filterModeLabel: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   minsMenu: { position: 'absolute', left: 12, top: '100%', marginTop: 4, minWidth: 250, backgroundColor: CREAM, borderWidth: 1, borderColor: GREY, zIndex: 6, shadowColor: INK, shadowOpacity: 0.16, shadowRadius: 28, shadowOffset: { width: 0, height: 12 } },
+  filtersMenu: { position: 'absolute', right: 12, top: '100%', marginTop: 4, minWidth: 230, backgroundColor: CREAM, borderWidth: 1, borderColor: GREY, zIndex: 6, shadowColor: INK, shadowOpacity: 0.16, shadowRadius: 28, shadowOffset: { width: 0, height: 12 } },
   minsHead: { fontFamily: fonts.body, fontSize: 11, fontWeight: '600', letterSpacing: 0.88, textTransform: 'uppercase', color: MUTED, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 6 },
   minsRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 16, paddingHorizontal: 14, paddingVertical: 12 },
   minsLabel: { fontFamily: fonts.body, fontSize: 15, color: INK },
