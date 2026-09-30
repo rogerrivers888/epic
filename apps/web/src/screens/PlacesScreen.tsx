@@ -264,9 +264,9 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
   // so coming back to Places from another tab finds it already there — instant,
   // no reload — and a copy older than ten minutes refreshes silently behind it.
   // The atlas is our own data, so the offline layer still persists it too; this
-  // only removes the on-mount refetch. `loadAtlas` is a hard refresh for the
-  // pull-to-refresh path.
-  const { data: atlas, error: atlasErr, refresh: loadAtlas } = useCachedResource<{ countries: AtlasCountry[]; unplaced: number; home: AtlasHome | null }>(
+  // only removes the on-mount refetch. A place write invalidates it centrally
+  // (api.request), and the hook refreshes it in the background from there.
+  const { data: atlas, error: atlasErr } = useCachedResource<{ countries: AtlasCountry[]; unplaced: number; home: AtlasHome | null }>(
     ATLAS_KEY,
     () => api.atlas(),
     { staleMs: TEN_MINUTES },
@@ -295,10 +295,12 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
     return () => clearTimeout(t);
   }, [wherePending, places, loadPlaces]);
 
-  // The place writes behind this (save, love, remove) invalidate the Inspire
-  // ring and the atlas centrally, on the write itself (api.request), so this
-  // only has to re-read what this screen shows (Codex, D13).
-  const refreshAll = async () => { await loadAtlas(); await loadPlaces(); await refreshHousehold(); };
+  // The place writes behind this (save, love, remove) invalidate the atlas and
+  // the area rows centrally, on the write itself (api.request), and this screen
+  // is mounted, so those refresh themselves — re-reading them here as well would
+  // fetch each of them twice (Codex, D13). All that is left to do is the
+  // household, which is not one of the cached tab resources.
+  const refreshAll = async () => { await refreshHousehold(); };
   const st = useListState(places, viewer);
   const ui: ListUi = { menu, setMenu, adding, setAdding, mode: add, setMode: (m) => setAdd(m, { replace: true }) };
 
@@ -425,7 +427,7 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
           if (newVenue?.venueRef) noteSearchEvent('places', 'close', newVenue.venueRef);
           setOpen(null); setNewVenue(null);
         }}
-        onVenue={async (v) => { if (open?.unnamed && v.name) { try { await api.nameAtlasPlace(open.venueRef, v.name); await loadPlaces(); } catch { /* the drawer still shows the fetched name */ } } }}
+        onVenue={async (v) => { if (open?.unnamed && v.name) { try { await api.nameAtlasPlace(open.venueRef, v.name); /* the write invalidates the area rows centrally, and this screen is mounted, so they refresh themselves */ } catch { /* the drawer still shows the fetched name */ } } }}
         capture={(() => {
           const v = newVenue ?? (open ? atlasToVenue(open) : null);
           if (!v) return null;

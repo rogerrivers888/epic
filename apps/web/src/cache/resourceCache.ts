@@ -149,7 +149,7 @@ export function peekCache<T>(key: string): { data: T | undefined; fetchedAt: num
 // *mounted* screen react: a write that invalidates the ring it is looking at has
 // to make it re-check and refresh in the background, not wait for a remount
 // (Codex, D13). `useCachedResource` re-checks freshness on every emit.
-function staleEntry(e: Entry<unknown>) { e.fetchedAt = 0; e.gen++; emit(e); }
+function staleEntry(e: Entry<unknown>) { e.fetchedAt = 0; e.gen++; e.error = undefined; emit(e); }
 
 /** Mark a key stale so the next read refreshes it. */
 export function invalidate(key: string) { const e = store.get(key); if (e) staleEntry(e); }
@@ -237,15 +237,23 @@ export function useCachedResource<T>(
     // on every emit, not only on mount, so an invalidation while this screen is
     // mounted makes it refresh in the background rather than wait for a remount
     // (Codex, D13). `runFetch` dedupes, so an emit mid-flight starts nothing.
-    const ensure = () => {
+    //
+    // `force` is the difference between a reason to try and a reason not to loop.
+    // A failed fetch records its error and emits; the listener must NOT treat
+    // that emit as a cue to fetch again, or an outage becomes an unbounded
+    // request loop (Codex, D13). So the emit path only fetches when there is no
+    // standing error — and an invalidation clears the error, which is what makes
+    // it count as an explicit retry. A fresh mount forces a try regardless, so
+    // coming back to a screen whose load failed does attempt it again.
+    const ensure = (force: boolean) => {
       const age = e.fetchedAt ? Date.now() - e.fetchedAt : Infinity;
-      if (!e.promise && (e.data === undefined || age > staleMs)) {
+      if ((force || e.error === undefined) && !e.promise && (e.data === undefined || age > staleMs)) {
         void runFetch(key, () => fetcherRef.current());
       }
     };
-    const listener = () => { bump(); ensure(); };
+    const listener = () => { bump(); ensure(false); };
     e.listeners.add(listener);
-    ensure();
+    ensure(true);
     return () => { e.listeners.delete(listener); };
   }, [key, enabled, staleMs]);
 
