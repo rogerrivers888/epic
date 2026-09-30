@@ -153,7 +153,11 @@ begin
   -- the one place Google's point may live, for its thirty days, where every
   -- reader looks (epic_point_lat/lng) — unless the index already holds a point
   -- of our own (Codex, 30 Sep 2026).
+  -- Not for an attraction: an insert that loses to a conflict carries an id
+  -- that is thrown away, and the activity sweep already notes its point under
+  -- its Google reference (Codex, 30 Sep 2026).
   if NEW.lat is not null and NEW.lng is not null and src = any(epic_rented_sources())
+     and TG_TABLE_NAME <> 'attractions'
      and (TG_OP = 'INSERT' or NEW.lat is distinct from OLD.lat or NEW.lng is distinct from OLD.lng) then
     -- Only where the index holds no point at all, and never a census box's
     -- centre copied from another table: a local copy must not overwrite the

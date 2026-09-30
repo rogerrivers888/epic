@@ -436,7 +436,8 @@ export async function locationsFor(householdId) {
   const { rows } = await query(
     `select country, country_code, locality, lat, lng from atlas_cities where household_id = $1 and locality is not null
      union all
-     select max(country) as country, country_code, locality, avg(lat) as lat, avg(lng) as lng
+     -- Where each saved place is, as every reader sees it (migration 307).
+     select max(country) as country, country_code, locality, avg(${LAT}) as lat, avg(${LNG}) as lng
        from household_places where household_id = $1 and locality is not null and country_code is not null
       group by country_code, locality
      union all
