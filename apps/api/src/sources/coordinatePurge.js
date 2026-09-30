@@ -78,36 +78,46 @@ export async function purgeRented({ days = 30, force = false } = {}) {
   if (!force && !(await backfilled())) return { ...out, copies: 'waiting for the backfill to finish' };
   const age = `(${days} || ' days')::interval`;
 
-  for (const t of TABLES) {
-    // Said to be the purge, for this transaction only: migration 307's trigger
-    // otherwise leaves a legacy row's unchanged point for the backfill.
+  // Each step in its own transaction, its log line written in the same one:
+  // a purge that committed is a purge written down, whatever fails after it
+  // (Codex, 30 Sep 2026). Said to be the purge, for that transaction only —
+  // migration 307's trigger otherwise leaves a legacy row's unchanged point
+  // for the backfill.
+  const step = async (label, sql, params) => {
     const client = await pool.connect();
     try {
       await client.query('begin');
       await client.query(`select set_config('epic.purging', 'on', true)`);
-      const { rowCount } = await client.query(
-        `update ${t.table} set point_from = point_from
-          where (${t.rented}) and ${t.first} < now() - ${age}`, t.rented.includes('$1') ? [RENTED_SOURCES] : []);
+      const { rowCount } = await client.query(sql, params);
+      if (rowCount) {
+        await client.query(`insert into coordinate_expiries (expired, cells, table_name, detail) values ($1, 0, $2, $3)`,
+          [rowCount, label, JSON.stringify({ days, rule: 'C59 step 5' })]);
+      }
       await client.query('commit');
-      out.tables[t.table] = rowCount;
+      out.tables[label] = rowCount;
     } catch (err) {
       await client.query('rollback').catch(() => null);
       throw err;
     } finally { client.release(); }
+  };
+
+  for (const t of TABLES) {
+    await step(t.table,
+      `update ${t.table} set point_from = point_from
+        where (${t.rented}) and ${t.first} < now() - ${age}`, t.rented.includes('$1') ? [RENTED_SOURCES] : []);
   }
 
   // A research record's Google name, where no owned source gave its name: the
   // drawer's look inside wrote it (the fifth hole).
-  const { rowCount: names } = await query(
+  await step('place_records (names)',
     `update place_records set name = null
       where name is not null and ${RENTED_REF('venue_ref')}
         and not (coalesce(provenance ->> 'name', '') = any(epic_owned_sources()))
         and coalesce(first_owned, updated_at) < now() - ${age}`, [RENTED_SOURCES]);
-  out.tables['place_records (names)'] = names;
 
-  // Cells stamped from a copy that is gone: a Google reference's cell whose
+  // Cells stamped from a copy that is gone: a rented reference's cell whose
   // point matches no point the place still holds anywhere.
-  const { rowCount: cells } = await query(
+  await step('place_cells',
     `delete from place_cells c
       where (${RENTED_REF('c.venue_ref')}
              -- An atlas reference on an unmatched activity-sweep row is Google's point too.
@@ -120,22 +130,15 @@ export async function purgeRented({ days = 30, force = false } = {}) {
                           and abs(pi.lat - c.lat) <= 0.0005 and abs(pi.lng - c.lng) <= 0.0005)
         and not exists (select 1 from owned_points o where o.venue_ref = c.venue_ref
                           and abs(o.lat - c.lat) <= 0.0005 and abs(o.lng - c.lng) <= 0.0005)`, [RENTED_SOURCES]);
-  out.tables.place_cells = cells;
 
   // The index's own undated rented points: written by the rebuild before it
   // recorded a source, so the hourly expiry could never see them.
-  const { rowCount: undated } = await query(
+  await step('place_index (undated)',
     `update place_index set lat = null, lng = null, cell = null, coords_at = null, coords_from = null, placed_at = null
       where lat is not null and (coords_from is null or coords_at is null)
         and ${RENTED_REF('venue_ref')}
         and not exists (select 1 from owned_points o where o.venue_ref = place_index.venue_ref)
         and first_seen < now() - ${age}`, [RENTED_SOURCES]);
-  out.tables['place_index (undated)'] = undated;
 
-  for (const [table, n] of Object.entries(out.tables)) {
-    if (!n) continue;
-    await query(`insert into coordinate_expiries (expired, cells, table_name, detail) values ($1, 0, $2, $3)`,
-      [n, table, JSON.stringify({ days, rule: 'C59 step 5' })]).catch(() => null);
-  }
   return out;
 }

@@ -716,7 +716,7 @@ export async function expireRentedCoordinates({ days = 30 } = {}) {
   // (migration 205). A count and a date, never the refs — keeping those would
   // be keeping a Google-derived collection past its thirty days by another
   // name.
-  await query('insert into coordinate_expiries (expired, cells) values ($1, $2)', [rows.length, cells])
+  await query(`insert into coordinate_expiries (expired, cells, table_name) values ($1, $2, 'place_index')`, [rows.length, cells])
     .catch(() => null);
   return { expired: rows.length, cells };
 }
