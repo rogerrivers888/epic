@@ -593,31 +593,37 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
   if (circle) {
     // Two different questions, two different sets (Codex):
     //  · which outcodes might hold a place inside the circle — the candidate
-    //    universe censusInRing searches. A large rural sector can hold a place
-    //    inside a short walk while its centroid sits well outside, so this is
-    //    generous (the exact per-place circle test then filters precisely); a
-    //    tight set here would silently drop that place.
+    //    universe censusInRing searches. Generous (the exact per-place circle
+    //    test then filters precisely); a tight set here would silently drop a
+    //    place in a large rural sector whose centroid sits outside the circle.
     //  · which outcodes the reach actually covers — the floor set. An uncensused
-    //    district several kilometres beyond a short urban walk must not make the
-    //    count read as a floor, so this is the outcodes with a sector truly
-    //    within the circle.
-    const genKm = circle.km + 5;
-    const dLat = genKm / 111;
-    const dLng = genKm / (111 * Math.max(0.3, Math.cos((circle.lat * Math.PI) / 180)));
-    const { rows: near } = await query(
-      `select upper(outcode) as outcode, lat, lng from geo_cells
-        where outcode is not null and lat between $1 and $2 and lng between $3 and $4`,
-      [circle.lat - dLat, circle.lat + dLat, circle.lng - dLng, circle.lng + dLng]);
-    const candidate = new Set(outcodes);
-    const reach = new Set(outcodes);
-    for (const r of near) {
-      if (!r.outcode) continue;
-      const d = kmBetween(circle, { lat: Number(r.lat), lng: Number(r.lng) });
-      if (d <= genKm) candidate.add(r.outcode);
-      if (d <= circle.km) reach.add(r.outcode);
-    }
-    outcodes = [...candidate];
-    reachOutcodes = [...reach];
+    //    district beyond the circle must not make the count read as a floor.
+    //
+    // Both are drawn from real postcodes, not sector centroids: a place inside
+    // the circle sits by a postcode inside it, so their outcodes are the exact
+    // set and no centroid allowance can silently exclude an overlapping sector
+    // (Codex). The circle is tested in SQL so only the distinct outcodes come
+    // back, not every postcode. Sector centroids are the fallback only where
+    // postcodes are not loaded (a fresh or test database).
+    const outcodesWithin = async (km) => {
+      const kx = 111 * Math.max(0.3, Math.cos((circle.lat * Math.PI) / 180));
+      const dLat = km / 111;
+      const dLng = km / kx;
+      const inCircle = 'power((lat - $5) * 111.0, 2) + power((lng - $6) * $7, 2) <= power($8, 2)';
+      const args = [circle.lat - dLat, circle.lat + dLat, circle.lng - dLng, circle.lng + dLng, circle.lat, circle.lng, kx, km];
+      const box = 'lat between $1 and $2 and lng between $3 and $4';
+      const pc = await query(
+        `select distinct upper(outcode) as outcode from postcodes where ${box} and ${inCircle} and outcode is not null`, args);
+      const rows = pc.rows.length ? pc.rows : (await query(
+        `select distinct upper(outcode) as outcode from geo_cells where outcode is not null and ${box} and ${inCircle}`, args)).rows;
+      return rows.map((r) => r.outcode).filter(Boolean);
+    };
+    const originOutcode = outcodeOfCell(cell);
+    // Generous by a 2 km cushion for a place sitting between two postcodes or on
+    // the very edge; the reach itself is the circle exactly, plus the origin's
+    // own district, which is at the centre and never a finder-only one.
+    outcodes = [...new Set([...outcodes, ...(await outcodesWithin(circle.km + 2))])];
+    reachOutcodes = [...new Set([originOutcode, ...(await outcodesWithin(circle.km))].filter(Boolean))];
   }
   return {
     cell,
