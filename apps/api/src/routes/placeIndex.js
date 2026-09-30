@@ -3806,7 +3806,10 @@ export async function coordinateReport() {
          -- OSM's point only where the sweep matched and replaced it: a Wikidata
          -- row's osm_ref is just its P402 id, and its point is still the
          -- atlas's (Codex, 30 Sep 2026).
-         select coalesce(venue_ref, 'atlas:' || id::text) as venue_ref, bool_or(osm_ref is not null and wikidata_id is null) as osm
+         -- The sweep's rows are source 'google', and a matched one carries no
+         -- display_source because its point was replaced by OSM's (Codex).
+         select coalesce(venue_ref, 'atlas:' || id::text) as venue_ref,
+                bool_or(source = 'google' and osm_ref is not null and display_source is distinct from 'google') as osm
            from attractions
           where lat is not null and display_source is distinct from 'google'
           group by 1),

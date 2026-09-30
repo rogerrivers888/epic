@@ -28,7 +28,8 @@ test('files each place under the best point held for it, and counts old rented p
   // sweep row the open map matched.
   const { rows: [atl] } = await query(`insert into attractions (region_slug, slug, name, lat, lng) values ('cornwall', 'a-castle', 'A castle', 51.5, -0.1) returning id`);
   await query(`insert into place_index (venue_ref) values ($1), ('google:swept')`, [`atlas:${atl.id}`]);
-  await query(`insert into attractions (region_slug, slug, name, lat, lng, venue_ref, osm_ref) values ('cornwall', 'a-pier', 'A pier', 51.5, -0.1, 'google:swept', 'way/5')`);
+  // A sweep row the open map matched — with the OSM object's own Wikidata tag.
+  await query(`insert into attractions (region_slug, slug, name, lat, lng, venue_ref, osm_ref, wikidata_id, source) values ('cornwall', 'a-pier', 'A pier', 51.5, -0.1, 'google:swept', 'way/5', 'Q5', 'google')`);
   // A sweep row Google named, indexed under atlas:<id> with Google's point;
   // and another provider's point, which is not Google's.
   const { rows: [gs] } = await query(`insert into attractions (region_slug, slug, name, lat, lng, display_source) values ('cornwall', 'a-maze', 'A maze', 51.5, -0.1, 'google') returning id`);
