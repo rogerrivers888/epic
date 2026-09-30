@@ -188,19 +188,22 @@ export function invalidateTabData() {
 }
 
 /**
- * A heart tapped on one screen has to still read as kept when you come back to
- * that screen from another tab. The screen's own `useState` cannot carry it —
- * the screen unmounted — and the cached pool it re-reads still holds the
- * provider's pre-save copy, so the heart would spring back (Codex, D13). These
- * overrides live here instead, keyed by the place's ref, so they outlive the
- * unmount; they are this session's own acts, cleared the moment it ends.
- *
- * Each carries *when* it was made, so it wins only over pool data older than it.
- * A later read — a refresh after the save, or a change made in another tab that
- * invalidated the ring — is fresher than the override and supersedes it, so the
- * heart cannot get stuck disagreeing with the server (Codex, D13).
+ * Whether the household has this place kept, place ref → kept, for the places it
+ * has saved or removed this session. A heart tapped on one screen has to still
+ * read as kept when you come back from another tab; the screen's own `useState`
+ * went with the unmount, and the Inspire ring cannot help — a ring card comes
+ * back `household: null` and carries no ledger at all, so it can neither confirm
+ * a save nor a removal (Codex, D13). So this is the session's own record of what
+ * it has changed, written by every save and removal wherever it is made
+ * (`api.savePlace` / `api.deleteAtlasPlace` call `setSavedOverride`), and it is
+ * what the heart reads first. Cleared the moment the session ends.
  */
-export const savedOverrides = new Map<string, { val: boolean; at: number }>();
+export const savedOverrides = new Map<string, boolean>();
+
+/** Record that this session has kept (or un-kept) a place. Called from the two
+ * API operations that change it, so a change made on any screen is seen on the
+ * others. */
+export function setSavedOverride(ref: string, kept: boolean) { savedOverrides.set(ref, kept); }
 
 /**
  * Drop everything. Wired to `onSessionChange` in App.tsx: a change of session —

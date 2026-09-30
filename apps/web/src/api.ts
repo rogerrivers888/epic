@@ -2,7 +2,7 @@
 // key ever reaches this bundle (Technical Constraints §13.7).
 
 import { forgetCopy, recall, remember, servingSaved, warm, warmQuietly } from './offline/cache';
-import { invalidateTabData } from './cache/resourceCache';
+import { invalidateTabData, setSavedOverride } from './cache/resourceCache';
 
 // Path prefixes whose writes change what the Inspire, Places or Trips tab caches
 // hold: saving/removing/naming a place (`/api/places/save`, `/api/atlas/*`),
@@ -2228,12 +2228,15 @@ export const api = {
   /** Research a place again now (Settings, and "look again" in the drawer). */
   researchPlace: (venueRef: string) => post<{ state: string; fields: number; matched: Record<string, any>; problems: string[]; record: OwnedRecord | null }>('/api/places/record', { ref: venueRef }),
   savePlace: (venueRef: string, status: 'saved' | 'dismissed' | 'special' = 'saved', context?: { label?: string; venue?: Partial<Venue>; category?: string | null; lat?: number; lng?: number; note?: string; country?: string | null; countryCode?: string | null; locality?: string | null }) =>
-    post<{ venueRef: string; status: string; filed?: PhotoFiled | null }>('/api/places/save', { ref: venueRef, status, ...(context ?? {}) }),
+    // Record what the heart should read now, so a card saved here shows saved on
+    // Inspire too, where the ring carries no ledger to say so (Codex, D13).
+    post<{ venueRef: string; status: string; filed?: PhotoFiled | null }>('/api/places/save', { ref: venueRef, status, ...(context ?? {}) })
+      .then((r) => { setSavedOverride(venueRef, status !== 'dismissed'); return r; }),
   /** Predictions as you type: one cheap call, nothing fetched until one is chosen. */
   suggestPlaces: (p: { q: string; near?: string; radiusKm?: number; session?: string; kind?: string }) =>
     request<{ suggestions: { placeId: string | null; venueRef: string; name: string; where: string | null; kind: string | null; mine: boolean; types: string[] }[] }>(`/api/places/suggest${qs(p)}`),
   /** Take a place out of the atlas. Somewhere you've been is kept — delete the visit first. */
-  deleteAtlasPlace: (venueRef: string) => del<void>('/api/atlas/places', { venueRef }),
+  deleteAtlasPlace: (venueRef: string) => del<void>('/api/atlas/places', { venueRef }).then((r) => { setSavedOverride(venueRef, false); return r; }),
   /** A place the atlas held only by its identifier learns its name once the source has been asked. */
   nameAtlasPlace: (venueRef: string, label: string) => patch<{ venueRef: string; label: string }>('/api/atlas/places', { venueRef, label }),
   createAtlasCity: (body: { placeText?: string; place?: Place }) => post<{ city: { name: string; country: string; countryCode: string; lat: number; lng: number } }>('/api/atlas/cities', body),

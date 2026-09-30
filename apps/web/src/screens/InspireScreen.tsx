@@ -4,7 +4,7 @@ import { Press } from '../components/press';
 import { api, Experience, BrowseItem, HouseholdResponse, InspireItem, InspireNear, MoodKey, OwnedImage, Place, VenuePhotoRef, Intake } from '../api';
 import { useHere } from '../hooks/useHere';
 import { colors, fonts, spacing, TARGET, type } from '../theme';
-import { useCachedResource, runFetch, peekCache, inspireNearKey, INSPIRE_DEFAULT_MINUTES, TEN_MINUTES, savedOverrides, useScrollMemory, scrollKey } from '../cache/resourceCache';
+import { useCachedResource, runFetch, inspireNearKey, INSPIRE_DEFAULT_MINUTES, TEN_MINUTES, savedOverrides, useScrollMemory, scrollKey } from '../cache/resourceCache';
 import { Icon } from '../components/Icon';
 import { AskRow, IntakeStrip } from '../components/voice/IntakeStrip';
 import { MOOD_LABEL, VIBE_MOOD } from '../moods';
@@ -833,16 +833,17 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
   // not flip the heart back — the override stands for it (Codex, D13).
   const [, bumpKept] = useReducer((n: number) => n + 1, 0);
   const [notice, setNotice] = useState<string | null>(null);
-  const nearFetchedAt = nearKey ? (peekCache(nearKey)?.fetchedAt ?? 0) : 0;
+  // The session's own record of what it has kept wins — it is written by every
+  // save and removal on any screen (cache/resourceCache), and the ring card
+  // itself carries no ledger to override it. A place the session has not touched
+  // falls back to whatever ledger the card does carry (the atlas half has one;
+  // a ring card does not, so it reads unkept, as it always has).
   const isKept = (i: InspireItem) => {
     const ov = savedOverrides.get(i.venueRef);
-    // `household != null` is a card that knows its ledger (the atlas half);
-    // a ring card cannot, so the override is not superseded for it.
-    const authoritative = i.household != null;
-    if (ov && (!authoritative || ov.at > nearFetchedAt)) return ov.val;
+    if (ov !== undefined) return ov;
     return ['saved', 'special'].includes(i.household?.ledger ?? '');
   };
-  const mark = (ref: string, val: boolean) => { savedOverrides.set(ref, { val, at: Date.now() }); bumpKept(); };
+  const mark = (ref: string, val: boolean) => { savedOverrides.set(ref, val); bumpKept(); };
   const keep = async (i: InspireItem) => {
     const now = !isKept(i);
     mark(i.venueRef, now);

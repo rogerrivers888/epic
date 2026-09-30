@@ -145,7 +145,7 @@ test('a scroll key ignores the open drawer, so a list keeps one key whether a ca
 test('clearing the cache drops the rows and the saved-heart overrides together', async () => {
   fresh();
   await runFetch('k', () => Promise.resolve('v'));
-  savedOverrides.set('venue:1', { val: true, at: Date.now() });
+  savedOverrides.set('venue:1', true);
   clearResourceCache();
   assert.equal(peekCache('k'), undefined);
   assert.equal(savedOverrides.size, 0);
