@@ -235,6 +235,18 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
     for (const r of heartRm) s.delete(r);
     return s;
   }, [d.shortlist, heartAdd, heartRm]);
+  // Places set aside on this trip: off the shortlist and out of this trip's feed,
+  // so they do not keep coming back (owner, 30 Sep 2026). It is a per-trip hide,
+  // not a household one — the place is untouched on other trips and in Inspire.
+  const asideRefs = useMemo(() => new Set(d.shortlist.filter((s) => s.status === 'set_aside').map((s) => s.venueRef)), [d.shortlist]);
+  // The pools the feed draws from, with this trip's set-aside places taken out —
+  // used for the feed rows, its counts and the detour menu alike, so the menu
+  // never promises more than the feed shows (Codex). The unfiltered `pools` stay
+  // for the shortlist, which still needs a set-aside place's photo and detour.
+  const livePools = useMemo(() => (pools ? {
+    activities: pools.activities.filter((p) => !asideRefs.has(p.venueRef)),
+    food: pools.food.filter((p) => !asideRefs.has(p.venueRef)),
+  } : null), [pools, asideRefs]);
   // The stops on the day the trip stage shows — the timeline, and what "In trip"
   // is measured against. The API keys these to a day and groups them by slot
   // (morning/afternoon/evening); the flat timeline is the slots in order, each
@@ -316,9 +328,9 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   // The band counts for the caption and the trip's "More ideas" line, kept live
   // as the pools arrive during a scan.
   useEffect(() => {
-    if (!pools) return;
-    setPoolCounts({ act: bandCount(pools.activities, detour), food: bandCount(pools.food, detour) });
-  }, [pools, detour]);
+    if (!livePools) return;
+    setPoolCounts({ act: bandCount(livePools.activities, detour), food: bandCount(livePools.food, detour) });
+  }, [livePools, detour]);
 
   // The feed and shortlist need the pools; the searched trip stage needs them
   // too, so the "Back to ideas" bar shows real counts rather than 0; and a
@@ -371,10 +383,12 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
 
   // --- data for the stages ----------------------------------------------
   const feed = useMemo(() => {
-    if (!pools) return null;
+    if (!livePools) return null;
     const kind = lastTab;
-    return buildFeed({ places: kind === 'food' ? pools.food : pools.activities, kind, trip, minutes: detour });
-  }, [pools, lastTab, trip, detour]);
+    // Set-aside places are already out of livePools, so the next search never
+    // brings a set-aside place straight back into the feed (owner).
+    return buildFeed({ places: kind === 'food' ? livePools.food : livePools.activities, kind, trip, minutes: detour });
+  }, [livePools, lastTab, trip, detour]);
 
   const shortlistCards: FeedCard[] = useMemo(() => {
     // Everything on the shortlist, with its detour if the search knows it.
@@ -420,6 +434,8 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
     () => shortlistCards.filter((c) => c.status !== 'set_aside' && (show === 'all' || (show === 'food' ? c.kind === 'food' : c.kind === 'activities'))),
     [shortlistCards, show],
   );
+  // The set-aside ones, gathered for the quiet foot row that can bring them back.
+  const asideCards = useMemo(() => shortlistCards.filter((c) => c.status === 'set_aside'), [shortlistCards]);
   const [shortSel, setShortSel] = useState<string | null>(null);
   useEffect(() => { if (shortSel && !shownShort.some((c) => c.ref === shortSel)) setShortSel(null); }, [shownShort, shortSel]);
 
@@ -558,6 +574,12 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
     const next = order[(order.indexOf((s.legMode as LegMode) ?? 'walking') + 1) % order.length];
     updateShortlistItem(s.id, { legMode: next });
   }, [slByRef, updateShortlistItem]);
+  // Bring a set-aside place back to the shortlist: its status returns to the
+  // to-book default, and it is a live shortlist place (and feed candidate) again.
+  const bringBack = useCallback((venueRef: string) => {
+    const s = slByRef.get(venueRef);
+    if (s) updateShortlistItem(s.id, { status: 'to_call' });
+  }, [slByRef, updateShortlistItem]);
   const timeline = useMemo(() => buildTimeline(trip, day, dest, dayStops, destStop?.id ?? null, detourByRef, slByRef, startLabel, fromBase), [trip, day, dest, dayStops, destStop, detourByRef, slByRef, startLabel, fromBase]);
   const homeBy = timeline.homeBy;
 
@@ -583,7 +605,12 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   // the booking time and reference.
   const drawerSl = place ? d.shortlist.find((x) => x.venueRef === place) ?? null : null;
 
-  const nHearts = shortlistRefs.size;
+  // The active shortlist — everything hearted that has not been set aside. It is
+  // what the badge counts and what a card's heart reflects, so the badge never
+  // disagrees with the list (Codex); the full `shortlistRefs` stays for the
+  // reconcile loop, which still has to know a set-aside place is a server row.
+  const activeRefs = useMemo(() => { const s = new Set(shortlistRefs); for (const r of asideRefs) s.delete(r); return s; }, [shortlistRefs, asideRefs]);
+  const nHearts = activeRefs.size;
   const canSearch = Boolean(trip.origin?.lat != null || trip.base?.lat != null);
   // The destination counts once: as a day stop if it was seeded, else as its own row.
   const nStops = addedStops.length + (dest ? 1 : 0);
@@ -736,9 +763,9 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
       >
         {feed ? (
           <FeedView
-            feed={feed} trip={trip} tab={lastTab} detour={detour} minsOpen={minsOpen} pools={pools}
+            feed={feed} trip={trip} tab={lastTab} detour={detour} minsOpen={minsOpen} pools={livePools}
             nHearts={nHearts} shortlistBtnRef={shortlistBtnRef}
-            heartOf={(ref) => shortlistRefs.has(ref)}
+            heartOf={(ref) => activeRefs.has(ref)}
             onBackToTrip={() => navigate(tripHref())}
             onShortlist={() => navigate(shortHref())}
             onTab={(t) => navigate(feedHref(t))}
@@ -767,13 +794,14 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
         style={[StyleSheet.absoluteFill, styles.short, { transform: [{ translateX: shortIn.interpolate({ inputRange: [0, 1], outputRange: [wide ? 0 : 500, 0] }) }], opacity: shortIn }]}
       >
         <ShortlistView
-          cards={shownShort} allCards={shortlistCards.filter((c) => c.status !== 'set_aside')} show={show} sel={shortSel} markers={shortMarkers} zone={zone}
+          cards={shownShort} allCards={shortlistCards.filter((c) => c.status !== 'set_aside')} aside={asideCards} show={show} sel={shortSel} markers={shortMarkers} zone={zone}
           trip={trip} nStops={nStops} homeBy={homeBy} homeWord={fromBase ? 'back' : 'home'}
           onBack={() => navigate(feedHref(lastTab))}
           onShow={(v) => setShow(v === 'all' ? null : v)}
           onSelect={(ref) => setShortSel((s) => (s === ref ? null : ref))}
           onDetails={(ref) => setPlace(ref)}
           onAdd={addToTrip}
+          onBringBack={bringBack}
           inTrip={(ref) => stopRefs.has(ref)}
           onViewTrip={() => navigate(tripHref())}
         />
@@ -789,8 +817,13 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
           addLabel={drawerInTrip ? 'In your trip' : 'Add to trip'}
           addIcon={drawerInTrip ? 'check' : 'add'}
           added={drawerInTrip}
-          shortlisted={drawerItem ? shortlistRefs.has(drawerItem.venueRef) : false}
-          onShortlist={drawerCard ? async () => { toggleHeart(drawerCard); } : undefined}
+          shortlisted={drawerItem ? activeRefs.has(drawerItem.venueRef) : false}
+          onShortlist={drawerCard ? async () => {
+            // Hearting a set-aside place brings it back to the shortlist rather
+            // than deleting its row (which is what removing an active place does)
+            // — the heart follows the active state the badge and list show (Codex).
+            if (drawerSl?.status === 'set_aside') bringBack(drawerCard.ref); else toggleHeart(drawerCard);
+          } : undefined}
           ours={drawerSl ? <SettleControls item={drawerSl} onUpdate={(patch) => updateShortlistItem(drawerSl.id, patch)} /> : undefined}
         />
       ) : null}
@@ -957,11 +990,12 @@ function ThinCard({ card, on, onHeart, onOpen }: { card: FeedCard; on: boolean; 
 // ---------------------------------------------------------------------------
 // The shortlist
 // ---------------------------------------------------------------------------
-function ShortlistView({ cards, allCards, show, sel, markers, zone, trip, nStops, homeBy, homeWord, onBack, onShow, onSelect, onDetails, onAdd, inTrip, onViewTrip }: {
-  cards: FeedCard[]; allCards: FeedCard[]; show: ShortTab; sel: string | null; markers: MapMarker[]; zone: any;
+function ShortlistView({ cards, allCards, aside, show, sel, markers, zone, trip, nStops, homeBy, homeWord, onBack, onShow, onSelect, onDetails, onAdd, onBringBack, inTrip, onViewTrip }: {
+  cards: FeedCard[]; allCards: FeedCard[]; aside: FeedCard[]; show: ShortTab; sel: string | null; markers: MapMarker[]; zone: any;
   trip: TripDetail['trip']; nStops: number; homeBy: string; homeWord: string;
-  onBack: () => void; onShow: (v: ShortTab) => void; onSelect: (ref: string) => void; onDetails: (ref: string) => void; onAdd: (c: FeedCard) => void; inTrip: (ref: string) => boolean; onViewTrip: () => void;
+  onBack: () => void; onShow: (v: ShortTab) => void; onSelect: (ref: string) => void; onDetails: (ref: string) => void; onAdd: (c: FeedCard) => void; onBringBack: (ref: string) => void; inTrip: (ref: string) => boolean; onViewTrip: () => void;
 }) {
+  const [asideOpen, setAsideOpen] = useState(false);
   const selCard = sel ? cards.find((c) => c.ref === sel) ?? null : null;
   const tabs: { key: ShortTab; label: string; n: number }[] = [
     { key: 'all', label: 'All', n: allCards.length },
@@ -1038,6 +1072,30 @@ function ShortlistView({ cards, allCards, show, sel, markers, zone, trip, nStops
             </Pressable>
           );
         })}
+
+        {/* Set aside: off the shortlist and out of this trip's feed, but not lost
+            — a quiet foot row that brings any of them back (owner, 30 Sep 2026).
+            Hidden when nothing is set aside. */}
+        {aside.length ? (
+          <View style={styles.asideWrap}>
+            <Pressable onPress={() => setAsideOpen((v) => !v)} style={styles.asideHead} accessibilityRole="button" accessibilityState={{ expanded: asideOpen }}>
+              <Text style={styles.asideHeadText}>{aside.length} set aside</Text>
+              <Icon name={asideOpen ? 'collapse' : 'expand'} size={14} color={MUTED} />
+            </Pressable>
+            {asideOpen ? aside.map((c) => (
+              <View key={c.ref} style={styles.asideRow}>
+                <VenueThumb name={c.name} photos={c.photos} category={c.category} experiences={c.experiences} width={48} height={32} rounded={MEDIA_RADIUS} credit={false}>
+                  <PhotoCredit text={c.photos[0]?.attribution ?? null} />
+                </VenueThumb>
+                <Text style={styles.asideName} numberOfLines={1}>{c.name}</Text>
+                <Pressable onPress={() => onBringBack(c.ref)} style={styles.asideBtn} accessibilityRole="button" accessibilityLabel={`Bring ${c.name} back to the shortlist`}>
+                  <Icon name="add" size={13} color={INK} />
+                  <Text style={styles.asideBtnText}>Bring back</Text>
+                </Pressable>
+              </View>
+            )) : null}
+          </View>
+        ) : null}
       </ScrollView>
 
       <Press onPress={onViewTrip} style={styles.viewTripBar} accessibilityRole="button">
@@ -1369,5 +1427,12 @@ const styles = StyleSheet.create({
   shortRowMeta: { fontFamily: fonts.body, fontSize: 12, color: MUTED },
   addBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, height: 34, paddingHorizontal: 10, borderWidth: 1, borderColor: INK, backgroundColor: CREAM },
   addBtnText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: INK },
+  asideWrap: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: GREY },
+  asideHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
+  asideHeadText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: MUTED },
+  asideRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 },
+  asideName: { flex: 1, minWidth: 0, fontFamily: fonts.body, fontSize: 14, color: INK },
+  asideBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, height: 30, paddingHorizontal: 10, borderWidth: 1, borderColor: INK, backgroundColor: CREAM },
+  asideBtnText: { fontFamily: fonts.body, fontSize: 12, fontWeight: '600', color: INK },
   viewTripBar: { position: 'absolute', left: 16, right: 16, bottom: 14, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingLeft: 16, paddingRight: 14, backgroundColor: INK, shadowColor: INK, shadowOpacity: 0.22, shadowRadius: 24, shadowOffset: { width: 0, height: 8 } },
 });
