@@ -311,7 +311,11 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
     }
     : ring.bandBox ?? ring.box;
 
-  const ringKey = `${ring.cell}|${mode}|${minutes}|${start?.lat?.toFixed?.(3)},${start?.lng?.toFixed?.(3)}`;
+  // Keyed on the box's own centre, not the journey origin: a straight-line box is
+  // centred on the searched place, so two searches in one sector from the same
+  // origin but kilometres apart must not share a cached page (Codex). For a matrix
+  // ring the centre is the origin, so this is unchanged.
+  const ringKey = `${ring.cell}|${mode}|${minutes}|${boxCentre?.lat?.toFixed?.(3)},${boxCentre?.lng?.toFixed?.(3)}`;
   // Near and wide (owner, 26 Sep 2026, E13; domain/wideSearch.js). One box the
   // size of the journey hands its twenty to whatever is most famous inside it:
   // from Winchester, things to do within the hour came back at a median of
