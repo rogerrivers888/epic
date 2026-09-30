@@ -3942,9 +3942,18 @@ export async function coordinateReport() {
     // Google's alone, as asked; any other provider's on a line of its own
     // (Codex, 30 Sep 2026).
     const RENTED_IX = `lat is not null and lng is not null and ${IX_SRC} = 'google'`;
-    await count('place_index', 'coords_at', `select ${OVER('coords_at')} from place_index where ${RENTED_IX}`);
-    await count('place_index (other providers)', 'coords_at',
-      `select ${OVER('coords_at')} from place_index where lat is not null and lng is not null and ${IX_SRC} not in ('osm', 'atlas', 'own', 'wikidata', 'household', 'photo', 'fixtures', 'google')`);
+    // An index point is dated only when its recorded source is the one it is
+    // judged to be: a rebuild could move a point and leave the old point's
+    // clock and label on it, and then the clock says nothing about this point
+    // (Codex, 30 Sep 2026).
+    const DATED = `(coords_at is not null and coords_from is not distinct from ${IX_SRC})`;
+    const IX_OVER = `count(*)::int held,
+                     count(*) filter (where ${DATED} and coords_at < now() - interval '30 days')::int over30,
+                     count(*) filter (where not ${DATED})::int undated,
+                     min(coords_at) filter (where ${DATED}) oldest`;
+    await count('place_index', 'coords_at, where its source is this point\'s', `select ${IX_OVER} from place_index where ${RENTED_IX}`);
+    await count('place_index (other providers)', 'coords_at, where its source is this point\'s',
+      `select ${IX_OVER} from place_index where lat is not null and lng is not null and ${IX_SRC} not in ('osm', 'atlas', 'own', 'wikidata', 'household', 'photo', 'fixtures', 'google')`);
     // Only the index and the cells date their points. Every other table's
     // clocks move with unrelated writes — a save again, an edit — so a point
     // in them has no age this report can speak to (Codex, 30 Sep 2026): each
@@ -4011,7 +4020,7 @@ export async function coordinateReport() {
       `select coalesce(substring(upper(split_part(replace(cell, 'sector:', ''), ' ', 1)) from '^[A-Z]+'), '?') as area,
               count(*)::int as over30
          from place_index
-        where ${RENTED_IX} and coords_at < now() - interval '30 days'
+        where ${RENTED_IX} and ${DATED} and coords_at < now() - interval '30 days'
         group by 1 order by 2 desc, 1`);
 
   return {
