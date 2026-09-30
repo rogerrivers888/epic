@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { storage } from '../storage';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { secureStorage } from '../secureStorage';
 import { Press } from '../components/press';
 import { api, SharedTrip } from '../api';
 import { colors, fonts, BORDER, type } from '../theme';
@@ -29,8 +29,11 @@ import { useViewport } from '../hooks/useViewport';
  */
 
 const KEY = (token: string) => `epic.shared.${token}`;
-const held = (token: string) => storage.getItem(KEY(token));
-const hold = (token: string, you: string) => storage.setItem(KEY(token), you);
+// `you` is a bearer credential — the API serves and acts as that guest from it —
+// so it lives in the secure store, not plaintext MMKV. Web reads it synchronously;
+// the phone warms it from the Keychain on mount (below).
+const held = (token: string) => secureStorage.getItem(KEY(token));
+const hold = (token: string, you: string) => secureStorage.setItem(KEY(token), you);
 
 const mins = (m: number) => (m < 60 ? `${m} min` : m % 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${Math.floor(m / 60)}h`);
 
@@ -45,13 +48,26 @@ export function SharedTripScreen({ token, you: fromLink }: {
   const [data, setData] = useState<SharedTrip | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'plan' | 'chat'>('plan');
+  // The saved credential is read synchronously on the web; on the phone the secure
+  // store is async, so hold the first load until it has been read — unless the link
+  // itself carries ?you= — the way JoinScreen does.
+  const [credReady, setCredReady] = useState(Boolean(fromLink) || Platform.OS === 'web');
 
   useEffect(() => { if (fromLink) hold(token, fromLink); }, [token, fromLink]);
+  useEffect(() => {
+    if (fromLink || Platform.OS === 'web') { setCredReady(true); return; }
+    let live = true;
+    setCredReady(false);
+    secureStorage.getAsync(KEY(token)).then((h) => { if (!live) return; setYou(h ?? null); setCredReady(true); });
+    return () => { live = false; };
+  }, [token, fromLink]);
 
+  const reqRef = useRef(0);
   const load = useCallback(async () => {
-    try { setData(await api.sharedTrip(token, you)); setError(null); } catch (e: any) { setError(e.message); }
+    const seq = ++reqRef.current;
+    try { const d = await api.sharedTrip(token, you); if (seq !== reqRef.current) return; setData(d); setError(null); } catch (e: any) { if (seq === reqRef.current) setError(e.message); }
   }, [token, you]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (credReady) load(); }, [load, credReady]);
 
   const joined = Boolean(data?.you?.joined);
 
