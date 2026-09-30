@@ -774,7 +774,13 @@ async function watch(now, tell, tellings, out) {
       `The day's run is marked running but has not advanced for over ${STALL_MINUTES} minutes.\n\n${lines}`);
   }
   // Or a quota day with no run of its own three hours after it began.
-  const todays = latest && pacificDay(latest.started_at) === pacificDay(now);
+  // A plan still paused as built is not today's run yet: fresh, it is being
+  // started (below); stale, it has hung, and that is the stall to say (Codex,
+  // 30 Sep 2026).
+  const todays = latest && pacificDay(latest.started_at) === pacificDay(now)
+    && !(latest.state === 'paused' && /^built paused/.test(latest.problem ?? ''))
+    // Nor a plan set aside to be written again, when the next one did not start.
+    && !(latest.state === 'stopped' && /^planning cut short/.test(latest.problem ?? ''));
   // Not while today's plan is being written — a day being started, not a day
   // missing (Codex, 30 Sep 2026). Judged by the plan's own heartbeat, not by
   // the scheduler's lock being held: a lock held by a hung process would

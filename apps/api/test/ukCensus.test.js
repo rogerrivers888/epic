@@ -1160,3 +1160,16 @@ test('a run stopped for a person is not a missing day, day after day', async (t)
   assert.ok(!box.got.some((m) => /^Census stalled/.test(m.subject)), box.got.map((m) => m.subject).join(' | '));
 });
 
+
+test('a plan that hung while being written today, and could not be written again, is a stall', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  await query(
+    `insert into census_runs (label, areas, tile_lat, tile_lng, max_requests, rate_per_sec, fresh_days, state, problem, started_by, started_at, last_seen_at)
+     values ('The rest of the UK — day 2', array['ZZ'], 0.08, 0.12, 70000, 5, 30, 'paused', 'built paused; resume to start', $1, '2026-09-29T07:05:00Z', '2026-09-29T07:30:00Z')`,
+    [(await import('../src/sources/censusRun.js')).ONE_DAY_RUNS]);
+  const box = mailbox();
+  // 12:00 UTC is five hours into Google's day; the plan's heartbeat stopped at 07:30.
+  await uk.daily(new Date('2026-09-29T12:00:00Z'), { send: box.send, start: async () => null, quota: async () => ({ speaks: true, limit: 75000 }) });
+  assert.ok(box.got.some((m) => m.subject === 'Census stalled: no run for 2026-09-29'), box.got.map((m) => m.subject).join(' | '));
+});
