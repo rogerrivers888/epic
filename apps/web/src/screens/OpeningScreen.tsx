@@ -123,7 +123,7 @@ function useReducedMotion(): boolean {
 // ---------------------------------------------------------------------------
 
 export function OpeningScreen() {
-  const { navigate } = useRouter();
+  const { navigate, back } = useRouter();
   const [step, setStep] = useQueryState<number>('step', 0, asNumber(0));
   // A replay launched from Settings (its "Play the welcome screens" button). An
   // already-set-up household must not be marked welcomed again or dropped into
@@ -144,7 +144,10 @@ export function OpeningScreen() {
   // to crew set-up: that would leave set-up's Back pointed at the retired
   // /welcome. Set-up is offered in the app instead, by the Settings banner.
   const leave = () => {
-    if (replay) { navigate(paths.settings(), { replace: true }); return; }
+    // A replay pops back to the Settings entry it was launched from, rather than
+    // replacing this one with a second /settings the user then has to press Back
+    // through twice. `back` falls back to /settings if there is no history.
+    if (replay) { back(paths.settings()); return; }
     markWelcomed();
     navigate(paths.inspire(), { replace: true });
   };
@@ -342,7 +345,19 @@ function IntroFrame({ stepIndex, showSkip, onSkip, title, sub, ctaLabel, onNext,
         <View style={{ flex: 1, flexDirection: 'row', gap: 6 }}>
           {[0, 1, 2, 3].map((i) => <View key={i} style={{ flex: 1, height: 4, backgroundColor: i < stepIndex ? INK : NEUTRAL }} />)}
         </View>
-        <Pressable onPress={onSkip} accessibilityRole="button" disabled={!showSkip} style={{ opacity: showSkip ? 1 : 0 }}>
+        {/* On the last screen Skip is hidden but kept as a spacer so the
+            progress bar stays the same width — hidden from the screen reader and
+            the tab order too, not just made transparent. */}
+        <Pressable
+          onPress={onSkip}
+          accessibilityRole="button"
+          disabled={!showSkip}
+          focusable={showSkip}
+          accessibilityElementsHidden={!showSkip}
+          importantForAccessibility={showSkip ? 'auto' : 'no-hide-descendants'}
+          {...(Platform.OS === 'web' && !showSkip ? ({ 'aria-hidden': true } as object) : {})}
+          style={{ opacity: showSkip ? 1 : 0 }}
+        >
           <Text style={styles.skip}>Skip</Text>
         </Pressable>
       </View>
