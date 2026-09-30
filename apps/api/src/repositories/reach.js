@@ -531,7 +531,19 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
     name = label ?? at?.code ?? null;
   }
   if (!cell) return null;
-  const within = await reachableCells(cell, { minutes, mode });
+  let within = await reachableCells(cell, { minutes, mode });
+  // No matrix rows for this mode — walking and public transport, until OSRM and
+  // a GTFS routing table are built (owner, 30 Sep 2026) — would otherwise
+  // collapse the ring to the home sector and freeze the count. A straight-line
+  // reach keeps it growing with the minutes and the mode instead. It is
+  // ESTIMATED and marked `method: 'straight-line'` so a count drawn from it can
+  // always be told apart from one from real journey times; transit uses a
+  // conservative speed so it is never overstated.
+  let method = 'matrix';
+  if (!within.length) {
+    method = 'straight-line';
+    within = await cellsWithinKmForMode(cell, travelMode(mode), minutes + EDGE_MINUTES);
+  }
   const codes = [...new Set([cell, ...within.map((c) => c.to_cell)])];
   // The band itself, without the finder's allowance.
   //
@@ -560,10 +572,52 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
     outcodes: [...new Set(codes.map(outcodeOfCell).filter(Boolean))],
     points: rows,
     bandPoints: bandPoints.length ? bandPoints : rows,
+    // 'matrix' from real (estimated) journey times in the reach table;
+    // 'straight-line' when a mode has no matrix and the ring was drawn from a
+    // distance-and-speed estimate. Callers surface this so a count is never
+    // dressed as a journey-time one.
+    method,
     at: lat != null && lng != null
       ? { lat: Number(lat), lng: Number(lng) }
       : home ? { lat: Number(home.lat), lng: Number(home.lng) } : null,
   };
+}
+
+// Effective door-to-door speeds for the straight-line fallback, km/h with a
+// road/route detour factor. Conservative on purpose — especially transit, which
+// waits and rarely runs point-to-point, so it must not be overstated (owner,
+// 30 Sep 2026). A real reach comes from OSRM (walking/cycling) and a GTFS
+// router (transit); this is the honest floor until those exist.
+const FALLBACK_SPEED = {
+  walking: { kmh: 4.8, factor: 1.15 },
+  cycling: { kmh: 15, factor: 1.2 },
+  transit: { kmh: 12, factor: 1.4 },
+  driving: { kmh: 32.5, factor: 1.4 },
+};
+export const kmPerMinute = (mode) => { const p = FALLBACK_SPEED[mode] ?? FALLBACK_SPEED.transit; return (p.kmh / 60) / p.factor; };
+
+/**
+ * The cells within a straight-line reach of a home cell, each with an estimated
+ * minutes and `method: 'straight-line'`. Shaped like `reachableCells` so the
+ * ring builds the same way whether the minutes are real or estimated.
+ */
+async function cellsWithinKmForMode(cell, mode, minutes) {
+  const { rows: [home] } = await query('select lat, lng from geo_cells where code = $1', [cell]);
+  if (!home) return [];
+  const perMin = kmPerMinute(mode);
+  const km = Math.max(0.5, perMin * Math.max(0, minutes));
+  const dLat = km / 111;
+  const dLng = km / (111 * Math.max(0.3, Math.cos((Number(home.lat) * Math.PI) / 180)));
+  const { rows } = await query(
+    'select code, lat, lng from geo_cells where lat between $1 and $2 and lng between $3 and $4',
+    [Number(home.lat) - dLat, Number(home.lat) + dLat, Number(home.lng) - dLng, Number(home.lng) + dLng],
+  );
+  const at = { lat: Number(home.lat), lng: Number(home.lng) };
+  return rows
+    .filter((r) => r.code !== cell)
+    .map((r) => ({ to_cell: r.code, km: kmBetween(at, { lat: Number(r.lat), lng: Number(r.lng) }) }))
+    .filter((r) => r.km <= km)
+    .map((r) => ({ to_cell: r.to_cell, km: r.km, minutes: Math.round(r.km / perMin), method: 'straight-line' }));
 }
 
 /** What has been built, for the back office and for the tests. */

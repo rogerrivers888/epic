@@ -586,6 +586,9 @@ inspire.get('/around', async (req, res, next) => {
         counts, unresolved: census.unresolved ?? {},
         categoryMemberships: Object.values(counts).reduce((a, n) => a + (Number(n) || 0), 0),
         cells: ring.cells.length, outcodes: ring.outcodes.length, notCensused: census.missing.length,
+        // 'matrix' = real (estimated) journey times; 'straight-line' = a
+        // distance-and-speed estimate because this mode has no matrix yet.
+        method: ring.method ?? 'matrix', estimated: (ring.method ?? 'matrix') === 'straight-line',
       });
     }
 

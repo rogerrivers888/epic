@@ -50,12 +50,17 @@ export const PRICE_BANDS: { key: string; label: string }[] = [
 ];
 export const PRICE_KEYS = PRICE_BANDS.map((b) => b.key);
 
-/** The How far boxes. There is no Anywhere in v8: two hours is the ceiling. */
+/**
+ * The How far boxes. The reach matrix is built to 90 minutes, so the ceiling is
+ * "90 min+", not "2 hours" — an option must never quietly return another's
+ * result (owner, 30 Sep 2026). A true two hours returns when the matrix is
+ * extended (OSRM/GTFS build).
+ */
 export const HOW_FAR: { minutes: number; label: string; short: string }[] = [
   { minutes: 20, label: '20 minutes', short: '20 min' },
   { minutes: 30, label: '30 minutes', short: '30 min' },
   { minutes: 60, label: '1 hour', short: '1 hr' },
-  { minutes: 120, label: '2 hours', short: '2 hr' },
+  { minutes: 90, label: '90 min+', short: '90 min+' },
 ];
 
 /** "1 hr", "20 min" — how the Where control reads a ceiling back. */
