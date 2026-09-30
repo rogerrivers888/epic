@@ -77,12 +77,16 @@ export async function recordOwnedPoint({ ref, lat, lng, source, sourceRef = null
             cell = case when lat is distinct from $2 or lng is distinct from $3 then null else cell end,
             placed_at = case when lat is distinct from $2 or lng is distinct from $3 then null else placed_at end
       where venue_ref = $1`, [ref, Number(lat), Number(lng), source]);
-  // Touched, not rewritten: the trigger decides, the same as for any write.
+  // Every copy that is not the reference's own point is sent back through the
+  // trigger with nothing said, so it takes the owned point as it now stands —
+  // a box, nothing, or an earlier owned point a better or corrected one has
+  // replaced (Codex, 30 Sep 2026). A copy holding the reference's own point
+  // (an open-map place's own) is left alone.
   for (const table of ['household_places', 'trip_shortlist', 'trip_stops', 'visits']) {
     await client.query(
-      `update ${table} set point_from = point_from
-        where venue_ref = $1 and (point_from is null or point_from = 'census-box' or not (point_from = any($2::text[])))`,
-      [ref, OWNED_SOURCES]);
+      `update ${table} set point_from = null
+        where venue_ref = $1 and point_from is distinct from epic_ref_true_source(venue_ref)`,
+      [ref]);
   }
   return { written: true };
 }

@@ -137,3 +137,22 @@ test('a second load of a source already loading is refused, not raced', async ()
   await assert.rejects(() => src.loadSource('os-open-names', { fetcher: async () => json({}, 500) }), /already loading/);
   await query(`update owned_source_loads set state = 'never', started_at = null where source = 'os-open-names'`);
 });
+
+test('a run that failed part-way carries on from its checkpoint', async () => {
+  await query('delete from owned_point_runs');
+  const { rows: [r] } = await query(`insert into owned_point_runs (kind, state, after, looked, problem) values ('backfill', 'failed', 'zzzz', 7, 'Wikidata answered 503') returning id`);
+  const out = await m.run({ kind: 'backfill', who: 'test', fetcher: async () => json({ entities: {} }) });
+  assert.equal(out.id, r.id, 'the same run');
+  assert.equal(out.looked, 7, 'nothing after zzzz, and the seven before it not looked at again');
+});
+
+test('a better owned point replaces an earlier one on every saved copy', async () => {
+  const { recordOwnedPoint } = await import('../src/sources/ownedPoints.js');
+  const { rows: [h] } = await query(`insert into households (name) values ('Better test') returning id`);
+  const ref = `google:better-${randomUUID()}`;
+  await recordOwnedPoint({ ref, lat: 51.40, lng: -0.50, source: 'osm', method: 'name+distance' });
+  await query(`insert into household_places (household_id, venue_ref, label, lat, lng) values ($1, $2, 'x', 51.5, -0.1)`, [h.id, ref]);
+  assert.equal((await query('select point_from from household_places where venue_ref = $1', [ref])).rows[0].point_from, 'osm');
+  await recordOwnedPoint({ ref, lat: 51.41, lng: -0.51, source: 'fsa', sourceRef: '1', method: 'name+distance' });
+  assert.deepEqual((await query('select lat, point_from from household_places where venue_ref = $1', [ref])).rows[0], { lat: 51.41, point_from: 'fsa' });
+});

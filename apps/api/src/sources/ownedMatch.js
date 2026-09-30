@@ -98,13 +98,14 @@ export async function wikidataPoints(ids, fetcher = fetch) {
  */
 export async function matchPlace(place) {
   const prefix = String(place.ref).split(':')[0];
+  // Wikidata first, in the owner's order, even for a place the open map names.
+  if (place.wikidataPoint) {
+    return { source: 'wikidata', ...place.wikidataPoint, sourceRef: place.wikidataId, method: 'reference' };
+  }
   // The reference is itself owned: its own point, by reference.
   if (prefix === 'osm') {
     const { rows: [r] } = await query('select lat, lng from osm_features where ref = $1', [place.ref.slice(4)]);
     if (r) return { source: 'osm', lat: r.lat, lng: r.lng, sourceRef: place.ref.slice(4), method: 'reference' };
-  }
-  if (place.wikidataPoint) {
-    return { source: 'wikidata', ...place.wikidataPoint, sourceRef: place.wikidataId, method: 'reference' };
   }
   const names = [...new Set((place.names ?? []).filter((n) => n && !/^\(.*\)$/.test(n) && n !== place.ref))];
   if (!names.length) return { none: 'no name to match on' };
@@ -187,8 +188,16 @@ let active = null;
 export async function run({ kind = 'backfill', who = 'Epic', pageSize = 500, fetcher = fetch, resume = true } = {}) {
   if (active) return active;
   active = (async () => {
-    let { rows: [r] } = await query(`select * from owned_point_runs where kind = $1 and state = 'running' order by started_at desc limit 1`, [kind]);
-    if (!r || !resume) {
+    // A run a deploy cut off, or one that failed part-way, carries on from its
+    // checkpoint rather than starting again (Codex, 30 Sep 2026).
+    let r = null;
+    if (resume) {
+      ({ rows: [r] } = await query(
+        `update owned_point_runs set state = 'running', problem = null, finished_at = null
+          where id = (select id from owned_point_runs where kind = $1 and state in ('running', 'failed') order by started_at desc limit 1)
+          returning *`, [kind]));
+    }
+    if (!r) {
       ({ rows: [r] } = await query(`insert into owned_point_runs (kind, started_by) values ($1, $2) returning *`, [kind, who]));
     }
     const bySource = { ...(r.by_source ?? {}) };
