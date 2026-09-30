@@ -544,7 +544,12 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
   // Driving has (and needs) a real matrix; an empty driving ring is "can't
   // speak", not something to paper over with a straight line, and papering over
   // it would also change every ring in a test that seeds no matrix (Codex).
-  if (!within.length && travelMode(mode) !== 'driving') {
+  //
+  // Availability is read from `cell_builds` — has this origin been built for the
+  // mode? — not from whether `within` has rows: an incremental build can leave a
+  // cell with reverse edges from its neighbours while it is not itself built,
+  // and that partial ring must not pass as a matrix one (Codex).
+  if (travelMode(mode) !== 'driving' && !(await originBuilt(cell, travelMode(mode)))) {
     method = 'straight-line';
     within = await cellsWithinKmForMode(cell, travelMode(mode), minutes + EDGE_MINUTES);
   }
@@ -599,6 +604,13 @@ const FALLBACK_SPEED = {
   driving: { kmh: 32.5, factor: 1.4 },
 };
 export const kmPerMinute = (mode) => { const p = FALLBACK_SPEED[mode] ?? FALLBACK_SPEED.transit; return (p.kmh / 60) / p.factor; };
+
+/** Has this origin cell been built into the matrix for this mode? (cell_builds,
+ *  not stray reverse edges.) */
+async function originBuilt(cell, mode) {
+  const { rows } = await query('select 1 from cell_builds where from_cell = $1 and mode = $2 limit 1', [cell, travelMode(mode)]);
+  return rows.length > 0;
+}
 
 /**
  * The cells within a straight-line reach of a home cell, each with an estimated

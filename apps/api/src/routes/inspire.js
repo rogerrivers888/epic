@@ -670,7 +670,12 @@ inspire.get('/around', async (req, res, next) => {
         // Which of the ring's outcodes the census has never been run in: the
         // difference between "nothing here" and "we have not looked".
         notCensused: census.missing,
+        // How the ring was drawn: real (estimated) journey times, or a
+        // straight-line estimate for a mode with no matrix (walk/transit). So
+        // the client can mark an estimated reach, not only the count-only call.
+        method: ring.method ?? 'matrix',
       },
+      estimated: (ring.method ?? 'matrix') === 'straight-line',
       categories,
       // What this answer cost, said plainly, because every screen that spends
       // says so (data policy, 19 Sep 2026).
@@ -804,7 +809,9 @@ inspire.get('/near', async (req, res, next) => {
           where: ring.label, minutes, cells: ring.cells.length,
           outcodes: ring.outcodes.length, notCensused: census.missing.length,
           box: boxKm(ring.box),
+          method: ring.method ?? 'matrix',
         },
+        estimated: (ring.method ?? 'matrix') === 'straight-line',
         moods, items,
         pools: { atlas: false, live: false, ring: true, why: null, failed: false },
         spent: { displaySearches: requests },

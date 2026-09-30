@@ -65,6 +65,15 @@ const ACROSS = 12;
 const BATCH = 24;
 /** The How far the screen opens on. */
 const HOW_FAR_DEFAULT = INSPIRE_DEFAULT_MINUTES;
+// The reach ceiling the picker offers (90 now that "2 hours" is gone). A wider
+// value left in the address — a bookmark from when 120 existed — is clamped to
+// it on read, so the picker, the "how far" label and the request all agree
+// rather than showing "2 hr" while the API answers 90 (Codex, 30 Sep 2026).
+const MAX_FAR = Math.max(...HOW_FAR.map((h) => h.minutes));
+const travelCodec = {
+  read: (raw: string): number | null => { const n = Math.trunc(Number(raw)); return Number.isFinite(n) && n > 0 ? Math.min(n, MAX_FAR) : null; },
+  write: (v: number | null): string | null => (v == null || v === HOW_FAR_DEFAULT ? null : String(v)),
+};
 
 /** Where a drawer says "it depends", the place's own words decide whether it keeps the rain off, or suits children. */
 const INDOOR_WORDS = /\b(museum|gallery|galleries|cinema|bowling|arcade|soft play|play ?centre|trampoline|climbing|bouldering|swimming|pool|leisure centre|aquarium|theatre|library|escape room|ice rink|skating|laser|indoor|shopping|market hall|cathedral|abbey|church|castle|palace|house|hall)\b/i;
@@ -285,7 +294,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
     if (query.get('at') === UNSET && !choseElsewhere.current) setQuery({ at: null, where: null, locality: null, country: null, from: null }, { replace: true });
   }, [query.get('at')]);
 
-  const [travel, setTravel] = useQueryState<number | null>('travel', HOW_FAR_DEFAULT, asNumber(HOW_FAR_DEFAULT));
+  const [travel, setTravel] = useQueryState<number | null>('travel', HOW_FAR_DEFAULT, travelCodec);
   const [travelBy, setTravelBy] = useQueryState<TravelMode>('by', 'drive', asOneOf(['drive', 'transit', 'walk'], 'drive'));
   const [rating, setRating] = useQueryState<number>('rating', 0, asNumber(0));
   /**
