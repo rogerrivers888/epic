@@ -28,6 +28,13 @@ import { COUNTRY_NAMES } from '../sources/portraits.js';
 import { crowdBand, countBand, score } from '../domain/scoring.js';
 
 /** Sources we can be asked about, in the order the boards print them. */
+
+/**
+ * An owned record holds a point we may keep when its provenance names an owned
+ * source for it, or it was matched to the open map (C59, 30 Sep 2026).
+ */
+export const RECORD_OWNS_POINT = `((r.provenance ->> 'lat') = any(epic_owned_sources()) or r.osm_ref is not null)`;
+
 export const SOURCES = [
   { key: 'google',      label: 'Google',        explain: 'Rented: identifiers and counts only, with nothing stored.', optIn: false, paid: true },
   { key: 'osm',         label: 'OSM',           explain: 'Ours to keep under its licence, which is why most of our names come from here.', optIn: false, paid: false },
@@ -705,10 +712,10 @@ async function reindexWhileLocked({ onProgress }) {
     -- An owned record's point is the open map's; a record with no match holds
     -- none we may copy (C59, 30 Sep 2026).
     select r.venue_ref,
-           case when r.osm_ref is not null then r.lat end, case when r.osm_ref is not null then r.lng end,
+           case when ${RECORD_OWNS_POINT} then r.lat end, case when ${RECORD_OWNS_POINT} then r.lng end,
            'own',
            case when ${OWNED_RECORD} then 'owned' else 'identified' end,
-           r.first_owned, r.updated_at, now(), 'osm'
+           r.first_owned, r.updated_at, now(), coalesce(r.provenance ->> 'lat', 'osm')
       from place_records r
     on conflict (venue_ref) do update
        -- Our own record's position wins where it has one, the same rule the

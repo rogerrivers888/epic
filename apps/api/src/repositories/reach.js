@@ -125,7 +125,8 @@ export async function unstamped(limit) {
             from scout_places s where s.lat is not null and coalesce(s.from_sources, '[]'::jsonb) ? 'osm'
          union all
           select r.venue_ref as ref, r.lat, r.lng, 1 as rank
-            from place_records r where r.lat is not null and r.osm_ref is not null
+            from place_records r
+           where r.lat is not null and ((r.provenance ->> 'lat') = any(epic_owned_sources()) or r.osm_ref is not null)
          union all
           -- And the index itself, which is where a corrected position lands: a
           -- place whose coordinates are put right by a later source may be in

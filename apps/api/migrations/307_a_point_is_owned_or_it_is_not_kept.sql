@@ -88,8 +88,12 @@ begin
     if coalesce(NEW.from_sources, '[]'::jsonb) ? 'osm' then src := 'osm'; else src := epic_ref_point_source(ref); end if;
   elsif TG_TABLE_NAME = 'place_records' then
     ref := NEW.venue_ref;
-    -- An owned record's point is composed from the open map alone.
-    if NEW.osm_ref is not null then src := 'osm'; else src := coalesce(said, epic_ref_point_source(ref)); end if;
+    -- An owned record's point is composed from owned sources, and its
+    -- provenance says which; a record matched to the open map is OSM's.
+    if (NEW.provenance ->> 'lat') = any(epic_owned_sources()) then src := NEW.provenance ->> 'lat';
+    elsif NEW.osm_ref is not null then src := 'osm';
+    else src := coalesce(said, epic_ref_point_source(ref));
+    end if;
   else
     ref := NEW.venue_ref;
     src := coalesce(said, epic_ref_point_source(ref));

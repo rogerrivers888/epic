@@ -58,7 +58,7 @@ test.before(async () => {
     await query(`insert into place_index (venue_ref, subcategory, found_rank) values ($1, $2, $3) on conflict (venue_ref) do update set subcategory = excluded.subcategory`, [r.venue_ref, SUB, 100 - r.score]);
     await query(`insert into place_areas (venue_ref, area_slug) values ($1, $2) on conflict do nothing`, [r.venue_ref, r.area]);
     await query(`insert into place_records (venue_ref, name, lat, lng, epic_score, website, enrich_state, provenance, enriched_at, research_version)
-                 values ($1, $2, $3, -0.6, $4, $5, 'done', '{"name":"osm"}'::jsonb, now(), 3)
+                 values ($1, $2, $3, -0.6, $4, $5, 'done', '{"name":"osm","lat":"osm","lng":"osm"}'::jsonb, now(), 3)
                  on conflict (venue_ref) do update set name = excluded.name, lat = excluded.lat, epic_score = excluded.epic_score, website = excluded.website`,
       [r.venue_ref, r.name, r.lat, r.score, r.website]);
   }

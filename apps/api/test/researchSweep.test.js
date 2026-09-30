@@ -505,7 +505,8 @@ test('a retry of a seeded place needs no Google and reserves nothing', async () 
   const { rows: [one] } = await query(`select venue_ref from research_sweep_places where sweep_id = $1 and venue_ref like 'google:%' order by venue_ref limit 1`, [row.id]);
   await query(`update research_sweep_places set state = 'done', outcome = '{"state":"done"}'::jsonb where sweep_id = $1 and venue_ref <> $2`, [row.id, one.venue_ref]);
   await query(`update research_sweep_places set state = 'failed', outcome = '{"state":"failed","problems":["OpenStreetMap: timeout"]}'::jsonb where sweep_id = $1 and venue_ref = $2`, [row.id, one.venue_ref]);
-  await query(`insert into place_records (venue_ref, name, lat, lng, website) values ($1, 'Known', 51.5, -0.6, 'https://known.example') on conflict (venue_ref) do update set name = 'Known', lat = 51.5, lng = -0.6, website = 'https://known.example', enrich_state = 'failed'`, [one.venue_ref]);
+  // Its point is the open map's, as a record's point always is (migration 307).
+  await query(`insert into place_records (venue_ref, name, lat, lng, website, provenance) values ($1, 'Known', 51.5, -0.6, 'https://known.example', '{"lat":"osm","lng":"osm"}') on conflict (venue_ref) do update set name = 'Known', lat = 51.5, lng = -0.6, website = 'https://known.example', enrich_state = 'failed', provenance = '{"lat":"osm","lng":"osm"}'`, [one.venue_ref]);
   await query(`update research_sweeps set state = 'done', finished_at = now() where id = $1`, [row.id]);
   await sweep.retryFailed(row.id, { confirm: (await sweep.retryEstimate(row.id)).requests });
   setOffKeys(['google']);
