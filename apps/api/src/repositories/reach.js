@@ -103,18 +103,29 @@ export async function allCells({ scheme = 'sector', country = 'GB' } = {}) {
  * thing missing, whichever table it is in — otherwise the atlas is finished
  * twice over before the sweep is started once.
  */
-async function unstamped(limit) {
+export async function unstamped(limit) {
   const { rows } = await query(
     `select ref, lat, lng from (
        select distinct on (ref) ref, lat, lng from (
+          -- Never a copy of a rented point (C59, 30 Sep 2026): the expiry
+          -- deleted a place's cell with its Google point, and the next hour
+          -- stamped it again from the copy the sweep, the activity sweep or a
+          -- research record still held. Only what each store may keep: the
+          -- atlas's and a matched sweep's OSM point, a sweep row the open map
+          -- gave, an owned record's OSM point — and the owned point itself,
+          -- first of all.
+          select o.venue_ref as ref, o.lat, o.lng, -1 as rank
+            from owned_points o
+         union all
           select coalesce(a.venue_ref, 'atlas:' || a.id::text) as ref, a.lat, a.lng, 2 as rank
-            from attractions a where a.lat is not null
+            from attractions a
+           where a.lat is not null and not (a.source = 'google' and (a.osm_ref is null or a.display_source = 'google'))
          union all
           select s.venue_ref as ref, s.lat, s.lng, 3 as rank
-            from scout_places s where s.lat is not null
+            from scout_places s where s.lat is not null and coalesce(s.from_sources, '[]'::jsonb) ? 'osm'
          union all
           select r.venue_ref as ref, r.lat, r.lng, 1 as rank
-            from place_records r where r.lat is not null
+            from place_records r where r.lat is not null and r.osm_ref is not null
          union all
           -- And the index itself, which is where a corrected position lands: a
           -- place whose coordinates are put right by a later source may be in
@@ -134,8 +145,8 @@ async function unstamped(limit) {
      -- over — buying a postcode lookup each time and leaving the final answer
      -- to whichever happened to be last (Codex, 18 Sep 2026).
      --
-     -- One per ref, ranked: the index first, then the owned record, the
-     -- attraction, the sweep.
+     -- One per ref, ranked: the owned point, the index, then the owned record,
+     -- the attraction, the sweep.
      --
      -- Unstamped, or stamped from somewhere else.
      --

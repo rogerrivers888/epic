@@ -17,6 +17,7 @@
  * selecting a country must not become a count over every row at page load.
  */
 
+import { pointSourceOfRef } from '../sources/ownedPoints.js';
 import { pool, query, withTransaction } from '../db.js';
 import { shelvesForAtlas, shelvesForVenue } from '../domain/moods.js';
 import { labelsOf, labelsOfAtlas } from '../domain/labels.js';
@@ -603,17 +604,24 @@ async function reindexWhileLocked({ onProgress }) {
   // 1 — every place, from every harvest. `on conflict` keeps `first_seen`, so a
   //     rebuild never rewrites when we first saw something.
   await query(`
-    insert into place_index (venue_ref, lat, lng, country_code, category, subcategory, derived_by, ownership, first_seen, last_seen)
+    insert into place_index (venue_ref, lat, lng, country_code, category, subcategory, derived_by, ownership, first_seen, last_seen, coords_at, coords_from)
     -- Null, not 'GB'. A region with no country is a country nobody has told us,
     -- and guessing here put the place under Great Britain for good — the exact
     -- thing migration 159 exists to stop (Codex, 17 Sep 2026).
-    select coalesce(a.venue_ref, 'atlas:' || a.id::text), a.lat, a.lng, reg.country_code,
+    -- Only a point we may keep (C59, 30 Sep 2026): the activity sweep's
+    -- unmatched Google rows hold Google's point, and it is never copied; a
+    -- matched one holds OSM's; everything else is the atlas's (Wikidata).
+    select coalesce(a.venue_ref, 'atlas:' || a.id::text),
+           case when a.source = 'google' and (a.osm_ref is null or a.display_source = 'google') then null else a.lat end,
+           case when a.source = 'google' and (a.osm_ref is null or a.display_source = 'google') then null else a.lng end,
+           reg.country_code,
            null, null, 'harvest',
            -- Owned means we hold our own research on it, so it survives every
            -- provider going dark. A harvested row with nothing but a name and a
            -- position is not that: it is a place we have identified.
            case when coalesce(a.summary, a.website, a.wikipedia_url) is not null then 'owned' else 'identified' end,
-           a.first_seen, a.last_seen
+           a.first_seen, a.last_seen,
+           now(), case when a.source = 'google' then 'osm' else 'atlas' end
       from (
         -- One row per reference, whatever the harvest holds.
         --
@@ -635,6 +643,11 @@ async function reindexWhileLocked({ onProgress }) {
     on conflict (venue_ref) do update
        set lat = coalesce(excluded.lat, place_index.lat),
            lng = coalesce(excluded.lng, place_index.lng),
+           -- The point's own source and clock go with it (C59): a rebuild that
+           -- wrote a position and left its provenance behind put it out of the
+           -- expiry's reach.
+           coords_at = case when excluded.lat is not null then excluded.coords_at else place_index.coords_at end,
+           coords_from = case when excluded.lat is not null then excluded.coords_from else place_index.coords_from end,
            -- The country a source knows, where the row does not. A place noted
            -- by the write path before anything knew its country kept a null
            -- through every rebuild, so it had no country area row and was
@@ -649,7 +662,7 @@ async function reindexWhileLocked({ onProgress }) {
                             else 'identified' end`);
 
   await query(`
-    insert into place_index (venue_ref, lat, lng, country_code, derived_by, ownership, first_seen, last_seen)
+    insert into place_index (venue_ref, lat, lng, country_code, derived_by, ownership, first_seen, last_seen, coords_at, coords_from)
     -- One row per place, whatever it is grouped by.
     --
     -- The same venue can sit in two swept areas — a restaurant on an outcode
@@ -661,16 +674,21 @@ async function reindexWhileLocked({ onProgress }) {
     --
     -- The most recently seen row wins the position, and the country says
     -- nothing rather than saying Britain where the area does not know.
+    -- The open map's point only: a sweep row the open map never gave holds
+    -- Google's, which is never copied (C59, 30 Sep 2026).
     select sp.venue_ref,
-           (array_agg(sp.lat order by sp.last_seen desc))[1],
-           (array_agg(sp.lng order by sp.last_seen desc))[1],
+           (array_agg(sp.lat order by sp.last_seen desc) filter (where coalesce(sp.from_sources, '[]'::jsonb) ? 'osm'))[1],
+           (array_agg(sp.lng order by sp.last_seen desc) filter (where coalesce(sp.from_sources, '[]'::jsonb) ? 'osm'))[1],
            (array_agg(sa.country_code order by sp.last_seen desc))[1],
-           'sweep', 'identified', min(sp.first_seen), max(sp.last_seen)
+           'sweep', 'identified', min(sp.first_seen), max(sp.last_seen),
+           now(), 'osm'
       from scout_places sp left join scout_areas sa on sa.code = sp.area_code
      group by sp.venue_ref
     on conflict (venue_ref) do update
        set lat = coalesce(place_index.lat, excluded.lat),
            lng = coalesce(place_index.lng, excluded.lng),
+           coords_at = case when place_index.lat is null and excluded.lat is not null then excluded.coords_at else place_index.coords_at end,
+           coords_from = case when place_index.lat is null and excluded.lat is not null then excluded.coords_from else place_index.coords_from end,
            -- The same: the sweep's area knows the country when the row does not.
            country_code = coalesce(place_index.country_code, excluded.country_code),
            last_seen = greatest(place_index.last_seen, excluded.last_seen)`);
@@ -683,10 +701,14 @@ async function reindexWhileLocked({ onProgress }) {
   // the places that most needed it (Codex, 17 Sep 2026). The same question
   // `noteOwned` answers, asked of the same columns.
   await query(`
-    insert into place_index (venue_ref, lat, lng, derived_by, ownership, first_seen, last_seen)
-    select r.venue_ref, r.lat, r.lng, 'own',
+    insert into place_index (venue_ref, lat, lng, derived_by, ownership, first_seen, last_seen, coords_at, coords_from)
+    -- An owned record's point is the open map's; a record with no match holds
+    -- none we may copy (C59, 30 Sep 2026).
+    select r.venue_ref,
+           case when r.osm_ref is not null then r.lat end, case when r.osm_ref is not null then r.lng end,
+           'own',
            case when ${OWNED_RECORD} then 'owned' else 'identified' end,
-           r.first_owned, r.updated_at
+           r.first_owned, r.updated_at, now(), 'osm'
       from place_records r
     on conflict (venue_ref) do update
        -- Our own record's position wins where it has one, the same rule the
@@ -694,8 +716,21 @@ async function reindexWhileLocked({ onProgress }) {
        -- corrected coordinate never survived a rebuild (Codex, 18 Sep 2026).
        set lat = coalesce(excluded.lat, place_index.lat),
            lng = coalesce(excluded.lng, place_index.lng),
+           coords_at = case when excluded.lat is not null then excluded.coords_at else place_index.coords_at end,
+           coords_from = case when excluded.lat is not null then excluded.coords_from else place_index.coords_from end,
            ownership = case when excluded.ownership = 'owned' then 'owned' else place_index.ownership end,
            last_seen = greatest(place_index.last_seen, excluded.last_seen)`);
+
+  // And every owned point, last, so it is the position that stands (C59, 30
+  // Sep 2026): the one point a place keeps for good, with its true source.
+  await query(`
+    update place_index pi
+       set lat = o.lat, lng = o.lng, coords_from = o.source, coords_at = now(),
+           cell = case when pi.lat is distinct from o.lat or pi.lng is distinct from o.lng then null else pi.cell end,
+           placed_at = case when pi.lat is distinct from o.lat or pi.lng is distinct from o.lng then null else pi.placed_at end
+      from owned_points o
+     where o.venue_ref = pi.venue_ref
+       and (pi.lat is distinct from o.lat or pi.lng is distinct from o.lng or pi.coords_from is distinct from o.source)`);
 
   // A household claiming a place is the third kind of ownership: we may hold
   // nothing of our own about it, but somebody has said it matters.
@@ -1557,7 +1592,13 @@ export async function noteMany(places = [], { source = null, countryCode = null,
     // undated and outside the expiry — which is exactly what the first cut of
     // it did (Codex, 19 Sep 2026). The source is read off the reference, which
     // is the only thing that actually knows whose point it is.
-    const values = rows.map((_, i) => `($${i * 6 + 1},$${i * 6 + 2}::double precision,$${i * 6 + 3}::double precision,$${i * 6 + 4},$${i * 6 + 5}, now(), $${i * 6 + 6}::text[], case when $${i * 6 + 2}::double precision is not null then now() end, case when $${i * 6 + 2}::double precision is not null then split_part($${i * 6 + 1}, ':', 1) end)`).join(',');
+    //
+    // The source is the caller's where it knows (C59, 30 Sep 2026: "the true
+    // source is recorded per point, not guessed from the ID prefix") — a sweep
+    // row twinned with the open map carries OSM's point under Google's
+    // reference, and a photo place is a household's own pin — and the
+    // reference's only where nobody says.
+    const values = rows.map((_, i) => `($${i * 7 + 1},$${i * 7 + 2}::double precision,$${i * 7 + 3}::double precision,$${i * 7 + 4},$${i * 7 + 5}, now(), $${i * 7 + 6}::text[], case when $${i * 7 + 2}::double precision is not null then now() end, case when $${i * 7 + 2}::double precision is not null then $${i * 7 + 7}::text end)`).join(',');
     await exec(
       `insert into place_index (venue_ref, lat, lng, country_code, ownership, last_seen, google_types, coords_at, coords_from)
        values ${values}
@@ -1629,7 +1670,8 @@ export async function noteMany(places = [], { source = null, countryCode = null,
               -- cheap to buy and a display search carries for nothing.
               google_types = coalesce(excluded.google_types, place_index.google_types),
               last_seen = now()`,
-      rows.flatMap((p) => [p.ref, p.lat ?? null, p.lng ?? null, p.countryCode ?? countryCode, p.ownership ?? ownership ?? 'identified', p.types?.length ? p.types : null]));
+      rows.flatMap((p) => [p.ref, p.lat ?? null, p.lng ?? null, p.countryCode ?? countryCode, p.ownership ?? ownership ?? 'identified', p.types?.length ? p.types : null,
+        p.coordsFrom ?? pointSourceOfRef(p.ref)]));
     // Who has returned each place, which may be more than one of them.
     //
     // A sweep result is often Google *and* OpenStreetMap, and the sweep keeps

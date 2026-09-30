@@ -149,6 +149,9 @@ export async function putPlace(areaCode, p, run = query) {
   await noteMany(
     [{
       ref: p.venueRef, lat: p.lat ?? null, lng: p.lng ?? null,
+      // Whose point it is, said rather than read off the reference: a row
+      // twinned with the open map holds OSM's under Google's reference (C59).
+      coordsFrom: Array.isArray(p.from) && p.from.includes('osm') ? 'osm' : null,
       // Everyone who actually returned it, not only the run that asked. The
       // same list this function writes to `from_sources` below — throwing it
       // away here made every combined place look single-source on the index's

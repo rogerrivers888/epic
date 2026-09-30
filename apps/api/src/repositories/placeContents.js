@@ -9,19 +9,30 @@
  */
 
 import { query } from '../db.js';
+import { RENTED_SOURCES, pointSourceOfRef } from '../sources/ownedPoints.js';
 
 export async function contentsState(parentRef) {
   const { rows } = await query('select contents_state, contents_at from place_records where venue_ref = $1', [parentRef]);
   return rows[0] ?? null;
 }
 
-/** Say the research has started, so two requests do not both do it. */
+/**
+ * Say the research has started, so two requests do not both do it.
+ *
+ * The name and point it is handed come from the drawer, and for a Google place
+ * they are Google's: used in memory to look inside the place, never written
+ * (owner, 30 Sep 2026: the fifth hole — "place_records saving a Google point
+ * and name … Google names fall under the same rule: don't keep them"). A place
+ * whose reference is ours keeps both, as before. Migration 307's trigger
+ * refuses the point anyway; the name is refused here.
+ */
 export async function markResearching(parentRef, name, lat, lng) {
+  const rented = RENTED_SOURCES.includes(pointSourceOfRef(parentRef));
   await query(
     `insert into place_records (venue_ref, name, lat, lng, contents_state)
      values ($1,$2,$3,$4,'pending')
      on conflict (venue_ref) do update set contents_state = 'pending'`,
-    [parentRef, name ?? null, lat, lng],
+    [parentRef, rented ? null : (name ?? null), rented ? null : lat, rented ? null : lng],
   );
 }
 

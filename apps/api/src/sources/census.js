@@ -30,6 +30,7 @@
  * the census permanent where a search result is not.
  */
 
+import { OWNED_SOURCES } from './ownedPoints.js';
 import { randomUUID } from 'node:crypto';
 import { query } from '../db.js';
 import { googleSource } from './google.js';
@@ -680,7 +681,10 @@ export async function noteFromDisplay(venues, { source = 'google' } = {}) {
  * somebody remembered to add it. Tripadvisor was exactly that case (Codex,
  * 19 Sep 2026).
  */
-export const OURS_TO_KEEP = ['osm', 'atlas', 'own'];
+// Every owned source (sources/ownedPoints.js, the same list as the
+// database's epic_owned_sources): Wikidata was missing, so an atlas point from
+// Wikidata was expired as though it were rented (C59, 30 Sep 2026).
+export const OURS_TO_KEEP = OWNED_SOURCES;
 
 export async function expireRentedCoordinates({ days = 30 } = {}) {
   const { rows } = await query(

@@ -1,0 +1,145 @@
+-- A point is owned or it is not kept (owner, C59, 30 Sep 2026).
+--
+-- "Close the four holes: tables reference the owned point instead of copying
+-- Google's; the rebuild and ring re-stamp never copy Google points; the true
+-- source is recorded per point, not guessed from the ID prefix." And the fifth:
+-- a place record saving a Google point and name.
+--
+-- 1. owned_points: one permanent point per place, from a source we may keep
+--    for good, with the source, its own identifier and its licence. This is
+--    what every table refers to instead of a copy of Google's.
+-- 2. point_from on every table that holds a place's point, saying whose point
+--    it is: an owned source, 'census-box' (the centre of the box the census
+--    found the place in, for a saved or visited place with nothing better), or
+--    null where nothing is held.
+-- 3. A trigger on each of those tables that refuses a rented point on the way
+--    in, whoever writes it: it puts the owned point in its place, or the
+--    census box where a household needs one, or nothing. One door rather than
+--    fifteen writers each remembering.
+-- 4. The expiry log says which table each purge touched.
+
+create table if not exists owned_points (
+  venue_ref   text primary key,
+  lat         double precision not null,
+  lng         double precision not null,
+  source      text not null check (source in ('wikidata', 'fsa', 'historic-england', 'os-open-names', 'osm', 'household')),
+  source_ref  text,               -- Q-id, FHRSID, list entry, OS id, node/123
+  licence     text not null,      -- 'CC0-1.0', 'OGL-UK-3.0', 'ODbL-1.0', 'the household''s own'
+  method      text not null,      -- how the match was made: 'reference', 'name+distance', ...
+  distance_m  real,               -- from the point it was matched against, where there was one
+  matched_at  timestamptz not null default now()
+);
+create index if not exists owned_points_source_idx on owned_points (source);
+
+-- Kept for good. Everything else a table holds on a place reference is either
+-- one of these or a rented point, and a rented point is never written.
+create or replace function epic_owned_sources() returns text[] language sql immutable as
+$$ select array['osm', 'atlas', 'wikidata', 'own', 'household', 'fsa', 'historic-england', 'os-open-names', 'fixtures'] $$;
+
+-- The licensed providers whose points are rented: Google, and the others the
+-- data policy names. A reference from anywhere else is not judged here.
+create or replace function epic_rented_sources() returns text[] language sql immutable as
+$$ select array['google', 'tripadvisor', 'yelp', 'foursquare'] $$;
+
+-- Whose a reference's own point is, by the reference: the fallback when the
+-- row does not say. A photo place is a household's own pin.
+create or replace function epic_ref_point_source(ref text) returns text language sql immutable as
+$$ select case split_part(coalesce(ref, ''), ':', 1) when '' then null when 'photo' then 'household' else split_part(ref, ':', 1) end $$;
+
+alter table household_places add column if not exists point_from text;
+alter table trip_shortlist   add column if not exists point_from text;
+alter table trip_stops       add column if not exists point_from text;
+alter table visits           add column if not exists point_from text;
+alter table scout_places     add column if not exists point_from text;
+alter table attractions      add column if not exists point_from text;
+alter table place_records    add column if not exists point_from text;
+
+create or replace function epic_keep_owned_point() returns trigger language plpgsql as $$
+declare
+  -- 'household': a saved or visited place, which falls back to its census box.
+  -- 'store': a source the index and the ring read, which never holds a box
+  -- centre, because a box centre read as a point beats the box it came from.
+  mode   text := TG_ARGV[0];
+  ref    text;
+  said   text;
+  src    text;
+  op     record;
+  b      text[];
+begin
+  ref := case when TG_TABLE_NAME = 'attractions' then coalesce(NEW.venue_ref, 'atlas:' || NEW.id::text) else NEW.venue_ref end;
+  -- What the writer said, unless the point itself moved: an update that brings
+  -- a new position with the old row's label on it would otherwise keep a
+  -- rented point under an owned name.
+  said := NEW.point_from;
+  if TG_OP = 'UPDATE' and (NEW.lat is distinct from OLD.lat or NEW.lng is distinct from OLD.lng) then said := null; end if;
+  if said = 'census-box' then said := null; end if;
+  src := case TG_TABLE_NAME
+    -- The activity sweep's unmatched Google rows are Google's point; a matched
+    -- one holds OSM's; every other attraction is the atlas (Wikidata/Commons).
+    when 'attractions' then case when NEW.display_source = 'google' then 'google'
+                                 when NEW.source = 'google' and NEW.osm_ref is not null then 'osm'
+                                 when NEW.source = 'google' then 'google'
+                                 else 'atlas' end
+    -- A sweep row twinned with the open map keeps OSM's point under Google's reference.
+    when 'scout_places' then case when coalesce(NEW.from_sources, '[]'::jsonb) ? 'osm' then 'osm' else epic_ref_point_source(ref) end
+    -- An owned record's point is composed from the open map alone.
+    when 'place_records' then case when NEW.osm_ref is not null then 'osm' else coalesce(said, epic_ref_point_source(ref)) end
+    else coalesce(said, epic_ref_point_source(ref)) end;
+
+  -- Google's name for a place the open map never gave is rented like its
+  -- point (owner, 30 Sep 2026: "Google names fall under the same rule: don't
+  -- keep them"). Every reader already refuses to show or search it.
+  if TG_TABLE_NAME = 'scout_places' and src = any(epic_rented_sources()) then
+    NEW.name := null;
+  end if;
+
+  if NEW.lat is not null and NEW.lng is not null and not (src = any(epic_rented_sources())) then
+    NEW.point_from := src;
+    return NEW;
+  end if;
+
+  -- Rented, or no point at all: the owned point, where one has landed.
+  select o.lat, o.lng, o.source into op from owned_points o where o.venue_ref = ref;
+  if found then
+    NEW.lat := op.lat; NEW.lng := op.lng; NEW.point_from := op.source;
+    return NEW;
+  end if;
+
+  -- A saved or visited place keeps working through its census box until its
+  -- owned point lands (owner, C59: "Saved/visited places keep working through
+  -- their census box until their owned point lands").
+  if mode = 'household' then
+    select string_to_array(pi.slice, ',') into b from place_index pi where pi.venue_ref = ref;
+    if b is not null and array_length(b, 1) = 4 then
+      NEW.lat := (b[1]::double precision + b[3]::double precision) / 2;
+      NEW.lng := (b[2]::double precision + b[4]::double precision) / 2;
+      NEW.point_from := 'census-box';
+      return NEW;
+    end if;
+  end if;
+
+  -- Nothing we may keep. A row that arrived without a point stays without one.
+  if NEW.lat is not null and src = any(epic_rented_sources()) then
+    NEW.lat := null; NEW.lng := null;
+  end if;
+  NEW.point_from := case when NEW.lat is null then null else src end;
+  return NEW;
+end $$;
+
+drop trigger if exists keep_owned_point on household_places;
+create trigger keep_owned_point before insert or update on household_places for each row execute function epic_keep_owned_point('household');
+drop trigger if exists keep_owned_point on trip_shortlist;
+create trigger keep_owned_point before insert or update on trip_shortlist for each row execute function epic_keep_owned_point('household');
+drop trigger if exists keep_owned_point on trip_stops;
+create trigger keep_owned_point before insert or update on trip_stops for each row execute function epic_keep_owned_point('household');
+drop trigger if exists keep_owned_point on visits;
+create trigger keep_owned_point before insert or update on visits for each row execute function epic_keep_owned_point('household');
+drop trigger if exists keep_owned_point on scout_places;
+create trigger keep_owned_point before insert or update on scout_places for each row execute function epic_keep_owned_point('store');
+drop trigger if exists keep_owned_point on attractions;
+create trigger keep_owned_point before insert or update on attractions for each row execute function epic_keep_owned_point('store');
+drop trigger if exists keep_owned_point on place_records;
+create trigger keep_owned_point before insert or update on place_records for each row execute function epic_keep_owned_point('store');
+
+alter table coordinate_expiries add column if not exists table_name text;
+alter table coordinate_expiries add column if not exists detail jsonb;
