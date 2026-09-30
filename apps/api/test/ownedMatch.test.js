@@ -156,3 +156,12 @@ test('a better owned point replaces an earlier one on every saved copy', async (
   await recordOwnedPoint({ ref, lat: 51.41, lng: -0.51, source: 'fsa', sourceRef: '1', method: 'name+distance' });
   assert.deepEqual((await query('select lat, point_from from household_places where venue_ref = $1', [ref])).rows[0], { lat: 51.41, point_from: 'fsa' });
 });
+
+test('an open-map place\'s copies follow its owned point when it is corrected', async () => {
+  const { recordOwnedPoint } = await import('../src/sources/ownedPoints.js');
+  const { rows: [h] } = await query(`insert into households (name) values ('Corrected test') returning id`);
+  const ref = `osm:node/${Date.now()}7`;
+  await query(`insert into household_places (household_id, venue_ref, label, lat, lng) values ($1, $2, 'x', 51.5, -0.1)`, [h.id, ref]);
+  await recordOwnedPoint({ ref, lat: 51.52, lng: -0.12, source: 'wikidata', sourceRef: 'Q9', method: 'reference' });
+  assert.deepEqual((await query('select lat, point_from from household_places where venue_ref = $1', [ref])).rows[0], { lat: 51.52, point_from: 'wikidata' });
+});

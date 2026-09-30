@@ -40,6 +40,7 @@ import { mirrorsInOrder, mirrorAnswered, mirrorFailed } from './overpass.js';
 import { normalise, metresBetween } from './openMatch.js';
 import * as lib from '../repositories/library.js';
 import { query } from '../db.js';
+import { noteMany } from '../repositories/placeIndex.js';
 
 /**
  * What a family might do on a Saturday, in the words somebody would type.
@@ -273,6 +274,12 @@ export async function sweepRegion(slug, {
 async function upsertSwept(slug, p, osm, owned) {
   const ref = `google:${p.sourcePlaceId}`;
   const name = owned ? (osm.tags?.name ?? null) : null;
+  // An unmatched row keeps no Google point of its own (migration 307); the
+  // index holds it for the thirty days Google allows, and that is what the
+  // rematch reads (Codex, 30 Sep 2026).
+  if (!owned && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng))) {
+    await noteMany([{ ref, lat: Number(p.lat), lng: Number(p.lng), coordsFrom: 'google' }], { source: 'google' }).catch(() => null);
+  }
   // Without a name we can show, there is nothing to publish yet — but the
   // pointer is still worth keeping, because it is what a later pass researches.
   const { rowCount } = await query(

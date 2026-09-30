@@ -118,15 +118,17 @@ begin
     NEW.name := null;
   end if;
 
-  if NEW.lat is not null and NEW.lng is not null and not (src = any(epic_rented_sources())) then
-    NEW.point_from := src;
-    return NEW;
-  end if;
-
-  -- Rented, or no point at all: the owned point, where one has landed.
+  -- A place's owned point, where one has landed, is its one point: every copy
+  -- takes it, so a correction or a better source reaches them all (Codex, 30
+  -- Sep 2026). A household's own pin on a photo place has none, and keeps its own.
   select o.lat, o.lng, o.source into op from owned_points o where o.venue_ref = ref;
   if found then
     NEW.lat := op.lat; NEW.lng := op.lng; NEW.point_from := op.source;
+    return NEW;
+  end if;
+
+  if NEW.lat is not null and NEW.lng is not null and not (src = any(epic_rented_sources())) then
+    NEW.point_from := src;
     return NEW;
   end if;
 
