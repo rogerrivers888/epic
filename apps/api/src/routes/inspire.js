@@ -253,12 +253,13 @@ const asCard = (it, { centre, origin, mode, category, straight = false, circleKm
   lat: it.lat, lng: it.lng,
   distanceKm: Number(kmBetween(centre, it).toFixed(1)),
   // The very number the fence measured, so the screen cannot contradict itself
-  // at the edge. A straight-line ring is fenced by the circle, so its card reads
-  // its minute off that same circle — distance as a fraction of the reach — which
-  // is at most the minutes asked for and never the journey-time estimate with its
-  // fixed overhead (a five-minute transit card would otherwise print eight).
-  travelMinutes: straight && circleKm
-    ? Math.min(minutes, Math.round((kmBetween(centre, it) / circleKm) * minutes))
+  // at the edge. A straight-line ring is fenced by the circle round the journey
+  // origin, so its card reads its minute off that same circle from the origin —
+  // distance as a fraction of the reach — which is at most the minutes asked for
+  // and never the journey-time estimate with its fixed overhead (a five-minute
+  // transit card would otherwise print eight).
+  travelMinutes: straight && circleKm && origin
+    ? Math.min(minutes, Math.round((kmBetween(origin, it) / circleKm) * minutes))
     : minutesTo(origin, it, mode),
   estimated: true,
   dwellMinutes: 90,
@@ -300,27 +301,23 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
   const start = from ?? ring.at ?? null;
   const straight = ring.method === 'straight-line';
   const reachKm = straight ? straightLineReachKm(mode, minutes) : boundKm(minutes, mode);
-  // A straight-line ring's cards are capped to the counted circle (`ring.circle`,
-  // centred on the searched place), so the provider box must cover that circle —
-  // not one round the journey origin, which in /near can be a different point and
-  // would search one area while counting another (Codex). The journey-origin band
-  // fence below still trims for the "nothing over the minutes" invariant. A matrix
-  // ring searches round the journey origin as before.
-  const boxCentre = straight && ring.circle ? ring.circle : start;
-  const searchBox = boxCentre
+  // The cards — the box that fetches them, the fence that keeps them and the
+  // minute they print — are all measured from the journey origin, so a walk or
+  // transit search around one place while travelling from another keeps the
+  // endpoint's origin-based reachability (Codex). The census count is taken over
+  // the searched place's own circle (censusForRing/ring.circle); when the origin
+  // and the searched place are one — the ordinary Inspire search — the two are
+  // the same circle and the count and the cards coincide.
+  const searchBox = start
     ? {
-      minLat: boxCentre.lat - reachKm / 111.32,
-      maxLat: boxCentre.lat + reachKm / 111.32,
-      minLng: boxCentre.lng - reachKm / (111.32 * Math.cos((boxCentre.lat * Math.PI) / 180) || 1),
-      maxLng: boxCentre.lng + reachKm / (111.32 * Math.cos((boxCentre.lat * Math.PI) / 180) || 1),
+      minLat: start.lat - reachKm / 111.32,
+      maxLat: start.lat + reachKm / 111.32,
+      minLng: start.lng - reachKm / (111.32 * Math.cos((start.lat * Math.PI) / 180) || 1),
+      maxLng: start.lng + reachKm / (111.32 * Math.cos((start.lat * Math.PI) / 180) || 1),
     }
     : ring.bandBox ?? ring.box;
 
-  // Keyed on the box's own centre, not the journey origin: a straight-line box is
-  // centred on the searched place, so two searches in one sector from the same
-  // origin but kilometres apart must not share a cached page (Codex). For a matrix
-  // ring the centre is the origin, so this is unchanged.
-  const ringKey = `${ring.cell}|${mode}|${minutes}|${boxCentre?.lat?.toFixed?.(3)},${boxCentre?.lng?.toFixed?.(3)}`;
+  const ringKey = `${ring.cell}|${mode}|${minutes}|${start?.lat?.toFixed?.(3)},${start?.lng?.toFixed?.(3)}`;
   // Near and wide (owner, 26 Sep 2026, E13; domain/wideSearch.js). One box the
   // size of the journey hands its twenty to whatever is most famous inside it:
   // from Winchester, things to do within the hour came back at a median of
@@ -465,17 +462,16 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
     // journey-time fence intersected with a circle, which would drop a venue the
     // count kept at the cycling overhead (Codex). A matrix ring fences by the
     // journey-time estimate the card itself prints.
-    // A straight-line ring (walk/transit with no matrix) is one circle, drawn by
-    // one estimator: the cards are exactly the census's own circle (`ring.circle`)
-    // and nothing else (Codex). Not the journey-time fence intersected with it —
-    // that measures from a different point and carries a fixed wait, so a
-    // five-minute transit board rejected even the origin (8-minute wait > 5) while
-    // the count stayed positive. The card's shown minute is the same straight-line
-    // estimate (see asCard), so it never prints a time past the band. A matrix
-    // ring keeps the journey-time fence measured from the origin.
+    // A straight-line ring (walk/transit with no matrix) fences by one circle,
+    // drawn by one conservative estimator, measured from the journey origin —
+    // not the journey-time band, which carries a fixed wait, so a five-minute
+    // transit board rejected even the origin (8-minute wait > 5) while the count
+    // stayed positive (Codex). The card's shown minute is that same circle (see
+    // asCard), so it never prints a time past the band and the two never
+    // contradict. A matrix ring keeps the journey-time fence from the origin.
     let fenced;
-    if (straight && ring.circle) {
-      const centre = { lat: Number(ring.circle.lat), lng: Number(ring.circle.lng) };
+    if (straight && start && ring.circle) {
+      const centre = { lat: Number(start.lat), lng: Number(start.lng) };
       const limitKm = ring.circle.km;
       fenced = (venues ?? []).filter((v) =>
         v?.lat != null && v?.lng != null
