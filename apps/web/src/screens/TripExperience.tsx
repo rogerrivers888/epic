@@ -163,7 +163,10 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   // detour zone and the along-route search both use it, and it seeds from the
   // trip's own mode. `travelMode` normalises the trip's canonical word.
   const tripModeSeed: TripMode = (TRIP_MODES as readonly string[]).includes(trip.travelMode) ? (trip.travelMode as TripMode) : 'driving';
-  const [by, setBy] = useQueryState<TripMode>('by', tripModeSeed, asOneOf(TRIP_MODES, 'driving'));
+  // The codec's fallback is the trip's own mode, so an absent `?by` means the
+  // trip's mode and picking a *different* mode writes it down — otherwise Drive
+  // on a walking trip serialised to nothing and snapped straight back (Codex).
+  const [by, setBy] = useQueryState<TripMode>('by', tripModeSeed, asOneOf(TRIP_MODES, tripModeSeed));
   const [place, setPlace] = useQueryState<string | null>('place', null, asText);
   const [showRaw, setShow] = useQueryState<string | null>('show', null, asText);
   // Which day the trip stage shows and adds to; `?day=` on a multi-day trip.
@@ -174,7 +177,10 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   // The detour band and the selected day travel with the moves between stages,
   // so the feed filters the way you left it and adding lands on the day you
   // chose — the defaults (15 min, the first day) are never written down.
-  const carried = () => ({ detour: detour !== 15 ? String(detour) : null, day: dayId && dayId !== days[0]?.id ? dayId : null });
+  // The picked mode travels with the moves between stages too, or switching
+  // Activities/Food or opening the shortlist would drop it back to the trip's
+  // own mode (Codex).
+  const carried = () => ({ detour: detour !== 15 ? String(detour) : null, day: dayId && dayId !== days[0]?.id ? dayId : null, by: by !== tripModeSeed ? by : null });
   const feedHref = (tab: IdeasTab) => withQuery(paths.tripIdeas(id, tab), carried());
   const shortHref = () => withQuery(paths.tripShortlist(id), carried());
   const tripHref = () => withQuery(paths.trip(id), carried());
@@ -349,6 +355,16 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   // too, so the "Back to ideas" bar shows real counts rather than 0; and a
   // ?place= deep link needs them to resolve the place it names (Codex).
   useEffect(() => { if (section === 'ideas' || section === 'shortlist' || place || (section == null && searched)) loadPools(); }, [section, searched, place, loadPools]);
+
+  // A new mode is a new pool: the detour minutes come back computed for it, so
+  // the cards, counts and zone must all be refetched, not just re-filtered — a
+  // plain `loadPools()` short-circuits on the pool it already has (Codex).
+  const lastModeRef = useRef(by);
+  useEffect(() => {
+    if (lastModeRef.current === by) return;
+    lastModeRef.current = by;
+    if (pools) loadPools(true);
+  }, [by, pools, loadPools]);
 
   // Landing on the feed or the shortlist — a shared link, say — is discovery
   // already done: mark it so the trip does not force a scan on Back to my trip
