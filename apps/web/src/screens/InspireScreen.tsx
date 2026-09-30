@@ -117,16 +117,20 @@ const placeFromQuery = (q: URLSearchParams): Place | null => {
   if (!at || at === UNSET) return null;
   const [lat, lng] = at.split(',').map(Number);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  return { lat, lng, label: q.get('where') ?? `${lat}, ${lng}`, locality: q.get('locality') };
+  // The country rides in the address too, so a place chosen abroad keeps its own
+  // market (its cost currency and bands) across a refresh or a shared link, and
+  // does not fall back to the household's own (Codex).
+  return { lat, lng, label: q.get('where') ?? `${lat}, ${lng}`, locality: q.get('locality'), countryCode: q.get('country') };
 };
 const placeToQuery = (p: Place | null, from: 'here' | 'search' | null): Record<string, string | null> => (p
   ? {
     at: `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`,
     where: p.label,
     locality: p.locality && p.locality !== p.label ? p.locality : null,
+    country: p.countryCode ?? null,
     from: from === 'here' ? 'here' : null,
   }
-  : { at: null, where: null, locality: null, from: null });
+  : { at: null, where: null, locality: null, country: null, from: null });
 
 /**
  * "Fairways, Titlarks Hill, Ascot, SL5 0JD" is where somebody lives; "Ascot" is
