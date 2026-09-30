@@ -1159,3 +1159,4 @@ test('a run stopped for a person is not a missing day, day after day', async (t)
   assert.equal(r.calls.length, 0);
   assert.ok(!box.got.some((m) => /^Census stalled/.test(m.subject)), box.got.map((m) => m.subject).join(' | '));
 });
+

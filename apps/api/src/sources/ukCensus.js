@@ -730,9 +730,8 @@ export function weeklySummary(st, bills, now = new Date()) {
 export async function daily(now = new Date(), { send, ...tickWith } = {}) {
   const tell = (subject, text, purpose = 'census_alert') => notify({ subject, text, purpose, ...(send ? { send, configured: () => true } : {}) });
   const tellings = [];
-  let out;
   try {
-    out = await tick({ ...tickWith, now, tell: (t) => tellings.push(t) });
+    return await watch(now, tell, tellings, await tick({ ...tickWith, now, tell: (t) => tellings.push(t) }));
   } catch (err) {
     // A failure is said once a day, in its own words.
     const msg = String(err?.message ?? err).slice(0, 120);
@@ -742,6 +741,13 @@ export async function daily(now = new Date(), { send, ...tickWith } = {}) {
     await tell(`Census failed on ${londonDay(now)}`, `The census scheduler could not run:\n\n${msg}`).catch(() => null);
     return { action: 'failed', error: msg };
   }
+}
+
+/**
+ * Everything after the tick, inside daily()'s failure handler: a query that
+ * breaks here is a failure to say, not only a line in the log (Codex, 30 Sep 2026).
+ */
+async function watch(now, tell, tellings, out) {
   if (out.action === 'off') return out;
   const st = await status(now);
   const lines = st.days.map((d) => reportLine(d)).join('\n');
@@ -758,7 +764,9 @@ export async function daily(now = new Date(), { send, ...tickWith } = {}) {
   const running = ['running', 'waiting'].includes(latest?.state);
   // Stopped on purpose, waiting for a person: said once by its own alert,
   // never again every day as a missing run (Codex, 30 Sep 2026).
-  const stopped = ['halted', 'held', 'complete', 'stopped'].includes(out.action);
+  // Judged on the status read after the tick too: a tick that found the
+  // scheduler busy says nothing of whether the census is stopped (Codex, 30 Sep 2026).
+  const stopped = [out.action, st.action].some((x) => ['halted', 'held', 'complete', 'stopped'].includes(x));
   // A stall: a running day that has not moved for an hour.
   if (latest?.state === 'running' && latest.last_seen_at
       && now.getTime() - new Date(latest.last_seen_at).getTime() > STALL_MINUTES * 60_000) {
