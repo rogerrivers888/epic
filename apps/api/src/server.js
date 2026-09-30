@@ -734,10 +734,23 @@ const billingDaily = () => {
 };
 void indexBuilt.then(billingDaily);
 setInterval(billingDaily, BAR_CHECK_EVERY_MS).unref?.();
+// And the owned points' week (owner, C59 step 6, 30 Sep 2026: "refresh our
+// OSM (Geofabrik GB) copy weekly and re-match unmatched places against all
+// owned sources each time. Never schedule a Google coordinate refresh"). The
+// open map first, then the FSA register, the heritage list and OS Open Names
+// where a week old, then every place still without an owned point is matched
+// again — once a week, whichever of those actually changed. Nothing here asks
+// Google for anything.
 const osmDaily = () => {
   void loadOsmDue()
     .then((out) => { for (const r of out) console.log(r.error ? `osm extract ${r.region}: ${r.error}` : `osm extract ${r.region}: ${r.features} places`); })
-    .catch((err) => console.error('osm extract', err.message));
+    .catch((err) => console.error('osm extract', err.message))
+    .then(() => import('./sources/ownedSources.js')).then(({ loadDue }) => loadDue())
+    .then((out) => { for (const r of out ?? []) console.log(r.error ? `owned source ${r.source}: ${r.error}` : `owned source ${r.source}: ${r.rows} rows`); })
+    .catch((err) => console.error('owned sources', err.message))
+    .then(() => import('./sources/ownedMatch.js')).then(({ weeklyDue }) => weeklyDue())
+    .then((out) => { if (out) console.log(`owned points, weekly: ${out.matched} of ${out.looked} matched`); })
+    .catch((err) => console.error('owned points weekly', err.message));
 };
 void indexBuilt.then(osmDaily);
 setInterval(osmDaily, BAR_CHECK_EVERY_MS).unref?.();

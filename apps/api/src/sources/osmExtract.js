@@ -314,7 +314,7 @@ export async function extracts() {
 /**
  * The regions a person has switched on, from config (EPIC_OSM_EXTRACT, a
  * comma list of region keys). No button starts a job (handover 1); a load
- * happens because the owner put a region in config, at boot and monthly.
+ * happens because the owner put a region in config, at boot and weekly.
  */
 export const REGIONS_ON = () => String(process.env.EPIC_OSM_EXTRACT ?? '').split(',').map((r) => r.trim()).filter((r) => EXTRACTS[r]);
 
@@ -333,8 +333,8 @@ export async function regionsOn() {
 const STUCK_MS = 6 * 3600_000;
 let loading = null;
 
-/** Load every switched-on region that has never loaded, failed, or is a month old. One at a time. */
-export async function loadDue({ who = 'Epic (monthly)' } = {}) {
+/** Load every switched-on region that has never loaded, failed, or is a week old. One at a time. */
+export async function loadDue({ who = 'Epic (weekly)' } = {}) {
   // One pass at a time in this process: the setting and the daily tick can
   // both ask.
   if (loading) return loading;
@@ -345,7 +345,9 @@ export async function loadDue({ who = 'Epic (monthly)' } = {}) {
       const running = x && ['downloading', 'reading'].includes(x.state);
       const stuck = running && (!x.started_at || Date.now() - new Date(x.started_at).getTime() > STUCK_MS);
       const stale = !x || x.state === 'never' || x.state === 'failed' || stuck
-        || (x.state === 'done' && Date.now() - new Date(x.finished_at).getTime() > 30 * 86400_000);
+        // Weekly (owner, C59 step 6, 30 Sep 2026: "refresh our OSM (Geofabrik
+        // GB) copy weekly"); it was monthly.
+        || (x.state === 'done' && Date.now() - new Date(x.finished_at).getTime() > 7 * 86400_000);
       if (!stale || (running && !stuck)) continue;
       out.push(await loadRegion({ region, who }).catch((err) => ({ region, error: err.message })));
     }

@@ -3169,6 +3169,43 @@ router.put('/bars/:sub', requires('manage_library'), async (req, res, next) => {
 // ---------------------------------------------------------------------------
 
 /** Rebuild the index. Free, no network, and resumable by being idempotent. */
+/**
+ * Owned points (C59, 30 Sep 2026): where they stand, the three owned sources'
+ * loads, and the match runs. Loading and matching are free — published open
+ * data and our own copy of the open map — and both run in the background and
+ * write their progress down, so a deploy mid-run is picked up where it stopped.
+ */
+router.get('/owned-points', requires('view_library'), async (_req, res, next) => {
+  try {
+    const [{ standing }, { loads }] = await Promise.all([import('../sources/ownedMatch.js'), import('../sources/ownedSources.js')]);
+    res.json({ ...(await standing()), loads: await loads() });
+  } catch (err) { next(err); }
+});
+
+router.post('/owned-points/load', requires('manage_library'), async (req, res, next) => {
+  try {
+    const { loadDue, SOURCES } = await import('../sources/ownedSources.js');
+    const only = req.body?.source ? [String(req.body.source)] : null;
+    if (only && !SOURCES.includes(only[0])) return res.status(400).json({ error: 'bad_request', message: `One of ${SOURCES.join(', ')}.` });
+    const who = actor(req).actorLabel;
+    // Due ones only, unless a source is named: a named one loads now.
+    const { loadSource } = await import('../sources/ownedSources.js');
+    const job = only ? loadSource(only[0], { who }) : loadDue({ who });
+    job.catch((err) => console.error(`epic-api: owned sources — ${err.message}`));
+    res.status(202).json({ started: only ?? 'every source that is due' });
+  } catch (err) { next(err); }
+});
+
+router.post('/owned-points/match', requires('manage_library'), async (req, res, next) => {
+  try {
+    const kind = req.body?.kind === 'weekly' ? 'weekly' : 'backfill';
+    const { run } = await import('../sources/ownedMatch.js');
+    const who = actor(req).actorLabel;
+    run({ kind, who }).catch((err) => console.error(`epic-api: owned points ${kind} — ${err.message}`));
+    res.status(202).json({ started: kind });
+  } catch (err) { next(err); }
+});
+
 router.post('/reindex', requires('manage_library'), async (req, res, next) => {
   try {
     await index.seedBars();
