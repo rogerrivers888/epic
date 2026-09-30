@@ -261,7 +261,10 @@ export function useCachedResource<T>(
     // coming back to a screen whose load failed does attempt it again.
     const ensure = (force: boolean) => {
       const age = e.fetchedAt ? Date.now() - e.fetchedAt : Infinity;
-      if ((force || e.error === undefined) && !e.promise && (e.data === undefined || age > staleMs)) {
+      // `>=`, not `>`: the TTL timer fires at exactly `fetchedAt + staleMs`, when
+      // age equals staleMs, and it does not reschedule itself — a `>` here would
+      // skip that one fire and leave a mounted tab stale for good (Codex, D13).
+      if ((force || e.error === undefined) && !e.promise && (e.data === undefined || age >= staleMs)) {
         void runFetch(key, () => fetcherRef.current());
       }
     };
