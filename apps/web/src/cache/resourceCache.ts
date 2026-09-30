@@ -265,7 +265,17 @@ export function useCachedResource<T>(
         void runFetch(key, () => fetcherRef.current());
       }
     };
-    const listener = () => { bump(); ensure(false); };
+    // A tab left mounted past its ten minutes has no emit and no remount to make
+    // it refresh, so without this it would sit on stale rows however long it is
+    // left open (Codex, D13; owner: "refresh if older than ~10 minutes"). A timer
+    // set for when the current data turns stale calls `ensure`, and re-arms off
+    // each successful fetch, so a tab open for hours still refreshes on the cadence.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = () => {
+      clearTimeout(timer);
+      if (e.fetchedAt) timer = setTimeout(() => ensure(false), Math.max(0, e.fetchedAt + staleMs - Date.now()));
+    };
+    const listener = () => { bump(); ensure(false); schedule(); };
     e.listeners.add(listener);
     ensure(true);
     // The entry may have moved between this render and this effect — a prefetch
@@ -274,7 +284,8 @@ export function useCachedResource<T>(
     // arrived (Codex, D13). One bump now re-reads the current state and closes
     // that window; every later change comes through the listener.
     bump();
-    return () => { e.listeners.delete(listener); };
+    schedule();
+    return () => { e.listeners.delete(listener); clearTimeout(timer); };
   }, [key, enabled, staleMs]);
 
   const e = enabled && key ? store.get(key) : undefined;
