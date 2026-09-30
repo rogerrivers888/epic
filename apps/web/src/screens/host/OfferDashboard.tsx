@@ -59,32 +59,12 @@ export function OfferDashboard({ offerId, hostName, chat = null }: { offerId: st
   };
 
   // The conversation on this offer (Chat screens, 13 Sep 2026): the host's door,
-  // whichever layer the address names. A deep thread keeps its own back; the
-  // Questions *list* is a sibling of Bookings, so it wears the offer's band and
-  // ink menu (Questions selected) with the list embedded — you never lose the
-  // way back to Bookings (Codex).
-  if (chat && chat.page !== 'list') return <ChatScreen door={hostOfferDoor(offerId)} layer={chat} navigate={navigate} back={back} query={query} onSettings={() => navigate(paths.settingsNotifications())} />;
-  if (chat) {
-    const liveN = offer ? offer.bookings.filter((b) => b.state !== 'cancelled').length : undefined;
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.bg }}>
-        <CompactBand
-          title={offer?.title ?? 'Questions'}
-          context={offer ? [SHAPE_LABEL[offer.shape], priceWords(offer), STATE_LABEL[offer.state].toLowerCase()].join(' · ') : undefined}
-          onBack={() => back(paths.host())}
-          right={<MicTile onPress={() => navigate(paths.say({ for: 'inspire' }))} />}
-        />
-        <InkMenu
-          tabs={[{ key: 'bookings' as const, label: 'Bookings', count: liveN }, { key: 'questions' as const, label: 'Questions' }]}
-          selected="questions"
-          onSelect={(key) => { if (key === 'bookings') navigate(paths.hostOffer(offerId)); }}
-        />
-        <View style={{ flex: 1 }}>
-          <ChatScreen embedded door={hostOfferDoor(offerId)} layer={chat} navigate={navigate} back={back} query={query} onSettings={() => navigate(paths.settingsNotifications())} />
-        </View>
-      </View>
-    );
-  }
+  // whichever layer the address names. Questions opens the full chat with all
+  // its own controls (ask, filter, notifications) and its own back. Carrying the
+  // offer's ink menu onto the chat view is a deferred refinement — it needs the
+  // topic list to keep its controls while dropping only its head, which is a
+  // chat-component change beyond this nav batch (Codex).
+  if (chat) return <ChatScreen door={hostOfferDoor(offerId)} layer={chat} navigate={navigate} back={back} query={query} onSettings={() => navigate(paths.settingsNotifications())} />;
   if (error && !offer) return <View style={styles.page}><Text style={type.h2}>Not one of yours</Text><Text style={type.small}>{error}</Text><Button label="Back to hosting" kind="secondary" onPress={() => navigate(paths.host(), { replace: true })} /></View>;
   if (!offer) return <View style={styles.page}><Text style={type.small}>Opening…</Text></View>;
   const o = offer;
