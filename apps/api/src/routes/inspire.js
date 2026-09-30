@@ -446,18 +446,20 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
   // The fence, the scores and the order, for whatever venues are handed in:
   // one page's, or — for the page after it — the first page's again.
   const rank = async (venues) => {
-    let fenced = fenceToBand(venues, { from: start, minutes, mode });
-    // A straight-line ring counts a circle of `straightLineReachKm`, but the box
-    // above is a rectangle whose corners reach √2 farther, and `fenceToBand`
-    // uses the faster journey-time profile — so a corner venue can survive the
-    // fence while lying outside the reach the count used. Cut it to the same
-    // circle here, so the cards and the count describe one reach (Codex).
+    // A straight-line ring has no journey times: it counts a circle of
+    // `straightLineReachKm` and the cards are fenced by that SAME circle, so the
+    // count and the cards describe one reach and cannot contradict — not the
+    // journey-time fence intersected with a circle, which would drop a venue the
+    // count kept at the cycling overhead (Codex). A matrix ring fences by the
+    // journey-time estimate the card itself prints.
+    let fenced;
     if (straight && start) {
       const limitKm = straightLineReachKm(mode, minutes);
-      fenced = fenced.filter((v) =>
-        v?.lat == null || v?.lng == null
-          ? true
-          : kmBetween(start, { lat: Number(v.lat), lng: Number(v.lng) }) <= limitKm);
+      fenced = (venues ?? []).filter((v) =>
+        v?.lat != null && v?.lng != null
+        && kmBetween(start, { lat: Number(v.lat), lng: Number(v.lng) }) <= limitKm);
+    } else {
+      fenced = fenceToBand(venues, { from: start, minutes, mode });
     }
     // Closed places, once the owner has applied the check, are not shown (C57).
     const hidden = await hiddenAmong(fenced.map((v) => `${v.source}:${v.sourcePlaceId}`));

@@ -30,6 +30,7 @@
  */
 
 import { query } from '../db.js';
+import { kmBetween } from '../domain/travel.js';
 import { TEXT_QUESTIONS, textStillAsked } from '../sources/censusQuestions.js';
 import { SHOWN_REF } from './placeStatus.js';
 
@@ -91,6 +92,33 @@ export function whereBoxSits(box, { cells, universe }) {
   let ins = 0;
   for (const c of v.codes) if (inRing.has(c)) ins += 1;
   if (ins === v.codes.size) return 'inside';
+  if (ins === 0) return 'outside';
+  return 'across';
+}
+
+/**
+ * Whether a box is wholly inside a straight-line circle, wholly outside it, or
+ * across its edge — the circle being the estimated reach a matrix-less mode
+ * (walk, cycle, transit) is counted over (owner, 30 Sep 2026).
+ *
+ * The same five points as the sector test — four corners and the middle — but
+ * judged by distance to the circle's centre rather than by nearest sector, so
+ * the count is over the identical circle the display cards are fenced by and
+ * the two cannot disagree (Codex). A box under the fine width is placed by its
+ * centre, exactly as the sector test places it; a wider one really can straddle
+ * the edge and is left unresolved.
+ */
+export function whereBoxSitsInCircle(box, { lat, lng, km }) {
+  if (!box) return 'nowhere';
+  const at = { lat, lng };
+  if (widthOf(box) <= FINE_M) {
+    const mid = { lat: (box.minLat + box.maxLat) / 2, lng: (box.minLng + box.maxLng) / 2 };
+    return kmBetween(at, mid) <= km ? 'inside' : 'outside';
+  }
+  let ins = 0;
+  const pts = cornersOf(box);
+  for (const p of pts) if (kmBetween(at, p) <= km) ins += 1;
+  if (ins === pts.length) return 'inside';
   if (ins === 0) return 'outside';
   return 'across';
 }
@@ -231,22 +259,30 @@ export function sectorsOfBox(box, universe) {
  * @param cells    the ring's own sectors, from the reachability matrix
  * @param outcodes the districts those sectors sit in — the candidate universe
  */
-export async function censusInRing({ cells = [], outcodes = [], shownOnly = false } = {}) {
+export async function censusInRing({ cells = [], outcodes = [], shownOnly = false, circle = null } = {}) {
   const empty = { counts: {}, unresolved: {}, placed: { own: 0, slice: 0 }, unplaceable: 0, boxes: { inside: 0, outside: 0, across: 0 }, placedBy: null };
-  if (!cells.length || !outcodes.length) return empty;
+  // A straight-line ring is a circle round the origin and needs no sector set;
+  // a matrix ring is a set of sectors and needs one. Either way the districts
+  // are the candidate universe (Codex, 30 Sep 2026).
+  if (!outcodes.length || (!circle && !cells.length)) return empty;
   const slugs = outcodes.map((o) => String(o).toLowerCase());
 
-  // Every sector these districts are made of, once — for the ground they
-  // cover; the points a box is judged against are every postcode on that
-  // ground (26 Sep 2026), the sector centroids where none are loaded.
-  const { rows: sectors } = await query(
-    'select code, lat, lng from geo_cells where lower(outcode) = any($1)', [slugs]);
-  if (!sectors.length) return empty;
-  const box = sectors.reduce((b, u) => ({
-    minLat: Math.min(b.minLat, u.lat), maxLat: Math.max(b.maxLat, u.lat),
-    minLng: Math.min(b.minLng, u.lng), maxLng: Math.max(b.maxLng, u.lng),
-  }), { minLat: 90, maxLat: -90, minLng: 180, maxLng: -180 });
-  const { index: universe, placedBy } = await placingPoints(box);
+  // For a matrix ring, every sector these districts are made of, once — for the
+  // ground they cover; the points a box is judged against are every postcode on
+  // that ground (26 Sep 2026), the sector centroids where none are loaded. A
+  // circle ring judges every box by distance to the centre, so it needs neither.
+  let universe = null;
+  let placedBy = circle ? 'circle' : null;
+  if (!circle) {
+    const { rows: sectors } = await query(
+      'select code, lat, lng from geo_cells where lower(outcode) = any($1)', [slugs]);
+    if (!sectors.length) return empty;
+    const box = sectors.reduce((b, u) => ({
+      minLat: Math.min(b.minLat, u.lat), maxLat: Math.max(b.maxLat, u.lat),
+      minLng: Math.min(b.minLng, u.lng), maxLng: Math.max(b.maxLng, u.lng),
+    }), { minLat: 90, maxLat: -90, minLng: 180, maxLng: -180 });
+    ({ index: universe, placedBy } = await placingPoints(box));
+  }
   const inRing = new Set(cells);
 
   // Both ways a surfacing is filed. The ring census wrote one row per outcode,
@@ -280,11 +316,17 @@ export async function censusInRing({ cells = [], outcodes = [], shownOnly = fals
   const verdicts = new Map();
   const verdictOf = (slice) => {
     if (verdicts.has(slice)) return verdicts.get(slice);
-    const v = whereBoxSits(boxFrom(slice), { cells: inRing, universe });
+    const v = circle
+      ? whereBoxSitsInCircle(boxFrom(slice), circle)
+      : whereBoxSits(boxFrom(slice), { cells: inRing, universe });
     verdicts.set(slice, v);
     return v;
   };
-  const cellFor = (lat, lng) => nearestSector({ lat, lng }, universe)?.code ?? null;
+  // A place with its own coordinate is placed exactly: inside the circle by
+  // distance, or inside a matrix ring by its nearest sector.
+  const ownInside = circle
+    ? (lat, lng) => kmBetween({ lat: circle.lat, lng: circle.lng }, { lat, lng }) <= circle.km
+    : (lat, lng) => inRing.has(nearestSector({ lat, lng }, universe)?.code ?? null);
 
   const counted = new Map();
   const unresolved = new Map();
@@ -300,7 +342,7 @@ export async function censusInRing({ cells = [], outcodes = [], shownOnly = fals
     // Its own point beats any box: that is exact.
     if (r.lat != null && r.lng != null) {
       if (!seenOwn.has(r.venue_ref)) { seenOwn.add(r.venue_ref); own += 1; }
-      if (inRing.has(cellFor(Number(r.lat), Number(r.lng)))) add(counted, r.category, r.venue_ref);
+      if (ownInside(Number(r.lat), Number(r.lng))) add(counted, r.category, r.venue_ref);
       continue;
     }
     if (!r.slice) { unplaceable += 1; continue; }

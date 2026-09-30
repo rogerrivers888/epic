@@ -30,6 +30,7 @@
 
 import { query } from '../db.js';
 import { censusInRing } from '../repositories/censusRing.js';
+import { straightLineReachKm } from '../domain/travel.js';
 import { displaySlice } from './google.js';
 import { outcodeOfCell } from '../domain/ring.js';
 import * as placeIndex from '../repositories/placeIndex.js';
@@ -215,7 +216,15 @@ export async function censusForRing(ring, { mode = 'driving', minutes = 30 } = {
     };
   }
 
-  const inRing = await censusInRing({ cells: ring.band ?? ring.cells ?? [], outcodes, shownOnly: true });
+  // A straight-line ring is counted over the SAME circle the display cards are
+  // fenced by (`straightLineReachKm`, centred on the ring's origin), not over its
+  // quantised sectors — so a short walk's count rises smoothly with the minutes
+  // instead of sticking on the origin sector, and the count and the cards
+  // describe one reach (Codex, 30 Sep 2026). A matrix ring counts by its sectors.
+  const circle = estimated && ring?.at
+    ? { lat: Number(ring.at.lat), lng: Number(ring.at.lng), km: straightLineReachKm(mode, minutes) }
+    : null;
+  const inRing = await censusInRing({ cells: ring.band ?? ring.cells ?? [], outcodes, shownOnly: true, circle });
   if (ring?.cell && !estimated) void refreshRing({ cell: ring.cell, mode, minutes }).catch(() => null);
   const unresolved = inRing.unresolved ?? {};
   const partly = byOutcode.partial.length > 0;
