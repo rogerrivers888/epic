@@ -347,3 +347,12 @@ test('an activity-sweep row with no name is matched by its point alone, as the s
   const hit = await m.matchPlace({ ref: 'google:swept-lido', names: ['(swimming pool)'], point: { lat: 50.6003, lng: -3.9002 }, swept: true });
   assert.deepEqual([hit.source, hit.sourceRef, hit.method], ['osm', 'way/424242', 'point, alone within 120 m']);
 });
+
+test('a second open-map place within 120 m makes a nameless sweep row no match', async () => {
+  const L = randomUUID();
+  await query(`insert into osm_features (ref, name, lat, lng, tags, region, load_id) values
+    ('node/8080801', 'Kiosk A', 50.7000, -3.8000, '{}', 'great-britain', $1),
+    ('node/8080802', 'Kiosk B', 50.7005, -3.8005, '{}', 'great-britain', $1) on conflict (ref) do nothing`, [L]);
+  const out = await m.matchPlace({ ref: 'google:two-kiosks', names: [], point: { lat: 50.7002, lng: -3.8002 }, swept: true });
+  assert.ok(out.none);
+});

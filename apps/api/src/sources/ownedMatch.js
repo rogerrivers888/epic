@@ -139,8 +139,11 @@ export async function matchPlace(place) {
     // rematchRegion), asked of our own copy of the map.
     if (place.swept && place.point) {
       const [a, b, c, d] = box(place.point.lat, place.point.lng, 120);
+      // Every candidate in the box, then the distance, then the count: a limit
+      // before the distance could hide a rival or the one (Codex, 30 Sep 2026).
       const { rows } = await query(
-        `select ref, lat, lng from osm_features where lat between $1 and $2 and lng between $3 and $4 limit 3`, [a, b, c, d]);
+        `select ref, lat, lng from osm_features where lat between $1 and $2 and lng between $3 and $4 limit 501`, [a, b, c, d]);
+      if (rows.length > 500) return { none: 'too many open-map places here to tell' };
       const near = rows.filter((r) => metresBetween(place.point, { lat: r.lat, lng: r.lng }) <= 120);
       if (near.length === 1) {
         return { source: 'osm', lat: near[0].lat, lng: near[0].lng, sourceRef: near[0].ref, method: 'point, alone within 120 m',
