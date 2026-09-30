@@ -66,25 +66,34 @@ declare
   op     record;
   b      text[];
 begin
-  ref := case when TG_TABLE_NAME = 'attractions' then coalesce(NEW.venue_ref, 'atlas:' || NEW.id::text) else NEW.venue_ref end;
   -- What the writer said, unless the point itself moved: an update that brings
   -- a new position with the old row's label on it would otherwise keep a
   -- rented point under an owned name.
   said := NEW.point_from;
   if TG_OP = 'UPDATE' and (NEW.lat is distinct from OLD.lat or NEW.lng is distinct from OLD.lng) then said := null; end if;
   if said = 'census-box' then said := null; end if;
-  src := case TG_TABLE_NAME
+  -- Each table on its own: PL/pgSQL resolves every field an expression names,
+  -- so one CASE across tables fails on the columns another table lacks.
+  if TG_TABLE_NAME = 'attractions' then
+    ref := coalesce(NEW.venue_ref, 'atlas:' || NEW.id::text);
     -- The activity sweep's unmatched Google rows are Google's point; a matched
     -- one holds OSM's; every other attraction is the atlas (Wikidata/Commons).
-    when 'attractions' then case when NEW.display_source = 'google' then 'google'
-                                 when NEW.source = 'google' and NEW.osm_ref is not null then 'osm'
-                                 when NEW.source = 'google' then 'google'
-                                 else 'atlas' end
+    if NEW.display_source = 'google' or (NEW.source = 'google' and NEW.osm_ref is null) then src := 'google';
+    elsif NEW.source = 'google' then src := 'osm';
+    else src := 'atlas';
+    end if;
+  elsif TG_TABLE_NAME = 'scout_places' then
+    ref := NEW.venue_ref;
     -- A sweep row twinned with the open map keeps OSM's point under Google's reference.
-    when 'scout_places' then case when coalesce(NEW.from_sources, '[]'::jsonb) ? 'osm' then 'osm' else epic_ref_point_source(ref) end
+    if coalesce(NEW.from_sources, '[]'::jsonb) ? 'osm' then src := 'osm'; else src := epic_ref_point_source(ref); end if;
+  elsif TG_TABLE_NAME = 'place_records' then
+    ref := NEW.venue_ref;
     -- An owned record's point is composed from the open map alone.
-    when 'place_records' then case when NEW.osm_ref is not null then 'osm' else coalesce(said, epic_ref_point_source(ref)) end
-    else coalesce(said, epic_ref_point_source(ref)) end;
+    if NEW.osm_ref is not null then src := 'osm'; else src := coalesce(said, epic_ref_point_source(ref)); end if;
+  else
+    ref := NEW.venue_ref;
+    src := coalesce(said, epic_ref_point_source(ref));
+  end if;
 
   -- Google's name for a place the open map never gave is rented like its
   -- point (owner, 30 Sep 2026: "Google names fall under the same rule: don't
