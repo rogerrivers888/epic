@@ -20,10 +20,14 @@ import { LIME, INK, CREAM, TAB_UNSELECTED, MENU_DIVIDER, fonts } from '../theme'
  */
 export type InkTab<T extends string> = { key: T; label: string; count?: number };
 
-export function InkMenu<T extends string>({ tabs, selected, onSelect }: {
+export function InkMenu<T extends string>({ tabs, selected, onSelect, flyToKey }: {
   tabs: InkTab<T>[];
   selected: T | null;
   onSelect: (key: T) => void;
+  /** The tab a flown heart lands on (the trip's Shortlist): its cell carries the
+   *  `[data-fly-to]` marker `flyHeart` reaches for, so hearting a card in the
+   *  drawer still flies to it now the old feed Shortlist button is gone. */
+  flyToKey?: T;
 }) {
   // §5: 2 tabs at 16px, 3–4 tabs at 15px.
   const fs = tabs.length <= 2 ? 16 : 15;
@@ -55,6 +59,7 @@ export function InkMenu<T extends string>({ tabs, selected, onSelect }: {
               >
                 {label}
               </Text>
+              {t.key === flyToKey ? <View {...({ dataSet: { flyTo: '1' } } as object)} pointerEvents="none" style={styles.flyMark} /> : null}
             </Press>
           </React.Fragment>
         );
@@ -71,6 +76,8 @@ const styles = StyleSheet.create({
   cellOff: {},
   // Nothing selected: no marker at all, so the bottom pad takes the 4px back.
   cellFlat: { paddingBottom: 15, borderBottomWidth: 0 },
+  // A zero-size marker centred in the cell for the heart-fly to land on.
+  flyMark: { position: 'absolute', top: '50%', left: '50%', width: 1, height: 1 },
   label: { fontFamily: fonts.heading, textAlign: 'center' },
   labelOn: { fontWeight: '800', color: CREAM },
   labelOff: { fontWeight: '500', color: TAB_UNSELECTED },

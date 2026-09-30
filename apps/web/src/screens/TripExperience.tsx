@@ -349,6 +349,15 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   const fromBase = trip.base?.lat != null && trip.base.kind !== 'home';
   const startLabel = fromBase ? (trip.base?.label?.split(',')[0]?.trim() || 'your base') : 'Home';
   const startIcon: IconName = fromBase ? (trip.base?.kind === 'centre' ? 'place' : 'hotel') : 'home';
+  // A booked place to stay — only on an overnight trip, because a day outing stores
+  // its destination as `trip.base` with kind 'other' too and is not a stay (Codex).
+  // Nights are the span of the dates, the same way the trip card counts them. Not
+  // home and not the stand-in city-centre; it heads The day as "Where you're staying"
+  // (owner) and opens the Stays tab when tapped.
+  const tripNights = trip.startDate && trip.endDate
+    ? Math.max(0, Math.round((+new Date(`${trip.endDate}T12:00:00`) - +new Date(`${trip.startDate}T12:00:00`)) / 86400000))
+    : 0;
+  const stayBase = tripNights > 0 && trip.base && trip.base.lat != null && trip.base.kind !== 'home' && trip.base.kind !== 'centre' ? trip.base : null;
   // The destination is its own timeline row; an outing that seeded it as the
   // day's first stop must not also show a second, plain copy. The trip payload
   // does not carry the destination's ref, so it is matched on the identity that
@@ -488,19 +497,6 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
     if (query.get('new')) setQuery({ new: null }, { replace: true });
   };
 
-  // --- transitions -------------------------------------------------------
-  const feedIn = useRef(new Animated.Value(section === 'ideas' || section === 'shortlist' ? 1 : 0)).current;
-  const shortIn = useRef(new Animated.Value(section === 'shortlist' ? 1 : 0)).current;
-  useEffect(() => {
-    const feedTo = section === 'ideas' || section === 'shortlist' ? 1 : 0;
-    const shortTo = section === 'shortlist' ? 1 : 0;
-    if (Platform.OS === 'web' && typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      feedIn.setValue(feedTo); shortIn.setValue(shortTo); return;
-    }
-    Animated.timing(feedIn, { toValue: feedTo, duration: 550, useNativeDriver: false }).start();
-    Animated.timing(shortIn, { toValue: shortTo, duration: 400, useNativeDriver: false }).start();
-  }, [section, feedIn, shortIn]);
-
   const frameRef = useRef<any>(null);
   const shortlistBtnRef = useRef<any>(null);
 
@@ -602,7 +598,14 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
     if (want) {
       setHeartAdd((s) => new Set(s).add(card.ref));
       setHeartRm((s) => { const n = new Set(s); n.delete(card.ref); return n; });
-      if (chipEl) flyHeart(chipEl, { frame: frameRef.current, target: shortlistBtnRef.current });
+      // In the drawer the old feed Shortlist button is gone, so the heart flies to
+      // the Shortlist tab in the ink menu — the marker's parent cell, so the bump on
+      // landing scales that tab, not the whole frame (Codex). Null if it is not on
+      // screen, and then the heart just pops in place rather than bumping anything.
+      const flyTarget: Element | null = shortlistBtnRef.current
+        ?? (frameRef.current?.querySelector?.('[data-fly-to]') as Element | null)?.parentElement
+        ?? null;
+      if (chipEl) flyHeart(chipEl, { frame: frameRef.current, target: flyTarget });
     } else {
       setHeartRm((s) => new Set(s).add(card.ref));
       setHeartAdd((s) => { const n = new Set(s); n.delete(card.ref); return n; });
@@ -907,6 +910,7 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
         ]}
         selected={sel}
         onSelect={selectTab}
+        flyToKey="shortlist"
       />
       <View style={styles.mapDrawerArea} onLayout={(e) => setAreaH(e.nativeEvent.layout.height)}>
         <View style={StyleSheet.absoluteFill}>
@@ -959,6 +963,23 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
                   );
                 })}
               </ScrollView>
+            ) : null}
+            {stayBase ? (
+              // Where the household is staying, above the day itself (owner). Tapping
+              // it opens the Stays tab, where a booking is changed or one is found.
+              <View style={styles.staySection}>
+                <Text style={styles.stayHead}>Where you're staying</Text>
+                <Press onPress={() => navigate(staysHref())} style={styles.stayRow} accessibilityRole="button" accessibilityLabel="Where you're staying">
+                  <Icon name="hotel" size={18} color={INK} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={styles.stayName} numberOfLines={1}>{stayBase.label?.split(',')[0]?.trim() || 'Your stay'}</Text>
+                    {/* check-in/out are times of day the editor stored (e.g. "15:00"),
+                        not dates, so they are shown as-is — dateLabel would blank them (Codex). */}
+                    {stayBase.checkIn ? <Text style={styles.stayMeta} numberOfLines={1}>Check in {stayBase.checkIn}{stayBase.checkOut ? ` · out ${stayBase.checkOut}` : ''}</Text> : null}
+                  </View>
+                  <Icon name="forward" size={16} color={MUTED} />
+                </Press>
+              </View>
             ) : null}
             <View style={styles.dayKickerRow}>
               <Text style={styles.dayKicker}>{days.length > 1 && day ? dateLabel(day.date) : 'The day'} · {nStops} {nStops === 1 ? 'stop' : 'stops'}</Text>
@@ -1300,6 +1321,8 @@ function ThinCard({ card, on, onHeart, onOpen }: { card: FeedCard; on: boolean; 
 // ---------------------------------------------------------------------------
 // The shortlist
 // ---------------------------------------------------------------------------
+const SHORT_FILTER_LABEL: Record<ShortTab, string> = { all: 'Everything', activities: 'Activities', food: 'Places to eat' };
+
 function ShortlistView({ cards, allCards, aside, show, sel, markers, zone, trip, nStops, homeBy, homeWord, drawer, onScroll, onBack, onShow, onSelect, onDetails, onAdd, onBringBack, inTrip, onViewTrip }: {
   cards: FeedCard[]; allCards: FeedCard[]; aside: FeedCard[]; show: ShortTab; sel: string | null; markers: MapMarker[]; zone: any;
   trip: TripDetail['trip']; nStops: number; homeBy: string; homeWord: string;
@@ -1322,6 +1345,7 @@ function ShortlistView({ cards, allCards, aside, show, sel, markers, zone, trip,
   // push the shortlist off the bottom (Codex). On a tiny frame it does not grow.
   const MAP_BIG = Math.max(MAP_SMALL, Math.min(Math.round(frameH * 0.58), frameH - 240));
   const [mapBig, setMapBig] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
   const mapH = useRef(new Animated.Value(MAP_SMALL)).current;
   useEffect(() => {
     Animated.timing(mapH, { toValue: mapBig ? MAP_BIG : MAP_SMALL, duration: 260, useNativeDriver: false }).start();
@@ -1369,14 +1393,40 @@ function ShortlistView({ cards, allCards, aside, show, sel, markers, zone, trip,
       </View>
       )}
 
-      <View style={styles.shortTabs}>
-        {tabs.map((t) => (
-          <Press key={t.key} onPress={() => onShow(t.key)} style={[styles.shortTab, { backgroundColor: show === t.key ? LIME : INACTIVE }]} accessibilityRole="button" accessibilityState={{ selected: show === t.key }}>
-            <Text style={[styles.shortTabLabel, { color: show === t.key ? INK : MUTED }]}>{t.label}</Text>
-            <Text style={[styles.shortTabN, { color: show === t.key ? INK : MUTED }]}>{t.n}</Text>
+      {drawer ? (
+        // 6c: the old three pills are one dropdown, and the count the selected tab
+        // used to carry lives in the header instead ("N saved") — nav §5.
+        <>
+        <View style={styles.shortDrawerHead}>
+          <Text style={styles.shortSaved}>{allCards.length} saved</Text>
+          <Press onPress={() => setFilterOpen((o) => !o)} style={styles.shortFilter} accessibilityRole="button" accessibilityState={{ expanded: filterOpen }} accessibilityLabel="Filter the shortlist">
+            <Text style={styles.shortFilterLabel}>{SHORT_FILTER_LABEL[show]}</Text>
+            <Icon name={filterOpen ? 'collapse' : 'expand'} size={12} color={INK} />
           </Press>
-        ))}
-      </View>
+        </View>
+        {/* The choices open in normal flow, pushing the list down — an absolute menu
+            would be clipped by the drawer's overflow:hidden on a short viewport (Codex). */}
+        {filterOpen ? (
+          <View style={styles.shortFilterMenu}>
+            {tabs.map((t) => (
+              <Press key={t.key} onPress={() => { onShow(t.key); setFilterOpen(false); }} style={[styles.shortFilterRow, show === t.key && { backgroundColor: LIME_TINT }]} accessibilityRole="button" accessibilityState={{ selected: show === t.key }}>
+                <Text style={styles.shortFilterRowLabel}>{t.label}</Text>
+                <Text style={styles.shortFilterRowN}>{t.n}</Text>
+              </Press>
+            ))}
+          </View>
+        ) : null}
+        </>
+      ) : (
+        <View style={styles.shortTabs}>
+          {tabs.map((t) => (
+            <Press key={t.key} onPress={() => onShow(t.key)} style={[styles.shortTab, { backgroundColor: show === t.key ? LIME : INACTIVE }]} accessibilityRole="button" accessibilityState={{ selected: show === t.key }}>
+              <Text style={[styles.shortTabLabel, { color: show === t.key ? INK : MUTED }]}>{t.label}</Text>
+              <Text style={[styles.shortTabN, { color: show === t.key ? INK : MUTED }]}>{t.n}</Text>
+            </Press>
+          ))}
+        </View>
+      )}
 
       <ScrollView
         style={{ flex: 1 }}
@@ -1691,6 +1741,13 @@ const styles = StyleSheet.create({
   whoText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: INK },
   dayKickerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 18, marginBottom: 8 },
   dayKicker: { fontFamily: fonts.body, fontSize: 11, fontWeight: '600', letterSpacing: 0.88, textTransform: 'uppercase', color: MUTED },
+  // Where you're staying: a title-case header (a possessive phrase reads wrong in
+  // caps) and a tappable row that opens the Stays tab.
+  staySection: { marginTop: 18 },
+  stayHead: { fontFamily: fonts.heading, fontSize: 14, fontWeight: '800', letterSpacing: -0.28, color: INK, marginBottom: 8 },
+  stayRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 12, backgroundColor: LIME_TINT },
+  stayName: { fontFamily: fonts.heading, fontSize: 15, fontWeight: '800', letterSpacing: -0.3, color: INK },
+  stayMeta: { fontFamily: fonts.body, fontSize: 12.5, color: MUTED, marginTop: 1 },
   dayMore: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', marginRight: -6 },
   dayStrip: { gap: 8, marginTop: 16 },
   dayChip: { paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: GREY, gap: 2 },
@@ -1795,6 +1852,15 @@ const styles = StyleSheet.create({
   calloutDetailsText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: INK },
   shortTitleRow: { flexDirection: 'row', alignItems: 'baseline', gap: 10, paddingHorizontal: 20, paddingTop: 16 },
   shortTitle: { fontFamily: fonts.heading, fontSize: 24, fontWeight: '800', letterSpacing: -0.72, color: INK },
+  // 6c drawer: "N saved" on the left, the "Everything ▾" filter dropdown on the right.
+  shortDrawerHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 8, paddingBottom: 4 },
+  shortSaved: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: MUTED },
+  shortFilter: { flexDirection: 'row', alignItems: 'center', gap: 6, marginVertical: -6, paddingVertical: 6 },
+  shortFilterLabel: { fontFamily: fonts.heading, fontSize: 15, fontWeight: '800', letterSpacing: -0.3, color: INK },
+  shortFilterMenu: { marginHorizontal: 20, marginTop: 4, marginBottom: 4, borderTopWidth: 1, borderColor: GREY, borderBottomWidth: 1 },
+  shortFilterRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 16, paddingHorizontal: 6, paddingVertical: 12 },
+  shortFilterRowLabel: { fontFamily: fonts.body, fontSize: 15, color: INK },
+  shortFilterRowN: { fontFamily: fonts.body, fontSize: 13, color: MUTED },
   shortTabs: { flexDirection: 'row', marginTop: 12 },
   shortTab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, paddingHorizontal: 6 },
   shortTabLabel: { fontFamily: fonts.heading, fontSize: 15, fontWeight: '800', letterSpacing: -0.3 },

@@ -7,12 +7,12 @@ import { CREAM, INK, LIME, fonts } from '../theme';
  * The X-ray search (trip redesign 8a, animation B — owner 29 Sep 2026).
  *
  * A bright lime line sweeps down the map; the ground below it is dimmed, places
- * flash lime as the line passes them, and the count ticks up with it. It runs
- * for 4.4s, eased in and out, then holds the result for 1.6s before handing over
- * to the feed — deliberately longer than a loader so it can be read. It draws in
- * screen space over the map area; the detour zone underneath is the real
- * geographic band (MapGL's `shade`). The old magnifying-glass sweep it replaces
- * is gone with the pin-search flow.
+ * flash lime as the line passes them, and the count ticks up with it. It runs for
+ * ~3s in total — the sweep (`dur`, 2.2s) then a short hold (`hold`, 0.8s) — short
+ * enough for something every new trip sees (owner, 30 Sep 2026, cutting the earlier
+ * 4.4s + 1.6s); it only runs on longer while the places are still loading. It draws
+ * in screen space over the shrunk map above the drawer (nav 6e); the detour zone
+ * underneath is the real geographic band (MapGL's `shade`).
  *
  * `act`/`food` are the real band counts once the search returns; while they are
  * still 0 the caption simply counts to 0 and the payoff line lands when they
