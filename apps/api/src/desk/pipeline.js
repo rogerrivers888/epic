@@ -890,14 +890,30 @@ export const PREWARM_TOP = 20;
  */
 export async function prewarm({ cell, mode = 'driving', minutes = 30, research = null } = {}) {
   if (!cell) return { places: 0 };
-  const { rankingFor } = await import('../repositories/ringTables.js');
+  const { rankingFor, refreshRing } = await import('../repositories/ringTables.js');
   // Whatever the ring tables rank by is what a household is shown, so read
   // the categories from the ring itself rather than guess the vocabulary.
   const { rows: cats } = await query(
     `select distinct category from ring_rankings where cell = $1 and minutes = $2`, [cell, minutes]);
   const refs = new Set();
-  for (const c of cats) {
-    for (const r of await rankingFor({ cell, mode, minutes, category: c.category, limit: PREWARM_TOP })) refs.add(r.venueRef);
+  if (cats.length) {
+    for (const c of cats) {
+      for (const r of await rankingFor({ cell, mode, minutes, category: c.category, limit: PREWARM_TOP })) refs.add(r.venueRef);
+    }
+  } else {
+    // A matrix-less mode (walk/transit) persists no rankings — they would freeze
+    // once a real matrix arrives — so its top places come off the ring's own
+    // live result instead of the empty table (Codex).
+    const live = await refreshRing({ cell, mode, minutes }).catch(() => null);
+    if (live?.estimated) {
+      const byCat = new Map();
+      for (const r of live.rankings ?? []) {
+        const n = byCat.get(r.category) ?? 0;
+        if (n >= PREWARM_TOP) continue;
+        byCat.set(r.category, n + 1);
+        refs.add(r.venueRef);
+      }
+    }
   }
   const queueResearch = research ?? (await import('../sources/own.js')).queueEnrichment;
   for (const ref of refs) {

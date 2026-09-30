@@ -85,20 +85,37 @@ export async function pickPlaces({ cell, mode = 'driving', minutes = 30, top = T
   const ring = await import('../repositories/ringTables.js');
   let counted = await ring.countsFor({ cell, mode, minutes });
   let refreshed = false;
+  let live = null;
   if (counted == null) {
-    await (refresh ?? ring.refreshRing)({ cell, mode, minutes });
+    live = await (refresh ?? ring.refreshRing)({ cell, mode, minutes });
     refreshed = true;
     counted = await ring.countsFor({ cell, mode, minutes });
   }
-  const { rows: cats } = await query(
-    `select distinct category from ring_rankings where cell = $1 and mode = $2 and minutes = $3 and category <> '' order by category`,
-    [cell, travelMode(mode), minutes]);
   const picked = new Map();
-  for (const { category } of cats) {
-    for (const r of await ring.rankingFor({ cell, mode, minutes, category, limit: top })) {
-      const had = picked.get(r.venueRef);
-      if (had) { if (!had.categories.includes(category)) had.categories.push(category); continue; }
-      picked.set(r.venueRef, { venueRef: r.venueRef, categories: [category], pickedFor: 'ring', rank: r.rank });
+  const add = (venueRef, category, rank) => {
+    const had = picked.get(venueRef);
+    if (had) { if (!had.categories.includes(category)) had.categories.push(category); return; }
+    picked.set(venueRef, { venueRef, categories: [category], pickedFor: 'ring', rank });
+  };
+  let cats;
+  if (live?.estimated) {
+    // A straight-line ring persists no rankings (they would freeze once a matrix
+    // is built), so its ranked places come off the refresh's own result rather
+    // than the empty `ring_rankings` table (Codex).
+    cats = [...new Set((live.rankings ?? []).map((r) => r.category).filter((c) => c && c !== ''))].sort().map((category) => ({ category }));
+    const byCat = new Map();
+    for (const r of live.rankings ?? []) {
+      const n = byCat.get(r.category) ?? 0;
+      if (n >= top) continue;
+      byCat.set(r.category, n + 1);
+      add(r.venueRef, r.category, r.rank);
+    }
+  } else {
+    ({ rows: cats } = await query(
+      `select distinct category from ring_rankings where cell = $1 and mode = $2 and minutes = $3 and category <> '' order by category`,
+      [cell, travelMode(mode), minutes]));
+    for (const { category } of cats) {
+      for (const r of await ring.rankingFor({ cell, mode, minutes, category, limit: top })) add(r.venueRef, category, r.rank);
     }
   }
   // The reference set (owner, 25 Sep 2026): research sweeps in reference mode.
@@ -117,7 +134,9 @@ export async function pickPlaces({ cell, mode = 'driving', minutes = 30, top = T
   }
   return {
     places: [...picked.values()],
-    counted: counted != null,
+    // An estimated ring is counted live and never lands in `ring_counts`, so a
+    // null there is not "uncounted" when the refresh returned an estimate.
+    counted: counted != null || Boolean(live?.estimated),
     refreshed,
     categories: cats.map((c) => c.category),
     reference,

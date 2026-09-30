@@ -69,7 +69,7 @@ const MARKER = '';
  * it directly rather than from a point, so the row is about exactly the ring
  * its key names.
  */
-export async function refreshRing({ cell, mode = 'driving', minutes = 30, force = false } = {}) {
+export async function refreshRing({ cell, lat = null, lng = null, mode = 'driving', minutes = 30, force = false } = {}) {
   const kind = travelMode(mode);
   // One count of a ring at a time, in this process (Codex, 25 Sep 2026).
   //
@@ -83,7 +83,7 @@ export async function refreshRing({ cell, mode = 'driving', minutes = 30, force 
   const key = ringKey({ cell, mode: kind, minutes });
   const going = inFlight.get(key);
   if (going && !force) return going;
-  const run = (going ?? Promise.resolve()).catch(() => null).then(() => countRing({ cell, kind, minutes }));
+  const run = (going ?? Promise.resolve()).catch(() => null).then(() => countRing({ cell, lat, lng, kind, minutes }));
   inFlight.set(key, run);
   try { return await run; }
   finally { if (inFlight.get(key) === run) inFlight.delete(key); }
@@ -92,51 +92,38 @@ export async function refreshRing({ cell, mode = 'driving', minutes = 30, force 
 /** Counts in flight, by ring key — what serialises `refreshRing`. */
 const inFlight = new Map();
 
-async function countRing({ cell, kind, minutes }) {
+async function countRing({ cell, lat = null, lng = null, kind, minutes }) {
   // The row is dated from the moment the count began reading, not the moment
   // it wrote: a count that read the matrix or the census before a refresh and
   // wrote after it would otherwise carry a date newer than the refresh's
   // cutoff and be skipped by the walk that follows, while holding the old
   // shape (Codex, 25 Sep 2026). Dated from the start, it is inside the walk.
   const { rows: [{ at: startedAt }] } = await query('select now() as at');
-  const ring = await ringFor({ cell, minutes, mode: kind });
+  // The home coordinate is passed through where there is one (a home move or
+  // registration), so a straight-line ring is centred on the actual home, the
+  // same circle a live Inspire request draws — not the sector centroid, which
+  // near a boundary can miss an uncensused neighbour that is inside the live
+  // circle and never trigger its census (Codex).
+  const ring = await ringFor({ cell, lat, lng, minutes, mode: kind });
   if (!ring) return null;
-  // `ring_counts` is keyed on (cell, mode, minutes) with no room for the reach's
-  // method, so a straight-line estimate written here would later be read as a
-  // matrix count once the mode's matrix is built — freezing the very count the
-  // fallback exists to move. censusForRing already recomputes an estimated ring
-  // live and never reads this table for one, so a straight-line ring is not
-  // persisted at all — and any legacy row for this key (a walk/transit count
-  // written under the old home-sector geometry, before this fallback) is deleted
-  // here, so the periodic refresh purges it and it can never be read as a matrix
-  // count when a real matrix later appears (Codex).
-  if (ring.method === 'straight-line') {
-    await query('delete from ring_counts where cell = $1 and mode = $2 and minutes = $3', [cell, kind, minutes]);
-    await query('delete from ring_rankings where cell = $1 and mode = $2 and minutes = $3', [cell, kind, minutes]);
-    // Its counts are not persisted, but a home move or registration on a
-    // matrix-less mode must still discover which districts of the reach the
-    // census has never looked at, or a new walk/transit household in an
-    // uncensused area never triggers the automatic census and stays empty
-    // (Codex). So return the discovery metadata, drawn from the reach's own
-    // districts, with no counts to store.
-    const discover = ring.reachOutcodes ?? ring.outcodes ?? [];
-    const { rows: unseen } = discover.length
-      ? await query('select distinct area_slug from area_counts where area_slug = any($1)',
-        [discover.map((o) => o.toLowerCase())])
-      : { rows: [] };
-    const reached = new Set(unseen.map((r) => r.area_slug));
-    const notCensusedOutcodes = discover.filter((o) => !reached.has(o.toLowerCase()));
-    return {
-      cell, mode: kind, minutes, counts: [], ranked: 0, estimated: true,
-      notCensused: notCensusedOutcodes.length, computedAt: startedAt, notCensusedOutcodes,
-    };
-  }
+  // A straight-line estimate is never persisted: `ring_counts` is keyed on
+  // (cell, mode, minutes) with no room for the reach's method, so a written
+  // estimate would later be read as a matrix count once the mode's matrix is
+  // built — freezing the very count the fallback exists to move. It is computed
+  // here all the same, so a home move can still discover uncensused districts and
+  // prewarm/pickPlaces still get ranked places; only the persist is skipped, and
+  // any legacy row for the key (a walk/transit count under the old home-sector
+  // geometry) is purged so it can never be read as a matrix count later (Codex).
+  const estimated = ring.method === 'straight-line';
   const band = ring.band ?? ring.cells;
+  // The reach's own districts — the tight set for a straight-line ring, the same
+  // as the candidate set for a matrix one — decide the floor and the discovery.
+  const floorOutcodes = ring.reachOutcodes ?? ring.outcodes;
 
   const [placed, seen] = await Promise.all([
     censusInRing({ cells: band, outcodes: ring.outcodes, shownOnly: true, circle: ring.circle ?? null }),
     query('select distinct area_slug, category, complete from area_counts where area_slug = any($1)',
-      [ring.outcodes.map((o) => o.toLowerCase())]),
+      [floorOutcodes.map((o) => o.toLowerCase())]),
   ]);
   // Looked at whole: a district with any row marked incomplete — a run stopped
   // part-way across it — is counted, and is a floor like one never reached
@@ -147,7 +134,7 @@ async function countRing({ cell, kind, minutes }) {
   const reached = new Set(seen.rows.map((r) => r.area_slug));
   const partial = new Set(seen.rows.filter((r) => r.complete === false).map((r) => r.area_slug));
   const censused = new Set([...reached].filter((a) => !partial.has(a)));
-  const notCensused = ring.outcodes.filter((o) => !censused.has(o.toLowerCase())).length;
+  const notCensused = floorOutcodes.filter((o) => !censused.has(o.toLowerCase())).length;
 
   // Every category the census knows in these districts, so a category it
   // looked for and found nothing of is written as nought rather than left
@@ -204,32 +191,42 @@ async function countRing({ cell, kind, minutes }) {
     ordered.forEach((ref, i) => rankings.push({ category, venueRef: ref, epicScore: scoreOf.get(ref), rank: i + 1 }));
   }
 
-  // Written whole, on one connection: a ring half counted is worse than a ring
-  // counted last month, and `begin` through the pool is not a transaction —
-  // each statement may land on a different client.
-  await withTransaction(async (client) => {
-    await client.query('delete from ring_counts where cell = $1 and mode = $2 and minutes = $3', [cell, kind, minutes]);
-    await client.query('delete from ring_rankings where cell = $1 and mode = $2 and minutes = $3', [cell, kind, minutes]);
-    await client.query(
-      `insert into ring_counts (cell, mode, minutes, category, places, unresolved, floor, computed_at)
-       select $1, $2, $3, c.category, c.places, c.unresolved, c.floor, $8::timestamptz
-         from unnest($4::text[], $5::int[], $6::int[], $7::boolean[]) as c(category, places, unresolved, floor)`,
-      [cell, kind, minutes, counts.map((c) => c.category), counts.map((c) => c.places),
-        counts.map((c) => c.unresolved), counts.map((c) => c.floor), startedAt]);
-    if (rankings.length) {
+  if (estimated) {
+    // No persist — but purge any legacy row for this key so the refresh trigger
+    // (keyed on ring_counts) stays clean and no stale rank survives.
+    await query('delete from ring_counts where cell = $1 and mode = $2 and minutes = $3', [cell, kind, minutes]);
+    await query('delete from ring_rankings where cell = $1 and mode = $2 and minutes = $3', [cell, kind, minutes]);
+  } else {
+    // Written whole, on one connection: a ring half counted is worse than a ring
+    // counted last month, and `begin` through the pool is not a transaction —
+    // each statement may land on a different client.
+    await withTransaction(async (client) => {
+      await client.query('delete from ring_counts where cell = $1 and mode = $2 and minutes = $3', [cell, kind, minutes]);
+      await client.query('delete from ring_rankings where cell = $1 and mode = $2 and minutes = $3', [cell, kind, minutes]);
       await client.query(
-        `insert into ring_rankings (cell, mode, minutes, category, venue_ref, epic_score, rank, computed_at)
-         select $1, $2, $3, r.category, r.venue_ref, r.epic_score, r.rank, $8::timestamptz
-           from unnest($4::text[], $5::text[], $6::real[], $7::int[]) as r(category, venue_ref, epic_score, rank)`,
-        [cell, kind, minutes, rankings.map((r) => r.category), rankings.map((r) => r.venueRef),
-          rankings.map((r) => r.epicScore), rankings.map((r) => r.rank), startedAt]);
-    }
-  });
+        `insert into ring_counts (cell, mode, minutes, category, places, unresolved, floor, computed_at)
+         select $1, $2, $3, c.category, c.places, c.unresolved, c.floor, $8::timestamptz
+           from unnest($4::text[], $5::int[], $6::int[], $7::boolean[]) as c(category, places, unresolved, floor)`,
+        [cell, kind, minutes, counts.map((c) => c.category), counts.map((c) => c.places),
+          counts.map((c) => c.unresolved), counts.map((c) => c.floor), startedAt]);
+      if (rankings.length) {
+        await client.query(
+          `insert into ring_rankings (cell, mode, minutes, category, venue_ref, epic_score, rank, computed_at)
+           select $1, $2, $3, r.category, r.venue_ref, r.epic_score, r.rank, $8::timestamptz
+             from unnest($4::text[], $5::text[], $6::real[], $7::int[]) as r(category, venue_ref, epic_score, rank)`,
+          [cell, kind, minutes, rankings.map((r) => r.category), rankings.map((r) => r.venueRef),
+            rankings.map((r) => r.epicScore), rankings.map((r) => r.rank), startedAt]);
+      }
+    });
+  }
   return {
     cell, mode: kind, minutes, counts: counts.filter((c) => c.category !== MARKER), ranked: rankings.length, notCensused,
-    computedAt: startedAt,
+    computedAt: startedAt, estimated,
+    // The rankings themselves travel on the result, so prewarm and pickPlaces can
+    // read them for an estimated ring that has nothing in `ring_rankings` (Codex).
+    rankings,
     // Named, so the caller can ask the census to look at them.
-    notCensusedOutcodes: ring.outcodes.filter((o) => !reached.has(o.toLowerCase())),
+    notCensusedOutcodes: floorOutcodes.filter((o) => !reached.has(o.toLowerCase())),
   };
 }
 
@@ -243,15 +240,18 @@ export async function refreshForHome({ lat, lng, mode = 'driving', bands = BANDS
   if (lat == null || lng == null) return null;
   const at = await cellAt({ lat: Number(lat), lng: Number(lng) }).catch(() => null);
   if (!at?.code) return null;
-  const done = await refreshBands({ cell: at.code, mode, bands });
+  // The home's own coordinate is carried down, so a straight-line ring is centred
+  // on the home rather than the sector centroid and its discovery matches the
+  // live circle (Codex).
+  const done = await refreshBands({ cell: at.code, lat: Number(lat), lng: Number(lng), mode, bands });
   const widest = done.filter(Boolean).sort((a, b) => b.minutes - a.minutes)[0] ?? null;
   return { cell: at.code, bands: done, notCensusedOutcodes: widest?.notCensusedOutcodes ?? [] };
 }
 
 /** Every band the app offers, for one ring. What a home-location change kicks off. */
-export async function refreshBands({ cell, mode = 'driving', bands = BANDS } = {}) {
+export async function refreshBands({ cell, lat = null, lng = null, mode = 'driving', bands = BANDS } = {}) {
   const out = [];
-  for (const minutes of bands) out.push(await refreshRing({ cell, mode, minutes }));
+  for (const minutes of bands) out.push(await refreshRing({ cell, lat, lng, mode, minutes }));
   return out;
 }
 
