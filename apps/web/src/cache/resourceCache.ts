@@ -239,7 +239,12 @@ export function useCachedResource<T>(
   const e = enabled && key ? store.get(key) : undefined;
   const refresh = useCallback(async () => {
     if (!key) return;
-    await refetch(key, () => fetcherRef.current());
+    // Bind the fetcher for *this* key now, not when a chained refetch later
+    // dereferences the ref: if the key changed while the refetch was queued
+    // behind an in-flight request, `fetcherRef.current` would be the new key's
+    // fetcher and its rows would land under the old key (Codex, D13).
+    const fn = fetcherRef.current;
+    await refetch(key, fn);
   }, [key]);
 
   return {

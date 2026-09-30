@@ -6,11 +6,12 @@ import { invalidateTabData } from './cache/resourceCache';
 
 // Path prefixes whose writes change what the Inspire, Places or Trips tab caches
 // hold: saving/removing/naming a place (`/api/places/save`, `/api/atlas/*`),
-// logging a visit (`/api/visits`), any trip write (`/api/trips`), a host booking
-// (`/api/bookings`, shown under Trips) and the home or household (`/api/household`,
-// which moves the Inspire ring and the atlas home). Telemetry and the back office
-// are deliberately absent — see the note at the call site.
-const TAB_DATA_WRITE = ['/api/places/', '/api/atlas/', '/api/visits', '/api/trips', '/api/bookings', '/api/household'];
+// logging a visit (`/api/visits`), recording a meal (`/api/orders/:id/eaten`
+// makes a visit and a household place), any trip write (`/api/trips`), a host
+// booking (`/api/bookings`, shown under Trips) and the home or household
+// (`/api/household`, which moves the Inspire ring and the atlas home). Telemetry
+// and the back office are deliberately absent — see the note at the call site.
+const TAB_DATA_WRITE = ['/api/places/', '/api/atlas/', '/api/visits', '/api/orders', '/api/trips', '/api/bookings', '/api/household'];
 import { flush as flushOutbox, queue as queueWrite, refreshOutbox } from './offline/outbox';
 import { copyHolder, deviceLabel, holderOf, sessionExpired, sessionToken, setCopyHolder, setSessionToken } from './session';
 
