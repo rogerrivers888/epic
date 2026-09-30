@@ -209,7 +209,8 @@ test('food near here still finds a Google-only sweep row through the index\'s po
   const g = `google:food-${randomUUID()}`;
   await query(`insert into scout_places (area_code, venue_ref, rank, lat, lng, from_sources) values ('ZZ5', $1, 1, 50.1, -5.1, '["google"]')`, [g]);
   assert.equal((await query('select lat from scout_places where venue_ref = $1', [g])).rows[0].lat, null, 'the row keeps no Google point');
-  await query(`insert into place_index (venue_ref, lat, lng, coords_from, coords_at) values ($1, 50.1, -5.1, 'google', now())`, [g]);
+  // The refused point went to the index as it arrived (migration 307).
+  assert.deepEqual((await query('select lat, coords_from from place_index where venue_ref = $1', [g])).rows[0], { lat: 50.1, coords_from: 'google' });
   const near = await foodNear({ lat: 50.1, lng: -5.1, km: 2, shownOnly: false });
   assert.ok(near.some((r) => r.venue_ref === g && r.lat === 50.1));
 });
@@ -218,7 +219,7 @@ test('a rented point refused by a table is left on the index for its thirty days
   const { rows: [t] } = await query(`insert into households (name) values ('Stop test') returning id`);
   const trip = (await query(`insert into trips (household_id, title, origin_label, origin_lat, origin_lng, depart_at, return_at, start_date, end_date) values ($1, 'x', 'Home', 51.4, -0.6, now(), now(), '2026-10-04', '2026-10-05') returning id`, [t.id])).rows[0];
   const ref = `google:outing-${randomUUID()}`;
-  await query(`insert into trip_stops (trip_id, venue_ref, venue_name, lat, lng, position) values ($1, $2, 'x', 51.47, -0.61, 1)`, [trip.id, ref]);
+  await query(`insert into trip_stops (trip_id, venue_ref, venue_name, lat, lng, position, dwell_minutes) values ($1, $2, 'x', 51.47, -0.61, 1, 60)`, [trip.id, ref]);
   assert.equal((await query('select lat from trip_stops where venue_ref = $1', [ref])).rows[0].lat, null);
   assert.deepEqual((await query('select lat, coords_from from place_index where venue_ref = $1', [ref])).rows[0], { lat: 51.47, coords_from: 'google' });
   assert.equal((await query('select epic_point_lat(venue_ref, lat, point_from) as lat from trip_stops where venue_ref = $1', [ref])).rows[0].lat, 51.47);
