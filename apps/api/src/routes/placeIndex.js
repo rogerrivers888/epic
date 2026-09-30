@@ -3828,9 +3828,11 @@ const IX_TRUE_SRC = (x) => `(case
                  and a.source is distinct from 'google' and a.display_source is null and a.lat is not null and a.lng is not null
                  and abs(a.lat - ${x}.lat) <= 0.0005 and abs(a.lng - ${x}.lng) <= 0.0005) then 'atlas'
   -- A sweep row under an atlas reference whose point matched nothing above is
-  -- the old Google point, rematched or not.
+  -- the old rented point, rematched or not — under the provider it is shown from.
   when ${x}.venue_ref like 'atlas:%' and exists (select 1 from attractions g where g.id = (case when ${x}.venue_ref ~ '^atlas:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then substr(${x}.venue_ref, 7)::uuid end)
-                 and (g.source = 'google' or g.display_source is not null)) then 'google'
+                 and (g.source = 'google' or g.display_source is not null))
+       then (select coalesce(g.display_source, 'google') from attractions g
+              where g.id = (case when ${x}.venue_ref ~ '^atlas:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then substr(${x}.venue_ref, 7)::uuid end))
   when split_part(${x}.venue_ref, ':', 1) in ('osm', 'atlas', 'wikidata', 'own', 'photo', 'fixtures')
        and coalesce(${x}.coords_from, split_part(${x}.venue_ref, ':', 1)) in ('osm', 'atlas', 'wikidata', 'own', 'household', 'photo', 'fixtures') then coalesce(${x}.coords_from, split_part(${x}.venue_ref, ':', 1))
   else split_part(${x}.venue_ref, ':', 1) end)`;
@@ -3868,7 +3870,12 @@ export async function coordinateReport() {
        -- Every copy of a rented point, with whose it is: Google's, or another
        -- licensed provider's, never folded into Google (Codex, 30 Sep 2026).
        rented as (
-         select venue_ref, case when venue_ref like 'atlas:%' then 'google' else split_part(venue_ref, ':', 1) end as provider from (
+         -- One provider per place, whichever copy named it first (Codex).
+         select distinct on (venue_ref) venue_ref, provider from (
+         select venue_ref,
+                case when venue_ref ~ '^atlas:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                     then coalesce((select g.display_source from attractions g where g.id::text = substr(venue_ref, 7)), 'google')
+                     else split_part(venue_ref, ':', 1) end as provider from (
            select venue_ref from place_cells where lat is not null and lng is not null and not (split_part(venue_ref, ':', 1) = any($1::text[]))
            -- A sweep row twinned with the open map keeps OSM's point under
            -- Google's reference: only the rows the open map never gave are rented.
@@ -3880,7 +3887,8 @@ export async function coordinateReport() {
            union select venue_ref from place_records where lat is not null and lng is not null and osm_ref is null and not (split_part(venue_ref, ':', 1) = any($1::text[]))
          ) r
          -- Whichever provider the row is displayed from, under its own name.
-         union select coalesce(venue_ref, 'atlas:' || id::text), display_source from attractions where lat is not null and lng is not null and display_source is not null),
+         union select coalesce(venue_ref, 'atlas:' || id::text), display_source from attractions where lat is not null and lng is not null and display_source is not null
+         ) one order by venue_ref, provider),
        p as (
          select case
                   when coalesce(r.osm, false) or coalesce(a.osm, false) or sc.venue_ref is not null or (pi.lat is not null and pi.lng is not null and pi.src = 'osm') then 'osm'
