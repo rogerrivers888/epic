@@ -125,17 +125,22 @@ export function OpeningScreen() {
   const s = Math.max(0, Math.min(4, Math.round(step)));
 
   const leave = () => navigate(paths.inspire(), { replace: true });
-  // Next is a move, so it pushes (the repo convention): Back then steps through
-  // the intro screens rather than leaving the opening in one tap.
-  const next = () => setStep(s + 1, { replace: false });
+  // The opening is one once-through sequence, not a stack of pages: each step
+  // replaces the last, so it lives in a single history entry and Back leaves the
+  // whole sequence (to wherever it was opened from) rather than stepping back
+  // into a screen already seen. `setStep` replaces by default.
+  const next = () => setStep(s + 1);
 
   const common = { stepIndex: s, reduced, onSkip: leave };
+  // A key per step: the two card screens are the same component, so without it
+  // React reuses the instance from step 3 on step 4 and the Host cards never
+  // run their slide-up (the animation values stay at their finished state).
   const inner = s === 0
-    ? <Opener width={box.w} height={box.h} reduced={reduced} onStart={() => setStep(1, { replace: false })} onHaveAccount={leave} />
-    : s === 1 ? <DayOrTrip {...common} onNext={next} />
-    : s === 2 ? <YourCrew {...common} onNext={next} />
-    : s === 3 ? <CardScreen {...common} title="Book an expert." sub="Local specialists who make the day. You just turn up." cards={EXPERTS} ctaLabel="Next" onNext={next} showSkip />
-    : <CardScreen {...common} title="Host it." sub="A weekend for friends and family, or a proper event: a craft fair, a 3-day course, a weekly workshop." cards={HOSTS} ctaLabel="Let's go" onNext={leave} showSkip={false} />;
+    ? <Opener key="s0" width={box.w} height={box.h} reduced={reduced} onStart={() => setStep(1)} onHaveAccount={leave} />
+    : s === 1 ? <DayOrTrip key="s1" {...common} onNext={next} />
+    : s === 2 ? <YourCrew key="s2" {...common} onNext={next} />
+    : s === 3 ? <CardScreen key="s3" {...common} title="Book an expert." sub="Local specialists who make the day. You just turn up." cards={EXPERTS} ctaLabel="Next" onNext={next} showSkip />
+    : <CardScreen key="s4" {...common} title="Host it." sub="A weekend for friends and family, or a proper event: a craft fair, a 3-day course, a weekly workshop." cards={HOSTS} ctaLabel="Let's go" onNext={leave} showSkip={false} />;
 
   return (
     <View
