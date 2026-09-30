@@ -490,6 +490,7 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
           // Per-field source, so the drawer maps only a Google price level onto
           // the bands and credits a Google rating even on an OSM identity (Codex).
           provenance: v.provenance ?? null,
+          mapsUrl: v.mapsUrl ?? null,
           // The reference and its credit, signed the way every other photo on
           // this screen is. The bytes are fetched for a tile in the viewport, a
           // row at a time, and never for a list — that is the card's job, and it
@@ -904,6 +905,7 @@ inspire.get('/near', async (req, res, next) => {
       // Per-field source, so the drawer maps only a Google price level onto the
       // bands and credits a Google rating even on an OSM identity (Codex).
       provenance: v.provenance ?? null,
+      mapsUrl: v.mapsUrl ?? null,
       goodForChildren: v.goodForChildren ?? null,
       photos: (v.photos ?? []).slice(0, 1),
       // Ours if we have one. A provider's photo still travels on `photos` and is

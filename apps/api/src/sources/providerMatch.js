@@ -252,7 +252,12 @@ const MAX = 400;
 
 export async function reviewsFor({ venueRef, name, lat, lng, householdId = null }) {
   const hit = kept.get(venueRef);
-  if (hit && Date.now() - hit.at < TTL_MS) return hit.value;
+  // Only a full entry answers here. `ratingsFor` writes the same map with a
+  // rating and count alone (for the cards), and returning one of those would
+  // report an atlas place's cost as "not known yet" and its Google attribution
+  // as unlinked even though a detail fetch would have both — so a rating-only
+  // entry is treated as a miss and the detail is fetched and merged (Codex).
+  if (hit && hit.value?.full && Date.now() - hit.at < TTL_MS) return hit.value;
 
   // Switched off is not "no reviews", and not "no match" either: asked here
   // it would have come back unmatched and been kept for six hours as such.
@@ -261,7 +266,7 @@ export async function reviewsFor({ venueRef, name, lat, lng, householdId = null 
 
   const id = await googleRefFor({ venueRef, name, lat, lng, householdId });
   if (!id) {
-    const value = { rating: null, ratingCount: null, reviews: [], priceLevel: null, mapsUrl: null, attribution: null, matched: false };
+    const value = { rating: null, ratingCount: null, reviews: [], priceLevel: null, mapsUrl: null, attribution: null, matched: false, full: true };
     kept.set(venueRef, { at: Date.now(), value });
     return value;
   }
@@ -283,6 +288,9 @@ export async function reviewsFor({ venueRef, name, lat, lng, householdId = null 
     // being allowed to show them, not a courtesy.
     attribution: v ? (googleSource.attribution?.text ?? 'Powered by Google') : null,
     matched: Boolean(v),
+    // A full entry (rating, reviews, price level, map link) — told apart from the
+    // rating-only entries ratingsFor writes to this same cache.
+    full: true,
   };
   kept.set(venueRef, { at: Date.now(), value });
   while (kept.size > MAX) kept.delete(kept.keys().next().value);

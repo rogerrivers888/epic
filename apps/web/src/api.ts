@@ -749,6 +749,8 @@ export type TripAlongPlace = {
   rating: number | null; ratingCount: number | null; priceLevel: number | null;
   /** Per-field source for a merged place — see Venue.provenance. */
   provenance?: Record<string, { source: string; expiresAt?: string | null }>;
+  /** Google Maps link for a Google-rated place — see Venue.provenance's neighbour on the drawer item. */
+  mapsUrl?: string | null;
   openingHours: string | null; phone: string | null; website: string | null; address: string | null;
   /** A sentence about the place, and whether it is open — the browse card's two other lines. */
   summary: string | null; openNow: boolean | null; closesAt: string | null; opensAt: string | null;
@@ -1182,7 +1184,7 @@ export type InspireStage = 'thinking' | 'thinking-again' | 'placing' | 'ready' |
 export type Idea = { id: string; title: string; why: string; placeText: string; place: Place | null; travelMinutes: number | null; distanceKm?: number | null; overnight: boolean; do: string[]; eat: string[]; placing?: boolean };
 export type IdeaThing = { venueRef: string; name: string; category: string; kind: 'do' | 'eat' | 'see'; experiences: string[]; rating: number | null; ratingCount: number | null; priceLevel: number | null; photos?: VenuePhotoRef[]; distanceKm: number | null; lat: number | null; lng: number | null; reasons: string[] };
 /** The place an idea is about, as its source holds it: the picture, the stars, how far. */
-export type IdeaHeadline = { venueRef: string; name: string; category: string; experiences?: string[]; rating: number | null; ratingCount: number | null; priceLevel: number | null; provenance?: Record<string, { source: string; expiresAt?: string | null }>; photos: VenuePhotoRef[]; distanceKm: number | null; summary: string | null; attribution: string | null };
+export type IdeaHeadline = { venueRef: string; name: string; category: string; experiences?: string[]; rating: number | null; ratingCount: number | null; priceLevel: number | null; provenance?: Record<string, { source: string; expiresAt?: string | null }>; mapsUrl?: string | null; photos: VenuePhotoRef[]; distanceKm: number | null; summary: string | null; attribution: string | null };
 
 // ---------------------------------------------------------------------------
 // Inspire — the home screen
@@ -1290,6 +1292,8 @@ export type InspireItem = {
   rating: number | null; ratingCount: number | null; priceLevel: number | null;
   /** Per-field source for a merged place — see Venue.provenance. */
   provenance?: Record<string, { source: string; expiresAt?: string | null }>;
+  /** Google Maps link for a Google-rated place, so its attribution can link to source without a detail fetch. */
+  mapsUrl?: string | null;
   goodForChildren: boolean | null;
   /** What its drawer says (back office › Shelves): indoors or out, and for children. Null is "it depends". */
   indoor?: boolean | null; forKids?: boolean | null;

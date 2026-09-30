@@ -1688,6 +1688,7 @@ function bestNameMatch(venues, label, center) {
     // Which source each merged field came from, so the drawer reads a Google
     // price level or rating merged onto an OSM identity as Google's (Codex).
     provenance: best.provenance ?? null,
+    mapsUrl: best.mapsUrl ?? null,
     photos: (best.photos ?? []).slice(0, 1), distanceKm: Number(kmBetween(center, best).toFixed(1)),
     summary: best.summary ?? null, attribution: best.attributionText ?? best.attribution ?? null,
   };

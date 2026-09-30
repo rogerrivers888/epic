@@ -711,7 +711,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
     // identity is read as Google's; and the atlas's own Wikipedia link, so its
     // summary carries the adjacent CC BY-SA credit where no owned record loads
     // (a wikidata: place never fetches one) (Codex).
-    provenance: item.provenance, wikipediaUrl: item.wikipediaUrl ?? null,
+    provenance: item.provenance, wikipediaUrl: item.wikipediaUrl ?? null, mapsUrl: item.mapsUrl ?? null,
     distanceKm: item.distanceKm, travelFromBaseMinutes: item.travelMinutes,
     source: item.source,
   } as BrowseItem);

@@ -3123,7 +3123,7 @@ function alongToItem(p: TripAlongPlace): BrowseItem {
     rating: p.rating, ratingCount: p.ratingCount, priceLevel: p.priceLevel,
     // Which source each merged field came from, so a Google rating or price
     // level on an OSM-identified place is read as Google's (Codex).
-    provenance: p.provenance,
+    provenance: p.provenance, mapsUrl: p.mapsUrl ?? null,
     summary: p.summary, goodForChildren: p.goodForChildren,
     /** What stopping here costs the day — the full view's meta line had no number. */
     travelFromBaseMinutes: p.detourMinutes,

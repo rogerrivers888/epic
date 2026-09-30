@@ -350,7 +350,7 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
       rating: head?.rating ?? null, ratingCount: head?.ratingCount ?? null, priceLevel: head?.priceLevel ?? null,
       // Which source each merged field came from, so a Google price level or
       // rating merged onto an OSM identity reads as Google's in the drawer (Codex).
-      provenance: head?.provenance,
+      provenance: head?.provenance, mapsUrl: head?.mapsUrl ?? null,
       photos: head?.photos ?? [], summary: head?.summary ?? null, attribution: head?.attribution ?? null,
       distanceKm: head?.distanceKm ?? idea.distanceKm ?? null, travelFromBaseMinutes: idea.travelMinutes ?? null,
       source: ref.split(':')[0],

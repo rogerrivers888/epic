@@ -1251,7 +1251,7 @@ function cardToItem(card: FeedCard): BrowseItem {
     rating: p?.rating ?? null, ratingCount: p?.ratingCount ?? null, priceLevel: p?.priceLevel ?? null,
     // The merged place's per-field source, so a Google rating or price level on
     // an OSM-identified place is read as Google's (Codex).
-    provenance: p?.provenance,
+    provenance: p?.provenance, mapsUrl: p?.mapsUrl ?? null,
     summary: p?.summary ?? null, goodForChildren: p?.goodForChildren ?? null,
     travelFromBaseMinutes: p?.detourMinutes ?? null,
   };

@@ -1160,6 +1160,7 @@ router.get('/:id/along', async (req, res, next) => {
         // Google rating to Google and maps only a Google price level onto the
         // bands even when the place's identity is OSM (Codex).
         provenance: v.provenance ?? null,
+        mapsUrl: v.mapsUrl ?? null,
         openingHours: v.openingHours ?? null, phone: v.phone ?? null, website: v.website ?? null,
         address: typeof v.address === 'string' ? v.address : v.address?.line1 ?? null,
         /**
