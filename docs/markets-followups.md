@@ -93,8 +93,23 @@ Inspire headline (`bestNameMatch`); on the client, every `BrowseItem` converter
 and all nine `VenueDrawer` callers pass a country.
 
 **The lesson for the next feature:** any new screen that opens a `VenueDrawer`, and any
-new server payload that builds a `BrowseItem`, has to carry `provenance` and be given a
-country, or the cost and attribution silently fall back (to "not known yet", and to the
-home market). This is ad-hoc across ~a dozen sites today. The next feature that adds a
-drawer surface will hit it again; a single shared `toBrowseItem` serializer (server) and
-a required `country` on the drawer's own resolution would close it for good.
+new server payload that builds a `BrowseItem`, has to carry `provenance`, `mapsUrl` and be
+given a country, or the cost and attribution silently fall back (to "not known yet", to an
+unlinked Google Maps label, and to the home market). This is ad-hoc across ~a dozen sites
+today. The next feature that adds a drawer surface will hit it again; a single shared
+`toBrowseItem` serializer (server) and a required `country` on the drawer's own resolution
+would close it for good.
+
+## 4. Places-tab atlas entries fetch no Google data (a spend decision)
+
+A place opened from the **Places** tab comes through `atlasToBrowseItem`, whose reference
+is `osm:`/`wikidata:`, so the drawer's crowd lookup — which only fires for `atlas`/`scout`
+sources — never runs for it. These entries therefore show **no Google rating and no Google
+cost** (the cost reads "not known yet"), where the same place opened from **Inspire**
+(source `atlas`) does fetch both. This is pre-existing — the cost line only made it
+visible — and fixing it means firing a **paid** Google Place Details call per Places-atlas
+open (as Inspire already does). That is consistent with the data policy ("for activities,
+get the reviews always from Google") but it is a spend and product decision — a new paid
+surface — and should be taken deliberately, not slipped in behind the cost line. The fix
+is small (mark these items so the crowd lookup fires, as Inspire's do); the decision is
+whether Places should spend the way Inspire does.
