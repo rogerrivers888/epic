@@ -152,7 +152,7 @@ export async function matchPlace(place) {
  */
 // An atlas reference's own row, by its primary key rather than by casting
 // every id in the table to text.
-const ATLAS_ID = `(case when pi.venue_ref ~ '^atlas:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then substr(pi.venue_ref, 7)::uuid end)`;
+const ATLAS_ID = `(case when pi.venue_ref like 'atlas:%' then epic_try_uuid(substr(pi.venue_ref, 7)) end)`;
 
 async function pageOfPlaces(after, limit, { weekly }) {
   const { rows } = await query(

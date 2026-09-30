@@ -46,12 +46,21 @@ $$ select array['google', 'tripadvisor', 'yelp', 'foursquare'] $$;
 create or replace function epic_ref_point_source(ref text) returns text language sql immutable as
 $$ select case split_part(coalesce(ref, ''), ':', 1) when '' then null when 'photo' then 'household' else split_part(ref, ':', 1) end $$;
 
+-- A UUID from text, or null: a cast that cannot fail, so no query ever trips
+-- on a reference that only looks like an atlas one (Codex, 30 Sep 2026).
+create or replace function epic_try_uuid(t text) returns uuid language plpgsql immutable as $$
+begin
+  return t::uuid;
+exception when others then
+  return null;
+end $$;
+
 -- The same, knowing that an atlas reference on an unmatched activity-sweep
 -- row stands in for a Google place: its point and name are Google's (Codex,
 -- 30 Sep 2026).
 create or replace function epic_ref_true_source(ref text) returns text language sql stable as
 $$ select case when coalesce(ref, '') ~ '^atlas:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' and exists (
-                   select 1 from attractions g where g.id = substr(ref, 7)::uuid
+                   select 1 from attractions g where g.id = epic_try_uuid(substr(ref, 7))
                       and (g.display_source = 'google' or (g.source = 'google' and g.osm_ref is null)))
                then 'google' else epic_ref_point_source(ref) end $$;
 

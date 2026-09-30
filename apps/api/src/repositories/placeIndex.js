@@ -36,6 +36,10 @@ import { crowdBand, countBand, score } from '../domain/scoring.js';
 const SWEEP_WINS = `(excluded.lat is not null and excluded.lng is not null
   and (place_index.lat is null or not (coalesce(place_index.coords_from, '') = any(epic_owned_sources()))))`;
 
+// Which callers' `source` says whose the points are. 'sweep' does not — a
+// sweep row may be the open map's or Google's, and says so row by row.
+const POINT_SOURCES_BY_CALLER = { atlas: 'atlas', google: 'google', tripadvisor: 'tripadvisor', osm: 'osm', own: 'own' };
+
 export const RECORD_OWNS_POINT = `((r.provenance ->> 'lat') = any(epic_owned_sources()) or r.osm_ref is not null)`;
 
 export const SOURCES = [
@@ -1700,7 +1704,9 @@ export async function noteMany(places = [], { source = null, countryCode = null,
               google_types = coalesce(excluded.google_types, place_index.google_types),
               last_seen = now()`,
       rows.flatMap((p) => [p.ref, p.lat ?? null, p.lng ?? null, p.countryCode ?? countryCode, p.ownership ?? ownership ?? 'identified', p.types?.length ? p.types : null,
-        p.coordsFrom ?? pointSourceOfRef(p.ref)]));
+        // The row's own word, then the caller's where it names a source of
+        // points, then the reference (Codex, 30 Sep 2026).
+        p.coordsFrom ?? (POINT_SOURCES_BY_CALLER[source] ?? pointSourceOfRef(p.ref))]));
     // Who has returned each place, which may be more than one of them.
     //
     // A sweep result is often Google *and* OpenStreetMap, and the sweep keeps

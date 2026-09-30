@@ -131,8 +131,11 @@ export async function unstamped(limit) {
           -- And the index itself, which is where a corrected position lands: a
           -- place whose coordinates are put right by a later source may be in
           -- none of the three stores above (Codex, 18 Sep 2026).
+          -- Only an owned point: the ring re-stamp never copies Google's (C59),
+          -- so a place Google alone has placed is counted by its census box.
           select pi.venue_ref as ref, pi.lat, pi.lng, 0 as rank
-            from place_index pi where pi.lat is not null
+            from place_index pi where pi.lat is not null and pi.lng is not null
+             and pi.coords_from = any(epic_owned_sources())
        ) all_of_them
        order by ref, rank
      ) p
