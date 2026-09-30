@@ -529,20 +529,20 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
     prefetch(TRIPS_KEY, () => api.trips());
   }, [household]);
 
-  // While the app was serving the offline layer's saved copy, the cached tabs may
-  // be holding it — real, but possibly days old, and the cache cannot tell a
-  // fallback from a fresh read, so it would otherwise treat it as fresh for ten
-  // minutes (Codex, D13). "Degraded" is either the browser being offline or the
-  // app serving saved pages because the API could not be reached (a 502/503/504
-  // with the browser still online — `offline.online` never drops then). When
-  // that clears, the tab data is marked stale so the next visit refreshes it; a
-  // fetch that succeeds replaces it, so there is no loop while the signal is flat.
-  const degraded = !offline.online || offline.serving;
-  const wasDegraded = useRef(degraded);
+  // Coming back online after being offline, the cached tabs may be holding the
+  // saved copy the offline layer served — real, but possibly days old, and the
+  // cache cannot tell a fallback from a fresh read, so it would otherwise treat
+  // it as fresh for ten minutes (Codex, D13). The browser's online flag is the
+  // real connectivity signal to key this on: marking the tab data stale on the
+  // transition back online means the next visit refreshes it, and a fetch that
+  // succeeds replaces it, so there is no loop. (The per-request "serving saved"
+  // flag is deliberately not used — it flaps once per request during a partial
+  // API outage and would invalidate the tabs over and over, Codex.)
+  const wasOnline = useRef(offline.online);
   useEffect(() => {
-    if (!degraded && wasDegraded.current) invalidateTabData();
-    wasDegraded.current = degraded;
-  }, [degraded]);
+    if (offline.online && !wasOnline.current) invalidateTabData();
+    wasOnline.current = offline.online;
+  }, [offline.online]);
 
   /** Somewhere to eat is Places' question, and it arrives there already asked. */
   const openFood = () => navigate(`${paths.placesHome()}?kind=eat`);
