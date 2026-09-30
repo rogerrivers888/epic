@@ -36,9 +36,12 @@ test('files each place under the best point held for it, and counts old rented p
   await query(`insert into place_index (venue_ref, lat, lng, cell) values ($1, 51.5, -0.1, 'sector:TR1 1'), ('tripadvisor:9', 51.5, -0.1, 'sector:TR1 1')`, [`atlas:${gs.id}`]);
   await query(`insert into place_records (venue_ref, lat, lng, osm_ref) values ('google:matched', 51.5, -0.1, 'node/9')`);
   await query(`insert into place_cells (venue_ref, lat, lng, at) values ('google:elsewhere', 51.5, -0.1, $1)`, [at(40)]);
+  // A saved copy of it, too.
+  const { rows: [hh] } = await query(`insert into households (name) values ('Report test') returning id`);
   // A cell stamped from a Google-named atlas row, under its atlas reference.
   const { rows: [gz] } = await query(`insert into attractions (region_slug, slug, name, lat, lng, display_source) values ('cornwall', 'a-zoo-cell', '(zoo)', 51.5, -0.1, 'google') returning id`);
   await query(`insert into place_cells (venue_ref, lat, lng, at) values ($1, 51.5, -0.1, now())`, [`atlas:${gz.id}`]);
+  await query(`insert into household_places (household_id, venue_ref, label, lat, lng) values ($1, $2, 'The zoo', 51.5, -0.1)`, [hh.id, `atlas:${gz.id}`]);
   // A sweep row the open map twinned keeps OSM's point, and is not rented.
   await query(`insert into scout_areas (code, lat, lng) values ('SL5', 51.4, -0.6) on conflict do nothing`);
   await query(`insert into scout_places (area_code, venue_ref, lat, lng, rank, from_sources) values ('SL5', 'google:matched', 51.5, -0.1, 1, '["osm","google"]'), ('SL5', 'google:nothing', 51.5, -0.1, 2, '["google"]')`);
@@ -60,6 +63,9 @@ test('files each place under the best point held for it, and counts old rented p
   assert.equal(idx.over30Days, 1);
   assert.equal(idx.undated, 2, 'a point with no clock is undated, not old');
   assert.equal(r.rented.find((x) => x.table === 'place_index (other providers)').held, 1, 'tripadvisor on its own line');
+  // A saved copy of the Google-named zoo, under its atlas reference, is Google's.
+  const hp = r.rented.find((x) => x.table === 'household_places');
+  assert.equal(hp.held, 1);
   const cells = r.rented.find((x) => x.table === 'place_cells');
   assert.equal(cells.held, 2, 'google:elsewhere, and the atlas row Google named');
   assert.equal(cells.undated, 2, 'neither has a dated index point, so their age cannot be told');
