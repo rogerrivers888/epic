@@ -497,11 +497,15 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
     let live = true;
     api.costBand({ country, level }).then((d) => { if (live) setCost(d); }).catch(() => { if (live) setCost(null); });
     return () => { live = false; };
-    // The source is a dependency, not just the number: a list item and its
-    // detail can carry the same priceLevel while the detail adds the Google
-    // provenance the list omitted, and without this the first "not known yet"
-    // would stand (Codex).
-  }, [item, country, venue?.priceLevel, venue?.provenance?.priceLevel?.source]);
+    // Stable scalar dependencies, not the whole `item`: a caller can rebuild the
+    // item object on every parent render (Inspire's asDrawerItem) without the
+    // place changing, and depending on the object reference would clear and
+    // refetch the cost on each render. The source is a dependency as much as the
+    // number — a card and its detail can share a priceLevel while only the detail
+    // carries the Google provenance — so every field the request reads is here
+    // (Codex).
+  }, [item?.venueRef, item?.priceLevel, item?.source, item?.provenance?.priceLevel?.source,
+      country, venue?.priceLevel, venue?.source, venue?.provenance?.priceLevel?.source]);
   const onHeroScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (!heroW) return;
     const i = Math.round(e.nativeEvent.contentOffset.x / heroW);
