@@ -53,6 +53,9 @@ export const INSPIRE_DEFAULT_MINUTES = 60;
 /** The one Places atlas list, and the one Trips list — shared, no parameters. */
 export const ATLAS_KEY = 'places:atlas';
 export const TRIPS_KEY = 'trips:list';
+/** The rows inside one Places area (home, or a country/city), one key each. */
+export const placesRowsKey = (area: string) => `places:rows:${area}`;
+const PLACES_ROWS_PREFIX = 'places:rows:';
 
 /** The cache key for a home-screen search. Home vs a searched town differ, and
  * how far / how you travel change the pool, so all of it is in the key. */
@@ -164,6 +167,7 @@ export function invalidateTabData() {
   invalidate(ATLAS_KEY);
   invalidate(TRIPS_KEY);
   invalidatePrefix('inspire:near:');
+  invalidatePrefix(PLACES_ROWS_PREFIX);
 }
 
 /**

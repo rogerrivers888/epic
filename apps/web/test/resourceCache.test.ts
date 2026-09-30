@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   runFetch, refetch, prefetch, invalidate, invalidatePrefix, invalidateTabData,
-  peekCache, clearResourceCache, inspireNearKey, savedOverrides,
+  peekCache, clearResourceCache, inspireNearKey, placesRowsKey, savedOverrides,
   ATLAS_KEY, TRIPS_KEY, TEN_MINUTES,
 } from '../src/cache/resourceCache.ts';
 
@@ -71,16 +71,19 @@ test('invalidating during an in-flight read stops that read marking itself fresh
   assert.equal(e?.fetchedAt, 0);     // …but not counted fresh, so a read re-fetches
 });
 
-test('invalidateTabData stales the atlas, the trips list and every inspire ring', async () => {
+test('invalidateTabData stales the atlas, the trips list, every inspire ring and every places area', async () => {
   fresh();
   const ring = inspireNearKey({ lat: 51.5, lng: -0.1, mode: 'drive', minutes: 60, from: null });
+  const area = placesRowsKey('GB/London');
   await runFetch(ATLAS_KEY, () => Promise.resolve('a'));
   await runFetch(TRIPS_KEY, () => Promise.resolve('t'));
   await runFetch(ring, () => Promise.resolve('r'));
+  await runFetch(area, () => Promise.resolve('p'));
   invalidateTabData();
   assert.equal(peekCache(ATLAS_KEY)?.fetchedAt, 0);
   assert.equal(peekCache(TRIPS_KEY)?.fetchedAt, 0);
   assert.equal(peekCache(ring)?.fetchedAt, 0);
+  assert.equal(peekCache(area)?.fetchedAt, 0);
 });
 
 test('invalidatePrefix stales every ring at once and nothing else', async () => {

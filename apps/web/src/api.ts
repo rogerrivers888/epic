@@ -76,6 +76,11 @@ export class QueuedError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const method = (init?.method ?? 'GET').toUpperCase();
   const readOnly = method === 'GET';
+  // Whether a *successful* call here changes what the cached tabs hold. Computed
+  // from the path, so it is the same answer whether the write comes back with a
+  // body or an empty 204 (the atlas and trip DELETE routes answer 204) — both
+  // must stale the caches (Codex, D13).
+  const isTabWrite = !readOnly && TAB_DATA_WRITE.some((p) => path.startsWith(p));
   const token = sessionToken();
   try {
     const res = await fetch(`${API_URL}${path}`, {
@@ -89,7 +94,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         ...(init?.headers || {}),
       },
     });
-    if (res.status === 204) return undefined as T;
+    if (res.status === 204) { if (isTabWrite) invalidateTabData(); return undefined as T; }
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
       // Signed out, or the token has run out. Drop it so the app shows the
@@ -105,17 +110,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     servingSaved(false);
     if (readOnly) void remember(path, body);
-    // A write to household data — a place saved, a visit logged, a trip made,
-    // the home moved — can change what the cached Inspire/Places/Trips tabs
-    // hold, so those caches are marked stale here, at the one door every write
-    // goes through, rather than at each call site (Codex, D13). It is an
-    // allowlist of the prefixes that touch that data, not "every write", on
-    // purpose: telemetry (`/api/discover/*`, `/api/activity`) and the back
-    // office post constantly during ordinary browsing, and invalidating on those
-    // would make every tab return re-fetch — the exact thing this change removes.
-    // A mutation missed here only goes stale for the ten-minute window; a
-    // telemetry write wrongly included would defeat the zero-request tab switch.
-    else if (TAB_DATA_WRITE.some((p) => path.startsWith(p))) invalidateTabData();
+    else if (isTabWrite) invalidateTabData();
     return body as T;
   } catch (err) {
     if (err instanceof ApiError) throw err;

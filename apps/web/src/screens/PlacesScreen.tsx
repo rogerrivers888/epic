@@ -13,7 +13,7 @@ import type { TripSeed } from './TripsScreen';
 import { asOneOf, asText, useQueryState, useRouter, useStickyQuery } from '../router';
 import { MOODS, paths, type Route } from '../routes';
 import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
-import { useCachedResource, useScrollMemory, ATLAS_KEY, TEN_MINUTES } from '../cache/resourceCache';
+import { useCachedResource, useScrollMemory, placesRowsKey, ATLAS_KEY, TEN_MINUTES } from '../cache/resourceCache';
 import { Button, Card, Chip, Row, StatusLine, Wrap } from '../components/ui';
 import { SourcePicker } from '../components/SourcePicker';
 import { BeenCapture, VenueRow, VisitForm, VisitSummary, rowsForVisit } from '../components/Visits';
@@ -205,8 +205,21 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
   const atHome = !!sel && 'home' in sel;
   const country = sel && !atHome ? (sel as { country: string; city: string | null }) : null;
   const inArea = atHome || !!country?.city;
-  const [places, setPlaces] = useState<AtlasPlace[]>([]);
-  const [wherePending, setWherePending] = useState(0);
+  // The rows inside an area are read through the shared cache too, keyed by the
+  // area, so returning to a list you were just on is instant — the atlas summary
+  // alone was not enough, the actual places were still fetched on every mount
+  // (Codex, D13). A place write invalidates these keys centrally (api.request),
+  // and `loadPlaces` below is the hook's forced refresh for the background refill.
+  const areaKey = inArea && sel ? placesRowsKey(atHome ? 'home' : `${country!.country}/${country!.city}`) : null;
+  const { data: areaData, error: placesErr, refresh: loadPlaces } = useCachedResource<{ places: AtlasPlace[]; wherePending?: number }>(
+    areaKey,
+    () => ('home' in (sel as any)
+      ? api.atlasPlaces({ nearHome: true })
+      : api.atlasPlaces({ country: (sel as { country: string; city: string }).country, city: (sel as { country: string; city: string }).city })),
+    { staleMs: TEN_MINUTES, enabled: !!areaKey },
+  );
+  const places = useMemo(() => areaData?.places ?? [], [areaData]);
+  const wherePending = areaData?.wherePending ?? 0;
   // Which place's drawer is open, over whichever layer is showing.
   const openRef = query.get('place');
   const open = openRef ? places.find((p) => p.venueRef === openRef) ?? null : null;
@@ -263,27 +276,24 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
   const data = atlas ?? null;
   useEffect(() => { if (atlasErr) setError((atlasErr as any)?.message ?? 'Could not load your atlas.'); }, [atlasErr]);
   // Keep the scroll position across tab switches, keyed by the full address.
-  const scroll = useScrollMemory(`places:${href}`, !!data);
+  // Restored only once the content that gives the page its height is in: the
+  // area rows on a home/city list, the atlas summary on the root or a country —
+  // restoring against a still-empty list would clamp it to the top (Codex, D13).
+  const scroll = useScrollMemory(`places:${href}`, inArea ? areaData !== undefined : !!data);
 
   const countryRow = country ? data?.countries.find((c) => c.code === country.country) ?? null : null;
   const city = countryRow && country?.city ? countryRow.cities.find((c) => c.name === country.city) ?? null : null;
   const home = atHome ? data?.home ?? null : null;
 
-  const loadPlaces = useCallback(async () => {
-    if (!inArea || !sel) { setPlaces([]); setWherePending(0); return; }
-    try {
-      const r = 'home' in sel ? await api.atlasPlaces({ nearHome: true }) : await api.atlasPlaces({ country: sel.country, city: sel.city! });
-      setPlaces(r.places); setWherePending(r.wherePending ?? 0);
-    } catch (e: any) { setError(e.message); }
-  }, [inArea, atHome ? 'home' : country?.country, atHome ? '' : country?.city]);
-  useEffect(() => { refills.current = 0; loadPlaces(); }, [loadPlaces]);
+  useEffect(() => { if (placesErr) setError((placesErr as any)?.message ?? 'Could not load these places.'); }, [placesErr]);
+  useEffect(() => { refills.current = 0; }, [areaKey]);
   // Postcode, station, pictures and ratings are looked up in the background
   // after the first read; ask again a few times while any row is waiting.
   useEffect(() => {
     if (!wherePending || refills.current >= 6) return;
-    const t = setTimeout(() => { refills.current += 1; loadPlaces(); }, 5000);
+    const t = setTimeout(() => { refills.current += 1; void loadPlaces(); }, 5000);
     return () => clearTimeout(t);
-  }, [wherePending, places]);
+  }, [wherePending, places, loadPlaces]);
 
   // The place writes behind this (save, love, remove) invalidate the Inspire
   // ring and the atlas centrally, on the write itself (api.request), so this
