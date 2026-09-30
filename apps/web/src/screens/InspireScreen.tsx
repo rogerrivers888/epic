@@ -6,7 +6,7 @@ import { useHere } from '../hooks/useHere';
 import { colors, fonts, spacing, TARGET, type } from '../theme';
 import { useCachedResource, runFetch, inspireNearKey, INSPIRE_DEFAULT_MINUTES, TEN_MINUTES, savedOverrides, useScrollMemory, scrollKey } from '../cache/resourceCache';
 import { Icon } from '../components/Icon';
-import { AskRow, IntakeStrip } from '../components/voice/IntakeStrip';
+import { IntakeStrip } from '../components/voice/IntakeStrip';
 import { MOOD_LABEL, VIBE_MOOD } from '../moods';
 import { VenueDrawer } from '../components/VenueDrawer';
 import { forgetSearch, heldSearch, holdConversion, noteDrawn, noteSearchEvent, searchIdOf } from '../search';
@@ -979,13 +979,13 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
 
         <View style={[styles.column, wide && styles.columnWide]}>
           {/* Voice (handoff, 8 Sep 2026). With a reading open (?intake=), its
-              question is the title and its facts the chip row (C5, R5b);
-              otherwise one grey row under the band: "Or just ask" (R5). */}
+              question is the title and its facts the chip row (C5, R5b). The
+              standing "Or just ask" row that used to sit under the band is gone
+              (owner, 30 Sep 2026): there is one microphone on this screen, the
+              one in the header — this was a second. */}
           {intakeId ? (
             <IntakeStrip intakeId={intakeId} household={household} onReask={() => navigate(paths.say({ for: 'inspire' }))} onLoaded={(i) => { setAsk(i); setLeadMood(VIBE_MOOD[i.resolved.vibe ?? ''] ?? null); }} />
-          ) : (
-            <AskRow onPress={() => navigate(paths.say({ for: 'inspire' }))} />
-          )}
+          ) : null}
           {/* No spinner on Inspire (owner, D13). A first-ever load with nothing
               yet to show draws the page's shape — the shelves and their cards as
               empty placeholders — so the family sees the home they are landing
