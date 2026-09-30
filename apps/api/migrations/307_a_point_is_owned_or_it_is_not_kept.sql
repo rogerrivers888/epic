@@ -66,6 +66,9 @@ declare
   op     record;
   b      text[];
 begin
+  -- Half a point is no point: a latitude kept beside another source's
+  -- longitude would be a place nobody put anywhere (Codex, 30 Sep 2026).
+  if (NEW.lat is null) <> (NEW.lng is null) then NEW.lat := null; NEW.lng := null; end if;
   -- What the writer said, unless the point itself moved: an update that brings
   -- a new position with the old row's label on it would otherwise keep a
   -- rented point under an owned name.

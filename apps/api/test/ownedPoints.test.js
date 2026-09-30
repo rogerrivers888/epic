@@ -174,3 +174,9 @@ test('looking inside a Google place again clears a Google name an earlier look w
   await markResearching(o, 'Google\'s name', 51.5, -0.1);
   assert.equal((await query('select name from place_records where venue_ref = $1', [o])).rows[0].name, 'The Open Map\'s');
 });
+
+test('half a point is no point', async () => {
+  const hh = await household();
+  const r = await saved(hh, `osm:node/${Date.now()}2`, 51.5, null);
+  assert.deepEqual(r, { lat: null, lng: null, point_from: null });
+});
