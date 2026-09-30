@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../components/press';
 import { api, GroupBooking, GuestAccount, GuestJoinResult, HouseholdMemberInput, JoinView } from '../api';
@@ -114,9 +114,14 @@ export function JoinScreen({ token, preview, onExit }: {
   /** Where the code went and how long it lasts, for the code page. */
   const [codeTo, setCodeTo] = useState<{ contact: string; minutes: number } | null>(null);
 
+  const reqRef = useRef(0);
   const load = useCallback(async () => {
+    // A newer load — a changed token or a just-read credential — supersedes this
+    // one, so a slow response is dropped rather than overwriting the current invite.
+    const seq = ++reqRef.current;
     try {
       const r = await api.joinView(token, me);
+      if (seq !== reqRef.current) return;
       setV(r); setError(null);
       // Somebody coming back to a link they have already used lands on their
       // own list, not on the sales page they have already read.
@@ -125,7 +130,7 @@ export function JoinScreen({ token, preview, onExit }: {
       // before anyone is asked to make an account for it (G24, G25).
       else if (!moved && !preview && r.group.cancelled) setStage('off');
       else if (!moved && !preview && !r.you && (r.group.closed || (r.invite.placesLeft != null && r.invite.placesLeft <= 0))) setStage('full');
-    } catch (e: any) { setError(e.message); }
+    } catch (e: any) { if (seq === reqRef.current) setError(e.message); }
   }, [token, me, moved]);
   useEffect(() => { if (credReady) load(); }, [load, credReady]);
 
