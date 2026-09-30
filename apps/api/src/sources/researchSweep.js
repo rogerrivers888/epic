@@ -483,8 +483,18 @@ export async function referenceResearch(venueRef, opts = {}) {
   // the sport picks were atlas places (found in the first proposal, 25 Sep
   // 2026).
   if (!seed.name && String(venueRef).startsWith('atlas:')) {
-    const { rows: [at] } = await query('select name, lat, lng, website from attractions where id::text = $1', [String(venueRef).slice(6)]);
-    if (at?.name && at?.lat != null) seed = { name: at.name, lat: at.lat, lng: at.lng, website: at.website ?? undefined };
+    // The row's own point, or the index's where the row keeps none (an
+    // activity-sweep row's Google point lives there for its thirty days —
+    // migration 307); never the sweep's "(query)" stand-in for a name (Codex).
+    const { rows: [at] } = await query(
+      `select a.name, a.website,
+              case when a.lat is not null and a.lng is not null then a.lat else pi.lat end as lat,
+              case when a.lat is not null and a.lng is not null then a.lng else pi.lng end as lng
+         from attractions a
+         left join place_index pi on pi.venue_ref in ($2, a.external_ref) and pi.lat is not null and pi.lng is not null
+        where a.id::text = $1
+        order by (pi.venue_ref = $2) desc nulls last limit 1`, [String(venueRef).slice(6), String(venueRef)]);
+    if (at?.name && !/^\(.*\)$/.test(at.name) && at?.lat != null) seed = { name: at.name, lat: at.lat, lng: at.lng, website: at.website ?? undefined };
   }
   return own.enrich(venueRef, { ...opts, seed, force: true, replace: true, hygiene: true });
 }
