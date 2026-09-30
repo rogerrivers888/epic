@@ -108,6 +108,22 @@ test('the backfill waits until every owned source is loaded', async () => {
   assert.equal((await query('select count(*)::int as n from owned_point_runs')).rows[0].n, 0, 'no run was started, so none can finish');
 });
 
+test('the backfill waits for a switched-on open-map region, and only a switched-on one', async () => {
+  await query('delete from owned_point_runs');
+  for (const source of ['fsa', 'historic-england', 'os-open-names']) {
+    await query(`update owned_source_loads set live_load = coalesce(live_load, $2) where source = $1`, [source, randomUUID()]);
+  }
+  const was = process.env.EPIC_OSM_EXTRACT;
+  process.env.EPIC_OSM_EXTRACT = 'great-britain';
+  try {
+    await query(`insert into osm_extracts (region, url, state) values ('great-britain', 'x', 'reading') on conflict (region) do update set state = 'reading'`);
+    const out = await m.run({ kind: 'backfill', who: 'test', fetcher: async () => json({ entities: {} }) });
+    assert.match(out.waiting, /osm \(great-britain\)/);
+  } finally {
+    if (was === undefined) delete process.env.EPIC_OSM_EXTRACT; else process.env.EPIC_OSM_EXTRACT = was;
+  }
+});
+
 test('the backfill writes owned points, counts what it could not key, and resumes', async () => {
   await query('delete from owned_point_runs');
   await everythingLoaded();

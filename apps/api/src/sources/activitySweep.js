@@ -278,7 +278,11 @@ async function upsertSwept(slug, p, osm, owned) {
   // index holds it for the thirty days Google allows, and that is what the
   // rematch reads (Codex, 30 Sep 2026).
   if (!owned && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng))) {
-    await noteMany([{ ref, lat: Number(p.lat), lng: Number(p.lng), coordsFrom: 'google' }], { source: 'google' }).catch(() => null);
+    await noteMany([{ ref, lat: Number(p.lat), lng: Number(p.lng), coordsFrom: 'google' }], { source: 'google' });
+    // It is the only copy the rematch can read, so a write that did not land
+    // fails this result rather than leaving a row nothing can place (Codex).
+    const { rows: [held] } = await query('select 1 from place_index where venue_ref = $1 and lat is not null', [ref]);
+    if (!held) throw new Error(`the index did not take ${ref}'s point`);
   }
   // Without a name we can show, there is nothing to publish yet — but the
   // pointer is still worth keeping, because it is what a later pass researches.

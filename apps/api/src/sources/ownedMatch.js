@@ -226,10 +226,15 @@ async function runLocked({ kind, who, pageSize, fetcher, resume }) {
   // Not before every owned source has a live load and the open map's copy is
   // in: a backfill run against empty tables would finish, and let the purge
   // throw away the names and points it should have matched (Codex, 30 Sep 2026).
+  // The open map's copy only where a region is switched on (a fresh
+  // installation has none, and must not wait for ever — Codex, 30 Sep 2026).
+  const { regionsOn } = await import('./osmExtract.js');
+  const regions = await regionsOn().catch(() => []);
   const { rows: missing } = await query(
     `select source from owned_source_loads where live_load is null
       union all
-     select 'osm' where not exists (select 1 from osm_extracts where state = 'done')`);
+     select 'osm (' || r || ')' from unnest($1::text[]) r
+      where not exists (select 1 from osm_extracts x where x.region = r and x.state = 'done')`, [regions]);
   if (missing.length) return { waiting: `not yet loaded: ${missing.map((m) => m.source).join(', ')}` };
   // A run a deploy cut off, or one that failed part-way, carries on from its
   // checkpoint rather than starting again (Codex, 30 Sep 2026).
