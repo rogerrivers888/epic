@@ -290,7 +290,7 @@ router.patch('/', async (req, res, next) => {
             // in every category around the home are checked against our own
             // sources now, free, so the household's first search is fast. The
             // census below counts what is missing; this answers what is known.
-            if (ring?.cell) await prewarm({ cell: ring.cell, mode: h.travel_mode ?? travelMode ?? 'driving' }).catch(() => null);
+            if (ring?.cell) await prewarm({ cell: ring.cell, lat: at.lat, lng: at.lng, mode: h.travel_mode ?? travelMode ?? 'driving' }).catch(() => null);
             if (!ring?.notCensusedOutcodes?.length) return;
             await censusRun.startRun({
               label: `home · ${ring.cell}`,

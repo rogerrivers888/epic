@@ -86,7 +86,11 @@ export async function pickPlaces({ cell, mode = 'driving', minutes = 30, top = T
   let counted = await ring.countsFor({ cell, mode, minutes });
   let refreshed = false;
   let live = null;
-  if (counted == null) {
+  // A non-driving mode may be matrix-less, and any stored count it has is a legacy
+  // home-sector row this change purges — so it is refreshed rather than trusted,
+  // which clears the legacy row and returns the live estimate to rank from. Only
+  // the matrix mode (driving) trusts a stored count and skips the refresh (Codex).
+  if (counted == null || travelMode(mode) !== 'driving') {
     live = await (refresh ?? ring.refreshRing)({ cell, mode, minutes });
     refreshed = true;
     counted = await ring.countsFor({ cell, mode, minutes });

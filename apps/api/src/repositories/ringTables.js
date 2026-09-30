@@ -80,7 +80,12 @@ export async function refreshRing({ cell, lat = null, lng = null, mode = 'drivin
   // an in-flight count may be reading — queues behind it and counts again
   // once it has written, rather than racing it and losing. A count that
   // failed does not block the next.
-  const key = ringKey({ cell, mode: kind, minutes });
+  // A straight-line ring depends on the exact point, not just the sector, and its
+  // live rankings and uncensused districts are consumed directly — so two homes in
+  // one sector must not share an in-flight count and receive each other's, centred
+  // on the wrong place (Codex). The coordinate joins the key when there is one.
+  const key = ringKey({ cell, mode: kind, minutes })
+    + (lat != null && lng != null ? `@${Number(lat).toFixed(3)},${Number(lng).toFixed(3)}` : '');
   const going = inFlight.get(key);
   if (going && !force) return going;
   const run = (going ?? Promise.resolve()).catch(() => null).then(() => countRing({ cell, lat, lng, kind, minutes }));

@@ -17,6 +17,7 @@
 
 import { FILED_SQL, CONFIRMED_SQL } from './categories.js';
 import { query, withTransaction } from '../db.js';
+import { travelMode } from '../domain/travel.js';
 import { settings } from './settings.js';
 import * as osmLocal from '../sources/osmExtract.js';
 import { osmElement } from '../sources/openMatch.js';
@@ -888,13 +889,16 @@ export const PREWARM_TOP = 20;
  * answer from — the IDs-only census gives no name or coordinates — so the
  * free research is what makes it answerable on the next pass.
  */
-export async function prewarm({ cell, mode = 'driving', minutes = 30, research = null } = {}) {
+export async function prewarm({ cell, lat = null, lng = null, mode = 'driving', minutes = 30, research = null } = {}) {
   if (!cell) return { places: 0 };
   const { rankingFor, refreshRing } = await import('../repositories/ringTables.js');
   // Whatever the ring tables rank by is what a household is shown, so read
-  // the categories from the ring itself rather than guess the vocabulary.
+  // the categories from the ring itself rather than guess the vocabulary — and
+  // for this mode, so driving rows in the same cell do not stand in for a
+  // matrix-less mode that has none of its own (Codex).
   const { rows: cats } = await query(
-    `select distinct category from ring_rankings where cell = $1 and minutes = $2`, [cell, minutes]);
+    `select distinct category from ring_rankings where cell = $1 and mode = $2 and minutes = $3`,
+    [cell, travelMode(mode), minutes]);
   const refs = new Set();
   if (cats.length) {
     for (const c of cats) {
@@ -902,9 +906,10 @@ export async function prewarm({ cell, mode = 'driving', minutes = 30, research =
     }
   } else {
     // A matrix-less mode (walk/transit) persists no rankings — they would freeze
-    // once a real matrix arrives — so its top places come off the ring's own
-    // live result instead of the empty table (Codex).
-    const live = await refreshRing({ cell, mode, minutes }).catch(() => null);
+    // once a real matrix arrives — so its top places come off the ring's own live
+    // result instead of the empty table, centred on the home coordinate so the
+    // set matches the count and cards that household sees (Codex).
+    const live = await refreshRing({ cell, lat, lng, mode, minutes }).catch(() => null);
     if (live?.estimated) {
       const byCat = new Map();
       for (const r of live.rankings ?? []) {
