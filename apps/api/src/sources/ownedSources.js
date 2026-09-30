@@ -189,7 +189,11 @@ export async function loadHeritage(loadId, fetcher = fetch) {
     let seen = 0;
     for (let offset = 0; ;) {
       const geo = L.points ? 'returnGeometry=true' : 'returnGeometry=false&returnCentroid=true';
-      const page = await getJson(`${NHLE}/${L.id}/query?where=1%3D1&outFields=ListEntry,Name,Grade&${geo}&outSR=4326&orderByFields=OBJECTID&resultOffset=${offset}&resultRecordCount=2000&f=json`, fetcher);
+      // Every field: only listed buildings and parks carry a Grade, and naming
+      // a field a layer lacks is refused outright ("'outFields' parameter is
+      // invalid", checked against the live service 30 Sep 2026). A polygon
+      // layer returns its centroid without its geometry (checked the same day).
+      const page = await getJson(`${NHLE}/${L.id}/query?where=1%3D1&outFields=*&${geo}&outSR=4326&orderByFields=OBJECTID&resultOffset=${offset}&resultRecordCount=2000&f=json`, fetcher);
       const features = page.features ?? [];
       const rows = [];
       for (const f of features) {
