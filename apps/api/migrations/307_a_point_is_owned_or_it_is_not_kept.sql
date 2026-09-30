@@ -50,7 +50,7 @@ $$ select case split_part(coalesce(ref, ''), ':', 1) when '' then null when 'pho
 -- row stands in for a Google place: its point and name are Google's (Codex,
 -- 30 Sep 2026).
 create or replace function epic_ref_true_source(ref text) returns text language sql stable as
-$$ select case when coalesce(ref, '') ~ '^atlas:[0-9a-f-]{36}$' and exists (
+$$ select case when coalesce(ref, '') ~ '^atlas:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' and exists (
                    select 1 from attractions g where g.id = substr(ref, 7)::uuid
                       and (g.display_source = 'google' or (g.source = 'google' and g.osm_ref is null)))
                then 'google' else epic_ref_point_source(ref) end $$;

@@ -90,11 +90,16 @@ export async function loadSource(source, { who = 'Epic', fetcher = fetch } = {})
     // A load that brought nothing is a failure, never an empty country.
     if (!rows) throw new Error('the source answered with nothing');
     // Live first, then the old loads go: the matcher reads the live load only.
-    await query(`update owned_source_loads set state = 'done', rows = $2, live_load = $3, finished_at = now() where source = $1`, [source, rows, loadId]);
+    // Only while this load is still the one claimed — a load that ran so long
+    // another took over publishes nothing and deletes nothing (Codex, 30 Sep 2026).
+    const { rowCount: mine } = await query(
+      `update owned_source_loads set state = 'done', rows = $2, live_load = $3, finished_at = now()
+        where source = $1 and load_id = $3 and state = 'loading'`, [source, rows, loadId]);
+    if (!mine) throw new Error(`${source}: another load took over while this one ran`);
     await query(`delete from ${table} where load_id <> $1`, [loadId]);
     return { source, rows };
   } catch (err) {
-    await query(`update owned_source_loads set state = 'failed', problem = $2, finished_at = now() where source = $1`, [source, String(err.message).slice(0, 500)]);
+    await query(`update owned_source_loads set state = 'failed', problem = $2, finished_at = now() where source = $1 and load_id = $3`, [source, String(err.message).slice(0, 500), loadId]);
     // What this load wrote is not a load; the last good one stands.
     const table = { fsa: 'fsa_establishments', 'historic-england': 'heritage_entries', 'os-open-names': 'os_names' }[source];
     await query(`delete from ${table} where load_id = $1`, [loadId]).catch(() => null);
@@ -132,7 +137,10 @@ export async function loadFsa(loadId, fetcher = fetch) {
     if (!a.FileName) continue;
     let body;
     try { body = await getJson(fsaFileUrl(a.FileName), fetcher); } catch (err) { failed.push(`${a.Name}: ${err.message}`); continue; }
-    const list = body?.FHRSEstablishment?.EstablishmentCollection ?? [];
+    // An array, as the feed serves it; the XML's EstablishmentDetail nesting
+    // read too, should the JSON ever follow it.
+    const coll = body?.FHRSEstablishment?.EstablishmentCollection;
+    const list = Array.isArray(coll) ? coll : (Array.isArray(coll?.EstablishmentDetail) ? coll.EstablishmentDetail : []);
     const rows = [];
     for (const e of list) {
       const lat = Number(e?.Geocode?.Latitude); const lng = Number(e?.Geocode?.Longitude);

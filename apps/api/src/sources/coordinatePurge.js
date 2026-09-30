@@ -101,7 +101,7 @@ export async function purgeRented({ days = 30, force = false } = {}) {
       where (${RENTED_REF('c.venue_ref')}
              -- An atlas reference on an unmatched activity-sweep row is Google's point too.
              or exists (select 1 from attractions g
-                         where g.id = (case when c.venue_ref ~ '^atlas:[0-9a-f-]{36}$' then substr(c.venue_ref, 7)::uuid end)
+                         where g.id = (case when c.venue_ref ~ '^atlas:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then substr(c.venue_ref, 7)::uuid end)
                            and (g.display_source = 'google' or (g.source = 'google' and g.osm_ref is null))))
         and c.lat is not null
         and c.at < now() - ${age}

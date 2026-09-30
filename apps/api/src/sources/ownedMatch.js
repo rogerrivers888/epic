@@ -17,7 +17,7 @@
  * than none, because it is kept for good.
  */
 
-import { query } from '../db.js';
+import { query, pool } from '../db.js';
 import { nameScore, metresBetween } from './openMatch.js';
 import { recordOwnedPoint } from './ownedPoints.js';
 
@@ -133,7 +133,7 @@ export async function matchPlace(place) {
  */
 // An atlas reference's own row, by its primary key rather than by casting
 // every id in the table to text.
-const ATLAS_ID = `(case when pi.venue_ref ~ '^atlas:[0-9a-f-]{36}$' then substr(pi.venue_ref, 7)::uuid end)`;
+const ATLAS_ID = `(case when pi.venue_ref ~ '^atlas:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then substr(pi.venue_ref, 7)::uuid end)`;
 
 async function pageOfPlaces(after, limit, { weekly }) {
   const { rows } = await query(
@@ -188,52 +188,65 @@ let active = null;
 export async function run({ kind = 'backfill', who = 'Epic', pageSize = 500, fetcher = fetch, resume = true } = {}) {
   if (active) return active;
   active = (async () => {
-    // A run a deploy cut off, or one that failed part-way, carries on from its
-    // checkpoint rather than starting again (Codex, 30 Sep 2026).
-    let r = null;
-    if (resume) {
-      ({ rows: [r] } = await query(
-        `update owned_point_runs set state = 'running', problem = null, finished_at = null
-          where id = (select id from owned_point_runs where kind = $1 and state in ('running', 'failed') order by started_at desc limit 1)
-          returning *`, [kind]));
-    }
-    if (!r) {
-      ({ rows: [r] } = await query(`insert into owned_point_runs (kind, started_by) values ($1, $2) returning *`, [kind, who]));
-    }
-    const bySource = { ...(r.by_source ?? {}) };
-    let { after, looked, matched, no_key: noKey } = r;
+    // One run at a time across every instance: a lock held on one connection
+    // for the whole run, not only this process's promise (Codex, 30 Sep 2026).
+    const holder = await pool.connect();
     try {
-      for (;;) {
-        const page = await pageOfPlaces(after, pageSize, { weekly: kind === 'weekly' });
-        if (!page.length) break;
-        // Wikidata comes first; a failed lookup stops the run where it stands
-        // (it resumes from here next time) rather than letting a lower source
-        // take the place for good (Codex, 30 Sep 2026).
-        const wd = await wikidataPoints(page.map((p) => p.wikidata_id).filter(Boolean), fetcher);
-        for (const p of page) {
-          const out = await matchPlace({
-            ref: p.ref, names: p.names,
-            point: p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : null,
-            box: boxOf(p.slice), wikidataId: p.wikidata_id, wikidataPoint: wd.get(p.wikidata_id) ?? null,
-          });
-          looked += 1;
-          if (out.none) { if (/no name|no point/.test(out.none)) noKey += 1; continue; }
-          const w = await recordOwnedPoint({ ref: p.ref, ...out });
-          if (w.written) { matched += 1; bySource[out.source] = (bySource[out.source] ?? 0) + 1; }
-        }
-        after = page[page.length - 1].ref;
-        await query(
-          `update owned_point_runs set after = $2, looked = $3, matched = $4, by_source = $5, no_key = $6 where id = $1`,
-          [r.id, after, looked, matched, JSON.stringify(bySource), noKey]);
+      const { rows: [{ got }] } = await holder.query(`select pg_try_advisory_lock(hashtext('owned-points-run')) as got`);
+      if (!got) return { busy: 'another instance is running the match' };
+      try { return await runLocked({ kind, who, pageSize, fetcher, resume }); } finally {
+        await holder.query(`select pg_advisory_unlock(hashtext('owned-points-run'))`).catch(() => null);
       }
-      await query(`update owned_point_runs set state = 'done', finished_at = now() where id = $1`, [r.id]);
-      return { id: r.id, kind, looked, matched, bySource, noKey };
-    } catch (err) {
-      await query(`update owned_point_runs set state = 'failed', problem = $2, finished_at = now() where id = $1`, [r.id, String(err.message).slice(0, 500)]);
-      throw err;
-    }
+    } finally { holder.release(); }
   })().finally(() => { active = null; });
   return active;
+}
+
+async function runLocked({ kind, who, pageSize, fetcher, resume }) {
+  // A run a deploy cut off, or one that failed part-way, carries on from its
+  // checkpoint rather than starting again (Codex, 30 Sep 2026).
+  let r = null;
+  if (resume) {
+    ({ rows: [r] } = await query(
+      `update owned_point_runs set state = 'running', problem = null, finished_at = null
+        where id = (select id from owned_point_runs where kind = $1 and state in ('running', 'failed') order by started_at desc limit 1)
+        returning *`, [kind]));
+  }
+  if (!r) {
+    ({ rows: [r] } = await query(`insert into owned_point_runs (kind, started_by) values ($1, $2) returning *`, [kind, who]));
+  }
+  const bySource = { ...(r.by_source ?? {}) };
+  let { after, looked, matched, no_key: noKey } = r;
+  try {
+    for (;;) {
+      const page = await pageOfPlaces(after, pageSize, { weekly: kind === 'weekly' });
+      if (!page.length) break;
+      // Wikidata comes first; a failed lookup stops the run where it stands
+      // (it resumes from here next time) rather than letting a lower source
+      // take the place for good (Codex, 30 Sep 2026).
+      const wd = await wikidataPoints(page.map((p) => p.wikidata_id).filter(Boolean), fetcher);
+      for (const p of page) {
+        const out = await matchPlace({
+          ref: p.ref, names: p.names,
+          point: p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : null,
+          box: boxOf(p.slice), wikidataId: p.wikidata_id, wikidataPoint: wd.get(p.wikidata_id) ?? null,
+        });
+        looked += 1;
+        if (out.none) { if (/no name|no point/.test(out.none)) noKey += 1; continue; }
+        const w = await recordOwnedPoint({ ref: p.ref, ...out });
+        if (w.written) { matched += 1; bySource[out.source] = (bySource[out.source] ?? 0) + 1; }
+      }
+      after = page[page.length - 1].ref;
+      await query(
+        `update owned_point_runs set after = $2, looked = $3, matched = $4, by_source = $5, no_key = $6 where id = $1`,
+        [r.id, after, looked, matched, JSON.stringify(bySource), noKey]);
+    }
+    await query(`update owned_point_runs set state = 'done', finished_at = now() where id = $1`, [r.id]);
+    return { id: r.id, kind, looked, matched, bySource, noKey };
+  } catch (err) {
+    await query(`update owned_point_runs set state = 'failed', problem = $2, finished_at = now() where id = $1`, [r.id, String(err.message).slice(0, 500)]);
+    throw err;
+  }
 }
 
 /**
