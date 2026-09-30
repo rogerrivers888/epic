@@ -608,7 +608,16 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
    * a source with no prose (Wikidata) carry no external credit. Google's
    * editorial summary is never shown, so Google is never a source here.
    */
-  const shownSummary = v?.summary ?? item.summary ?? null;
+  // Google's editorial summary is rented prose — read in memory for vocabulary,
+  // never shown as a description (data policy). google.js fills venue.summary
+  // from editorialSummary, so a summary whose source is Google is dropped here:
+  // the description is the owned one (Wikipedia, the venue's page, the atlas), or
+  // nothing at all — owned facts only (Codex).
+  const rawSummary = v?.summary ?? item.summary ?? null;
+  const rawSummaryIsGoogle = v?.summary != null
+    ? (v.provenance?.summary?.source ?? v.source) === 'google'
+    : item.summary != null ? (item.provenance?.summary?.source ?? item.source) === 'google' : false;
+  const shownSummary = rawSummaryIsGoogle ? (ownRecord?.summary ?? null) : rawSummary;
   // A credit is only correct if the prose on screen is one whose source we know.
   // A source's own summary must never be labelled "From Wikipedia", so the credit
   // stands only for the owned record's summary — or, for a wikidata: atlas place
@@ -934,11 +943,11 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
 
                   <CostScale cost={cost} />
 
-                  {v?.summary ?? item.summary ? <Text style={type.body}>{v?.summary ?? item.summary}</Text> : null}
+                  {shownSummary ? <Text style={type.body}>{shownSummary}</Text> : null}
                   {/* The description credit, directly beneath it and linked (M7): the
                       encyclopaedia or the venue's own page, with the licence. Google's
-                      editorial summary is never shown, so it never appears here. */}
-                  {(v?.summary ?? item.summary) && descriptionCredit ? (
+                      editorial summary is not shown at all, so it never appears here. */}
+                  {shownSummary && descriptionCredit ? (
                     descriptionCredit.url
                       ? <Press onPress={() => Linking.openURL(descriptionCredit.url as string)} accessibilityRole="link"><Text style={[type.tiny, { textDecorationLine: 'underline' }]}>{descriptionCredit.label}</Text></Press>
                       : <Text style={type.tiny}>{descriptionCredit.label}</Text>
