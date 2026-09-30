@@ -257,7 +257,7 @@ const zipOf = async (name, text) => {
 
 test('OS Open Names loads from its zip: named features in, roads and postcodes out', async () => {
   const csv = [
-    'osgb1,x,Windsor Great Park,eng,,,landcover,Woodland Or Forest,497000,172000',
+    '\uFEFFosgb1,x,Windsor Great Park,eng,,,landcover,Woodland Or Forest,497000,172000',
     'osgb2,x,High Street,eng,,,transportNetwork,Named Road,497100,176800',
     'osgb3,x,"Snow Hill, The",eng,,,landform,Hill Or Mountain,497300,173400',
   ].join('\n');
@@ -267,6 +267,7 @@ test('OS Open Names loads from its zip: named features in, roads and postcodes o
   assert.equal(out.rows, 2);
   const names = (await query(`select name from os_names where load_id = (select live_load from owned_source_loads where source = 'os-open-names') order by name`)).rows.map((r) => r.name);
   assert.deepEqual(names, ['Snow Hill, The', 'Windsor Great Park']);
+  assert.equal((await query(`select count(*)::int as n from os_names where id = 'osgb1'`)).rows[0].n, 1, 'the byte-order mark is not part of the id');
 });
 
 test('two names that point at two different places is no match', async () => {

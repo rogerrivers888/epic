@@ -243,7 +243,9 @@ export async function loadOsNames(loadId, fetcher = fetch) {
     const data = entry.method === 8 ? await inflate(entry.raw) : entry.raw;
     await new Promise((ok) => setImmediate(ok));
     const rows = [];
-    for (const line of data.toString('utf8').split(/\r?\n/)) {
+    // Each file opens with a byte-order mark (checked 30 Sep 2026), which would
+    // otherwise cling to the first row's identifier.
+    for (const line of data.toString('utf8').replace(/^\uFEFF/, '').split(/\r?\n/)) {
       if (!line) continue;
       const c = parseCsvLine(line);
       // ID, NAMES_URI, NAME1, NAME1_LANG, NAME2, NAME2_LANG, TYPE, LOCAL_TYPE, GEOMETRY_X, GEOMETRY_Y, ...
