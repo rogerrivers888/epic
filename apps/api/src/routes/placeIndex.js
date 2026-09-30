@@ -3788,7 +3788,7 @@ const OURS_BY_REF = ['osm', 'atlas', 'wikidata', 'own', 'photo', 'household', 'f
 // (Codex, 30 Sep 2026).
 const ATLAS_GOOGLE = (ref) => `exists (select 1 from attractions g
    where g.id = (case when ${ref} ~ '^atlas:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then substr(${ref}, 7)::uuid end)
-     and (g.source = 'google' or g.display_source = 'google'))`;
+     and (g.source = 'google' or g.display_source is not null))`;
 
 // A copy whose point is one of ours: the same place's OSM-backed record or
 // sweep row, or its atlas row, at the same spot.
@@ -3800,7 +3800,7 @@ const OWNED_AT = (x) => `(exists (select 1 from place_records r where r.venue_re
                where (a.venue_ref = ${x}.venue_ref or a.id = (case when ${x}.venue_ref ~ '^atlas:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then substr(${x}.venue_ref, 7)::uuid end))
                  and a.lat is not null and a.lng is not null
                  -- Null-safe: a Wikidata row has no display_source at all (Codex).
-                 and not (coalesce(a.display_source, '') = 'google' or (coalesce(a.source, '') = 'google' and a.osm_ref is null))
+                 and not (a.display_source is not null or (coalesce(a.source, '') = 'google' and a.osm_ref is null))
                  and abs(a.lat - ${x}.lat) <= 0.0005 and abs(a.lng - ${x}.lng) <= 0.0005))`;
 
 // A rented copy: a provider's reference or a Google-named atlas row, and not
@@ -3822,15 +3822,15 @@ const IX_TRUE_SRC = (x) => `(case
   when exists (select 1 from scout_places s where s.venue_ref = ${x}.venue_ref and coalesce(s.from_sources, '[]'::jsonb) ? 'osm' and s.lat is not null and s.lng is not null
                  and abs(s.lat - ${x}.lat) <= 0.0005 and abs(s.lng - ${x}.lng) <= 0.0005) then 'osm'
   when exists (select 1 from attractions a where (a.venue_ref = ${x}.venue_ref or a.id = (case when ${x}.venue_ref ~ '^atlas:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then substr(${x}.venue_ref, 7)::uuid end))
-                 and a.source = 'google' and a.osm_ref is not null and a.display_source is distinct from 'google' and a.lat is not null and a.lng is not null
+                 and a.source = 'google' and a.osm_ref is not null and a.display_source is null and a.lat is not null and a.lng is not null
                  and abs(a.lat - ${x}.lat) <= 0.0005 and abs(a.lng - ${x}.lng) <= 0.0005) then 'osm'
   when exists (select 1 from attractions a where (a.venue_ref = ${x}.venue_ref or a.id = (case when ${x}.venue_ref ~ '^atlas:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then substr(${x}.venue_ref, 7)::uuid end))
-                 and a.source is distinct from 'google' and a.display_source is distinct from 'google' and a.lat is not null and a.lng is not null
+                 and a.source is distinct from 'google' and a.display_source is null and a.lat is not null and a.lng is not null
                  and abs(a.lat - ${x}.lat) <= 0.0005 and abs(a.lng - ${x}.lng) <= 0.0005) then 'atlas'
   -- A sweep row under an atlas reference whose point matched nothing above is
   -- the old Google point, rematched or not.
   when ${x}.venue_ref like 'atlas:%' and exists (select 1 from attractions g where g.id = (case when ${x}.venue_ref ~ '^atlas:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then substr(${x}.venue_ref, 7)::uuid end)
-                 and (g.source = 'google' or g.display_source = 'google')) then 'google'
+                 and (g.source = 'google' or g.display_source is not null)) then 'google'
   when split_part(${x}.venue_ref, ':', 1) in ('osm', 'atlas', 'wikidata', 'own', 'photo', 'fixtures')
        and coalesce(${x}.coords_from, split_part(${x}.venue_ref, ':', 1)) in ('osm', 'atlas', 'wikidata', 'own', 'household', 'photo', 'fixtures') then coalesce(${x}.coords_from, split_part(${x}.venue_ref, ':', 1))
   else split_part(${x}.venue_ref, ':', 1) end)`;
@@ -3849,9 +3849,9 @@ export async function coordinateReport() {
          -- The sweep's rows are source 'google', and a matched one carries no
          -- display_source because its point was replaced by OSM's (Codex).
          select coalesce(venue_ref, 'atlas:' || id::text) as venue_ref,
-                bool_or(source = 'google' and osm_ref is not null and display_source is distinct from 'google') as osm
+                bool_or(source = 'google' and osm_ref is not null and display_source is null) as osm
            from attractions
-          where lat is not null and lng is not null and display_source is distinct from 'google'
+          where lat is not null and lng is not null and display_source is null
           group by 1),
        -- The index's own point, with the source it was stamped with or, where
        -- a rebuild wrote it without one, the source its reference names.
@@ -3879,7 +3879,8 @@ export async function coordinateReport() {
            union select x.venue_ref from visits x where x.lat is not null and x.lng is not null and ${RENTED_COPY('x')}
            union select venue_ref from place_records where lat is not null and lng is not null and osm_ref is null and not (split_part(venue_ref, ':', 1) = any($1::text[]))
          ) r
-         union select coalesce(venue_ref, 'atlas:' || id::text), 'google' from attractions where lat is not null and lng is not null and display_source = 'google'),
+         -- Whichever provider the row is displayed from, under its own name.
+         union select coalesce(venue_ref, 'atlas:' || id::text), display_source from attractions where lat is not null and lng is not null and display_source is not null),
        p as (
          select case
                   when coalesce(r.osm, false) or coalesce(a.osm, false) or sc.venue_ref is not null or (pi.lat is not null and pi.lng is not null and pi.src = 'osm') then 'osm'
@@ -3950,11 +3951,11 @@ export async function coordinateReport() {
           and not exists (select 1 from attractions a
                            where (a.venue_ref = c.venue_ref or a.id = (case when c.venue_ref ~ '^atlas:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then substr(c.venue_ref, 7)::uuid end))
                              and a.source = 'google' and a.osm_ref is not null
-                             and a.display_source is distinct from 'google' and a.lat is not null and a.lng is not null and ${NEAR('a')})
+                             and a.display_source is null and a.lat is not null and a.lng is not null and ${NEAR('a')})
           and not exists (select 1 from scout_places s where s.venue_ref = c.venue_ref and coalesce(s.from_sources, '[]'::jsonb) ? 'osm' and s.lat is not null and s.lng is not null and ${NEAR('s')})
           and not exists (select 1 from place_records r where r.venue_ref = c.venue_ref and r.osm_ref is not null and r.lat is not null and r.lng is not null and ${NEAR('r')})`, [OURS_BY_REF]);
     await count('scout_places', 'first_seen (row)', `select ${ROWS('first_seen')} from scout_places where lat is not null and lng is not null and not (split_part(venue_ref, ':', 1) = any($1::text[])) and not (coalesce(from_sources, '[]'::jsonb) ? 'osm')`, [OURS_BY_REF]);
-    await count('attractions', 'first_seen (row)', `select ${ROWS('first_seen')} from attractions where lat is not null and lng is not null and display_source = 'google'`);
+    await count('attractions', 'first_seen (row)', `select ${ROWS('first_seen')} from attractions where lat is not null and lng is not null and display_source is not null`);
     await count('household_places', 'first_seen (row)', `select ${ROWS('x.first_seen')} from household_places x where x.lat is not null and x.lng is not null and ${RENTED_COPY('x')}`, [OURS_BY_REF]);
     await count('trip_stops', 'created_at (row)', `select ${ROWS('x.created_at')} from trip_stops x where x.lat is not null and x.lng is not null and ${RENTED_COPY('x')}`, [OURS_BY_REF]);
     await count('trip_shortlist', 'added_at (row)', `select ${ROWS('x.added_at')} from trip_shortlist x where x.lat is not null and x.lng is not null and ${RENTED_COPY('x')}`, [OURS_BY_REF]);
