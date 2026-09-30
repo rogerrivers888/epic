@@ -32,7 +32,14 @@ test('nor is an open drawer, or a sub-category of a category you have left', () 
 });
 
 test('but where you are looking, and how far, still are', () => {
-  for (const k of ['at', 'where', 'locality', 'travel', 'rating', 'price', 'sort']) {
+  for (const k of ['at', 'where', 'locality', 'travel', 'rating', 'price']) {
     assert.ok(KEYS.includes(k), `${k} should survive a visit — it describes how you look, not what is open`);
   }
+});
+
+test('sort is no longer remembered — it was dropped as a control', () => {
+  // New navigation (owner, 30 Sep 2026) removed the Sort control to match the
+  // mockups; the list holds its default order, so a persisted `sort` would be
+  // dead state the address advertised with no way to clear it (Codex).
+  assert.ok(!KEYS.includes('sort'), 'sort has no control now, so it must not persist');
 });

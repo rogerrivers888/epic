@@ -89,7 +89,7 @@ type Menu = null | 'where' | 'filters' | 'sort';
  * the visit. When Settings grows the handoff's "Default travel mode" that is
  * where a standing choice belongs, and this can read it.
  */
-const KEYS = ['at', 'where', 'locality', 'from', 'travel', 'rating', 'price', 'sort', 'who', 'intake'];
+const KEYS = ['at', 'where', 'locality', 'from', 'travel', 'rating', 'price', 'who', 'intake'];
 
 /**
  * What travels with you when you move around this tab, and what does not.
@@ -101,7 +101,7 @@ const KEYS = ['at', 'where', 'locality', 'from', 'travel', 'rating', 'price', 's
  * open *over* a page, and `within`, a drawer inside one category — Museums
  * means nothing in Sport.
  */
-const CARRIED = ['at', 'where', 'locality', 'from', 'travel', 'by', 'rating', 'price', 'sort', 'who', 'intake'];
+const CARRIED = ['at', 'where', 'locality', 'from', 'travel', 'by', 'rating', 'price', 'who', 'intake'];
 
 /**
  * "Nowhere, deliberately." The address says `at=unset` when somebody chose

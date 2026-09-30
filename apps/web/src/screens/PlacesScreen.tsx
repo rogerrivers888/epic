@@ -170,7 +170,7 @@ function atlasToBrowseItem(p: AtlasPlace): BrowseItem {
 }
 
 /** Inside a list: how it is set. All of it is in the address. */
-const CITY_KEYS = ['kind', 'list', 'type', 'mood', 'sort'];
+const CITY_KEYS = ['kind', 'list', 'type', 'mood'];
 /** The old `status=` addresses still land where they meant to. */
 const LEGACY_STATUS: Record<string, ListKey> = { been: 'been', loved: 'loved', special: 'loved', saved: 'short', any: 'been' };
 

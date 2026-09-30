@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Press } from './press';
 import { Icon, IconName } from './Icon';
-import { colors, fonts } from '../theme';
+import { colors, fonts, TARGET } from '../theme';
 
 /**
  * The two rows below the ink menu (New navigation, owner 30 Sep 2026, §6).
@@ -35,9 +35,9 @@ export function ContextRow({ label, icon = 'driving', onPress, onFilters, filter
   const filtersColour = filtersActive ? colors.accent : colors.inkMuted;
   return (
     <View style={styles.ctxRow}>
-      {/* A thin row by design, but a full 44px to the finger — the hit area is
-          extended past the text rather than padding the layout (Codex). */}
-      <Press onPress={onPress} style={styles.ctl} accessibilityRole="button" accessibilityLabel={label} hitSlop={{ top: 14, bottom: 14, left: 4, right: 6 }}>
+      {/* A thin row by design, but each control is a full 44px to the finger
+          (minHeight on the press), with a little slop besides (Codex). */}
+      <Press onPress={onPress} style={styles.ctl} accessibilityRole="button" accessibilityLabel={label} hitSlop={{ top: 8, bottom: 8, left: 4, right: 6 }}>
         {icon ? <Icon name={icon} size={17} color={colors.ink} strokeWidth={2} /> : null}
         <Text numberOfLines={1} style={styles.ctlText}>{label}</Text>
         <Icon name="expand" size={14} color={colors.inkMuted} strokeWidth={2.4} />
@@ -76,10 +76,13 @@ export function SectionHeader({ title, count, onSeeAll }: {
 }
 
 const styles = StyleSheet.create({
-  ctxRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: 20, paddingTop: 10 },
-  ctl: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 1 },
+  // §6 draws a thin row, but the controls are a full 44px to the finger (the
+  // pack's TARGET, as the row it replaced was) — the height is on the presses,
+  // so the text still reads at the top (Codex).
+  ctxRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: 20, paddingTop: 6 },
+  ctl: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 1, minHeight: TARGET },
   ctlText: { fontFamily: fonts.body, fontSize: 13.5, fontWeight: '400', color: colors.ink },
-  filters: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  filters: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: TARGET },
   filtersText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.inkMuted },
   // Gutter-agnostic: it inherits its parent's horizontal padding (the list
   // body's 20px gutter), so it lines up with the rows under it. §6 puts 24px
