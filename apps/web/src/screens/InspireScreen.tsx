@@ -89,7 +89,7 @@ type Menu = null | 'where' | 'filters' | 'sort';
  * the visit. When Settings grows the handoff's "Default travel mode" that is
  * where a standing choice belongs, and this can read it.
  */
-const KEYS = ['at', 'where', 'locality', 'from', 'travel', 'rating', 'price', 'who', 'intake'];
+const KEYS = ['at', 'where', 'locality', 'country', 'from', 'travel', 'rating', 'price', 'who', 'intake'];
 
 /**
  * What travels with you when you move around this tab, and what does not.
@@ -101,7 +101,7 @@ const KEYS = ['at', 'where', 'locality', 'from', 'travel', 'rating', 'price', 'w
  * open *over* a page, and `within`, a drawer inside one category — Museums
  * means nothing in Sport.
  */
-const CARRIED = ['at', 'where', 'locality', 'from', 'travel', 'by', 'rating', 'price', 'who', 'intake'];
+const CARRIED = ['at', 'where', 'locality', 'country', 'from', 'travel', 'by', 'rating', 'price', 'who', 'intake'];
 
 /**
  * "Nowhere, deliberately." The address says `at=unset` when somebody chose
@@ -240,7 +240,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
   const choseElsewhere = useRef(false);
   const goUnknown = () => { choseElsewhere.current = true; setQuery({ at: UNSET, where: null, locality: null, from: null }, { replace: false }); };
   useEffect(() => {
-    if (query.get('at') === UNSET && !choseElsewhere.current) setQuery({ at: null, where: null, locality: null, from: null }, { replace: true });
+    if (query.get('at') === UNSET && !choseElsewhere.current) setQuery({ at: null, where: null, locality: null, country: null, from: null }, { replace: true });
   }, [query.get('at')]);
 
   const [travel, setTravel] = useQueryState<number | null>('travel', HOW_FAR_DEFAULT, asNumber(HOW_FAR_DEFAULT));
