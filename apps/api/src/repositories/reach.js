@@ -599,20 +599,16 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
   // for "is a district of the reach uncensused?". Starts as the matrix outcodes.
   let reachOutcodes = outcodes;
   if (circle) {
-    // Two different questions, two different sets (Codex):
-    //  · which outcodes might hold a place inside the circle — the candidate
-    //    universe censusInRing searches. Generous (the exact per-place circle
-    //    test then filters precisely); a tight set here would silently drop a
-    //    place in a large rural sector whose centroid sits outside the circle.
-    //  · which outcodes the reach actually covers — the floor set. An uncensused
-    //    district beyond the circle must not make the count read as a floor.
-    //
-    // Both are drawn from real postcodes, not sector centroids: a place inside
-    // the circle sits by a postcode inside it, so their outcodes are the exact
-    // set and no centroid allowance can silently exclude an overlapping sector
-    // (Codex). The circle is tested in SQL so only the distinct outcodes come
-    // back, not every postcode. Sector centroids are the fallback only where
-    // postcodes are not loaded (a fresh or test database).
+    // Both the candidate universe and the reach's own districts are drawn from
+    // real postcodes, not sector centroids: a place inside the circle sits by a
+    // postcode inside it, so their outcodes are the exact set and no centroid
+    // allowance can silently exclude an overlapping sector (Codex). A 2 km cushion
+    // covers a place sitting between two postcodes or on the very edge — a district
+    // with no postcode within the circle plus that cushion has no ground a place
+    // could stand on inside the circle, so it belongs to neither set. The circle
+    // is tested in SQL so only the distinct outcodes come back, not every
+    // postcode. Sector centroids are the fallback only where postcodes are not
+    // loaded (a fresh or test database).
     const outcodesWithin = async (km) => {
       const kx = 111 * Math.max(0.3, Math.cos((circle.lat * Math.PI) / 180));
       const dLat = km / 111;
@@ -627,11 +623,14 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
       return rows.map((r) => r.outcode).filter(Boolean);
     };
     const originOutcode = outcodeOfCell(cell);
-    // Generous by a 2 km cushion for a place sitting between two postcodes or on
-    // the very edge; the reach itself is the circle exactly, plus the origin's
-    // own district, which is at the centre and never a finder-only one.
-    outcodes = [...new Set([...outcodes, ...(await outcodesWithin(circle.km + 2))])];
-    reachOutcodes = [...new Set([originOutcode, ...(await outcodesWithin(circle.km))].filter(Boolean))];
+    // The intersecting districts, cushioned: the candidate universe (finder codes
+    // plus these) and the floor (these plus the origin's own district) share them,
+    // so a sparse rural district the circle crosses is flagged as a possible floor
+    // rather than dropped — but a finder-only district, ten minutes past the reach,
+    // never makes the count read as a floor (Codex).
+    const near = await outcodesWithin(circle.km + 2);
+    outcodes = [...new Set([...outcodes, ...near])];
+    reachOutcodes = [...new Set([originOutcode, ...near].filter(Boolean))];
   }
   return {
     cell,
