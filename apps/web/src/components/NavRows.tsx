@@ -35,12 +35,14 @@ export function ContextRow({ label, icon = 'driving', onPress, onFilters, filter
   const filtersColour = filtersActive ? colors.accent : colors.inkMuted;
   return (
     <View style={styles.ctxRow}>
-      <Press onPress={onPress} style={styles.ctl} accessibilityRole="button" accessibilityLabel={label}>
+      {/* A thin row by design, but a full 44px to the finger — the hit area is
+          extended past the text rather than padding the layout (Codex). */}
+      <Press onPress={onPress} style={styles.ctl} accessibilityRole="button" accessibilityLabel={label} hitSlop={{ top: 14, bottom: 14, left: 4, right: 6 }}>
         {icon ? <Icon name={icon} size={17} color={colors.ink} strokeWidth={2} /> : null}
         <Text numberOfLines={1} style={styles.ctlText}>{label}</Text>
         <Icon name="expand" size={14} color={colors.inkMuted} strokeWidth={2.4} />
       </Press>
-      <Press onPress={onFilters} style={styles.filters} accessibilityRole="button" accessibilityLabel={filtersLabel}>
+      <Press onPress={onFilters} style={styles.filters} accessibilityRole="button" accessibilityLabel={filtersLabel} hitSlop={{ top: 14, bottom: 14, left: 6, right: 4 }}>
         <Icon name="filters" size={15} color={filtersColour} strokeWidth={2} />
         <Text style={[styles.filtersText, { color: filtersColour }]}>{filtersLabel}</Text>
       </Press>
