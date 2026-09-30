@@ -781,7 +781,8 @@ export async function foodNear({ lat, lng, km = 25, limit = 120, shownOnly = tru
   const LNG = '(case when p.lat is not null and p.lng is not null then p.lng else ix.lng end)';
   const { rows } = await query(
     `select distinct on (p.venue_ref)
-            p.venue_ref, p.name, ${LAT} as lat, ${LNG} as lng, p.website, p.cuisines, p.cuisine_group, p.secondary,
+            -- A name we may keep: the sweep's own (the open map's) or our research's.
+            p.venue_ref, coalesce(p.name, r.name) as name, ${LAT} as lat, ${LNG} as lng, p.website, p.cuisines, p.cuisine_group, p.secondary,
             p.accolades, p.crowd_band, p.count_band, p.chain, p.chain_scale, p.epic_score,
             p.from_sources,
             -- What kind of place, from the sweep first and the open map second.
@@ -797,6 +798,11 @@ export async function foodNear({ lat, lng, km = 25, limit = 120, shownOnly = tru
        left join place_records r on r.venue_ref = p.venue_ref
        left join place_index ix on ix.venue_ref = p.venue_ref
       where ${LAT} between $3 and $4 and ${LNG} between $5 and $6
+        -- A row with no name we may keep is not food we can show: Google's is
+        -- not kept (migration 307), so it is left to the live search, which
+        -- shows it as it shows any rented place, rather than counted as
+        -- coverage and shown nameless (Codex, 30 Sep 2026).
+        and coalesce(p.name, r.name) is not null
         ${shownOnly ? `and ${SHOWN_REF('p.venue_ref')}` : ''}
       order by p.venue_ref, p.epic_score desc nulls last`,
     [lat, lng, lat - dLat, lat + dLat, lng - dLng, lng + dLng]);

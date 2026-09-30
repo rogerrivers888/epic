@@ -203,7 +203,7 @@ test('an unrelated update leaves a legacy row\'s point and name for the backfill
   assert.deepEqual((await query('select name, lat from scout_places where venue_ref = $1', [g])).rows[0], { name: 'Google\'s name', lat: 51.5 });
 });
 
-test('food near here still finds a Google-only sweep row through the index\'s point', async () => {
+test('food near here finds a Google-only sweep row through the index\'s point, once it has a name of our own', async () => {
   const { foodNear } = await import('../src/repositories/scout.js');
   await query(`insert into scout_areas (code, lat, lng) values ('ZZ5', 50.1, -5.1) on conflict do nothing`);
   const g = `google:food-${randomUUID()}`;
@@ -211,8 +211,12 @@ test('food near here still finds a Google-only sweep row through the index\'s po
   assert.equal((await query('select lat from scout_places where venue_ref = $1', [g])).rows[0].lat, null, 'the row keeps no Google point');
   // The refused point went to the index as it arrived (migration 307).
   assert.deepEqual((await query('select lat, coords_from from place_index where venue_ref = $1', [g])).rows[0], { lat: 50.1, coords_from: 'google' });
+  // Nameless — Google's name is not kept — so not food we can show, until our
+  // own research names it.
+  assert.ok(!(await foodNear({ lat: 50.1, lng: -5.1, km: 2, shownOnly: false })).some((r) => r.venue_ref === g));
+  await query(`insert into place_records (venue_ref, name, provenance) values ($1, 'The Harbour Café', '{"name":"osm"}') on conflict (venue_ref) do update set name = excluded.name, provenance = excluded.provenance`, [g]);
   const near = await foodNear({ lat: 50.1, lng: -5.1, km: 2, shownOnly: false });
-  assert.ok(near.some((r) => r.venue_ref === g && r.lat === 50.1));
+  assert.ok(near.some((r) => r.venue_ref === g && r.lat === 50.1 && r.name === 'The Harbour Café'));
 });
 
 test('a rented point refused by a table is left on the index for its thirty days', async () => {
