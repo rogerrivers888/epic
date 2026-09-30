@@ -735,7 +735,9 @@ export async function daily(now = new Date(), { send, ...tickWith } = {}) {
     // A failure is said once a day, in its own words.
     const msg = String(err?.message ?? err).slice(0, 120);
     console.error(`epic-api: census — the tick failed: ${msg}`);
-    await tell(`Census failed on ${londonDay(now)}: ${msg}`, `The census scheduler could not run:\n\n${msg}`).catch(() => null);
+    // The subject is the day alone; the words go in the body, so a message
+    // that changes from tick to tick is still one e-mail (Codex, 30 Sep 2026).
+    await tell(`Census failed on ${londonDay(now)}`, `The census scheduler could not run:\n\n${msg}`).catch(() => null);
     return { action: 'failed', error: msg };
   }
   if (out.action === 'off') return out;
@@ -767,12 +769,12 @@ export async function daily(now = new Date(), { send, ...tickWith } = {}) {
     || (latest?.state === 'paused' && /^built paused/.test(latest.problem ?? '')
         && now.getTime() - new Date(latest.last_seen_at ?? latest.started_at).getTime() < 15 * 60_000);
   if (!stopped && !running && !todays && !starting && pacificHour(now) >= START_GRACE_HOURS) {
-    await tell(`Census stalled: no run for ${pacificDay(now)} (${out.action})`,
+    await tell(`Census stalled: no run for ${pacificDay(now)}`,
       `Google's day ${pacificDay(now)} began ${START_GRACE_HOURS}+ hours ago and the census has not started it. The scheduler says: ${out.action}${out.why ? ` — ${out.why}` : ''}.\n\n${lines}`);
   }
   // A run that ended in failure.
   if (latest?.state === 'failed') {
-    await tell(`Census failed: day ${st.days.length} — ${String(latest.problem ?? 'no reason given').slice(0, 100)}`, lines);
+    await tell(`Census failed: day ${st.days.length}`, `${String(latest.problem ?? 'no reason given')}\n\n${lines}`);
   }
   // The billing export still empty after Friday 2 October.
   const bills = await billedByDay(pacificDay(runsNow[0].started_at)).catch(() => null);
@@ -784,8 +786,10 @@ export async function daily(now = new Date(), { send, ...tickWith } = {}) {
   const p = londonParts(now);
   const finishedAt = st.complete ? (await query(`select value->>'at' as at from bo_settings where key = 'census:uk-complete'`)).rows[0]?.at : null;
   const finishedLongAgo = finishedAt && now.getTime() - Date.parse(finishedAt) > 7 * 86_400_000;
-  if (p.weekday === 'Mon' && Number(p.hour) >= 7 && !finishedLongAgo) {
-    const w = weeklySummary(st, bills ?? [], now);
+  // Not on a billing lookup that failed: the summary is sent once, and would
+  // say "nothing billed" for good (Codex, 30 Sep 2026). The next tick tries.
+  if (p.weekday === 'Mon' && Number(p.hour) >= 7 && !finishedLongAgo && bills) {
+    const w = weeklySummary(st, bills, now);
     await tell(w.subject, w.text, 'census_report');
   }
   if (st.complete) await tell('Census — the rest of the UK is complete', lines, 'census_report');

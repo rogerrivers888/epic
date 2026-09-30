@@ -1109,3 +1109,16 @@ test('a day whose plan is being written is not a stall', async (t) => {
   await uk.daily(new Date('2026-09-29T12:00:00Z'), { send: box.send, start: recorder().start, switchOn: async () => false, quota: async () => ({ speaks: true, limit: 75000 }) });
   assert.ok(!box.got.some((m) => /^Census stalled/.test(m.subject)), box.got.map((m) => m.subject).join(' | '));
 });
+
+test('a scheduler failure is one e-mail a day, whatever its words', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  const box = mailbox();
+  let n = 0;
+  const start = async () => { n += 1; throw new Error(`planning broke at tile ${n}`); };
+  for (const at of ['2026-09-29T08:10:00Z', '2026-09-29T08:20:00Z', '2026-09-29T08:30:00Z']) {
+    await uk.daily(new Date(at), { send: box.send, start, quota: async () => ({ speaks: true, limit: 75000 }) });
+  }
+  assert.deepEqual(box.got.map((m) => m.subject), ['Census failed on 2026-09-29']);
+  assert.match(box.got[0].text, /planning broke at tile 1/);
+});
