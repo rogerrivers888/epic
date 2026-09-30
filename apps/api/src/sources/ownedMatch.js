@@ -87,8 +87,10 @@ export async function candidateIn(source, name, near, { strict = false } = {}) {
   const best = good[0];
   // Judged by where the two are, not by how far each is from here: two the
   // same distance away in opposite directions are two places (Codex, 30 Sep 2026).
-  const rival = good.find((r) => r !== best && r.score >= best.score - 0.05
-    && metresBetween({ lat: r.lat, lng: r.lng }, { lat: best.lat, lng: best.lng }) > 50);
+  // In a census box there is no point to tell two apart: any second one is a
+  // rival, however close (Codex, 30 Sep 2026).
+  const rival = good.find((r) => r !== best && r.id !== best.id && r.score >= best.score - 0.05
+    && (strict || metresBetween({ lat: r.lat, lng: r.lng }, { lat: best.lat, lng: best.lng }) > 50));
   if (rival) return { ambiguous: 'two candidates are both it' };
   return best;
 }

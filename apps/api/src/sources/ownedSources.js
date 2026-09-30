@@ -153,7 +153,12 @@ export async function loadFsa(loadId, fetcher = fetch) {
     // An array, as the feed serves it; the XML's EstablishmentDetail nesting
     // read too, should the JSON ever follow it.
     const coll = body?.FHRSEstablishment?.EstablishmentCollection;
-    const list = Array.isArray(coll) ? coll : (Array.isArray(coll?.EstablishmentDetail) ? coll.EstablishmentDetail : []);
+    const list = Array.isArray(coll) ? coll : (Array.isArray(coll?.EstablishmentDetail) ? coll.EstablishmentDetail : null);
+    // A file that does not hold its list, or holds fewer than it says, is a
+    // council that failed — never an empty one (Codex, 30 Sep 2026).
+    const said = Number(body?.FHRSEstablishment?.Header?.ItemCount);
+    if (!list) { failed.push(`${a.Name}: no establishment list`); continue; }
+    if (Number.isFinite(said) && list.length < said) { failed.push(`${a.Name}: ${list.length} of ${said}`); continue; }
     const rows = [];
     for (const e of list) {
       // Both halves present and on the map: an empty one is not nought (Codex).
