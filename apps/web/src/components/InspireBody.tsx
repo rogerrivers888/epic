@@ -2,7 +2,7 @@ import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from './press';
 import { InspireItem } from '../api';
-import { colors, fonts, spacing, TARGET, MOSS, MUTED } from '../theme';
+import { colors, fonts, spacing, TARGET } from '../theme';
 import { Icon, IconName } from './Icon';
 import { CARD_H, CARD_W, MEDIA_RADIUS, VenueThumb } from './VenueThumb';
 import { briefly, priceMarks } from '../screens/inspireList';
@@ -320,8 +320,8 @@ const styles = StyleSheet.create({
   sectionHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: spacing.md, paddingHorizontal: GUTTER },
   sectionLeft: { flexDirection: 'row', alignItems: 'baseline', gap: 8, flexShrink: 1 },
   sectionTitle: { fontFamily: fonts.heading, fontSize: 20, fontWeight: '800', letterSpacing: -0.4, color: colors.ink },
-  sectionCount: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: MUTED },
-  seeAll: { fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: MOSS },
+  sectionCount: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.inkMuted },
+  seeAll: { fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: colors.accent },
   allLink: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   carousel: { gap: 12, paddingHorizontal: GUTTER },
   card: { width: CARD_W, gap: 7 },

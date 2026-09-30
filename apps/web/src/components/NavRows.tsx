@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Press } from './press';
 import { Icon, IconName } from './Icon';
-import { colors, fonts, INK, INK_MUTED, MUTED, MOSS } from '../theme';
+import { colors, fonts } from '../theme';
 
 /**
  * The two rows below the ink menu (New navigation, owner 30 Sep 2026, §6).
@@ -29,13 +29,16 @@ export function ContextRow({ label, icon = 'driving', onPress, onFilters, filter
   /** Set away from the default: the control turns moss, like every other "set" control. */
   filtersActive?: boolean;
 }) {
-  const filtersColour = filtersActive ? MOSS : INK_MUTED;
+  // Below-band controls sit on the screen ground (cream in light, dark in
+  // dark), so their colours are palette-aware — not the band's fixed light
+  // constants, which would vanish in dark mode (Codex).
+  const filtersColour = filtersActive ? colors.accent : colors.inkMuted;
   return (
     <View style={styles.ctxRow}>
       <Press onPress={onPress} style={styles.ctl} accessibilityRole="button" accessibilityLabel={label}>
-        {icon ? <Icon name={icon} size={17} color={INK} strokeWidth={2} /> : null}
+        {icon ? <Icon name={icon} size={17} color={colors.ink} strokeWidth={2} /> : null}
         <Text numberOfLines={1} style={styles.ctlText}>{label}</Text>
-        <Icon name="expand" size={14} color={INK_MUTED} strokeWidth={2.4} />
+        <Icon name="expand" size={14} color={colors.inkMuted} strokeWidth={2.4} />
       </Press>
       <Press onPress={onFilters} style={styles.filters} accessibilityRole="button" accessibilityLabel={filtersLabel}>
         <Icon name="filters" size={15} color={filtersColour} strokeWidth={2} />
@@ -73,15 +76,15 @@ export function SectionHeader({ title, count, onSeeAll }: {
 const styles = StyleSheet.create({
   ctxRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: 20, paddingTop: 10 },
   ctl: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 1 },
-  ctlText: { fontFamily: fonts.body, fontSize: 13.5, fontWeight: '400', color: INK },
+  ctlText: { fontFamily: fonts.body, fontSize: 13.5, fontWeight: '400', color: colors.ink },
   filters: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  filtersText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: INK_MUTED },
+  filtersText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.inkMuted },
   // Gutter-agnostic: it inherits its parent's horizontal padding (the list
   // body's 20px gutter), so it lines up with the rows under it. §6 puts 24px
   // between the context row and the first header — the caller owns that gap.
   secRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
   secLeft: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
   secTitle: { fontFamily: fonts.heading, fontSize: 20, fontWeight: '800', letterSpacing: -0.4, color: colors.ink },
-  secCount: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: MUTED },
-  seeAll: { fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: MOSS },
+  secCount: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.inkMuted },
+  seeAll: { fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: colors.accent },
 });
