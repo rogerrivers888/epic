@@ -107,6 +107,8 @@ async function recordIn({ ref, lat, lng, source, sourceRef = null, method, dista
   await client.query(
     `update attractions set point_from = null
       where venue_ref = $1
+         -- An activity-sweep row keyed on its Google reference (Codex).
+         or external_ref = $1
          or id = (case when $1 like 'atlas:%' then epic_try_uuid(substr($1, 7)) end)`, [ref]);
   return { written: true };
 }

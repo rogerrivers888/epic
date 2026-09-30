@@ -192,7 +192,9 @@ export async function loadHeritage(loadId, fetcher = fetch) {
     const { count } = await getJson(`${NHLE}/${L.id}/query?where=1%3D1&returnCountOnly=true&f=json`, fetcher);
     // A count that is not a number is no count — an error answered with 200 —
     // and a layer with none cannot be known to be whole (Codex, 30 Sep 2026).
-    if (!Number.isFinite(count) || count < 0) throw new Error(`${L.layer}: the list gave no count`);
+    // Nought too: every layer of the list has entries, so nought is a failure
+    // answered as a number, and would publish a load missing a layer (Codex).
+    if (!Number.isFinite(count) || count <= 0) throw new Error(`${L.layer}: the list gave no count`);
     let got = 0;
     let seen = 0;
     for (let offset = 0; ;) {

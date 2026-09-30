@@ -333,3 +333,11 @@ test('a heritage layer that gives no count is not loaded', async () => {
   await query(`update owned_source_loads set state = 'never' where source = 'historic-england'`);
   await assert.rejects(() => src.loadSource('historic-england', { fetcher: async () => json({ error: { code: 400 } }) }), /gave no count/);
 });
+
+test('an owned point reaches an activity-sweep row keyed on its Google reference', async () => {
+  const { recordOwnedPoint } = await import('../src/sources/ownedPoints.js');
+  const ext = `google:ext-${randomUUID()}`;
+  await query(`insert into attractions (region_slug, slug, name, source, external_ref, osm_ref, lat, lng) values ('cornwall', $1, 'A pier', 'google', $2, 'way/8', 51.0, -1.0)`, [`p-${randomUUID()}`, ext]);
+  await recordOwnedPoint({ ref: ext, lat: 51.2, lng: -1.2, source: 'fsa', sourceRef: '9', method: 'name+distance' });
+  assert.equal((await query('select lat from attractions where external_ref = $1', [ext])).rows[0].lat, 51.2);
+});
