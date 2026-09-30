@@ -301,6 +301,21 @@ export function saveScroll(key: string, y: number) { scrollStore.set(key, y); }
 export function readScroll(key: string): number { return scrollStore.get(key) ?? 0; }
 
 /**
+ * A scroll key built from an address with the transient overlay parameters
+ * dropped — the open drawer (`?place=`) and the voice reading (`?intake=`) are
+ * something open *over* a list, not a different list. Without this, opening a
+ * card changes the key, and a fresh key scrolls to its own (zero) position,
+ * jumping the list under the drawer to the top on a wide layout (Codex, D13).
+ */
+export function scrollKey(prefix: string, href: string, drop: string[] = ['place']): string {
+  const [path, q = ''] = href.split('?');
+  const params = new URLSearchParams(q);
+  for (const d of drop) params.delete(d);
+  const s = params.toString();
+  return `${prefix}:${s ? `${path}?${s}` : path}`;
+}
+
+/**
  * Remember and restore a ScrollView's offset for `key`. Returns the props to
  * spread onto the ScrollView; restoration happens once `ready` is true (the rows
  * are in, so the content is tall enough to scroll), on the next frame so it lands

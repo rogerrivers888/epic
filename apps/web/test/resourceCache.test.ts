@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   runFetch, refetch, prefetch, invalidate, invalidatePrefix, invalidateTabData,
-  peekCache, clearResourceCache, inspireNearKey, placesRowsKey, savedOverrides,
+  peekCache, clearResourceCache, inspireNearKey, placesRowsKey, scrollKey, savedOverrides,
   ATLAS_KEY, TRIPS_KEY, TEN_MINUTES,
 } from '../src/cache/resourceCache.ts';
 
@@ -132,6 +132,14 @@ test('the home ring and a searched town do not share a key', () => {
   const walk = inspireNearKey({ lat: 51.386, lng: -0.623, mode: 'walk', minutes: 60, from: null });
   assert.notEqual(home, town);
   assert.notEqual(home, walk);
+});
+
+test('a scroll key ignores the open drawer, so a list keeps one key whether a card is open or not', () => {
+  const list = scrollKey('inspire', '/inspire?by=drive&travel=60', ['place', 'intake']);
+  const withDrawer = scrollKey('inspire', '/inspire?by=drive&travel=60&place=abc', ['place', 'intake']);
+  assert.equal(list, withDrawer);
+  // But a different list — a different category — is a different key.
+  assert.notEqual(list, scrollKey('inspire', '/inspire?by=drive&travel=30', ['place', 'intake']));
 });
 
 test('clearing the cache drops the rows and the saved-heart overrides together', async () => {

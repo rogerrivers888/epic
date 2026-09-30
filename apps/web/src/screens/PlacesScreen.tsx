@@ -13,7 +13,7 @@ import type { TripSeed } from './TripsScreen';
 import { asOneOf, asText, useQueryState, useRouter, useStickyQuery } from '../router';
 import { MOODS, paths, type Route } from '../routes';
 import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
-import { useCachedResource, useScrollMemory, placesRowsKey, ATLAS_KEY, TEN_MINUTES } from '../cache/resourceCache';
+import { useCachedResource, useScrollMemory, scrollKey, placesRowsKey, ATLAS_KEY, TEN_MINUTES } from '../cache/resourceCache';
 import { Button, Card, Chip, Row, StatusLine, Wrap } from '../components/ui';
 import { SourcePicker } from '../components/SourcePicker';
 import { BeenCapture, VenueRow, VisitForm, VisitSummary, rowsForVisit } from '../components/Visits';
@@ -282,7 +282,7 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
   // Restored only once the content that gives the page its height is in: the
   // area rows on a home/city list, the atlas summary on the root or a country —
   // restoring against a still-empty list would clamp it to the top (Codex, D13).
-  const scroll = useScrollMemory(`places:${href}`, inArea ? areaData !== undefined : !!data);
+  const scroll = useScrollMemory(scrollKey('places', href, ['place']), inArea ? areaData !== undefined : !!data);
 
   const countryRow = country ? data?.countries.find((c) => c.code === country.country) ?? null : null;
   const city = countryRow && country?.city ? countryRow.cities.find((c) => c.name === country.city) ?? null : null;

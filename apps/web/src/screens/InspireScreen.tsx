@@ -4,7 +4,7 @@ import { Press } from '../components/press';
 import { api, Experience, BrowseItem, HouseholdResponse, InspireItem, InspireNear, MoodKey, OwnedImage, Place, VenuePhotoRef, Intake } from '../api';
 import { useHere } from '../hooks/useHere';
 import { colors, fonts, spacing, TARGET, type } from '../theme';
-import { useCachedResource, runFetch, peekCache, inspireNearKey, INSPIRE_DEFAULT_MINUTES, TEN_MINUTES, savedOverrides, useScrollMemory } from '../cache/resourceCache';
+import { useCachedResource, runFetch, peekCache, inspireNearKey, INSPIRE_DEFAULT_MINUTES, TEN_MINUTES, savedOverrides, useScrollMemory, scrollKey } from '../cache/resourceCache';
 import { Icon } from '../components/Icon';
 import { AskRow, IntakeStrip } from '../components/voice/IntakeStrip';
 import { MOOD_LABEL, VIBE_MOOD } from '../moods';
@@ -447,7 +447,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
   // Keep the scroll position too, keyed by the full address so the home list and
   // a category drilled into each keep their own place; restored once the rows
   // are in (owner, D13: "come back … and it is as you left it").
-  const scroll = useScrollMemory(`inspire:${href}`, !!pool);
+  const scroll = useScrollMemory(scrollKey('inspire', href, ['place', 'intake']), !!pool);
 
   const placeName = shortPlace(pool?.place.locality ?? centre?.locality ?? centre?.label);
   /** The town, and only the town — never "near" (owner, 8 Sep 2026). */
@@ -825,16 +825,21 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
   // The heart reads from the session's saved-overrides (cache/resourceCache) so
   // a place hearted here still reads as kept when you come back from another
   // tab — the cached pool the screen re-reads holds the provider's pre-save
-  // copy. An override wins only while it is newer than the pool on screen: once
-  // a read that reflects the change lands (a refresh after the save, or a change
-  // made in Places that invalidated the ring), the pool's own ledger takes over,
-  // so the heart never gets stuck disagreeing with the server (Codex, D13).
+  // copy. An override wins until a response that actually *knows* the saved
+  // state, and is newer than the override, supersedes it — a change made in
+  // Places (which carries a household ledger) that invalidated the ring. A
+  // ring-backed card is `household: null`: it carries no ledger and so can never
+  // confirm or overturn a save, so a plain refresh of the ring after a save must
+  // not flip the heart back — the override stands for it (Codex, D13).
   const [, bumpKept] = useReducer((n: number) => n + 1, 0);
   const [notice, setNotice] = useState<string | null>(null);
   const nearFetchedAt = nearKey ? (peekCache(nearKey)?.fetchedAt ?? 0) : 0;
   const isKept = (i: InspireItem) => {
     const ov = savedOverrides.get(i.venueRef);
-    if (ov && ov.at > nearFetchedAt) return ov.val;
+    // `household != null` is a card that knows its ledger (the atlas half);
+    // a ring card cannot, so the override is not superseded for it.
+    const authoritative = i.household != null;
+    if (ov && (!authoritative || ov.at > nearFetchedAt)) return ov.val;
     return ['saved', 'special'].includes(i.household?.ledger ?? '');
   };
   const mark = (ref: string, val: boolean) => { savedOverrides.set(ref, { val, at: Date.now() }); bumpKept(); };
