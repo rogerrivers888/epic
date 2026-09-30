@@ -76,9 +76,14 @@ export async function loadSource(source, { who = 'Epic', fetcher = fetch } = {})
   const loader = { fsa: loadFsa, 'historic-england': loadHeritage, 'os-open-names': loadOsNames }[source];
   if (!loader) throw new Error(`not an owned source: ${source}`);
   const loadId = randomUUID();
-  await query(
+  // Claimed in one statement: a load already under way (and not stuck) is
+  // left to finish, never raced — two would each delete the other's rows
+  // (Codex, 30 Sep 2026).
+  const { rows: [claimed] } = await query(
     `update owned_source_loads set state = 'loading', load_id = $2, problem = null, started_at = now(), finished_at = null, started_by = $3
-      where source = $1`, [source, loadId, who]);
+      where source = $1 and (state <> 'loading' or started_at is null or started_at < now() - interval '6 hours')
+      returning source`, [source, loadId, who]);
+  if (!claimed) throw new Error(`${source} is already loading`);
   try {
     const rows = await loader(loadId, fetcher);
     const table = { fsa: 'fsa_establishments', 'historic-england': 'heritage_entries', 'os-open-names': 'os_names' }[source];

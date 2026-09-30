@@ -387,8 +387,17 @@ export async function rematchRegion(slug, { onLine } = {}) {
   const region = await lib.regionBySlug(slug);
   if (!region) throw new Error(`No region "${slug}"`);
   const { rows } = await query(
-    `select id, external_ref, name, lat, lng, found_by from attractions
-      where region_slug = $1 and source = 'google' and display_source = 'google'`, [slug]);
+    // The point to match by: the row no longer keeps Google's (migration 307),
+    // so it is the index's own, which holds it for thirty days — under the
+    // row's Google reference or its atlas one (Codex, 30 Sep 2026).
+    `select a.id, a.external_ref, a.name, a.found_by,
+            coalesce(a.lat, pi.lat) as lat, case when a.lat is not null then a.lng else pi.lng end as lng
+       from attractions a
+       left join lateral (
+         select p.lat, p.lng from place_index p
+          where p.venue_ref in (a.external_ref, 'atlas:' || a.id::text) and p.lat is not null and p.lng is not null
+          limit 1) pi on true
+      where a.region_slug = $1 and a.source = 'google' and a.display_source = 'google'`, [slug]);
   if (!rows.length) return { looked: 0, matched: 0 };
 
   const osmList = await osmNear({ lat: region.lat, lng: region.lng, spanKm: 50 });

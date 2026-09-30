@@ -66,7 +66,10 @@ export async function candidateIn(source, name, near, { strict = false } = {}) {
   good.sort((x, y) => y.score - x.score || x.distanceM - y.distanceM);
   // Two that are both clearly it — a chain's branches in one box — is no match.
   const best = good[0];
-  const rival = good.find((r) => r !== best && r.score >= best.score - 0.05 && Math.abs(r.distanceM - best.distanceM) > 25);
+  // Judged by where the two are, not by how far each is from here: two the
+  // same distance away in opposite directions are two places (Codex, 30 Sep 2026).
+  const rival = good.find((r) => r !== best && r.score >= best.score - 0.05
+    && metresBetween({ lat: r.lat, lng: r.lng }, { lat: best.lat, lng: best.lng }) > 50);
   if (rival) return null;
   return best;
 }
@@ -194,7 +197,10 @@ export async function run({ kind = 'backfill', who = 'Epic', pageSize = 500, fet
       for (;;) {
         const page = await pageOfPlaces(after, pageSize, { weekly: kind === 'weekly' });
         if (!page.length) break;
-        const wd = await wikidataPoints(page.map((p) => p.wikidata_id).filter(Boolean), fetcher).catch(() => new Map());
+        // Wikidata comes first; a failed lookup stops the run where it stands
+        // (it resumes from here next time) rather than letting a lower source
+        // take the place for good (Codex, 30 Sep 2026).
+        const wd = await wikidataPoints(page.map((p) => p.wikidata_id).filter(Boolean), fetcher);
         for (const p of page) {
           const out = await matchPlace({
             ref: p.ref, names: p.names,

@@ -125,3 +125,15 @@ test('where the owned points stand', async () => {
   assert.ok(s.bySource.fsa >= 1);
   assert.equal(typeof s.box_only, 'number');
 });
+
+test('two of the same name, the same distance away in opposite directions, is no match', async () => {
+  await fsaRow(91020, 'Greggs', 51.3000, -0.4000 + 0.0012);
+  await fsaRow(91021, 'Greggs', 51.3000, -0.4000 - 0.0012);
+  assert.ok((await m.matchPlace({ ref: 'google:g', names: ['Greggs'], point: { lat: 51.3, lng: -0.4 } })).none);
+});
+
+test('a second load of a source already loading is refused, not raced', async () => {
+  await query(`update owned_source_loads set state = 'loading', started_at = now() where source = 'os-open-names'`);
+  await assert.rejects(() => src.loadSource('os-open-names', { fetcher: async () => json({}, 500) }), /already loading/);
+  await query(`update owned_source_loads set state = 'never', started_at = null where source = 'os-open-names'`);
+});
