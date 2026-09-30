@@ -12,7 +12,7 @@ import { BellScreen } from './BellScreen';
  * screen reads the address and hands the layer in, and this decides what is
  * drawn. Nothing here reads the window.
  */
-export function ChatScreen({ door, layer, navigate, back, query, insetBottom = 0, onSettings }: {
+export function ChatScreen({ door, layer, navigate, back, query, insetBottom = 0, onSettings, embedded }: {
   door: ChatDoor;
   layer: ChatLayer;
   navigate: (href: string, opts?: { replace?: boolean }) => void;
@@ -22,6 +22,9 @@ export function ChatScreen({ door, layer, navigate, back, query, insetBottom = 0
   insetBottom?: number;
   /** Settings → Notifications, where there is a signed-in person to hold them. */
   onSettings?: () => void;
+  /** The list layer is drawn inside another screen's head (the offer's Questions
+   *  tab) rather than under its own back bar. */
+  embedded?: boolean;
 }) {
   const toList = () => back(door.href.list);
   switch (layer.page) {
@@ -54,7 +57,8 @@ export function ChatScreen({ door, layer, navigate, back, query, insetBottom = 0
       return (
         <TopicList
           door={door}
-          onBack={() => back(parentOfList(door.href.list))}
+          embedded={embedded}
+          onBack={embedded ? undefined : () => back(parentOfList(door.href.list))}
           onOpen={(id) => navigate(door.href.topic(id))}
           onAsk={(opts) => navigate(`${door.href.ask(opts?.tag ?? null)}${opts?.private ? `${door.href.ask(opts?.tag ?? null).includes('?') ? '&' : '?'}private=1` : ''}`)}
           onBell={door.href.bell ? () => navigate(door.href.bell!) : undefined}
