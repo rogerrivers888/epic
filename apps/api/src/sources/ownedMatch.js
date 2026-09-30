@@ -180,17 +180,18 @@ async function pageOfPlaces(after, limit, { weekly }) {
             -- saved place or a record still holds until the purge — read once
             -- here to find the owned twin, never written anywhere.
             pt.lat, pt.lng,
-            array_remove(array[
-              (select r.name from place_records r where r.venue_ref = pi.venue_ref),
-              -- An activity-sweep row is keyed on its Google reference (Codex).
-              coalesce((select a.name from attractions a where (a.venue_ref = pi.venue_ref or a.external_ref = pi.venue_ref) limit 1),
-                       (select a.name from attractions a where a.id = ${ATLAS_ID})),
-              (select s.name from scout_places s where s.venue_ref = pi.venue_ref and s.name is not null limit 1),
-              (select h.label from household_places h where h.venue_ref = pi.venue_ref and h.label <> h.venue_ref limit 1),
-              (select t.venue_label from trip_shortlist t where t.venue_ref = pi.venue_ref and t.venue_label <> t.venue_ref limit 1),
-              (select t.venue_name from trip_stops t where t.venue_ref = pi.venue_ref and t.venue_name <> t.venue_ref limit 1),
-              (select v.venue_label from visits v where v.venue_ref = pi.venue_ref and v.venue_label <> v.venue_ref limit 1)
-            ], null) as names,
+            -- Every distinct label the place is held under, from every copy —
+            -- not one arbitrary row per table (Codex, 30 Sep 2026).
+            (select coalesce(array_agg(distinct n), '{}') from (
+               select r.name as n from place_records r where r.venue_ref = pi.venue_ref
+               union select a.name from attractions a where a.venue_ref = pi.venue_ref or a.external_ref = pi.venue_ref
+               union select a.name from attractions a where a.id = ${ATLAS_ID}
+               union select s.name from scout_places s where s.venue_ref = pi.venue_ref
+               union select h.label from household_places h where h.venue_ref = pi.venue_ref and h.label <> h.venue_ref
+               union select t.venue_label from trip_shortlist t where t.venue_ref = pi.venue_ref and t.venue_label <> t.venue_ref
+               union select t.venue_name from trip_stops t where t.venue_ref = pi.venue_ref and t.venue_name <> t.venue_ref
+               union select v.venue_label from visits v where v.venue_ref = pi.venue_ref and v.venue_label <> v.venue_ref
+             ) labels where n is not null) as names,
             epic_ref_true_source(pi.venue_ref) = any(epic_rented_sources()) as rented,
             coalesce((select r.wikidata_id from place_records r where r.venue_ref = pi.venue_ref),
                      -- Only an identifier the atlas vouches for: a harvested row,
