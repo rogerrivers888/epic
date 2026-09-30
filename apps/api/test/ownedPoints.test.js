@@ -180,3 +180,14 @@ test('half a point is no point', async () => {
   const r = await saved(hh, `osm:node/${Date.now()}2`, 51.5, null);
   assert.deepEqual(r, { lat: null, lng: null, point_from: null });
 });
+
+test('an atlas reference standing in for an unmatched Google row keeps neither Google\'s point nor its name', async () => {
+  const { rows: [a] } = await query(
+    `insert into attractions (region_slug, slug, name, source, display_source) values ('cornwall', $1, '(maze)', 'google', 'google') returning id`, [`gm-${randomUUID()}`]);
+  const ref = `atlas:${a.id}`;
+  const { markResearching } = await import('../src/repositories/placeContents.js');
+  await markResearching(ref, 'Google\'s name for the maze', 51.5, -0.1);
+  assert.deepEqual((await query('select name, lat from place_records where venue_ref = $1', [ref])).rows[0], { name: null, lat: null });
+  const hh = await household();
+  assert.deepEqual(await saved(hh, ref, 51.5, -0.1), { lat: null, lng: null, point_from: null });
+});

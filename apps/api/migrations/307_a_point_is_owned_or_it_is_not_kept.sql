@@ -46,6 +46,15 @@ $$ select array['google', 'tripadvisor', 'yelp', 'foursquare'] $$;
 create or replace function epic_ref_point_source(ref text) returns text language sql immutable as
 $$ select case split_part(coalesce(ref, ''), ':', 1) when '' then null when 'photo' then 'household' else split_part(ref, ':', 1) end $$;
 
+-- The same, knowing that an atlas reference on an unmatched activity-sweep
+-- row stands in for a Google place: its point and name are Google's (Codex,
+-- 30 Sep 2026).
+create or replace function epic_ref_true_source(ref text) returns text language sql stable as
+$$ select case when coalesce(ref, '') ~ '^atlas:[0-9a-f-]{36}$' and exists (
+                   select 1 from attractions g where g.id = substr(ref, 7)::uuid
+                      and (g.display_source = 'google' or (g.source = 'google' and g.osm_ref is null)))
+               then 'google' else epic_ref_point_source(ref) end $$;
+
 alter table household_places add column if not exists point_from text;
 alter table trip_shortlist   add column if not exists point_from text;
 alter table trip_stops       add column if not exists point_from text;
@@ -95,11 +104,11 @@ begin
     -- provenance says which; a record matched to the open map is OSM's.
     if (NEW.provenance ->> 'lat') = any(epic_owned_sources()) then src := NEW.provenance ->> 'lat';
     elsif NEW.osm_ref is not null then src := 'osm';
-    else src := coalesce(said, epic_ref_point_source(ref));
+    else src := coalesce(said, epic_ref_true_source(ref));
     end if;
   else
     ref := NEW.venue_ref;
-    src := coalesce(said, epic_ref_point_source(ref));
+    src := coalesce(said, epic_ref_true_source(ref));
   end if;
 
   -- Google's name for a place the open map never gave is rented like its
@@ -172,12 +181,12 @@ create or replace function epic_point_lat(ref text, lat double precision, point_
 language sql stable as $$
   select case when lat is not null and point_from = any(epic_owned_sources()) then lat
               else coalesce((select pi.lat from place_index pi where pi.venue_ref = ref and pi.lat is not null and pi.lng is not null),
-                            case when (point_from = 'census-box' or (point_from is null and not (coalesce(epic_ref_point_source(ref), '') = any(epic_rented_sources())))) then lat end) end $$;
+                            case when (point_from = 'census-box' or (point_from is null and not (coalesce(epic_ref_true_source(ref), '') = any(epic_rented_sources())))) then lat end) end $$;
 create or replace function epic_point_lng(ref text, lng double precision, point_from text) returns double precision
 language sql stable as $$
   select case when lng is not null and point_from = any(epic_owned_sources()) then lng
               else coalesce((select pi.lng from place_index pi where pi.venue_ref = ref and pi.lat is not null and pi.lng is not null),
-                            case when (point_from = 'census-box' or (point_from is null and not (coalesce(epic_ref_point_source(ref), '') = any(epic_rented_sources())))) then lng end) end $$;
+                            case when (point_from = 'census-box' or (point_from is null and not (coalesce(epic_ref_true_source(ref), '') = any(epic_rented_sources())))) then lng end) end $$;
 
 alter table coordinate_expiries add column if not exists table_name text;
 alter table coordinate_expiries add column if not exists detail jsonb;

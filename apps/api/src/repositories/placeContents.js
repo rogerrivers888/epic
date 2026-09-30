@@ -27,7 +27,10 @@ export async function contentsState(parentRef) {
  * refuses the point anyway; the name is refused here.
  */
 export async function markResearching(parentRef, name, lat, lng) {
-  const rented = RENTED_SOURCES.includes(pointSourceOfRef(parentRef));
+  // Google's, on a Google reference or on an atlas reference that stands in
+  // for an unmatched activity-sweep row (Codex, 30 Sep 2026).
+  const { rows: [t] } = await query('select epic_ref_true_source($1) as src', [parentRef]);
+  const rented = RENTED_SOURCES.includes(t?.src ?? pointSourceOfRef(parentRef));
   await query(
     `insert into place_records (venue_ref, name, lat, lng, contents_state)
      values ($1,$2,$3,$4,'pending')

@@ -38,12 +38,14 @@ const box = (lat, lng, radiusM) => {
   return [lat - dLat, lat + dLat, lng - dLng, lng + dLng];
 };
 
+// The live load of each, the last that arrived whole — never one being written.
+const LIVE = (source) => `load_id = (select live_load from owned_source_loads where source = '${source}') and`;
 const TABLES = {
-  fsa: { sql: 'select fhrsid::text as id, name, lat, lng from fsa_establishments' },
-  'historic-england': { sql: "select layer || ':' || list_entry as id, name, lat, lng from heritage_entries" },
-  'os-open-names': { sql: 'select id, name, lat, lng from os_names' },
+  fsa: { sql: `select fhrsid::text as id, name, lat, lng from fsa_establishments where ${LIVE('fsa')}` },
+  'historic-england': { sql: `select layer || ':' || list_entry as id, name, lat, lng from heritage_entries where ${LIVE('historic-england')}` },
+  'os-open-names': { sql: `select id, name, lat, lng from os_names where ${LIVE('os-open-names')}` },
   // The open map, from our own copy of it (sources/osmExtract.js).
-  osm: { sql: 'select ref as id, name, lat, lng from osm_features' },
+  osm: { sql: 'select ref as id, name, lat, lng from osm_features where' },
 };
 
 /**
@@ -55,7 +57,7 @@ export async function candidateIn(source, name, near, { strict = false } = {}) {
   const t = TABLES[source];
   const radiusM = near.radiusM ?? RULES[source].radiusM;
   const [a, b, c, d] = box(near.lat, near.lng, radiusM);
-  const { rows } = await query(`${t.sql} where lat between $1 and $2 and lng between $3 and $4 limit 2000`, [a, b, c, d]);
+  const { rows } = await query(`${t.sql} lat between $1 and $2 and lng between $3 and $4 limit 2000`, [a, b, c, d]);
   const need = strict ? BOX_SCORE : RULES[source].score;
   const good = rows
     .map((r) => ({ ...r, score: nameScore(name, r.name), distanceM: metresBetween({ lat: near.lat, lng: near.lng }, { lat: r.lat, lng: r.lng }) }))

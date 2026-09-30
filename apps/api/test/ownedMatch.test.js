@@ -33,6 +33,14 @@ test('the FSA register loads every council\'s file, and a new load replaces the 
   await src.loadSource('fsa', { fetcher: load(['The Duck']) });
   assert.deepEqual((await query('select name from fsa_establishments where fhrsid >= 90000 order by fhrsid')).rows.map((r) => r.name), ['The Duck']);
 
+  // A load that fails part-way keeps the last good one whole.
+  const failing = async (url) => {
+    if (url.includes('/Authorities')) return json({ authorities: [1, 2, 3, 4, 5].map((k) => ({ Name: `C${k}`, FileName: `https://ratings.food.gov.uk/OpenDataFiles/FHRS${k}en-GB.xml` })) });
+    if (url.includes('FHRS1en')) return json({ FHRSEstablishment: { EstablishmentCollection: [{ FHRSID: 90000, BusinessName: 'The Duck, renamed', Geocode: { Latitude: '51.48', Longitude: '-0.61' } }] } });
+    return json({}, 404);
+  };
+  await assert.rejects(() => src.loadSource('fsa', { fetcher: failing }));
+  assert.deepEqual((await query(`select name from fsa_establishments where fhrsid = 90000 and load_id = (select live_load from owned_source_loads where source = 'fsa')`)).rows.map((r) => r.name), ['The Duck']);
   // A load that fails keeps the last good one.
   await assert.rejects(() => src.loadSource('fsa', { fetcher: async () => json({}, 503) }));
   assert.equal((await query('select count(*)::int as n from fsa_establishments where fhrsid >= 90000')).rows[0].n, 1);
@@ -47,9 +55,18 @@ test('the heritage list is refused when a layer does not all arrive', async () =
   await assert.rejects(() => src.loadSource('historic-england', { fetcher }), /1 of 3 arrived/);
 });
 
-const fsaRow = (fhrsid, name, lat, lng) => query(
-  `insert into fsa_establishments (fhrsid, name, lat, lng, load_id) values ($1, $2, $3, $4, $5) on conflict (fhrsid) do update set name = excluded.name, lat = excluded.lat, lng = excluded.lng`,
-  [fhrsid, name, lat, lng, randomUUID()]);
+// Written into the live load, the only one the matcher reads.
+const fsaRow = async (fhrsid, name, lat, lng) => {
+  let { rows: [l] } = await query(`select live_load from owned_source_loads where source = 'fsa'`);
+  if (!l?.live_load) {
+    const id = randomUUID();
+    await query(`update owned_source_loads set live_load = $1 where source = 'fsa'`, [id]);
+    l = { live_load: id };
+  }
+  await query(`insert into fsa_establishments (fhrsid, name, lat, lng, load_id) values ($1, $2, $3, $4, $5)
+               on conflict (fhrsid, load_id) do update set name = excluded.name, lat = excluded.lat, lng = excluded.lng`,
+    [fhrsid, name, lat, lng, l.live_load]);
+};
 
 test('a place is matched by its name near its point, and a chain in one box is no match', async () => {
   await fsaRow(91001, 'Kokoro Windsor', 51.4830, -0.6100);

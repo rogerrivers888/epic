@@ -11,8 +11,11 @@
 -- loaded: it holds a number and a point and nothing else, so no place can be
 -- matched to it without already knowing its UPRN, which no free source gives.
 
+-- Each load is written beside the last, keyed by its load, and becomes the
+-- live one only once it is whole: a load that fails part-way never touches the
+-- rows the matcher is reading (Codex, 30 Sep 2026).
 create table if not exists fsa_establishments (
-  fhrsid          bigint primary key,
+  fhrsid          bigint not null,
   name            text not null,
   business_type   text,
   business_type_id integer,
@@ -20,9 +23,10 @@ create table if not exists fsa_establishments (
   authority       text,
   lat             double precision not null,
   lng             double precision not null,
-  load_id         uuid not null
+  load_id         uuid not null,
+  primary key (fhrsid, load_id)
 );
-create index if not exists fsa_establishments_lat_lng on fsa_establishments (lat, lng);
+create index if not exists fsa_establishments_lat_lng on fsa_establishments (load_id, lat, lng);
 
 create table if not exists heritage_entries (
   list_entry  bigint not null,
@@ -32,26 +36,28 @@ create table if not exists heritage_entries (
   lat         double precision not null,
   lng         double precision not null,
   load_id     uuid not null,
-  primary key (list_entry, layer)
+  primary key (list_entry, layer, load_id)
 );
-create index if not exists heritage_entries_lat_lng on heritage_entries (lat, lng);
+create index if not exists heritage_entries_lat_lng on heritage_entries (load_id, lat, lng);
 
 create table if not exists os_names (
-  id          text primary key,     -- OS's own identifier, e.g. 'osgb4000000074568954'
+  id          text not null,        -- OS's own identifier, e.g. 'osgb4000000074568954'
   name        text not null,
   type        text not null,        -- 'landform', 'hydrography', 'landcover', 'other'
   local_type  text,                 -- 'Hill Or Mountain', 'Woodland Or Forest', ...
   lat         double precision not null,
   lng         double precision not null,
-  load_id     uuid not null
+  load_id     uuid not null,
+  primary key (id, load_id)
 );
-create index if not exists os_names_lat_lng on os_names (lat, lng);
+create index if not exists os_names_lat_lng on os_names (load_id, lat, lng);
 
 -- One row per source: when it was last loaded, how much, and whether it worked.
 create table if not exists owned_source_loads (
   source       text primary key check (source in ('fsa', 'historic-england', 'os-open-names')),
   state        text not null default 'never' check (state in ('never', 'loading', 'done', 'failed')),
-  load_id      uuid,
+  load_id      uuid,                -- the load being written, or the last one written
+  live_load    uuid,                -- the load the matcher reads: the last one that arrived whole
   rows         integer,
   licence      text not null,
   url          text,

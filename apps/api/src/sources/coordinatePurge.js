@@ -37,7 +37,9 @@ import { query } from '../db.js';
 import { expireRentedCoordinates } from './census.js';
 import { RENTED_SOURCES } from './ownedPoints.js';
 
-const RENTED_REF = (col) => `split_part(${col}, ':', 1) = any($1::text[])`;
+// A rented reference: a provider's own, or an atlas one standing in for an
+// unmatched activity-sweep row (epic_ref_true_source, migration 307).
+const RENTED_REF = (col) => `(split_part(${col}, ':', 1) = any($1::text[]) or epic_ref_true_source(${col}) = any($1::text[]))`;
 
 /**
  * Each table: the rows still holding a rented copy older than thirty days,

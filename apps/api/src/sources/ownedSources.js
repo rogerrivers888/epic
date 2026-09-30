@@ -84,8 +84,9 @@ export async function loadSource(source, { who = 'Epic', fetcher = fetch } = {})
     const table = { fsa: 'fsa_establishments', 'historic-england': 'heritage_entries', 'os-open-names': 'os_names' }[source];
     // A load that brought nothing is a failure, never an empty country.
     if (!rows) throw new Error('the source answered with nothing');
+    // Live first, then the old loads go: the matcher reads the live load only.
+    await query(`update owned_source_loads set state = 'done', rows = $2, live_load = $3, finished_at = now() where source = $1`, [source, rows, loadId]);
     await query(`delete from ${table} where load_id <> $1`, [loadId]);
-    await query(`update owned_source_loads set state = 'done', rows = $2, finished_at = now() where source = $1`, [source, rows]);
     return { source, rows };
   } catch (err) {
     await query(`update owned_source_loads set state = 'failed', problem = $2, finished_at = now() where source = $1`, [source, String(err.message).slice(0, 500)]);
@@ -137,8 +138,7 @@ export async function loadFsa(loadId, fetcher = fetch) {
       await insertBatch('fsa_establishments',
         ['fhrsid', 'name', 'business_type', 'business_type_id', 'postcode', 'authority', 'lat', 'lng', 'load_id'],
         rows.slice(i, i + 500),
-        `on conflict (fhrsid) do update set name = excluded.name, business_type = excluded.business_type, business_type_id = excluded.business_type_id,
-            postcode = excluded.postcode, authority = excluded.authority, lat = excluded.lat, lng = excluded.lng, load_id = excluded.load_id`);
+        'on conflict do nothing');
     }
     total += rows.length;
   }
@@ -162,16 +162,22 @@ export async function loadHeritage(loadId, fetcher = fetch) {
       const features = page.features ?? [];
       const rows = [];
       for (const f of features) {
-        const pt = L.points ? f.geometry?.points?.[0] : (f.centroid ? [f.centroid.x, f.centroid.y] : null);
+        // A multipoint layer answers with `points`; a point layer with x and y
+        // (Codex, 30 Sep 2026) — either is read; a polygon with its centroid.
+        const g = f.geometry;
+        const pt = L.points
+          ? (g?.points?.[0] ?? (Number.isFinite(g?.x) && Number.isFinite(g?.y) ? [g.x, g.y] : null))
+          : (f.centroid ? [f.centroid.x, f.centroid.y] : null);
         const entry = Number(f.attributes?.ListEntry);
         if (!pt || !Number.isFinite(entry) || !f.attributes?.Name) continue;
         rows.push([entry, L.layer, String(f.attributes.Name), f.attributes.Grade ?? null, Number(pt[1]), Number(pt[0]), loadId]);
       }
       for (let i = 0; i < rows.length; i += 500) {
-        await insertBatch('heritage_entries', ['list_entry', 'layer', 'name', 'grade', 'lat', 'lng', 'load_id'], rows.slice(i, i + 500),
-          `on conflict (list_entry, layer) do update set name = excluded.name, grade = excluded.grade, lat = excluded.lat, lng = excluded.lng, load_id = excluded.load_id`);
+        await insertBatch('heritage_entries', ['list_entry', 'layer', 'name', 'grade', 'lat', 'lng', 'load_id'], rows.slice(i, i + 500), 'on conflict do nothing');
       }
-      got += features.length;
+      got += rows.length;
+      // A feature that did not become a row is a layer read wrongly, not a place.
+      if (features.length && rows.length < features.length * 0.99) throw new Error(`${L.layer}: ${features.length - rows.length} of ${features.length} features had no name or point`);
       if (!features.length || (!page.exceededTransferLimit && features.length < 2000)) break;
     }
     // Every entry the list says it holds, or the layer is not loaded.
@@ -204,8 +210,7 @@ export async function loadOsNames(loadId, fetcher = fetch) {
       rows.push([id, name1, type, localType ?? null, lat, lng, loadId]);
     }
     for (let i = 0; i < rows.length; i += 500) {
-      await insertBatch('os_names', ['id', 'name', 'type', 'local_type', 'lat', 'lng', 'load_id'], rows.slice(i, i + 500),
-        `on conflict (id) do update set name = excluded.name, type = excluded.type, local_type = excluded.local_type, lat = excluded.lat, lng = excluded.lng, load_id = excluded.load_id`);
+      await insertBatch('os_names', ['id', 'name', 'type', 'local_type', 'lat', 'lng', 'load_id'], rows.slice(i, i + 500), 'on conflict do nothing');
     }
     total += rows.length;
   }
