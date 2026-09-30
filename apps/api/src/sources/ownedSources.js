@@ -44,6 +44,10 @@ const OS_NAMES = 'https://api.os.uk/downloads/v1/products/OpenNames/downloads?ar
 // Named features a family might go to; settlements, roads and postcodes are
 // not places in that sense, and would match every business in them.
 export const OS_TYPES = new Set(['landform', 'hydrography', 'landcover', 'other']);
+// What a whole archive holds, at least: 824 files and ~280,000 kept rows in the
+// July 2026 release. Less is a truncated or partial download, and is refused
+// rather than published over a whole one (Codex, 30 Sep 2026).
+export const OS_EXPECT = { files: 700, rows: 150_000 };
 const OS_LOCAL_TYPES_OUT = new Set(['Named Road', 'Numbered Road', 'Postcode', 'Section Of Named Road', 'Section Of Numbered Road']);
 
 const UA = { 'user-agent': 'Epic (epic.day) owned-sources loader; roger@epic.day' };
@@ -252,6 +256,7 @@ export async function loadOsNames(loadId, fetcher = fetch) {
   if (!res.ok) throw new Error(`OS Open Names answered ${res.status}`);
   const zip = Buffer.from(await res.arrayBuffer());
   let total = 0;
+  let files = 0;
   // One file at a time, inflated off the event loop, with a yield between
   // files: the archive is ~100 MB and its files are a few MB each, so the API
   // keeps answering while a load runs (Codex, 30 Sep 2026).
@@ -259,6 +264,7 @@ export async function loadOsNames(loadId, fetcher = fetch) {
     const { name } = entry;
     if (!/\.csv$/i.test(name) || /header/i.test(name)) continue;
     const data = entry.method === 8 ? await inflate(entry.raw) : entry.raw;
+    files += 1;
     await new Promise((ok) => setImmediate(ok));
     const rows = [];
     // Each file opens with a byte-order mark (checked 30 Sep 2026), which would
@@ -279,6 +285,7 @@ export async function loadOsNames(loadId, fetcher = fetch) {
     }
     total += rows.length;
   }
+  if (files < OS_EXPECT.files || total < OS_EXPECT.rows) throw new Error(`OS Open Names looks partial: ${files} files, ${total} rows`);
   return total;
 }
 

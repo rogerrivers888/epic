@@ -263,7 +263,15 @@ test('OS Open Names loads from its zip: named features in, roads and postcodes o
   ].join('\n');
   const zip = await zipOf('DATA/SU97.csv', csv);
   await query(`update owned_source_loads set state = 'never' where source = 'os-open-names'`);
-  const out = await src.loadSource('os-open-names', { fetcher: async () => ({ ok: true, status: 200, arrayBuffer: async () => zip }) });
+  // A one-file archive is refused as partial at the real thresholds...
+  await assert.rejects(() => src.loadSource('os-open-names', { fetcher: async () => ({ ok: true, status: 200, arrayBuffer: async () => zip }) }), /looks partial/);
+  // ...and loads with them lowered for the test.
+  const was = { ...src.OS_EXPECT };
+  Object.assign(src.OS_EXPECT, { files: 1, rows: 1 });
+  let out;
+  try {
+    out = await src.loadSource('os-open-names', { fetcher: async () => ({ ok: true, status: 200, arrayBuffer: async () => zip }) });
+  } finally { Object.assign(src.OS_EXPECT, was); }
   assert.equal(out.rows, 2);
   const names = (await query(`select name from os_names where load_id = (select live_load from owned_source_loads where source = 'os-open-names') order by name`)).rows.map((r) => r.name);
   assert.deepEqual(names, ['Snow Hill, The', 'Windsor Great Park']);

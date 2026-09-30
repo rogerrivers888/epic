@@ -142,9 +142,12 @@ export async function purgeRented({ days = 30, force = false } = {}) {
                          where g.id = (case when c.venue_ref like 'atlas:%' then epic_try_uuid(substr(c.venue_ref, 7)) end)
                            and (g.display_source = 'google' or (g.source = 'google' and g.osm_ref is null))))
         and c.lat is not null
-        -- Whatever its stamp time: a cell is a copy of a point, and one whose
-        -- point the index and the owned points no longer hold is an orphan
-        -- (Codex, 30 Sep 2026).
+        -- An orphan: a copy of a point the index and the owned points no longer
+        -- hold. Where the index still has the place, its point was cleared by
+        -- the thirty-day expiry, so the copy goes whatever its stamp; where the
+        -- index has no row at all, the stamp is the only clock there is (Codex,
+        -- 30 Sep 2026, both ways).
+        and (exists (select 1 from place_index px where px.venue_ref = c.venue_ref) or c.at < now() - ${age})
         and not exists (select 1 from place_index pi where pi.venue_ref = c.venue_ref and pi.lat is not null
                           and abs(pi.lat - c.lat) <= 0.0005 and abs(pi.lng - c.lng) <= 0.0005)
         and not exists (select 1 from owned_points o where o.venue_ref = c.venue_ref
