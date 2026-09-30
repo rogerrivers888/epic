@@ -36,6 +36,9 @@ test('files each place under the best point held for it, and counts old rented p
   await query(`insert into place_index (venue_ref, lat, lng, cell) values ($1, 51.5, -0.1, 'sector:TR1 1'), ('tripadvisor:9', 51.5, -0.1, 'sector:TR1 1')`, [`atlas:${gs.id}`]);
   await query(`insert into place_records (venue_ref, lat, lng, osm_ref) values ('google:matched', 51.5, -0.1, 'node/9')`);
   await query(`insert into place_cells (venue_ref, lat, lng, at) values ('google:elsewhere', 51.5, -0.1, $1)`, [at(40)]);
+  // A cell stamped from a Google-named atlas row, under its atlas reference.
+  const { rows: [gz] } = await query(`insert into attractions (region_slug, slug, name, lat, lng, display_source) values ('cornwall', 'a-zoo-cell', '(zoo)', 51.5, -0.1, 'google') returning id`);
+  await query(`insert into place_cells (venue_ref, lat, lng, at) values ($1, 51.5, -0.1, now())`, [`atlas:${gz.id}`]);
   // A sweep row the open map twinned keeps OSM's point, and is not rented.
   await query(`insert into scout_areas (code, lat, lng) values ('SL5', 51.4, -0.6) on conflict do nothing`);
   await query(`insert into scout_places (area_code, venue_ref, lat, lng, rank, from_sources) values ('SL5', 'google:matched', 51.5, -0.1, 1, '["osm","google"]'), ('SL5', 'google:nothing', 51.5, -0.1, 2, '["google"]')`);
@@ -58,13 +61,13 @@ test('files each place under the best point held for it, and counts old rented p
   assert.equal(idx.undated, 2, 'a point with no clock is undated, not old');
   assert.equal(r.rented.find((x) => x.table === 'place_index (other providers)').held, 1, 'tripadvisor on its own line');
   const cells = r.rented.find((x) => x.table === 'place_cells');
-  assert.equal(cells.held, 1);
-  assert.equal(cells.undated, 1, 'its index point is gone, so its age cannot be told');
+  assert.equal(cells.held, 2, 'google:elsewhere, and the atlas row Google named');
+  assert.equal(cells.undated, 2, 'neither has a dated index point, so their age cannot be told');
   assert.equal(cells.over30Days, 0);
   assert.equal(r.rentedOver30Days, 1);
   assert.equal(r.pointsByTable.place_index.google, 4, 'matched, old, fresh, undated — the raw prefix spread');
   assert.equal(r.pointsByTable.place_cells.google, 1);
-  assert.equal(r.pointsByTable.attractions.atlas, 2, 'the castle and the maze, keyed atlas:<id>');
+  assert.equal(r.pointsByTable.attractions.atlas, 3, 'the castle, the maze and the zoo, keyed atlas:<id>');
   assert.equal(r.rented.length, 11);
   assert.deepEqual(r.indexOver30DaysByArea, [{ area: 'TR', over30: 1 }], 'SL\'s was the open map\'s point');
 });

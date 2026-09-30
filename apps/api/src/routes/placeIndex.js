@@ -3908,7 +3908,12 @@ export async function coordinateReport() {
               min(pi.coords_at) oldest
          from place_cells c
          left join place_index pi on pi.venue_ref = c.venue_ref and pi.lat is not null and ${NEAR('pi')}
-        where c.lat is not null and split_part(c.venue_ref, ':', 1) = any($1::text[])
+        where c.lat is not null
+          and (split_part(c.venue_ref, ':', 1) = any($1::text[])
+               -- An atlas reference on an unmatched activity-sweep row is Google's point too.
+               or exists (select 1 from attractions g
+                           where g.id = (case when c.venue_ref ~ '^atlas:[0-9a-f-]{36}$' then substr(c.venue_ref, 7)::uuid end)
+                             and (g.display_source = 'google' or (g.source = 'google' and g.osm_ref is null))))
           and (pi.venue_ref is null or ${IX_TRUE_SRC('pi')} = any($1::text[]))
           and not exists (select 1 from attractions a where a.venue_ref = c.venue_ref and a.source = 'google' and a.osm_ref is not null
                             and a.display_source is distinct from 'google' and a.lat is not null and ${NEAR('a')})
