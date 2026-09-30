@@ -141,7 +141,7 @@ export function SayScreen({ household }: { household: HouseholdResponse | null }
     return (
       <View style={{ flex: 1, backgroundColor: colors.bg }}>
         <CompactBand title={bandTitle} onClose={() => (door ? back(door === 'trip' ? paths.trips() : paths.inspire()) : back(paths.inspire()))} />
-        <VoiceScreen>
+        <VoiceScreen topInset={false}>
         {known.length ? <KnownChips chips={known} /> : null}
         <Example>{copy.example}</Example>
         {!off ? <SentenceField value={text} onChange={setText} onSubmit={() => text.trim() && submit(text.trim(), 'typed')} placeholder={copy.placeholder} /> : null}
@@ -170,7 +170,7 @@ export function SayScreen({ household }: { household: HouseholdResponse | null }
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <CompactBand title={bandTitle} onClose={() => (door === 'trip' ? back(paths.trips()) : back(paths.inspire()))} />
-      <VoiceScreen>
+      <VoiceScreen topInset={false}>
       {known.length ? <KnownChips chips={known} /> : null}
       <Example>{copy.example}</Example>
       {off ? <VoiceOff door={door} onSearch={() => navigate(paths.tripsSearch())} /> : null}

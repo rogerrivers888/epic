@@ -22,10 +22,12 @@ import type { ChipSource } from '../../api';
 // ---------------------------------------------------------------------------
 
 /** A whole voice screen: cream ground, 20px gutters, the header on top. */
-export function VoiceScreen({ children, footer, scroll = true }: { children: React.ReactNode; footer?: React.ReactNode; scroll?: boolean }) {
+export function VoiceScreen({ children, footer, scroll = true, topInset = true }: { children: React.ReactNode; footer?: React.ReactNode; scroll?: boolean; topInset?: boolean }) {
   const body = <View style={styles.body}>{children}</View>;
   return (
-    <View style={styles.screen}>
+    // A CompactBand above already carries the status-bar inset, so the screen
+    // under it opts out of its own to avoid a second notch-sized gap (Codex).
+    <View style={[styles.screen, !topInset && { paddingTop: 0 }]}>
       {scroll ? <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">{body}</ScrollView> : <View style={[styles.scroll, { flex: 1 }]}>{body}</View>}
       {footer ? <View style={styles.footer}>{footer}</View> : null}
     </View>
