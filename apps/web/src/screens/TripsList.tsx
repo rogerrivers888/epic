@@ -137,7 +137,10 @@ export function TripsList({ trips, bookings, loading, error, span, when, onSpan,
         <InkMenu
           tabs={[{ key: 'day', label: 'Day trips' }, { key: 'holiday', label: 'Holidays' }]}
           selected={span}
-          onSelect={(s) => onSpan(s as 'day' | 'holiday')}
+          // Choosing a span is also the way out of the bookings focus: without
+          // the old `when` menu, tapping a tab is the only control left, so it
+          // clears ?when=hosts back to the trip sections (Codex P1).
+          onSelect={(s) => { onSpan(s as 'day' | 'holiday'); if (when === 'hosts') onWhen('upcoming'); }}
         />
       </View>
 
