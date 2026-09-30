@@ -1197,7 +1197,7 @@ const styles = StyleSheet.create({
   rootTitleText: { fontFamily: fonts.heading, fontSize: 26, fontWeight: '800', letterSpacing: -0.78, lineHeight: 28, color: colors.selectedFg },
   rootSub: { fontFamily: fonts.body, fontSize: 13, color: colors.selectedFg },
   crumbWrap: { paddingTop: 14 },
-  chrome: { marginTop: 14 },
+  chrome: { marginTop: 0 },  // the ink menu sits flush under the band (§5)
 
   list: { paddingTop: 4 },
   navRow: {

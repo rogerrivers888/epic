@@ -109,7 +109,7 @@ function BookingsList({ home }: { home: HostHome }) {
     .sort((a, z) => z.b.bookedAt.localeCompare(a.b.bookedAt));
   return (
     <View style={{ paddingTop: 16 }}>
-      <SectionHeader title="Bookings" count={rows.length} />
+      <View style={k.gutter}><SectionHeader title="Bookings" count={rows.length} /></View>
       <View style={[k.gutter, { paddingTop: 8 }]}>
         {rows.length ? rows.map(({ b, o }) => (
           <View key={b.id} style={styles.bookingRow}>
@@ -155,7 +155,7 @@ function Dashboard({ home, onReset }: { home: HostHome; onReset: () => Promise<v
       </View>
 
       <View style={{ paddingTop: 16 }}>
-        <SectionHeader title="Offers" count={offers.length} />
+        <View style={k.gutter}><SectionHeader title="Offers" count={offers.length} /></View>
         <View style={[k.gutter, { paddingTop: 8, gap: 8 }]}>
         <View>
           {offers.map((o, i) => (

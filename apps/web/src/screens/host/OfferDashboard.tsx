@@ -160,7 +160,7 @@ export function OfferDashboard({ offerId, hostName, chat = null }: { offerId: st
 
         {/* Who is coming: people and bookings counted separately. */}
         <View style={styles.block}>
-          <View style={styles.sectionEdge}><SectionHeader title="Who is coming" count={`${heads} in ${live.length} booking${live.length === 1 ? '' : 's'}`} /></View>
+          <SectionHeader title="Who is coming" count={`${heads} in ${live.length} booking${live.length === 1 ? '' : 's'}`} />
           {live.length ? live.slice(0, 8).map((b) => (
             <Row key={b.id} style={styles.person}>
               <HostFace host={{ name: b.name ?? 'Guest', photo: null }} size={36} />
@@ -177,7 +177,7 @@ export function OfferDashboard({ offerId, hostName, chat = null }: { offerId: st
 
         {o.broadcasts.length ? (
           <View style={styles.block}>
-            <View style={styles.sectionEdge}><SectionHeader title="What you have said to them" /></View>
+            <SectionHeader title="What you have said to them" />
             {o.broadcasts.slice(0, 3).map((b) => <Text key={b.id} style={type.small}><Text style={{ color: colors.ink }}>{dateOnly(b.at.slice(0, 10))}</Text> · {b.body}</Text>)}
           </View>
         ) : null}
@@ -258,8 +258,6 @@ function Tile({ label, value, sub, red }: { label: string; value: string; sub?: 
 }
 
 const styles = StyleSheet.create({
-  // A section header owns its own 20px gutter; this cancels the ScrollView's so it lands at the true edge.
-  sectionEdge: { marginHorizontal: -20 },
   chatRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.ruleSoft },
   chatTile: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.lime },
   page: { flex: 1, padding: spacing.lg, gap: spacing.md, backgroundColor: colors.bg },
