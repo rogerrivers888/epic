@@ -616,6 +616,8 @@ function ListHead({ st, ui, onLandedShown }: { st: ListState; ui: ListUi; onLand
   // on a screen. Type and mood fold into Filters; sort is dropped to match the
   // signed-off mockups (owner, 30 Sep 2026).
   const listLabel = LISTS.find((l) => l.key === st.list)?.label ?? 'Been and liked';
+  // So a set type/mood filter is never silent on the Filters control (Codex).
+  const nFilters = (st.typeF ? 1 : 0) + (st.moodShown && st.moodF ? 1 : 0);
   return (
     <View style={styles.chrome}>
       <InkMenu
@@ -634,6 +636,8 @@ function ListHead({ st, ui, onLandedShown }: { st: ListState; ui: ListUi; onLand
         icon={null}
         onPress={toggle('list')}
         onFilters={toggle('filters')}
+        filtersLabel={nFilters ? `Filters (${nFilters})` : 'Filters'}
+        filtersActive={nFilters > 0}
       />
     </View>
   );

@@ -886,6 +886,8 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
             icon={travelDraw.icon}
             onPress={toggle('where')}
             onFilters={toggle('filters')}
+            filtersLabel={filtersLabel}
+            filtersActive={active > 0}
           />
         </View>
 

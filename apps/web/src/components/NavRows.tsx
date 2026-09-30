@@ -18,13 +18,18 @@ import { colors, fonts, INK, INK_MUTED, MUTED, MOSS } from '../theme';
  * 0`. The car is Lucide `car`, side-on. The control is regular weight — it is a
  * setting, not a heading.
  */
-export function ContextRow({ label, icon = 'driving', onPress, onFilters }: {
+export function ContextRow({ label, icon = 'driving', onPress, onFilters, filtersLabel = 'Filters', filtersActive = false }: {
   label: string;
   /** A leading icon, or `null` for none (the "Been and liked ▾" list dropdown). */
   icon?: IconName | null;
   onPress: () => void;
   onFilters: () => void;
+  /** e.g. "Filters (2)" when some are set — so an active filter is never silent. */
+  filtersLabel?: string;
+  /** Set away from the default: the control turns moss, like every other "set" control. */
+  filtersActive?: boolean;
 }) {
+  const filtersColour = filtersActive ? MOSS : INK_MUTED;
   return (
     <View style={styles.ctxRow}>
       <Press onPress={onPress} style={styles.ctl} accessibilityRole="button" accessibilityLabel={label}>
@@ -32,9 +37,9 @@ export function ContextRow({ label, icon = 'driving', onPress, onFilters }: {
         <Text numberOfLines={1} style={styles.ctlText}>{label}</Text>
         <Icon name="expand" size={14} color={INK_MUTED} strokeWidth={2.4} />
       </Press>
-      <Press onPress={onFilters} style={styles.filters} accessibilityRole="button" accessibilityLabel="Filters">
-        <Icon name="filters" size={15} color={INK_MUTED} strokeWidth={2} />
-        <Text style={styles.filtersText}>Filters</Text>
+      <Press onPress={onFilters} style={styles.filters} accessibilityRole="button" accessibilityLabel={filtersLabel}>
+        <Icon name="filters" size={15} color={filtersColour} strokeWidth={2} />
+        <Text style={[styles.filtersText, { color: filtersColour }]}>{filtersLabel}</Text>
       </Press>
     </View>
   );
