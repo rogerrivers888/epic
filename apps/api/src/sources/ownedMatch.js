@@ -76,7 +76,7 @@ export async function candidateIn(source, name, near, { strict = false } = {}) {
     // Accents folded as the stems were, so a Café is found by "cafe" (Codex).
     `${t.sql} lat between $1 and $2 and lng between $3 and $4
        ${stems.length ? `and translate(lower(name), '${FOLD_FROM}', '${FOLD_TO}') ~ $5` : ''} limit ${CAP + 1}`, params);
-  if (rows.length > CAP) return null;
+  if (rows.length > CAP) return { ambiguous: `more than ${CAP} candidates` };
   const need = strict ? BOX_SCORE : RULES[source].score;
   const good = rows
     .map((r) => ({ ...r, score: nameScore(name, r.name), distanceM: metresBetween({ lat: near.lat, lng: near.lng }, { lat: r.lat, lng: r.lng }) }))
@@ -89,7 +89,7 @@ export async function candidateIn(source, name, near, { strict = false } = {}) {
   // same distance away in opposite directions are two places (Codex, 30 Sep 2026).
   const rival = good.find((r) => r !== best && r.score >= best.score - 0.05
     && metresBetween({ lat: r.lat, lng: r.lng }, { lat: best.lat, lng: best.lng }) > 50);
-  if (rival) return null;
+  if (rival) return { ambiguous: 'two candidates are both it' };
   return best;
 }
 
@@ -141,6 +141,9 @@ export async function matchPlace(place) {
     const hits = [];
     for (const name of names) {
       const hit = await candidateIn(source, name, strict ? near : { ...near, radiusM: RULES[source].radiusM }, { strict });
+      // A source that cannot tell which of its places this is has spoken: a
+      // lower one is not asked to break the tie (Codex, 30 Sep 2026).
+      if (hit?.ambiguous) return { none: `${source} holds more than one place it could be (${hit.ambiguous})` };
       if (hit) hits.push(hit);
     }
     if (!hits.length) continue;

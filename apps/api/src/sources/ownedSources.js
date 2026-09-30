@@ -156,8 +156,12 @@ export async function loadFsa(loadId, fetcher = fetch) {
     const list = Array.isArray(coll) ? coll : (Array.isArray(coll?.EstablishmentDetail) ? coll.EstablishmentDetail : []);
     const rows = [];
     for (const e of list) {
-      const lat = Number(e?.Geocode?.Latitude); const lng = Number(e?.Geocode?.Longitude);
-      if (!e?.FHRSID || !e.BusinessName || !Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) continue;
+      // Both halves present and on the map: an empty one is not nought (Codex).
+      const rawLat = e?.Geocode?.Latitude; const rawLng = e?.Geocode?.Longitude;
+      if (rawLat == null || rawLng == null || String(rawLat).trim() === '' || String(rawLng).trim() === '') continue;
+      const lat = Number(rawLat); const lng = Number(rawLng);
+      if (!e?.FHRSID || !e.BusinessName || !Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      if (lat < 49 || lat > 61.5 || lng < -9 || lng > 3) continue;
       rows.push([Number(e.FHRSID), String(e.BusinessName), e.BusinessType ?? null, e.BusinessTypeID ?? null, e.PostCode ?? null, e.LocalAuthorityName ?? a.Name ?? null, lat, lng, loadId]);
     }
     for (let i = 0; i < rows.length; i += 500) {
@@ -182,7 +186,8 @@ export async function loadHeritage(loadId, fetcher = fetch) {
   for (const L of NHLE_LAYERS) {
     const { count } = await getJson(`${NHLE}/${L.id}/query?where=1%3D1&returnCountOnly=true&f=json`, fetcher);
     let got = 0;
-    for (let offset = 0; ; offset += 2000) {
+    let seen = 0;
+    for (let offset = 0; ;) {
       const geo = L.points ? 'returnGeometry=true' : 'returnGeometry=false&returnCentroid=true';
       const page = await getJson(`${NHLE}/${L.id}/query?where=1%3D1&outFields=ListEntry,Name,Grade&${geo}&outSR=4326&orderByFields=OBJECTID&resultOffset=${offset}&resultRecordCount=2000&f=json`, fetcher);
       const features = page.features ?? [];
@@ -201,13 +206,17 @@ export async function loadHeritage(loadId, fetcher = fetch) {
       for (let i = 0; i < rows.length; i += 500) {
         await insertBatch('heritage_entries', ['list_entry', 'layer', 'name', 'grade', 'lat', 'lng', 'load_id'], rows.slice(i, i + 500), 'on conflict do nothing');
       }
+      // By what came back, not by what was asked for: a server that caps a
+      // page lower would otherwise have rows skipped between pages (Codex).
+      offset += features.length;
+      seen += features.length;
       got += rows.length;
       // A feature that did not become a row is a layer read wrongly, not a place.
       if (features.length && rows.length < features.length * 0.99) throw new Error(`${L.layer}: ${features.length - rows.length} of ${features.length} features had no name or point`);
       if (!features.length || (!page.exceededTransferLimit && features.length < 2000)) break;
     }
     // Every entry the list says it holds, or the layer is not loaded.
-    if (got < count) throw new Error(`${L.layer}: ${got} of ${count} arrived`);
+    if (seen < count) throw new Error(`${L.layer}: ${seen} of ${count} arrived`);
     total += got;
   }
   return total;

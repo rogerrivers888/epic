@@ -300,3 +300,13 @@ test('a failed weekly run carries on even in a week that already had one', async
   const out = await m.weeklyDue();
   assert.equal(out.id, f.id);
 });
+
+test('a higher source that cannot tell is not overruled by a lower one', async () => {
+  await fsaRow(91070, 'The Mill House', 50.9000, -0.1000);
+  await fsaRow(91071, 'The Mill House', 50.9000, -0.1015);
+  await query(`update owned_source_loads set live_load = coalesce(live_load, $1) where source = 'historic-england'`, [randomUUID()]);
+  const { rows: [l] } = await query(`select live_load from owned_source_loads where source = 'historic-england'`);
+  await query(`insert into heritage_entries (list_entry, layer, name, lat, lng, load_id) values (777001, 'listed-building', 'The Mill House', 50.9001, -0.1007, $1) on conflict do nothing`, [l.live_load]);
+  const out = await m.matchPlace({ ref: 'google:mill', names: ['The Mill House'], point: { lat: 50.9, lng: -0.1007 } });
+  assert.match(out.none, /fsa holds more than one place/);
+});
