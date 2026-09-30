@@ -242,7 +242,7 @@ function attributionOf(v, lines) {
  * not: the paged-in places carried no journey, and the cards printed "NaNh
  * drive" under a photograph of a go-karting track (20 Sep 2026).
  */
-const asCard = (it, { centre, origin, mode, category }) => ({
+const asCard = (it, { centre, origin, mode, category, straight = false, circleKm = null, minutes = null }) => ({
   venueRef: it.venueRef, source: 'google', name: it.name, category: it.category,
   moods: it.moods?.length ? it.moods : [category], subcategory: it.subcategory ?? null,
   experiences: [], cuisines: [],
@@ -252,9 +252,14 @@ const asCard = (it, { centre, origin, mode, category }) => ({
   attribution: ['Powered by Google'],
   lat: it.lat, lng: it.lng,
   distanceKm: Number(kmBetween(centre, it).toFixed(1)),
-  // The very number the fence measured: one function, so the screen cannot
-  // contradict itself at the edge.
-  travelMinutes: minutesTo(origin, it, mode),
+  // The very number the fence measured, so the screen cannot contradict itself
+  // at the edge. A straight-line ring is fenced by the circle, so its card reads
+  // its minute off that same circle — distance as a fraction of the reach — which
+  // is at most the minutes asked for and never the journey-time estimate with its
+  // fixed overhead (a five-minute transit card would otherwise print eight).
+  travelMinutes: straight && circleKm
+    ? Math.min(minutes, Math.round((kmBetween(centre, it) / circleKm) * minutes))
+    : minutesTo(origin, it, mode),
   estimated: true,
   dwellMinutes: 90,
   household: null,
@@ -460,24 +465,23 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
     // journey-time fence intersected with a circle, which would drop a venue the
     // count kept at the cycling overhead (Codex). A matrix ring fences by the
     // journey-time estimate the card itself prints.
-    let fenced = fenceToBand(venues, { from: start, minutes, mode });
-    // A straight-line ring (walk/transit with no matrix) has two things to
-    // honour, and they meet at an intersection (Codex):
-    //   · the band invariant — nothing over the minutes is shown, measured from
-    //     the journey origin the card itself prints from — which fenceToBand
-    //     above already enforces; and
-    //   · the counted reach — `ring.circle`, the exact circle the count was taken
-    //     over — so no card lies past the reach the count claims, and none inside
-    //     it is dropped.
-    // A card must satisfy both, so cap the band by `ring.circle` itself, never a
-    // second circle round another point; when the searched place and the journey
-    // origin coincide (the ordinary case) the two are one.
+    // A straight-line ring (walk/transit with no matrix) is one circle, drawn by
+    // one estimator: the cards are exactly the census's own circle (`ring.circle`)
+    // and nothing else (Codex). Not the journey-time fence intersected with it —
+    // that measures from a different point and carries a fixed wait, so a
+    // five-minute transit board rejected even the origin (8-minute wait > 5) while
+    // the count stayed positive. The card's shown minute is the same straight-line
+    // estimate (see asCard), so it never prints a time past the band. A matrix
+    // ring keeps the journey-time fence measured from the origin.
+    let fenced;
     if (straight && ring.circle) {
       const centre = { lat: Number(ring.circle.lat), lng: Number(ring.circle.lng) };
       const limitKm = ring.circle.km;
-      fenced = fenced.filter((v) =>
+      fenced = (venues ?? []).filter((v) =>
         v?.lat != null && v?.lng != null
         && kmBetween(centre, { lat: Number(v.lat), lng: Number(v.lng) }) <= limitKm);
+    } else {
+      fenced = fenceToBand(venues, { from: start, minutes, mode });
     }
     // Closed places, once the owner has applied the check, are not shown (C57).
     const hidden = await hiddenAmong(fenced.map((v) => `${v.source}:${v.sourcePlaceId}`));
@@ -666,6 +670,7 @@ inspire.get('/around', async (req, res, next) => {
         items: got.items.slice(0, shows).map((it) => asCard(it, {
           centre: { lat: ring.at?.lat ?? it.lat, lng: ring.at?.lng ?? it.lng },
           origin: ring.at ?? it, mode, category: key,
+          straight: ring.method === 'straight-line', circleKm: ring.circle?.km ?? null, minutes,
         })),
         of: got.items.length,
         // Where the twenty went.
@@ -834,7 +839,10 @@ inspire.get('/near', async (req, res, next) => {
           more: Boolean(got.nextPageToken),
         });
         for (const it of got.items) {
-          items.push(asCard(it, { centre, origin, mode, category: key }));
+          items.push(asCard(it, {
+            centre, origin, mode, category: key,
+            straight: ring.method === 'straight-line', circleKm: ring.circle?.km ?? null, minutes,
+          }));
         }
       }
       const answer = {
