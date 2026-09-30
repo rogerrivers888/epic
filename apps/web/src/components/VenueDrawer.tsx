@@ -619,11 +619,18 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
   // from editorialSummary, so a summary whose source is Google is dropped here:
   // the description is the owned one (Wikipedia, the venue's page, the atlas), or
   // nothing at all — owned facts only (Codex).
-  const rawSummary = v?.summary ?? item.summary ?? null;
-  const rawSummaryIsGoogle = v?.summary != null
-    ? (v.provenance?.summary?.source ?? v.source) === 'google'
-    : item.summary != null ? (item.provenance?.summary?.source ?? item.source) === 'google' : false;
-  const shownSummary = rawSummaryIsGoogle ? (ownRecord?.summary ?? null) : rawSummary;
+  // The best summary that is NOT Google's editorial (rented prose, read for
+  // vocabulary and never shown as a description): the detail's, then the owned
+  // record's, then the card's — each only when its source is not Google — and
+  // otherwise nothing at all, owned facts only. Dropping the detail's Google
+  // summary must not also drop a perfectly good atlas Wikipedia one on the card
+  // (an OSM-backed atlas entry with no place_records summary) (Codex).
+  const notGoogle = (text: string | null | undefined, src: string | undefined) =>
+    (text != null && src !== 'google') ? text : null;
+  const shownSummary = notGoogle(v?.summary, v?.provenance?.summary?.source ?? v?.source)
+    ?? ownRecord?.summary
+    ?? notGoogle(item.summary, item.provenance?.summary?.source ?? item.source)
+    ?? null;
   // A credit is only correct if the prose on screen is one whose source we know,
   // and its source is written down in several shapes: own.js stores
   // `summary_source` as the literal "wikipedia", as a venue URL, or as a full

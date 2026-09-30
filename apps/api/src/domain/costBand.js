@@ -26,9 +26,14 @@ export function scaleFor(currency) {
  * Null when there is no level — the "not known yet" case.
  */
 export function bandIndexForLevel(level) {
-  if (level == null || Number.isNaN(Number(level))) return null;
+  if (level == null) return null;
   const n = Number(level);
-  if (n <= 0) return 0;
+  // Google's price level is one of 0–4 and nothing else: a non-integer, a
+  // negative, or an out-of-range number is not a level (the query is
+  // client-controlled), so it is "not known", never Free and never a fractional
+  // index that fills no scale step (Codex).
+  if (!Number.isInteger(n) || n < 0 || n > 4) return null;
+  if (n === 0) return 0;
   return Math.min(n, 3);
 }
 

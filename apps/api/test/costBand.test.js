@@ -25,6 +25,12 @@ test('a price level fills a step; no level fills none (not known yet, never Free
   assert.equal(bandIndexForLevel(null), null, 'no level → no band');
   assert.equal(bandIndexForLevel(undefined), null);
   assert.equal(bandIndexForLevel(NaN), null);
+  // The query is client-controlled: a non-integer, a negative, or out of range
+  // is not a Google level, so it is "not known" — never Free, never a
+  // fractional index that fills no step (Codex).
+  assert.equal(bandIndexForLevel(1.5), null, 'a fractional level is not a level');
+  assert.equal(bandIndexForLevel(-1), null, 'a negative is not Free');
+  assert.equal(bandIndexForLevel(5), null, 'above 4 is not a level');
 });
 
 test('the range comes from the market bands; Free and a bandless market make no money sentence', () => {
