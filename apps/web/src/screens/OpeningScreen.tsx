@@ -636,8 +636,10 @@ function CardScreen({ stepIndex, reduced, onSkip, onNext, title, sub, cards, cta
 const introTop = Platform.OS === 'web' ? ('calc(64px + var(--epic-sat))' as unknown as number) : 64;
 const bottomPad = Platform.OS === 'web' ? ('calc(40px + var(--epic-sab))' as unknown as number) : 40;
 // The opener's doors sit closer to the bottom edge than the intro screens' CTA
-// (owner, 30 Sep 2026: move them down about a centimetre).
-const openerBottom = Platform.OS === 'web' ? ('calc(18px + var(--epic-sab))' as unknown as number) : 18;
+// (owner, 30 Sep 2026: move them down about a centimetre). The web adds the real
+// inset with env(); native has no env(), so it keeps the home-indicator-safe 40
+// the screen used before rather than dropping the door into the gesture area.
+const openerBottom = Platform.OS === 'web' ? ('calc(18px + var(--epic-sab))' as unknown as number) : 40;
 
 const styles = StyleSheet.create({
   glyph: { fontFamily: fonts.heading, fontWeight: '800', letterSpacing: -6, color: INK, includeFontPadding: false },
