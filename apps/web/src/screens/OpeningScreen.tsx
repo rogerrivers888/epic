@@ -31,6 +31,14 @@ import { LIME, LIME_TINT, INK, CREAM, MOSS, HAIRLINE, INK_MUTED, NEUTRAL, fonts 
 // The todo (not-yet-reached) progress bar and card rules are a soft warm grey.
 const SOFT = HAIRLINE;
 
+// The looping preview panels are decoration — the heading and subline carry the
+// message a screen reader needs. The opacity-crossfaded ones (day/trip, crew
+// rows/lanes) keep both halves mounted, so the whole panel is taken out of the
+// accessibility tree rather than leaving two overlapping lists to be read.
+const DECOR: object = Platform.OS === 'web'
+  ? { ['aria-hidden']: true }
+  : { accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' };
+
 // ---------------------------------------------------------------------------
 // placeholders (the handoff's own photos, names and prices)
 // ---------------------------------------------------------------------------
@@ -97,8 +105,16 @@ const HOSTS = [
 // reduced motion
 // ---------------------------------------------------------------------------
 
+const webReducedMotion = () =>
+  Platform.OS === 'web' && typeof window !== 'undefined' && !!window.matchMedia
+  && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 function useReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(false);
+  // Read synchronously on the web so the very first render already knows, and no
+  // animation gets a frame in before an effect could turn it off (native reads
+  // it asynchronously through AccessibilityInfo, so it can still settle a beat
+  // later — every screen stops its running animations when the flag flips).
+  const [reduced, setReduced] = useState(webReducedMotion);
   useEffect(() => {
     // The web reads the CSS media query; iOS and Android read the OS setting
     // through AccessibilityInfo. Either way, a change flips the flag live.
@@ -238,24 +254,30 @@ function Opener({ width, height, reduced, onStart, onHaveAccount }: {
     tag.setValue(0);
     cta.setValue(0);
 
-    const anims = tileP.map((v, i) => Animated.sequence([
+    // Every handle is kept so the cleanup can stop it — if reduced motion turns
+    // on a beat after mount (the native path settles asynchronously), the
+    // running timelines are cancelled rather than left to play under the
+    // final-state values the next effect writes.
+    const running: Animated.CompositeAnimation[] = [];
+    const run = (a: Animated.CompositeAnimation) => { running.push(a); a.start(); };
+
+    run(Animated.parallel(tileP.map((v, i) => Animated.sequence([
       Animated.delay(i * 70),
       Animated.timing(v, { toValue: 0.5, duration: 650, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
       Animated.delay(1100),
       Animated.timing(v, { toValue: 1, duration: 500, easing: Easing.bezier(0.7, 0, 0.2, 1), useNativeDriver: true }),
-    ]));
-    Animated.parallel(anims).start();
+    ]))));
 
-    Animated.timing(band, { toValue: 1, duration: 380, delay: 2250, easing: Easing.bezier(0.7, 0, 0.2, 1), useNativeDriver: false }).start();
-    letters.forEach((v, i) => Animated.timing(v, { toValue: 1, duration: 480, delay: 2480 + i * 70, easing: Easing.bezier(0.2, 0.9, 0.3, 1.25), useNativeDriver: true }).start());
-    Animated.timing(tag, { toValue: 1, duration: 450, delay: 2800, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
-    Animated.timing(cta, { toValue: 1, duration: 500, delay: 2900, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    run(Animated.timing(band, { toValue: 1, duration: 380, delay: 2250, easing: Easing.bezier(0.7, 0, 0.2, 1), useNativeDriver: false }));
+    letters.forEach((v, i) => run(Animated.timing(v, { toValue: 1, duration: 480, delay: 2480 + i * 70, easing: Easing.bezier(0.2, 0.9, 0.3, 1.25), useNativeDriver: true })));
+    run(Animated.timing(tag, { toValue: 1, duration: 450, delay: 2800, easing: Easing.out(Easing.cubic), useNativeDriver: true }));
+    run(Animated.timing(cta, { toValue: 1, duration: 500, delay: 2900, easing: Easing.out(Easing.cubic), useNativeDriver: true }));
 
     const burst = setTimeout(() => {
       confetti.current?.burst(380, 420, { n: 70, colors: [INK, MOSS, LIME, CREAM], shapes: ['rect', 'pin'], power: 900, angle: Math.PI * 1.1, spread: Math.PI * 0.9, size: 11 });
       confetti.current?.burst(10, 420, { n: 50, colors: [INK, MOSS, LIME], shapes: ['rect'], power: 800, angle: -Math.PI * 0.2, spread: Math.PI * 0.8, size: 10 });
     }, 2620);
-    return () => clearTimeout(burst);
+    return () => { clearTimeout(burst); running.forEach((a) => a.stop()); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reduced, width, height]);
 
@@ -416,7 +438,7 @@ function DayOrTrip({ stepIndex, reduced, onSkip, onNext }: IntroProps) {
           <View style={styles.switchCell}><Text style={styles.switchText}>Day out</Text></View>
           <View style={[styles.switchCell, { borderLeftWidth: 2, borderLeftColor: INK }]}><Text style={styles.switchText}>Trip</Text></View>
         </View>
-        <View style={{ height: 300 }}>
+        <View style={{ height: 300 }} {...DECOR}>
           <Animated.View style={[StyleSheet.absoluteFill, { opacity: reduced ? 1 : dayOp }]}>
             <ItineraryList head="Saturday · Richmond" rows={DAY_ROWS} />
           </Animated.View>
@@ -481,7 +503,7 @@ function YourCrew({ stepIndex, reduced, onSkip, onNext }: IntroProps) {
   return (
     <IntroFrame stepIndex={stepIndex} showSkip onSkip={onSkip} onNext={onNext} ctaLabel="Next" scroll={false}
       title="Built around your crew." sub="Tell us who's coming and what they love. Everything we suggest works for all of you.">
-      <View style={{ flex: 1, overflow: 'hidden', marginTop: 4 }} onLayout={(e) => setZoneH(e.nativeEvent.layout.height)}>
+      <View style={{ flex: 1, overflow: 'hidden', marginTop: 4 }} onLayout={(e) => setZoneH(e.nativeEvent.layout.height)} {...DECOR}>
         {/* Phase 1 — the crew, with pills popping in. */}
         <Animated.View style={{ opacity: rowsOp, transform: [{ translateY: rowsY }] }}>
           {CREW.map((m, mi) => (
