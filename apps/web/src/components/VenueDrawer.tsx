@@ -491,7 +491,11 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
     let live = true;
     api.costBand({ country, level }).then((d) => { if (live) setCost(d); }).catch(() => { if (live) setCost(null); });
     return () => { live = false; };
-  }, [item, country, venue?.priceLevel]);
+    // The source is a dependency, not just the number: a list item and its
+    // detail can carry the same priceLevel while the detail adds the Google
+    // provenance the list omitted, and without this the first "not known yet"
+    // would stand (Codex).
+  }, [item, country, venue?.priceLevel, venue?.provenance?.priceLevel?.source]);
   const onHeroScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (!heroW) return;
     const i = Math.round(e.nativeEvent.contentOffset.x / heroW);
