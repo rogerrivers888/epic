@@ -28,6 +28,21 @@ const changesTabData = (path: string): boolean => {
   const p = path.split('?')[0];
   return TAB_DATA_WRITE.some((w) => p.startsWith(w)) || EATEN.test(p);
 };
+
+// The two writes that change whether a place is kept — recorded in the session's
+// saved-overrides so the Inspire heart (whose ring carries no ledger) reads it.
+// Done here, at the write door, so it covers both a direct call and an outbox
+// replay of a delete queued offline, which goes through `request` and not the
+// `deleteAtlasPlace` helper (Codex, D13).
+function noteSavedState(path: string, method: string, rawBody: BodyInit | null | undefined) {
+  const p = path.split('?')[0];
+  if (p !== '/api/places/save' && p !== '/api/atlas/places') return;
+  try {
+    const body = rawBody ? JSON.parse(String(rawBody)) : {};
+    if (p === '/api/places/save' && method === 'POST' && body.ref) setSavedOverride(body.ref, body.status !== 'dismissed');
+    else if (p === '/api/atlas/places' && method === 'DELETE' && body.venueRef) setSavedOverride(body.venueRef, false);
+  } catch { /* a body we cannot read tells us nothing to record */ }
+}
 import { flush as flushOutbox, queue as queueWrite, refreshOutbox } from './offline/outbox';
 import { copyHolder, deviceLabel, holderOf, sessionExpired, sessionToken, setCopyHolder, setSessionToken } from './session';
 
@@ -111,7 +126,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         ...(init?.headers || {}),
       },
     });
-    if (res.status === 204) { if (isTabWrite) invalidateTabData(); return undefined as T; }
+    if (res.status === 204) {
+      if (!readOnly) { if (isTabWrite) invalidateTabData(); if (sessionToken() === token) noteSavedState(path, method, init?.body); }
+      return undefined as T;
+    }
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
       // Signed out, or the token has run out. Drop it so the app shows the
@@ -127,7 +145,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     servingSaved(false);
     if (readOnly) void remember(path, body);
-    else if (isTabWrite) invalidateTabData();
+    else { if (isTabWrite) invalidateTabData(); if (sessionToken() === token) noteSavedState(path, method, init?.body); }
     return body as T;
   } catch (err) {
     if (err instanceof ApiError) throw err;
@@ -2228,18 +2246,12 @@ export const api = {
   /** Research a place again now (Settings, and "look again" in the drawer). */
   researchPlace: (venueRef: string) => post<{ state: string; fields: number; matched: Record<string, any>; problems: string[]; record: OwnedRecord | null }>('/api/places/record', { ref: venueRef }),
   savePlace: (venueRef: string, status: 'saved' | 'dismissed' | 'special' = 'saved', context?: { label?: string; venue?: Partial<Venue>; category?: string | null; lat?: number; lng?: number; note?: string; country?: string | null; countryCode?: string | null; locality?: string | null }) =>
-    // Record what the heart should read now, so a card saved here shows saved on
-    // Inspire too, where the ring carries no ledger to say so — but only if the
-    // session that made the request is still the one signed in, or a save still
-    // in flight across a sign-out would write the last household's act into the
-    // next one's cleared overrides (Codex, D13).
-    ((t) => post<{ venueRef: string; status: string; filed?: PhotoFiled | null }>('/api/places/save', { ref: venueRef, status, ...(context ?? {}) })
-      .then((r) => { if (sessionToken() === t) setSavedOverride(venueRef, status !== 'dismissed'); return r; }))(sessionToken()),
+    post<{ venueRef: string; status: string; filed?: PhotoFiled | null }>('/api/places/save', { ref: venueRef, status, ...(context ?? {}) }),
   /** Predictions as you type: one cheap call, nothing fetched until one is chosen. */
   suggestPlaces: (p: { q: string; near?: string; radiusKm?: number; session?: string; kind?: string }) =>
     request<{ suggestions: { placeId: string | null; venueRef: string; name: string; where: string | null; kind: string | null; mine: boolean; types: string[] }[] }>(`/api/places/suggest${qs(p)}`),
   /** Take a place out of the atlas. Somewhere you've been is kept — delete the visit first. */
-  deleteAtlasPlace: (venueRef: string) => ((t) => del<void>('/api/atlas/places', { venueRef }).then((r) => { if (sessionToken() === t) setSavedOverride(venueRef, false); return r; }))(sessionToken()),
+  deleteAtlasPlace: (venueRef: string) => del<void>('/api/atlas/places', { venueRef }),
   /** A place the atlas held only by its identifier learns its name once the source has been asked. */
   nameAtlasPlace: (venueRef: string, label: string) => patch<{ venueRef: string; label: string }>('/api/atlas/places', { venueRef, label }),
   createAtlasCity: (body: { placeText?: string; place?: Place }) => post<{ city: { name: string; country: string; countryCode: string; lat: number; lng: number } }>('/api/atlas/cities', body),
