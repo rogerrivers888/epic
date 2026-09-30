@@ -320,7 +320,10 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
     }
     : ring.bandBox ?? ring.box;
 
-  const ringKey = `${ring.cell}|${mode}|${minutes}|${start?.lat?.toFixed?.(3)},${start?.lng?.toFixed?.(3)}`;
+  // The reach method is in the key: a straight-line box and a matrix box for the
+  // same cell/mode/minutes are different geometry, so when a mode gains a matrix
+  // its pages must not be served from a page cached under the old estimate (Codex).
+  const ringKey = `${ring.cell}|${mode}|${minutes}|${start?.lat?.toFixed?.(3)},${start?.lng?.toFixed?.(3)}|${ring.method}`;
   // Near and wide (owner, 26 Sep 2026, E13; domain/wideSearch.js). One box the
   // size of the journey hands its twenty to whatever is most famous inside it:
   // from Winchester, things to do within the hour came back at a median of
