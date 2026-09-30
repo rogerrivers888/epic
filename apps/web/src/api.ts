@@ -745,6 +745,8 @@ export type TripAlongPlace = {
   /** The shelf it sits on (one, the same reading Inspire draws), and its drawer. Absent on an older answer. */
   moods?: MoodKey[]; subcategory?: string | null;
   rating: number | null; ratingCount: number | null; priceLevel: number | null;
+  /** Per-field source for a merged place — see Venue.provenance. */
+  provenance?: Record<string, { source: string; expiresAt?: string | null }>;
   openingHours: string | null; phone: string | null; website: string | null; address: string | null;
   /** A sentence about the place, and whether it is open — the browse card's two other lines. */
   summary: string | null; openNow: boolean | null; closesAt: string | null; opensAt: string | null;

@@ -495,7 +495,7 @@ export function BrowseNear({ d, household, onChanged, find, setFind, initialPric
           that used to sit here is gone — the shortlist has a tab of its own. */}
       <Button label={find.loading ? 'Searching…' : 'Search again'} icon="refresh" kind="secondary" onPress={() => run({}, true)} loading={find.loading} disabled={find.loading} />
 
-      <VenueDrawer item={open} baseLabel={baseLabel}
+      <VenueDrawer item={open} country={trip.countryCode ?? null} baseLabel={baseLabel}
                    onClose={() => { if (open) noteSearchEvent('trip', 'close', open.venueRef); setOpen(null); }} onShortlist={async (b) => { const v = (find.res ?? []).find((x) => x.venueRef === b.venueRef); if (v) await add(v); }} shortlisted={open ? shortlisted.has(open.venueRef) : false} />
     </View>
   );

@@ -1249,6 +1249,9 @@ function cardToItem(card: FeedCard): BrowseItem {
     address: p?.address ?? null, website: p?.website ?? null, openingHours: p?.openingHours ?? null,
     photos: p?.photos ?? [], attribution: p?.attribution ?? null,
     rating: p?.rating ?? null, ratingCount: p?.ratingCount ?? null, priceLevel: p?.priceLevel ?? null,
+    // The merged place's per-field source, so a Google rating or price level on
+    // an OSM-identified place is read as Google's (Codex).
+    provenance: p?.provenance,
     summary: p?.summary ?? null, goodForChildren: p?.goodForChildren ?? null,
     travelFromBaseMinutes: p?.detourMinutes ?? null,
   };
