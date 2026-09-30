@@ -18,7 +18,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Image, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter, useQueryState, asNumber } from '../router';
 import { paths } from '../routes';
 import { useViewport } from '../hooks/useViewport';
@@ -305,8 +305,8 @@ function Opener({ width, height, reduced, onStart, onHaveAccount }: {
 // shared chrome for 1h-1 … 1h-4
 // ---------------------------------------------------------------------------
 
-function IntroFrame({ stepIndex, showSkip, onSkip, title, sub, ctaLabel, onNext, children }: {
-  stepIndex: number; showSkip: boolean; onSkip: () => void; title: string; sub: string; ctaLabel: string; onNext: () => void; children: React.ReactNode;
+function IntroFrame({ stepIndex, showSkip, onSkip, title, sub, ctaLabel, onNext, scroll = true, children }: {
+  stepIndex: number; showSkip: boolean; onSkip: () => void; title: string; sub: string; ctaLabel: string; onNext: () => void; scroll?: boolean; children: React.ReactNode;
 }) {
   return (
     <View style={styles.introRoot}>
@@ -322,7 +322,12 @@ function IntroFrame({ stepIndex, showSkip, onSkip, title, sub, ctaLabel, onNext,
         <Text style={styles.headingTitle}>{title}</Text>
         <Text style={styles.headingSub}>{sub}</Text>
       </View>
-      <View style={{ flex: 1, minHeight: 0 }}>{children}</View>
+      {/* The body centres on a tall phone and scrolls on a short one (e.g. an SE
+          at 667), so its fixed-height content never overlaps the heading or CTA.
+          The crew screen manages its own bounded, clipping zone, so it opts out. */}
+      {scroll
+        ? <ScrollView style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }} showsVerticalScrollIndicator={false}>{children}</ScrollView>
+        : <View style={{ flex: 1, minHeight: 0 }}>{children}</View>}
       <Pressable onPress={onNext} accessibilityRole="button" style={styles.ctaBar}>
         <Text style={styles.ctaLabel}>{ctaLabel}</Text>
         <Icon name="forward" size={20} color={CREAM} strokeWidth={2.4} />
@@ -431,7 +436,7 @@ function YourCrew({ stepIndex, reduced, onSkip, onNext }: IntroProps) {
   const pills = CREW.flatMap((m) => m.likes.map((t, j) => ({ t, top: j === 0 })));
 
   return (
-    <IntroFrame stepIndex={stepIndex} showSkip onSkip={onSkip} onNext={onNext} ctaLabel="Next"
+    <IntroFrame stepIndex={stepIndex} showSkip onSkip={onSkip} onNext={onNext} ctaLabel="Next" scroll={false}
       title="Built around your crew." sub="Tell us who's coming and what they love. Everything we suggest works for all of you.">
       <View style={{ flex: 1, overflow: 'hidden', marginTop: 4 }} onLayout={(e) => setZoneH(e.nativeEvent.layout.height)}>
         {/* Phase 1 — the crew, with pills popping in. */}
@@ -553,17 +558,21 @@ function CardScreen({ stepIndex, reduced, onSkip, onNext, title, sub, cards, cta
 // styles
 // ---------------------------------------------------------------------------
 
-const topInset = Platform.OS === 'web' ? ('var(--epic-sat)' as unknown as number) : 0;
+// The opening is full-bleed (routes.ts `isFullBleed`), so the shell adds no
+// safe-area insets — the screen takes the notch and the home indicator into its
+// own top and bottom padding.
+const introTop = Platform.OS === 'web' ? ('calc(64px + var(--epic-sat))' as unknown as number) : 64;
+const bottomPad = Platform.OS === 'web' ? ('calc(40px + var(--epic-sab))' as unknown as number) : 40;
 
 const styles = StyleSheet.create({
   glyph: { fontFamily: fonts.heading, fontWeight: '800', letterSpacing: -6, color: INK, includeFontPadding: false },
   openerTag: { fontSize: 17, fontWeight: '700', color: INK },
-  openerCta: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 40, backgroundColor: CREAM, borderTopWidth: 2, borderTopColor: INK, gap: 16, zIndex: 35 },
+  openerCta: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 20, paddingTop: 20, paddingBottom: bottomPad, backgroundColor: CREAM, borderTopWidth: 2, borderTopColor: INK, gap: 16, zIndex: 35 },
   ctaBar: { height: 56, backgroundColor: INK, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20 },
   ctaLabel: { color: CREAM, fontSize: 17, fontWeight: '700' },
   haveAccount: { fontSize: 16, fontWeight: '600', color: INK },
 
-  introRoot: { flex: 1, backgroundColor: CREAM, paddingTop: (Platform.OS === 'web' ? (`calc(64px + ${topInset})` as unknown as number) : 64), paddingHorizontal: 20, paddingBottom: 40 },
+  introRoot: { flex: 1, backgroundColor: CREAM, paddingTop: introTop, paddingHorizontal: 20, paddingBottom: bottomPad },
   progressRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   skip: { fontSize: 15, fontWeight: '600', color: INK },
   heading: { marginHorizontal: -20, marginTop: 24, paddingTop: 28, paddingHorizontal: 20, paddingBottom: 26, backgroundColor: LIME },

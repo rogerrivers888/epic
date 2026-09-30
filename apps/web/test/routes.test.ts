@@ -704,6 +704,7 @@ test('the opening: the postcards opener and four intro screens', () => {
   assert.equal(parseRoute('/opening/3').name, 'unknown');
   assert.equal(ownsHeader(parseRoute('/opening')), true, 'the opening draws its own head');
   assert.equal(isImmersive(parseRoute('/opening'), new URLSearchParams()), true, 'no tab bar on the opening');
+  assert.equal(isFullBleed(parseRoute('/opening')), true, 'the opening runs to every edge and takes its own insets');
   assert.equal(parentOf(parseRoute('/opening')), '/inspire');
 });
 

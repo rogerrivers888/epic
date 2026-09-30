@@ -888,6 +888,11 @@ export const paths = {
  * shortlist, Stay — are ordinary pages and keep the chrome.
  */
 export function isFullBleed(route: Route): boolean {
+  // The opening runs to every edge (Welcome screens, 1h): the postcards fill the
+  // screen behind the band, and the intro screens are a cream ground that meets
+  // all four sides. So the shell adds no insets of its own — the opening takes
+  // the notch and the home indicator into its own padding, the way a trip does.
+  if (route.name === 'opening') return true;
   if (route.name !== 'trips' || route.creating || route.tripId == null) return false;
   // The chat used to be the map collapsed to a strip (5e). It is a list of
   // questions with a head of its own now (Chat screens D3, 13 Sep 2026), so it
