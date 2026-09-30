@@ -19,7 +19,7 @@
 
 import { query, pool } from '../db.js';
 import { nameScore, metresBetween, significantStems } from './openMatch.js';
-import { recordOwnedPoint } from './ownedPoints.js';
+import { recordOwnedPoint, RENTED_SOURCES } from './ownedPoints.js';
 
 /** How far from the point each source's twin may be, and how alike the names must be. */
 export const RULES = {
@@ -122,6 +122,10 @@ export async function matchPlace(place) {
     const { rows: [r] } = await query('select lat, lng from osm_features where ref = $1', [place.ref.slice(4)]);
     if (r) return { source: 'osm', lat: r.lat, lng: r.lng, sourceRef: place.ref.slice(4), method: 'reference' };
   }
+  // A name is matched only for a place whose point is rented. One whose point
+  // is already ours — a household's own pin, an atlas or open-map place — is
+  // never moved onto somebody else's feature by a name (Codex, 30 Sep 2026).
+  if (!(place.rented ?? RENTED_SOURCES.includes(prefix))) return { none: 'its point is already ours' };
   const names = [...new Set((place.names ?? []).filter((n) => n && !/^\(.*\)$/.test(n) && n !== place.ref))];
   if (!names.length) return { none: 'no name to match on' };
   const near = place.point ?? place.box;
@@ -168,6 +172,7 @@ async function pageOfPlaces(after, limit, { weekly }) {
               (select t.venue_name from trip_stops t where t.venue_ref = pi.venue_ref and t.venue_name <> t.venue_ref limit 1),
               (select v.venue_label from visits v where v.venue_ref = pi.venue_ref and v.venue_label <> v.venue_ref limit 1)
             ], null) as names,
+            epic_ref_true_source(pi.venue_ref) = any(epic_rented_sources()) as rented,
             coalesce((select r.wikidata_id from place_records r where r.venue_ref = pi.venue_ref),
                      (select a.wikidata_id from attractions a where a.venue_ref = pi.venue_ref and a.wikidata_id is not null limit 1),
                      (select a.wikidata_id from attractions a where a.id = ${ATLAS_ID}),
@@ -253,16 +258,19 @@ async function runLocked({ kind, who, pageSize, fetcher, resume }) {
           ref: p.ref, names: p.names,
           point: p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : null,
           box: boxOf(p.slice), wikidataId: p.wikidata_id, wikidataPoint: wd.get(p.wikidata_id) ?? null,
+          rented: p.rented,
         });
         looked += 1;
-        if (out.none) { if (/no name|no point/.test(out.none)) noKey += 1; continue; }
-        const w = await recordOwnedPoint({ ref: p.ref, ...out });
-        if (w.written) { matched += 1; bySource[out.source] = (bySource[out.source] ?? 0) + 1; }
+        if (out.none) { if (/no name|no point/.test(out.none)) noKey += 1; } else {
+          const w = await recordOwnedPoint({ ref: p.ref, ...out });
+          if (w.written) { matched += 1; bySource[out.source] = (bySource[out.source] ?? 0) + 1; }
+        }
+        // After every place, so a resume neither looks again nor counts twice (Codex).
+        after = p.ref;
+        await query(
+          `update owned_point_runs set after = $2, looked = $3, matched = $4, by_source = $5, no_key = $6 where id = $1`,
+          [r.id, after, looked, matched, JSON.stringify(bySource), noKey]);
       }
-      after = page[page.length - 1].ref;
-      await query(
-        `update owned_point_runs set after = $2, looked = $3, matched = $4, by_source = $5, no_key = $6 where id = $1`,
-        [r.id, after, looked, matched, JSON.stringify(bySource), noKey]);
     }
     await query(`update owned_point_runs set state = 'done', finished_at = now() where id = $1`, [r.id]);
     return { id: r.id, kind, looked, matched, bySource, noKey };

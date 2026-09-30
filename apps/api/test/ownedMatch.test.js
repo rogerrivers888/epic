@@ -198,3 +198,9 @@ test('an accented name is found by its plain stem', async () => {
   const hit = await m.matchPlace({ ref: 'google:cr', names: ['Cafe Rouge'], point: { lat: 51.2001, lng: -0.3001 } });
   assert.equal(hit.sourceRef, '91030');
 });
+
+test('a household\'s own photo pin is never moved onto a feature that shares its name', async () => {
+  await fsaRow(91040, 'Granny\'s Kitchen', 51.1000, -0.2000);
+  const out = await m.matchPlace({ ref: `photo:${randomUUID()}`, names: ['Granny\'s Kitchen'], point: { lat: 51.1001, lng: -0.2001 } });
+  assert.equal(out.none, 'its point is already ours');
+});

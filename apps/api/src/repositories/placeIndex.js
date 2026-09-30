@@ -33,6 +33,9 @@ import { crowdBand, countBand, score } from '../domain/scoring.js';
  * An owned record holds a point we may keep when its provenance names an owned
  * source for it, or it was matched to the open map (C59, 30 Sep 2026).
  */
+const SWEEP_WINS = `(excluded.lat is not null and excluded.lng is not null
+  and (place_index.lat is null or not (coalesce(place_index.coords_from, '') = any(epic_owned_sources()))))`;
+
 export const RECORD_OWNS_POINT = `((r.provenance ->> 'lat') = any(epic_owned_sources()) or r.osm_ref is not null)`;
 
 export const SOURCES = [
@@ -692,10 +695,12 @@ async function reindexWhileLocked({ onProgress }) {
       from scout_places sp left join scout_areas sa on sa.code = sp.area_code
      group by sp.venue_ref
     on conflict (venue_ref) do update
-       set lat = coalesce(place_index.lat, excluded.lat),
-           lng = coalesce(place_index.lng, excluded.lng),
-           coords_at = case when place_index.lat is null and excluded.lat is not null then excluded.coords_at else place_index.coords_at end,
-           coords_from = case when place_index.lat is null and excluded.lat is not null then excluded.coords_from else place_index.coords_from end,
+       -- The open map's point from the sweep wins over a rented one the index
+       -- holds, and over none; an owned one already there stands (Codex).
+       set lat = case when ${SWEEP_WINS} then excluded.lat else place_index.lat end,
+           lng = case when ${SWEEP_WINS} then excluded.lng else place_index.lng end,
+           coords_at = case when ${SWEEP_WINS} then excluded.coords_at else place_index.coords_at end,
+           coords_from = case when ${SWEEP_WINS} then excluded.coords_from else place_index.coords_from end,
            -- The same: the sweep's area knows the country when the row does not.
            country_code = coalesce(place_index.country_code, excluded.country_code),
            last_seen = greatest(place_index.last_seen, excluded.last_seen)`);
