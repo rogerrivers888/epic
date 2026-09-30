@@ -22,6 +22,7 @@ import { Animated, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput,
 import Svg, { Path } from 'react-native-svg';
 import { api, DayStop, HouseholdResponse, LegMode, ShortlistItem, ShortlistStatus, TripAlongPlace, TripDay, TripDetail } from '../api';
 import type { BrowseItem } from '../api';
+import { storage } from '../storage';
 import { CHIP_SCRIM, CREAM, GHOST, HAIRLINE, INACTIVE, INK, INK_MUTED, LIME, LIME_EDGE, LIME_TINT, MOSS, NEUTRAL, fonts } from '../theme';
 import { Icon, type IconName } from '../components/Icon';
 import { Press } from '../components/press';
@@ -92,13 +93,9 @@ const fmtMinutes = (mins: number | null): string => (mins == null ? '' : `${Stri
 const clock = (iso: string | null | undefined, tz?: string | null): string => fmtMinutes(isoMinutes(iso, tz));
 const addMin = (iso: string | null | undefined, mins: number, tz?: string | null): string => { const b = isoMinutes(iso, tz); return b == null ? '' : fmtMinutes(b + Math.round(mins)); };
 
-const seededFlag = (key: string): boolean => {
-  if (typeof localStorage === 'undefined') return false;
-  try { return localStorage.getItem(key) === '1'; } catch { return false; }
-};
+const seededFlag = (key: string): boolean => storage.getItem(key) === '1';
 const setFlag = (key: string, on: boolean) => {
-  if (typeof localStorage === 'undefined') return;
-  try { if (on) localStorage.setItem(key, '1'); else localStorage.removeItem(key); } catch { /* private mode */ }
+  if (on) storage.setItem(key, '1'); else storage.removeItem(key);
 };
 
 /** A place's fit line, always "+N min detour" in 8a. */
@@ -187,13 +184,13 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   const justCreated = query.get('new') === '1' || justCreatedTrips.has(id);
   const [needsRescan, setNeedsRescan] = useState(false);
   useEffect(() => {
-    // The signature is kept in memory as well as localStorage, so a route/time/
-    // mode change is caught even on native or where storage is blocked (Codex).
+    // The signature is kept in memory as well as the device store, so a
+    // route/time/mode change is caught even where storage is blocked (Codex).
     let prev: string | null = searchSigs.get(id) ?? null;
-    if (prev == null && typeof localStorage !== 'undefined') { try { prev = localStorage.getItem(sigKey); } catch { prev = null; } }
+    if (prev == null) prev = storage.getItem(sigKey);
     if (prev === searchSig) return;
     searchSigs.set(id, searchSig);
-    if (typeof localStorage !== 'undefined') { try { localStorage.setItem(sigKey, searchSig); } catch { /* private mode */ } }
+    storage.setItem(sigKey, searchSig);
     // A change from a known signature is a re-search; a first sighting is not.
     if (prev != null) { setSearched(false); setFlag(searchedKey, false); setNeedsRescan(true); }
   }, [searchSig, sigKey, searchedKey, id]);

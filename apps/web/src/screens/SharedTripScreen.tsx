@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { storage } from '../storage';
 import { Press } from '../components/press';
 import { api, SharedTrip } from '../api';
 import { colors, fonts, BORDER, type } from '../theme';
@@ -28,12 +29,8 @@ import { useViewport } from '../hooks/useViewport';
  */
 
 const KEY = (token: string) => `epic.shared.${token}`;
-const held = (token: string) => {
-  try { return Platform.OS === 'web' && typeof localStorage !== 'undefined' ? localStorage.getItem(KEY(token)) : null; } catch { return null; }
-};
-const hold = (token: string, you: string) => {
-  try { if (Platform.OS === 'web' && typeof localStorage !== 'undefined') localStorage.setItem(KEY(token), you); } catch { /* a full store just means asking again */ }
-};
+const held = (token: string) => storage.getItem(KEY(token));
+const hold = (token: string, you: string) => storage.setItem(KEY(token), you);
 
 const mins = (m: number) => (m < 60 ? `${m} min` : m % 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${Math.floor(m / 60)}h`);
 

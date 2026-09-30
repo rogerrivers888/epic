@@ -2,10 +2,9 @@
 // rating"). There is no sign-in yet, so the device remembers who is looking;
 // Settings › Preferences › Ratings shown as. Defaults to the first person in
 // the household.
-import { Platform } from 'react-native';
+import { storage } from './storage';
 
 export const VIEWER_KEY = 'epic.viewer';
-const isWeb = Platform.OS === 'web' && typeof localStorage !== 'undefined';
 
 /**
  * "Anyone", written down. Nobody in particular is a real answer — the Places
@@ -15,7 +14,7 @@ const isWeb = Platform.OS === 'web' && typeof localStorage !== 'undefined';
 const ANYONE = 'anyone';
 
 export function getViewer(members: { id: string }[]): string | null {
-  const saved = isWeb ? localStorage.getItem(VIEWER_KEY) : null;
+  const saved = storage.getItem(VIEWER_KEY);
   if (saved === ANYONE) return null;
   if (saved && members.some((m) => m.id === saved)) return saved;
   return members[0]?.id ?? null;
@@ -23,7 +22,7 @@ export function getViewer(members: { id: string }[]): string | null {
 
 /** One person's verdicts, or null for the household's between them. */
 export function setViewer(memberId: string | null) {
-  if (isWeb) localStorage.setItem(VIEWER_KEY, memberId ?? ANYONE);
+  storage.setItem(VIEWER_KEY, memberId ?? ANYONE);
   listeners.forEach((fn) => fn(memberId));
 }
 

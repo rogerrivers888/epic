@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { storage, type SyncStore } from '../storage';
 import { Press } from './press';
 import { api, Place } from '../api';
 import { colors, radius, spacing, TARGET, type, BORDER } from '../theme';
@@ -34,7 +35,7 @@ import { useViewport } from '../hooks/useViewport';
 const RECENT_KEY = 'epic.inspire.recent';
 const RECENT_MAX = 6;
 
-const store = (): Storage | null => (Platform.OS === 'web' && typeof localStorage !== 'undefined' ? localStorage : null);
+const store = (): SyncStore => storage;
 
 /** Somewhere this household has looked before. Open-map names and points only. */
 export function recentPlaces(): Place[] {

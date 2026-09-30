@@ -46,6 +46,7 @@ import { useViewport, ViewportProvider } from './src/hooks/useViewport';
 import { useOffline } from './src/hooks/useOffline';
 import { useOutbox } from './src/hooks/useOutbox';
 import { useSession } from './src/hooks/useSession';
+import { hydrateSession } from './src/session';
 import { Icon, IconName } from './src/components/Icon';
 import { RouterProvider, rememberedAddress, useRememberedAddress, useRouter } from './src/router';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
@@ -87,6 +88,20 @@ const readViewMode = (): ViewMode =>
  * including the phone frame, the passcode and the choice of profile.
  */
 export default function App() {
+  // The token lives in the device's secure store; on the web it is read
+  // synchronously, but on the phone the Keychain is async, so the app holds the
+  // first paint until it has loaded (`hydrateSession`) — otherwise the first
+  // request would go out signed-out. On the web this is already true, so nothing
+  // waits. (State that is not a secret is synchronous on both platforms and
+  // needs no gate.)
+  const [ready, setReady] = useState(Platform.OS === 'web');
+  useEffect(() => {
+    if (ready) return;
+    let live = true;
+    hydrateSession().finally(() => { if (live) setReady(true); });
+    return () => { live = false; };
+  }, [ready]);
+  if (!ready) return null;
   return (
     <RouterProvider>
       <Frame />

@@ -12,10 +12,14 @@ import { useRouter } from '../../router';
 import { PrimaryCta, VoiceScreen } from '../../components/voice/kit';
 import { Wordmark } from '../../components/Wordmark';
 import { colors, fonts } from '../../theme';
+import { storage } from '../../storage';
 
 export const WELCOMED_KEY = 'epic.voice.welcomed';
-export const markWelcomed = () => { try { localStorage.setItem(WELCOMED_KEY, 'yes'); } catch { /* noop */ } };
-export const wasWelcomed = () => { try { return localStorage.getItem(WELCOMED_KEY) === 'yes'; } catch { return true; } };
+export const markWelcomed = () => storage.setItem(WELCOMED_KEY, 'yes');
+// An unset flag means "not yet welcomed" on both platforms now (the device
+// store answers null, not a thrown error), so first-run shows once on the phone
+// too rather than defaulting to "already seen".
+export const wasWelcomed = () => storage.getItem(WELCOMED_KEY) === 'yes';
 
 export function WelcomeScreen() {
   const { navigate } = useRouter();

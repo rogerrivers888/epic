@@ -14,6 +14,7 @@ import { chatLayerOf, paths, withQuery } from '../routes';
 import { ChatScreen } from '../components/chat/ChatScreen';
 import { participantDoor } from '../components/chat/door';
 import { setSessionToken } from '../session';
+import { secureStorage } from '../secureStorage';
 
 /**
  * What an invite link opens (Group Trips, Epic 3).
@@ -35,11 +36,13 @@ const day = (iso?: string | null) => (iso ? new Date(`${iso.slice(0, 10)}T12:00:
 const shortDay = (iso?: string | null) => (iso ? new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString([], { day: 'numeric', month: 'short' }) : '');
 const ICON: Record<string, IconName> = { stay: 'hotel', activity: 'ticket', fee: 'money' };
 
-const remembered = (token: string): string | null =>
-  (Platform.OS === 'web' && typeof localStorage !== 'undefined' ? localStorage.getItem(`${KEY}.${token}`) : null);
-const remember = (token: string, participantToken: string) => {
-  if (Platform.OS === 'web' && typeof localStorage !== 'undefined') localStorage.setItem(`${KEY}.${token}`, participantToken);
-};
+// The participant token is a credential, so it lives in the secure store. On the
+// web that read is synchronous; on the phone the Keychain is async and this
+// per-token key is not hydrated at boot, so the sync read may miss and the
+// component warms it once on mount (below).
+const partKey = (token: string) => `${KEY}.${token}`;
+const remembered = (token: string): string | null => secureStorage.getItem(partKey(token));
+const remember = (token: string, participantToken: string) => secureStorage.setItem(partKey(token), participantToken);
 
 /**
  * `code` is the six-digit code a sender delivered (G20): the account waits for
@@ -76,6 +79,14 @@ export function JoinScreen({ token, preview, onExit }: {
   const { width } = useViewport();
   const { query, href, navigate } = useRouter();
   const [me, setMe] = useState<string | null>(() => (preview ? null : remembered(token)));
+  // Warm the credential from the secure store on the phone, where the sync read
+  // above misses (the Keychain is async). A no-op on the web, where it hit.
+  useEffect(() => {
+    if (preview || me) return;
+    let live = true;
+    secureStorage.getAsync(partKey(token)).then((held) => { if (live && held) setMe(held); });
+    return () => { live = false; };
+  }, [preview, token]); // eslint-disable-line react-hooks/exhaustive-deps
   const [v, setV] = useState<JoinView | null>(null);
   const [account, setAccount] = useState<GuestAccount | null>(null);
   const [booking, setBooking] = useState<GroupBooking | null>(null);

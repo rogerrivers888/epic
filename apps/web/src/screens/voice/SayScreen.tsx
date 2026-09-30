@@ -30,14 +30,15 @@ import { Captions, ChipGroup, Example, FactChip, ListRow, MicControl, MicTile, P
 import { Icon } from '../../components/Icon';
 import { colors, type } from '../../theme';
 import { StatusLine } from '../../components/ui';
+import { storage } from '../../storage';
 
 const PREPERMISSION_KEY = 'epic.voice.prepermission';
-const seenPrePermission = () => typeof localStorage !== 'undefined' && localStorage.getItem(PREPERMISSION_KEY) === 'seen';
-const markPrePermission = () => { try { localStorage.setItem(PREPERMISSION_KEY, 'seen'); } catch { /* noop */ } };
+const seenPrePermission = () => storage.getItem(PREPERMISSION_KEY) === 'seen';
+const markPrePermission = () => storage.setItem(PREPERMISSION_KEY, 'seen');
 
 const RECENTS_KEY = 'epic.voice.recents';
-const recents = (): string[] => { try { return JSON.parse(localStorage.getItem(RECENTS_KEY) ?? '[]'); } catch { return []; } };
-const remember = (place: string) => { try { localStorage.setItem(RECENTS_KEY, JSON.stringify([place, ...recents().filter((p) => p !== place)].slice(0, 5))); } catch { /* noop */ } };
+const recents = (): string[] => { try { return JSON.parse(storage.getItem(RECENTS_KEY) ?? '[]'); } catch { return []; } };
+const remember = (place: string) => storage.setItem(RECENTS_KEY, JSON.stringify([place, ...recents().filter((p) => p !== place)].slice(0, 5)));
 
 const COPY = {
   first: { title: 'What do you fancy doing?', example: 'we want a day out on Saturday, happy to drive an hour, the kids want something active, and we’d like a good pub lunch', placeholder: 'Where, when, who’s coming, and what for…' },

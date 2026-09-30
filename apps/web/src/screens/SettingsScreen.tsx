@@ -31,6 +31,7 @@ import { colors, fonts, radius, resolveTheme, spacing, TARGET, type, BORDER } fr
 import { Button, Card, Chip, FoldLine, Row, Segmented, SectionTitle, StatusLine, Stepper, minutes } from '../components/ui';
 import { useRouter } from '../router';
 import { paths, type Route, type SettingsSection } from '../routes';
+import { storage } from '../storage';
 import { NotificationsSettings } from '../components/chat/NotificationsSettings';
 import { ProvidersTable } from '../components/ProvidersTable';
 import { useTheme } from '../hooks/useTheme';
@@ -46,7 +47,7 @@ import { AddPerson, HomeCard, summarise } from './HouseholdScreen';
 import { TRUST_LABEL, dateOnly } from '../components/hosting';
 
 export const SPEAK_KEY = 'epic.speakReplies';
-export const getSpeakPref = () => (Platform.OS === 'web' && typeof localStorage !== 'undefined' ? localStorage.getItem(SPEAK_KEY) !== 'off' : true);
+export const getSpeakPref = () => storage.getItem(SPEAK_KEY) !== 'off';
 
 const MODE_LABEL: Record<string, string> = { driving: 'Drive', transit: 'Train & bus', walking: 'On foot', cycling: 'Cycle' };
 
@@ -281,7 +282,7 @@ function YouAndYours({ data, refresh }: { data: HouseholdResponse; refresh: () =
           </Row>
         </FoldLine>
         <SwitchRow label="Show me the words before planning" hint="After Done, what Epic heard is shown to check and change. Off, it plans straight away." value={voiceConfirm} onChange={(v) => { setVoiceConfirm(v); setVoiceConfirmState(v); }} />
-        <SwitchRow label="Speak replies back when I use my voice" hint="Recordings are never kept: they go to the server, are written down, and are forgotten in the same breath." value={speak} onChange={(v) => { setSpeak(v); if (Platform.OS === 'web') localStorage.setItem(SPEAK_KEY, v ? 'on' : 'off'); }} />
+        <SwitchRow label="Speak replies back when I use my voice" hint="Recordings are never kept: they go to the server, are written down, and are forgotten in the same breath." value={speak} onChange={(v) => { setSpeak(v); storage.setItem(SPEAK_KEY, v ? 'on' : 'off'); }} />
       </View>
 
       {/* Appearance: two cells, and following the phone until the first tap. */}

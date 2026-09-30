@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { storage, type SyncStore } from './storage';
 
 /**
  * Where you were, when you come back (owner, 4 Sep 2026).
@@ -29,8 +29,8 @@ import { Platform } from 'react-native';
 const PREFIX = 'epic.screen.';
 const LIFE_MS = 12 * 3600_000;
 
-const store = (): Storage | null =>
-  (Platform.OS === 'web' && typeof localStorage !== 'undefined' ? localStorage : null);
+// The device store — localStorage on the web, MMKV on the phone (`storage.ts`).
+const store = (): SyncStore => storage;
 
 type Held<T> = { savedAt: string; data: T };
 

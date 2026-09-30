@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { storage } from '../storage';
 
 /**
  * The switch the voice experiment runs behind (owner's brief, 8 Sep 2026:
@@ -47,7 +47,7 @@ const MODE_KEY = 'epic.voice.mode';
 const LANGUAGE_KEY = 'epic.voice.language';
 const CONFIRM_KEY = 'epic.voice.confirm';
 
-const store = () => (Platform.OS === 'web' && typeof localStorage !== 'undefined' ? localStorage : null);
+const store = () => storage;
 
 export const getVoiceMode = (): VoiceMode => {
   const v = store()?.getItem(MODE_KEY);

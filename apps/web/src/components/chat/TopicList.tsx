@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { storage } from '../../storage';
 import { Press } from '../press';
 import { ChatAnchor, ChatList, ChatShowing, ChatTopic } from '../../api';
 import { colors, fonts, BORDER, ON_LIME, TARGET } from '../../theme';
@@ -28,10 +29,10 @@ import { SHOWING_ROWS, headerLine, repliesLine, rowMeta, seenLine, tagKicker } f
 
 const KEY = (ctx: string) => `epic.chat.${ctx}.filters`;
 const remembered = (ctx: string): { showing?: ChatShowing; about?: string | null } => {
-  try { return Platform.OS === 'web' && typeof localStorage !== 'undefined' ? JSON.parse(localStorage.getItem(KEY(ctx)) ?? '{}') : {}; } catch { return {}; }
+  try { return JSON.parse(storage.getItem(KEY(ctx)) ?? '{}'); } catch { return {}; }
 };
 const remember = (ctx: string, v: { showing: ChatShowing; about: string | null }) => {
-  try { if (Platform.OS === 'web' && typeof localStorage !== 'undefined') localStorage.setItem(KEY(ctx), JSON.stringify(v)); } catch { /* a full store just forgets */ }
+  storage.setItem(KEY(ctx), JSON.stringify(v));
 };
 
 export function TopicList({ door, onBack, onOpen, onAsk, onBell, fixedAbout, embedded, insetBottom = 0, onCount }: {
