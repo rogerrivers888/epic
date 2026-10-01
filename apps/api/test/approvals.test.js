@@ -30,6 +30,8 @@ test('only a replayable back-office write, never an approvals call, can be filed
   assert.equal(approvals.parseApprovalRequest('POST /api/trips/x'), null, 'not a back-office path');
   assert.equal(approvals.parseApprovalRequest('POST /api/admin/approvals/1/decide'), null, 'no approving an approval');
   assert.ok(approvals.parseApprovalRequest('DELETE /api/accounts/5'), 'an accounts path is allowed');
+  assert.equal(approvals.parseApprovalRequest('POST /api/admin/../api/trips/x'), null, 'no path traversal');
+  assert.equal(approvals.parseApprovalRequest('POST /api/admin/x/../../trips'), null, 'no dot segments');
 });
 
 test('a filed request keeps its fixed payload and shows as open', async () => {
@@ -54,15 +56,27 @@ test('approving runs the recorded call; a failure is re-approvable, a success is
   const claimed = await approvals.startRun(filed2.id, { by: 'roger@epic.day' });
   assert.equal(claimed.state, 'running');
   const bad = await runApprovedCall(claimed, { headers: { authorization: 'Bearer t' } }, async () => ({ ok: false, status: 409, body: { message: 'nothing to purge' } }));
-  const failedRow = await approvals.finishRun(claimed.id, { ok: bad.ok, result: bad });
+  const failedRow = await approvals.finishRun(claimed.id, { state: 'failed', result: bad });
   assert.equal(failedRow.state, 'failed');
   assert.match(failedRow.result.message, /nothing to purge/);
   // Re-approvable: startRun claims it again.
   const again = await approvals.startRun(filed2.id, { by: 'roger@epic.day' });
   assert.equal(again.state, 'running', 'a failed run can be approved again');
-  await approvals.finishRun(filed2.id, { ok: true, result: { ok: true, status: 200, message: 'Done.' } });
+  await approvals.finishRun(filed2.id, { state: 'done', result: { ok: true, status: 200, message: 'Done.' } });
   const done = (await query('select state from approvals where id = $1', [filed2.id])).rows[0];
   assert.equal(done.state, 'done');
+});
+
+test('a lost connection is unknown, not a re-approvable failure', async () => {
+  const filed = await approvals.fileApproval({ sessionId: AGENT, request: REQ, description: 'purge', payload: {} });
+  const claimed = await approvals.startRun(filed.id, { by: 'me' });
+  const thrown = await runApprovedCall(claimed, { headers: { authorization: 'Bearer t' } }, async () => { throw new Error('socket hang up'); });
+  assert.equal(thrown.indeterminate, true);
+  await approvals.finishRun(claimed.id, { state: 'unknown', result: thrown });
+  const row = (await query('select state from approvals where id = $1', [filed.id])).rows[0];
+  assert.equal(row.state, 'unknown');
+  // Not re-approvable: startRun (open states only) cannot claim it.
+  assert.equal(await approvals.startRun(filed.id, { by: 'me' }), null, 'an unknown-outcome run is not re-approvable');
 });
 
 test('runApprovedCall refuses a bad recorded request or a missing token', async () => {

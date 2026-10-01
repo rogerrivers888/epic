@@ -800,21 +800,50 @@ router.post('/approvals/:id/decide', requires('view_activity'), requireOwnerSign
     if (!['approved', 'declined'].includes(decision)) throw bad('A decision is approved or declined.');
     const who = actor(req);
 
+    const auditRow = (client, action, id, subjectLabel, after) => client.query(
+      `insert into admin_audit (actor_id, actor_label, action, subject_type, subject_id, subject_label, after)
+       values ($1, $2, $3, 'approval', $4, $5, $6)`,
+      [who.actorId ?? null, who.actorLabel ?? null, action, id, subjectLabel, JSON.stringify(after)]);
+
     if (decision === 'declined') {
-      const row = await approvals.declineApproval(req.params.id, { by: who.actorLabel });
+      const row = await withTransaction(async (client) => {
+        const { rows } = await client.query(
+          `update approvals set state = 'declined', decided_by = $2, decided_at = now() where id = $1 and state = any($3) returning *`,
+          [req.params.id, who.actorLabel ?? null, approvals.OPEN_STATES]);
+        const r = rows[0] ?? null;
+        if (!r) return null;
+        await auditRow(client, 'approval.declined', r.id, r.request, { description: r.description, numbers: r.numbers });
+        return r;
+      });
       if (!row) return res.status(409).json({ error: 'not_open', message: 'That request is not waiting for a decision.' });
-      await rolesRepo.writeAuditStrict({ ...who, action: 'approval.declined', subjectType: 'approval', subjectId: row.id, subjectLabel: row.request, after: { description: row.description, numbers: row.numbers } });
       return res.json({ approval: row });
     }
 
-    // Approved: claim it to run (atomic), then replay the recorded call.
-    const claimed = await approvals.startRun(req.params.id, { by: who.actorLabel });
+    // Claim it to run, with its audit, atomically.
+    const claimed = await withTransaction(async (client) => {
+      const { rows } = await client.query(
+        `update approvals set state = 'running', decided_by = $2, decided_at = now(), result = null where id = $1 and state = any($3) returning *`,
+        [req.params.id, who.actorLabel ?? null, approvals.OPEN_STATES]);
+      const r = rows[0] ?? null;
+      if (!r) return null;
+      await auditRow(client, 'approval.approved', r.id, r.request, { description: r.description, numbers: r.numbers });
+      return r;
+    });
     if (!claimed) return res.status(409).json({ error: 'not_open', message: 'That request is not waiting for a decision.' });
-    await rolesRepo.writeAuditStrict({ ...who, action: 'approval.approved', subjectType: 'approval', subjectId: claimed.id, subjectLabel: claimed.request, after: { description: claimed.description, numbers: claimed.numbers } });
 
+    // Replay the recorded call under the owner's identity (outside the txn), then
+    // record the outcome and its audit together.
     const result = await runApprovedCall(claimed, req, runApprovedCall.dispatch);
-    const finished = await approvals.finishRun(claimed.id, { ok: result.ok, result });
-    await rolesRepo.writeAuditStrict({ ...who, action: result.ok ? 'approval.ran' : 'approval.failed', subjectType: 'approval', subjectId: claimed.id, subjectLabel: claimed.request, after: result });
+    const state = result.indeterminate ? 'unknown' : (result.ok ? 'done' : 'failed');
+    const action = state === 'done' ? 'approval.ran' : state === 'unknown' ? 'approval.unknown' : 'approval.failed';
+    const finished = await withTransaction(async (client) => {
+      const { rows } = await client.query(
+        `update approvals set state = $2, result = $3, ran_at = now() where id = $1 and state = 'running' returning *`,
+        [claimed.id, state, JSON.stringify(result)]);
+      const r = rows[0] ?? null;
+      await auditRow(client, action, claimed.id, claimed.request, result);
+      return r;
+    });
     res.json({ approval: finished ?? claimed, result });
   } catch (err) { next(err); }
 });
@@ -834,7 +863,10 @@ export async function runApprovedCall(approval, req, dispatch) {
     const message = out.ok ? 'Done.' : (out.body?.message || `The call answered ${out.status}.`);
     return { ok: out.ok, status: out.status, message: String(message).slice(0, 300) };
   } catch (err) {
-    return { ok: false, status: 0, message: `Could not run it: ${String(err?.message || err).slice(0, 200)}` };
+    // The call may have reached the server and completed before the connection
+    // was lost — so its outcome is unknown, never a safe "failed" that invites a
+    // retry of a non-idempotent purge or grant (Codex, 1 Oct 2026).
+    return { ok: false, indeterminate: true, status: 0, message: `Ran, but the result was lost: ${String(err?.message || err).slice(0, 180)}. Check before retrying.` };
   }
 }
 

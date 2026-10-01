@@ -55,6 +55,13 @@ export function Approvals() {
             <Text style={type.tiny} numberOfLines={2}>
               {`${nums ? `${nums} · ` : ''}${r.request} · ${r.requested_label ?? r.session_label ?? 'an agent'} · ${ago(r.created_at)}`}
             </Text>
+            {/* The exact call that will run, so the owner authorises what he sees —
+                the description is the agent's claim; this is what executes. */}
+            {r.payload != null && Object.keys(r.payload as object).length > 0 ? (
+              <Text style={[type.tiny, { color: colors.inkMuted, fontFamily: 'monospace' as any }]} numberOfLines={4}>
+                {`It will send: ${JSON.stringify(r.payload)}`}
+              </Text>
+            ) : null}
             {failed && r.result ? (
               <Text style={[type.tiny, { color: colors.overrun }]}>{`Last run failed (${r.result.status}): ${r.result.message} — approve to try again.`}</Text>
             ) : null}

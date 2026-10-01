@@ -22,11 +22,15 @@ export const OPEN_STATES = ['pending', 'failed'];
  * parsed `{ method, path }`, or null when it is not an allowed shape.
  */
 export function parseApprovalRequest(request) {
-  const m = /^(POST|PUT|PATCH|DELETE)\s+(\/[^\s?]+)$/.exec(String(request || '').trim());
+  // Strict by construction: an allowed method, then a canonical back-office
+  // path of a safe charset only — no dots, no percent-encoding, no empty
+  // segments — so it cannot be URL-normalised into a path outside the
+  // allowlist once it reaches `fetch` (Codex, 1 Oct 2026).
+  const m = /^(POST|PUT|PATCH|DELETE) (\/api\/(?:admin|accounts)\/[A-Za-z0-9/_-]+)$/.exec(String(request || '').trim());
   if (!m) return null;
   const method = m[1];
   const path = m[2];
-  if (!(path.startsWith('/api/admin/') || path.startsWith('/api/accounts/'))) return null;
+  if (path.includes('..') || path.includes('//')) return null;
   if (/\/approvals(\/|$)/.test(path)) return null; // no approving an approval
   return { method, path };
 }
@@ -82,12 +86,18 @@ export async function startRun(id, { by }) {
   return row ?? null;
 }
 
-/** Record the outcome of a run: `ok` to 'done', otherwise 'failed' (re-approvable). */
-export async function finishRun(id, { ok, result }) {
+/**
+ * Record the outcome of a run. `done` (succeeded), `failed` (the server
+ * answered with an error — re-approvable, since nothing happened) or `unknown`
+ * (the call may have happened but the result was lost — NOT re-approvable, for
+ * the owner to check by hand, so a non-idempotent purge/grant is not run twice;
+ * Codex, 1 Oct 2026).
+ */
+export async function finishRun(id, { state, result }) {
   const { rows: [row] } = await query(
     `update approvals set state = $2, result = $3, ran_at = now()
       where id = $1 and state = 'running' returning *`,
-    [id, ok ? 'done' : 'failed', result ? JSON.stringify(result) : null],
+    [id, state, result ? JSON.stringify(result) : null],
   );
   return row ?? null;
 }
