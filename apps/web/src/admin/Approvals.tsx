@@ -2,9 +2,10 @@
  * The Approvals queue (G11, 1 Oct 2026).
  *
  * An agent that needs a privileged action files a request; the owner, signed in
- * personally, approves or declines it with one click — logged with his name. An
- * approved request lets that one call through once. The buttons are shown to
- * everyone but work only when elevated; otherwise they say how.
+ * personally, approves or declines with one click — logged with his name. On
+ * approval the server runs exactly the recorded call under the owner's identity
+ * and shows the result; a failed one can be approved again. The buttons are
+ * shown to everyone but work only when elevated.
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -15,6 +16,9 @@ import { colors, spacing, type } from '../theme';
 import { Button } from '../components/ui';
 import { Panel, ago } from './kit';
 
+const numbersLine = (n: Approval['numbers']) =>
+  n && typeof n === 'object' ? Object.entries(n).map(([k, v]) => `${v} ${k}`).join(', ') : '';
+
 export function Approvals() {
   const { access } = useSession();
   const elevated = Boolean(access?.elevated);
@@ -23,7 +27,7 @@ export function Approvals() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    try { setRows((await api.approvals('pending')).approvals); } catch { setRows(null); }
+    try { setRows((await api.approvals('open')).approvals); } catch { setRows(null); }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
@@ -34,27 +38,35 @@ export function Approvals() {
     } finally { setBusy(null); }
   };
 
-  if (!rows || (rows.length === 0 && elevated)) return null;
+  if (!rows || rows.length === 0) return null;
   return (
     <Panel title="Waiting for you" sub="An agent has asked to do something only you may authorise.">
       {error ? <Text style={[type.small, { color: colors.overrun }]}>{error}</Text> : null}
       {!elevated ? (
         <Text style={[type.small, { color: colors.ink }]}>Sign in with your e-mail link to approve or decline these.</Text>
       ) : null}
-      {rows.length ? rows.map((r) => (
-        <View key={r.id} style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.lineSoft, gap: 4 }}>
-          <Text style={[type.small, { color: colors.ink, fontWeight: '700' }]}>{r.description}</Text>
-          <Text style={type.tiny} numberOfLines={1}>
-            {`${r.request}${r.numbers ? ` · ${Object.entries(r.numbers).map(([k, v]) => `${v} ${k}`).join(', ')}` : ''} · ${r.requested_label ?? r.session_label ?? 'an agent'} · ${ago(r.created_at)}`}
-          </Text>
-          {elevated ? (
-            <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: 2 }}>
-              <Button kind="primary" label="Approve" loading={busy === r.id} onPress={() => void decide(r.id, 'approved')} />
-              <Button kind="secondary" label="Decline" loading={busy === r.id} onPress={() => void decide(r.id, 'declined')} />
-            </View>
-          ) : null}
-        </View>
-      )) : <Text style={type.small}>Nothing waiting.</Text>}
+      {rows.map((r) => {
+        const nums = numbersLine(r.numbers);
+        const failed = r.state === 'failed';
+        return (
+          <View key={r.id} style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.lineSoft, gap: 4 }}>
+            {/* What it will do, in plain English, and the numbers affected. */}
+            <Text style={[type.small, { color: colors.ink, fontWeight: '700' }]}>{r.description}</Text>
+            <Text style={type.tiny} numberOfLines={2}>
+              {`${nums ? `${nums} · ` : ''}${r.request} · ${r.requested_label ?? r.session_label ?? 'an agent'} · ${ago(r.created_at)}`}
+            </Text>
+            {failed && r.result ? (
+              <Text style={[type.tiny, { color: colors.overrun }]}>{`Last run failed (${r.result.status}): ${r.result.message} — approve to try again.`}</Text>
+            ) : null}
+            {elevated ? (
+              <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: 2 }}>
+                <Button kind="primary" label={failed ? 'Approve & run again' : 'Approve & run'} loading={busy === r.id} onPress={() => void decide(r.id, 'approved')} />
+                <Button kind="secondary" label="Decline" loading={busy === r.id} onPress={() => void decide(r.id, 'declined')} />
+              </View>
+            ) : null}
+          </View>
+        );
+      })}
     </Panel>
   );
 }

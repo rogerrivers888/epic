@@ -765,11 +765,16 @@ router.post('/approvals', async (req, res, next) => {
     const request = String(req.body?.request || '').trim();
     const description = String(req.body?.description || '').trim();
     if (!request || !description) throw bad('An approval needs the request (METHOD /path) and a one-line description.');
+    // The call must be a replayable back-office write, and never an approvals
+    // endpoint (so approving cannot drive approving). The payload is fixed here
+    // and cannot be edited after filing — what the owner approves is what runs.
+    if (!approvals.parseApprovalRequest(request)) throw bad('That is not a request Approvals can run: a POST/PUT/PATCH/DELETE under /api/admin or /api/accounts, not an approvals call.');
     const row = await approvals.fileApproval({
       sessionId: req.session?.id ?? null,
       label: req.session?.label ?? null,
       request, description,
       numbers: req.body?.numbers ?? null,
+      payload: req.body?.payload ?? null,
     });
     res.status(201).json({ approval: row });
   } catch (err) { next(err); }
@@ -777,36 +782,76 @@ router.post('/approvals', async (req, res, next) => {
 
 router.get('/approvals', requires('view_activity'), async (req, res, next) => {
   try {
-    const state = ['pending', 'approved', 'declined', 'consumed', 'all'].includes(String(req.query.state)) ? String(req.query.state) : 'pending';
+    const state = ['pending', 'running', 'done', 'declined', 'failed', 'open', 'all'].includes(String(req.query.state)) ? String(req.query.state) : 'open';
     res.json({ approvals: await approvals.listApprovals({ state }) });
   } catch (err) { next(err); }
 });
 
-// Deciding spends the owner's authority, so it needs him personally signed in,
-// and is logged with his name.
+/**
+ * The owner decides an open request while signed in (G11). Declining records it.
+ * Approving RUNS the recorded call under the owner's own elevated identity, by
+ * replaying it against this server with his token — so it passes exactly the
+ * gates he would, no bypass — and keeps the result. A failed run is left
+ * re-approvable. Each is logged with his name.
+ */
 router.post('/approvals/:id/decide', requires('view_activity'), requireOwnerSignedIn('decide an approval'), async (req, res, next) => {
   try {
     const decision = String(req.body?.decision || '');
     if (!['approved', 'declined'].includes(decision)) throw bad('A decision is approved or declined.');
     const who = actor(req);
-    // The decision and its audit commit together, or neither does (G11): the
-    // owner's call is never recorded without taking effect, nor taken without
-    // being recorded.
-    const row = await withTransaction(async (client) => {
-      const { rows } = await client.query(
-        `update approvals set state = $2, decided_by = $3, decided_at = now() where id = $1 and state = 'pending' returning *`,
-        [req.params.id, decision, who.actorLabel ?? null]);
-      const decided = rows[0] ?? null;
-      if (!decided) return null;
-      await client.query(
-        `insert into admin_audit (actor_id, actor_label, action, subject_type, subject_id, subject_label, after)
-         values ($1, $2, $3, 'approval', $4, $5, $6)`,
-        [who.actorId ?? null, who.actorLabel ?? null, `approval.${decision}`, decided.id, decided.request, JSON.stringify({ description: decided.description, numbers: decided.numbers })]);
-      return decided;
-    });
-    if (!row) return res.status(409).json({ error: 'not_pending', message: 'That request is not waiting for a decision.' });
-    res.json({ approval: row });
+
+    if (decision === 'declined') {
+      const row = await approvals.declineApproval(req.params.id, { by: who.actorLabel });
+      if (!row) return res.status(409).json({ error: 'not_open', message: 'That request is not waiting for a decision.' });
+      await rolesRepo.writeAuditStrict({ ...who, action: 'approval.declined', subjectType: 'approval', subjectId: row.id, subjectLabel: row.request, after: { description: row.description, numbers: row.numbers } });
+      return res.json({ approval: row });
+    }
+
+    // Approved: claim it to run (atomic), then replay the recorded call.
+    const claimed = await approvals.startRun(req.params.id, { by: who.actorLabel });
+    if (!claimed) return res.status(409).json({ error: 'not_open', message: 'That request is not waiting for a decision.' });
+    await rolesRepo.writeAuditStrict({ ...who, action: 'approval.approved', subjectType: 'approval', subjectId: claimed.id, subjectLabel: claimed.request, after: { description: claimed.description, numbers: claimed.numbers } });
+
+    const result = await runApprovedCall(claimed, req, runApprovedCall.dispatch);
+    const finished = await approvals.finishRun(claimed.id, { ok: result.ok, result });
+    await rolesRepo.writeAuditStrict({ ...who, action: result.ok ? 'approval.ran' : 'approval.failed', subjectType: 'approval', subjectId: claimed.id, subjectLabel: claimed.request, after: result });
+    res.json({ approval: finished ?? claimed, result });
   } catch (err) { next(err); }
 });
+
+/**
+ * Replay an approved call against this server under the owner's token, so it is
+ * authorised exactly as if the owner made it. The dispatcher is a property so a
+ * test can replace it without a live socket.
+ */
+export async function runApprovedCall(approval, req, dispatch) {
+  const parsed = approvals.parseApprovalRequest(approval.request);
+  if (!parsed) return { ok: false, status: 400, message: 'The recorded request is not a runnable call.' };
+  const token = String(req.headers?.authorization || '').replace(/^Bearer\s+/i, '') || null;
+  if (!token) return { ok: false, status: 401, message: 'No owner token to run the request with.' };
+  try {
+    const out = await dispatch({ method: parsed.method, path: parsed.path, body: approval.payload ?? {}, token });
+    const message = out.ok ? 'Done.' : (out.body?.message || `The call answered ${out.status}.`);
+    return { ok: out.ok, status: out.status, message: String(message).slice(0, 300) };
+  } catch (err) {
+    return { ok: false, status: 0, message: `Could not run it: ${String(err?.message || err).slice(0, 200)}` };
+  }
+}
+
+// The real dispatcher: a loopback request to this very server (so the whole
+// auth + gate stack runs), replaced in tests.
+runApprovedCall.dispatch = async ({ method, path, body, token }) => {
+  const port = Number(process.env.PORT) || 4000;
+  const base = process.env.EPIC_SELF_URL || `http://127.0.0.1:${port}`;
+  const res = await fetch(`${base}${path}`, {
+    method,
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: method === 'GET' ? undefined : JSON.stringify(body ?? {}),
+    signal: AbortSignal.timeout(120_000),
+  });
+  const text = await res.text().catch(() => '');
+  let parsed = null; try { parsed = text ? JSON.parse(text) : null; } catch { /* non-JSON */ }
+  return { ok: res.ok, status: res.status, body: parsed };
+};
 
 export default router;
