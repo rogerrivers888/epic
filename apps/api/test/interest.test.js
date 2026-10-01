@@ -254,3 +254,17 @@ test('with one proxy too many trusted, rotating forged addresses still meets the
     assert.equal(statuses[300], 429, 'but the edge address they all came through does not');
   } finally { s.close(); }
 });
+
+test('the edge address is read from the header only when a proxy of ours connected', async () => {
+  const { connectedCallerOf, isPrivateAddress } = await import('../src/limits.js');
+  const at = (peer, xff) => connectedCallerOf({ socket: { remoteAddress: peer }, headers: xff ? { 'x-forwarded-for': xff } : {} });
+  // Through a private-network proxy: the address it appended.
+  assert.equal(at('10.0.3.7', '1.2.3.4, 203.0.113.9'), '203.0.113.9');
+  assert.equal(at('::ffff:100.64.0.2', '203.0.113.9'), '203.0.113.9');
+  // Straight from the internet: the socket, whatever the header says.
+  assert.equal(at('198.51.100.20', '1.2.3.4, 203.0.113.9'), '198.51.100.20');
+  assert.equal(at('198.51.100.20'), '198.51.100.20');
+  assert.equal(isPrivateAddress('172.20.1.1'), true);
+  assert.equal(isPrivateAddress('172.32.1.1'), false);
+  assert.equal(isPrivateAddress('8.8.8.8'), false);
+});

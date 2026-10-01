@@ -38,6 +38,16 @@ export function callerOf(req) {
   return req.ip || req.socket?.remoteAddress || 'unknown';
 }
 
+/** A private, loopback or carrier-grade-NAT address: one a proxy in front of us has, never a visitor on the internet. */
+export function isPrivateAddress(ip) {
+  const a = String(ip || '').replace(/^::ffff:/i, '').toLowerCase();
+  if (a === '::1' || a.startsWith('fc') || a.startsWith('fd') || a.startsWith('fe80:')) return true;
+  const m = a.match(/^(\d+)\.(\d+)\.\d+\.\d+$/);
+  if (!m) return false;
+  const [x, y] = [Number(m[1]), Number(m[2])];
+  return x === 10 || x === 127 || (x === 172 && y >= 16 && y <= 31) || (x === 192 && y === 168) || (x === 100 && y >= 64 && y <= 127);
+}
+
 /**
  * Who is calling, for a public door that sends mail — never a header the caller
  * can write. Express's `req.ip` under the configured `trust proxy` hop count
@@ -47,12 +57,17 @@ export function callerOf(req) {
  * (Codex, 1 Oct 2026).
  */
 export function connectedCallerOf(req) {
+  // The forwarded header is believed only when the peer that connected is a
+  // proxy of ours — a private address, as Railway's edge is to the container.
+  // A caller reaching the process directly writes that header themselves, so
+  // then the socket's own address is the caller (Codex, 1 Oct 2026).
+  const peer = req.socket?.remoteAddress || '';
   const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string' && forwarded.length) {
+  if (isPrivateAddress(peer) && typeof forwarded === 'string' && forwarded.length) {
     const last = forwarded.split(',').map((x) => x.trim()).filter(Boolean).pop();
     if (last) return last;
   }
-  return req.socket?.remoteAddress || req.ip || 'unknown';
+  return peer || req.ip || 'unknown';
 }
 
 function hit(name, key, windowMs, max) {
