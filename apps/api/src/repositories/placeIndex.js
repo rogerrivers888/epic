@@ -1268,14 +1268,17 @@ const correctPlaceCountriesFromPostcode = async (q = query) => {
  *
  * Under the build lock, because a bare run could land between a rebuild generating
  * place_areas and its final blanket `placed_at = now()`, which would re-mark the row
- * placed without refiling its new country (Codex). If a rebuild holds the lock it
- * does the same correction itself (reindexWhileLocked), so skipping is safe.
+ * placed without refiling its new country (Codex). And it WAITS for the lock rather
+ * than skipping: the postcode-table swap runs under its own lock, not this one, so a
+ * rebuild could correct against the old snapshot, the loader swap in the new one, and
+ * a non-waiting call then skip — leaving the new snapshot's outcodes uncorrected.
+ * Waiting runs the correction after the rebuild releases, against the new snapshot.
  */
 export async function backfillCountriesFromPostcodes() {
   return underTheBuildLock(async () => {
     await normaliseOutcodeCountries();
     return correctPlaceCountriesFromPostcode();
-  }, 0);
+  }, 0, { wait: true });
 }
 
 export async function settleNew({ limit = 5000 } = {}) {

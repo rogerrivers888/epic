@@ -122,7 +122,10 @@ export async function loadPostcodes(file, { source = null } = {}) {
   // path runs it — the scheduled and admin-triggered refresh (postcodeRefresh)
   // included — and only after a real swap (Codex).
   if (stats.swapped) {
-    const corrected = await backfillCountriesFromPostcodes().catch((err) => { console.error('country backfill:', err.message); return 0; });
+    // Let a failure propagate rather than swallowing it: if it is lost, the scheduled
+    // refresh (postcodeRefresh) records the release as loaded and never retries,
+    // leaving already-placed rows under stale countries (Codex).
+    const corrected = await backfillCountriesFromPostcodes();
     if (corrected) console.log(`country backfill: ${corrected} place(s) corrected from their postcode`);
   }
   return stats;
