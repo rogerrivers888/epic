@@ -67,10 +67,12 @@ export async function listApprovals({ state = 'open', limit = 100 } = {}) {
 
 /** Decline an open request. Returns the row, or null if it was not open. */
 export async function declineApproval(id, { by }) {
+  // Pending/failed, and also an unknown run the owner has checked and wants to
+  // close (G11). A re-run (startRun) is still open-states only.
   const { rows: [row] } = await query(
     `update approvals set state = 'declined', decided_by = $2, decided_at = now()
       where id = $1 and state = any($3) returning *`,
-    [id, by ?? null, OPEN_STATES],
+    [id, by ?? null, DECLINABLE],
   );
   return row ?? null;
 }
