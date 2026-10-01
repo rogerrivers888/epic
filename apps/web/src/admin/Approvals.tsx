@@ -24,8 +24,15 @@ const numbersLine = (n: Approval['numbers']) =>
 
 /** The brief the server required at filing (routes/admin.js), or null on a request filed before it was. */
 const briefOf = (n: Approval['numbers']): ApprovalBrief | null => {
-  const b = n && typeof n === 'object' ? (n as { brief?: ApprovalBrief }).brief : null;
-  return b && typeof b.chat === 'string' && typeof b.costPence === 'number' && b.affected ? b : null;
+  // Every field and its type, the way the server checked it at filing — a
+  // malformed stored value is "no brief", never a crash (Codex, 1 Oct 2026).
+  const b = n && typeof n === 'object' ? (n as { brief?: any }).brief : null;
+  const said = (v: unknown) => typeof v === 'string' && v.trim() !== '';
+  const whole = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
+  return b && typeof b === 'object' && said(b.chat) && said(b.why) && said(b.change)
+    && b.affected && typeof b.affected === 'object' && whole(b.affected.count) && said(b.affected.unit)
+    && whole(b.costPence)
+    ? (b as ApprovalBrief) : null;
 };
 
 const pounds = (pence: number) =>

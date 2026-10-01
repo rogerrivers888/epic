@@ -24,6 +24,15 @@ test.after(async () => { await query(`delete from approvals where session_id = $
 
 const REQ = 'POST /api/admin/place-index/owned-points/purge';
 
+/** A complete plain-English brief (owner, 1 Oct 2026) — required to file and to approve. */
+const BRIEF = {
+  chat: 'epic-8c — G11 approvals',
+  why: 'The place index is stale after the re-fencing run.',
+  change: 'Every place is re-filed under the current categories.',
+  affected: { count: 11127, unit: 'places' },
+  costPence: 0,
+};
+
 test('only a replayable back-office write, never an approvals call, can be filed', () => {
   assert.ok(approvals.parseApprovalRequest(REQ));
   assert.ok(approvals.parseApprovalRequest('GET /api/admin/place-index/place/compare?ref=google:abc'), 'a paid GET with a query is allowed');
@@ -119,7 +128,7 @@ test('runApprovedCall refuses a bad recorded request or a missing token', async 
 });
 
 test('the decide route runs an approved request end to end', async () => {
-  const filed = await approvals.fileApproval({ sessionId: AGENT, request: REQ, description: 'purge', numbers: { places: 1 }, payload: { ref: 'x' } });
+  const filed = await approvals.fileApproval({ sessionId: AGENT, request: REQ, description: 'purge', numbers: { places: 1 }, brief: BRIEF, payload: { ref: 'x' } });
   const prev = runApprovedCall.dispatch;
   runApprovedCall.dispatch = async () => ({ ok: true, status: 200, body: { done: 1 } });
   const app = express();
@@ -156,13 +165,6 @@ test('the decide route runs an approved request end to end', async () => {
  * (£0 if free) above the technical call — and a filing without all of it is
  * refused, with nothing written.
  */
-const BRIEF = {
-  chat: 'epic-8c — G11 approvals',
-  why: 'The place index is stale after the re-fencing run.',
-  change: 'Every place is re-filed under the current categories.',
-  affected: { count: 11127, unit: 'places' },
-  costPence: 0,
-};
 
 test('parseApprovalBrief: all five parts are required, and a nought is a stated nought', () => {
   const ok = approvals.parseApprovalBrief(BRIEF);
@@ -216,4 +218,41 @@ test('the filing route refuses an incomplete brief and files a complete one', as
     const { approval } = await filed.json();
     assert.deepEqual(approval.numbers.brief, BRIEF, 'the brief is kept with the request');
   } finally { await new Promise((d) => s.close(d)); }
+});
+
+test('a request with no brief can be declined but never approved, whatever client asks', async () => {
+  const bare = await approvals.fileApproval({ sessionId: AGENT, request: REQ, description: 'filed before the rule', payload: {} });
+  const half = await approvals.fileApproval({ sessionId: AGENT, request: REQ, description: 'malformed brief', payload: {},
+    numbers: { brief: { chat: 'x', why: 'y', change: 'z', affected: { unit: 'places' }, costPence: 0 } } });
+  let ran = 0;
+  const prev = runApprovedCall.dispatch;
+  runApprovedCall.dispatch = async () => { ran += 1; return { ok: true, status: 200, body: {} }; };
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    req.access = { doors: ['admin'], capabilities: new Set(['view_activity']), isOwner: true, role: null, elevated: true };
+    req.account = { id: null, email: 'roger@epic.day' };
+    req.session = { id: null };
+    req.headers.authorization = 'Bearer owner';
+    next();
+  });
+  app.use('/admin', adminRoutes);
+  // eslint-disable-next-line no-unused-vars
+  app.use((err, _req, res, _next) => res.status(err.status ?? 500).json({ error: err.message }));
+  const s = app.listen(0);
+  await new Promise((r) => s.once('listening', r));
+  const decide = (id, decision) => fetch(`http://127.0.0.1:${s.address().port}/admin/approvals/${id}/decide`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ decision }) });
+  try {
+    for (const row of [bare, half]) {
+      const res = await decide(row.id, 'approved');
+      assert.equal(res.status, 409);
+      assert.equal((await res.json()).error, 'brief_missing');
+      const { rows: [after] } = await query(`select state from approvals where id = $1`, [row.id]);
+      assert.equal(after.state, 'pending', 'refused before it was claimed — still waiting');
+    }
+    assert.equal(ran, 0, 'nothing was replayed');
+    const declined = await decide(bare.id, 'declined');
+    assert.equal(declined.status, 200, 'the owner can still clear it');
+  } finally { runApprovedCall.dispatch = prev; await new Promise((d) => s.close(d)); }
 });

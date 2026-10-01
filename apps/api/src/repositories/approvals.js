@@ -81,6 +81,14 @@ export function parseApprovalBrief(body) {
   return { brief: { chat, why, change, affected: { count, unit }, costPence } };
 }
 
+/**
+ * The brief a stored request carries, checked the same way it was at filing, or
+ * null. The decide route asks this before it runs anything, so a request filed
+ * without one — before the rule, or by any other door — can be declined but
+ * never approved (Codex, 1 Oct 2026).
+ */
+export const storedBrief = (numbers) => parseApprovalBrief(numbers?.brief).brief ?? null;
+
 /** An agent files a request, with the fixed payload to replay. Returns the row. */
 export async function fileApproval({ sessionId = null, label = null, request, description, numbers = null, brief = null, payload = null }) {
   const stored = brief ? { ...(numbers ?? {}), brief } : numbers;

@@ -898,8 +898,13 @@ router.post('/approvals/:id/decide', requires('view_activity'), requireOwnerSign
       return res.json({ approval: row });
     }
 
-    // Claim it to run, with its audit, atomically.
+    // Claim it to run, with its audit, atomically. A request with no complete
+    // plain-English brief is refused here, server-side, whatever client asked:
+    // the owner cannot authorise what he was never told (owner, 1 Oct 2026).
     const claimed = await withTransaction(async (client) => {
+      const { rows: [current] } = await client.query(`select * from approvals where id = $1 for update`, [req.params.id]);
+      if (!current || !approvals.OPEN_STATES.includes(current.state)) return null;
+      if (!approvals.storedBrief(current.numbers)) return { unbriefed: true };
       const { rows } = await client.query(
         `update approvals set state = 'running', decided_by = $2, decided_at = now(), result = null where id = $1 and state = any($3) returning *`,
         [req.params.id, who.actorLabel ?? null, approvals.OPEN_STATES]);
@@ -909,6 +914,9 @@ router.post('/approvals/:id/decide', requires('view_activity'), requireOwnerSign
       return r;
     });
     if (!claimed) return res.status(409).json({ error: 'not_open', message: 'That request is not waiting for a decision.' });
+    if (claimed.unbriefed) {
+      return res.status(409).json({ error: 'brief_missing', message: 'This request has no plain-English brief, so it cannot be approved. Decline it and have it filed again.' });
+    }
 
     // Replay the recorded call under the owner's identity (outside the txn), then
     // record the outcome and its audit together.
