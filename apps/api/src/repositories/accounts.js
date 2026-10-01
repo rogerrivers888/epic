@@ -31,9 +31,12 @@ export const normaliseEmail = (email) => {
 
 // A deliberately plain shape — the routes decide what the owner sees and what
 // an account holder sees, and neither is served a database row directly.
+// `password_hash` is deliberately absent: it is a secret and must never be
+// selected into an API answer. `google_sub` is not — it is only Google's opaque
+// id for the person and the account page shows "Log in with · Google" from it.
 const COLUMNS = `id, household_id, member_id, email, mobile, name, role, role_id, status, plan, trial_ends_on,
                  monthly_call_bound, note, invited_at, activated_at, last_seen_at,
-                 sign_in_count, created_at, updated_at`;
+                 sign_in_count, google_sub, created_at, updated_at`;
 
 export async function accountById(id) {
   const { rows } = await query(`select ${COLUMNS} from accounts where id = $1`, [id]);
@@ -44,6 +47,30 @@ export async function accountByEmail(email) {
   const address = normaliseEmail(email);
   if (!address) return null;
   const { rows } = await query(`select ${COLUMNS} from accounts where lower(email) = $1`, [address]);
+  return rows[0] ?? null;
+}
+
+/** By Google's stable subject id — the first thing a Google sign-in matches on. */
+export async function accountByGoogleSub(sub) {
+  const id = String(sub || '').trim();
+  if (!id) return null;
+  const { rows } = await query(`select ${COLUMNS} from accounts where google_sub = $1`, [id]);
+  return rows[0] ?? null;
+}
+
+/**
+ * Remember which Google identity an account signs in with — written once, on the
+ * first match by verified email. The `where google_sub is null` guard means a
+ * second Google identity can never quietly overwrite the first; the account
+ * keeps the one it was first linked to, and a mismatched second returns no row.
+ */
+export async function setGoogleSub(accountId, sub) {
+  const { rows } = await query(
+    `update accounts set google_sub = $2, updated_at = now()
+      where id = $1 and google_sub is null
+      returning ${COLUMNS}`,
+    [accountId, String(sub)],
+  );
   return rows[0] ?? null;
 }
 
@@ -323,7 +350,16 @@ export async function createSignInLink(accountId, { requestedBy = 'owner', ttlHo
  * that somebody else opened first is simply spent. A suspended account's link
  * does not open anything either.
  */
-export async function consumeSignInLink(token) {
+export async function consumeSignInLink(token, { requestedBy = null } = {}) {
+  // A Google handoff code (requested_by 'google', five minutes) and an ordinary
+  // magic link (owner/self, up to a week) are different credentials for different
+  // doors, and neither redeems the other: the Google exchange asks for
+  // `requestedBy: 'google'`, and the ordinary link door (the default) takes
+  // anything that is *not* google. So a week-long link cannot be spent as a
+  // Google sign-in, and a Google code cannot be spent as a magic link.
+  const match = requestedBy
+    ? { clause: 'l.requested_by = $2', params: [digest(token), requestedBy] }
+    : { clause: "l.requested_by is distinct from 'google'", params: [digest(token)] };
   const { rows } = await query(
     `update sign_in_links l
         set used_at = now()
@@ -333,8 +369,9 @@ export async function consumeSignInLink(token) {
         and l.used_at is null
         and l.expires_at > now()
         and a.status <> 'suspended'
+        and ${match.clause}
       returning l.id, l.account_id`,
-    [digest(token)],
+    match.params,
   );
   return rows[0] ?? null;
 }

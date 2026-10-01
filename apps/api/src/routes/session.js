@@ -27,9 +27,11 @@ const router = express.Router();
  *
  * `requireSession` attaches these to every other request, but this route
  * answers *before* the door — it is how the app finds out whether it is inside
- * — so it resolves them itself from the account it just looked up.
+ * — so it resolves them itself from the account it just looked up. Exported
+ * because the Google exchange (routes/authGoogle.js) answers the same shape:
+ * one spelling of the summary, so `elevated` cannot drift between the doors.
  */
-function summariseAccess(access) {
+export function summariseAccess(access) {
   return { doors: access.doors, capabilities: [...access.capabilities], role: access.role ? { key: access.role.key, label: access.role.label } : null, elevated: Boolean(access.elevated) };
 }
 

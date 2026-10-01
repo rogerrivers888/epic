@@ -74,6 +74,7 @@ import { SCOUT_MONTHLY_RUNS } from './sources/localscout.js';
 import { enabledSources, defaultSourceKeys, loadSourceSettings, sourceHasKey, sourceOff, bedRatesOn } from './sources/index.js';
 import { routingEnabled, routingPaused } from './sources/routing.js';
 import sessionRoutes, { devices as deviceRoutes } from './routes/session.js';
+import authGoogleRoutes from './routes/authGoogle.js';
 import { authConfigured, deployed, originAllowed, requireOwner, requireSession } from './auth.js';
 import { requireDoor, requireOwnerSignedIn, hasDoor } from './access.js';
 import { writeAuditStrict } from './repositories/roles.js';
@@ -178,6 +179,10 @@ app.post('/api/session', signInLimit);
 // (limits.js › SENDING_DOORS; G2 inventory, 28 Sep 2026).
 holdSendingDoors(app);
 app.use('/api', sessionRoutes);
+// Log in with Google (routes/authGoogle.js). Public, like the session verbs: the
+// start and callback carry their own signed handshake, and the exchange redeems
+// a single-use code. Mounted before `requireSession` so it is answered.
+app.use('/api', authGoogleRoutes);
 
 // The atlas image library, outside the door on purpose (routes/library.js):
 // open-licence photographs we hold and are entitled to redistribute, answered

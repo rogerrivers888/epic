@@ -249,6 +249,14 @@ const PUBLIC = [
   (req) => req.path === '/api/session',
   (req) => req.path === '/api/session/link',
   (req) => req.path === '/api/session/request-link',
+  /**
+   * Log in with Google (routes/authGoogle.js). The start and callback are the
+   * OIDC handshake — they must answer without a session because they are how one
+   * is obtained — and the exchange redeems a single-use code, exactly as the
+   * magic link does. Staff-only is enforced inside the callback, not here.
+   */
+  (req) => req.path === '/api/auth/google' || req.path === '/api/auth/google/callback',
+  (req) => req.method === 'POST' && req.path === '/api/auth/google/exchange',
   // Postmark's delivery, open and bounce events: admitted by their own token (routes/postmark.js), never by a session.
   (req) => req.method === 'POST' && req.path === '/api/postmark/events',
   (req) => req.path === '/api/join' || req.path.startsWith('/api/join/'),

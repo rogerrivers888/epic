@@ -230,6 +230,11 @@ test('the sign-in door is left open for native clients and the magic link', asyn
       mockReq({ path: '/api/session', method: 'POST' }),
       mockReq({ path: '/api/session/link', method: 'POST' }),
       mockReq({ path: '/api/session/request-link', method: 'POST' }),
+      // Log in with Google is a sign-in door too (routes/authGoogle.js): a
+      // signed-out staff member must reach the handshake and the exchange.
+      mockReq({ path: '/api/auth/google', method: 'GET' }),
+      mockReq({ path: '/api/auth/google/callback', method: 'GET' }),
+      mockReq({ path: '/api/auth/google/exchange', method: 'POST' }),
       // Express treats a trailing slash as the same route; the gate must too.
       mockReq({ path: '/api/session/link/', method: 'POST' }),
       mockReq({ path: '/api/postmark/events/', method: 'POST' }),

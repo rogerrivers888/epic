@@ -80,7 +80,14 @@ export const sessionBlockedByGate = (session) => siteGateOn() && predatesGate(se
 // obtained in the first place. It is not unguarded: the passcode / magic link is
 // the credential, the attempt is rate-limited (limits.js), and a handful of
 // failures locks the caller out with an alert to the owner (signInGuard.js).
-const SIGN_IN = new Set(['/api/session', '/api/session/link', '/api/session/request-link']);
+const SIGN_IN = new Set([
+  '/api/session', '/api/session/link', '/api/session/request-link',
+  // Log in with Google is a sign-in door too (routes/authGoogle.js): the start
+  // and callback are the OIDC handshake and the exchange redeems a single-use
+  // code. A signed-out staff member must reach them, so the gate leaves them
+  // open exactly as it does the passcode and the magic link.
+  '/api/auth/google', '/api/auth/google/callback', '/api/auth/google/exchange',
+]);
 
 /** Is the gate up? Unset is ON; only an explicit off word takes it down. */
 export function siteGateOn() {
