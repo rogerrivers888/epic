@@ -1587,12 +1587,14 @@ router.get('/census-ring-curve', requires('view_library'), async (req, res, next
       const floorOutcodes = ring.reachOutcodes ?? ring.outcodes;
       const floorSlugs = floorOutcodes.map((o) => o.toLowerCase());
       // A district is fully censused for the request only when each drawer the count
-      // is over (reqSubs, resolved above) has a complete row there; a drawer with no
-      // row at all was never examined, not finished (Codex).
+      // is over (reqSubs, resolved above) has a complete AND unsaturated row there: a
+      // drawer with no row was never examined, and a saturated one hit the provider's
+      // result ceiling so its count is a lower bound even though the roll-up marks it
+      // complete — both make the count a floor (Codex).
       const fully = new Set();
       if (reqSubs.length) {
         const { rows } = await query(
-          `select area_slug, count(distinct subcategory) filter (where complete) as n
+          `select area_slug, count(distinct subcategory) filter (where complete and coalesce(saturated, 0) = 0) as n
              from area_counts where area_slug = any($1) and category = $2 and subcategory = any($3)
             group by area_slug`, [floorSlugs, category, reqSubs]);
         for (const r of rows) if (Number(r.n) >= reqSubs.length) fully.add(r.area_slug);
