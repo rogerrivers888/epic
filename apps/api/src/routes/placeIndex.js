@@ -26,7 +26,8 @@ import { query, withTransaction } from '../db.js';
 import * as index from '../repositories/placeIndex.js';
 import { decodeEntities } from '../repositories/placeIndex.js';
 import { phoneOf } from '../domain/contact.js';
-import { censusInRing, censusByOutcodeSum } from '../repositories/censusRing.js';
+import { censusInRing, censusByOutcodeSum, placingPoints, whereBoxSits, nearestSector } from '../repositories/censusRing.js';
+import { TEXT_QUESTIONS, textStillAsked } from '../sources/censusQuestions.js';
 import { ownSite } from '../sources/logo.js';
 import * as reach from '../repositories/reach.js';
 import { OURS_TO_KEEP, slicePlan } from '../sources/census.js';
@@ -1198,6 +1199,144 @@ router.get('/census-ring', requires('view_library'), async (req, res, next) => {
       placed: now.placed,
       unplaceable: now.unplaceable,
       fineM: 1000,
+    });
+  } catch (err) { next(err); }
+});
+
+/**
+ * Why a category's count jumps between two reach bands — a back-office diagnostic
+ * (owner, 1 Oct 2026: a 13× Culture jump over 20→30 min "needs explaining before
+ * I trust it"). Read-only and free: no display search, no provider, no cost. For
+ * the places a wider band adds over a narrower one, it groups them by the
+ * subcategory the census found them under (which carries Google's own type, since
+ * the census fences every query with `includedType`) and by postcode district, so
+ * monuments/sculptures/fountains filed as Culture are told apart from museums, and
+ * a whole dense district tipping in is visible. A sample carries each place's
+ * subcategory, district and our computed drive time; the name is shown only where
+ * we own it (the atlas), never a rented one.
+ */
+router.get('/census-ring-breakdown', requires('view_library'), async (req, res, next) => {
+  try {
+    const mode = travelMode(req.query.mode ?? 'drive');
+    const category = String(req.query.category ?? 'culture').toLowerCase();
+    const inner = Math.min(90, Math.max(5, Math.trunc(Number(req.query.inner)) || 20));
+    const outer = Math.min(90, Math.max(inner + 1, Math.trunc(Number(req.query.outer)) || 30));
+    const sampleN = Math.min(50, Math.max(1, Math.trunc(Number(req.query.sample)) || 15));
+    const locus = { where: req.query.where ?? null, lat: req.query.lat ?? null, lng: req.query.lng ?? null };
+    const [ringOuter, ringInner] = await Promise.all([
+      reach.ringFor({ ...locus, minutes: outer, mode }),
+      reach.ringFor({ ...locus, minutes: inner, mode }),
+    ]);
+    if (!ringOuter || !ringInner) return res.status(400).json({ error: 'where_required' });
+    const outerBand = new Set(ringOuter.band ?? ringOuter.cells);
+    const innerBand = new Set(ringInner.band ?? ringInner.cells);
+    const slugs = ringOuter.outcodes.map((o) => o.toLowerCase());
+
+    const { rows: sectors } = await query(
+      'select code, lat, lng, upper(outcode) as outcode from geo_cells where lower(outcode) = any($1)', [slugs]);
+    const bbox = sectors.reduce((b, u) => ({
+      minLat: Math.min(b.minLat, u.lat), maxLat: Math.max(b.maxLat, u.lat),
+      minLng: Math.min(b.minLng, u.lng), maxLng: Math.max(b.maxLng, u.lng),
+    }), { minLat: 90, maxLat: -90, minLng: 180, maxLng: -180 });
+    const { index: universe, placedBy } = await placingPoints(bbox);
+
+    const boxFrom = (slice) => {
+      const n = String(slice ?? '').split(',').map(Number);
+      return n.length === 4 && n.every(Number.isFinite) ? { minLat: n[0], minLng: n[1], maxLat: n[2], maxLng: n[3] } : null;
+    };
+    const textDrawers = Object.keys(TEXT_QUESTIONS).filter(textStillAsked);
+    const { rows } = await query(`
+      select ps.venue_ref, ps.subcategory, pi.lat, pi.lng, pi.slice
+        from place_subcategories ps
+        join place_index pi on pi.venue_ref = ps.venue_ref
+       where ps.category = $3
+         and (ps.area_slug = any($1)
+           or ps.area_slug in (select grid_key from census_tiles
+                                where outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)))
+         and (ps.sourced is distinct from 'text' or ps.subcategory = any($2::text[]))`,
+    [slugs, textDrawers, category]);
+
+    // One membership verdict per distinct slice per band, not per row.
+    const vCache = new Map();
+    const verdict = (slice, band, tag) => {
+      const key = `${tag}|${slice}`;
+      if (vCache.has(key)) return vCache.get(key);
+      const v = whereBoxSits(boxFrom(slice), { cells: band, universe });
+      vCache.set(key, v);
+      return v;
+    };
+    const byRef = new Map();
+    for (const r of rows) {
+      let e = byRef.get(r.venue_ref);
+      if (!e) { e = { subcats: new Set(), lat: r.lat, lng: r.lng, slice: r.slice, outcode: null, code: null, inInner: false, inOuter: false, placed: null }; byRef.set(r.venue_ref, e); }
+      if (r.subcategory) e.subcats.add(r.subcategory);
+    }
+    for (const e of byRef.values()) {
+      if (e.lat != null && e.lng != null) {
+        const s = nearestSector({ lat: Number(e.lat), lng: Number(e.lng) }, universe);
+        e.code = s?.code ?? null; e.outcode = s?.outcode ?? null; e.placed = 'own';
+        e.inInner = e.code != null && innerBand.has(e.code);
+        e.inOuter = e.code != null && outerBand.has(e.code);
+      } else if (e.slice) {
+        e.inInner = verdict(e.slice, innerBand, 'i') === 'inside';
+        e.inOuter = verdict(e.slice, outerBand, 'o') === 'inside';
+        const bx = boxFrom(e.slice);
+        const s = bx ? nearestSector({ lat: (bx.minLat + bx.maxLat) / 2, lng: (bx.minLng + bx.maxLng) / 2 }, universe) : null;
+        e.code = s?.code ?? null; e.outcode = s?.outcode ?? null; e.placed = 'slice';
+      }
+    }
+    const entries = [...byRef.entries()];
+    const added = entries.filter(([, e]) => e.inOuter && !e.inInner);
+
+    const tally = (pairs, keyOf) => {
+      const m = new Map();
+      for (const [, e] of pairs) for (const k of keyOf(e)) m.set(k, (m.get(k) ?? 0) + 1);
+      return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([key, n]) => ({ key, n }));
+    };
+    // A place found by more than one drawer is counted in each here, so these sum
+    // to more than `added` — that is the point: it shows which drawers contribute.
+    const bySubcategory = tally(added, (e) => [...e.subcats]);
+    const byOutcode = tally(added, (e) => [e.outcode ?? '(unplaced)']).slice(0, 50);
+
+    // The sample, with our computed drive time from the reach matrix and an owned
+    // name where the atlas holds one. Names are never a rented copy of Google's.
+    const sample = added.slice(0, sampleN).map(([venueRef, e]) => ({ venueRef, e }));
+    const codes = [...new Set(sample.map((s) => s.e.code).filter(Boolean))];
+    const mins = new Map();
+    if (codes.length) {
+      const { rows: mr } = await query(
+        'select to_cell, minutes from reach where from_cell = $1 and mode = $2 and to_cell = any($3)',
+        [ringOuter.cell, mode, codes]);
+      for (const r of mr) mins.set(r.to_cell, r.minutes);
+    }
+    const refs = sample.map((s) => s.venueRef);
+    const names = new Map();
+    if (refs.length) {
+      const { rows: nr } = await query(
+        "select venue_ref, name from attractions where venue_ref = any($1) and name is not null and state <> 'hidden'", [refs]).catch(() => ({ rows: [] }));
+      for (const r of nr) names.set(r.venue_ref, r.name);
+    }
+
+    res.json({
+      category, mode, inner, outer, placedBy,
+      count: {
+        inner: entries.filter(([, e]) => e.inInner).length,
+        outer: entries.filter(([, e]) => e.inOuter).length,
+        added: added.length,
+      },
+      bySubcategory,
+      byOutcode,
+      sample: sample.map(({ venueRef, e }) => ({
+        venueRef,
+        subcategories: [...e.subcats],
+        outcode: e.outcode,
+        placed: e.placed,
+        lat: e.lat != null ? Number(e.lat) : null,
+        lng: e.lng != null ? Number(e.lng) : null,
+        slice: e.lat == null ? e.slice : null,
+        driveMinutes: e.code != null ? (mins.get(e.code) ?? null) : null,
+        name: names.get(venueRef) ?? null,
+      })),
     });
   } catch (err) { next(err); }
 });
