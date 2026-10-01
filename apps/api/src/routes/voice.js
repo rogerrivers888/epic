@@ -46,7 +46,7 @@ import {
 } from '../domain/voiceFacts.js';
 import {
   FOOD_SCHEMA, FOOD_SYSTEM, LIKES_SCHEMA, LIKES_SYSTEM, WHO_SCHEMA, WHO_SYSTEM,
-  applyFood, applyLikes, likesVocabularyText, normaliseFood, normaliseLikes, normaliseWho,
+  applyFood, applyLikes, dietPatch, dietSpill, likesVocabularyText, normaliseFood, normaliseLikes, normaliseWho,
 } from '../domain/voiceHousehold.js';
 import { searchAreas } from '../sources/areas.js';
 import { kmBetween } from '../domain/travel.js';
@@ -675,9 +675,23 @@ router.post('/intake/:id/remember', async (req, res, next) => {
     const year = new Date().getFullYear();
     for (const item of offer?.items ?? []) {
       if (item.kind === 'diet') {
+        // Diet is a member column now (migration 318), never a constraint row —
+        // the same mapping the apply path uses, or the remembered word would
+        // vanish from the profile on the next read (Codex, 1 Oct 2026).
         for (const d of item.values) for (const m of (adults.length ? adults : members)) {
-          await households.upsertConstraint(m.id, { kind: 'diet', value: d.toLowerCase(), conceptKey: null, conceptKind: 'diet', favourite: false });
-          written.push({ memberId: m.id, kind: 'diet', value: d });
+          const patch = dietPatch(d);
+          if (patch) {
+            await households.updateMember(m.id, patch, household.id);
+            written.push({ memberId: m.id, kind: 'diet', value: d });
+            continue;
+          }
+          const spill = dietSpill(d);
+          if (spill) {
+            await households.upsertConstraint(m.id, { kind: spill.kind, value: spill.value, conceptKey: null, conceptKind: null, favourite: false });
+            written.push({ memberId: m.id, kind: spill.kind, value: spill.value });
+          }
+          // Neither a main diet, a faith, nor a mappable preference: left
+          // unwritten rather than stored where nothing reads it.
         }
       }
       if (item.kind === 'kids') {

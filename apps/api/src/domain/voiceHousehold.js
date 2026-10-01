@@ -23,7 +23,7 @@ import { resolveConcept, allergenKeys } from './concepts.js';
 // Settings revised v2 maps diet onto the person (one main diet + two faiths) and
 // allergens onto the UK 14 — so a spoken "vegetarian" or "shellfish" has to land
 // where the profile now reads it, not in the old free-text diet/allergen rows.
-const dietPatch = (raw) => {
+export const dietPatch = (raw) => {
   const v = String(raw).toLowerCase();
   if (v.includes('vegan')) return { diet: 'vegan' };
   if (v.includes('pescatar')) return { diet: 'pescatarian' };
@@ -34,7 +34,7 @@ const dietPatch = (raw) => {
 };
 // The same safe-direction mapping the diet migration uses for spoken values
 // that aren't a main diet or a faith: a preference becomes a filter or a rank.
-const dietSpill = (raw) => {
+export const dietSpill = (raw) => {
   const v = String(raw).toLowerCase();
   if (v.includes('gluten') || v.includes('coeliac') || v.includes('celiac')) return { kind: 'allergen', value: 'gluten' };
   if (v.includes('dairy') || v.includes('lactose')) return { kind: 'allergen', value: 'milk' };

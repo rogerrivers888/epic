@@ -300,7 +300,9 @@ function AllergiesRow({ member, refresh, canEdit }: { member: Member; refresh: (
   const saveNote = async () => {
     const trimmed = note.trim();
     if (trimmed === (member.allergenNote ?? '')) return;
-    await api.updateMember(member.id, { allergenNote: trimmed || null });
+    // '' is the clear sentinel: updateMember keeps the old value on null,
+    // and clears only on the empty string (Codex, 1 Oct 2026).
+    await api.updateMember(member.id, { allergenNote: trimmed });
     await refresh();
   };
   // An allergy kept only as a private note (migration 319, or said aloud and

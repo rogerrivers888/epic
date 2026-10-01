@@ -16,6 +16,7 @@ import { aHousehold, testDatabase } from './helpers/db.js';
 
 const { query, pool } = await testDatabase();
 const householdRoutes = (await import('../src/routes/household.js')).default;
+const voiceRoutes = (await import('../src/routes/voice.js')).default;
 const { devices } = await import('../src/routes/session.js');
 const { runAsAccount } = await import('../src/context.js');
 const { createAccountOnHousehold } = await import('../src/repositories/accounts.js');
@@ -34,6 +35,7 @@ async function server(account, session = null) {
   app.use(express.json());
   app.use((req, _res, next) => { req.session = session; runAsAccount(account, next); });
   app.use('/api/household', householdRoutes);
+  app.use('/api/voice', voiceRoutes);
   app.use('/api', devices);
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => res.status(err.status ?? 500).json({ error: err.code ?? 'x', message: err.message }));
@@ -269,6 +271,59 @@ test('"Sign out all other devices" signs out devices, never the agent and servic
     assert.deepEqual(rows.map((r) => r.label), ['This phone', 'f4-scroll', 'service'],
       'the other device goes; this phone, the agent and the service session stay');
   } finally { await srv.close(); }
+});
+
+test('a signed-in teenager is still managed by the adults — the joined lock is for adults only', async () => {
+  const { household: h, member: roger } = await aHousehold(query);
+  const teen = await addMember(h.id, 'Tess', { minor: true, birthDate: '2012-03-01' });
+  const acct = await createAccountOnHousehold(h.id, { memberId: teen.id, name: 'Tess', role: 'customer', plan: 'household', email: 'tess@example.com' });
+  await query('update accounts set activated_at = now() where id = $1', [acct.id]);
+  const asOwner = await server(owner(h, roger.id));
+  try {
+    assert.equal((await asOwner.send('PATCH', `/api/household/members/${teen.id}`, { diet: 'vegetarian' })).status, 200,
+      'an adult edits a child with an account of their own');
+  } finally { await asOwner.close(); }
+});
+
+// "Yes, remember" (D1) writes what a trip request taught us — and diet is a
+// member column now, so the remembered word must land where the profile reads
+// it, through the same mapping the apply path uses (Codex, 1 Oct 2026).
+const { normaliseTripFacts } = await import('../src/domain/voiceFacts.js');
+
+test('Remember writes a spoken diet to the person, never to a retired constraint row', async () => {
+  const { household: h, member: roger } = await aHousehold(query);
+  const facts = normaliseTripFacts({ food: { diets: ['vegan', 'gluten free'] } });
+  const { rows: [intake] } = await query(
+    'insert into voice_intakes (household_id, facts) values ($1, $2) returning id',
+    [h.id, JSON.stringify(facts)]);
+  const srv = await server(owner(h, roger.id));
+  try {
+    const res = await srv.send('POST', `/api/voice/intake/${intake.id}/remember`);
+    assert.equal(res.status, 200);
+    const got = (await srv.get('/api/household')).body.members.find((m) => m.id === roger.id);
+    assert.equal(got.diet, 'vegan', 'the main diet lands on the member column');
+    const { rows } = await query('select kind, value from member_constraints where member_id = $1', [roger.id]);
+    assert.deepEqual(rows.map((r) => `${r.kind}:${r.value}`).sort(), ['allergen:gluten'],
+      'gluten-free spills to the Gluten allergen; no diet row is ever written');
+  } finally { await srv.close(); }
+});
+
+// The household's day window is whole hours (smallint); a trip's is SQL times.
+const { hourToTime } = await import('../src/domain/time.js');
+const trips = await import('../src/repositories/trips.js');
+
+test("the household's whole-hour day window lands on a planned stay as a real time", async () => {
+  assert.equal(hourToTime(7), '07:00');
+  assert.equal(hourToTime(18), '18:00');
+  const { household: h } = await aHousehold(query);
+  const stay = await trips.insertPlannedStay(h.id, {
+    title: 'Lyme · test', notes: null, placeLabel: 'Lyme Regis', startDate: '2026-10-10', endDate: '2026-10-12',
+    baseLabel: 'Lyme (centre)', baseLat: 50.72, baseLng: -2.93, hasCar: true,
+    dayStart: hourToTime(h.day_start), dayEnd: hourToTime(h.day_end),
+    travelMode: 'driving', intensity: 'balanced', timezone: 'Europe/London',
+  });
+  assert.equal(stay.day_start, '10:00:00', "the migration's default start, as a time");
+  assert.equal(stay.day_end, '18:00:00');
 });
 
 // The allergen filter is a safety rule: after the UK-14 migration, members and

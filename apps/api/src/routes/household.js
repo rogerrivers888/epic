@@ -130,9 +130,13 @@ export function callerIsOwner() {
  * Enforced here, in the write path, not only hidden in the UI (owner's ask).
  */
 export async function canEditPerson(target) {
+  // A child is always managed by the adults — even one old enough (13+) to
+  // have signed in with an account of their own. The joined lock is for
+  // adults only (Codex, 1 Oct 2026).
+  if (target.is_minor) return true;
   const account = await accountByMember(target.id);
   const joined = Boolean(account && account.activated_at);
-  if (!joined) return true;              // pending, no account, or a child
+  if (!joined) return true;              // pending, or no account yet
   const me = await currentMember();
   return Boolean(me && me.id === target.id); // a joined adult's tastes are theirs alone
 }

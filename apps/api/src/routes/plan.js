@@ -36,7 +36,7 @@ import { dayAsTrip, slotFor } from '../domain/days.js';
 import { ensureDays, placeTrip, addShortlistItem } from './trips.js';
 import { searchCached, searchKept } from '../sources/cache.js';
 import { routingEnabled, travelMatrixMinutes, routeMatrixMinutes, routeBetween } from '../sources/routing.js';
-import { wallToUtc, wallClock, DEFAULT_TZ } from '../domain/time.js';
+import { wallToUtc, wallClock, DEFAULT_TZ, hourToTime } from '../domain/time.js';
 import { INTENSITY_TARGETS } from '../domain/budget.js';
 import { corridorStops, scheduleCorridor, MAX_DETOUR_MINUTES } from '../domain/corridor.js';
 import { currentHousehold, loadMembers, toAttendees, loadLearnedPreferences } from './household.js';
@@ -545,7 +545,10 @@ async function createStayFromIntent({ household, members, intent, destination })
       title, notes, placeLabel: destination.label, startDate: start, endDate: end,
       baseLabel: base.label, baseLat: base.lat, baseLng: base.lng,
       hasCar: travelMode !== 'transit',
-      dayStart: household.day_start ?? '09:30', dayEnd: household.day_end ?? '21:00',
+      // households.day_start/day_end are whole hours (smallint, migration 320);
+      // the trip's columns are SQL times (Codex, 1 Oct 2026).
+      dayStart: hourToTime(household.day_start ?? 10),
+      dayEnd: hourToTime(household.day_end ?? 18),
       travelMode, intensity, timezone: tz,
     }, client);
     for (const m of attending.length ? attending : members) await tripsRepo.addAttendee(created.id, m.id, client);
