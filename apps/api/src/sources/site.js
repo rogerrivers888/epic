@@ -299,7 +299,12 @@ export function admissionFrom(html, node = {}) {
       // qualifier that leads — "Members enjoy …" — and stored an unconditional Free
       // over a paid place (Codex). Confidently wrong is worse than no price.
       const after = flat.slice(m.index + m[0].length, m.index + m[0].length + 80);
-      const before = flat.slice(Math.max(0, m.index - 40), m.index);
+      // The leading check is bound to the current clause: flatten() drops element and
+      // sentence boundaries, so an unrelated earlier sentence ("Children can explore
+      // the play area. Admission is free.") must not qualify it — cut the window at the
+      // last sentence terminator before the claim (Codex).
+      const window = flat.slice(Math.max(0, m.index - 40), m.index);
+      const before = window.slice(window.search(/[.!?;:][^.!?;:]*$/) + 1);
       if (!QUALIFIED.test(after) && !QUALIFIED.test(before)) { found.free = true; break; }
     }
   }

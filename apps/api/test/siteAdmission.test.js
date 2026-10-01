@@ -23,6 +23,13 @@ test('a qualifier before the free claim disqualifies it', () => {
   assert.equal(free('<p>Students get free entry with a valid card.</p>'), false);
 });
 
+test('a qualifier in an earlier sentence does not disqualify a free claim', () => {
+  // flatten() drops the element boundary, so the leading check must stop at the
+  // sentence terminator — the "Children" clause is not about the free admission.
+  assert.equal(free('<p>Children can explore the play area.</p><p>Admission is free.</p>'), true);
+  assert.equal(free('Students welcome. Entry is free.'), true);
+});
+
 test('a qualifier after the free claim disqualifies it', () => {
   assert.equal(free('<p>Free entry for children under 5.</p>'), false);
   assert.equal(free('<p>Free admission for NHS staff.</p>'), false);
