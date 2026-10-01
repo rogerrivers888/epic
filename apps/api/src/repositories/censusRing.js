@@ -369,7 +369,7 @@ export async function censusInRing({ cells = [], outcodes = [], shownOnly = fals
        -- the owner has applied the check (C57); the back office's census
        -- boards still count everything that exists.
        ${shownOnly ? `and ${SHOWN_REF('ps.venue_ref')}` : ''}`,
-  [slugs, textDrawers, subcategories && subcategories.length ? subcategories : null]);
+  [slugs, textDrawers, Array.isArray(subcategories) ? subcategories : null]);
 
   // One verdict per distinct box, not per row: the same slice found hundreds of
   // places and the corner test would otherwise run hundreds of times.
