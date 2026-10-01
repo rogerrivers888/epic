@@ -2784,7 +2784,7 @@ function PlaceBoard({ refId, canManage, onClose, tab, onTab }: {
       </View>
 
       {tab === 'record' ? <RecordTab place={place} canManage={canManage} onSaved={load} /> : null}
-      {tab === 'compare' ? <CompareTab refId={refId} canManage={canManage} onEdit={() => setTab('record')} /> : null}
+      {tab === 'compare' ? <CompareTab refId={refId} canManage={canManage} onEdit={() => setTab('record')} onResearched={load} /> : null}
       {tab === 'score' ? <ScoreTab refId={refId} canManage={canManage} /> : null}
       {tab === 'pictures' ? <PlacePicturesTab place={place} canManage={canManage} onFound={load} /> : null}
       {tab === 'raw' ? <RawTab refId={refId} canManage={canManage} onDone={load} /> : null}
@@ -3060,15 +3060,70 @@ function saidValue(v: unknown): string {
   return String(v);
 }
 
+/** One step the research stream reported, as the page holds it: a source and its latest state. */
+type ResearchStep = { source: string; state: string; read?: number; why?: string; verification?: string; [k: string]: unknown };
+/** The words the stream's source and state read as, for a human watching it run. */
+const RESEARCH_SOURCE_WORD: Record<string, string> = {
+  'open-map': 'The open map', 'venue-site': 'Its own page', address: 'Where it is',
+  encyclopedia: 'The encyclopedias', hygiene: 'The hygiene register', reviews: 'Reading reviews',
+};
+const RESEARCH_STATE_WORD: Record<string, string> = {
+  checking: 'looking…', found: 'found something', nothing: 'nothing there', failed: "couldn't reach it",
+};
+
 /** BO2h — ours beside each provider's, field by field. Only ours is editable. */
-function CompareTab({ refId, canManage, onEdit }: { refId: string; canManage: boolean; onEdit: (field: string) => void }) {
+function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string; canManage: boolean; onEdit: (field: string) => void; onResearched?: () => void }) {
   const { navigate } = useRouter();
   const [data, setData] = useState<Awaited<ReturnType<typeof api.adminPlaceCompare>> | null>(null);
   const [match, setMatch] = useState(false);
   const [reach, setReach] = useState<{ rule: string | null; places: number; counties: number; onlyThis: boolean } | null>(null);
-  useEffect(() => { setData(null); api.adminPlaceCompare(refId, match).then(setData).catch(() => setData(null)); }, [refId, match]);
+  /** What "Research this place" could spend, said before the button is pressed. */
+  const [quote, setQuote] = useState<Awaited<ReturnType<typeof api.adminResearchQuote>> | null>(null);
+  /** The stream, while it runs and after: the latest state per source, in order, and any fault. */
+  const [research, setResearch] = useState<{ running: boolean; steps: ResearchStep[]; error: string | null } | null>(null);
+  const reload = useCallback(() => { setData(null); api.adminPlaceCompare(refId, match).then(setData).catch(() => setData(null)); }, [refId, match]);
+  useEffect(() => { reload(); }, [reload]);
   useEffect(() => { api.adminPlaceReach(refId).then(setReach).catch(() => setReach(null)); }, [refId]);
+  // The quote and any running stream belong to the place on screen; both reset
+  // when it changes, so a half-finished run is never read against another place.
+  useEffect(() => { setResearch(null); setQuote(null); api.adminResearchQuote(refId).then(setQuote).catch(() => setQuote(null)); }, [refId]);
+
+  /**
+   * Research this place — run the owned pipeline now and watch it. Each `source`
+   * frame replaces that source's line in place, so the list stays in the order
+   * the pipeline checks rather than jumping as states arrive. On `done` our
+   * column has changed, so the comparison and the boards behind it are re-read.
+   */
+  const runResearch = useCallback(() => {
+    if (!canManage || research?.running) return;
+    setResearch({ running: true, steps: [], error: null });
+    const put = (s: ResearchStep) => setResearch((r) => {
+      if (!r) return r;
+      const i = r.steps.findIndex((x) => x.source === s.source);
+      const steps = i >= 0 ? r.steps.map((x, n) => (n === i ? s : x)) : [...r.steps, s];
+      return { ...r, steps };
+    });
+    api.adminResearchStream(refId, (name, d) => {
+      if (name === 'source') put(d as ResearchStep);
+      else if (name === 'error') setResearch((r) => (r ? { ...r, running: false, error: String(d?.message ?? 'Research could not finish.') } : r));
+      else if (name === 'done') {
+        setResearch((r) => (r ? { ...r, running: false } : r));
+        reload();
+        onResearched?.();
+      }
+    }).catch((e) => setResearch((r) => (r ? { ...r, running: false, error: e?.body?.message ?? 'Research could not finish.' } : r)));
+  }, [canManage, research?.running, refId, reload, onResearched]);
+
   if (!data) return <Waiting />;
+
+  // A row Google holds a value for and we do not: the one the back office is read
+  // for, and the one "Research this place" or "Ask Google" might fill. A
+  // provider's value is shown live and never written down — the marker points at
+  // the hole, it does not copy the content into ours.
+  const cellBlank = (v: unknown) => v == null || v === '' || (Array.isArray(v) && v.length === 0)
+    || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v as object).length === 0);
+  const isGap = (r: CompareRow) => !cellBlank(r.cells.google) && cellBlank(r.cells.ours);
+  const gaps = data.rows.filter(isGap).length;
 
   /**
    * A value, said rather than serialised.
@@ -3085,6 +3140,47 @@ function CompareTab({ refId, canManage, onEdit }: { refId: string; canManage: bo
       : <Explain tip="notAsked"><NotAsked /></Explain>);
   return (
     <>
+      {/* Two acts, cost-first (owner, 29 Sep 2026). Research fills *our* column
+          from what the place publishes and keeps it; Ask Google fills *theirs*,
+          live, and keeps nothing. Each says what it spends before it runs. */}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md }}>
+        <Act label={research?.running ? 'Researching…'
+                     : `Research this place · ${quote ? (quote.off ? 'free' : quote.human.replace(/^about /, '')) : '…'}`}
+             icon="search" disabled={!canManage || Boolean(research?.running)} onPress={runResearch} />
+        {/* Ask Google — fill their column now. A place we already hold Google's
+            id for needs no match and its column is already here; so this shows
+            only where a match would actually spend. */}
+        {!match && data.matchPence ? (
+          <Act label={`Ask Google · ${pounds(Math.round(data.matchPence))}`} tone="secondary" icon="search"
+               disabled={!canManage} onPress={() => setMatch(true)} />
+        ) : null}
+        {gaps ? (
+          <Explain tip={['Gaps', 'Facts Google holds a value for and we do not. “Research this place” fills ours from what the place publishes; a provider’s value is only ever shown, never kept.']}>
+            <Text style={styles.rowNote}>{`${gaps} ${gaps === 1 ? 'gap' : 'gaps'} where Google has more`}</Text>
+          </Explain>
+        ) : null}
+      </View>
+
+      {/* The stream, while it runs and after: one line a source, its latest
+          state. No box — the back office does not draw panels (12 Sep 2026). */}
+      {research ? (
+        <View style={{ gap: spacing.xs, marginBottom: spacing.md }}>
+          {research.steps.map((s) => (
+            <View key={s.source} style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'baseline' }}>
+              <Text style={[styles.fieldName, { width: 160 }]}>{RESEARCH_SOURCE_WORD[s.source] ?? s.source}</Text>
+              <Text style={[styles.fieldValue, s.state === 'found' && { color: colors.accent }, s.state === 'failed' && { color: colors.inkMuted }]}>
+                {(RESEARCH_STATE_WORD[s.state] ?? s.state)}
+                {s.source === 'reviews' && s.state === 'found' ? ` · ${s.read ?? 0} read, not kept` : ''}
+                {s.state === 'failed' && s.why ? ` · ${s.why}` : ''}
+              </Text>
+            </View>
+          ))}
+          {research.error ? <Text style={styles.rowNote}>{research.error}</Text>
+            : !research.running && research.steps.length ? <Text style={styles.rowNote}>Done — our column is filled in below.</Text>
+            : null}
+        </View>
+      ) : null}
+
       <View style={styles.recordHead}>
         <Explain tip="fact" style={{ width: 180 }}><Text style={styles.headLabelSmall}>Fact</Text></Explain>
         {data.columns.map((c) => (
@@ -3117,7 +3213,12 @@ function CompareTab({ refId, canManage, onEdit }: { refId: string; canManage: bo
                      read for what is absent, and "we hold none" is the finding
                      (18 Sep 2026, the separate audit). A provider's blank cell
                      stays a dash — they answered, they just hold nothing. */
-                  : c.key === 'ours' ? <Explain tip="weHoldNoneOfThis"><Word muted>we hold none</Word></Explain>
+                  : c.key === 'ours' ? (isGap(r)
+                      /* A hole Google could fill: the marker points at it, and
+                         the content stays Google's — shown, never copied into
+                         ours (owner, 29 Sep 2026). */
+                      ? <Explain tip={['Google has this', 'Google holds a value for this and we do not. “Research this place” may fill ours from what the place publishes; a provider’s value is only ever shown, never kept.']}><Word accent>Google has this</Word></Explain>
+                      : <Explain tip="weHoldNoneOfThis"><Word muted>we hold none</Word></Explain>)
                   : <Blank />}
                 {c.key === 'ours' && v && r.editable && canManage ? (
                   <Explain tip="editableColumn">
@@ -3155,20 +3256,15 @@ function CompareTab({ refId, canManage, onEdit }: { refId: string; canManage: bo
         </View>
       ) : null}
 
+      {/* "Match it by name and distance" moved up to the "Ask Google" act, where
+          it sits beside "Research this place" — the two cost-first buttons the
+          owner asked for at the top (29 Sep 2026). The footer keeps the per-column
+          fill count, which is the reading, not an action. */}
       <Footer left={(
         <Explain tip="howMuchEachColumnFilled">
           <Text style={styles.rowNote}>{data.columns.map((c) => `${c.label}: ${c.filled ?? 0} of ${c.of ?? 0}`).join('  ·  ')}</Text>
         </Explain>
-      )}>
-        {/* The price comes from the API. It was written into the bundle as
-            £0.014 — the old figure, about half the real one (Codex, 18 Sep
-            2026) — and a price a screen holds itself goes stale the day it
-            moves. */}
-        {!match ? (
-          <Act label={`Match it by name and distance · ${data.matchPence ? pounds(Math.round(data.matchPence)) : 'free'}`}
-               disabled={!canManage} onPress={() => setMatch(true)} />
-        ) : null}
-      </Footer>
+      )}>{null}</Footer>
     </>
   );
 }

@@ -2925,6 +2925,61 @@ export const api = {
     request<{ ref: string; name: string | null; columns: CompareColumn[]; rows: CompareRow[]; ours: string[];
       /** What matching it by name and distance costs, in pence, from the API's own price table. */
       matchPence?: number }>(`/api/admin/place-index/place/compare${qs({ ref, match: match ? 1 : undefined })}`),
+  /**
+   * What "Research this place" could spend, before the button is pressed. A
+   * ceiling, not a bill: a place the free sources fully identify never reaches
+   * the paid steps (routes/placeResearch.js).
+   */
+  adminResearchQuote: (ref: string) =>
+    request<{ pence: number; off: boolean; human: string; breakdown: { identify: number; findPage: number; reviews: number } }>(`/api/admin/place-index/research/quote${qs({ ref })}`),
+  /**
+   * Research one place now — the owned pipeline (venue page, OSM, Wikipedia,
+   * Wikidata, the hygiene register), streamed. A POST, not an `EventSource`,
+   * because it must carry the caller's bearer token — which is also the sign-in
+   * the paid gate reads as this household's approval for this one place (owner,
+   * 29 Sep 2026). `onEvent` is called per frame: `start`, a `source` frame for
+   * every step (checking / found / nothing / failed), `kept`, a `reviews` frame
+   * where there is a Google id, then `done`; `error` on a fault. The returned
+   * promise settles when the stream closes.
+   */
+  adminResearchStream: async (ref: string, onEvent: (name: string, data: any) => void): Promise<void> => {
+    const token = sessionToken();
+    const res = await fetch(`${API_URL}/api/admin/place-index/research${qs({ ref })}`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ ref }),
+    });
+    // A refusal arrives as JSON before any frame — over the ceiling, not indexed,
+    // signed out — and is thrown like any other so the screen can say it.
+    if (!res.ok || !res.body) {
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 401) sessionExpired();
+      throw new ApiError(res.status, body);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      // Frames are separated by a blank line (SSE). Anything after the last
+      // blank line is a partial frame and stays in the buffer for the next read.
+      let i;
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const frame = buf.slice(0, i);
+        buf = buf.slice(i + 2);
+        let event = 'message';
+        let data = '';
+        for (const line of frame.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim();
+          else if (line.startsWith('data:')) data += line.slice(5).trim();
+        }
+        try { onEvent(event, data ? JSON.parse(data) : {}); } catch { /* one unreadable frame is not the stream */ }
+      }
+    }
+  },
   /** BO2r — literally the fields each source returned, and which were never asked. */
   adminPlaceRaw: (ref: string) => request<{ ref: string; sources: RawSource[] }>(`/api/admin/place-index/place/raw${qs({ ref })}`),
   /** BO2r's History: which run changed what. */
