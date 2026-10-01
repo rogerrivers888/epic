@@ -121,23 +121,33 @@ export async function updateHousehold(id, f) {
 export async function deleteHouseholdAndCalls(householdId) {
   let demoted = 0;
   await withTransaction(async (client) => {
-    // What this household had claimed, read before the cascade takes it. The
-    // index row is derived and does not cascade, so a deleted household's
-    // claims went on counting in coverage and in Collect's claimed lane for
-    // good (Codex, 18 Sep 2026).
-    const { rows } = await client.query(
-      `select venue_ref from household_places where household_id = $1 and venue_ref is not null
-       union
-       select venue_ref from place_claims where household_id = $1`, [householdId]);
-    await client.query('delete from provider_calls where household_id = $1', [householdId]);
-    await client.query('delete from households where id = $1', [householdId]);
-    // After the delete: another household may still be claiming the same place,
-    // and settleClaims asks that rather than assuming.
-    if (rows.length) demoted = await settleClaims(rows.map((r) => r.venue_ref), client);
+    demoted = await wipeHousehold(householdId, client);
   });
   // Outside the transaction, because it takes its own lock and the boards
   // should not wait an hour for the hourly settle to notice (Codex, 18 Sep).
   if (demoted) await refreshStats().catch(() => null);
+}
+
+/**
+ * The delete itself, inside the caller's transaction — so the route can hold
+ * the host's offers locked across the outstanding-bookings check and the
+ * delete in one piece (Codex, 1 Oct 2026). Returns how many claims were
+ * demoted; the caller refreshes the boards after its commit.
+ */
+export async function wipeHousehold(householdId, client) {
+  // What this household had claimed, read before the cascade takes it. The
+  // index row is derived and does not cascade, so a deleted household's
+  // claims went on counting in coverage and in Collect's claimed lane for
+  // good (Codex, 18 Sep 2026).
+  const { rows } = await client.query(
+    `select venue_ref from household_places where household_id = $1 and venue_ref is not null
+     union
+     select venue_ref from place_claims where household_id = $1`, [householdId]);
+  await client.query('delete from provider_calls where household_id = $1', [householdId]);
+  await client.query('delete from households where id = $1', [householdId]);
+  // After the delete: another household may still be claiming the same place,
+  // and settleClaims asks that rather than assuming.
+  return rows.length ? settleClaims(rows.map((r) => r.venue_ref), client) : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -170,15 +180,33 @@ export async function membersOf(householdId) {
   return rows;
 }
 
+/** The Household plan covers six people, counted here where every door can see it. */
+export const HOUSEHOLD_PLAN_CAP = Number(process.env.EPIC_HOUSEHOLD_PLAN_CAP || 6);
+
 export async function insertMember(householdId, m) {
-  const { rows } = await query(
-    `insert into members (household_id, name, is_minor, relationship, birth_year, birth_date, avatar_url, typical_visit_minutes, max_travel_minutes, email, mobile)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning *`,
-    [householdId, m.name, m.isMinor, m.relationship ?? null, m.birthYear ?? null, m.birthDate ?? null,
-      m.avatarUrl ?? null, m.typicalVisitMinutes ?? null, m.maxTravelMinutes ?? null,
-      m.email ?? null, m.mobile ?? null],
-  );
-  return rows[0];
+  // The cap is enforced here, under the household's row lock, so every door
+  // that adds a person — Settings, voice, a group invite — shares one check
+  // and two concurrent adds cannot both squeeze under it (Codex, 1 Oct 2026).
+  let member;
+  await withTransaction(async (client) => {
+    await client.query('select id from households where id = $1 for update', [householdId]);
+    const { rows: counted } = await client.query('select count(*)::int n from members where household_id = $1', [householdId]);
+    if (counted[0].n >= HOUSEHOLD_PLAN_CAP) {
+      const err = new Error(`Your Household plan covers up to ${HOUSEHOLD_PLAN_CAP} people.`);
+      err.status = 403;
+      err.code = 'plan_cap';
+      throw err;
+    }
+    const { rows } = await client.query(
+      `insert into members (household_id, name, is_minor, relationship, birth_year, birth_date, avatar_url, typical_visit_minutes, max_travel_minutes, email, mobile)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning *`,
+      [householdId, m.name, m.isMinor, m.relationship ?? null, m.birthYear ?? null, m.birthDate ?? null,
+        m.avatarUrl ?? null, m.typicalVisitMinutes ?? null, m.maxTravelMinutes ?? null,
+        m.email ?? null, m.mobile ?? null],
+    );
+    member = rows[0];
+  });
+  return member;
 }
 
 /**

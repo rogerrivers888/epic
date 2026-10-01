@@ -289,6 +289,7 @@ function AllergiesRow({ member, refresh, canEdit }: { member: Member; refresh: (
   const chosen = useMemo(() => new Set(member.allergens.map((c) => c.value)), [member.allergens]);
   const anyRest = ALLERGENS_REST.some((a) => chosen.has(a));
   const [showAll, setShowAll] = useState(anyRest);
+  const [note, setNote] = useState(member.allergenNote ?? '');
   const list = showAll ? [...ALLERGENS_COMMON, ...ALLERGENS_REST] : ALLERGENS_COMMON;
   const toggle = async (key: string) => {
     const existing = member.allergens.find((c) => c.value === key);
@@ -296,8 +297,20 @@ function AllergiesRow({ member, refresh, canEdit }: { member: Member; refresh: (
     else await api.addConstraint(member.id, { kind: 'allergen', value: key });
     await refresh();
   };
-  const hasAny = member.allergens.length > 0;
-  const noteList = member.allergens.map((c) => ALLERGEN_LABEL[c.value] ?? cap(c.value)).join(', ');
+  const saveNote = async () => {
+    const trimmed = note.trim();
+    if (trimmed === (member.allergenNote ?? '')) return;
+    await api.updateMember(member.id, { allergenNote: trimmed || null });
+    await refresh();
+  };
+  // An allergy kept only as a private note (migration 319, or said aloud and
+  // unmatched) is still an allergy: it counts and it shows, or there is no way
+  // to see or clear what was preserved (Codex, 1 Oct 2026).
+  const hasAny = member.allergens.length > 0 || Boolean(member.allergenNote);
+  const noteList = [
+    ...member.allergens.map((c) => ALLERGEN_LABEL[c.value] ?? cap(c.value)),
+    ...(member.allergenNote ? [member.allergenNote] : []),
+  ].join(', ');
 
   if (!open) {
     if (!canEdit && !hasAny) return <View style={styles.collapsedRow}><View style={[styles.rowTile, styles.rowTileRed]}><Icon name="allergen" size={18} color={colors.allergen} strokeWidth={2.2} /></View><Text style={styles.rowTitle}>No allergies</Text></View>;
@@ -335,6 +348,15 @@ function AllergiesRow({ member, refresh, canEdit }: { member: Member; refresh: (
         })}
       </Wrap>
       {!showAll ? <Press onPress={() => setShowAll(true)} accessibilityRole="button"><Text style={styles.showAll}>Show all 14</Text></Press> : null}
+      <Text style={styles.openHint}>Anything else — kept as a private note; it can't filter places</Text>
+      <TextInput
+        value={note}
+        onChangeText={setNote}
+        onBlur={saveNote}
+        placeholder="e.g. latex"
+        placeholderTextColor={colors.inkFaint}
+        style={styles.input}
+      />
     </View>
   );
 }

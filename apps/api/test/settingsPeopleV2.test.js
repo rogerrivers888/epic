@@ -126,6 +126,24 @@ test('the Household plan covers six people, and the seventh is refused on the se
   } finally { await srv.close(); }
 });
 
+test('the cap holds at the repository, under the household lock, so every door and a racing pair share it', async () => {
+  const { household: h } = await aHousehold(query);
+  for (let i = 0; i < 4; i += 1) await addMember(h.id, `P${i}`); // 5 in total with Roger
+  // Two adds at once with one place left: the row lock serialises them, so
+  // exactly one fits — never both (Codex, 1 Oct 2026).
+  const results = await Promise.allSettled([
+    households.insertMember(h.id, { name: 'Sixth', isMinor: false }),
+    households.insertMember(h.id, { name: 'AlsoSixth', isMinor: false }),
+  ]);
+  const won = results.filter((r) => r.status === 'fulfilled');
+  const lost = results.filter((r) => r.status === 'rejected');
+  assert.equal(won.length, 1, 'exactly one of two racing adds fits the last place');
+  assert.equal(lost[0].reason.code, 'plan_cap');
+  assert.equal(lost[0].reason.status, 403);
+  const { rows } = await query('select count(*)::int n from members where household_id = $1', [h.id]);
+  assert.equal(rows[0].n, 6, 'never a seventh');
+});
+
 test('nobody removes themselves; a non-owner removes children only; a removed joined adult is signed out', async () => {
   const { household: h, member: roger } = await aHousehold(query);
   const dev = await addMember(h.id, 'Dev');
@@ -228,6 +246,28 @@ test('Signed-in devices shows this account real devices only — never a test or
     const { body } = await srv.get('/api/sessions');
     const labels = body.sessions.map((s) => s.label).sort();
     assert.deepEqual(labels, ['Kitchen iPad', 'This phone'], 'only device sessions, never agent/service');
+  } finally { await srv.close(); }
+});
+
+test('"Sign out all other devices" signs out devices, never the agent and service sessions the list hid', async () => {
+  const { household: h, member: roger } = await aHousehold(query);
+  const acct = await createAccountOnHousehold(h.id, { memberId: roger.id, name: 'Roger', role: 'customer', plan: 'household', email: 'roger2@example.com' });
+  const { rows: seeded } = await query(
+    `insert into api_sessions (token_hash, label, account_id, kind) values
+       ('so-d1','Kitchen iPad',$1,'device'),('so-d2','This phone',$1,'device'),('so-a1','f4-scroll',$1,'agent'),('so-s1','service',$1,'service')
+     returning id, label`,
+    [acct.id],
+  );
+  const mine = seeded.find((s) => s.label === 'This phone');
+  const srv = await server(asMember(h, roger.id), { id: mine.id, account_id: acct.id });
+  try {
+    assert.equal((await srv.send('DELETE', '/api/sessions')).status, 204);
+    const { rows } = await query(
+      `select label from api_sessions where account_id = $1 and revoked_at is null order by label`,
+      [acct.id],
+    );
+    assert.deepEqual(rows.map((r) => r.label), ['This phone', 'f4-scroll', 'service'],
+      'the other device goes; this phone, the agent and the service session stay');
   } finally { await srv.close(); }
 });
 

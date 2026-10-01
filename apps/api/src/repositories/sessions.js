@@ -114,12 +114,14 @@ export async function revokeAllSessions(accountId, { db = null } = {}) {
 /**
  * Sign one named device out (SX6). Scoped to the caller's own account so one
  * household can never revoke another's device; `is not distinct from` lets the
- * shared passcode (no account) sign out one of its own devices by id.
+ * shared passcode (no account) sign out one of its own devices by id. Devices
+ * only: the list this id came from never showed an agent or service session,
+ * so this door never touches one (Codex, 1 Oct 2026).
  */
 export async function revokeSessionById(id, accountId) {
   const { rowCount } = await query(
     `update api_sessions set revoked_at = now()
-      where id = $1 and account_id is not distinct from $2 and revoked_at is null`,
+      where id = $1 and account_id is not distinct from $2 and kind = 'device' and revoked_at is null`,
     [id, accountId],
   );
   return rowCount;
@@ -128,13 +130,15 @@ export async function revokeSessionById(id, accountId) {
 /**
  * Sign out every OTHER device of this account, keeping the one asking (SX6's
  * "Sign out all other devices"). Needs an account, for the same reason
- * `revokeAllSessions` does — it never reaches across the estate.
+ * `revokeAllSessions` does — it never reaches across the estate. Devices only,
+ * like the list the button sits under: an agent or service session the screen
+ * never showed is not swept up by it (Codex, 1 Oct 2026).
  */
 export async function revokeOtherSessions(accountId, exceptId) {
   if (!accountId) throw new Error('revokeOtherSessions needs an account');
   return query(
     `update api_sessions set revoked_at = now()
-      where account_id = $1 and id <> $2 and revoked_at is null`,
+      where account_id = $1 and id <> $2 and kind = 'device' and revoked_at is null`,
     [accountId, exceptId],
   );
 }

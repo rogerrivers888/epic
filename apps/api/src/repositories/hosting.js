@@ -24,6 +24,22 @@ export async function outstandingForHousehold(householdId) {
   const bookings = await bookingsOfOffers(offers.map((o) => o.id));
   return outstandingFrom(offers, bookings);
 }
+
+/**
+ * The same verdict, inside the caller's transaction, with the host's offers
+ * locked — delete-household checks it this way so a booking landing meanwhile
+ * waits on the offer lock and then finds nothing to book, rather than being
+ * confirmed and cascading away a moment later (Codex, 1 Oct 2026; stop-hosting
+ * already worked like this).
+ */
+export async function outstandingForHouseholdLocked(householdId, client) {
+  const { rows } = await client.query('select * from hosts where household_id = $1 for update', [householdId]);
+  const host = rows[0] ?? null;
+  if (!host) return { blocked: false, upcomingDates: 0, guests: 0, payout: null };
+  const offers = await lockOffersOfHost(host.id, client);
+  const bookings = (await Promise.all(offers.map((o) => bookingsOfOffer(o.id, client)))).flat();
+  return outstandingFrom(offers, bookings);
+}
 import crypto from 'node:crypto';
 
 const newToken = () => crypto.randomBytes(9).toString('base64url');

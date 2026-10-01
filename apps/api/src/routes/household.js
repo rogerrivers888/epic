@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import * as households from '../repositories/households.js';
-import { outstandingForHousehold } from '../repositories/hosting.js';
+import { outstandingForHouseholdLocked } from '../repositories/hosting.js';
+import { refreshStats } from '../repositories/placeIndex.js';
+import { withTransaction } from '../db.js';
 import { ALLERGENS, matchConcepts, resolveConcept, conceptByKey, isNegated } from '../domain/concepts.js';
 
 const NEGATION_PREFIX = /^(not|no|never|without|anything but|nothing)\s+/i;
@@ -35,8 +37,10 @@ const DIETS = ['none', 'vegetarian', 'vegan', 'pescatarian'];
 // Access needs (SX4). Step-free filters places out; the rest rank.
 export const ACCESS_NEEDS = ['step-free', 'accessible-toilet', 'lift', 'quiet'];
 const RATINGS_MODES = ['all', 'mine', 'some'];
-// The household plan covers up to six people (server-enforced; the Add tile dims at six).
-export const HOUSEHOLD_PLAN_CAP = Number(process.env.EPIC_HOUSEHOLD_PLAN_CAP || 6);
+// The household plan covers up to six people (server-enforced; the Add tile dims
+// at six). The number lives in the repository, where insertMember enforces it
+// under the household's row lock for every door that adds a person.
+export const HOUSEHOLD_PLAN_CAP = households.HOUSEHOLD_PLAN_CAP;
 export const LEARN_THRESHOLD = Number(process.env.EPIC_LEARN_THRESHOLD || 3);
 const HALF_LIFE_DAYS = Number(process.env.EPIC_LEARN_HALF_LIFE_DAYS || 180);
 
@@ -1013,14 +1017,29 @@ router.delete('/', async (req, res, next) => {
     const { confirmName } = req.body || {};
     // Refused while this household hosts anything still outstanding (SX21): the
     // guests holding places have to be told and refunded first, by calling each
-    // date off, never by the household quietly vanishing underneath them.
-    const outstanding = await outstandingForHousehold(household.id);
-    if (outstanding.blocked) {
-      return res.status(409).json({ error: 'has_outstanding', message: "Finish or call off what's outstanding first.", details: outstanding });
-    }
-    if (confirmName !== household.name) return res.status(400).json({ error: 'confirm_name_mismatch', message: 'Type the household name exactly to confirm deletion.' });
-    await households.deleteHouseholdAndCalls(household.id);
-    res.json({ deleted: true, household: household.name });
+    // date off, never by the household quietly vanishing underneath them. The
+    // check holds the host's offers locked in the same transaction as the
+    // delete, so a booking landing meanwhile waits on the lock and then finds
+    // nothing to book, rather than being confirmed and cascading away a moment
+    // later (Codex, 1 Oct 2026 — the stop-hosting door already worked this way).
+    let verdict;
+    let demoted = 0;
+    await withTransaction(async (client) => {
+      const outstanding = await outstandingForHouseholdLocked(household.id, client);
+      if (outstanding.blocked) {
+        verdict = { status: 409, body: { error: 'has_outstanding', message: "Finish or call off what's outstanding first.", details: outstanding } };
+        return;
+      }
+      if (confirmName !== household.name) {
+        verdict = { status: 400, body: { error: 'confirm_name_mismatch', message: 'Type the household name exactly to confirm deletion.' } };
+        return;
+      }
+      demoted = await households.wipeHousehold(household.id, client);
+      verdict = { status: 200, body: { deleted: true, household: household.name } };
+    });
+    // After the commit, so the boards do not wait an hour for the settle (Codex, 18 Sep 2026).
+    if (demoted) await refreshStats().catch(() => null);
+    res.status(verdict.status).json(verdict.body);
   } catch (err) {
     next(err);
   }
