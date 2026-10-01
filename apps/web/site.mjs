@@ -39,7 +39,12 @@ export function localeFor(SITE, req) {
  */
 export function siteAddress(SITE, pathname) {
   let segs;
-  try { segs = pathname.split('/').filter(Boolean).map((x) => decodeURIComponent(x).toLowerCase()); } catch { return null; }
+  try { segs = pathname.split('/').filter(Boolean).map((x) => decodeURIComponent(x).toLowerCase()); } catch {
+    // A malformed escape under a locale is a page that is not there — a real
+    // 404, not the app shell answering 200 (Codex, 1 Oct 2026).
+    const first = (pathname.split('/').find(Boolean) || '').toLowerCase();
+    return SITE.locales.includes(first) ? { locale: first, status: 404 } : null;
+  }
   const [locale, a, b, c] = segs;
   if (!SITE.locales.includes(locale)) return null;
   if (!SITE.liveLocales.includes(locale)) return { locale, status: 404 };

@@ -49,3 +49,11 @@ test('epic.day/ sends a visitor to a live locale: saved choice, then language, t
   assert.equal(localeFor(SITE, req({ 'accept-language': 'fr-FR, en-GB;q=0.8' })), 'en-gb');
   assert.equal(localeFor(SITE, req({ 'cf-ipcountry': 'GB' })), 'en-gb');
 });
+
+test('a malformed escape under a locale is a real 404, and elsewhere it is the app', async () => {
+  const SITE = await loadSite();
+  assert.equal(siteAddress(SITE, '/en-gb/%E0%A4%A')?.status, 404);
+  assert.equal(siteAddress(SITE, '/EN-GB/%ZZ')?.status, 404);
+  assert.equal(siteAddress(SITE, '/en-us/%ZZ')?.status, 404);
+  assert.equal(siteAddress(SITE, '/trips/%ZZ'), null);
+});

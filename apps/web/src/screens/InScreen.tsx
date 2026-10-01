@@ -38,12 +38,21 @@ export function InScreen({ token }: { token: string }) {
   const [show, setShow] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let live = true;
-    api.credentialsLink(token).then((l) => { if (live) setLink(l); }).catch(() => { if (live) setSpent(true); });
+    setLoadErr(null);
+    // Only the API saying so makes a link spent; a dropped connection, a 429 or a
+    // 500 is "try again", never "ask for a new one" (Codex, 1 Oct 2026).
+    api.credentialsLink(token).then((l) => { if (live) setLink(l); }).catch((e) => {
+      if (!live) return;
+      if (e instanceof ApiError && e.status === 404) setSpent(true);
+      else setLoadErr(e instanceof ApiError && e.status === 429 ? 'Too many tries just now. Wait a few minutes, then try again.' : 'Could not reach Epic. Check your connection and try again.');
+    });
     return () => { live = false; };
-  }, [token]);
+  }, [token, attempt]);
 
   const long = pw.length >= MIN;
   const invite = link?.mode === 'invite';
@@ -73,7 +82,7 @@ export function InScreen({ token }: { token: string }) {
     window.location.assign(`${API_URL}/api/auth/google?invite=${encodeURIComponent(token)}`);
   };
 
-  const title = spent ? 'That link has been used.' : !link ? '' : invite ? `Set up your login${link.firstName ? `, ${link.firstName}` : ''}.` : 'Choose a new password.';
+  const title = spent ? 'That link has been used.' : loadErr && !link ? "We couldn't open that link." : !link ? '' : invite ? `Set up your login${link.firstName ? `, ${link.firstName}` : ''}.` : 'Choose a new password.';
 
   return (
     <View style={[styles.root, wide && { flexDirection: 'row' }]}>
@@ -86,6 +95,13 @@ export function InScreen({ token }: { token: string }) {
               <Text style={styles.copy}>It works once, and only for a while. Ask for a new one from the log-in page.</Text>
               <Pressable accessibilityRole="link" onPress={() => navigate(paths.login(), { replace: true })}>
                 {({ hovered }: any) => <Text style={[styles.action, hovered && { color: MOSS }]}>Back to log in</Text>}
+              </Pressable>
+            </View>
+          ) : loadErr ? (
+            <View style={styles.rule}>
+              <Text style={styles.copy} accessibilityLiveRegion="polite">{loadErr}</Text>
+              <Pressable accessibilityRole="button" onPress={() => setAttempt((n) => n + 1)}>
+                {({ hovered }: any) => <Text style={[styles.action, hovered && { color: MOSS }]}>Try again</Text>}
               </Pressable>
             </View>
           ) : link ? (
