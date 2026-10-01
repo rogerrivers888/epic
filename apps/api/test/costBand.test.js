@@ -71,8 +71,11 @@ test('costBandFor: known only with a level AND a market AND that market\'s bands
     { known: true, scale: ['Free', '£', '££', '£££'], index: 0, band: 'Free', currency: 'GBP', range: null });
   // No level → not known yet (never Free).
   assert.deepEqual(costBandFor(gb, null), { known: false });
-  // No market at all → not known yet.
+  // No market at all → not known yet for a paid level, but Free is still Free (an
+  // owned free admission in a country with no market row; GBP-default scale) (Codex).
   assert.deepEqual(costBandFor(null, 2), { known: false });
+  assert.deepEqual(costBandFor(null, 0),
+    { known: true, scale: ['Free', '£', '££', '£££'], index: 0, band: 'Free', currency: 'GBP', range: null });
   // A market whose bands are not set (Portugal, Greece, Turkey, the UAE are all
   // seeded null) → not known yet, never a symbol scale with no meaning (Codex).
   assert.deepEqual(costBandFor({ name: 'Portugal', currency: 'EUR', cost_bands: null }, 2), { known: false });

@@ -418,8 +418,12 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
         const now = held?.records?.[ref];
         if (!live || !now) continue;
         setOwnRecord(now);
-        // Something to show: a name, a page of theirs, or the open map's entry.
-        if (now.website || now.osmRef || now.name) return;
+        // Keep polling until the venue page has been read (website resolved), because
+        // that is the step that writes the owned admission answer the cost row shows —
+        // stopping as soon as the open map's name arrived left Free hidden until a
+        // reopen (Codex). The name still appears at once via setOwnRecord each poll;
+        // only the stop is deferred. A place with no page polls to exhaustion (bounded).
+        if (now.website) return;
       }
     };
     api.place(item.venueRef)

@@ -111,8 +111,13 @@ const KIND_BATCH = 5;
  *      a business (26 Sep 2026). Nothing paid changed, so the places already
  *      researched are brought up to it by the free sources alone: see
  *      `PAID_RESEARCH_VERSION` and `freeBackfill`.
+ *   5  writes the venue's admission as the owned cost-band answer (1 Oct 2026;
+ *      parks admission). Free, from the page already read — so the places already
+ *      researched are brought up to it by the free backfill, and existing claimed
+ *      parks get their free-entry cost band rather than only newly-researched ones
+ *      (Codex). Nothing paid changed, so PAID_RESEARCH_VERSION stays.
  */
-export const RESEARCH_VERSION = 4;
+export const RESEARCH_VERSION = 5;
 
 /**
  * The last version whose change needed a paid call to catch up with.
