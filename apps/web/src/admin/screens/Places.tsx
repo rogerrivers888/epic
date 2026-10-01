@@ -2689,6 +2689,12 @@ function PlaceBoard({ refId, canManage, onClose, tab, onTab }: {
   // Anything that changes this place changes the boards behind it, so the
   // reload the drawer's own buttons call forgets what they were told.
   const load = useCallback(() => { forgetBoards(); refresh(); }, [refresh]);
+  // The place the drawer is on now, read live. A research stream keeps the handler
+  // it started with, so the ref must be read at completion, not captured when the
+  // run began — or a run that finished after the drawer moved on would act on the
+  // place it started on (Codex, 1 Oct 2026).
+  const refIdRef = useRef(refId);
+  refIdRef.current = refId;
   // Research changes a place, so the boards behind the drawer are stale and are
   // forgotten — but the place the drawer is on *now* keeps its cache so its tab is
   // never blanked (that would throw away a result it is streaming). Only when the
@@ -2696,9 +2702,10 @@ function PlaceBoard({ refId, canManage, onClose, tab, onTab }: {
   // a stale stream from a place the drawer has left invalidates the boards but must
   // not refresh — and so blank — the place now showing (Codex, 1 Oct 2026).
   const afterResearch = useCallback((completedRef: string) => {
-    forgetBoardsExcept(placeKey);
-    if (completedRef === refId) refresh();
-  }, [refresh, placeKey, refId]);
+    const current = refIdRef.current;
+    forgetBoardsExcept(JSON.stringify(['place', current]));
+    if (completedRef === current) refresh();
+  }, [refresh]);
   useEffect(() => { setError(null); }, [refId]);
 
   if (error) {
