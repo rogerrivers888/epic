@@ -109,7 +109,12 @@ test('the Runs screen\'s spend is the Spend tile\'s own numbers', async () => {
   assert.equal(s.title, o.health.spend.title);
   assert.equal(s.tone, o.health.spend.tone);
   assert.equal(s.line, o.health.spend.line);
-  assert.equal(typeof s.google.spent, 'number');
+  // `google.spent` is null when the billing snapshot is not the current month
+  // (billingTile reports usage only for the month it covers) — so the Runs screen
+  // and the tile agree on null just as they agree on a number. The seeded
+  // September snapshot becomes a prior month on any later month's first days, and
+  // the suite runs across those boundaries (Oct 2026).
+  assert.ok(s.google.spent === null || typeof s.google.spent === 'number');
   assert.equal(typeof s.claude.budget, 'number');
   const srv = await server();
   try {

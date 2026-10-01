@@ -300,7 +300,11 @@ test('the overview answers with no inputs and says what needs a person', async (
   const o = await overview();
   assert.ok(Array.isArray(o.needs));
   assert.ok(o.needs.some((n) => n.key === 'mapping'), 'an undecided word needs a decision');
-  assert.ok(['green', 'amber', 'red'].includes(o.health.spend.tone));
+  // 'none' is the documented can't-speak tone when the billing snapshot's month
+  // is not the current one (billingTile) — which is what the seeded September
+  // snapshot becomes on any later month's first days. The suite runs across month
+  // boundaries, so the valid tones include it (Oct 2026).
+  assert.ok(['green', 'amber', 'red', 'none'].includes(o.health.spend.tone));
   assert.equal(o.collections.speaks, false, 'engagement cannot speak without real households');
 });
 
