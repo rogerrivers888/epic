@@ -226,6 +226,11 @@ const TEMPORAL = new RegExp([
   'christmas', 'easter', 'new\\s+year', 'holiday\\s+period',
   // date ranges and limits
   'until', 'till', 'between', 'from\\s+\\d', '\\d{1,2}(?:st|nd|rd|th)\\b', '\\b20\\d\\d\\b', 'limited\\s+time', 'for\\s+a\\s+limited',
+  // short-lived offers — "free today only", "free admission tomorrow", "for one day
+  // only", "this weekend" (Codex): a promotion stored as a standing Free is the wrong
+  // Free the owner warned of, so "only" after a claim bars it too
+  'today', 'tonight', 'tomorrow', 'this\\s+(?:week|weekend|month|year)', 'one\\s+day', 'one[- ]off',
+  'only', 'special\\s+offer', 'promotion', 'open\\s+days?', 'launch',
 ].map((p) => `(?:${p})`).join('|').replace(/^/, '\\b(?:').concat(')'), 'i');
 
 const flatten = (html) => String(html)

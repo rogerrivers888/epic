@@ -95,3 +95,12 @@ test('a qualifier anywhere in the same sentence disqualifies the claim', () => {
   // The neighbouring sentence still does not count.
   assert.equal(free('<p>Members of the National Trust and English Heritage can park here. Admission is free.</p>'), true);
 });
+
+test('a short-lived free offer is not a standing free entry', () => {
+  assert.equal(free('<p>Admission is free today only.</p>'), false);
+  assert.equal(free('<p>Free admission tomorrow.</p>'), false);
+  assert.equal(free('<p>Free admission for one day only.</p>'), false);
+  assert.equal(free('<p>Free entry this weekend.</p>'), false);
+  assert.equal(free('<p>Free entry on our open day.</p>'), false);
+  assert.equal(free('<p>Free entry every day of the year.</p>'), true, 'a standing claim survives');
+});
