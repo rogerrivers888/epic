@@ -71,21 +71,39 @@ test('a postcode change requeues a placed row, so settle re-resolves its country
   assert.equal(pi.placed_at, null, 'the postcode change requeued the place for settling');
 });
 
-test('a UK outcode wrongly stamped non-GB is normalised, so its places resolve to GB', async () => {
+// Migration 310's normalisation, run against the test's own data: a postcode
+// locality is corrected to GB only where its slug is a GB outcode ONS knows.
+const normaliseLegacyOutcodes = () => query(`update localities loc set country_code = 'GB'
+   where loc.kind = 'postcode' and upper(loc.country_code) <> 'GB'
+     and exists (select 1 from postcodes p where lower(p.outcode) = loc.slug)`);
+
+test('a GB outcode wrongly stamped non-GB is normalised, so its places resolve to GB', async () => {
   const ref = 'osm:node/cfp-legacy';
-  // Legacy damage: a UK-format outcode locality the old edit path stamped IE.
+  // Legacy damage: a GB outcode's locality the old edit path stamped IE. It is a real
+  // GB outcode, so ONS knows it (seed postcodes), and normalisation must fix it.
+  await query(`insert into postcodes (pcds, sector, outcode, lat, lng, source)
+               values ('ZZ5 1AA','ZZ5 1','ZZ5',51.5,-0.6,'test') on conflict (pcds) do nothing`);
   await query(`insert into localities (slug, name, kind, country_code) values ('zz5','ZZ5','postcode','IE')
                on conflict (slug) do update set country_code = 'IE'`);
   await index.noteMany([{ ref, lat: 51.5, lng: -0.6, countryCode: 'IE' }], { source: 'osm' });
   await query(`insert into place_records (venue_ref, postcode, updated_at) values ($1,'ZZ5 1AA', now())
                on conflict (venue_ref) do update set postcode = excluded.postcode`, [ref]);
-  // Migration 310's normalisation: a UK-format postcode locality is GB by definition.
-  await query(`update localities set country_code = 'GB'
-                where kind = 'postcode' and slug ~ '^[a-z]{1,2}[0-9][a-z0-9]?$' and upper(country_code) <> 'GB'`);
+  await normaliseLegacyOutcodes();
   const { rows: [loc] } = await query(`select country_code from localities where slug = 'zz5'`);
-  assert.equal(loc.country_code, 'GB', 'the UK outcode locality is corrected to GB');
+  assert.equal(loc.country_code, 'GB', 'the GB outcode locality is corrected to GB');
   await index.settleCountryFromPostcode([ref]);
   assert.equal(await countryOf(ref), 'GB', 'and the place follows the corrected outcode, not its IE stamp');
+});
+
+test('an Eircode routing key is not reclassified as GB — syntax overlaps but ONS does not know it', async () => {
+  // D02 is a valid Eircode routing key and matches the UK outward-code shape, but it
+  // is not a GB outcode, so ONS has no row for it and normalisation must leave it IE.
+  await query(`delete from postcodes where outcode = 'D02'`);
+  await query(`insert into localities (slug, name, kind, country_code) values ('d02','D02','postcode','IE')
+               on conflict (slug) do update set country_code = 'IE'`);
+  await normaliseLegacyOutcodes();
+  const { rows: [loc] } = await query(`select country_code from localities where slug = 'd02'`);
+  assert.equal(loc.country_code, 'IE', 'the Irish routing key stays IE');
 });
 
 test('the outward code is read from any postcode shape', async () => {

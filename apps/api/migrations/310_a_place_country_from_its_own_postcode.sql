@@ -22,14 +22,17 @@
 -- First, undo the legacy damage the backfill would otherwise trust and spread. The
 -- old admin postcode edit created a new outcode's locality with the place's current
 -- country_code — so an IE-stamped place moved to a UK outcode could leave that
--- outcode's locality stamped IE (Codex). A postcode locality whose slug is a UK
--- outward code is in GB by definition (Eircodes and ZIPs do not match this shape),
--- so those are corrected to GB before anything reads them as authoritative.
-update localities
+-- outcode's locality stamped IE (Codex). The authoritative source of which outcodes
+-- are British is the ONS postcode load (`postcodes`, migration 253), which is
+-- GB-only — NOT the outward-code *syntax*, because valid Eircode routing keys like
+-- D02 and D6W share that shape and would be wrongly reclassified. So a postcode
+-- locality is corrected to GB only where its slug is a real GB outcode ONS knows;
+-- an Irish routing key is not in `postcodes` and is left as it is.
+update localities loc
    set country_code = 'GB'
- where kind = 'postcode'
-   and slug ~ '^[a-z]{1,2}[0-9][a-z0-9]?$'
-   and upper(country_code) <> 'GB';
+ where loc.kind = 'postcode'
+   and upper(loc.country_code) <> 'GB'
+   and exists (select 1 from postcodes p where lower(p.outcode) = loc.slug);
 
 update place_index pi
    set country_code = upper(loc.country_code),
