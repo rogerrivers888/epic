@@ -212,11 +212,14 @@ test('voice intake writes diet to the column and maps allergens onto the UK 14',
     { kind: 'diet', value: 'no-pork' },       // → a pork dislike (ranks)
     { kind: 'diet', value: 'no-alcohol' },    // → an alcohol dislike (ranks)
     { kind: 'allergy', value: 'shellfish' },  // → crustaceans AND molluscs, as migration 319 expands it
+    { kind: 'allergy', value: 'latex' },      // → the private note (not a UK-14 word)
+    { kind: 'allergy', value: 'nickel' },     // → the SAME note, beside latex — never over it
     { kind: 'favourite', value: 'ramen' },    // → a like
   ], { members: [member], everyone: [member], households, householdId: h.id });
-  const row = (await query('select diet, halal from members where id = $1', [member.id])).rows[0];
+  const row = (await query('select diet, halal, allergen_note from members where id = $1', [member.id])).rows[0];
   assert.equal(row.diet, 'vegetarian');
   assert.equal(row.halal, true);
+  assert.equal(row.allergen_note, 'latex, nickel', 'two unknown allergies in one apply both survive');
   const allergens = (await query(`select value from member_constraints where member_id = $1 and kind='allergen' order by value`, [member.id])).rows.map((r) => r.value);
   assert.deepEqual(allergens, ['crustaceans', 'gluten', 'milk', 'molluscs'], 'gluten-free/dairy-free become filtering allergens; spoken shellfish names both crustaceans and molluscs');
   const dislikes = (await query(`select value from member_constraints where member_id = $1 and kind='dislike' order by value`, [member.id])).rows.map((r) => r.value);
@@ -297,13 +300,16 @@ test('the shared passcode can sign its other devices out too — its own, never 
 
 test('a signed-in teenager is still managed by the adults — the joined lock is for adults only', async () => {
   const { household: h, member: roger } = await aHousehold(query);
-  const teen = await addMember(h.id, 'Tess', { minor: true, birthDate: '2012-03-01' });
+  // A real 15-year-old: is_minor is FALSE (it means under-13), and the guard
+  // must find the child from the birthday, not the flag (Codex, 1 Oct 2026).
+  const yr = new Date().getFullYear() - 15;
+  const teen = await addMember(h.id, 'Tess', { minor: false, birthDate: `${yr}-03-01` });
   const acct = await createAccountOnHousehold(h.id, { memberId: teen.id, name: 'Tess', role: 'customer', plan: 'household', email: 'tess@example.com' });
   await query('update accounts set activated_at = now() where id = $1', [acct.id]);
   const asOwner = await server(owner(h, roger.id));
   try {
     assert.equal((await asOwner.send('PATCH', `/api/household/members/${teen.id}`, { diet: 'vegetarian' })).status, 200,
-      'an adult edits a child with an account of their own');
+      'an adult edits a 15-year-old with an account of their own');
   } finally { await asOwner.close(); }
 });
 

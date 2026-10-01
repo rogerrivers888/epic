@@ -132,8 +132,10 @@ export function callerIsOwner() {
 export async function canEditPerson(target) {
   // A child is always managed by the adults — even one old enough (13+) to
   // have signed in with an account of their own. The joined lock is for
-  // adults only (Codex, 1 Oct 2026).
-  if (target.is_minor) return true;
+  // adults only. `is_minor` means under-13, so the 13–17s are found from
+  // their birthday, not the flag (Codex, 1 Oct 2026, twice).
+  const age = ageFrom(target.birth_date, target.birth_year);
+  if (target.is_minor || (age != null && age < 18)) return true;
   const account = await accountByMember(target.id);
   const joined = Boolean(account && account.activated_at);
   if (!joined) return true;              // pending, or no account yet

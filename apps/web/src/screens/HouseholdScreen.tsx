@@ -89,10 +89,12 @@ function PersonProfile({ data, member, refresh }: { data: HouseholdResponse; mem
   const index = data.members.findIndex((m) => m.id === member.id);
   const isYou = member.id === data.me;
   const joined = member.access?.status === 'active';
-  const pending = member.access?.status === 'invited';
-  const canEdit = !(joined && !isYou);
-  const owner = Boolean(member.access?.isLead);
   const isChild = member.age != null ? member.age < 18 : member.isMinor;
+  const pending = member.access?.status === 'invited';
+  // A child is managed by the adults even with a phone of their own — the
+  // joined lock is for adults only, matching the server (Codex, 1 Oct 2026).
+  const canEdit = isChild || !(joined && !isYou);
+  const owner = Boolean(member.access?.isLead);
   const role = owner ? 'OWNER' : isChild ? 'CHILD' : 'ADULT';
   const adultName = data.members.find((m) => !m.isMinor && m.id !== member.id)?.name;
 

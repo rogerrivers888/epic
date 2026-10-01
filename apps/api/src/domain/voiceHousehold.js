@@ -199,6 +199,10 @@ export function likesVocabularyText(vocab) {
  */
 export async function applyFood(items, { members, households, everyone, householdId }) {
   const written = [];
+  // Notes written this run, per person — two unknown allergies in one apply
+  // must accumulate, not each build on the stale pre-apply note and the second
+  // silently drop the first (Codex, 1 Oct 2026).
+  const noteOf = new Map();
   for (const it of items) {
     const targets = it.memberId ? members.filter((m) => m.id === it.memberId) : everyone;
     // Diet is a column now (one main diet + halal/kosher), not a constraint row.
@@ -229,8 +233,10 @@ export async function applyFood(items, { members, households, everyone, househol
           }
         } else {
           const said = String(it.value).trim();
-          const already = (m.allergenNote ?? '').toLowerCase().includes(said.toLowerCase());
-          const note = already ? m.allergenNote : [m.allergenNote, said].filter(Boolean).join(', ');
+          const current = noteOf.get(m.id) ?? m.allergenNote ?? '';
+          const already = current.toLowerCase().includes(said.toLowerCase());
+          const note = already ? current : [current, said].filter(Boolean).join(', ');
+          noteOf.set(m.id, note);
           await households.updateMember(m.id, { allergenNote: note }, householdId);
           written.push({ memberId: m.id, kind: 'allergen-note', value: said });
         }
