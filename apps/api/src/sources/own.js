@@ -781,7 +781,7 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
         // its problems, and stamping it version 5 would never retry the write (Codex).
         if (site.sourceUrl) {
           try {
-            await recordAdmissionAnswer(venueRef, site.admission, { sourceUrl: site.sourceUrl });
+            await recordAdmissionAnswer(venueRef, site.admission, { sourceUrl: site.sourceUrl, postcode: site.postcode ?? seed.postcode ?? null });
           } catch (err) {
             admissionFailed = true;
             problems.push(`the admission answer: ${String(err?.message || err).slice(0, 120)}`);

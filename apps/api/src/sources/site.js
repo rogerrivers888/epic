@@ -233,6 +233,9 @@ const TEMPORAL = new RegExp([
   'only', 'special\\s+offer', 'promotion', 'open\\s+days?', 'launch',
 ].map((p) => `(?:${p})`).join('|').replace(/^/, '\\b(?:').concat(')'), 'i');
 
+// A structured offer label that names the general ticket.
+const GENERAL_OFFER = /\b(?:general|standard|adult|admission|entry|entrance)\b/i;
+
 // The words that may stand before a free claim in its own sentence (see admissionFrom).
 const LEAD_WORDS = new Set([
   'there', 'is', 'are', 'it', "it's", 'its', 'the', 'our', 'this', 'general', 'standard', 'and', 'to',
@@ -294,10 +297,15 @@ export function admissionFrom(html, node = {}) {
     const shown = currency === 'GBP' ? `£${price}` : `${price} ${currency}`;
     const label = String(offer.name ?? offer.category ?? '');
     const slot = TICKETS.find(([, re]) => re.test(label))?.[0] ?? 'adult';
-    // A zero-priced offer is free entry only when it is the general (adult) ticket.
-    // A free child ticket beside a paid family one is not a free place, and reading
-    // it as one showed a paid venue as Free (Codex).
-    if (Number(price) === 0) { if (slot === 'adult') found.free = true; continue; }
+    // A zero-priced offer is free entry only when its label says it is the general
+    // ticket. A free child ticket beside a paid family one is not a free place, and
+    // an unlabelled or unknown label — "Members", "Carer" — defaulted to the adult
+    // slot and read as free for everyone (Codex). So free needs a general label and
+    // nothing in it that names an audience or a date.
+    if (Number(price) === 0) {
+      if (GENERAL_OFFER.test(label) && !QUALIFIED.test(label) && !TEMPORAL.test(label)) found.free = true;
+      continue;
+    }
     found[slot] ??= shown;
   }
 

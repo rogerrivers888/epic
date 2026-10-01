@@ -26,6 +26,7 @@
 
 import { query } from '../db.js';
 import { saveAnswer, markDisagreement } from '../repositories/questionSets.js';
+import { isGbPostcode } from '../repositories/placeIndex.js';
 
 let costBandQuestion; // the global cost-band question id, resolved once
 
@@ -59,20 +60,28 @@ export function admissionToAnswer(admission) {
  * Idempotent per (venue_ref, question, source). Returns the answer written, or null if
  * the cost-band question is not registered.
  */
-export async function recordAdmissionAnswer(venueRef, admission, { sourceUrl = null } = {}) {
+export async function recordAdmissionAnswer(venueRef, admission, { sourceUrl = null, postcode = null } = {}) {
   const questionId = await costBandQuestionId();
   if (!questionId) return null;
   // The extractor recognises only £ prices, so it can tell free from paid only in GB:
   // elsewhere a €/$ charge goes undetected and "free … on some days" would be stored as
   // an unconditional Free over a paid venue (Codex). Restrict the writer to GB, the one
-  // currency it validates. A settled non-GB country is skipped; a null country defaults
-  // to GB — the only market with live data (as everywhere this session; non-GB is
-  // deferred groundwork), revisited when another market's currency is understood.
-  const { rows: [pi] } = await query('select country_code from place_index where venue_ref = $1', [venueRef]);
-  if (String(pi?.country_code || 'GB').toUpperCase() !== 'GB') {
-    // A venue now settled outside GB — clear any site answer written while its country
-    // was unknown (defaulted GB), so the cost row stops serving a band from a currency
-    // the extractor cannot validate (Codex). ownedCostBand then falls back to Google.
+  // currency it validates — a market-expansion item (docs/markets.md §3.3): the owned
+  // route stays GB-only until the extractor learns € and $.
+  //
+  // GB must be KNOWN, not assumed: an unknown country is skipped like a foreign one
+  // (Codex). Where the index has no country yet, a GB postcode — the page's own, or
+  // the record's — settles it, the same test settleCountryFromPostcode uses.
+  const { rows: [pi] } = await query(
+    `select pi.country_code, r.postcode from place_index pi
+       left join place_records r on r.venue_ref = pi.venue_ref where pi.venue_ref = $1`, [venueRef]);
+  const country = pi?.country_code
+    ? String(pi.country_code).toUpperCase()
+    : (await isGbPostcode(postcode) || await isGbPostcode(pi?.postcode)) ? 'GB' : null;
+  if (country !== 'GB') {
+    // A venue outside GB, or not yet known to be in it — clear any site answer written
+    // before (Codex), so the cost row stops serving a band from a currency the extractor
+    // cannot validate. ownedCostBand then falls back to Google.
     await query(`delete from place_answers where venue_ref = $1 and question_id = $2 and source = 'site'`, [venueRef, questionId]);
     // With the site row gone, an answer it disagreed with is no longer contested —
     // recompute the flags so ownedCostBand does not keep ignoring it (Codex).

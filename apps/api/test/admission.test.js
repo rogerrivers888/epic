@@ -107,3 +107,23 @@ test('ownedCostBand ignores a disagreement between two owned sources', async () 
   assert.ok(rows.every((r) => r.unresolved === true), 'both rows are marked unresolved');
   assert.equal(await ownedCostBand(ref), null, 'a disagreement shows nothing, not one side');
 });
+
+test('an unknown country is not assumed GB — a GB postcode settles it', async () => {
+  const ref = 'osm:node/adm-nocountry';
+  await index.noteMany([{ ref, lat: 51.5, lng: -0.6 }], { source: 'osm' });
+  await query(`update place_index set country_code = null where venue_ref = $1`, [ref]);
+  // No country and no postcode: skipped, the €/$ blind spot is not risked (Codex).
+  assert.equal(await admission.recordAdmissionAnswer(ref, { free: true }, { sourceUrl: 'https://x.example' }), null);
+  assert.equal(await ownedCostBand(ref), null);
+  // A postcode whose outcode we hold settles it as GB, and the free answer is written.
+  await query(`insert into postcodes (pcds, sector, outcode, lat, lng, source)
+               values ('ZA9 1AA', 'ZA9 1', 'ZA9', 51.5, -0.6, 'test') on conflict (pcds) do nothing`);
+  const out = await admission.recordAdmissionAnswer(ref, { free: true }, { sourceUrl: 'https://x.example', postcode: 'ZA9 1AA' });
+  assert.deepEqual(out, { state: 'answered', choice: 'free' });
+  assert.equal(await ownedCostBand(ref), 'free');
+  // A postcode we do not hold is not GB.
+  const other = 'osm:node/adm-nocountry-ie';
+  await index.noteMany([{ ref: other, lat: 53.3, lng: -6.2 }], { source: 'osm' });
+  await query(`update place_index set country_code = null where venue_ref = $1`, [other]);
+  assert.equal(await admission.recordAdmissionAnswer(other, { free: true }, { sourceUrl: 'https://x.ie', postcode: 'D02 X285' }), null);
+});

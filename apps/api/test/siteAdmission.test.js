@@ -121,3 +121,11 @@ test('an exception or a narrower "all" in the sentence bars the claim', () => {
   assert.equal(free('<p>Free admission for all ages, every day of the year.</p>'), true);
   assert.equal(free('<p>Free entry to the gardens, open all year round.</p>'), true);
 });
+
+test('a zero-priced offer is free only when its label names the general ticket', () => {
+  for (const name of ['Members', 'Carer', '', 'Student', 'Adult member']) {
+    const a = admissionFrom('<p></p>', { offers: [{ price: 0, name }] });
+    assert.notEqual(a?.free, true, `"${name}" at nought is not free for everyone`);
+  }
+  assert.equal(admissionFrom('<p></p>', { offers: [{ price: 0, name: 'Standard entry' }] })?.free, true);
+});

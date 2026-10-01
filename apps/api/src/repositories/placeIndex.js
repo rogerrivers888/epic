@@ -1228,6 +1228,18 @@ end)`;
  * Pass the refs being settled, or null for the whole corpus. Returns how many rows
  * it corrected.
  */
+/**
+ * Whether a postcode's outcode is a GB one we hold — the same test
+ * `settleCountryFromPostcode` settles a country on, for a caller that has the
+ * postcode in hand before the record is composed (sources/admission.js).
+ */
+export async function isGbPostcode(postcode, q = query) {
+  if (!postcode || !String(postcode).trim()) return false;
+  const { rows } = await q(
+    `select exists (select 1 from postcodes p where p.outcode = upper(${OUTCODE_FROM('$1::text')})) as gb`, [String(postcode)]);
+  return rows[0]?.gb === true;
+}
+
 export async function settleCountryFromPostcode(refs = null, q = query) {
   const scope = refs ? 'and pi.venue_ref = any($1) and r.venue_ref = any($1)' : '';
   const { rowCount } = await q(`
