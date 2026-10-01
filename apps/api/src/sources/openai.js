@@ -173,6 +173,7 @@ const trimHint = (hint) => (hint ? String(hint).replace(/\s+/g, ' ').trim().slic
  * is the same either way.
  */
 export async function transcribe({ audio, mime, filename, language = null, hint = '', keywords = [], stream = false, onDelta = null, signal = null, model = null } = {}) {
+  assertBackOfficeSpendAllowed('voice transcription');
   if (!openaiEnabled()) throw notConfigured();
   if (!audio?.length) throw new VoiceProviderError('voice_empty', 'Nothing was recorded.', null, 400);
   const ladder = model ? [model] : FILE_LADDER;
@@ -315,6 +316,7 @@ export async function readTranscriptStream(res, onDelta) {
  * session's length.
  */
 export async function mintLiveToken({ language = null, hint = '', keywords = [], seconds = 120, model = null } = {}) {
+  assertBackOfficeSpendAllowed('live voice');
   if (!openaiEnabled()) throw notConfigured();
   const ladder = model ? [model] : LIVE_LADDER;
   const dropped = new Set();
@@ -383,6 +385,7 @@ export async function mintLiveToken({ language = null, hint = '', keywords = [],
  * object is worse than no plan.
  */
 export async function extract({ system, input, schema, name = 'answer', model = PLAN_MODEL, signal = null } = {}) {
+  assertBackOfficeSpendAllowed('voice planning');
   if (!openaiEnabled()) throw notConfigured();
   const started = Date.now();
   // Reading a form out of a sentence is not a reasoning problem: with the

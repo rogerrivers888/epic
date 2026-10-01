@@ -1,4 +1,5 @@
 import { noteFault, bump } from './meter.js';
+import { assertBackOfficeSpendAllowed } from '../context.js';
 import { sourceOff } from './switches.js';
 import { FENCE_M, metresBetween, namesAreSame } from '../domain/matchFence.js';
 // Tripadvisor Terra Content API, Discover plan (Technical Constraints §3.3).
@@ -44,6 +45,9 @@ const off = (meter) => {
 async function get(path, params = {}, meter = null) {
   const key = KEY();
   if (!key) throw new Error('TRIPADVISOR_API_KEY not set');
+  // A Tripadvisor call bills; from the back office it needs the owner personally
+  // signed in (G11) — Tripadvisor has no Google/Claude choke point of its own.
+  assertBackOfficeSpendAllowed('Tripadvisor lookup');
   // The owner's switch, at the door — see google.js `call()` for why it is
   // asked here and not by the caller.
   if (sourceOff('tripadvisor')) { noteFault(meter, 'switched_off'); throw Object.assign(new Error('Tripadvisor is switched off in Settings › Providers'), { code: 'switched_off' }); }
