@@ -778,7 +778,10 @@ async function reindexWhileLocked({ onProgress }) {
   // (owner, 1 Oct 2026; Option C). A full rebuild files place_areas and the country
   // localities from pi.country_code just below, then marks every row placed — so the
   // correction has to land first, or a rebuild would re-cement a stale country out
-  // of settle's reach afterwards (Codex). Whole index, not a queue.
+  // of settle's reach afterwards (Codex). Already under the build lock here, so the
+  // helpers are called directly: normalise the GB outcode localities, then take each
+  // place's country from its outcode. Whole index, not a queue.
+  await normaliseOutcodeCountries();
   await settleCountryFromPostcode();
 
   // Every country the index holds places in gets a row you can point at.
@@ -1189,6 +1192,12 @@ const BUILD_LOCK = 'epic.placeIndex.build';
  * the sources and the editor use. The same derivation step 1 of settle does; kept
  * here so the country correction below reads it without depending on the areas
  * having been rebuilt yet.
+ *
+ * It assumes a UK incode of three characters. A space-separated Eircode ("D02 AF30")
+ * is handled — the routing key is taken before the space — but a compact one
+ * ("D02AF30") would strip four, not three, and yield "d02a". That is a pre-existing
+ * limitation of this shared derivation and only bites Ireland, which is groundwork
+ * with no live data; it is left for the IE launch rather than reworked here (Codex).
  */
 const OUTCODE_FROM = (col) => `lower(case
   when btrim(upper(${col})) ~ '^[A-Z]{1,2}[0-9][A-Z0-9]?$' then btrim(upper(${col}))
@@ -1227,21 +1236,18 @@ export async function settleCountryFromPostcode(refs = null, q = query) {
 }
 
 /**
- * The whole-corpus country correction, repeatable — run after the ONS postcode load
- * (loadPostcodes.js) as well as once by migration 310 (owner, 1 Oct 2026; Option C).
- * It has to be repeatable because `postcodes` is empty until `npm run postcodes`
- * runs, which on a fresh install is after the migrations, so the migration alone
- * would match nothing and never run again (Codex). Two steps: (1) a postcode
- * locality ONS knows as a GB outcode is GB — undoing a legacy edit that could stamp
- * it from a place's own country; (2) each place takes its country from its outcode's
- * locality, requeued (placed_at, settle_tried_at nulled) so settle refiles it under
- * the right country. Returns how many places were corrected.
+ * A postcode locality ONS knows as a GB outcode is GB — undoing a legacy edit that
+ * could have stamped it from a place's own country. ONS (`postcodes`, GB-only) is the
+ * authority, not the outward-code syntax, because Eircode routing keys share the
+ * shape (Codex). An Irish routing key is not in `postcodes` and is left alone.
  */
-export async function backfillCountriesFromPostcodes() {
-  await query(`update localities loc set country_code = 'GB'
-     where loc.kind = 'postcode' and upper(loc.country_code) <> 'GB'
-       and exists (select 1 from postcodes p where lower(p.outcode) = loc.slug)`);
-  const { rowCount } = await query(`
+const normaliseOutcodeCountries = (q = query) => q(`update localities loc set country_code = 'GB'
+   where loc.kind = 'postcode' and upper(loc.country_code) <> 'GB'
+     and exists (select 1 from postcodes p where lower(p.outcode) = loc.slug)`);
+
+/** Each place takes its country from its outcode's locality, requeued so settle refiles it. */
+const correctPlaceCountriesFromPostcode = async (q = query) => {
+  const { rowCount } = await q(`
     update place_index pi
        set country_code = upper(loc.country_code), placed_at = null, settle_tried_at = null
       from place_records r
@@ -1250,6 +1256,26 @@ export async function backfillCountriesFromPostcodes() {
        and loc.country_code is not null
        and upper(pi.country_code) is distinct from upper(loc.country_code)`);
   return rowCount ?? 0;
+};
+
+/**
+ * The whole-corpus country correction, repeatable — run after the ONS postcode load
+ * (loadPostcodes.js) as well as once by migration 310 (owner, 1 Oct 2026; Option C).
+ * It has to be repeatable because `postcodes` is empty until `npm run postcodes`
+ * runs, which on a fresh install is after the migrations, so the migration alone
+ * would match nothing and never run again (Codex). It normalises the localities,
+ * then refiles the places, requeued.
+ *
+ * Under the build lock, because a bare run could land between a rebuild generating
+ * place_areas and its final blanket `placed_at = now()`, which would re-mark the row
+ * placed without refiling its new country (Codex). If a rebuild holds the lock it
+ * does the same correction itself (reindexWhileLocked), so skipping is safe.
+ */
+export async function backfillCountriesFromPostcodes() {
+  return underTheBuildLock(async () => {
+    await normaliseOutcodeCountries();
+    return correctPlaceCountriesFromPostcode();
+  }, 0);
 }
 
 export async function settleNew({ limit = 5000 } = {}) {
