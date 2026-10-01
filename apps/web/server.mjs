@@ -21,7 +21,8 @@ import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { siteGateOn } from './gate.mjs';
 
-const ROOT = resolve(fileURLToPath(new URL('./dist', import.meta.url)));
+// The built app; a test points it at a folder of its own.
+const ROOT = resolve(process.env.EPIC_WEB_ROOT || fileURLToPath(new URL('./dist', import.meta.url)));
 const PORT = Number(process.env.PORT || 8080);
 
 const clean = (u) => String(u || '').trim().replace(/\/+$/, '');
@@ -79,7 +80,10 @@ function wantsApp(req, pathname) {
 
 /** Resolve a URL path to a file inside dist, or null if it escapes or is missing. */
 async function fileFor(pathname) {
-  const decoded = decodeURIComponent(pathname);
+  // A malformed escape (`/%E0%A4%A`) is not a file; it must never throw out of
+  // the request and take the process with it (Codex, 1 Oct 2026).
+  let decoded;
+  try { decoded = decodeURIComponent(pathname); } catch { return null; }
   const wanted = resolve(join(ROOT, normalize(decoded)));
   // `normalize` collapses `..`, but a path that still starts outside dist is a
   // traversal attempt and gets nothing.
@@ -108,7 +112,19 @@ function firstSegment(pathname) {
 /** The pages never for an index: the sign-in doors, the account page, the back office. */
 const PRIVATE_FIRST = new Set(['login', 'account', 'admin', 'in']);
 
-const server = http.createServer(async (req, res) => {
+/**
+ * Any request that throws answers 500 and is logged, rather than rejecting a
+ * promise nobody awaits — on a Node that ends the process, one bad request
+ * would take the whole site down.
+ */
+const guarded = (handler) => (req, res) => {
+  Promise.resolve(handler(req, res)).catch((err) => {
+    console.error('epic-web: request failed —', err?.message || err);
+    if (!res.headersSent) { res.writeHead(500, { 'content-type': 'text/plain' }); res.end('Something went wrong'); } else res.end();
+  });
+};
+
+const server = http.createServer(guarded(async (req, res) => {
   const pathname = (req.url || '/').split('?')[0].split('#')[0];
   // A health endpoint the deploy can watch — answered FIRST, before the canonical-host
   // redirect, because Railway's probe arrives on a non-canonical host (e.g.
@@ -155,7 +171,7 @@ const server = http.createServer(async (req, res) => {
   });
   if (req.method === 'HEAD') { res.end(); return; }
   createReadStream(found.path).pipe(res);
-});
+}));
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`epic-web serving ${ROOT} on 0.0.0.0:${PORT}, canonical ${APP_URL}`);
