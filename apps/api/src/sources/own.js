@@ -764,11 +764,13 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
           // the body is for the extractor (owner, 26 Sep 2026).
           put('body', site.body),
         ]);
-        // Admission is an owned fact (owner, 1 Oct 2026; parks admission): a free or
-        // priced entry read from the venue's own page is written as the owned
-        // cost-band answer the drawer's cost row prefers over Google (B11). A page we
-        // reached that said nothing bandable is recorded as asked_nothing_found.
-        await recordAdmissionAnswer(venueRef, site.admission, { sourceUrl: site.sourceUrl ?? seed.website }).catch(() => null);
+        // Admission is an owned fact (owner, 1 Oct 2026; parks admission): a free
+        // entry read from the venue's own page is written as the owned cost-band
+        // answer the drawer's cost row prefers over Google (B11). Only when the page
+        // was actually read — `sourceUrl` present — so a menu-only result (the page
+        // did not answer but a menu URL was found) does not overwrite a stored
+        // free answer with asked_nothing_found (Codex).
+        if (site.sourceUrl) await recordAdmissionAnswer(venueRef, site.admission, { sourceUrl: site.sourceUrl }).catch(() => null);
         identified += 1;
         step('venue-site', 'found', { url: site.sourceUrl ?? seed.website });
       } else {

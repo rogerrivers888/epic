@@ -77,6 +77,10 @@ test('costBandFor: known only with a level AND a market AND that market\'s bands
   // seeded null) → not known yet, never a symbol scale with no meaning (Codex).
   assert.deepEqual(costBandFor({ name: 'Portugal', currency: 'EUR', cost_bands: null }, 2), { known: false });
   assert.deepEqual(costBandFor({ name: 'Greece', currency: 'EUR', cost_bands: [] }, 2), { known: false });
+  // Free is the exception: it needs no money bands, so an owned free admission (or
+  // Google's level 0) shows Free even in a bandless market (owner, 1 Oct 2026; Codex).
+  assert.deepEqual(costBandFor({ name: 'Portugal', currency: 'EUR', cost_bands: null }, 0),
+    { known: true, scale: ['Free', '€', '€€', '€€€'], index: 0, band: 'Free', currency: 'EUR', range: null });
 });
 
 test('fillDefinition keeps a $-currency band whole (the live US "$$"→"$" bug)', () => {

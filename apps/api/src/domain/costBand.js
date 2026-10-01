@@ -72,10 +72,15 @@ export function money(minor, currency) {
 export function costBandFor(market, level) {
   const index = bandIndexForLevel(level);
   if (index == null || !market) return { known: false };
-  const bands = Array.isArray(market.cost_bands) ? market.cost_bands : null;
-  if (!bands || !bands.length) return { known: false };
   const currency = market.currency;
   const scale = scaleFor(currency);
+  // Free is universal and needs no money bands — there is no money sentence to make,
+  // and an owned free admission (or Google's PRICE_LEVEL_FREE) must show Free even in a
+  // market whose bands are not yet set (owner, 1 Oct 2026; parks admission; Codex). A
+  // paid band still needs the market's absolute money bands.
+  if (index === 0) return { known: true, scale, index: 0, band: scale[0], currency, range: null };
+  const bands = Array.isArray(market.cost_bands) ? market.cost_bands : null;
+  if (!bands || !bands.length) return { known: false };
   return { known: true, scale, index, band: scale[index], currency, range: rangeText(bands, index, currency) };
 }
 
