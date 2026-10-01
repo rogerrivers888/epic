@@ -112,10 +112,16 @@ export const sse = (event, data) => `event: ${event}\ndata: ${JSON.stringify(dat
  */
 export async function runResearchStream({ ref, householdId, sessionId, send, run = enrich } = {}) {
   send('start', { ref });
-  // The pipeline itself, forced (the button means "look now"), paid, and allowed
-  // its web search. Each source boundary is relayed straight to the page.
+  // The pipeline itself, forced (the button means "look now") and paid — but
+  // `search: false`, exactly as the priced sweep runs it (own.js). `search` is
+  // the one paid step the Google quote cannot price: the Claude web search that
+  // goes looking for a website a place with no OSM match does not publish, "not
+  // in the estimate, not under the ceiling" (Codex, 25 Sep 2026). A cost-first
+  // button must never spend what its price did not show, so it is off; the Google
+  // page-find (`websiteLead`, gated on `paid` alone) stays, and the quote covers
+  // it. Each source boundary is relayed straight to the page.
   const result = await run(ref, {
-    householdId, sessionId, paid: true, search: true, force: true,
+    householdId, sessionId, paid: true, search: false, force: true,
     onStep: (s) => send('source', s),
   });
   // What our record holds now — as booleans, so the atlas column can fill in

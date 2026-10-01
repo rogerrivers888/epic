@@ -36,6 +36,7 @@ test('the stream relays each source step, then what we kept, then done', async (
   const run = async (ref, opts) => {
     assert.equal(opts.paid, true, 'the button is a paid pass');
     assert.equal(opts.force, true, 'the button means "look now"');
+    assert.equal(opts.search, false, 'cost-first: no unpriced Claude web search from this button');
     opts.onStep({ source: 'open-map', state: 'checking' });
     opts.onStep({ source: 'open-map', state: 'found', ref: 'node/42' });
     opts.onStep({ source: 'venue-site', state: 'nothing' });
@@ -83,8 +84,9 @@ test('the quote reserves the worst case and never under-reserves', async () => {
   assert.ok(withSite.pence < bare.pence, 'holding a website costs less to research');
 
   // A non-google ref with no stored match makes no Google call at all — it seeds
-  // from its own record and looks for a page via a Claude search (its own
-  // budget), so nothing is reserved against the Google ceiling here.
+  // from its own record, so nothing is reserved against the Google ceiling here.
+  // (The button runs with `search: false`, so it does not even reach the Claude
+  // page-find; the quote never counted it either way.)
   const osm = await quoteResearch('osm:way/123_research_test');
   assert.deepEqual(osm.breakdown, { identify: 0, findPage: 0, reviews: 0 });
   assert.equal(osm.pence, 0);
