@@ -119,17 +119,18 @@ export async function gatherSignals(refs, { heritageLoad: heLoad = null } = {}) 
          and h.lat between coalesce(op.lat, pi.lat, pr.lat) - 0.0006 and coalesce(op.lat, pi.lat, pr.lat) + 0.0006
          and h.lng between coalesce(op.lng, pi.lng, pr.lng) - 0.0009 and coalesce(op.lng, pi.lng, pr.lng) + 0.0009
          and exists (
-           select 1 from unnest(string_to_array(lower(regexp_replace(
-             coalesce(case when (pr.provenance ->> 'name') is not null then pr.name end, at.name, ''),
-             '[^a-z0-9 ]', ' ', 'g')), ' ')) as vt
+           select 1
+             from unnest(string_to_array(lower(regexp_replace(
+               coalesce(case when (pr.provenance ->> 'name') is not null then pr.name end, at.name, ''),
+               '[^a-z0-9 ]', ' ', 'g')), ' ')) as vt
+             join unnest(string_to_array(lower(regexp_replace(h.name, '[^a-z0-9 ]', ' ', 'g')), ' ')) as ht on ht = vt
             -- >= 3 so a saint's short name (Ann, Ive, Bee) still identifies the
             -- place; generic short words stay excluded below (Codex).
             where length(vt) >= 3
               and vt not in ('church','saint','chapel','abbey','priory','friary','minster','cathedral',
                              'house','hall','castle','tower','bridge','viaduct','memorial','monument',
                              'garden','gardens','park','green','the','and','war','old','new','great','little',
-                             'grade','listed','building','former','parish')
-              and position(vt in lower(h.name)) > 0)
+                             'grade','listed','building','former','parish'))
      ) her on true`,
     [refs, heLoad]);
 

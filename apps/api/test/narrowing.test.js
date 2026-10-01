@@ -324,3 +324,16 @@ test('a short saint name still identifies a heritage listing — St Ann’s matc
   const kept = new Set(out.subcategories.find((s) => s.key === 'churches').examplesKept.map((e) => e.ref));
   assert.ok(kept.has('google:stann'), 'St Ann’s is kept via its Grade I listing');
 });
+
+test('a three-letter token matches a whole word, not a substring — St Bee does not inherit Beech House (Codex)', async () => {
+  const load = '44444444-4444-4444-4444-444444444444';
+  await query(`update owned_source_loads set state='done', live_load=$1, load_id=$1, finished_at=now() where source='historic-england'`, [load]);
+  await seedPlace('google:stbee', { subcategory: 'churches', record: { name: 'St Bee Church' }, point: { lat: 50.10000, lng: -5.20000 } });
+  const { rows: [eng] } = await query(`select slug from localities where kind='county' and nation='England' limit 1`);
+  await query('insert into place_areas (venue_ref, area_slug) values ($1,$2) on conflict do nothing', ['google:stbee', eng.slug]);
+  await query(`insert into heritage_entries (list_entry, layer, name, grade, lat, lng, load_id)
+                 values (5544332,'listed-building','Beech House','I',50.10002,-5.20001,$1) on conflict do nothing`, [load]);
+  const out = await narrowing.narrowingPreview({ scope: 'estate' });
+  const kept = new Set(out.subcategories.find((s) => s.key === 'churches').examplesKept.map((e) => e.ref));
+  assert.ok(!kept.has('google:stbee'), 'St Bee Church does not inherit Beech House’s Grade I by substring');
+});
