@@ -26,7 +26,7 @@ import { query, withTransaction } from '../db.js';
 import * as index from '../repositories/placeIndex.js';
 import { decodeEntities } from '../repositories/placeIndex.js';
 import { phoneOf } from '../domain/contact.js';
-import { censusInRing, censusByOutcodeSum, placingPoints, nearestSector, widthOf, FINE_M } from '../repositories/censusRing.js';
+import { censusInRing, censusByOutcodeSum, placingPoints, nearestSector, sectorsOfBox, widthOf, FINE_M } from '../repositories/censusRing.js';
 import { TEXT_QUESTIONS, textStillAsked } from '../sources/censusQuestions.js';
 import { ownSite } from '../sources/logo.js';
 import * as reach from '../repositories/reach.js';
@@ -1264,7 +1264,8 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
       if (!refList.length) return;
       const scope = [...new Set(outcodes.map((o) => o.toLowerCase()))];
       const { rows: dr } = await query(
-        `select ps.venue_ref, ps.subcategory, pi.lat, pi.lng, pi.slice
+        `select ps.venue_ref, ps.subcategory, pi.lat, pi.lng, pi.slice,
+                (pi.coords_from = any(epic_owned_sources())) as coord_owned
            from place_subcategories ps
            join place_index pi on pi.venue_ref = ps.venue_ref
           where ps.category = $2 and ps.venue_ref = any($1)
@@ -1275,7 +1276,10 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
         [refList, category, scope, textDrawers]);
       for (const r of dr) {
         let e = detail.get(r.venue_ref);
-        if (!e) { e = { subcats: new Set(), lat: r.lat, lng: r.lng, slice: r.slice }; detail.set(r.venue_ref, e); }
+        // lat/lng are kept for server-side placement only; whether they may be shown
+        // to a client turns on coord_owned (a rented Google point is 30-day and never
+        // leaves the server — data policy).
+        if (!e) { e = { subcats: new Set(), lat: r.lat, lng: r.lng, slice: r.slice, coordOwned: r.coord_owned === true }; detail.set(r.venue_ref, e); }
         if (r.subcategory) e.subcats.add(r.subcategory);
       }
     };
@@ -1294,9 +1298,11 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
       const n = String(slice ?? '').split(',').map(Number);
       return n.length === 4 && n.every(Number.isFinite) ? { minLat: n[0], minLng: n[1], maxLat: n[2], maxLng: n[3] } : null;
     };
-    // The district and the matrix sector for a changed place. A box wider than the
-    // fine width spans several districts, so it is not blamed on its midpoint's one
-    // (Codex); it is marked ambiguous and carries no single sector for a drive time.
+    // The district and the matrix sector for a changed place. A box under the fine
+    // width is placed by its centre; a wider one is classified by its corners —
+    // reported as its single district when they all fall in one, and marked ambiguous
+    // only when they genuinely span outcodes (Codex). A wide box carries no single
+    // sector for a drive time.
     const placeOf = (e) => {
       if (!e) return { outcode: '(unknown)', code: null, placed: null };
       if (e.lat != null && e.lng != null) {
@@ -1304,10 +1310,14 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
         return { outcode: s?.outcode ?? '(unplaced)', code: s?.code ?? null, placed: 'own' };
       }
       const bx = boxFrom(e.slice);
-      if (bx && widthOf(bx) <= FINE_M) {
+      if (!bx) return { outcode: '(unplaced)', code: null, placed: 'slice' };
+      if (widthOf(bx) <= FINE_M) {
         const s = nearestSector({ lat: (bx.minLat + bx.maxLat) / 2, lng: (bx.minLng + bx.maxLng) / 2 }, universe);
         return { outcode: s?.outcode ?? '(unplaced)', code: s?.code ?? null, placed: 'slice' };
       }
+      const v = sectorsOfBox(bx, universe);
+      if (v.kind === 'inside') return { outcode: v.outcode ?? '(unplaced)', code: v.code ?? null, placed: 'slice' };
+      if (v.kind === 'across' && v.outcodes?.size === 1) return { outcode: [...v.outcodes][0], code: null, placed: 'slice' };
       return { outcode: '(wide slice — multiple districts)', code: null, placed: 'slice' };
     };
 
@@ -1364,14 +1374,19 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
       sample: sampleRefs.map((ref) => {
         const e = detail.get(ref);
         const p = placed.get(ref);
+        // A coordinate goes to the client only when it is owned; a rented Google
+        // point stays server-side (data policy, Codex), and the census slice — our
+        // own query rectangle, not a provider point — is shown instead.
+        const ownCoord = e?.coordOwned && e?.lat != null && e?.lng != null;
         return {
           venueRef: ref,
           subcategories: [...(e?.subcats ?? [])],
           outcode: p.outcode,
           placed: p.placed,
-          lat: e?.lat != null ? Number(e.lat) : null,
-          lng: e?.lng != null ? Number(e.lng) : null,
-          slice: e?.lat == null ? (e?.slice ?? null) : null,
+          lat: ownCoord ? Number(e.lat) : null,
+          lng: ownCoord ? Number(e.lng) : null,
+          coordSource: ownCoord ? 'owned' : (e?.lat != null ? 'rented (server-side only)' : null),
+          slice: ownCoord ? null : (e?.slice ?? null),
           // Mode-neutral: the reach matrix minutes for the chosen mode, or null for a
           // matrix-less mode where the reach is a straight-line estimate (Codex).
           reachMinutes: p.code != null ? (mins.get(p.code) ?? null) : null,
