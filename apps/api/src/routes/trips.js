@@ -38,6 +38,7 @@ import { shelvesForVenue } from '../domain/moods.js';
 import { rules as shelfRules } from '../repositories/shelfRules.js';
 import { taxonomy as shelfTaxonomy } from '../repositories/shelfTaxonomy.js';
 import { hiddenAmong } from '../repositories/placeStatus.js';
+import { resolveNames } from '../sources/displayNames.js';
 
 const router = Router();
 
@@ -172,7 +173,9 @@ export async function tripPayload(tripId) {
     trips.daysOf(tripId), trips.stopsOf(tripId), trips.attendeesOf(tripId), trips.visitIdsOf(tripId), trips.shortlistOf(tripId),
   ]);
   const visitsByStop = new Map();
-  for (const v of visitRows) if (v.stop_id) visitsByStop.set(v.stop_id, await visitPayload(v.id));
+  // Embedded under stops the trip-wide resolve already names: owned or neutral
+  // here, no per-visit live call outside that capped batch (Codex, 1 Oct 2026).
+  for (const v of visitRows) if (v.stop_id) visitsByStop.set(v.stop_id, await visitPayload(v.id, { live: false }));
   const scheduledRefs = new Set(stops.map((s) => s.venue_ref));
 
   const dayPayloads = days.map((d) => {
@@ -203,7 +206,7 @@ export async function tripPayload(tripId) {
     };
   });
 
-  return {
+  const payload = {
     // The journey is worked out for the day's mode where the day set one.
     trip: { ...publicTrip(trip), journey: journeyOf(trip, days[0]?.travel_mode ?? null) },
     attendees: attendees.map((a) => ({ id: a.id, name: a.name, isMinor: a.is_minor, avatarUrl: a.avatar_url })),
@@ -219,6 +222,16 @@ export async function tripPayload(tripId) {
     stops: stops.map((s) => ({ id: s.id, position: s.position, venueRef: s.venue_ref, name: s.venue_name, lat: s.lat, lng: s.lng, dwellMinutes: s.dwell_minutes, visit: visitsByStop.get(s.id) ?? null })),
     budget: computeBudget({ trip, stops, household }),
   };
+  // Every place on this trip shows its owned name, or Google's live (in memory,
+  // never written down), or a neutral word — never the stored provider label
+  // this used to carry in `venue_name`/`venue_label`. The stops appear twice
+  // (per-day and the legacy flat list); resolving them together means one owned
+  // lookup and one capped live batch for the screen (sources/displayNames.js).
+  await resolveNames(
+    [...payload.days.flatMap((d) => d.slots.flatMap((sl) => sl.stops)), ...payload.shortlist, ...payload.stops],
+    { refKey: 'venueRef', purpose: 'trip.displayName' },
+  );
+  return payload;
 }
 
 // ---------------------------------------------------------------------------
@@ -655,6 +668,12 @@ router.get('/:id/places', async (req, res, next) => {
         photos: heroes.get(r.venue_ref) ? undefined : photosKept(r.venue_ref) ?? undefined,
       };
     });
+
+    // The owned name, or Google's live (in memory only), or a neutral word —
+    // never the stored `label`, which is being removed (sources/displayNames.js).
+    // Done before the base row is added below: a trip's base carries the
+    // household's own label and is not a place to be resolved or researched.
+    await resolveNames(places, { refKey: 'venueRef', purpose: 'trip.displayName' });
 
     // Somewhere they slept is a place this trip touched even when nobody put it
     // on a day. A day out's "base" is the town it went to, not a hotel, so it

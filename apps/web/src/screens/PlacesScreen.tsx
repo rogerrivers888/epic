@@ -429,7 +429,13 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
           if (newVenue?.venueRef) noteSearchEvent('places', 'close', newVenue.venueRef);
           setOpen(null); setNewVenue(null);
         }}
-        onVenue={async (v) => { if (open?.unnamed && v.name) { try { await api.nameAtlasPlace(open.venueRef, v.name); /* the write invalidates the area rows centrally, and this screen is mounted, so they refresh themselves */ } catch { /* the drawer still shows the fetched name */ } } }}
+        // An unnamed place is named by the server's resolver now — our own name,
+        // else Google's live (in memory only), else a neutral word, with the
+        // place queued for research (api/src/sources/displayNames.js). It must
+        // NOT be auto-named from the drawer's fetched venue: that wrote a
+        // provider's name into `nickname` as if a person had typed it, which is
+        // exactly the confusion the nickname column exists to prevent (owner,
+        // 1 Oct 2026). A nickname is written only when someone types one.
         capture={(() => {
           const v = newVenue ?? (open ? atlasToVenue(open) : null);
           if (!v) return null;

@@ -825,6 +825,17 @@ export const googleSource = {
    * hours, no rating, no reviews, no photos. Nothing it returns is written
    * down — it is read, used to search OpenStreetMap and Wikipedia, and dropped.
    */
+  /**
+   * One place's display name, by its id, and nothing else — the narrowest mask
+   * that returns a name (owner, 1 Oct 2026). A name is a Pro field; there is no
+   * cheaper tier for it. Read in memory to show the place and never written.
+   */
+  async displayName(id, { meter = null } = {}) {
+    if (off(meter)) return null;
+    const p = await call(`/places/${id}`, { method: 'GET', fieldMask: 'id,displayName', meter });
+    return p?.displayName?.text ?? null;
+  },
+
   async brief(id, { meter = null } = {}) {
     if (off(meter)) return null;
     const p = await call(`/places/${id}`, { method: 'GET', fieldMask: 'id,displayName,location,websiteUri,businessStatus', meter });

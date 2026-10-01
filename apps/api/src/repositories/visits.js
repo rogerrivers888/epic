@@ -167,11 +167,14 @@ export async function recordLedger(householdId, source, sourcePlaceId, status, c
 
 /** Somewhere already in the atlas, matched by name, to rank above a stranger. */
 export async function knownPlacesMatching(householdId, q, limit = 4) {
+  // A name a person typed now lives in `nickname` (migration 309), so a match
+  // on it — and the name shown — prefers it over the provider label that is
+  // being removed (Codex, 1 Oct 2026).
   const { rows } = await query(
-    `select hp.venue_ref, hp.label, hp.category, hp.locality, hp.postcode,
+    `select hp.venue_ref, coalesce(hp.nickname, hp.label) as label, hp.category, hp.locality, hp.postcode,
             exists (select 1 from visits v where v.household_id = hp.household_id and v.venue_ref = hp.venue_ref) as been
        from household_places hp
-      where hp.household_id = $1 and lower(hp.label) like $2
+      where hp.household_id = $1 and (lower(hp.nickname) like $2 or lower(hp.label) like $2)
       order by been desc, hp.last_seen desc limit $3`,
     [householdId, `%${String(q).toLowerCase()}%`, limit],
   );

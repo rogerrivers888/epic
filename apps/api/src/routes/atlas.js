@@ -28,6 +28,7 @@ import { recordsFor } from '../repositories/ownedPlaces.js';
 import { fileUnder } from '../domain/fileUnder.js';
 import { stampImage } from '../sources/photoLinks.js';
 import { closedBrief, hiddenStatusesOf } from '../repositories/placeStatus.js';
+import { resolveNames } from '../sources/displayNames.js';
 
 /**
  * A stored picture in the shape a card draws. `credit` travels with it because
@@ -380,6 +381,13 @@ atlas.get('/places', async (req, res, next) => {
     // once the owner has applied the check.
     const closedHere = await hiddenStatusesOf(places.map((p) => p.venueRef)).catch(() => new Map());
     places = places.map((p) => ({ ...p, closed: closedBrief(closedHere.get(p.venueRef)) }));
+    // The name a row is shown under: our own first, then Google live (in memory,
+    // never written down, counted on the ledger), then a neutral word — and a
+    // place with no owned name is queued for research (sources/displayNames.js).
+    // The stored Google label this used to show is being removed, so the name
+    // comes from here, not from `known_label`/`label` any more.
+    await resolveNames(places, { refKey: 'venueRef', purpose: 'atlas.displayName' });
+    for (const p of places) p.unnamed = p.nameSource === 'none';
     // Where a place is, and what kind of place it is, are looked up lazily a few
     // rows per read, after the response has gone; the web asks again shortly
     // while any row is still waiting.

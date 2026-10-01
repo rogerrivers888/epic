@@ -85,6 +85,29 @@ function cleanPlaceRow<T extends { venueRef?: string; venue?: unknown; photos?: 
 }
 
 /**
+ * A name fetched live from a provider at display is rented in the same strict
+ * sense as a photograph or a rating: the server shows it from memory and writes
+ * it down nowhere (api/src/sources/displayNames.js marks such a row
+ * `nameSource: 'google-live'`). On the network the place reads under Google's
+ * name; offline it reads under a neutral word, so no provider name reaches
+ * IndexedDB. Walks the whole body so a stop nested in a day, or a visit on a
+ * place page, is caught wherever it sits — and never mutates its input.
+ */
+function stripLiveNames(node: any): any {
+  if (Array.isArray(node)) return node.map(stripLiveNames);
+  if (!node || typeof node !== 'object') return node;
+  const out: any = {};
+  for (const [k, v] of Object.entries(node)) out[k] = (v && typeof v === 'object') ? stripLiveNames(v) : v;
+  if (out.nameSource === 'google-live') {
+    const neutral = out.locality ? `A place in ${out.locality}` : 'A place';
+    if ('name' in out) out.name = neutral;
+    if ('venueLabel' in out) out.venueLabel = neutral;
+    out.nameSource = 'none';
+  }
+  return out;
+}
+
+/**
  * The body to save for this path, or null to save nothing.
  *
  * Never mutates what it is given: the app goes on using the full answer for as
@@ -97,7 +120,7 @@ export function storable(fullPath: string, body: any): any | null {
   // --- the household's own, in full -------------------------------------
   if (p === '/api/household' || p === '/api/household/learned') return body;
   if (p === '/api/concepts/browse') return body;
-  if (p === '/api/visits' || isVisit(p)) return body;
+  if (p === '/api/visits' || isVisit(p)) return stripLiveNames(body);
   if (p === '/api/sources') return body;
   if (p === '/api/offline/manifest') return body;
   // The collections a household sees (routes/collections.js). Kept, and
@@ -155,7 +178,7 @@ export function storable(fullPath: string, body: any): any | null {
   // --- the atlas: household rows, with any rented taxonomy stripped ------
   if (p === '/api/atlas') return body;
   if (p === '/api/atlas/places') {
-    return { ...body, places: (body.places ?? []).map(cleanPlaceRow) };
+    return stripLiveNames({ ...body, places: (body.places ?? []).map(cleanPlaceRow) });
   }
 
   // The map a search is drawn on: a country's coast from Natural Earth and
@@ -181,10 +204,10 @@ export function storable(fullPath: string, body: any): any | null {
   // --- trips: the household's plan, with the same strip on the shortlist --
   if (p === '/api/trips') return body;
   if (isTripDetail(p)) {
-    return {
+    return stripLiveNames({
       ...body,
       shortlist: (body.shortlist ?? []).map(cleanPlaceRow),
-    };
+    });
   }
   /**
    * Every place a trip touched. Each row is a place the household put on this
@@ -198,7 +221,7 @@ export function storable(fullPath: string, body: any): any | null {
    * and written down nowhere. `cleanPlaceRow` takes it off, along with a rented
    * rating — the same strip the atlas rows get.
    */
-  if (isTripPlaces(p)) return { ...body, places: (body.places ?? []).map(cleanPlaceRow) };
+  if (isTripPlaces(p)) return stripLiveNames({ ...body, places: (body.places ?? []).map(cleanPlaceRow) });
 
   /**
    * The trip's conversation, and one stop's Ask (trip rebuild, 7 Sep 2026).

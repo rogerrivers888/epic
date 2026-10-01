@@ -36,6 +36,7 @@ import * as atlasRepo from '../repositories/atlas.js';
 import { googleSource } from '../sources/google.js';
 import { claimPlace, ownedRecord, ownedRecords, enrich, researchOnOpen } from '../sources/own.js';
 import { closedBrief, hiddenAmong, hiddenStatusesOf, labelFor, statusFor } from '../repositories/placeStatus.js';
+import { resolveNames } from '../sources/displayNames.js';
 import { onVisitRecorded } from '../sources/closedCheck.js';
 // Somewhere you eat, where the menu is the thing you want on the way in; and
 // the three words a take may be.
@@ -228,11 +229,11 @@ async function writeTakes(client, visitId, takes, venue) {
   }
 }
 
-async function visitPayload(id) {
+async function visitPayload(id, { live = true } = {}) {
   const v = await visitsRepo.visitById(id);
   if (!v) return null;
   const { attendees, takes } = await visitsRepo.visitDetail(id);
-  return {
+  const payload = {
     id: v.id,
     venueRef: v.venue_ref,
     venueLabel: v.venue_label,
@@ -252,6 +253,19 @@ async function visitPayload(id) {
       conceptKey: t.concept_key, concept: conceptByKey(t.concept_key)?.label ?? null,
     })),
   };
+  // The visit shows the place's owned name, or Google's live (in memory, never
+  // written down), or a neutral word — never the stored `venue_label`, which is
+  // being removed (sources/displayNames.js). One choke point: a visit opened on
+  // its own, embedded in a trip, or listed on a place page all pass through here.
+  //
+  // `live` is turned off where the screen resolves the place's name itself and a
+  // per-visit lookup would be both a second wait and a way past the per-screen
+  // cap: a trip's visits are embedded under stops the trip already names, and a
+  // trip of many distinct unnamed stops must not fetch one live name per visit
+  // outside the capped batch (Codex, 1 Oct 2026). A place page's history is all
+  // one venue, so the in-flight share already makes it one call.
+  await resolveNames([payload], { refKey: 'venueRef', nameKey: 'venueLabel', purpose: 'visit.displayName', live });
+  return payload;
 }
 
 // ---------------------------------------------------------------------------
@@ -1066,13 +1080,18 @@ visits.get('/', async (req, res, next) => {
     const facets = await visitsRepo.visitCountries(household.id);
     // The history keeps a place that has since closed, marked (C57).
     const closedHere = await hiddenStatusesOf(rows.map((v) => v.venue_ref)).catch(() => new Map());
+    const visitsOut = rows.map((v) => ({
+      closed: closedBrief(closedHere.get(v.venue_ref)),
+      id: v.id, venueRef: v.venue_ref, venueLabel: v.venue_label, category: v.category, lat: v.lat, lng: v.lng,
+      visitedOn: v.visited_on, note: v.note, country: v.country, countryCode: v.country_code, locality: v.locality,
+      tripId: v.trip_id, attendees: v.attendees ?? [], visitTakes: v.visit_takes ?? [], itemTakes: v.item_takes,
+    }));
+    // The list shows each place's owned name (or Google live, in memory only),
+    // never the stored `venue_label` that is being removed — one batched lookup
+    // and one capped live fetch for the screen (sources/displayNames.js).
+    await resolveNames(visitsOut, { refKey: 'venueRef', nameKey: 'venueLabel', purpose: 'visit.displayName' });
     res.json({
-      visits: rows.map((v) => ({
-        closed: closedBrief(closedHere.get(v.venue_ref)),
-        id: v.id, venueRef: v.venue_ref, venueLabel: v.venue_label, category: v.category, lat: v.lat, lng: v.lng,
-        visitedOn: v.visited_on, note: v.note, country: v.country, countryCode: v.country_code, locality: v.locality,
-        tripId: v.trip_id, attendees: v.attendees ?? [], visitTakes: v.visit_takes ?? [], itemTakes: v.item_takes,
-      })),
+      visits: visitsOut,
       countries: facets.map((f) => ({ code: f.country_code, name: f.country, visits: f.visits })),
     });
   } catch (err) {
@@ -1094,6 +1113,15 @@ visits.patch('/:id', async (req, res, next) => {
   try {
     const { note, visitedOn, venueLabel } = req.body || {};
     await visitsRepo.updateVisit(req.params.id, { note, visitedOn, venueLabel });
+    // A label a person types for a visit is a name they gave the place — owned,
+    // not a provider's — so it is kept as the place's nickname, where the
+    // resolver reads it first and it survives on every screen rather than being
+    // overwritten by the resolved name on the way back (Codex, 1 Oct 2026).
+    if (venueLabel != null && String(venueLabel).trim()) {
+      const household = await currentHousehold();
+      const v = await visitsRepo.visitById(req.params.id);
+      if (v) await atlasRepo.nameUnnamedPlace(household.id, v.venue_ref, String(venueLabel).trim());
+    }
     res.json({ visit: await visitPayload(req.params.id) });
   } catch (err) {
     next(err);

@@ -100,8 +100,13 @@ export async function upsertHouseholdPlace(client, householdId, p) {
 
 /** Name a place that was only ever held by its identifier. */
 export async function nameUnnamedPlace(householdId, venueRef, label) {
+  // A name a person types is an owned annotation Epic keeps for good, and it is
+  // kept apart from any provider's name in its own column (owner, 1 Oct 2026:
+  // "keep user-typed nicknames separately with a marker"). `label` still holds
+  // whatever named the place before and is being removed; the nickname is what
+  // the display resolver reads first (sources/displayNames.js).
   await query(
-    'update household_places set label = $3 where household_id = $1 and venue_ref = $2 and label = venue_ref',
+    'update household_places set nickname = $3 where household_id = $1 and venue_ref = $2',
     [householdId, venueRef, label],
   );
 }
@@ -318,7 +323,7 @@ export async function placesIn(householdId, f = {}, home = null) {
   if (f.country && !f.nearHome) { params.push(String(f.country).toUpperCase()); where.push(`hp.country_code = $${params.length}`); }
   if (f.city && !f.nearHome) { params.push(String(f.city)); where.push(`coalesce(hp.locality, 'Elsewhere') = $${params.length}`); }
   if (f.kind) { params.push(String(f.kind)); where.push(`hp.kind = $${params.length}`); }
-  if (f.q) { params.push(`%${String(f.q).toLowerCase()}%`); where.push(`(lower(hp.label) like $${params.length} or lower(coalesce(hp.note,'')) like $${params.length})`); }
+  if (f.q) { params.push(`%${String(f.q).toLowerCase()}%`); where.push(`(lower(coalesce(hp.nickname,'')) like $${params.length} or lower(hp.label) like $${params.length} or lower(coalesce(hp.note,'')) like $${params.length})`); }
 
   const { rows } = await query(
     `select hp.*, ${HP_LAT} as lat, ${HP_LNG} as lng,

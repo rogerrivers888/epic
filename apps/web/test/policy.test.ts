@@ -81,6 +81,34 @@ test('a trip’s shortlist is stripped the same way', () => {
   assert.notEqual(saved.shortlist[1].venue, null);
 });
 
+test('a name fetched live from Google is shown on the network but neutral on the device', () => {
+  // The server marks a live provider name `nameSource: 'google-live'`; offline
+  // it must read under a neutral word so no provider name reaches IndexedDB,
+  // while an owned name is kept exactly as it is.
+  const atlas: any = storable('/api/atlas/places', {
+    places: [
+      { venueRef: 'google:places/A', name: 'Live From Google', nameSource: 'google-live', locality: 'Bath' },
+      { venueRef: 'google:places/B', name: 'Our Spot', nameSource: 'household' },
+    ],
+  });
+  assert.equal(atlas.places[0].name, 'A place in Bath');
+  assert.equal(atlas.places[0].nameSource, 'none');
+  assert.equal(atlas.places[1].name, 'Our Spot', 'an owned name is untouched');
+});
+
+test('a live name nested in a trip day, and a visit’s live label, are both stripped', () => {
+  const trip: any = storable('/api/trips/abc-123', {
+    trip: { id: 'abc-123' },
+    days: [{ slots: [{ stops: [{ venueRef: 'google:places/C', name: 'Live Name', nameSource: 'google-live' }] }] }],
+    shortlist: [],
+  });
+  assert.equal(trip.days[0].slots[0].stops[0].name, 'A place');
+  const visits: any = storable('/api/visits', {
+    visits: [{ venueRef: 'google:places/D', venueLabel: 'Live Label', nameSource: 'google-live', locality: 'Ely' }],
+  });
+  assert.equal(visits.visits[0].venueLabel, 'A place in Ely');
+});
+
 test('a place drawer keeps our side of it and none of theirs', () => {
   const saved: any = storable('/api/places/detail', {
     venueRef: 'google:places/Y',
