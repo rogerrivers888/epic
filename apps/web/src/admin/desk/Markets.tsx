@@ -94,7 +94,12 @@ function CostBandEditor({ code, currency, bands, onSaved, toast }: {
   useEffect(() => { setT1(seedT1); setT2(seedT2); }, [seedT1, seedT2]);
   const [busy, setBusy] = useState(false);
   const a = Number(t1); const b = Number(t2);
-  const valid = t1.trim() !== '' && t2.trim() !== '' && Number.isFinite(a) && Number.isFinite(b) && a > 0 && b > a;
+  // Validity is judged on the minor units actually sent — the API rounds to whole
+  // minor units and needs 1 < first < second — so two major amounts that round to
+  // the same minor value, or a first that rounds to 1, never offer a Set that the
+  // server would reject (Codex).
+  const mt1 = Math.round(a * 100); const mt2 = Math.round(b * 100);
+  const valid = t1.trim() !== '' && t2.trim() !== '' && Number.isFinite(a) && Number.isFinite(b) && mt1 > 1 && mt2 > mt1;
   const preview = valid
     ? `Free · ${sym} under ${sym}${a} · ${sym}${sym} ${sym}${a}–${b} · ${sym}${sym}${sym} over ${sym}${b}, a person`
     : 'Two amounts a person pays: where the first band tops out, and where the second does.';
@@ -102,11 +107,15 @@ function CostBandEditor({ code, currency, bands, onSaved, toast }: {
     if (!valid || busy) return;
     setBusy(true);
     try {
-      const res = await deskApi.post<{ change?: string }>(`/markets/${encodeURIComponent(code)}/cost-bands`,
-        { t1: Math.round(a * 100), t2: Math.round(b * 100) });
+      const res = await deskApi.post<{ change?: string }>(`/markets/${encodeURIComponent(code)}/cost-bands`, { t1: mt1, t2: mt2 });
       onSaved();
       const changeId = res?.change;
-      if (changeId) toast(`Cost bands set for ${code}`, async () => { await deskApi.post(`/undo/${changeId}`, {}); onSaved(); });
+      // Undo reports its own failure, as the source-connect undo does — a later
+      // change standing, or a network error, must not fail silently (Codex).
+      if (changeId) toast(`Cost bands set for ${code}`, async () => {
+        try { await deskApi.post(`/undo/${changeId}`, {}); onSaved(); }
+        catch (err) { toast((err as Error)?.message || 'Could not undo that.'); }
+      });
     } catch (err) { toast((err as Error)?.message || 'Could not set the bands.'); }
     finally { setBusy(false); }
   };
