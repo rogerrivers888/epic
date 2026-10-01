@@ -1273,12 +1273,20 @@ const correctPlaceCountriesFromPostcode = async (q = query) => {
  * rebuild could correct against the old snapshot, the loader swap in the new one, and
  * a non-waiting call then skip — leaving the new snapshot's outcodes uncorrected.
  * Waiting runs the correction after the rebuild releases, against the new snapshot.
+ *
+ * If the wait times out (a rebuild held the lock past the 30s limit) it THROWS rather
+ * than returning a count, so the caller — the postcode load — fails and the scheduled
+ * refresh retries instead of recording the release as loaded with places left stale
+ * (Codex).
  */
 export async function backfillCountriesFromPostcodes() {
-  return underTheBuildLock(async () => {
+  const BUSY = Symbol('build-lock-busy');
+  const result = await underTheBuildLock(async () => {
     await normaliseOutcodeCountries();
     return correctPlaceCountriesFromPostcode();
-  }, 0, { wait: true });
+  }, BUSY, { wait: true });
+  if (result === BUSY) throw new Error('country backfill could not take the build lock within the wait; a rebuild is running — the postcode load will retry');
+  return result;
 }
 
 export async function settleNew({ limit = 5000 } = {}) {
