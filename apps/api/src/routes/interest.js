@@ -21,6 +21,10 @@
 
 import express from 'express';
 import { interestLimit, interestMailAllowed } from '../limits.js';
+import { readFileSync } from 'node:fs';
+
+/** What each form on epic.day says above its button, by source (`home`, `host`). */
+export const CONSENT_WORDINGS = JSON.parse(readFileSync(new URL('../sources/consentWordings.json', import.meta.url), 'utf8'));
 import { addSignup } from '../repositories/interest.js';
 import { interestEmail, mailConfigured, sendMail, webUrl } from '../sources/mail.js';
 
@@ -63,8 +67,14 @@ export function readSignup(body, req) {
   // The wording the person agreed to is the record of their consent (PECR); a
   // sign-up without it is one we could not later account for, so it is refused
   // rather than stored with a blank.
+  // Only wording a form on the site actually shows (sources/consentWordings.json,
+  // pinned to the site's own strings by apps/web/test/consentWording.test.ts):
+  // the column is the record of what the person agreed to, so a direct request
+  // cannot write one nobody was shown (Codex, 1 Oct 2026).
   const consentWording = text(b.consentWording, 300);
-  if (!consentWording) return { refusal: { error: 'bad_consent', message: 'Something went wrong with that form. Try again.' } };
+  if (!consentWording || !CONSENT_WORDINGS[source]?.includes(consentWording)) {
+    return { refusal: { error: 'bad_consent', message: 'Something went wrong with that form. Try again.' } };
+  }
   // The host kind belongs to the host page's picker and nowhere else; anything
   // outside the four, or anything from the homepage, is simply not given.
   const kind = typeof b.hostKind === 'string' ? b.hostKind.trim().toLowerCase() : '';

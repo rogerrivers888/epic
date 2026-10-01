@@ -39,14 +39,12 @@ export function callerOf(req) {
 }
 
 /**
- * Who is calling, from what the nearest proxy saw — never a header the caller
- * can write. The API is reached on its own hostname (api.epic.day, Railway's
- * edge), not through Cloudflare, so `CF-Connecting-IP` and the left of
- * `X-Forwarded-For` are both whatever the caller typed; the entry Railway's
- * edge appends — the right-most — is the address that actually connected
- * (Codex, 1 Oct 2026). Behind more proxies this is the nearest one, which can
- * only make the bucket wider, never forgeable. For a public door that sends
- * mail, where a forged key is unlimited sends.
+ * Who is calling, for a public door that sends mail — never a header the caller
+ * can write. Express's `req.ip` under the configured `trust proxy` hop count
+ * (server.js, EPIC_TRUSTED_PROXIES) is the first address the trusted proxies did
+ * not add, so a forged `X-Forwarded-For` prefix and a forged `CF-Connecting-IP`
+ * are both ignored; this is its fallback for a bare request with no `req.ip`
+ * (Codex, 1 Oct 2026).
  */
 export function connectedCallerOf(req) {
   const forwarded = req.headers['x-forwarded-for'];
@@ -140,7 +138,7 @@ export const interestLimit = limit({
   windowMs: 10 * MINUTE,
   max: 10,
   message: 'That is a lot of sign-ups at once. Try again in a few minutes.',
-  keyOf: connectedCallerOf,
+  keyOf: (req) => req.ip || connectedCallerOf(req),
 });
 
 /**

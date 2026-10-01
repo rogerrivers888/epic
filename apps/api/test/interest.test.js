@@ -22,6 +22,7 @@ const { isPublicPath } = await import('../src/auth.js');
 const sent = [];
 let configured = true;
 const app = express();
+app.set('trust proxy', 1);
 app.use(express.json());
 app.use('/api', interestRouter({
   send: async (m) => { sent.push(m); return { sent: true }; },
@@ -45,7 +46,8 @@ const post = async (body, headers = {}) => {
   });
   return { status: res.status, body: await res.json().catch(() => null) };
 };
-const HOME = { source: 'home', locale: 'en-gb', consentWording: 'Remind me' };
+const HOME = { source: 'home', locale: 'en-gb', consentWording: "Remind me — You're on the list. We'll email you when the app's out." };
+const HOST_WORDS = "Become a host — You're on the hosts list. We'll be in touch before launch.";
 const rowsFor = async (email) => (await query('select * from interest_signups where lower(email) = lower($1) order by source', [email])).rows;
 
 test('the form is a public path', () => {
@@ -66,7 +68,7 @@ test('a sign-up is stored lowercased, with its attribution and consent, and conf
   assert.equal(row.email, 'ada.lovelace@example.com');
   assert.equal(row.source, 'home');
   assert.equal(row.locale, 'en-gb');
-  assert.equal(row.consent_wording, 'Remind me');
+  assert.equal(row.consent_wording, HOME.consentWording);
   assert.equal(row.landing_page, 'Half term');
   assert.equal(row.referrer, 'https://news.example/');
   assert.equal(row.utm_campaign, 'october');
@@ -92,7 +94,7 @@ test('a repeat is the same 200, one row, and no second email — whatever the ca
 test('the homepage and the hosts page are two lists', async () => {
   sent.length = 0;
   await post({ ...HOME, email: 'both@example.com' });
-  await post({ source: 'host', hostKind: 'class', locale: 'en-gb', consentWording: 'Become a host', email: 'both@example.com' });
+  await post({ source: 'host', hostKind: 'class', locale: 'en-gb', consentWording: HOST_WORDS, email: 'both@example.com' });
   const rows = await rowsFor('both@example.com');
   assert.deepEqual(rows.map((r) => r.source), ['home', 'host']);
   assert.equal(rows[1].host_kind, 'class');
@@ -136,7 +138,7 @@ test('an unknown source, locale or missing consent is refused and stores nothing
 test('a host kind is kept only for the hosts page, and only the four', async () => {
   await post({ ...HOME, email: 'homekind@example.com', hostKind: 'class' });
   assert.equal((await rowsFor('homekind@example.com'))[0].host_kind, null, 'the homepage has no picker');
-  await post({ source: 'host', hostKind: 'juggling', locale: 'en-gb', consentWording: 'Count me in', email: 'oddkind@example.com' });
+  await post({ source: 'host', hostKind: 'juggling', locale: 'en-gb', consentWording: HOST_WORDS, email: 'oddkind@example.com' });
   assert.equal((await rowsFor('oddkind@example.com'))[0].host_kind, null, 'an unknown kind is not given');
 });
 
@@ -171,6 +173,7 @@ test('with mail not configured, the sign-up still lands and nothing is sent', as
 
 test('a failed send does not fail the sign-up', async () => {
   const failing = express();
+  failing.set('trust proxy', 1);
   failing.use(express.json());
   failing.use('/api', interestRouter({ send: async () => { throw new Error('postmark down'); }, configured: () => true }));
   const s = failing.listen(0);
@@ -201,6 +204,7 @@ test('one caller is held to ten sign-ups in ten minutes, whatever headers it for
 
 test('past the hourly cap a sign-up is kept and answered, and only the e-mail is held', async () => {
   const capped = express();
+  capped.set('trust proxy', 1);
   const mails = [];
   capped.use(express.json());
   capped.use('/api', interestRouter({ send: async (m) => { mails.push(m); }, configured: () => true, mailAllowed: () => false }));
@@ -215,4 +219,14 @@ test('past the hourly cap a sign-up is kept and answered, and only the e-mail is
     assert.equal((await rowsFor('capped@example.com')).length, 1);
     assert.equal(mails.length, 0);
   } finally { s.close(); }
+});
+
+test('a consent wording no form on the site shows is refused, and nothing is kept', async () => {
+  const r = await post({ ...HOME, email: 'madeup@example.com', consentWording: 'I agree to everything' });
+  assert.equal(r.status, 400);
+  assert.equal(r.body.error, 'bad_consent');
+  // A homepage wording on the host form is not the host form's wording either.
+  const h = await post({ source: 'host', locale: 'en-gb', consentWording: HOME.consentWording, email: 'crossed@example.com' });
+  assert.equal(h.status, 400);
+  assert.equal((await rowsFor('madeup@example.com')).length + (await rowsFor('crossed@example.com')).length, 0);
 });

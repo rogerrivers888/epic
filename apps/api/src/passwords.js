@@ -66,8 +66,16 @@ export async function hashWithArgon2(password) {
   return `argon2id$m=${ARGON.memory},t=${ARGON.passes},p=${ARGON.parallelism}$${b64(salt)}$${b64(key)}`;
 }
 
+/**
+ * New hashes are scrypt, on every runtime. Argon2id is only in Node 24.7+, and
+ * the API's engines allow 20: a hash written on a newer Node would not verify
+ * after a deploy onto an older one, and every password set in between would read
+ * as wrong (Codex, 1 Oct 2026). scrypt is in every Node this runs on. An argon2
+ * hash is still verified where the runtime can, since the stored string names
+ * its own algorithm.
+ */
 export function hashPassword(password) {
-  return argon2Async ? hashWithArgon2(password) : hashWithScrypt(password);
+  return hashWithScrypt(password);
 }
 
 /**

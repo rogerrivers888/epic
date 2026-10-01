@@ -106,7 +106,8 @@ test('a password hashes and verifies, under argon2id and scrypt alike', async ()
     assert.match(argon, /^argon2id\$m=19456,t=2,p=1\$[A-Za-z0-9_-]+\$[A-Za-z0-9_-]+$/);
     assert.equal(await passwords.verifyPassword('correct horse battery', argon), true);
     assert.equal(await passwords.verifyPassword('wrong', argon), false);
-    assert.match(await passwords.hashPassword('x'.repeat(12)), /^argon2id\$/, 'argon2id is preferred where it exists');
+    // New hashes are scrypt everywhere, so a hash written on one Node always verifies on another.
+    assert.match(await passwords.hashPassword('x'.repeat(12)), /^scrypt\$/, 'new hashes are scrypt on every runtime');
   } else {
     assert.match(await passwords.hashPassword('x'.repeat(12)), /^scrypt\$/);
   }
