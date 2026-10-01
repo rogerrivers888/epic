@@ -1,18 +1,18 @@
 /**
- * Log in — epic.day/login (Supporting docs › EPIC staff management, L1/L2).
+ * Log in — epic.day/login (Website & Registration v2, L1 and L2).
  *
- * One screen for customers and staff: enter an email, get a single-use link.
- * Where you land afterwards is decided by the account, not here — staff go to
- * the back office, customers to their own account page — because this screen
- * never learns whether the address even has an account. It answers the same
- * either way ("If … has an Epic account, a login link is on its way"), so it
- * cannot be used to find out who Epic's customers are.
+ * One door for customers and staff: Log in with Google, or email + password.
+ * Where you land is decided by the account's role, never here and never by the
+ * e-mail's domain — staff to the first back-office screen their role opens,
+ * customers to their account page. Wrong email and wrong password are one line
+ * ("Wrong email or password."), and "Forgot your password?" (L2, `?step=forgot`)
+ * answers the same whether or not the address has an account, so neither can
+ * be used to find out who Epic's customers are.
  *
- * Log in with Google sits on top (Website & Registration L1; owner, 1 Oct 2026:
- * "L1 replaces the magic-link /login", Google first). Staff only until launch —
- * the API decides that, and bounces anyone else back here with `?e=no-account`.
- * The email link below stays as the second way in until the owner has signed
- * in with Google and confirmed it, then gives way to email + password (L1).
+ * Google is staff only until launch — the API decides, and bounces anyone else
+ * back here with `?e=no-account`. The e-mail link (`?step=link`) stays a way in
+ * until the owner has signed in with Google and lifted the hold (owner, 1 Oct
+ * 2026); then it goes.
  *
  * A fixed-light design, like the opening and the navigation band: cream ground,
  * ink type, the one lime field on the right. Its colours are the pack's brand
@@ -61,6 +61,9 @@ const safeNext = (value?: string | null) => {
   if (q.has('code') || q.has('signin')) return null;
   return s;
 };
+
+/** The one heading on the page, said as one on the web. */
+const H1 = Platform.OS === 'web' ? ({ role: 'heading', 'aria-level': 1 } as object) : {};
 
 export function LoginScreen() {
   const { width } = useViewport();
@@ -134,26 +137,87 @@ export function LoginScreen() {
     const root = Platform.OS === 'web' && typeof window !== 'undefined' ? `${window.location.origin}/` : 'https://epic.day/';
     void Linking.openURL(root);
   };
-  const [step, setStep] = useState<'email' | 'sent'>('email');
+  // Which step of the door is open travels in the query (routes.ts): none is
+  // L1, `?step=forgot` is L2, `?step=link` the e-mail link kept until the owner
+  // lifts the hold. The "sent" states are what happened, not a place, so they
+  // live here and a reload is back on the form.
+  const { setQuery } = useRouter();
+  const stepParam = query.get('step');
+  const step: 'login' | 'forgot' | 'link' = stepParam === 'forgot' || stepParam === 'link' ? stepParam : 'login';
+  const go = (to: 'login' | 'forgot' | 'link') => { setSent(false); setResent(false); setErr(''); setPwErr(''); setQuery({ step: to === 'login' ? null : to }); };
+  const [sent, setSent] = useState(false);
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [show, setShow] = useState(false);
   const [err, setErr] = useState('');
+  const [pwErr, setPwErr] = useState('');
   const [resent, setResent] = useState(false);
-  const [focused, setFocused] = useState(false);
+  const [focused, setFocused] = useState<'email' | 'password' | null>(null);
   const [busy, setBusy] = useState(false);
 
+  /** Where a session lands: `next` if it is safe, else by role — never by the e-mail's domain. */
+  const land = (st: { access?: { doors?: string[]; capabilities?: string[] } | null }) => {
+    const target = safeNext(next);
+    if (target) { navigate(target, { replace: true }); return; }
+    const screen = firstAdminScreen(st.access);
+    navigate(st.access?.doors?.includes('admin')
+      ? (screen === 'filing' ? paths.filing('categories') : paths.admin(screen))
+      : paths.account(), { replace: true });
+  };
+
+  // L1: email + password. Wrong together, never separately (the API's one line).
+  const logIn = async () => {
+    const value = email.trim();
+    const badEmail = !EMAIL.test(value);
+    setErr(badEmail ? "That email doesn't look right." : '');
+    setPwErr(!badEmail && !password ? 'Enter your password.' : '');
+    if (badEmail || !password) return;
+    setBusy(true);
+    try { land(await api.passwordLogin(value, password)); }
+    catch (e) {
+      setPwErr(e instanceof ApiError && e.status === 401 ? 'Wrong email or password.'
+        : e instanceof ApiError && e.status === 429 ? (e.message || 'Too many tries. Wait a few minutes and try again.')
+        : 'Could not reach Epic. Check your connection and try again.');
+    } finally { setBusy(false); }
+  };
+
+  // L2 and the e-mail link: both answer the same whether or not the address has an account.
   const send = async () => {
     const value = email.trim();
     if (!EMAIL.test(value)) return setErr("That email doesn't look right.");
     setErr(''); setBusy(true);
-    try { await api.requestSignInLink(value); setResent(false); setStep('sent'); }
-    catch (e) { setErr(e instanceof ApiError ? e.message : 'Could not send a link just now.'); }
+    try {
+      if (step === 'forgot') await api.forgotPassword(value); else await api.requestSignInLink(value);
+      setResent(false); setSent(true);
+    } catch (e) { setErr(e instanceof ApiError ? e.message : 'Could not send a link just now.'); }
     finally { setBusy(false); }
   };
-
   const resend = async () => {
-    try { await api.requestSignInLink(email.trim()); } catch { /* answered the same either way */ }
+    try { if (step === 'forgot') await api.forgotPassword(email.trim()); else await api.requestSignInLink(email.trim()); } catch { /* answered the same either way */ }
     setResent(true);
   };
+
+  const emailField = (onSubmit: () => void) => (
+    <View style={{ gap: 10 }}>
+      <Text style={styles.label}>Email</Text>
+      <TextInput
+        value={email}
+        onChangeText={(v) => { setEmail(v); setErr(''); }}
+        onSubmitEditing={onSubmit}
+        placeholder="you@example.com"
+        placeholderTextColor="#9B9797"
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="email-address"
+        accessibilityLabel="Email"
+        {...(Platform.OS === 'web' ? ({ autoComplete: 'email' } as object) : {})}
+        onFocus={() => setFocused('email')}
+        onBlur={() => setFocused(null)}
+        style={[styles.input, focused === 'email' && ({ boxShadow: `0 0 0 4px ${LIME}` } as object)]}
+      />
+      {err ? <Text style={styles.error}>{err}</Text> : null}
+    </View>
+  );
 
   return (
     <View style={[styles.root, wide && styles.rootWide]}>
@@ -162,9 +226,9 @@ export function LoginScreen() {
       <ScrollView style={styles.leftScroll} contentContainerStyle={[styles.left, wide && styles.leftWide]} keyboardShouldPersistTaps="handled">
         <Wordmark height={30} ink={INK} ground={CREAM} />
         <View style={styles.leftBody}>
-          {step === 'email' ? (
+          {step === 'login' ? (
             <>
-              <Text style={styles.h1}>Log in.</Text>
+              <Text style={styles.h1} {...H1}>Log in.</Text>
               {/* Google is a web hand-off to the API; the native apps have no
                   handoff yet, so the button is drawn only where it works. */}
               {Platform.OS === 'web' ? (<>
@@ -181,44 +245,77 @@ export function LoginScreen() {
                 <View style={styles.orRule} />
               </View>
               </>) : null}
-              <View style={{ gap: 12 }}>
-                <Text style={styles.label}>Email</Text>
-                <TextInput
-                  value={email}
-                  onChangeText={(v) => { setEmail(v); setErr(''); }}
-                  onSubmitEditing={send}
-                  placeholder="you@example.com"
-                  placeholderTextColor="#9B9797"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="email-address"
-                  onFocus={() => setFocused(true)}
-                  onBlur={() => setFocused(false)}
-                  style={[styles.input, focused && ({ boxShadow: `0 0 0 4px ${LIME}` } as object)]}
-                />
-                {err ? <Text style={styles.error}>{err}</Text> : null}
-                <Press onPress={send} disabled={busy} style={({ hovered }: any) => [styles.cta, hovered && styles.ctaHover]}>
-                  <Text style={styles.ctaLabel}>Send me a login link</Text>
-                  <Icon name="forward" size={20} color={CREAM} strokeWidth={2.4} />
-                </Press>
+              {emailField(logIn)}
+              <View style={{ gap: 10 }}>
+                <View style={styles.labelRow}>
+                  <Text style={styles.label}>Password</Text>
+                  <Press onPress={() => go('forgot')} effect="none" accessibilityRole="link">
+                    <Text style={[styles.label, { textDecorationLine: 'underline' }]}>Forgot your password?</Text>
+                  </Press>
+                </View>
+                <View style={[styles.pwBox, focused === 'password' && ({ boxShadow: `0 0 0 4px ${LIME}` } as object)]}>
+                  <TextInput
+                    value={password}
+                    onChangeText={(v) => { setPassword(v); setPwErr(''); }}
+                    onSubmitEditing={logIn}
+                    secureTextEntry={!show}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    accessibilityLabel="Password"
+                    {...(Platform.OS === 'web' ? ({ autoComplete: 'current-password' } as object) : {})}
+                    onFocus={() => setFocused('password')}
+                    onBlur={() => setFocused(null)}
+                    style={[styles.pwInput, Platform.OS === 'web' && ({ outlineWidth: 0 } as object)]}
+                  />
+                  <Press onPress={() => setShow((v) => !v)} effect="none" accessibilityRole="button" accessibilityLabel={show ? 'Hide password' : 'Show password'} style={({ hovered }: any) => [styles.toggle, hovered && styles.googleHover]}>
+                    <Text style={styles.toggleText}>{show ? 'Hide' : 'Show'}</Text>
+                  </Press>
+                </View>
+                {pwErr ? <Text style={styles.error} accessibilityLiveRegion="polite">{pwErr}</Text> : null}
               </View>
+              <Press onPress={logIn} disabled={busy} accessibilityRole="button" style={({ hovered }: any) => [styles.cta, hovered && styles.ctaHover]}>
+                <Text style={styles.ctaLabel}>Log in</Text>
+                <Icon name="forward" size={20} color={CREAM} strokeWidth={2.4} />
+              </Press>
               <View style={styles.rule}>
                 <Text style={styles.ruleText}>
                   No account yet?{' '}
                   <Text style={styles.link} onPress={registerInterest}>Register your interest</Text>
                 </Text>
+                {/* The e-mail link stays a way in until the owner has signed in
+                    with Google and lifted the hold (owner, 1 Oct 2026). */}
+                <Press onPress={() => go('link')} effect="none" accessibilityRole="link">
+                  <Text style={[styles.ruleText, { marginTop: 12, textDecorationLine: 'underline' }]}>Email me a login link instead</Text>
+                </Press>
+              </View>
+            </>
+          ) : !sent ? (
+            <>
+              <Text style={styles.h1} {...H1}>{step === 'forgot' ? 'Forgot your password?' : 'Email me a link.'}</Text>
+              <Text style={styles.sentBody}>{step === 'forgot'
+                ? "Enter your email and we'll send you a link to set a new one."
+                : "Enter your email and we'll send you a link that logs you in."}</Text>
+              {emailField(send)}
+              <Press onPress={send} disabled={busy} accessibilityRole="button" style={({ hovered }: any) => [styles.cta, hovered && styles.ctaHover]}>
+                <Text style={styles.ctaLabel}>{step === 'forgot' ? 'Send me a reset link' : 'Send me a login link'}</Text>
+                <Icon name="forward" size={20} color={CREAM} strokeWidth={2.4} />
+              </Press>
+              <View style={styles.rule}>
+                <Press onPress={() => go('login')} effect="none" accessibilityRole="link"><Text style={styles.link}>Back to log in</Text></Press>
               </View>
             </>
           ) : (
             <>
-              <Text style={styles.h1}>Check your email.</Text>
+              <Text style={styles.h1} {...H1}>Check your email.</Text>
               <Text style={styles.sentBody}>
-                If <Text style={{ fontWeight: '800' }}>{email}</Text> has an Epic account, a login link is on its way. It works once, for 15 minutes.
+                If <Text style={{ fontWeight: '800' }}>{email}</Text> has an Epic account, {step === 'forgot'
+                  ? 'a link to set a new password is on its way. It works once, for 30 minutes.'
+                  : 'a login link is on its way. It works once, for 15 minutes.'}
               </Text>
               <View style={styles.rule}>
                 <View style={styles.sentActions}>
-                  <Press onPress={resend} effect="none"><Text style={styles.link}>{resent ? 'Sent again' : 'Send it again'}</Text></Press>
-                  <Press onPress={() => { setStep('email'); setResent(false); }} effect="none"><Text style={styles.link}>Use a different email</Text></Press>
+                  <Press onPress={resend} effect="none" accessibilityRole="button"><Text style={styles.link}>{resent ? 'Sent again' : 'Send it again'}</Text></Press>
+                  <Press onPress={() => go('login')} effect="none" accessibilityRole="link"><Text style={styles.link}>Back to log in</Text></Press>
                 </View>
               </View>
             </>
@@ -265,7 +362,13 @@ const styles = StyleSheet.create({
   leftBody: { flex: 1, justifyContent: 'center', gap: 28, maxWidth: 460, width: '100%' },
   h1: { fontFamily: fonts.heading, fontWeight: '800', fontSize: 72, letterSpacing: -3.2, lineHeight: 68, color: INK },
   label: { fontFamily: fonts.body, fontSize: 14, fontWeight: '700', color: INK },
-  input: { height: 58, borderWidth: 2, borderColor: INK, backgroundColor: CREAM, paddingHorizontal: 18, fontFamily: fonts.body, fontSize: 18, color: INK },
+  labelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 },
+  // The password box (L1): the input's own box, with Show/Hide behind a 2px ink rule.
+  pwBox: { flexDirection: 'row', height: 54, borderWidth: 2, borderColor: INK, backgroundColor: CREAM },
+  pwInput: { flex: 1, minWidth: 0, paddingHorizontal: 18, fontFamily: fonts.body, fontSize: 18, color: INK },
+  toggle: { paddingHorizontal: 16, justifyContent: 'center', borderLeftWidth: 2, borderLeftColor: INK },
+  toggleText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '700', color: INK },
+  input: { height: 54, borderWidth: 2, borderColor: INK, backgroundColor: CREAM, paddingHorizontal: 18, fontFamily: fonts.body, fontSize: 18, color: INK },
   error: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: MOSS },
   cta: { height: 58, backgroundColor: INK, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginTop: 4 },
   ctaHover: { backgroundColor: '#3A3735' },

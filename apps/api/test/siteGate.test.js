@@ -235,6 +235,13 @@ test('the sign-in door is left open for native clients and the magic link', asyn
       mockReq({ path: '/api/auth/google', method: 'GET' }),
       mockReq({ path: '/api/auth/google/callback', method: 'GET' }),
       mockReq({ path: '/api/auth/google/exchange', method: 'POST' }),
+      // Email + password (routes/authPassword.js): log in, forgot, set credentials,
+      // and L4's look at an invite or reset link before anybody has a session.
+      mockReq({ path: '/api/auth/login', method: 'POST' }),
+      mockReq({ path: '/api/auth/forgot', method: 'POST' }),
+      mockReq({ path: '/api/auth/credentials', method: 'POST' }),
+      mockReq({ path: '/api/auth/link/some-token', method: 'GET' }),
+      mockReq({ path: '/api/auth/link/some-token/', method: 'GET' }),
       // Express treats a trailing slash as the same route; the gate must too.
       mockReq({ path: '/api/session/link/', method: 'POST' }),
       mockReq({ path: '/api/postmark/events/', method: 'POST' }),
@@ -248,6 +255,16 @@ test('the sign-in door is left open for native clients and the magic link', asyn
     const del = await run(mockReq({ path: '/api/session', method: 'DELETE' }));
     assert.equal(del.nexted, false, 'DELETE /api/session is not exempt');
     assert.equal(del.res.statusCode, 401);
+    // The link look-up is one token deep and GET only: nothing under it, and no
+    // other verb, is let through on its say-so.
+    for (const req of [
+      mockReq({ path: '/api/auth/link/a/b', method: 'GET' }),
+      mockReq({ path: '/api/auth/link/a', method: 'POST' }),
+      mockReq({ path: '/api/auth/link', method: 'GET' }),
+    ]) {
+      const { nexted } = await run(req);
+      assert.equal(nexted, false, `${req.method} ${req.path} is not a sign-in door`);
+    }
   });
 });
 

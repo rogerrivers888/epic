@@ -77,6 +77,7 @@ import { enabledSources, defaultSourceKeys, loadSourceSettings, sourceHasKey, so
 import { routingEnabled, routingPaused } from './sources/routing.js';
 import sessionRoutes, { devices as deviceRoutes } from './routes/session.js';
 import authGoogleRoutes from './routes/authGoogle.js';
+import authPasswordRoutes from './routes/authPassword.js';
 import { authConfigured, deployed, originAllowed, requireOwner, requireSession } from './auth.js';
 import { requireDoor, requireOwnerSignedIn, hasDoor } from './access.js';
 import { writeAuditStrict } from './repositories/roles.js';
@@ -191,6 +192,10 @@ app.use('/api', authGoogleRoutes);
 // through the launch gate on its own rule: it is for the people who cannot sign in
 // yet. Rate-limited per caller inside the router (limits.js › interestLimit).
 app.use('/api', interestRoutes);
+
+// Email + password (routes/authPassword.js): log in, forgot, and the invite/reset
+// link that sets one. Public for the same reason — it is how a session is obtained.
+app.use('/api', authPasswordRoutes);
 
 // The atlas image library, outside the door on purpose (routes/library.js):
 // open-licence photographs we hold and are entitled to redistribute, answered

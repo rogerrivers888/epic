@@ -359,3 +359,24 @@ export function interestEmail({ source, url }) {
   });
   return { subject: host ? "You're on the Epic hosts list" : "You're on the Epic list", text, html };
 }
+
+/**
+ * The password reset (L2), to an address that has an account — and only then:
+ * the door answers the same either way (routes/authPassword.js), and an unknown
+ * address gets nothing, so this is never sent to a stranger. Thirty minutes, once.
+ * The handoff's words, exactly.
+ */
+export function resetPasswordEmail({ url }) {
+  const line = 'Tap below to choose a new password. The link works once, for 30 minutes.';
+  const foot = "Didn't ask for this? Ignore it and your password stays the same.";
+  const text = [line, '', 'Set a new password:', url, '', foot].join('\n');
+  const html = shell({
+    url,
+    action: 'Set a new password',
+    body: [
+      `        <p style="margin:0">${line}</p>`,
+      note(foot),
+    ].join('\n'),
+  });
+  return { subject: 'Reset your Epic password', text, html };
+}

@@ -117,8 +117,13 @@ async function issueLink(req, account, { fresh = false } = {}) {
   // Seven days for a staff invite — the table default, and what the handover
   // asks for ("Expires 8 Oct 2026" for a link sent on 1 Oct). replaceSignInLink
   // voids any older unused link and mints this one atomically.
-  const { token, link } = await replaceSignInLink(account.id, { requestedBy: 'owner' });
-  const url = `${webUrl(req)}/?signin=${token}`;
+  //
+  // An invite (migration 325): it opens L4 at /in/<token>, where they set a
+  // password (or use Google) before they are signed in, and it is redeemed only
+  // there — never as a magic link, so a new colleague cannot reach the back office
+  // without leaving a way back in behind them (routes/authPassword.js).
+  const { token, link } = await replaceSignInLink(account.id, { requestedBy: 'owner', purpose: 'invite' });
+  const url = `${webUrl(req)}/in/${token}`;
   const mail = mailStatus();
   let delivery = mail.configured ? 'email' : 'no_sender';
   let error = mail.configured ? null : mail.message;

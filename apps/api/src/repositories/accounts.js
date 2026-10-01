@@ -74,6 +74,35 @@ export async function setGoogleSub(accountId, sub) {
   return rows[0] ?? null;
 }
 
+/**
+ * The account and its password hash, by e-mail — for the login door and nothing
+ * else. The only statement that ever reads `password_hash`: it is a secret and is
+ * not in COLUMNS, so no other answer can carry it by accident. The hash is
+ * returned beside the account, never on it, so it cannot be spread into a body.
+ */
+export async function passwordFor(email) {
+  const address = normaliseEmail(email);
+  if (!address) return null;
+  const { rows } = await query(
+    `select ${COLUMNS}, password_hash as "__hash" from accounts where lower(email) = $1`,
+    [address],
+  );
+  if (!rows[0]) return null;
+  const { __hash: hash, ...account } = rows[0];
+  return { account, hash: hash ?? null };
+}
+
+/** Store a new password hash (never the password) and when it was set. */
+export async function setPassword(accountId, hash) {
+  const { rows } = await query(
+    `update accounts set password_hash = $2, password_set_at = now(), updated_at = now()
+      where id = $1
+      returning ${COLUMNS}`,
+    [accountId, hash],
+  );
+  return rows[0] ?? null;
+}
+
 /** The same lookup for the other credential. Both are indexed and unique. */
 export async function accountByMobile(mobile) {
   const number = normaliseMobile(mobile);
@@ -330,16 +359,43 @@ export function revokeAccountSessions(accountId) {
 // signing in
 // ---------------------------------------------------------------------------
 
-/** A link, returned in full once. What is stored is the digest and nothing else. */
-export async function createSignInLink(accountId, { requestedBy = 'owner', ttlHours = 24 * 7 } = {}) {
+/**
+ * A link, returned in full once. What is stored is the digest and nothing else.
+ *
+ * `purpose` is set only for the two links the password door redeems (migration
+ * 325): an 'invite' (a new staff member sets their credentials) or a 'reset'
+ * (L2). For those, making a new one cancels that account's older unused links of
+ * the same purpose — "making a new link of either kind cancels the older unused
+ * links of the same kind" — so only the newest reset email works. Cancelled is
+ * `expires_at = now()`, as `invalidateUnusedLinks` does it, not `used_at`: the
+ * row keeps the record of what was sent, and "used" stays true only of a link
+ * somebody actually opened. A reset does not cancel a pending invite, or the
+ * other way round. The pair runs under a row lock on the account, so two "send
+ * it again" taps cannot both leave a live link (the race `replaceSignInLink`
+ * closes). Without a purpose it is the old single insert, untouched.
+ */
+export async function createSignInLink(accountId, { requestedBy = 'owner', ttlHours = 24 * 7, purpose = null } = {}) {
   const token = crypto.randomBytes(32).toString('base64url');
-  const { rows } = await query(
-    `insert into sign_in_links (account_id, token_hash, expires_at, requested_by)
-     values ($1, $2, now() + ($3 || ' hours')::interval, $4)
-     returning id, account_id, expires_at, created_at`,
-    [accountId, digest(token), String(ttlHours), requestedBy],
+  const insert = (db) => db.query(
+    `insert into sign_in_links (account_id, token_hash, expires_at, requested_by, purpose)
+     values ($1, $2, now() + ($3 || ' hours')::interval, $4, $5)
+     returning id, account_id, expires_at, created_at, purpose`,
+    [accountId, digest(token), String(ttlHours), requestedBy, purpose],
   );
-  return { token, link: rows[0] };
+  if (!purpose) {
+    const { rows } = await insert({ query });
+    return { token, link: rows[0] };
+  }
+  return withTransaction(async (client) => {
+    await client.query('select id from accounts where id = $1 for update', [accountId]);
+    await client.query(
+      `update sign_in_links set expires_at = now()
+        where account_id = $1 and purpose = $2 and used_at is null and expires_at > now()`,
+      [accountId, purpose],
+    );
+    const { rows } = await insert(client);
+    return { token, link: rows[0] };
+  });
 }
 
 /**
@@ -350,16 +406,36 @@ export async function createSignInLink(accountId, { requestedBy = 'owner', ttlHo
  * that somebody else opened first is simply spent. A suspended account's link
  * does not open anything either.
  */
-export async function consumeSignInLink(token, { requestedBy = null } = {}) {
+export async function consumeSignInLink(token, { requestedBy = null, purpose = null } = {}) {
   // A Google handoff code (requested_by 'google', five minutes) and an ordinary
   // magic link (owner/self, up to a week) are different credentials for different
   // doors, and neither redeems the other: the Google exchange asks for
   // `requestedBy: 'google'`, and the ordinary link door (the default) takes
   // anything that is *not* google. So a week-long link cannot be spent as a
   // Google sign-in, and a Google code cannot be spent as a magic link.
-  const match = requestedBy
-    ? { clause: 'l.requested_by = $2', params: [digest(token), requestedBy] }
-    : { clause: "l.requested_by is distinct from 'google'", params: [digest(token)] };
+  //
+  // The invite and reset links (migration 325) are a third door's, the same way.
+  // `purpose: 'credentials'` — routes/authPassword.js — takes only a link whose
+  // purpose is invite or reset; every other door takes only a link with no
+  // purpose. So an invite cannot be opened as a magic link and sign a new staff
+  // member in without ever setting the password it was sent to set, and a
+  // fifteen-minute magic link cannot be used to set somebody's password.
+  const params = [digest(token)];
+  let clause;
+  if (purpose === 'credentials') {
+    clause = "l.purpose in ('invite', 'reset')";
+  } else if (purpose === 'invite') {
+    // "Use Google instead" on an invitation (authGoogle.js): only an invite —
+    // a reset is password only, so Google never spends one.
+    clause = "l.purpose = 'invite'";
+  } else if (purpose) {
+    throw new Error(`consumeSignInLink: unknown purpose ${purpose}`);
+  } else if (requestedBy) {
+    params.push(requestedBy);
+    clause = 'l.purpose is null and l.requested_by = $2';
+  } else {
+    clause = "l.purpose is null and l.requested_by is distinct from 'google'";
+  }
   const { rows } = await query(
     `update sign_in_links l
         set used_at = now()
@@ -369,9 +445,30 @@ export async function consumeSignInLink(token, { requestedBy = null } = {}) {
         and l.used_at is null
         and l.expires_at > now()
         and a.status <> 'suspended'
-        and ${match.clause}
-      returning l.id, l.account_id`,
-    match.params,
+        and ${clause}
+      returning l.id, l.account_id, l.purpose`,
+    params,
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * An invite or reset link, looked at but not spent — what L4 needs to draw
+ * itself ("Set up your login, Jo." or "Choose a new password.") before anybody
+ * has typed a password. The same conditions `consumeSignInLink` redeems on, so a
+ * link this calls good is one the credentials door will take. Null otherwise.
+ */
+export async function inspectSignInLink(token) {
+  if (!token) return null;
+  const { rows } = await query(
+    `select l.id, l.account_id, l.purpose, l.expires_at
+       from sign_in_links l join accounts a on a.id = l.account_id
+      where l.token_hash = $1
+        and l.used_at is null
+        and l.expires_at > now()
+        and a.status <> 'suspended'
+        and l.purpose in ('invite', 'reset')`,
+    [digest(token)],
   );
   return rows[0] ?? null;
 }
@@ -430,8 +527,14 @@ export function invalidateUnusedLinks(accountId) {
  * two requests can both finish the invalidate before either inserts, and end with
  * two live links (Codex, 1 Oct 2026). A row lock on the account serialises the
  * pair per account, so the invariant actually holds under concurrency.
+ *
+ * It voids *every* unused link, whatever its purpose — a staff invite sent now
+ * (`purpose: 'invite'`) supersedes an older reset as well as an older invite,
+ * and a self-serve magic link still voids an outstanding invite, as it did
+ * before migration 325. `createSignInLink` with a purpose is the narrower form
+ * the handoff asks for when only same-kind links should go.
  */
-export async function replaceSignInLink(accountId, { requestedBy = 'owner', ttlHours = 24 * 7 } = {}) {
+export async function replaceSignInLink(accountId, { requestedBy = 'owner', ttlHours = 24 * 7, purpose = null } = {}) {
   const token = crypto.randomBytes(32).toString('base64url');
   return withTransaction(async (client) => {
     await client.query('select id from accounts where id = $1 for update', [accountId]);
@@ -441,13 +544,23 @@ export async function replaceSignInLink(accountId, { requestedBy = 'owner', ttlH
       [accountId],
     );
     const { rows } = await client.query(
-      `insert into sign_in_links (account_id, token_hash, expires_at, requested_by)
-       values ($1, $2, now() + ($3 || ' hours')::interval, $4)
-       returning id, account_id, expires_at, created_at`,
-      [accountId, digest(token), String(ttlHours), requestedBy],
+      `insert into sign_in_links (account_id, token_hash, expires_at, requested_by, purpose)
+       values ($1, $2, now() + ($3 || ' hours')::interval, $4, $5)
+       returning id, account_id, expires_at, created_at, purpose`,
+      [accountId, digest(token), String(ttlHours), requestedBy, purpose],
     );
     return { token, link: rows[0] };
   });
+}
+
+/** How many links of one purpose an account has been sent lately — the reset door's per-account ceiling. */
+export async function recentLinkCount(accountId, { purpose, minutes = 60 }) {
+  const { rows } = await query(
+    `select count(*)::int as n from sign_in_links
+      where account_id = $1 and purpose = $2 and created_at > now() - ($3 || ' minutes')::interval`,
+    [accountId, purpose, String(minutes)],
+  );
+  return rows[0].n;
 }
 
 /** The most recent link for an account, so the admin screen can say what happened to it. */

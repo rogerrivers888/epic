@@ -732,6 +732,11 @@ test('the unified log-in and the account page', () => {
   // A segment after either is nothing Epic has.
   assert.equal(parseRoute('/login/x').name, 'unknown');
   assert.equal(parseRoute('/account/x').name, 'unknown');
+  // Set your credentials (L4): the token is the one segment after /in.
+  assert.deepEqual(roundTrip('/in/abc123'), { name: 'in', token: 'abc123' });
+  assert.equal(paths.credentials('abc123'), '/in/abc123');
+  assert.equal(parseRoute('/in').name, 'unknown');
+  assert.equal(parseRoute('/in/abc/x').name, 'unknown');
   // Neither is a household tab.
   assert.equal(tabOf(parseRoute('/login')), null);
   assert.equal(tabOf(parseRoute('/account')), null);

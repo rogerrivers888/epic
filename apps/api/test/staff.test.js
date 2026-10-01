@@ -138,7 +138,7 @@ test('on the passcode, managing staff is blocked but claiming the owner account 
   const claim = await call('POST', '/api/admin/staff/claim-owner',
     { email: 'roger@epic.day', name: 'Roger' }, OWNER_STAFF, PASSCODE);
   assert.equal(claim.status, 201);
-  assert.match(claim.body.invitation.url, /\/\?signin=/);
+  assert.match(claim.body.invitation.url, /\/in\/[^/?]+$/);
   const owner = await accounts.ownerAccount();
   assert.ok(owner && owner.email === 'roger@epic.day', 'the owner account now exists');
 
@@ -168,7 +168,10 @@ test('adding a colleague creates an account with a role, no household, and a lin
   assert.equal(body.existedAsCustomer, false);
   // No sender configured in the test, so the link comes back for the owner to copy (ST4).
   assert.equal(body.invitation.delivery, 'no_sender');
-  assert.match(body.invitation.url, /\/\?signin=/);
+  assert.match(body.invitation.url, /\/in\/[^/?]+$/, 'a staff invite opens L4 to set credentials');
+  // Recorded as an invite (migration 325), so only the credentials door takes it.
+  const inv = await query("select l.purpose from sign_in_links l join accounts a on a.id = l.account_id where lower(a.email) = 'ana@epic.day'");
+  assert.deepEqual(inv.rows.map((r) => r.purpose), ['invite']);
 
   const { rows } = await query('select household_id, role, status from accounts where lower(email) = $1', ['ana@epic.day']);
   assert.equal(rows[0].household_id, null, 'a staff account has no household');
@@ -245,7 +248,7 @@ test('a role change, a new link that voids the old one, suspend, unsuspend, remo
   const analyst = await roleId('analyst');
   const created = (await call('POST', '/api/admin/staff', { name: 'Tom Okafor', email: 'tom@epic.day', roleId: support })).body;
   const id = created.staff.id;
-  const firstToken = new URL(created.invitation.url).searchParams.get('signin');
+  const firstToken = new URL(created.invitation.url).pathname.split('/').pop();
 
   // change the role
   const changed = await call('PATCH', `/api/admin/staff/${id}/role`, { roleId: analyst });
@@ -254,13 +257,14 @@ test('a role change, a new link that voids the old one, suspend, unsuspend, remo
   // a new link makes the first one unusable
   const relink = await call('POST', `/api/admin/staff/${id}/link`);
   assert.equal(relink.status, 200);
-  assert.equal(await accounts.consumeSignInLink(firstToken), null, 'the first link is void once a new one is sent');
+  assert.equal(await accounts.consumeSignInLink(firstToken, { purpose: 'credentials' }), null, 'the first link is void once a new one is sent');
 
   // suspend: the live link is refused and the row says suspended
-  const live = new URL(relink.body.invitation.url).searchParams.get('signin');
+  const live = new URL(relink.body.invitation.url).pathname.split('/').pop();
+  assert.ok(await accounts.inspectSignInLink(live), 'the new invite is live before the suspension');
   const suspended = await call('POST', `/api/admin/staff/${id}/suspend`);
   assert.equal(suspended.body.staff.status, 'suspended');
-  assert.equal(await accounts.consumeSignInLink(live), null, 'a suspended account opens nothing');
+  assert.equal(await accounts.consumeSignInLink(live, { purpose: 'credentials' }), null, 'a suspended account opens nothing');
 
   // a new link cannot be sent while suspended
   assert.equal((await call('POST', `/api/admin/staff/${id}/link`)).status, 409);

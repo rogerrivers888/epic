@@ -61,6 +61,16 @@ test('the owner signed in by e-mail link, on a device, is elevated', async () =>
   assert.equal(a.elevated, true);
 });
 
+test('the owner signed in with a password, on a device, is elevated', async () => {
+  // A password is something only that person knows — the same standing as a link
+  // to their own inbox (routes/authPassword.js).
+  const a = await accessFor({ account: owner, session: { kind: 'device', auth_method: 'password' } });
+  assert.equal(a.isOwner, true);
+  assert.equal(a.elevated, true);
+  const automated = await accessFor({ account: owner, session: { kind: 'agent', auth_method: 'password' } });
+  assert.equal(automated.elevated, false, 'an automated session is still never elevated');
+});
+
 test('a personal method on an automated session is still not elevated', async () => {
   // Belt and braces: an agent that somehow carried a link method is still an agent.
   const a = await accessFor({ account: owner, session: { kind: 'agent', auth_method: 'link' } });

@@ -37,8 +37,8 @@ import {
 import { openSession, sessionCookie, sessionKindFor, deployed } from '../auth.js';
 import { signInLimit } from '../limits.js';
 import {
-  accountByEmail, accountByGoogleSub, setGoogleSub,
-  createSignInLink, consumeSignInLink, linkContactFor, recordSignIn,
+  accountByEmail, accountByGoogleSub, accountById, setGoogleSub,
+  createSignInLink, consumeSignInLink, inspectSignInLink, linkContactFor, recordSignIn,
 } from '../repositories/accounts.js';
 import { roleForAccount } from '../repositories/roles.js';
 import { accessFor } from '../access.js';
@@ -183,6 +183,49 @@ export async function resolveGoogleAccount({ sub, email, emailVerified }) {
   return { ok: true, account };
 }
 
+/** An invite token as createSignInLink mints it (32 random bytes, base64url), or null. */
+const inviteToken = (v) => (typeof v === 'string' && /^[A-Za-z0-9_-]{20,100}$/.test(v) ? v : null);
+
+/** Back to L4 for this invitation, with what went wrong in the query. */
+const inviteUrl = (req, token, query) => `${webUrl(req)}/in/${encodeURIComponent(token)}${query ? `?${query}` : ''}`;
+
+/**
+ * "Use Google instead" on an invitation (Website & Registration › L4): Google
+ * must return the address that was invited. A different one is sent back to
+ * L4 with that address to show ("That Google account is {x}. Use {invited
+ * email}, or set a password instead."), and the invitation is left unspent.
+ * The right one spends the invitation, binds the Google subject to the account
+ * and then signs in exactly as any Google sign-in does — a single-use handoff
+ * code the SPA trades for a session, where `recordSignIn` turns invited into
+ * active. An account already bound to a different Google identity is refused
+ * the same way, so an invitation cannot rebind one.
+ */
+export async function finishInvite(req, res, token, claims) {
+  const link = await inspectSignInLink(token);
+  if (!link || link.purpose !== 'invite') return res.redirect(inviteUrl(req, token));
+  const account = await accountById(link.account_id);
+  if (!account) return res.redirect(inviteUrl(req, token));
+  const email = typeof claims?.email === 'string' ? claims.email.trim().toLowerCase() : '';
+  const sub = claims?.sub ? String(claims.sub) : '';
+  const verified = claims?.email_verified === true;
+  const invited = String(account.email || '').trim().toLowerCase();
+  if (!sub || !verified || !email || email !== invited || (account.google_sub && account.google_sub !== sub)) {
+    const q = new URLSearchParams({ e: 'google-mismatch' });
+    if (email && verified) q.set('as', email);
+    return res.redirect(inviteUrl(req, token, q.toString()));
+  }
+  // The same Google identity must not already be another account's.
+  const holder = await accountByGoogleSub(sub);
+  if (holder && holder.id !== account.id) return res.redirect(inviteUrl(req, token, 'e=failed'));
+  const spent = await consumeSignInLink(token, { purpose: 'invite' });
+  if (!spent || spent.account_id !== account.id) return res.redirect(inviteUrl(req, token));
+  if (!account.google_sub && !(await setGoogleSub(account.id, sub))) return res.redirect(loginUrl(req, 'e=failed'));
+  const bound = await accountById(account.id);
+  if (!bound || !(await isStaff(bound))) return res.redirect(loginUrl(req, 'e=no-account'));
+  const { token: code } = await createSignInLink(account.id, { requestedBy: 'google', ttlHours: HANDOFF_TTL_HOURS });
+  return res.redirect(loginUrl(req, new URLSearchParams({ code }).toString()));
+}
+
 // --- the routes ------------------------------------------------------------
 
 /**
@@ -217,8 +260,12 @@ router.get('/auth/google', toCanonicalHost, signInLimit, async (req, res) => {
     const state = randomState();
     const nonce = randomNonce();
     const next = safeNext(req.query.next);
+    // "Use Google instead" on an invitation (L4) carries the invite's token, so
+    // the callback can insist Google returns the address that was invited. The
+    // token travels in the signed handshake cookie, never to Google.
+    const invite = inviteToken(req.query.invite);
 
-    handshakeCookie(res, sign({ v: verifier, s: state, n: nonce, next }));
+    handshakeCookie(res, sign({ v: verifier, s: state, n: nonce, next, ...(invite ? { i: invite } : {}) }));
 
     const url = buildAuthorizationUrl(cfg, {
       redirect_uri: redirectUri(),
@@ -256,6 +303,8 @@ router.get('/auth/google/callback', async (req, res) => {
     // A bad state, a replayed code, a nonce that does not match: never says why.
     return res.redirect(loginUrl(req, 'e=failed'));
   }
+
+  if (stash.i) return finishInvite(req, res, stash.i, claims);
 
   // email_verified is part of trusting the address at all (J11 / brief step 2).
   const resolved = await resolveGoogleAccount({

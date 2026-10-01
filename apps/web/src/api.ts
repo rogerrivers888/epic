@@ -141,7 +141,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       // invite link was posted twice, and the second 401 ended the session the
       // first had just opened). The Google exchange is the same kind of door: a
       // spent or stale `?code=` must not end the session already held.
-      if (res.status === 401 && !['/api/session', '/api/session/link', '/api/session/request-link', '/api/auth/google/exchange'].includes(path)) sessionExpired();
+      if (res.status === 401 && !['/api/session', '/api/session/link', '/api/session/request-link', '/api/auth/google/exchange', '/api/auth/login', '/api/auth/credentials'].includes(path)) sessionExpired();
       // The API answering "no" is an answer; only an API that cannot answer at
       // all falls back to the copy.
       if (readOnly && [502, 503, 504].includes(res.status)) {
@@ -3307,6 +3307,35 @@ export const api = {
   registerInterest: (body: InterestSignup) => post<{ ok: true }>('/api/interest', body),
 
   /**
+   * Email + password (L1). The same tail as the other doors: the token goes into
+   * the device's own store and is sent as a Bearer header from then on. Any
+   * refusal is one 401 — wrong email or password, never which (authPassword.js).
+   */
+  passwordLogin: async (email: string, password: string): Promise<SessionState> => {
+    const r = await post<{ token: string; session: SessionSummary; account: AccountSummary; isOwner?: boolean; access?: Access | null }>(
+      '/api/auth/login', { email, password, label: deviceLabel() },
+    );
+    await claimDeviceCopy(r.account);
+    setSessionToken(r.token);
+    void api.sendWaitingWrites();
+    return { signedIn: true, configured: true, session: r.session, account: r.account, isOwner: r.isOwner ?? (r.account?.role === 'owner'), access: r.access ?? null };
+  },
+  /** L2. Always `{ ok: true }`, whether or not the address has an account. */
+  forgotPassword: (email: string) => post<{ ok: true }>('/api/auth/forgot', { email }),
+  /** L4 draws itself from this; it only looks — the link is spent by `setCredentials`. 404 once spent. */
+  credentialsLink: (token: string) => request<CredentialsLink>(`/api/auth/link/${encodeURIComponent(token)}`),
+  /** L4: set the password, spend the link and sign in (a reset also signs every other device out). */
+  setCredentials: async (token: string, password: string): Promise<SessionState> => {
+    const r = await post<{ token: string; session: SessionSummary; account: AccountSummary; isOwner?: boolean; access?: Access | null }>(
+      '/api/auth/credentials', { token, password, label: deviceLabel() },
+    );
+    await claimDeviceCopy(r.account);
+    setSessionToken(r.token);
+    void api.sendWaitingWrites();
+    return { signedIn: true, configured: true, session: r.session, account: r.account, isOwner: r.isOwner ?? (r.account?.role === 'owner'), access: r.access ?? null };
+  },
+
+  /**
    * "E-mail me a link." Answers the same whether or not the address has an
    * account, so it cannot be used to find out who else uses Epic.
    */
@@ -5873,3 +5902,6 @@ export type WaitlistResponse = {
   byCampaign: { key: string; signups: number; share: number | null }[];
   count: number;
 };
+
+/** An invite or reset link, as L4 reads it before anything is spent. */
+export type CredentialsLink = { mode: 'invite' | 'reset'; email: string; firstName: string | null; expiresAt: string };

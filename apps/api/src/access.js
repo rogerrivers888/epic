@@ -90,13 +90,14 @@ export const CAPABILITY_KEYS = new Set(CAPABILITIES.map((c) => c.key));
 export const OWNER_ONLY_CAPABILITIES = new Set(['manage_staff']);
 
 /**
- * A session somebody signed into as themselves: a magic link, or Google once it
- * lands. An allowlist, not "anything but the passcode" — an invitation or code
+ * A session somebody signed into as themselves: a magic link, Google, or a
+ * password. A password has the same standing as a link to their own inbox — it is
+ * something only that person knows — so it clears the same gate. An allowlist, not "anything but the passcode" — an invitation or code
  * session is also nobody's personal sign-in, and a denylist quietly admits
  * every method added later (Codex, 1 Oct 2026). The one definition of
  * "personal"; `accessFor` and every personal-only door read it.
  */
-export const PERSONAL_AUTH_METHODS = new Set(['link', 'google']);
+export const PERSONAL_AUTH_METHODS = new Set(['link', 'google', 'password']);
 export const isPersonalSession = (session) => PERSONAL_AUTH_METHODS.has(session?.auth_method);
 
 /**

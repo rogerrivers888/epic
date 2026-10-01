@@ -48,6 +48,7 @@ import { AdminApp, firstAdminScreen } from './src/admin/AdminApp';
 import { useActivity } from './src/hooks/useActivity';
 import { LockScreen } from './src/screens/LockScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
+import { InScreen } from './src/screens/InScreen';
 import { SiteScreen } from './src/site/SiteScreen';
 import { AccountScreen } from './src/screens/AccountScreen';
 import { Wordmark } from './src/components/Wordmark';
@@ -316,6 +317,8 @@ function Routed() {
    */
   if (route.name === 'site') return <SiteScreen route={route} />;
   if (route.name === 'login') return <LoginScreen />;
+  // Set your credentials (L4): an invitation or a reset link, before any session.
+  if (route.name === 'in') return <InScreen token={route.token} />;
   return <Gate route={route} />;
 }
 

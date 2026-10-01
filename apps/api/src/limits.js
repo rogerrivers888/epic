@@ -88,6 +88,8 @@ export const signInLimit = limit({
  */
 export const SENDING_DOORS = [
   '/api/session/request-link',
+  // A password reset is an e-mail to whoever owns the address (routes/authPassword.js).
+  '/api/auth/forgot',
   '/api/join/:token/code/again',
   '/api/join/:token/account',
   '/api/shared/:token/enter',

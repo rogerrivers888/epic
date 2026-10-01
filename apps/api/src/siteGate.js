@@ -143,7 +143,13 @@ const SIGN_IN = new Set([
   // code. A signed-out staff member must reach them, so the gate leaves them
   // open exactly as it does the passcode and the magic link.
   '/api/auth/google', '/api/auth/google/callback', '/api/auth/google/exchange',
+  // Email + password (routes/authPassword.js) — log in, forgot, set credentials.
+  // The fourth verb, GET /api/auth/link/:token, carries the token in its path and
+  // is matched by SIGN_IN_LINK below.
+  '/api/auth/login', '/api/auth/forgot', '/api/auth/credentials',
 ]);
+// L4 asks what an invite or reset link is for before anybody has a session.
+const SIGN_IN_LINK = /^\/api\/auth\/link\/[^/]+$/;
 
 /** Is the gate up? Unset is ON; only an explicit off word takes it down. */
 export function siteGateOn() {
@@ -233,6 +239,7 @@ export async function siteGate(req, res, next) {
   // session cutoff, so a pre-cutoff token cannot reach it and revoke newer, valid
   // sessions (Codex, 1 Oct 2026).
   if ((req.method === 'GET' || req.method === 'POST') && SIGN_IN.has(path)) return next();
+  if (req.method === 'GET' && SIGN_IN_LINK.test(path)) return next();
   // The owned image library is byte content an `<img>` loads with no header, and
   // its approved rows carry no signature (routes/library.js). It is referenced by
   // the public web bundle and spends nothing, so it is left open like a static

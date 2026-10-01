@@ -228,3 +228,54 @@ test('a start on another hostname for the API is moved to the configured one fir
     if (before === undefined) delete process.env.EPIC_API_BASE_URL; else process.env.EPIC_API_BASE_URL = before;
   }
 });
+
+// --- "Use Google instead" on an invitation (L4) -----------------------------
+
+/** finishInvite's redirect, captured: where it sent the browser, and the query. */
+async function inviteFinish(token, claims) {
+  let to = null;
+  const res = { redirect: (u) => { to = u; return res; } };
+  await authGoogle.finishInvite({ headers: {} }, res, token, claims);
+  const url = new URL(to);
+  return { path: url.pathname, q: url.searchParams };
+}
+
+test('Google on an invitation must return the invited address, and only then spends it', async () => {
+  const acct = await makeAccount({ email: 'invited.g@epic.day', staff: true });
+  const { token } = await accounts.createSignInLink(acct.id, { requestedBy: 'owner', purpose: 'invite' });
+
+  // A different Google address: back to L4 with it named, the invitation unspent.
+  const wrong = await inviteFinish(token, { sub: 'g-other', email: 'Someone.Else@gmail.com', email_verified: true });
+  assert.equal(wrong.path, `/in/${token}`);
+  assert.equal(wrong.q.get('e'), 'google-mismatch');
+  assert.equal(wrong.q.get('as'), 'someone.else@gmail.com');
+  // An unverified address is never named, and never accepted.
+  const unverified = await inviteFinish(token, { sub: 'g-x', email: 'invited.g@epic.day', email_verified: false });
+  assert.equal(unverified.q.get('e'), 'google-mismatch');
+  assert.equal(unverified.q.get('as'), null);
+  assert.ok(await accounts.inspectSignInLink(token), 'a refused attempt leaves the invitation usable');
+
+  // The invited address: the invitation is spent, the subject bound, and a handoff code issued.
+  const right = await inviteFinish(token, { sub: 'g-invited', email: 'invited.g@epic.day', email_verified: true });
+  assert.equal(right.path, '/login');
+  const code = right.q.get('code');
+  assert.ok(code, 'a handoff code for the exchange');
+  assert.equal(await accounts.inspectSignInLink(token), null, 'the invitation is used up');
+  assert.equal((await accounts.accountById(acct.id)).google_sub, 'g-invited');
+  const spent = await accounts.consumeSignInLink(code, { requestedBy: 'google' });
+  assert.equal(spent?.account_id, acct.id, 'the code is a Google handoff for the invited account');
+});
+
+test('Google never spends a reset link, nor rebinds an account bound to another Google identity', async () => {
+  const acct = await makeAccount({ email: 'reset.g@epic.day', staff: true });
+  const { token: reset } = await accounts.createSignInLink(acct.id, { requestedBy: 'self', purpose: 'reset' });
+  const r = await inviteFinish(reset, { sub: 'g-r', email: 'reset.g@epic.day', email_verified: true });
+  assert.equal(r.path, `/in/${reset}`);
+  assert.ok(await accounts.inspectSignInLink(reset), 'the reset link is untouched');
+
+  const bound = await makeAccount({ email: 'bound.g@epic.day', staff: true, sub: 'g-first' });
+  const { token } = await accounts.createSignInLink(bound.id, { requestedBy: 'owner', purpose: 'invite' });
+  const b = await inviteFinish(token, { sub: 'g-second', email: 'bound.g@epic.day', email_verified: true });
+  assert.equal(b.q.get('e'), 'google-mismatch');
+  assert.ok(await accounts.inspectSignInLink(token), 'refused, and the invitation is left as it was');
+});

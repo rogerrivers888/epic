@@ -312,7 +312,7 @@ test('switching a source: capability to touch it, personal sign-in to re-enable 
 // ---------------------------------------------------------------------------
 
 test('every public door that sends a text or e-mail is held to the sign-in limit', async () => {
-  for (const door of ['/api/session/request-link', '/api/join/:token/code/again', '/api/join/:token/account', '/api/shared/:token/enter']) {
+  for (const door of ['/api/session/request-link', '/api/auth/forgot', '/api/join/:token/code/again', '/api/join/:token/account', '/api/shared/:token/enter']) {
     assert.ok(SENDING_DOORS.includes(door), `${door} is a sending door`);
   }
   const limited = express();

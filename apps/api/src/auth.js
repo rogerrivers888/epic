@@ -274,6 +274,13 @@ const PUBLIC = [
    */
   (req) => req.path === '/api/auth/google' || req.path === '/api/auth/google/callback',
   (req) => req.method === 'POST' && req.path === '/api/auth/google/exchange',
+  /**
+   * Email + password (routes/authPassword.js): log in, ask for a reset, look at
+   * an invite/reset link, and set a password with one. Each is the credential
+   * itself, guarded by the sign-in limit and lockout, never by a session.
+   */
+  (req) => req.method === 'POST' && ['/api/auth/login', '/api/auth/forgot', '/api/auth/credentials'].includes(req.path),
+  (req) => req.method === 'GET' && /^\/api\/auth\/link\/[^/]+$/.test(req.path),
   // Postmark's delivery, open and bounce events: admitted by their own token (routes/postmark.js), never by a session.
   (req) => req.method === 'POST' && req.path === '/api/postmark/events',
   // "Register your interest" on epic.day (routes/interest.js): the people it is

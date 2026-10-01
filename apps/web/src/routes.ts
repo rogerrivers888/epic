@@ -457,6 +457,12 @@ export type Route =
   | { name: 'site'; locale: SiteLocale; page: SitePage; landing: HomeDesign | null }
   | { name: 'login' }
   /**
+   * Set your credentials (L4), epic.day/in/<token>: where a staff invitation and
+   * a password reset land. Public and noindex; the single-use token in the path
+   * is the credential, so nothing else is written to the address.
+   */
+  | { name: 'in'; token: string }
+  /**
    * A customer's own account page (L3), where a magic link lands a household
    * customer. Behind the session; staff land in the back office instead.
    */
@@ -645,6 +651,9 @@ export function parseRoute(path: string): Route {
     case 'login':
       return a ? { name: 'unknown', path } : { name: 'login' };
 
+    case 'in':
+      return a && !b ? { name: 'in', token: a } : { name: 'unknown', path };
+
     case 'account':
       return a ? { name: 'unknown', path } : { name: 'account' };
 
@@ -791,6 +800,7 @@ export function hrefOf(route: Route): string {
         : route.page === 'go' ? paths.siteLanding(route.landing!, route.locale)
           : buildHref([route.locale, route.page]);
     case 'login': return '/login';
+    case 'in': return buildHref(['in', route.token]);
     case 'account': return '/account';
     case 'welcome': return '/welcome';
     case 'opening': return '/opening';
@@ -929,6 +939,7 @@ export const paths = {
   heard: (intakeId: string) => buildHref(['say', intakeId]),
   ask: (intakeId: string, n?: number) => `${buildHref(['say', intakeId, 'ask'])}${n && n > 1 ? `?n=${n}` : ''}`,
   login: () => '/login',
+  credentials: (token: string) => buildHref(['in', token]),
   /**
    * The public website. The homepage keeps its trailing slash (`/en-gb/`) — the
    * one URL that does (Technical Foundations › URL conventions).
@@ -1205,6 +1216,7 @@ export function parentOf(route: Route): string {
     case 'say': return route.ask ? paths.heard(route.intakeId!) : route.intakeId || route.steps ? '/say' : '/inspire';
     case 'site': return paths.siteHome(route.locale);
     case 'login': return '/inspire';
+    case 'in': return '/login';
     case 'account': return '/inspire';
     case 'welcome': return '/inspire';
     case 'opening': return '/inspire';
@@ -1246,6 +1258,7 @@ export function titleOf(route: Route): string {
     case 'say': return epic(route.ask ? 'One more thing' : route.intakeId ? 'Here’s what we heard' : route.steps ? 'One at a time' : 'Just say it');
     case 'site': return siteTitleOf(route);
     case 'login': return epic('Log in');
+    case 'in': return epic('Set up your login');
     case 'account': return epic('Your account');
     case 'welcome': return epic('Plan less. Live more.');
     case 'opening': return epic('Welcome to Epic');
