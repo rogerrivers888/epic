@@ -111,3 +111,38 @@ test('the period fee comes from the engine: 5% on a host-link booking, the level
   assert.equal(period.feePence, 2000);
   assert.equal(period.netPence, 18000);
 });
+
+import express from 'express';
+const { default: hostingRouter } = await import('../src/routes/hosting.js');
+const { runAsAccount } = await import('../src/context.js');
+
+async function hostServer(household, account) {
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => { req.session = { id: null, account_id: account?.id ?? null }; runAsAccount(account ?? { id: null, household_id: household.id, member_id: null, role: 'owner', status: 'active' }, next); });
+  app.use('/api', hostingRouter);
+  // eslint-disable-next-line no-unused-vars
+  app.use((err, _req, res, _next) => res.status(err.status ?? 500).json({ error: err.code ?? 'x', message: err.message }));
+  const s = app.listen(0);
+  await new Promise((r) => s.once('listening', r));
+  return { url: `http://127.0.0.1:${s.address().port}`, close: () => new Promise((r) => s.close(r)) };
+}
+
+test('GET /api/host/money returns the Money screen (intro state defined — not a 500)', async () => {
+  const { household } = await aHousehold(query, 'the money route');
+  const host = await repo.insertHost(household.id, { name: 'Roger', type: 'skill' });
+  const offer = await repo.insertOffer(host.id, 'oneoff');
+  await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2026-12-01', party: [], heads: 1, state: 'confirmed', amountPence: 10000, viaHostLink: true }, null);
+  const srv = await hostServer(household);
+  try {
+    const r = await fetch(`${srv.url}/api/host/money`);
+    assert.equal(r.status, 200, 'the Money screen must not 500 — the regression Codex caught');
+    const body = await r.json();
+    assert.equal(typeof body.intro?.active, 'boolean', 'host-wide intro state present');
+    assert.equal(typeof body.trusted?.completed, 'number', 'completed count present');
+    assert.ok(Array.isArray(body.totals?.lines) && Array.isArray(body.ladder) && body.ladder.length === 3);
+    // A brand-new host's first booking is inside the 0% intro, which beats even
+    // the 5% link rate — so the line is 0%, proving per-booking intro resolution.
+    assert.ok(body.totals.lines.some((l) => l.rate === 0), 'the new host\'s booking is charged the 0% intro, not the level or link rate');
+  } finally { await srv.close(); }
+});

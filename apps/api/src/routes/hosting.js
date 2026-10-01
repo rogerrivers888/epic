@@ -156,7 +156,7 @@ function publicOffer(o, bookings = [], { revealed = false, host = null } = {}) {
 }
 
 /** The host's own offer adds the roster, the money and what stands between it and Publish. */
-function ownOffer(o, host, bookings, broadcasts = [], invites = [], evidence = null) {
+function ownOffer(o, host, bookings, broadcasts = [], invites = [], evidence = null, hostBookingsSoFar = null) {
   const live = bookings.filter((b) => b.state !== 'cancelled');
   const collected = live.filter((b) => b.payment_status === 'paid').reduce((n, b) => n + b.amount_pence, 0);
   const recorded = live.filter((b) => b.payment_status === 'recorded').reduce((n, b) => n + b.amount_pence, 0);
@@ -192,7 +192,9 @@ function ownOffer(o, host, bookings, broadcasts = [], invites = [], evidence = n
       fee: feeForBooking({
         amountPence: takingsAt(o, o.expected_count) ?? 0,
         level: host?.trust ?? 'verified',
-        intro: introState({ hostStartedAt: host?.created_at, bookingsSoFar: live.filter((b) => b.state === 'confirmed' || b.state === 'attended').length }),
+        // The intro is host-wide (first 90 days / first ten bookings across ALL
+        // offers), so count the host's bookings, not just this offer's.
+        intro: introState({ hostStartedAt: host?.created_at, bookingsSoFar: hostBookingsSoFar ?? live.filter((b) => b.state === 'confirmed' || b.state === 'attended').length }),
       }),
     },
     bookings: bookings.map((b) => ({
@@ -271,6 +273,7 @@ router.get('/host', async (req, res, next) => {
     const byOffer = (id) => bookings.filter((b) => b.offer_id === id);
     const rating = await repo.ratingOf(host.id);
     const live = bookings.filter((b) => b.state !== 'cancelled');
+    const hostBookingsSoFar = live.filter((b) => b.state === 'confirmed' || b.state === 'attended').length;
     const evidence = await repo.evidenceOf(host.id);
     // The same credentials the submit endpoint checks, so the dashboard cannot
     // say "everything is in place" about an offer Publish will refuse (Codex,
@@ -280,7 +283,7 @@ router.get('/host', async (req, res, next) => {
       host: { ...ownHost(host), rating: rating.rating, reviewCount: rating.count, guests: rating.guests, isNew: rating.count === 0, evidence: evidence.map(evidencePayload), payoutAccounts: payoutAccounts.map(payoutAccountPayload) },
       // What guests wrote when they booked: each one is a second offer waiting to be written (S4).
       asks: live.map((b) => b.note_to_host).filter(Boolean).slice(-6),
-      offers: withTags.map((o) => ownOffer(o, host, byOffer(o.id), [], [], credentials)),
+      offers: withTags.map((o) => ownOffer(o, host, byOffer(o.id), [], [], credentials, hostBookingsSoFar)),
       stats: {
         live: offers.filter((o) => o.state === 'live').length,
         booked: live.reduce((n, b) => n + b.heads, 0),
@@ -462,6 +465,10 @@ router.get('/host/money', async (req, res, next) => {
     const chron = [...live].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     chron.forEach((b, i) => { introById.set(b.id, introState({ hostStartedAt: host.created_at, bookingsSoFar: i, now: new Date(b.created_at) })); });
     const resolve = (b) => ({ amountPence: b.amount_pence ?? 0, level: host.trust, viaHostLink: Boolean(b.via_host_link), intro: introById.get(b.id) ?? null });
+    // The host-wide figures the screen shows directly: how many completed
+    // experiences so far (the Trusted ladder) and the current/next intro state.
+    const bookingsSoFar = live.filter((b) => b.state === 'confirmed' || b.state === 'attended').length;
+    const intro = introState({ hostStartedAt: host.created_at, bookingsSoFar });
     const all = feesForPeriod(live.map(resolve));
     const byOffer = {};
     for (const o of offers) {
@@ -616,11 +623,11 @@ async function myOffer(id) {
 }
 
 async function ownOfferPayload(offer, host) {
-  const [bookings, broadcasts, invites, withTags, evidence] = await Promise.all([
+  const [bookings, broadcasts, invites, withTags, evidence, hostBookingsSoFar] = await Promise.all([
     repo.bookingsOfOffer(offer.id), repo.broadcastsOf(offer.id), repo.invitesOf(offer.id), attachSkills([offer]),
-    evidenceFor(host),
+    evidenceFor(host), repo.confirmedBookingsSoFar(host.id),
   ]);
-  return ownOffer(withTags[0], host, bookings, broadcasts, invites, evidence);
+  return ownOffer(withTags[0], host, bookings, broadcasts, invites, evidence, hostBookingsSoFar);
 }
 
 /**

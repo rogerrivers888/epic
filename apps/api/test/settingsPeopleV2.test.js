@@ -148,6 +148,20 @@ test('nobody removes themselves; a non-owner removes children only; a removed jo
   } finally { await asOwner.close(); await asDev.close(); }
 });
 
+test('a signed-in teenager cannot remove another child — only an adult may', async () => {
+  const { household: h, member: roger } = await aHousehold(query);
+  const teen = await addMember(h.id, 'Teen', { birthDate: '2010-05-01' }); // ~15
+  const theo = await addMember(h.id, 'Theo', { minor: true, birthDate: '2016-05-01' });
+  const teenAcct = await createAccountOnHousehold(h.id, { memberId: teen.id, name: 'Teen', role: 'customer', plan: 'household', email: 'teen@example.com' });
+  await query('update accounts set activated_at = now() where id = $1', [teenAcct.id]);
+  const asTeen = await server(asMember(h, teen.id));
+  const asOwner = await server(owner(h, roger.id));
+  try {
+    assert.equal((await asTeen.send('DELETE', `/api/household/members/${theo.id}`)).status, 403, 'a 15-year-old may not remove a child');
+    assert.equal((await asOwner.send('DELETE', `/api/household/members/${theo.id}`)).status, 204, 'the owner may');
+  } finally { await asTeen.close(); await asOwner.close(); }
+});
+
 test('how Epic plans round-trips, "any distance" clears to null, and an impossible day is refused', async () => {
   const { household: h, member: roger } = await aHousehold(query);
   const srv = await server(owner(h, roger.id));

@@ -125,12 +125,16 @@ export function callerIsOwner() {
  *
  * Enforced here, in the write path, not only hidden in the UI (owner's ask).
  */
-async function assertMayEditPerson(target) {
+export async function canEditPerson(target) {
   const account = await accountByMember(target.id);
   const joined = Boolean(account && account.activated_at);
-  if (!joined) return;
+  if (!joined) return true;              // pending, no account, or a child
   const me = await currentMember();
-  if (me && me.id === target.id) return;
+  return Boolean(me && me.id === target.id); // a joined adult's tastes are theirs alone
+}
+
+async function assertMayEditPerson(target) {
+  if (await canEditPerson(target)) return;
   const first = target.name?.split(/\s+/)[0] ?? 'they';
   const err = new Error(`Only ${first} can change this now they've joined.`);
   err.status = 403;
@@ -496,8 +500,12 @@ router.delete('/members/:id', async (req, res, next) => {
     if (me && me.id === target.id) return res.status(400).json({ error: 'cannot_remove_self', message: 'You cannot remove yourself.' });
     const targetAge = ageFrom(target.birth_date, target.birth_year);
     const targetIsChild = targetAge != null ? targetAge < 18 : target.is_minor;
-    if (!callerIsOwner() && !targetIsChild) {
-      return res.status(403).json({ error: 'adults_removed_by_owner', message: 'Only the household owner can remove another adult.' });
+    // A non-owner may remove children only, AND must be an adult themselves — a
+    // signed-in 13–17-year-old is not allowed to remove anyone (Codex).
+    const callerAge = me ? ageFrom(me.birth_date, me.birth_year) : null;
+    const callerIsAdult = callerAge != null ? callerAge >= 18 : (me ? !me.is_minor : true);
+    if (!callerIsOwner() && (!targetIsChild || !callerIsAdult)) {
+      return res.status(403).json({ error: 'not_allowed_to_remove', message: callerIsAdult ? 'Only the household owner can remove another adult.' : 'Only an adult can remove someone from the household.' });
     }
     // A joined adult is signed out of every device before their account goes
     // with the cascade; a pending invite is simply cancelled.

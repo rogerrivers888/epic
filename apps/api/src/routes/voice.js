@@ -30,7 +30,7 @@ import { z } from 'zod/v4';
 import { query } from '../db.js';
 import { requires } from '../access.js';
 import { assertWithinBounds } from '../claude.js';
-import { currentHousehold, loadMembers } from './household.js';
+import { currentHousehold, loadMembers, canEditPerson } from './household.js';
 import * as providerCalls from '../repositories/providerCalls.js';
 import { sourceOff } from '../sources/index.js';
 import {
@@ -806,10 +806,18 @@ router.post('/household/apply', async (req, res, next) => {
       likes: z.array(z.object({ kind: z.enum(['love', 'avoid']), phrase: z.string().min(1).max(80), label: z.string().max(80).nullish(), category: z.string().max(40).nullish(), subcategory: z.string().max(60).nullish(), memberId: z.string().uuid().nullish() })).max(60).default([]),
     }).parse(req.body ?? {});
     const members = await loadMembers(household.id).catch(() => []);
-    const everyone = body.memberId ? members.filter((m) => m.id === body.memberId) : members;
+    // A joined adult's tastes are theirs alone — the same guard the member and
+    // constraint routes keep, enforced here too so voice can't write around it
+    // (Codex). Target only people the caller may edit; a named target they may
+    // not is refused, and an "everyone" write skips the locked ones.
+    const editable = new Set();
+    for (const m of members) if (await canEditPerson(m)) editable.add(m.id);
+    if (body.memberId && !editable.has(body.memberId)) return res.status(403).json({ error: 'joined_adult_read_only', message: 'Only they can change their tastes now they have joined.' });
+    const everyone = (body.memberId ? members.filter((m) => m.id === body.memberId) : members).filter((m) => editable.has(m.id));
+    const mayWrite = (it) => !it.memberId || editable.has(it.memberId);
     const written = [
-      ...await applyFood(body.food, { members, households, everyone, householdId: household.id }),
-      ...await applyLikes(body.likes, { members, households, everyone }),
+      ...await applyFood(body.food.filter(mayWrite), { members, households, everyone, householdId: household.id }),
+      ...await applyLikes(body.likes.filter(mayWrite), { members, households, everyone }),
     ];
     res.json({ written, members: await loadMembers(household.id) });
   } catch (err) { next(err); }

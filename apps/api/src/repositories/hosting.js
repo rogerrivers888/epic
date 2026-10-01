@@ -419,6 +419,12 @@ export async function bookingById(id) {
   return rows[0] ?? null;
 }
 
+/** How many of a host's bookings count toward the intro (first-ten) threshold, host-wide. */
+export async function confirmedBookingsSoFar(hostId) {
+  const { rows } = await query(`select count(*)::int n from experience_bookings where host_id = $1 and state in ('confirmed', 'attended')`, [hostId]);
+  return rows[0].n;
+}
+
 export async function insertBooking(b, client) {
   const { rows } = await on(client)(
     `insert into experience_bookings (offer_id, host_id, household_id, account_id, booked_by, occurrence, party, heads, state, amount_pence,
