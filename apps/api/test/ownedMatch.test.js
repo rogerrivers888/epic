@@ -380,3 +380,16 @@ test('ownedNameGaps counts saved, stops, shortlist and visits with no owned name
   const after = await ownedNameGaps();
   assert.equal(after.saved_places - before.saved_places, 1, 'only the one with no owned name is counted');
 });
+
+test('an unmatched sweep placeholder name does not count as an owned name', async () => {
+  const { ownedNameGaps } = await import('../src/sources/ownedMatch.js');
+  const { rows: [h] } = await query(`insert into households (name) values ('Placeholder test') returning id`);
+  // A sweep row Google named but the open map never matched: source google, no osm_ref.
+  const { rows: [a] } = await query(`insert into attractions (region_slug, slug, name, source, display_source) values ('cornwall', $1, '(zoo)', 'google', null) returning id`, [`ph-${randomUUID()}`]);
+  const ref = `atlas:${a.id}`;
+  const before = await ownedNameGaps();
+  await query('alter table household_places disable trigger keep_owned_point');
+  try { await query(`insert into household_places (household_id, venue_ref, label) values ($1, $2, '(zoo)')`, [h.id, ref]); }
+  finally { await query('alter table household_places enable trigger keep_owned_point'); }
+  assert.equal((await ownedNameGaps()).saved_places - before.saved_places, 1, 'the placeholder is not an owned name');
+});
