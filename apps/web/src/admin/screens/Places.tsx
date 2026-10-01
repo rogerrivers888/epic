@@ -3089,14 +3089,38 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
   // the run's final reload (Codex, 1 Oct 2026).
   const matchRef = useRef(match);
   matchRef.current = match;
-  const reload = useCallback(() => { setData(null); api.adminPlaceCompare(refId, matchRef.current).then(setData).catch(() => setData(null)); }, [refId]);
-  useEffect(() => { reload(); }, [reload, match]);
-  useEffect(() => { api.adminPlaceReach(refId).then(setReach).catch(() => setReach(null)); }, [refId]);
   // Which place the drawer is on now. A research stream outlives a change of
   // place — the drawer is one component the ref flows through, not a remount —
   // so every frame checks this before it touches state: a late frame or final
   // reload from the place you just left must never overwrite the one you are on.
   const activeRef = useRef<string>(refId);
+  // Only one comparison fetch is ever in flight. A compare with match=true makes
+  // a paid googleMatchFor, and two of them racing — "Ask Google" pressed just as
+  // a research run finishes and reloads — could both reach it before either had
+  // persisted the match, billing the same paid search twice (Codex, 1 Oct 2026).
+  // So a reload asked for while one is running is coalesced into a single
+  // follow-up, which runs once the first lands and the match it made is saved.
+  // `reloadRef` always points at the latest reload, so that follow-up uses the
+  // place the drawer is on now, not the one the in-flight fetch began on.
+  const compareInFlight = useRef(false);
+  const reloadWanted = useRef(false);
+  const reloadRef = useRef<() => void>(() => {});
+  const reload = useCallback(() => {
+    if (compareInFlight.current) { reloadWanted.current = true; return; }
+    compareInFlight.current = true;
+    const forRef = refId;
+    setData(null);
+    api.adminPlaceCompare(refId, matchRef.current)
+      .then((d) => { if (activeRef.current === forRef) setData(d); })
+      .catch(() => { if (activeRef.current === forRef) setData(null); })
+      .finally(() => {
+        compareInFlight.current = false;
+        if (reloadWanted.current) { reloadWanted.current = false; reloadRef.current(); }
+      });
+  }, [refId]);
+  reloadRef.current = reload;
+  useEffect(() => { reload(); }, [reload, match]);
+  useEffect(() => { api.adminPlaceReach(refId).then(setReach).catch(() => setReach(null)); }, [refId]);
   // The quote and any running stream belong to the place on screen; both reset
   // when it changes, so a half-finished run is never read against another place.
   // The quote response is tied to the ref it was asked for: a slow one for the
