@@ -543,7 +543,7 @@ function AtlasRoot({ data, error, homeTown, mode, onGo, onShowAll }: {
     <View style={styles.list}>
       {error ? <View style={styles.gutter}><StatusLine tone="warn">{error}</StatusLine></View> : null}
       {!data ? <Text style={[type.small, styles.gutter, { paddingTop: spacing.md }]}>Loading your atlas…</Text> : null}
-      {empty && !data?.unplaced ? (
+      {empty && (!all || !data?.unplaced) ? (
         <View style={styles.emptyRoot}>
           <Text style={styles.emptyTitle}>{emptyTitle}</Text>
           <Text style={styles.emptyBody}>{emptyBody}</Text>
