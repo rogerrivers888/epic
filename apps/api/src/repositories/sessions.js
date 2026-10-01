@@ -16,11 +16,11 @@ const digest = (token) => crypto.createHash('sha256').update(String(token)).dige
 /** How stale `last_seen_at` may get before a read is worth a write. */
 const SEEN_EVERY = '5 minutes';
 
-export async function insertSession(token, label, accountId = null, kind = 'agent') {
+export async function insertSession(token, label, accountId = null, kind = 'agent', authMethod = 'passcode') {
   const { rows } = await query(
-    `insert into api_sessions (token_hash, label, account_id, kind) values ($1, $2, $3, $4)
-     returning id, label, account_id, kind, created_at, expires_at`,
-    [digest(token), label || null, accountId, kind],
+    `insert into api_sessions (token_hash, label, account_id, kind, auth_method) values ($1, $2, $3, $4, $5)
+     returning id, label, account_id, kind, auth_method, created_at, expires_at`,
+    [digest(token), label || null, accountId, kind, authMethod],
   );
   return rows[0];
 }
@@ -28,7 +28,7 @@ export async function insertSession(token, label, accountId = null, kind = 'agen
 /** The live session this token opens, or null. Never says which of the two it failed. */
 export async function findLiveSession(token) {
   const { rows } = await query(
-    `select id, label, account_id, kind, created_at, last_seen_at, expires_at
+    `select id, label, account_id, kind, auth_method, created_at, last_seen_at, expires_at
        from api_sessions
       where token_hash = $1 and revoked_at is null and expires_at > now()`,
     [digest(token)],

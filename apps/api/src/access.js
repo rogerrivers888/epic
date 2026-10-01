@@ -61,6 +61,18 @@ export const CAPABILITIES = [
 
 export const CAPABILITY_KEYS = new Set(CAPABILITIES.map((c) => c.key));
 
+/**
+ * What an agent session may do: read everything, change nothing (G11, 1 Oct
+ * 2026). The owner asked that agents "read, test, propose" — no spending, no
+ * lifting holds, no paid grants, no bulk production changes. Tests run on the
+ * machine, not through the API; proposing is a pull request, not a write. So
+ * through the API an agent holds the reads (the capabilities not marked
+ * `manages`) and none of the writes. A coding session signs in on the shared
+ * passcode and used to be the owner — everything — which is exactly the hole
+ * this closes.
+ */
+export const VIEW_CAPABILITIES = CAPABILITIES.filter((c) => !c.manages).map((c) => c.key);
+
 /** The owner's role holds everything there is, including capabilities added later. */
 const ALL = () => CAPABILITIES.map((c) => c.key);
 
@@ -81,8 +93,34 @@ const ALL = () => CAPABILITIES.map((c) => c.key);
  */
 export async function accessFor(req) {
   const account = req.account ?? null;
+  const session = req.session ?? null;
+
+  // An agent session reads and proposes; it never writes to production (G11).
+  // Decided before the account, because a coding agent signs in on the owner's
+  // own passcode and would otherwise be the owner — it is the session, not the
+  // account, that is restricted.
+  if (session?.kind === 'agent') {
+    return {
+      doors: ['client', 'admin'],
+      capabilities: new Set(VIEW_CAPABILITIES),
+      role: { key: 'agent', label: 'Agent — read & propose', is_owner: false },
+      isOwner: false,
+      elevated: false,
+    };
+  }
+
+  // Elevated: the owner, signed in personally (a magic link, later Google),
+  // from a real device — never the shared passcode, never automated. This is
+  // what a privileged action requires (G11). It is a property of *how* this
+  // session signed in, so it is computed here from the session, not the account.
+  const personal = session?.auth_method === 'link' || session?.auth_method === 'google';
+  const notAutomated = session?.kind !== 'agent' && session?.kind !== 'service';
+
   if (!account) {
-    return { doors: DOORS, capabilities: new Set(ALL()), role: { key: 'owner', label: 'Owner', isOwner: true }, isOwner: true };
+    // The shared passcode with no claimed owner account: the owner's ordinary
+    // way in, so every door and capability — but the passcode is not personal,
+    // so never elevated.
+    return { doors: DOORS, capabilities: new Set(ALL()), role: { key: 'owner', label: 'Owner', isOwner: true }, isOwner: true, elevated: false };
   }
   const role = account.role_id ? await roleForAccount(account.id) : null;
   // `accounts.role` is the older column and still says 'owner' for the founding
@@ -90,19 +128,28 @@ export async function accessFor(req) {
   // owner out of the back office he built.
   const isOwner = Boolean(role?.is_owner) || account.role === 'owner';
   if (isOwner) {
-    return { doors: DOORS, capabilities: new Set(ALL()), role: role ?? { key: 'owner', label: 'Owner', is_owner: true }, isOwner: true };
+    return {
+      doors: DOORS,
+      capabilities: new Set(ALL()),
+      role: role ?? { key: 'owner', label: 'Owner', is_owner: true },
+      isOwner: true,
+      // Ordinary manage works on the passcode; the privileged set needs the
+      // owner personally signed in (owner, 1 Oct 2026).
+      elevated: Boolean(isOwner && personal && notAutomated),
+    };
   }
-  if (!role) return { doors: ['client'], capabilities: new Set(), role: null, isOwner: false };
+  if (!role) return { doors: ['client'], capabilities: new Set(), role: null, isOwner: false, elevated: false };
   return {
     doors: Array.isArray(role.doors) ? role.doors : ['client'],
     capabilities: new Set(role.capabilities ?? []),
     role,
     isOwner: false,
+    elevated: false,
   };
 }
 
 /** Attached by `requireSession`, so every route below it can ask without a query. */
-export const accessOf = (req) => req.access ?? { doors: ['client'], capabilities: new Set(), isOwner: false, role: null };
+export const accessOf = (req) => req.access ?? { doors: ['client'], capabilities: new Set(), isOwner: false, role: null, elevated: false };
 
 export const hasDoor = (req, door) => accessOf(req).doors.includes(door);
 export const can = (req, capability) => accessOf(req).capabilities.has(capability);
@@ -141,6 +188,30 @@ export function requires(capability) {
   };
 }
 
+/**
+ * A privileged action: the owner, personally signed in — not the shared
+ * passcode, not an agent (G11, owner 1 Oct 2026).
+ *
+ * "Lift the hold, paid grants, bulk production changes, anything that spends
+ * money or overrides a safeguard must require my own signed-in account
+ * (roger@epic.day via the e-mail link), and be logged with my name." So this
+ * sits in front of those routes, above any capability check, and refuses every
+ * session that did not sign in personally — with a 403 that says how to clear
+ * it, because the caller is the owner on the wrong kind of session, not an
+ * intruder. The action's audit row carries the actor; the route writes it.
+ *
+ * `action` is a short verb for the message ("lift a census hold").
+ */
+export function requireOwnerSignedIn(action = 'do that') {
+  return (req, res, next) => {
+    if (accessOf(req).elevated) return next();
+    return res.status(403).json({
+      error: 'needs_personal_sign_in',
+      message: `This needs you signed in personally to ${action} — open Epic and sign in with your e-mail link, then try again. A shared-passcode or agent session can't.`,
+    });
+  };
+}
+
 /** What the app is told about itself, so it draws only the doors it holds. */
 export function accessPayload(req) {
   const access = accessOf(req);
@@ -149,5 +220,6 @@ export function accessPayload(req) {
     capabilities: [...access.capabilities],
     role: access.role ? { key: access.role.key, label: access.role.label } : null,
     isOwner: access.isOwner,
+    elevated: Boolean(access.elevated),
   };
 }

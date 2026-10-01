@@ -73,7 +73,7 @@ import { enabledSources, defaultSourceKeys, loadSourceSettings, sourceHasKey, so
 import { routingEnabled, routingPaused } from './sources/routing.js';
 import sessionRoutes, { devices as deviceRoutes } from './routes/session.js';
 import { authConfigured, deployed, originAllowed, requireOwner, requireSession } from './auth.js';
-import { requireDoor } from './access.js';
+import { requireDoor, requireOwnerSignedIn } from './access.js';
 import sourceSwitchRoutes from './routes/sourceSwitch.js';
 import { APP_URL, canonicalRedirect } from './origins.js';
 import { SPEND_PREFIXES, generalLimit, holdSendingDoors, photoLimit, signInLimit, spendLimit, voiceLimit } from './limits.js';
@@ -274,7 +274,26 @@ app.use('/api/admin/questions', requireDoor('admin'), questionRoutes);
 // each bound to a different table became one bound to a question, and this is
 // what it reads. The older locality routes stay mounted beneath it — nothing
 // that had a link to them has lost it.
-app.use('/api/admin/place-index', requireDoor('admin'), placeIndexRoutes);
+// Privileged place-index actions need the owner personally signed in — the
+// shared passcode and agent sessions are refused (G11, owner 1 Oct 2026: lift
+// the hold, estate-wide re-runs, a rebuild of the index). Enforced at the mount
+// so it holds whatever the route file does, and named rather than prefixed so
+// browsing coverage never trips it.
+const OWNER_ONLY_PLACE_INDEX = new Map([
+  ['POST /census/uk/lift', 'lift the census hold'],
+  ['POST /census/run', 'start an estate census run'],
+  ['POST /census/edge/run', 'start an estate census run'],
+  ['POST /refresh', 'rebuild the place index'],
+]);
+// Any resume of a stored run is a lift of a hold, whatever its id.
+const ownerOnlyPlaceIndex = (req, res, next) => {
+  const key = `${req.method} ${doorOf(req)}`;
+  const action = OWNER_ONLY_PLACE_INDEX.get(key)
+    ?? (req.method === 'POST' && /^\/census\/run\/[^/]+\/resume$/.test(doorOf(req)) ? 'lift the census hold' : null);
+  if (!action) return next();
+  return requireOwnerSignedIn(action)(req, res, next);
+};
+app.use('/api/admin/place-index', requireDoor('admin'), ownerOnlyPlaceIndex, placeIndexRoutes);
 // "Research this place" and the ranked Google list: the explorer's two live
 // endpoints, beside the same Places prefix (routes/placeResearch.js). Their own
 // file and own leaf paths (/research, /research/quote, /ranked, /ranked/quote),

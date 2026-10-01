@@ -15,7 +15,7 @@
  */
 
 import express from 'express';
-import { CAPABILITIES, DOORS, can, requires } from '../access.js';
+import { CAPABILITIES, DOORS, accessOf, can, requires, requireOwnerSignedIn } from '../access.js';
 import * as activity from '../repositories/activity.js';
 import * as insights from '../repositories/insights.js';
 import * as rolesRepo from '../repositories/roles.js';
@@ -711,19 +711,23 @@ router.get('/sessions/agents', requires('manage_settings'), async (req, res, nex
   // `canGrant`: the panel says up front when the screen it is on cannot grant
   // (an agent's own session), rather than letting a tap fail (29 Sep 2026).
   try {
-    res.json({ ...(await liveAgentSessions({ all: req.query.all === '1' })), canGrant: req.session?.kind === 'device', you: req.session?.id ?? null });
+    res.json({ ...(await liveAgentSessions({ all: req.query.all === '1' })), canGrant: accessOf(req).elevated, you: req.session?.id ?? null });
   } catch (err) { next(err); }
 });
 
-router.post('/sessions/:id/grant', requires('manage_settings'), async (req, res, next) => {
+// Granting an agent paid calls spends the owner's money, so it needs the owner
+// personally signed in — not the passcode, not an agent granting itself (G11,
+// 1 Oct 2026) — and it is logged with his name.
+router.post('/sessions/:id/grant', requires('manage_settings'), requireOwnerSignedIn('grant paid calls'), async (req, res, next) => {
   try {
-    if (req.session?.kind !== 'device') {
-      return res.status(403).json({ error: 'device_only', message: 'Only a signed-in device can grant paid calls — not an agent.' });
-    }
     const hours = Math.max(0, Math.min(72, Math.round(Number(req.body?.hours ?? 0))));
     const row = await grantPaid(String(req.params.id), hours);
     if (!row) return res.status(404).json({ error: 'not_an_agent', message: 'No live agent session by that id.' });
     forgetSession(row.id);
+    await rolesRepo.writeAudit({
+      ...actor(req), action: 'paid.grant', subjectType: 'session', subjectId: row.id, subjectLabel: row.label ?? null,
+      after: { hours, until: row.paid_grant_until },
+    }).catch(() => null);
     res.json({ session: row });
   } catch (err) { next(err); }
 });

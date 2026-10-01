@@ -89,9 +89,9 @@ export const passcodeMatches = (given) => authConfigured() && sameSecret(given, 
  * which keeps working so that adding accounts does not sign the owner out of
  * his own app.
  */
-export async function openSession(label, accountId = null, kind = 'agent') {
+export async function openSession(label, accountId = null, kind = 'agent', authMethod = 'passcode') {
   const token = crypto.randomBytes(32).toString('base64url');
-  const session = await insertSession(token, label, accountId, kind);
+  const session = await insertSession(token, label, accountId, kind, authMethod);
   return { token, session };
 }
 

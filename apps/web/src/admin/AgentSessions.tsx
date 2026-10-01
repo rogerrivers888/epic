@@ -74,7 +74,7 @@ export function AgentSessions() {
     <Panel title="Agent sessions" sub="No paid calls unless you allow them.">
       {error ? <Text style={[type.small, { color: colors.overrun }]}>{error}</Text> : null}
       {!canGrant ? (
-        <Text style={[type.small, { color: colors.ink }]}>Only you, signed in on your phone or computer, can allow paid calls — this sign-in is an agent’s.</Text>
+        <Text style={[type.small, { color: colors.ink }]}>Only you, signed in with your e-mail link, can allow paid calls. This sign-in is on the shared passcode or an agent’s, so it can’t.</Text>
       ) : null}
       {rows.length ? rows.map((r) => (
         <View key={r.id} style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm, paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: colors.lineSoft }}>

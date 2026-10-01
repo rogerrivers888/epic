@@ -21,6 +21,7 @@ import { Press } from '../../components/press';
 import { Icon } from '../../components/Icon';
 import { colors, spacing, type, BORDER } from '../../theme';
 import { useViewport } from '../../hooks/useViewport';
+import { useSession } from '../../hooks/useSession';
 import { asText, useQueryState, useRouter } from '../../router';
 import { api, type RunsList, type Run, type RunFailures, type UkCensus, type UkCensusDay } from '../../api';
 import { AdminPage, ago, day, pounds, since } from '../kit';
@@ -507,6 +508,11 @@ const ukWord = (u: UkCensus) => {
 function UkCensusSection({ canManage, phone = false }: { canManage: boolean; phone?: boolean }) {
   const [u, setU] = useState<UkCensus | null>(null);
   const [lifting, setLifting] = useState(false);
+  // Lifting the hold spends the day's quota, so it needs the owner personally
+  // signed in — the server refuses a passcode or agent session (G11, 1 Oct
+  // 2026). The button says so rather than failing on the tap.
+  const { access } = useSession();
+  const elevated = Boolean(access?.elevated);
   const load = useCallback(() => { api.adminUkCensus().then(setU).catch(() => setU(null)); }, []);
   useEffect(load, [load]);
   // Nothing to show where the programme has never run.
@@ -543,7 +549,10 @@ function UkCensusSection({ canManage, phone = false }: { canManage: boolean; pho
       </View>
       {u.held || u.halted ? (
         <View style={styles.trail}>
-          <Act label={lifting ? 'Lifting…' : 'Lift the hold'} tone="solid" disabled={!canManage || lifting} onPress={lift} />
+          <Act label={lifting ? 'Lifting…' : 'Lift the hold'} tone="solid" disabled={!canManage || !elevated || lifting} onPress={lift} />
+          {canManage && !elevated ? (
+            <Text style={[type.small, { color: colors.inkMuted }]}>Only you, signed in with your e-mail link, can lift the hold — this sign-in is on the shared passcode or an agent’s.</Text>
+          ) : null}
         </View>
       ) : null}
       <Ladder columns={columns} rows={[...u.days].reverse()} keyOf={(d) => d.runId} highlight={(d) => !d.ended}

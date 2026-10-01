@@ -23,9 +23,9 @@ const router = express.Router();
  * answers *before* the door — it is how the app finds out whether it is inside
  * — so it resolves them itself from the account it just looked up.
  */
-async function accessSummary(account) {
-  const access = await accessFor({ account });
-  return { doors: access.doors, capabilities: [...access.capabilities], role: access.role ? { key: access.role.key, label: access.role.label } : null };
+async function accessSummary(account, session = null) {
+  const access = await accessFor({ account, session });
+  return { doors: access.doors, capabilities: [...access.capabilities], role: access.role ? { key: access.role.key, label: access.role.label } : null, elevated: access.elevated };
 }
 
 const bearerOf = (req) => {
@@ -66,7 +66,7 @@ router.get('/session', async (req, res, next) => {
       // Which applications this session may enter and what it may do in them
       // (access.js). The app draws only the doors it is told it holds — and the
       // API refuses the rest whatever the app draws.
-      access: session ? await accessSummary(account) : null,
+      access: session ? await accessSummary(account, session) : null,
     });
   } catch (err) { next(err); }
 });
@@ -94,7 +94,7 @@ router.post('/session', async (req, res, next) => {
     // way everybody else's are. Until then it opens a session with no account,
     // which resolves to the founding household exactly as it always has.
     const owner = await ownerAccount();
-    const { token, session } = await openSession(label, owner?.id ?? null, sessionKindFor(req, label));
+    const { token, session } = await openSession(label, owner?.id ?? null, sessionKindFor(req, label), 'passcode');
     if (owner) await recordSignIn(owner.id, { method: 'passcode', label });
     sessionCookie(res, token);
     res.status(201).json({
@@ -156,7 +156,8 @@ router.post('/session/link', async (req, res, next) => {
     }
     const label = String(req.body?.label || '').slice(0, 80) || null;
     const account = await recordSignIn(spent.account_id, { method: 'link', label });
-    const { token: sessionToken, session } = await openSession(label, spent.account_id, sessionKindFor(req, label, { onAccount: true }));
+    // A magic link is a personal sign-in: this is who a privileged action needs (G11).
+    const { token: sessionToken, session } = await openSession(label, spent.account_id, sessionKindFor(req, label, { onAccount: true }), 'link');
     sessionCookie(res, sessionToken);
     res.status(201).json({
       token: sessionToken,
