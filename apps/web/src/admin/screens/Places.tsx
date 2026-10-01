@@ -3116,10 +3116,13 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
     // fresh compare — and with match on, a paid Google match — after unmount
     // (Codex, 1 Oct 2026).
     if (!mountedRef.current) return;
+    // Clear the old place's comparison straight away — before coalescing — so the
+    // drawer shows the loading state, not the place you just left, while the new
+    // fetch is queued behind one in flight (Codex, 1 Oct 2026).
+    setData(null);
     if (compareInFlight.current) { reloadWanted.current = true; return; }
     compareInFlight.current = true;
     const forRef = refId;
-    setData(null);
     api.adminPlaceCompare(refId, matchRef.current)
       .then((d) => { if (activeRef.current === forRef) setData(d); })
       .catch(() => { if (activeRef.current === forRef) setData(null); })
