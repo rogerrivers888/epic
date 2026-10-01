@@ -110,13 +110,22 @@ export async function loadPostcodes(file, { source = null } = {}) {
   try {
     ({ rows: [{ got }] } = await holder.query('select pg_try_advisory_lock(hashtext($1)) as got', [LOCK]));
     if (!got) throw new Error('another postcode load is running');
-    return await loadWhileLocked(file, stats, source);
+    await loadWhileLocked(file, stats, source);
   } finally {
     // Whatever happened — the lock refused, the lock query itself failing, the
     // load throwing — the client goes back (Codex, 26 Sep 2026).
     if (got) await holder.query('select pg_advisory_unlock(hashtext($1))', [LOCK]).catch(() => null);
     holder.release();
   }
+  // ONS data is now in: correct any place filed under the wrong country from its
+  // postcode (Option C). Here in the exported loader rather than the CLI, so every
+  // path runs it — the scheduled and admin-triggered refresh (postcodeRefresh)
+  // included — and only after a real swap (Codex).
+  if (stats.swapped) {
+    const corrected = await backfillCountriesFromPostcodes().catch((err) => { console.error('country backfill:', err.message); return 0; });
+    if (corrected) console.log(`country backfill: ${corrected} place(s) corrected from their postcode`);
+  }
+  return stats;
 }
 
 async function loadWhileLocked(file, stats, source) {
@@ -185,11 +194,6 @@ if (isMain) {
       await query('update postcode_releases set loaded_release = $1, loaded_at = now() where one', [stats.release]).catch(() => null);
     }
     console.log({ ...stats, table: n });
-    // Now that ONS data is in, fix any place filed under the wrong country from its
-    // postcode (Option C). Migration 310 does this once, but on a fresh install the
-    // table is empty when it runs, so the load is where it actually takes effect.
-    const corrected = await backfillCountriesFromPostcodes().catch((err) => { console.error('country backfill:', err.message); return 0; });
-    console.log(`country backfill: ${corrected} place(s) corrected from their postcode`);
     if (!given) fs.rmSync(file, { force: true });
     await pool.end();
   })().catch((err) => { console.error(err); process.exit(1); });
