@@ -1314,8 +1314,12 @@ function FeedCardView({ card, on, onHeart, onOpen }: { card: FeedCard; on: boole
       </VenueThumb>
       <View style={{ gap: 3 }}>
         <Text style={styles.cardName} numberOfLines={2}>{card.name}</Text>
-        <Text style={styles.cardFit}>{card.fit}</Text>
-        <Text style={styles.metaText} numberOfLines={1}>{card.typeR}</Text>
+        {/* The detour on the left, what it is and its rating on the right, one
+            line now the card is wider (owner, 1 Oct 2026). */}
+        <View style={styles.cardLine}>
+          <Text style={styles.cardFit} numberOfLines={1}>{card.fit}</Text>
+          <Text style={[styles.metaText, styles.cardLineR]} numberOfLines={1}>{card.typeR}</Text>
+        </View>
       </View>
     </View>
   );
@@ -1334,8 +1338,10 @@ function ThinCard({ card, on, onHeart, onOpen }: { card: FeedCard; on: boolean; 
       </VenueThumb>
       <View style={{ gap: 3 }}>
         <Text style={[styles.cardName, { fontSize: 16 }]}>{card.name}</Text>
-        <Text style={styles.cardFit}>{card.fit}</Text>
-        <Text style={styles.metaText}>{card.typeR}</Text>
+        <View style={styles.cardLine}>
+          <Text style={styles.cardFit} numberOfLines={1}>{card.fit}</Text>
+          <Text style={[styles.metaText, styles.cardLineR]} numberOfLines={1}>{card.typeR}</Text>
+        </View>
       </View>
     </View>
   );
@@ -1845,6 +1851,11 @@ const styles = StyleSheet.create({
   rowScroll: { gap: 12, paddingHorizontal: 20 },
   cardName: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', lineHeight: 19, color: INK },
   cardFit: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: MOSS },
+  // The detour and the type·rating on one row: detour left, the rest right, with
+  // the right side free to shrink so a long "Museum · ★ 4.7" never shoves the
+  // detour off the card.
+  cardLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  cardLineR: { flexShrink: 1, textAlign: 'right' },
   heartChipWrap: { position: 'absolute', top: 8, right: 8 },
   heartChip: { width: 38, height: 38, borderRadius: 19, backgroundColor: CHIP_SCRIM, alignItems: 'center', justifyContent: 'center' },
   priceTag: { position: 'absolute', left: 8, bottom: 8, backgroundColor: CREAM, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4 },

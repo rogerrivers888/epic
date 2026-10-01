@@ -197,20 +197,27 @@ export function Carousel({ title, count, floor, estimated, items, onAll, onOpen,
 }
 
 /**
- * One place on a shelf: "name → ★ rating + '3.2k reviews' → travel-mode glyph
- * + '20 min drive'". The rating line is held whether or not there is a number
- * yet: a square that says nothing reads as broken rather than as unknown.
+ * One place on a shelf: the name, then one line with the journey on the left
+ * ("20 min drive", its mode glyph in front) and the crowd's verdict on the
+ * right ("★ 4.5 · 3.2k reviews"); a price, when there is one, on its own row
+ * underneath. The rating is held whether or not there is a number yet: a square
+ * that says nothing reads as broken rather than as unknown.
  */
 function Card({ item, crowd, travel, onOpen }: { item: InspireItem; crowd?: Crowd; travel?: Travel; onOpen: () => void }) {
   const price = priceMarks(item.priceLevel);
   return (
     <MediaCard name={item.name} onPress={onOpen} thumb={<PlaceThumb item={item} width={CARD_W} height={CARD_H} />}>
-      {crowd ? <Crowd rating={crowd.rating} count={crowd.ratingCount} empty={crowd.known ? 'No ratings yet' : null} /> : null}
-      {item.closed?.status === 'temporarily_closed' ? <Text style={styles.tempClosed}>Temporarily closed</Text> : null}
+      {/* One line: the drive on the left, the crowd's verdict on the right
+          (owner, 1 Oct 2026 — the wider card has the room, and these were a line
+          each before). The rating is still held blank while its answer is on the
+          way, so the card does not shuffle when it lands. A price is rare and
+          takes its own row underneath when it is there. */}
       <View style={styles.cardFoot}>
         <Journey item={item} travel={travel} />
-        {price ? <Text style={styles.price}>{price}</Text> : null}
+        {crowd ? <Crowd rating={crowd.rating} count={crowd.ratingCount} empty={crowd.known ? 'No ratings yet' : null} /> : null}
       </View>
+      {item.closed?.status === 'temporarily_closed' ? <Text style={styles.tempClosed}>Temporarily closed</Text> : null}
+      {price ? <Text style={styles.price}>{price}</Text> : null}
     </MediaCard>
   );
 }
@@ -220,12 +227,14 @@ export function CardWide({ item, crowd, travel, onOpen }: { item: InspireItem; c
   const price = priceMarks(item.priceLevel);
   return (
     <MediaCard wide name={item.name} onPress={onOpen} thumb={<PlaceThumb item={item} fill />}>
-      {crowd ? <Crowd rating={crowd.rating} count={crowd.ratingCount} empty={crowd.known ? 'No ratings yet' : null} /> : null}
-      {item.closed?.status === 'temporarily_closed' ? <Text style={styles.tempClosed}>Temporarily closed</Text> : null}
+      {/* Drive left, crowd right, on one line; a price takes its own row below
+          when there is one (owner, 1 Oct 2026). */}
       <View style={styles.cardFoot}>
         <Journey item={item} travel={travel} />
-        {price ? <Text style={styles.price}>{price}</Text> : null}
+        {crowd ? <Crowd rating={crowd.rating} count={crowd.ratingCount} empty={crowd.known ? 'No ratings yet' : null} /> : null}
       </View>
+      {item.closed?.status === 'temporarily_closed' ? <Text style={styles.tempClosed}>Temporarily closed</Text> : null}
+      {price ? <Text style={styles.price}>{price}</Text> : null}
     </MediaCard>
   );
 }
