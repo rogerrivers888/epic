@@ -43,7 +43,7 @@ country from the census, because it stores nothing the outcode does not already 
 **Until then** the drawer uses the area country and fails safe: a cross-border result
 reads the search area's currency, never crashes, and a place with no usable Google price
 level still reads "not known yet". This fallback is the timezone/currency "right in Britain,
-wrong abroad" shape — see [`right-in-britain-wrong-abroad.md`](./right-in-britain-wrong-abroad.md) §1.
+wrong abroad" shape — see [`right-here-wrong-elsewhere.md`](./right-here-wrong-elsewhere.md) §1.
 
 ## 2. Should Google's editorial summary be shown as a description? (held commit)
 
