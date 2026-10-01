@@ -219,6 +219,27 @@ export class PointIndex {
     }
     return best;
   }
+  /**
+   * Every point whose own location lies within the box. A point inside the box is
+   * proof that its sector has ground there, so the box is not wholly inside the
+   * ring unless that sector is too — the exact half of the E9 test (owner, 1 Oct
+   * 2026) that a grid sample on its own cannot guarantee.
+   */
+  within(box) {
+    const out = [];
+    const bi0 = Math.floor(box.minLat / this.cell); const bi1 = Math.floor(box.maxLat / this.cell);
+    const bj0 = Math.floor(box.minLng / this.cell); const bj1 = Math.floor(box.maxLng / this.cell);
+    for (let i = bi0; i <= bi1; i += 1) {
+      for (let j = bj0; j <= bj1; j += 1) {
+        const b = this.buckets.get(`${i}:${j}`);
+        if (!b) continue;
+        for (const p of b) {
+          if (p.lat >= box.minLat && p.lat <= box.maxLat && p.lng >= box.minLng && p.lng <= box.maxLng) out.push(p);
+        }
+      }
+    }
+    return out;
+  }
 }
 
 /**
@@ -281,10 +302,17 @@ export function sectorsOfBox(box, universe) {
     return best ? { kind: 'inside', code: best.code, outcode: best.outcode ?? null } : { kind: 'nowhere' };
   }
   const codes = new Set(); const outcodes = new Set(); let one = null;
-  for (const p of gridOf(box)) {
-    const best = nearestSector(p, universe);
-    if (best) { codes.add(best.code); if (best.outcode != null) outcodes.add(best.outcode); one = best; }
-  }
+  const note = (best) => { if (best) { codes.add(best.code); if (best.outcode != null) outcodes.add(best.outcode); one = best; } };
+  // The grid covers the box's area and edges; a ring edge can no longer slip
+  // between five points.
+  for (const p of gridOf(box)) note(nearestSector(p, universe));
+  // And every sector with a point physically inside the box is added exactly — a
+  // point in the box proves that sector has ground there, so an out-of-ring sector
+  // in the box forces the box to straddle even if the grid missed it (E9).
+  const inside = typeof universe?.within === 'function'
+    ? universe.within(box)
+    : (Array.isArray(universe) ? universe.filter((p) => p.lat >= box.minLat && p.lat <= box.maxLat && p.lng >= box.minLng && p.lng <= box.maxLng) : []);
+  for (const p of inside) note({ code: p.code, outcode: p.outcode ?? null });
   if (!codes.size) return { kind: 'nowhere' };
   if (codes.size === 1) return { kind: 'inside', code: one.code, outcode: one.outcode ?? null };
   return { kind: 'across', codes, outcodes };

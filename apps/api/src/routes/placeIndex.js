@@ -1535,18 +1535,34 @@ router.get('/census-ring-curve', requires('view_library'), async (req, res, next
       .map((m) => Math.min(90, Math.max(5, Math.trunc(Number(m)))))
       .filter((m) => Number.isFinite(m));
     const locus = { where: req.query.where ?? null, lat: req.query.lat ?? null, lng: req.query.lng ?? null };
+    if (!locus.where && !(locus.lat != null && locus.lng != null)) {
+      return res.status(400).json({ error: 'where_required', message: 'Pass ?where= or ?lat=&lng=.' });
+    }
     const curve = [];
     for (const m of minutes) {
       const ring = await reach.ringFor({ ...locus, minutes: m, mode });
-      if (!ring) { curve.push({ minutes: m, count: null, unresolved: null }); continue; }
+      if (!ring) { curve.push({ minutes: m, count: null, unresolved: null, floor: null }); continue; }
       const c = await censusInRing({
         cells: ring.band ?? ring.cells, outcodes: ring.outcodes,
         shownOnly: true, circle: ring.circle ?? null, subcategories,
       });
+      // A count over a reach whose districts the census has not finished is a floor,
+      // the same way /census-ring reports it: a district never looked at, or one a
+      // run stopped part-way across, or a straddling box, all make it "N+".
+      const floorOutcodes = ring.reachOutcodes ?? ring.outcodes;
+      const { rows: seen } = await query(
+        'select area_slug, bool_and(complete) as whole from area_counts where area_slug = any($1) group by area_slug',
+        [floorOutcodes.map((o) => o.toLowerCase())]);
+      const censused = new Set(seen.map((r) => r.area_slug));
+      const notCensused = floorOutcodes.filter((o) => !censused.has(o.toLowerCase())).length;
+      const partial = seen.filter((r) => !r.whole).length;
+      const unresolved = c.unresolved?.[category] ?? 0;
       curve.push({
         minutes: m,
         count: c.counts?.[category] ?? 0,
-        unresolved: c.unresolved?.[category] ?? 0,
+        unresolved,
+        floor: notCensused > 0 || partial > 0 || unresolved > 0,
+        notCensused,
         method: ring.method ?? 'matrix',
       });
     }
