@@ -14,12 +14,19 @@ import { Approval, api, ApiError } from '../api';
 import { useSession } from '../hooks/useSession';
 import { colors, spacing, type } from '../theme';
 import { Button } from '../components/ui';
-import { Panel, ago } from './kit';
+import { AdminPage, PageHead, Panel, ago } from './kit';
 
 const numbersLine = (n: Approval['numbers']) =>
   n && typeof n === 'object' ? Object.entries(n).map(([k, v]) => `${v} ${k}`).join(', ') : '';
 
-export function Approvals() {
+/**
+ * @param standalone  On its own rail screen it always draws, with an empty
+ *   state, so the owner who clicked "Approvals" is never shown a blank page.
+ *   Embedded on the Overview it stays silent (returns null) when nothing waits.
+ * @param onCount  Reports the number in review after every load, so the rail's
+ *   "Approvals (n)" badge keeps up with an approval decided here.
+ */
+export function Approvals({ standalone = false, onCount }: { standalone?: boolean; onCount?: (n: number) => void } = {}) {
   const { access } = useSession();
   const elevated = Boolean(access?.elevated);
   const [rows, setRows] = useState<Approval[] | null>(null);
@@ -28,8 +35,12 @@ export function Approvals() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    try { setRows((await api.approvals('review')).approvals); } catch { setRows(null); }
-  }, []);
+    try {
+      const got = (await api.approvals('review')).approvals;
+      setRows(got);
+      onCount?.(got.length);
+    } catch { setRows(null); }
+  }, [onCount]);
   useEffect(() => { void load(); }, [load]);
 
   const decide = async (id: string, decision: 'approved' | 'declined') => {
@@ -49,7 +60,12 @@ export function Approvals() {
     } finally { setBusy(null); }
   };
 
-  if (!rows || (rows.length === 0 && !notice)) return null;
+  // Embedded on the Overview, stay out of the way when nothing waits. On its
+  // own rail screen, always draw — the owner who clicked "Approvals" gets an
+  // answer, not a blank page.
+  if (!standalone && (!rows || (rows.length === 0 && !notice))) return null;
+  const list = rows ?? [];
+  const empty = list.length === 0 && !notice && !error;
   return (
     <Panel title="Waiting for you" sub="An agent has asked to do something only you may authorise.">
       {error ? <Text style={[type.small, { color: colors.overrun }]}>{error}</Text> : null}
@@ -57,7 +73,10 @@ export function Approvals() {
       {!elevated ? (
         <Text style={[type.small, { color: colors.ink }]}>Sign in with your e-mail link to approve or decline these.</Text>
       ) : null}
-      {rows.map((r) => {
+      {empty ? (
+        <Text style={type.small}>Nothing is waiting for you right now. When an agent asks to do something only you may authorise, it appears here.</Text>
+      ) : null}
+      {list.map((r) => {
         const nums = numbersLine(r.numbers);
         const failed = r.state === 'failed';
         const unknown = r.state === 'unknown';
@@ -94,5 +113,23 @@ export function Approvals() {
         );
       })}
     </Panel>
+  );
+}
+
+/**
+ * The rail's Approvals screen — the panel on its own page, with a heading, so
+ * "Approvals" in the menu lands somewhere that explains itself whether or not
+ * anything is waiting (owner, 1 Oct 2026: "put the approvals list somewhere
+ * obvious"). The queue used to live only on the unlisted estate Overview.
+ */
+export function ApprovalsScreen({ onCount }: { onCount?: (n: number) => void }) {
+  return (
+    <AdminPage>
+      <PageHead
+        title="Approvals"
+        sub="Actions an agent has asked you to authorise. Approving runs the exact recorded call under your name and shows the result; declining closes it."
+      />
+      <Approvals standalone onCount={onCount} />
+    </AdminPage>
   );
 }

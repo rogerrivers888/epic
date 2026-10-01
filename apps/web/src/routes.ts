@@ -273,6 +273,12 @@ export const PROTOTYPE_SECTIONS: PrototypeSection[] = ['plan', 'places', 'trips'
  * are no longer in the rail.
  */
 export type AdminScreen =
+  /**
+   * The owner's approvals queue (G11). At the top of the rail, above the
+   * reporting folder, because it is the one back-office screen that is about an
+   * action waiting on a person rather than a number to read.
+   */
+  | 'approvals'
   | 'overview' | 'accounts' | 'households' | 'activity' | 'reporting'
   /**
    * The reporting suite (handoff "Reporting & overview", 20 Sep 2026): six
@@ -334,6 +340,7 @@ export const howAnchorOf = (raw: string | null | undefined): HowAnchor | null =>
 };
 
 export const ADMIN_SCREENS: AdminScreen[] = [
+  'approvals',
   'overview', 'accounts', 'households', 'activity', 'reporting',
   'money', 'subscriptions', 'customers', 'suppliers', 'behaviour', 'engagement',
   'places', 'demand', 'runs', 'queue',

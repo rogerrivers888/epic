@@ -17,11 +17,11 @@
  * not doing a day's work.
  */
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from '../router';
 import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from '../components/press';
-import { Access } from '../api';
+import { Access, api } from '../api';
 import { AdminScreen, filingTabOf } from '../routes';
 import { colors, spacing, type } from '../theme';
 import { Icon, IconName } from '../components/Icon';
@@ -33,6 +33,7 @@ import { Explain, Explains } from './explain';
 import { SpendAlarm } from './SpendAlarm';
 import { AccountsScreen } from '../screens/AccountsScreen';
 import { Overview } from './screens/Overview';
+import { ApprovalsScreen } from './Approvals';
 import { People } from './screens/People';
 import { Activity } from './screens/Activity';
 import { Reporting } from './screens/Reporting';
@@ -79,6 +80,16 @@ type Screen = AdminScreen;
  * atlas, the shelves and the sweep are where they were until he moves them.
  */
 const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: string; group?: string }[] = [
+  /**
+   * Approvals sits alone at the very top, above the Reporting folder, with no
+   * group heading of its own. It is the one rail item that is not a report but
+   * a thing waiting on the owner: an agent cannot spend, lift a hold or make a
+   * bulk change itself (G11), so it files the request here for the owner,
+   * signed in personally, to approve-and-run or decline. The rail draws it in
+   * lime with a count when any are waiting, so it cannot be missed (owner,
+   * 1 Oct 2026). `view_activity` is the capability behind the queue's read.
+   */
+  { key: 'approvals', label: 'Approvals', icon: 'locked', needs: 'view_activity', sub: 'What an agent has asked you to authorise' },
   /**
    * The four that used to be at the top of this rail — Overview, Accounts,
    * Households, Activity — are gone from it (owner, 20 Sep 2026: "The whole
@@ -183,7 +194,10 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
  */
 export function firstAdminScreen(access?: { capabilities?: string[] | null } | null): Screen {
   const held = new Set(access?.capabilities ?? []);
-  const item = NAV.find((n) => !n.needs || held.has(n.needs));
+  // Approvals is top of the rail but is never where the back office *begins* —
+  // it is an alert, not a landing. Begin on the first real destination (the
+  // reporting Overview for most), exactly as before Approvals joined the rail.
+  const item = NAV.find((n) => n.key !== 'approvals' && (!n.needs || held.has(n.needs)));
   return item?.key ?? 'how';
 }
 
@@ -236,6 +250,18 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
   const items = NAV.filter((n) => !n.needs || held.has(n.needs));
   const can = (c: string) => held.has(c);
 
+  // How many approvals are waiting, for the rail's "Approvals (n)" badge. Read
+  // once on mount and again whenever the screen changes (so declining one and
+  // stepping away refreshes it); the Approvals screen also reports its own
+  // count through `onCount` so a decision made there updates the badge at once.
+  const [pending, setPending] = useState(0);
+  useEffect(() => {
+    if (!held.has('view_activity')) return;
+    let live = true;
+    api.approvals('review').then((r) => { if (live) setPending(r.approvals.length); }).catch(() => {});
+    return () => { live = false; };
+  }, [held, screen]);
+
   // The back office reports its own use like every other screen: an
   // administrator's time is activity too, and leaving it out would make the
   // estate's own numbers quietly wrong.
@@ -254,6 +280,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
 
   const body = (
     <>
+      {screen === 'approvals' ? <ApprovalsScreen onCount={setPending} /> : null}
       {screen === 'overview' ? <Overview /> : null}
       {screen === 'accounts' ? <AccountsScreen /> : null}
       {screen === 'households' ? <People canManageRoles={can('manage_roles')} /> : null}
@@ -320,7 +347,12 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
             <Explain tip="railBackOffice" cursor="help"><Text style={styles.badge}>Back office</Text></Explain>
           </View>
 
-          {items.map((n, i) => (
+          {items.map((n, i) => {
+            // Approvals lights lime whenever something waits, even when it is not
+            // the open screen — the one item that is an alert, not a destination.
+            const hot = n.key === 'approvals' && pending > 0;
+            const on = lit(n.key) || hot;
+            return (
             <React.Fragment key={n.key}>
               {/* A group heading is a header, and the owner asked for a tooltip
                   on any of them (17 Sep 2026). */}
@@ -331,17 +363,20 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
               ) : null}
               <Press
                 onPress={() => setScreen(n.key)}
-                style={[styles.navItem, lit(n.key) && styles.navItemOn, n.group ? styles.navItemGrouped : null]}
+                style={[styles.navItem, on && styles.navItemOn, n.group ? styles.navItemGrouped : null]}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: lit(n.key) }}
               >
-                <Icon name={n.icon} size={15} strokeWidth={1.8} color={lit(n.key) ? colors.selectedFg : colors.ink} />
+                <Icon name={n.icon} size={15} strokeWidth={1.8} color={on ? colors.selectedFg : colors.ink} />
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.navLabel, lit(n.key) && { color: colors.selectedFg, fontWeight: '700' }]}>{n.label}</Text>
+                  <Text style={[styles.navLabel, on && { color: colors.selectedFg, fontWeight: '700' }]}>
+                    {hot ? `${n.label} (${pending})` : n.label}
+                  </Text>
                 </View>
               </Press>
             </React.Fragment>
-          ))}
+            );
+          })}
 
           <View style={{ flex: 1 }} />
 
@@ -369,18 +404,22 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
             </Press>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-            {items.map((n) => (
+            {items.map((n) => {
+              const hot = n.key === 'approvals' && pending > 0;
+              const on = lit(n.key) || hot;
+              return (
               <Press
                 key={n.key}
                 onPress={() => setScreen(n.key)}
-                style={[styles.chip, lit(n.key) && styles.chipOn]}
+                style={[styles.chip, on && styles.chipOn]}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: lit(n.key) }}
               >
-                <Icon name={n.icon} size={13} color={lit(n.key) ? colors.selectedFg : colors.ink} />
-                <Text style={[type.tiny, { color: lit(n.key) ? colors.selectedFg : colors.ink }, lit(n.key) && { fontWeight: '700' }]}>{n.label}</Text>
+                <Icon name={n.icon} size={13} color={on ? colors.selectedFg : colors.ink} />
+                <Text style={[type.tiny, { color: on ? colors.selectedFg : colors.ink }, on && { fontWeight: '700' }]}>{hot ? `${n.label} (${pending})` : n.label}</Text>
               </Press>
-            ))}
+              );
+            })}
           </ScrollView>
         </View>
       )}

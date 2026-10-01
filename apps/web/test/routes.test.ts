@@ -452,6 +452,7 @@ test('Household, Settings, Prototypes and the back office', () => {
   // resolves — see below — but it is not where the back office starts).
   assert.deepEqual(parseRoute('/admin'), { name: 'admin', screen: 'reporting' });
   // The four that left the rail all still land rather than 404.
+  assert.deepEqual(roundTrip('/admin/approvals'), { name: 'admin', screen: 'approvals' });
   assert.deepEqual(roundTrip('/admin/overview'), { name: 'admin', screen: 'overview' });
   assert.deepEqual(roundTrip('/admin/accounts'), { name: 'admin', screen: 'accounts' });
   assert.deepEqual(roundTrip('/admin/households'), { name: 'admin', screen: 'households' });
