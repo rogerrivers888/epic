@@ -3835,6 +3835,12 @@ router.post('/census/uk/lift', requires('manage_library'), async (req, res, next
 // rented copy is reported under its provider's own name.
 const OURS_BY_REF = ['osm', 'atlas', 'wikidata', 'own', 'photo', 'household', 'fixtures'];
 
+// Every source whose point we keep for good — migration 307's
+// epic_owned_sources, plus 'photo' (a household's own pin). A point whose true
+// source is one of these is ours, never rented, however its reference reads.
+const OWNED_SRC = ['osm', 'atlas', 'wikidata', 'own', 'household', 'photo', 'fixtures', 'fsa', 'historic-england', 'os-open-names'];
+const OWNED_SQL = OWNED_SRC.map((x) => `'${x}'`).join(', ');
+
 // An activity-sweep row under an atlas reference: Google's point, unless the
 // copy sits where the open map later put it (OWNED_AT). Matched or not, and
 // wherever a rematch moved it, a copy elsewhere is the old Google point
@@ -3870,6 +3876,14 @@ const RENTED_COPY = (x) => `((not (split_part(${x}.venue_ref, ':', 1) = any($1::
  * 2026, twice).
  */
 const IX_TRUE_SRC = (x) => `(case
+  -- The owned point, where one has landed, is the authority C59 built: it names
+  -- the place's true source, so it is believed over every heuristic below
+  -- (Codex, 1 Oct 2026). Matched on the point, so a later divergence cannot
+  -- mislabel a row the owned point no longer sits on.
+  when exists (select 1 from owned_points o where o.venue_ref = ${x}.venue_ref
+                 and abs(o.lat - ${x}.lat) <= 0.0005 and abs(o.lng - ${x}.lng) <= 0.0005)
+       then (select o.source from owned_points o where o.venue_ref = ${x}.venue_ref
+              and abs(o.lat - ${x}.lat) <= 0.0005 and abs(o.lng - ${x}.lng) <= 0.0005)
   when exists (select 1 from place_records r where r.venue_ref = ${x}.venue_ref and r.osm_ref is not null and r.lat is not null and r.lng is not null
                  and abs(r.lat - ${x}.lat) <= 0.0005 and abs(r.lng - ${x}.lng) <= 0.0005) then 'osm'
   when exists (select 1 from scout_places s where s.venue_ref = ${x}.venue_ref and coalesce(s.from_sources, '[]'::jsonb) ? 'osm' and s.lat is not null and s.lng is not null
@@ -3965,7 +3979,12 @@ export async function coordinateReport() {
                   when pi.lat is not null and pi.lng is not null then
                     case when pi.src = 'osm' then 'osm'
                          when pi.src in ('atlas', 'wikidata') then 'atlas'
+                         when pi.src = 'fsa' then 'fsa'
+                         when pi.src = 'historic-england' then 'historic-england'
+                         when pi.src = 'os-open-names' then 'os-open-names'
                          when pi.src in ('own', 'household', 'photo', 'fixtures') then 'own'
+                         -- Any other owned source is ours, never rented.
+                         when pi.src in (${OWNED_SQL}) then 'own'
                          -- Rented, named by whose it is: Google, or any other provider.
                          else 'rented:' || pi.src end
                   -- Only where the index holds none do the other stores speak.
@@ -4014,7 +4033,7 @@ export async function coordinateReport() {
                      min(coords_at) filter (where ${DATED}) oldest`;
     await count('place_index', 'coords_at, where its source is this point\'s', `select ${IX_OVER} from place_index where ${RENTED_IX}`);
     await count('place_index (other providers)', 'coords_at, where its source is this point\'s',
-      `select ${IX_OVER} from place_index where lat is not null and lng is not null and ${IX_SRC} not in ('osm', 'atlas', 'own', 'wikidata', 'household', 'photo', 'fixtures', 'google')`);
+      `select ${IX_OVER} from place_index where lat is not null and lng is not null and ${IX_SRC} not in (${OWNED_SQL}, 'google')`);
     // Only the index and the cells date their points. Every other table's
     // clocks move with unrelated writes — a save again, an edit — so a point
     // in them has no age this report can speak to (Codex, 30 Sep 2026): each
@@ -4088,8 +4107,13 @@ export async function coordinateReport() {
   return {
       places: {
         total: sources.reduce((n, r) => n + r.n, 0),
-        owned: { osm: of('osm'), atlas: of('atlas'), own: of('own') },
-        notYetHeld: ['fsa', 'historic-england', 'os'],
+        // Every source we keep a point from, under its own name. FSA, Historic
+        // England and OS are no longer "not yet held" once the backfill has run
+        // (owner, C59; the authority is owned_points — Codex, 1 Oct 2026).
+        owned: {
+          osm: of('osm'), atlas: of('atlas'), own: of('own'),
+          fsa: of('fsa'), 'historic-england': of('historic-england'), 'os-open-names': of('os-open-names'),
+        },
         googleOnly: of('rented:google'),
         // Rented from anybody else, by provider — never folded into Google.
         otherRented: Object.fromEntries(sources.filter((r) => r.source.startsWith('rented:') && r.source !== 'rented:google')

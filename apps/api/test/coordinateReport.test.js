@@ -64,7 +64,7 @@ test('files each place under the best point held for it, and counts old rented p
 
   const r = await coordinateReport();
   assert.equal(r.places.total, 14);
-  assert.deepEqual(r.places.owned, { osm: 4, atlas: 2, own: 1 }, 'the photo pin is the household\'s own');
+  assert.deepEqual(r.places.owned, { osm: 4, atlas: 2, own: 1, fsa: 0, 'historic-england': 0, 'os-open-names': 0 }, 'the photo pin is the household\'s own');
   assert.equal(r.places.googleOnly, 6, 'the Google-named atlas row is Google\'s, and so is the sweep row the open map never gave');
   assert.deepEqual(r.places.otherRented, { tripadvisor: 1 });
   assert.equal(r.places.none, 0, 'google:nothing has a rented point in the sweep');
@@ -92,5 +92,27 @@ test('files each place under the best point held for it, and counts old rented p
   assert.equal(r.pointsByTable.attractions.atlas, 3, 'the castle, the maze and the zoo, keyed atlas:<id>');
   assert.equal(r.rented.length, 11);
   assert.deepEqual(r.indexGoogleOver30DaysByArea, [{ area: 'TR', over30: 1 }], 'SL\'s was the open map\'s point');
+  } finally { await setTriggers(true); }
+});
+
+test('an owned point is the authority: a Google-referenced place is reported under its owned source', async () => {
+  await setTriggers(false);
+  try {
+    const before = await coordinateReport();
+    for (const [ref, src] of [['google:op-fsa', 'fsa'], ['google:op-he', 'historic-england'], ['google:op-os', 'os-open-names'], ['google:op-wd', 'wikidata'], ['google:op-osm', 'osm']]) {
+      await query(`insert into place_index (venue_ref, lat, lng, coords_from, coords_at) values ($1, 52.1, -1.2, $2, now())`, [ref, src]);
+      await query(`insert into owned_points (venue_ref, lat, lng, source, licence, method) values ($1, 52.1, -1.2, $2, 'OGL-UK-3.0', 'test')`, [ref, src]);
+    }
+    const after = await coordinateReport();
+    const up = (k, from = after.places.owned, was = before.places.owned) => (from[k] ?? 0) - (was[k] ?? 0);
+    assert.equal(up('fsa'), 1);
+    assert.equal(up('historic-england'), 1);
+    assert.equal(up('os-open-names'), 1);
+    assert.equal(up('atlas'), 1, 'wikidata is the atlas bucket');
+    assert.equal(up('osm'), 1);
+    assert.equal(after.places.googleOnly, before.places.googleOnly, 'none of the five is Google, despite its reference');
+    const idxBefore = before.rented.find((x) => x.table === 'place_index').held;
+    const idxAfter = after.rented.find((x) => x.table === 'place_index').held;
+    assert.equal(idxAfter, idxBefore, 'no new rented index point');
   } finally { await setTriggers(true); }
 });
