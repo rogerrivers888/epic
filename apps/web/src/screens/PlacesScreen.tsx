@@ -263,6 +263,18 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
   const members = household?.members ?? [];
   const [viewer, setViewer] = useState<string | null>(null);
   useEffect(() => { setViewer(getViewer(members)); return onViewerChange(setViewer); }, [members.map((m) => m.id).join(',')]);
+  // Whose ratings the rows show (SE11, per person on the server): null means
+  // everyone; "Only mine" is the signed-in person; "Choose people" is their
+  // picked set. This is what the Epic-rating figure and the "Epic rating" sort
+  // are computed from — the device-local viewer above only decides who reads
+  // as "You" in the by-line.
+  const me = household?.me ?? null;
+  const ratingsView = members.find((m) => m.id === me)?.ratingsView ?? null;
+  const allowedRaters = useMemo<ReadonlySet<string> | null>(() => {
+    if (!ratingsView || ratingsView.mode === 'all') return null;
+    if (ratingsView.mode === 'mine') return new Set(me ? [me] : []);
+    return new Set(ratingsView.who ?? []);
+  }, [me, ratingsView?.mode, (ratingsView?.who ?? []).join(',')]);
 
   // The atlas is read through the shared in-memory cache (cache/resourceCache),
   // so coming back to Places from another tab finds it already there — instant,
@@ -308,7 +320,7 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
   // fetch each of them twice (Codex, D13). All that is left to do is the
   // household, which is not one of the cached tab resources.
   const refreshAll = async () => { await refreshHousehold(); };
-  const st = useListState(places, viewer);
+  const st = useListState(places, viewer, allowedRaters);
   const ui: ListUi = { menu, setMenu, adding, setAdding, mode: add, setMode: (m) => setAdd(m, { replace: true }) };
 
   /**
@@ -410,7 +422,7 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
 
         {inArea && (city || home) && !ui.adding ? (
           <ListBody
-            st={st} ui={ui} places={places} viewer={viewer}
+            st={st} ui={ui} places={places} viewer={viewer} allowed={allowedRaters}
             city={city} homeArea={home}
             onOpen={setOpen} openRef={open?.venueRef ?? null}
             landed={landed} onLandedShown={() => setLanded(null)}
@@ -670,7 +682,7 @@ type ListUi = { menu: ListMenu; setMenu: (m: ListMenu) => void; adding: boolean;
  * rows and the panels (anchored, outside it) are three parts of one list and
  * their counts must not drift apart.
  */
-function useListState(places: AtlasPlace[], viewer: string | null) {
+function useListState(places: AtlasPlace[], viewer: string | null, allowed: ReadonlySet<string> | null = null) {
   const { query, setQuery } = useRouter();
   const [kind, setKind] = useQueryState<Kind>('kind', 'do', asOneOf(['do', 'eat', 'stay'] as const, 'do'));
   /**
@@ -729,8 +741,8 @@ function useListState(places: AtlasPlace[], viewer: string | null) {
   const rows = useMemo(
     // Sort dropped from the head (owner, 30 Sep 2026): the list holds its
     // default order, never a hidden stale ?sort= with no way to change it (Codex).
-    () => sortPlaces(inShowing.filter((p) => matchesType(p) && matchesMood(p)), 'recent', viewer),
-    [inShowing, typeF, moodF, moodShown, viewer, shown],
+    () => sortPlaces(inShowing.filter((p) => matchesType(p) && matchesMood(p)), 'recent', viewer, allowed),
+    [inShowing, typeF, moodF, moodShown, viewer, allowed, shown],
   );
 
   return {
@@ -846,8 +858,8 @@ function AddPanel({ ui, household, kind, centre, radiusKm, ctx, onAdded, onOpen,
 }
 
 /** The rows. */
-function ListBody({ st, ui, places, viewer, city, homeArea, onOpen, openRef, landed, onLandedShown }: {
-  st: ListState; ui: ListUi; places: AtlasPlace[]; viewer: string | null;
+function ListBody({ st, ui, places, viewer, allowed = null, city, homeArea, onOpen, openRef, landed, onLandedShown }: {
+  st: ListState; ui: ListUi; places: AtlasPlace[]; viewer: string | null; allowed?: ReadonlySet<string> | null;
   city: AtlasCity | null; homeArea: AtlasHome | null;
   onOpen: (p: AtlasPlace) => void; openRef: string | null;
   landed: { venueRef: string; kind: Kind } | null; onLandedShown: () => void;
@@ -883,7 +895,7 @@ function ListBody({ st, ui, places, viewer, city, homeArea, onOpen, openRef, lan
             <View style={wide ? styles.cardGrid : undefined}>
               {st.rows.map((p) => (
                 <PlaceCard
-                  key={p.venueRef} place={p} kind={st.shown} viewer={viewer} wide={wide}
+                  key={p.venueRef} place={p} kind={st.shown} viewer={viewer} allowed={allowed} wide={wide}
                   selected={openRef === p.venueRef || landed?.venueRef === p.venueRef}
                   onPress={() => { onLandedShown(); onOpen(p); }}
                 />
@@ -930,10 +942,10 @@ function ListBody({ st, ui, places, viewer, city, homeArea, onOpen, openRef, lan
  * ground, the same floor every other tab has; the outlined type glyph the row
  * used to draw was the same idea in a different frame.
  */
-function PlaceCard({ place, kind, viewer, selected, wide, onPress }: {
-  place: AtlasPlace; kind: Kind; viewer: string | null; selected: boolean; wide: boolean; onPress: () => void;
+function PlaceCard({ place, kind, viewer, allowed = null, selected, wide, onPress }: {
+  place: AtlasPlace; kind: Kind; viewer: string | null; allowed?: ReadonlySet<string> | null; selected: boolean; wide: boolean; onPress: () => void;
 }) {
-  const ours = epicRating(place, viewer);
+  const ours = epicRating(place, viewer, allowed);
   const what = typeOf(place, kind);
   // Closed (C57): the row stays — it is somewhere they kept or went — and says so first.
   // The drawer's words. Only a closure is ever marked: an unconfirmed place is

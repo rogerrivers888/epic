@@ -17,6 +17,9 @@ import type { HostFeeLine, OwnOffer } from '../../api';
 
 export const todayIso = () => new Date().toISOString().slice(0, 10);
 
+/** The session dates a series runs on — computed by the server (publicOffer.dates), never re-derived here. */
+const seriesDatesOf = (offer: OwnOffer): string[] => (Array.isArray(offer.dates) ? offer.dates : []);
+
 /** The calendar date one of this offer's bookings sits on. */
 export const dateOf = (offer: OwnOffer, occ: string | null): string | null =>
   offer.shape === 'oneoff' ? offer.startsOn
@@ -25,18 +28,34 @@ export const dateOf = (offer: OwnOffer, occ: string | null): string | null =>
 
 export type DateGroup = { on: string | null; heads: number; bookings: number; pence: number };
 
-/** This offer's non-cancelled bookings, folded by the date they run on. */
+/**
+ * This offer's place-holding bookings, folded by the date they run on. A
+ * waitlisted request holds no place and earns nothing, so it is outside the
+ * fold entirely — otherwise an over-capacity waitlist inflates the booked
+ * count, the guests and the money (Codex; /host/money keeps the same rule).
+ * A whole-series booking sits on EVERY remaining session, exactly as the
+ * server holds it active through the run, so it stays in Upcoming after the
+ * first session rather than vanishing (Codex).
+ */
 export function offerDateGroups(offer: OwnOffer): DateGroup[] {
-  const live = offer.bookings.filter((b) => b.state !== 'cancelled');
+  const live = offer.bookings.filter((b) => b.state !== 'cancelled' && b.state !== 'waitlisted');
   const by = new Map<string, DateGroup>();
-  for (const b of live) {
-    const on = dateOf(offer, b.occurrence);
+  const fold = (on: string | null, b: OwnOffer['bookings'][number], countMoney: boolean) => {
     const key = on ?? 'tbd';
     const g = by.get(key) ?? { on, heads: 0, bookings: 0, pence: 0 };
     g.heads += b.heads;
-    if (b.state !== 'waitlisted') g.bookings += 1;
-    g.pence += b.paymentStatus !== 'refunded' ? b.amountPence : 0;
+    g.bookings += 1;
+    // A whole-run booking's money is one sum for the run; count it once (on the
+    // first session) rather than once per session.
+    if (countMoney) g.pence += b.paymentStatus !== 'refunded' ? b.amountPence : 0;
     by.set(key, g);
+  };
+  for (const b of live) {
+    if (offer.shape === 'series' && b.occurrence === 'whole') {
+      const dates = seriesDatesOf(offer);
+      if (dates.length) { dates.forEach((on, i) => fold(on, b, i === 0)); continue; }
+    }
+    fold(dateOf(offer, b.occurrence), b, true);
   }
   return [...by.values()].sort((a, z) => (a.on ?? '').localeCompare(z.on ?? ''));
 }

@@ -215,15 +215,24 @@ export async function applyFood(items, { members, households, everyone, househol
       }
       continue;
     }
-    // Allergens are the UK 14; anything else can't filter, so it is dropped.
-    // A word naming two (shellfish) writes both constraints.
+    // Allergens are the UK 14. A word naming two (shellfish) writes both
+    // constraints; one naming none ("latex") can't filter, so it goes to the
+    // person's private note rather than being lost (Codex — the note exists for
+    // exactly this).
     if (it.kind === 'allergy') {
       const keys = allergenKeys(it.value);
-      if (!keys.length) continue;
       for (const m of targets) {
-        for (const key of keys) {
-          await households.upsertConstraint(m.id, { kind: 'allergen', value: key, conceptKey: null, conceptKind: null, favourite: false });
-          written.push({ memberId: m.id, kind: 'allergen', value: key });
+        if (keys.length) {
+          for (const key of keys) {
+            await households.upsertConstraint(m.id, { kind: 'allergen', value: key, conceptKey: null, conceptKind: null, favourite: false });
+            written.push({ memberId: m.id, kind: 'allergen', value: key });
+          }
+        } else {
+          const said = String(it.value).trim();
+          const already = (m.allergenNote ?? '').toLowerCase().includes(said.toLowerCase());
+          const note = already ? m.allergenNote : [m.allergenNote, said].filter(Boolean).join(', ');
+          await households.updateMember(m.id, { allergenNote: note }, householdId);
+          written.push({ memberId: m.id, kind: 'allergen-note', value: said });
         }
       }
       continue;

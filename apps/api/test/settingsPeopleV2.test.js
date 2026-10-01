@@ -232,3 +232,19 @@ test('the allergen filter speaks one dialect: gluten excludes wheat, crustaceans
   assert.deepEqual(excluded.map((v) => v.id).sort(), ['v1', 'v2'], 'old-vocabulary venue data still excludes');
   assert.deepEqual(candidates.map((v) => v.id), ['v3']);
 });
+
+test('step-free excludes only on a known no; unknown never hides; a known yes ranks up', () => {
+  const attendees = [{ id: 'm1', name: 'Maya', allergens: [], diets: [], dislikes: [], likes: [], access: ['step-free', 'accessible-toilet'] }];
+  const venues = [
+    { id: 'steps', name: 'Steps Only', allergens: [], accessibility: { stepFree: 'no' } },
+    { id: 'unknown', name: 'No Facts', allergens: [] },
+    { id: 'flat', name: 'Flat In', allergens: [], accessibility: { stepFree: 'yes', wheelchairToilet: 'yes' } },
+  ];
+  const { candidates, excluded } = applyConstraints({ venues, attendees });
+  assert.deepEqual(excluded.map((v) => v.id), ['steps'], 'a KNOWN non-step-free place is hidden');
+  assert.deepEqual(candidates.map((v) => v.id).sort(), ['flat', 'unknown'], 'no step-free fact never hides (can\'t-speak)');
+  const flat = candidates.find((v) => v.id === 'flat');
+  const unknown = candidates.find((v) => v.id === 'unknown');
+  assert.ok(flat.score > unknown.score, 'known step-free + accessible toilet ranks above no-facts');
+  assert.ok(flat.reasons.some((r) => r.kind === 'access'), 'and says why');
+});

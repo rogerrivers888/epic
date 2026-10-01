@@ -51,8 +51,12 @@ const firstName = (name: string) => (name ?? '').trim().split(/\s+/)[0] || name;
  * decimal; `viewer` is whoever this device is set to (Settings › Ratings
  * shown as), and reads as "You".
  */
-export function epicRating(p: Pick<AtlasPlace, 'scores'>, viewer: string | null): { score: number; by: string } | null {
-  const scores = p.scores ?? [];
+export function epicRating(p: Pick<AtlasPlace, 'scores'>, viewer: string | null, allowed: ReadonlySet<string> | null = null): { score: number; by: string } | null {
+  // `allowed` is the person's saved "Whose ratings to show" (SE11): null means
+  // everyone; otherwise only those members' scores are averaged — and a place
+  // none of them has rated shows no Epic rating at all.
+  const all = p.scores ?? [];
+  const scores = allowed ? all.filter((s) => allowed.has(s.memberId)) : all;
   if (!scores.length) return null;
   const score = Math.round((scores.reduce((n, s) => n + s.score, 0) / scores.length) * 10) / 10;
   if (scores.length >= 3) return { score, by: `Family · ${scores.length} ratings` };
@@ -94,8 +98,8 @@ export function whenLabel(iso: string | null | undefined, now: Date = new Date()
  * The rows in the chosen order. Ties and unknowns fall back to the name, so
  * two places nobody has scored still come in a predictable order.
  */
-export function sortPlaces(rows: AtlasPlace[], sort: PlaceSort, viewer: string | null): AtlasPlace[] {
-  const ours = (p: AtlasPlace) => epicRating(p, viewer)?.score ?? -1;
+export function sortPlaces(rows: AtlasPlace[], sort: PlaceSort, viewer: string | null, allowed: ReadonlySet<string> | null = null): AtlasPlace[] {
+  const ours = (p: AtlasPlace) => epicRating(p, viewer, allowed)?.score ?? -1;
   const by: Record<PlaceSort, (a: AtlasPlace, b: AtlasPlace) => number> = {
     az: (a, b) => a.name.localeCompare(b.name),
     ours: (a, b) => ours(b) - ours(a) || a.name.localeCompare(b.name),

@@ -49,6 +49,24 @@ function dietSupport(venue, dietSlug) {
   return false;
 }
 
+const ACCESS_WORD = { 'step-free': 'Step-free access', 'accessible-toilet': 'An accessible toilet', lift: 'A lift', quiet: 'A quiet space' };
+
+/**
+ * What a venue is KNOWN to say about an access need: true, false, or null for
+ * no fact at all. Reads the owned record's accessibility block — OSM-style
+ * 'yes'/'no'/'designated' strings or booleans. 'limited' and anything else
+ * unrecognised is null: not clearly either, so it neither boosts nor hides.
+ */
+function accessSignal(venue, need) {
+  const a = venue.accessibility || {};
+  const read = (v) => (v == null ? null : v === true || v === 'yes' || v === 'designated' ? true : v === false || v === 'no' ? false : null);
+  if (need === 'step-free') return read(a.stepFree ?? a.wheelchair ?? venue.stepFree);
+  if (need === 'accessible-toilet') return read(a.wheelchairToilet ?? a.accessibleToilet);
+  if (need === 'lift') return read(a.lift);
+  if (need === 'quiet') return read(a.quiet ?? venue.quiet);
+  return null;
+}
+
 export function applyConstraints({ venues, attendees, learned = [] }) {
   const kept = [];
   const excluded = [];
@@ -79,6 +97,26 @@ export function applyConstraints({ venues, attendees, learned = [] }) {
         excluded: true,
         exclusionReasons: allergenConflicts.map((c) => `Excluded: ${c.allergen} is an allergen for ${c.member}`),
         allergenConflicts,
+      });
+      continue;
+    }
+
+    // --- Step-free access: the one access need that EXCLUDES (SX4) — but only
+    // on a KNOWN negative. A place with no step-free fact stays in the list:
+    // hiding on absence would hide nearly everything (the can't-speak rule).
+    // The other three needs, and a known step-free yes, rank below.
+    const accessConflicts = [];
+    for (const member of attendees) {
+      if ((member.access || []).includes('step-free') && accessSignal(venue, 'step-free') === false) {
+        accessConflicts.push({ member: member.name, memberId: member.id });
+      }
+    }
+    if (accessConflicts.length > 0) {
+      excluded.push({
+        ...venue,
+        excluded: true,
+        exclusionReasons: accessConflicts.map((c) => `Excluded: no step-free access for ${c.member}`),
+        accessConflicts,
       });
       continue;
     }
@@ -119,6 +157,19 @@ export function applyConstraints({ venues, attendees, learned = [] }) {
         } else if (support === true) {
           score += 3;
           reasons.push({ kind: 'diet-ok', member: member.name, memberId: member.id, value: diet.value, text: `${diet.value} options for ${member.name}` });
+        }
+      }
+      // --- Access needs (SX4): step-free excluded above on a known no; a known
+      // yes on any need ranks the place up, a known no on the ranking three
+      // ranks it down. Unknown stays unknown, exactly as diet does.
+      for (const need of member.access || []) {
+        const signal = accessSignal(venue, need);
+        if (signal === true) {
+          score += 6;
+          reasons.push({ kind: 'access', member: member.name, memberId: member.id, value: need, text: `${ACCESS_WORD[need] ?? need} for ${member.name}` });
+        } else if (signal === false && need !== 'step-free') {
+          score -= 8;
+          reasons.push({ kind: 'access-missing', member: member.name, memberId: member.id, value: need, text: `No ${(ACCESS_WORD[need] ?? need).toLowerCase()} known for ${member.name}` });
         }
       }
     }
