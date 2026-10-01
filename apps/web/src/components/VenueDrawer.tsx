@@ -411,8 +411,13 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
     // calls nobody.
     const waitForResearch = async (since: string | null) => {
       const ref = item.venueRef;
-      for (let n = 0; n < 6 && live; n += 1) {
-        await new Promise((r) => setTimeout(r, 4000));
+      // Up to two minutes: a slow venue page can take nearly a minute on its own
+      // (own.js), and the admission answer is written only after it — a 24-second
+      // cap gave up before Free landed (Codex). The poll reads our own tables and
+      // calls nobody, so waiting longer costs nothing; it backs off to 8s after 30s.
+      const started = Date.now();
+      for (let n = 0; live && Date.now() - started < 120_000; n += 1) {
+        await new Promise((r) => setTimeout(r, n < 8 ? 4000 : 8000));
         if (!live) return;
         const held = await api.placeRecords([ref]).catch(() => null);
         const now = held?.records?.[ref];

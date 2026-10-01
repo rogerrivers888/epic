@@ -588,6 +588,7 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
   // OpenStreetMap entry five metres away, because Overpass happened to be busy
   // on the afternoon it was claimed (owner, 5 Sep 2026).
   let identified = 0;
+  let admissionFailed = false; // the owned cost-band write failed; leave the version behind
   // Going out to look for a venue's own page is the one step here that costs
   // money, so it is remembered: once a month at the very most, and never twice
   // because somebody opened the drawer twice.
@@ -774,11 +775,18 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
         // answer the drawer's cost row prefers over Google (B11). Only when the page
         // was actually read — `sourceUrl` present — so a menu-only result (the page
         // did not answer but a menu URL was found) does not overwrite a stored
-        // free answer with asked_nothing_found (Codex). A failure here is NOT
-        // swallowed: it throws into the site step's catch below, which marks the
-        // research failed so the version-5 backfill retries rather than recording the
-        // write as done without it (Codex).
-        if (site.sourceUrl) await recordAdmissionAnswer(venueRef, site.admission, { sourceUrl: site.sourceUrl });
+        // free answer with asked_nothing_found (Codex). A failed write is not
+        // recorded as done: the run is stamped one version short, so the free
+        // backfill comes round for it again — a free top-up stays `done` whatever
+        // its problems, and stamping it version 5 would never retry the write (Codex).
+        if (site.sourceUrl) {
+          try {
+            await recordAdmissionAnswer(venueRef, site.admission, { sourceUrl: site.sourceUrl });
+          } catch (err) {
+            admissionFailed = true;
+            problems.push(`the admission answer: ${String(err?.message || err).slice(0, 120)}`);
+          }
+        }
         identified += 1;
         step('venue-site', 'found', { url: site.sourceUrl ?? seed.website });
       } else {
@@ -962,7 +970,7 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
   const attempts = await owned.recordAttempt(venueRef, {
     state, error: problems.length ? problems.join('; ') : null,
     matched: topUp ? { ...(before?.matched ?? {}), ...matched } : matched,
-    researchVersion: RESEARCH_VERSION,
+    researchVersion: admissionFailed ? RESEARCH_VERSION - 1 : RESEARCH_VERSION,
   });
   const schedule = state === 'failed' ? BACKOFF_MIN : state === 'partial' ? EMPTY_BACKOFF_MIN : null;
   const giveUpAfter = state === 'failed' ? MAX_ATTEMPTS : EMPTY_BACKOFF_MIN.length + 1;
