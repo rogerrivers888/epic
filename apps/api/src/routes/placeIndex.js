@@ -1558,24 +1558,35 @@ router.get('/census-ring-curve', requires('view_library'), async (req, res, next
       // the same way /census-ring reports it: a district never looked at, or one a
       // run stopped part-way across, or a straddling box, all make it "N+".
       // Completeness is scoped to THIS category and the requested drawers — a
-      // finished Food row says nothing about a museums-only Culture curve, and an
-      // unfinished unrelated drawer must not floor a finished one (Codex).
+      // finished Food row says nothing about a museums-only Culture curve (Codex) —
+      // and a district is fully censused for the request only when EVERY requested
+      // drawer has a complete row there, not merely the ones that happen to exist.
       const floorOutcodes = ring.reachOutcodes ?? ring.outcodes;
-      const { rows: seen } = await query(
-        `select area_slug, bool_and(complete) as whole from area_counts
-          where area_slug = any($1) and category = $2
-            and ($3::text[] is null or subcategory = any($3))
-          group by area_slug`,
-        [floorOutcodes.map((o) => o.toLowerCase()), category, subcategories && subcategories.length ? subcategories : null]);
-      const censused = new Set(seen.map((r) => r.area_slug));
-      const notCensused = floorOutcodes.filter((o) => !censused.has(o.toLowerCase())).length;
-      const partial = seen.filter((r) => !r.whole).length;
+      const floorSlugs = floorOutcodes.map((o) => o.toLowerCase());
+      const reqSubs = subcategories && subcategories.length ? [...new Set(subcategories)] : null;
+      const fully = new Set();
+      if (reqSubs) {
+        // Fully censused iff a complete row exists for every requested subcategory.
+        const { rows } = await query(
+          `select area_slug, count(distinct subcategory) filter (where complete) as n
+             from area_counts where area_slug = any($1) and category = $2 and subcategory = any($3)
+            group by area_slug`, [floorSlugs, category, reqSubs]);
+        for (const r of rows) if (Number(r.n) >= reqSubs.length) fully.add(r.area_slug);
+      } else {
+        const { rows } = await query(
+          `select area_slug, bool_and(complete) as whole from area_counts
+            where area_slug = any($1) and category = $2 group by area_slug`, [floorSlugs, category]);
+        for (const r of rows) if (r.whole === true) fully.add(r.area_slug);
+      }
+      // Reach districts not fully censused for the request — never looked at, or
+      // only partly — all make the count a floor.
+      const notCensused = floorSlugs.filter((s) => !fully.has(s)).length;
       const unresolved = c.unresolved?.[category] ?? 0;
       curve.push({
         minutes: m,
         count: c.counts?.[category] ?? 0,
         unresolved,
-        floor: notCensused > 0 || partial > 0 || unresolved > 0,
+        floor: notCensused > 0 || unresolved > 0,
         notCensused,
         method: ring.method ?? 'matrix',
       });
