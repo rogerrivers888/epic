@@ -120,7 +120,7 @@ const MODE_ALIAS = {
   drive: 'driving', driving: 'driving', car: 'driving',
   walk: 'walking', walking: 'walking', foot: 'walking',
   cycle: 'cycling', cycling: 'cycling', bike: 'cycling',
-  transit: 'transit', public: 'transit', pt: 'transit',
+  transit: 'transit', public: 'transit', pt: 'transit', train: 'transit', rail: 'transit', bus: 'transit', coach: 'transit',
 };
 
 /** A caller's word for a mode, as one of the four this file models. */
@@ -225,12 +225,16 @@ export function searchRadiusKm(mode, minutes, { capKm = 50 } = {}) {
  * approved by the owner before it is used. This function stays the free default
  * until then; nothing here ever calls a paid route.
  */
-export function closeToHomeRadiusMiles({ minutes, modes = [], fallbackMiles = 10, capKm = 60 }) {
-  if (minutes == null) return fallbackMiles;
+export function closeToHomeRadiusMiles({ minutes, modes = [], capKm = 60 }) {
+  // "Any distance" (null) is unbounded — not the old 10-mile radius. A radius
+  // wide enough to hold any two points on Earth means the near-home view stops
+  // filtering by distance at all, as the setting and migration 320 intend.
+  if (minutes == null) return ANY_DISTANCE_MILES;
   const list = modes && modes.length ? modes : ['driving'];
   const km = Math.max(...list.map((m) => searchRadiusKm(m, minutes, { capKm })));
   return Math.max(1, Math.round(km / 1.60934));
 }
+export const ANY_DISTANCE_MILES = 100000;
 
 /** How far, in km, the mode plausibly reaches in the given minutes — for bounding a source query. */
 export function reachRadiusKm(mode, minutes) {

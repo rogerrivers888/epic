@@ -69,6 +69,20 @@ test('one bank is the payout account at a time', async () => {
   const otherHost = await repo.insertHost(other.household.id, { name: 'Not you', type: 'skill' });
   const theirs = await addAccount(otherHost.id, 'Lloyds', '99', true);
   assert.equal(await repo.setActivePayoutAccount(host.id, theirs.id), null, 'not one of yours');
+  // And a rejected activation must not have stood the real one down (Codex).
+  accounts = await repo.payoutAccountsOf(host.id);
+  assert.equal(accounts.filter((a) => a.is_active).length, 1, 'a failed activation leaves exactly one active');
+  assert.equal(accounts.find((a) => a.is_active).id, starling.id, 'the host still has their payout account');
+});
+
+test("a booking remembers it came through the host's own link (the 5% fee); otherwise false", async () => {
+  const { household } = await aHousehold(query, 'a host with a link');
+  const host = await repo.insertHost(household.id, { name: 'Linked', type: 'skill' });
+  const offer = await repo.insertOffer(host.id, 'oneoff');
+  const viaLink = await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2026-12-01', party: [], heads: 1, state: 'confirmed', amountPence: 10000, viaHostLink: true }, null);
+  assert.equal(viaLink.via_host_link, true);
+  const epicSurface = await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2026-12-02', party: [], heads: 1, state: 'confirmed', amountPence: 10000 }, null);
+  assert.equal(epicSurface.via_host_link, false, 'an Epic-surface booking is not a host-link booking');
 });
 
 test('a payout account payload shows only a label and the last four digits', async () => {

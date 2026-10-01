@@ -27,7 +27,6 @@ import { closeToHomeRadiusMiles } from '../domain/travel.js';
 const nearHomeMiles = (h) => closeToHomeRadiusMiles({
   minutes: h.close_to_home_minutes ?? null,
   modes: Array.isArray(h.travel_modes) ? h.travel_modes : [],
-  fallbackMiles: h.home_radius_miles ?? 10,
 });
 import { fillTaxonomy, needsTaxonomy, taxonomyKept } from '../sources/taxonomy.js';
 import { fillPhotos, needsPhoto, photosKept } from '../sources/rentedPhoto.js';

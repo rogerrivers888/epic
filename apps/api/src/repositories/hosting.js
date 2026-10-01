@@ -97,6 +97,11 @@ export async function payoutAccountsOf(hostId) {
 /** Make one account the payout account; the partial unique index keeps it to one. */
 export async function setActivePayoutAccount(hostId, accountId) {
   return withTransaction(async (client) => {
+    // Check it is this host's account BEFORE touching anything — otherwise a
+    // stale or foreign id would deactivate every valid account and then fail,
+    // leaving the host with no payout destination (Codex).
+    const { rowCount } = await client.query('select 1 from host_payout_accounts where id = $1 and host_id = $2', [accountId, hostId]);
+    if (!rowCount) return null;
     await client.query('update host_payout_accounts set is_active = false where host_id = $1', [hostId]);
     const { rows } = await client.query(
       'update host_payout_accounts set is_active = true where id = $1 and host_id = $2 returning *', [accountId, hostId]);
@@ -417,10 +422,10 @@ export async function bookingById(id) {
 export async function insertBooking(b, client) {
   const { rows } = await on(client)(
     `insert into experience_bookings (offer_id, host_id, household_id, account_id, booked_by, occurrence, party, heads, state, amount_pence,
-                                      address, access_notes, note_to_host, decide_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning *`,
+                                      address, access_notes, note_to_host, decide_by, via_host_link)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) returning *`,
     [b.offerId, b.hostId, b.householdId, b.accountId ?? null, b.bookedBy ?? null, b.occurrence ?? null, JSON.stringify(b.party ?? []), b.heads,
-      b.state, b.amountPence ?? 0, b.address ?? null, b.accessNotes ?? null, b.noteToHost ?? null, b.decideBy ?? null],
+      b.state, b.amountPence ?? 0, b.address ?? null, b.accessNotes ?? null, b.noteToHost ?? null, b.decideBy ?? null, Boolean(b.viaHostLink)],
   );
   return rows[0];
 }

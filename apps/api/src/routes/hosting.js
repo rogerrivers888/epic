@@ -451,12 +451,17 @@ router.get('/host/money', async (req, res, next) => {
     const offers = await repo.offersOfHost(host.id);
     const bookings = await repo.bookingsOfOffers(offers.map((o) => o.id));
     const live = bookings.filter((b) => b.state !== 'cancelled');
-    // The intro is the host's: active only inside their first 90 days AND first
-    // ten bookings (confirmed or attended). Applied to every line, because
-    // nothing is paid yet and there is no per-booking payment date to anchor to.
-    const bookingsSoFar = live.filter((b) => b.state === 'confirmed' || b.state === 'attended').length;
-    const intro = introState({ hostStartedAt: host.created_at, bookingsSoFar });
-    const resolve = (b) => ({ amountPence: b.amount_pence ?? 0, level: host.trust, viaHostLink: Boolean(b.via_host_link), intro });
+    // Each booking is priced by the terms in force WHEN IT WAS MADE, not a single
+    // current snapshot — otherwise the intro ending (ten bookings or 90 days)
+    // retroactively re-charges the 0% bookings (Codex). So walk the host's
+    // bookings oldest-first: the i-th booking is intro iff it was inside the
+    // first 90 days AND among the first ten. (The level rate still reads current
+    // `host.trust` — trust is not versioned historically, so past bookings move
+    // with a level change; a versioned trust ledger is the follow-on for that.)
+    const introById = new Map();
+    const chron = [...live].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    chron.forEach((b, i) => { introById.set(b.id, introState({ hostStartedAt: host.created_at, bookingsSoFar: i, now: new Date(b.created_at) })); });
+    const resolve = (b) => ({ amountPence: b.amount_pence ?? 0, level: host.trust, viaHostLink: Boolean(b.via_host_link), intro: introById.get(b.id) ?? null });
     const all = feesForPeriod(live.map(resolve));
     const byOffer = {};
     for (const o of offers) {
@@ -1557,10 +1562,13 @@ router.post('/experiences/:id/book', async (req, res, next) => {
       const price = priceFor(o, { heads, occurrence, headsNow: st.heads + heads });
       const full = Boolean(o.max_count && st.heads + heads > o.max_count);
       const state = full ? 'waitlisted' : (!o.min_count || st.heads + heads >= o.min_count) ? 'confirmed' : 'pending';
+      // Did this booking come through the host's own direct link? (The 5% fee.)
+      // True when the request carried the offer's link token, at any level.
+      const viaHostLink = Boolean(o.link_token) && str(req.query.l ?? b.linkToken, 64) === o.link_token;
       const made = await repo.insertBooking({
         offerId: o.id, hostId: host.id, householdId: household.id, accountId: currentAccount()?.id ?? null,
         bookedBy: str(b.bookedBy, 80) ?? currentAccount()?.name ?? party.find((p) => !p.child)?.name ?? null,
-        occurrence, party, heads, state, amountPence: price.pence,
+        occurrence, party, heads, state, amountPence: price.pence, viaHostLink,
         address: str(b.address, 300), accessNotes: str(b.accessNotes, 400), noteToHost: str(b.noteToHost, 600),
         decideBy: state === 'pending' ? decideBy(o, occurrence) : null,
       }, client);

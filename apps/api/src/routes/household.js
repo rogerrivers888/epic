@@ -212,6 +212,12 @@ export function toAttendees(members) {
     diets: m.diets.map(pref),
     dislikes: m.dislikes.map(pref),
     likes: m.likes.map(pref),
+    // Per-person access needs reach the ranking layer here (SX4). Step-free is
+    // meant to FILTER and the rest to RANK; the ranking's use of this is wired
+    // against per-place step-free data under an "unknown never hides" policy —
+    // see the handover note (hiding places we have no step-free fact for would
+    // empty most lists, which the can't-speak rule forbids).
+    access: Array.isArray(m.accessNeeds) ? m.accessNeeds : [],
   }));
 }
 
@@ -221,6 +227,11 @@ export function toAttendees(members) {
  */
 export async function loadLearnedPreferences(householdId) {
   const rows = await households.conceptRatings(householdId);
+  // Forget is a promise: a concept a person has set aside never comes back,
+  // however many more visits rate it (SX5). The learner consults each person's
+  // never_learn here, the one place learned preferences are derived.
+  const forget = new Map((await households.membersOf(householdId)).map(
+    (m) => [m.id, new Set((Array.isArray(m.never_learn) ? m.never_learn : []).map((w) => String(w).toLowerCase()))]));
   const now = Date.now();
   const acc = new Map();
   for (const r of rows) {
@@ -244,6 +255,10 @@ export async function loadLearnedPreferences(householdId) {
       conceptKind: conceptByKey(a.conceptKey)?.kind ?? null,
       net: Number(a.net.toFixed(2)),
     }))
+    .filter((a) => {
+      const f = forget.get(a.memberId);
+      return !f || (!f.has(String(a.label).toLowerCase()) && !f.has(String(a.conceptKey).toLowerCase()));
+    })
     .sort((x, y) => y.count - x.count);
 }
 

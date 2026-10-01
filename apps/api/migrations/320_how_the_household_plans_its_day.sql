@@ -14,7 +14,9 @@
 -- day" and is untouched. The single `travel_mode` column stays for any legacy
 -- reader; the new UI reads `travel_modes`. Additive + backfill.
 
-alter table households add column if not exists close_to_home_minutes integer;           -- NULL = any distance
+-- Default "Up to 1 hr" (SE7's default). Nullable, and NULL means a deliberate
+-- "Any distance" — never an unset new row, which the default keeps at 60.
+alter table households add column if not exists close_to_home_minutes integer default 60;
 alter table households add column if not exists travel_modes          jsonb   not null default '[]'::jsonb;
 alter table households add column if not exists day_start             smallint not null default 10;
 alter table households add column if not exists day_end               smallint not null default 18;
