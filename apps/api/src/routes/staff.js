@@ -18,13 +18,13 @@
  */
 
 import express from 'express';
-import { requires, areasFor } from '../access.js';
+import { requires, areasFor, accessOf, OWNER_ONLY_CAPABILITIES } from '../access.js';
 import {
-  backOfficeRoles, createStaffAccount, deleteStaffAccount, grantStaffRole, invalidateUnusedLinks,
+  backOfficeRoles, createStaffAccount, deleteStaffAccount, grantStaffRole,
   listStaff, removeStaffRole, setStaffRole, staffById,
 } from '../repositories/staff.js';
 import {
-  accountByEmail, accountById, createSignInLink, markLinkSent,
+  accountByEmail, accountById, createSignInLink, invalidateUnusedLinks, markLinkSent,
   normaliseEmail, revokeAccountSessions, updateAccount,
 } from '../repositories/accounts.js';
 import { roleById, roleByKey, writeAudit } from '../repositories/roles.js';
@@ -34,6 +34,19 @@ const router = express.Router();
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const bad = (message, code = 'bad_request', status = 400) => Object.assign(new Error(message), { status, code });
+
+/**
+ * Giving somebody a role that itself carries an owner-only capability
+ * (manage_staff) is the owner's alone — even for a delegate the owner trusted
+ * with manage_staff. Without this, that delegate could add or re-role a colleague
+ * onto a manage_staff-bearing role and propagate the owner-only privilege
+ * (Codex, 1 Oct 2026). Checked wherever a role is chosen here.
+ */
+function refuseOwnerOnlyRole(req, role) {
+  if ((role?.capabilities ?? []).some((c) => OWNER_ONLY_CAPABILITIES.has(c)) && !accessOf(req).isOwner) {
+    throw bad('Only the owner can grant staff management.', 'owner_only', 403);
+  }
+}
 
 /** Who is doing this. The shared passcode has no account row behind it. */
 const actor = (req) => ({ actorId: req.account?.id ?? null, actorLabel: req.account?.email ?? 'the owner (passcode)' });
@@ -166,6 +179,7 @@ router.post('/', requires('manage_staff'), async (req, res, next) => {
     if (!role || !Array.isArray(role.doors) || !role.doors.includes('admin') || role.is_owner) {
       throw bad('That is not a back-office role.', 'bad_role');
     }
+    refuseOwnerOnlyRole(req, role);
 
     const existing = await accountByEmail(email);
     let account;
@@ -219,6 +233,7 @@ router.patch('/:id/role', requires('manage_staff'), async (req, res, next) => {
     if (row.role_is_owner || row.legacy_role === 'owner') throw bad("The owner's role can't be changed.", 'owner', 409);
     const role = await roleById(req.body?.roleId);
     if (!role || !Array.isArray(role.doors) || !role.doors.includes('admin') || role.is_owner) throw bad('That is not a back-office role.', 'bad_role');
+    refuseOwnerOnlyRole(req, role);
     const before = row.role_label;
     const updated = await setStaffRole(row.id, role.id);
     await writeAudit({

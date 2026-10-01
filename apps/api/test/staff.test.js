@@ -31,11 +31,13 @@ const adminRoutes = (await import('../src/routes/admin.js')).default;
 // A tiny back office: the real router, behind a stand-in for the owner's session.
 // The door and the manage_staff capability are what server.js puts in front of
 // it; here they are simply granted, because what is under test is the router.
+const OWNER_STAFF = { isOwner: true, doors: ['client', 'admin'], capabilities: new Set(['manage_staff']) };
+let staffAccess = OWNER_STAFF; // most tests act as the owner; a few flip this per call.
 const app = express();
 app.use(express.json());
 app.use((req, res, next) => {
   req.account = { id: null, email: 'owner@epic.day' };
-  req.access = { isOwner: true, doors: ['client', 'admin'], capabilities: new Set(['manage_staff']) };
+  req.access = staffAccess;
   next();
 });
 app.use('/api/admin/staff', staffRoutes);
@@ -65,7 +67,8 @@ const OWNER = { isOwner: true, doors: ['client', 'admin'], capabilities: new Set
 const server = app.listen(0);
 await new Promise((r) => server.on('listening', r));
 const base = `http://127.0.0.1:${server.address().port}`;
-const call = async (method, path, body) => {
+const call = async (method, path, body, acc) => {
+  staffAccess = acc ?? OWNER_STAFF; // default: act as the owner; reset every call.
   const res = await fetch(base + path, {
     method,
     headers: body ? { 'content-type': 'application/json' } : {},
@@ -375,4 +378,30 @@ test('the login link e-mail says fifteen minutes and nothing about the account',
 test('areasFor lists the sections a set of capabilities opens, in order', () => {
   assert.deepEqual(access.areasFor(['view_activity', 'view_accounts']), ['People', 'Behaviour']);
   assert.deepEqual(access.areasFor([]), []);
+});
+
+test('a manage_staff delegate cannot propagate staff management through the staff routes', async () => {
+  // Even a delegate the owner trusted with manage_staff cannot hand the owner-only
+  // capability to anyone else — through add or re-role (Codex, 1 Oct 2026).
+  const DELEGATE = { isOwner: false, doors: ['client', 'admin'], capabilities: new Set(['manage_staff']) };
+  const deputy = (await rolesRepo.roleByKey('deputy')) ?? await rolesRepo.createRole({ key: 'deputy', label: 'Deputy', doors: ['client', 'admin'], capabilities: ['manage_staff'] });
+  const add = await call('POST', '/api/admin/staff', { name: 'Prop', email: 'prop@epic.day', roleId: deputy.id }, DELEGATE);
+  assert.equal(add.status, 403);
+  assert.equal(add.body.error, 'owner_only');
+
+  const tom = (await call('POST', '/api/admin/staff', { name: 'Tomm', email: 'tomm@epic.day', roleId: await roleId('support') })).body;
+  const rerole = await call('PATCH', `/api/admin/staff/${tom.staff.id}/role`, { roleId: deputy.id }, DELEGATE);
+  assert.equal(rerole.status, 403);
+  // The owner may.
+  const ok = await call('PATCH', `/api/admin/staff/${tom.staff.id}/role`, { roleId: deputy.id });
+  assert.equal(ok.status, 200);
+});
+
+test('asking for a self-serve login link voids an older unused link', async () => {
+  // The single-current-link invariant reaches the /login path too: an outstanding
+  // seven-day invite cannot still open a session after a replacement (Codex, P1).
+  const acct = await accounts.createAccount({ email: 'void@home.test', name: 'Void' });
+  const { token: older } = await accounts.createSignInLink(acct.id, { requestedBy: 'owner' });
+  await call('POST', '/api/session/request-link', { email: 'void@home.test' });
+  assert.equal(await accounts.consumeSignInLink(older), null, 'the older link no longer works');
 });

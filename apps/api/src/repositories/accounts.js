@@ -368,6 +368,23 @@ export function markLinkSent(id, { delivery, error = null, channel = null }) {
   );
 }
 
+/**
+ * Make every still-live, unused link for an account unusable.
+ *
+ * The single-current-link invariant: issuing a new link — a staff invite, or a
+ * self-serve link from /login — voids the older ones, so a leaked or forwarded
+ * invitation cannot still open a ninety-day session after a replacement was
+ * asked for. Expiring rather than deleting keeps the record of what was sent;
+ * `consumeSignInLink` already refuses an expired one.
+ */
+export function invalidateUnusedLinks(accountId) {
+  return query(
+    `update sign_in_links set expires_at = now()
+      where account_id = $1 and used_at is null and expires_at > now()`,
+    [accountId],
+  );
+}
+
 /** The most recent link for an account, so the admin screen can say what happened to it. */
 export async function lastLinkFor(accountId) {
   const { rows } = await query(

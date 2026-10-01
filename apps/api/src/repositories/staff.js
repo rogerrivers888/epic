@@ -148,17 +148,5 @@ export function deleteStaffAccount(id) {
   return query('delete from accounts where id = $1', [id]);
 }
 
-/**
- * Make every still-live link for an account unusable.
- *
- * "Send a new login link makes every older unused link for that account
- * invalid" (handover). Expiring them rather than deleting keeps the record of
- * what was sent and when; `consumeSignInLink` already refuses an expired one.
- */
-export function invalidateUnusedLinks(accountId) {
-  return query(
-    `update sign_in_links set expires_at = now()
-      where account_id = $1 and used_at is null and expires_at > now()`,
-    [accountId],
-  );
-}
+// invalidateUnusedLinks moved to repositories/accounts.js (it is a sign_in_links
+// operation, shared by the staff invite and the self-serve login path).
