@@ -75,7 +75,7 @@ test('a postcode change requeues a placed row, so settle re-resolves its country
 // locality is corrected to GB only where its slug is a GB outcode ONS knows.
 const normaliseLegacyOutcodes = () => query(`update localities loc set country_code = 'GB'
    where loc.kind = 'postcode' and upper(loc.country_code) <> 'GB'
-     and exists (select 1 from postcodes p where lower(p.outcode) = loc.slug)`);
+     and exists (select 1 from postcodes p where p.outcode = upper(loc.slug))`);
 
 test('a GB outcode wrongly stamped non-GB is normalised, so its places resolve to GB', async () => {
   const ref = 'osm:node/cfp-legacy';

@@ -1985,7 +1985,7 @@ router.patch('/place', requires('manage_library'), async (req, res, next) => {
           await client.query(
             `insert into localities (slug, name, kind, country_code)
              select $1, $2, 'postcode',
-                    case when exists (select 1 from postcodes p where lower(p.outcode) = $1) then 'GB'
+                    case when exists (select 1 from postcodes p where p.outcode = upper($1)) then 'GB'
                          else $3 end
              on conflict (slug) do nothing`,
             [lower(outcode), outcode, place?.country_code ?? 'GB']);

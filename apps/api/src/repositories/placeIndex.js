@@ -1243,7 +1243,7 @@ export async function settleCountryFromPostcode(refs = null, q = query) {
  */
 const normaliseOutcodeCountries = (q = query) => q(`update localities loc set country_code = 'GB'
    where loc.kind = 'postcode' and upper(loc.country_code) <> 'GB'
-     and exists (select 1 from postcodes p where lower(p.outcode) = loc.slug)`);
+     and exists (select 1 from postcodes p where p.outcode = upper(loc.slug))`);
 
 /** Each place takes its country from its outcode's locality, requeued so settle refiles it. */
 const correctPlaceCountriesFromPostcode = async (q = query) => {

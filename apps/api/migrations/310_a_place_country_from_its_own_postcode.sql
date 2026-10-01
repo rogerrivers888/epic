@@ -34,7 +34,9 @@ update localities loc
    set country_code = 'GB'
  where loc.kind = 'postcode'
    and upper(loc.country_code) <> 'GB'
-   and exists (select 1 from postcodes p where lower(p.outcode) = loc.slug);
+   -- p.outcode = upper(slug), not lower(p.outcode) = slug, so the postcodes(outcode)
+   -- index is used rather than scanning 1.7M rows for an unknown outcode (Codex).
+   and exists (select 1 from postcodes p where p.outcode = upper(loc.slug));
 
 update place_index pi
    set country_code = upper(loc.country_code),
