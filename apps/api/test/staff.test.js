@@ -50,16 +50,18 @@ app.use((err, req, res, _next) => res.status(err.status || 500).json({ error: er
 // to prove an Administrator (manage_roles, not the owner) cannot grant the
 // owner-only manage_staff.
 let adminAccess = { isOwner: true, doors: ['client', 'admin'], capabilities: new Set() };
+let adminSession = { auth_method: 'link' }; // personal by default; a test flips it.
 const adminApp = express();
 adminApp.use(express.json());
-adminApp.use((req, _res, next) => { req.account = { id: null, email: 'actor@epic.day' }; req.access = adminAccess; next(); });
+adminApp.use((req, _res, next) => { req.account = { id: null, email: 'actor@epic.day' }; req.access = adminAccess; req.session = adminSession; next(); });
 adminApp.use('/api/admin', adminRoutes);
 adminApp.use((err, req, res, _next) => res.status(err.status || 500).json({ error: err.code || 'error', message: err.message }));
 const adminServer = adminApp.listen(0);
 await new Promise((r) => adminServer.on('listening', r));
 const adminBase = `http://127.0.0.1:${adminServer.address().port}`;
-const adminCall = async (method, path, body, acc) => {
+const adminCall = async (method, path, body, acc, sess) => {
   adminAccess = acc;
+  adminSession = sess ?? { auth_method: 'link' }; // personal unless a test says otherwise.
   const res = await fetch(adminBase + path, { method, headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
   return { status: res.status, body: await res.json().catch(() => null) };
 };
@@ -471,6 +473,36 @@ test('manage_roles alone cannot open back-office access; that needs manage_staff
   assert.equal((await accounts.accountById(dual.id)).role_id, support, 'now staff');
   await call('DELETE', `/api/admin/staff/${dual.id}`); // personal owner session
   assert.equal((await accounts.accountById(dual.id)).role_id, power.id, 'restored to their client role, not member');
+});
+
+test('the passcode cannot open the back office through the roles endpoints either', async () => {
+  // A real-browser passcode session holds every capability (the owner's old way
+  // in), so the roles endpoints were a bypass of the personal-sign-in boundary
+  // the staff routes enforce (Codex, 1 Oct 2026). Same session, same refusal.
+  const PASSCODE = { auth_method: 'passcode' };
+  const support = await roleId('support');
+  const cust = await accounts.createAccount({ email: 'viapasscode@home.test', name: 'Via' });
+  const assign = await adminCall('PATCH', `/api/admin/people/${cust.id}/role`, { roleId: support }, OWNER, PASSCODE);
+  assert.equal(assign.status, 403);
+  assert.equal(assign.body.error, 'needs_personal');
+  const create = await adminCall('POST', '/api/admin/roles',
+    { key: 'pc_role', label: 'PC', doors: ['client', 'admin'], capabilities: [] }, OWNER, PASSCODE);
+  assert.equal(create.status, 403);
+  assert.equal(create.body.error, 'needs_personal');
+  // A pure client role is still the passcode's to edit — only the admin door is personal.
+  const client = await adminCall('POST', '/api/admin/roles',
+    { key: 'pc_client', label: 'PC client', doors: ['client'], capabilities: [] }, OWNER, PASSCODE);
+  assert.equal(client.status, 201);
+});
+
+test('personal is an allowlist: an invitation session cannot manage staff', async () => {
+  // auth_method 'invite' is nobody's personal sign-in; a denylist of just the
+  // passcode would have let it through (Codex, 1 Oct 2026).
+  const support = await roleId('support');
+  const res = await call('POST', '/api/admin/staff',
+    { name: 'Inv', email: 'inv@epic.day', roleId: support }, OWNER_STAFF, { auth_method: 'invite' });
+  assert.equal(res.status, 403);
+  assert.equal(res.body.error, 'needs_personal');
 });
 
 test('asking for a self-serve login link voids an older unused link', async () => {

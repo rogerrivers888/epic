@@ -18,7 +18,7 @@
  */
 
 import express from 'express';
-import { requires, areasFor, accessOf, OWNER_ONLY_CAPABILITIES } from '../access.js';
+import { requires, areasFor, accessOf, isPersonalSession, OWNER_ONLY_CAPABILITIES } from '../access.js';
 import {
   backOfficeRoles, createStaffAccount, deleteStaffAccount, grantStaffRole,
   listStaff, removeStaffRole, setStaffRole, staffById,
@@ -55,13 +55,13 @@ const actor = (req) => ({ actorId: req.account?.id ?? null, actorLabel: req.acco
 /**
  * Managing staff is a personal act. The shared passcode may read the list and
  * claim the owner account (the bootstrap below), but adding, re-roling,
- * suspending or removing staff needs a real sign-in — so a leaked passcode, or a
- * coding agent that happens to hold manage_staff, cannot create back-office
- * access. A magic-link or Google session is personal; the passcode is not
- * (auth_method, migration 264 / G11).
+ * suspending or removing staff needs a real sign-in — so a leaked passcode, an
+ * invitation session, or a coding agent that happens to hold manage_staff,
+ * cannot create back-office access. Personal is the allowlist in access.js — a
+ * magic link, or Google — never "anything but the passcode" (Codex, 1 Oct 2026).
  */
 function requirePersonal(req, res, next) {
-  if (req.session?.auth_method === 'passcode') {
+  if (!isPersonalSession(req.session)) {
     return res.status(403).json({
       error: 'needs_personal',
       message: 'Sign in as yourself to manage staff. Claim your owner account and follow the login link.',

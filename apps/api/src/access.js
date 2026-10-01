@@ -82,6 +82,16 @@ export const CAPABILITY_KEYS = new Set(CAPABILITIES.map((c) => c.key));
 export const OWNER_ONLY_CAPABILITIES = new Set(['manage_staff']);
 
 /**
+ * A session somebody signed into as themselves: a magic link, or Google once it
+ * lands. An allowlist, not "anything but the passcode" — an invitation or code
+ * session is also nobody's personal sign-in, and a denylist quietly admits
+ * every method added later (Codex, 1 Oct 2026). The one definition of
+ * "personal"; `accessFor` and every personal-only door read it.
+ */
+export const PERSONAL_AUTH_METHODS = new Set(['link', 'google']);
+export const isPersonalSession = (session) => PERSONAL_AUTH_METHODS.has(session?.auth_method);
+
+/**
  * What an agent session may do: read everything, change nothing (G11, 1 Oct
  * 2026). The owner asked that agents "read, test, propose" — no spending, no
  * lifting holds, no paid grants, no bulk production changes. Tests run on the
@@ -148,7 +158,7 @@ export async function accessFor(req) {
   // from a real device — never the shared passcode, never automated. This is
   // what a privileged action requires (G11), and it is a property of *how* this
   // session signed in, so it is computed here from the session.
-  const personal = session?.auth_method === 'link' || session?.auth_method === 'google';
+  const personal = isPersonalSession(session);
   const notAutomated = session?.kind !== 'agent' && session?.kind !== 'service';
   const elevated = Boolean(base.isOwner && personal && notAutomated);
 

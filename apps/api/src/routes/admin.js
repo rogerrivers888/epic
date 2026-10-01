@@ -15,7 +15,7 @@
  */
 
 import express from 'express';
-import { CAPABILITIES, DOORS, OWNER_ONLY_CAPABILITIES, accessOf, can, requires, requireOwnerSignedIn } from '../access.js';
+import { CAPABILITIES, DOORS, OWNER_ONLY_CAPABILITIES, accessOf, can, isPersonalSession, requires, requireOwnerSignedIn } from '../access.js';
 import * as activity from '../repositories/activity.js';
 import * as insights from '../repositories/insights.js';
 import * as rolesRepo from '../repositories/roles.js';
@@ -65,8 +65,16 @@ function refuseOwnerOnlyGrant(req, capabilities) {
  * taken away, or toggled on a role.
  */
 function needManageStaff(req, touchesAdminDoor) {
-  if (touchesAdminDoor && !can(req, 'manage_staff')) {
+  if (!touchesAdminDoor) return;
+  if (!can(req, 'manage_staff')) {
     throw Object.assign(new Error('Changing back-office access needs staff management; ask the owner.'), { status: 403, code: 'needs_manage_staff' });
+  }
+  // And done as yourself: a real-browser passcode session holds every
+  // capability, so without this it could open or close the back office through
+  // the roles endpoints while the staff routes refuse it — the same boundary,
+  // bypassed one door over (Codex, 1 Oct 2026).
+  if (!isPersonalSession(req.session)) {
+    throw Object.assign(new Error('Sign in as yourself to change back-office access. Claim your owner account and follow the login link.'), { status: 403, code: 'needs_personal' });
   }
 }
 const opensAdmin = (doors) => Array.isArray(doors) && doors.includes('admin');
