@@ -332,10 +332,15 @@ export function admissionFrom(html, node = {}) {
       // semicolon INTRODUCES the restriction — "Free entry: members only", "Members:
       // free admission" — so it must stay inside the window or the qualifier is lost
       // and a paid venue reads Free (Codex). Terminators are . ! ? alone.
-      const tail = flat.slice(m.index + m[0].length, m.index + m[0].length + 80);
+      // And the whole sentence, not a fixed window: "Members of the National Trust and
+      // English Heritage currently receive free admission" puts its qualifier 60
+      // characters ahead, and a 40-character lead read it as universal (Codex). A
+      // page with no terminators at all makes the sentence long, which only ever
+      // bars more — the conservative side, since a missed Free falls back to Google.
+      const tail = flat.slice(m.index + m[0].length);
       const afterEnd = tail.search(/[.!?]/);
       const after = afterEnd >= 0 ? tail.slice(0, afterEnd) : tail;
-      const lead = flat.slice(Math.max(0, m.index - 40), m.index);
+      const lead = flat.slice(0, m.index);
       const before = lead.slice(lead.search(/[.!?][^.!?]*$/) + 1);
       const barred = (x) => QUALIFIED.test(x) || TEMPORAL.test(x);
       if (!barred(after) && !barred(before)) { found.free = true; break; }

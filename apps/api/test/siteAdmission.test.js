@@ -87,3 +87,11 @@ test('a zero-priced offer for one ticket type is not a free place', () => {
   const c = admissionFrom('<p></p>', { offers: [{ price: 0, name: 'General admission' }] });
   assert.equal(c?.free, true, 'a free general ticket does');
 });
+
+test('a qualifier anywhere in the same sentence disqualifies the claim', () => {
+  // Not a fixed window either side: the qualifier can sit a long way off (Codex).
+  assert.equal(free('<p>Members of the National Trust and English Heritage currently receive free admission.</p>'), false);
+  assert.equal(free('<p>Free admission to the house and the walled gardens and the woodland walks with an annual pass.</p>'), false);
+  // The neighbouring sentence still does not count.
+  assert.equal(free('<p>Members of the National Trust and English Heritage can park here. Admission is free.</p>'), true);
+});
