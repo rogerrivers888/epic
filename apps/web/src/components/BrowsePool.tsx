@@ -94,6 +94,14 @@ export function BrowsePool({ items, eventsSource, baseLabel, country, pinned, bu
     const order = tab === 'food' ? PRICE_ORDER : Object.values(ADMISSION_LABEL);
     return [...c.entries()].sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
   }, [inTab, tab]);
+  // Are there food places with no band? They are kept in the results (B11) but not
+  // shown a chip — and their presence is the reason a single known band is still
+  // worth offering: selecting it narrows to that band and drops the unpriced ones,
+  // the filtering the old "No price given" bucket used to enable (Codex).
+  const hasUnpriced = useMemo(() => tab === 'food' && inTab.some((b) => priceBand(b) == null), [inTab, tab]);
+  // Worth showing the price controls when there is a choice to make: more than one
+  // band, or one band alongside unpriced places you might want to exclude.
+  const showPrices = priceList.length > 1 || (priceList.length === 1 && hasUnpriced);
 
   const sf = useSourceFilter(inTab);
   const list = useMemo(() => {
@@ -131,7 +139,7 @@ export function BrowsePool({ items, eventsSource, baseLabel, country, pinned, bu
           {facets.size ? <Chip label="Clear" onPress={() => setFacets(new Set())} /> : null}
         </Wrap>
       ) : null}
-      {priceList.length > 1 ? (
+      {showPrices ? (
         <View style={{ gap: 4 }}>
           <Wrap>
             <Text style={[type.tiny, { alignSelf: 'center' }]}>{tab === 'food' ? 'Price' : 'Entry'}</Text>
