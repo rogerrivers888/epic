@@ -7,7 +7,7 @@ import { useScrollMemory } from '../cache/resourceCache';
 import { TallBand, MicTile } from '../components/Band';
 import { InkMenu } from '../components/InkMenu';
 import { SectionHeader } from '../components/NavRows';
-import { VenueThumb } from '../components/VenueThumb';
+import { VenueThumb, MEDIA_RADIUS } from '../components/VenueThumb';
 import { StatusLine } from '../components/ui';
 // The name the household wrote is what a row says (1a: "Windsor Saturday",
 // "Thorpe Park with the kids"). `tripTitle` is that name, with the one repair
@@ -239,17 +239,17 @@ function TripRow({ trip, onPress, onHold }: { trip: TripSummary; onPress: () => 
       onPress={onPress}
       onLongPress={onHold}
       delayLongPress={400}
-      style={styles.row}
+      style={styles.card}
       accessibilityRole="button"
       accessibilityLabel={`${tripTitle(trip)}. Hold for rename, share and delete`}
     >
-      {/* 84 at 1.6 (owner, 8 Sep 2026: "increase image size 60%", on Trips as
-          on Inspire) — a trip is remembered by where it went, and the picture
-          is the fastest way to say it. The width is that 134; the shape is the
-          one every photograph now has (9 Sep 2026): 3:2 and rounded, not a
-          square with square corners. */}
-      <VenueThumb name={tripTitle(trip)} image={trip.image} category={null} width={134} height={89} credit={false} />
-      <View style={styles.rowBody}>
+      {/* A trip is remembered by where it went, and the picture is the fastest
+          way to say it — so it is the full-width photograph on top now, the same
+          size the browse and Inspire cards use (owner, 1 Oct 2026: "everywhere I
+          go, I want them to be this size"). 3:2 and rounded, as every photograph
+          is (9 Sep 2026). */}
+      <VenueThumb name={tripTitle(trip)} image={trip.image} category={null} fill credit={false} rounded={MEDIA_RADIUS} />
+      <View style={styles.cardBody}>
         <Text style={styles.name} numberOfLines={2}>{tripTitle(trip)}</Text>
         <Text style={styles.meta} numberOfLines={1}>{meta}</Text>
         <Text style={[styles.status, status.strong && styles.statusOn]} numberOfLines={1}>{status.text}</Text>
@@ -270,6 +270,10 @@ const styles = StyleSheet.create({
 
   row: { flexDirection: 'row', gap: 14, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
   rowBody: { flex: 1, minWidth: 0, gap: 4 },
+  // A trip is a full-width top-image card now (owner, 1 Oct 2026) — the picture
+  // on top at the one shared size, the words under it, spaced rather than ruled.
+  card: { gap: 10, paddingTop: 14, paddingBottom: 18 },
+  cardBody: { gap: 4 },
   name: { fontFamily: fonts.body, fontSize: 16, fontWeight: '600', color: colors.ink },
   meta: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted },
   // Moss for something coming, grey for something that is not — the handoff's

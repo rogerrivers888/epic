@@ -29,7 +29,7 @@ import { Press } from '../components/press';
 import { MapGL } from '../components/MapGL';
 import type { MapMarker, MapRoute } from '../components/MapGL';
 import { VenueDrawer } from '../components/VenueDrawer';
-import { VenueThumb, MEDIA_RADIUS } from '../components/VenueThumb';
+import { VenueThumb, MEDIA_RADIUS, CARD_W, CARD_H } from '../components/VenueThumb';
 import { ScanOverlay } from '../components/ScanOverlay';
 import { CompactBand, MicTile } from '../components/Band';
 import { InkMenu } from '../components/InkMenu';
@@ -1299,9 +1299,9 @@ function FeedView({ feed, trip, tab, detour, by, onBy, minsOpen, filtersOpen, po
 
 // Every card is the large top-row size now (owner, 30 Sep 2026: "all the images
 // the same size as the top row"). The 160-wide small card is gone; each row is
-// the same 280×187 picture, whichever shelf it is.
-const CARD_W = 280;
-const CARD_H = 187;
+// the same 280×187 picture, whichever shelf it is — and that size is the shared
+// CARD_W/CARD_H from VenueThumb, so Inspire, Places and the trip list match it
+// (owner, 1 Oct 2026: "everywhere I go, I want them to be this size").
 function FeedCardView({ card, on, onHeart, onOpen }: { card: FeedCard; on: boolean; onHeart: (c: FeedCard, chip?: Element | null) => void; onOpen: (ref: string) => void }) {
   return (
     <View style={{ width: CARD_W, gap: 8 }}>

@@ -103,8 +103,12 @@ export const PHOTO_W = 480;
  */
 export const MEDIA_RADIUS = 12;
 export const MEDIA_RATIO = 3 / 2;
-/** "Cards 208px wide, fixed 3:2 media" — Inspire's card, now everyone's. */
-export const CARD_W = 208;
+/**
+ * One card size everywhere (owner, 1 Oct 2026: "everywhere I go, I want them to
+ * be this size"). 280px wide, fixed 3:2 media — the size the trip-browse top
+ * row settled on (30 Sep 2026), now Inspire's, Places' and the trip list's too.
+ */
+export const CARD_W = 280;
 export const CARD_H = Math.round(CARD_W / MEDIA_RATIO);
 /** The height a photograph takes at a given width. */
 export const mediaHeight = (width: number) => Math.round(width / MEDIA_RATIO);
