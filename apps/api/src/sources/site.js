@@ -233,6 +233,16 @@ const TEMPORAL = new RegExp([
   'only', 'special\\s+offer', 'promotion', 'open\\s+days?', 'launch',
 ].map((p) => `(?:${p})`).join('|').replace(/^/, '\\b(?:').concat(')'), 'i');
 
+// The words that may stand before a free claim in its own sentence (see admissionFrom).
+const LEAD_WORDS = new Set([
+  'there', 'is', 'are', 'it', "it's", 'its', 'the', 'our', 'this', 'general', 'standard', 'and', 'to',
+  'entry', 'admission', 'entrance', 'all', 'always', 'everyone', 'everybody', 'visitors', 'visitor',
+  'completely', 'totally', 'entirely', 'absolutely', 'still', 'also', 'yes', 'good', 'news',
+  'park', 'parks', 'garden', 'gardens', 'museum', 'gallery', 'galleries', 'house', 'grounds', 'site',
+  'castle', 'church', 'cathedral', 'abbey', 'reserve', 'nature', 'wood', 'woods', 'woodland', 'beach',
+  'country', 'exhibition', 'exhibitions', 'collection', 'collections', 'permanent', 'main',
+]);
+
 const flatten = (html) => String(html)
   .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
   .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
@@ -348,7 +358,17 @@ export function admissionFrom(html, node = {}) {
       const lead = flat.slice(0, m.index);
       const before = lead.slice(lead.search(/[.!?][^.!?]*$/) + 1);
       const barred = (x) => QUALIFIED.test(x) || TEMPORAL.test(x);
-      if (!barred(after) && !barred(before)) { found.free = true; break; }
+      // Who gets it is said before the claim, and that list has no end — "Disabled
+      // visitors receive free admission", "Competition winners receive free
+      // admission" (Codex). So the lead is an allowlist, not a denylist: only words
+      // that name the place or say it is open to all may stand before the claim in
+      // its sentence; anything else and it is somebody's free, and Google's level
+      // stands. A free place named only by its proper name ("Kew is free") falls
+      // back too — the cheap side of being wrong.
+      const leadOk = (before.toLowerCase().match(/[a-z']+/g) ?? []).every((w) => LEAD_WORDS.has(w));
+      // And after: "free entry for <someone>" names an audience unless it is everyone.
+      const forSomeone = /^\s*for\s+(?!(?:everyone|everybody|all)\b)/i.test(after);
+      if (leadOk && !forSomeone && !barred(after) && !barred(before)) { found.free = true; break; }
     }
   }
   // A place that charges is not free, whatever a "free parking" line elsewhere

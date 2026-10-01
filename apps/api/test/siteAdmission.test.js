@@ -104,3 +104,12 @@ test('a short-lived free offer is not a standing free entry', () => {
   assert.equal(free('<p>Free entry on our open day.</p>'), false);
   assert.equal(free('<p>Free entry every day of the year.</p>'), true, 'a standing claim survives');
 });
+
+test('an audience the guard has never heard of still bars the claim', () => {
+  // The lead is an allowlist: anybody named before the claim makes it somebody's free.
+  assert.equal(free('<p>Disabled visitors receive free admission.</p>'), false);
+  assert.equal(free('<p>Competition winners receive free admission.</p>'), false);
+  assert.equal(free('<p>Free entry for disabled visitors.</p>'), false);
+  assert.equal(free('<p>There is free entry for everyone.</p>'), true);
+  assert.equal(free('<p>The museum and gardens: free entry, all year round.</p>'), true);
+});
