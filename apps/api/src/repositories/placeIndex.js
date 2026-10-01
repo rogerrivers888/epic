@@ -1218,7 +1218,7 @@ end)`;
  * (migration 184) cannot touch it.
  *
  * Pass the refs being settled, or null for the whole corpus (the one-time backfill
- * migration 310 does the same thing in SQL). Returns how many rows it corrected.
+ * migration 311 does the same thing in SQL). Returns how many rows it corrected.
  */
 export async function settleCountryFromPostcode(refs = null, q = query) {
   const scope = refs ? 'and pi.venue_ref = any($1) and r.venue_ref = any($1)' : '';
@@ -1275,7 +1275,7 @@ const correctPlaceCountriesFromPostcode = async (q = query) => {
 
 /**
  * The whole-corpus country correction, repeatable — run after the ONS postcode load
- * (loadPostcodes.js) as well as once by migration 310 (owner, 1 Oct 2026; Option C).
+ * (loadPostcodes.js) as well as once by migration 311 (owner, 1 Oct 2026; Option C).
  * It has to be repeatable because `postcodes` is empty until `npm run postcodes`
  * runs, which on a fresh install is after the migrations, so the migration alone
  * would match nothing and never run again (Codex). It normalises the localities,

@@ -2,7 +2,7 @@
  * A place's country from its own postcode (settleCountryFromPostcode; owner, 1 Oct
  * 2026, Option C). The durable postcode is owned and permanent where the coordinate
  * is rented and the country_code stamp is a copy, so its outcode's locality country
- * wins over a disagreeing stamp and fills a null one. Migration 310 does the same
+ * wins over a disagreeing stamp and fills a null one. Migration 311 does the same
  * one-time over the existing corpus; this exercises the ongoing path settle runs.
  */
 
@@ -71,7 +71,7 @@ test('a postcode change requeues a placed row, so settle re-resolves its country
   assert.equal(pi.placed_at, null, 'the postcode change requeued the place for settling');
 });
 
-// Migration 310's normalisation, run against the test's own data: a postcode
+// Migration 311's normalisation, run against the test's own data: a postcode
 // locality is corrected to GB only where its slug is a GB outcode ONS knows.
 const normaliseLegacyOutcodes = () => query(`update localities loc set country_code = 'GB'
    where loc.kind = 'postcode' and upper(loc.country_code) <> 'GB'
