@@ -26,7 +26,7 @@ import { query, withTransaction } from '../db.js';
 import * as index from '../repositories/placeIndex.js';
 import { decodeEntities } from '../repositories/placeIndex.js';
 import { phoneOf } from '../domain/contact.js';
-import { censusInRing, censusByOutcodeSum, placingPoints, whereBoxSits, whereBoxSitsInCircle, nearestSector } from '../repositories/censusRing.js';
+import { censusInRing, censusByOutcodeSum, placingPoints, whereBoxSits, whereBoxSitsInCircle, nearestSector, widthOf, FINE_M } from '../repositories/censusRing.js';
 import { TEXT_QUESTIONS, textStillAsked } from '../sources/censusQuestions.js';
 import { ownSite } from '../sources/logo.js';
 import * as reach from '../repositories/reach.js';
@@ -1230,7 +1230,13 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
     if (!ringOuter || !ringInner) return res.status(400).json({ error: 'where_required' });
     const outerBand = new Set(ringOuter.band ?? ringOuter.cells);
     const innerBand = new Set(ringInner.band ?? ringInner.cells);
-    const slugs = ringOuter.outcodes.map((o) => o.toLowerCase());
+    // Both rings' districts: if a mode's matrix reaches the inner band but not the
+    // outer (the outer then falls back to a straight-line circle), the two shapes
+    // need not nest, so a place inside the inner matrix but outside the outer circle
+    // would be dropped from the candidate query and the inner count understated
+    // (Codex). The union covers both; the per-place membership test still decides
+    // each band.
+    const slugs = [...new Set([...ringOuter.outcodes, ...ringInner.outcodes].map((o) => o.toLowerCase()))];
 
     const { rows: sectors } = await query(
       'select code, lat, lng, upper(outcode) as outcode from geo_cells where lower(outcode) = any($1)', [slugs]);
@@ -1298,8 +1304,18 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
         e.inInner = innerMember.slice(e.slice);
         e.inOuter = outerMember.slice(e.slice);
         const bx = boxFrom(e.slice);
-        const s = bx ? nearestSector({ lat: (bx.minLat + bx.maxLat) / 2, lng: (bx.minLng + bx.maxLng) / 2 }, universe) : null;
-        e.code = s?.code ?? null; e.outcode = s?.outcode ?? null; e.placed = 'slice';
+        // A box under the fine width is placed by its centre, as the census does; a
+        // wider one can span several districts, so it is not attributed to its
+        // midpoint's district — it is marked ambiguous rather than falsely blaming
+        // one district for the jump (Codex). Its sector (for the drive time) is left
+        // null, since a wide box has no single one.
+        if (bx && widthOf(bx) <= FINE_M) {
+          const s = nearestSector({ lat: (bx.minLat + bx.maxLat) / 2, lng: (bx.minLng + bx.maxLng) / 2 }, universe);
+          e.code = s?.code ?? null; e.outcode = s?.outcode ?? null;
+        } else {
+          e.code = null; e.outcode = '(wide slice — multiple districts)';
+        }
+        e.placed = 'slice';
       }
     }
     const entries = [...byRef.entries()];
@@ -1320,23 +1336,31 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
     const sample = added.slice(0, sampleN).map(([venueRef, e]) => ({ venueRef, e }));
     const codes = [...new Set(sample.map((s) => s.e.code).filter(Boolean))];
     const mins = new Map();
-    if (codes.length) {
+    // Only a matrix-backed outer ring has real journey minutes to read. A
+    // straight-line ring has none (and leftover reverse-edge reach rows must not be
+    // served as if it did), so its sample minutes stay null (Codex).
+    if (codes.length && ringOuter.method !== 'straight-line') {
       const { rows: mr } = await query(
         'select to_cell, minutes from reach where from_cell = $1 and mode = $2 and to_cell = any($3)',
         [ringOuter.cell, mode, codes]);
       for (const r of mr) mins.set(r.to_cell, r.minutes);
     }
     const refs = sample.map((s) => s.venueRef);
+    const refSet = new Set(refs);
     const names = new Map();
     if (refs.length) {
       // Owned atlas names only — never a rented Google name (display_source
-      // 'google'), and matched on both an atlas ref form and a plain venue_ref, the
-      // way every other place-index read resolves the atlas (Codex).
+      // 'google'), matched on both ref forms. Keyed by whichever form the sample
+      // actually used, so an atlas place that also carries a provider ref is still
+      // found when the sample refers to it as `atlas:<id>` (Codex).
       const { rows: nr } = await query(
-        `select coalesce(venue_ref, 'atlas:' || id::text) as ref, name from attractions
+        `select venue_ref, 'atlas:' || id::text as atlas_ref, name from attractions
           where (venue_ref = any($1) or 'atlas:' || id::text = any($1))
             and name is not null and state <> 'hidden' and display_source is distinct from 'google'`, [refs]).catch(() => ({ rows: [] }));
-      for (const r of nr) names.set(r.ref, r.name);
+      for (const r of nr) {
+        if (r.venue_ref && refSet.has(r.venue_ref)) names.set(r.venue_ref, r.name);
+        if (refSet.has(r.atlas_ref)) names.set(r.atlas_ref, r.name);
+      }
     }
 
     res.json({
