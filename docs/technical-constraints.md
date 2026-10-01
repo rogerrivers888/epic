@@ -909,6 +909,8 @@ Cost is the central commercial risk: provider content cannot be retained between
 
 **Instrumentation to build alongside:** cost per session, cost per household per period, and cost per source. Without these the source rationalisation planned for V2 has no evidence base.
 
+**The paid paths earn the most review — they are reviewed adversarially, not merely tested** (owner, 1 Oct 2026). The cost-band distribution runner — a background job that buys one Place Details per place — took eight Codex rounds to land, and every round found a spend-correctness fault the passing suite did not show: a re-census that let a run spend beyond the set it was priced on; two workers racing the same run into a double charge; a transient failure that could not resume and so re-paid everything; a dedicated connection held per run that could deadlock the pool; a reclaim that charged the wrong household; a reclaim that skipped the confirm gate; and a lease-expiry window that let two workers issue the same lookup. So any code path that spends money — a loop that calls a provider, a lease that lets a job resume, a gate that authorises spend — is read with the question "how does this bill twice, bill the wrong account, or bill past what was agreed", and the answer has to be in the code rather than in the hope that the happy path holds. A green suite is necessary and not sufficient here.
+
 ---
 
 ## 15. Legal, licensing and permissions register
