@@ -1537,8 +1537,8 @@ router.get('/census-ring-curve', requires('view_library'), async (req, res, next
     // completeness check, so a retired drawer never inflates a count the floor check
     // treats as complete, and an unknown category is a 400 rather than a confident
     // zero (Codex).
-    const { rows: [cat] } = await query('select key from shelf_categories where key = $1', [category]);
-    if (!cat) return res.status(400).json({ error: 'unknown_category', message: `No such category: ${category}` });
+    const { rows: [cat] } = await query('select key from shelf_categories where key = $1 and active', [category]);
+    if (!cat) return res.status(400).json({ error: 'unknown_category', message: `No such active category: ${category}` });
     const { rows: activeSubs } = await query('select key from shelf_subcategories where category_key = $1 and active', [category]);
     const activeKeys = new Set(activeSubs.map((r) => r.key));
     let reqSubs;
@@ -1604,11 +1604,14 @@ router.get('/census-ring-curve', requires('view_library'), async (req, res, next
       // there is nothing to be incomplete.)
       const notCensused = reqSubs.length ? floorSlugs.filter((s) => !fully.has(s)).length : 0;
       const unresolved = c.unresolved?.[category] ?? 0;
+      // A matched place with neither a point nor a box cannot be placed in the ring;
+      // it is left out of the count, so a non-zero one makes the count a floor too.
+      const unplaceable = c.unplaceableByCategory?.[category] ?? 0;
       curve.push({
         minutes: m,
         count: c.counts?.[category] ?? 0,
         unresolved,
-        floor: notCensused > 0 || unresolved > 0,
+        floor: notCensused > 0 || unresolved > 0 || unplaceable > 0,
         notCensused,
         method: ring.method ?? 'matrix',
       });

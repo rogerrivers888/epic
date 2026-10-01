@@ -298,7 +298,16 @@ export function sectorsOfBox(box, universe) {
   const inside = typeof universe?.within === 'function'
     ? universe.within(box)
     : (Array.isArray(universe) ? universe.filter((p) => p.lat >= box.minLat && p.lat <= box.maxLat && p.lng >= box.minLng && p.lng <= box.maxLng) : []);
-  for (const p of inside) note({ code: p.code, outcode: p.outcode ?? null });
+  // One owner per location: two points at the same spot with different sector codes
+  // resolve, as `nearestSector` does, to the lexicographically lower code — so a
+  // collocated pair does not invent a second sector and a false straddle (Codex).
+  const byLoc = new Map();
+  for (const p of inside) {
+    const k = `${p.lat},${p.lng}`;
+    const prev = byLoc.get(k);
+    if (!prev || p.code < prev.code) byLoc.set(k, p);
+  }
+  for (const p of byLoc.values()) note({ code: p.code, outcode: p.outcode ?? null });
   for (const p of cornersOf(box)) note(nearestSector(p, universe));
   if (!codes.size) return { kind: 'nowhere' };
   if (codes.size === 1) return { kind: 'inside', code: one.code, outcode: one.outcode ?? null };
@@ -389,6 +398,7 @@ export async function censusInRing({ cells = [], outcodes = [], shownOnly = fals
     map.get(category).add(ref);
   };
   let own = 0; let bySlice = 0; let unplaceable = 0;
+  const unplaceableBy = new Map();
   const seenOwn = new Set(); const seenSlice = new Set();
   const boxes = { inside: 0, outside: 0, across: 0 };
 
@@ -399,7 +409,10 @@ export async function censusInRing({ cells = [], outcodes = [], shownOnly = fals
       if (ownInside(Number(r.lat), Number(r.lng))) add(counted, r.category, r.venue_ref);
       continue;
     }
-    if (!r.slice) { unplaceable += 1; continue; }
+    // Neither a point nor a box: it matched the drawers but cannot be placed, so it
+    // is left out of the count and recorded per category — a count beside a non-zero
+    // one of these is a floor, since an in-ring place may be missing (Codex).
+    if (!r.slice) { unplaceable += 1; add(unplaceableBy, r.category, r.venue_ref); continue; }
     if (!seenSlice.has(r.venue_ref)) { seenSlice.add(r.venue_ref); bySlice += 1; }
     const v = verdictOf(r.slice);
     if (v === 'inside') add(counted, r.category, r.venue_ref);
@@ -421,6 +434,7 @@ export async function censusInRing({ cells = [], outcodes = [], shownOnly = fals
     unresolved: Object.fromEntries([...unresolved].map(([k, set]) => [k, set.size])),
     placed: { own, slice: bySlice },
     unplaceable,
+    unplaceableByCategory: Object.fromEntries([...unplaceableBy].map(([k, set]) => [k, set.size])),
     boxes,
     // The boxes themselves that fell across the edge, as rectangles: what a
     // finer census of the edge re-asks (sources/censusEdge.js). One per
