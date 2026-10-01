@@ -1,15 +1,19 @@
 /**
  * The read-only measurement behind the church / landmark / monument narrowing
- * proposal (owner, 1 Oct 2026). PROPOSE ONLY — nothing here writes, hides, or
- * changes filing. It counts what the Culture census holds now, and what the
- * notability predicate (domain/narrowing.js) would keep and drop, with examples
- * of each, so the owner can judge the rule before it is applied (H1).
+ * (Option 2, owner, 1 Oct 2026). This module MEASURES ONLY — it writes nothing
+ * and hides nothing (applying is repositories/placeSurfacing.js). Per drawer it
+ * reports countNow, surfaced (positive notability evidence) and notSurfaced
+ * (everything else — there is no can't-tell for surfacing; can't-speak governs
+ * FACTS, not this), with examples, plus a cultureTotal (now vs after) over the
+ * whole Culture category so the lead can read "Culture 270–330" straight off it.
  *
- * The ring is resolved and counted by exactly the tooling the Inspire board and
- * the /census-ring-breakdown diagnostic use — `reach.ringFor` then
- * `censusInRing({ shownOnly: true })` — so these numbers are the same ones the
- * owner read his 78 → 1,005 from, split by subcategory and run through the
- * predicate. The estate variant counts every place filed under each drawer.
+ * The ring is resolved and counted by the Inspire board's own tooling —
+ * `reach.ringFor` then `censusInRing({ shownOnly: true })` — the numbers the
+ * owner read his 78 → 1,005 from. Each drawer's countNow is the DISTINCT
+ * physical-place count: filed as the Categories screen files (desk/categories.js
+ * FILED_SQL — primary shelf + secondary words, fence-filtered, so churches
+ * reconcile to the screen's 11,127, not place_subcategories' 29,265), deduped
+ * atlas↔census so a place held both ways counts once.
  *
  * Signals come only from what we own or may freely read: an owned name, Google's
  * and OSM's type words, the open map's tags from our own copy (osm_features),
@@ -20,19 +24,34 @@
 import { query } from '../db.js';
 import * as reach from '../repositories/reach.js';
 import { censusInRing } from './censusRing.js';
-import { TEXT_QUESTIONS, textStillAsked } from '../sources/censusQuestions.js';
 import { travelMode } from '../domain/travel.js';
-import { notable } from '../domain/narrowing.js';
+import { notable, NOT_SURFACED_REASON } from '../domain/narrowing.js';
+import { FILED_SQL } from '../desk/categories.js';
 
-/** The text-sourced drawers still asked — a filing under any other text drawer is obsolete. */
-const currentTextDrawers = () => Object.keys(TEXT_QUESTIONS).filter(textStillAsked);
+/**
+ * The three low-attraction Culture drawers the rule narrows, by the owner's
+ * decided bar (Option 2). A filing elsewhere — any drawer not in this set — is
+ * what keeps a place that legitimately surfaces as something else.
+ */
+export const NARROWED = ['churches', 'landmarks-you-can-see', 'monuments-memorials'];
 
-/** The four Culture drawers in question, and the comparator. */
+/**
+ * The full Culture category, so the lead can sum "Culture after": the three
+ * narrowed drawers and the six comparators that are left exactly as they are
+ * (museums, galleries, castles, historic houses, ancient sites, theatre). The
+ * comparators are never run through the predicate — they are a count and a
+ * sample only.
+ */
 export const SUBCATEGORIES = [
   { key: 'churches', label: 'Cathedrals, churches & abbeys', narrow: true },
   { key: 'landmarks-you-can-see', label: 'Landmarks', narrow: true },
   { key: 'monuments-memorials', label: 'Monuments & memorials', narrow: true },
   { key: 'museums', label: 'Museums', narrow: false },
+  { key: 'galleries', label: 'Art galleries', narrow: false },
+  { key: 'castles', label: 'Castles & forts', narrow: false },
+  { key: 'historic-houses', label: 'Historic houses & palaces', narrow: false },
+  { key: 'ancient-sites', label: 'Ancient & archaeological sites', narrow: false },
+  { key: 'theatre', label: 'Theatre & concert halls', narrow: false },
 ];
 const CULTURE = 'culture';
 
@@ -179,80 +198,233 @@ export async function gatherSignals(refs, { heritageLoad: heLoad = null } = {}) 
   return out;
 }
 
-/**
- * The subcategory(ies) each ref is currently filed under, limited to the drawers
- * given — with the same filter censusInRing applies: a text-sourced surfacing
- * counts only while its drawer is still asked in text. Without this a venue was
- * re-added to an obsolete, re-fenced drawer, and a per-subcategory ring total
- * diverged from the census count it is drawn from (Codex).
- */
-async function filedUnder(refs, keys) {
-  const byRef = new Map();
-  if (!refs.length) return byRef;
-  const { rows } = await query(
-    `select distinct venue_ref, subcategory from place_subcategories
-      where venue_ref = any($1) and subcategory = any($2)
-        and (sourced is distinct from 'text' or subcategory = any($3::text[]))`,
-    [refs, keys, currentTextDrawers()]);
-  for (const r of rows) byRef.set(r.venue_ref, [...(byRef.get(r.venue_ref) ?? []), r.subcategory]);
-  return byRef;
-}
-
-/** Judge a set of refs, bucket them, and draw the examples. */
-function judge(refs, signalsByRef) {
-  const kept = [];
-  const dropped = [];
-  const cantSpeak = [];
-  for (const ref of refs) {
-    const s = signalsByRef.get(ref) ?? { ref, heritageAvailable: false, heritage: null };
-    const v = notable(s);
-    const row = {
-      ref,
-      name: s.name ?? null,
-      where: s.where ?? null,
-      why: v.signals.length ? v.signals.join('; ') : v.reason,
-    };
-    if (v.status === 'kept') kept.push(row);
-    else if (v.status === 'dropped') dropped.push(row);
-    else cantSpeak.push(row);
-  }
-  return { kept, dropped, cantSpeak };
-}
-
 const EXAMPLES = 10;
-const subcategoryResult = (sub, refs, signalsByRef) => {
-  // Museums is the unchanged comparator: the rule does not narrow it, so the
-  // predicate is never run on it and nothing is reported as dropped — it is a
-  // count, with a sample, and nothing more (Codex).
-  if (!sub.narrow) {
-    const examples = refs.slice(0, EXAMPLES).map((ref) => {
-      const s = signalsByRef.get(ref) ?? {};
-      return { ref, name: s.name ?? null, where: s.where ?? null };
-    });
-    return {
-      key: sub.key,
-      label: sub.label,
-      narrow: false,
-      comparator: true,
-      countNow: refs.length,
-      examples,
-    };
+const emptySignals = (ref) => ({ ref, heritageAvailable: false, heritage: null });
+
+/**
+ * Every (venue_ref, drawer) filing the **Categories screen** counts — primary
+ * (`place_index.subcategory`) and secondary (a Google word pointing at another
+ * drawer) — fence-filtered (`not_in_epic_at is null`), reusing its own `FILED_SQL`
+ * (desk/categories.js). This is the base-reconciliation fix (owner, item 3): the
+ * estate base read 29,265 for churches against the screen's 11,127, because it
+ * was counting `place_subcategories` — a surfacing row per census box, including
+ * drawers the fence has since dropped. FILED_SQL is one row per in-Epic place per
+ * drawer, so the drawer counts match the screen. `refs` narrows to a set (the
+ * ring); null is the whole estate.
+ */
+async function filingRowsFor({ refs = null, keys }) {
+  const args = [keys];
+  let where = 'f.sub = any($1)';
+  if (refs) {
+    if (!refs.length) return [];
+    args.push(refs);
+    where = 'f.sub = any($1) and f.venue_ref = any($2::text[])';
   }
-  const { kept, dropped, cantSpeak } = judge(refs, signalsByRef);
-  return {
-    key: sub.key,
-    label: sub.label,
-    narrow: true,
-    countNow: refs.length,
-    kept: kept.length,
-    dropped: dropped.length,
-    cantSpeak: cantSpeak.length,
-    // now = kept + dropped + cantSpeak, always.
-    examplesKept: kept.slice(0, EXAMPLES),
-    examplesDropped: dropped.slice(0, EXAMPLES),
-    examplesCantSpeak: cantSpeak.slice(0, EXAMPLES),
+  const { rows } = await query(
+    `select f.venue_ref as ref, f.sub, bool_or(f.is_primary) as is_primary
+       from (${FILED_SQL}) f
+      where ${where}
+      group by f.venue_ref, f.sub`, args);
+  return rows;
+}
+
+/** The refs (within a set) filed — primary or secondary — in any drawer that is
+ * NOT one of the three narrowed ones. These surface as something else and are
+ * never held back (Part B: "don't hide a place that legitimately surfaces
+ * elsewhere"); here they keep their cluster counted in Culture-after. */
+export async function filedElsewhere(refs) {
+  if (!refs.length) return new Set();
+  const { rows } = await query(
+    `select distinct f.venue_ref as ref from (${FILED_SQL}) f
+      where f.venue_ref = any($1::text[]) and f.sub <> all($2::text[])`,
+    [refs, NARROWED]);
+  return new Set(rows.map((r) => r.ref));
+}
+
+/**
+ * The same-physical-place links we hold (owner, item 3: "de-duplicated against
+ * census IDs where both exist"), as (a, b) pairs touching `list`. These are the
+ * SAME link tables HIDDEN_REFS expands over, so the determination and the hide
+ * agree on what is one place: `provider_matches` (a Google id and the venue it
+ * matched, both directions), and every name an atlas row goes by — its venue ref,
+ * external ref, explicit `atlas:<id>`, `wikidata:`, `osm:` (both spellings) and
+ * the open-map match (`atlas_osm_matches`). One hop; `aliasClosure` iterates this
+ * to a full transitive closure.
+ */
+async function linkEdges(list) {
+  if (!list.length) return [];
+  const { rows } = await query(
+    `select m.venue_ref as a, 'google:' || m.source_ref as b
+       from provider_matches m
+      where m.source = 'google' and not m.missing and m.source_ref is not null
+        and (m.venue_ref = any($1::text[]) or 'google:' || m.source_ref = any($1::text[]))
+     union all
+     select coalesce(a.venue_ref, 'atlas:' || a.id::text) as a, x.b
+       from attractions a
+       left join atlas_osm_matches mo on mo.attraction_id = a.id
+       cross join lateral (values
+         (a.venue_ref),
+         (a.external_ref),
+         ('atlas:' || a.id::text),
+         ('wikidata:' || a.wikidata_id),
+         ('osm:' || a.osm_ref),
+         (case when a.osm_ref ~ '^[0-9]+$' then 'osm:relation/' || a.osm_ref end),
+         (case when a.osm_ref like 'relation/%' then 'osm:' || substr(a.osm_ref, 10) end),
+         ('osm:' || mo.osm_ref),
+         (case when mo.osm_ref ~ '^[0-9]+$' then 'osm:relation/' || mo.osm_ref end),
+         (case when mo.osm_ref like 'relation/%' then 'osm:' || substr(mo.osm_ref, 10) end)
+       ) x(b)
+      where x.b is not null
+        and (coalesce(a.venue_ref, 'atlas:' || a.id::text) = any($1::text[])
+             or a.external_ref = any($1::text[]) or 'atlas:' || a.id::text = any($1::text[])
+             or x.b = any($1::text[]))`,
+    [list]);
+  return rows;
+}
+
+/** A fresh union-find with path compression and node creation on union. */
+function unionFind() {
+  const parent = new Map();
+  const add = (x) => { if (x != null && x !== '' && !parent.has(x)) parent.set(x, x); };
+  const find = (x) => {
+    let r = x; while (parent.get(r) !== r) r = parent.get(r);
+    while (parent.get(x) !== r) { const n = parent.get(x); parent.set(x, r); x = n; }
+    return r;
   };
-};
+  const union = (a, b) => {
+    if (a == null || b == null || a === '' || b === '') return;
+    add(a); add(b);
+    const ra = find(a); const rb = find(b);
+    if (ra !== rb) parent.set(ra, rb);
+  };
+  return { parent, add, find, union };
+}
+
+/**
+ * THE alias closure (owner, item 3; Codex root fix). The one transitive
+ * same-physical-place grouping, used by BOTH the preview's dedup and the apply's
+ * determination, so measured surfaced/notSurfaced and what apply hides can never
+ * diverge. Seeded with any refs (including a single one), it follows `linkEdges`
+ * repeatedly — a NEWLY discovered attraction ref has its own filings and links
+ * expanded too — until nothing new is found. Returns `{ rootOf, membersOf }` over
+ * every node reached. It is a SUPERSET of HIDDEN_REFS's bounded expansion, so two
+ * refs HIDDEN_REFS would hide together are always judged together: a notable twin
+ * can never be hidden.
+ */
+export async function aliasClosure(seedRefs) {
+  const uf = unionFind();
+  const seen = new Set();
+  let frontier = [...new Set((seedRefs ?? []).filter(Boolean).map(String))];
+  frontier.forEach((r) => { uf.add(r); seen.add(r); });
+  while (frontier.length) {
+    const edges = await linkEdges(frontier);
+    const next = [];
+    for (const { a, b } of edges) {
+      uf.union(a, b);
+      for (const x of [a, b]) {
+        const s = x == null ? null : String(x);
+        if (s && !seen.has(s)) { seen.add(s); next.push(s); }
+      }
+    }
+    frontier = next;
+  }
+  const membersOf = new Map();
+  const rootOf = new Map();
+  for (const node of uf.parent.keys()) {
+    const root = uf.find(node);
+    rootOf.set(node, root);
+    if (!membersOf.has(root)) membersOf.set(root, []);
+    membersOf.get(root).push(node);
+  }
+  return { rootOf, membersOf };
+}
+
+/** A cluster's name/where for an example: prefer a member that carries an owned name. */
+function clusterExample(members, signalsByRef) {
+  const named = members.find((m) => signalsByRef.get(m)?.name);
+  const ref = named ?? members[0];
+  const s = signalsByRef.get(ref) ?? {};
+  return { ref, name: s.name ?? null, where: s.where ?? null };
+}
+
+/** Group a drawer's refs into clusters. */
+function clustersIn(refs, clusterOf) {
+  const byCluster = new Map();
+  for (const ref of refs) {
+    const c = clusterOf.get(ref) ?? ref;
+    if (!byCluster.has(c)) byCluster.set(c, []);
+    byCluster.get(c).push(ref);
+  }
+  return byCluster;
+}
+
+/** Whether a cluster (one physical place, several refs) surfaces: notable on any
+ * copy — so a place that resolves through the atlas/owned record where both an
+ * atlas entry and a census id exist is kept if either shows evidence. */
+const clusterNotable = (members, signalsByRef) =>
+  members.some((m) => notable(signalsByRef.get(m) ?? emptySignals(m)).status === 'kept');
+
+/**
+ * One drawer's result. For a narrowed drawer: surfaced = has positive evidence;
+ * notSurfaced = everything else. **Can't-speak governs FACTS, not this** (CLAUDE.md):
+ * there is no can't-tell for surfacing, so the old dropped and can't-speak fold
+ * together as notSurfaced, with the true reason (NOT_SURFACED_REASON). A
+ * comparator drawer (museums, galleries, …) is a count and a sample only — the
+ * predicate is never run on it.
+ */
+function drawerResult(sub, refs, signalsByRef, clusterOf, membersOf) {
+  const byCluster = clustersIn(refs, clusterOf);
+  // Notability is read across the FULL cluster (every alias of the place, via the
+  // closure), not just the refs filed in this drawer — so evidence on a linked
+  // twin (a Wikidata attraction with a Wikipedia url, provider-matched to the
+  // filed church) surfaces the place, exactly as the apply check does (Codex,
+  // preview == check).
+  const full = (root, drawerRefs) => membersOf?.get(root) ?? drawerRefs;
+  if (!sub.narrow) {
+    const examples = [...byCluster.values()].slice(0, EXAMPLES).map((m) => clusterExample(m, signalsByRef));
+    return { key: sub.key, label: sub.label, narrow: false, comparator: true, countNow: byCluster.size, examples };
+  }
+  const surfaced = [];
+  const notSurfaced = [];
+  for (const [root, drawerRefs] of byCluster) {
+    const members = full(root, drawerRefs);
+    const ex = clusterExample(drawerRefs, signalsByRef);
+    const nm = members.find((m) => notable(signalsByRef.get(m) ?? emptySignals(m)).status === 'kept');
+    if (nm) surfaced.push({ ...ex, why: notable(signalsByRef.get(nm)).signals.join('; ') });
+    else notSurfaced.push({ ...ex, why: NOT_SURFACED_REASON });
+  }
+  return {
+    key: sub.key, label: sub.label, narrow: true,
+    // now = surfaced + notSurfaced, always (clusters, deduped).
+    countNow: byCluster.size,
+    surfaced: surfaced.length,
+    notSurfaced: notSurfaced.length,
+    examplesSurfaced: surfaced.slice(0, EXAMPLES),
+    examplesNotSurfaced: notSurfaced.slice(0, EXAMPLES),
+  };
+}
+
+/**
+ * Culture now vs after, deduped across every Culture drawer. `now` is the
+ * distinct Culture places; `after` leaves out only the places the rule holds
+ * back — primary-filed in a narrowed drawer, not notable on any copy of the whole
+ * place, and not filed in a non-low-attraction drawer (the exact Part B
+ * determination, over the same closure), so the lead can read "Culture 270–330"
+ * straight off it and it equals what applying hides.
+ */
+function cultureTotals(refsBySub, filingRows, signalsByRef, clusterOf, membersOf, elsewhereSet) {
+  const allRefs = [...new Set([...refsBySub.values()].flat())];
+  const primaryNarrowed = new Set(filingRows.filter((r) => r.is_primary && NARROWED.includes(r.sub)).map((r) => r.ref));
+  const roots = new Set(allRefs.map((ref) => clusterOf.get(ref) ?? ref));
+  let held = 0;
+  for (const root of roots) {
+    const members = membersOf?.get(root) ?? [root];
+    const primaryHere = members.some((m) => primaryNarrowed.has(m));
+    const elsewhere = members.some((m) => elsewhereSet.has(m));
+    if (primaryHere && !elsewhere && !clusterNotable(members, signalsByRef)) held += 1;
+  }
+  return { now: roots.size, after: roots.size - held };
+}
 
 /**
  * The preview. `scope` is 'ring' (a drive-time ring from `where`) or 'estate'
@@ -262,23 +434,33 @@ export async function narrowingPreview({
   scope = 'ring', where = null, lat = null, lng = null, minutes = 30, mode = 'driving',
 } = {}) {
   const he = await heritageLoad();
+  const keys = SUBCATEGORIES.map((s) => s.key);
+
+  const assemble = async (filingRows, extra = {}) => {
+    const refsBySub = new Map(keys.map((k) => [k, []]));
+    for (const r of filingRows) if (refsBySub.has(r.sub)) refsBySub.get(r.sub).push(r.ref);
+    const allRefs = [...new Set(filingRows.map((r) => r.ref))];
+    // Expand the alias closure FIRST, then read signals and "filed elsewhere" over
+    // EVERY cluster member — the same set runSurfacingCheck judges — so the report
+    // the owner approves equals exactly what applying will do (Codex, preview == check).
+    const { rootOf, membersOf } = await aliasClosure(allRefs);
+    const allNodes = [...rootOf.keys()];
+    const [signalsByRef, elsewhereSet] = await Promise.all([
+      gatherSignals(allNodes, { heritageLoad: he.load }),
+      filedElsewhere(allNodes),
+    ]);
+    const clusterOf = rootOf;
+    return {
+      scope,
+      heritage: he,
+      ...extra,
+      subcategories: SUBCATEGORIES.map((s) => drawerResult(s, refsBySub.get(s.key) ?? [], signalsByRef, clusterOf, membersOf)),
+      cultureTotal: cultureTotals(refsBySub, filingRows, signalsByRef, clusterOf, membersOf, elsewhereSet),
+    };
+  };
 
   if (scope === 'estate') {
-    const keys = SUBCATEGORIES.map((s) => s.key);
-    const { rows } = await query(
-      `select subcategory, array_agg(distinct venue_ref) as refs
-         from place_subcategories
-        where subcategory = any($1)
-          and (sourced is distinct from 'text' or subcategory = any($2::text[]))
-        group by subcategory`, [keys, currentTextDrawers()]);
-    const refsBySub = new Map(rows.map((r) => [r.subcategory, r.refs ?? []]));
-    const allRefs = [...new Set(rows.flatMap((r) => r.refs ?? []))];
-    const signalsByRef = await gatherSignals(allRefs, { heritageLoad: he.load });
-    return {
-      scope: 'estate',
-      heritage: he,
-      subcategories: SUBCATEGORIES.map((s) => subcategoryResult(s, refsBySub.get(s.key) ?? [], signalsByRef)),
-    };
+    return assemble(await filingRowsFor({ keys }));
   }
 
   const m = travelMode(mode);
@@ -291,16 +473,9 @@ export async function narrowingPreview({
     shownOnly: true, circle: ring.circle ?? null,
   });
   const cultureRefs = res.refs?.[CULTURE] ?? [];
-  const keys = SUBCATEGORIES.map((s) => s.key);
-  const filed = await filedUnder(cultureRefs, keys);
-  const refsBySub = new Map(keys.map((k) => [k, []]));
-  for (const [ref, subs] of filed) for (const sub of subs) refsBySub.get(sub).push(ref);
-  const allRefs = [...new Set([...refsBySub.values()].flat())];
-  const signalsByRef = await gatherSignals(allRefs, { heritageLoad: he.load });
+  const filingRows = await filingRowsFor({ refs: cultureRefs, keys });
 
-  return {
-    scope: 'ring',
-    heritage: he,
+  return assemble(filingRows, {
     ring: {
       where: ring.label ?? where, minutes: mins, mode: m,
       method: ring.method ?? null,
@@ -311,25 +486,25 @@ export async function narrowingPreview({
       cultureUnresolved: res.unresolved?.[CULTURE] ?? 0,
       cultureCounted: (res.counts?.[CULTURE] ?? 0),
     },
-    subcategories: SUBCATEGORIES.map((s) => subcategoryResult(s, refsBySub.get(s.key) ?? [], signalsByRef)),
-  };
+  });
 }
 
 /**
  * The proposed rule, in plain words, carried on the response so the owner reads
  * the measurement and the rule it measures together. It is a PROPOSAL; applying
- * it is a separate, approved step.
+ * it is a separate, approved step (Part B).
  */
 export const PROPOSED_RULE = {
-  applies_to: ['churches', 'landmarks-you-can-see', 'monuments-memorials'],
+  applies_to: NARROWED,
   notable_when_any: [
     'It is a cathedral, abbey or minster — by an OSM building type, or by its own owned name (the word as what the place is, so "Westminster Abbey" and "York Minster" stay and "Abbey Road Studios" does not).',
     'It has an encyclopedia article — an atlas row or owned record with a Wikidata id or Wikipedia url, or a wikidata: reference.',
     'It has visitor facilities or opening hours — opening_hours, a website, or an OSM tourism / fee / wheelchair tag, from the venue\'s own page or our own copy of the open map.',
-    'It is Grade I listed, a scheduled monument, or a World Heritage Site — matched to the Historic England list on our own disk (migration 308).',
+    'It is Grade I or II* listed, a scheduled monument, or a World Heritage Site — matched to the Historic England list on our own disk (migration 308).',
   ],
-  dropped: 'Ordinary parish churches, statues, memorials and plaques with no encyclopedia article, no listing, and no visitor facilities we hold.',
-  not_surfaced_means: 'Kept in the data and in the back office exactly as now; left out of what families are shown and out of the Culture ring and area counts — the same treatment as a C57 unconfirmed place. Nothing is deleted or hidden.',
-  grade_i_note: 'The Historic England loader shipped (migration 308, C59, 30 Sep 2026). This preview reads the live load where there is one; where it has not loaded yet, Grade I cannot be checked, and such places are returned as "cant-speak" rather than dropped — never a false drop (CLAUDE.md can\'t-speak).',
+  not_surfaced: 'Ordinary parish churches, statues, memorials and plaques with no encyclopedia article, no listing, and no visitor facilities we hold.',
+  not_surfaced_reason: NOT_SURFACED_REASON,
+  not_surfaced_means: 'Kept in the data and in the back office exactly as now; left out of what families are shown and out of the Culture ring and area counts. Nothing is deleted or hidden, and it comes back on its own if evidence arrives through normal use (reversible).',
+  cant_speak_note: 'Can\'t-speak governs FACTS, not surfacing (CLAUDE.md). A place with no notability evidence is simply "not surfaced" — there is no can\'t-tell here. The Historic England list shipped (migration 308); where a listing cannot be checked (outside England, or not loaded in an environment) the place is still not surfaced on the facts it has, never on a false "listing not loaded".',
   application_is_separate: true,
 };

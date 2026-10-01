@@ -101,6 +101,7 @@ import * as providerCalls from './repositories/providerCalls.js';
 import closedRoutes from './routes/closed.js';
 import * as googlePlaces from './sources/google.js';
 import { onGoogleStatus, onResearched } from './sources/closedCheck.js';
+import { onResearched as onResurfaced } from './repositories/placeSurfacing.js';
 import * as ownResearch from './sources/own.js';
 
 const app = express();
@@ -400,9 +401,10 @@ app.use('/api/admin/place-index', requireDoor('admin'), ownerOnlyPlaceIndex, pla
 // file and own leaf paths (/research, /research/quote, /ranked, /ranked/quote),
 // so nothing in the index router is shadowed.
 app.use('/api/admin/place-index', requireDoor('admin'), placeResearchRoutes);
-// Narrowing: a read-only preview of the church / landmark / monument notability
-// rule (owner, 1 Oct 2026) — counts now vs kept vs dropped, with examples.
-// PROPOSE ONLY; it writes nothing and changes no filing.
+// Narrowing (Option 2, owner, 1 Oct 2026): the church / landmark / monument
+// surfacing rule — the read-only measurement (preview/report) and the gated,
+// reversible apply path (check/apply). Mirrors C57: apply is device-only, and
+// nothing a family sees changes until the owner applies it.
 app.use('/api/admin/narrowing', requireDoor('admin'), narrowingRoutes);
 // What the census found out, and what it found out about itself
 // (routes/censusFindings.js): denominators with their coverage, drawers nobody
@@ -437,8 +439,13 @@ app.use('/api/admin/closed', requireDoor('admin'), closedRoutes);
 // (/tmp/c57-google.patch), so this line is safe on either side of it.
 googlePlaces.onBusinessStatus?.(onGoogleStatus);
 // Research landing on a place re-judges it if the closed check had it as a
-// question (C57): review settles itself, and nothing queues for a person.
-ownResearch.onResearched(onResearched);
+// question (C57: review settles itself), and re-evaluates its surfacing
+// (Option 2, migration 321: a held-back place that gains evidence comes back on
+// its own — normal use, never a sweep, C38). One listener for both.
+ownResearch.onResearched(async (ref, out) => {
+  await onResearched(ref, out).catch(() => null);
+  await onResurfaced(ref).catch(() => null);
+});
 
 // Telemetry is the household's own — which screen, and still here — and is
 // always written against the session's own household (routes/activity.js).

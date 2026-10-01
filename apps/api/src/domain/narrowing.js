@@ -7,8 +7,9 @@
  * must not count in 'museums and galleries' or as things to do." His test for
  * what stays: a church is kept only when notable — a cathedral, abbey or
  * minster; or it has a Wikipedia article; or it has visitor facilities /
- * opening hours; or it is Grade I listed. The same test for landmarks and
- * monuments. Everything else is "not surfaced" — kept in the data and the back
+ * opening hours; or it is Grade I or II* listed, a scheduled monument or a
+ * World Heritage Site. The same test for landmarks and monuments. Everything
+ * else is "not surfaced" — kept in the data and the back
  * office, left out of family surfacing and the Culture ring counts.
  *
  * This module is the predicate only. It is **pure**: it reads a `signals`
@@ -185,20 +186,31 @@ export function visitorFacilities(signals) {
 
 /**
  * The heritage verdict for one place, or null when the Historic England list is
- * not loaded (can't-speak on this one signal). Only the designations the owner
- * named as keeping a place — Grade I, a scheduled monument, a World Heritage
- * Site — count; Grade II* and II are reported by the gatherer as near-misses but
- * are not notability here, because the owner said "Grade I listed".
+ * not loaded (can't-speak on this one signal). The designations the owner named
+ * as keeping a place — "Grade I or II* listed, scheduled monument" — plus a
+ * World Heritage Site count (owner, 1 Oct 2026: Grade II* is now a keep). Plain
+ * Grade II is reported by the gatherer as a near-miss but is not notability here.
  */
 export function heritageNotable(signals) {
   if (signals.heritageAvailable === false) return null;
   const h = signals.heritage;
   if (!h) return false;
   if (h.gradeI) return 'Grade I listed';
+  if (h.grade2star) return 'Grade II* listed';
   if (h.scheduled) return 'a scheduled monument';
   if (h.worldHeritage) return 'a World Heritage Site';
   return false;
 }
+
+/**
+ * The surfacing bar's own words for a place that is not surfaced. The owner
+ * (item 4, 1 Oct 2026): state the true cause — there is no listing match, no
+ * article and no facilities held — and never "listing data is not loaded", which
+ * is false (the Historic England list shipped with migration 308). For surfacing
+ * there is no can't-tell: this one reason covers every not-surfaced place.
+ */
+export const NOT_SURFACED_REASON =
+  'no notable evidence held — no listing match, article or facilities';
 
 /**
  * The predicate. Given what we hold on a place, is it notable enough to surface?
@@ -235,7 +247,12 @@ export function notable(signals = {}) {
     reason: status === 'kept'
       ? hits.join('; ')
       : status === 'dropped'
-        ? 'no cathedral/abbey/minster, no encyclopedia article, no visitor facilities we hold, and not Grade I listed / scheduled / World Heritage'
-        : 'no notable signal in what we hold, and the Historic England listing data is not loaded — a Grade I listing cannot be ruled out',
+        ? 'no cathedral/abbey/minster, no encyclopedia article, no visitor facilities we hold, and not Grade I or II* listed, scheduled or World Heritage'
+        // Can't-speak is a FACTS verdict (CLAUDE.md), not the surfacing bar: the
+        // Historic England list cannot be checked here — the place is outside
+        // England, or the list has not loaded in this environment — so a Grade I
+        // or II* listing cannot be ruled out. (For surfacing this still reads as
+        // "not surfaced"; see NOT_SURFACED_REASON.)
+        : 'no notable signal in what we hold, and the Historic England listing cannot be checked here — a Grade I or II* listing cannot be ruled out',
   };
 }

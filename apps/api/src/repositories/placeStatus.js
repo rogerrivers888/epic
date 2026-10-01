@@ -29,6 +29,13 @@ const on = (client) => (client ? (text, params) => client.query(text, params) : 
 // in every result and carries a "Temporarily closed" label instead — that
 // label rides on `MARKED`, not on this.
 export const HIDING = `s.applied and s.status = 'permanently_closed'`;
+// A place held back by the surfacing bar (Option 2, owner, 1 Oct 2026; migration
+// 319). The same door as a C57 closure: `applied` gates it, so nothing a family
+// sees changes before the owner applies the narrowing check. One filter honours
+// both — the row and its judged snapshot (place_surfacing_members) are folded
+// into HIDDEN_REFS below, so every family read that already drops closed places
+// drops not-surfaced ones too. Alias `ns`.
+export const NOT_SURFACED = `ns.applied and not ns.surfaced`;
 // A place that carries a closed *label* to a family: applied, and temporarily
 // or permanently closed. The permanent ones are also hidden (above); the
 // temporary ones are shown with the label. The owner's OK (`applied`) gates
@@ -36,49 +43,79 @@ export const HIDING = `s.applied and s.status = 'permanently_closed'`;
 export const MARKED = `s.applied and s.status in ('temporarily_closed', 'permanently_closed')`;
 
 /**
- * Every ref a hidden place goes by (Codex, 29 Sep 2026: a closed atlas row
- * stored as `atlas:<id>` came back from a live search as `google:<id>` and
- * showed). One uncorrelated statement, so Postgres works it out once per
- * query and hashes it; the hidden rows are few, and every join below is an
- * equality, never an OR across the atlas.
+ * One step of the alias walk, correlated to `c.ref`: every ref one link away over
+ * the SAME edges `aliasClosure` (repositories/narrowing.js) uses — provider
+ * matches both directions, and every alias of any attraction `c.ref` names (its
+ * venue ref, external ref, `atlas:<id>`, `wikidata:<Q>`, `osm:` in either
+ * spelling, and its open-map match). Shared by HIDDEN_REFS and the status-origin
+ * lookup below, so hiding and the Closed marker always walk the same graph.
+ */
+const ALIAS_NEIGHBOURS = `(
+        select m.venue_ref as ref from provider_matches m
+          where m.source = 'google' and not m.missing and m.source_ref is not null and 'google:' || m.source_ref = c.ref
+        union all
+        select 'google:' || m.source_ref from provider_matches m
+          where m.source = 'google' and not m.missing and m.source_ref is not null and m.venue_ref = c.ref
+        union all
+        select al.ref
+          from attractions a
+          left join atlas_osm_matches mo on mo.attraction_id = a.id
+          cross join lateral (values
+            (a.venue_ref), (a.external_ref), ('atlas:' || a.id::text), ('wikidata:' || a.wikidata_id),
+            ('osm:' || a.osm_ref), (case when a.osm_ref ~ '^[0-9]+$' then 'osm:relation/' || a.osm_ref end),
+            (case when a.osm_ref like 'relation/%' then 'osm:' || substr(a.osm_ref, 10) end),
+            ('osm:' || mo.osm_ref), (case when mo.osm_ref ~ '^[0-9]+$' then 'osm:relation/' || mo.osm_ref end),
+            (case when mo.osm_ref like 'relation/%' then 'osm:' || substr(mo.osm_ref, 10) end)
+          ) al(ref)
+         where al.ref is not null and (
+           a.venue_ref = c.ref or a.external_ref = c.ref
+           or (c.ref like 'atlas:%' and a.id::text = substr(c.ref, 7))
+           or (c.ref like 'wikidata:%' and a.wikidata_id = substr(c.ref, 10))
+           -- an osm ref is stored bare ('123') or prefixed ('relation/123') on
+           -- either column, and a seed arrives in either spelling: match all
+           -- four, as aliasClosure does (Codex).
+           or (c.ref like 'osm:relation/%' and (a.osm_ref = substr(c.ref, 14) or a.osm_ref = substr(c.ref, 5)
+                                                or mo.osm_ref = substr(c.ref, 14) or mo.osm_ref = substr(c.ref, 5)))
+           or (c.ref like 'osm:%' and c.ref not like 'osm:relation/%'
+               and (a.osm_ref = substr(c.ref, 5) or a.osm_ref = 'relation/' || substr(c.ref, 5)
+                    or mo.osm_ref = substr(c.ref, 5) or mo.osm_ref = 'relation/' || substr(c.ref, 5)))
+         )
+      ) nb`;
+
+/**
+ * Every ref a hidden place goes by. Two branches, on purpose:
  *
- *   1. seed: each hidden row's own ref and `wikidata:<Q>`, plus — the other
- *      way through `provider_matches` — whatever a hidden `google:` ref is
- *      matched to;
- *   2. atlas: every attraction any seed ref names, by `atlas:<id>`, venue ref,
- *      `wikidata:<Q>` or OpenStreetMap ref — so a Google closure matched only
- *      to `wikidata:Q…` still reaches the row's `atlas:<id>` and `osm:` refs
- *      (Codex, second pass);
- *   3. names: the seed and every name those attractions go by;
- *   4. matched: the Google id `provider_matches` holds for any of the names.
+ *   · CLOSED (C57, place_status): a TRANSITIVE alias closure. A closure is
+ *     evidence about the physical place, so every name it goes by — however
+ *     many hops away, and however recently linked — is hidden. A `recursive`
+ *     CTE from the closed seed over ALIAS_NEIGHBOURS reaches the fixpoint;
+ *     `union` dedups, so a cycle terminates. The seed is small, so it is cheap.
+ *
+ *   · NOT SURFACED (the surfacing bar, migration 321): ONLY the snapshot of refs
+ *     the check judged (`place_surfacing_members`) — never a live expansion.
+ *     Surfacing is a judgement about a cluster as it stood: a ref linked after
+ *     the check (a provider match to a newly harvested museum, a
+ *     Wikipedia-backed attraction) must not vanish without anyone re-running
+ *     eligibility and notability on the enlarged cluster (Codex). It stays
+ *     visible until the next check or a reconsider judges it — the bar fails
+ *     open toward surfacing. The determination's own ref is always included.
  */
 export const HIDDEN_REFS = `(
-  with hid as (select s.venue_ref, s.wikidata_id from place_status s where ${HIDING}),
-  seed as (
-    select venue_ref as ref from hid
-    union select 'wikidata:' || wikidata_id from hid where wikidata_id is not null
-    union select m.venue_ref from provider_matches m join hid on hid.venue_ref = 'google:' || m.source_ref
-     where m.source = 'google' and not m.missing),
-  atlas as (
-    select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, (select m2.osm_ref from atlas_osm_matches m2 where m2.attraction_id = a.id) as matched_osm from seed join attractions a on seed.ref like 'atlas:%' and a.id::text = substr(seed.ref, 7)
-    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, (select m2.osm_ref from atlas_osm_matches m2 where m2.attraction_id = a.id) as matched_osm from seed join attractions a on a.venue_ref = seed.ref
-    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, (select m2.osm_ref from atlas_osm_matches m2 where m2.attraction_id = a.id) as matched_osm from seed join attractions a on seed.ref like 'wikidata:%' and a.wikidata_id = substr(seed.ref, 10)
-    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, (select m2.osm_ref from atlas_osm_matches m2 where m2.attraction_id = a.id) as matched_osm from seed join attractions a on seed.ref like 'osm:%' and a.osm_ref = substr(seed.ref, 5)
-    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, (select m2.osm_ref from atlas_osm_matches m2 where m2.attraction_id = a.id) as matched_osm from seed join attractions a on seed.ref like 'osm:relation/%' and a.osm_ref = substr(seed.ref, 14)
-    -- …and the open-map match the closed check found (migration 299), which is a name the place goes by too.
-    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, m.osm_ref from seed join atlas_osm_matches m on seed.ref like 'osm:%' and m.osm_ref = substr(seed.ref, 5) join attractions a on a.id = m.attraction_id
-    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, m.osm_ref from seed join atlas_osm_matches m on seed.ref like 'osm:relation/%' and m.osm_ref = 'relation/' || substr(seed.ref, 14) join attractions a on a.id = m.attraction_id),
-  names as (
-    select ref from seed where ref is not null
-    union select x.ref from atlas cross join lateral (values
-      (atlas.venue_ref), ('atlas:' || atlas.id::text), ('wikidata:' || atlas.wikidata_id),
-      ('osm:' || atlas.osm_ref), (case when atlas.osm_ref ~ '^[0-9]+$' then 'osm:relation/' || atlas.osm_ref end),
-      ('osm:' || atlas.matched_osm), (case when atlas.matched_osm ~ '^[0-9]+$' then 'osm:relation/' || atlas.matched_osm end)) x(ref)
-     where x.ref is not null),
-  matched as (
-    select 'google:' || m.source_ref as ref from provider_matches m join names n on n.ref = m.venue_ref
-     where m.source = 'google' and not m.missing and m.source_ref is not null)
-  select ref from names union select ref from matched
+  with recursive seed(ref) as (
+    select s.venue_ref from place_status s where ${HIDING}
+    union select 'wikidata:' || s.wikidata_id from place_status s where ${HIDING} and s.wikidata_id is not null
+  ),
+  closure(ref) as (
+    select ref from seed
+    union
+    select nb.ref from closure c cross join lateral ${ALIAS_NEIGHBOURS}
+  )
+  select ref from closure where ref is not null
+  union
+  select ns.venue_ref from place_surfacing ns where ${NOT_SURFACED}
+  union
+  select pm.member_ref from place_surfacing ns join place_surfacing_members pm on pm.venue_ref = ns.venue_ref
+   where ${NOT_SURFACED}
 )`;
 
 /** The place under `refExpr` is not hidden, under any name it goes by. */
@@ -190,34 +227,21 @@ async function hiddenOriginOf(ref) {
 export async function hiddenStatusesOf(refs) {
   const list = [...new Set((refs ?? []).filter(Boolean).map(String))];
   if (!list.length) return new Map();
+  // The same TRANSITIVE walk as HIDDEN_REFS (ALIAS_NEIGHBOURS), carrying which
+  // closed row each alias came from — so a far alias of a multi-hop graph that
+  // SHOWN_REF hides can still resolve its Closed marker in a saved list or
+  // history (Codex: hiding and the label must cover the identical set).
   const { rows } = await query(
-    `with hid as (select s.venue_ref, s.wikidata_id from place_status s where ${MARKED}),
-     seed as (
-       select venue_ref as ref, venue_ref as origin from hid
-       union select 'wikidata:' || wikidata_id, venue_ref from hid where wikidata_id is not null
-       union select m.venue_ref, hid.venue_ref from provider_matches m join hid on hid.venue_ref = 'google:' || m.source_ref
-        where m.source = 'google' and not m.missing),
-     atlas as (
-       select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, (select m2.osm_ref from atlas_osm_matches m2 where m2.attraction_id = a.id) as matched_osm, seed.origin from seed join attractions a on seed.ref like 'atlas:%' and a.id::text = substr(seed.ref, 7)
-       union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, (select m2.osm_ref from atlas_osm_matches m2 where m2.attraction_id = a.id) as matched_osm, seed.origin from seed join attractions a on a.venue_ref = seed.ref
-       union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, (select m2.osm_ref from atlas_osm_matches m2 where m2.attraction_id = a.id) as matched_osm, seed.origin from seed join attractions a on seed.ref like 'wikidata:%' and a.wikidata_id = substr(seed.ref, 10)
-       union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, (select m2.osm_ref from atlas_osm_matches m2 where m2.attraction_id = a.id) as matched_osm, seed.origin from seed join attractions a on seed.ref like 'osm:%' and a.osm_ref = substr(seed.ref, 5)
-       union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, (select m2.osm_ref from atlas_osm_matches m2 where m2.attraction_id = a.id) as matched_osm, seed.origin from seed join attractions a on seed.ref like 'osm:relation/%' and a.osm_ref = substr(seed.ref, 14)
-    -- …and the open-map match the closed check found (migration 299), which is a name the place goes by too.
-    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, m.osm_ref, seed.origin from seed join atlas_osm_matches m on seed.ref like 'osm:%' and m.osm_ref = substr(seed.ref, 5) join attractions a on a.id = m.attraction_id
-    union select a.id, a.venue_ref, a.wikidata_id, a.osm_ref, m.osm_ref, seed.origin from seed join atlas_osm_matches m on seed.ref like 'osm:relation/%' and m.osm_ref = 'relation/' || substr(seed.ref, 14) join attractions a on a.id = m.attraction_id),
-     names as (
+    `with recursive hid as (select s.venue_ref, s.wikidata_id from place_status s where ${MARKED}),
+     seed(ref, origin) as (
+       select venue_ref, venue_ref from hid
+       union select 'wikidata:' || wikidata_id, venue_ref from hid where wikidata_id is not null),
+     closure(ref, origin) as (
        select ref, origin from seed where ref is not null
-       union select x.ref, atlas.origin from atlas cross join lateral (values
-         (atlas.venue_ref), ('atlas:' || atlas.id::text), ('wikidata:' || atlas.wikidata_id),
-         ('osm:' || atlas.osm_ref), (case when atlas.osm_ref ~ '^[0-9]+$' then 'osm:relation/' || atlas.osm_ref end),
-      ('osm:' || atlas.matched_osm), (case when atlas.matched_osm ~ '^[0-9]+$' then 'osm:relation/' || atlas.matched_osm end)) x(ref)
-        where x.ref is not null),
-     matched as (
-       select 'google:' || m.source_ref as ref, n.origin from provider_matches m join names n on n.ref = m.venue_ref
-        where m.source = 'google' and not m.missing and m.source_ref is not null),
-     every as (select ref, origin from names union select ref, origin from matched)
-     select distinct on (e.ref) e.ref as asked_ref, s.*, ${SUCCESSOR_LABEL} from every e join place_status s on s.venue_ref = e.origin
+       union
+       select nb.ref, c.origin from closure c cross join lateral ${ALIAS_NEIGHBOURS}
+     )
+     select distinct on (e.ref) e.ref as asked_ref, s.*, ${SUCCESSOR_LABEL} from closure e join place_status s on s.venue_ref = e.origin
       where e.ref = any($1::text[]) order by e.ref, s.decided_at desc`, [list]);
   return new Map(rows.map((r) => [r.asked_ref, shape(r)]));
 }
