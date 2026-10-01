@@ -62,7 +62,6 @@ const lastSeen = (iso?: string | null) => {
 export function Staff({ canManage = true }: { canManage?: boolean } = {}) {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [roles, setRoles] = useState<StaffRole[]>([]);
-  const [mailOn, setMailOn] = useState(true);
   const [filter, setFilter] = useState<Filter>('All');
   const [mode, setMode] = useState<Mode>(null);
   const [curId, setCurId] = useState<string | null>(null);
@@ -93,7 +92,6 @@ export function Staff({ canManage = true }: { canManage?: boolean } = {}) {
       const data = await api.adminStaff();
       setStaff(data.staff);
       setRoles(data.roles);
-      setMailOn(Boolean(data.mail?.configured));
       setError(null);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not load the staff list.');
@@ -222,7 +220,7 @@ export function Staff({ canManage = true }: { canManage?: boolean } = {}) {
 
       {mode ? (
         <Drawer
-          mode={mode} cur={cur} roles={roles} mailOn={mailOn} canManage={canManage}
+          mode={mode} cur={cur} roles={roles} canManage={canManage}
           fName={fName} fEmail={fEmail} fRole={fRole} fErr={fErr}
           setFName={(v) => { setFName(v); setFErr(''); }}
           setFEmail={(v) => { setFEmail(v); setFErr(''); }}
@@ -250,7 +248,7 @@ const statusStyle = (status: string) => (status === 'invited' ? styles.stInvited
 // ---------------------------------------------------------------------------
 
 function Drawer(props: {
-  mode: Mode; cur: StaffMember | null; roles: StaffRole[]; mailOn: boolean; canManage: boolean;
+  mode: Mode; cur: StaffMember | null; roles: StaffRole[]; canManage: boolean;
   fName: string; fEmail: string; fRole: string | null; fErr: string;
   setFName: (v: string) => void; setFEmail: (v: string) => void; setFRole: (v: string) => void;
   invitation: StaffInvitation | null; sentExtra: string; copied: boolean;
@@ -258,16 +256,19 @@ function Drawer(props: {
   onChangeRole: (id: string) => void; onSendLink: () => void;
   onSuspend: () => void; onUnsuspend: () => void; onLogoutAll: () => void; onRemove: () => void;
 }) {
-  const { mode, cur, roles, mailOn, canManage } = props;
+  const { mode, cur, roles, canManage } = props;
   const { width, height, framed, origin } = useViewport();
   const wide = width >= 900;
   const frameBox = framed && origin ? { position: 'absolute' as const, left: origin.x, top: origin.y, width, height, overflow: 'hidden' as const } : null;
 
   const isOwner = Boolean(cur?.isOwner);
   const first = firstName(cur?.name);
-  const kicker = mode === 'add' ? 'NEW STAFF' : mode === 'sent' ? (mailOn ? 'LOGIN LINK SENT' : 'LOGIN LINK READY') : 'STAFF';
+  // Whether it actually went by e-mail, from the delivery the API reported — not
+  // the global mail state: a configured sender can still fail on one address.
+  const emailed = props.invitation?.delivery === 'email';
+  const kicker = mode === 'add' ? 'NEW STAFF' : mode === 'sent' ? (emailed ? 'LOGIN LINK SENT' : 'LOGIN LINK READY') : 'STAFF';
   const title = mode === 'add' ? 'Add staff'
-    : mode === 'sent' ? (mailOn ? `Sent to ${first}` : `Copy the link to ${first}`)
+    : mode === 'sent' ? (emailed ? `Sent to ${first}` : `Copy the link to ${first}`)
     : (cur?.name || '');
 
   return (
@@ -341,13 +342,16 @@ function AddForm(props: {
 }
 
 // ST3 / ST4 · Login link sent / ready
-function SentView({ cur, invitation, mailOn, sentExtra, copied, onCopy, onClose }: {
-  cur: StaffMember | null; invitation: StaffInvitation | null; mailOn: boolean; sentExtra: string;
+function SentView({ cur, invitation, sentExtra, copied, onCopy, onClose }: {
+  cur: StaffMember | null; invitation: StaffInvitation | null; sentExtra: string;
   copied: boolean; onCopy: () => void; onClose: () => void;
 }) {
-  const line = mailOn
+  const delivery = invitation?.delivery;
+  const line = delivery === 'email'
     ? "We've emailed them a login link. You can also copy it and send it yourself."
-    : "Mail isn't set up yet, so nothing was sent. Copy the link and send it to them yourself.";
+    : delivery === 'no_sender' || delivery === 'no_from'
+      ? "Mail isn't set up yet, so nothing was sent. Copy the link and send it to them yourself."
+      : "We couldn't email it just now, so copy the link and send it to them yourself.";
   return (
     <>
       <Text style={styles.sentLine}>{sentExtra ? `${sentExtra} ` : ''}{line}</Text>

@@ -15,7 +15,7 @@ import { Wordmark } from '../components/Wordmark';
 import { useViewport } from '../hooks/useViewport';
 import { useRouter } from '../router';
 import { paths } from '../routes';
-import { api, type Member } from '../api';
+import { api, type AccountSummary, type Member } from '../api';
 import { CREAM, INK, LIME, MOSS, fonts, HAIRLINE, INK_MUTED } from '../theme';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -31,14 +31,14 @@ export function AccountScreen() {
   const { width } = useViewport();
   const { navigate } = useRouter();
   const wide = width >= 900;
-  const [account, setAccount] = useState<{ name: string | null; email: string; plan: string; trialEndsOn?: string | null } | null>(null);
+  const [account, setAccount] = useState<AccountSummary | null>(null);
   const [crew, setCrew] = useState<Member[]>([]);
 
   useEffect(() => {
     void (async () => {
       try {
         const st = await api.sessionState();
-        if (st.account) setAccount(st.account as any);
+        if (st.account) setAccount(st.account);
       } catch { /* the gate handles a lost session */ }
       try {
         const h = await api.household();

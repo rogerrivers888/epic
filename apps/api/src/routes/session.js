@@ -14,6 +14,7 @@ import {
   accountByContact, accountById, consumeSignInLink, createSignInLink, linkContactFor, markLinkSent, ownerAccount, recordSignIn,
 } from '../repositories/accounts.js';
 import { loginLinkEmail, mailStatus, sendMail, webUrl } from '../sources/mail.js';
+import { sendSms, smsStatus } from '../sources/sms.js';
 import { accessFor } from '../access.js';
 import { signInLockedOut, noteSignInFailure } from '../signInGuard.js';
 import { sessionBlockedByGate } from '../siteGate.js';
@@ -69,7 +70,7 @@ router.get('/session', async (req, res, next) => {
       // passcode carries no account and is the owner (auth.js `requireOwner`),
       // which is why `isOwner` is answered here rather than inferred from
       // `account` being absent.
-      account: account ? { id: account.id, email: account.email, name: account.name, role: account.role, plan: account.plan } : null,
+      account: account ? { id: account.id, email: account.email, name: account.name, role: account.role, plan: account.plan, trialEndsOn: account.trial_ends_on ?? null } : null,
       // Derived from the resolved access, not computed apart from it: an agent
       // session on the owner's account is not the owner, and the app must be
       // told so or it draws owner-only controls the API will then refuse
@@ -119,7 +120,7 @@ router.post('/session', async (req, res, next) => {
     res.status(201).json({
       token,
       session: { id: session.id, label: session.label, since: session.created_at, until: session.expires_at },
-      account: owner ? { id: owner.id, email: owner.email, name: owner.name, role: owner.role, plan: owner.plan } : null,
+      account: owner ? { id: owner.id, email: owner.email, name: owner.name, role: owner.role, plan: owner.plan, trialEndsOn: owner.trial_ends_on ?? null } : null,
       // An agent on the passcode is not the owner, whoever claimed the account.
       isOwner: access.isOwner,
       access: summariseAccess(access),
@@ -193,7 +194,7 @@ router.post('/session/link', async (req, res, next) => {
     res.status(201).json({
       token: sessionToken,
       session: { id: session.id, label: session.label, since: session.created_at, until: session.expires_at },
-      account: { id: account.id, email: account.email, name: account.name, role: account.role, plan: account.plan },
+      account: { id: account.id, email: account.email, name: account.name, role: account.role, plan: account.plan, trialEndsOn: account.trial_ends_on ?? null },
       isOwner: access.isOwner,
       access: summariseAccess(access),
     });
@@ -205,22 +206,41 @@ router.post('/session/link', async (req, res, next) => {
  *
  * Fifteen minutes, not a week: a link somebody asked for a moment ago at
  * epic.day/login does not need to outlive the afternoon, and the shorter it
- * lives the less a forwarded or intercepted one is worth (handover). The e-mail
- * is the generic "Your login link" — it is answered the same whether or not the
+ * lives the less a forwarded or intercepted one is worth (handover). The
+ * generic "Your login link" — it is answered the same whether or not the
  * address has an account, so it cannot describe an account it may not be about.
+ *
+ * By e-mail where there is one, by text where there is not: since migration 056
+ * an account may have a mobile and no address at all, and that account most
+ * needs a way back in once its first link is spent. Dropping the SMS path would
+ * lock it out for good.
  */
 async function sendLoginLink(req, account) {
-  if (!account.email) return; // a mobile-only account cannot be e-mailed a link.
   const { token, link } = await createSignInLink(account.id, { requestedBy: 'self', ttlHours: 0.25 });
   const url = `${webUrl(req)}/?signin=${token}`;
-  const mail = mailStatus();
-  let delivery = mail.configured ? 'email' : 'no_sender';
-  let error = mail.configured ? null : mail.message;
-  if (mail.configured) {
-    const sent = await sendMail({ to: account.email, ...loginLinkEmail({ url }), purpose: 'sign_in' });
-    if (!sent.sent) { delivery = sent.reason ?? 'send_failed'; error = sent.message ?? null; }
+  let delivery; let error = null; let channel = null;
+  if (account.email) {
+    channel = 'email';
+    const mail = mailStatus();
+    if (!mail.configured) { delivery = mail.reason || 'no_sender'; error = mail.message; }
+    else {
+      const sent = await sendMail({ to: account.email, ...loginLinkEmail({ url }), purpose: 'sign_in' });
+      delivery = sent.sent ? 'email' : (sent.reason ?? 'send_failed');
+      error = sent.sent ? null : (sent.message ?? null);
+    }
+  } else if (account.mobile) {
+    channel = 'sms';
+    const sms = smsStatus();
+    if (!sms.configured) { delivery = sms.reason || 'no_sender'; error = sms.message; }
+    else {
+      const sent = await sendSms({ to: account.mobile, text: `Log in to Epic — this link works once, for 15 minutes: ${url}` });
+      delivery = sent.sent ? 'sms' : (sent.reason ?? 'send_failed');
+      error = sent.sent ? null : (sent.message ?? null);
+    }
+  } else {
+    return; // no e-mail and no mobile: nothing to send to.
   }
-  await markLinkSent(link.id, { delivery, error });
+  await markLinkSent(link.id, { delivery, error, channel });
 }
 
 /**
@@ -245,7 +265,9 @@ router.post('/session/request-link', async (req, res, next) => {
     }
     res.json({
       sent: true,
-      message: 'If that email has an Epic account, a login link is on its way. It works once, for 15 minutes.',
+      message: req.body?.mobile && !req.body?.email
+        ? 'If that number has an Epic account, a login link is on its way by text. It works once, for 15 minutes.'
+        : 'If that email has an Epic account, a login link is on its way. It works once, for 15 minutes.',
     });
   } catch (err) { next(err); }
 });

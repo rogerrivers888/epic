@@ -223,6 +223,19 @@ test('asking for a login link mints a 15-minute self link and never reveals the 
   assert.ok(rows[0].ttl > 12 * 60 && rows[0].ttl <= 15 * 60, `a self link lives ~15 minutes, saw ${rows[0].ttl}s`);
 });
 
+test('a mobile-only account still gets a link minted, by text — not silently nothing', async () => {
+  // Migration 056: an account may have a mobile and no e-mail. Dropping its path
+  // would lock it out once its first link is spent (Codex, P1).
+  const acct = await accounts.createGuestAccount({ name: 'Mo', mobile: '+447700900123' });
+  const res = await call('POST', '/api/session/request-link', { mobile: '+447700900123' });
+  assert.match(res.body.message, /by text/);
+  const { rows } = await query(
+    `select requested_by, channel from sign_in_links where account_id = $1 order by created_at desc limit 1`, [acct.id]);
+  assert.ok(rows[0], 'a link was minted for the mobile-only account');
+  assert.equal(rows[0].requested_by, 'self');
+  assert.equal(rows[0].channel, 'sms', 'its channel is text, not e-mail');
+});
+
 // ---------------------------------------------------------------------------
 // the e-mails
 // ---------------------------------------------------------------------------

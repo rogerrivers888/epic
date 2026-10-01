@@ -3950,7 +3950,7 @@ export const api = {
 };
 
 export type SessionSummary = { id: string; label: string | null; since: string; until: string };
-export type AccountSummary = { id: string; email: string; name: string | null; role: 'owner' | 'customer'; plan: string };
+export type AccountSummary = { id: string; email: string; name: string | null; role: 'owner' | 'customer'; plan: string; trialEndsOn?: string | null };
 export type SessionState = {
   signedIn: boolean;
   configured: boolean;

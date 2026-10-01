@@ -174,6 +174,20 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
 ];
 
 /**
+ * The first back-office screen a session may actually open, from the same NAV
+ * the rail filters by. A magic link lands staff in the back office, but a Support
+ * role has the admin door without `view_reporting`, so sending everyone to the
+ * Overview would greet them with a screen whose first request is a 403. This
+ * answers "where does this person's back office begin"; `how` has no capability,
+ * so there is always an answer.
+ */
+export function firstAdminScreen(access?: { capabilities?: string[] | null } | null): Screen {
+  const held = new Set(access?.capabilities ?? []);
+  const item = NAV.find((n) => !n.needs || held.has(n.needs));
+  return item?.key ?? 'how';
+}
+
+/**
  * Light or dark, for the back office alone.
  *
  * Two words rather than a switch, because a switch has to say what it is a

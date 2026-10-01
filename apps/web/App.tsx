@@ -44,7 +44,7 @@ import { MatchScreen } from './src/screens/open/Match';
 import { PrototypesScreen } from './src/screens/PrototypesScreen';
 import { JoinScreen } from './src/screens/JoinScreen';
 import { OrderTicketScreen } from './src/screens/OrderTicketScreen';
-import { AdminApp } from './src/admin/AdminApp';
+import { AdminApp, firstAdminScreen } from './src/admin/AdminApp';
 import { useActivity } from './src/hooks/useActivity';
 import { LockScreen } from './src/screens/LockScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
@@ -359,7 +359,13 @@ function Gate({ route }: { route: Route }) {
         recheck();
         if (dropped) return;
         const toAdmin = Boolean(st?.access?.doors?.includes('admin'));
-        navigate(toAdmin ? paths.admin('reporting') : paths.account(), { replace: true });
+        // Land on the first screen their role can open, not a fixed one: a
+        // Support member has the admin door but not the Overview's capability.
+        const screen = firstAdminScreen(st?.access);
+        const landing = toAdmin
+          ? (screen === 'filing' ? paths.filing('categories') : paths.admin(screen))
+          : paths.account();
+        navigate(landing, { replace: true });
         setRedeeming(false);
       } catch (err: any) {
         if (dropped) return;
