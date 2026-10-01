@@ -21,7 +21,9 @@ export function PricePointControl({ value, onChange }: { value: PricePoint; onCh
         options={(['any', 'affordable', 'mid', 'upmarket'] as PricePoint[]).map((v) => ({ value: v, label: PRICE_LABEL[v] }))}
         onChange={onChange}
       />
-      <Text style={type.tiny}>Places whose price is unknown stay in and say so — only a source with prices (Google, Tripadvisor) can filter them.</Text>
+      {/* B11 (owner, 1 Oct 2026): no copy about unknown prices. Unpriced places still
+          stay in (a price point never drops Epic's lead content for a missing Google
+          price), but cost absence is silent — no "price unknown", no explanation of it. */}
     </View>
   );
 }

@@ -44,8 +44,11 @@ export function admissionOf(b: Pick<BrowseItem, 'category' | 'experiences' | 'pr
   if (kinds.some((k) => PAID_ACTIVITY_KINDS.has(k))) return 'ticketed';
   return 'check';
 }
-const PRICE_ORDER = ['Free', '£', '££', '£££', '££££', 'No price given'];
-const priceBand = (b: BrowseItem) => priceMarks(b.priceLevel) ?? 'No price given';
+const PRICE_ORDER = ['Free', '£', '££', '£££', '££££'];
+// B11 (owner, 1 Oct 2026): a place with no price level gets no price band shown —
+// no "No price given" bucket. It stays in the results (it is only filtered out when
+// a real band is explicitly selected), it is just not labelled with an absence.
+const priceBand = (b: BrowseItem): string | null => priceMarks(b.priceLevel);
 
 export function BrowsePool({ items, eventsSource, baseLabel, country, pinned, busy, addLabel = 'Add to plan', addedLabel = 'In the plan', initialPrices, onAdd, onRemove, onDislike, onShortlist, shortlistedRefs }: {
   items: BrowseItem[];
@@ -87,7 +90,7 @@ export function BrowsePool({ items, eventsSource, baseLabel, country, pinned, bu
   const priceList = useMemo(() => {
     if (tab === 'events') return [] as [string, number][];
     const c = new Map<string, number>();
-    for (const b of inTab) { const p = priceOf(b); c.set(p, (c.get(p) ?? 0) + 1); }
+    for (const b of inTab) { const p = priceOf(b); if (p != null) c.set(p, (c.get(p) ?? 0) + 1); }
     const order = tab === 'food' ? PRICE_ORDER : Object.values(ADMISSION_LABEL);
     return [...c.entries()].sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
   }, [inTab, tab]);
@@ -96,7 +99,7 @@ export function BrowsePool({ items, eventsSource, baseLabel, country, pinned, bu
   const list = useMemo(() => {
     let l = sf.filtered;
     if (facets.size) l = l.filter((b) => ((tab === 'food' ? b.cuisines : b.experiences) ?? []).some((f) => facets.has(f)));
-    if (prices.size) l = l.filter((b) => prices.has(priceOf(b)));
+    if (prices.size) l = l.filter((b) => { const p = priceOf(b); return p != null && prices.has(p); });
     const by: Record<Sort, (a: BrowseItem, b: BrowseItem) => number> = {
       best: (a, b) => (b.score ?? 0) - (a.score ?? 0),
       rating: (a, b) => (b.rating ?? 0) - (a.rating ?? 0) || (b.ratingCount ?? 0) - (a.ratingCount ?? 0),

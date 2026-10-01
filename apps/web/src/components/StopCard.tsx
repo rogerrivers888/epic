@@ -61,7 +61,7 @@ export function StopCard({ stop, mode, baseLabel, previousName, dim, pinned, bus
 
         {!isAnchor ? (
           <Text style={type.small}>
-            {typeLine(stop)}{price ? ` · ${price}` : stop.category !== 'attraction' && stop.category !== 'event' ? ' · price unknown' : ''}
+            {typeLine(stop)}{price ? ` · ${price}` : ''}
           </Text>
         ) : null}
 

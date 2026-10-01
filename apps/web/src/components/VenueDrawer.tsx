@@ -122,20 +122,19 @@ function Hero({ uri, attribution }: { uri: string | null; attribution: string | 
 
 /**
  * The cost as a four-step scale — Free · £ · ££ · £££ — with one step filled,
- * and a money definition from the place's market beneath (M5/M6). A place with
- * no price signal reads "not known yet", never Free. Never the place's own
- * price — the band is a relative Google signal, the range is the market's.
+ * and a money definition from the place's market beneath (M5/M6). Never Free from
+ * absence, and never the place's own price — the band is a relative Google signal,
+ * the range is the market's.
+ *
+ * B11 (owner, 1 Oct 2026; register B11): a place with no level we can place on the
+ * scale — no Google price level, or a market with no bands to read it in — gets no
+ * row at all, not a "not known yet" line. This is a knowing exception to the
+ * standing "an unknown fact reads not known yet" convention: on the home market the
+ * cost would be blank 56% of the time (SL5: 45 of 80 places), and a row that is
+ * usually blank trains families to ignore it. So cost alone stays silent on absence.
  */
 function CostScale({ cost }: { cost: Awaited<ReturnType<typeof api.costBand>> | null }) {
-  if (!cost) return null;
-  if (!cost.known) {
-    return (
-      <View style={{ gap: 4 }}>
-        <Text style={type.tiny}>COST</Text>
-        <Text style={type.body}>{cost.label}</Text>
-      </View>
-    );
-  }
+  if (!cost || !cost.known) return null;
   return (
     <View style={{ gap: 6 }}>
       <View style={{ flexDirection: 'row', gap: 6 }}>
@@ -499,13 +498,15 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
       : itemLevelGoogle ? item.priceLevel!
         : crowd?.priceLevel != null ? crowd.priceLevel : null;
     let live = true;
-    // A failed lookup — offline (this endpoint is not in offline/policy.ts, so it
-    // is never cached), or a transient error — settles to the honest unknown
-    // state rather than removing the cost row: we could not find out, which is
-    // exactly what "not known yet" says (Codex).
+    // No Google level means no cost row (B11): don't even ask the endpoint, and
+    // show nothing. A failed lookup — offline (this endpoint is not in
+    // offline/policy.ts, so it is never cached) or a transient error — also shows
+    // nothing rather than a "not known yet" line: under B11 cost is silent on
+    // absence, and a band we could not fetch is an absence like any other.
+    if (level == null) { setCost(null); return () => { live = false; }; }
     api.costBand({ country, level })
       .then((d) => { if (live) setCost(d); })
-      .catch(() => { if (live) setCost({ known: false, label: 'Not known yet' }); });
+      .catch(() => { if (live) setCost(null); });
     return () => { live = false; };
     // Stable scalar dependencies, not the whole `item`: a caller can rebuild the
     // item object on every parent render (Inspire's asDrawerItem) without the
