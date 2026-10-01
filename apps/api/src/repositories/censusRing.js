@@ -278,13 +278,18 @@ export function sectorsOfBox(box, universe) {
     return best ? { kind: 'inside', code: best.code, outcode: best.outcode ?? null } : { kind: 'nowhere' };
   }
   // Classify a wide box by every sector whose ground lies in it, or within a
-  // fine-tile margin of it — not by sampling a handful of points (E9, conservative:
-  // owner 1 Oct 2026). A seed inside the box proves that sector has ground there; a
-  // seed just outside, within the margin, is a neighbour whose nearest-point region
-  // can reach into the box. If any such sector is out of the ring, the box straddles
-  // and is unresolved — so "within the minutes" is never overstated. The finer
-  // census resolves whatever is left unresolved. Over-fencing a box whose neighbour
-  // does not quite reach it only ever errs toward unresolved, never toward inside.
+  // fine-tile margin of it — not by sampling a handful of points (E9: owner 1 Oct
+  // 2026, "a box straddling the ring edge is unresolved, not inside"). A seed
+  // inside the box proves that sector has ground there; a seed just outside, within
+  // the margin, is a neighbour whose nearest-point region can reach in. Any such
+  // sector out of the ring makes the box unresolved, so the overstatement this fixes
+  // — a nine-kilometre tile read "inside" off four in-ring corners — cannot recur.
+  // The margin is a fine tile, not larger, on purpose: a bigger one would fence a
+  // wide box wholly inside the ring (owner, 20 Sep: "a 6 km box in the middle needs
+  // no splitting"). The residual it cannot see — an out-of-ring seed further than a
+  // fine tile away in sparse ground whose region still clips the box — is what the
+  // finer census (which splits these tiles to the fine grid) resolves; there is no
+  // exact, cheap whole-box test that does not over-fence large boxes.
   const midLat = (box.minLat + box.maxLat) / 2;
   const mLat = FINE_M / 111320;
   const mLng = FINE_M / (111320 * Math.max(0.2, Math.cos((midLat * Math.PI) / 180)));

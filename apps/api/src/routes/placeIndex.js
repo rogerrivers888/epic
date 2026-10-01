@@ -1538,9 +1538,17 @@ router.get('/census-ring-curve', requires('view_library'), async (req, res, next
     if (!locus.where && !(locus.lat != null && locus.lng != null)) {
       return res.status(400).json({ error: 'where_required', message: 'Pass ?where= or ?lat=&lng=.' });
     }
+    // Resolve the locus once up front: a present-but-unknown place or non-numeric
+    // coordinates make every ring null, and that is an invalid location (400), not a
+    // curve of nulls (Codex).
+    const rings = new Map();
+    for (const m of minutes) rings.set(m, await reach.ringFor({ ...locus, minutes: m, mode }));
+    if (![...rings.values()].some(Boolean)) {
+      return res.status(400).json({ error: 'where_unresolved', message: 'That place could not be located.' });
+    }
     const curve = [];
     for (const m of minutes) {
-      const ring = await reach.ringFor({ ...locus, minutes: m, mode });
+      const ring = rings.get(m);
       if (!ring) { curve.push({ minutes: m, count: null, unresolved: null, floor: null }); continue; }
       const c = await censusInRing({
         cells: ring.band ?? ring.cells, outcodes: ring.outcodes,
