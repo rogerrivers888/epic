@@ -288,7 +288,7 @@ export type AdminScreen =
    * moved to. It is still resolvable and no longer in the rail, which is the
    * same treatment `coverage`, `lookup`, `library` and `scout` got.
    */
-  | 'money' | 'subscriptions' | 'customers' | 'suppliers' | 'behaviour' | 'engagement'
+  | 'money' | 'subscriptions' | 'customers' | 'waitlist' | 'suppliers' | 'behaviour' | 'engagement'
   | 'places' | 'demand' | 'runs' | 'queue'
   /**
    * The filing desk (back-office handover, 28 Sep 2026): seven tabs over one
@@ -342,7 +342,7 @@ export const howAnchorOf = (raw: string | null | undefined): HowAnchor | null =>
 export const ADMIN_SCREENS: AdminScreen[] = [
   'approvals',
   'overview', 'accounts', 'households', 'activity', 'reporting',
-  'money', 'subscriptions', 'customers', 'suppliers', 'behaviour', 'engagement',
+  'money', 'subscriptions', 'customers', 'waitlist', 'suppliers', 'behaviour', 'engagement',
   'places', 'demand', 'runs', 'queue',
   'filing',
   'lookup', 'coverage', 'library', 'shelves', 'scout', 'sources', 'categories', 'voice', 'hosting', 'skills', 'staff', 'roles', 'mail', 'plans', 'audit', 'how',

@@ -274,6 +274,7 @@ test('Household, Settings, Prototypes and the back office', () => {
   assert.deepEqual(roundTrip('/admin/money'), { name: 'admin', screen: 'money' });
   assert.deepEqual(roundTrip('/admin/subscriptions'), { name: 'admin', screen: 'subscriptions' });
   assert.deepEqual(roundTrip('/admin/customers'), { name: 'admin', screen: 'customers' });
+  assert.deepEqual(roundTrip('/admin/waitlist'), { name: 'admin', screen: 'waitlist' });
   assert.deepEqual(roundTrip('/admin/suppliers'), { name: 'admin', screen: 'suppliers' });
   assert.deepEqual(roundTrip('/admin/behaviour'), { name: 'admin', screen: 'behaviour' });
   assert.deepEqual(roundTrip('/admin/engagement'), { name: 'admin', screen: 'engagement' });

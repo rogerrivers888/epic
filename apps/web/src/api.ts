@@ -2119,6 +2119,34 @@ export const api = {
   spend: (p: { period: SpendPeriod; from?: string; to?: string }) => request<SpendResponse>(`/api/household/spend${qs(p)}`),
   deleteHousehold: (confirmName: string) => del<{ deleted: boolean }>('/api/household', { confirmName }),
 
+  // --- Back office › Waitlist (WL1, routes/waitlist.js) ----------------------
+  waitlist: (f: WaitlistFilters = {}) => request<WaitlistResponse>(`/api/admin/waitlist${qs(f)}`),
+  /**
+   * The filtered rows as a spreadsheet. Fetched rather than opened in a tab, as
+   * the household export is: a new tab carries no session header. The API writes
+   * the export to Audit before the file leaves.
+   */
+  downloadWaitlist: async (f: WaitlistFilters = {}): Promise<void> => {
+    const token = sessionToken();
+    const res = await fetch(`${API_URL}/api/admin/waitlist.csv${qs(f)}`, {
+      credentials: 'include',
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => ({})));
+    const blob = await res.blob();
+    if (typeof document === 'undefined') return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `epic-waitlist-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+  /** An erasure request: the row is gone; the audit keeps that it happened, never the address. */
+  deleteWaitlistSignup: (id: string) => del<{ ok: true; id: string }>(`/api/admin/waitlist/${encodeURIComponent(id)}`),
+
   // prototypes (the owner's design review: approved, rejected, archived)
   prototypeReviews: () => request<{ reviews: Record<string, { status: PrototypeStatus; note: string | null; updatedAt: string | null }> }>('/api/prototypes'),
   reviewPrototype: (file: string, status: PrototypeStatus, note?: string | null) =>
@@ -5828,4 +5856,20 @@ export type InterestSignup = {
   consentWording: string;
   /** The honeypot: a field no person sees. Anything in it is a bot, answered as a success and kept nowhere. */
   website?: string;
+};
+
+/** Back office › Waitlist (WL1): the filters, every one optional. */
+export type WaitlistFilters = { search?: string; source?: string; kind?: string; locale?: string; campaign?: string };
+export type WaitlistRow = {
+  id: string; email: string; source: 'home' | 'host'; sourceLabel: string;
+  hostKind: string | null; hostKindLabel: string | null; locale: string; country: string | null;
+  campaign: string; landingPage: string | null; signedUp: string;
+};
+export type WaitlistResponse = {
+  rows: WaitlistRow[];
+  totals: { all: number; home: number; host: number; last7: number };
+  /** `share` is null with nobody on the list — never a 0 that reads as "nobody chose this". */
+  byKind: { key: string; label: string; signups: number; share: number | null }[];
+  byCampaign: { key: string; signups: number; share: number | null }[];
+  count: number;
 };

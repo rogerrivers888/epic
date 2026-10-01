@@ -56,6 +56,7 @@ import { HowItWorks } from './screens/HowItWorks';
 import { VoiceLab } from './screens/VoiceLab';
 import { Hosting } from './screens/Hosting';
 import { Mail } from './screens/Mail';
+import { Waitlist } from './screens/Waitlist';
 import { Staff } from './screens/Staff';
 import { Sources } from './screens/Sources';
 import { Categories } from './screens/Categories';
@@ -133,6 +134,9 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
    * used to read the whole reporting model and answer 403).
    */
   { key: 'customers', label: 'Customers', icon: 'household', needs: 'view_accounts', sub: 'Every household, and the record behind one', group: 'Reporting' },
+  // Under the households (Website & Registration › WL1): everyone who
+  // registered interest on epic.day before launch.
+  { key: 'waitlist', label: 'Waitlist', icon: 'list', needs: 'view_waitlist', sub: 'Everyone who registered interest on epic.day, before launch', group: 'Reporting' },
   /**
    * Suppliers asks for `view_reporting`, because that is what loads it.
    *
@@ -319,6 +323,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
       {screen === 'skills' ? <Skills canManage={can('manage_skills')} /> : null}
       {screen === 'staff' ? <Staff canManage={can('manage_staff')} /> : null}
       {screen === 'mail' ? <Mail canSend={can('manage_settings')} /> : null}
+      {screen === 'waitlist' ? <Waitlist canManage={can('manage_waitlist')} /> : null}
       {screen === 'roles' ? <Roles canManage={can('manage_roles')} /> : null}
       {screen === 'plans' ? <Plans canManage={can('manage_plans')} /> : null}
       {screen === 'audit' ? <Audit /> : null}
