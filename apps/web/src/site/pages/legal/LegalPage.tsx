@@ -3,6 +3,10 @@
  * Foundations › Legal pages): one plain reading layout on cream, the page's
  * name as its one <h1>, each section an <h2>. The words live per locale beside
  * this file and are placeholders until the owner supplies the final ones.
+ *
+ * Every page has at least one email form (README › Email forms), so each
+ * closes with the homepage's, in the homepage's own words — the consent it
+ * records is one the API already knows (sources/consentWordings.json).
  */
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -12,9 +16,12 @@ import type { SitePageName, SiteLocale } from '../../../routes';
 import { pick } from '../../i18n';
 import { SiteH1, SiteH2, SiteP } from '../../type';
 import { LEGAL_STRINGS } from './LegalPage.strings';
+import { InterestForm } from '../../InterestForm';
+import { W2_WORDS } from '../home/W2Sorted.strings';
 
 export function LegalPage({ locale, page }: { locale: SiteLocale; page: Exclude<SitePageName, 'host'> }) {
   const doc = pick(LEGAL_STRINGS, locale)[page];
+  const join = pick(W2_WORDS, locale);
   const { width } = useViewport();
   const phone = width < 700;
   return (
@@ -27,6 +34,10 @@ export function LegalPage({ locale, page }: { locale: SiteLocale; page: Exclude<
             <SiteP style={[styles.body, phone && { fontSize: 17 }]}>{s.body}</SiteP>
           </View>
         ))}
+        <View style={styles.section}>
+          <SiteH2 style={styles.h2}>{join.planned}</SiteH2>
+          <InterestForm locale={locale} source="home" label={join.formLabel} successMessage={join.success} ground="cream" maxWidth={560} />
+        </View>
       </View>
     </View>
   );
