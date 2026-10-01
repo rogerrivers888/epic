@@ -92,6 +92,15 @@ async function fileFor(pathname) {
 }
 
 const server = http.createServer(async (req, res) => {
+  const pathname = (req.url || '/').split('?')[0].split('#')[0];
+  // A health endpoint the deploy can watch — answered FIRST, before the canonical-host
+  // redirect, because Railway's probe arrives on a non-canonical host (e.g.
+  // healthcheck.railway.app) and a 301 there would fail every deployment (Codex). Railway
+  // holds the old container serving until the new one answers this 200, so a deploy never
+  // shows users a cold start (owner, 1 Oct 2026). The API has its own /health; this is the
+  // web's, so one repo-root railway.json can name /health for both services.
+  if (pathname === '/health') { res.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'no-store' }); res.end('ok'); return; }
+
   const to = redirectTo(req);
   if (to) { res.writeHead(301, { location: to, 'cache-control': 'no-cache' }); res.end(); return; }
 
@@ -99,7 +108,6 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(405, { allow: 'GET, HEAD' }); res.end(); return;
   }
 
-  const pathname = (req.url || '/').split('?')[0].split('#')[0];
   let found = await fileFor(pathname);
   if (!found && wantsApp(req, pathname)) found = await fileFor('/index.html');
   if (!found) { res.writeHead(404, { 'content-type': 'text/plain' }); res.end('Not found'); return; }

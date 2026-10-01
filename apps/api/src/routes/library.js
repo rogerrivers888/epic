@@ -38,6 +38,7 @@ import * as lib from '../repositories/library.js';
 import * as placeIndex from '../repositories/placeIndex.js';
 import { runHarvest, refreshKinds, WIDTHS, researchAttraction, detailPass } from '../sources/harvest.js';
 import { contentsOf } from '../sources/inside.js';
+import { isStorableLicence } from '../sources/wikimedia.js';
 import { readAttraction, readVenueFromWeb } from '../domain/attractionReading.js';
 import { readCategoryTeaching, CATEGORIES } from '../domain/categoryTeaching.js';
 import * as shelfRules from '../repositories/shelfRules.js';
@@ -154,12 +155,21 @@ imageRouter.get('/:id/:width', async (req, res, next) => {
     if (!image || (image.moderation !== 'approved' && !theirs)) return res.status(404).end();
     const variant = await lib.variantFor(image.id, Number(req.params.width));
     if (!variant) return res.status(404).end();
+    // Only an open licence may sit in a shared/edge cache (owner, 1 Oct 2026): the
+    // LICENCE is the test, not "owned" and not the source. It is judged by the harvest's
+    // own allow-list (`isStorableLicence`), so the edge-cache gate and the ingestion
+    // never drift — CC BY/-SA, CC0, public domain, OGL, GFDL, Attribution, "No
+    // restrictions" are open; a logo's trademark, a household photo, anything restricted
+    // (All rights reserved, Fair use, CC BY-NC/-ND) or unreadable is `private`, off the
+    // shared edge (Codex). An id addresses one photograph for ever, so all are immutable.
+    const openLicence = isStorableLicence(image.licence);
     res.set({
       'content-type': variant.mime,
-      // An id addresses one photograph for ever; a different picture is a
-      // different row. So this may be cached as hard as the web allows — on
-      // the household's own device only, while it is theirs alone.
-      'cache-control': theirs ? 'private, max-age=21600' : 'public, max-age=31536000, immutable',
+      'cache-control': theirs
+        ? 'private, max-age=21600'
+        : openLicence
+          ? 'public, max-age=31536000, immutable'
+          : 'private, max-age=31536000, immutable',
       etag: `"${image.id}-${variant.width}"`,
       // The licence, on the response itself, so it is attached to the bytes
       // wherever they end up and not only to the JSON that pointed at them.

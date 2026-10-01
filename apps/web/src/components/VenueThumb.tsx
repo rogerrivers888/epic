@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { Press, Zoom } from './press';
 import { API_URL, OwnedImage, VenuePhotoRef, ownedImageUrl } from '../api';
+import { onSessionChange } from '../session';
 import { Icon, IconName, iconFor } from './Icon';
 import { colors, spacing, type } from '../theme';
 
@@ -101,6 +102,65 @@ export const PHOTO_W = 480;
  * Inspire's cards were designed at, and it is the shape the library's own
  * portraits are held in.
  */
+/**
+ * Lazy-loading (owner, 1 Oct 2026). A tile does not fetch its photograph until it
+ * is about to scroll into view, and a rented (Google) photograph is fetched at most
+ * once a session. Before this, every tile in every shelf loaded eagerly — a fresh
+ * Inspire fired one live Google Place Photo request per non-owned tile on screen,
+ * dozens at once, which was slow, cost money, and broke "photos only for tiles in
+ * the viewport, a row at a time" (data policy §13.8).
+ *
+ * `canLazy` is web with IntersectionObserver; on native the tile loads straight
+ * away (the lists virtualise, and IO is a browser API).
+ */
+const canLazy = () => typeof window !== 'undefined' && typeof IntersectionObserver !== 'undefined';
+const RENTED_PATH = '/api/photos/google';
+const isRentedUri = (uri: string | null): boolean => !!uri && uri.includes(RENTED_PATH);
+/**
+ * One request per rented photograph per session, keyed by the photo's IDENTITY — its
+ * `name` — not the signed URL (Codex). The link's signature and expiry vary between
+ * tiles and payloads, so URL-keying would miss duplicates and refetch; and because
+ * every tile of a photo then draws the one URL the first tile used, the browser
+ * fetches it exactly once. The promise resolves true on load and FALSE on failure,
+ * so a photo that will not load (a 429, a 5xx) falls back to its mark or icon rather
+ * than being retried tile by tile (Codex).
+ */
+type RentedEntry = { url: string; expMs: number; done: Promise<boolean> };
+// One load per rented photograph, keyed by the photo's IDENTITY — its `name` — not the
+// signed URL. The signature and expiry are freshly stamped for every tile and payload
+// (sources/photoLinks.js), so URL- or signature-keying would miss duplicates and
+// refetch; keying by identity fetches each photo once and has every tile of it draw the
+// one URL the first tile used, so the browser fetches it once. The result — success OR
+// failure — is kept, so a photo that will not load (a 429, a 5xx) falls back to its
+// mark/icon and is NOT retried tile by tile, which during an outage would be a burst of
+// paid calls, and a fresh signature on a later tile is not a new attempt (Codex).
+//
+// Two things keep it correct over time (Codex): it is **scoped to the session** — a
+// token change (sign-in, sign-out, a household switch) clears it, so a load is never
+// reused across spenders — and each entry carries the link's **expiry**, so once the
+// signed URL has aged out (a page left open past its lifetime) the next tile replaces it
+// with the payload's fresh URL rather than re-requesting a stale, now-rejected one.
+const rentedLoads = new Map<string, RentedEntry>();
+onSessionChange(() => rentedLoads.clear());
+const rentedIdentity = (url: string): string => (/[?&]name=([^&]+)/.exec(url)?.[1]) ?? url;
+const rentedExpiry = (url: string): number => { const m = /[?&]e=(\d+)/.exec(url); return m ? Number(m[1]) : Infinity; };
+function loadRentedOnce(url: string): RentedEntry {
+  const key = rentedIdentity(url);
+  const cached = rentedLoads.get(key);
+  if (cached && cached.expMs > Date.now()) return cached;
+  const done = new Promise<boolean>((resolve) => {
+    try {
+      const img = new (window as unknown as { Image: { new (): HTMLImageElement } }).Image();
+      img.onload = () => resolve(true);
+      img.onerror = () => resolve(false);
+      img.src = url;
+    } catch { resolve(false); }
+  });
+  const entry: RentedEntry = { url, expMs: rentedExpiry(url), done };
+  rentedLoads.set(key, entry);
+  return entry;
+}
+
 export const MEDIA_RADIUS = 12;
 export const MEDIA_RATIO = 3 / 2;
 /**
@@ -172,6 +232,51 @@ export function VenueThumb({
    */
   useEffect(() => { setFailed(false); setLoaded(false); }, [uri]);
 
+  // Lazy-load: hold the network image until the tile is near the viewport, with a
+  // 300px margin so it is ready just before it appears. On native (no IO) it loads
+  // at once. Once seen, it stays loaded.
+  const hostRef = useRef<any>(null);
+  const [inView, setInView] = useState(() => !canLazy());
+  useEffect(() => {
+    if (inView || !canLazy()) return;
+    const node = hostRef.current as Element | null;
+    if (!node || typeof (node as Element).getBoundingClientRect !== 'function') { setInView(true); return; }
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) { setInView(true); io.disconnect(); }
+    }, { rootMargin: '300px' });
+    io.observe(node);
+    return () => io.disconnect();
+  }, [inView]);
+
+  // A rented photo waits for its one-per-session preload before it is drawn, so two
+  // tiles of the same place never both fetch it, and it draws the one shared URL the
+  // preload used. A preload that fails marks the tile failed, so it falls back to the
+  // mark/icon instead of retrying. Owned images draw as soon as they are in view
+  // (ours, cheap, served from our own origin). Readiness is tied to the current URL:
+  // when it changes the tile waits for the new photo, never shows the old (Codex).
+  const rented = isRentedUri(uri);
+  const [rentedReady, setRentedReady] = useState(false);
+  const [rentedUrl, setRentedUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!rented || !inView || !canLazy() || !uri) return;
+    let live = true;
+    setRentedReady(false);
+    const entry = loadRentedOnce(uri);
+    setRentedUrl(entry.url);
+    entry.done.then((ok) => { if (!live) return; if (ok) setRentedReady(true); else setRentedFailed(true); });
+    return () => { live = false; };
+  }, [rented, inView, uri]);
+  // Whether the preloaded URL is for THIS photo, worked out synchronously during the
+  // render — so a tile reused for a different place never shows the previous photo
+  // (with the new attribution) for a frame while the effect catches up (Codex).
+  const rentedFresh = rented && !!uri && !!rentedUrl && rentedIdentity(rentedUrl) === rentedIdentity(uri);
+  // What the network <Image> is allowed to draw: in view, and (for a rented photo)
+  // its own preload ready. Native short-circuits both to true.
+  const showImage = inView && (!rented || !canLazy() || (rentedReady && rentedFresh));
+  // The rented photo draws the shared, deduped URL once preloaded; everything else
+  // draws its own URI.
+  const drawUri = rented && canLazy() ? (rentedFresh ? rentedUrl : null) : uri;
+
   const isMark = shown?.source === 'logo';
   const line = shown?.creditRequired ? shown.credit : showRented ? photo?.attribution ?? null : null;
   const onError = () => { if (showRented) setRentedFailed(true); else setFailed(true); };
@@ -189,9 +294,9 @@ export function VenueThumb({
       {shown?.lqip && !isMark && !loaded && !failed ? (
         <Image source={{ uri: shown.lqip }} style={StyleSheet.absoluteFill as any} resizeMode="cover" blurRadius={2} accessibilityIgnoresInvertColors />
       ) : null}
-      {uri && !failed && !isMark ? (
+      {uri && showImage && !failed && !isMark ? (
         <Image
-          source={{ uri }}
+          source={{ uri: drawUri as string }}
           style={StyleSheet.absoluteFill as any}
           resizeMode="cover"
           onError={onError}
@@ -201,7 +306,7 @@ export function VenueThumb({
         />
       ) : null}
       </Zoom>
-      {uri && !failed && isMark ? (
+      {uri && showImage && !failed && isMark ? (
         <Image
           source={{ uri }}
           style={[styles.mark, { padding: Math.round(least * 0.16) }]}
@@ -211,7 +316,9 @@ export function VenueThumb({
           accessibilityIgnoresInvertColors
           accessibilityLabel={name ? `${name} logo` : undefined}
         />
-      ) : uri && !failed ? null : (
+      ) : uri && showImage && !failed ? null : (
+        // Before the tile is in view, or when there is no picture, the floor. An
+        // owned LQIP (above) sits over it while the real photograph loads.
         <View style={styles.empty}>
           <Icon name={icon} size={fill ? 40 : Math.max(18, Math.round(least * 0.28))} color={colors.icon} />
         </View>
@@ -221,13 +328,13 @@ export function VenueThumb({
   );
 
   return (
-    <View style={fill ? { width: '100%', gap: 2 } : { width, gap: 2 }}>
+    <View ref={hostRef} style={fill ? { width: '100%', gap: 2 } : { width, gap: 2 }}>
       {onPress ? (
         <Press onPress={onPress} accessibilityRole="button" accessibilityLabel={name ?? undefined}>{tile}</Press>
       ) : tile}
       {/* Not decoration. For every licence but CC0 and public domain, the
-          picture without the line is the licence broken. */}
-      {credit && line && !failed && uri ? (
+          picture without the line is the licence broken. Shown with the picture. */}
+      {credit && line && !failed && uri && showImage ? (
         <Text style={[type.tiny, styles.credit]} numberOfLines={1}>{line}</Text>
       ) : null}
     </View>

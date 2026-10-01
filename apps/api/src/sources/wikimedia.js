@@ -729,6 +729,19 @@ const STORABLE = [
 ];
 const NEVER = /non[- ]commercial|nc\b|no derivative|nd\b|fair use|copyright|all rights reserved/i;
 
+/**
+ * Whether a licence string permits keeping and republishing the bytes — the same
+ * allow-list the harvest admits by (`STORABLE` minus `NEVER`). Exported so the only
+ * other place that must judge a licence — whether an image may sit in a shared/edge
+ * cache (routes/library.js) — asks the same question and the two never drift. A logo
+ * (trademark) and a household photograph are not open licences, so this returns false
+ * for them, as it does for anything restricted or unreadable.
+ */
+export const isStorableLicence = (licence) => {
+  const s = String(licence ?? '').trim();
+  return Boolean(s) && STORABLE.some((re) => re.test(s)) && !NEVER.test(s);
+};
+
 function readLicence(meta = {}) {
   const short = stripTags(meta.LicenseShortName?.value) || stripTags(meta.UsageTerms?.value) || null;
   const restrictions = stripTags(meta.Restrictions?.value) || null;
