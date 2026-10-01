@@ -38,6 +38,7 @@ import { matchOsm } from './openMatch.js';
 import { venueFromOsmElement, kindFromOsmTags, OSM_ATTRIBUTION } from './osm.js';
 import { encyclopediaFor } from './encyclopedia.js';
 import { siteFacts } from './site.js';
+import { recordAdmissionAnswer } from './admission.js';
 import { reverseGeocode } from './geocode.js';
 import { googleSource } from './google.js';
 import { dayOutTestOn } from '../domain/dayOut.js';
@@ -763,6 +764,11 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
           // the body is for the extractor (owner, 26 Sep 2026).
           put('body', site.body),
         ]);
+        // Admission is an owned fact (owner, 1 Oct 2026; parks admission): a free or
+        // priced entry read from the venue's own page is written as the owned
+        // cost-band answer the drawer's cost row prefers over Google (B11). A page we
+        // reached that said nothing bandable is recorded as asked_nothing_found.
+        await recordAdmissionAnswer(venueRef, site.admission, { sourceUrl: site.sourceUrl ?? seed.website }).catch(() => null);
         identified += 1;
         step('venue-site', 'found', { url: site.sourceUrl ?? seed.website });
       } else {

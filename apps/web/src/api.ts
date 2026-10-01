@@ -2313,9 +2313,9 @@ export const api = {
   placeReviews: (q: { ref: string; name: string; lat: number; lng: number }) =>
     request<{ rating: number | null; ratingCount: number | null; reviews: { text: string; rating: number | null; author: string | null; authorUri: string | null; when: string | null }[]; priceLevel: number | null; mapsUrl: string | null; attribution: string | null; matched: boolean }>(`/api/places/reviews${qs(q)}`),
   placeRecords: (venueRefs: string[]) => request<{ records: Record<string, OwnedRecord>; missing: string[] }>(`/api/places/record${qs({ refs: venueRefs.join(',') })}`),
-  /** The cost scale for a place: the band Google's price level fills, and a money definition from the place's market. `known: false` = not known yet. */
-  costBand: (q: { country?: string | null; level: number | null }) =>
-    request<{ known: false; label: string } | { known: true; scale: string[]; index: number; band: string; currency: string; range: string | null; definition: string | null }>(`/api/places/cost-band${qs({ country: q.country ?? undefined, level: q.level ?? undefined })}`),
+  /** The cost scale for a place: owned admission (from the venue's own page) if we hold it, else the band Google's price level fills, and a money definition from the place's market. `known: false` = not known yet. `ref` lets the endpoint find the owned admission answer. */
+  costBand: (q: { country?: string | null; level: number | null; ref?: string | null }) =>
+    request<{ known: false; label: string } | { known: true; scale: string[]; index: number; band: string; currency: string; range: string | null; definition: string | null }>(`/api/places/cost-band${qs({ country: q.country ?? undefined, level: q.level ?? undefined, ref: q.ref ?? undefined })}`),
   /** Research a place again now (Settings, and "look again" in the drawer). */
   researchPlace: (venueRef: string) => post<{ state: string; fields: number; matched: Record<string, any>; problems: string[]; record: OwnedRecord | null }>('/api/places/record', { ref: venueRef }),
   savePlace: (venueRef: string, status: 'saved' | 'dismissed' | 'special' = 'saved', context?: { label?: string; venue?: Partial<Venue>; category?: string | null; lat?: number; lng?: number; note?: string; country?: string | null; countryCode?: string | null; locality?: string | null }) =>

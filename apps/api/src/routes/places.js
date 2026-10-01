@@ -15,7 +15,8 @@ import { taxonomy } from '../repositories/shelfTaxonomy.js';
 import { shelvesForVenue } from '../domain/moods.js';
 import { withTransaction, query } from '../db.js';
 import { resolve as resolveWording, localeOfHousehold } from '../repositories/wording.js';
-import { costBandFor, fillDefinition } from '../domain/costBand.js';
+import { costBandFor, fillDefinition, bandIndexForChoice } from '../domain/costBand.js';
+import { ownedCostBand } from '../repositories/questionSets.js';
 import * as visitsRepo from '../repositories/visits.js';
 import * as menusRepo from '../repositories/menus.js';
 import { enabledSources, recallVenue, optInFrom } from '../sources/index.js';
@@ -299,14 +300,24 @@ places.get('/cost-band', async (req, res, next) => {
     const country = (String(req.query.country || '').toUpperCase())
       || (household?.home_country_code ? String(household.home_country_code).toUpperCase() : 'GB');
 
+    // Owned admission first (owner, 1 Oct 2026; parks admission): a cost-band answer
+    // read from the venue's own page — "free entry" and the like — beats Google's
+    // price level, which 0 of 80 SL5 places even had. The owned choice is already a
+    // scale index (free·cheap·moderate·expensive line up with Free·£·££·£££), which
+    // is a valid "level" to costBandFor. Google's level is the fallback; neither is
+    // "not known yet". Needs the place's ref, so an unidentified place simply has none.
+    const ref = String(req.query.ref || '');
+    const ownedChoice = ref ? await ownedCostBand(ref) : null;
+    const ownedIndex = ownedChoice != null ? bandIndexForChoice(ownedChoice) : null;
     const levelRaw = req.query.level;
+    const level = levelRaw === '' || levelRaw == null ? null : Number(levelRaw);
     const { rows: [m] } = await query('select name, currency, cost_bands from markets where code = $1', [country]);
     // The whole "is the cost knowable" decision — no level, no market, or a
     // market with no bands set — is one pure function (domain/costBand.js), so
     // "never a guess" is testable and the route only adds the wording. A country
     // Epic has no market for, and a market (Portugal, Greece, Turkey, the UAE)
     // seeded with null bands, both read "not known yet" here (Codex).
-    const cost = costBandFor(m ?? null, levelRaw === '' || levelRaw == null ? null : Number(levelRaw));
+    const cost = costBandFor(m ?? null, ownedIndex != null ? ownedIndex : level);
     if (!cost.known) {
       return res.json({ known: false, label: await t('cost.unknown', 'Not known yet') });
     }

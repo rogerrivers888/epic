@@ -498,13 +498,15 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
       : itemLevelGoogle ? item.priceLevel!
         : crowd?.priceLevel != null ? crowd.priceLevel : null;
     let live = true;
-    // No Google level means no cost row (B11): don't even ask the endpoint, and
-    // show nothing. A failed lookup — offline (this endpoint is not in
-    // offline/policy.ts, so it is never cached) or a transient error — also shows
-    // nothing rather than a "not known yet" line: under B11 cost is silent on
-    // absence, and a band we could not fetch is an absence like any other.
-    if (level == null) { setCost(null); return () => { live = false; }; }
-    api.costBand({ country, level })
+    const ref = item?.venueRef ?? null;
+    // Ask when we have the place OR a Google level. Owned admission — "free entry"
+    // read from the venue's own page — can give a band where Google has no price
+    // level at all (parks: 0 of 80 SL5 places had one), so a place with a ref is
+    // worth asking about even with no level. Nothing to ask with (no ref and no
+    // level) shows no row. A failed or empty lookup shows nothing too — B11: cost is
+    // silent on absence, never a "not known yet" line.
+    if (!ref && level == null) { setCost(null); return () => { live = false; }; }
+    api.costBand({ country, level, ref })
       .then((d) => { if (live) setCost(d); })
       .catch(() => { if (live) setCost(null); });
     return () => { live = false; };

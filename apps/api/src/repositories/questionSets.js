@@ -930,6 +930,24 @@ export async function markDisagreement(venueRef, questionId) {
   );
 }
 
+/**
+ * A place's owned cost-band choice, for the drawer's cost row (owner, 1 Oct 2026;
+ * parks admission). The most recently checked `answered` cost-band answer from any
+ * owned source — admission read from the venue's own page. Null when nothing owned
+ * has answered it, so the cost row falls back to Google's price level (B11).
+ */
+export async function ownedCostBand(venueRef) {
+  const { rows } = await query(
+    `select p.choice from place_answers p
+       join questions q on q.id = p.question_id
+      where p.venue_ref = $1 and q.attribute_key = 'cost-band'
+        and p.state = 'answered' and p.choice is not null
+      order by p.checked_at desc limit 1`,
+    [venueRef],
+  );
+  return rows[0]?.choice ?? null;
+}
+
 /** Every answer a place has, with the question and the label beside it. */
 export async function answersFor(venueRef) {
   const { rows } = await query(
