@@ -20,7 +20,7 @@
  */
 
 import express from 'express';
-import { interestLimit, interestMailAllowed } from '../limits.js';
+import { interestEdgeLimit, interestLimit, interestMailAllowed } from '../limits.js';
 import { deployed } from '../auth.js';
 import { readFileSync } from 'node:fs';
 
@@ -104,7 +104,7 @@ export function readSignup(body, req) {
 export function interestRouter({ send = sendMail, configured = mailConfigured, mailAllowed = interestMailAllowed } = {}) {
   const router = express.Router();
 
-  router.post('/interest', interestLimit, async (req, res, next) => {
+  router.post('/interest', interestEdgeLimit, interestLimit, async (req, res, next) => {
     try {
       // The honeypot: a field no person can see, so anything in it was typed by
       // a script. It gets the same success a person does — telling it apart

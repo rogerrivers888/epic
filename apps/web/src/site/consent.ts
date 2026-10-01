@@ -50,6 +50,11 @@ export function startTracking(): void {
   // eslint-disable-next-line prefer-rest-params
   w.gtag = function gtag() { w.dataLayer.push(arguments); };
   w.gtag('consent', 'default', { ad_storage: 'denied', analytics_storage: 'denied', ad_user_data: 'denied', ad_personalization: 'denied', wait_for_update: 500 });
+  // A choice already made is applied before anything is configured, so a
+  // returning visitor's first page view goes out under the consent they gave
+  // (Codex, 1 Oct 2026).
+  const known = readConsent();
+  if (known) applyConsent(known);
   w.gtag('js', new Date());
   if (GA4_ID) w.gtag('config', GA4_ID);
   if (GOOGLE_ADS_ID) w.gtag('config', GOOGLE_ADS_ID);
@@ -57,6 +62,4 @@ export function startTracking(): void {
   s.async = true;
   s.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(GA4_ID || GOOGLE_ADS_ID)}`;
   document.head.appendChild(s);
-  const known = readConsent();
-  if (known) applyConsent(known);
 }

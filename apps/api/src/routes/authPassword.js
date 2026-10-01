@@ -25,7 +25,7 @@
 import express from 'express';
 import { withTransaction } from '../db.js';
 import { closeSession, deployed, openSession, sessionCookie, sessionKindFor } from '../auth.js';
-import { passwordLimit, signInLimit } from '../limits.js';
+import { passwordEdgeLimit, passwordLimit, signInLimit } from '../limits.js';
 import {
   accountByEmail, accountById, consumeSignInLink, createSignInLink, inspectSignInLink, linkContactFor,
   markLinkSent, normaliseEmail, passwordFor, recentLinkCount, recordSignIn, setPassword,
@@ -123,7 +123,7 @@ export async function signIn(req, res, accountId, { verified = null, email = nul
  * checked instead, so an unknown address costs the same KDF run as a known one
  * and the response time cannot be used to find out who has an account.
  */
-router.post('/auth/login', passwordLimit, signInLimit, async (req, res, next) => {
+router.post('/auth/login', passwordEdgeLimit, passwordLimit, signInLimit, async (req, res, next) => {
   try {
     const email = normaliseEmail(req.body?.email);
     const password = passwordOf(req.body?.password);
@@ -176,7 +176,7 @@ async function sendReset(req, account) {
  * per account an hour, so it cannot be used to fill somebody's inbox. A lockout
  * on the address is honoured silently: still 200, nothing sent.
  */
-router.post('/auth/forgot', passwordLimit, async (req, res) => {
+router.post('/auth/forgot', passwordEdgeLimit, passwordLimit, async (req, res) => {
   const email = normaliseEmail(req.body?.email);
   res.json({ ok: true });
   if (!email) return;
@@ -206,7 +206,7 @@ router.post('/auth/forgot', passwordLimit, async (req, res) => {
  * all). Looks only: the link is spent by the POST below, once a password has
  * been typed.
  */
-router.get('/auth/link/:token', passwordLimit, signInLimit, async (req, res, next) => {
+router.get('/auth/link/:token', passwordEdgeLimit, passwordLimit, signInLimit, async (req, res, next) => {
   try {
     const link = await inspectSignInLink(String(req.params.token || '').trim());
     const account = link ? await accountById(link.account_id) : null;
@@ -233,7 +233,7 @@ router.get('/auth/link/:token', passwordLimit, signInLimit, async (req, res, nex
  * The password is hashed before the link is spent, so a hashing failure leaves
  * the link usable.
  */
-router.post('/auth/credentials', passwordLimit, signInLimit, async (req, res, next) => {
+router.post('/auth/credentials', passwordEdgeLimit, passwordLimit, signInLimit, async (req, res, next) => {
   try {
     const token = String(req.body?.token || '').trim();
     const password = passwordOf(req.body?.password);

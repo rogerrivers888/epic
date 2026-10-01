@@ -142,6 +142,24 @@ export const interestLimit = limit({
 });
 
 /**
+ * Two keys, because which one is the visitor depends on how many proxies sit
+ * in front of the API, and that is a deployment fact the code cannot see:
+ * `req.ip` is right when `trust proxy` matches the hops (EPIC_TRUSTED_PROXIES),
+ * and forgeable when it counts one too many; the right-most forwarded address
+ * cannot be forged, but behind a second proxy it is that proxy, shared by
+ * everyone. So the tight limit is on `req.ip`, and a looser one on the edge
+ * address catches a caller rotating `req.ip` with forged headers without
+ * squeezing visitors who share an edge (Codex, 1 Oct 2026, both ways round).
+ */
+export const interestEdgeLimit = limit({
+  name: 'interest-edge',
+  windowMs: 10 * MINUTE,
+  max: 300,
+  message: 'That is a lot of sign-ups at once. Try again in a few minutes.',
+  keyOf: connectedCallerOf,
+});
+
+/**
  * Every waitlist confirmation, from everyone, an hour: a backstop on what the
  * form can make Postmark send whatever a caller does to look like many callers.
  * Past it a sign-up is still kept and still answered; only the e-mail waits for
@@ -165,6 +183,15 @@ export const passwordLimit = limit({
   max: 20,
   message: 'Too many sign-in attempts. Try again in a few minutes.',
   keyOf: (req) => req.ip || connectedCallerOf(req),
+});
+
+/** The password doors' edge backstop, as interestEdgeLimit is the form's. */
+export const passwordEdgeLimit = limit({
+  name: 'password-edge',
+  windowMs: 15 * MINUTE,
+  max: 300,
+  message: 'Too many sign-in attempts. Try again in a few minutes.',
+  keyOf: connectedCallerOf,
 });
 
 /** Anything that can reach a paid provider. */

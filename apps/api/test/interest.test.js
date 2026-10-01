@@ -230,3 +230,27 @@ test('a consent wording no form on the site shows is refused, and nothing is kep
   assert.equal(h.status, 400);
   assert.equal((await rowsFor('madeup@example.com')).length + (await rowsFor('crossed@example.com')).length, 0);
 });
+
+test('with one proxy too many trusted, rotating forged addresses still meets the edge limit', async () => {
+  // trust proxy 2 on a one-proxy route: req.ip is whatever the caller wrote second-from-right.
+  const loose = express();
+  loose.set('trust proxy', 2);
+  loose.use(express.json());
+  loose.use('/api', interestRouter({ send: async () => {}, configured: () => false }));
+  const s = loose.listen(0);
+  await new Promise((r) => s.on('listening', r));
+  try {
+    const statuses = [];
+    for (let i = 0; i < 305; i += 1) {
+      const res = await fetch(`http://127.0.0.1:${s.address().port}/api/interest`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': `10.${i >> 8}.${i & 255}.1, 192.0.2.250` },
+        // The honeypot: answered as a success and kept nowhere, so the limiters are all this measures.
+        body: JSON.stringify({ ...HOME, email: `edge${i}@example.com`, website: 'bot' }),
+      });
+      statuses.push(res.status);
+    }
+    assert.equal(statuses.slice(0, 300).every((x) => x === 200), true, 'each forged address gets its own tight bucket');
+    assert.equal(statuses[300], 429, 'but the edge address they all came through does not');
+  } finally { s.close(); }
+});
