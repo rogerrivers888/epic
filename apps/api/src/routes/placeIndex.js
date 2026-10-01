@@ -1219,7 +1219,10 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
   try {
     const mode = travelMode(req.query.mode ?? 'drive');
     const category = String(req.query.category ?? 'culture').toLowerCase();
-    const inner = Math.min(90, Math.max(5, Math.trunc(Number(req.query.inner)) || 20));
+    // Inner is capped at 89 so there is always room for a strictly wider outer: at
+    // the 90-minute ceiling an inner of 90 would otherwise compare a ring with
+    // itself (Codex).
+    const inner = Math.min(89, Math.max(5, Math.trunc(Number(req.query.inner)) || 20));
     const outer = Math.min(90, Math.max(inner + 1, Math.trunc(Number(req.query.outer)) || 30));
     const sampleN = Math.min(50, Math.max(1, Math.trunc(Number(req.query.sample)) || 15));
     const locus = { where: req.query.where ?? null, lat: req.query.lat ?? null, lng: req.query.lng ?? null };
@@ -1320,6 +1323,12 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
     }
     const entries = [...byRef.entries()];
     const added = entries.filter(([, e]) => e.inOuter && !e.inInner);
+    // Usually the outer ring contains the inner, so there are no removals and the
+    // jump is exactly `added`. But when the two bands use different reach methods
+    // (an inner matrix, an outer straight-line circle) the shapes need not nest, so
+    // some places fall out of the wider band too. Those are reported, so the net
+    // jump (added − removed) is explained rather than overstated (Codex).
+    const removed = entries.filter(([, e]) => e.inInner && !e.inOuter);
 
     const tally = (pairs, keyOf) => {
       const m = new Map();
@@ -1369,9 +1378,13 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
         inner: entries.filter(([, e]) => e.inInner).length,
         outer: entries.filter(([, e]) => e.inOuter).length,
         added: added.length,
+        // Non-zero only when the bands do not nest (mixed reach methods); the jump
+        // is added − removed.
+        removed: removed.length,
       },
       bySubcategory,
       byOutcode,
+      removedBySubcategory: removed.length ? tally(removed, (e) => [...e.subcats]) : [],
       sample: sample.map(({ venueRef, e }) => ({
         venueRef,
         subcategories: [...e.subcats],
