@@ -242,6 +242,10 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
    */
   const [add, setAdd] = useQueryState<AddMode>('add', null, asOneOf(['search', 'photo'] as const, null));
   const adding = add != null;
+  // Places home is the Been · Liked menu (4b): where the household has been, or
+  // what it has loved. The country/city list — the atlas — is what Been shows, a
+  // tap into any row away, so it is kept rather than deleted (owner, 30 Sep 2026).
+  const [show, setShow] = useQueryState<'been' | 'liked'>('show', 'been', asOneOf(['been', 'liked'] as const, 'been'));
   const setAdding = (v: boolean) => setAdd(v ? 'search' : null, { replace: true });
   const areaName = atHome ? 'home' : country?.city ? `${country.country}.${country.city}` : null;
   // A move closes the panels — but not the first paint, or a shared `?add=photo` would be thrown away on arrival.
@@ -364,7 +368,15 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
               voice exists; until then the tab home carries the wordmark alone
               and a drilled area its back + title. */}
           {!sel ? (
-            <TallBand />
+            <>
+              <TallBand />
+              {/* Been · Liked, flush under the band (§5, 4b). No second menu. */}
+              <InkMenu
+                tabs={[{ key: 'been', label: 'Been' }, { key: 'liked', label: 'Liked' }]}
+                selected={show}
+                onSelect={(k) => setShow(k as 'been' | 'liked')}
+              />
+            </>
           ) : crumb ? (
             <CompactBand
               title={crumb.title}
@@ -386,7 +398,7 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
         ) : null}
 
         {!sel && !ui.adding ? (
-          <AtlasRoot data={data} error={error} homeTown={homeTown} onGo={(href) => navigate(href)} />
+          <AtlasRoot data={data} error={error} homeTown={homeTown} mode={show} onGo={(href) => navigate(href)} />
         ) : null}
 
         {country && !country.city && !ui.adding ? (
@@ -475,54 +487,90 @@ function shortTown(label: string): string {
  * Kingdom — flag, three example cities, count; each country visited — flag,
  * its cities, count. There is no 'Abroad' step."
  */
-function AtlasRoot({ data, error, homeTown, onGo }: {
+/** A 20px section heading on the Places home, with an optional muted count (4b). */
+function AtlasSection({ label, meta }: { label: string; meta?: string }) {
+  return (
+    <View style={styles.sectionHead}>
+      <Text style={type.h2}>{label}</Text>
+      {meta ? <Text style={styles.sectionMeta}>{meta}</Text> : null}
+    </View>
+  );
+}
+
+function AtlasRoot({ data, error, homeTown, mode, onGo }: {
   data: { countries: AtlasCountry[]; unplaced: number; home: AtlasHome | null } | null;
-  error: string | null; homeTown: string | null; onGo: (href: string) => void;
+  error: string | null; homeTown: string | null; mode: 'been' | 'liked'; onGo: (href: string) => void;
 }) {
+  const liked = mode === 'liked';
   const homeCode = data?.home?.countryCode ?? null;
   const countries = data?.countries ?? [];
   const homeCountry = homeCode ? countries.find((c) => c.code === homeCode) ?? null : null;
   const others = countries.filter((c) => c.code !== homeCode).sort((a, b) => a.name.localeCompare(b.name));
   const citiesOf = (c: AtlasCountry) => [...c.cities].sort((a, b) => b.places - a.places).slice(0, 3).map((ci) => ci.name).join(' · ');
+  // The count a row carries: how many places here the household has been to, or
+  // how many it has loved. A country has no `special` of its own, so Liked sums
+  // its cities' loved count (atlas.js gives each city both numbers).
+  const cityN = (ci: AtlasCountry['cities'][number]) => (liked ? ci.special : ci.been);
+  const countryN = (c: AtlasCountry) => (liked ? c.cities.reduce((s, ci) => s + (ci.special ?? 0), 0) : c.been);
+  const homeN = data?.home ? (liked ? data.home.special : data.home.been) : 0;
+  const homeCities = [...(homeCountry?.cities ?? [])].filter((ci) => cityN(ci) > 0).sort((a, b) => cityN(b) - cityN(a));
+  const abroad = others.filter((c) => countryN(c) > 0);
+  const nothing = !!data && homeN === 0 && homeCities.length === 0 && abroad.length === 0;
   return (
     <View style={styles.list}>
       {error ? <View style={styles.gutter}><StatusLine tone="warn">{error}</StatusLine></View> : null}
       {!data ? <Text style={[type.small, styles.gutter, { paddingTop: spacing.md }]}>Loading your atlas…</Text> : null}
-      {data && !countries.length && !data.home?.places ? (
+      {nothing ? (
         <View style={styles.emptyRoot}>
-          <Text style={styles.emptyTitle}>Nothing here yet</Text>
-          <Text style={styles.emptyBody}>Heart a place on Inspire or on a trip, or say you have been somewhere, and it lands here under where it is.</Text>
+          <Text style={styles.emptyTitle}>{liked ? 'Nothing loved yet' : 'Nowhere been yet'}</Text>
+          <Text style={styles.emptyBody}>{liked
+            ? 'Heart a place on Inspire or on a trip, and it lands here under where it is.'
+            : 'Say you have been somewhere, or record a visit, and it lands here under where it is.'}</Text>
         </View>
       ) : null}
-      {data?.home ? (
-        <NavRow
-          tile={<View style={styles.homeTile}><Icon name="home" size={19} color={colors.selectedFg} strokeWidth={2.1} /></View>}
-          label="Near home"
-          sub={`${homeTown ?? 'Home'} · within ${data.home.radiusMiles} miles`}
-          count={plural(data.home.places, 'place')}
-          onPress={() => onGo(paths.placesHome())}
-        />
+      {homeN > 0 && data?.home ? (
+        <>
+          <AtlasSection label="Close to home" />
+          <NavRow
+            tile={<View style={styles.homeTile}><Icon name="home" size={19} color={colors.selectedFg} strokeWidth={2.1} /></View>}
+            label={homeTown ?? 'Near home'}
+            sub={`Within ${data.home.radiusMiles} miles of home`}
+            count={String(homeN)}
+            onPress={() => onGo(paths.placesHome())}
+          />
+        </>
       ) : null}
-      {homeCountry ? (
-        <NavRow
-          tile={<Flag code={homeCountry.code} width={FLAG_W} height={FLAG_H} bare />}
-          label={homeCountry.name}
-          sub={citiesOf(homeCountry) || 'No places yet'}
-          count={plural(homeCountry.places, 'place')}
-          onPress={() => onGo(paths.placesCountry(homeCountry.code))}
-        />
+      {homeCountry && homeCities.length ? (
+        <>
+          <AtlasSection label={homeCountry.name} />
+          {homeCities.map((ci) => (
+            <NavRow
+              key={ci.name}
+              tile={<Flag code={homeCountry.code} width={FLAG_W} height={FLAG_H} bare />}
+              label={ci.name}
+              sub={ci.lastTrip ? `Last: ${tripWhen(ci.lastTrip)}` : homeCountry.name}
+              count={String(cityN(ci))}
+              onPress={() => onGo(paths.placesCity(homeCountry.code, ci.name))}
+            />
+          ))}
+        </>
       ) : null}
-      {others.map((c) => (
-        <NavRow
-          key={c.code}
-          tile={<Flag code={c.code} width={FLAG_W} height={FLAG_H} bare />}
-          label={c.name}
-          sub={citiesOf(c) || 'No places yet'}
-          count={plural(c.places, 'place')}
-          onPress={() => onGo(paths.placesCountry(c.code))}
-        />
-      ))}
-      {data?.unplaced ? <Text style={[type.tiny, styles.gutter, { paddingTop: spacing.md }]}>{data.unplaced} place{data.unplaced === 1 ? '' : 's'} still being placed on the map.</Text> : null}
+      {abroad.length ? (
+        <>
+          <AtlasSection label="Abroad" meta={plural(abroad.length, 'country', 'countries')} />
+          {abroad.map((c) => (
+            <NavRow
+              key={c.code}
+              tile={<Flag code={c.code} width={FLAG_W} height={FLAG_H} bare />}
+              label={c.name}
+              sub={citiesOf(c) || c.name}
+              count={String(countryN(c))}
+              onPress={() => onGo(paths.placesCountry(c.code))}
+            />
+          ))}
+        </>
+      ) : null}
+      {data?.unplaced && !liked ? <Text style={[type.tiny, styles.gutter, { paddingTop: spacing.md }]}>{data.unplaced} place{data.unplaced === 1 ? '' : 's'} still being placed on the map.</Text> : null}
     </View>
   );
 }
@@ -1259,6 +1307,8 @@ const styles = StyleSheet.create({
   chrome: { marginTop: 0 },  // the ink menu sits flush under the band (§5)
 
   list: { paddingTop: 4 },
+  sectionHead: { flexDirection: 'row', alignItems: 'baseline', gap: 8, paddingHorizontal: GUTTER, paddingTop: 18, paddingBottom: 2 },
+  sectionMeta: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.inkFaint },
   navRow: {
     flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14, marginHorizontal: GUTTER, minHeight: TARGET,
     borderBottomWidth: 1, borderBottomColor: colors.lineSoft,
