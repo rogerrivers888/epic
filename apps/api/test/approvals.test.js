@@ -9,7 +9,6 @@ import { testDatabase } from './helpers/db.js';
 
 const { query, pool } = await testDatabase();
 const approvals = await import('../src/repositories/approvals.js');
-const { requireOwnerSignedIn, accessFor } = await import('../src/access.js');
 
 let AGENT = null;
 test.before(async () => {
@@ -46,23 +45,4 @@ test('a decided request cannot be decided again', async () => {
   const filed = await approvals.fileApproval({ sessionId: AGENT, request: REQ, description: 'x' });
   assert.ok(await approvals.decideApproval(filed.id, { state: 'declined', by: 'me' }));
   assert.equal(await approvals.decideApproval(filed.id, { state: 'approved', by: 'me' }), null, 'already decided');
-});
-
-test('requireOwnerSignedIn lets a non-elevated session through on an approved matching request', async () => {
-  await query(`delete from approvals where session_id = $1`, [AGENT]);
-  const filed = await approvals.fileApproval({ sessionId: AGENT, request: REQ, description: 'purge' });
-  await approvals.decideApproval(filed.id, { state: 'approved', by: 'me' });
-
-  const access = await accessFor({ account: { role: 'owner' }, session: { id: AGENT, kind: 'agent', auth_method: 'passcode' } });
-  const req = { session: { id: AGENT }, method: 'POST', originalUrl: '/api/admin/place-index/owned-points/purge?x=1', access };
-  let passed = false; const res = { status: () => ({ json: () => {} }) };
-  await requireOwnerSignedIn('purge owned points')(req, res, () => { passed = true; });
-  assert.equal(passed, true, 'the approved request let it through');
-
-  // And not a second time (the approval is spent).
-  let passed2 = false; let code = null;
-  const res2 = { status: (c) => { code = c; return { json: () => {} }; } };
-  await requireOwnerSignedIn('purge owned points')(req, res2, () => { passed2 = true; });
-  assert.equal(passed2, false);
-  assert.equal(code, 403);
 });

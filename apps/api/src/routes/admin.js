@@ -789,12 +789,22 @@ router.post('/approvals/:id/decide', requires('view_activity'), requireOwnerSign
     const decision = String(req.body?.decision || '');
     if (!['approved', 'declined'].includes(decision)) throw bad('A decision is approved or declined.');
     const who = actor(req);
-    const row = await approvals.decideApproval(req.params.id, { state: decision, by: who.actorLabel });
-    if (!row) return res.status(409).json({ error: 'not_pending', message: 'That request is not waiting for a decision.' });
-    await rolesRepo.writeAuditStrict({
-      ...who, action: `approval.${decision}`, subjectType: 'approval', subjectId: row.id, subjectLabel: row.request,
-      after: { description: row.description, numbers: row.numbers },
+    // The decision and its audit commit together, or neither does (G11): the
+    // owner's call is never recorded without taking effect, nor taken without
+    // being recorded.
+    const row = await withTransaction(async (client) => {
+      const { rows } = await client.query(
+        `update approvals set state = $2, decided_by = $3, decided_at = now() where id = $1 and state = 'pending' returning *`,
+        [req.params.id, decision, who.actorLabel ?? null]);
+      const decided = rows[0] ?? null;
+      if (!decided) return null;
+      await client.query(
+        `insert into admin_audit (actor_id, actor_label, action, subject_type, subject_id, subject_label, after)
+         values ($1, $2, $3, 'approval', $4, $5, $6)`,
+        [who.actorId ?? null, who.actorLabel ?? null, `approval.${decision}`, decided.id, decided.request, JSON.stringify({ description: decided.description, numbers: decided.numbers })]);
+      return decided;
     });
+    if (!row) return res.status(409).json({ error: 'not_pending', message: 'That request is not waiting for a decision.' });
     res.json({ approval: row });
   } catch (err) { next(err); }
 });

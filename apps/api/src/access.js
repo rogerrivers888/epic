@@ -212,17 +212,14 @@ export function requires(capability) {
  * `action` is a short verb for the message ("lift a census hold").
  */
 export function requireOwnerSignedIn(action = 'do that') {
-  return async (req, res, next) => {
+  return (req, res, next) => {
     if (accessOf(req).elevated) return next();
-    // An agent (or passcode) with an approved, matching request from the owner
-    // may make exactly that call, once (G11 Approvals, 1 Oct 2026).
-    try {
-      const { consumeApproval, requestKey } = await import('./repositories/approvals.js');
-      if (req.session?.id && await consumeApproval(req.session.id, requestKey(req))) return next();
-    } catch { /* fall through to the refusal */ }
+    // Not elevated: refused, with what to file for approval so an agent can ask
+    // the owner rather than ask in chat (G11 Approvals). The owner, signed in,
+    // then does it. The request line names the call for the approval.
     return res.status(403).json({
       error: 'needs_personal_sign_in',
-      message: `This needs you signed in personally to ${action} — open Epic and sign in with your e-mail link, or file it for approval. A shared-passcode or agent session can't do it directly.`,
+      message: `This needs you signed in personally to ${action} — open Epic and sign in with your e-mail link. A shared-passcode or agent session can't; file it for approval instead.`,
       request: `${req.method} ${String(req.originalUrl || req.url || '').split('?')[0]}`,
       action,
     });
