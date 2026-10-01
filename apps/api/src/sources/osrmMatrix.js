@@ -124,6 +124,13 @@ export function osrmTable(baseUrl, { fetchImpl = fetch, profile = 'driving' } = 
  *   `horizon`   how far out to build, in minutes — the cap plus the edge
  *               allowance, same as the estimator.
  *   `resume`    skip an origin already built to at least `horizon` by OSRM.
+ *               Resume is for continuing one interrupted run over one coverage:
+ *               it cannot tell which extract built an origin, so a build over a
+ *               *different* extract (a regional proof, then the full-GB run) must
+ *               pass `resume: false` — otherwise a route the narrow extract could
+ *               not make (a ferry, a road just outside it) stays missing though
+ *               the origin is marked complete. The production build is a single
+ *               full-GB pass, where this does not arise (Codex).
  *   `chunk`     destinations per `/table` request (OSRM's `--max-table-size`
  *               must be at least this plus one).
  */
