@@ -61,7 +61,11 @@ export function W2Sorted({ locale, landingPage }: SitePageProps) {
   // 168px at 1280; on a phone, as large as lets the widest word fit (README: closing headlines 60px).
   const size = phone ? Math.min(60, Math.floor((width - 40 - 44) / 7)) : Math.min(168, Math.floor((Math.min(width, 1280) - 112 - 44) / 6.7));
   const big = { fontSize: size, letterSpacing: -size * 0.055, lineHeight: Math.round(size * 0.88) };
-  const pad = phone ? { paddingTop: 4, paddingBottom: 8, paddingHorizontal: 12, marginLeft: -12 } : { paddingTop: 6, paddingBottom: 14, paddingHorizontal: 22, marginLeft: -22 };
+  // The design's 14px under the word, plus what Archivo's descender needs below
+  // a 0.88 line box (about 0.11em), so the "y" of birthday is never trimmed by
+  // the band's own mask — the mask is there for the word sliding up.
+  const tail = Math.round(size * 0.11);
+  const pad = phone ? { paddingTop: 4, paddingBottom: 8 + tail, paddingHorizontal: 12, marginLeft: -12 } : { paddingTop: 6, paddingBottom: 14 + tail, paddingHorizontal: 22, marginLeft: -22 };
 
   return (
     <View style={[styles.page, !phone && styles.pageWide]}>
@@ -72,10 +76,10 @@ export function W2Sorted({ locale, landingPage }: SitePageProps) {
             {/* Every word, laid out at no height: the block takes the widest and never resizes. */}
             {w.rotating.map((r) => (
               <View key={r} style={styles.sizer} {...hidden}>
-                <Text style={[styles.big, big]} numberOfLines={1}>{r}</Text>
+                <Text style={[styles.big, big, styles.nowrap]}>{r}</Text>
               </View>
             ))}
-            <Text ref={wordRef} style={[styles.big, big]} numberOfLines={1}>{word}</Text>
+            <Text ref={wordRef} style={[styles.big, big, styles.nowrap]}>{word}</Text>
           </View>
           <Text style={[styles.big, big]}>{w.sorted}</Text>
         </View>
@@ -111,6 +115,9 @@ const styles = StyleSheet.create({
   },
   headline: { alignItems: 'flex-start' },
   block: { backgroundColor: LIME, overflow: 'hidden' },
+  // One line, as the design's `white-space: nowrap` — not numberOfLines, which on
+  // the web also clips the text to its 0.88 line box and cut the descenders off.
+  nowrap: { whiteSpace: 'nowrap' } as object,
   sizer: { height: 0, overflow: 'hidden' },
   big: { fontFamily: fonts.heading, fontWeight: '800', color: INK, ...(Platform.OS === 'web' ? ({ whiteSpace: 'nowrap' } as object) : {}) },
   rule: { borderTopWidth: 2, borderTopColor: INK },

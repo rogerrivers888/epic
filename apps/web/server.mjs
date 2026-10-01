@@ -49,6 +49,8 @@ const TYPES = {
 function cacheFor(pathname) {
   if (pathname === '/sw.js') return 'no-cache, no-store, must-revalidate';
   if (pathname.startsWith('/_expo/')) return 'public, max-age=31536000, immutable';
+  // Self-hosted type: the version is in the file name (public/fonts), so it never changes in place.
+  if (/^\/fonts\/[^/]+-v\d+-[^/]+\.woff2$/.test(pathname)) return 'public, max-age=31536000, immutable';
   if (pathname === '/' || pathname.endsWith('.html')) return 'no-cache';
   return 'public, max-age=3600';
 }
