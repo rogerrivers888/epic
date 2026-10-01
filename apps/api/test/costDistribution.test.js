@@ -10,6 +10,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { testDatabase } from './helpers/db.js';
 
 const { query, pool } = await testDatabase();
@@ -123,6 +124,27 @@ test('work resumes where it left off — a place with a committed outcome is not
   const get = async (id) => { asked.push(id); return { priceLevel: 2 }; };
   await dist.work(run.id, { get });
   assert.deepEqual(asked.sort(), ['D', 'E'], 'only the two places without an outcome are looked up');
+});
+
+test('a reclaim transfers household and session together; an active re-start does not', async (t) => {
+  await seed(); t.after(() => query(`delete from place_areas where area_slug = $1`, [AREA]));
+  const h1 = randomUUID(); const s1 = randomUUID();
+  const { run } = await dist.start({ areaSlug: AREA, confirm: 5, startedBy: 'a', householdId: h1, startedSessionId: s1 });
+  const h2 = randomUUID(); const s2 = randomUUID();
+  // An active run: a second admin's re-start must not touch its credentials, or
+  // its remaining calls would charge h1 using s2 — the wrong household (Codex).
+  const active = await dist.start({ areaSlug: AREA, confirm: 0, startedBy: 'b', householdId: h2, startedSessionId: s2 });
+  assert.equal(active.reclaim, false, 'an actively-worked run is not reclaimable');
+  let row = (await query('select household_id, started_session_id from cost_dist_runs where id = $1', [run.id])).rows[0];
+  assert.equal(row.household_id, h1, 'active run keeps its household');
+  assert.equal(row.started_session_id, s1, 'active run keeps its session');
+  // Once paused it is reclaimable, and a reclaim moves both to the new caller.
+  await query("update cost_dist_runs set problem = 'paused for the test' where id = $1", [run.id]);
+  const reclaimed = await dist.start({ areaSlug: AREA, confirm: 0, startedBy: 'b', householdId: h2, startedSessionId: s2 });
+  assert.equal(reclaimed.reclaim, true, 'a paused run is reclaimable');
+  row = (await query('select household_id, started_session_id from cost_dist_runs where id = $1', [run.id])).rows[0];
+  assert.equal(row.household_id, h2, 'a reclaim takes the new household');
+  assert.equal(row.started_session_id, s2, 'and the new session, paired with it');
 });
 
 test('only one worker touches a run — a second cannot while the first holds the lock', async (t) => {

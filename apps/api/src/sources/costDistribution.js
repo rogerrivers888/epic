@@ -108,10 +108,20 @@ export async function start({ areaSlug, confirm, householdId = null, startedBy =
   const session = startedSessionId ?? currentSpender().sessionId ?? null;
   const existing = await latestRun(slug);
   if (existing && existing.state === 'running') {
-    // Attribute the resumed spend to the reclaiming session (its grant is the live
-    // one); do not disturb touched_at — work() claims the run when it starts.
-    if (session) await query('update cost_dist_runs set started_session_id = $2 where id = $1', [existing.id, session]);
-    return { run: existing, created: false, reclaim: reclaimable(existing) };
+    const reclaim = reclaimable(existing);
+    // Only when reclaiming is the run handed to the new caller — and household and
+    // session move together, so the remaining paid calls are attributed to one
+    // caller. Never leave the original household paired with a second admin's
+    // session: paidGate validates the session but not that it belongs to the
+    // household, so that pairing would charge the wrong household (Codex). A run
+    // being actively worked is left entirely alone; touched_at is untouched so
+    // work() can claim it.
+    if (reclaim && session && householdId) {
+      await query('update cost_dist_runs set household_id = $2, started_session_id = $3 where id = $1', [existing.id, householdId, session]);
+      existing.household_id = householdId;
+      existing.started_session_id = session;
+    }
+    return { run: existing, created: false, reclaim };
   }
   const refs = await refsFor(slug);
   if (Number(confirm) !== refs.length) {
