@@ -353,6 +353,12 @@ router.patch('/:id', requires('manage_accounts'), async (req, res, next) => {
     // fields (name, plan, status, note) stay ordinary manage. Compared without
     // numeric coercion so null (the estate default) and 0 are not confused
     // (Codex, 1 Oct 2026).
+    // Validate before anything is audited or written: an invalid value must
+    // not leave an audit row for a change that then fails (Codex, 1 Oct 2026).
+    if (b.monthlyCallBound !== undefined && b.monthlyCallBound !== null
+        && (!Number.isFinite(Number(b.monthlyCallBound)) || Number(b.monthlyCallBound) < 0 || !Number.isInteger(Number(b.monthlyCallBound)))) {
+      throw bad('A monthly bound is a whole number of calls, or nothing.');
+    }
     const newBound = b.monthlyCallBound === undefined ? undefined : (b.monthlyCallBound === null ? null : Number(b.monthlyCallBound));
     const oldBound = before.monthly_call_bound == null ? null : Number(before.monthly_call_bound);
     const boundChanging = newBound !== undefined && newBound !== oldBound;
