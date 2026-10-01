@@ -74,6 +74,7 @@ import { routingEnabled, routingPaused } from './sources/routing.js';
 import sessionRoutes, { devices as deviceRoutes } from './routes/session.js';
 import { authConfigured, deployed, originAllowed, requireOwner, requireSession } from './auth.js';
 import { requireDoor, requireOwnerSignedIn, hasDoor } from './access.js';
+import { writeAuditStrict } from './repositories/roles.js';
 import sourceSwitchRoutes from './routes/sourceSwitch.js';
 import { APP_URL, canonicalRedirect } from './origins.js';
 import { SPEND_PREFIXES, generalLimit, holdSendingDoors, photoLimit, signInLimit, spendLimit, voiceLimit } from './limits.js';
@@ -236,14 +237,29 @@ const PAID_ADMIN = new Set([
 // Compared without its trailing slash. Express routes `/collect/` to the same
 // handler, and matching the path as written let a paid door be knocked on with
 // a slash on the end and skip the limiter entirely (Codex, 18 Sep 2026).
-const doorOf = (req) => (req.path.length > 1 ? req.path.replace(/\/+$/, '') : req.path);
+const doorOf = (req) => (req.path.length > 1 ? req.path.replace(/\/+$/, '').toLowerCase() : req.path.toLowerCase());
 // Spending needs the owner personally signed in (G11, 1 Oct 2026), and then
 // the spend limiter. Tied to the same predicate that already names what spends,
 // so a new paid door cannot be added past this by forgetting a list. The admin
 // door is checked first so a non-admin still gets the mount's 404, not a 403
 // that would reveal the path.
-const paidOwnerThenLimit = (req, res, next) =>
-  requireOwnerSignedIn('spend money')(req, res, () => spendLimit(req, res, next));
+// The owner, personally, then a strict audit with his name — fail closed: if
+// the record cannot be written, the action does not run (G11, owner 1 Oct
+// 2026). Used for every privileged place-index action, so the guarantee holds
+// whatever the handler in the route file does or does not log.
+const requireOwnerAndAudit = (action, then = null) => (req, res, next) =>
+  requireOwnerSignedIn(action)(req, res, () => {
+    writeAuditStrict({
+      actorId: req.account?.id ?? null,
+      actorLabel: req.account?.email ?? 'the owner',
+      action: 'privileged.place-index',
+      subjectType: 'place-index',
+      subjectId: doorOf(req),
+      subjectLabel: action,
+      after: { method: req.method },
+    }).then(() => (then ? then(req, res, next) : next()), (err) => next(err));
+  });
+const paidOwnerThenLimit = requireOwnerAndAudit('spend money', (req, res, next) => spendLimit(req, res, next));
 app.use('/api/admin/place-index', (req, res, next) =>
   (hasDoor(req, 'admin') && PAID_ADMIN.has(doorOf(req)) ? paidOwnerThenLimit(req, res, next) : next()));
 app.use('/api/admin/demand', (req, res, next) =>
@@ -328,7 +344,7 @@ const ownerOnlyPlaceIndex = (req, res, next) => {
   const action = OWNER_ONLY_PLACE_INDEX.get(key)
     ?? (req.method === 'POST' && /^\/census\/run\/[^/]+\/resume$/.test(path) ? 'lift the census hold' : null);
   if (!action) return next();
-  return requireOwnerSignedIn(action)(req, res, next);
+  return requireOwnerAndAudit(action)(req, res, next);
 };
 app.use('/api/admin/place-index', requireDoor('admin'), ownerOnlyPlaceIndex, placeIndexRoutes);
 // "Research this place" and the ranked Google list: the explorer's two live

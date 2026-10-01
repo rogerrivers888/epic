@@ -611,6 +611,8 @@ router.post('/data/sources/bench', requires('manage_settings'), requireOwnerSign
     if (!fields.length) throw bad('Say which fields to check: ' + BENCHABLE.join(', '));
     const sample = Math.min(BENCH_MAX, Math.max(1, Number(req.body?.sample) || 10));
     if (!sourceHasKey('google')) return res.status(409).json({ error: 'no_key', message: 'The Google key is not set on this API, so there is nothing to check against.' });
+    // A spend, logged with the owner's name before it runs (G11, 1 Oct 2026).
+    await rolesRepo.writeAuditStrict({ ...actor(req), action: 'bench.run', subjectType: 'source', subjectId: provider, after: { fields, sample } });
 
     const factFields = [...new Set(fields.flatMap((f) => BENCH_FACTS[f]))];
     // Eligibility — facts from the source, and a Google identifier — is decided
