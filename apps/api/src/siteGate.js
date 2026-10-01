@@ -12,9 +12,11 @@
  *     photo). Someone Epic has already issued a session to is not the public, so
  *     the logged-in app works end to end — its every-reload session check, its
  *     sign-out, its images — rather than being shut out by a flat Basic wall;
- *   · the two things that must answer without either: `/health`, which Railway
- *     restarts the service on, and Postmark's delivery webhook, which carries its
- *     own credential and validates it in its own handler (routes/postmark.js).
+ *   · the things that must answer without either: `/health`, which Railway
+ *     restarts the service on; Postmark's delivery webhook, which carries its
+ *     own credential and validates it in its own handler (routes/postmark.js);
+ *     and the waitlist form, `POST /api/interest`, which is for the very people
+ *     who cannot sign in yet (routes/interest.js).
  *
  * **Deny by default** is the point: a request is refused unless it matches one of
  * those, so a route that is mounted before the session door (the image library) or
@@ -236,6 +238,12 @@ export async function siteGate(req, res, next) {
   // the public web bundle and spends nothing, so it is left open like a static
   // asset; the route itself keeps an unapproved image behind its own signed link.
   if (req.method === 'GET' && path.startsWith('/api/images/')) return next();
+  // "Register your interest" (routes/interest.js) is the one thing the unopened
+  // site asks of the public, so the form must reach it with no password and no
+  // session. Only the POST, only this exact path: it answers `{ok:true}` or a
+  // validation sentence and reveals nothing, and its own handler holds it to a
+  // per-caller limit and a honeypot. Nothing beneath `/api/interest` is admitted.
+  if (req.method === 'POST' && path === '/api/interest') return next();
   // A CORS preflight carries no credentials and reveals nothing.
   if (req.method === 'OPTIONS') return next();
   // The gate password: the owner and testers, and the only way to the sign-in door.

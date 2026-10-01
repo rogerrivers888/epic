@@ -276,6 +276,10 @@ const PUBLIC = [
   (req) => req.method === 'POST' && req.path === '/api/auth/google/exchange',
   // Postmark's delivery, open and bounce events: admitted by their own token (routes/postmark.js), never by a session.
   (req) => req.method === 'POST' && req.path === '/api/postmark/events',
+  // "Register your interest" on epic.day (routes/interest.js): the people it is
+  // for cannot sign in yet. Validated, rate-limited per caller and honeypotted in
+  // its own handler; it reads and writes nothing of any household's.
+  (req) => req.method === 'POST' && req.path === '/api/interest',
   (req) => req.path === '/api/join' || req.path.startsWith('/api/join/'),
   /**
    * A trip somebody was sent (trip rebuild, 7 Sep 2026): "anyone with the link

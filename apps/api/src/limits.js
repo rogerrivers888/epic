@@ -106,6 +106,21 @@ export function holdSendingDoors(app) {
  */
 export const SPEND_PREFIXES = ['/api/discover', '/api/plan', '/api/atlas', '/api/menu', '/api/places', '/api/inspire'];
 
+/**
+ * "Register your interest" (routes/interest.js), per caller address.
+ *
+ * Its own bucket, not the sign-in one: somebody who signs up on the homepage
+ * and then on the host page should not use up their way back in. Ten in ten
+ * minutes is more than any person types into a one-field form, and it caps what
+ * a script can make Postmark send from outside to ten confirmations an address.
+ */
+export const interestLimit = limit({
+  name: 'interest',
+  windowMs: 10 * MINUTE,
+  max: 10,
+  message: 'That is a lot of sign-ups at once. Try again in a few minutes.',
+});
+
 /** Anything that can reach a paid provider. */
 export const spendLimit = limit({
   name: 'spend',

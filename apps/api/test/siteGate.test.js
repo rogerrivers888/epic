@@ -272,6 +272,34 @@ test('the image library is open; a signed photo is admitted, an unsigned one is 
   });
 });
 
+test('the waitlist form is open — only POST /api/interest, nothing near it', async () => {
+  await withEnv({ SITE_GATE: null, GATE_USER: 'u', GATE_PASSWORD: 'p' }, async () => {
+    // "Register your interest" is for the people who cannot sign in yet.
+    for (const req of [
+      mockReq({ path: '/api/interest', method: 'POST' }),
+      mockReq({ path: '/api/interest/', method: 'POST' }),
+    ]) {
+      const { res, nexted } = await run(req);
+      assert.equal(nexted, true, `${req.method} ${req.path} reaches the form handler without a credential`);
+      assert.equal(res.statusCode, null);
+    }
+    // Any other verb, anything beneath it, and the back office's reading of the
+    // list are all still the public's to be refused.
+    for (const req of [
+      mockReq({ path: '/api/interest', method: 'GET' }),
+      mockReq({ path: '/api/interest', method: 'DELETE' }),
+      mockReq({ path: '/api/interest/anything', method: 'POST' }),
+      mockReq({ path: '/api/interests', method: 'POST' }),
+      mockReq({ path: '/api/admin/waitlist', method: 'GET' }),
+      mockReq({ path: '/api/admin/waitlist.csv', method: 'GET' }),
+    ]) {
+      const { res, nexted } = await run(req);
+      assert.equal(nexted, false, `${req.method} ${req.path} is not exempt`);
+      assert.equal(res.statusCode, 401);
+    }
+  });
+});
+
 test('health, the Postmark webhook, and a CORS preflight answer without a credential', async () => {
   await withEnv({ SITE_GATE: null, GATE_USER: 'u', GATE_PASSWORD: 'p' }, async () => {
     const health = await run(mockReq({ path: '/health' }));

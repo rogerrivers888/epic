@@ -330,3 +330,32 @@ export function loginLinkEmail({ url }) {
   });
   return { subject: 'Your login link', text, html };
 }
+
+/**
+ * The confirmation after "Register your interest" on epic.day (Website &
+ * Registration v2). One line, the same words the form showed when it was
+ * replaced by its tick, so the inbox says exactly what the page promised and
+ * nothing more: the button text was the consent, and it was consent to this one
+ * message and the launch email — no other marketing (Technical Foundations ›
+ * Waitlist data). It is sent once, on the first sign-up to a list; a repeat
+ * sends nothing (routes/interest.js).
+ */
+export function interestEmail({ source, url }) {
+  const host = source === 'host';
+  const line = host
+    ? "You're on the hosts list. We'll be in touch before launch."
+    : "You're on the list. We'll email you when the app's out.";
+  // No promise that they will never hear from us: the launch email still comes,
+  // and an erasure is a delete in the back office (WL1), not a link in here.
+  const foot = "Didn't sign up? Just ignore this.";
+  const text = [line, '', foot].join('\n');
+  const html = shell({
+    url,
+    action: 'Visit epic.day',
+    body: [
+      `        <p style="margin:0;font-weight:700">${line}</p>`,
+      note(foot),
+    ].join('\n'),
+  });
+  return { subject: host ? "You're on the Epic hosts list" : "You're on the Epic list", text, html };
+}

@@ -44,6 +44,14 @@ export const CAPABILITIES = [
   // changing are one capability here rather than a pair, because there is no
   // one who should see the staff list but not be able to act on it.
   { key: 'manage_staff', area: 'People', label: 'Manage staff', note: 'Add people to the back office, issue login links, change roles, suspend and remove.', manages: true },
+  // The pre-launch waitlist (WL1, Website & Registration v2): everyone who
+  // registered interest on epic.day. Reading it is a list of strangers' email
+  // addresses, so it is its own read rather than riding on `view_accounts`; the
+  // manage half exports the list (the whole thing leaving the building) and
+  // deletes a row for an erasure request. Neither is in any role seed — the
+  // owner holds both and grants them on purpose.
+  { key: 'view_waitlist', area: 'Waitlist', label: 'See the waitlist', note: 'Everyone who registered interest on epic.day before launch, and where they came from.' },
+  { key: 'manage_waitlist', area: 'Waitlist', label: 'Manage the waitlist', note: 'Export the waitlist as a spreadsheet, and delete a sign-up for an erasure request.', manages: true },
   { key: 'view_activity', area: 'Behaviour', label: 'See activity', note: 'What a household has done in Epic, and how long they spend in it.' },
   { key: 'view_reporting', area: 'Behaviour', label: 'See reporting', note: 'Engagement, retention and usage across every household.' },
   { key: 'view_financials', area: 'Money', label: 'See financials', note: 'Revenue, what plans earn, and what providers cost.' },

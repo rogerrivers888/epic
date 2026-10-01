@@ -29,6 +29,8 @@ import accountRoutes from './routes/accounts.js';
 import adminRoutes from './routes/admin.js';
 import * as approvalsRepo from './repositories/approvals.js';
 import staffRoutes from './routes/staff.js';
+import interestRoutes from './routes/interest.js';
+import waitlistRoutes from './routes/waitlist.js';
 import suiteRoutes from './routes/suite.js';
 import postmarkRoutes from './routes/postmark.js';
 import openToRoutes, { adminRouter as openToAdminRoutes, startOpenToLoop } from './routes/openTo.js';
@@ -185,6 +187,10 @@ app.use('/api', sessionRoutes);
 // start and callback carry their own signed handshake, and the exchange redeems
 // a single-use code. Mounted before `requireSession` so it is answered.
 app.use('/api', authGoogleRoutes);
+// "Register your interest" on epic.day (routes/interest.js). Public, and admitted
+// through the launch gate on its own rule: it is for the people who cannot sign in
+// yet. Rate-limited per caller inside the router (limits.js › interestLimit).
+app.use('/api', interestRoutes);
 
 // The atlas image library, outside the door on purpose (routes/library.js):
 // open-licence photographs we hold and are entitled to redistribute, answered
@@ -332,6 +338,10 @@ app.use('/api/admin', requireDoor('admin'), adminRoutes);
 // Mounted after the general /api/admin router, which has no /staff route of its
 // own, so this one answers it. The manage_staff capability is owner-only.
 app.use('/api/admin/staff', requireDoor('admin'), staffRoutes);
+// The pre-launch waitlist (WL1): view_waitlist reads it, manage_waitlist exports
+// and deletes. Mounted at /api/admin so `/waitlist.csv` and `/waitlist/:id` sit
+// beside `/waitlist`; the general admin router has no route of that name.
+app.use('/api/admin', requireDoor('admin'), waitlistRoutes);
 // What became of the e-mails we sent, from Postmark, admitted by its own token.
 app.use('/api/postmark', postmarkRoutes);
 // Pitch review and the trust ladder (hosts and events, 12 Sep 2026). A host
