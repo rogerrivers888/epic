@@ -933,15 +933,18 @@ export async function markDisagreement(venueRef, questionId) {
 /**
  * A place's owned cost-band choice, for the drawer's cost row (owner, 1 Oct 2026;
  * parks admission). The most recently checked `answered` cost-band answer from any
- * owned source — admission read from the venue's own page. Null when nothing owned
- * has answered it, so the cost row falls back to Google's price level (B11).
+ * owned source — admission read from the venue's own page. **Unresolved rows are
+ * excluded**: when two owned sources disagree, `saveAnswer` marks both unresolved
+ * precisely so neither is silently preferred (the brief: "Do not pick silently"), so
+ * the cost row shows nothing rather than one side of a disagreement, and falls back to
+ * Google's price level (Codex). Null when nothing owned has cleanly answered it.
  */
 export async function ownedCostBand(venueRef) {
   const { rows } = await query(
     `select p.choice from place_answers p
        join questions q on q.id = p.question_id
       where p.venue_ref = $1 and q.attribute_key = 'cost-band'
-        and p.state = 'answered' and p.choice is not null
+        and p.state = 'answered' and p.choice is not null and p.unresolved is not true
       order by p.checked_at desc limit 1`,
     [venueRef],
   );

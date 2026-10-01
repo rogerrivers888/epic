@@ -8,7 +8,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { scaleFor, bandIndexForLevel, bandIndexForPrice, bandIndexForChoice, COST_CHOICES, rangeText, money, costBandFor, fillDefinition } from '../src/domain/costBand.js';
+import { scaleFor, bandIndexForLevel, bandIndexForChoice, COST_CHOICES, rangeText, money, costBandFor, fillDefinition } from '../src/domain/costBand.js';
 
 test('an owned admission choice fills the scale index it lines up with', () => {
   assert.deepEqual(COST_CHOICES, ['free', 'cheap', 'moderate', 'expensive']);
@@ -18,29 +18,6 @@ test('an owned admission choice fills the scale index it lines up with', () => {
   assert.equal(bandIndexForChoice('expensive'), 3);
   assert.equal(bandIndexForChoice('nonsense'), null);
   assert.equal(bandIndexForChoice(null), null);
-});
-
-// The GB bands from migration 300, half-open [min, max) in pence.
-const GB_BANDS = [
-  { symbol: 'Free', min: 0, max: 0 },
-  { symbol: '£', min: 1, max: 1000 },
-  { symbol: '££', min: 1000, max: 2500 },
-  { symbol: '£££', min: 2500, max: null },
-];
-
-test('an owned admission price fills the band its money lands in', () => {
-  assert.equal(bandIndexForPrice(0, GB_BANDS), 0, 'free is Free, exactly nought');
-  assert.equal(bandIndexForPrice(1, GB_BANDS), 1, 'a penny is £');
-  assert.equal(bandIndexForPrice(999, GB_BANDS), 1, 'just under the ££ floor is £');
-  assert.equal(bandIndexForPrice(1000, GB_BANDS), 2, 'the ££ floor is ££ (half-open)');
-  assert.equal(bandIndexForPrice(2499, GB_BANDS), 2);
-  assert.equal(bandIndexForPrice(2500, GB_BANDS), 3, 'the £££ floor is £££');
-  assert.equal(bandIndexForPrice(10000, GB_BANDS), 3, 'an unbounded top band');
-  assert.equal(bandIndexForPrice(null, GB_BANDS), null, 'no price → no band');
-  assert.equal(bandIndexForPrice(500, null), null, 'no bands → no band');
-  assert.equal(bandIndexForPrice(500, []), null);
-  assert.equal(bandIndexForPrice(-5, GB_BANDS), null, 'a negative is not a price');
-  assert.equal(bandIndexForPrice('nope', GB_BANDS), null);
 });
 
 test('the scale is Free and three currency symbols', () => {

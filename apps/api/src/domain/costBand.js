@@ -40,8 +40,9 @@ export function bandIndexForLevel(level) {
 /**
  * The `cost-band` label's `oneof` options (migration 246), in scale order: they line
  * up index-for-index with the Free·£·££·£££ scale, so an owned admission answer's
- * choice is turned into a band by its position here, and a price is turned into a
- * choice by `bandIndexForPrice` then this (owner, 1 Oct 2026; parks admission).
+ * choice is turned into a band by its position here (owner, 1 Oct 2026; parks
+ * admission). Only `free` is written today (sources/admission.js), so in practice this
+ * maps `free` → index 0 → Free.
  */
 export const COST_CHOICES = ['free', 'cheap', 'moderate', 'expensive'];
 
@@ -49,29 +50,6 @@ export const COST_CHOICES = ['free', 'cheap', 'moderate', 'expensive'];
 export function bandIndexForChoice(choice) {
   const i = COST_CHOICES.indexOf(String(choice));
   return i < 0 ? null : i;
-}
-
-/**
- * The scale index an actual admission price fills, from the market's own money
- * bands (owner, 1 Oct 2026; parks admission). This is how an OWNED admission fact —
- * a price read from a venue's own page — becomes a band, where `bandIndexForLevel`
- * turns Google's 0–4 signal into one. The bands are half-open [min, max) in minor
- * units (migration 300): a price `p` fills the band whose `min <= p < max`, a null
- * max is unbounded, and 0 is exactly Free (the Free band is {0,0} and matches no
- * paid interval). Caps at 3, like the level scale. Null when there is nothing to
- * read it against — no price, or a market with no bands.
- */
-export function bandIndexForPrice(minor, bands) {
-  if (minor == null || !Array.isArray(bands) || !bands.length) return null;
-  const n = Number(minor);
-  if (!Number.isFinite(n) || n < 0) return null;
-  if (n === 0) return 0; // Free — exactly nought, never a rounded-down cheap price
-  for (let i = 0; i < bands.length; i += 1) {
-    const min = Number(bands[i]?.min) || 0;
-    const max = bands[i]?.max == null ? Infinity : Number(bands[i].max);
-    if (n >= min && n < max) return Math.min(i, 3);
-  }
-  return Math.min(bands.length - 1, 3);
 }
 
 /** A minor-unit amount (pence, cents) in a market's currency. */

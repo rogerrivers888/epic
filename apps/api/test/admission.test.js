@@ -1,9 +1,10 @@
 /**
  * Admission as the owned cost-band answer (sources/admission.js; owner, 1 Oct 2026,
- * parks admission). The venue's own page is a source we may read and keep, so a free
- * or priced entry read from it is written as the owned `cost-band` answer the drawer's
- * cost row prefers over Google (B11). "Free entry" is the high-value case — it is
- * exactly what Google has no price level for.
+ * parks admission). The venue's own page is a source we may read and keep, so "free
+ * entry" read from it is written as the owned `cost-band` answer the drawer's cost row
+ * prefers over Google (B11). Only the free case is stored — it is market-agnostic and
+ * never stale, and it is exactly what Google has no price level for; a priced entry is
+ * left to Google's level.
  */
 
 import test from 'node:test';
@@ -13,41 +14,20 @@ import { testDatabase } from './helpers/db.js';
 const { query, pool } = await testDatabase();
 const index = await import('../src/repositories/placeIndex.js');
 const admission = await import('../src/sources/admission.js');
-const { ownedCostBand } = await import('../src/repositories/questionSets.js');
+const { ownedCostBand, saveAnswer } = await import('../src/repositories/questionSets.js');
 test.after(() => pool.end());
 
-const GB_BANDS = [
-  { symbol: 'Free', min: 0, max: 0 },
-  { symbol: '£', min: 1, max: 1000 },
-  { symbol: '££', min: 1000, max: 2500 },
-  { symbol: '£££', min: 2500, max: null },
-];
-
-test('admissionMinor reads the number out of a written price', () => {
-  assert.equal(admission.admissionMinor('£32.00'), 3200);
-  assert.equal(admission.admissionMinor('£14.50'), 1450);
-  assert.equal(admission.admissionMinor('14.50'), 1450);
-  assert.equal(admission.admissionMinor('£8'), 800);
-  assert.equal(admission.admissionMinor('£14.50 online, £16.50 on the day'), 1450, 'the first (lower) price, as shown');
-  assert.equal(admission.admissionMinor(null), null);
-  assert.equal(admission.admissionMinor('free'), null, 'no number to read');
+test('admissionToAnswer stores only free; everything else is asked_nothing_found', () => {
+  assert.deepEqual(admission.admissionToAnswer({ free: true }), { state: 'answered', choice: 'free' });
+  assert.deepEqual(admission.admissionToAnswer(null), { state: 'asked_nothing_found' }, 'a page with no admission');
+  assert.deepEqual(admission.admissionToAnswer({ adult: '£20.00', free: false }), { state: 'asked_nothing_found' }, 'a charge is left to Google, not banded here');
+  assert.deepEqual(admission.admissionToAnswer({ note: 'varies' }), { state: 'asked_nothing_found' });
 });
 
-test('admissionToAnswer maps free, priced, and nothing-bandable', () => {
-  assert.deepEqual(admission.admissionToAnswer(null, GB_BANDS), { state: 'asked_nothing_found' });
-  assert.deepEqual(admission.admissionToAnswer({ free: true }, GB_BANDS), { state: 'answered', choice: 'free' });
-  assert.deepEqual(admission.admissionToAnswer({ adult: '£8.50' }, GB_BANDS), { state: 'answered', choice: 'cheap' }, '850p is £ = cheap');
-  assert.deepEqual(admission.admissionToAnswer({ adult: '£20.00' }, GB_BANDS), { state: 'answered', choice: 'moderate' }, '2000p is ££ = moderate');
-  assert.deepEqual(admission.admissionToAnswer({ adult: '£40.00' }, GB_BANDS), { state: 'answered', choice: 'expensive' }, '4000p is £££ = expensive');
-  assert.deepEqual(admission.admissionToAnswer({ note: 'varies by season' }, GB_BANDS), { state: 'asked_nothing_found' }, 'a charge we cannot band is not an answer');
-  assert.deepEqual(admission.admissionToAnswer({ adult: '£8.50' }, null), { state: 'asked_nothing_found' }, 'no market bands to band it against');
-});
+const seedPlace = (ref, countryCode = 'GB') => index.noteMany([{ ref, lat: 51.5, lng: -0.6, countryCode }], { source: 'osm' });
+const costBandQuestionId = async () => (await query(`select id from questions where attribute_key = 'cost-band' and scope = 'global' order by id limit 1`)).rows[0]?.id;
 
-async function seedPlace(ref, countryCode = 'GB') {
-  await index.noteMany([{ ref, lat: 51.5, lng: -0.6, countryCode }], { source: 'osm' });
-}
-
-test('recordAdmissionAnswer writes a free entry as the owned cost-band answer', async (t) => {
+test('recordAdmissionAnswer writes a free entry as the owned cost-band answer', async () => {
   const ref = 'osm:node/adm-free';
   await seedPlace(ref);
   const out = await admission.recordAdmissionAnswer(ref, { free: true }, { sourceUrl: 'https://park.example/visit' });
@@ -59,21 +39,27 @@ test('recordAdmissionAnswer writes a free entry as the owned cost-band answer', 
   assert.equal(a.source_url, 'https://park.example/visit', 'with the page it was read from');
 });
 
-test('recordAdmissionAnswer bands a priced entry against the place market', async () => {
-  const ref = 'osm:node/adm-priced';
-  await seedPlace(ref, 'GB');
-  const out = await admission.recordAdmissionAnswer(ref, { adult: '£20.00', free: false }, { sourceUrl: 'https://zoo.example' });
-  assert.deepEqual(out, { state: 'answered', choice: 'moderate' });
-  assert.equal(await ownedCostBand(ref), 'moderate');
+test('a priced or silent page records asked_nothing_found, and the cost row falls back', async () => {
+  for (const [ref, adm] of [['osm:node/adm-priced', { adult: '£20.00', free: false }], ['osm:node/adm-silent', null]]) {
+    await seedPlace(ref);
+    const out = await admission.recordAdmissionAnswer(ref, adm, { sourceUrl: 'https://x.example' });
+    assert.deepEqual(out, { state: 'asked_nothing_found' });
+    assert.equal(await ownedCostBand(ref), null, 'no owned choice → fall back to Google');
+    const { rows: [a] } = await query(`select state, choice from place_answers where venue_ref = $1`, [ref]);
+    assert.equal(a.state, 'asked_nothing_found', 'a real answer: we looked and nothing established free entry');
+    assert.equal(a.choice, null);
+  }
 });
 
-test('recordAdmissionAnswer records a page that said nothing as asked_nothing_found', async () => {
-  const ref = 'osm:node/adm-silent';
+test('ownedCostBand ignores a disagreement between two owned sources', async () => {
+  const ref = 'osm:node/adm-clash';
   await seedPlace(ref);
-  const out = await admission.recordAdmissionAnswer(ref, null, { sourceUrl: 'https://quiet.example' });
-  assert.deepEqual(out, { state: 'asked_nothing_found' });
-  assert.equal(await ownedCostBand(ref), null, 'no answered choice, so the cost row falls back to Google');
-  const { rows: [a] } = await query(`select state, choice from place_answers where venue_ref = $1`, [ref]);
-  assert.equal(a.state, 'asked_nothing_found', 'a real answer: we looked and nothing said so');
-  assert.equal(a.choice, null);
+  const qid = await costBandQuestionId();
+  // Two owned sources answer the cost-band differently — saveAnswer marks both
+  // unresolved, and the cost row must not pick one silently (brief: "Do not pick").
+  await saveAnswer({ venueRef: ref, questionId: qid, source: 'site', state: 'answered', value: { choice: 'free' } });
+  await saveAnswer({ venueRef: ref, questionId: qid, source: 'wikipedia', state: 'answered', value: { choice: 'moderate' } });
+  const { rows } = await query(`select unresolved from place_answers where venue_ref = $1`, [ref]);
+  assert.ok(rows.every((r) => r.unresolved === true), 'both rows are marked unresolved');
+  assert.equal(await ownedCostBand(ref), null, 'a disagreement shows nothing, not one side');
 });
