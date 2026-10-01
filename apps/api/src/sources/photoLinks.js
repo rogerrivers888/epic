@@ -113,9 +113,12 @@ export function restampForSpender(value, depth = 0) {
 const signedFor = new Map();
 const SIGNED_MAX = 200_000;
 function remember(sig, expiry) {
-  const { householdId, sessionId } = currentSpender();
+  const { householdId, sessionId, backOffice, elevated } = currentSpender();
   if (!householdId || !sessionId) return;
-  signedFor.set(sig, { householdId, sessionId, expiry });
+  // The privilege context travels with the link, so a photo embedded in a
+  // back-office response still needs personal sign-in when its paid request is
+  // made later (G11, Codex 1 Oct 2026).
+  signedFor.set(sig, { householdId, sessionId, backOffice: Boolean(backOffice), elevated: Boolean(elevated), expiry });
   if (signedFor.size > SIGNED_MAX) {
     // Oldest first: a Map iterates in insertion order.
     for (const [k, v] of signedFor) { if (signedFor.size <= SIGNED_MAX * 0.9 && v.expiry > Date.now()) break; signedFor.delete(k); }
@@ -127,7 +130,7 @@ export function spenderForLink(query) {
   const sig = query?.s ?? query?.sig;
   const hit = sig ? signedFor.get(String(sig)) : null;
   if (!hit || hit.expiry < Date.now()) return null;
-  return { householdId: hit.householdId, sessionId: hit.sessionId };
+  return { householdId: hit.householdId, sessionId: hit.sessionId, backOffice: hit.backOffice, elevated: hit.elevated };
 }
 
 export const stampPhotos = (photos) => (Array.isArray(photos) ? photos.map(stampPhoto) : photos);
