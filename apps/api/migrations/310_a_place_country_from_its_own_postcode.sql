@@ -35,7 +35,12 @@ alter table postcode_releases add column if not exists country_backfilled_releas
 -- GB-only — NOT the outward-code *syntax*, because valid Eircode routing keys like
 -- D02 and D6W share that shape and would be wrongly reclassified. So a postcode
 -- locality is corrected to GB only where its slug is a real GB outcode ONS knows;
--- an Irish routing key is not in `postcodes` and is left as it is.
+-- an Irish routing key is not in `postcodes` and is left as it is. GB-scoped on
+-- purpose: an outcode slug is not country-unique (W12 is a London outcode and a Dublin
+-- Eircode routing key) and localities keys on slug alone, so a shared slug is taken as
+-- GB here. Correct for the only live market, and it cannot misfile real Irish data
+-- (there is none); the (country, slug) area key that resolves the collision is the
+-- deferred US-census prerequisite — markets step 6 — not this migration (Codex).
 update localities loc
    set country_code = 'GB'
  where loc.kind = 'postcode'

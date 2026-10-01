@@ -1242,6 +1242,16 @@ export async function settleCountryFromPostcode(refs = null, q = query) {
  * could have stamped it from a place's own country. ONS (`postcodes`, GB-only) is the
  * authority, not the outward-code syntax, because Eircode routing keys share the
  * shape (Codex). An Irish routing key is not in `postcodes` and is left alone.
+ *
+ * SCOPE — GB only, deliberately. A `localities` slug is an outcode and is NOT
+ * country-unique: W12 is both a London outcode and a Dublin Eircode routing key, and
+ * the table keys on slug alone, so one row cannot be both. A slug shared with a GB
+ * outcode is treated as GB here. That is correct for the only live market and cannot
+ * misfile real Irish data, because there is none — Ireland is groundwork, and giving
+ * areas a (country, slug) key is the deferred US-census prerequisite the markets work
+ * records as step 6 (migration 300: "folding [country_code] into the primary key is a
+ * prerequisite of the US census … not of this migration"). The IE/GB slug collision
+ * is resolved there, not here (Codex).
  */
 const normaliseOutcodeCountries = (q = query) => q(`update localities loc set country_code = 'GB'
    where loc.kind = 'postcode' and upper(loc.country_code) <> 'GB'
