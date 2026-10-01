@@ -1232,8 +1232,10 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
     ]);
     if (!ringOuter || !ringInner) return res.status(400).json({ error: 'where_required' });
 
-    // The counts come from censusInRing itself — the one function /census-ring and
-    // the Inspire board both count with — each ring with its OWN candidate scope and
+    // The counts come from censusInRing itself — the one function that counts the
+    // Inspire board the owner read these figures from (shownOnly, the family-facing
+    // count; the back office's /census-ring counts everything, and would read a
+    // little higher). Each ring is counted with its OWN candidate scope and
     // membership, so this breakdown explains the very numbers it is about and cannot
     // drift from them (Codex). The added set is then the exact difference of the two
     // counted-ref sets, and the jump is added − removed (removals arise only when the
@@ -1247,18 +1249,20 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
     const addedRefs = [...outerRefs].filter((r) => !innerRefs.has(r));
     const removedRefs = [...innerRefs].filter((r) => !outerRefs.has(r));
 
-    // The districts both rings cover, for the detail scope and the placement universe.
+    // The districts both rings cover, for the placement universe.
     const slugs = [...new Set([...ringOuter.outcodes, ...ringInner.outcodes].map((o) => o.toLowerCase()))];
 
     // Detail for the changed places only — their drawers, point and slice — and ONLY
     // from the surfacing rows the census would have counted: the same area/tile scope
-    // and active-text filter censusInRing applies, so a drawer the count excluded (a
-    // surfacing in another district, or a retired text drawer) never appears in the
-    // breakdown (Codex).
-    const allRefs = [...new Set([...addedRefs, ...removedRefs])];
+    // and active-text filter censusInRing applies, and scoped to the ring that
+    // counted each set (the outer ring for the added, the inner for the removed), so
+    // in the non-nesting mixed-method case a drawer the counting ring never
+    // considered never appears in the breakdown (Codex).
     const textDrawers = Object.keys(TEXT_QUESTIONS).filter(textStillAsked);
     const detail = new Map();
-    if (allRefs.length) {
+    const fetchDetail = async (refList, outcodes) => {
+      if (!refList.length) return;
+      const scope = [...new Set(outcodes.map((o) => o.toLowerCase()))];
       const { rows: dr } = await query(
         `select ps.venue_ref, ps.subcategory, pi.lat, pi.lng, pi.slice
            from place_subcategories ps
@@ -1268,13 +1272,15 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
               or ps.area_slug in (select grid_key from census_tiles
                                    where outcodes && (select array_agg(upper(s)) from unnest($3::text[]) s)))
             and (ps.sourced is distinct from 'text' or ps.subcategory = any($4::text[]))`,
-        [allRefs, category, slugs, textDrawers]);
+        [refList, category, scope, textDrawers]);
       for (const r of dr) {
         let e = detail.get(r.venue_ref);
         if (!e) { e = { subcats: new Set(), lat: r.lat, lng: r.lng, slice: r.slice }; detail.set(r.venue_ref, e); }
         if (r.subcategory) e.subcats.add(r.subcategory);
       }
-    }
+    };
+    await fetchDetail(addedRefs, ringOuter.outcodes);
+    await fetchDetail(removedRefs, ringInner.outcodes);
 
     // A universe to name each changed place's district.
     const { rows: sectors } = await query(
