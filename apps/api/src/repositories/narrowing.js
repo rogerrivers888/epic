@@ -122,10 +122,12 @@ export async function gatherSignals(refs, { heritageLoad: heLoad = null } = {}) 
            select 1 from unnest(string_to_array(lower(regexp_replace(
              coalesce(case when (pr.provenance ->> 'name') is not null then pr.name end, at.name, ''),
              '[^a-z0-9 ]', ' ', 'g')), ' ')) as vt
-            where length(vt) >= 4
+            -- >= 3 so a saint's short name (Ann, Ive, Bee) still identifies the
+            -- place; generic short words stay excluded below (Codex).
+            where length(vt) >= 3
               and vt not in ('church','saint','chapel','abbey','priory','friary','minster','cathedral',
                              'house','hall','castle','tower','bridge','viaduct','memorial','monument',
-                             'garden','gardens','park','green','the','and','war','old','great','little',
+                             'garden','gardens','park','green','the','and','war','old','new','great','little',
                              'grade','listed','building','former','parish')
               and position(vt in lower(h.name)) > 0)
      ) her on true`,

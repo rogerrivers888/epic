@@ -311,3 +311,16 @@ test('a neighbour’s listing is not attributed by proximity alone — the names
   assert.ok(kept.has('google:namech'), 'the church whose name matches the listing is kept');
   assert.ok(memDropped.has('google:yardmem'), 'the churchyard war memorial does not inherit the church’s Grade I');
 });
+
+test('a short saint name still identifies a heritage listing — St Ann’s matches Church of St Ann (Codex)', async () => {
+  const load = '33333333-3333-3333-3333-333333333333';
+  await query(`update owned_source_loads set state='done', live_load=$1, load_id=$1, finished_at=now() where source='historic-england'`, [load]);
+  await seedPlace('google:stann', { subcategory: 'churches', record: { name: "St Ann's Church" }, point: { lat: 53.48100, lng: -2.24400 } });
+  const { rows: [eng] } = await query(`select slug from localities where kind='county' and nation='England' limit 1`);
+  await query('insert into place_areas (venue_ref, area_slug) values ($1,$2) on conflict do nothing', ['google:stann', eng.slug]);
+  await query(`insert into heritage_entries (list_entry, layer, name, grade, lat, lng, load_id)
+                 values (9988776,'listed-building','Church of St Ann','I',53.48102,-2.24402,$1) on conflict do nothing`, [load]);
+  const out = await narrowing.narrowingPreview({ scope: 'estate' });
+  const kept = new Set(out.subcategories.find((s) => s.key === 'churches').examplesKept.map((e) => e.ref));
+  assert.ok(kept.has('google:stann'), 'St Ann’s is kept via its Grade I listing');
+});
