@@ -12,6 +12,7 @@ import { testDatabase } from './helpers/db.js';
 
 const { query, pool } = await testDatabase();
 const index = await import('../src/repositories/placeIndex.js');
+const owned = await import('../src/repositories/ownedPlaces.js');
 test.after(() => pool.end());
 
 // A test outcode nobody's real data uses, with a chosen country, plus a place in
@@ -55,6 +56,19 @@ test('an agreeing stamp, and a place with no postcode, are left alone', async ()
   const n = await index.settleCountryFromPostcode([agree, nopc]);
   assert.equal(n, 0, 'nothing to correct: one agrees, one has no postcode');
   assert.equal(await countryOf(nopc), 'US', 'a place with no postcode keeps its stamp');
+});
+
+test('a postcode change requeues a placed row, so settle re-resolves its country', async () => {
+  const ref = 'osm:node/cfp-requeue';
+  await index.noteMany([{ ref, lat: 51.5, lng: -0.6, countryCode: 'GB' }], { source: 'osm' });
+  await query(`insert into place_records (venue_ref, postcode, updated_at) values ($1,'ZZ8 1AA', now())
+               on conflict (venue_ref) do update set postcode = excluded.postcode`, [ref]);
+  await query('update place_index set placed_at = now() where venue_ref = $1', [ref]);
+  // Changing the postcode through the owned-record writer must clear placed_at, or
+  // settle (which only revisits placed_at-null rows) never re-resolves the country.
+  await owned.writeRecord(ref, ['postcode'], ['ZZ9 2BB'], {}, {});
+  const { rows: [pi] } = await query('select placed_at from place_index where venue_ref = $1', [ref]);
+  assert.equal(pi.placed_at, null, 'the postcode change requeued the place for settling');
 });
 
 test('the outward code is read from any postcode shape', async () => {

@@ -12,9 +12,17 @@
 -- settleCountryFromPostcode() keeps new places right going forward (settle step 0a),
 -- running the same derivation scoped to the places it is settling. The outward-code
 -- expression is the one settle uses, kept in step with it.
+--
+-- Correcting the stamp is not enough on its own: a placed row's old country sits in
+-- place_areas and area_stats too, and settle only refiles rows whose placed_at is
+-- null. So a corrected row is requeued (placed_at, settle_tried_at nulled) and the
+-- next settle pass refiles it under the right country and refreshes the boards
+-- (Codex). Only the rows that actually changed are requeued — the WHERE sees to that.
 
 update place_index pi
-   set country_code = upper(loc.country_code)
+   set country_code = upper(loc.country_code),
+       placed_at = null,
+       settle_tried_at = null
   from place_records r
   join localities loc
     on loc.kind = 'postcode'

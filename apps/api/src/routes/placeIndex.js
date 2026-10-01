@@ -1983,6 +1983,11 @@ router.patch('/place', requires('manage_library'), async (req, res, next) => {
             'insert into place_areas (venue_ref, area_slug) values ($1,$2) on conflict do nothing',
             [ref, lower(outcode)]);
         }
+        // Requeue so settle re-resolves the country from the new postcode (step 0a)
+        // and refiles the country-level area membership: an edited postcode can move
+        // the place to another country, and settle only revisits placed_at-null rows
+        // (Codex, Option C).
+        await client.query('update place_index set placed_at = null, settle_tried_at = null where venue_ref = $1', [ref]);
       });
     } else if (key === 'busy') {
       // A sweep-only place has no owned record yet, and an UPDATE against no row

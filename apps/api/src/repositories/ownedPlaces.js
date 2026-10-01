@@ -226,7 +226,10 @@ export async function writeRecord(venueRef, columns, values, attribution, proven
   // have changed. `is distinct from` rather than `<>`, because null is one of
   // the values that matters here — a kind being *withdrawn* has to travel as
   // surely as one arriving.
-  const changed = ['category', 'experiences']
+  // A postcode change requeues too (Codex, Option C): the place's country is
+  // resolved from its outcode, so a new postcode can move it to another country,
+  // and settle (step 0a) only re-resolves and refiles rows whose placed_at is null.
+  const changed = ['category', 'experiences', 'postcode']
     .map((name) => [name, columns.indexOf(name)])
     .filter(([, at]) => at >= 0)
     .map(([name, at]) => `w.${name} is distinct from $${at + 2}${name === 'experiences' ? '::jsonb' : ''}`);
@@ -241,7 +244,7 @@ export async function writeRecord(venueRef, columns, values, attribution, proven
     // nothing moved, and leave the place on its old shelf until somebody ran a
     // full rebuild (Codex, 19 Sep 2026).
     `with was as (
-       select venue_ref, category, experiences from place_records where venue_ref = $1),
+       select venue_ref, category, experiences, postcode from place_records where venue_ref = $1),
      upd as (
        update place_records set ${sets},
          attribution = $${columns.length + 2}, provenance = $${columns.length + 3}, updated_at = now()
