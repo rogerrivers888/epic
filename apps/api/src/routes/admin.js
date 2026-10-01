@@ -15,7 +15,7 @@
  */
 
 import express from 'express';
-import { CAPABILITIES, DOORS, accessOf, can, requires, requireOwnerSignedIn } from '../access.js';
+import { CAPABILITIES, DOORS, OWNER_ONLY_CAPABILITIES, accessOf, can, requires, requireOwnerSignedIn } from '../access.js';
 import * as activity from '../repositories/activity.js';
 import * as insights from '../repositories/insights.js';
 import * as rolesRepo from '../repositories/roles.js';
@@ -40,6 +40,20 @@ import { STATUS_WORDS } from '../domain/mail.js';
 const router = express.Router();
 
 const bad = (message, code = 'bad_request') => Object.assign(new Error(message), { status: 400, code });
+
+/**
+ * Granting an owner-only capability (manage_staff) is itself the owner's to do.
+ * An Administrator holds manage_roles, so without this they could write
+ * manage_staff onto their own role and bypass the owner-only rule — the escalation
+ * this closes. Checked only when such a capability is actually being granted, so
+ * ordinary role edits are untouched.
+ */
+function refuseOwnerOnlyGrant(req, capabilities) {
+  if (!Array.isArray(capabilities)) return;
+  if (capabilities.some((c) => OWNER_ONLY_CAPABILITIES.has(c)) && !accessOf(req).isOwner) {
+    throw Object.assign(new Error('Only the owner can grant staff management.'), { status: 403, code: 'owner_only' });
+  }
+}
 const days = (req, fallback = 30) => Math.min(365, Math.max(1, Number(req.query.days) || fallback));
 
 /** Who is doing this, for the audit trail. The passcode has no account row. */
@@ -426,6 +440,7 @@ router.post('/roles', requires('manage_roles'), async (req, res, next) => {
     const label = String(req.body?.label || '').trim();
     if (!key || !label) throw bad('A role needs a name.');
     if (await rolesRepo.roleByKey(key)) throw bad('There is already a role with that name.');
+    refuseOwnerOnlyGrant(req, req.body?.capabilities);
     const role = await rolesRepo.createRole({
       key, label, description: req.body?.description ?? null,
       doors: Array.isArray(req.body?.doors) ? req.body.doors.filter((d) => DOORS.includes(d)) : ['client'],
@@ -443,6 +458,12 @@ router.patch('/roles/:id', requires('manage_roles'), async (req, res, next) => {
     // The owner's role always holds everything; letting it be edited would be a
     // way to lock the estate's owner out of his own back office.
     if (before.is_owner) throw bad('The owner role holds every capability there is, and cannot be narrowed.');
+    // Guard only a capability being *added* — a role that already had it can be
+    // edited for other reasons without the owner present.
+    const adding = Array.isArray(req.body?.capabilities)
+      ? req.body.capabilities.filter((c) => !(before.capabilities ?? []).includes(c))
+      : null;
+    refuseOwnerOnlyGrant(req, adding);
     await rolesRepo.updateRole(req.params.id, {
       label: req.body?.label,
       description: req.body?.description,

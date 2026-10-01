@@ -91,14 +91,25 @@ export async function createStaffAccount({ email, name, roleId }) {
 }
 
 /**
- * Give an existing account a back-office role.
- *
- * Two callers: adding somebody who turns out to already have a customer account
- * (the handover's "they now have back-office access too"), and changing a staff
- * member's role. Returns the staff view so the screen can drop it straight in.
+ * Change a staff member's role. One caller: the role picker on an account that is
+ * already staff. It does not touch `prior_role_id` — that still remembers the
+ * customer role from before they were staff, if there was one.
  */
 export async function setStaffRole(id, roleId) {
   await query('update accounts set role_id = $2, updated_at = now() where id = $1', [id, roleId]);
+  return staffById(id);
+}
+
+/**
+ * Give an existing *customer* account a back-office role, remembering the role it
+ * held so removal can put it back. `coalesce` so that re-granting (if they were
+ * made staff, removed, and added again) does not overwrite a prior already kept.
+ */
+export async function grantStaffRole(id, roleId) {
+  await query(
+    'update accounts set prior_role_id = coalesce(prior_role_id, role_id), role_id = $2, updated_at = now() where id = $1',
+    [id, roleId],
+  );
   return staffById(id);
 }
 
@@ -107,15 +118,19 @@ export async function setStaffRole(id, roleId) {
  * in as a customer as it was before — or no account at all if there was never a
  * household behind it.
  *
- * A staff member added here has `household_id` null (310): there is nothing to
+ * A staff member added here has `household_id` null (318): there is nothing to
  * keep, so the row goes. Somebody who was a customer first and was given
  * back-office access keeps their household, their trips and their ratings, and
- * simply loses the admin door — so the role is set back to the member role
- * rather than the row being deleted. The routes decide which, having looked at
- * the household; this does what it is told.
+ * simply loses the admin door — restored to the role they held *before* they
+ * were staff (`prior_role_id`), which is the member role for most but may be a
+ * custom client role; the fallback is the member role. The routes decide delete
+ * vs restore, having looked at the household; this does what it is told.
  */
 export async function removeStaffRole(id, { memberRoleId }) {
-  await query('update accounts set role_id = $2, updated_at = now() where id = $1', [id, memberRoleId ?? null]);
+  await query(
+    'update accounts set role_id = coalesce(prior_role_id, $2), prior_role_id = null, updated_at = now() where id = $1',
+    [id, memberRoleId ?? null],
+  );
 }
 
 export function deleteStaffAccount(id) {

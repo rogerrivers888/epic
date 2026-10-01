@@ -25,6 +25,7 @@ const mail = await import('../src/sources/mail.js');
 const access = await import('../src/access.js');
 const staffRoutes = (await import('../src/routes/staff.js')).default;
 const sessionRouter = (await import('../src/routes/session.js')).default;
+const adminRoutes = (await import('../src/routes/admin.js')).default;
 
 // A tiny back office: the real router, behind a stand-in for the owner's session.
 // The door and the manage_staff capability are what server.js puts in front of
@@ -40,6 +41,26 @@ app.use('/api/admin/staff', staffRoutes);
 app.use('/api', sessionRouter);
 app.use((err, req, res, _next) => res.status(err.status || 500).json({ error: err.code || 'error', message: err.message }));
 
+// A second back office, for the roles endpoints, behind a session the tests set —
+// to prove an Administrator (manage_roles, not the owner) cannot grant the
+// owner-only manage_staff.
+let adminAccess = { isOwner: true, doors: ['client', 'admin'], capabilities: new Set() };
+const adminApp = express();
+adminApp.use(express.json());
+adminApp.use((req, _res, next) => { req.account = { id: null, email: 'actor@epic.day' }; req.access = adminAccess; next(); });
+adminApp.use('/api/admin', adminRoutes);
+adminApp.use((err, req, res, _next) => res.status(err.status || 500).json({ error: err.code || 'error', message: err.message }));
+const adminServer = adminApp.listen(0);
+await new Promise((r) => adminServer.on('listening', r));
+const adminBase = `http://127.0.0.1:${adminServer.address().port}`;
+const adminCall = async (method, path, body, acc) => {
+  adminAccess = acc;
+  const res = await fetch(adminBase + path, { method, headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+  return { status: res.status, body: await res.json().catch(() => null) };
+};
+const ROLES_ADMIN = { isOwner: false, doors: ['client', 'admin'], capabilities: new Set(['manage_roles', 'view_accounts']) };
+const OWNER = { isOwner: true, doors: ['client', 'admin'], capabilities: new Set(access.CAPABILITIES.map((c) => c.key)) };
+
 const server = app.listen(0);
 await new Promise((r) => server.on('listening', r));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -52,7 +73,7 @@ const call = async (method, path, body) => {
   return { status: res.status, body: await res.json().catch(() => null) };
 };
 
-test.after(() => { server.close(); return pool.end(); });
+test.after(() => { server.close(); adminServer.close(); return pool.end(); });
 
 const roleId = async (key) => (await rolesRepo.roleByKey(key)).id;
 
@@ -217,6 +238,37 @@ test('removing a colleague who was a customer first leaves the customer behind',
   assert.ok(after, 'the account stays');
   assert.equal(after.household_id, customer.household_id, 'with its household');
   assert.equal(await staffRepo.staffById(customer.id), null, 'but off staff');
+});
+
+test('a dual-use customer gets their original role back when removed from staff', async () => {
+  // A customer on a custom client role, made staff, then removed, must return to
+  // that role — not be flattened to member (Codex, P2).
+  const custom = await rolesRepo.createRole({ key: 'power_user', label: 'Power user', doors: ['client'], capabilities: [] });
+  const customer = await accounts.createAccount({ email: 'power@home.test', name: 'Power' });
+  await rolesRepo.setAccountRole(customer.id, custom.id);
+  const support = await roleId('support');
+  await call('POST', '/api/admin/staff', { name: 'Power', email: 'power@home.test', roleId: support });
+  // While staff, they hold the staff role, and the prior role is remembered.
+  assert.equal((await accounts.accountById(customer.id)).role_id, support);
+  await call('DELETE', `/api/admin/staff/${customer.id}`);
+  const after = await accounts.accountById(customer.id);
+  assert.equal(after.role_id, custom.id, 'their original client role is restored, not member');
+});
+
+test('an Administrator cannot grant themselves staff management; the owner can', async () => {
+  // manage_staff is in the vocabulary so the roles screen can show it, but
+  // granting it is the owner's alone — a manage_roles holder writing it onto a
+  // role would bypass the owner-only rule (Codex, P1).
+  const refused = await adminCall('POST', '/api/admin/roles',
+    { key: 'sneaky', label: 'Sneaky', doors: ['client', 'admin'], capabilities: ['view_accounts', 'manage_staff'] }, ROLES_ADMIN);
+  assert.equal(refused.status, 403);
+  assert.equal(refused.body.error, 'owner_only');
+  assert.equal(await rolesRepo.roleByKey('sneaky'), null, 'the role was not created');
+
+  const allowed = await adminCall('POST', '/api/admin/roles',
+    { key: 'deputy', label: 'Deputy', doors: ['client', 'admin'], capabilities: ['view_accounts', 'manage_staff'] }, OWNER);
+  assert.equal(allowed.status, 201);
+  assert.ok((await rolesRepo.roleByKey('deputy')).capabilities.includes('manage_staff'), 'the owner may grant it');
 });
 
 test('the owner cannot be suspended, re-roled or removed through staff', async () => {

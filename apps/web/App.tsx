@@ -348,20 +348,21 @@ function Gate({ route }: { route: Route }) {
     let dropped = false;
     (async () => {
       try {
-        await api.signInWithLink(link);
+        // The link exchange already answers with this session's access, so the
+        // landing is decided from its result — not a second request that, if it
+        // failed after the one-time link was spent, would strand a staff member
+        // on /account with no household (Codex, 1 Oct 2026).
+        const st = await api.signInWithLink(link);
         if (dropped) return;
-        // Where you land is decided by the account, not the link: staff go to the
-        // back office, a customer to their own account page (L3). The access the
-        // session just gained says which — the admin door is what makes somebody
-        // staff. Navigating to the landing also takes the spent token out of the
-        // address bar (a link left in a URL gets pasted into a chat).
-        const st = await api.sessionState().catch(() => null);
         recheck();
-        if (dropped) return;
-        const toAdmin = Boolean(st?.access?.doors?.includes('admin'));
+        // Where you land is decided by the account, not the link: staff go to the
+        // back office, a customer to their own account page (L3). The admin door
+        // is what makes somebody staff. Navigating also takes the spent token out
+        // of the address bar (a link left in a URL gets pasted into a chat).
+        const toAdmin = Boolean(st.access?.doors?.includes('admin'));
         // Land on the first screen their role can open, not a fixed one: a
         // Support member has the admin door but not the Overview's capability.
-        const screen = firstAdminScreen(st?.access);
+        const screen = firstAdminScreen(st.access);
         const landing = toAdmin
           ? (screen === 'filing' ? paths.filing('categories') : paths.admin(screen))
           : paths.account();

@@ -28,3 +28,11 @@ alter table accounts alter column household_id drop not null;
 -- legacy `role = 'owner'` value, so `accounts_single_owner_idx` still admits
 -- exactly one owner. Staff are distinguished by `role_id` pointing at a role
 -- whose `doors` include 'admin', which is what `accessFor` already reads.
+
+-- When an existing customer is given back-office access, their customer role is
+-- overwritten by the staff role (an account holds one role at a time). This
+-- remembers what it was, so removing staff access later restores their original
+-- role rather than flattening everyone to the default member role. Null for a
+-- plain staff account (nothing to restore — it is deleted on removal) and for a
+-- customer who had no explicit role.
+alter table accounts add column if not exists prior_role_id uuid references roles(id) on delete set null;

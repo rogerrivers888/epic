@@ -70,6 +70,18 @@ export const CAPABILITIES = [
 export const CAPABILITY_KEYS = new Set(CAPABILITIES.map((c) => c.key));
 
 /**
+ * Capabilities only the owner may grant to a role.
+ *
+ * `manage_staff` is in the vocabulary like any other so the roles screen can
+ * show it, but granting it is itself a staff decision: an Administrator holds
+ * `manage_roles`, so without this they could add `manage_staff` to their own
+ * role and let themselves manage staff — the owner-only rule bypassed by one
+ * edit. The roles endpoints refuse to grant anything in this set unless the
+ * requester is the owner (routes/admin.js).
+ */
+export const OWNER_ONLY_CAPABILITIES = new Set(['manage_staff']);
+
+/**
  * What an agent session may do: read everything, change nothing (G11, 1 Oct
  * 2026). The owner asked that agents "read, test, propose" — no spending, no
  * lifting holds, no paid grants, no bulk production changes. Tests run on the

@@ -20,7 +20,7 @@
 import express from 'express';
 import { requires, areasFor } from '../access.js';
 import {
-  backOfficeRoles, createStaffAccount, deleteStaffAccount, invalidateUnusedLinks,
+  backOfficeRoles, createStaffAccount, deleteStaffAccount, grantStaffRole, invalidateUnusedLinks,
   listStaff, removeStaffRole, setStaffRole, staffById,
 } from '../repositories/staff.js';
 import {
@@ -183,8 +183,8 @@ router.post('/', requires('manage_staff'), async (req, res, next) => {
         throw bad('That account is suspended. Make it active on the Accounts screen before adding them to staff.', 'suspended', 409);
       }
       // A customer being given back-office access. Keep everything they have;
-      // add the door.
-      account = await setStaffRole(existing.id, role.id);
+      // add the door, and remember the role they held so removal restores it.
+      account = await grantStaffRole(existing.id, role.id);
       existedAsCustomer = true;
       await writeAudit({
         ...actor(req), action: 'staff.grant', subjectType: 'account', subjectId: existing.id, subjectLabel: email,
