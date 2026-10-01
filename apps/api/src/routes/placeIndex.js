@@ -1557,10 +1557,16 @@ router.get('/census-ring-curve', requires('view_library'), async (req, res, next
       // A count over a reach whose districts the census has not finished is a floor,
       // the same way /census-ring reports it: a district never looked at, or one a
       // run stopped part-way across, or a straddling box, all make it "N+".
+      // Completeness is scoped to THIS category and the requested drawers — a
+      // finished Food row says nothing about a museums-only Culture curve, and an
+      // unfinished unrelated drawer must not floor a finished one (Codex).
       const floorOutcodes = ring.reachOutcodes ?? ring.outcodes;
       const { rows: seen } = await query(
-        'select area_slug, bool_and(complete) as whole from area_counts where area_slug = any($1) group by area_slug',
-        [floorOutcodes.map((o) => o.toLowerCase())]);
+        `select area_slug, bool_and(complete) as whole from area_counts
+          where area_slug = any($1) and category = $2
+            and ($3::text[] is null or subcategory = any($3))
+          group by area_slug`,
+        [floorOutcodes.map((o) => o.toLowerCase()), category, subcategories && subcategories.length ? subcategories : null]);
       const censused = new Set(seen.map((r) => r.area_slug));
       const notCensused = floorOutcodes.filter((o) => !censused.has(o.toLowerCase())).length;
       const partial = seen.filter((r) => !r.whole).length;
