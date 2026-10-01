@@ -2689,11 +2689,16 @@ function PlaceBoard({ refId, canManage, onClose, tab, onTab }: {
   // Anything that changes this place changes the boards behind it, so the
   // reload the drawer's own buttons call forgets what they were told.
   const load = useCallback(() => { forgetBoards(); refresh(); }, [refresh]);
-  // Research also changes the place, and the boards behind the drawer are stale
-  // until they ask again — but this tab must stay mounted so the result it just
-  // streamed is not thrown away. So forget every board except this place, then
-  // refresh the header in place (Codex, 1 Oct 2026).
-  const afterResearch = useCallback(() => { forgetBoardsExcept(placeKey); refresh(); }, [refresh, placeKey]);
+  // Research changes a place, so the boards behind the drawer are stale and are
+  // forgotten — but the place the drawer is on *now* keeps its cache so its tab is
+  // never blanked (that would throw away a result it is streaming). Only when the
+  // place that finished is the one still on screen is its header refreshed in place;
+  // a stale stream from a place the drawer has left invalidates the boards but must
+  // not refresh — and so blank — the place now showing (Codex, 1 Oct 2026).
+  const afterResearch = useCallback((completedRef: string) => {
+    forgetBoardsExcept(placeKey);
+    if (completedRef === refId) refresh();
+  }, [refresh, placeKey, refId]);
   useEffect(() => { setError(null); }, [refId]);
 
   if (error) {
@@ -3095,7 +3100,7 @@ const RESEARCH_STATE_WORD: Record<string, string> = {
 };
 
 /** BO2h — ours beside each provider's, field by field. Only ours is editable. */
-function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string; canManage: boolean; onEdit: (field: string) => void; onResearched?: () => void }) {
+function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string; canManage: boolean; onEdit: (field: string) => void; onResearched?: (ref: string) => void }) {
   const { navigate } = useRouter();
   const [data, setData] = useState<Awaited<ReturnType<typeof api.adminPlaceCompare>> | null>(null);
   const [match, setMatch] = useState(false);
@@ -3198,7 +3203,7 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
       // are stale whoever is looking — invalidate them even if this tab has moved
       // on or unmounted. Everything below only touches this tab's own state, and
       // only while it is still the one on screen (Codex, 1 Oct 2026).
-      if (name === 'done') onResearched?.();
+      if (name === 'done') onResearched?.(refId);
       if (!mine()) return; // a frame for a place the drawer has already left
       if (name === 'source') put(d as ResearchStep);
       // What the record holds now, and how the pipeline judged the run: `done`
