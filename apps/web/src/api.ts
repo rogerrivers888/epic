@@ -1892,7 +1892,7 @@ export type UkCensusDay = {
 export type UkCensus = {
   action: string;
   /** Stopped: a day over £5 of Google, or any Places spend after credits ('net'). */
-  halted: { day: string; kind: 'five' | 'net'; googleGbp: number; placesNetGbp: number } | null;
+  halted: { day: string; kind: 'five' | 'net' | 'census'; googleGbp: number; placesNetGbp: number; censusGbp: number } | null;
   held: { day: string; censusGbp: number } | null;
   complete: boolean;
   districtsWhole: number; tilesLeft: number; requestsPerTile: number | null; daysLeft: number | null;

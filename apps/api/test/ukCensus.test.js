@@ -133,6 +133,84 @@ test('any day over £5 of Google stops the census and starts nothing again', asy
   assert.equal(r.calls.length, 0);
 });
 
+test('the census halts when its SKU spends promotional credit, though net is £0 (1 Oct 2026)', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  // The census SKU (Text Search IDs Only), paid entirely by PROMOTIONAL credit:
+  // net (cost + credits) is £0, so the £5 all-Google and Places-net stops do not
+  // fire — but a finite credit has been spent, so the census must halt.
+  await billed('2026-09-28', 'google-essentials', 2, { credits: -2, promo: -2 });
+  const r = recorder(); const told = [];
+  const out = await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start, stop: async () => {}, tell: (x) => told.push(x) });
+  assert.equal(out.action, 'halted');
+  assert.equal(out.over.kind, 'census', 'the census SKU before promo, not a net stop');
+  assert.equal(r.calls.length, 0, 'and starts nothing');
+  assert.match(told[0].subject, /free Text Search \(IDs Only\) monthly allowance is used up — the census spent £2\.00 of promotional credit or cash on 2026-09-28/);
+});
+
+test('permanent free-tier credit on the census SKU is not a halt — only promotional credit is', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  // Fully covered by a permanent free-tier credit (promo = 0): Google never
+  // charges this, so it is £0 net AND £0 before promo — the census carries on.
+  await billed('2026-09-28', 'google-essentials', 2, { credits: -2, promo: 0 });
+  const r = recorder();
+  assert.equal((await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start })).action, 'start');
+});
+
+test('a promotional charge on a non-census SKU does not halt the census (census SKU only)', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  // Place Details Pro paid by promotional credit: not the census's SKU, and net
+  // £0, so neither the census stop nor the net/£5 stops fire.
+  await billed('2026-09-28', 'google-pro', 2, { credits: -2, promo: -2 });
+  const r = recorder();
+  assert.equal((await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start })).action, 'start');
+});
+
+test('a lifted census hold carries on, and a later rise in the census charge halts it again', async (t) => {
+  await clean(); t.after(clean);
+  const run = await dayOne({ state: 'running', problem: null, finished: null });
+  await billed('2026-09-28', 'google-essentials', 2, { credits: -2, promo: -2 });
+  const r = recorder();
+  assert.equal((await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start, stop: async () => {} })).action, 'halted');
+  await query(`update census_runs set state = 'paused', problem = 'stopped at the 70000-request ceiling; resume to carry on', finished_at = '2026-09-28T22:05:00Z' where id = $1`, [run.id]);
+  await uk.liftHold({ who: 'test' });
+  assert.equal((await uk.tick({ now: new Date('2026-09-29T09:00:00Z'), start: r.start })).action, 'start', 'the lifted census charge does not stop it again');
+  // A later rise on that day — more promotional credit spent — stops it afresh.
+  await billed('2026-09-28', 'google-essentials', 1, { credits: -1, promo: -1 });
+  assert.equal((await uk.tick({ now: new Date('2026-09-29T10:00:00Z'), start: r.start, stop: async () => {} })).action, 'halted', 'growth after the lift still stops it');
+});
+
+test('upgrading a pre-census lift covers its London export day, not the Pacific one (1 Oct 2026)', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne();
+  // A census charge on 2026-09-29 (a London export day), fully on promotional credit.
+  await billed('2026-09-29', 'google-essentials', 2, { credits: -2, promo: -2 });
+  // A lift from after seenNet but before seenCensus, made at 07:00 UTC — London is
+  // the 29th, Pacific still the 28th. The upgrade must fill seenCensus with the
+  // London day, or the new census check re-halts on the already-lifted 29th.
+  await query(`insert into bo_settings (key, value, updated_by) values ('census:uk-hold-lifted', $1, 'test')`,
+    [JSON.stringify({ seen: {}, seenGoogle: {}, seenNet: {}, seenGoogleSpan: {}, seenNetSpan: {}, at: '2026-09-29T07:00:00Z' })]);
+  const r = recorder();
+  assert.equal((await uk.tick({ now: new Date('2026-09-30T08:00:00Z'), start: r.start })).action, 'start',
+    'the already-lifted census charge on the London day is not held again');
+});
+
+test('a census charge that grew since an old lift still stops it after the upgrade (1 Oct 2026)', async (t) => {
+  await clean(); t.after(clean);
+  await dayOne({ state: 'running', problem: null, finished: null });
+  // Billing now shows £2 of promotional credit on the census SKU; the old lift's
+  // snapshot (`seen`) saw only £0.50 on that quota day. The upgrade must keep the
+  // old snapshot so the growth to £2 is still a stop — not re-snapshot £2 as seen.
+  await billed('2026-09-28', 'google-essentials', 2, { credits: -2, promo: -2 });
+  await query(`insert into bo_settings (key, value, updated_by) values ('census:uk-hold-lifted', $1, 'test')`,
+    [JSON.stringify({ seen: { '2026-09-28': 0.5 }, seenGoogle: {}, seenNet: {}, seenGoogleSpan: {}, seenNetSpan: {}, at: '2026-09-28T22:00:00Z' })]);
+  const r = recorder();
+  assert.equal((await uk.tick({ now: new Date('2026-09-29T08:00:00Z'), start: r.start, stop: async () => {} })).action, 'halted',
+    'growth above the old lifted census snapshot still stops it');
+});
+
 test('a person\'s stop is not undone, and a finished UK is complete', async (t) => {
   await clean(); t.after(clean);
   const run = await dayOne({ state: 'stopped', problem: null });

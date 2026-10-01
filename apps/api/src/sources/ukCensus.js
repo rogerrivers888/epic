@@ -98,6 +98,7 @@ export const pacificDay = (at) => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit',
 }).format(new Date(at));
 
+
 /** The programme's runs, oldest first. */
 export async function programme() {
   const { rows } = await query(
@@ -209,21 +210,39 @@ export async function decide(now = new Date()) {
   // (Codex, 29 Sep 2026).
   // It is converted once, with the amounts on those days now as its baseline —
   // finite, so a later backfill or rise still stops it (Codex, 29 Sep 2026).
-  if (lifted && !lifted.value?.seenNet && lifted.value?.at) {
-    const through = pacificDay(lifted.value.at);
+  // A lift from before the census-SKU figure existed — pre-seenNet (only `seen`)
+  // or post-seenNet but pre-seenCensus — must gain the maps it lacks, or the new
+  // census stop would hold a charge already looked at (owner, 1 Oct 2026). Each
+  // missing map is filled once from the bills up to the day the lift was made,
+  // finite, so a later backfill or rise still stops it; maps already present are
+  // left as the snapshot they were taken at.
+  if (lifted?.value?.at && (!lifted.value.seenNet || lifted.value.seenCensus === undefined)) {
+    // The export-day maps (bills) are keyed by London's day, the span maps by the
+    // quota day (Pacific), so each is capped by the lift instant in its own zone:
+    // a lift made between London midnight and the Pacific rollover would otherwise
+    // drop the current London row from the export maps and re-halt on a charge
+    // already looked at (Codex, 1 Oct 2026).
+    const throughLondon = londonDay(new Date(lifted.value.at));
+    const throughPacific = pacificDay(lifted.value.at);
     const spansNow = runs.map((r) => billedFor(bills, pacificDay(r.started_at))).filter(Boolean);
-    const upTo = (list, key) => Object.fromEntries(list.filter((b) => b.day <= through).map((b) => [b.day, b[key] ?? 0]));
-    lifted.value = {
-      ...lifted.value,
-      seenGoogle: upTo(bills, 'google_gbp'), seenNet: upTo(bills, 'places_net_gbp'),
-      seenGoogleSpan: upTo(spansNow, 'google_gbp'), seenNetSpan: upTo(spansNow, 'places_net_gbp'),
-    };
+    const upTo = (list, key, through) => Object.fromEntries(list.filter((b) => b.day <= through).map((b) => [b.day, b[key] ?? 0]));
+    const fill = (k, list, key, through) => { if (lifted.value[k] === undefined) lifted.value[k] = upTo(list, key, through); };
+    fill('seenGoogle', bills, 'google_gbp', throughLondon); fill('seenNet', bills, 'places_net_gbp', throughLondon); fill('seenCensus', bills, 'census_gbp', throughLondon);
+    fill('seenGoogleSpan', spansNow, 'google_gbp', throughPacific); fill('seenNetSpan', spansNow, 'places_net_gbp', throughPacific);
+    // The census span snapshot comes from the old `seen` map — the census totals
+    // observed AT LIFT TIME — not from current billing, so a charge that grew or
+    // backfilled since the lift is still seen as growth and still stops the census;
+    // re-snapshotting current billing would wave that growth through (Codex, 1 Oct
+    // 2026). Only when there is no old `seen` is it rebuilt from the spans now.
+    if (lifted.value.seenCensusSpan === undefined) lifted.value.seenCensusSpan = lifted.value.seen ?? upTo(spansNow, 'census_gbp', throughPacific);
     await query(`update bo_settings set value = $2, updated_at = now() where key = $1`, ['census:uk-hold-lifted', JSON.stringify(lifted.value)]);
   }
   const seenGoogle = lifted?.value?.seenGoogle ?? {};
   const seenNet = lifted?.value?.seenNet ?? {};
+  const seenCensus = lifted?.value?.seenCensus ?? {};
   const seenGoogleSpan = lifted?.value?.seenGoogleSpan ?? {};
   const seenNetSpan = lifted?.value?.seenNetSpan ?? {};
+  const seenCensusSpan = lifted?.value?.seenCensusSpan ?? {};
   // Below half a millionth of a pound is float noise: Google bills to the millionth.
   const EPS = 5e-7;
   // A quota-day total with no lifted figure of its own — a day that did not
@@ -254,7 +273,12 @@ export async function decide(now = new Date()) {
     }));
     const net = bills.filter((b) => spanned.has(b.day)).find((b) => unseen(b, 'places_net_gbp', seenNet, 0))
       ?? days.find((b) => unseen(b, 'places_net_gbp', spanSeen(seenNetSpan, seenNet), 0));
-    return { action: 'complete', runs, latest, bills, over: over ? { ...over, kind: 'five' } : net ? { ...net, kind: 'net' } : null };
+    // A late census-SKU charge after the finish, before promotional credit, is
+    // surfaced the same way (consistent with the working stop); it reports, it
+    // does not re-run a finished census.
+    const cen = bills.filter((b) => spanned.has(b.day)).find((b) => unseen(b, 'census_gbp', seenCensus, 0))
+      ?? days.find((b) => unseen(b, 'census_gbp', spanSeen(seenCensusSpan, seenCensus), 0));
+    return { action: 'complete', runs, latest, bills, over: over ? { ...over, kind: 'five' } : net ? { ...net, kind: 'net' } : cen ? { ...cen, kind: 'census' } : null };
   }
   // Any export day over £5, and any quota day of the programme over £5 across
   // the two London days it spans — £3 and £3 is £6 (Codex, 29 Sep 2026). The
@@ -275,6 +299,25 @@ export async function decide(now = new Date()) {
   const spent = bills.find((b) => unseen(b, 'places_net_gbp', seenNet, 0))
     ?? spans.find((b) => unseen(b, 'places_net_gbp', spanSeen(seenNetSpan, seenNet), 0));
   if (spent) return { action: 'halted', runs, latest, bills, over: { ...spent, kind: 'net' } };
+  // The census's own SKU (Text Search IDs Only / Essentials), BEFORE promotional
+  // credit (`census_gbp = cost + credits - promo`): under the free monthly
+  // allowance, and under the permanent free-tier credits Google never charges, it
+  // is £0 and the census runs; the moment it spends promotional credit — a finite
+  // grant that runs out — or cash, it is above £0 and the census halts. A finite
+  // credit is spent once, so spending it is a decision the owner lifts
+  // deliberately (POST /census/uk/lift), not a side effect (owner, 1 Oct 2026).
+  //
+  // This SUPERSEDES the 29 Sep 2026 "usage paid by credit is £0 net" rule FOR THE
+  // CENSUS STOP ONLY. The £5 all-Google and Places-net stops above still net out
+  // every credit, promotional included — they answer a different question (is
+  // anything costing real money). The census stop is before-promo because a UK
+  // census that eats the month's Text Search allowance would otherwise leave the
+  // US census the owner wants next starting on promotional credit, then cash,
+  // without a word — the allowance is per billing account per SKU per month, not
+  // per country.
+  const census = bills.find((b) => unseen(b, 'census_gbp', seenCensus, 0))
+    ?? spans.find((b) => unseen(b, 'census_gbp', spanSeen(seenCensusSpan, seenCensus), 0));
+  if (census) return { action: 'halted', runs, latest, bills, over: { ...census, kind: 'census' } };
   // Done is complete only if no square was given up on: a run finishes with
   // its failed squares set aside, and the UK is not done while they are
   // unasked. A day that ended so is followed by another, which tries them
@@ -398,14 +441,18 @@ async function tickLocked({ now = new Date(), start = censusRun.startRun, stop =
     } else if (d.latest?.state === 'waiting') {
       await endDay(d.latest.id);
     }
-    tell({ kind: 'alert', subject: d.over.kind === 'net'
-      ? `Census stopped: Places cost ${gbp(d.over.places_net_gbp)} after credits on ${d.over.day}`
-      : `Census stopped: Google billed ${gbp(d.over.google_gbp)} on ${d.over.day}`, d });
+    tell({ kind: 'alert', subject: d.over.kind === 'census'
+      ? `Census stopped: the free Text Search (IDs Only) monthly allowance is used up — the census spent ${gbp(d.over.census_gbp)} of promotional credit or cash on ${d.over.day}`
+      : d.over.kind === 'net'
+        ? `Census stopped: Places cost ${gbp(d.over.places_net_gbp)} after credits on ${d.over.day}`
+        : `Census stopped: Google billed ${gbp(d.over.google_gbp)} on ${d.over.day}`, d });
   }
   if (d.action === 'complete' && d.over) {
-    tell({ kind: 'alert', subject: d.over.kind === 'net'
-      ? `Census (finished): Places cost ${gbp(d.over.places_net_gbp)} after credits on ${d.over.day}`
-      : `Census (finished) was billed ${gbp(d.over.google_gbp)} of Google on ${d.over.day}`, d });
+    tell({ kind: 'alert', subject: d.over.kind === 'census'
+      ? `Census (finished): the free Text Search (IDs Only) allowance was used up — ${gbp(d.over.census_gbp)} of promotional credit or cash on ${d.over.day}`
+      : d.over.kind === 'net'
+        ? `Census (finished): Places cost ${gbp(d.over.places_net_gbp)} after credits on ${d.over.day}`
+        : `Census (finished) was billed ${gbp(d.over.google_gbp)} of Google on ${d.over.day}`, d });
   }
   if (d.action === 'held') tell({ kind: 'alert', subject: `Census held: the census was billed £${d.yesterday.census_gbp.toFixed(2)} on ${d.yesterday.day}`, d });
   if (d.action === 'overran') {
@@ -562,7 +609,7 @@ export async function status(now = new Date()) {
     // A stop, or a late charge after the finish — shown either way, so it can
     // be looked at and lifted from the screen (Codex, 29 Sep 2026).
     halted: (d.action === 'halted' || (d.action === 'complete' && d.over))
-      ? { day: d.over.day, kind: d.over.kind, googleGbp: d.over.google_gbp, placesNetGbp: d.over.places_net_gbp ?? 0 } : null,
+      ? { day: d.over.day, kind: d.over.kind, googleGbp: d.over.google_gbp, placesNetGbp: d.over.places_net_gbp ?? 0, censusGbp: d.over.census_gbp ?? 0 } : null,
     // What holds it, so the screen can say so beside "Lift the hold".
     held: d.action === 'held' ? { day: d.yesterday.day, censusGbp: d.yesterday.census_gbp } : null,
     complete: d.action === 'complete',
@@ -843,11 +890,16 @@ export async function liftHold({ who = null, now = new Date() } = {}) {
   // (Codex, 29 Sep 2026).
   const seenGoogle = Object.fromEntries(bills.map((b) => [b.day, b.google_gbp]));
   const seenNet = Object.fromEntries(bills.map((b) => [b.day, b.places_net_gbp ?? 0]));
+  // The census SKU before promo, both ways decide() reads it — export days
+  // (seenCensus) and quota-day spans (seenCensusSpan) — so a lifted census
+  // charge is not held against the day again unless it grows (owner, 1 Oct 2026).
+  const seenCensus = Object.fromEntries(bills.map((b) => [b.day, b.census_gbp]));
   const seenGoogleSpan = Object.fromEntries(spans.map((b) => [b.day, b.google_gbp]));
   const seenNetSpan = Object.fromEntries(spans.map((b) => [b.day, b.places_net_gbp ?? 0]));
+  const seenCensusSpan = Object.fromEntries(spans.map((b) => [b.day, b.census_gbp]));
   await query(
     `insert into bo_settings (key, value, updated_by) values ('census:uk-hold-lifted', $1, $2)
      on conflict (key) do update set value = excluded.value, updated_by = excluded.updated_by, updated_at = now(), version = bo_settings.version + 1`,
-    [JSON.stringify({ seen, seenGoogle, seenNet, seenGoogleSpan, seenNetSpan, at: new Date(now).toISOString() }), who]);
-  return { seen, seenGoogle, seenNet, seenGoogleSpan, seenNetSpan };
+    [JSON.stringify({ seen, seenGoogle, seenNet, seenCensus, seenGoogleSpan, seenNetSpan, seenCensusSpan, at: new Date(now).toISOString() }), who]);
+  return { seen, seenGoogle, seenNet, seenCensus, seenGoogleSpan, seenNetSpan, seenCensusSpan };
 }
