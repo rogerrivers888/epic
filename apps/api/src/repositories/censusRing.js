@@ -264,10 +264,10 @@ export async function placingPoints({ minLat, minLng, maxLat, maxLng }, { padLat
  * smaller than any box — could never resolve a single place: Bloomsbury
  * counted 3 with hundreds unresolved, and the one-kilometre re-census made it
  * worse. Wider boxes are judged over their whole area, because a box that big
- * really can be on either side of the line: every sector with ground in the box,
- * or within a fine-tile margin of it, decides it (E9, owner 1 Oct 2026) — so a
- * ring edge cutting the box can no longer pass as "inside" the way the old
- * five-point corner sample let it.
+ * really can be on either side of the line: every sector with a point inside the
+ * box, and the sector nearest each corner and the middle, decide it (E9, owner
+ * 1 Oct 2026) — so a ring edge cutting the box can no longer pass as "inside" the
+ * way the old five-point corner sample let it.
  *
  * @returns {{kind:'inside', code:string} | {kind:'across', codes:Set<string>} | {kind:'nowhere'}}
  */
@@ -277,34 +277,28 @@ export function sectorsOfBox(box, universe) {
     const best = nearestSector({ lat: (box.minLat + box.maxLat) / 2, lng: (box.minLng + box.maxLng) / 2 }, universe);
     return best ? { kind: 'inside', code: best.code, outcode: best.outcode ?? null } : { kind: 'nowhere' };
   }
-  // Classify a wide box by every sector whose ground lies in it, or within a
-  // fine-tile margin of it — not by sampling a handful of points (E9: owner 1 Oct
-  // 2026, "a box straddling the ring edge is unresolved, not inside"). A seed
-  // inside the box proves that sector has ground there; a seed just outside, within
-  // the margin, is a neighbour whose nearest-point region can reach in. Any such
-  // sector out of the ring makes the box unresolved, so the overstatement this fixes
-  // — a nine-kilometre tile read "inside" off four in-ring corners — cannot recur.
-  // The margin is a fine tile, not larger, on purpose: a bigger one would fence a
-  // wide box wholly inside the ring (owner, 20 Sep: "a 6 km box in the middle needs
-  // no splitting"). The residual it cannot see — an out-of-ring seed further than a
-  // fine tile away in sparse ground whose region still clips the box — is what the
-  // finer census (which splits these tiles to the fine grid) resolves; there is no
-  // exact, cheap whole-box test that does not over-fence large boxes.
-  const midLat = (box.minLat + box.maxLat) / 2;
-  const mLat = FINE_M / 111320;
-  const mLng = FINE_M / (111320 * Math.max(0.2, Math.cos((midLat * Math.PI) / 180)));
-  const exp = { minLat: box.minLat - mLat, maxLat: box.maxLat + mLat, minLng: box.minLng - mLng, maxLng: box.maxLng + mLng };
-  const seeds = typeof universe?.within === 'function'
-    ? universe.within(exp)
-    : (Array.isArray(universe) ? universe.filter((p) => p.lat >= exp.minLat && p.lat <= exp.maxLat && p.lng >= exp.minLng && p.lng <= exp.maxLng) : []);
+  // Classify a wide box by the sectors that genuinely own ground in it — not by
+  // sampling a handful of points (E9: owner 1 Oct 2026, "a box straddling the ring
+  // edge is unresolved, not inside"). Two exact sources, no guessing at whether a
+  // distant neighbour reaches in:
+  //   · every sector with a point physically inside the box — that point is in the
+  //     box, so that sector certainly owns ground there; and
+  //   · the sector nearest each corner and the middle — those box points are owned
+  //     by whatever is nearest them, near or far.
+  // Any of those sectors being out of the ring means the box holds out-of-ring
+  // ground and straddles. Every code added owns a real box point, so this never
+  // fences a wholly-in-ring box (no margin guesswork). The overstatement it fixes —
+  // a nine-kilometre tile counted "inside" off four in-ring corners while out-of-ring
+  // ground sat in its middle — cannot recur. The residual it cannot see — an
+  // out-of-ring seed just outside an edge, between the corners, whose region clips
+  // the edge — is the same the old corner test had, and the finer census (splitting
+  // these tiles to the fine grid) resolves it.
   const codes = new Set(); const outcodes = new Set(); let one = null;
   const note = (best) => { if (best) { codes.add(best.code); if (best.outcode != null) outcodes.add(best.outcode); one = best; } };
-  for (const p of seeds) note({ code: p.code, outcode: p.outcode ?? null });
-  // Combined with the nearest sector to each corner and the middle: the seed scan
-  // catches a sector sitting inside or beside the box; the corner samples catch a
-  // far seed in sparse ground whose nearest-point region owns a corner from outside
-  // the margin (Codex). The union is more conservative than either alone — a box is
-  // inside only if neither test finds out-of-ring ground.
+  const inside = typeof universe?.within === 'function'
+    ? universe.within(box)
+    : (Array.isArray(universe) ? universe.filter((p) => p.lat >= box.minLat && p.lat <= box.maxLat && p.lng >= box.minLng && p.lng <= box.maxLng) : []);
+  for (const p of inside) note({ code: p.code, outcode: p.outcode ?? null });
   for (const p of cornersOf(box)) note(nearestSector(p, universe));
   if (!codes.size) return { kind: 'nowhere' };
   if (codes.size === 1) return { kind: 'inside', code: one.code, outcode: one.outcode ?? null };
