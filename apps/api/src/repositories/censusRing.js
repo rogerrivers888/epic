@@ -65,6 +65,33 @@ const boxFrom = (slice) => {
   return { minLat: n[0], minLng: n[1], maxLat: n[2], maxLng: n[3] };
 };
 
+/**
+ * A grid of points across a box, no two more than `stepM` metres apart.
+ *
+ * E9 (owner, 1 Oct 2026): a box straddling the ring edge counts as *unresolved*,
+ * not inside — so "within 30 minutes" is never overstated for a place known only
+ * to a census box. Five points (the corners and the middle) could not see a ring
+ * edge that cut a wide box between them: a nine-kilometre tile read "inside" on
+ * four in-ring corners while much of its area sat in sectors the ring never
+ * reached. A grid stepped at the fine-tile width leaves no such gap, so a wide box
+ * is called inside only when its whole area is.
+ */
+const gridOf = (box, stepM = FINE_M) => {
+  const midLat = (box.minLat + box.maxLat) / 2;
+  const latStep = stepM / 111320;
+  const lngStep = stepM / (111320 * Math.max(0.2, Math.cos((midLat * Math.PI) / 180)));
+  const nLat = Math.min(40, Math.max(1, Math.ceil((box.maxLat - box.minLat) / latStep)));
+  const nLng = Math.min(40, Math.max(1, Math.ceil((box.maxLng - box.minLng) / lngStep)));
+  const pts = [];
+  for (let i = 0; i <= nLat; i += 1) {
+    const lat = box.minLat + ((box.maxLat - box.minLat) * i) / nLat;
+    for (let j = 0; j <= nLng; j += 1) {
+      pts.push({ lat, lng: box.minLng + ((box.maxLng - box.minLng) * j) / nLng });
+    }
+  }
+  return pts;
+};
+
 export const widthOf = (box) => (box
   ? Math.max((box.maxLat - box.minLat) * 111320, (box.maxLng - box.minLng) * 70000)
   : 0);
@@ -254,7 +281,7 @@ export function sectorsOfBox(box, universe) {
     return best ? { kind: 'inside', code: best.code, outcode: best.outcode ?? null } : { kind: 'nowhere' };
   }
   const codes = new Set(); const outcodes = new Set(); let one = null;
-  for (const p of cornersOf(box)) {
+  for (const p of gridOf(box)) {
     const best = nearestSector(p, universe);
     if (best) { codes.add(best.code); if (best.outcode != null) outcodes.add(best.outcode); one = best; }
   }
@@ -267,7 +294,7 @@ export function sectorsOfBox(box, universe) {
  * @param cells    the ring's own sectors, from the reachability matrix
  * @param outcodes the districts those sectors sit in — the candidate universe
  */
-export async function censusInRing({ cells = [], outcodes = [], shownOnly = false, circle = null } = {}) {
+export async function censusInRing({ cells = [], outcodes = [], shownOnly = false, circle = null, subcategories = null } = {}) {
   const empty = { counts: {}, unresolved: {}, placed: { own: 0, slice: 0 }, unplaceable: 0, boxes: { inside: 0, outside: 0, across: 0 }, placedBy: null };
   // A straight-line ring is a circle round the origin and needs no sector set;
   // a matrix ring is a set of sectors and needs one. Either way the districts
@@ -313,11 +340,15 @@ export async function censusInRing({ cells = [], outcodes = [], shownOnly = fals
         or ps.area_slug in (select grid_key from census_tiles
                              where outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)))
        and (ps.sourced is distinct from 'text' or ps.subcategory = any($2::text[]))
+       -- Restricted to a set of subcategories where one is given: the "real
+       -- family" Culture figure asked for only museums, galleries and the like,
+       -- not churches or landmarks (owner, 1 Oct 2026). Null means every drawer.
+       and ($3::text[] is null or ps.subcategory = any($3::text[]))
        -- What a family is shown leaves out closed and unconfirmed places once
        -- the owner has applied the check (C57); the back office's census
        -- boards still count everything that exists.
        ${shownOnly ? `and ${SHOWN_REF('ps.venue_ref')}` : ''}`,
-  [slugs, textDrawers]);
+  [slugs, textDrawers, subcategories && subcategories.length ? subcategories : null]);
 
   // One verdict per distinct box, not per row: the same slice found hundreds of
   // places and the corner test would otherwise run hundreds of times.

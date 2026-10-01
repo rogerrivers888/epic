@@ -1516,6 +1516,44 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
   } catch (err) { next(err); }
 });
 
+/**
+ * A category's count at a series of reach bands — the curve, the way the family
+ * sees it (owner, 1 Oct 2026). Read-only and free. `?subcategories=` restricts the
+ * category to the drawers given (the "real" Culture figure asked only for museums,
+ * galleries, theatres, historic houses, castles and ancient sites, not churches or
+ * landmarks); the count is the shown, family-facing census over each ring, and it
+ * inherits E9 — a census box straddling the ring edge is unresolved, not inside.
+ */
+router.get('/census-ring-curve', requires('view_library'), async (req, res, next) => {
+  try {
+    const mode = travelMode(req.query.mode ?? 'drive');
+    const category = String(req.query.category ?? 'culture').toLowerCase();
+    const subcategories = req.query.subcategories
+      ? String(req.query.subcategories).split(',').map((s) => s.trim()).filter(Boolean)
+      : null;
+    const minutes = (req.query.minutes ? String(req.query.minutes).split(',') : ['10', '15', '20', '25', '30', '35', '40', '45', '50', '55', '60'])
+      .map((m) => Math.min(90, Math.max(5, Math.trunc(Number(m)))))
+      .filter((m) => Number.isFinite(m));
+    const locus = { where: req.query.where ?? null, lat: req.query.lat ?? null, lng: req.query.lng ?? null };
+    const curve = [];
+    for (const m of minutes) {
+      const ring = await reach.ringFor({ ...locus, minutes: m, mode });
+      if (!ring) { curve.push({ minutes: m, count: null, unresolved: null }); continue; }
+      const c = await censusInRing({
+        cells: ring.band ?? ring.cells, outcodes: ring.outcodes,
+        shownOnly: true, circle: ring.circle ?? null, subcategories,
+      });
+      curve.push({
+        minutes: m,
+        count: c.counts?.[category] ?? 0,
+        unresolved: c.unresolved?.[category] ?? 0,
+        method: ring.method ?? 'matrix',
+      });
+    }
+    res.json({ category, mode, subcategories, curve });
+  } catch (err) { next(err); }
+});
+
 // ---------------------------------------------------------------------------
 // one place
 // ---------------------------------------------------------------------------

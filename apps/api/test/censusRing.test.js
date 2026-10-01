@@ -249,3 +249,35 @@ test('whereBoxSitsInCircle: centre for a fine box, corners for a wide one', () =
   const small = { lat: 51.505, lng: -0.10, km: 0.3 };
   assert.equal(whereBoxSitsInCircle(wide, small), 'across', 'the circle overlaps the box between its corners');
 });
+
+test('E9: a wide box the ring edge cuts between the corners is unresolved, not inside', async () => {
+  const { whereBoxSits } = await import('../src/repositories/censusRing.js');
+  // A in the ring at the four corners and the middle; X out of the ring, nearest a
+  // point on the bottom edge that the old five-point sample never looked at. A
+  // ~11 km box.
+  const universe = [
+    { code: 'A', lat: 51.00, lng: -0.02 }, { code: 'A', lat: 51.00, lng: 0.02 },
+    { code: 'A', lat: 51.10, lng: -0.02 }, { code: 'A', lat: 51.10, lng: 0.02 },
+    { code: 'A', lat: 51.05, lng: 0.00 }, { code: 'X', lat: 51.00, lng: 0.00 },
+  ];
+  const box = { minLat: 51.00, minLng: -0.02, maxLat: 51.10, maxLng: 0.02 };
+  // The corners and the middle are all A; only the grid sees X on the edge. Under
+  // the old corner test this read 'inside'; under E9 it straddles.
+  assert.equal(whereBoxSits(box, { cells: ['A'], universe }), 'across');
+  // And a wide box wholly in the ring is still inside — E9 does not over-fence.
+  assert.equal(whereBoxSits(box, { cells: ['A', 'X'], universe }), 'inside');
+});
+
+test('a subcategory filter counts only the drawers asked for', async () => {
+  await seed();
+  // Every Fun place: RING-OWN, RING-SLICE, RING-WIDE, RING-BOTH (RING-OUTSIDE is
+  // outside, RING-ACROSS unresolved).
+  const all = await censusInRing({ cells: [IN], outcodes: OUTCODES });
+  assert.equal(all.counts.fun, 4);
+  // Restricted to theme-parks, only RING-OWN qualifies.
+  const parks = await censusInRing({ cells: [IN], outcodes: OUTCODES, subcategories: ['theme-parks'] });
+  assert.equal(parks.counts.fun, 1, 'only the theme-park is counted');
+  // Restricted to a drawer nothing in the ring is filed under: nought, not absent.
+  const none = await censusInRing({ cells: [IN], outcodes: OUTCODES, subcategories: ['zzz-nothing'] });
+  assert.equal(none.counts.fun ?? 0, 0);
+});
