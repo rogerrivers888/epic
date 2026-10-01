@@ -54,6 +54,21 @@ function refuseOwnerOnlyGrant(req, capabilities) {
     throw Object.assign(new Error('Only the owner can grant staff management.'), { status: 403, code: 'owner_only' });
   }
 }
+
+/**
+ * Opening or closing back-office access is a staff decision, not a plain role
+ * edit. manage_roles creates and edits roles, but whether a role (or an account's
+ * role) carries the `admin` door — which is exactly what makes somebody staff —
+ * is gated on manage_staff, or a manage_roles holder could make anybody staff
+ * without it (Codex, 1 Oct 2026). Called whenever the admin door is handed out,
+ * taken away, or toggled on a role.
+ */
+function needManageStaff(req, touchesAdminDoor) {
+  if (touchesAdminDoor && !can(req, 'manage_staff')) {
+    throw Object.assign(new Error('Changing back-office access needs staff management; ask the owner.'), { status: 403, code: 'needs_manage_staff' });
+  }
+}
+const opensAdmin = (doors) => Array.isArray(doors) && doors.includes('admin');
 const days = (req, fallback = 30) => Math.min(365, Math.max(1, Number(req.query.days) || fallback));
 
 /** Who is doing this, for the audit trail. The passcode has no account row. */
@@ -271,6 +286,9 @@ router.patch('/people/:id/role', requires('manage_roles'), async (req, res, next
     // staff without the owner (Codex, 1 Oct 2026).
     refuseOwnerOnlyGrant(req, role?.capabilities);
     const before = account.role_id ? await rolesRepo.roleById(account.role_id) : null;
+    // Giving somebody a back-office role, or taking one away, makes or unmakes a
+    // staff member — a staff decision, whatever the role's capabilities are.
+    needManageStaff(req, opensAdmin(before?.doors) || opensAdmin(role?.doors));
     await rolesRepo.setAccountRole(account.id, roleId);
     await rolesRepo.writeAudit({
       ...actor(req), action: 'role.grant', subjectType: 'account', subjectId: account.id, subjectLabel: account.email,
@@ -446,9 +464,11 @@ router.post('/roles', requires('manage_roles'), async (req, res, next) => {
     if (!key || !label) throw bad('A role needs a name.');
     if (await rolesRepo.roleByKey(key)) throw bad('There is already a role with that name.');
     refuseOwnerOnlyGrant(req, req.body?.capabilities);
+    const doors = Array.isArray(req.body?.doors) ? req.body.doors.filter((d) => DOORS.includes(d)) : ['client'];
+    needManageStaff(req, opensAdmin(doors)); // a new back-office role is a staff decision
     const role = await rolesRepo.createRole({
       key, label, description: req.body?.description ?? null,
-      doors: Array.isArray(req.body?.doors) ? req.body.doors.filter((d) => DOORS.includes(d)) : ['client'],
+      doors,
       capabilities: (req.body?.capabilities ?? []).filter((c) => CAPABILITIES.some((x) => x.key === c)),
     });
     await rolesRepo.writeAudit({ ...actor(req), action: 'role.create', subjectType: 'role', subjectId: role.id, subjectLabel: label, after: req.body });
@@ -469,10 +489,14 @@ router.patch('/roles/:id', requires('manage_roles'), async (req, res, next) => {
       ? req.body.capabilities.filter((c) => !(before.capabilities ?? []).includes(c))
       : null;
     refuseOwnerOnlyGrant(req, adding);
+    const nextDoors = Array.isArray(req.body?.doors) ? req.body.doors.filter((d) => DOORS.includes(d)) : undefined;
+    // Only a *change* to the admin door is a staff decision — editing an
+    // admin-door role's other fields is still a plain role edit.
+    if (nextDoors !== undefined) needManageStaff(req, opensAdmin(before.doors) !== opensAdmin(nextDoors));
     await rolesRepo.updateRole(req.params.id, {
       label: req.body?.label,
       description: req.body?.description,
-      doors: Array.isArray(req.body?.doors) ? req.body.doors.filter((d) => DOORS.includes(d)) : undefined,
+      doors: nextDoors,
       capabilities: Array.isArray(req.body?.capabilities)
         ? req.body.capabilities.filter((c) => CAPABILITIES.some((x) => x.key === c))
         : undefined,

@@ -397,6 +397,29 @@ test('a manage_staff delegate cannot propagate staff management through the staf
   assert.equal(ok.status, 200);
 });
 
+test('manage_roles alone cannot open back-office access; that needs manage_staff', async () => {
+  // Whether a role or an account carries the admin door is a staff decision — a
+  // manage_roles delegate without manage_staff cannot make anybody staff (Codex).
+  const support = await roleId('support'); // a back-office role (admin door)
+  const cust = await accounts.createAccount({ email: 'bo@home.test', name: 'BO' });
+  const assign = await adminCall('PATCH', `/api/admin/people/${cust.id}/role`, { roleId: support }, ROLES_ADMIN);
+  assert.equal(assign.status, 403);
+  assert.equal(assign.body.error, 'needs_manage_staff');
+
+  const create = await adminCall('POST', '/api/admin/roles',
+    { key: 'bo_role', label: 'BO role', doors: ['client', 'admin'], capabilities: ['view_accounts'] }, ROLES_ADMIN);
+  assert.equal(create.status, 403);
+
+  const clientRole = await rolesRepo.createRole({ key: 'plain_client', label: 'Plain', doors: ['client'], capabilities: [] });
+  const openDoor = await adminCall('PATCH', `/api/admin/roles/${clientRole.id}`, { doors: ['client', 'admin'] }, ROLES_ADMIN);
+  assert.equal(openDoor.status, 403);
+
+  // The owner may do all three.
+  assert.equal((await adminCall('PATCH', `/api/admin/people/${cust.id}/role`, { roleId: support }, OWNER)).status, 200);
+  assert.equal((await adminCall('POST', '/api/admin/roles', { key: 'bo_role2', label: 'BO2', doors: ['client', 'admin'], capabilities: ['view_accounts'] }, OWNER)).status, 201);
+  assert.equal((await adminCall('PATCH', `/api/admin/roles/${clientRole.id}`, { doors: ['client', 'admin'] }, OWNER)).status, 200);
+});
+
 test('asking for a self-serve login link voids an older unused link', async () => {
   // The single-current-link invariant reaches the /login path too: an outstanding
   // seven-day invite cannot still open a session after a replacement (Codex, P1).
