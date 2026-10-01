@@ -507,23 +507,19 @@ function AtlasRoot({ data, error, homeTown, mode, onGo }: {
   const homeCountry = homeCode ? countries.find((c) => c.code === homeCode) ?? null : null;
   const others = countries.filter((c) => c.code !== homeCode).sort((a, b) => a.name.localeCompare(b.name));
   const citiesOf = (c: AtlasCountry) => [...c.cities].sort((a, b) => b.places - a.places).slice(0, 3).map((ci) => ci.name).join(' · ');
-  // The count a row carries, and whether the row shows at all. Liked: how many
-  // places here the household has loved (a country has no `special` of its own, so
-  // it sums its cities'). Been: how many it has been to — and a place reached only
-  // by a PAST trip, with no individually recorded visit, still counts as been (so it
-  // stays rather than dropping out) and shows no number. A trip that has not
-  // happened yet (`lastTrip` null) is not "been" (Codex).
+  // The count a row carries, and whether it shows. Liked: how many places here the
+  // household has loved (a country has no `special` of its own, so it sums its
+  // cities'). Been: how many it has been to — the recorded-visit count, which is
+  // the only reliable signal: `lastTrip` can be a date-unfixed trip idea whose
+  // placeholder dates have passed, so it is not taken as proof of a visit (Codex).
   const likedN = (ci: AtlasCountry['cities'][number]) => ci.special;
   const likedCountry = (c: AtlasCountry) => c.cities.reduce((s, ci) => s + (ci.special ?? 0), 0);
-  const cityShown = (ci: AtlasCountry['cities'][number]) => (liked ? likedN(ci) > 0 : (ci.been > 0 || !!ci.lastTrip));
-  const cityCount = (ci: AtlasCountry['cities'][number]) => (liked ? String(likedN(ci)) : (ci.been > 0 ? String(ci.been) : ''));
-  const countryShown = (c: AtlasCountry) => (liked ? likedCountry(c) > 0 : (c.been > 0 || !!c.lastTrip));
-  const countryCount = (c: AtlasCountry) => (liked ? String(likedCountry(c)) : (c.been > 0 ? String(c.been) : ''));
+  const cityN = (ci: AtlasCountry['cities'][number]) => (liked ? likedN(ci) : ci.been);
+  const countryN = (c: AtlasCountry) => (liked ? likedCountry(c) : c.been);
+  const cityShown = (ci: AtlasCountry['cities'][number]) => cityN(ci) > 0;
+  const countryShown = (c: AtlasCountry) => countryN(c) > 0;
   const homeN = data?.home ? (liked ? data.home.special : data.home.been) : 0;
-  // Ordered by weight: loved count in Liked; in Been, visited places first (and
-  // by how many), then the past-trip-only destinations.
-  const cityMag = (ci: AtlasCountry['cities'][number]) => (liked ? likedN(ci) : (ci.been > 0 ? 1_000_000 + ci.been : 0));
-  const homeCities = [...(homeCountry?.cities ?? [])].filter(cityShown).sort((a, b) => cityMag(b) - cityMag(a));
+  const homeCities = [...(homeCountry?.cities ?? [])].filter(cityShown).sort((a, b) => cityN(b) - cityN(a));
   const abroad = others.filter(countryShown);
   // With no claimed place in the home radius the API gives no home country code,
   // so every country lands in `others`; it would be wrong to head them "Abroad",
@@ -563,7 +559,7 @@ function AtlasRoot({ data, error, homeTown, mode, onGo }: {
               tile={<Flag code={homeCountry.code} width={FLAG_W} height={FLAG_H} bare />}
               label={ci.name}
               sub={ci.lastTrip ? `Last: ${tripWhen(ci.lastTrip)}` : homeCountry.name}
-              count={cityCount(ci)}
+              count={String(cityN(ci))}
               onPress={() => onGo(paths.placesCity(homeCountry.code, ci.name))}
             />
           ))}
@@ -578,7 +574,7 @@ function AtlasRoot({ data, error, homeTown, mode, onGo }: {
               tile={<Flag code={c.code} width={FLAG_W} height={FLAG_H} bare />}
               label={c.name}
               sub={citiesOf(c) || c.name}
-              count={countryCount(c)}
+              count={String(countryN(c))}
               onPress={() => onGo(paths.placesCountry(c.code))}
             />
           ))}
