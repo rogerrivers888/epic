@@ -369,6 +369,28 @@ export async function weeklyDue({ now = Date.now() } = {}) {
 }
 
 /** Where the owned points stand, for the report after the backfill. */
+/**
+ * How many saved places, trip stops, shortlist items and visits have no name
+ * of our own — a name from place_records (with name provenance), an owned
+ * attractions row, or the open map on an open reference. The stored label is
+ * Google's and is not counted (owner, 1 Oct 2026). Read only.
+ */
+export async function ownedNameGaps() {
+  const { rows: [r] } = await query(`
+    with owned as (
+      select venue_ref from place_records where name is not null and (provenance ->> 'name') is not null
+      union select coalesce(venue_ref, 'atlas:' || id::text) from attractions where name is not null and display_source is distinct from 'google'
+      union select venue_ref from scout_places where name is not null
+        and (venue_ref like 'osm:%' or venue_ref like 'atlas:%' or venue_ref like 'wikidata:%' or venue_ref like 'own:%')
+    )
+    select
+      (select count(*)::int from household_places hp where not exists (select 1 from owned o where o.venue_ref = hp.venue_ref)) as saved_places,
+      (select count(*)::int from trip_stops ts where not exists (select 1 from owned o where o.venue_ref = ts.venue_ref)) as trip_stops,
+      (select count(*)::int from trip_shortlist sl where not exists (select 1 from owned o where o.venue_ref = sl.venue_ref)) as shortlist,
+      (select count(*)::int from visits v where not exists (select 1 from owned o where o.venue_ref = v.venue_ref)) as visits`);
+  return r;
+}
+
 export async function standing() {
   const { rows: [t] } = await query(
     `select (select count(*)::int from place_index) as places,
@@ -379,5 +401,5 @@ export async function standing() {
                 and pi.slice is null) as neither`);
   const { rows: by } = await query('select source, count(*)::int as n from owned_points group by 1 order by 2 desc');
   const { rows: runs } = await query('select * from owned_point_runs order by started_at desc limit 5');
-  return { ...t, bySource: Object.fromEntries(by.map((x) => [x.source, x.n])), runs };
+  return { ...t, bySource: Object.fromEntries(by.map((x) => [x.source, x.n])), runs, namesMissingOwned: await ownedNameGaps() };
 }

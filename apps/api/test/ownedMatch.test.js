@@ -364,3 +364,19 @@ test('a second open-map place within 120 m makes a nameless sweep row no match',
   const out = await m.matchPlace({ ref: 'google:two-kiosks', names: [], point: { lat: 50.7002, lng: -3.8002 }, swept: true });
   assert.ok(out.none);
 });
+
+test('ownedNameGaps counts saved, stops, shortlist and visits with no owned name', async () => {
+  const { ownedNameGaps } = await import('../src/sources/ownedMatch.js');
+  const { rows: [h] } = await query(`insert into households (name) values ('Gaps test') returning id`);
+  const owned = `osm:node/${Date.now()}g`; const rented = `google:gap-${randomUUID()}`;
+  // One place with an owned name, one without.
+  await query(`insert into place_records (venue_ref, name, provenance) values ($1, 'The Owned Arms', '{"name":"osm"}')`, [owned]);
+  await query(`insert into households (id, name) values (gen_random_uuid(), 'x') on conflict do nothing`);
+  const before = await ownedNameGaps();
+  await query('alter table household_places disable trigger keep_owned_point');
+  try {
+    await query(`insert into household_places (household_id, venue_ref, label) values ($1, $2, 'Owned'), ($1, $3, 'Googles name')`, [h.id, owned, rented]);
+  } finally { await query('alter table household_places enable trigger keep_owned_point'); }
+  const after = await ownedNameGaps();
+  assert.equal(after.saved_places - before.saved_places, 1, 'only the one with no owned name is counted');
+});
