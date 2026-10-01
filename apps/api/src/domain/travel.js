@@ -225,7 +225,11 @@ export function searchRadiusKm(mode, minutes, { capKm = 50 } = {}) {
  * approved by the owner before it is used. This function stays the free default
  * until then; nothing here ever calls a paid route.
  */
-export function closeToHomeRadiusMiles({ minutes, modes = [], capKm = 60 }) {
+// The cap only bounds the binary search — close-to-home is a database radius,
+// not a provider query, so Google's 50 km answer ceiling does not apply here.
+// 200 km holds the full two-hour drive (~120 km); without it the 90- and
+// 120-minute options both collapsed to the 60 km cap's ~37 miles (Codex).
+export function closeToHomeRadiusMiles({ minutes, modes = [], capKm = 200 }) {
   // "Any distance" (null) is unbounded — not the old 10-mile radius. A radius
   // wide enough to hold any two points on Earth means the near-home view stops
   // filtering by distance at all, as the setting and migration 320 intend.

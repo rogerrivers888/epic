@@ -351,6 +351,10 @@ router.patch('/host', async (req, res, next) => {
     if (b.paySchedule !== undefined) patch.paySchedule = oneOf(['weekly', 'weekday', 'monthly'], b.paySchedule) ?? 'weekly';
     if (b.taxIsCompany !== undefined) patch.taxIsCompany = Boolean(b.taxIsCompany);
     if (b.companyNumber !== undefined) patch.companyNumber = str(b.companyNumber, 20);
+    // Tax identity is its own record: editing the legal name or the tax address
+    // never touches the guest-facing host name or the hosting location (Codex).
+    if (b.legalName !== undefined) patch.legalName = str(b.legalName, 120);
+    if (b.taxAddress !== undefined) patch.taxAddress = str(b.taxAddress, 300);
     if (b.payoutStatus !== undefined) {
       // 'connected' is what Stripe says back, and Stripe is not here yet.
       if (b.payoutStatus === 'connected' && !paymentsConfig().ready) throw refuse(409, 'payments_not_ready', paymentsConfig().note);
@@ -504,7 +508,9 @@ router.get('/host/money', async (req, res, next) => {
       // would carry a statement once a year has closed under a real provider.
       statements: [{ year: thisYear, feeLabel: `${LEVEL_RATE[host.trust] ?? LEVEL_RATE.verified}% · ${LEVEL_LABEL[host.trust] ?? LEVEL_LABEL.verified}`, netPence: null, ready: false }],
       tax: {
-        legalName: host.name, address: host.address ?? null,
+        // The legal name and tax address fall back to the profile for DISPLAY
+        // only; an edit writes the dedicated columns, never the profile.
+        legalName: host.legal_name ?? host.name, address: host.tax_address ?? host.address ?? null,
         taxReference: host.tax_reference ? `••••${String(host.tax_reference).slice(-3)}` : null,
         dateOfBirth: host.date_of_birth ?? null, taxIsCompany: host.tax_is_company ?? false, companyNumber: host.company_number ?? null,
       },

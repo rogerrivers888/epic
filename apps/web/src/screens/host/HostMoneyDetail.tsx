@@ -191,7 +191,10 @@ function Tax({ money, onChanged }: { money: HostMoney; onChanged: () => Promise<
           current={edit === 'name' ? tax.legalName : edit === 'address' ? tax.address : edit === 'company' ? tax.companyNumber : ''}
           onClose={() => setEdit(null)}
           onSave={async (v) => {
-            const patch = edit === 'name' ? { name: v } : edit === 'address' ? { address: v } : edit === 'company' ? { companyNumber: v } : { taxReference: v };
+            // Tax identity only — the legal name and tax address have their own
+            // columns; this never writes the guest-facing host name or the
+            // operational hosting address (Codex).
+            const patch = edit === 'name' ? { legalName: v } : edit === 'address' ? { taxAddress: v } : edit === 'company' ? { companyNumber: v } : { taxReference: v };
             try { await api.updateHost(patch as any); showToast('Saved'); await onChanged(); } catch (e: any) { showToast(e?.body?.message || 'Could not save.'); }
             setEdit(null);
           }}

@@ -16,6 +16,11 @@
 alter table hosts add column if not exists pay_schedule   text    not null default 'weekly';
 alter table hosts add column if not exists tax_is_company  boolean not null default false;
 alter table hosts add column if not exists company_number  text;
+-- Tax identity is its own record (SX19): the legal name HMRC sees and the
+-- registered/tax address are NOT the guest-facing host name or the operational
+-- hosting location, and editing one must never change the other (Codex).
+alter table hosts add column if not exists legal_name   text;
+alter table hosts add column if not exists tax_address  text;
 
 alter table hosts drop constraint if exists hosts_pay_schedule_check;
 alter table hosts add  constraint hosts_pay_schedule_check

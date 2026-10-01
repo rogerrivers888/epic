@@ -2700,7 +2700,7 @@ export const api = {
   /** The Host tab: the invitation, or the dashboard. */
   hostHome: () => request<HostHome>('/api/host'),
   becomeHost: (body: HostInput) => post<{ host: OwnHost }>('/api/host', body),
-  updateHost: (body: Partial<HostInput> & { introVideoId?: string | null; photoId?: string | null; idDocument?: 'passport' | 'driving_licence' | null; insuranceConfirmed?: boolean; taxReference?: string | null; payoutStatus?: 'not_connected' | 'connected'; paySchedule?: PaySchedule; taxIsCompany?: boolean; companyNumber?: string | null }) =>
+  updateHost: (body: Partial<HostInput> & { introVideoId?: string | null; photoId?: string | null; idDocument?: 'passport' | 'driving_licence' | null; insuranceConfirmed?: boolean; taxReference?: string | null; payoutStatus?: 'not_connected' | 'connected'; paySchedule?: PaySchedule; taxIsCompany?: boolean; companyNumber?: string | null; legalName?: string | null; taxAddress?: string | null }) =>
     patch<{ host: OwnHost }>('/api/host', body),
   /** The Host tab's Money screen: fee lines, the ladder, payouts, tax (SX9/SX14/SX16–SX20). */
   hostMoney: () => request<HostMoney>('/api/host/money'),

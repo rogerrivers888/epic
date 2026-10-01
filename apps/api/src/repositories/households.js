@@ -82,7 +82,20 @@ export async function updateHousehold(id, f) {
             -- multi-select. The day window is start and finish hours.
             close_to_home_minutes = case when $18::int is null then close_to_home_minutes
                                          when $18 = 0 then null else $18 end,
-            travel_modes          = coalesce($19::jsonb, travel_modes),
+            -- An explicit multi-select wins; otherwise a legacy single-mode
+            -- write (the set-up flow still sends only travelMode) fills an
+            -- EMPTY travel_modes with the same mapping the migration used, so
+            -- a new household's Settings never reads "Not set" and close-to-
+            -- home never silently assumes driving (Codex). A non-empty
+            -- multi-select is never overwritten by the legacy word.
+            travel_modes          = coalesce($19::jsonb,
+                                      case when $16 is not null and travel_modes = '[]'::jsonb then
+                                        case $16 when 'driving' then '["car"]'::jsonb
+                                                 when 'transit' then '["train","bus"]'::jsonb
+                                                 when 'walking' then '["walking"]'::jsonb
+                                                 when 'cycling' then '["bike"]'::jsonb
+                                                 else travel_modes end
+                                      else travel_modes end),
             day_start             = coalesce($20, day_start),
             day_end               = coalesce($21, day_end)
       where id = $1 returning *`,

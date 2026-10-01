@@ -205,6 +205,20 @@ test('voice intake writes diet to the column and maps allergens onto the UK 14',
   assert.equal(noDiet, 0, 'diet never goes back into member_constraints');
 });
 
+test('a legacy single travel mode fills an empty multi-select, and never overwrites a set one', async () => {
+  const { household: h, member: roger } = await aHousehold(query);
+  const srv = await server(owner(h, roger.id));
+  try {
+    await srv.send('PATCH', '/api/household', { travelMode: 'walking' });
+    let hh = (await srv.get('/api/household')).body.household;
+    assert.deepEqual(hh.travelModes, ['walking'], 'set-up sending only travelMode still fills the new column');
+    await srv.send('PATCH', '/api/household', { travelModes: ['car', 'train'] });
+    await srv.send('PATCH', '/api/household', { travelMode: 'cycling' });
+    hh = (await srv.get('/api/household')).body.household;
+    assert.deepEqual(hh.travelModes, ['car', 'train'], 'a chosen multi-select is never overwritten by the legacy word');
+  } finally { await srv.close(); }
+});
+
 test('Signed-in devices shows this account real devices only — never a test or agent session', async () => {
   const { household: h, member: roger } = await aHousehold(query);
   const acct = await createAccountOnHousehold(h.id, { memberId: roger.id, name: 'Roger', role: 'owner', plan: 'household', email: 'roger@example.com' });

@@ -286,7 +286,11 @@ test('the FAQ: consent is recorded, ask counts climb, withdrawing unpublishes', 
   assert.equal(faq.length, 1);
   assert.equal(faq[0].ask_count, 4);
   assert.equal(faq[0].asked_by, null);
-  assert.equal(await repo.faqPublishedBefore(offer.id, new Date()), 1);
+  // A second in the future, not `new Date()`: published_at is Postgres now()
+  // at microsecond precision, a JS Date is milliseconds — in the same
+  // millisecond `published_at <= $2` is false and this flaked under suite load
+  // (seen 1 Oct 2026, full suite only, never standalone).
+  assert.equal(await repo.faqPublishedBefore(offer.id, new Date(Date.now() + 1000)), 1);
   await repo.withdrawFaq(e.id);
   faq = await repo.faqOf(offer.id);
   assert.equal(faq.length, 0, 'withdrawn is unpublished');
