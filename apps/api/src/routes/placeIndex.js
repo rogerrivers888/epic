@@ -26,8 +26,7 @@ import { query, withTransaction } from '../db.js';
 import * as index from '../repositories/placeIndex.js';
 import { decodeEntities } from '../repositories/placeIndex.js';
 import { phoneOf } from '../domain/contact.js';
-import { censusInRing, censusByOutcodeSum, placingPoints, whereBoxSits, whereBoxSitsInCircle, nearestSector, widthOf, FINE_M } from '../repositories/censusRing.js';
-import { TEXT_QUESTIONS, textStillAsked } from '../sources/censusQuestions.js';
+import { censusInRing, censusByOutcodeSum, placingPoints, nearestSector, widthOf, FINE_M } from '../repositories/censusRing.js';
 import { ownSite } from '../sources/logo.js';
 import * as reach from '../repositories/reach.js';
 import { OURS_TO_KEEP, slicePlan } from '../sources/census.js';
@@ -38,7 +37,7 @@ import { LIVE_ROW, FOLDED_MONTH } from '../repositories/searches.js';
 import { sectorOf, labelOf, CAP_MINUTES, EDGE_MINUTES } from '../domain/reach.js';
 import { searchAreas } from '../sources/areas.js';
 import { outcodesFor } from '../sources/localities.js';
-import { travelMode, estimateTravelMinutes, kmBetween } from '../domain/travel.js';
+import { travelMode, estimateTravelMinutes } from '../domain/travel.js';
 import { FACTS, FACT_KEYS, FACT_WEIGHTS, scorePlace, faultOf, SHORT_FAULT, holdsAnOwnedFact } from '../domain/placeIndex.js';
 import { writeAudit } from '../repositories/roles.js';
 import { OUR_LABEL, detailFor, detailHeld, blank, lineUp } from '../sources/compare.js';
@@ -1231,141 +1230,100 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
       reach.ringFor({ ...locus, minutes: inner, mode }),
     ]);
     if (!ringOuter || !ringInner) return res.status(400).json({ error: 'where_required' });
-    const outerBand = new Set(ringOuter.band ?? ringOuter.cells);
-    const innerBand = new Set(ringInner.band ?? ringInner.cells);
-    // Both rings' districts: if a mode's matrix reaches the inner band but not the
-    // outer (the outer then falls back to a straight-line circle), the two shapes
-    // need not nest, so a place inside the inner matrix but outside the outer circle
-    // would be dropped from the candidate query and the inner count understated
-    // (Codex). The union covers both; the per-place membership test still decides
-    // each band.
-    const slugs = [...new Set([...ringOuter.outcodes, ...ringInner.outcodes].map((o) => o.toLowerCase()))];
 
+    // The counts come from censusInRing itself — the one function /census-ring and
+    // the Inspire board both count with — each ring with its OWN candidate scope and
+    // membership, so this breakdown explains the very numbers it is about and cannot
+    // drift from them (Codex). The added set is then the exact difference of the two
+    // counted-ref sets, and the jump is added − removed (removals arise only when the
+    // two bands use different reach methods and so do not nest).
+    const [innerRes, outerRes] = await Promise.all([
+      censusInRing({ cells: ringInner.band ?? ringInner.cells, outcodes: ringInner.outcodes, shownOnly: true, circle: ringInner.circle ?? null }),
+      censusInRing({ cells: ringOuter.band ?? ringOuter.cells, outcodes: ringOuter.outcodes, shownOnly: true, circle: ringOuter.circle ?? null }),
+    ]);
+    const innerRefs = new Set(innerRes.refs?.[category] ?? []);
+    const outerRefs = new Set(outerRes.refs?.[category] ?? []);
+    const addedRefs = [...outerRefs].filter((r) => !innerRefs.has(r));
+    const removedRefs = [...innerRefs].filter((r) => !outerRefs.has(r));
+
+    // Detail for the changed places only — their drawers, point and slice — from the
+    // same surfacing rows the count was taken over.
+    const allRefs = [...new Set([...addedRefs, ...removedRefs])];
+    const detail = new Map();
+    if (allRefs.length) {
+      const { rows: dr } = await query(
+        `select ps.venue_ref, ps.subcategory, pi.lat, pi.lng, pi.slice
+           from place_subcategories ps
+           join place_index pi on pi.venue_ref = ps.venue_ref
+          where ps.category = $2 and ps.venue_ref = any($1)`, [allRefs, category]);
+      for (const r of dr) {
+        let e = detail.get(r.venue_ref);
+        if (!e) { e = { subcats: new Set(), lat: r.lat, lng: r.lng, slice: r.slice }; detail.set(r.venue_ref, e); }
+        if (r.subcategory) e.subcats.add(r.subcategory);
+      }
+    }
+
+    // A universe to name each changed place's district.
+    const slugs = [...new Set(ringOuter.outcodes.map((o) => o.toLowerCase()))];
     const { rows: sectors } = await query(
-      'select code, lat, lng, upper(outcode) as outcode from geo_cells where lower(outcode) = any($1)', [slugs]);
+      'select lat, lng, upper(outcode) as outcode from geo_cells where lower(outcode) = any($1)', [slugs]);
     const bbox = sectors.reduce((b, u) => ({
       minLat: Math.min(b.minLat, u.lat), maxLat: Math.max(b.maxLat, u.lat),
       minLng: Math.min(b.minLng, u.lng), maxLng: Math.max(b.maxLng, u.lng),
     }), { minLat: 90, maxLat: -90, minLng: 180, maxLng: -180 });
     const { index: universe, placedBy } = await placingPoints(bbox);
-
     const boxFrom = (slice) => {
       const n = String(slice ?? '').split(',').map(Number);
       return n.length === 4 && n.every(Number.isFinite) ? { minLat: n[0], minLng: n[1], maxLat: n[2], maxLng: n[3] } : null;
     };
-    const textDrawers = Object.keys(TEXT_QUESTIONS).filter(textStillAsked);
-    const { rows } = await query(`
-      select ps.venue_ref, ps.subcategory, pi.lat, pi.lng, pi.slice
-        from place_subcategories ps
-        join place_index pi on pi.venue_ref = ps.venue_ref
-       where ps.category = $3
-         and (ps.area_slug = any($1)
-           or ps.area_slug in (select grid_key from census_tiles
-                                where outcodes && (select array_agg(upper(s)) from unnest($1::text[]) s)))
-         and (ps.sourced is distinct from 'text' or ps.subcategory = any($2::text[]))`,
-    [slugs, textDrawers, category]);
-
-    // Membership exactly as censusInRing decides it, so the breakdown explains the
-    // very count it is about: a matrix-less mode (walk/transit with no matrix) is a
-    // straight-line circle, tested by distance; a matrix mode is the quantised band,
-    // tested by nearest sector (Codex). Each band carries its own ring, so inner and
-    // outer may be a circle or a sector set independently.
-    const memberFns = (ring, bandSet) => {
-      const circle = ring.circle ?? null;
-      const vCache = new Map();
-      return {
-        coord: (lat, lng) => (circle
-          ? kmBetween({ lat: circle.lat, lng: circle.lng }, { lat, lng }) <= circle.km
-          : bandSet.has(nearestSector({ lat, lng }, universe)?.code ?? null)),
-        slice: (slice) => {
-          if (vCache.has(slice)) return vCache.get(slice);
-          const box = boxFrom(slice);
-          const v = circle
-            ? whereBoxSitsInCircle(box, circle) === 'inside'
-            : whereBoxSits(box, { cells: bandSet, universe }) === 'inside';
-          vCache.set(slice, v);
-          return v;
-        },
-      };
-    };
-    const innerMember = memberFns(ringInner, innerBand);
-    const outerMember = memberFns(ringOuter, outerBand);
-
-    const byRef = new Map();
-    for (const r of rows) {
-      let e = byRef.get(r.venue_ref);
-      if (!e) { e = { subcats: new Set(), lat: r.lat, lng: r.lng, slice: r.slice, outcode: null, code: null, inInner: false, inOuter: false, placed: null }; byRef.set(r.venue_ref, e); }
-      if (r.subcategory) e.subcats.add(r.subcategory);
-    }
-    for (const e of byRef.values()) {
+    // The district and the matrix sector for a changed place. A box wider than the
+    // fine width spans several districts, so it is not blamed on its midpoint's one
+    // (Codex); it is marked ambiguous and carries no single sector for a drive time.
+    const placeOf = (e) => {
+      if (!e) return { outcode: '(unknown)', code: null, placed: null };
       if (e.lat != null && e.lng != null) {
         const s = nearestSector({ lat: Number(e.lat), lng: Number(e.lng) }, universe);
-        e.code = s?.code ?? null; e.outcode = s?.outcode ?? null; e.placed = 'own';
-        e.inInner = innerMember.coord(Number(e.lat), Number(e.lng));
-        e.inOuter = outerMember.coord(Number(e.lat), Number(e.lng));
-      } else if (e.slice) {
-        e.inInner = innerMember.slice(e.slice);
-        e.inOuter = outerMember.slice(e.slice);
-        const bx = boxFrom(e.slice);
-        // A box under the fine width is placed by its centre, as the census does; a
-        // wider one can span several districts, so it is not attributed to its
-        // midpoint's district — it is marked ambiguous rather than falsely blaming
-        // one district for the jump (Codex). Its sector (for the drive time) is left
-        // null, since a wide box has no single one.
-        if (bx && widthOf(bx) <= FINE_M) {
-          const s = nearestSector({ lat: (bx.minLat + bx.maxLat) / 2, lng: (bx.minLng + bx.maxLng) / 2 }, universe);
-          e.code = s?.code ?? null; e.outcode = s?.outcode ?? null;
-        } else {
-          e.code = null; e.outcode = '(wide slice — multiple districts)';
-        }
-        e.placed = 'slice';
+        return { outcode: s?.outcode ?? '(unplaced)', code: s?.code ?? null, placed: 'own' };
       }
-    }
-    const entries = [...byRef.entries()];
-    const added = entries.filter(([, e]) => e.inOuter && !e.inInner);
-    // Usually the outer ring contains the inner, so there are no removals and the
-    // jump is exactly `added`. But when the two bands use different reach methods
-    // (an inner matrix, an outer straight-line circle) the shapes need not nest, so
-    // some places fall out of the wider band too. Those are reported, so the net
-    // jump (added − removed) is explained rather than overstated (Codex).
-    const removed = entries.filter(([, e]) => e.inInner && !e.inOuter);
+      const bx = boxFrom(e.slice);
+      if (bx && widthOf(bx) <= FINE_M) {
+        const s = nearestSector({ lat: (bx.minLat + bx.maxLat) / 2, lng: (bx.minLng + bx.maxLng) / 2 }, universe);
+        return { outcode: s?.outcode ?? '(unplaced)', code: s?.code ?? null, placed: 'slice' };
+      }
+      return { outcode: '(wide slice — multiple districts)', code: null, placed: 'slice' };
+    };
 
-    const tally = (pairs, keyOf) => {
+    const tally = (refList, keyOf) => {
       const m = new Map();
-      for (const [, e] of pairs) for (const k of keyOf(e)) m.set(k, (m.get(k) ?? 0) + 1);
+      for (const ref of refList) for (const k of keyOf(ref)) m.set(k, (m.get(k) ?? 0) + 1);
       return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([key, n]) => ({ key, n }));
     };
-    // A place found by more than one drawer is counted in each here, so these sum
-    // to more than `added` — that is the point: it shows which drawers contribute.
-    const bySubcategory = tally(added, (e) => [...e.subcats]);
-    const byOutcode = tally(added, (e) => [e.outcode ?? '(unplaced)']).slice(0, 50);
+    // A place found by more than one drawer is counted in each here, so these sum to
+    // more than the added total — that is the point: it shows which drawers feed it.
+    const subsOf = (ref) => [...(detail.get(ref)?.subcats ?? ['(no detail)'])];
+    const outcodeOf = (ref) => [placeOf(detail.get(ref)).outcode];
+    const bySubcategory = tally(addedRefs, subsOf);
+    const byOutcode = tally(addedRefs, outcodeOf).slice(0, 50);
 
-    // The sample, with our computed drive time from the reach matrix and an owned
-    // name where the atlas holds one. Names are never a rented copy of Google's.
-    const sample = added.slice(0, sampleN).map(([venueRef, e]) => ({ venueRef, e }));
-    const codes = [...new Set(sample.map((s) => s.e.code).filter(Boolean))];
+    // The sample: our computed drive time (matrix-backed modes only) and an owned
+    // atlas name where there is one — never a rented Google name.
+    const sampleRefs = addedRefs.slice(0, sampleN);
+    const placed = new Map(sampleRefs.map((ref) => [ref, placeOf(detail.get(ref))]));
+    const codes = [...new Set([...placed.values()].map((p) => p.code).filter(Boolean))];
     const mins = new Map();
-    // Only a matrix-backed outer ring has real journey minutes to read. A
-    // straight-line ring has none (and leftover reverse-edge reach rows must not be
-    // served as if it did), so its sample minutes stay null (Codex).
     if (codes.length && ringOuter.method !== 'straight-line') {
       const { rows: mr } = await query(
         'select to_cell, minutes from reach where from_cell = $1 and mode = $2 and to_cell = any($3)',
         [ringOuter.cell, mode, codes]);
       for (const r of mr) mins.set(r.to_cell, r.minutes);
     }
-    const refs = sample.map((s) => s.venueRef);
-    const refSet = new Set(refs);
+    const refSet = new Set(sampleRefs);
     const names = new Map();
-    if (refs.length) {
-      // Owned atlas names only — never a rented Google name (display_source
-      // 'google'), matched on both ref forms. Keyed by whichever form the sample
-      // actually used, so an atlas place that also carries a provider ref is still
-      // found when the sample refers to it as `atlas:<id>` (Codex).
+    if (sampleRefs.length) {
       const { rows: nr } = await query(
         `select venue_ref, 'atlas:' || id::text as atlas_ref, name from attractions
           where (venue_ref = any($1) or 'atlas:' || id::text = any($1))
-            and name is not null and state <> 'hidden' and display_source is distinct from 'google'`, [refs]).catch(() => ({ rows: [] }));
+            and name is not null and state <> 'hidden' and display_source is distinct from 'google'`, [sampleRefs]).catch(() => ({ rows: [] }));
       for (const r of nr) {
         if (r.venue_ref && refSet.has(r.venue_ref)) names.set(r.venue_ref, r.name);
         if (refSet.has(r.atlas_ref)) names.set(r.atlas_ref, r.name);
@@ -1375,29 +1333,33 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
     res.json({
       category, mode, inner, outer, placedBy,
       count: {
-        inner: entries.filter(([, e]) => e.inInner).length,
-        outer: entries.filter(([, e]) => e.inOuter).length,
-        added: added.length,
+        inner: innerRes.counts?.[category] ?? 0,
+        outer: outerRes.counts?.[category] ?? 0,
+        added: addedRefs.length,
         // Non-zero only when the bands do not nest (mixed reach methods); the jump
         // is added − removed.
-        removed: removed.length,
+        removed: removedRefs.length,
       },
       bySubcategory,
       byOutcode,
-      removedBySubcategory: removed.length ? tally(removed, (e) => [...e.subcats]) : [],
-      sample: sample.map(({ venueRef, e }) => ({
-        venueRef,
-        subcategories: [...e.subcats],
-        outcode: e.outcode,
-        placed: e.placed,
-        lat: e.lat != null ? Number(e.lat) : null,
-        lng: e.lng != null ? Number(e.lng) : null,
-        slice: e.lat == null ? e.slice : null,
-        // Mode-neutral: the reach matrix minutes for the chosen mode, or null for a
-        // matrix-less mode where the reach is a straight-line estimate (Codex).
-        reachMinutes: e.code != null ? (mins.get(e.code) ?? null) : null,
-        name: names.get(venueRef) ?? null,
-      })),
+      removedBySubcategory: removedRefs.length ? tally(removedRefs, subsOf) : [],
+      sample: sampleRefs.map((ref) => {
+        const e = detail.get(ref);
+        const p = placed.get(ref);
+        return {
+          venueRef: ref,
+          subcategories: [...(e?.subcats ?? [])],
+          outcode: p.outcode,
+          placed: p.placed,
+          lat: e?.lat != null ? Number(e.lat) : null,
+          lng: e?.lng != null ? Number(e.lng) : null,
+          slice: e?.lat == null ? (e?.slice ?? null) : null,
+          // Mode-neutral: the reach matrix minutes for the chosen mode, or null for a
+          // matrix-less mode where the reach is a straight-line estimate (Codex).
+          reachMinutes: p.code != null ? (mins.get(p.code) ?? null) : null,
+          name: names.get(ref) ?? null,
+        };
+      }),
     });
   } catch (err) { next(err); }
 });
