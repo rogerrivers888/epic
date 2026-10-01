@@ -862,7 +862,7 @@ router.get('/cost-distribution/estimate', requires('view_library'), async (req, 
 router.post('/cost-distribution/start', requires('manage_library'), async (req, res, next) => {
   try {
     const household = await currentHousehold();
-    const { run, created } = await costDist.start({
+    const { run, created, reclaim } = await costDist.start({
       areaSlug: String(req.body?.area ?? ''),
       confirm: req.body?.confirm,
       householdId: household.id,
@@ -870,10 +870,11 @@ router.post('/cost-distribution/start', requires('manage_library'), async (req, 
       startedSessionId: req.session?.id ?? null,
     });
     res.json({ started: true, runId: run.id, requests: run.requests, resumed: !created });
-    // Launch the worker only for a run we created; a resume of a run already
-    // being worked must not start a second worker (Codex). A detached worker's
-    // rejection is swallowed here — the run row carries any stop reason.
-    if (created) void costDist.work(run.id).catch(() => null);
+    // Launch a worker for a run we created, or for a running run whose worker is
+    // gone (paused or stalled); a run already being worked gets no second worker
+    // (Codex). A detached worker's rejection is swallowed — the run row carries
+    // any pause reason.
+    if (created || reclaim) void costDist.work(run.id).catch(() => null);
   } catch (err) { next(err); }
 });
 

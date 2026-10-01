@@ -1,16 +1,22 @@
--- The cost-band distribution of an area (owner, 1 Oct 2026). Google's price
--- level for every place the census found in an area, measured once, so the
--- drawer's four-step scale can be judged against real coverage rather than
--- against central London's best-in-the-world 18-of-20. SL5 — Sunningdale's
--- gardens, farm parks and heritage — is close to Google's worst; the number is
--- the point.
+-- The cost-band distribution of an area (owner, 1 Oct 2026). How often does
+-- Google actually hold a price level for the places the census found? The
+-- drawer's four-step scale (Free · £ · ££ · £££) earns its row only if most
+-- places have a level; on the kind of place Epic exists to surface — gardens,
+-- farm parks, heritage — Google's coverage is thin, and SL5 is close to its
+-- worst. Measured once, so the scale can be judged against a real number rather
+-- than central London's best-in-the-world coverage.
 --
--- A run spends through the session that started it (a granted agent session),
--- resumable across a deploy, and records per place one of three things: a price
--- level, or that Google holds the place but gives no price, or that the id would
--- not resolve at all — a stale id, which is a different problem from a coverage
--- gap. The second and third are told apart because they look identical in the
--- atlas and mean different things.
+-- A run spends through the session that started it (a granted agent session) and
+-- is resumable across a deploy. What it keeps is the DISTRIBUTION, not the
+-- prices: the per-place price level is rented content the data policy says we may
+-- not store (google.js retention: none), so it is counted in memory and only the
+-- aggregate histogram lands on the run row (Codex). The sample table is a pure
+-- claim ledger of which place ids this run has already looked up — ids we already
+-- hold — so a resume never pays for the same place twice and two workers racing
+-- the same run cannot each pay for one place (the claim is inserted before the
+-- call). The histogram tells two coverage facts apart that look identical in the
+-- atlas: a place Google holds but gives no price, versus an id that will not
+-- resolve at all — a stale id we hold, the more interesting number.
 
 create table if not exists cost_dist_runs (
   id                 uuid primary key default gen_random_uuid(),
@@ -27,29 +33,45 @@ create table if not exists cost_dist_runs (
   -- census that adds places after the start cannot make the run spend on more
   -- than was confirmed (Codex). The worker only ever asks about these.
   refs               jsonb       not null default '[]'::jsonb,
+  -- The histogram, counted in memory and written here — never the per-place
+  -- price, which is rented (Codex). band0 Free · band1 £ · band2 ££ · band3 £££
+  -- (Google's level 4 folds into £££); no_price: Google holds it but gives no
+  -- price; unresolved: a stale id Place Details would not resolve.
+  band0              integer     not null default 0,
+  band1              integer     not null default 0,
+  band2              integer     not null default 0,
+  band3              integer     not null default 0,
+  no_price           integer     not null default 0,
+  unresolved         integer     not null default 0,
+  -- 'running' covers both a run actively being worked and one paused on a
+  -- transient failure (problem set): a paused run keeps state 'running' so the
+  -- one-running-run index still guards its area, and it is reclaimed — by a
+  -- restart or the boot pickup — rather than abandoned (Codex). 'done' is the
+  -- only terminal state.
   state              text        not null default 'running'
-                     check (state in ('running', 'done', 'stopped')),
+                     check (state in ('running', 'done')),
+  -- Why a still-running run is not being worked: a 429, a timeout, the grant
+  -- gone. NULL while it is being worked or when it is done. A running run with a
+  -- problem is reclaimable at once; one without, only once its heartbeat is stale.
   problem            text,
   started_at         timestamptz not null default now(),
   touched_at         timestamptz not null default now(),
   finished_at        timestamptz
 );
--- The one going now, for the boot pickup.
+-- The ones to reclaim at boot: a paused run, or one whose worker died silently.
 create index if not exists cost_dist_runs_going on cost_dist_runs (touched_at) where state = 'running';
 -- At most one running run per area: two Starts racing cannot each insert one and
 -- then each pay for the whole area (Codex). The loser resumes the winner's run.
 create unique index if not exists cost_dist_runs_one_running on cost_dist_runs (area_slug) where state = 'running';
 
+-- The claim ledger: which place ids this run has already looked up. No provider
+-- content — only the id (which we already hold) and when it was claimed. A row is
+-- inserted BEFORE the paid call, so a concurrent worker that loses the insert
+-- skips the place rather than paying for it again; a place whose call fails
+-- transiently has its claim released so a resume retries it.
 create table if not exists cost_dist_samples (
   run_id      uuid        not null references cost_dist_runs (id) on delete cascade,
   venue_ref   text        not null,
-  -- Google's 0–4 price level. NULL with resolved = true means Google holds the
-  -- place but gives no price (a coverage thinness). resolved = false means Place
-  -- Details could not resolve the id at all — a stale id we hold, not a gap
-  -- (owner, 1 Oct 2026: the more interesting number). One row per place, written
-  -- as it is measured, so a deploy loses nothing and a resume skips the done.
-  price_level integer,
-  resolved    boolean     not null,
   at          timestamptz not null default now(),
   primary key (run_id, venue_ref)
 );
