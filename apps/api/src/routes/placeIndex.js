@@ -1563,24 +1563,28 @@ router.get('/census-ring-curve', requires('view_library'), async (req, res, next
       // drawer has a complete row there, not merely the ones that happen to exist.
       const floorOutcodes = ring.reachOutcodes ?? ring.outcodes;
       const floorSlugs = floorOutcodes.map((o) => o.toLowerCase());
-      const reqSubs = subcategories && subcategories.length ? [...new Set(subcategories)] : null;
+      // The drawers the count is over: the ones requested, or — for a whole-category
+      // curve — every active drawer of the category. A district is fully censused for
+      // the request only when each of these drawers has a complete row there; a drawer
+      // with no row at all was never examined, not finished (Codex).
+      let reqSubs = subcategories && subcategories.length ? [...new Set(subcategories)] : null;
+      if (!reqSubs) {
+        const { rows: active } = await query(
+          'select key from shelf_subcategories where category_key = $1 and active', [category]);
+        reqSubs = active.map((r) => r.key);
+      }
       const fully = new Set();
-      if (reqSubs) {
-        // Fully censused iff a complete row exists for every requested subcategory.
+      if (reqSubs.length) {
         const { rows } = await query(
           `select area_slug, count(distinct subcategory) filter (where complete) as n
              from area_counts where area_slug = any($1) and category = $2 and subcategory = any($3)
             group by area_slug`, [floorSlugs, category, reqSubs]);
         for (const r of rows) if (Number(r.n) >= reqSubs.length) fully.add(r.area_slug);
-      } else {
-        const { rows } = await query(
-          `select area_slug, bool_and(complete) as whole from area_counts
-            where area_slug = any($1) and category = $2 group by area_slug`, [floorSlugs, category]);
-        for (const r of rows) if (r.whole === true) fully.add(r.area_slug);
       }
       // Reach districts not fully censused for the request — never looked at, or
-      // only partly — all make the count a floor.
-      const notCensused = floorSlugs.filter((s) => !fully.has(s)).length;
+      // only partly — all make the count a floor. (With no active drawer to census,
+      // there is nothing to be incomplete.)
+      const notCensused = reqSubs.length ? floorSlugs.filter((s) => !fully.has(s)).length : 0;
       const unresolved = c.unresolved?.[category] ?? 0;
       curve.push({
         minutes: m,
