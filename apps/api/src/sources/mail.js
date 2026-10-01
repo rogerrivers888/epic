@@ -161,15 +161,21 @@ const FONT = "Archivo,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif";
 
 const originOf = (url) => { try { return new URL(url).origin; } catch { return null; } };
 
-function shell({ url, body, action = 'Open Epic' }) {
+function shell({ url, body, action = 'Open Epic', headline = null }) {
   const origin = originOf(url);
   const mark = origin
     ? `<img src="${origin}/brand/epic-wordmark-ink.png" width="150" height="117" alt="Epic" style="display:block;border:0;outline:none;text-decoration:none">`
     : `<span style="font-family:${FONT};font-weight:800;font-size:44px;letter-spacing:-2.6px;color:${INK}">Epic</span>`;
+  // Some messages (the staff invitation, ST6) carry a headline inside the lime
+  // band, under the mark, at the pack's display weight. Most do not and the band
+  // is the mark alone.
+  const banner = headline
+    ? `${mark}<div style="font-family:${FONT};font-weight:800;font-size:40px;letter-spacing:-1.4px;line-height:1.02;color:${INK};margin-top:22px">${headline}</div>`
+    : mark;
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:${CREAM};margin:0;padding:0">
   <tr><td align="center" style="padding:24px 12px">
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="520" style="width:520px;max-width:100%;border:2px solid ${INK};background:${CREAM}">
-      <tr><td style="background:${LIME};padding:18px 24px;border-bottom:2px solid ${INK}">${mark}</td></tr>
+      <tr><td style="background:${LIME};padding:${headline ? '28px 24px 26px' : '18px 24px'};border-bottom:2px solid ${INK}">${banner}</td></tr>
       <tr><td style="padding:24px;font-family:${FONT};font-size:16px;line-height:1.5;color:${INK}">
 ${body}
         <p style="margin:24px 0 0"><a href="${url}" style="display:inline-block;background:${INK};color:${CREAM};font-weight:700;padding:14px 22px;text-decoration:none;border-radius:0">${action}</a></p>
@@ -246,4 +252,67 @@ export function householdInvitationEmail({ name, url, household, from, expiresAt
     note('If you were not expecting this, ignore it — nothing happens until the link is opened.'),
   ].join('\n') });
   return { subject: returning ? 'Your link back in to Epic' : `You're in ${household || 'the household'} on Epic`, text, html };
+}
+
+/** "Accounts, Households and Activity" — comma-separated, "and" before the last. */
+const andList = (items) => {
+  const list = items.filter(Boolean);
+  if (list.length <= 1) return list[0] ?? '';
+  return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
+};
+
+/**
+ * The e-mail a new staff member gets (ST6).
+ *
+ * Not the customer invitation: a colleague is not being given Epic to plan days
+ * out with, they are being given a login to the back office, so it says what the
+ * login is (their role) and what it opens (the sections their role may enter),
+ * and nothing about trips or tastes. The headline sits in the lime band at the
+ * pack's display weight, as the design has it.
+ */
+export function staffInviteEmail({ name, url, roleLabel, opens = [], expiresAt }) {
+  const first = String(name || '').trim().split(/\s+/)[0] || 'there';
+  const on = new Date(expiresAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
+  const doors = andList(opens);
+  const line = `You've got a back-office login as ${roleLabel}${doors ? `, so you can open ${doors}` : ''}.`;
+  const foot = `The link works once and expires on ${on}. After that, log in at epic.day with this email.`;
+  const text = [
+    `You're on the team, ${first}.`, '', line, '', 'Log in to the back office:', url, '', foot,
+  ].join('\n');
+  const html = shell({
+    url,
+    action: 'Log in to the back office',
+    headline: `You're on the team, ${first}.`,
+    body: [
+      `        <p style="margin:0">${line}</p>`,
+      note(foot),
+    ].join('\n'),
+  });
+  return { subject: "You've been added to the Epic back office", text, html };
+}
+
+/**
+ * The self-serve login link (L2), sent to anybody who asks at epic.day/login,
+ * customer or staff.
+ *
+ * Deliberately says almost nothing: it is answered the same whether or not the
+ * address has an account (routes/session.js), so it cannot describe an account
+ * it may not be about. Fifteen minutes, not a week — a link somebody asked for a
+ * moment ago does not need to outlive the afternoon.
+ */
+export function loginLinkEmail({ url }) {
+  const text = [
+    'Tap below to log in to Epic. The link works once, for 15 minutes.', '',
+    'Log in to Epic:', url, '',
+    "Didn't ask for this? Ignore it and nothing happens.",
+  ].join('\n');
+  const html = shell({
+    url,
+    action: 'Log in to Epic',
+    body: [
+      '        <p style="margin:0">Tap below to log in to Epic. The link works once, for 15 minutes.</p>',
+      note("Didn't ask for this? Ignore it and nothing happens."),
+    ].join('\n'),
+  });
+  return { subject: 'Your login link', text, html };
 }

@@ -3251,6 +3251,20 @@ export const api = {
   adminPeople: (days = 30) => request<AdminPeople>(`/api/admin/people?days=${days}`),
   adminPerson: (id: string, days = 30) => request<PersonRecord>(`/api/admin/people/${id}?days=${days}`),
   adminSetRole: (id: string, roleId: string | null) => patch<{ account: { id: string; role: any } }>(`/api/admin/people/${id}/role`, { roleId }),
+
+  // Staff: the people who can log in to the back office. Owner-only (manage_staff).
+  adminStaff: () => request<StaffList>('/api/admin/staff'),
+  adminAddStaff: (body: { name: string; email: string; roleId: string }) =>
+    post<{ staff: StaffMember; invitation: StaffInvitation; existedAsCustomer: boolean }>('/api/admin/staff', body),
+  adminStaffRole: (id: string, roleId: string) =>
+    patch<{ staff: StaffMember }>(`/api/admin/staff/${id}/role`, { roleId }),
+  adminStaffLink: (id: string) =>
+    post<{ staff: StaffMember; invitation: StaffInvitation }>(`/api/admin/staff/${id}/link`, {}),
+  adminStaffLogoutAll: (id: string) =>
+    post<{ staff: StaffMember; loggedOut: boolean }>(`/api/admin/staff/${id}/logout-all`, {}),
+  adminStaffSuspend: (id: string) => post<{ staff: StaffMember }>(`/api/admin/staff/${id}/suspend`, {}),
+  adminStaffUnsuspend: (id: string) => post<{ staff: StaffMember }>(`/api/admin/staff/${id}/unsuspend`, {}),
+  adminRemoveStaff: (id: string) => del<{ removed: boolean; keptAsCustomer: boolean; message: string }>(`/api/admin/staff/${id}`),
   adminActivity: (days = 30) => request<{ window: { days: number }; feed: FeedRow[]; screens: ScreenRow[]; daily: DailyRow[]; active: Engagement['active'] }>(`/api/admin/activity?days=${days}`),
   /**
    * The reporting suite: Overview, Money, Customers, Suppliers and Behaviour,
@@ -4886,6 +4900,27 @@ export type AdminPeople = {
   plans: { key: string; label: string; pricePence: number | null }[];
   withheld: string[];
 };
+// Staff — who can log in to the back office (Supporting docs › EPIC staff management).
+export type StaffMember = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  roleId: string | null;
+  role: string | null;
+  roleKey: string | null;
+  isOwner: boolean;
+  status: 'invited' | 'active' | 'suspended';
+  invitedAt: string | null;
+  activatedAt: string | null;
+  lastSeenAt: string | null;
+  signInCount: number | null;
+  hasHousehold: boolean;
+  synthetic?: boolean;
+};
+export type StaffRole = { id: string; key: string; label: string; description: string | null };
+export type StaffInvitation = { url: string; expiresAt: string; delivery: string; fresh?: boolean; message: string | null };
+export type StaffList = { staff: StaffMember[]; roles: StaffRole[]; mail: { configured: boolean; reason?: string } };
+
 export type PersonRecord = {
   account: { id: string; email: string; name: string | null; status: string; plan: string; trialEndsOn: string | null; note: string | null; createdAt: string; activatedAt: string | null; lastSeenAt: string | null; signInCount: number; monthlyCallBound: number | null; role: { id: string; key: string; label: string; doors: string[] } | null };
   household: { id: string; name: string; homeLabel: string | null; timezone: string | null; createdAt: string } | null;

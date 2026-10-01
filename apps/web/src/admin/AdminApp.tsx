@@ -55,6 +55,7 @@ import { HowItWorks } from './screens/HowItWorks';
 import { VoiceLab } from './screens/VoiceLab';
 import { Hosting } from './screens/Hosting';
 import { Mail } from './screens/Mail';
+import { Staff } from './screens/Staff';
 import { Sources } from './screens/Sources';
 import { Categories } from './screens/Categories';
 import { Desk as Filing } from './desk/Desk';
@@ -160,8 +161,11 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
   { key: 'skills', label: 'Skills', icon: 'credential', needs: 'view_skills', sub: 'What hosts say they are expert in, the sixteen buckets it is browsed by, and the words Epic has not heard before', group: 'Data' },
   { key: 'queue', label: 'Content queue', icon: 'preview', needs: 'view_library', sub: 'What households have sent us, and whether it is fit to publish', group: 'Data' },
   { key: 'runs', label: 'Runs', icon: 'download', needs: 'view_library', sub: 'What is going, what it cost, and what failed', group: 'Data' },
-  { key: 'mail', label: 'Mail', icon: 'mail', needs: 'view_activity', sub: 'Every e-mail sent, and whether it was delivered, opened or bounced', group: 'Admin' },
+  // First in the Admin group, above Roles (Supporting docs › EPIC staff
+  // management). manage_staff is owner-only, so only the owner sees it.
+  { key: 'staff', label: 'Staff', icon: 'accounts', needs: 'manage_staff', sub: 'Who can log in to the back office, and what their role lets them open', group: 'Admin' },
   { key: 'roles', label: 'Roles', icon: 'locked', needs: 'view_accounts', sub: 'Doors and capabilities', group: 'Admin' },
+  { key: 'mail', label: 'Mail', icon: 'mail', needs: 'view_activity', sub: 'Every e-mail sent, and whether it was delivered, opened or bounced', group: 'Admin' },
   { key: 'plans', label: 'Plans', icon: 'money', needs: 'view_accounts', sub: 'What a household can be on', group: 'Admin' },
   { key: 'audit', label: 'Audit', icon: 'info', needs: 'view_audit', sub: 'Who did what to whom', group: 'Admin' },
   // No capability: the decisions behind what Epic does are not a privilege, and
@@ -272,6 +276,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
       {screen === 'voice' ? <VoiceLab /> : null}
       {screen === 'hosting' ? <Hosting canManage={can('manage_hosting')} /> : null}
       {screen === 'skills' ? <Skills canManage={can('manage_skills')} /> : null}
+      {screen === 'staff' ? <Staff canManage={can('manage_staff')} /> : null}
       {screen === 'mail' ? <Mail canSend={can('manage_settings')} /> : null}
       {screen === 'roles' ? <Roles canManage={can('manage_roles')} /> : null}
       {screen === 'plans' ? <Plans canManage={can('manage_plans')} /> : null}

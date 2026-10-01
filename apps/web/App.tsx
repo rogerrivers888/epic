@@ -47,6 +47,8 @@ import { OrderTicketScreen } from './src/screens/OrderTicketScreen';
 import { AdminApp } from './src/admin/AdminApp';
 import { useActivity } from './src/hooks/useActivity';
 import { LockScreen } from './src/screens/LockScreen';
+import { LoginScreen } from './src/screens/LoginScreen';
+import { AccountScreen } from './src/screens/AccountScreen';
 import { Wordmark } from './src/components/Wordmark';
 import { useViewport, ViewportProvider } from './src/hooks/useViewport';
 import { useOffline } from './src/hooks/useOffline';
@@ -295,6 +297,14 @@ function Routed() {
    * stranger for a passcode first would throw the traffic away.
    */
   if (route.name === 'tag') return <TagScreen tagKey={route.key} vocab={route.vocab} />;
+  /**
+   * Log in (Supporting docs › EPIC staff management, L1/L2). The front door at
+   * epic.day/login, public and the same for customers and staff: an email, then
+   * a single-use link. Answered before the Gate so it is reachable with no
+   * session. The link it asks for is redeemed by the Gate, which then lands staff
+   * in the back office and customers on their account page.
+   */
+  if (route.name === 'login') return <LoginScreen />;
   return <Gate route={route} />;
 }
 
@@ -340,17 +350,26 @@ function Gate({ route }: { route: Route }) {
       try {
         await api.signInWithLink(link);
         if (dropped) return;
+        // Where you land is decided by the account, not the link: staff go to the
+        // back office, a customer to their own account page (L3). The access the
+        // session just gained says which — the admin door is what makes somebody
+        // staff. Navigating to the landing also takes the spent token out of the
+        // address bar (a link left in a URL gets pasted into a chat).
+        const st = await api.sessionState().catch(() => null);
         recheck();
+        if (dropped) return;
+        const toAdmin = Boolean(st?.access?.doors?.includes('admin'));
+        navigate(toAdmin ? paths.admin('reporting') : paths.account(), { replace: true });
+        setRedeeming(false);
       } catch (err: any) {
-        if (!dropped) setLinkFailed(err?.message ?? 'That link did not work. Ask for a new one.');
-      } finally {
-        // Whether it worked or not, the token comes out of the address bar: a
-        // spent link in a URL is still a link somebody pastes into a chat.
-        if (!dropped) { setQuery({ signin: null }, { replace: true }); setRedeeming(false); }
+        if (dropped) return;
+        setLinkFailed(err?.message ?? 'That link did not work. Ask for a new one.');
+        setQuery({ signin: null }, { replace: true });
+        setRedeeming(false);
       }
     })();
     return () => { dropped = true; };
-  }, [link, recheck, setQuery]);
+  }, [link, recheck, setQuery, navigate]);
 
   // Signed in but the access check never answered (a 429, or no network):
   // that is not a "no", so the back office says it is busy and asks again
@@ -374,6 +393,11 @@ function Gate({ route }: { route: Route }) {
   // The back office is only reachable by a session holding the `admin` door —
   // and if this app drew it anyway, every request it made would answer 404
   // (api/src/access.js).
+  // A customer's own account page (L3), where a magic link lands a household
+  // customer. Behind the session — the signed-out branch above has already sent
+  // anybody without one to the lock screen.
+  if (route.name === 'account') return <AccountScreen />;
+
   const mayAdminister = Boolean(access?.doors?.includes('admin'));
   if (route.name === 'admin') {
     if (accessUnknown) return <NotHere title="The back office is busy — try again in a moment" body="Trying again by itself every few seconds." href={paths.inspire()} />;

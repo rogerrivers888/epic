@@ -292,7 +292,7 @@ export type AdminScreen =
    * drawer for whoever it is sent to. The tab's spellings are `FILING_TABS`.
    */
   | 'filing'
-  | 'lookup' | 'coverage' | 'library' | 'shelves' | 'scout' | 'sources' | 'categories' | 'voice' | 'hosting' | 'skills' | 'mail' | 'roles' | 'plans' | 'audit' | 'how';
+  | 'lookup' | 'coverage' | 'library' | 'shelves' | 'scout' | 'sources' | 'categories' | 'voice' | 'hosting' | 'skills' | 'staff' | 'roles' | 'mail' | 'plans' | 'audit' | 'how';
 /**
  * The filing desk's tabs, as the address spells them.
  *
@@ -338,7 +338,7 @@ export const ADMIN_SCREENS: AdminScreen[] = [
   'money', 'subscriptions', 'customers', 'suppliers', 'behaviour', 'engagement',
   'places', 'demand', 'runs', 'queue',
   'filing',
-  'lookup', 'coverage', 'library', 'shelves', 'scout', 'sources', 'categories', 'voice', 'hosting', 'skills', 'mail', 'roles', 'plans', 'audit', 'how',
+  'lookup', 'coverage', 'library', 'shelves', 'scout', 'sources', 'categories', 'voice', 'hosting', 'skills', 'staff', 'roles', 'mail', 'plans', 'audit', 'how',
 ];
 
 /**
@@ -413,6 +413,17 @@ export type Route =
    * keyboard; `?page=2` the wizard's page; `?n=2` the second question.
    */
   | { name: 'say'; intakeId: string | null; steps: boolean; ask: boolean }
+  /**
+   * Log in at epic.day/login (Supporting docs › EPIC staff management, L1/L2).
+   * One screen for customers and staff: enter an email, get a single-use link.
+   * Public — reachable before any session exists.
+   */
+  | { name: 'login' }
+  /**
+   * A customer's own account page (L3), where a magic link lands a household
+   * customer. Behind the session; staff land in the back office instead.
+   */
+  | { name: 'account' }
   /** First run: two doors (C0). */
   | { name: 'welcome' }
   /**
@@ -578,6 +589,12 @@ export function parseRoute(path: string): Route {
       return { name: 'say', intakeId: a, steps: false, ask: false };
     }
 
+    case 'login':
+      return a ? { name: 'unknown', path } : { name: 'login' };
+
+    case 'account':
+      return a ? { name: 'unknown', path } : { name: 'account' };
+
     case 'welcome':
       return a ? { name: 'unknown', path } : { name: 'welcome' };
 
@@ -716,6 +733,8 @@ export function hrefOf(route: Route): string {
       return route.steps ? '/say/steps'
         : route.intakeId ? buildHref(['say', route.intakeId, route.ask ? 'ask' : null])
           : '/say';
+    case 'login': return '/login';
+    case 'account': return '/account';
     case 'welcome': return '/welcome';
     case 'opening': return '/opening';
     case 'setup': return '/setup';
@@ -852,6 +871,8 @@ export const paths = {
   saySteps: (page?: number) => (page && page > 1 ? `/say/steps?page=${page}` : '/say/steps'),
   heard: (intakeId: string) => buildHref(['say', intakeId]),
   ask: (intakeId: string, n?: number) => `${buildHref(['say', intakeId, 'ask'])}${n && n > 1 ? `?n=${n}` : ''}`,
+  login: () => '/login',
+  account: () => '/account',
   welcome: () => '/welcome',
   /**
    * The opening sequence, at a given screen. Step 0 (the opener) is the default
@@ -1117,6 +1138,8 @@ export function parentOf(route: Route): string {
     case 'tag': return '/inspire/people';
     // Up from the questions is the card; up from the card or the wizard is the mic; up from the mic is home.
     case 'say': return route.ask ? paths.heard(route.intakeId!) : route.intakeId || route.steps ? '/say' : '/inspire';
+    case 'login': return '/inspire';
+    case 'account': return '/inspire';
     case 'welcome': return '/inspire';
     case 'opening': return '/inspire';
     case 'setup': return '/welcome';
@@ -1155,6 +1178,8 @@ export function titleOf(route: Route): string {
     }
     case 'household': return epic(route.voice === 'tell' ? 'Tell Epic about them' : route.voice === 'review' ? 'What we heard' : 'You and yours');
     case 'say': return epic(route.ask ? 'One more thing' : route.intakeId ? 'Here’s what we heard' : route.steps ? 'One at a time' : 'Just say it');
+    case 'login': return epic('Log in');
+    case 'account': return epic('Your account');
     case 'welcome': return epic('Plan less. Live more.');
     case 'opening': return epic('Welcome to Epic');
     case 'setup': return epic('Set up your family');

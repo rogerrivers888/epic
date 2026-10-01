@@ -10,8 +10,10 @@ import {
   authConfigured, clearSessionCookie, closeSession, openSession, passcodeMatches, sessionKindFor, sessionCookie,
 } from '../auth.js';
 import { findLiveSession, liveSessions, revokeAllSessions } from '../repositories/sessions.js';
-import { accountByContact, accountById, consumeSignInLink, linkContactFor, ownerAccount, recordSignIn } from '../repositories/accounts.js';
-import { invite } from './accounts.js';
+import {
+  accountByContact, accountById, consumeSignInLink, createSignInLink, linkContactFor, markLinkSent, ownerAccount, recordSignIn,
+} from '../repositories/accounts.js';
+import { loginLinkEmail, mailStatus, sendMail, webUrl } from '../sources/mail.js';
 import { accessFor } from '../access.js';
 import { signInLockedOut, noteSignInFailure } from '../signInGuard.js';
 import { sessionBlockedByGate } from '../siteGate.js';
@@ -199,22 +201,39 @@ router.post('/session/link', async (req, res, next) => {
 });
 
 /**
- * POST /api/session/request-link — "send me a link".
+ * Mint a self-serve login link and send it, for both customers and staff (L2).
  *
- * The owner sends invitations from the admin screen and the household sends
- * them from the Household tab, but a link is single-use and a device is signed
- * in for ninety days, so somebody who changes phone in month four needs a way
- * back in that is not "text Roger". This is it.
+ * Fifteen minutes, not a week: a link somebody asked for a moment ago at
+ * epic.day/login does not need to outlive the afternoon, and the shorter it
+ * lives the less a forwarded or intercepted one is worth (handover). The e-mail
+ * is the generic "Your login link" — it is answered the same whether or not the
+ * address has an account, so it cannot describe an account it may not be about.
+ */
+async function sendLoginLink(req, account) {
+  if (!account.email) return; // a mobile-only account cannot be e-mailed a link.
+  const { token, link } = await createSignInLink(account.id, { requestedBy: 'self', ttlHours: 0.25 });
+  const url = `${webUrl(req)}/?signin=${token}`;
+  const mail = mailStatus();
+  let delivery = mail.configured ? 'email' : 'no_sender';
+  let error = mail.configured ? null : mail.message;
+  if (mail.configured) {
+    const sent = await sendMail({ to: account.email, ...loginLinkEmail({ url }), purpose: 'sign_in' });
+    if (!sent.sent) { delivery = sent.reason ?? 'send_failed'; error = sent.message ?? null; }
+  }
+  await markLinkSent(link.id, { delivery, error });
+}
+
+/**
+ * POST /api/session/request-link — "send me a link" (L1).
  *
- * Either credential, because since migration 056 somebody may have been invited
- * by text and have no address on their account at all — and a way in that only
- * works for people with e-mail is not a way back in for the person most likely
- * to need one.
+ * The front door at epic.day/login, for everybody. A link is single-use and a
+ * device is signed in for ninety days, so somebody who changes phone in month
+ * four needs a way back in that is not "text Roger"; this is it, and it is the
+ * only way a staff member gets in once their invite link is spent.
  *
- * It answers exactly the same whether or not the address or number has an
- * account, and takes the same time to do it, so it cannot be used to find out
- * who Epic's customers are. It is held to the sign-in limit (limits.js) like
- * the passcode.
+ * It answers exactly the same whether or not the address has an account, and
+ * takes the same time to do it, so it cannot be used to find out who Epic's
+ * customers are. It is held to the sign-in limit (limits.js) like the passcode.
  */
 router.post('/session/request-link', async (req, res, next) => {
   try {
@@ -222,13 +241,11 @@ router.post('/session/request-link', async (req, res, next) => {
     // Only an account that has been invited and is not suspended gets a link.
     // Everything else falls through to the same answer as an unknown address.
     if (account && account.status !== 'suspended') {
-      await invite(req, account, { requestedBy: 'self', returning: true });
+      await sendLoginLink(req, account);
     }
     res.json({
       sent: true,
-      message: req.body?.mobile && !req.body?.email
-        ? 'If that number has a Epic account, a link is on its way by text. It works once and lasts a week.'
-        : 'If that address has a Epic account, a link is on its way. It works once and lasts a week.',
+      message: 'If that email has an Epic account, a login link is on its way. It works once, for 15 minutes.',
     });
   } catch (err) { next(err); }
 });

@@ -36,6 +36,14 @@ export const CAPABILITIES = [
   { key: 'view_accounts', area: 'People', label: 'See accounts', note: 'The list of households, their plan, and when they were last in.' },
   { key: 'manage_accounts', area: 'People', label: 'Manage accounts', note: 'Invite, change a plan or ceiling, suspend, remove.', manages: true },
   { key: 'manage_roles', area: 'People', label: 'Manage roles', note: 'Create roles and grant capabilities — including these.', manages: true },
+  // Staff are the people who log in to the back office at all. Managing them —
+  // adding a colleague, issuing a login link, changing their role, suspending or
+  // removing them — is the one capability the owner keeps to himself: it is not
+  // granted to any role in the seed, so only the owner (who holds every
+  // capability there is) has it until he grants it on purpose. Reading and
+  // changing are one capability here rather than a pair, because there is no
+  // one who should see the staff list but not be able to act on it.
+  { key: 'manage_staff', area: 'People', label: 'Manage staff', note: 'Add people to the back office, issue login links, change roles, suspend and remove.', manages: true },
   { key: 'view_activity', area: 'Behaviour', label: 'See activity', note: 'What a household has done in Epic, and how long they spend in it.' },
   { key: 'view_reporting', area: 'Behaviour', label: 'See reporting', note: 'Engagement, retention and usage across every household.' },
   { key: 'view_financials', area: 'Money', label: 'See financials', note: 'Revenue, what plans earn, and what providers cost.' },
@@ -73,6 +81,21 @@ export const CAPABILITY_KEYS = new Set(CAPABILITIES.map((c) => c.key));
  */
 export const VIEW_CAPABILITIES = CAPABILITIES.filter((c) => !c.manages).map((c) => c.key);
 const MANAGE_CAPABILITIES = new Set(CAPABILITIES.filter((c) => c.manages).map((c) => c.key));
+
+/**
+ * The sections a set of capabilities opens, in the order the roles screen lists
+ * them — "People", "Money", "Governance". Used to tell a new staff member what
+ * their role lets them open (ST6), so the words come from what they can actually
+ * do rather than from a second list that could drift out of step with it.
+ */
+export function areasFor(capabilities) {
+  const held = capabilities instanceof Set ? capabilities : new Set(capabilities ?? []);
+  const areas = [];
+  for (const c of CAPABILITIES) {
+    if (held.has(c.key) && !areas.includes(c.area)) areas.push(c.area);
+  }
+  return areas;
+}
 
 /** The owner's role holds everything there is, including capabilities added later. */
 const ALL = () => CAPABILITIES.map((c) => c.key);

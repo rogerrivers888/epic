@@ -319,6 +319,8 @@ test('Household, Settings, Prototypes and the back office', () => {
    * section explaining that screen, never the top of the page. `?at=` is the
    * section, and only a section that exists is one.
    */
+  assert.deepEqual(roundTrip('/admin/staff'), { name: 'admin', screen: 'staff' });
+  assert.equal(paths.admin('staff'), '/admin/staff');
   assert.deepEqual(roundTrip('/admin/how'), { name: 'admin', screen: 'how' });
   assert.equal(paths.how(), '/admin/how');
   assert.equal(paths.how(null), '/admin/how');
@@ -689,6 +691,19 @@ test('the voice intake: the mic, the wizard, the card and its questions', () => 
   for (const href of ['/say', '/say/steps', '/say/abc', '/say/abc/ask', '/welcome', '/setup', '/household/m1/tell']) {
     assert.equal(ownsHeader(parseRoute(href)), true, `${href} draws its own head`);
   }
+});
+
+test('the unified log-in and the account page', () => {
+  assert.deepEqual(roundTrip('/login'), { name: 'login' });
+  assert.deepEqual(roundTrip('/account'), { name: 'account' });
+  assert.equal(paths.login(), '/login');
+  assert.equal(paths.account(), '/account');
+  // A segment after either is nothing Epic has.
+  assert.equal(parseRoute('/login/x').name, 'unknown');
+  assert.equal(parseRoute('/account/x').name, 'unknown');
+  // Neither is a household tab.
+  assert.equal(tabOf(parseRoute('/login')), null);
+  assert.equal(tabOf(parseRoute('/account')), null);
 });
 
 test('first run and the two-minute set-up', () => {

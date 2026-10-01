@@ -45,7 +45,7 @@ test('the vocabulary is unique, and every capability says what it is for', () =>
   // point, and a `manage_` with no matching read is a capability that cannot be
   // granted usefully.
   for (const c of CAPABILITIES.filter((x) => x.key.startsWith('manage_'))) {
-    if (c.key === 'manage_roles' || c.key === 'manage_settings' || c.key === 'manage_plans') continue;
+    if (c.key === 'manage_roles' || c.key === 'manage_settings' || c.key === 'manage_plans' || c.key === 'manage_staff') continue;
     assert.ok(CAPABILITY_KEYS.has(c.key.replace('manage_', 'view_')), `${c.key} has no read half`);
   }
 });

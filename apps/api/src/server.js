@@ -28,6 +28,7 @@ import hostingRoutes, { adminRouter as hostingAdminRoutes, publicRouter as hosti
 import accountRoutes from './routes/accounts.js';
 import adminRoutes from './routes/admin.js';
 import * as approvalsRepo from './repositories/approvals.js';
+import staffRoutes from './routes/staff.js';
 import suiteRoutes from './routes/suite.js';
 import postmarkRoutes from './routes/postmark.js';
 import openToRoutes, { adminRouter as openToAdminRoutes, startOpenToLoop } from './routes/openTo.js';
@@ -320,6 +321,10 @@ app.use('/api/accounts', requireDoor('admin'), accountRoutes);
 // What people are up for, and the introductions between them (routes/openTo.js).
 app.use('/api', openToRoutes);
 app.use('/api/admin', requireDoor('admin'), adminRoutes);
+// Who can log in to the back office (Supporting docs › EPIC staff management).
+// Mounted after the general /api/admin router, which has no /staff route of its
+// own, so this one answers it. The manage_staff capability is owner-only.
+app.use('/api/admin/staff', requireDoor('admin'), staffRoutes);
 // What became of the e-mails we sent, from Postmark, admitted by its own token.
 app.use('/api/postmark', postmarkRoutes);
 // Pitch review and the trust ladder (hosts and events, 12 Sep 2026). A host
