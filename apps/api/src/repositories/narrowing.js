@@ -120,10 +120,10 @@ export async function gatherSignals(refs, { heritageLoad: heLoad = null } = {}) 
          and h.lng between coalesce(op.lng, pi.lng, pr.lng) - 0.0009 and coalesce(op.lng, pi.lng, pr.lng) + 0.0009
          and exists (
            select 1
-             from unnest(string_to_array(lower(regexp_replace(
-               coalesce(case when (pr.provenance ->> 'name') is not null then pr.name end, at.name, ''),
-               '[^a-z0-9 ]', ' ', 'g')), ' ')) as vt
-             join unnest(string_to_array(lower(regexp_replace(h.name, '[^a-z0-9 ]', ' ', 'g')), ' ')) as ht on ht = vt
+             from unnest(string_to_array(regexp_replace(
+               lower(coalesce(case when (pr.provenance ->> 'name') is not null then pr.name end, at.name, '')),
+               '[^a-z0-9 ]', ' ', 'g'), ' ')) as vt
+             join unnest(string_to_array(regexp_replace(lower(h.name), '[^a-z0-9 ]', ' ', 'g'), ' ')) as ht on ht = vt
             -- >= 3 so a saint's short name (Ann, Ive, Bee) still identifies the
             -- place; generic short words stay excluded below (Codex).
             where length(vt) >= 3

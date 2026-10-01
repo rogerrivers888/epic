@@ -337,3 +337,16 @@ test('a three-letter token matches a whole word, not a substring — St Bee does
   const kept = new Set(out.subcategories.find((s) => s.key === 'churches').examplesKept.map((e) => e.ref));
   assert.ok(!kept.has('google:stbee'), 'St Bee Church does not inherit Beech House’s Grade I by substring');
 });
+
+test('an all-caps Historic England name still matches (lower before stripping) (Codex)', async () => {
+  const load = '55555555-5555-5555-5555-555555555555';
+  await query(`update owned_source_loads set state='done', live_load=$1, load_id=$1, finished_at=now() where source='historic-england'`, [load]);
+  await seedPlace('google:allcaps', { subcategory: 'churches', record: { name: "St Oswald's Church" }, point: { lat: 54.30000, lng: -2.75000 } });
+  const { rows: [eng] } = await query(`select slug from localities where kind='county' and nation='England' limit 1`);
+  await query('insert into place_areas (venue_ref, area_slug) values ($1,$2) on conflict do nothing', ['google:allcaps', eng.slug]);
+  await query(`insert into heritage_entries (list_entry, layer, name, grade, lat, lng, load_id)
+                 values (1212121,'listed-building','CHURCH OF ST OSWALD','I',54.30001,-2.75001,$1) on conflict do nothing`, [load]);
+  const out = await narrowing.narrowingPreview({ scope: 'estate' });
+  const kept = new Set(out.subcategories.find((s) => s.key === 'churches').examplesKept.map((e) => e.ref));
+  assert.ok(kept.has('google:allcaps'), 'the uppercase listing still matches on the word Oswald');
+});
