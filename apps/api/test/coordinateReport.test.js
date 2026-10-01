@@ -103,8 +103,14 @@ test('an owned point is the authority: a Google-referenced place is reported und
       await query(`insert into place_index (venue_ref, lat, lng, coords_from, coords_at) values ($1, 52.1, -1.2, $2, now())`, [ref, src]);
       await query(`insert into owned_points (venue_ref, lat, lng, source, licence, method) values ($1, 52.1, -1.2, $2, 'OGL-UK-3.0', 'test')`, [ref, src]);
     }
+    // A saved copy of the FSA-owned place: it must read owned, not rented, in
+    // both places and the per-table counts (Codex, 1 Oct 2026).
+    const { rows: [hh] } = await query(`insert into households (name) values ('Owned-copy test') returning id`);
+    await query(`insert into household_places (household_id, venue_ref, label, lat, lng) values ($1, 'google:op-fsa', 'x', 52.1, -1.2)`, [hh.id]);
     const after = await coordinateReport();
     const up = (k, from = after.places.owned, was = before.places.owned) => (from[k] ?? 0) - (was[k] ?? 0);
+    const held = (t, r) => r.rented.find((x) => x.table === t).held;
+    assert.equal(held('household_places', after), held('household_places', before), 'a saved copy of an owned point is not counted as rented');
     assert.equal(up('fsa'), 1);
     assert.equal(up('historic-england'), 1);
     assert.equal(up('os-open-names'), 1);
