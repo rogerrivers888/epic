@@ -119,12 +119,21 @@ export function billingTile(b, money, cfg, now = new Date()) {
   const expWord = exp.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
   const paid = b.paidGbp > 0.005 ? `${gbp(b.paidGbp)} paid` : 'paid by credit';
   const credit = daysLeft > 0 ? `${gbp(b.creditGbp)} credit left, expires ${expWord}` : `credit expired ${expWord}`;
+  // A snapshot from an earlier month means this month is not yet in the billing
+  // export — which is £0 spent so far, a KNOWN figure, not an unknown (owner,
+  // 1 Oct 2026). So this month's usage reads £0 (never null) and the tone is
+  // judged on that £0 (green, within budget, unless the credit is low or expired)
+  // rather than 'none'. The title still names the last month's figure for context
+  // ("Usage in September …"), and the line already says it is not in the billing
+  // yet. Before this, on the first of the month the Spend tile returned
+  // null/`none` until the export caught up — invisible on every day but the first.
+  const usageThisMonth = thisMonth ? b.usageGbp : 0;
   const title = `${thisMonth ? 'Usage this month' : `Usage in ${monthName}`} ${gbp(b.usageGbp)} · ${paid} · ${credit}`;
-  const googlePct = thisMonth && cfg.budgetGoogle ? b.usageGbp / cfg.budgetGoogle : 0;
+  const googlePct = cfg.budgetGoogle ? usageThisMonth / cfg.budgetGoogle : 0;
   const claudePct = cfg.budgetClaude ? money.claude / cfg.budgetClaude : 0;
   const worst = Math.max(googlePct, claudePct);
   const creditLow = daysLeft > 0 && (b.creditGbp < 20 || daysLeft < 30);
-  const tone = worst > 1 ? 'red' : worst > 0.8 || creditLow || daysLeft <= 0 ? 'amber' : thisMonth ? 'green' : 'none';
+  const tone = worst > 1 ? 'red' : worst > 0.8 || creditLow || daysLeft <= 0 ? 'amber' : 'green';
   const said = worst > 1 ? 'over budget' : worst > 0.8 ? 'close to budget'
     : daysLeft <= 0 ? 'the credit has run out — usage is paid for real'
       : creditLow ? (b.creditGbp < 20 ? 'credit running low' : `credit expires in ${daysLeft} days`)
@@ -133,7 +142,7 @@ export function billingTile(b, money, cfg, now = new Date()) {
     tone,
     title,
     line: `${said} · ${claudeWords(money, cfg)}`,
-    google: { spent: thisMonth ? b.usageGbp : null, budget: cfg.budgetGoogle, credit: b.creditGbp, creditExpires: b.creditExpires, source: b.source },
+    google: { spent: usageThisMonth, budget: cfg.budgetGoogle, credit: b.creditGbp, creditExpires: b.creditExpires, source: b.source },
     claude: claudeOf(money, cfg),
   };
 }
