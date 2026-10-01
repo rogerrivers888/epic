@@ -64,7 +64,13 @@ export async function recordAdmissionAnswer(venueRef, admission, { sourceUrl = n
   // to GB — the only market with live data (as everywhere this session; non-GB is
   // deferred groundwork), revisited when another market's currency is understood.
   const { rows: [pi] } = await query('select country_code from place_index where venue_ref = $1', [venueRef]);
-  if (String(pi?.country_code || 'GB').toUpperCase() !== 'GB') return null;
+  if (String(pi?.country_code || 'GB').toUpperCase() !== 'GB') {
+    // A venue now settled outside GB — clear any site answer written while its country
+    // was unknown (defaulted GB), so the cost row stops serving a band from a currency
+    // the extractor cannot validate (Codex). ownedCostBand then falls back to Google.
+    await query(`delete from place_answers where venue_ref = $1 and question_id = $2 and source = 'site'`, [venueRef, questionId]);
+    return null;
+  }
   const answer = admissionToAnswer(admission);
   await saveAnswer({
     venueRef,

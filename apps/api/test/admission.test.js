@@ -62,6 +62,20 @@ test('a non-GB venue is skipped — the extractor only validates £', async () =
   assert.equal(rows.length, 0, 'no owned cost-band answer for a non-GB place');
 });
 
+test('a venue that later settles outside GB has its stale free answer cleared', async () => {
+  const ref = 'osm:node/adm-resettle';
+  await seedPlace(ref, 'GB');
+  await admission.recordAdmissionAnswer(ref, { free: true }, { sourceUrl: 'https://x.example' });
+  assert.equal(await ownedCostBand(ref), 'free', 'written while GB');
+  // Its country is corrected to non-GB; the next research must clear the stale answer.
+  await query(`update place_index set country_code = 'IE' where venue_ref = $1`, [ref]);
+  const out = await admission.recordAdmissionAnswer(ref, { free: true }, { sourceUrl: 'https://x.example' });
+  assert.equal(out, null, 'skipped now it is non-GB');
+  assert.equal(await ownedCostBand(ref), null, 'and the stale free answer is gone');
+  const { rows } = await query(`select 1 from place_answers where venue_ref = $1 and source = 'site'`, [ref]);
+  assert.equal(rows.length, 0);
+});
+
 test('ownedCostBand ignores a disagreement between two owned sources', async () => {
   const ref = 'osm:node/adm-clash';
   await seedPlace(ref);

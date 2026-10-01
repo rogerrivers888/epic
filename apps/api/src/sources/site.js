@@ -206,6 +206,13 @@ const FREE = /\b(?:free\s+(?:admission|entry|entrance|to\s+enter|of\s+charge)|ad
 // so a free claim counts only when nothing qualifies it.
 const QUALIFIED = /\b(?:members?|membership|subscriber|annual pass|children|child|under[- ]?\d|accompanied|carers?|when you|if you|with (?:a|an|any|your)|for (?:up to|the first)|residents?|students?|locals?|nhs|blue light)\b/i;
 
+// "Free on Sundays", "free entry after 4pm", "free during term time" — a time-limited
+// free entry is not a universally free place, and storing it as one shows a paid venue
+// as Free (Codex). A day name, a time, or a season near the claim disqualifies it;
+// conservative on purpose — a genuinely free place that merely mentions a day nearby
+// falls back to Google rather than being confidently wrong.
+const TEMPORAL = /\b(?:mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?|weekdays?|weekends?|bank\s+holidays?|term\s+time|school\s+holidays?|after\s+\d|before\s+\d|\d\s?(?:am|pm)\b|half[- ]term)\b/i;
+
 const flatten = (html) => String(html)
   .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
   .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
@@ -312,7 +319,8 @@ export function admissionFrom(html, node = {}) {
       const after = afterEnd >= 0 ? tail.slice(0, afterEnd) : tail;
       const lead = flat.slice(Math.max(0, m.index - 40), m.index);
       const before = lead.slice(lead.search(/[.!?][^.!?]*$/) + 1);
-      if (!QUALIFIED.test(after) && !QUALIFIED.test(before)) { found.free = true; break; }
+      const barred = (x) => QUALIFIED.test(x) || TEMPORAL.test(x);
+      if (!barred(after) && !barred(before)) { found.free = true; break; }
     }
   }
   // A place that charges is not free, whatever a "free parking" line elsewhere

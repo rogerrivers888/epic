@@ -35,6 +35,15 @@ test('a qualifier after the free claim disqualifies it', () => {
   assert.equal(free('<p>Free admission for NHS staff.</p>'), false);
 });
 
+test('a time-limited free claim is not universally free', () => {
+  assert.equal(free('<p>Admission is free on Sundays.</p>'), false);
+  assert.equal(free('<p>Free entry after 4pm.</p>'), false);
+  assert.equal(free('<p>Free admission during term time.</p>'), false);
+  // But a genuinely universal free claim is not caught by the temporal guard.
+  assert.equal(free('<p>Free entry every day of the year.</p>'), true);
+  assert.equal(free('<p>Admission is free.</p>'), true);
+});
+
 test('a colon introduces the restriction, not a new sentence', () => {
   // A colon must not be treated as a boundary, or the qualifier it introduces is lost.
   assert.equal(free('<p>Free entry: members only.</p>'), false);

@@ -418,12 +418,12 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
         const now = held?.records?.[ref];
         if (!live || !now) continue;
         setOwnRecord(now);
-        // Keep polling until the venue page has been read (website resolved), because
-        // that is the step that writes the owned admission answer the cost row shows —
-        // stopping as soon as the open map's name arrived left Free hidden until a
-        // reopen (Codex). The name still appears at once via setOwnRecord each poll;
-        // only the stop is deferred. A place with no page polls to exhaustion (bounded).
-        if (now.website) return;
+        // Stop when research has actually finished (researchedAt set at finalisation,
+        // after the venue page is read and the admission answer written), not when a
+        // name or even a website arrives — those can come from the open map before the
+        // site step runs, so stopping on them left Free hidden until a reopen (Codex).
+        // The name still shows at once via setOwnRecord each poll; only the stop waits.
+        if (now.researchedAt) return;
       }
     };
     api.place(item.venueRef)
