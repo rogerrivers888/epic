@@ -353,7 +353,13 @@ export async function requireSession(req, res, next) {
 
     // Everything downstream — including `currentHousehold()`, 86 call sites
     // deep — is served inside this account's context (context.js).
-    if (account) return runAsAccount(account, () => runAsSpender({ householdId: account.household_id, sessionId: session.id }, next));
+    // A request under the admin door is a back-office request: a spend there
+    // needs the owner personally signed in (G11, paidGate.js). Decided by path,
+    // not by the session, so the owner's own client-app searches (client door)
+    // are never caught by it.
+    const backOffice = req.path.startsWith('/api/admin') || req.path.startsWith('/api/accounts');
+    const elevated = Boolean(req.access?.elevated);
+    if (account) return runAsAccount(account, () => runAsSpender({ householdId: account.household_id, sessionId: session.id, backOffice, elevated }, next));
     // The shared passcode carries no account and is the founding household's
     // own traffic — the one whose spending the cap most needs to see. Left
     // with no spender it read as background work and every Google call it
@@ -362,7 +368,7 @@ export async function requireSession(req, res, next) {
     // for this request, not a request that spends uncapped (Codex, 25 Sep
     // 2026) — the same as an account whose cap queries cannot be read.
     const founding = await firstHousehold();
-    return runAsAccount(null, () => runAsSpender({ householdId: founding?.id ?? null, sessionId: session.id }, next));
+    return runAsAccount(null, () => runAsSpender({ householdId: founding?.id ?? null, sessionId: session.id, backOffice, elevated }, next));
   } catch (err) {
     return next(err);
   }

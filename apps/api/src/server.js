@@ -243,10 +243,10 @@ const doorOf = (req) => (req.path.length > 1 ? req.path.replace(/\/+$/, '').toLo
 // so a new paid door cannot be added past this by forgetting a list. The admin
 // door is checked first so a non-admin still gets the mount's 404, not a 403
 // that would reveal the path.
-// The owner, personally, then a strict audit with his name — fail closed: if
-// the record cannot be written, the action does not run (G11, owner 1 Oct
-// 2026). Used for every privileged place-index action, so the guarantee holds
-// whatever the handler in the route file does or does not log.
+// The owner, personally, then a strict audit with his name on a successful
+// response — used for the privileged *bulk* place-index actions (G11, owner
+// 1 Oct 2026). Spending is gated separately at the paid choke point
+// (sources/paidGate.js), so it is not repeated here.
 const requireOwnerAndAudit = (action, then = null) => (req, res, next) =>
   requireOwnerSignedIn(action)(req, res, () => {
     // Logged with the owner's name when it actually happens: the row is written
@@ -268,11 +268,13 @@ const requireOwnerAndAudit = (action, then = null) => (req, res, next) =>
     });
     return then ? then(req, res, next) : next();
   });
-const paidOwnerThenLimit = requireOwnerAndAudit('spend money', (req, res, next) => spendLimit(req, res, next));
+// Spending from the back office requires personal sign-in — enforced at the
+// paid choke point (sources/paidGate.js), which covers every paid admin route
+// in every router, so here these shims only pace the spend as before.
 app.use('/api/admin/place-index', (req, res, next) =>
-  (hasDoor(req, 'admin') && PAID_ADMIN.has(doorOf(req)) ? paidOwnerThenLimit(req, res, next) : next()));
+  (PAID_ADMIN.has(doorOf(req)) ? spendLimit(req, res, next) : next()));
 app.use('/api/admin/demand', (req, res, next) =>
-  (hasDoor(req, 'admin') && doorOf(req) === '/search' && String(req.query.names ?? '') === '1' ? paidOwnerThenLimit(req, res, next) : next()));
+  (doorOf(req) === '/search' && String(req.query.names ?? '') === '1' ? spendLimit(req, res, next) : next()));
 
 // Speech is a paid minute per request, held to its own number per household
 // (`voiceLimit`) as well as the monthly minutes in routes/voice.js.

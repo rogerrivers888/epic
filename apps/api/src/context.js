@@ -52,12 +52,20 @@ export const runOutsideRequest = (fn) => storage.run({ account: null }, fn);
  * never before Google is exactly how today's ceiling surprise happens
  * again"). Google's `call()` reads it; nothing else has to be threaded.
  */
-export const runAsSpender = ({ householdId = null, sessionId = null } = {}, fn) =>
-  storage.run({ ...(storage.getStore() ?? { account: null }), spender: { householdId, sessionId } }, fn);
+export const runAsSpender = ({ householdId = null, sessionId = null, backOffice = false, elevated = false } = {}, fn) =>
+  storage.run({ ...(storage.getStore() ?? { account: null }), spender: { householdId, sessionId, backOffice, elevated } }, fn);
 
-/** The household (and session) a paid call is on behalf of, or nulls. */
+/**
+ * The household (and session) a paid call is on behalf of, or nulls.
+ *
+ * `backOffice` marks a request served under the admin door, and `elevated`
+ * whether the owner is personally signed in: a back-office spend needs the
+ * second (G11, 1 Oct 2026), while a household's own search — client door, not
+ * back office — never does. Background jobs enter with neither, so they are not
+ * treated as back-office.
+ */
 export function currentSpender() {
   const store = storage.getStore();
   if (store?.spender) return store.spender;
-  return { householdId: store?.account?.household_id ?? null, sessionId: null };
+  return { householdId: store?.account?.household_id ?? null, sessionId: null, backOffice: false, elevated: false };
 }

@@ -393,3 +393,22 @@ test('the agent list holds the last 24 hours and any live grant, and says how ma
     await query(`delete from api_sessions where token_hash like 'test:agents-%'`);
   }
 });
+
+test('a back-office spend needs the owner personally signed in; a household search never does', async () => {
+  // G11, 1 Oct 2026: the one choke point every paid call passes through.
+  await withGoogle(async (out) => {
+    // Back office (admin door), not elevated: refused before any request.
+    await assert.rejects(
+      () => runAsSpender({ householdId: HH, sessionId: SIGNED_IN, backOffice: true, elevated: false }, () => googleSource.brief('ChIJ_bo', { meter: {} })),
+      (e) => e.code === 'unattributed_paid_call' && /personally/.test(e.message));
+    assert.equal(out(), 0);
+
+    // Back office, elevated (owner by link): allowed.
+    await runAsSpender({ householdId: HH, sessionId: SIGNED_IN, backOffice: true, elevated: true }, () => googleSource.brief('ChIJ_bo_ok', { meter: {} }));
+    assert.equal(out(), 1);
+
+    // A household's own search is not back office: allowed without elevation.
+    await runAsSpender({ householdId: HH, sessionId: SIGNED_IN, backOffice: false, elevated: false }, () => googleSource.brief('ChIJ_household', { meter: {} }));
+    assert.equal(out(), 2);
+  });
+});

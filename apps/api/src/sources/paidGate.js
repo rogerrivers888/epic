@@ -124,12 +124,21 @@ const admittedFor = (householdId) => {
  * request that was not made.
  */
 export async function admitPaid({ meter = null, requests = 1 } = {}) {
-  const { householdId, sessionId } = currentSpender();
+  const { householdId, sessionId, backOffice, elevated } = currentSpender();
   if (!householdId) { noteFault(meter, 'unattributed'); throw new UnattributedCallError('no household'); }
   const standing = await sessionStanding(sessionId).catch(() => 'no_session');
   if (standing !== 'may_spend') {
     noteFault(meter, standing === 'agent' ? 'agent_session' : 'unattributed');
     throw new UnattributedCallError(WHY[standing] ?? standing);
+  }
+  // A spend from the back office needs the owner personally signed in — the one
+  // choke point every paid provider call passes through, so a paid admin route
+  // in any router is covered, present or future (G11, owner 1 Oct 2026). A
+  // household's own search (client door) and background jobs are not back
+  // office and pass.
+  if (backOffice && !elevated) {
+    noteFault(meter, 'needs_personal_sign_in');
+    throw new UnattributedCallError('a back-office spend needs you signed in personally');
   }
   // The estate's day, across every household and provider (sources/dailyCeiling.js).
   try { await assertUnderDailyCeiling(); } catch (err) { noteFault(meter, 'daily_ceiling'); throw err; }
