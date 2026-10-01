@@ -3100,7 +3100,6 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
   // a tab that is gone (Codex, 1 Oct 2026). The server's single-flight stops a
   // duplicate research run; this stops the dead tab's own callbacks.
   const mountedRef = useRef(true);
-  useEffect(() => () => { mountedRef.current = false; }, []);
   // Only one comparison fetch is ever in flight. A compare with match=true makes
   // a paid googleMatchFor, and two of them racing — "Ask Google" pressed just as
   // a research run finishes and reloads — could both reach it before either had
@@ -3113,6 +3112,10 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
   const reloadWanted = useRef(false);
   const reloadRef = useRef<() => void>(() => {});
   const reload = useCallback(() => {
+    // Not from a tab that has gone: a coalesced follow-up could otherwise start a
+    // fresh compare — and with match on, a paid Google match — after unmount
+    // (Codex, 1 Oct 2026).
+    if (!mountedRef.current) return;
     if (compareInFlight.current) { reloadWanted.current = true; return; }
     compareInFlight.current = true;
     const forRef = refId;
@@ -3122,11 +3125,13 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
       .catch(() => { if (activeRef.current === forRef) setData(null); })
       .finally(() => {
         compareInFlight.current = false;
-        if (reloadWanted.current) { reloadWanted.current = false; reloadRef.current(); }
+        if (reloadWanted.current && mountedRef.current) { reloadWanted.current = false; reloadRef.current(); }
       });
   }, [refId]);
   reloadRef.current = reload;
   useEffect(() => { reload(); }, [reload, match]);
+  // On unmount the tab stops reacting: no late stream frame, no coalesced reload.
+  useEffect(() => () => { mountedRef.current = false; reloadWanted.current = false; }, []);
   useEffect(() => { api.adminPlaceReach(refId).then(setReach).catch(() => setReach(null)); }, [refId]);
   // The quote and any running stream belong to the place on screen; both reset
   // when it changes, so a half-finished run is never read against another place.

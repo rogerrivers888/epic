@@ -68,6 +68,13 @@ const bad = (message, code = 'bad_request') => Object.assign(new Error(message),
 // is taken, a further run is told the desk is busy rather than left to wait.
 const researchLock = (ref) => `epic.research.${ref}`;
 
+// A fast same-process guard checked the moment a request arrives, before it waits
+// on a lock connection. The advisory lock alone would let a duplicate that queued
+// for a connection slip through once the first run finished and freed the lock
+// (Codex, 1 Oct 2026); recording the ref at arrival turns that duplicate away
+// immediately. The advisory lock still carries the cross-process case.
+const researching = new Set();
+
 /** Pence at the list price, to two places — the same arithmetic the rest of Places prices with. */
 const gbpPence = (usd) => Math.round((Number(usd) || 0) * 100 * USD_TO_GBP * 100) / 100;
 // A name and a type is a Pro call (Codex, 19 Sep 2026); a detail with reviews is
@@ -203,14 +210,20 @@ router.post('/research', requires('manage_library'), async (req, res, next) => {
 
   // One run per place at a time, across every worker: a second press (a remounted
   // tab, a retry, a request on another replica) is turned away rather than left to
-  // spend and write beside the first. A connection from the bounded lock pool
-  // holds the lock for the life of the run.
-  const holder = await lockPool.connect().catch(() => null);
-  if (!holder) {
-    return res.status(503).json({ error: 'lock_desk_busy', message: 'Too many places are being researched right now — give it a moment and try again.' });
+  // spend and write beside the first. The arrival guard catches a same-process
+  // duplicate at once; the advisory lock, held on a connection from the bounded
+  // lock pool for the life of the run, carries the cross-process case.
+  if (researching.has(ref)) {
+    return res.status(409).json({ error: 'already_running', message: 'This place is being researched right now — give it a moment.' });
   }
+  researching.add(ref);
+  let holder = null;
   let locked = false;
   try {
+    holder = await lockPool.connect().catch(() => null);
+    if (!holder) {
+      return res.status(503).json({ error: 'lock_desk_busy', message: 'Too many places are being researched right now — give it a moment and try again.' });
+    }
     ({ rows: [{ locked }] } = await holder.query('select pg_try_advisory_lock(hashtext($1)) as locked', [researchLock(ref)]));
     if (!locked) {
       return res.status(409).json({ error: 'already_running', message: 'This place is being researched right now — give it a moment.' });
@@ -250,19 +263,20 @@ router.post('/research', requires('manage_library'), async (req, res, next) => {
       if (!res.writableEnded) res.end();
     }
   } finally {
-    // Whatever happened — the lock refused, the lock query failing, the run
-    // throwing — the lock is released before the connection goes back to the lock
-    // pool, so the next holder of that connection never inherits it.
-    let unlockFailed = false;
-    if (locked) {
-      try { await holder.query('select pg_advisory_unlock(hashtext($1))', [researchLock(ref)]); }
-      catch { unlockFailed = true; }
+    // Release the advisory lock and return the lock connection. If the unlock did
+    // not land, the session may still hold the lock, so the connection is released
+    // with an error — destroyed, not returned to the pool, where it would answer
+    // 409 for this place for ever and could reacquire the lock reentrantly (Codex,
+    // 1 Oct 2026). The arrival guard is cleared whatever happened.
+    if (holder) {
+      let unlockFailed = false;
+      if (locked) {
+        try { await holder.query('select pg_advisory_unlock(hashtext($1))', [researchLock(ref)]); }
+        catch { unlockFailed = true; }
+      }
+      holder.release(unlockFailed ? new Error('advisory unlock failed; connection discarded') : undefined);
     }
-    // If the unlock did not land, the session may still hold the lock. Releasing
-    // with an error destroys the connection instead of returning it to the pool,
-    // where it would answer 409 for this place for ever and could reacquire the
-    // lock reentrantly (Codex, 1 Oct 2026).
-    holder.release(unlockFailed ? new Error('advisory unlock failed; connection discarded') : undefined);
+    researching.delete(ref);
   }
 });
 
