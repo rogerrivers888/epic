@@ -80,6 +80,15 @@ const money = (pence) => `£${(Math.max(0, pence) / 100).toFixed(2)}`;
 const googleUsable = () => googleSource.enabled() && !sourceOff('google');
 
 /**
+ * "Compare all" is an area-or-ring action, never a country-wide paid sweep
+ * (owner, 1 Oct 2026; C38 — no paid research pass per place). At a country scope
+ * the summary still shows the honest opened/total partial; the action refuses and
+ * invites narrowing to a town, district or ring.
+ */
+const isCountryScope = (scope) => scope.kind === 'area' && scope.area?.kind === 'country';
+const NARROW_TO_AREA = 'Compare all works on an area or a ring. A whole country would be a paid sweep — narrow to a town, a postcode district or a ring, then compare all there.';
+
+/**
  * The ceiling, checked before a call rather than after it.
  *
  * "Nothing spends past it" is printed on the Runs board, and a limit that is
@@ -2961,6 +2970,8 @@ router.get('/subcategory-summary/quote', requires('view_library'), async (req, r
     const sub = req.query.sub ? String(req.query.sub) : null;
     if (!sub) throw bad('Which subcategory? Pass ?sub=.');
     const refs = await subcategoryRefs(scope, sub);
+    // Compare all is capped to an area or a ring; a whole country is a sweep.
+    if (isCountryScope(scope)) return res.json({ refs: refs.length, pence: 0, tooBroad: true, message: NARROW_TO_AREA });
     if (!googleUsable()) return res.json({ refs: refs.length, pence: 0, off: true });
     const held = await alreadyHeld(refs);
     const misses = await missesKept(refs, 'google', { withinMinutes: STALE_MONTHS * 30 * 24 * 60 });
@@ -2991,6 +3002,10 @@ router.post('/subcategory-summary/compare-all', requires('manage_library'), asyn
     if (scope.kind === 'none' || scope.kind === 'unknown') throw bad('Which area? Pass ?where=.');
     const sub = req.body?.sub ? String(req.body.sub) : (req.query.sub ? String(req.query.sub) : null);
     if (!sub) throw bad('Which subcategory? Pass sub.');
+    // An area or a ring only — never a country-wide sweep (owner, 1 Oct 2026;
+    // C38). The summary still shows the honest partial at a country scope; this
+    // action sends the person to narrow it.
+    if (isCountryScope(scope)) return res.status(422).json({ error: 'too_broad', message: NARROW_TO_AREA });
     if (!googleUsable()) {
       return res.status(422).json({ error: 'not_switched_on', message: 'Google is not switched on here.' });
     }
