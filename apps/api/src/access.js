@@ -72,6 +72,7 @@ export const CAPABILITY_KEYS = new Set(CAPABILITIES.map((c) => c.key));
  * this closes.
  */
 export const VIEW_CAPABILITIES = CAPABILITIES.filter((c) => !c.manages).map((c) => c.key);
+const MANAGE_CAPABILITIES = new Set(CAPABILITIES.filter((c) => c.manages).map((c) => c.key));
 
 /** The owner's role holds everything there is, including capabilities added later. */
 const ALL = () => CAPABILITIES.map((c) => c.key);
@@ -94,33 +95,45 @@ const ALL = () => CAPABILITIES.map((c) => c.key);
 export async function accessFor(req) {
   const account = req.account ?? null;
   const session = req.session ?? null;
+  const isAgent = session?.kind === 'agent';
 
-  // An agent session reads and proposes; it never writes to production (G11).
-  // Decided before the account, because a coding agent signs in on the owner's
-  // own passcode and would otherwise be the owner — it is the session, not the
-  // account, that is restricted.
-  if (session?.kind === 'agent') {
+  // The baseline: what this account would hold on an ordinary sign-in. Agents
+  // are a *downgrade* of this, not a replacement for it — so a household member
+  // on an automated user agent is still only a member, never the back office
+  // (Codex, 1 Oct 2026). It is the session that is restricted, applied on top
+  // of whatever the account already is.
+  const base = await baselineAccess(account);
+
+  // Elevated: the owner, signed in personally (a magic link, later Google),
+  // from a real device — never the shared passcode, never automated. This is
+  // what a privileged action requires (G11), and it is a property of *how* this
+  // session signed in, so it is computed here from the session.
+  const personal = session?.auth_method === 'link' || session?.auth_method === 'google';
+  const notAutomated = session?.kind !== 'agent' && session?.kind !== 'service';
+  const elevated = Boolean(base.isOwner && personal && notAutomated);
+
+  if (isAgent) {
+    // Read what this account may read, change nothing (G11): the reads it
+    // already held, with every `manage_*` removed, and never elevated.
+    const reads = new Set([...base.capabilities].filter((k) => !MANAGE_CAPABILITIES.has(k)));
     return {
-      doors: ['client', 'admin'],
-      capabilities: new Set(VIEW_CAPABILITIES),
+      doors: base.doors,
+      capabilities: reads,
       role: { key: 'agent', label: 'Agent — read & propose', is_owner: false },
       isOwner: false,
       elevated: false,
     };
   }
 
-  // Elevated: the owner, signed in personally (a magic link, later Google),
-  // from a real device — never the shared passcode, never automated. This is
-  // what a privileged action requires (G11). It is a property of *how* this
-  // session signed in, so it is computed here from the session, not the account.
-  const personal = session?.auth_method === 'link' || session?.auth_method === 'google';
-  const notAutomated = session?.kind !== 'agent' && session?.kind !== 'service';
+  return { ...base, elevated };
+}
 
+/** What an account holds on an ordinary (non-agent) sign-in, before the session narrows it. */
+async function baselineAccess(account) {
   if (!account) {
     // The shared passcode with no claimed owner account: the owner's ordinary
-    // way in, so every door and capability — but the passcode is not personal,
-    // so never elevated.
-    return { doors: DOORS, capabilities: new Set(ALL()), role: { key: 'owner', label: 'Owner', isOwner: true }, isOwner: true, elevated: false };
+    // way in, so every door and capability.
+    return { doors: DOORS, capabilities: new Set(ALL()), role: { key: 'owner', label: 'Owner', isOwner: true }, isOwner: true };
   }
   const role = account.role_id ? await roleForAccount(account.id) : null;
   // `accounts.role` is the older column and still says 'owner' for the founding
@@ -128,23 +141,14 @@ export async function accessFor(req) {
   // owner out of the back office he built.
   const isOwner = Boolean(role?.is_owner) || account.role === 'owner';
   if (isOwner) {
-    return {
-      doors: DOORS,
-      capabilities: new Set(ALL()),
-      role: role ?? { key: 'owner', label: 'Owner', is_owner: true },
-      isOwner: true,
-      // Ordinary manage works on the passcode; the privileged set needs the
-      // owner personally signed in (owner, 1 Oct 2026).
-      elevated: Boolean(isOwner && personal && notAutomated),
-    };
+    return { doors: DOORS, capabilities: new Set(ALL()), role: role ?? { key: 'owner', label: 'Owner', is_owner: true }, isOwner: true };
   }
-  if (!role) return { doors: ['client'], capabilities: new Set(), role: null, isOwner: false, elevated: false };
+  if (!role) return { doors: ['client'], capabilities: new Set(), role: null, isOwner: false };
   return {
     doors: Array.isArray(role.doors) ? role.doors : ['client'],
     capabilities: new Set(role.capabilities ?? []),
     role,
     isOwner: false,
-    elevated: false,
   };
 }
 

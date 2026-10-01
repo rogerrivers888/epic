@@ -94,3 +94,14 @@ test('requireOwnerSignedIn lets an elevated session through and refuses the rest
   assert.equal(none.passed, false);
   assert.equal(none.r.code, 403);
 });
+
+test('an agent sign-in on a member account is still only a member, never the back office', async () => {
+  // Codex, 1 Oct 2026: the agent branch must downgrade the account, not replace
+  // it — a household member on an automated user agent must not read the estate.
+  const member = { id: 'm2', email: 'sam@test', role: null };
+  const a = await accessFor({ account: member, session: { kind: 'agent', auth_method: 'passcode' } });
+  assert.deepEqual(a.doors, ['client'], 'the client door only — no admin');
+  assert.equal(a.capabilities.size, 0, 'a member holds no reads to keep');
+  assert.equal(a.isOwner, false);
+  assert.equal(a.elevated, false);
+});

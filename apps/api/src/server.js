@@ -162,6 +162,21 @@ app.use('/api/images', libraryImageRoutes);
 app.use('/api/order', orderTicketRoutes);
 
 app.use(requireSession);
+// An agent session reads and proposes; it never writes to production (G11,
+// owner 1 Oct 2026). Capabilities stop it at the back office's manage handlers,
+// but the client routes (a trip, the household) have no capability checks — so
+// the write is refused here, at the door, for every agent session whatever the
+// path. Reads pass; sign-in is a public path and never reaches this.
+const WRITE = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+app.use((req, res, next) => {
+  if (req.session?.kind === 'agent' && WRITE.has(req.method)) {
+    return res.status(403).json({
+      error: 'agent_read_only',
+      message: 'This sign-in is an agent: it may read and propose, but not change anything. Sign in on your own device to make this change.',
+    });
+  }
+  return next();
+});
 // Every photo link in a JSON answer is signed for the household and session it
 // is being sent to, not for whoever filled the shared cache it came out of —
 // the picture it fetches is spent on their behalf (sources/photoLinks.js;
