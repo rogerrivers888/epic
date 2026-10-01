@@ -14,8 +14,10 @@
 -- which place ids this run has a committed outcome for — ids we already hold — and
 -- a row is written in the same statement as the count it adds to, so a resume
 -- never pays for a counted place twice and a crash can never split a count from
--- its record. Only one worker touches a run at a time (an advisory lock), so no
--- place is paid for twice. The histogram tells two coverage facts apart that look
+-- its record. Only one worker touches a run at a time — a row lease (leased_by,
+-- leased_until) held by short pooled queries, never a connection kept open for
+-- the pass — so no place is paid for twice and concurrent area-runs cannot
+-- exhaust the pool. The histogram tells two coverage facts apart that look
 -- identical in the atlas: a place Google holds but gives no price, versus an id
 -- that will not resolve at all — a stale id we hold, the more interesting number.
 
@@ -52,15 +54,22 @@ create table if not exists cost_dist_runs (
   state              text        not null default 'running'
                      check (state in ('running', 'done')),
   -- Why a still-running run is not being worked: a 429, a timeout, the grant
-  -- gone. NULL while it is being worked or when it is done. A running run with a
-  -- problem is reclaimable at once; one without, only once its heartbeat is stale.
+  -- gone. NULL while it is being worked or when it is done.
   problem            text,
+  -- The lease that makes a worker exclusive without holding a connection: a
+  -- worker takes the run by stamping its own token and an expiry, renews the
+  -- expiry as it goes, and clears it on pause or completion. A run is free to
+  -- reclaim when leased_until is null or in the past (its worker is gone); every
+  -- write a worker makes is gated on its own token, so a lease that lapses mid-run
+  -- and is stolen cannot be clobbered by the slow worker that lost it.
+  leased_by          uuid,
+  leased_until       timestamptz,
   started_at         timestamptz not null default now(),
   touched_at         timestamptz not null default now(),
   finished_at        timestamptz
 );
--- The ones to reclaim at boot: a paused run, or one whose worker died silently.
-create index if not exists cost_dist_runs_going on cost_dist_runs (touched_at) where state = 'running';
+-- The ones to reclaim at boot: a paused run, or one whose worker's lease lapsed.
+create index if not exists cost_dist_runs_going on cost_dist_runs (leased_until) where state = 'running';
 -- At most one running run per area: two Starts racing cannot each insert one and
 -- then each pay for the whole area (Codex). The loser resumes the winner's run.
 create unique index if not exists cost_dist_runs_one_running on cost_dist_runs (area_slug) where state = 'running';

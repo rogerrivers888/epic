@@ -48,10 +48,11 @@ test('estimate prices one Place Details per unclaimed place; start gates on the 
   assert.equal(run.requests, 5);
   assert.deepEqual(run.refs, ['google:A', 'google:B', 'google:C', 'google:D', 'google:E'], 'the place set is frozen onto the run');
   // A second start while one runs resumes rather than duplicates, and does not create.
+  // (reclaim is decided by the lease, exercised in its own test; the lease acquisition
+  // dedupes workers, so a double-launch here could never double-pay.)
   const again = await dist.start({ areaSlug: AREA, confirm: 0, startedBy: 'test' });
   assert.equal(again.run.id, run.id, 'resumed, not a second run');
   assert.equal(again.created, false, 'the loser does not create — it resumes the winner');
-  assert.equal(again.reclaim, false, 'a run just created is being worked, not reclaimable');
 });
 
 test('work records one band per place, and status splits no-price from unresolved', async (t) => {
@@ -133,13 +134,15 @@ test('a reclaim transfers household and session together; an active re-start doe
   const h2 = randomUUID(); const s2 = randomUUID();
   // An active run: a second admin's re-start must not touch its credentials, or
   // its remaining calls would charge h1 using s2 — the wrong household (Codex).
+  // A live lease marks the run as actively worked.
+  await query("update cost_dist_runs set leased_by = $2, leased_until = now() + interval '2 minutes' where id = $1", [run.id, randomUUID()]);
   const active = await dist.start({ areaSlug: AREA, confirm: 0, startedBy: 'b', householdId: h2, startedSessionId: s2 });
-  assert.equal(active.reclaim, false, 'an actively-worked run is not reclaimable');
+  assert.equal(active.reclaim, false, 'an actively-leased run is not reclaimable');
   let row = (await query('select household_id, started_session_id from cost_dist_runs where id = $1', [run.id])).rows[0];
   assert.equal(row.household_id, h1, 'active run keeps its household');
   assert.equal(row.started_session_id, s1, 'active run keeps its session');
-  // Once paused it is reclaimable, and a reclaim moves both to the new caller.
-  await query("update cost_dist_runs set problem = 'paused for the test' where id = $1", [run.id]);
+  // Once the lease lapses it is reclaimable, and a reclaim moves both to the new caller.
+  await query("update cost_dist_runs set leased_until = now() - interval '1 minute' where id = $1", [run.id]);
   const reclaimed = await dist.start({ areaSlug: AREA, confirm: 0, startedBy: 'b', householdId: h2, startedSessionId: s2 });
   assert.equal(reclaimed.reclaim, true, 'a paused run is reclaimable');
   row = (await query('select household_id, started_session_id from cost_dist_runs where id = $1', [run.id])).rows[0];
@@ -147,19 +150,15 @@ test('a reclaim transfers household and session together; an active re-start doe
   assert.equal(row.started_session_id, s2, 'and the new session, paired with it');
 });
 
-test('only one worker touches a run — a second cannot while the first holds the lock', async (t) => {
+test('only one worker touches a run — a second cannot while the lease is live', async (t) => {
   await seed(); t.after(() => query(`delete from place_areas where area_slug = $1`, [AREA]));
   const { run } = await dist.start({ areaSlug: AREA, confirm: 5, startedBy: 'test' });
-  // Hold the run's advisory lock on another connection, as a first worker would,
-  // so no place is ever paid for twice by two racing recoveries (Codex).
-  const holder = await pool.connect();
-  t.after(() => holder.release());
-  const { rows: [{ got }] } = await holder.query("select pg_try_advisory_lock(hashtext('cost_dist_runs'), hashtext($1)) as got", [run.id]);
-  assert.equal(got, true, 'the first worker holds the lock');
+  // A live lease, as a first worker would hold, so no place is ever paid for twice
+  // by two racing recoveries (Codex).
+  await query("update cost_dist_runs set leased_by = $2, leased_until = now() + interval '2 minutes' where id = $1", [run.id, randomUUID()]);
   const asked = [];
   const get = async (id) => { asked.push(id); return { priceLevel: 1 }; };
   const r = await dist.work(run.id, { get });
-  assert.deepEqual(asked, [], 'the second worker paid for nothing while the lock was held');
+  assert.deepEqual(asked, [], 'the second worker paid for nothing while the lease was live');
   assert.equal(r.state, 'running', 'and it left the run alone');
-  await holder.query("select pg_advisory_unlock(hashtext('cost_dist_runs'), hashtext($1))", [run.id]);
 });
