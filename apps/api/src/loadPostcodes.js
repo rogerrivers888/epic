@@ -122,11 +122,13 @@ export async function loadPostcodes(file, { source = null } = {}) {
   // path runs it — the scheduled and admin-triggered refresh (postcodeRefresh)
   // included — and only after a real swap (Codex).
   if (stats.swapped) {
-    // Let a failure propagate rather than swallowing it: if it is lost, the scheduled
-    // refresh (postcodeRefresh) records the release as loaded and never retries,
-    // leaving already-placed rows under stale countries (Codex).
-    const corrected = await backfillCountriesFromPostcodes();
-    if (corrected) console.log(`country backfill: ${corrected} place(s) corrected from their postcode`);
+    // Apply the country correction promptly across the corpus now the new snapshot is
+    // in. Best-effort: contention with a rebuild returns deferred (settle/reindex will
+    // apply it) and must not fail the load, which would strand the refresh schedule; a
+    // genuine error still propagates (Codex).
+    const { corrected, deferred } = await backfillCountriesFromPostcodes();
+    if (deferred) console.log('country backfill deferred — a rebuild holds the build lock; settle/reindex will apply it');
+    else if (corrected) console.log(`country backfill: ${corrected} place(s) corrected from their postcode`);
   }
   return stats;
 }

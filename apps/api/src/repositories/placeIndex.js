@@ -1274,10 +1274,15 @@ const correctPlaceCountriesFromPostcode = async (q = query) => {
  * a non-waiting call then skip — leaving the new snapshot's outcodes uncorrected.
  * Waiting runs the correction after the rebuild releases, against the new snapshot.
  *
- * If the wait times out (a rebuild held the lock past the 30s limit) it THROWS rather
- * than returning a count, so the caller — the postcode load — fails and the scheduled
- * refresh retries instead of recording the release as loaded with places left stale
- * (Codex).
+ * It is prompt-but-best-effort, and that is deliberate (Codex, after several rounds
+ * on the loader/refresh coupling). The correctness guarantee for a place's country is
+ * not this pass — it is settle (step 0a, hourly, on every place it touches) and a
+ * full reindex (which normalises and re-resolves the whole index). This pass only
+ * applies the correction *promptly* across the corpus after a new ONS release. So if
+ * a rebuild holds the lock past the wait, it returns `{ deferred: true }` rather than
+ * throwing: the caller does not fail the load (which would strand the refresh
+ * schedule), and the next settle/reindex applies it. A genuine error — a real SQL
+ * fault, not mere contention — still propagates and is not swallowed.
  */
 export async function backfillCountriesFromPostcodes() {
   const BUSY = Symbol('build-lock-busy');
@@ -1285,8 +1290,8 @@ export async function backfillCountriesFromPostcodes() {
     await normaliseOutcodeCountries();
     return correctPlaceCountriesFromPostcode();
   }, BUSY, { wait: true });
-  if (result === BUSY) throw new Error('country backfill could not take the build lock within the wait; a rebuild is running — the postcode load will retry');
-  return result;
+  if (result === BUSY) return { corrected: 0, deferred: true };
+  return { corrected: result, deferred: false };
 }
 
 export async function settleNew({ limit = 5000 } = {}) {

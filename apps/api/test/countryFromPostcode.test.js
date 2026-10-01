@@ -105,8 +105,9 @@ test('backfillCountriesFromPostcodes normalises the locality and requeues the pl
   await query(`insert into place_records (venue_ref, postcode, updated_at) values ($1,'ZZ6 1AA', now())
                on conflict (venue_ref) do update set postcode = excluded.postcode`, [ref]);
   await query('update place_index set placed_at = now() where venue_ref = $1', [ref]);
-  const n = await index.backfillCountriesFromPostcodes();
-  assert.ok(n >= 1, 'it corrected at least this place');
+  const { corrected, deferred } = await index.backfillCountriesFromPostcodes();
+  assert.equal(deferred, false, 'the lock was free, so it ran');
+  assert.ok(corrected >= 1, 'it corrected at least this place');
   const { rows: [pi] } = await query('select country_code, placed_at from place_index where venue_ref = $1', [ref]);
   assert.equal(pi.country_code, 'GB', 'the GB outcode (ZZ6) wins over the IE stamp');
   assert.equal(pi.placed_at, null, 'and the place is requeued so settle refiles it under GB');
