@@ -36,6 +36,7 @@ import reachRoutes from './routes/reach.js';
 import scoringRoutes from './routes/scoring.js';
 import { router as localityRoutes } from './routes/localities.js';
 import placeIndexRoutes from './routes/placeIndex.js';
+import placeResearchRoutes from './routes/placeResearch.js';
 import censusFindingRoutes from './routes/censusFindings.js';
 import runsRoutes from './routes/runs.js';
 import demandRoutes from './routes/demand.js';
@@ -205,6 +206,14 @@ for (const path of SPEND_PREFIXES) {
  */
 const PAID_ADMIN = new Set([
   '/place/compare', '/ask', '/collect', '/pictures/find',
+  // The explorer's paid doors (29 Sep – 1 Oct 2026): "Research this place" and
+  // the ranked Google list (this file's own routes), and the Places-index
+  // router's "Show names from Google" and "Compare all". Their free `/quote` and
+  // read siblings (/research/quote, /ranked/quote, /names/quote,
+  // /subcategory-summary, /subcategory-summary/quote) stay out, so a browse is
+  // never rate-limited (Codex, 18 Sep 2026) — the rate wall on top of each
+  // door's own manage_library + ceiling + paid-gate (G6).
+  '/research', '/ranked', '/names', '/subcategory-summary/compare-all',
 ]);
 // Compared without its trailing slash. Express routes `/collect/` to the same
 // handler, and matching the path as written let a paid door be knocked on with
@@ -265,6 +274,11 @@ app.use('/api/admin/questions', requireDoor('admin'), questionRoutes);
 // what it reads. The older locality routes stay mounted beneath it — nothing
 // that had a link to them has lost it.
 app.use('/api/admin/place-index', requireDoor('admin'), placeIndexRoutes);
+// "Research this place" and the ranked Google list: the explorer's two live
+// endpoints, beside the same Places prefix (routes/placeResearch.js). Their own
+// file and own leaf paths (/research, /research/quote, /ranked, /ranked/quote),
+// so nothing in the index router is shadowed.
+app.use('/api/admin/place-index', requireDoor('admin'), placeResearchRoutes);
 // What the census found out, and what it found out about itself
 // (routes/censusFindings.js): denominators with their coverage, drawers nobody
 // asked about, types that never answer, and the free ground counts beside ours.

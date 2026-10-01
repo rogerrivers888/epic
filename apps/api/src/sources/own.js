@@ -536,17 +536,25 @@ export async function enrich(venueRef, opts = {}) {
   return out;
 }
 
-async function enrichOnce(venueRef, { householdId = null, sessionId = null, seed: given = {}, force = false, replace = force, paid = false, search = paid, hygiene = true } = {}) {
+async function enrichOnce(venueRef, { householdId = null, sessionId = null, seed: given = {}, force = false, replace = force, paid = false, search = paid, hygiene = true, onStep = null } = {}) {
   // Every paid call below is on this household's behalf, and the cap on its
   // calls that can cost money is asked at Google's door — which reads the
   // spender from the context rather than from thirty call sites.
   // The session as well as the household: a sweep or a request that asked for
   // this research is who the ledger names; with neither in hand, whatever the
   // surrounding context already says (26 Sep 2026).
-  return runAsSpender({ householdId, sessionId: sessionId ?? currentSpender().sessionId }, () => research(venueRef, { householdId, given, force, replace, paid, search, hygiene }));
+  return runAsSpender({ householdId, sessionId: sessionId ?? currentSpender().sessionId }, () => research(venueRef, { householdId, given, force, replace, paid, search, hygiene, onStep }));
 }
 
-async function research(venueRef, { householdId, given, force, replace, paid, search, hygiene }) {
+async function research(venueRef, { householdId, given, force, replace, paid, search, hygiene, onStep = null }) {
+  // A place page watching this research runs a listener that says which source
+  // is being checked and what it found (owner, 29 Sep 2026). It is advisory
+  // only: a throwing or slow listener must never break or hold up the research,
+  // so every call is wrapped and its return ignored.
+  const step = (source, state, detail = {}) => {
+    if (!onStep) return;
+    try { onStep({ source, state, ...detail }); } catch { /* a watcher never breaks the work */ }
+  };
   await owned.ensureRecord(venueRef);
   const before = await owned.enrichStateOf(venueRef);
   if (!force && alreadyResearched(before)) return { state: 'done', skipped: 'already researched' };
@@ -577,6 +585,7 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
   // 1. The same place in the open map. Everything else is easier once this
   //    lands, because OSM carries the website the other two need.
   let osm = null;
+  step('open-map', 'checking');
   // A record that already holds its open-map reference is not matched again
   // on a pass that replaces nothing (owner, C19, 26 Sep 2026): the backfill of
   // four thousand places was asking Overpass to find places we had already
@@ -589,6 +598,7 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
     osm = held;
     matched.osm = before?.matched?.osm ?? { ref: held.ref, how: 'held' };
     identified += 1;
+    step('open-map', 'found', { how: 'held', ref: held.ref });
     if (!seed.website) seed.website = held.website ?? null;
     if (held.category) seed.category = held.category;
   } else try {
@@ -650,15 +660,18 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
         }),
       ]);
       identified += 1;
+      step('open-map', 'found', { ref: osm.ref, distanceM: osm.distanceM });
       if (!seed.website) seed.website = v?.website ?? null;
       // The map has just said what kind of place this is, and that is what
       // decides whether their page is worth reading for a menu.
       if (v?.category) seed.category = v.category;
     } else {
       problems.push('no match in OpenStreetMap');
+      step('open-map', 'nothing');
     }
   } catch (err) {
     problems.push(`OpenStreetMap: ${String(err?.message || err).slice(0, 120)}`);
+    step('open-map', 'failed');
   }
 
   // 1a. Where their own page is, when the open map does not know this place.
@@ -716,6 +729,7 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
 
   // 2. Their own page: the facts a business publishes to be republished.
   if (seed.website) {
+    step('venue-site', 'checking', { website: seed.website });
     try {
       const site = await siteFacts({ website: seed.website, name: seed.name, category: seed.category ?? null, locality: seed.locality ?? null, knownAddress: seed.address ?? null });
       // Replace, do not erase — a site that would not answer this afternoon has
@@ -743,11 +757,14 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
           put('body', site.body),
         ]);
         identified += 1;
+        step('venue-site', 'found', { url: site.sourceUrl ?? seed.website });
       } else {
         problems.push('their website did not answer');
+        step('venue-site', 'nothing');
       }
     } catch (err) {
       problems.push(`their website: ${String(err?.message || err).slice(0, 120)}`);
+      step('venue-site', 'failed');
     }
   }
 
@@ -760,10 +777,12 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
   //    one in six we were managing (owner, 4 Sep 2026).
   const point = { lat: osm?.lat ?? seed.lat, lng: osm?.lng ?? seed.lng };
   if (point.lat != null && point.lng != null) {
+    step('address', 'checking');
     try {
       const geo = await reverseGeocode(point.lat, point.lng, { zoom: 18 });
       await logCall(householdId, 'osm-nominatim', 'own.where');
       if (geo) {
+        step('address', 'found', { formatted: geo.formatted ?? null });
         matched.nominatim = { formatted: geo.formatted ?? null };
         await forgetSource(venueRef, ['nominatim']);
         await Promise.all([
@@ -777,6 +796,7 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
   }
 
   // 4. The encyclopedias, for the places that have an article.
+  step('encyclopedia', 'checking');
   try {
     let enc;
     // The drawer the index files it under travels with the record's own
@@ -805,9 +825,13 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
         putFact(venueRef, 'website', 'wikidata', enc.officialWebsite, enc.confidence),
       ]);
       identified += 1;
+      step('encyclopedia', 'found', { title: enc.title, url: enc.url });
+    } else {
+      step('encyclopedia', 'nothing');
     }
   } catch (err) {
     problems.push(`Wikipedia: ${String(err?.message || err).slice(0, 120)}`);
+    step('encyclopedia', 'failed');
     // The facts were kept, so the match they came from is kept with them
     // (Codex, 26 Sep 2026).
     if (before?.matched?.wikipedia) matched.wikipedia = before.matched.wikipedia;
@@ -834,6 +858,7 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
       const pc = firstBy('postcode') ?? seed.postcode ?? null;
       const nm = firstBy('name') ?? seed.name ?? null;
       if (pc) {
+        step('hygiene', 'checking');
         const got = await fsa.lookup({ name: nm, postcode: pc, householdId, venueRef });
         // Replaced only by an answer: a match, or the register's own "nothing
         // here". A register that could not be reached has not withdrawn what
@@ -847,12 +872,17 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
             putFact(venueRef, 'fsa_rated_at', 'fsa', got.facts.ratedAt, 1),
             putFact(venueRef, 'fsa_id', 'fsa', got.facts.id, 1),
           ]);
+          step('hygiene', 'found', { rating: got.facts.rating });
         } else if (got.problem && !/nothing at that postcode/.test(got.problem)) {
           problems.push(`the hygiene register: ${got.problem}`);
+          step('hygiene', 'failed');
+        } else {
+          step('hygiene', 'nothing');
         }
       }
     } catch (err) {
       problems.push(`the hygiene register: ${String(err?.message || err).slice(0, 120)}`);
+      step('hygiene', 'failed');
     }
   }
 
