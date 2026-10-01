@@ -21,7 +21,7 @@ import * as insights from '../repositories/insights.js';
 import * as rolesRepo from '../repositories/roles.js';
 import { accountById, listAccounts, signInsFor } from '../repositories/accounts.js';
 import { householdById, membersWithConstraints } from '../repositories/households.js';
-import { liveSessions, liveAgentSessions, grantPaid } from '../repositories/sessions.js';
+import { liveSessions, liveAgentSessions } from '../repositories/sessions.js';
 import { todayStatus, alarmsToday } from '../sources/dailyCeiling.js';
 import { forgetSession } from '../sources/paidGate.js';
 import { CHECKED_ON, DOMAINS, PROVIDERS, SERVICES, cellsOf, matrix } from '../sources/catalogue.js';
@@ -31,7 +31,7 @@ import { googleSource } from '../sources/google.js';
 import { BENCHABLE, judge, postcodeOf, say, tally } from '../domain/sourceBench.js';
 import * as providerCalls from '../repositories/providerCalls.js';
 import { currentHousehold } from './household.js';
-import { query } from '../db.js';
+import { query, withTransaction } from '../db.js';
 import * as mailRepo from '../repositories/mail.js';
 import { mailStatus, sendMail } from '../sources/mail.js';
 import { STATUS_WORDS } from '../domain/mail.js';
@@ -602,7 +602,7 @@ router.get('/data/sources/bench', requires('view_reporting'), async (_req, res, 
  * are in this response and nowhere else; the run keeps ours and the verdicts
  * (migration 078). Every call goes through the ledger.
  */
-router.post('/data/sources/bench', requires('manage_settings'), async (req, res, next) => {
+router.post('/data/sources/bench', requires('manage_settings'), requireOwnerSignedIn('run the source bench'), async (req, res, next) => {
   try {
     const provider = String(req.body?.provider ?? '');
     const source = BENCH_SOURCES[provider];
@@ -721,13 +721,27 @@ router.get('/sessions/agents', requires('view_activity'), async (req, res, next)
 router.post('/sessions/:id/grant', requires('manage_settings'), requireOwnerSignedIn('grant paid calls'), async (req, res, next) => {
   try {
     const hours = Math.max(0, Math.min(72, Math.round(Number(req.body?.hours ?? 0))));
-    // The audit is written first and not swallowed: a money-spending action must
-    // not succeed without the record this gate exists to guarantee (Codex, 1 Oct
-    // 2026). A grant with no name against it is worse than a grant that failed.
-    await rolesRepo.writeAuditStrict({
-      ...actor(req), action: 'paid.grant', subjectType: 'session', subjectId: String(req.params.id), after: { hours },
+    const who = actor(req);
+    // The grant and its audit commit together, or neither does (Codex, 1 Oct
+    // 2026): a money-spending action is never applied without the owner's name
+    // against it, and the trail never claims a grant that did not happen.
+    const row = await withTransaction(async (client) => {
+      const { rows } = await client.query(
+        `update api_sessions
+            set paid_grant_until = case when $2::int > 0 then now() + make_interval(hours => $2::int) else null end
+          where id = $1 and kind = 'agent'
+          returning id, label, paid_grant_until`,
+        [String(req.params.id), hours],
+      );
+      const granted = rows[0] ?? null;
+      if (!granted) return null;
+      await client.query(
+        `insert into admin_audit (actor_id, actor_label, action, subject_type, subject_id, subject_label, after)
+         values ($1, $2, 'paid.grant', 'session', $3, $4, $5)`,
+        [who.actorId ?? null, who.actorLabel ?? null, granted.id, granted.label ?? null, JSON.stringify({ hours, until: granted.paid_grant_until })],
+      );
+      return granted;
     });
-    const row = await grantPaid(String(req.params.id), hours);
     if (!row) return res.status(404).json({ error: 'not_an_agent', message: 'No live agent session by that id.' });
     forgetSession(row.id);
     res.json({ session: row });

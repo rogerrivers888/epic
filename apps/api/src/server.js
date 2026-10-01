@@ -73,7 +73,7 @@ import { enabledSources, defaultSourceKeys, loadSourceSettings, sourceHasKey, so
 import { routingEnabled, routingPaused } from './sources/routing.js';
 import sessionRoutes, { devices as deviceRoutes } from './routes/session.js';
 import { authConfigured, deployed, originAllowed, requireOwner, requireSession } from './auth.js';
-import { requireDoor, requireOwnerSignedIn } from './access.js';
+import { requireDoor, requireOwnerSignedIn, hasDoor } from './access.js';
 import sourceSwitchRoutes from './routes/sourceSwitch.js';
 import { APP_URL, canonicalRedirect } from './origins.js';
 import { SPEND_PREFIXES, generalLimit, holdSendingDoors, photoLimit, signInLimit, spendLimit, voiceLimit } from './limits.js';
@@ -237,10 +237,17 @@ const PAID_ADMIN = new Set([
 // handler, and matching the path as written let a paid door be knocked on with
 // a slash on the end and skip the limiter entirely (Codex, 18 Sep 2026).
 const doorOf = (req) => (req.path.length > 1 ? req.path.replace(/\/+$/, '') : req.path);
+// Spending needs the owner personally signed in (G11, 1 Oct 2026), and then
+// the spend limiter. Tied to the same predicate that already names what spends,
+// so a new paid door cannot be added past this by forgetting a list. The admin
+// door is checked first so a non-admin still gets the mount's 404, not a 403
+// that would reveal the path.
+const paidOwnerThenLimit = (req, res, next) =>
+  requireOwnerSignedIn('spend money')(req, res, () => spendLimit(req, res, next));
 app.use('/api/admin/place-index', (req, res, next) =>
-  (PAID_ADMIN.has(doorOf(req)) ? spendLimit(req, res, next) : next()));
+  (hasDoor(req, 'admin') && PAID_ADMIN.has(doorOf(req)) ? paidOwnerThenLimit(req, res, next) : next()));
 app.use('/api/admin/demand', (req, res, next) =>
-  (doorOf(req) === '/search' && String(req.query.names ?? '') === '1' ? spendLimit(req, res, next) : next()));
+  (hasDoor(req, 'admin') && doorOf(req) === '/search' && String(req.query.names ?? '') === '1' ? paidOwnerThenLimit(req, res, next) : next()));
 
 // Speech is a paid minute per request, held to its own number per household
 // (`voiceLimit`) as well as the monthly minutes in routes/voice.js.
@@ -305,10 +312,8 @@ const OWNER_ONLY_PLACE_INDEX = new Map([
   ['POST /refresh', 'rebuild the place index'],
   ['POST /reindex', 'reindex the estate'],
   ['POST /rescore', 'rescore the estate'],
-  // Anything that spends money (Collect, Ask, the picture finder).
-  ['POST /collect', 'spend on collecting places'],
-  ['POST /ask', 'spend on asking a provider'],
-  ['POST /pictures/find', 'spend on finding pictures'],
+  // Paid operations (Collect, Ask, the picture finder, Compare) are gated by the
+  // spend predicate above, so they are not repeated here.
   // Loading the owned-point sources over the estate, matching them, and the purge.
   ['POST /owned-points/load', 'load the owned-point sources'],
   ['POST /owned-points/match', 'match the owned points over the estate'],
