@@ -192,10 +192,16 @@ export async function work(runId, { get = googleSource.priceLevel.bind(googleSou
   const left = (run.refs ?? []).filter((r) => !done.has(r));
 
   for (const ref of left) {
-    // Still ours and still running? (Our lease may have lapsed and been stolen, or
-    // the run finished.) If not, stop — every write below is token-gated anyway.
-    const { rows: [cur] } = await query('select state, leased_by from cost_dist_runs where id = $1', [runId]);
-    if (!cur || cur.state !== 'running' || cur.leased_by !== token) return reread(runId);
+    // Renew the lease atomically before paying: this proves it is still ours AND
+    // unexpired and extends it for this call, so a recovery worker cannot take an
+    // expired lease and issue the same paid lookup in parallel — token-gating the
+    // write alone would stop a double count but not the double spend (Codex). No
+    // match means the run finished, our lease was stolen, or it expired: stop.
+    const { rowCount: held } = await query(
+      `update cost_dist_runs set leased_until = now() + ($2 * interval '1 millisecond'), touched_at = now()
+        where id = $1 and leased_by = $3 and state = 'running' and leased_until > now()`,
+      [runId, LEASE_MS, token]);
+    if (!held) return reread(runId);
     const id = ref.slice('google:'.length);
     const meter = {};
     let outcome;

@@ -129,6 +129,24 @@ test('a paid call that cannot be written to the ledger pauses the run, uncommitt
   assert.equal(rows.length, 0, 'the place has no row, so the resume retries it');
 });
 
+test('a worker whose lease is stolen mid-run stops, and does not commit the stolen place', async (t) => {
+  await seed(); t.after(() => query(`delete from place_areas where area_slug = $1`, [AREA]));
+  const { run } = await dist.start({ areaSlug: AREA, confirm: 5, startedBy: 'test' });
+  let n = 0;
+  const get = async (id, { meter }) => {
+    meter.google = 1; meter['google-details'] = 1;
+    n += 1;
+    // During the first place, a recovery worker takes over the lease.
+    if (n === 1) await query("update cost_dist_runs set leased_by = $2, leased_until = now() + interval '2 minutes' where id = $1", [run.id, randomUUID()]);
+    return { priceLevel: 1 };
+  };
+  const stopped = await dist.work(run.id, { get });
+  assert.equal(n, 1, 'it stopped after the first place rather than paying for more under a lost lease');
+  assert.equal(stopped.state, 'running', 'the run is left running for the new owner');
+  const st = await dist.status(AREA);
+  assert.equal(st.sampled, 0, 'the place paid for under the stolen lease is not committed — the new owner retries it');
+});
+
 test('resume rotates by least-recent attempt, not by age', async (t) => {
   const a1 = 'zzres1'; const a2 = 'zzres2';
   await query(`delete from cost_dist_runs`); // isolate: no leftover reclaimable run competes
