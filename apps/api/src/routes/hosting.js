@@ -396,15 +396,20 @@ router.delete('/host', async (req, res, next) => {
       const offers = await repo.lockOffersOfHost(host.id, client);
       const bookings = (await Promise.all(offers.map((o) => repo.bookingsOfOffer(o.id, client)))).flat();
       // Only a place still to come is a hold: what has happened is history and
-      // goes with the host; what was cancelled was never a place.
-      // A whole-run booking is still to come until its last week has been.
-      const holding = bookings.filter((b) => ['pending', 'confirmed', 'waitlisted'].includes(b.state) && (lastDate(offers.find((o) => o.id === b.offer_id), b.occurrence) ?? today) >= today);
+      // goes with the host; what was cancelled was never a place. A waitlisted
+      // request holds no place, so it never blocks — but anyone still waiting
+      // is called off and told on the way out, never left wondering
+      // (Codex, 1 Oct 2026). A whole-run booking is still to come until its
+      // last week has been.
+      const upcoming = (b) => (lastDate(offers.find((o) => o.id === b.offer_id), b.occurrence) ?? today) >= today;
+      const holding = bookings.filter((b) => ['pending', 'confirmed'].includes(b.state) && upcoming(b));
+      const waiting = bookings.filter((b) => b.state === 'waitlisted' && upcoming(b));
       if (holding.length && !force) throw refuse(409, 'has_bookings', `${holding.length} ${holding.length === 1 ? 'person holds' : 'people hold'} a place on your offers. Call those off first, so they are told and refunded.`, outstandingFrom(offers, bookings));
-      for (const b of holding) {
+      for (const b of [...holding, ...waiting]) {
         await repo.updateBooking(b.id, { state: 'cancelled', cancelledAt: new Date(), cancelledBy: 'host', paymentStatus: b.payment_status === 'paid' ? 'refunded' : b.payment_status, refundedAt: b.payment_status === 'paid' ? new Date() : null }, client);
       }
       for (const o of offers) {
-        const bs = holding.filter((b) => b.offer_id === o.id);
+        const bs = [...holding, ...waiting].filter((b) => b.offer_id === o.id);
         if (bs.length) toTell.push({ title: o.title, bookings: bs });
       }
       await repo.deleteMediaOfHost(host, offers, client);
@@ -472,15 +477,23 @@ router.get('/host/money', async (req, res, next) => {
     const chron = [...live].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     chron.forEach((b, i) => { introById.set(b.id, introState({ hostStartedAt: host.created_at, bookingsSoFar: i, now: new Date(b.created_at) })); });
     const resolve = (b) => ({ amountPence: b.amount_pence ?? 0, level: host.trust, viaHostLink: Boolean(b.via_host_link), intro: introById.get(b.id) ?? null });
-    // The host-wide figures the screen shows directly: how many completed
-    // experiences so far (the Trusted ladder) and the current/next intro state.
-    // `live` is already the fee-bearing set, so its length is the count.
+    // The host-wide figures the screen shows directly. The intro ladder counts
+    // bookings MADE (a confirmed booking consumes an intro position whenever
+    // its date is, matching the per-booking pricing above); the Trusted ladder
+    // counts experiences RUN — distinct past dates, because several guests on
+    // one future date are nobody's track record yet (Codex, 1 Oct 2026).
     const bookingsSoFar = live.length;
     const intro = introState({ hostStartedAt: host.created_at, bookingsSoFar });
+    const today = ymd(new Date());
+    const done = live.filter((b) => (lastDate(offers.find((o) => o.id === b.offer_id), b.occurrence) ?? today) < today);
+    const completed = new Set(done.map((b) => `${b.offer_id}|${JSON.stringify(b.occurrence ?? null)}`)).size;
     const all = feesForPeriod(live.map(resolve));
+    // Per-offer money is PAST dates only: its one reader is the Past tab's
+    // money block, which must agree with the past-dates table beside it
+    // (Codex, 1 Oct 2026). The all-time figures live in `totals`.
     const byOffer = {};
     for (const o of offers) {
-      const mine = live.filter((b) => b.offer_id === o.id);
+      const mine = done.filter((b) => b.offer_id === o.id);
       byOffer[o.id] = feesForPeriod(mine.map(resolve));
     }
     const payoutAccounts = (await repo.payoutAccountsOf(host.id)).map(payoutAccountPayload);
@@ -499,7 +512,7 @@ router.get('/host/money', async (req, res, next) => {
       // SX14 ladder: a line per level, "you are here" on the host's own.
       ladder: ['verified', 'checked', 'trusted'].map((lvl) => ({ level: lvl, label: LEVEL_LABEL[lvl], feeRate: LEVEL_RATE[lvl], keep: 100 - LEVEL_RATE[lvl], here: host.trust === lvl })),
       trusted: {
-        completed: bookingsSoFar, completedNeeded: TRUSTED_THRESHOLDS.completedExperiences,
+        completed, completedNeeded: TRUSTED_THRESHOLDS.completedExperiences,
         ratingAtLeast: TRUSTED_THRESHOLDS.ratingAtLeast, ratingWindow: TRUSTED_THRESHOLDS.ratingWindow,
       },
       // SX18: real payouts need paid bookings; there are none, so the list is empty and honest.

@@ -22,6 +22,7 @@ const { query } = await testDatabase();
 const repo = await import('../src/repositories/hosting.js');
 const { ownHost, payoutAccountPayload } = await import('../src/routes/hosting.js');
 const { feesForPeriod, LEVEL_RATE, LINK_RATE } = await import('../src/domain/hostFees.js');
+const { outstandingFrom } = await import('../src/domain/hosting.js');
 
 const addAccount = (hostId, label, last4, active = false) =>
   query('insert into host_payout_accounts (host_id, label, last4, holder_name, is_active) values ($1,$2,$3,$4,$5) returning *',
@@ -131,23 +132,45 @@ async function hostServer(household, account) {
 test('GET /api/host/money returns the Money screen (intro state defined — not a 500)', async () => {
   const { household } = await aHousehold(query, 'the money route');
   const host = await repo.insertHost(household.id, { name: 'Roger', type: 'skill' });
-  const offer = await repo.insertOffer(host.id, 'oneoff');
+  // A one-off is dated by its offer: December's is still to come, June's has run.
+  const offer = await repo.insertOffer(host.id, 'oneoff', { startsOn: '2026-12-01' });
+  const ran = await repo.insertOffer(host.id, 'oneoff', { startsOn: '2025-06-01' });
   await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2026-12-01', party: [], heads: 1, state: 'confirmed', amountPence: 10000, viaHostLink: true }, null);
   // A waitlisted request holds no place and earns nothing: it must not appear
   // in the money totals nor burn one of the first-ten intro positions (Codex).
   await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2026-12-03', party: [], heads: 1, state: 'waitlisted', amountPence: 77700 }, null);
+  // One date already run: the only thing the Trusted ladder may count, and the
+  // only money the Past tab's per-offer block may show (Codex, 1 Oct 2026).
+  await repo.insertBooking({ offerId: ran.id, hostId: host.id, householdId: household.id, occurrence: '2025-06-01', party: [], heads: 2, state: 'attended', amountPence: 5000 }, null);
   const srv = await hostServer(household);
   try {
     const r = await fetch(`${srv.url}/api/host/money`);
     assert.equal(r.status, 200, 'the Money screen must not 500 — the regression Codex caught');
     const body = await r.json();
     assert.equal(typeof body.intro?.active, 'boolean', 'host-wide intro state present');
-    assert.equal(typeof body.trusted?.completed, 'number', 'completed count present');
     assert.ok(Array.isArray(body.totals?.lines) && Array.isArray(body.ladder) && body.ladder.length === 3);
     // A brand-new host's first booking is inside the 0% intro, which beats even
     // the 5% link rate — so the line is 0%, proving per-booking intro resolution.
     assert.ok(body.totals.lines.some((l) => l.rate === 0), 'the new host\'s booking is charged the 0% intro, not the level or link rate');
-    assert.equal(body.totals.grossPence, 10000, 'the waitlisted £777 request is not revenue');
-    assert.equal(body.trusted.completed, 1, 'nor a completed experience');
+    assert.equal(body.totals.grossPence, 15000, 'the waitlisted £777 request is not revenue');
+    // The confirmed December date is still to come: a booking made is not an
+    // experience run, so the ladder counts only the June date.
+    assert.equal(body.trusted.completed, 1, 'only the past date counts toward Epic Trusted');
+    assert.equal(body.byOffer[offer.id].grossPence, 0, "the December offer's Past money is nothing yet");
+    assert.equal(body.byOffer[ran.id].grossPence, 5000, "the Past tab's per-offer money is past dates only");
   } finally { await srv.close(); }
+});
+
+test('a waitlisted request never blocks leaving: outstanding counts held places only', async () => {
+  const offer = { id: 'o1', shape: 'oneoff' };
+  const future = '2099-01-01';
+  const waitlistedOnly = outstandingFrom([offer], [{ offer_id: 'o1', state: 'waitlisted', occurrence: future, heads: 3 }]);
+  assert.equal(waitlistedOnly.blocked, false, 'a waitlist holds no place');
+  assert.equal(waitlistedOnly.guests, 0);
+  const held = outstandingFrom([offer], [
+    { offer_id: 'o1', state: 'confirmed', occurrence: future, heads: 2 },
+    { offer_id: 'o1', state: 'waitlisted', occurrence: future, heads: 3 },
+  ]);
+  assert.equal(held.blocked, true, 'a confirmed place still blocks');
+  assert.equal(held.guests, 2, 'and only the held places are the guests to tell');
 });

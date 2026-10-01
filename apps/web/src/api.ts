@@ -5404,6 +5404,7 @@ export type HostMoney = {
   statements: { year: number; feeLabel: string; netPence: number | null; ready: boolean }[];
   tax: { legalName: string | null; address: string | null; taxReference: string | null; dateOfBirth: string | null; taxIsCompany: boolean; companyNumber: string | null };
   totals: HostFeePeriod;
+  /** Per-offer money for PAST dates only — the Past tab's money block. All-time lives in `totals`. */
   byOffer: Record<string, HostFeePeriod>;
 };
 export type HostInput = {

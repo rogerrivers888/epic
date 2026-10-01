@@ -205,7 +205,10 @@ export function takingsAt(offer, n) {
  */
 export function outstandingFrom(offers, bookings) {
   const today = ymd(new Date());
-  const holding = bookings.filter((b) => ['pending', 'confirmed', 'waitlisted'].includes(b.state)
+  // A waitlisted request holds no place — it is outside money and capacity
+  // everywhere else, so it does not block a household leaving either
+  // (Codex, 1 Oct 2026). Stop-hosting still tells the waitlist on the way out.
+  const holding = bookings.filter((b) => ['pending', 'confirmed'].includes(b.state)
     && (lastDate(offers.find((o) => o.id === b.offer_id), b.occurrence) ?? today) >= today);
   const dates = new Set(holding.map((b) => `${b.offer_id}|${JSON.stringify(b.occurrence ?? null)}`));
   const guests = holding.reduce((n, b) => n + (b.heads ?? 1), 0);

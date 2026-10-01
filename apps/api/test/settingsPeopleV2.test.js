@@ -273,6 +273,28 @@ test('"Sign out all other devices" signs out devices, never the agent and servic
   } finally { await srv.close(); }
 });
 
+test('the shared passcode can sign its other devices out too — its own, never an account\'s', async () => {
+  const { household: h, member: roger } = await aHousehold(query);
+  const other = await aHousehold(query);
+  const acct = await createAccountOnHousehold(other.household.id, { memberId: other.member.id, name: 'Else', role: 'customer', plan: 'household', email: 'else@example.com' });
+  const { rows: seeded } = await query(
+    `insert into api_sessions (token_hash, label, account_id, kind) values
+       ('pc-d1','Hall tablet',null,'device'),('pc-d2','This phone',null,'device'),('pc-a1','agent',null,'agent'),('pc-x1','Else phone',$1,'device')
+     returning id, label`,
+    [acct.id],
+  );
+  const mine = seeded.find((s) => s.label === 'This phone');
+  const srv = await server(owner(h, roger.id), { id: mine.id, account_id: null });
+  try {
+    assert.equal((await srv.send('DELETE', '/api/sessions')).status, 204, 'the passcode is not refused its own button');
+    const { rows } = await query(
+      `select label from api_sessions where token_hash like 'pc-%' and revoked_at is null order by label`,
+    );
+    assert.deepEqual(rows.map((r) => r.label), ['Else phone', 'This phone', 'agent'],
+      "the other passcode device goes; this phone, the agent, and an account's device stay");
+  } finally { await srv.close(); }
+});
+
 test('a signed-in teenager is still managed by the adults — the joined lock is for adults only', async () => {
   const { household: h, member: roger } = await aHousehold(query);
   const teen = await addMember(h.id, 'Tess', { minor: true, birthDate: '2012-03-01' });

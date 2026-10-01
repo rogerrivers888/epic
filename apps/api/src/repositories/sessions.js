@@ -129,16 +129,18 @@ export async function revokeSessionById(id, accountId) {
 
 /**
  * Sign out every OTHER device of this account, keeping the one asking (SX6's
- * "Sign out all other devices"). Needs an account, for the same reason
- * `revokeAllSessions` does — it never reaches across the estate. Devices only,
- * like the list the button sits under: an agent or service session the screen
- * never showed is not swept up by it (Codex, 1 Oct 2026).
+ * "Sign out all other devices"). Devices only, like the list the button sits
+ * under: an agent or service session the screen never showed is not swept up
+ * by it (Codex, 1 Oct 2026). A null account is the shared passcode — the
+ * founding household's own devices, the one place no-account device sessions
+ * exist — so `is not distinct from` serves it without ever reaching an
+ * account's sessions across the estate (Codex, 1 Oct 2026).
  */
 export async function revokeOtherSessions(accountId, exceptId) {
-  if (!accountId) throw new Error('revokeOtherSessions needs an account');
+  if (!exceptId) throw new Error('revokeOtherSessions keeps the session asking; it needs its id');
   return query(
     `update api_sessions set revoked_at = now()
-      where account_id = $1 and id <> $2 and kind = 'device' and revoked_at is null`,
+      where account_id is not distinct from $1 and id <> $2 and kind = 'device' and revoked_at is null`,
     [accountId, exceptId],
   );
 }

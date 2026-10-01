@@ -316,12 +316,16 @@ devices.delete('/sessions/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-/** DELETE /api/sessions — sign out every OTHER device of this account (SX6). */
+/**
+ * DELETE /api/sessions — sign out every OTHER device of this account (SX6).
+ * The shared passcode (no account) gets the same button over its own
+ * no-account devices; without a session row to keep, there is nothing to
+ * scope by and the ask is refused rather than guessed at (Codex, 1 Oct 2026).
+ */
 devices.delete('/sessions', async (req, res, next) => {
   try {
-    const accountId = req.session?.account_id ?? null;
-    if (!accountId) return res.status(400).json({ error: 'no_account', message: 'This device signs out on its own.' });
-    await revokeOtherSessions(accountId, req.session.id);
+    if (!req.session?.id) return res.status(400).json({ error: 'no_session', message: 'This device signs out on its own.' });
+    await revokeOtherSessions(req.session?.account_id ?? null, req.session.id);
     res.status(204).end();
   } catch (err) { next(err); }
 });
