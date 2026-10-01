@@ -2,7 +2,7 @@
   "name": "Epic",
   "short_name": "Epic",
   "description": "Seize the day",
-  "start_url": "/",
+  "start_url": "/inspire",
   "display": "standalone",
   "background_color": "#FFFDF9",
   "theme_color": "#C8F542",

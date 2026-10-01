@@ -353,6 +353,30 @@ export const ADMIN_SCREENS: AdminScreen[] = [
  * area inside it. A country is a page now — its areas and its trips (handover,
  * 5 Sep 2026) — so it has an address of its own.
  */
+// ---------------------------------------------------------------------------
+// The public website (Website & Registration v2, signed off 1 Oct 2026)
+// ---------------------------------------------------------------------------
+
+/**
+ * Locale in the path from day one (Decisions J1): `{language}-{country}`. Only a
+ * live locale has pages, links, a sitemap and hreflang; a built-but-off locale is
+ * a 404 (J2). `en-us` is built — its own strings, spelling, dates and $ — but off.
+ */
+export const SITE_LOCALES = ['en-gb', 'en-us'] as const;
+export type SiteLocale = typeof SITE_LOCALES[number];
+export const LIVE_SITE_LOCALES: readonly SiteLocale[] = ['en-gb'];
+export const isSiteLocale = (v: string | null | undefined): v is SiteLocale => (SITE_LOCALES as readonly string[]).includes(String(v));
+export const isLiveLocale = (l: SiteLocale) => LIVE_SITE_LOCALES.includes(l);
+
+/** The six homepage directions (W1–W6): one is the homepage, the rest noindex landing pages at /{locale}/go/{name} (J10). */
+export const HOME_DESIGNS = ['postcards', 'sorted', 'story', 'phone', 'poster', 'crew'] as const;
+export type HomeDesign = typeof HOME_DESIGNS[number];
+
+/** The public pages under a locale, beside the homepage (`/{locale}/`) and the landing pages. */
+export const SITE_PAGES = ['host', 'privacy', 'terms', 'cookies', 'accessibility', 'contact'] as const;
+export type SitePageName = typeof SITE_PAGES[number];
+export type SitePage = 'home' | 'go' | SitePageName;
+
 export type PlacesScope = null | { home: true } | { country: string; city: string | null };
 
 export type Route =
@@ -425,6 +449,12 @@ export type Route =
    * One screen for customers and staff: enter an email, get a single-use link.
    * Public — reachable before any session exists.
    */
+  /**
+   * The public website: a locale's homepage, its host page, the legal pages, and
+   * the five campaign landing pages (`go`). Outside the app — no tab, no session —
+   * and indexable, except a landing page, which is noindex (J10).
+   */
+  | { name: 'site'; locale: SiteLocale; page: SitePage; landing: HomeDesign | null }
   | { name: 'login' }
   /**
    * A customer's own account page (L3), where a magic link lands a household
@@ -596,6 +626,22 @@ export function parseRoute(path: string): Route {
       return { name: 'say', intakeId: a, steps: false, ask: false };
     }
 
+    case 'en-gb':
+    case 'en-us': {
+      // A built-but-off locale answers 404, exactly like an address with no page (J2).
+      const locale = head as SiteLocale;
+      if (!isLiveLocale(locale)) return { name: 'unknown', path };
+      if (!a) return { name: 'site', locale, page: 'home', landing: null };
+      if (a === 'go') {
+        return b && !c && (HOME_DESIGNS as readonly string[]).includes(b)
+          ? { name: 'site', locale, page: 'go', landing: b as HomeDesign }
+          : { name: 'unknown', path };
+      }
+      return !b && (SITE_PAGES as readonly string[]).includes(a)
+        ? { name: 'site', locale, page: a as SitePageName, landing: null }
+        : { name: 'unknown', path };
+    }
+
     case 'login':
       return a ? { name: 'unknown', path } : { name: 'login' };
 
@@ -740,6 +786,10 @@ export function hrefOf(route: Route): string {
       return route.steps ? '/say/steps'
         : route.intakeId ? buildHref(['say', route.intakeId, route.ask ? 'ask' : null])
           : '/say';
+    case 'site':
+      return route.page === 'home' ? paths.siteHome(route.locale)
+        : route.page === 'go' ? paths.siteLanding(route.landing!, route.locale)
+          : buildHref([route.locale, route.page]);
     case 'login': return '/login';
     case 'account': return '/account';
     case 'welcome': return '/welcome';
@@ -879,6 +929,14 @@ export const paths = {
   heard: (intakeId: string) => buildHref(['say', intakeId]),
   ask: (intakeId: string, n?: number) => `${buildHref(['say', intakeId, 'ask'])}${n && n > 1 ? `?n=${n}` : ''}`,
   login: () => '/login',
+  /**
+   * The public website. The homepage keeps its trailing slash (`/en-gb/`) — the
+   * one URL that does (Technical Foundations › URL conventions).
+   */
+  siteHome: (locale: SiteLocale = 'en-gb') => `/${locale}/`,
+  siteHost: (locale: SiteLocale = 'en-gb') => `/${locale}/host`,
+  sitePage: (page: SitePageName, locale: SiteLocale = 'en-gb') => `/${locale}/${page}`,
+  siteLanding: (design: HomeDesign, locale: SiteLocale = 'en-gb') => `/${locale}/go/${design}`,
   account: () => '/account',
   welcome: () => '/welcome',
   /**
@@ -1145,6 +1203,7 @@ export function parentOf(route: Route): string {
     case 'tag': return '/inspire/people';
     // Up from the questions is the card; up from the card or the wizard is the mic; up from the mic is home.
     case 'say': return route.ask ? paths.heard(route.intakeId!) : route.intakeId || route.steps ? '/say' : '/inspire';
+    case 'site': return paths.siteHome(route.locale);
     case 'login': return '/inspire';
     case 'account': return '/inspire';
     case 'welcome': return '/inspire';
@@ -1185,6 +1244,7 @@ export function titleOf(route: Route): string {
     }
     case 'household': return epic(route.voice === 'tell' ? 'Tell Epic about them' : route.voice === 'review' ? 'What we heard' : 'You and yours');
     case 'say': return epic(route.ask ? 'One more thing' : route.intakeId ? 'Here’s what we heard' : route.steps ? 'One at a time' : 'Just say it');
+    case 'site': return siteTitleOf(route);
     case 'login': return epic('Log in');
     case 'account': return epic('Your account');
     case 'welcome': return epic('Plan less. Live more.');
@@ -1265,4 +1325,21 @@ export function legacyHref(path: string, query: URLSearchParams): string | null 
     household: paths.settings(), settings: paths.settings(), prototypes: paths.prototypes(), host: paths.host(),
   };
   return known[tab] ? withQuery(known[tab]) : null;
+}
+
+/**
+ * A public page's title: brand first (J7), ≤ 60 characters, unique per page. The
+ * web server writes the same into the HTML it serves (server.mjs), so the title
+ * a crawler reads is never left to JavaScript; this keeps the tab in step.
+ */
+export function siteTitleOf(route: Extract<Route, { name: 'site' }>): string {
+  switch (route.page) {
+    case 'host': return 'Epic Hosting – Run events, classes, tours and homeschool';
+    case 'privacy': return 'Epic – Privacy notice';
+    case 'terms': return 'Epic – Terms';
+    case 'cookies': return 'Epic – Cookies';
+    case 'accessibility': return 'Epic – Accessibility';
+    case 'contact': return 'Epic – Contact';
+    default: return 'Epic – Days out and trips away, planned around your crew';
+  }
 }

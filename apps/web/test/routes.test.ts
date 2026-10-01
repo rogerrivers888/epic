@@ -486,6 +486,35 @@ test('the code on a restaurant table has an address of its own', () => {
   assert.equal(tabOf(parseRoute('/order/tok123')), null);
 });
 
+test('the public website lives under a live locale; an off locale is a 404', () => {
+  // The homepage keeps its trailing slash; every other page has none.
+  assert.deepEqual(roundTrip('/en-gb/'), { name: 'site', locale: 'en-gb', page: 'home', landing: null });
+  assert.equal(hrefOf(parseRoute('/en-gb')), '/en-gb/');
+  assert.equal(paths.siteHome(), '/en-gb/');
+  assert.deepEqual(roundTrip('/en-gb/host'), { name: 'site', locale: 'en-gb', page: 'host', landing: null });
+  for (const page of ['privacy', 'terms', 'cookies', 'accessibility', 'contact'] as const) {
+    assert.deepEqual(roundTrip(`/en-gb/${page}`), { name: 'site', locale: 'en-gb', page, landing: null });
+    assert.equal(paths.sitePage(page), `/en-gb/${page}`);
+  }
+  // Each of the six designs is a landing page; anything else under /go is not a page.
+  for (const design of ['postcards', 'sorted', 'story', 'phone', 'poster', 'crew'] as const) {
+    assert.deepEqual(roundTrip(`/en-gb/go/${design}`), { name: 'site', locale: 'en-gb', page: 'go', landing: design });
+    assert.equal(paths.siteLanding(design), `/en-gb/go/${design}`);
+  }
+  for (const path of ['/en-gb/go', '/en-gb/go/nope', '/en-gb/go/sorted/x', '/en-gb/nope', '/en-gb/host/x']) {
+    assert.equal(parseRoute(path).name, 'unknown', `${path} is not a page`);
+  }
+  // en-us is built but switched off: every address under it answers as no page (J2).
+  for (const path of ['/en-us/', '/en-us/host', '/en-us/privacy', '/en-us/go/sorted']) {
+    assert.equal(parseRoute(path).name, 'unknown', `${path} must 404 while en-us is off`);
+  }
+  // No tab behind it; titles lead with the brand (J7).
+  assert.equal(tabOf(parseRoute('/en-gb/')), null);
+  assert.equal(titleOf(parseRoute('/en-gb/')), 'Epic – Days out and trips away, planned around your crew');
+  assert.equal(titleOf(parseRoute('/en-gb/host')), 'Epic Hosting – Run events, classes, tours and homeschool');
+  assert.equal(parentOf(parseRoute('/en-gb/privacy')), '/en-gb/');
+});
+
 test('an address with no page behind it says so rather than pretending', () => {
   for (const path of ['/nowhere', '/settings/money', '/plan/extra', '/prototypes/nothing', '/order']) {
     assert.equal(parseRoute(path).name, 'unknown', `${path} should not resolve to a page`);

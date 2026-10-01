@@ -48,6 +48,7 @@ import { AdminApp, firstAdminScreen } from './src/admin/AdminApp';
 import { useActivity } from './src/hooks/useActivity';
 import { LockScreen } from './src/screens/LockScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
+import { SiteScreen } from './src/site/SiteScreen';
 import { AccountScreen } from './src/screens/AccountScreen';
 import { Wordmark } from './src/components/Wordmark';
 import { useViewport, ViewportProvider } from './src/hooks/useViewport';
@@ -177,8 +178,12 @@ function Frame() {
   // from taking the tabs with it; this one is for everything above the tabs —
   // the passcode, the profile, the frame's own chrome.
   const app = <ErrorBoundary what="Epic"><Routed /></ErrorBoundary>;
-  // A narrow window is a phone already: no toggle, no frame.
-  if (window.width < DESKTOP) return app;
+  // A narrow window is a phone already: no toggle, no frame. The public website
+  // never shows the review toolbar either — a visitor to epic.day must not see
+  // "Viewing as Web / Mobile"; the site is fully responsive, so a narrow window
+  // shows its phone layout.
+  const { path } = useRouter();
+  if (window.width < DESKTOP || /^\/en-(gb|us)(\/|$)/.test(path)) return app;
 
   const frameHeight = Math.min(PHONE.height, window.height - TOOLBAR - spacing.xl * 2 - BEZEL * 2);
   // Where the phone's screen lands in the real window: the stage centres it below the toolbar.
@@ -304,6 +309,12 @@ function Routed() {
    * session. The link it asks for is redeemed by the Gate, which then lands staff
    * in the back office and customers on their account page.
    */
+  /**
+   * The public website (Website & Registration): the homepage, the host page,
+   * the legal pages and the campaign landing pages. Public and outside the app —
+   * answered before the passcode, drawn in its own frame with no app chrome.
+   */
+  if (route.name === 'site') return <SiteScreen route={route} />;
   if (route.name === 'login') return <LoginScreen />;
   return <Gate route={route} />;
 }

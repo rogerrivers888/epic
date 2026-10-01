@@ -20,6 +20,7 @@ import http from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { siteGateOn } from './gate.mjs';
+import { loadSite, localeFor as localeOf, siteAddress as addressOf } from './site.mjs';
 
 // The built app; a test points it at a folder of its own.
 const ROOT = resolve(process.env.EPIC_WEB_ROOT || fileURLToPath(new URL('./dist', import.meta.url)));
@@ -112,6 +113,66 @@ function firstSegment(pathname) {
 /** The pages never for an index: the sign-in doors, the account page, the back office. */
 const PRIVATE_FIRST = new Set(['login', 'account', 'admin', 'in']);
 
+// --- the public website (Website & Registration) -----------------------------
+// Which locale and page an address is, and where epic.day/ sends a visitor, live
+// in site.mjs beside its tests; the head written into the shell is here.
+const SITE = await loadSite();
+/** The query keys the app itself reads at `/` (App.tsx › Routed, routes.ts › legacyHref). */
+const APP_ROOT_PARAMS = ['signin', 'join', 'tab'];
+
+let shell = null;
+let shellAt = 0;
+/** dist/index.html, read once per build. */
+async function shellHtml() {
+  const file = join(ROOT, 'index.html');
+  const stat = await fs.stat(file);
+  if (!shell || stat.mtimeMs !== shellAt) { shell = await fs.readFile(file, 'utf8'); shellAt = stat.mtimeMs; }
+  return shell;
+}
+const attr = (v) => String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/**
+ * The shell with this page's head written in — lang, title, description,
+ * canonical, hreflang for every live locale plus x-default, Open Graph — so
+ * nothing a crawler reads waits on JavaScript (Technical Foundations › SEO). A
+ * landing page is noindex and carries no alternates (J10).
+ */
+function withSiteHead(html, site) {
+  const copy = SITE.copy[site.locale][site.page];
+  const url = `${APP_URL}${site.canonical}`;
+  const extra = site.landing
+    ? ['<meta name="robots" content="noindex" />']
+    : [
+      ...SITE.liveLocales.map((l) => `<link rel="alternate" hreflang="${SITE.htmlLang[l]}" href="${attr(APP_URL + (site.page === 'home' ? `/${l}/` : `/${l}/${site.page}`))}" />`),
+      `<link rel="alternate" hreflang="x-default" href="${attr(APP_URL)}/" />`,
+    ];
+  extra.push('<meta name="twitter:card" content="summary" />');
+  return html
+    .replace(/<html lang="[^"]*"/, `<html lang="${SITE.htmlLang[site.locale]}"`)
+    .replace(/<title>[\s\S]*?<\/title>/, `<title>${attr(copy.title)}</title>`)
+    .replace(/<meta name="description"[^>]*>/, `<meta name="description" content="${attr(copy.description)}" />`)
+    .replace(/<link rel="canonical"[^>]*>/, `<link rel="canonical" href="${attr(url)}" />`)
+    .replace(/<meta property="og:url"[^>]*>/, `<meta property="og:url" content="${attr(url)}" />`)
+    .replace(/<meta property="og:title"[^>]*>/, `<meta property="og:title" content="${attr(copy.title)}" />`)
+    .replace(/<meta property="og:description"[^>]*>/, `<meta property="og:description" content="${attr(copy.description)}" />`)
+    .replace('</head>', `  ${extra.join('\n    ')}\n  </head>`);
+}
+
+/** sitemap.xml, generated — never by hand: every live locale's indexable pages, each with its alternates. */
+function sitemapXml() {
+  const day = new Date(shellAt || Date.now()).toISOString().slice(0, 10);
+  const href = (l, p) => `${APP_URL}${p === 'home' ? `/${l}/` : `/${l}/${p}`}`;
+  const urls = SITE.liveLocales.flatMap((l) => ['home', ...SITE.pages].map((p) => [
+    '  <url>',
+    `    <loc>${href(l, p)}</loc>`,
+    `    <lastmod>${day}</lastmod>`,
+    ...SITE.liveLocales.map((x) => `    <xhtml:link rel="alternate" hreflang="${SITE.htmlLang[x]}" href="${href(x, p)}" />`),
+    `    <xhtml:link rel="alternate" hreflang="x-default" href="${APP_URL}/" />`,
+    '  </url>',
+  ].join('\n')));
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${urls.join('\n')}\n</urlset>\n`;
+}
+
 /**
  * Any request that throws answers 500 and is logged, rather than rejecting a
  * promise nobody awaits — on a Node that ends the process, one bad request
@@ -145,6 +206,42 @@ const server = http.createServer(guarded(async (req, res) => {
 
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405, { allow: 'GET, HEAD' }); res.end(); return;
+  }
+
+  // --- the public website ---------------------------------------------------
+  const search = (req.url || '').includes('?') ? (req.url || '').slice((req.url || '').indexOf('?')) : '';
+  // epic.day/ is Google's x-default: a 302 to the visitor's locale (J3), the
+  // query carried along so a campaign's utm_*/gclid/fbclid reach the form. Only
+  // the app's own links at the root (`/?signin=…`, `/?join=…`, `/?tab=…`) are
+  // left for the app to answer (Codex, 1 Oct 2026).
+  if (pathname === '/' && !APP_ROOT_PARAMS.some((k) => new URLSearchParams(search).has(k))) {
+    res.writeHead(302, { location: `/${localeOf(SITE, req)}/${search}`, 'cache-control': 'no-store', vary: 'Accept-Language, Cookie' });
+    res.end();
+    return;
+  }
+  if (pathname === '/sitemap.xml') {
+    await shellHtml().catch(() => null);
+    const body = sitemapXml();
+    res.writeHead(200, { 'content-type': TYPES['.xml'], 'content-length': Buffer.byteLength(body), 'cache-control': 'public, max-age=3600' });
+    res.end(req.method === 'HEAD' ? undefined : body);
+    return;
+  }
+  const site = addressOf(SITE, pathname);
+  if (site?.redirect) { res.writeHead(301, { location: site.redirect + search, 'cache-control': 'no-cache' }); res.end(); return; }
+  if (site) {
+    let html;
+    try { html = await shellHtml(); } catch { res.writeHead(404, { 'content-type': 'text/plain' }); res.end('Not found'); return; }
+    const status = site.status || 200;
+    const body = status === 200 ? withSiteHead(html, site) : html;
+    const headers = {
+      'content-type': TYPES['.html'], 'content-length': Buffer.byteLength(body), 'cache-control': 'no-cache',
+      'x-content-type-options': 'nosniff', 'x-frame-options': 'SAMEORIGIN', 'referrer-policy': 'strict-origin-when-cross-origin',
+    };
+    // A page that is not there, and a campaign landing page, are never indexed.
+    if (status !== 200 || site.landing) headers['x-robots-tag'] = 'noindex';
+    res.writeHead(status, headers);
+    res.end(req.method === 'HEAD' ? undefined : body);
+    return;
   }
 
   let found = await fileFor(pathname);

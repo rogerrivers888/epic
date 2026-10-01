@@ -62,6 +62,15 @@ export const CHIP_SCRIM = 'rgba(32,30,29,0.32)'; // the card heart chip's ground
  * (§1); everything under the band is cream.
  */
 export const MIC_TILE = '#AEDF3C';      // oklch(0.84 0.19 125), the band's mic tile — one step darker than lime
+/**
+ * The website's two hover steps (Website & Registration › Design tokens): an ink
+ * button lifts to a warm grey, a lime one on ink steps down to the mic-tile lime.
+ */
+export const INK_HOVER = '#3A3735';
+export const LIME_HOVER = MIC_TILE;
+/** Rules and grey text on an ink ground (the footer, the CK3 banner). */
+export const INK_RULE = '#46413F';
+export const ON_INK_MUTED = '#CFCAC7';
 export const MUTED = '#7D7979';         // a section-header count, the Filters control, a tab-bar label off
 export const TAB_UNSELECTED = '#A8A4A2';// the ink menu's unselected tab label (cream is 800/selected)
 export const MENU_DIVIDER = '#55514F';  // the 1px rule between two ink-menu cells

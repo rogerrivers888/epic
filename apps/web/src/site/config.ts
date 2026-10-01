@@ -1,0 +1,26 @@
+/**
+ * The website's switches — each one value, so a decision is a one-line change.
+ */
+import type { HomeDesign } from '../routes';
+
+/**
+ * Which of W1–W6 renders at /{locale}/ (owner, 1 Oct 2026: W2 or W6 — not yet
+ * named). The other five run as noindex landing pages at /{locale}/go/{name}.
+ */
+export const HOMEPAGE: HomeDesign = 'sorted';
+
+/** The footer's small print (owner, 1 Oct 2026). */
+export const COMPANY = {
+  name: 'MAKE IT EPIC LIMITED',
+  number: '17445225',
+  office: '124 City Road, London EC1V 2NX',
+} as const;
+
+/**
+ * GA4 and Google Ads, both later (owner, 1 Oct 2026). Unset means no tracking —
+ * and with no tracking there is nothing to consent to, so no banner and no
+ * "Cookie settings" link. Public by definition (EXPO_PUBLIC_*), never a secret.
+ */
+export const GA4_ID = process.env.EXPO_PUBLIC_GA4_ID || '';
+export const GOOGLE_ADS_ID = process.env.EXPO_PUBLIC_GOOGLE_ADS_ID || '';
+export const TRACKING_ON = Boolean(GA4_ID || GOOGLE_ADS_ID);

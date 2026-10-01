@@ -3272,6 +3272,13 @@ export const api = {
   },
 
   /**
+   * "Register your interest" (Website & Registration › Registration). Public: the
+   * waitlist before launch. Answers the same for a new address and a repeat one,
+   * so the form cannot be used to find out who has already signed up.
+   */
+  registerInterest: (body: InterestSignup) => post<{ ok: true }>('/api/interest', body),
+
+  /**
    * "E-mail me a link." Answers the same whether or not the address has an
    * account, so it cannot be used to find out who else uses Epic.
    */
@@ -5800,4 +5807,25 @@ export type FilingPlaceAnswer = {
 export type FilingVocabulary = {
   vocabulary: { key: string; name: string; scope: 'everywhere' | 'sets' | 'nowhere'; sets: string[]; places: number }[];
   counts: { labels: number; everywhere: number; nowhere: number };
+};
+
+/** A "Register your interest" sign-up, as the forms on epic.day send it (POST /api/interest). */
+export type InterestSignup = {
+  email: string;
+  source: 'home' | 'host';
+  hostKind?: 'one-off' | 'activity' | 'class' | 'homeschool' | null;
+  locale: string;
+  landingPage?: string | null;
+  referrer?: string | null;
+  utmSource?: string | null;
+  utmMedium?: string | null;
+  utmCampaign?: string | null;
+  utmTerm?: string | null;
+  utmContent?: string | null;
+  gclid?: string | null;
+  fbclid?: string | null;
+  /** The words the person agreed to: the button they pressed and what it promised (UK PECR). */
+  consentWording: string;
+  /** The honeypot: a field no person sees. Anything in it is a bot, answered as a success and kept nowhere. */
+  website?: string;
 };
