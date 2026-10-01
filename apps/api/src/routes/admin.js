@@ -707,7 +707,7 @@ router.get('/spend/today', async (_req, res, next) => {
  * has it, and an agent that could grant itself hours would have no zero
  * budget at all.
  */
-router.get('/sessions/agents', requires('manage_settings'), async (req, res, next) => {
+router.get('/sessions/agents', requires('view_activity'), async (req, res, next) => {
   // `canGrant`: the panel says up front when the screen it is on cannot grant
   // (an agent's own session), rather than letting a tap fail (29 Sep 2026).
   try {
@@ -721,13 +721,15 @@ router.get('/sessions/agents', requires('manage_settings'), async (req, res, nex
 router.post('/sessions/:id/grant', requires('manage_settings'), requireOwnerSignedIn('grant paid calls'), async (req, res, next) => {
   try {
     const hours = Math.max(0, Math.min(72, Math.round(Number(req.body?.hours ?? 0))));
+    // The audit is written first and not swallowed: a money-spending action must
+    // not succeed without the record this gate exists to guarantee (Codex, 1 Oct
+    // 2026). A grant with no name against it is worse than a grant that failed.
+    await rolesRepo.writeAudit({
+      ...actor(req), action: 'paid.grant', subjectType: 'session', subjectId: String(req.params.id), after: { hours },
+    });
     const row = await grantPaid(String(req.params.id), hours);
     if (!row) return res.status(404).json({ error: 'not_an_agent', message: 'No live agent session by that id.' });
     forgetSession(row.id);
-    await rolesRepo.writeAudit({
-      ...actor(req), action: 'paid.grant', subjectType: 'session', subjectId: row.id, subjectLabel: row.label ?? null,
-      after: { hours, until: row.paid_grant_until },
-    }).catch(() => null);
     res.json({ session: row });
   } catch (err) { next(err); }
 });

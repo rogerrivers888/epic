@@ -105,3 +105,14 @@ test('an agent sign-in on a member account is still only a member, never the bac
   assert.equal(a.isOwner, false);
   assert.equal(a.elevated, false);
 });
+
+test('an agent is restricted only on the shared passcode — a personal sign-in from an automated client is not caged', async () => {
+  // Codex, 1 Oct 2026: a coding agent holds the passcode; a human (even via
+  // okhttp or curl) signs in by link and keeps their hands.
+  const passcodeAgent = await accessFor({ account: owner, session: { kind: 'agent', auth_method: 'passcode' } });
+  assert.deepEqual([...passcodeAgent.capabilities].filter((k) => k.startsWith('manage_')), [], 'passcode agent: reads only');
+
+  const linkFromAutomated = await accessFor({ account: owner, session: { kind: 'agent', auth_method: 'link' } });
+  assert.ok([...linkFromAutomated.capabilities].some((k) => k.startsWith('manage_')), 'a personal link keeps manage, even from an automated client');
+  assert.equal(linkFromAutomated.elevated, false, 'but an automated session is still never elevated');
+});

@@ -17,7 +17,7 @@ async function serve(session, { elevated = false } = {}) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    req.access = { doors: ['admin'], capabilities: new Set(['manage_settings', 'view_library']), isOwner: true, role: null, elevated };
+    req.access = { doors: ['admin'], capabilities: new Set(['manage_settings', 'view_library', 'view_activity']), isOwner: true, role: null, elevated };
     req.session = session;
     next();
   });

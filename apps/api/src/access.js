@@ -95,7 +95,12 @@ const ALL = () => CAPABILITIES.map((c) => c.key);
 export async function accessFor(req) {
   const account = req.account ?? null;
   const session = req.session ?? null;
-  const isAgent = session?.kind === 'agent';
+  // A restricted agent is an automated session on the *shared passcode* — a
+  // coding session, which has no personal credential. A personal sign-in
+  // (a magic link, later Google) is a human even from an automated user agent
+  // (okhttp, a bare curl), so it is never caged here (Codex, 1 Oct 2026). This
+  // is also why a future native app, which signs in by link, is not read-only.
+  const isAgent = session?.kind === 'agent' && session?.auth_method === 'passcode';
 
   // The baseline: what this account would hold on an ordinary sign-in. Agents
   // are a *downgrade* of this, not a replacement for it — so a household member

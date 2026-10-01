@@ -169,7 +169,9 @@ app.use(requireSession);
 // path. Reads pass; sign-in is a public path and never reaches this.
 const WRITE = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 app.use((req, res, next) => {
-  if (req.session?.kind === 'agent' && WRITE.has(req.method)) {
+  // Only a coding agent on the shared passcode, never a personal sign-in from
+  // an automated user agent (a future native app signs in by link) (Codex, 1 Oct).
+  if (req.session?.kind === 'agent' && req.session?.auth_method === 'passcode' && WRITE.has(req.method)) {
     return res.status(403).json({
       error: 'agent_read_only',
       message: 'This sign-in is an agent: it may read and propose, but not change anything. Sign in on your own device to make this change.',
@@ -302,9 +304,12 @@ const OWNER_ONLY_PLACE_INDEX = new Map([
 ]);
 // Any resume of a stored run is a lift of a hold, whatever its id.
 const ownerOnlyPlaceIndex = (req, res, next) => {
-  const key = `${req.method} ${doorOf(req)}`;
+  // Express routes case-insensitively, so the gate must too, or CENSUS/UK/LIFT
+  // runs the route while slipping the check (Codex, 1 Oct 2026).
+  const path = doorOf(req).toLowerCase();
+  const key = `${req.method.toUpperCase()} ${path}`;
   const action = OWNER_ONLY_PLACE_INDEX.get(key)
-    ?? (req.method === 'POST' && /^\/census\/run\/[^/]+\/resume$/.test(doorOf(req)) ? 'lift the census hold' : null);
+    ?? (req.method === 'POST' && /^\/census\/run\/[^/]+\/resume$/.test(path) ? 'lift the census hold' : null);
   if (!action) return next();
   return requireOwnerSignedIn(action)(req, res, next);
 };
