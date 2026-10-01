@@ -402,7 +402,7 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
         ) : null}
 
         {country && !country.city && !ui.adding ? (
-          <CountryCities row={countryRow} data={data} onCity={(name) => navigate(paths.placesCity(country.country, name))} />
+          <CountryCities row={countryRow} data={data} list={st.list} onCity={(name) => navigate(paths.placesCity(country.country, name) + (st.list === 'loved' ? '?list=loved' : ''))} />
         ) : null}
 
         {inArea && (city || home) && !ui.adding ? (
@@ -513,19 +513,19 @@ function AtlasRoot({ data, error, homeTown, mode, onGo }: {
   // The count a row carries, and whether the row shows at all. Liked: how many
   // places here the household has loved (a country has no `special` of its own, so
   // it sums its cities'). Been: how many it has been to — and a place reached only
-  // by a past trip, with no individually recorded visit, still counts as been, so
-  // it shows the trips instead of dropping out (Codex).
+  // by a PAST trip, with no individually recorded visit, still counts as been (so it
+  // stays rather than dropping out) and shows no number. A trip that has not
+  // happened yet (`lastTrip` null) is not "been" (Codex).
   const likedN = (ci: AtlasCountry['cities'][number]) => ci.special;
   const likedCountry = (c: AtlasCountry) => c.cities.reduce((s, ci) => s + (ci.special ?? 0), 0);
-  const beenRow = (been: number, trips: number) => (been > 0 ? String(been) : trips > 0 ? plural(trips, 'trip') : '0');
-  const cityShown = (ci: AtlasCountry['cities'][number]) => (liked ? likedN(ci) > 0 : (ci.been > 0 || (ci.trips ?? 0) > 0));
-  const cityCount = (ci: AtlasCountry['cities'][number]) => (liked ? String(likedN(ci)) : beenRow(ci.been, ci.trips ?? 0));
-  const countryShown = (c: AtlasCountry) => (liked ? likedCountry(c) > 0 : (c.been > 0 || (c.trips ?? 0) > 0));
-  const countryCount = (c: AtlasCountry) => (liked ? String(likedCountry(c)) : beenRow(c.been, c.trips ?? 0));
+  const cityShown = (ci: AtlasCountry['cities'][number]) => (liked ? likedN(ci) > 0 : (ci.been > 0 || !!ci.lastTrip));
+  const cityCount = (ci: AtlasCountry['cities'][number]) => (liked ? String(likedN(ci)) : (ci.been > 0 ? String(ci.been) : ''));
+  const countryShown = (c: AtlasCountry) => (liked ? likedCountry(c) > 0 : (c.been > 0 || !!c.lastTrip));
+  const countryCount = (c: AtlasCountry) => (liked ? String(likedCountry(c)) : (c.been > 0 ? String(c.been) : ''));
   const homeN = data?.home ? (liked ? data.home.special : data.home.been) : 0;
   // Ordered by weight: loved count in Liked; in Been, visited places first (and
-  // by how many), then trip-only destinations.
-  const cityMag = (ci: AtlasCountry['cities'][number]) => (liked ? likedN(ci) : (ci.been > 0 ? 1_000_000 + ci.been : (ci.trips ?? 0)));
+  // by how many), then the past-trip-only destinations.
+  const cityMag = (ci: AtlasCountry['cities'][number]) => (liked ? likedN(ci) : (ci.been > 0 ? 1_000_000 + ci.been : 0));
   const homeCities = [...(homeCountry?.cities ?? [])].filter(cityShown).sort((a, b) => cityMag(b) - cityMag(a));
   const abroad = others.filter(countryShown);
   // With no claimed place in the home radius the API gives no home country code,
@@ -592,11 +592,15 @@ function AtlasRoot({ data, error, homeTown, mode, onGo }: {
   );
 }
 
-/** One country's towns and cities. */
-function CountryCities({ row, data, onCity }: {
-  row: AtlasCountry | null; data: { home: AtlasHome | null } | null; onCity: (name: string) => void;
+/** One country's towns and cities. Honours the list (Been · Loved) carried in. */
+function CountryCities({ row, data, list, onCity }: {
+  row: AtlasCountry | null; data: { home: AtlasHome | null } | null; list: ListKey; onCity: (name: string) => void;
 }) {
-  const cities = [...(row?.cities ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  const loved = list === 'loved';
+  const all = [...(row?.cities ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  // On Loved, only towns with a loved place, counting those; otherwise every town
+  // with its place count (Codex).
+  const cities = loved ? all.filter((ci) => ci.special > 0) : all;
   if (!row) return data ? <View style={styles.emptyRoot}><Text style={styles.emptyBody}>Nothing in your atlas here yet.</Text></View> : null;
   return (
     <View style={styles.list}>
@@ -606,11 +610,11 @@ function CountryCities({ row, data, onCity }: {
           tile={<Flag code={row.code} width={FLAG_W} height={FLAG_H} bare />}
           label={ci.name}
           sub={ci.nextTrip ? `Next: ${tripWhen(ci.nextTrip)}` : ci.lastTrip ? `Last: ${tripWhen(ci.lastTrip)}` : row.name}
-          count={plural(ci.places, 'place')}
+          count={loved ? String(ci.special) : plural(ci.places, 'place')}
           onPress={() => onCity(ci.name)}
         />
       ))}
-      {!cities.length ? <View style={styles.emptyRoot}><Text style={styles.emptyBody}>No towns in {row.name} yet.</Text></View> : null}
+      {!cities.length ? <View style={styles.emptyRoot}><Text style={styles.emptyBody}>{loved ? `Nothing loved in ${row.name} yet.` : `No towns in ${row.name} yet.`}</Text></View> : null}
     </View>
   );
 }
