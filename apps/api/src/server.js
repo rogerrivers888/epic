@@ -54,6 +54,7 @@ import scoutRoutes, { areaRouter } from './routes/scout.js';
 import shelfRoutes from './routes/shelves.js';
 import taxonomyRoutes, { ensureTaxonomyReady } from './routes/taxonomy.js';
 import { filingRoutes } from './routes/filing.js';
+import { narrowingRoutes } from './routes/narrowing.js';
 import { deskRoutes, deskHousekeeping } from './routes/desk.js';
 import { familyRoutes } from './routes/families.js';
 import { collectionRoutes } from './routes/collections.js';
@@ -279,6 +280,10 @@ app.use('/api/admin/place-index', requireDoor('admin'), placeIndexRoutes);
 // file and own leaf paths (/research, /research/quote, /ranked, /ranked/quote),
 // so nothing in the index router is shadowed.
 app.use('/api/admin/place-index', requireDoor('admin'), placeResearchRoutes);
+// Narrowing: a read-only preview of the church / landmark / monument notability
+// rule (owner, 1 Oct 2026) — counts now vs kept vs dropped, with examples.
+// PROPOSE ONLY; it writes nothing and changes no filing.
+app.use('/api/admin/narrowing', requireDoor('admin'), narrowingRoutes);
 // What the census found out, and what it found out about itself
 // (routes/censusFindings.js): denominators with their coverage, drawers nobody
 // asked about, types that never answer, and the free ground counts beside ours.
