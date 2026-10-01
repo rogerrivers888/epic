@@ -61,6 +61,17 @@ const SCHEME = process.env.EPIC_OSRM_SCHEME || 'sector';
 const HORIZON = Number(process.env.EPIC_OSRM_HORIZON || HORIZON_MINUTES);
 const RESUME = process.env.EPIC_OSRM_RESUME !== '0';
 const CHUNK = Number(process.env.EPIC_OSRM_CHUNK || 300);
+// The chunk is the destination-loop stride; zero or a non-integer would step
+// `j += 0` and spin forever on the first origin with candidates (Codex). The
+// horizon has to be a real positive number of minutes for the same reason.
+if (!Number.isInteger(CHUNK) || CHUNK < 1) {
+  console.error(`EPIC_OSRM_CHUNK must be a positive integer, not "${process.env.EPIC_OSRM_CHUNK}".`);
+  process.exit(1);
+}
+if (!Number.isFinite(HORIZON) || HORIZON < 1) {
+  console.error(`EPIC_OSRM_HORIZON must be a positive number, not "${process.env.EPIC_OSRM_HORIZON}".`);
+  process.exit(1);
+}
 const PROFILE = { walking: 'foot', cycling: 'bike' };
 const DATA = { walking: process.env.EPIC_OSRM_DATA_WALKING, cycling: process.env.EPIC_OSRM_DATA_CYCLING };
 // A regional extract routes honestly only for cells inside it: OSRM snaps a
