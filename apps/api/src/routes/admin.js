@@ -859,7 +859,7 @@ export async function runApprovedCall(approval, req, dispatch) {
   const token = String(req.headers?.authorization || '').replace(/^Bearer\s+/i, '') || null;
   if (!token) return { ok: false, status: 401, message: 'No owner token to run the request with.' };
   try {
-    const out = await dispatch({ method: parsed.method, path: parsed.path, body: approval.payload ?? {}, token });
+    const out = await dispatch({ method: parsed.method, path: `${parsed.path}${parsed.query || ''}`, body: parsed.method === 'GET' ? null : (approval.payload ?? {}), token });
     // A 2xx is done; a 4xx was rejected before acting (re-approvable); a 5xx may
     // have partly run, so it is indeterminate — never a safe retry (Codex, 1 Oct).
     const indeterminate = out.status >= 500;

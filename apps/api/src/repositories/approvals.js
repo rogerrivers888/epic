@@ -24,17 +24,20 @@ export const REVIEW_STATES = ['pending', 'failed', 'unknown']; // what the owner
  * parsed `{ method, path }`, or null when it is not an allowed shape.
  */
 export function parseApprovalRequest(request) {
-  // Strict by construction: an allowed method, then a canonical back-office
-  // path of a safe charset only — no dots, no percent-encoding, no empty
-  // segments — so it cannot be URL-normalised into a path outside the
-  // allowlist once it reaches `fetch` (Codex, 1 Oct 2026).
-  const m = /^(POST|PUT|PATCH|DELETE) (\/api\/(?:admin|accounts)\/[A-Za-z0-9/_-]+)$/.exec(String(request || '').trim());
+  // Strict by construction. The *path* is a canonical back-office path of a
+  // safe charset only — no dots, no percent-encoding, no empty segments — so it
+  // cannot be URL-normalised out of the allowlist at `fetch` time. A GET is
+  // allowed too (Compare, Ranked and named demand are owner-gated paid reads),
+  // and a bounded query string is preserved for replay — a query cannot change
+  // the path (Codex, 1 Oct 2026).
+  const m = /^(GET|POST|PUT|PATCH|DELETE) (\/api\/(?:admin|accounts)\/[A-Za-z0-9/_-]+)(\?[A-Za-z0-9=&,.%:+_-]{0,500})?$/.exec(String(request || '').trim());
   if (!m) return null;
   const method = m[1];
   const path = m[2];
+  const query = m[3] || '';
   if (path.includes('..') || path.includes('//')) return null;
   if (/\/approvals(\/|$)/i.test(path)) return null; // no approving an approval, any case
-  return { method, path };
+  return { method, path, query };
 }
 
 /** An agent files a request, with the fixed payload to replay. Returns the row. */

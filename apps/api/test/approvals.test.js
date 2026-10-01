@@ -26,7 +26,8 @@ const REQ = 'POST /api/admin/place-index/owned-points/purge';
 
 test('only a replayable back-office write, never an approvals call, can be filed', () => {
   assert.ok(approvals.parseApprovalRequest(REQ));
-  assert.equal(approvals.parseApprovalRequest('GET /api/admin/foo'), null, 'reads are not filed');
+  assert.ok(approvals.parseApprovalRequest('GET /api/admin/place-index/place/compare?ref=google:abc'), 'a paid GET with a query is allowed');
+  assert.equal(approvals.parseApprovalRequest('GET /api/admin/place-index/place/compare?ref=../etc'), null, 'no dots in the query charset');
   assert.equal(approvals.parseApprovalRequest('POST /api/trips/x'), null, 'not a back-office path');
   assert.equal(approvals.parseApprovalRequest('POST /api/admin/approvals/1/decide'), null, 'no approving an approval');
   assert.equal(approvals.parseApprovalRequest('POST /api/admin/Approvals/1/decide'), null, 'nor any case of it');
@@ -113,7 +114,7 @@ test('runApprovedCall refuses a bad recorded request or a missing token', async 
   const noToken = await runApprovedCall({ request: REQ, payload: {} }, { headers: {} }, async () => ({ ok: true, status: 200 }));
   assert.equal(noToken.ok, false);
   assert.equal(noToken.status, 401);
-  const badReq = await runApprovedCall({ request: 'GET /api/admin/x', payload: {} }, { headers: { authorization: 'Bearer t' } }, async () => ({ ok: true, status: 200 }));
+  const badReq = await runApprovedCall({ request: 'GET /api/trips/x', payload: {} }, { headers: { authorization: 'Bearer t' } }, async () => ({ ok: true, status: 200 }));
   assert.equal(badReq.ok, false);
 });
 
