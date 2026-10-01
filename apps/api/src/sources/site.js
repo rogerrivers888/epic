@@ -242,6 +242,11 @@ const LEAD_WORDS = new Set([
   'castle', 'church', 'cathedral', 'abbey', 'reserve', 'nature', 'wood', 'woods', 'woodland', 'beach',
   'country', 'exhibition', 'exhibitions', 'collection', 'collections', 'permanent', 'main',
 ]);
+// And the words that may follow it: the same, plus "all year round", "every day of
+// the year", "for everyone", "open daily".
+const TAIL_WORDS = new Set([...LEAD_WORDS,
+  'for', 'year', 'round', 'every', 'day', 'days', 'of', 'open', 'daily', 'ages', 'welcome', 'charge', 'no',
+]);
 
 const flatten = (html) => String(html)
   .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
@@ -365,10 +370,14 @@ export function admissionFrom(html, node = {}) {
       // its sentence; anything else and it is somebody's free, and Google's level
       // stands. A free place named only by its proper name ("Kew is free") falls
       // back too — the cheap side of being wrong.
-      const leadOk = (before.toLowerCase().match(/[a-z']+/g) ?? []).every((w) => LEAD_WORDS.has(w));
-      // And after: "free entry for <someone>" names an audience unless it is everyone.
-      const forSomeone = /^\s*for\s+(?!(?:everyone|everybody|all)\b)/i.test(after);
-      if (leadOk && !forSomeone && !barred(after) && !barred(before)) { found.free = true; break; }
+      // The rest of the sentence is held to the same rule: "Admission is free except
+      // for ticketed exhibitions", "Free admission for all military personnel" each
+      // slipped a denylist (Codex), and that list has no end either. So the whole
+      // sentence must be the claim and words that only name the place or say it is
+      // open to everyone, all year; any other word and the claim is ambiguous, and an
+      // ambiguous claim falls back to Google — it costs nothing (owner, 1 Oct 2026).
+      const only = (x, ok) => (x.toLowerCase().match(/[a-z']+/g) ?? []).every((w) => ok.has(w));
+      if (only(before, LEAD_WORDS) && only(after, TAIL_WORDS) && !barred(after) && !barred(before)) { found.free = true; break; }
     }
   }
   // A place that charges is not free, whatever a "free parking" line elsewhere

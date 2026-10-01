@@ -73,9 +73,10 @@ test('seasonal and date-bounded free entry is not universally free', () => {
   assert.equal(free('<p>Free entry over Christmas.</p>'), false);
   assert.equal(free('<p>Free admission until 31st October.</p>'), false);
   assert.equal(free('<p>Free entry till 5pm.</p>'), false);
-  // "may" the verb and "still" are not dates; a universal claim survives them.
-  assert.equal(free('<p>Admission is free and you may bring a picnic.</p>'), true);
-  assert.equal(free('<p>Free entry, and it is still the best walk around.</p>'), true);
+  // A free claim with anything else in its sentence is ambiguous and falls back to
+  // Google — even a harmless "you may bring a picnic". Its own sentence is fine.
+  assert.equal(free('<p>Admission is free and you may bring a picnic.</p>'), false);
+  assert.equal(free('<p>Admission is free. You may bring a picnic.</p>'), true);
 });
 
 test('a zero-priced offer for one ticket type is not a free place', () => {
@@ -112,4 +113,11 @@ test('an audience the guard has never heard of still bars the claim', () => {
   assert.equal(free('<p>Free entry for disabled visitors.</p>'), false);
   assert.equal(free('<p>There is free entry for everyone.</p>'), true);
   assert.equal(free('<p>The museum and gardens: free entry, all year round.</p>'), true);
+});
+
+test('an exception or a narrower "all" in the sentence bars the claim', () => {
+  assert.equal(free('<p>Admission is free except for ticketed exhibitions.</p>'), false);
+  assert.equal(free('<p>Free admission for all military personnel.</p>'), false);
+  assert.equal(free('<p>Free admission for all ages, every day of the year.</p>'), true);
+  assert.equal(free('<p>Free entry to the gardens, open all year round.</p>'), true);
 });
