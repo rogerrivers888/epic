@@ -2952,38 +2952,51 @@ export const api = {
     });
     // A refusal arrives as JSON before any frame — over the ceiling, not indexed,
     // signed out — and is thrown like any other so the screen can say it.
-    if (!res.ok || !res.body) {
+    if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       if (res.status === 401) sessionExpired();
       throw new ApiError(res.status, body);
     }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = '';
     // Whether a terminal frame arrived. A connection that closes cleanly without
     // one — a proxy timeout, a server restart mid-run — otherwise resolves this
     // promise with no `done`/`error` ever delivered, and the screen sits on
     // "Researching…" for ever (Codex, 1 Oct 2026). On an early close we throw, so
     // the caller's `.catch` can clear the running state and say what happened.
     let terminated = false;
+    // Frames are separated by a blank line (SSE). Parse one and deliver it.
+    const emit = (frame: string) => {
+      if (!frame.trim()) return;
+      let event = 'message';
+      let data = '';
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) data += line.slice(5).trim();
+      }
+      if (event === 'done' || event === 'error') terminated = true;
+      try { onEvent(event, data ? JSON.parse(data) : {}); } catch { /* one unreadable frame is not the stream */ }
+    };
+    // React Native's fetch (whatwg-fetch over XHR) exposes no streaming body. With
+    // no reader, wait for the whole response and parse its frames at once — no live
+    // updates, but the same events in the same order (Codex, 1 Oct 2026).
+    if (!res.body?.getReader) {
+      const text = await res.text();
+      for (const frame of text.split('\n\n')) emit(frame);
+      if (!terminated) throw new ApiError(0, { message: 'The connection closed before research finished.' });
+      return;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
       buf += decoder.decode(value, { stream: true });
-      // Frames are separated by a blank line (SSE). Anything after the last
-      // blank line is a partial frame and stays in the buffer for the next read.
+      // Anything after the last blank line is a partial frame and stays in the
+      // buffer for the next read.
       let i;
       while ((i = buf.indexOf('\n\n')) >= 0) {
-        const frame = buf.slice(0, i);
+        emit(buf.slice(0, i));
         buf = buf.slice(i + 2);
-        let event = 'message';
-        let data = '';
-        for (const line of frame.split('\n')) {
-          if (line.startsWith('event:')) event = line.slice(6).trim();
-          else if (line.startsWith('data:')) data += line.slice(5).trim();
-        }
-        if (event === 'done' || event === 'error') terminated = true;
-        try { onEvent(event, data ? JSON.parse(data) : {}); } catch { /* one unreadable frame is not the stream */ }
       }
     }
     if (!terminated) throw new ApiError(0, { message: 'The connection closed before research finished.' });
