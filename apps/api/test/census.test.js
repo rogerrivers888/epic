@@ -212,11 +212,14 @@ test('the census locates nothing, and the first display search locates it', asyn
   assert.ok(row.censused_at);
 
   // The display search is the call that locates it — one being made anyway,
-  // for a place somebody is actually looking at.
+  // for a place somebody is actually looking at. It buys the point, but Google's
+  // words for what the place is are rented and no longer stored (item 6, 1 Oct
+  // 2026): the types are held only in the 12h working set and used on display to
+  // re-derive the subcategory, never written to the index.
   await noteFromDisplay([{ venueRef: ref, lat: 51.41, lng: -0.66, primaryType: 'restaurant', labels: ['google:restaurant', 'google:bar'] }]);
   row = await after();
   assert.equal(Number(row.lat), 51.41);
-  assert.deepEqual(row.google_types.sort(), ['bar', 'restaurant']);
+  assert.equal(row.google_types, null, 'and still does not store Googles words for what it is');
   assert.equal(row.coords_from, 'google', 'and dates it, because a rented point expires');
   assert.ok(row.coords_at);
 

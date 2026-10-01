@@ -1866,11 +1866,15 @@ export async function noteMany(places = [], { source = null, countryCode = null,
               -- not restart somebody else's thirty days.
               coords_at = case when excluded.lat is not null then excluded.coords_at else place_index.coords_at end,
               coords_from = case when excluded.lat is not null then excluded.coords_from else place_index.coords_from end,
-              -- Google's own words for what it is, which the census is too
-              -- cheap to buy and a display search carries for nothing.
-              google_types = coalesce(excluded.google_types, place_index.google_types),
+              -- Google's words for what a place is are rented content and are no
+              -- longer stored (owner, 1 Oct 2026, item 6): a place keeps only our
+              -- derived classification and our own facts, and the types are held
+              -- only in the 12h working set, used on display to re-derive the
+              -- subcategory. So this never updates the column, and the insert below
+              -- always passes null. The column stays for its back-office readers
+              -- (which simply see null going forward) and for the one-off clear.
               last_seen = now()`,
-      rows.flatMap((p) => [p.ref, p.lat ?? null, p.lng ?? null, p.countryCode ?? countryCode, p.ownership ?? ownership ?? 'identified', p.types?.length ? p.types : null,
+      rows.flatMap((p) => [p.ref, p.lat ?? null, p.lng ?? null, p.countryCode ?? countryCode, p.ownership ?? ownership ?? 'identified', null,
         // The row's own word, then the caller's where it names a source of
         // points, then the reference (Codex, 30 Sep 2026).
         // Nobody said: the database judges by the reference, knowing an atlas

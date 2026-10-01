@@ -61,7 +61,18 @@ export async function gatherSignals(refs, { heritageLoad: heLoad = null } = {}) 
        -- rented one (CLAUDE.md). A record name counts only where provenance says
        -- we set it ourselves; otherwise the atlas name, else none.
        coalesce(case when (pr.provenance ->> 'name') is not null then pr.name end, at.name) as name,
-       pi.google_types,
+       -- The census queries that found this place — our own words for what it is
+       -- (found_by), used where the rented google_types column used to be, which is
+       -- no longer stored (item 6, 1 Oct 2026). worshipKind et al. check these
+       -- against the Google worship types; found_by values are Google types too.
+       coalesce(array(
+         select distinct q.f from (
+           select s.found_by as f from place_subcategories s
+             where s.venue_ref = r.venue_ref and s.found_by is not null
+           union all
+           select pi2.found_by from place_index pi2
+             where pi2.venue_ref = r.venue_ref and pi2.found_by is not null
+         ) q), '{}') as query_types,
        coalesce((select array_agg(l.label) from place_index_labels l where l.venue_ref = r.venue_ref), '{}') as labels,
        -- A real encyclopedia article, not merely a Wikidata id (every atlas row
        -- has one): the url is the evidence of an article (Codex).
@@ -154,7 +165,7 @@ export async function gatherSignals(refs, { heritageLoad: heLoad = null } = {}) 
       ref: row.venue_ref,
       name: row.name ?? null,
       nation: row.nation ?? null,
-      googleTypes: row.google_types ?? [],
+      googleTypes: row.query_types ?? [],
       labels: row.labels ?? [],
       osmTags: row.osm_tags ?? null,
       hasWikipedia: row.has_wikipedia === true,

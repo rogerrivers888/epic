@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mixed, nobodyGoes, notVisitable, orphans, primaryMismatch, singletons } from '../src/domain/taxonomyAudit.js';
+import { mixed, nobodyGoes, notVisitable, orphans, singletons } from '../src/domain/taxonomyAudit.js';
 import { agreed, DELIVERY_OUT, STRUCTURAL } from '../src/domain/taxonomyCleanup.js';
 
 // A database of this file's own, built from the committed migrations, like the
@@ -104,24 +104,6 @@ test('mixed will not speak about a drawer whose words it has never seen on a pla
   const seen = mixed({ subs, rulesBySub, wordsOfRule: (r) => r.labels.map((l) => l.split(':').pop()), together });
   assert.equal(seen.proposals.length, 1);
   assert.match(seen.proposals[0].because, /fall into 2 groups/);
-});
-
-test('primary mismatch needs to know enough primaries to judge', () => {
-  const refs = Array.from({ length: 20 }, (_, i) => `r${i}`);
-  const quiet = primaryMismatch({
-    words: [{ key: 'cemetery', label: 'Cemetery' }],
-    placesByWord: new Map([['cemetery', refs]]),
-    primaryByRef: new Map([['r0', 'church']]),
-  });
-  assert.equal(quiet.length, 0);
-
-  const loud = primaryMismatch({
-    words: [{ key: 'cemetery', label: 'Cemetery' }],
-    placesByWord: new Map([['cemetery', refs]]),
-    primaryByRef: new Map(refs.map((r) => [r, 'church'])),
-  });
-  assert.equal(loud.length, 1);
-  assert.match(loud[0].because, /catching the rest incidentally/);
 });
 
 test('the agreed cleanup only proposes what this database can carry', () => {
@@ -908,4 +890,24 @@ test('the evidence carries each rule\u2019s weights, so a weight-only rule is no
   const { evidence } = await import('../src/repositories/taxonomyAudit.js');
   const input = await evidence();
   assert.ok(input.rules.every((r) => 'weights' in r));
+});
+
+test('co-occurrence is read from found_by, not from Google types (item 6)', async (t) => {
+  // Two census queries that both found the same place: that, and only that, is
+  // what makes two words "together" now. Google types are no longer stored, so
+  // the signal has to come from our own query records. place_subcategories
+  // references place_index, so the place is written there first.
+  await query(`insert into place_index (venue_ref) values ('google:cooccur') on conflict (venue_ref) do nothing`);
+  await query(`insert into place_subcategories (venue_ref, category, subcategory, found_by, area_slug) values
+                 ('google:cooccur', 'sport', 'cooccur-a', 'cooccur_word_x', 'ZZ-COOCCUR'),
+                 ('google:cooccur', 'sport', 'cooccur-b', 'cooccur_word_y', 'ZZ-COOCCUR')
+               on conflict (venue_ref, subcategory, coalesce(area_slug, '')) do update set found_by = excluded.found_by`);
+  // Deleting the index row cascades to place_subcategories.
+  t.after(() => query(`delete from place_index where venue_ref = 'google:cooccur'`));
+  const { evidence } = await import('../src/repositories/taxonomyAudit.js');
+  const input = await evidence();
+  assert.ok(input.together.get('cooccur_word_x')?.includes('cooccur_word_y'),
+    'two words found on the same place are together');
+  assert.ok(input.together.get('cooccur_word_y')?.includes('cooccur_word_x'), 'and symmetrically');
+  assert.ok(!('primaryByRef' in input), 'and the retired primary-type map is gone');
 });

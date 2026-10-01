@@ -79,12 +79,28 @@ async function decidingRule(ref, rules) {
       where venue_ref = $1 or ('wikidata:' || wikidata_id) = $1 or ('osm:' || osm_ref) = $1
       limit 1`, [ref]);
   const { rows: [indexed] } = await query(
-    'select category, subcategory, google_types from place_index where venue_ref = $1', [ref]);
+    'select category, subcategory from place_index where venue_ref = $1', [ref]);
   if (!atlas && !indexed) return null;
 
+  // The words that filed it come from found_by — our own census queries, which
+  // outlive the rented google_types column (no longer stored; item 6, 1 Oct
+  // 2026). The old call passed the types under a `types:` key that labelsOf
+  // never read, so an indexed-only place always fell to the default here; said
+  // as google: labels, the label rules can actually see them.
+  const { rows: words } = await query(
+    `select distinct found_by from (
+       select found_by from place_subcategories where venue_ref = $1 and found_by is not null
+       union all
+       select found_by from place_index where venue_ref = $1 and found_by is not null) w`, [ref]);
+
+  // shelvesForVenue derives its ref from source + sourcePlaceId and ignores a
+  // bare `ref` key, so the reference goes in the shape it recognises — exactly
+  // as the reindex builds it — or a place-scoped rule would be skipped and a
+  // broader label rule blamed for the correction (Codex, 1 Oct 2026).
+  const [refSource, ...refRest] = ref.split(':');
   const filed = atlas
     ? shelvesForAtlas({ ref, category: atlas.category, kinds: atlas.kinds ?? [], pinned: Boolean(atlas.pinned) }, rules, tax.vocab)
-    : shelvesForVenue({ ref, types: indexed.google_types ?? [] }, rules, tax.vocab);
+    : shelvesForVenue({ source: refSource, sourcePlaceId: refRest.join(':'), labels: words.map((w) => `google:${w.found_by}`) }, rules, tax.vocab);
   // `because` is the chain that fired, narrowest first. A default has no rule.
   const top = (filed.because ?? []).find((b) => b && b.scope && b.scope !== 'default') ?? null;
   return {

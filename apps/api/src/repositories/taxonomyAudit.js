@@ -15,7 +15,7 @@ import { forget as forgetAttributes } from './placeAttributes.js';
 
 /** What the signals need, read in one pass. */
 export async function evidence() {
-  const [subs, rules, places, words, shown, opened, owned, types, pairs, labels, alsoIn, defaults] = await Promise.all([
+  const [subs, rules, places, words, shown, opened, owned, pairs, labels, alsoIn, defaults] = await Promise.all([
     query('select key, label, category_key, active from shelf_subcategories'),
     query('select id, scope, subject, subject_label, subcategory, labels, weights from shelf_rules'),
     query('select subcategory, count(*) n from place_index where subcategory is not null group by 1'),
@@ -39,8 +39,6 @@ export async function evidence() {
                   (website is not null or opening_hours is not null or booking_url is not null) as visitable
              from place_records
             where enrich_state in ('done', 'partial') and enriched_at is not null`),
-    query(`select venue_ref, google_types from place_index
-            where google_types is not null and cardinality(google_types) > 0`),
     // Every word that has ever surfaced a place, not the last one to do so.
     // `place_index.found_by` is overwritten by each census run, so a place
     // found by four words counted for one of them and the other three came out
@@ -65,20 +63,34 @@ export async function evidence() {
   }
 
   const byWord = new Map();
+  // Which words were found on each place, for co-occurrence below.
+  const onPlace = new Map();
   for (const r of pairs.rows) {
     const had = byWord.get(r.found_by) ?? new Set();
     had.add(r.venue_ref);
     byWord.set(r.found_by, had);
+    onPlace.set(r.venue_ref, [...(onPlace.get(r.venue_ref) ?? []), r.found_by]);
   }
   for (const [k, v] of byWord) byWord.set(k, [...v]);
-  // Two words are together when the same place carries both.
-  const onPlace = new Map();
-  for (const r of types.rows) {
-    for (const t of r.google_types) onPlace.set(r.venue_ref, [...(onPlace.get(r.venue_ref) ?? []), t]);
-  }
+  // Two words are together when the same place was found by both census queries,
+  // read from `found_by` — our own records, owned and permanent — not Google's
+  // stored types, which are rented and no longer kept (owner, 1 Oct 2026, item 6).
+  // `found_by` is the same bare-word space as a rule's labels, so `mixed` and
+  // `near` read it unchanged.
+  //
+  // Known limit (Codex, 1 Oct 2026): `place_subcategories` keeps one `found_by`
+  // per (place, subcategory, area) and the index one per place, so two words in
+  // the SAME drawer that find a place in the same area leave only one edge —
+  // within-drawer co-occurrence is thin. `mixed`'s coverage guard (cover = 0.5)
+  // then withholds rather than mis-split, which is the can't-speak side; and
+  // cross-drawer co-occurrence and `near`, over the ~133k censused places, are
+  // far better covered than the old google_types graph ever was (on ~458 display
+  // places). A complete within-drawer fix needs a per-query surfacing history,
+  // which the schema does not keep; left for a deliberate pass, not item 6.
   const together = new Map();
   for (const list of onPlace.values()) {
-    for (const a of list) for (const b of list) {
+    const uniq = [...new Set(list)];
+    for (const a of uniq) for (const b of uniq) {
       if (a === b) continue;
       together.set(a, new Set([...(together.get(a) ?? []), b]));
     }
@@ -118,8 +130,6 @@ export async function evidence() {
     shownByRef: new Map(shown.rows.map((r) => [r.venue_ref, Number(r.n)])),
     openedByRef: new Map(opened.rows.map((r) => [r.venue_ref, Number(r.n)])),
     ownedByRef: new Map(owned.rows.map((r) => [r.venue_ref, r.visitable])),
-    // The first type Google lists is the one it thinks the place mostly is.
-    primaryByRef: new Map(types.rows.map((r) => [r.venue_ref, r.google_types[0]])),
     together: new Map([...together].map(([k, v]) => [k, [...v]])),
     kindsByName,
     // A rule's words, for the junk-drawer detector.

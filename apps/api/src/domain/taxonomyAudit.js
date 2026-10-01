@@ -248,33 +248,13 @@ export function mixed({ subs, rulesBySub, wordsOfRule, together, floor = 4, cove
 }
 
 /**
- * Words that bring places in without being what those places mostly are.
- *
- * Needs the place's own primary type, which the census does not buy — it asks
- * for identifiers only, so `google_types` is present on a small share of the
- * index. It therefore reports its own coverage and skips any word it cannot see
- * enough of.
+ * Primary-mismatch is retired (owner, 1 Oct 2026, item 6). It needed the
+ * place's own primary Google type, and Google types are rented content that is
+ * no longer stored — so the signal has no owned evidence to speak from and does
+ * not pretend to. Co-occurrence (the `mixed` junk-drawer detector and the fold
+ * `near` targets) is rebuilt from `found_by`, our own census query records,
+ * which is owned and permanent; see repositories/taxonomyAudit.js.
  */
-export function primaryMismatch({ words, placesByWord, primaryByRef, floor = 10 }) {
-  const out = [];
-  for (const w of words) {
-    const refs = placesByWord.get(w.key) ?? [];
-    const known = refs.filter((r) => primaryByRef.has(r));
-    if (known.length < floor) continue;
-    const same = known.filter((r) => primaryByRef.get(r) === w.key);
-    const share = same.length / known.length;
-    if (share > 0.3) continue;
-    out.push(say('primary_mismatch', {
-      subject_kind: 'word', subject: w.key, subject_label: w.label,
-      action: 'repoint',
-      now_value: w.subcategoryLabel ?? null,
-      proposed: null,
-      because: `Of ${known.length} of its places whose primary type we know, ${same.length} are actually this. It is catching the rest incidentally.`,
-      numbers: { places: refs.length, known: known.length, same: same.length },
-    }));
-  }
-  return out;
-}
 
 /** Every signal, with what each one could see. */
 export function auditAll(input) {
@@ -287,14 +267,12 @@ export function auditAll(input) {
     ...goes.proposals,
     ...notVisitable(input),
     ...mix.proposals,
-    ...primaryMismatch(input),
   ];
   const evidence = {
     words: input.words.length,
     subcategories: input.subs.filter((s) => s.active).length,
     opensKnownFor: input.openedByRef.size,
     shownKnownFor: input.shownByRef.size,
-    primaryKnownFor: input.primaryByRef.size,
     researched: input.ownedByRef.size,
     tooThinToJudge: goes.thin.length,
     drawersTooThinToJudge: mix.thin.length,

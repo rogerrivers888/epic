@@ -660,7 +660,8 @@ const FLAGS = {
   singleton: { key: 'singleton', name: 'Singleton', grave: false },
   mixed: { key: 'mixed', name: 'Mixed', grave: false },
   orphan: { key: 'orphan', name: 'Orphan', grave: false },
-  primary_mismatch: { key: 'mismatch', name: 'Primary mismatch', grave: false },
+  // Primary-mismatch retired with item 6 (1 Oct 2026): it read Google's stored
+  // primary type, which is no longer kept. The audit no longer raises it.
 };
 
 /**
