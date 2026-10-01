@@ -553,7 +553,14 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
   // so every call is wrapped and its return ignored.
   const step = (source, state, detail = {}) => {
     if (!onStep) return;
-    try { onStep({ source, state, ...detail }); } catch { /* a watcher never breaks the work */ }
+    try {
+      // A synchronous throw is caught here; an async listener that rejects would
+      // otherwise become an unhandled rejection and could take the process down,
+      // so its promise's rejection is swallowed too — non-blocking either way,
+      // the research never waits on or fails for a watcher (Codex, 1 Oct 2026).
+      const r = onStep({ source, state, ...detail });
+      if (r && typeof r.then === 'function') r.then(undefined, () => {});
+    } catch { /* a watcher never breaks the work */ }
   };
   await owned.ensureRecord(venueRef);
   const before = await owned.enrichStateOf(venueRef);
@@ -782,16 +789,23 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
       const geo = await reverseGeocode(point.lat, point.lng, { zoom: 18 });
       await logCall(householdId, 'osm-nominatim', 'own.where');
       if (geo) {
-        step('address', 'found', { formatted: geo.formatted ?? null });
         matched.nominatim = { formatted: geo.formatted ?? null };
         await forgetSource(venueRef, ['nominatim']);
         await Promise.all([
           putFact(venueRef, 'address', 'nominatim', geo.formatted || null, 1),
           putFact(venueRef, 'postcode', 'nominatim', geo.address?.postcode ?? null, 1),
         ]);
+        // After the writes land, so a watcher never sees "found" for a row that
+        // then failed to store (Codex, 1 Oct 2026).
+        step('address', 'found', { formatted: geo.formatted ?? null });
+      } else {
+        step('address', 'nothing');
       }
     } catch (err) {
       problems.push(`the address lookup: ${String(err?.message || err).slice(0, 120)}`);
+      // A terminal event on every outcome, so the page does not leave the
+      // address lookup spinning after `done` (Codex, 1 Oct 2026).
+      step('address', 'failed');
     }
   }
 

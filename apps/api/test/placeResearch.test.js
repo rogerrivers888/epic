@@ -32,73 +32,62 @@ test('one frame is a named event and its JSON payload', () => {
 test('the stream relays each source step, then what we kept, then done', async () => {
   const frames = [];
   const send = (event, data) => frames.push({ event, data });
-  // A pipeline that reports two source steps and returns a found record.
+  // A pipeline that reports source steps and returns a found record.
   const run = async (ref, opts) => {
     assert.equal(opts.paid, true, 'the button is a paid pass');
     assert.equal(opts.force, true, 'the button means "look now"');
     opts.onStep({ source: 'open-map', state: 'checking' });
     opts.onStep({ source: 'open-map', state: 'found', ref: 'node/42' });
     opts.onStep({ source: 'venue-site', state: 'nothing' });
-    return { state: 'done', fields: { name: 'Windsor Great Park', summary: 'A royal park.', address: 'Windsor', opening_hours: 'Dawn to dusk' }, problems: [] };
+    // `enrich` returns `fields` as a count and `provenance` as which field came
+    // from where; `kept.have` is read from provenance.
+    return { state: 'done', fields: 4, provenance: { name: 'osm', summary: 'wikipedia', address: 'nominatim', opening_hours: 'site' }, problems: [] };
   };
-  let recorded = null;
-  const google = { enabled: () => true, get: async (id, { meter }) => { meter.google = 1; meter['google-details'] = 1; return { reviews: [{}, {}, {}], reviewSummary: 'Lovely.' }; } };
-  const recordCall = async (...args) => { recorded = args; };
 
-  const out = await runResearchStream({ ref: `${PREFIX}kept`, householdId: 'hh1', sessionId: 's1', send, run, google, recordCall });
+  const out = await runResearchStream({ ref: `${PREFIX}kept`, householdId: 'hh1', sessionId: 's1', send, run });
 
   const events = frames.map((f) => f.event);
-  assert.deepEqual(events, ['start', 'source', 'source', 'source', 'kept', 'source', 'source', 'done']);
-  // The kept frame reports what our record now holds, as ticks.
+  assert.deepEqual(events, ['start', 'source', 'source', 'source', 'kept', 'done']);
+  // The kept frame reports what our record now holds, as ticks, read from provenance.
   const kept = frames.find((f) => f.event === 'kept').data;
   assert.equal(kept.state, 'done');
   assert.equal(kept.have.name, true);
   assert.equal(kept.have.what_it_is, true, 'a summary is "what it is"');
   assert.equal(kept.have.where_to_go, true, 'an address is "where to go"');
-  assert.equal(kept.have.hours, true, '"Dawn to dusk" is a known opening answer');
-  // The reviews pass ran in memory, was attributed to the ledger, and reported
-  // itself as spotting-only with verification pending — nothing stored.
-  const reviews = frames.filter((f) => f.event === 'source' && f.data.source === 'reviews');
-  assert.equal(reviews.length, 2, 'checking then found');
-  assert.equal(reviews[1].data.state, 'found');
-  assert.equal(reviews[1].data.read, 3);
-  assert.equal(reviews[1].data.verification, 'pending');
-  assert.ok(recorded, 'the review call is on the ledger');
-  assert.equal(recorded[2], 'admin.places.research.reviews');
+  assert.equal(kept.have.hours, true, 'an opening answer is "when it\'s open"');
+  // Reading Google reviews for spotting is deferred to the verification answerer
+  // (it cannot use googleSource.get while that carries C57's status sink), so the
+  // stream emits no reviews pass yet.
+  assert.ok(!frames.some((f) => f.event === 'source' && f.data.source === 'reviews'), 'no reviews pass yet');
   assert.equal(out.state, 'done');
 });
 
-test('no Google id means no review pass, and the rest still streams', async () => {
-  const frames = [];
-  const send = (event, data) => frames.push({ event, data });
-  const run = async (_ref, opts) => { opts.onStep({ source: 'open-map', state: 'nothing' }); return { state: 'partial', fields: {}, problems: ['no match in OpenStreetMap'] }; };
-  // enabled but never asked, because there is no id to read reviews by.
-  let asked = false;
-  const google = { enabled: () => true, get: async () => { asked = true; return {}; } };
-  // A non-google ref with no stored match resolves to no id (matchesFor returns
-  // an empty map here — nothing seeded).
-  await runResearchStream({ ref: `${PREFIX}noid`.replace('google:', 'osm:'), householdId: 'hh1', sessionId: 's1', send, run, google, recordCall: async () => {} });
-  assert.equal(asked, false, 'no id, no review call');
-  assert.ok(frames.some((f) => f.event === 'done'));
-  assert.ok(!frames.some((f) => f.event === 'source' && f.data.source === 'reviews'));
-});
+test('the quote reserves the worst case and never under-reserves', async () => {
+  // A google: ref with no website held: reserve the identify brief and the
+  // page-find (both Pro) and one review read — so the reservation always covers
+  // what the pipeline can spend, rather than under-reserving an identify that
+  // seedFor still makes.
+  const bare = await quoteResearch(`${PREFIX}bare`);
+  assert.equal(bare.off, false);
+  assert.deepEqual(bare.breakdown, { identify: 1, findPage: 1, reviews: 0 });
+  assert.ok(bare.pence > 0);
 
-test('the quote is the worst case, minus what is plainly not needed', async () => {
-  // A place we hold Google's id for (a google: ref) and no website: no identify
-  // call, one page-find, one review read.
-  const noSite = await quoteResearch(`${PREFIX}nosite`);
-  assert.equal(noSite.off, false);
-  assert.deepEqual(noSite.breakdown, { identify: 0, findPage: 1, reviews: 1 });
-  assert.ok(noSite.pence > 0);
-
-  // The same place once we hold a website: the page-find drops off.
+  // Once we hold a website, the page-find drops off; identify and the review read
+  // stay reserved for the Google id.
   await query(
     `insert into place_records (venue_ref, website) values ($1, 'https://example.com')
      on conflict (venue_ref) do update set website = 'https://example.com'`,
     [`${PREFIX}withsite`]);
   const withSite = await quoteResearch(`${PREFIX}withsite`);
-  assert.deepEqual(withSite.breakdown, { identify: 0, findPage: 0, reviews: 1 });
-  assert.ok(withSite.pence < noSite.pence, 'holding a website costs less to research');
+  assert.deepEqual(withSite.breakdown, { identify: 1, findPage: 0, reviews: 0 });
+  assert.ok(withSite.pence < bare.pence, 'holding a website costs less to research');
+
+  // A non-google ref with no stored match makes no Google call at all — it seeds
+  // from its own record and looks for a page via a Claude search (its own
+  // budget), so nothing is reserved against the Google ceiling here.
+  const osm = await quoteResearch('osm:way/123_research_test');
+  assert.deepEqual(osm.breakdown, { identify: 0, findPage: 0, reviews: 0 });
+  assert.equal(osm.pence, 0);
 });
 
 test('a rectangle around a point spans the radius and is capped at 50km', () => {

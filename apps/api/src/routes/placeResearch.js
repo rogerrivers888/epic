@@ -17,12 +17,17 @@
  * What it keeps and what it does not:
  *   · Everything the owned pipeline finds is ours and is kept — that is the
  *     point of the button (`place_records` / `place_facts`, via `enrich`).
- *   · Google is used only to identify the place and find its website, and its
- *     details and reviews are read **in memory for spotting** and never written
- *     down (owner, 29 Sep 2026; the data policy's licence line). The spotted
- *     candidates are offered to the verification hook, which answers them from
- *     owned sources — that answerer is a separate build, so today spotting is
- *     recorded as "read, verification pending" and nothing is stored from it.
+ *   · Google is used only to identify the place and find its website: an id (which
+ *     we may keep) and, in memory, a name and a point to search the open map and
+ *     the encyclopedias with. **None of Google's rented content — names, hours,
+ *     ratings, reviews, descriptions — is ever written down or used to set a
+ *     fact** (owner, 29 Sep 2026; the data policy's licence line). The only
+ *     Google-derived thing the platform persists is the operating status C57
+ *     already writes on every Google call (a derived place_status, not raw
+ *     content), which is unchanged here.
+ *   · Reading Google's reviews in memory for spotting is deferred to the
+ *     verification answerer — a separate build — because the current detail
+ *     fetch carries C57's status sink; so no review-spotting runs here yet.
  *
  * A device sign-in pressing the button is the household's approval for this one
  * place — no separate paid-hours grant (owner, 29 Sep 2026). It is still held to
@@ -39,11 +44,11 @@ import { query } from '../db.js';
 import { currentHousehold } from './household.js';
 import { enrich } from '../sources/own.js';
 import { googleSource, rankedSlice } from '../sources/google.js';
-import { matchesFor } from '../sources/providerMatch.js';
+import { sourceOff } from '../sources/switches.js';
 import { PRICE_PER_UNIT_USD, USD_TO_GBP } from '../domain/providerPrices.js';
 import { roomToSpend, releaseSpend } from './placeIndex.js';
-import { whySourceFailed } from '../sources/why.js';
 import { recordProviderCall } from '../repositories/visits.js';
+import { healthOf } from '../sources/meter.js';
 
 const router = express.Router();
 const bad = (message, code = 'bad_request') => Object.assign(new Error(message), { status: 400, code });
@@ -67,15 +72,30 @@ const money = (pence) => `£${(Math.max(0, pence) / 100).toFixed(2)}`;
  * identify never reaches the paid steps — so this is a ceiling, said as one.
  */
 export async function quoteResearch(ref) {
-  if (!googleSource.enabled()) return { pence: 0, off: true, breakdown: { identify: 0, findPage: 0, reviews: 0 } };
-  const googleId = ref.startsWith('google:') ? ref.slice('google:'.length) : (await matchesFor([ref], 'google')).get(ref) ?? null;
+  // Usable means a key AND the Settings switch on — not just a key; with the
+  // switch off the adapter refuses every call (Codex, 1 Oct 2026).
+  if (!usable()) return { pence: 0, off: true, breakdown: { identify: 0, findPage: 0, reviews: 0 } };
+  const isGoogleRef = ref.startsWith('google:');
   const { rows: [rec] } = await query('select website from place_records where venue_ref = $1', [ref]);
-  const identify = googleId ? 0 : 1;              // one Pro call to work out which place this is
-  const findPage = rec?.website ? 0 : 1;          // one Pro call to find their own page
-  const reviews = (googleId || identify) ? 1 : 0; // one details call, read in memory for spotting
+  // The Google Pro calls research can make, scoped to where they actually happen
+  // (Codex, 1 Oct 2026): only a google: ref is briefed to identify the place and
+  // has its page found through Google — an osm:/atlas: ref seeds from its owned
+  // record and, if it has no website, goes looking via a Claude web search
+  // (its own budget, not this Google reservation). The brief is reserved for
+  // every google: ref and the unspent part released, since whether seedFor needs
+  // it depends on owned seed we cannot read reliably here (rented lat/lng expire).
+  // Reviews are NOT reserved: the in-memory review-spotting pass is deferred with
+  // the verification answerer, so it makes no Details call to reserve for yet
+  // (Codex, 1 Oct 2026) — reserving it returned over_the_ceiling for work that fit.
+  const identify = isGoogleRef ? 1 : 0;
+  const findPage = (isGoogleRef && !rec?.website) ? 1 : 0;
+  const reviews = 0;
   const pence = Math.round(((identify + findPage) * PRO_PENCE + reviews * DETAILS_PENCE) * 100) / 100;
   return { pence, off: false, breakdown: { identify, findPage, reviews } };
 }
+
+/** A key AND the Settings switch on — the adapter refuses every call otherwise. */
+const usable = () => googleSource.enabled() && !sourceOff('google');
 
 /** One Server-Sent-Events frame: a named event and its JSON payload. */
 export const sse = (event, data) => `event: ${event}\ndata: ${JSON.stringify(data ?? {})}\n\n`;
@@ -90,7 +110,7 @@ export const sse = (event, data) => `event: ${event}\ndata: ${JSON.stringify(dat
  * now holds), then — where there is a Google id — a `reviews` frame for the
  * in-memory spotting pass, then `done`. Any throw becomes a single `error` frame.
  */
-export async function runResearchStream({ ref, householdId, sessionId, send, run = enrich, google = googleSource, recordCall = recordProviderCall } = {}) {
+export async function runResearchStream({ ref, householdId, sessionId, send, run = enrich } = {}) {
   send('start', { ref });
   // The pipeline itself, forced (the button means "look now"), paid, and allowed
   // its web search. Each source boundary is relayed straight to the page.
@@ -98,37 +118,24 @@ export async function runResearchStream({ ref, householdId, sessionId, send, run
     householdId, sessionId, paid: true, search: true, force: true,
     onStep: (s) => send('source', s),
   });
-  // What our record holds now — the fields that came back, as booleans, so the
-  // atlas column can fill in without the page re-reading the record.
+  // What our record holds now — as booleans, so the atlas column can fill in
+  // without re-reading the record. Read from `provenance` (which field came from
+  // where), not `fields`: `enrich` returns `fields` as a count, and `provenance`
+  // is the object whose keys are the facts it set (Codex, 1 Oct 2026).
   send('kept', {
     state: result?.state ?? null,
-    have: heldFrom(result?.fields ?? {}),
+    have: heldFrom(result?.provenance ?? {}),
     problems: result?.problems ?? [],
   });
 
-  // Google's details and reviews, read in memory for spotting — never stored.
-  // Only where we have an id to read them by; and the candidates are handed to
-  // the verification hook, which answers them from owned sources (a separate
-  // build), so today this reports "read, verification pending".
-  const googleId = ref.startsWith('google:') ? ref.slice('google:'.length) : (await matchesFor([ref], 'google').catch(() => new Map())).get(ref) ?? null;
-  if (googleId && google.enabled?.()) {
-    send('source', { source: 'reviews', state: 'checking' });
-    const meter = {};
-    try {
-      const detail = await google.get(googleId, { meter });
-      const reviews = Array.isArray(detail?.reviews) ? detail.reviews.length : 0;
-      const hasSummary = Boolean(detail?.reviewSummary || detail?.aiSummary);
-      // Spotting only: nothing from here is written down. The candidates would
-      // be offered to the answerer here; it is a separate build, so the step
-      // says so rather than pretending to have verified anything.
-      send('source', { source: 'reviews', state: 'found', read: reviews, summary: hasSummary, verification: 'pending' });
-    } catch (err) {
-      send('source', { source: 'reviews', state: 'failed', why: whySourceFailed('google', err) });
-    } finally {
-      // The call is on the ledger whether or not it answered — it still went out.
-      if (Object.keys(meter).length) await recordCall(householdId, 'google', 'admin.places.research.reviews', meter, `google:${googleId}`).catch(() => null);
-    }
-  }
+  // Reading Google's reviews in memory for spotting is deferred to the
+  // verification answerer, which is itself a separate build (owner, 29 Sep 2026:
+  // "wire verification to the hook, leave the deferred answerer separate"). It is
+  // left out here rather than done early because `googleSource.get()` now carries
+  // C57's businessStatus sink, which persists a derived place_status as a side
+  // effect — so a "read in memory, never stored" spotting pass cannot use it
+  // (Codex, 1 Oct 2026). When the answerer lands it will read reviews through a
+  // status-free fetch and offer the candidates to it.
 
   send('done', { state: result?.state ?? null });
   return result;
@@ -228,7 +235,17 @@ export function rectFromCenter({ lat, lng, radiusKm = 30 }) {
   const km = Math.min(Math.max(Number(radiusKm) || 30, 1), 50);
   const dLat = km / 111.32;
   const dLng = km / (111.32 * Math.cos((lat * Math.PI) / 180) || 1);
-  return { minLat: lat - dLat, minLng: lng - dLng, maxLat: lat + dLat, maxLng: lng + dLng };
+  const minLat = Math.max(-90, lat - dLat);
+  const maxLat = Math.min(90, lat + dLat);
+  // Near a pole the radius can span more than 180° of longitude; then the box
+  // must cover every longitude, not an arbitrary wrapped slice (Codex, 1 Oct
+  // 2026). Otherwise longitude wraps at the antimeridian rather than clipping, so
+  // a centre near ±180 keeps its full radius — Google's rectangle takes
+  // low.longitude > high.longitude as crossing the 180th meridian. `wrap`
+  // normalises to [-180, 180).
+  if (dLng >= 180) return { minLat, maxLat, minLng: -180, maxLng: 180 };
+  const wrap = (x) => ((((x + 180) % 360) + 360) % 360) - 180;
+  return { minLat, maxLat, minLng: wrap(lng - dLng), maxLng: wrap(lng + dLng) };
 }
 
 /**
@@ -246,7 +263,7 @@ export async function runRanked({ lat, lng, radiusKm = 30, query = null, include
 
 /** GET /ranked/quote — what one page of the ranked list costs. */
 router.get('/ranked/quote', requires('view_library'), (_req, res) => {
-  const off = !googleSource.enabled();
+  const off = !usable();
   res.json({ pence: off ? 0 : RANKED_PENCE, off, human: off ? 'Google is not switched on here.' : `about ${money(RANKED_PENCE)} for twenty` });
 });
 
@@ -264,13 +281,20 @@ router.get('/ranked', requires('manage_library'), async (req, res, next) => {
   try {
     const lat = Number(req.query.lat);
     const lng = Number(req.query.lng);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) throw bad('Where? Pass ?lat=&lng= for the area.');
-    if (!googleSource.enabled()) {
+    // A real point on the globe, not merely a finite number: lat=100 would make
+    // an invalid rectangle and still reserve spend (Codex, 1 Oct 2026).
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+      throw bad('Where? Pass ?lat=&lng= as a real point (lat ±90, lng ±180).');
+    }
+    // A subcategory to rank: a Table-A type, or words. Without either this would
+    // reserve spend and search Google's fallback "things to do" (Codex, 1 Oct 2026).
+    const query = req.query.q ? String(req.query.q).trim() : '';
+    const includedType = req.query.type ? String(req.query.type).trim() : '';
+    if (!query && !includedType) throw bad('Which subcategory? Pass ?type= (a Google type) or ?q= (search words).');
+    if (!usable()) {
       return res.status(422).json({ error: 'not_switched_on', message: 'Google is not switched on here. The key is the owner\'s to add in Doppler.' });
     }
     const radiusKm = Number(req.query.radiusKm) || 30;
-    const query = req.query.q ? String(req.query.q) : null;
-    const includedType = req.query.type ? String(req.query.type) : null;
     const from = Math.max(0, Math.trunc(Number(req.query.from)) || 0);
     const pageToken = req.query.pageToken ? String(req.query.pageToken) : null;
 
@@ -285,7 +309,8 @@ router.get('/ranked', requires('manage_library'), async (req, res, next) => {
     try {
       const household = await currentHousehold();
       const out = await runRanked({ lat, lng, radiusKm, query, includedType, from, pageToken, meter });
-      if (Object.keys(meter).length) await recordProviderCall(household.id, 'google', 'admin.places.ranked', meter, null).catch(() => null);
+      // Units OR a fault, so a paid-gate refusal is on the ledger too (Codex, 1 Oct 2026).
+      if (Object.keys(meter).length || healthOf(meter).failed) await recordProviderCall(household.id, 'google', 'admin.places.ranked', meter, null).catch(() => null);
       res.json({ ...out, from });
     } finally {
       await releaseSpend(room.reservation);
