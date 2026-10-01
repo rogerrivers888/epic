@@ -357,7 +357,8 @@ export async function requireSession(req, res, next) {
     // needs the owner personally signed in (G11, paidGate.js). Decided by path,
     // not by the session, so the owner's own client-app searches (client door)
     // are never caught by it.
-    const backOffice = req.path.startsWith('/api/admin') || req.path.startsWith('/api/accounts');
+    const p = String(req.path || '').toLowerCase();
+    const backOffice = p.startsWith('/api/admin') || p.startsWith('/api/accounts');
     const elevated = Boolean(req.access?.elevated);
     if (account) return runAsAccount(account, () => runAsSpender({ householdId: account.household_id, sessionId: session.id, backOffice, elevated }, next));
     // The shared passcode carries no account and is the founding household's

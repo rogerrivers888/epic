@@ -249,32 +249,31 @@ const doorOf = (req) => (req.path.length > 1 ? req.path.replace(/\/+$/, '').toLo
 // (sources/paidGate.js), so it is not repeated here.
 const requireOwnerAndAudit = (action, then = null) => (req, res, next) =>
   requireOwnerSignedIn(action)(req, res, () => {
-    // Logged with the owner's name when it actually happens: the row is written
-    // on a successful response, so a rate-limited, refused or failed request
-    // leaves no row claiming an action occurred (Codex, 1 Oct 2026). The
-    // completion audit a route writes for itself stands beside this.
-    const path = doorOf(req);
-    res.on('finish', () => {
-      if (res.statusCode >= 400) return;
-      void writeAuditStrict({
-        actorId: req.account?.id ?? null,
-        actorLabel: req.account?.email ?? 'the owner',
-        action: 'privileged.place-index',
-        subjectType: 'place-index',
-        subjectId: path,
-        subjectLabel: action,
-        after: { method: req.method, status: res.statusCode },
-      }).catch(() => null);
-    });
-    return then ? then(req, res, next) : next();
+    // Logged with the owner's name, strictly and before the action: if the
+    // record cannot be written the action does not run (G11, fail closed). It
+    // is the owner's authorization of a privileged action; the route writes its
+    // own completion audit beside this (Codex, 1 Oct 2026).
+    writeAuditStrict({
+      actorId: req.account?.id ?? null,
+      actorLabel: req.account?.email ?? 'the owner',
+      action: 'privileged.place-index',
+      subjectType: 'place-index',
+      subjectId: doorOf(req),
+      subjectLabel: action,
+      after: { method: req.method, authorized: true },
+    }).then(() => (then ? then(req, res, next) : next()), (err) => next(err));
   });
-// Spending from the back office requires personal sign-in — enforced at the
-// paid choke point (sources/paidGate.js), which covers every paid admin route
-// in every router, so here these shims only pace the spend as before.
+// Spending from the back office requires personal sign-in (G11). The paid
+// choke point (sources/paidGate.js) covers Google and Routes in every router;
+// this mount gate covers the named paid endpoints whatever the provider —
+// Compare also bills Tripadvisor, which never reaches that choke point. Then it
+// paces the spend as before. A non-admin still gets the mount's 404 first.
+const paidOwner = (req, res, next) =>
+  requireOwnerSignedIn('spend money')(req, res, () => spendLimit(req, res, next));
 app.use('/api/admin/place-index', (req, res, next) =>
-  (PAID_ADMIN.has(doorOf(req)) ? spendLimit(req, res, next) : next()));
+  (hasDoor(req, 'admin') && PAID_ADMIN.has(doorOf(req)) ? paidOwner(req, res, next) : next()));
 app.use('/api/admin/demand', (req, res, next) =>
-  (doorOf(req) === '/search' && String(req.query.names ?? '') === '1' ? spendLimit(req, res, next) : next()));
+  (hasDoor(req, 'admin') && doorOf(req) === '/search' && String(req.query.names ?? '') === '1' ? paidOwner(req, res, next) : next()));
 
 // Speech is a paid minute per request, held to its own number per household
 // (`voiceLimit`) as well as the monthly minutes in routes/voice.js.

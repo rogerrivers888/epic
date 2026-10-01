@@ -52,8 +52,20 @@ export const runOutsideRequest = (fn) => storage.run({ account: null }, fn);
  * never before Google is exactly how today's ceiling surprise happens
  * again"). Google's `call()` reads it; nothing else has to be threaded.
  */
-export const runAsSpender = ({ householdId = null, sessionId = null, backOffice = false, elevated = false } = {}, fn) =>
-  storage.run({ ...(storage.getStore() ?? { account: null }), spender: { householdId, sessionId, backOffice, elevated } }, fn);
+export const runAsSpender = ({ householdId = null, sessionId = null, backOffice, elevated } = {}, fn) => {
+  // A nested spender inherits the request's security context unless it says
+  // otherwise, so paid research re-entered from an admin route stays a
+  // back-office spend rather than looking like client traffic (Codex, 1 Oct 2026).
+  const prev = storage.getStore()?.spender;
+  return storage.run({
+    ...(storage.getStore() ?? { account: null }),
+    spender: {
+      householdId, sessionId,
+      backOffice: backOffice ?? prev?.backOffice ?? false,
+      elevated: elevated ?? prev?.elevated ?? false,
+    },
+  }, fn);
+};
 
 /**
  * The household (and session) a paid call is on behalf of, or nulls.

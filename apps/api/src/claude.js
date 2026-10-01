@@ -95,13 +95,20 @@ export async function assertWithinBounds({ householdId, sessionId }) {
   // here is the plan's. Background work (no session, or the server's own) is
   // not refused here: the owner's rule for that was Google's, not Claude's,
   // and the daily ceiling below holds it.
-  const apiSession = currentSpender().sessionId;
+  const { sessionId: apiSession, backOffice, elevated } = currentSpender();
   if (apiSession) {
     const { sessionStanding, UnattributedCallError } = await import('./sources/paidGate.js');
     const standing = await sessionStanding(apiSession).catch(() => 'no_session');
     if (standing === 'agent' || standing === 'not_live') {
       throw new UnattributedCallError(standing === 'agent' ? 'an agent session with no paid budget granted' : 'a session that has been signed out or has expired');
     }
+  }
+  // Claude spends too: a back-office run (the scout, the harvest classifier, a
+  // back-office planner call) needs the owner personally signed in, the same as
+  // a Google spend (G11, 1 Oct 2026). A household's own planning is client door.
+  if (backOffice && !elevated) {
+    const { UnattributedCallError } = await import('./sources/paidGate.js');
+    throw new UnattributedCallError('a back-office spend needs you signed in personally');
   }
   await assertUnderDailyCeiling();
   const [sessionCalls, monthCalls, bound] = await Promise.all([
