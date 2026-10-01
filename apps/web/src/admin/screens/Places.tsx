@@ -3194,6 +3194,11 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
       return { ...r, steps };
     });
     api.adminResearchStream(refId, (name, d) => {
+      // `done` means the server finished and wrote data, so the boards it changed
+      // are stale whoever is looking — invalidate them even if this tab has moved
+      // on or unmounted. Everything below only touches this tab's own state, and
+      // only while it is still the one on screen (Codex, 1 Oct 2026).
+      if (name === 'done') onResearched?.();
       if (!mine()) return; // a frame for a place the drawer has already left
       if (name === 'source') put(d as ResearchStep);
       // What the record holds now, and how the pipeline judged the run: `done`
@@ -3209,7 +3214,6 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
         // (identify only, not identify-plus-find-page); re-price so the button
         // stops advertising the old ceiling.
         api.adminResearchQuote(refId).then((q) => { if (mine()) setQuote(q); }).catch(() => { /* keep the last known price */ });
-        onResearched?.();
       }
     }).catch((e) => { if (mine()) setResearch((r) => (r ? { ...r, running: false, error: e?.body?.message ?? 'Research could not finish.' } : r)); });
   }, [canManage, research?.running, quote, refId, reload, onResearched]);
