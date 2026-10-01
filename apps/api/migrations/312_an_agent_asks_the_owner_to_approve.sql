@@ -4,8 +4,9 @@
 -- (a purge, a bulk apply, a paid run). Rather than ask in chat, it files a
 -- request here: the exact call it needs, a one-line description, and the numbers
 -- affected. The owner, signed in personally, approves or declines with one
--- click — logged with his name. An approved request lets that one call through,
--- once, for the session that filed it.
+-- click — logged with his name. V1 is a governance record: the owner then
+-- performs the action. (The `request` column names the exact call, so a later
+-- follow-on could authorise an approved call without reopening the shape.)
 create table if not exists approvals (
   id uuid primary key default gen_random_uuid(),
   session_id uuid references api_sessions(id) on delete set null,
