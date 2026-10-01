@@ -85,8 +85,13 @@ function CostBandEditor({ code, currency, bands, onSaved, toast }: {
   const majorOf = (minor: number | null | undefined) => (minor == null ? '' : String(minor / 100));
   // Seed from the current bands: the first paid band's ceiling, and the second's.
   const seeded = Array.isArray(bands) && bands.length === 4;
-  const [t1, setT1] = useState(seeded ? majorOf(bands![1].max) : '');
-  const [t2, setT2] = useState(seeded ? majorOf(bands![2].max) : '');
+  const seedT1 = seeded ? majorOf(bands![1].max) : '';
+  const seedT2 = seeded ? majorOf(bands![2].max) : '';
+  const [t1, setT1] = useState(seedT1);
+  const [t2, setT2] = useState(seedT2);
+  // Re-seed when the market's bands change — after a save or an Undo reload — so
+  // the boxes never keep an undone value that a later Change would reapply (Codex).
+  useEffect(() => { setT1(seedT1); setT2(seedT2); }, [seedT1, seedT2]);
   const [busy, setBusy] = useState(false);
   const a = Number(t1); const b = Number(t2);
   const valid = t1.trim() !== '' && t2.trim() !== '' && Number.isFinite(a) && Number.isFinite(b) && a > 0 && b > a;

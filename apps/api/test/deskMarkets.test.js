@@ -83,9 +83,12 @@ test('setting a null-band market\'s cost bands fills four half-open bands, and i
   const after = await m.getMarket('PT');
   assert.equal(after.checklist.costBands, true, 'now it has bands');
   assert.equal(after.costBandsSetBy, 'sarah@epic.day', 'and says who set them');
-  // The two thresholds must be whole minor units, ascending and positive.
-  await assert.rejects(() => m.setCostBands('PT', { t1: 3000, t2: 1200 }, 'sarah@epic.day'), /0 < first < second/);
-  await assert.rejects(() => m.setCostBands('PT', { t1: 0, t2: 100 }, 'sarah@epic.day'), /0 < first < second/);
+  // The two thresholds must be whole minor units, ascending, with a real first band.
+  await assert.rejects(() => m.setCostBands('PT', { t1: 3000, t2: 1200 }, 'sarah@epic.day'), /1 < first < second/, 'descending');
+  await assert.rejects(() => m.setCostBands('PT', { t1: 0, t2: 100 }, 'sarah@epic.day'), /1 < first < second/, 'zero first');
+  await assert.rejects(() => m.setCostBands('PT', { t1: 1, t2: 100 }, 'sarah@epic.day'), /1 < first < second/, 't1 = 1 is an empty [1,1) band');
+  await assert.rejects(() => m.setCostBands('PT', { t1: 1200.4, t2: 3000 }, 'sarah@epic.day'), /whole minor units/, 'fractional minor units, checked before rounding');
+  await assert.rejects(() => m.setCostBands('PT', { t1: 1200, t2: 3000, basis: 'made up' }, 'sarah@epic.day'), /judgement.*prices/, 'basis is an enum');
   await assert.rejects(() => m.setCostBands('PT', { t1: 1200, t2: 3000 }, null), /says who made it/);
   // Undo restores "not known yet".
   const { rows: [chg] } = await query(`select * from bo_changes where subject_id='PT/cost-bands' order by at desc limit 1`);

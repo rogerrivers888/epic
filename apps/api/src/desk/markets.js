@@ -93,13 +93,25 @@ export async function undoMarketSource({ change, who }) {
  * Logged and undoable; the whole prior bands set is kept so undo is exact,
  * including restoring a market to "not known yet" (null).
  */
+/** A one-line summary of a bands set for the change log — "not set" when null. */
+function bandsSummary(bands, currency) {
+  if (!Array.isArray(bands) || bands.length < 4) return 'not set';
+  const sym = scaleFor(currency)[1] ?? '';
+  const money = (minor) => { const major = minor / 100; return `${sym}${Number.isInteger(major) ? major : major.toFixed(2)}`; };
+  return `${sym} up to ${money(bands[1].max)} · ${sym}${sym} up to ${money(bands[2].max)}`;
+}
+
 export async function setCostBands(code, { t1, t2, basis = 'judgement' }, who) {
   if (!who) throw bad('a change says who made it');
+  if (basis !== 'judgement' && basis !== 'prices') throw bad("basis is 'judgement' or 'prices'");
   const c = String(code || '').toUpperCase();
-  const a = Math.round(Number(t1));
-  const b = Math.round(Number(t2));
-  if (!Number.isInteger(a) || !Number.isInteger(b) || a < 1 || b <= a) {
-    throw bad('the two thresholds must be whole minor units with 0 < first < second');
+  const a = Number(t1);
+  const b = Number(t2);
+  // Whole minor units, checked BEFORE any rounding so a fractional minor unit is
+  // rejected, not silently floored; the first paid band starts at 1 so the first
+  // threshold must exceed it (t1 = 1 would make an empty [1, 1) band); ascending.
+  if (!Number.isInteger(a) || !Number.isInteger(b) || a <= 1 || b <= a) {
+    throw bad('the two thresholds must be whole minor units with 1 < first < second');
   }
   return withTransaction(async (client) => {
     const { rows: [m] } = await client.query('select currency, cost_bands from markets where code = $1 for update', [c]);
@@ -113,8 +125,12 @@ export async function setCostBands(code, { t1, t2, basis = 'judgement' }, who) {
       { symbol: scale[3], min: b, max: null, basis, set_by: who, at },
     ];
     await client.query('update markets set cost_bands = $2, updated_at = now() where code = $1', [c, JSON.stringify(bands)]);
+    // The change log's fields are text, so the bands go in as a readable summary
+    // (not [object Object]); the whole prior set is kept in `undo` for an exact
+    // restore, including back to "not set".
     const change = await logChange({ client, who, area: 'Markets', what: `set cost bands for ${c}`,
-      before: m.cost_bands, after: bands, subjectType: 'market', subjectId: `${c}/cost-bands`,
+      before: bandsSummary(m.cost_bands, m.currency), after: bandsSummary(bands, m.currency),
+      subjectType: 'market', subjectId: `${c}/cost-bands`,
       undo: { kind: 'market_cost_bands', code: c, before: m.cost_bands ?? null } });
     return { ok: true, change: change.id, bands };
   });
