@@ -19,6 +19,7 @@ import { createReadStream, promises as fs } from 'node:fs';
 import http from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { siteGateOn } from './gate.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('./dist', import.meta.url)));
 const PORT = Number(process.env.PORT || 8080);
@@ -99,7 +100,13 @@ const server = http.createServer(async (req, res) => {
   // holds the old container serving until the new one answers this 200, so a deploy never
   // shows users a cold start (owner, 1 Oct 2026). The API has its own /health; this is the
   // web's, so one repo-root railway.json can name /health for both services.
-  if (pathname === '/health') { res.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'no-store' }); res.end('ok'); return; }
+  if (pathname === '/health') { res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' }); res.end(req.method === 'HEAD' ? undefined : 'ok'); return; }
+
+  // While the launch gate is up, nothing of the unopened site should be indexed.
+  // The web bundle itself is still served — the app decides what a logged-out
+  // visitor sees, and the API is the wall on the data (apps/api/src/siteGate.js) —
+  // but every response says noindex until epic.day opens.
+  if (siteGateOn()) res.setHeader('x-robots-tag', 'noindex');
 
   const to = redirectTo(req);
   if (to) { res.writeHead(301, { location: to, 'cache-control': 'no-cache' }); res.end(); return; }

@@ -339,6 +339,25 @@ export async function consumeSignInLink(token) {
   return rows[0] ?? null;
 }
 
+/**
+ * The account a sign-in link token belongs to, by its digest — even when the
+ * link is already spent or expired — so a failed redemption can be counted
+ * against the account it was aimed at, not only the IP it came from
+ * (signInGuard.js). Returns a stable key (the e-mail, or the id when there is no
+ * e-mail); null for a token that was never a link, which a blind guess will be.
+ * Never the token itself.
+ */
+export async function linkContactFor(token) {
+  if (!token) return null;
+  const { rows } = await query(
+    `select a.email, a.id from sign_in_links l join accounts a on a.id = l.account_id
+      where l.token_hash = $1 limit 1`,
+    [digest(token)],
+  );
+  if (!rows[0]) return null;
+  return rows[0].email || rows[0].id;
+}
+
 export function markLinkSent(id, { delivery, error = null, channel = null }) {
   return query(
     `update sign_in_links

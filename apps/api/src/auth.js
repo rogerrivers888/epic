@@ -305,12 +305,44 @@ const PUBLIC = [
 
 export const isPublicPath = (req) => PUBLIC.some((test) => test(req));
 
+/**
+ * The live session behind a request, or null — the same token resolution
+ * `requireSession` uses, without any of the account/access work. The launch gate
+ * (siteGate.js) asks this to tell a signed-in household from the public before
+ * the session door runs: a Bearer token, or the cookie where it is allowed to
+ * stand in. A request carrying neither never touches the database.
+ */
+export async function liveSessionFor(req) {
+  const token = bearer(req) || (cookieAllowed(req) ? cookieToken(req) : null);
+  if (!token) return null;
+  // A lookup error propagates on purpose: the gate must not read a database blip
+  // as "no session" and answer 401, which the client takes for session-expiry and
+  // discards a good token over. A thrown error is a retryable 5xx (Codex, 1 Oct).
+  return findLiveSession(token);
+}
+
+/**
+ * Is this a valid, Epic-signed photo URL? A rented photograph is loaded by an
+ * `<img>`, which can carry no header, and the signed URL is the proof of who
+ * asked — and the spender the paid fetch is billed to (sources/photoLinks.js).
+ * The launch gate honours it so a signed-in household's photos are not refused as
+ * the public. Pure HMAC, no database. (The owned image library carries no
+ * signature on its approved rows and is handled by the gate as its own open path.)
+ */
+export function signedMediaOk(req) {
+  return req.method === 'GET' && req.path === '/api/photos/google' && photoLinkValid(req.query);
+}
+
 export async function requireSession(req, res, next) {
   try {
     if (req.method === 'OPTIONS' || isPublicPath(req)) return next();
 
     const token = bearer(req) || (cookieAllowed(req) ? cookieToken(req) : null);
-    const session = token ? await findLiveSession(token) : null;
+    // The launch gate may have already resolved this request's session
+    // (siteGate.js); reuse it rather than asking the database the same question
+    // twice (Codex, 1 Oct 2026). Unset — gate off, or no session there — falls
+    // back to the lookup.
+    const session = req.siteGateSession ?? (token ? await findLiveSession(token) : null);
 
     // Whose session this is. A session with no account is the shared passcode:
     // the owner, on the founding household, exactly as before accounts existed.

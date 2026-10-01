@@ -10,9 +10,11 @@ import {
   authConfigured, clearSessionCookie, closeSession, openSession, passcodeMatches, sessionKindFor, sessionCookie,
 } from '../auth.js';
 import { findLiveSession, liveSessions, revokeAllSessions } from '../repositories/sessions.js';
-import { accountByContact, accountById, consumeSignInLink, ownerAccount, recordSignIn } from '../repositories/accounts.js';
+import { accountByContact, accountById, consumeSignInLink, linkContactFor, ownerAccount, recordSignIn } from '../repositories/accounts.js';
 import { invite } from './accounts.js';
 import { accessFor } from '../access.js';
+import { signInLockedOut, noteSignInFailure } from '../signInGuard.js';
+import { sessionBlockedByGate } from '../siteGate.js';
 
 const router = express.Router();
 
@@ -45,7 +47,11 @@ router.get('/session', async (req, res, next) => {
       return res.json({ signedIn: false, configured: false, message: 'This Epic API has no passcode set yet.' });
     }
     const token = bearerOf(req);
-    const session = token ? await findLiveSession(token) : null;
+    let session = token ? await findLiveSession(token) : null;
+    // While the launch gate is up, a session minted before its cutoff is not a
+    // session (siteGate.js): report it as signed out rather than send the client
+    // into the signed-in UI with a token every protected request will refuse.
+    if (session && sessionBlockedByGate(session)) session = null;
     const account = session?.account_id ? await accountById(session.account_id) : null;
     // A suspended account is signed out here as well as at the door, so the app
     // shows the sign-in screen rather than five screens' worth of 403s.
@@ -87,9 +93,15 @@ router.post('/session', async (req, res, next) => {
     if (!authConfigured()) {
       return res.status(503).json({ error: 'auth_not_configured', message: 'This Epic API has no passcode set. The owner adds EPIC_PASSCODE in Doppler.' });
     }
+    // The launch gate leaves this door open, so it guards itself: a handful of
+    // failed attempts from one IP locks it out for a while (signInGuard.js).
+    if (await signInLockedOut(req)) {
+      return res.status(429).json({ error: 'locked_out', message: 'Too many attempts just now. Try again shortly.' });
+    }
     if (!passcodeMatches(req.body?.passcode)) {
       // One message for a missing passcode and a wrong one: which it was is
       // information, and the caller is not necessarily the family.
+      await noteSignInFailure(req, { kind: 'passcode', reason: 'wrong_passcode' });
       return res.status(401).json({ error: 'wrong_passcode', message: "That passcode doesn't open this Epic." });
     }
     const label = String(req.body?.label || '').slice(0, 80) || null;
@@ -153,8 +165,15 @@ router.delete('/session', async (req, res, next) => {
 router.post('/session/link', async (req, res, next) => {
   try {
     const token = String(req.body?.token || '').trim();
+    // The account the token is for, so a run of bad links against one account is
+    // locked out wherever it comes from — not only by IP (signInGuard.js).
+    const who = await linkContactFor(token);
+    if (await signInLockedOut(req, who)) {
+      return res.status(429).json({ error: 'locked_out', message: 'Too many attempts just now. Try again shortly.' });
+    }
     const spent = token ? await consumeSignInLink(token) : null;
     if (!spent) {
+      await noteSignInFailure(req, { kind: 'link', contact: who, reason: 'link_spent' });
       return res.status(401).json({
         error: 'link_spent',
         // Not "it will arrive by e-mail": since migration 056 somebody may have

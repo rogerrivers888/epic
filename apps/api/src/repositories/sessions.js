@@ -135,6 +135,18 @@ export async function liveSessions(accountId = null) {
  * Throw away what has already lapsed. A revoked or expired row is a hash and a
  * date and holds nothing about anybody, but it is not needed either.
  */
+/**
+ * When the launch-gate clean-slate migration ran, from `schema_migrations` — the
+ * automatic cutoff the gate uses to retire pre-launch sessions without anyone
+ * having to set a variable (siteGate.js; Codex, 1 Oct 2026). Null until it has run.
+ */
+export async function cleanSlateAppliedAt() {
+  const { rows } = await query(
+    "select applied_at from schema_migrations where name like '%clean_slate_of_sessions%' order by applied_at limit 1",
+  );
+  return rows[0]?.applied_at ?? null;
+}
+
 export function sweepDeadSessions() {
   // A session the ledger names is kept: it is the answer to "which session
   // spent this", the ledger's foreign key refuses the delete anyway, and one

@@ -1,0 +1,13 @@
+-- A clean slate of sessions before the launch gate (owner, 1 Oct 2026:
+-- "Invalidate all existing sessions at deploy").
+--
+-- Every session that exists at the moment the gate goes up is revoked, so nobody
+-- rides a token minted before the door existed straight past it. New sign-ins
+-- mint fresh tokens exactly as before; this only closes what is already open.
+--
+-- One-time by nature, which is why it is a migration and not a call to
+-- revokeAllSessions(): that function refuses to sign the whole estate out at
+-- runtime on purpose (repositories/sessions.js). A migration runs once, on the
+-- deploy that carries the gate, which is precisely the single moment this is meant
+-- to happen.
+update api_sessions set revoked_at = now() where revoked_at is null;

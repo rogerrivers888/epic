@@ -80,9 +80,12 @@ import { APP_URL, canonicalRedirect } from './origins.js';
 import { SPEND_PREFIXES, generalLimit, holdSendingDoors, photoLimit, signInLimit, spendLimit, voiceLimit } from './limits.js';
 import { sweepDeadSessions } from './repositories/sessions.js';
 import { sweepExpiredPlanSessions } from './repositories/planSessions.js';
+import { sweepOldFailures } from './repositories/signInFailures.js';
 import { refresh as refreshReach } from './repositories/reach.js';
 import { buildIfEmpty, checkBars, seedBars, settleNew } from './repositories/placeIndex.js';
 import { health } from './health.js';
+import { siteGate, siteGateOn, setCleanSlateEpoch } from './siteGate.js';
+import { cleanSlateAppliedAt } from './repositories/sessions.js';
 import { noteInvariantRun } from './repositories/settings.js';
 import * as censusRun from './sources/censusRun.js';
 import * as ringTables from './repositories/ringTables.js';
@@ -107,6 +110,36 @@ const app = express();
 // deploy if the chain in front of us changes again.
 app.set('trust proxy', Number(process.env.EPIC_TRUSTED_PROXIES ?? 2));
 
+// CORS first, so every response — the health check, and even the gate's own 401 —
+// carries `Access-Control-Allow-Origin`. Without it a browser reads a cross-origin
+// `coming_soon` (or a health check) as a network/CORS failure and the app reports
+// the API unreachable or drops into its offline fallback (Codex, 1 Oct 2026).
+// `credentials` is on so the sign-in response can set the session cookie photos are
+// loaded with; which origins may carry it is `EPIC_WEB_ORIGIN`, and the canonical
+// site is always allowed (auth.js).
+app.use(cors({ origin: (origin, cb) => cb(null, originAllowed(origin)), credentials: true }));
+
+// Railway's health check, answered before the limiter and the gate — never
+// redirected, rate-limited, or gated — so a busy or aggressively probed deployment
+// can still prove it is alive (Codex, 1 Oct 2026). CORS above has already run, so
+// the web app's cross-origin health probe gets its headers. Says nothing about the household.
+app.get('/health', health);
+
+// The coarse per-caller limit runs before the gate, so a flood of requests
+// carrying random Bearer tokens cannot drive unbounded session lookups in the
+// gate below — the limiter turns them away first (Codex, 1 Oct 2026).
+app.use(generalLimit);
+
+// --- the launch gate --------------------------------------------------------
+// First of all, before anything else can answer: until epic.day is open, the
+// world-open routes (sign-in, experience pages, shared links) need the gate
+// password, and every protected route is left to requireSession so a signed-in
+// household still works end to end (siteGate.js). Fails closed — on by default,
+// password admits nobody when unset — and leaves only `/health` open so deploys
+// still pass. The web service serves its own bundle and decides what a logged-out
+// visitor sees; this is the API half of the same launch gate.
+app.use(siteGate);
+
 /**
  * Everything answers on one address.
  *
@@ -130,19 +163,12 @@ app.use((req, res, next) => {
 // JSON API only — no templates, no static assets, no server-rendered HTML.
 // The web app is a separate Expo workspace that talks to this over HTTP.
 app.use(express.json({ limit: '1mb' })); // member photos travel as data URLs
-// `credentials` is on so the sign-in response can set the session cookie, which
-// exists only for the two GETs that cannot carry a header (auth.js). Which
-// origins may do that is `EPIC_WEB_ORIGIN`; unset, this behaves as it always
-// did and the passcode is the only guard.
-app.use(cors({ origin: (origin, cb) => cb(null, originAllowed(origin)), credentials: true }));
-
-app.get('/health', health);
 
 // --- the door ---------------------------------------------------------------
 // Everything below `requireSession` needs a session; everything above is the
 // short list in auth.js that does not (the door itself, health, and the group
-// invite link, which is somebody else's credential).
-app.use(generalLimit);
+// invite link, which is somebody else's credential). The coarse rate limit is
+// mounted earlier now, ahead of the launch gate.
 // Only the attempt is held to ten a quarter-hour. Asking "am I signed in" is
 // what the app does on every load and is not a guess at anything.
 app.post('/api/session', signInLimit);
@@ -687,6 +713,20 @@ app.use((err, _req, res, _next) => {
 const port = Number(process.env.PORT) || 4000;
 // 0.0.0.0 rather than localhost: the container/platform decides the interface.
 await loadSourceSettings();
+// The launch gate's automatic session cutoff: when the clean-slate migration ran
+// (siteGate.js). Resolved BEFORE the server listens, so no request is served while
+// the cutoff is still unknown. If it cannot be read and the gate is up, fail
+// closed — retire every session rather than honour a pre-launch one we cannot date
+// — and keep retrying until the read succeeds (Codex, 1 Oct 2026).
+const loadLaunchCutoff = async () => {
+  try { setCleanSlateEpoch(await cleanSlateAppliedAt()); return true; }
+  catch (err) { console.warn(`epic-api: launch-gate cutoff load failed: ${err.message}`); return false; }
+};
+if (!(await loadLaunchCutoff()) && siteGateOn()) {
+  setCleanSlateEpoch(new Date(Date.now() + 365 * 24 * 3600_000));
+  const retry = setInterval(async () => { if (await loadLaunchCutoff()) clearInterval(retry); }, 60_000);
+  retry.unref?.();
+}
 
 // Say out loud which state the door is in. A deployed API with no passcode set
 // serves nothing (auth.js) — that is deliberate, and it must be obvious in the
@@ -720,6 +760,9 @@ if (authConfigured()) {
 // true rather than true-when-a-sweep-succeeds.
 const sweep = async () => {
   await sweepDeadSessions().catch(() => null);
+  // The sign-in failure ledger keeps only a short audit tail; the lockout reads
+  // minutes, not days (repositories/signInFailures.js).
+  await sweepOldFailures().catch(() => null);
   const plans = await sweepExpiredPlanSessions().catch(() => null);
   if (plans) console.log(`epic-api: swept ${plans} expired planning session(s)`);
   const reach = await refreshReach({ mode: 'driving' }).catch(() => null);
