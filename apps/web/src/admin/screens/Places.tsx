@@ -3132,7 +3132,11 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
   // again and revive a stale stream (Codex, 1 Oct 2026). The bump runs before the
   // reload below, so a reload on a change of place reads the new generation.
   const genRef = useRef(0);
-  useEffect(() => { genRef.current += 1; }, [refId]);
+  // Advanced during render the moment the place changes, not in a passive effect:
+  // a response that lands after the new place commits but before an effect runs
+  // would otherwise still pass the old generation's guard (Codex, 1 Oct 2026).
+  const genForRef = useRef<string | null>(null);
+  if (genForRef.current !== refId) { genForRef.current = refId; genRef.current += 1; }
   // Whether this tab is still mounted. Switching drawer tabs *does* unmount
   // CompareTab (it is a conditional child), and a research stream outlives that
   // too; its terminal frame must not reload, re-price or repeat a paid match from
@@ -3173,7 +3177,11 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
   reloadRef.current = reload;
   useEffect(() => { reload(); }, [reload, match]);
   // On unmount the tab stops reacting: no late stream frame, no coalesced reload.
-  useEffect(() => () => { mountedRef.current = false; reloadWanted.current = false; }, []);
+  // Set true on setup, not only true at declaration: under React Strict Mode the
+  // mount effect is set up, torn down and set up again, and without this the first
+  // teardown would leave the tab marked unmounted for good — stuck on Waiting,
+  // every later frame discarded (Codex, 1 Oct 2026).
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; reloadWanted.current = false; }; }, []);
   useEffect(() => { api.adminPlaceReach(refId).then(setReach).catch(() => setReach(null)); }, [refId]);
   // The quote and any running stream belong to the place on screen; both reset
   // when it changes, so a half-finished run is never read against another place.
