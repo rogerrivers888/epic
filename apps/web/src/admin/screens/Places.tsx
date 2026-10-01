@@ -122,6 +122,18 @@ const rememberAnswer = (key: string, value: unknown) => {
 };
 /** Anything that changes a place: the boards have to ask again. */
 const forgetBoards = () => ANSWERED.clear();
+/**
+ * Forget every board but one. Research changes a place and the boards behind the
+ * drawer must ask again — but the open place tab must keep its cached answer, or
+ * refreshing it would blank and unmount mid-stream and throw the result away
+ * (Codex, 1 Oct 2026).
+ */
+const forgetBoardsExcept = (keep: string) => {
+  const had = ANSWERED.has(keep);
+  const kept = ANSWERED.get(keep);
+  ANSWERED.clear();
+  if (had) ANSWERED.set(keep, kept);
+};
 
 /**
  * The last answer first, then the true one.
@@ -2668,14 +2680,20 @@ function PlaceBoard({ refId, canManage, onClose, tab, onTab }: {
   const [error, setError] = useState<string | null>(null);
   /** What the drawer is doing, in the words the menu used to say it. */
   const [busyWord, setBusyWord] = useState<string | null>(null);
+  const placeKey = JSON.stringify(['place', refId]);
   const [place, refresh] = useFresh(
-    JSON.stringify(['place', refId]),
+    placeKey,
     () => api.adminPlace(refId).then((p) => { setError(null); return p; }),
     (e: any) => setError(e?.body?.message ?? 'Nothing indexed under that ref yet.'),
   );
   // Anything that changes this place changes the boards behind it, so the
   // reload the drawer's own buttons call forgets what they were told.
   const load = useCallback(() => { forgetBoards(); refresh(); }, [refresh]);
+  // Research also changes the place, and the boards behind the drawer are stale
+  // until they ask again — but this tab must stay mounted so the result it just
+  // streamed is not thrown away. So forget every board except this place, then
+  // refresh the header in place (Codex, 1 Oct 2026).
+  const afterResearch = useCallback(() => { forgetBoardsExcept(placeKey); refresh(); }, [refresh, placeKey]);
   useEffect(() => { setError(null); }, [refId]);
 
   if (error) {
@@ -2784,11 +2802,12 @@ function PlaceBoard({ refId, canManage, onClose, tab, onTab }: {
       </View>
 
       {tab === 'record' ? <RecordTab place={place} canManage={canManage} onSaved={load} /> : null}
-      {/* `refresh`, not `load`: load() forgets the boards first, which blanks the
-          place and unmounts this tab mid-stream, throwing away the result the run
-          just showed. refresh re-reads the header in place, keeping the panel
+      {/* `afterResearch`, not `load`: load() clears every board including this one,
+          which blanks the place and unmounts this tab mid-stream, throwing away the
+          result the run just showed. afterResearch forgets the boards behind the
+          drawer but keeps this place, and refreshes the header in place
           (Codex, 1 Oct 2026). */}
-      {tab === 'compare' ? <CompareTab refId={refId} canManage={canManage} onEdit={() => setTab('record')} onResearched={refresh} /> : null}
+      {tab === 'compare' ? <CompareTab refId={refId} canManage={canManage} onEdit={() => setTab('record')} onResearched={afterResearch} /> : null}
       {tab === 'score' ? <ScoreTab refId={refId} canManage={canManage} /> : null}
       {tab === 'pictures' ? <PlacePicturesTab place={place} canManage={canManage} onFound={load} /> : null}
       {tab === 'raw' ? <RawTab refId={refId} canManage={canManage} onDone={load} /> : null}
