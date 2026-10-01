@@ -1,0 +1,29 @@
+-- A place's country comes from owned data, not a rented coordinate (owner, 1 Oct
+-- 2026; Option C). A place is stamped with its country once and keeps it:
+-- coordinates expire at 30 days (migration 184) but the country does not, because
+-- it never depended on them. The owned, permanent signal is the durable postcode
+-- (place_records.postcode, "a fact of ours", migration 162) — its outcode's
+-- locality carries the country ONS puts it in (localities, migration 048,
+-- country_code). That beats a country_code copied from whatever source area first
+-- mentioned the place, so where the two disagree the postcode wins, and where the
+-- stamp was null it fills it.
+--
+-- This one-time pass corrects the existing corpus. repositories/placeIndex.js
+-- settleCountryFromPostcode() keeps new places right going forward (settle step 0a),
+-- running the same derivation scoped to the places it is settling. The outward-code
+-- expression is the one settle uses, kept in step with it.
+
+update place_index pi
+   set country_code = upper(loc.country_code)
+  from place_records r
+  join localities loc
+    on loc.kind = 'postcode'
+   and loc.slug = lower(case
+         when btrim(upper(r.postcode)) ~ '^[A-Z]{1,2}[0-9][A-Z0-9]?$' then btrim(upper(r.postcode))
+         when position(' ' in btrim(r.postcode)) > 0 then split_part(btrim(upper(r.postcode)), ' ', 1)
+         else left(upper(btrim(r.postcode)), greatest(0, length(btrim(r.postcode)) - 3))
+       end)
+ where pi.venue_ref = r.venue_ref
+   and r.postcode is not null
+   and loc.country_code is not null
+   and upper(pi.country_code) is distinct from upper(loc.country_code);

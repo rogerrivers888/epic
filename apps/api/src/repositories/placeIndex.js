@@ -1177,6 +1177,48 @@ const BUILD_LOCK = 'epic.placeIndex.build';
  * row. It runs on the hour and whenever somebody presses Refresh, and it is
  * safe to run when there is nothing to do: one indexed read that finds nothing.
  */
+/**
+ * The outward code lowercased, from a postcode held in any of the three shapes
+ * the sources and the editor use. The same derivation step 1 of settle does; kept
+ * here so the country correction below reads it without depending on the areas
+ * having been rebuilt yet.
+ */
+const OUTCODE_FROM = (col) => `lower(case
+  when btrim(upper(${col})) ~ '^[A-Z]{1,2}[0-9][A-Z0-9]?$' then btrim(upper(${col}))
+  when position(' ' in btrim(${col})) > 0 then split_part(btrim(upper(${col})), ' ', 1)
+  else left(upper(btrim(${col})), greatest(0, length(btrim(${col})) - 3))
+end)`;
+
+/**
+ * A place's country from owned data, not a rented coordinate (owner, 1 Oct 2026;
+ * Option C). Its durable postcode — a fact of ours (migration 162) — resolves to
+ * an outcode, and that outcode's locality carries the country ONS puts it in
+ * (`localities`, migration 048). That beats a `country_code` copied from whatever
+ * source area first mentioned the place, so where the two disagree the postcode
+ * wins, and where the stamp was null it fills it. The country is resolved once and
+ * kept — it never depended on the coordinate, so the 30-day coordinate expiry
+ * (migration 184) cannot touch it.
+ *
+ * Pass the refs being settled, or null for the whole corpus (the one-time backfill
+ * migration 310 does the same thing in SQL). Returns how many rows it corrected.
+ */
+export async function settleCountryFromPostcode(refs = null, q = query) {
+  const scope = refs ? 'and pi.venue_ref = any($1) and r.venue_ref = any($1)' : '';
+  const { rowCount } = await q(`
+    update place_index pi
+       set country_code = upper(loc.country_code)
+      from place_records r
+      join localities loc
+        on loc.kind = 'postcode'
+       and loc.slug = ${OUTCODE_FROM('r.postcode')}
+     where pi.venue_ref = r.venue_ref
+       and r.postcode is not null
+       and loc.country_code is not null
+       and upper(pi.country_code) is distinct from upper(loc.country_code)
+       ${scope}`, refs ? [refs] : []);
+  return rowCount ?? 0;
+}
+
 export async function settleNew({ limit = 5000 } = {}) {
   // Under the same lock as a full rebuild: the two write the same tables, and a
   // settling pass running inside a rebuild can leave either half-done (Codex,
@@ -1238,6 +1280,14 @@ async function settleWhileLocked(limit) {
          where (a.venue_ref = todo.venue_ref or 'atlas:' || a.id::text = todo.venue_ref) limit 1) reg on true
      where pi.venue_ref = todo.venue_ref
        and coalesce(sa.country_code, reg.country_code) is not null`, [refs]);
+
+  // 0a — the durable postcode wins over the stamp (owner, 1 Oct 2026). Step 0 fills
+  //      a null country from the source area; this corrects it — and fills what step
+  //      0 could not — from the place's own postcode, which is owned and permanent
+  //      where the stamp is a copy and the coordinate is rented. It runs before the
+  //      areas are rebuilt below, so the corrected country reaches the country-level
+  //      filing. (settleCountryFromPostcode.)
+  await settleCountryFromPostcode(refs);
 
   // 0b — and a country we hold places in is a place you can point at.
   //
