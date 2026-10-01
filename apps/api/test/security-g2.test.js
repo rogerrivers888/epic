@@ -282,22 +282,29 @@ test('"sign out everywhere" from an account signs out that account\'s devices on
 // 6. the estate-wide source switch
 // ---------------------------------------------------------------------------
 
-test('switching a source estate-wide needs the settings capability and personal sign-in', async () => {
-  const customer = await as(ours, 'PATCH', '/api/sources/google', { on: false });
+test('switching a source: capability to touch it, personal sign-in to re-enable it', async () => {
+  const customer = await as(ours, 'PATCH', '/api/sources/google', { on: true });
   assert.equal(customer.status, 403, 'a household account is refused on the capability');
   assert.equal((await customer.json()).capability, 'manage_settings');
 
-  // The shared passcode holds the capability but re-enabling a paid source is a
-  // safeguard override (G11): refused until the owner is personally signed in.
-  const passcode = await as(null, 'PATCH', '/api/sources/not-a-source', { on: false });
+  // Turning a source *off* is tightening, so the passcode may: an unknown key
+  // then answers 404 without touching any setting.
+  const off = await as(null, 'PATCH', '/api/sources/not-a-source', { on: false });
+  assert.equal(off.status, 404);
+  assert.equal((await off.json()).error, 'unknown_source');
+
+  // Re-enabling a paid source is a safeguard override (G11): the passcode is
+  // refused until the owner is personally signed in.
+  // (osm needs no key, so this reaches the gate rather than a no-key 409.)
+  const passcode = await as(null, 'PATCH', '/api/sources/osm', { on: true });
   assert.equal(passcode.status, 403);
   assert.equal((await passcode.json()).error, 'needs_personal_sign_in');
 
-  // The owner signed in by e-mail link passes the gate; an unknown key then
-  // answers 404 without touching any setting.
-  const owner = await asLink(null, 'PATCH', '/api/sources/not-a-source', { on: false });
-  assert.equal(owner.status, 404);
-  assert.equal((await owner.json()).error, 'unknown_source');
+  // The owner signed in by e-mail link passes the gate (osm is already on, so
+  // this changes nothing).
+  const owner = await asLink(null, 'PATCH', '/api/sources/osm', { on: true });
+  assert.equal(owner.status, 200);
+  assert.equal((await owner.json()).on, true);
 });
 
 // ---------------------------------------------------------------------------

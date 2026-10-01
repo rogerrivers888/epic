@@ -73,6 +73,12 @@ export async function loadSourceSettings() {
   return offKeysList();
 }
 export async function setSourceOff(key, off) {
+  // Turning a source back ON re-enables its paid calls estate-wide — a
+  // safeguard override, so from the back office it needs the owner personally
+  // signed in, whatever route asked (G11, Codex 1 Oct 2026). Turning one off is
+  // tightening and stays ordinary; boot and background have no back-office
+  // context and pass.
+  if (!off) { const { assertBackOfficeSpendAllowed } = await import('../context.js'); assertBackOfficeSpendAllowed('re-enable a provider'); }
   const next = new Set(offKeysList());
   if (off) next.add(key); else next.delete(key);
   await settings.setSourcesOff([...next]);

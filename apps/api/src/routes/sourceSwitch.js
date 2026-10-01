@@ -10,20 +10,23 @@
  */
 
 import { Router } from 'express';
-import { requires, requireOwnerSignedIn } from '../access.js';
+import { requires, accessOf } from '../access.js';
 import { setSourceOff, sourceHasKey, sourceKeys } from '../sources/index.js';
 import { writeAuditStrict } from '../repositories/roles.js';
 
 const router = Router();
 
-// Switching a keyed source back on re-enables its paid calls estate-wide — a
-// safeguard override, so the owner personally, logged by name (G11, 1 Oct 2026).
-router.patch('/sources/:key', requires('manage_settings'), requireOwnerSignedIn('change a provider source'), async (req, res, next) => {
+router.patch('/sources/:key', requires('manage_settings'), async (req, res, next) => {
   try {
     const key = String(req.params.key);
     if (!sourceKeys().includes(key)) return res.status(404).json({ error: 'unknown_source' });
     const on = Boolean(req.body?.on);
     if (on && !sourceHasKey(key)) return res.status(409).json({ error: 'no_key', message: 'This source has no key yet; the owner adds it through Doppler.' });
+    // Re-enabling a paid source is a safeguard override (G11): the owner
+    // personally signed in. Turning one off is tightening and stays ordinary.
+    if (on && !accessOf(req).elevated) {
+      return res.status(403).json({ error: 'needs_personal_sign_in', message: 'Re-enabling a provider needs you signed in personally with your e-mail link.' });
+    }
     // The owner's authorization, strictly and before the change: fail closed (G11).
     await writeAuditStrict({
       actorId: req.account?.id ?? null, actorLabel: req.account?.email ?? 'the owner',

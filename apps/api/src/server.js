@@ -268,8 +268,7 @@ const requireOwnerAndAudit = (action, then = null) => (req, res, next) =>
 // this mount gate covers the named paid endpoints whatever the provider —
 // Compare also bills Tripadvisor, which never reaches that choke point. Then it
 // paces the spend as before. A non-admin still gets the mount's 404 first.
-const paidOwner = (req, res, next) =>
-  requireOwnerSignedIn('spend money')(req, res, () => spendLimit(req, res, next));
+const paidOwner = requireOwnerAndAudit('spend money', (req, res, next) => spendLimit(req, res, next));
 app.use('/api/admin/place-index', (req, res, next) =>
   (hasDoor(req, 'admin') && PAID_ADMIN.has(doorOf(req)) ? paidOwner(req, res, next) : next()));
 app.use('/api/admin/demand', (req, res, next) =>

@@ -355,11 +355,18 @@ router.patch('/:id', requires('manage_accounts'), async (req, res, next) => {
     // (Codex, 1 Oct 2026).
     // Validate before anything is audited or written: an invalid value must
     // not leave an audit row for a change that then fails (Codex, 1 Oct 2026).
-    if (b.monthlyCallBound !== undefined && b.monthlyCallBound !== null
-        && (!Number.isFinite(Number(b.monthlyCallBound)) || Number(b.monthlyCallBound) < 0 || !Number.isInteger(Number(b.monthlyCallBound)))) {
-      throw bad('A monthly bound is a whole number of calls, or nothing.');
+    // Normalised once, and used for the comparison, the audit and the update,
+    // so the stored value and the audit cannot disagree. Empty or null clears
+    // it to the estate default; anything else must be a whole non-negative
+    // number (Codex, 1 Oct 2026).
+    let newBound;
+    if (b.monthlyCallBound === undefined) newBound = undefined;
+    else if (b.monthlyCallBound === null || b.monthlyCallBound === '') newBound = null;
+    else {
+      const n = Number(b.monthlyCallBound);
+      if (!Number.isInteger(n) || n < 0) throw bad('A monthly bound is a whole number of calls, or nothing.');
+      newBound = n;
     }
-    const newBound = b.monthlyCallBound === undefined ? undefined : (b.monthlyCallBound === null ? null : Number(b.monthlyCallBound));
     const oldBound = before.monthly_call_bound == null ? null : Number(before.monthly_call_bound);
     const boundChanging = newBound !== undefined && newBound !== oldBound;
     if (boundChanging && !accessOf(req).elevated) {
@@ -375,7 +382,7 @@ router.patch('/:id', requires('manage_accounts'), async (req, res, next) => {
       plan: b.plan,
       status: b.status,
       trialEndsOn: b.trialEndsOn,
-      monthlyCallBound: b.monthlyCallBound === null ? null : b.monthlyCallBound,
+      monthlyCallBound: newBound,
       note: b.note,
     });
     // Suspending takes the devices with it; the data stays exactly where it is.
