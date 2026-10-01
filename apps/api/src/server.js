@@ -249,15 +249,24 @@ const doorOf = (req) => (req.path.length > 1 ? req.path.replace(/\/+$/, '').toLo
 // whatever the handler in the route file does or does not log.
 const requireOwnerAndAudit = (action, then = null) => (req, res, next) =>
   requireOwnerSignedIn(action)(req, res, () => {
-    writeAuditStrict({
-      actorId: req.account?.id ?? null,
-      actorLabel: req.account?.email ?? 'the owner',
-      action: 'privileged.place-index',
-      subjectType: 'place-index',
-      subjectId: doorOf(req),
-      subjectLabel: action,
-      after: { method: req.method },
-    }).then(() => (then ? then(req, res, next) : next()), (err) => next(err));
+    // Logged with the owner's name when it actually happens: the row is written
+    // on a successful response, so a rate-limited, refused or failed request
+    // leaves no row claiming an action occurred (Codex, 1 Oct 2026). The
+    // completion audit a route writes for itself stands beside this.
+    const path = doorOf(req);
+    res.on('finish', () => {
+      if (res.statusCode >= 400) return;
+      void writeAuditStrict({
+        actorId: req.account?.id ?? null,
+        actorLabel: req.account?.email ?? 'the owner',
+        action: 'privileged.place-index',
+        subjectType: 'place-index',
+        subjectId: path,
+        subjectLabel: action,
+        after: { method: req.method, status: res.statusCode },
+      }).catch(() => null);
+    });
+    return then ? then(req, res, next) : next();
   });
 const paidOwnerThenLimit = requireOwnerAndAudit('spend money', (req, res, next) => spendLimit(req, res, next));
 app.use('/api/admin/place-index', (req, res, next) =>
