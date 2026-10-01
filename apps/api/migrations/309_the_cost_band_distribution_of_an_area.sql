@@ -10,13 +10,14 @@
 -- is resumable across a deploy. What it keeps is the DISTRIBUTION, not the
 -- prices: the per-place price level is rented content the data policy says we may
 -- not store (google.js retention: none), so it is counted in memory and only the
--- aggregate histogram lands on the run row (Codex). The sample table is a pure
--- claim ledger of which place ids this run has already looked up — ids we already
--- hold — so a resume never pays for the same place twice and two workers racing
--- the same run cannot each pay for one place (the claim is inserted before the
--- call). The histogram tells two coverage facts apart that look identical in the
--- atlas: a place Google holds but gives no price, versus an id that will not
--- resolve at all — a stale id we hold, the more interesting number.
+-- aggregate histogram lands on the run row (Codex). The sample table records only
+-- which place ids this run has a committed outcome for — ids we already hold — and
+-- a row is written in the same statement as the count it adds to, so a resume
+-- never pays for a counted place twice and a crash can never split a count from
+-- its record. Only one worker touches a run at a time (an advisory lock), so no
+-- place is paid for twice. The histogram tells two coverage facts apart that look
+-- identical in the atlas: a place Google holds but gives no price, versus an id
+-- that will not resolve at all — a stale id we hold, the more interesting number.
 
 create table if not exists cost_dist_runs (
   id                 uuid primary key default gen_random_uuid(),
@@ -64,11 +65,12 @@ create index if not exists cost_dist_runs_going on cost_dist_runs (touched_at) w
 -- then each pay for the whole area (Codex). The loser resumes the winner's run.
 create unique index if not exists cost_dist_runs_one_running on cost_dist_runs (area_slug) where state = 'running';
 
--- The claim ledger: which place ids this run has already looked up. No provider
--- content — only the id (which we already hold) and when it was claimed. A row is
--- inserted BEFORE the paid call, so a concurrent worker that loses the insert
--- skips the place rather than paying for it again; a place whose call fails
--- transiently has its claim released so a resume retries it.
+-- The outcome ledger: which place ids this run has a committed outcome for. No
+-- provider content — only the id (which we already hold) and when it was recorded.
+-- A row is written in the same statement as the histogram count it contributes to
+-- (never before the paid call), so presence always means counted: a resume skips
+-- it, and a crash mid-call leaves no row so the place is retried. A place whose
+-- call fails transiently gets no row at all.
 create table if not exists cost_dist_samples (
   run_id      uuid        not null references cost_dist_runs (id) on delete cascade,
   venue_ref   text        not null,

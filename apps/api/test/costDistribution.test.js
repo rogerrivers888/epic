@@ -98,9 +98,10 @@ test('a transient failure pauses the run resumably, and never records a false st
   let st = await dist.status(AREA);
   assert.equal(st.sampled, 1, 'only google:A was counted; B was not recorded as unresolved');
   assert.equal(st.unresolved, 0, 'a transient failure is not a stale id');
-  // B's claim was released, so a resume retries it rather than skipping it.
-  const { rows: bClaim } = await query('select 1 from cost_dist_samples where run_id = $1 and venue_ref = $2', [run.id, 'google:B']);
-  assert.equal(bClaim.length, 0, 'the paused place\'s claim is released for the retry');
+  // B got no ledger row (the row is written only with a committed outcome), so a
+  // resume retries it rather than skipping it.
+  const { rows: bRow } = await query('select 1 from cost_dist_samples where run_id = $1 and venue_ref = $2', [run.id, 'google:B']);
+  assert.equal(bRow.length, 0, 'the paused place has no row, so the retry re-asks it');
 
   // A paused run is reclaimable, and resume() finishes it from where it left off.
   const again = await dist.start({ areaSlug: AREA, confirm: 0, startedBy: 'test' });
@@ -111,15 +112,32 @@ test('a transient failure pauses the run resumably, and never records a false st
   assert.equal(st.sampled, 5, 'all five counted after the resume');
 });
 
-test('work resumes where it left off — a place already claimed is not asked again', async (t) => {
+test('work resumes where it left off — a place with a committed outcome is not asked again', async (t) => {
   await seed(); t.after(() => query(`delete from place_areas where area_slug = $1`, [AREA]));
   const { run } = await dist.start({ areaSlug: AREA, confirm: 5, startedBy: 'test' });
-  // Pretend three were already claimed (looked up) before a deploy.
+  // Pretend three already had a committed outcome before a deploy.
   for (const ref of ['google:A', 'google:B', 'google:C']) {
     await query(`insert into cost_dist_samples (run_id, venue_ref) values ($1, $2)`, [run.id, ref]);
   }
   const asked = [];
   const get = async (id) => { asked.push(id); return { priceLevel: 2 }; };
   await dist.work(run.id, { get });
-  assert.deepEqual(asked.sort(), ['D', 'E'], 'only the two unclaimed places are looked up');
+  assert.deepEqual(asked.sort(), ['D', 'E'], 'only the two places without an outcome are looked up');
+});
+
+test('only one worker touches a run — a second cannot while the first holds the lock', async (t) => {
+  await seed(); t.after(() => query(`delete from place_areas where area_slug = $1`, [AREA]));
+  const { run } = await dist.start({ areaSlug: AREA, confirm: 5, startedBy: 'test' });
+  // Hold the run's advisory lock on another connection, as a first worker would,
+  // so no place is ever paid for twice by two racing recoveries (Codex).
+  const holder = await pool.connect();
+  t.after(() => holder.release());
+  const { rows: [{ got }] } = await holder.query("select pg_try_advisory_lock(hashtext('cost_dist_runs'), hashtext($1)) as got", [run.id]);
+  assert.equal(got, true, 'the first worker holds the lock');
+  const asked = [];
+  const get = async (id) => { asked.push(id); return { priceLevel: 1 }; };
+  const r = await dist.work(run.id, { get });
+  assert.deepEqual(asked, [], 'the second worker paid for nothing while the lock was held');
+  assert.equal(r.state, 'running', 'and it left the run alone');
+  await holder.query("select pg_advisory_unlock(hashtext('cost_dist_runs'), hashtext($1))", [run.id]);
 });

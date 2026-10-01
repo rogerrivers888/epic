@@ -18,16 +18,20 @@
  * What it keeps is the distribution, not the prices. A place's price level is
  * rented content the data policy will not let us store (google.js retention:
  * none), so it is counted in memory and only the aggregate histogram lands on the
- * run (Codex). Each place is claimed in the ledger BEFORE it is paid for, so a
- * resume never pays twice and two workers racing the same run cannot each pay for
- * one place. Each place ends as one of: a band, a place Google holds but gives no
- * price, or an id that will not resolve at all — a stale id, not a coverage gap.
- * A transient failure (a 429, a timeout, the session's grant gone) never counts
- * as a stale id: it releases that place's claim and pauses the run — kept
- * 'running' so it is reclaimed, not abandoned — so the data is never poisoned.
+ * run (Codex). Only one worker touches a run at a time — an exclusive advisory
+ * lock serialises a racing restart against the boot pickup — so no place is ever
+ * paid for twice (Codex). A place's ledger row is written only once it has a
+ * committed outcome, in the same statement as the count it adds to, so a crash
+ * mid-call leaves neither a counted-but-unrecorded nor a recorded-but-uncounted
+ * place: the place simply has no row and is retried. Each place ends as one of: a
+ * band, a place Google holds but gives no price, or an id that will not resolve
+ * at all — a stale id, not a coverage gap. A transient failure (a 429, a timeout,
+ * the grant gone) never counts as a stale id: it pauses the run — kept 'running'
+ * so it is reclaimed, not abandoned — and the run finalises as 'done' only once
+ * every frozen place has a committed outcome (Codex).
  */
 
-import { query } from '../db.js';
+import { query, pool } from '../db.js';
 import { googleSource } from './google.js';
 import { runAsSpender, currentSpender } from '../context.js';
 import * as providerCalls from '../repositories/providerCalls.js';
@@ -40,6 +44,8 @@ const callGbp = (n) => Math.round(costOf({ 'google-details': n }, 'google') * US
 const STALL_MS = 5 * 60_000;
 /** The histogram column each outcome increments; names are fixed, never interpolated from input. */
 const BAND_COLUMN = ['band0', 'band1', 'band2', 'band3'];
+/** Advisory-lock namespace: one worker per run id at a time (follows reach.js, placeIndex.js). */
+const LOCK_NS = 'cost_dist_runs';
 
 /** The google: refs the census found in an area — the only ones a Place Details id resolves. */
 export async function refsFor(areaSlug) {
@@ -60,7 +66,7 @@ export async function latestRun(areaSlug) {
   return rows[0] ?? null;
 }
 
-/** The place ids this run has already claimed — looked up and counted. */
+/** The place ids this run has a committed outcome for — counted, so a resume skips them. */
 const claimedRefs = async (runId) => {
   const { rows } = await query('select venue_ref from cost_dist_samples where run_id = $1', [runId]);
   return new Set(rows.map((r) => r.venue_ref));
@@ -128,65 +134,83 @@ export async function start({ areaSlug, confirm, householdId = null, startedBy =
 }
 
 /**
- * Work a run to completion over its frozen set: one Place Details per place not
- * yet claimed, each spent through the run's own session. Every place is CLAIMED
- * in the ledger before it is paid for, so a concurrent worker that loses the
- * claim skips the place rather than paying again. A place that resolves counts
- * one band (or no_price, if Google holds it but gives no price); a definite
- * not-found (404) counts one stale id. A transient failure — a 429, a timeout, an
- * unreachable provider, the grant gone, any non-404 error — releases the place's
- * claim and pauses the run (kept 'running', problem set) so a resume finishes it
- * rather than recording a false stale id. Returns the finished or paused run.
+ * Work a run to completion over its frozen set: one Place Details per place that
+ * does not yet have a committed outcome, each spent through the run's own session.
+ *
+ * An exclusive advisory lock means only one worker ever touches a run — a racing
+ * restart or the boot pickup that cannot take the lock returns at once, so no
+ * place is paid for twice (Codex). A place that resolves counts one band (or
+ * no_price, if Google holds it but gives no price); a definite not-found (404)
+ * counts one stale id. The place's ledger row and the count it adds to are
+ * written in one statement, so a crash leaves the place with no row — to be
+ * retried — never counted-but-unrecorded. A transient failure — a 429, a timeout,
+ * an unreachable provider, the grant gone, any non-404 error — pauses the run
+ * (kept 'running', problem set) so a resume finishes it rather than recording a
+ * false stale id. The run finalises as 'done' only once every frozen place has a
+ * committed outcome (Codex). Returns the finished or paused run.
  */
 export async function work(runId, { get = googleSource.priceLevel.bind(googleSource) } = {}) {
-  // Claim the run: clear any prior pause and mark it worked. If it is not running
-  // (already done), there is nothing to do.
-  const { rowCount: claimed } = await query(
-    "update cost_dist_runs set problem = null, touched_at = now() where id = $1 and state = 'running'", [runId]);
-  if (!claimed) { const { rows: [r] } = await query('select * from cost_dist_runs where id = $1', [runId]); return r ?? null; }
-  const { rows: [run] } = await query('select * from cost_dist_runs where id = $1', [runId]);
-  const done = await claimedRefs(runId);
-  const left = (run.refs ?? []).filter((r) => !done.has(r));
-  for (const ref of left) {
-    // Stop if the run was finished elsewhere between places.
-    const { rows: [cur] } = await query('select state from cost_dist_runs where id = $1', [runId]);
-    if (!cur || cur.state !== 'running') { const { rows: [r] } = await query('select * from cost_dist_runs where id = $1', [runId]); return r ?? null; }
-    // Claim the place BEFORE paying: a concurrent worker that loses this insert
-    // skips it rather than paying for the same place again.
-    const { rowCount: mine } = await query(
-      'insert into cost_dist_samples (run_id, venue_ref) values ($1, $2) on conflict do nothing', [runId, ref]);
-    if (!mine) continue;
-    const id = ref.slice('google:'.length);
-    const meter = {};
-    let outcome;
-    try {
-      const v = await runAsSpender({ householdId: run.household_id, sessionId: run.started_session_id }, () => get(id, { meter }));
-      // A null answer is the source switched off — transient, not a stale id.
-      outcome = v ? { band: columnFor(v.priceLevel) } : { pause: 'Google returned nothing (source off)' };
-    } catch (err) {
-      const status = Number((/Google Places (\d{3})/.exec(String(err?.message ?? '')) || [])[1]) || null;
-      // Only a definite not-found is a stale id. A 400 (bad request/mask) or any
-      // other error would hit every place, so it pauses rather than marking all
-      // places unresolved (Codex).
-      outcome = status === 404 ? { band: 'unresolved' } : { pause: String(err?.message ?? err).slice(0, 200) };
+  const lock = await pool.connect();
+  try {
+    // One worker per run. A second (a racing restart, the boot pickup) gets no
+    // lock and returns, so no place is paid for twice (Codex).
+    const { rows: [{ mine }] } = await lock.query('select pg_try_advisory_lock(hashtext($1), hashtext($2)) as mine', [LOCK_NS, runId]);
+    if (!mine) return reread(runId);
+
+    // Under the lock: clear any prior pause and mark it worked. Not running
+    // (already done) means there is nothing to do.
+    const { rowCount: live } = await query("update cost_dist_runs set problem = null, touched_at = now() where id = $1 and state = 'running'", [runId]);
+    if (!live) return reread(runId);
+    const { rows: [run] } = await query('select * from cost_dist_runs where id = $1', [runId]);
+    const done = await claimedRefs(runId);
+    const left = (run.refs ?? []).filter((r) => !done.has(r));
+
+    for (const ref of left) {
+      // Stop if the run was finished elsewhere between places.
+      const { rows: [cur] } = await query('select state from cost_dist_runs where id = $1', [runId]);
+      if (!cur || cur.state !== 'running') return reread(runId);
+      const id = ref.slice('google:'.length);
+      const meter = {};
+      let outcome;
+      try {
+        const v = await runAsSpender({ householdId: run.household_id, sessionId: run.started_session_id }, () => get(id, { meter }));
+        // A null answer is the source switched off — transient, not a stale id.
+        outcome = v ? { band: columnFor(v.priceLevel) } : { pause: 'Google returned nothing (source off)' };
+      } catch (err) {
+        const status = Number((/Google Places (\d{3})/.exec(String(err?.message ?? '')) || [])[1]) || null;
+        // Only a definite not-found is a stale id. A 400 (bad request/mask) or any
+        // other error would hit every place, so it pauses rather than marking all
+        // places unresolved (Codex).
+        outcome = status === 404 ? { band: 'unresolved' } : { pause: String(err?.message ?? err).slice(0, 200) };
+      }
+      // The spend lands on the ledger attributed to the run's own session, as every
+      // paid background pass here does (desk/pilot.js).
+      if (Object.keys(meter).length) await providerCalls.record(run.household_id, 'google', 'cost.distribution', meter, run.started_session_id, ref).catch(() => null);
+      if (outcome.pause) {
+        await query("update cost_dist_runs set problem = $2, touched_at = now() where id = $1 and state = 'running'", [runId, `paused at ${ref}: ${outcome.pause}`]);
+        return reread(runId);
+      }
+      // The ledger row (presence = committed) and the histogram count move in one
+      // statement, so a crash can never split them (Codex). The count only rises
+      // for a row that was actually inserted.
+      await query(
+        `with w as (insert into cost_dist_samples (run_id, venue_ref) values ($1, $2) on conflict do nothing returning 1)
+         update cost_dist_runs set ${outcome.band} = ${outcome.band} + (select count(*) from w), touched_at = now() where id = $1`,
+        [runId, ref]);
     }
-    // The spend lands on the ledger attributed to the run's own session, as every
-    // paid background pass here does (desk/pilot.js).
-    if (Object.keys(meter).length) await providerCalls.record(run.household_id, 'google', 'cost.distribution', meter, run.started_session_id, ref).catch(() => null);
-    if (outcome.pause) {
-      // Release the claim so a resume retries this place, and pause the run.
-      await query('delete from cost_dist_samples where run_id = $1 and venue_ref = $2', [runId, ref]);
-      await query("update cost_dist_runs set problem = $2, touched_at = now() where id = $1 and state = 'running'", [runId, `paused at ${ref}: ${outcome.pause}`]);
-      const { rows: [paused] } = await query('select * from cost_dist_runs where id = $1', [runId]);
-      return paused;
-    }
-    // Count the band in memory's histogram on the run — never the price itself.
-    await query(`update cost_dist_runs set ${outcome.band} = ${outcome.band} + 1, touched_at = now() where id = $1`, [runId]);
+    // Finalise only once every frozen place has a committed outcome (Codex).
+    await query(
+      `update cost_dist_runs set state = 'done', finished_at = now(), touched_at = now()
+        where id = $1 and state = 'running'
+          and (select count(*) from cost_dist_samples where run_id = $1) >= requests`, [runId]);
+    return reread(runId);
+  } finally {
+    await lock.query('select pg_advisory_unlock(hashtext($1), hashtext($2))', [LOCK_NS, runId]).catch(() => {});
+    lock.release();
   }
-  await query("update cost_dist_runs set state = 'done', finished_at = now(), touched_at = now() where id = $1 and state = 'running'", [runId]);
-  const { rows: [finished] } = await query('select * from cost_dist_runs where id = $1', [runId]);
-  return finished;
 }
+
+const reread = async (runId) => { const { rows: [r] } = await query('select * from cost_dist_runs where id = $1', [runId]); return r ?? null; };
 
 /** The histogram column a price level counts towards. */
 function columnFor(priceLevel) {
