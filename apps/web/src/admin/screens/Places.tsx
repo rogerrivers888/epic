@@ -3089,11 +3089,15 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
   // the run's final reload (Codex, 1 Oct 2026).
   const matchRef = useRef(match);
   matchRef.current = match;
-  // Which place the drawer is on now. A research stream outlives a change of
-  // place — the drawer is one component the ref flows through, not a remount —
-  // so every frame checks this before it touches state: a late frame or final
-  // reload from the place you just left must never overwrite the one you are on.
-  const activeRef = useRef<string>(refId);
+  // A generation that steps on every change of place. A research stream or a
+  // comparison fetch outlives a change of place — the drawer is one component the
+  // ref flows through, not a remount — so each one captures the generation it
+  // began in and only touches state while that is still current. A ref string is
+  // not enough: leaving a place and coming back to it would make the string match
+  // again and revive a stale stream (Codex, 1 Oct 2026). The bump runs before the
+  // reload below, so a reload on a change of place reads the new generation.
+  const genRef = useRef(0);
+  useEffect(() => { genRef.current += 1; }, [refId]);
   // Whether this tab is still mounted. Switching drawer tabs *does* unmount
   // CompareTab (it is a conditional child), and a research stream outlives that
   // too; its terminal frame must not reload, re-price or repeat a paid match from
@@ -3122,10 +3126,10 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
     setData(null);
     if (compareInFlight.current) { reloadWanted.current = true; return; }
     compareInFlight.current = true;
-    const forRef = refId;
+    const gen = genRef.current;
     api.adminPlaceCompare(refId, matchRef.current)
-      .then((d) => { if (activeRef.current === forRef) setData(d); })
-      .catch(() => { if (activeRef.current === forRef) setData(null); })
+      .then((d) => { if (genRef.current === gen) setData(d); })
+      .catch(() => { if (genRef.current === gen) setData(null); })
       .finally(() => {
         compareInFlight.current = false;
         if (reloadWanted.current && mountedRef.current) { reloadWanted.current = false; reloadRef.current(); }
@@ -3141,11 +3145,11 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
   // The quote response is tied to the ref it was asked for: a slow one for the
   // place you just left must not set the price for the one you are on now.
   useEffect(() => {
-    activeRef.current = refId; setResearch(null); setQuote(null); setQuoteErr(false);
-    const forRef = refId;
+    setResearch(null); setQuote(null); setQuoteErr(false);
+    const gen = genRef.current;
     api.adminResearchQuote(refId)
-      .then((q) => { if (activeRef.current === forRef) setQuote(q); })
-      .catch(() => { if (activeRef.current === forRef) setQuoteErr(true); });
+      .then((q) => { if (genRef.current === gen) setQuote(q); })
+      .catch(() => { if (genRef.current === gen) setQuoteErr(true); });
   }, [refId]);
 
   /**
@@ -3157,8 +3161,8 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
   const runResearch = useCallback(() => {
     // Cost-first: never start the (possibly paid) run until its price is in hand.
     if (!canManage || research?.running || !quote) return;
-    const startedFor = refId;
-    const mine = () => mountedRef.current && activeRef.current === startedFor; // tab still open, on this place
+    const myGen = genRef.current;
+    const mine = () => mountedRef.current && genRef.current === myGen; // tab still open, same place still showing
     setResearch({ running: true, steps: [], error: null, outcome: null, problems: [] });
     const put = (s: ResearchStep) => setResearch((r) => {
       if (!r) return r;
@@ -3181,7 +3185,7 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
         // Research may have filled a website, which makes the next run cheaper
         // (identify only, not identify-plus-find-page); re-price so the button
         // stops advertising the old ceiling.
-        api.adminResearchQuote(startedFor).then((q) => { if (mine()) setQuote(q); }).catch(() => { /* keep the last known price */ });
+        api.adminResearchQuote(refId).then((q) => { if (mine()) setQuote(q); }).catch(() => { /* keep the last known price */ });
         onResearched?.();
       }
     }).catch((e) => { if (mine()) setResearch((r) => (r ? { ...r, running: false, error: e?.body?.message ?? 'Research could not finish.' } : r)); });
