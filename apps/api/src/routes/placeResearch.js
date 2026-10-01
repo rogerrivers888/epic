@@ -40,7 +40,7 @@
 
 import express from 'express';
 import { requires } from '../access.js';
-import { query } from '../db.js';
+import { pool, query } from '../db.js';
 import { currentHousehold } from './household.js';
 import { enrich } from '../sources/own.js';
 import { googleSource, rankedSlice } from '../sources/google.js';
@@ -53,12 +53,14 @@ import { healthOf } from '../sources/meter.js';
 const router = express.Router();
 const bad = (message, code = 'bad_request') => Object.assign(new Error(message), { status: 400, code });
 
-// The places a research run is open on right now. The button's own guard is
-// component-local, so switching drawer tabs and coming back re-enables it and a
-// second forced, paid pass could start for the same place; the run forces and
-// writes, so two at once double the spend and the writes. Single-flight here is
-// the one guard that holds however the second press arrives (Codex, 1 Oct 2026).
-const researching = new Set();
+// One research run per place, across the whole deployment. The button's own
+// guard is component-local (a remounted tab re-enables it), and an in-process
+// Set would not hold once requests reach different API workers — the run forces
+// and writes, so two at once double the spend and the writes (Codex, 1 Oct 2026).
+// A Postgres advisory lock keyed on the ref spans every process, the same device
+// the postcode load and the index build use; it lives on one connection for the
+// life of the run and is released when it ends (or when the connection dies).
+const researchLock = (ref) => `epic.research.${ref}`;
 
 /** Pence at the list price, to two places — the same arithmetic the rest of Places prices with. */
 const gbpPence = (usd) => Math.round((Number(usd) || 0) * 100 * USD_TO_GBP * 100) / 100;
@@ -193,13 +195,18 @@ router.post('/research', requires('manage_library'), async (req, res, next) => {
     if (!pi) return res.status(404).json({ error: 'not_indexed', message: 'Nothing indexed under that ref yet.' });
   } catch (err) { return next(err); }
 
-  // One run per place at a time: a second press (a remounted tab, a retry) is
-  // turned away rather than left to spend and write beside the first.
-  if (researching.has(ref)) {
-    return res.status(409).json({ error: 'already_running', message: 'This place is being researched right now — give it a moment.' });
-  }
-  researching.add(ref);
+  // One run per place at a time, across every worker: a second press (a remounted
+  // tab, a retry, a request on another replica) is turned away rather than left to
+  // spend and write beside the first. The lock lives on this one connection for
+  // the life of the run.
+  const holder = await pool.connect();
+  let locked = false;
   try {
+    ({ rows: [{ locked }] } = await holder.query('select pg_try_advisory_lock(hashtext($1)) as locked', [researchLock(ref)]));
+    if (!locked) {
+      return res.status(409).json({ error: 'already_running', message: 'This place is being researched right now — give it a moment.' });
+    }
+
     // Reserve the worst case before a call goes out; a run over the ceiling is
     // refused whole rather than half-done.
     const quote = await quoteResearch(ref);
@@ -234,7 +241,10 @@ router.post('/research', requires('manage_library'), async (req, res, next) => {
       if (!res.writableEnded) res.end();
     }
   } finally {
-    researching.delete(ref);
+    // Whatever happened — the lock refused, the lock query failing, the run
+    // throwing — the lock goes back and the connection with it.
+    if (locked) await holder.query('select pg_advisory_unlock(hashtext($1))', [researchLock(ref)]).catch(() => null);
+    holder.release();
   }
 });
 
