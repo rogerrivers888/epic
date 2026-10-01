@@ -774,6 +774,13 @@ async function reindexWhileLocked({ onProgress }) {
 
   await retireWhileLocked();
 
+  // The durable postcode wins over the stamp, before anything is filed from it
+  // (owner, 1 Oct 2026; Option C). A full rebuild files place_areas and the country
+  // localities from pi.country_code just below, then marks every row placed — so the
+  // correction has to land first, or a rebuild would re-cement a stale country out
+  // of settle's reach afterwards (Codex). Whole index, not a queue.
+  await settleCountryFromPostcode();
+
   // Every country the index holds places in gets a row you can point at.
   //
   // `settleNew()` makes one as a place arrives, which does not help a place that

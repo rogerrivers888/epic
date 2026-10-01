@@ -1973,12 +1973,17 @@ router.patch('/place', requires('manage_library'), async (req, res, next) => {
           'delete from place_areas pa using localities l where l.slug = pa.area_slug and pa.venue_ref = $1 and l.kind = $2',
           [ref, 'postcode']);
         if (outcode) {
-          const place = (await client.query(
-            'select country_code from place_index where venue_ref = $1', [ref])).rows[0] ?? null;
+          // A new outcode locality is stamped GB, not the place's current country
+          // (Codex, Option C): the value is validated UK outward-code format above,
+          // so GB is authoritative — whereas copying the place's stamp would seed the
+          // outcode with the very country the requeue below is meant to correct (an
+          // IE-stamped place moved to a UK outcode would otherwise stay IE for good,
+          // since on conflict does nothing). A real outcode we already hold keeps its
+          // own country; only a brand-new one is created, and it is a UK one.
           await client.query(
-            `insert into localities (slug, name, kind, country_code) values ($1,$2,'postcode',$3)
+            `insert into localities (slug, name, kind, country_code) values ($1,$2,'postcode','GB')
              on conflict (slug) do nothing`,
-            [lower(outcode), outcode, place?.country_code ?? 'GB']);
+            [lower(outcode), outcode]);
           await client.query(
             'insert into place_areas (venue_ref, area_slug) values ($1,$2) on conflict do nothing',
             [ref, lower(outcode)]);
