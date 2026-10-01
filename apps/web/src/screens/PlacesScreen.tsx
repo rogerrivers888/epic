@@ -243,9 +243,10 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
   const [add, setAdd] = useQueryState<AddMode>('add', null, asOneOf(['search', 'photo'] as const, null));
   const adding = add != null;
   // Places home is the Been · Liked menu (4b): where the household has been, or
-  // what it has loved. The country/city list — the atlas — is what Been shows, a
-  // tap into any row away, so it is kept rather than deleted (owner, 30 Sep 2026).
-  const [show, setShow] = useQueryState<'been' | 'liked'>('show', 'been', asOneOf(['been', 'liked'] as const, 'been'));
+  // what it has loved. "All your places" — the whole atlas, including places only
+  // saved to try — is one tap away under the menu's nothing-selected state, so the
+  // atlas is kept and a shortlisted area is always reachable (owner, 30 Sep 2026).
+  const [show, setShow] = useQueryState<'been' | 'liked' | 'all'>('show', 'been', asOneOf(['been', 'liked', 'all'] as const, 'been'));
   const setAdding = (v: boolean) => setAdd(v ? 'search' : null, { replace: true });
   const areaName = atHome ? 'home' : country?.city ? `${country.country}.${country.city}` : null;
   // A move closes the panels — but not the first paint, or a shared `?add=photo` would be thrown away on arrival.
@@ -398,7 +399,7 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
         ) : null}
 
         {!sel && !ui.adding ? (
-          <AtlasRoot data={data} error={error} homeTown={homeTown} mode={show} onGo={(href) => navigate(href)} />
+          <AtlasRoot data={data} error={error} homeTown={homeTown} mode={show} onGo={(href) => navigate(href)} onShowAll={() => setShow('all')} />
         ) : null}
 
         {country && !country.city && !ui.adding ? (
@@ -497,45 +498,50 @@ function AtlasSection({ label, meta }: { label: string; meta?: string }) {
   );
 }
 
-function AtlasRoot({ data, error, homeTown, mode, onGo }: {
+function AtlasRoot({ data, error, homeTown, mode, onGo, onShowAll }: {
   data: { countries: AtlasCountry[]; unplaced: number; home: AtlasHome | null } | null;
-  error: string | null; homeTown: string | null; mode: 'been' | 'liked'; onGo: (href: string) => void;
+  error: string | null; homeTown: string | null; mode: 'been' | 'liked' | 'all'; onGo: (href: string) => void; onShowAll: () => void;
 }) {
   const liked = mode === 'liked';
+  const all = mode === 'all';
   const homeCode = data?.home?.countryCode ?? null;
   const countries = data?.countries ?? [];
   const homeCountry = homeCode ? countries.find((c) => c.code === homeCode) ?? null : null;
   const others = countries.filter((c) => c.code !== homeCode).sort((a, b) => a.name.localeCompare(b.name));
-  const citiesOf = (c: AtlasCountry) => [...c.cities].sort((a, b) => b.places - a.places).slice(0, 3).map((ci) => ci.name).join(' · ');
-  // The count a row carries, and whether it shows. Liked: how many places here the
-  // household has loved (a country has no `special` of its own, so it sums its
-  // cities'). Been: how many it has been to — the recorded-visit count, which is
-  // the only reliable signal: `lastTrip` can be a date-unfixed trip idea whose
-  // placeholder dates have passed, so it is not taken as proof of a visit (Codex).
-  const likedN = (ci: AtlasCountry['cities'][number]) => ci.special;
-  const likedCountry = (c: AtlasCountry) => c.cities.reduce((s, ci) => s + (ci.special ?? 0), 0);
-  const cityN = (ci: AtlasCountry['cities'][number]) => (liked ? likedN(ci) : ci.been);
-  const countryN = (c: AtlasCountry) => (liked ? likedCountry(c) : c.been);
+  // The count a row carries, and whether it shows. Liked: places loved here (a
+  // country has no `special` of its own, so it sums its cities'). Been: places
+  // been to — the recorded-visit count, the only reliable signal, since `lastTrip`
+  // can be a date-unfixed idea whose placeholder dates have passed (Codex). All:
+  // every place kept here, so a shortlisted-only area is still reachable.
+  const cityN = (ci: AtlasCountry['cities'][number]) => (all ? ci.places : liked ? ci.special : ci.been);
+  const countryN = (c: AtlasCountry) => (all ? c.places : liked ? c.cities.reduce((s, ci) => s + (ci.special ?? 0), 0) : c.been);
   const cityShown = (ci: AtlasCountry['cities'][number]) => cityN(ci) > 0;
   const countryShown = (c: AtlasCountry) => countryN(c) > 0;
-  const homeN = data?.home ? (liked ? data.home.special : data.home.been) : 0;
+  // A country's subtitle names only its towns that have an entry for this tab, so
+  // a Been/Liked row never advertises towns with nothing on the tab (Codex).
+  const citiesOf = (c: AtlasCountry) => [...c.cities].filter(cityShown).sort((a, b) => cityN(b) - cityN(a)).slice(0, 3).map((ci) => ci.name).join(' · ');
+  const homeN = data?.home ? (all ? data.home.places : liked ? data.home.special : data.home.been) : 0;
   const homeCities = [...(homeCountry?.cities ?? [])].filter(cityShown).sort((a, b) => cityN(b) - cityN(a));
   const abroad = others.filter(countryShown);
   // With no claimed place in the home radius the API gives no home country code,
-  // so every country lands in `others`; it would be wrong to head them "Abroad",
-  // so the heading is neutral until a home nation is known (Codex).
-  const abroadLabel = homeCountry ? 'Abroad' : 'Where you have been';
-  const nothing = !!data && homeN === 0 && homeCities.length === 0 && abroad.length === 0;
+  // so every country lands in `others`; heading them "Abroad" would be wrong, so
+  // the heading is neutral until a home nation is known (Codex).
+  const abroadLabel = homeCountry ? 'Abroad' : all ? 'Countries' : 'Where you have been';
+  const empty = !!data && homeN === 0 && homeCities.length === 0 && abroad.length === 0;
+  const emptyTitle = all ? 'Nothing here yet' : liked ? 'Nothing loved yet' : 'Nowhere been yet';
+  const emptyBody = liked
+    ? 'Heart a place on Inspire or on a trip, and it lands here under where it is.'
+    : all
+      ? 'Heart a place on Inspire or a trip, or say you have been somewhere, and it lands here under where it is.'
+      : 'Say you have been somewhere, or record a visit, and it lands here under where it is.';
   return (
     <View style={styles.list}>
       {error ? <View style={styles.gutter}><StatusLine tone="warn">{error}</StatusLine></View> : null}
       {!data ? <Text style={[type.small, styles.gutter, { paddingTop: spacing.md }]}>Loading your atlas…</Text> : null}
-      {nothing ? (
+      {empty && !data?.unplaced ? (
         <View style={styles.emptyRoot}>
-          <Text style={styles.emptyTitle}>{liked ? 'Nothing loved yet' : 'Nowhere been yet'}</Text>
-          <Text style={styles.emptyBody}>{liked
-            ? 'Heart a place on Inspire or on a trip, and it lands here under where it is.'
-            : 'Say you have been somewhere, or record a visit, and it lands here under where it is.'}</Text>
+          <Text style={styles.emptyTitle}>{emptyTitle}</Text>
+          <Text style={styles.emptyBody}>{emptyBody}</Text>
         </View>
       ) : null}
       {homeN > 0 && data?.home ? (
@@ -580,7 +586,15 @@ function AtlasRoot({ data, error, homeTown, mode, onGo }: {
           ))}
         </>
       ) : null}
-      {data?.unplaced && !liked ? <Text style={[type.tiny, styles.gutter, { paddingTop: spacing.md }]}>{data.unplaced} place{data.unplaced === 1 ? '' : 's'} still being placed on the map.</Text> : null}
+      {/* The whole atlas, one tap away (owner): everything kept here, including
+          places only shortlisted, which the Been and Liked tabs leave out. */}
+      {!all && !empty ? (
+        <Press onPress={onShowAll} style={styles.allPlaces} accessibilityRole="button" accessibilityLabel="All your places">
+          <Text style={styles.allPlacesText}>All your places</Text>
+          <Icon name="more" size={16} color={colors.ink} strokeWidth={2.4} />
+        </Press>
+      ) : null}
+      {data?.unplaced ? <Text style={[type.tiny, styles.gutter, { paddingTop: spacing.md }]}>{data.unplaced} place{data.unplaced === 1 ? '' : 's'} still being placed on the map.</Text> : null}
     </View>
   );
 }
@@ -1319,6 +1333,8 @@ const styles = StyleSheet.create({
   list: { paddingTop: 4 },
   sectionHead: { flexDirection: 'row', alignItems: 'baseline', gap: 8, paddingHorizontal: GUTTER, paddingTop: 18, paddingBottom: 2 },
   sectionMeta: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.inkFaint },
+  allPlaces: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: GUTTER, paddingVertical: 15, marginTop: 8, borderTopWidth: 1, borderTopColor: colors.lineSoft },
+  allPlacesText: { fontFamily: fonts.heading, fontSize: 15, fontWeight: '700', color: colors.ink },
   navRow: {
     flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14, marginHorizontal: GUTTER, minHeight: TARGET,
     borderBottomWidth: 1, borderBottomColor: colors.lineSoft,
