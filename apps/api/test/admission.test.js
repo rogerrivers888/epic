@@ -51,6 +51,25 @@ test('a priced or silent page records asked_nothing_found, and the cost row fall
   }
 });
 
+test('admissionToAnswer refuses free when any ticket on the page is paid', () => {
+  assert.deepEqual(admission.admissionToAnswer({ free: true, family: '£20' }), { state: 'asked_nothing_found' });
+  assert.deepEqual(admission.admissionToAnswer({ free: true, concession: '£5' }), { state: 'asked_nothing_found' });
+});
+
+test('clearing a non-GB site answer recomputes the disagreement it was part of', async () => {
+  const ref = 'osm:node/adm-clash-resettle';
+  await seedPlace(ref, 'GB');
+  const qid = await costBandQuestionId();
+  await saveAnswer({ venueRef: ref, questionId: qid, source: 'site', state: 'answered', value: { choice: 'free' } });
+  await saveAnswer({ venueRef: ref, questionId: qid, source: 'wikipedia', state: 'answered', value: { choice: 'moderate' } });
+  assert.equal(await ownedCostBand(ref), null, 'contested while both stand');
+  await query(`update place_index set country_code = 'IE' where venue_ref = $1`, [ref]);
+  await admission.recordAdmissionAnswer(ref, { free: true }, { sourceUrl: 'https://x.ie' });
+  const { rows } = await query(`select source, unresolved from place_answers where venue_ref = $1`, [ref]);
+  assert.deepEqual(rows.map((r) => [r.source, r.unresolved]), [['wikipedia', false]], 'the remaining answer is uncontested');
+  assert.equal(await ownedCostBand(ref), 'moderate');
+});
+
 test('a non-GB venue is skipped — the extractor only validates £', async () => {
   const ref = 'osm:node/adm-ie';
   await seedPlace(ref, 'IE');

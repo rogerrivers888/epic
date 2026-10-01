@@ -211,7 +211,22 @@ const QUALIFIED = /\b(?:members?|membership|subscriber|annual pass|children|chil
 // as Free (Codex). A day name, a time, or a season near the claim disqualifies it;
 // conservative on purpose — a genuinely free place that merely mentions a day nearby
 // falls back to Google rather than being confidently wrong.
-const TEMPORAL = /\b(?:mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?|weekdays?|weekends?|bank\s+holidays?|term\s+time|school\s+holidays?|after\s+\d|before\s+\d|\d\s?(?:am|pm)\b|half[- ]term)\b/i;
+const TEMPORAL = new RegExp([
+  // days and parts of the week
+  'mondays?', 'tuesdays?', 'wednesdays?', 'thursdays?', 'fridays?', 'saturdays?', 'sundays?',
+  'weekdays?', 'weekends?', 'bank\\s+holidays?', 'term\\s+time', 'school\\s+holidays?', 'half[- ]term',
+  // times of day
+  'after\\s+\\d', 'before\\s+\\d', '\\d\\s?(?:am|pm)\\b',
+  // months — "may" only where it is plainly the month, never the verb ("you may book")
+  'january', 'february', 'march', 'april', 'june', 'july', 'august', 'september', 'october', 'november', 'december',
+  '(?:jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\\b\\.?',
+  '(?:in|from|until|till|to|through|between|during|throughout)\\s+may\\b', 'may\\s*(?:to|until|till|-|\\u2013)',
+  // seasons and dated periods
+  'winter', 'spring', 'summer', 'autumn', 'seasonal', 'season', 'off[- ]peak', 'peak\\s+times?',
+  'christmas', 'easter', 'new\\s+year', 'holiday\\s+period',
+  // date ranges and limits
+  'until', 'till', 'between', 'from\\s+\\d', '\\d{1,2}(?:st|nd|rd|th)\\b', '\\b20\\d\\d\\b', 'limited\\s+time', 'for\\s+a\\s+limited',
+].map((p) => `(?:${p})`).join('|').replace(/^/, '\\b(?:').concat(')'), 'i');
 
 const flatten = (html) => String(html)
   .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
@@ -257,9 +272,12 @@ export function admissionFrom(html, node = {}) {
     if (price == null || price === '') continue;
     const currency = offer.priceCurrency ?? offer.priceSpecification?.priceCurrency ?? 'GBP';
     const shown = currency === 'GBP' ? `£${price}` : `${price} ${currency}`;
-    if (Number(price) === 0) { found.free = true; continue; }
     const label = String(offer.name ?? offer.category ?? '');
     const slot = TICKETS.find(([, re]) => re.test(label))?.[0] ?? 'adult';
+    // A zero-priced offer is free entry only when it is the general (adult) ticket.
+    // A free child ticket beside a paid family one is not a free place, and reading
+    // it as one showed a paid venue as Free (Codex).
+    if (Number(price) === 0) { if (slot === 'adult') found.free = true; continue; }
     found[slot] ??= shown;
   }
 
@@ -324,8 +342,9 @@ export function admissionFrom(html, node = {}) {
     }
   }
   // A place that charges is not free, whatever a "free parking" line elsewhere
-  // on the page said.
-  if (found.adult) found.free = false;
+  // on the page said — and that holds for any paid ticket, not only the adult one:
+  // a printed family or concession price means somebody pays at the gate (Codex).
+  if (found.adult || found.child || found.family || found.concession) found.free = false;
 
   const said = Object.entries(found).filter(([, v]) => v !== null && v !== false);
   if (!said.length) return null;

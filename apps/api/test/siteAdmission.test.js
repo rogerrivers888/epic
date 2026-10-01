@@ -63,3 +63,27 @@ test('a printed adult price is not free', () => {
   assert.equal(a?.free, false, 'a place that charges is not free');
   assert.equal(a?.adult, '£12.00');
 });
+
+test('seasonal and date-bounded free entry is not universally free', () => {
+  // The case that matters most: free in the months families do not go, read as free
+  // all year, sends a family to a gate expecting not to pay (owner, 1 Oct 2026).
+  assert.equal(free('<p>Free admission from November until March.</p>'), false);
+  assert.equal(free('<p>Free admission during winter.</p>'), false);
+  assert.equal(free('<p>Free entry in May.</p>'), false);
+  assert.equal(free('<p>Free entry over Christmas.</p>'), false);
+  assert.equal(free('<p>Free admission until 31st October.</p>'), false);
+  assert.equal(free('<p>Free entry till 5pm.</p>'), false);
+  // "may" the verb and "still" are not dates; a universal claim survives them.
+  assert.equal(free('<p>Admission is free and you may bring a picnic.</p>'), true);
+  assert.equal(free('<p>Free entry, and it is still the best walk around.</p>'), true);
+});
+
+test('a zero-priced offer for one ticket type is not a free place', () => {
+  const a = admissionFrom('<p></p>', { offers: [{ price: 0, name: 'Child' }, { price: 20, name: 'Family' }] });
+  assert.equal(a?.free, false, 'a free child ticket beside a paid family one');
+  assert.equal(a?.family, '£20');
+  const b = admissionFrom('<p></p>', { offers: [{ price: 0, name: 'Child' }] });
+  assert.notEqual(b?.free, true, 'a free child ticket alone does not make the place free');
+  const c = admissionFrom('<p></p>', { offers: [{ price: 0, name: 'General admission' }] });
+  assert.equal(c?.free, true, 'a free general ticket does');
+});

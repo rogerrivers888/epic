@@ -25,7 +25,7 @@
  */
 
 import { query } from '../db.js';
-import { saveAnswer } from '../repositories/questionSets.js';
+import { saveAnswer, markDisagreement } from '../repositories/questionSets.js';
 
 let costBandQuestion; // the global cost-band question id, resolved once
 
@@ -45,7 +45,12 @@ async function costBandQuestionId() {
  * "we read the page and it did not establish a free entry", never a guess.
  */
 export function admissionToAnswer(admission) {
-  if (admission && admission.free === true) return { state: 'answered', choice: 'free' };
+  // Free only when nothing on the page says anybody pays: a printed adult, child,
+  // family or concession price beside a "free" means somebody pays at the gate, and a
+  // wrong Free is worse than no answer — a family arrives expecting not to (owner,
+  // 1 Oct 2026; Codex). The extractor applies the same rule; this holds it here too.
+  const paid = admission && (admission.adult || admission.child || admission.family || admission.concession);
+  if (admission && admission.free === true && !paid) return { state: 'answered', choice: 'free' };
   return { state: 'asked_nothing_found' };
 }
 
@@ -69,6 +74,9 @@ export async function recordAdmissionAnswer(venueRef, admission, { sourceUrl = n
     // was unknown (defaulted GB), so the cost row stops serving a band from a currency
     // the extractor cannot validate (Codex). ownedCostBand then falls back to Google.
     await query(`delete from place_answers where venue_ref = $1 and question_id = $2 and source = 'site'`, [venueRef, questionId]);
+    // With the site row gone, an answer it disagreed with is no longer contested —
+    // recompute the flags so ownedCostBand does not keep ignoring it (Codex).
+    await markDisagreement(venueRef, questionId);
     return null;
   }
   const answer = admissionToAnswer(admission);

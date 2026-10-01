@@ -409,7 +409,7 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
     // daily allowance to watch a free lookup finish is how the allowance ran
     // out in the first place. `/api/places/record` reads our own tables and
     // calls nobody.
-    const waitForResearch = async () => {
+    const waitForResearch = async (since: string | null) => {
       const ref = item.venueRef;
       for (let n = 0; n < 6 && live; n += 1) {
         await new Promise((r) => setTimeout(r, 4000));
@@ -418,12 +418,14 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
         const now = held?.records?.[ref];
         if (!live || !now) continue;
         setOwnRecord(now);
-        // Stop when research has actually finished (researchedAt set at finalisation,
-        // after the venue page is read and the admission answer written), not when a
-        // name or even a website arrives — those can come from the open map before the
-        // site step runs, so stopping on them left Free hidden until a reopen (Codex).
-        // The name still shows at once via setOwnRecord each poll; only the stop waits.
-        if (now.researchedAt) return;
+        // Stop when THIS research run has finished: researchedAt is set at finalisation
+        // (after the venue page is read and the admission answer written), and it must
+        // differ from the value the record had when the run began — a place researched
+        // again after a failed or partial attempt already carries an old timestamp, and
+        // stopping on that left Free hidden until a reopen (Codex). A name or website
+        // can arrive from the open map earlier; they show at once via setOwnRecord each
+        // poll, and only the stop waits.
+        if (now.researchedAt && now.researchedAt !== since) return;
       }
     };
     api.place(item.venueRef)
@@ -435,7 +437,7 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
         if (d.sourceError) setError(d.sourceError);
         if (d.ours) setOwnRecord(d.ours);
         else void fromDevice();
-        if (d.researching) void waitForResearch();
+        if (d.researching) void waitForResearch(d.ours?.researchedAt ?? null);
       })
       .catch((e) => {
         if (!live) return;
