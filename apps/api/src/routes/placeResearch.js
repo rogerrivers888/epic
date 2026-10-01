@@ -220,6 +220,15 @@ router.post('/research', requires('manage_library'), async (req, res, next) => {
   let holder = null;
   let locked = false;
   try {
+    // Do not queue for a lock connection. If every one is taken, say the desk is
+    // busy now rather than wait up to the pool's timeout — a queued request could
+    // otherwise get a connection only after the run it duplicates had finished and
+    // freed the advisory lock, and then run the whole paid pass again (Codex,
+    // 1 Oct 2026). The arrival guard above catches the same-worker duplicate; this
+    // keeps a cross-worker one from slipping through the queue.
+    if (lockPool.idleCount === 0 && lockPool.totalCount >= (lockPool.options?.max ?? 3)) {
+      return res.status(503).json({ error: 'lock_desk_busy', message: 'Too many places are being researched right now — give it a moment and try again.' });
+    }
     holder = await lockPool.connect().catch(() => null);
     if (!holder) {
       return res.status(503).json({ error: 'lock_desk_busy', message: 'Too many places are being researched right now — give it a moment and try again.' });

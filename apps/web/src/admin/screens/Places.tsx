@@ -2784,7 +2784,11 @@ function PlaceBoard({ refId, canManage, onClose, tab, onTab }: {
       </View>
 
       {tab === 'record' ? <RecordTab place={place} canManage={canManage} onSaved={load} /> : null}
-      {tab === 'compare' ? <CompareTab refId={refId} canManage={canManage} onEdit={() => setTab('record')} onResearched={load} /> : null}
+      {/* `refresh`, not `load`: load() forgets the boards first, which blanks the
+          place and unmounts this tab mid-stream, throwing away the result the run
+          just showed. refresh re-reads the header in place, keeping the panel
+          (Codex, 1 Oct 2026). */}
+      {tab === 'compare' ? <CompareTab refId={refId} canManage={canManage} onEdit={() => setTab('record')} onResearched={refresh} /> : null}
       {tab === 'score' ? <ScoreTab refId={refId} canManage={canManage} /> : null}
       {tab === 'pictures' ? <PlacePicturesTab place={place} canManage={canManage} onFound={load} /> : null}
       {tab === 'raw' ? <RawTab refId={refId} canManage={canManage} onDone={load} /> : null}
