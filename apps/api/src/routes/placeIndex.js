@@ -26,7 +26,7 @@ import { query, withTransaction } from '../db.js';
 import * as index from '../repositories/placeIndex.js';
 import { decodeEntities } from '../repositories/placeIndex.js';
 import { phoneOf } from '../domain/contact.js';
-import { censusInRing, censusByOutcodeSum, placingPoints, whereBoxSits, nearestSector } from '../repositories/censusRing.js';
+import { censusInRing, censusByOutcodeSum, placingPoints, whereBoxSits, whereBoxSitsInCircle, nearestSector } from '../repositories/censusRing.js';
 import { TEXT_QUESTIONS, textStillAsked } from '../sources/censusQuestions.js';
 import { ownSite } from '../sources/logo.js';
 import * as reach from '../repositories/reach.js';
@@ -38,7 +38,7 @@ import { LIVE_ROW, FOLDED_MONTH } from '../repositories/searches.js';
 import { sectorOf, labelOf, CAP_MINUTES, EDGE_MINUTES } from '../domain/reach.js';
 import { searchAreas } from '../sources/areas.js';
 import { outcodesFor } from '../sources/localities.js';
-import { travelMode, estimateTravelMinutes } from '../domain/travel.js';
+import { travelMode, estimateTravelMinutes, kmBetween } from '../domain/travel.js';
 import { FACTS, FACT_KEYS, FACT_WEIGHTS, scorePlace, faultOf, SHORT_FAULT, holdsAnOwnedFact } from '../domain/placeIndex.js';
 import { writeAudit } from '../repositories/roles.js';
 import { OUR_LABEL, detailFor, detailHeld, blank, lineUp } from '../sources/compare.js';
@@ -1256,15 +1256,32 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
          and (ps.sourced is distinct from 'text' or ps.subcategory = any($2::text[]))`,
     [slugs, textDrawers, category]);
 
-    // One membership verdict per distinct slice per band, not per row.
-    const vCache = new Map();
-    const verdict = (slice, band, tag) => {
-      const key = `${tag}|${slice}`;
-      if (vCache.has(key)) return vCache.get(key);
-      const v = whereBoxSits(boxFrom(slice), { cells: band, universe });
-      vCache.set(key, v);
-      return v;
+    // Membership exactly as censusInRing decides it, so the breakdown explains the
+    // very count it is about: a matrix-less mode (walk/transit with no matrix) is a
+    // straight-line circle, tested by distance; a matrix mode is the quantised band,
+    // tested by nearest sector (Codex). Each band carries its own ring, so inner and
+    // outer may be a circle or a sector set independently.
+    const memberFns = (ring, bandSet) => {
+      const circle = ring.circle ?? null;
+      const vCache = new Map();
+      return {
+        coord: (lat, lng) => (circle
+          ? kmBetween({ lat: circle.lat, lng: circle.lng }, { lat, lng }) <= circle.km
+          : bandSet.has(nearestSector({ lat, lng }, universe)?.code ?? null)),
+        slice: (slice) => {
+          if (vCache.has(slice)) return vCache.get(slice);
+          const box = boxFrom(slice);
+          const v = circle
+            ? whereBoxSitsInCircle(box, circle) === 'inside'
+            : whereBoxSits(box, { cells: bandSet, universe }) === 'inside';
+          vCache.set(slice, v);
+          return v;
+        },
+      };
     };
+    const innerMember = memberFns(ringInner, innerBand);
+    const outerMember = memberFns(ringOuter, outerBand);
+
     const byRef = new Map();
     for (const r of rows) {
       let e = byRef.get(r.venue_ref);
@@ -1275,11 +1292,11 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
       if (e.lat != null && e.lng != null) {
         const s = nearestSector({ lat: Number(e.lat), lng: Number(e.lng) }, universe);
         e.code = s?.code ?? null; e.outcode = s?.outcode ?? null; e.placed = 'own';
-        e.inInner = e.code != null && innerBand.has(e.code);
-        e.inOuter = e.code != null && outerBand.has(e.code);
+        e.inInner = innerMember.coord(Number(e.lat), Number(e.lng));
+        e.inOuter = outerMember.coord(Number(e.lat), Number(e.lng));
       } else if (e.slice) {
-        e.inInner = verdict(e.slice, innerBand, 'i') === 'inside';
-        e.inOuter = verdict(e.slice, outerBand, 'o') === 'inside';
+        e.inInner = innerMember.slice(e.slice);
+        e.inOuter = outerMember.slice(e.slice);
         const bx = boxFrom(e.slice);
         const s = bx ? nearestSector({ lat: (bx.minLat + bx.maxLat) / 2, lng: (bx.minLng + bx.maxLng) / 2 }, universe) : null;
         e.code = s?.code ?? null; e.outcode = s?.outcode ?? null; e.placed = 'slice';
@@ -1312,9 +1329,14 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
     const refs = sample.map((s) => s.venueRef);
     const names = new Map();
     if (refs.length) {
+      // Owned atlas names only — never a rented Google name (display_source
+      // 'google'), and matched on both an atlas ref form and a plain venue_ref, the
+      // way every other place-index read resolves the atlas (Codex).
       const { rows: nr } = await query(
-        "select venue_ref, name from attractions where venue_ref = any($1) and name is not null and state <> 'hidden'", [refs]).catch(() => ({ rows: [] }));
-      for (const r of nr) names.set(r.venue_ref, r.name);
+        `select coalesce(venue_ref, 'atlas:' || id::text) as ref, name from attractions
+          where (venue_ref = any($1) or 'atlas:' || id::text = any($1))
+            and name is not null and state <> 'hidden' and display_source is distinct from 'google'`, [refs]).catch(() => ({ rows: [] }));
+      for (const r of nr) names.set(r.ref, r.name);
     }
 
     res.json({
@@ -1334,7 +1356,9 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
         lat: e.lat != null ? Number(e.lat) : null,
         lng: e.lng != null ? Number(e.lng) : null,
         slice: e.lat == null ? e.slice : null,
-        driveMinutes: e.code != null ? (mins.get(e.code) ?? null) : null,
+        // Mode-neutral: the reach matrix minutes for the chosen mode, or null for a
+        // matrix-less mode where the reach is a straight-line estimate (Codex).
+        reachMinutes: e.code != null ? (mins.get(e.code) ?? null) : null,
         name: names.get(venueRef) ?? null,
       })),
     });
