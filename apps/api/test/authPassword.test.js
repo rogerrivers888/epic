@@ -458,3 +458,13 @@ test('a set-credentials that fails part-way leaves the link usable and the devic
   const ok = await post('/api/auth/credentials', { token, password: 'the new password 2' });
   assert.equal(ok.status, 201);
 });
+
+test('a new staff invitation leaves a reset the person asked for alone', async () => {
+  const acct = await makeAccount({ email: 'both.links@epic.day', staff: true, password: 'a password 12' });
+  const { token: reset } = await accounts.createSignInLink(acct.id, { requestedBy: 'self', purpose: 'reset', ttlHours: 0.5 });
+  const { token: first } = await accounts.replaceSignInLink(acct.id, { requestedBy: 'owner', purpose: 'invite' });
+  const { token: second } = await accounts.replaceSignInLink(acct.id, { requestedBy: 'owner', purpose: 'invite' });
+  assert.ok(await accounts.inspectSignInLink(reset), 'the reset still works');
+  assert.equal(await accounts.inspectSignInLink(first), null, 'the older invite is void');
+  assert.ok(await accounts.inspectSignInLink(second), 'the new invite works');
+});

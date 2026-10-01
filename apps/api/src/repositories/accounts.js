@@ -540,10 +540,14 @@ export async function replaceSignInLink(accountId, { requestedBy = 'owner', ttlH
   const token = crypto.randomBytes(32).toString('base64url');
   return withTransaction(async (client) => {
     await client.query('select id from accounts where id = $1 for update', [accountId]);
+    // A new invite voids the older invites and any plain login link (what an
+    // invite used to be), but never a reset the person asked for themselves:
+    // that is theirs, and it is not the owner's to cancel (Codex, 1 Oct 2026).
     await client.query(
       `update sign_in_links set expires_at = now()
-        where account_id = $1 and used_at is null and expires_at > now()`,
-      [accountId],
+        where account_id = $1 and used_at is null and expires_at > now()
+          and ($2::text is null or purpose is null or purpose = $2::text)`,
+      [accountId, purpose],
     );
     const { rows } = await client.query(
       `insert into sign_in_links (account_id, token_hash, expires_at, requested_by, purpose)
