@@ -49,22 +49,22 @@ update localities loc
    -- index is used rather than scanning 1.7M rows for an unknown outcode (Codex).
    and exists (select 1 from postcodes p where p.outcode = upper(loc.slug));
 
+-- A place whose outcode ONS knows is GB. Resolved against `postcodes` directly, not
+-- the derived `localities` row for the outcode: research writes a postcode without
+-- creating a locality, so a locality join would leave such places uncorrected (Codex).
 update place_index pi
-   set country_code = upper(loc.country_code),
+   set country_code = 'GB',
        placed_at = null,
        settle_tried_at = null
   from place_records r
-  join localities loc
-    on loc.kind = 'postcode'
-   and loc.slug = lower(case
+ where pi.venue_ref = r.venue_ref
+   and r.postcode is not null
+   and upper(pi.country_code) is distinct from 'GB'
+   and exists (select 1 from postcodes p where p.outcode = upper(lower(case
          when btrim(upper(r.postcode)) ~ '^[A-Z]{1,2}[0-9][A-Z0-9]?$' then btrim(upper(r.postcode))
          when position(' ' in btrim(r.postcode)) > 0 then split_part(btrim(upper(r.postcode)), ' ', 1)
          else left(upper(btrim(r.postcode)), greatest(0, length(btrim(r.postcode)) - 3))
-       end)
- where pi.venue_ref = r.venue_ref
-   and r.postcode is not null
-   and loc.country_code is not null
-   and upper(pi.country_code) is distinct from upper(loc.country_code);
+       end)));
 
 -- This pass has caught the backfill up to whatever release is in, so settle does not
 -- redo it. Null on a fresh install (no load yet); the load stamps it when it runs.

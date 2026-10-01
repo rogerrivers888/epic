@@ -1209,30 +1209,35 @@ end)`;
 
 /**
  * A place's country from owned data, not a rented coordinate (owner, 1 Oct 2026;
- * Option C). Its durable postcode — a fact of ours (migration 162) — resolves to
- * an outcode, and that outcode's locality carries the country ONS puts it in
- * (`localities`, migration 048). That beats a `country_code` copied from whatever
- * source area first mentioned the place, so where the two disagree the postcode
- * wins, and where the stamp was null it fills it. The country is resolved once and
- * kept — it never depended on the coordinate, so the 30-day coordinate expiry
- * (migration 184) cannot touch it.
+ * Option C). Its durable postcode — a fact of ours (migration 162) — resolves to an
+ * outcode, and the authoritative record of which outcodes are British is the ONS
+ * postcode load (`postcodes`, migration 253), which is GB-only. So a place whose
+ * outcode ONS knows is GB: that beats a `country_code` copied from whatever source
+ * area first mentioned the place, where the stamp disagrees or is null. The country
+ * is resolved once and kept — it never depended on the coordinate, so the 30-day
+ * coordinate expiry (migration 184) cannot touch it.
  *
- * Pass the refs being settled, or null for the whole corpus (the one-time backfill
- * migration 311 does the same thing in SQL). Returns how many rows it corrected.
+ * ONS directly, NOT the `localities` row for the outcode, which is the derived area
+ * cache and is not created for every postcode the research pipeline writes — so a
+ * valid owned postcode with no locality row would otherwise be left uncorrected
+ * (Codex). GB-scoped: ONS is GB-only; other markets' code datasets and the
+ * (country, slug) area key are the deferred US-census prerequisite (markets step 6,
+ * migration 300), where a W12-type outcode shared with an Eircode routing key is
+ * disambiguated. No live Irish data exists to misfile before then.
+ *
+ * Pass the refs being settled, or null for the whole corpus. Returns how many rows
+ * it corrected.
  */
 export async function settleCountryFromPostcode(refs = null, q = query) {
   const scope = refs ? 'and pi.venue_ref = any($1) and r.venue_ref = any($1)' : '';
   const { rowCount } = await q(`
     update place_index pi
-       set country_code = upper(loc.country_code)
+       set country_code = 'GB'
       from place_records r
-      join localities loc
-        on loc.kind = 'postcode'
-       and loc.slug = ${OUTCODE_FROM('r.postcode')}
      where pi.venue_ref = r.venue_ref
        and r.postcode is not null
-       and loc.country_code is not null
-       and upper(pi.country_code) is distinct from upper(loc.country_code)
+       and upper(pi.country_code) is distinct from 'GB'
+       and exists (select 1 from postcodes p where p.outcode = upper(${OUTCODE_FROM('r.postcode')}))
        ${scope}`, refs ? [refs] : []);
   return rowCount ?? 0;
 }
@@ -1260,16 +1265,15 @@ const normaliseOutcodeCountries = (q = query) => q(`update localities loc set co
 /** Mark the country backfill as caught up to the postcode release that is loaded. */
 const stampCountryBackfilled = (q = query) => q('update postcode_releases set country_backfilled_release = loaded_release where one');
 
-/** Each place takes its country from its outcode's locality, requeued so settle refiles it. */
+/** Each place whose outcode ONS knows as GB takes GB, requeued so settle refiles it. */
 const correctPlaceCountriesFromPostcode = async (q = query) => {
   const { rowCount } = await q(`
     update place_index pi
-       set country_code = upper(loc.country_code), placed_at = null, settle_tried_at = null
+       set country_code = 'GB', placed_at = null, settle_tried_at = null
       from place_records r
-      join localities loc on loc.kind = 'postcode' and loc.slug = ${OUTCODE_FROM('r.postcode')}
      where pi.venue_ref = r.venue_ref and r.postcode is not null
-       and loc.country_code is not null
-       and upper(pi.country_code) is distinct from upper(loc.country_code)`);
+       and upper(pi.country_code) is distinct from 'GB'
+       and exists (select 1 from postcodes p where p.outcode = upper(${OUTCODE_FROM('r.postcode')}))`);
   return rowCount ?? 0;
 };
 
