@@ -143,12 +143,21 @@ export function Waitlist({ canManage = false }: { canManage?: boolean } = {}) {
           {data && data.rows.length === 0 ? <Text style={styles.empty}>{any ? 'No sign-ups match these filters.' : 'Nobody has signed up yet.'}</Text> : null}
           {(data?.rows ?? []).map((r) => (
             <View key={r.id} style={[styles.row, !wide && { flexWrap: 'wrap', gap: 6 }]}>
-              <Text style={[styles.cellStrong, !wide && { flexBasis: '100%' }]} numberOfLines={1}>{r.email}</Text>
-              <Text style={styles.cell} numberOfLines={1}>{r.sourceLabel}</Text>
-              <Text style={styles.cell} numberOfLines={1}>{r.hostKindLabel ?? '—'}</Text>
-              <Text style={styles.cell} numberOfLines={1}>{r.locale}</Text>
-              <Text style={styles.cell} numberOfLines={1}>{r.campaign}</Text>
-              <Text style={styles.cellMuted} numberOfLines={1}>{when(r.signedUp)}</Text>
+              <Text style={[styles.cellStrong, !wide && { flexBasis: '70%' }]} numberOfLines={1}>{r.email}</Text>
+              {wide ? (
+                <>
+                  <Text style={styles.cell} numberOfLines={1}>{r.sourceLabel}</Text>
+                  <Text style={styles.cell} numberOfLines={1}>{r.hostKindLabel ?? '—'}</Text>
+                  <Text style={styles.cell} numberOfLines={1}>{r.locale}</Text>
+                  <Text style={styles.cell} numberOfLines={1}>{r.campaign}</Text>
+                  <Text style={styles.cellMuted} numberOfLines={1}>{when(r.signedUp)}</Text>
+                </>
+              ) : (
+                // On a phone the five facts are one wrapped line under the address.
+                <Text style={[styles.cellMuted, { flexBasis: '100%', order: 3 } as object]}>
+                  {[r.sourceLabel, r.hostKindLabel ?? '—', r.locale, r.campaign, when(r.signedUp)].join(' · ')}
+                </Text>
+              )}
               {canManage ? (
                 <Press onPress={() => setConfirm(r)} effect="none" accessibilityLabel={`Delete ${r.email}`} style={({ hovered }: any) => [styles.actionCell, styles.del, hovered && { backgroundColor: desk.rule }]}>
                   <Icon name="delete" size={16} color={desk.inkMuted} strokeWidth={2} />
@@ -172,8 +181,10 @@ export function Waitlist({ canManage = false }: { canManage?: boolean } = {}) {
 function Breakdown({ title, rows, on, onPick }: {
   title: string; rows: { key: string; label: string; signups: number; share: number | null }[]; on?: string; onPick: (key: string) => void;
 }) {
+  // Side by side they share the row; stacked on a phone each keeps its own height.
+  const { width } = useViewport();
   return (
-    <View style={styles.breakdown}>
+    <View style={[styles.breakdown, width >= 900 && { flex: 1 }]}>
       <Text style={styles.breakdownTitle}>{title}</Text>
       <View style={styles.bHead}>
         {['Name', 'Sign-ups', 'Share'].map((h) => <Text key={h} style={styles.headCell}>{h}</Text>)}
@@ -262,7 +273,7 @@ const styles = StyleSheet.create({
   totalValue: { fontFamily: fonts.heading, fontSize: 34, fontWeight: '800', letterSpacing: -1, lineHeight: 36, color: desk.ink },
 
   breakdowns: { flexDirection: 'row', gap: 28 },
-  breakdown: { flex: 1, minWidth: 0, gap: 4 },
+  breakdown: { minWidth: 0, gap: 4 },
   breakdownTitle: { fontFamily: fonts.heading, fontSize: 15, fontWeight: '800', letterSpacing: -0.3, color: desk.ink, marginBottom: 6 },
   bHead: { flexDirection: 'row', gap: 16, borderBottomWidth: 2, borderBottomColor: desk.ruleStrong, paddingBottom: 8 },
   bRow: { flexDirection: 'row', gap: 16, alignItems: 'center', paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: desk.rule },

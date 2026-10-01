@@ -40,7 +40,7 @@ const post = async (body, headers = {}) => {
   ip += 1;
   const res = await fetch(`${base}/api/interest`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'cf-connecting-ip': `203.0.113.${ip}`, ...headers },
+    headers: { 'content-type': 'application/json', 'x-forwarded-for': `203.0.113.${ip}`, ...headers },
     body: JSON.stringify(body),
   });
   return { status: res.status, body: await res.json().catch(() => null) };
@@ -177,7 +177,7 @@ test('a failed send does not fail the sign-up', async () => {
   await new Promise((r) => s.on('listening', r));
   try {
     const res = await fetch(`http://127.0.0.1:${s.address().port}/api/interest`, {
-      method: 'POST', headers: { 'content-type': 'application/json', 'cf-connecting-ip': '198.51.100.7' },
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': '198.51.100.7' },
       body: JSON.stringify({ ...HOME, email: 'sendfail@example.com' }),
     });
     assert.equal(res.status, 200);
@@ -185,14 +185,34 @@ test('a failed send does not fail the sign-up', async () => {
   } finally { s.close(); }
 });
 
-test('one caller is held to ten sign-ups in ten minutes', async () => {
-  const headers = { 'content-type': 'application/json', 'cf-connecting-ip': '192.0.2.99' };
+test('one caller is held to ten sign-ups in ten minutes, whatever headers it forges', async () => {
   const statuses = [];
   for (let i = 0; i < 11; i += 1) {
+    // A fresh CF-Connecting-IP and a fresh left-hand X-Forwarded-For every time —
+    // both typed by the caller — over the one address the edge appended.
+    const headers = { 'content-type': 'application/json', 'cf-connecting-ip': `10.9.8.${i}`, 'x-forwarded-for': `10.7.6.${i}, 192.0.2.99` };
     const res = await fetch(`${base}/api/interest`, { method: 'POST', headers, body: JSON.stringify({ ...HOME, email: `flood${i}@example.com` }) });
     statuses.push(res.status);
   }
   assert.deepEqual(statuses.slice(0, 10), Array(10).fill(200));
   assert.equal(statuses[10], 429);
   assert.equal((await query(`select count(*)::int as n from interest_signups where email like 'flood%'`)).rows[0].n, 10);
+});
+
+test('past the hourly cap a sign-up is kept and answered, and only the e-mail is held', async () => {
+  const capped = express();
+  const mails = [];
+  capped.use(express.json());
+  capped.use('/api', interestRouter({ send: async (m) => { mails.push(m); }, configured: () => true, mailAllowed: () => false }));
+  const s = capped.listen(0);
+  await new Promise((r) => s.on('listening', r));
+  try {
+    const res = await fetch(`http://127.0.0.1:${s.address().port}/api/interest`, {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': '198.51.100.8' },
+      body: JSON.stringify({ ...HOME, email: 'capped@example.com' }),
+    });
+    assert.equal(res.status, 200);
+    assert.equal((await rowsFor('capped@example.com')).length, 1);
+    assert.equal(mails.length, 0);
+  } finally { s.close(); }
 });

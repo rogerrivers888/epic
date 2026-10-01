@@ -23,7 +23,7 @@
  */
 
 import express from 'express';
-import { deployed, openSession, sessionCookie, sessionKindFor } from '../auth.js';
+import { closeSession, deployed, openSession, sessionCookie, sessionKindFor } from '../auth.js';
 import { signInLimit } from '../limits.js';
 import {
   accountByEmail, accountById, consumeSignInLink, createSignInLink, inspectSignInLink, linkContactFor,
@@ -69,11 +69,29 @@ const passwordOf = (value) => (typeof value === 'string' ? value : '');
  */
 const linkBase = (req) => webUrl(deployed() ? { headers: {} } : req);
 
-/** Record the sign-in, open a 'password' session, and answer as the link door does. */
-async function signIn(req, res, accountId) {
+/**
+ * Record the sign-in, open a 'password' session, and answer as the link door does.
+ *
+ * `verified` is the stored hash a log-in was checked against. A reset can land
+ * between that check and the session opening — the old password verified, then
+ * every session revoked, then this one opened after — so once the session
+ * exists the hash is read again, and if the password has changed under it the
+ * session is closed and the log-in refused as any wrong password is (Codex,
+ * 1 Oct 2026). With the reset revoking again *after* it sets the password, a
+ * log-in on the old password cannot leave a session either side of it.
+ */
+export async function signIn(req, res, accountId, { verified = null, email = null } = {}) {
   const label = labelOf(req);
-  const account = await recordSignIn(accountId, { method: 'password', label });
   const { token, session } = await openSession(label, accountId, sessionKindFor(req, label, { onAccount: true }), 'password');
+  if (verified) {
+    const now = await passwordFor(email);
+    if (!now || now.hash !== verified || now.account.id !== accountId || now.account.status === 'suspended') {
+      await closeSession(token);
+      await noteSignInFailure(req, { kind: 'password', contact: email, reason: 'password_changed' });
+      return res.status(401).json(WRONG);
+    }
+  }
+  const account = await recordSignIn(accountId, { method: 'password', label });
   sessionCookie(res, token);
   const access = await accessFor({ account, session });
   return res.status(201).json({
@@ -110,7 +128,7 @@ router.post('/auth/login', signInLimit, async (req, res, next) => {
       await noteSignInFailure(req, { kind: 'password', contact: email, reason });
       return res.status(401).json(WRONG);
     }
-    return signIn(req, res, found.account.id);
+    return signIn(req, res, found.account.id, { verified: found.hash, email });
   } catch (err) { next(err); }
 });
 
@@ -221,6 +239,11 @@ router.post('/auth/credentials', signInLimit, async (req, res, next) => {
     }
     if (spent.purpose === 'reset') await revokeAllSessions(spent.account_id);
     await setPassword(spent.account_id, hash);
+    // And again, now the old password no longer verifies: a log-in that checked
+    // it before the change and opened its session after the first revoke is
+    // closed here, and one opening later re-reads the hash and closes itself
+    // (signIn). Nothing on the old password outlives the reset.
+    if (spent.purpose === 'reset') await revokeAllSessions(spent.account_id);
     return signIn(req, res, spent.account_id);
   } catch (err) { next(err); }
 });

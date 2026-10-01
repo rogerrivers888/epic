@@ -38,6 +38,25 @@ export function callerOf(req) {
   return req.ip || req.socket?.remoteAddress || 'unknown';
 }
 
+/**
+ * Who is calling, from what the nearest proxy saw — never a header the caller
+ * can write. The API is reached on its own hostname (api.epic.day, Railway's
+ * edge), not through Cloudflare, so `CF-Connecting-IP` and the left of
+ * `X-Forwarded-For` are both whatever the caller typed; the entry Railway's
+ * edge appends — the right-most — is the address that actually connected
+ * (Codex, 1 Oct 2026). Behind more proxies this is the nearest one, which can
+ * only make the bucket wider, never forgeable. For a public door that sends
+ * mail, where a forged key is unlimited sends.
+ */
+export function connectedCallerOf(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.length) {
+    const last = forwarded.split(',').map((x) => x.trim()).filter(Boolean).pop();
+    if (last) return last;
+  }
+  return req.socket?.remoteAddress || req.ip || 'unknown';
+}
+
 function hit(name, key, windowMs, max) {
   let bucket = buckets.get(name);
   if (!bucket) { bucket = new Map(); buckets.set(name, bucket); }
@@ -121,7 +140,19 @@ export const interestLimit = limit({
   windowMs: 10 * MINUTE,
   max: 10,
   message: 'That is a lot of sign-ups at once. Try again in a few minutes.',
+  keyOf: connectedCallerOf,
 });
+
+/**
+ * Every waitlist confirmation, from everyone, an hour: a backstop on what the
+ * form can make Postmark send whatever a caller does to look like many callers.
+ * Past it a sign-up is still kept and still answered; only the e-mail waits for
+ * nobody — the launch e-mail reaches them anyway.
+ */
+export const INTEREST_MAILS_PER_HOUR = 200;
+export function interestMailAllowed() {
+  return hit('interest-mail', 'all', 60 * MINUTE, INTEREST_MAILS_PER_HOUR).ok;
+}
 
 /** Anything that can reach a paid provider. */
 export const spendLimit = limit({

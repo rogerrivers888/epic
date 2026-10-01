@@ -392,3 +392,18 @@ test('a new invite cancels the older unused invite, but not a reset; a suspended
   assert.equal((await get(`/api/auth/link/${inviteNew}`)).status, 404);
   assert.equal((await post('/api/auth/credentials', { token: inviteNew, password: 'a perfectly good password' })).status, 401);
 });
+
+test('a log-in that verified the old password before a reset never keeps its session', async () => {
+  const { signIn } = await import('../src/routes/authPassword.js');
+  const acct = await makeAccount({ email: 'race@epic.day', staff: true, password: 'the old password' });
+  const before = await accounts.passwordFor('race@epic.day');
+  // The reset lands between the check and the session: the password changes.
+  await accounts.setPassword(acct.id, await passwords.hashPassword('the brand new password'));
+  let status = null; let body = null;
+  const res = { status(c) { status = c; return res; }, json(b) { body = b; return res; }, cookie() { return res; }, setHeader() {}, append() {}, getHeader() {} };
+  await signIn({ headers: {}, body: {}, ip: '127.0.0.1', socket: {} }, res, acct.id, { verified: before.hash, email: 'race@epic.day' });
+  assert.equal(status, 401);
+  assert.equal(body.error, 'wrong_credentials');
+  const live = await query('select count(*)::int as n from api_sessions where account_id = $1 and revoked_at is null', [acct.id]);
+  assert.equal(live.rows[0].n, 0, 'the session it opened is closed again');
+});

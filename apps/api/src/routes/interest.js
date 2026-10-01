@@ -20,7 +20,7 @@
  */
 
 import express from 'express';
-import { interestLimit } from '../limits.js';
+import { interestLimit, interestMailAllowed } from '../limits.js';
 import { addSignup } from '../repositories/interest.js';
 import { interestEmail, mailConfigured, sendMail, webUrl } from '../sources/mail.js';
 
@@ -90,7 +90,7 @@ export function readSignup(body, req) {
  * The router. `send` and `configured` are the mail sender's, injectable so a
  * test can see what would have gone without Postmark.
  */
-export function interestRouter({ send = sendMail, configured = mailConfigured } = {}) {
+export function interestRouter({ send = sendMail, configured = mailConfigured, mailAllowed = interestMailAllowed } = {}) {
   const router = express.Router();
 
   router.post('/interest', interestLimit, async (req, res, next) => {
@@ -106,7 +106,7 @@ export function interestRouter({ send = sendMail, configured = mailConfigured } 
 
       const added = await addSignup(signup);
       // A repeat is answered exactly as a first sign-up, and gets no second email.
-      if (added && configured()) {
+      if (added && configured() && mailAllowed()) {
         try {
           const mail = interestEmail({ source: signup.source, url: webUrl(req) });
           Promise.resolve(send({ to: signup.email, ...mail, purpose: 'interest' }))
