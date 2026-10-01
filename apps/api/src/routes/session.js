@@ -128,7 +128,7 @@ router.delete('/session', async (req, res, next) => {
       // carries the owner's account_id — must not sign the owner out of his own
       // personal sessions. The passcode, a service and an agent each sign out
       // only themselves (G2, 28 Sep 2026; G11, 1 Oct 2026).
-      if (live.account_id && live.kind !== 'agent') await revokeAllSessions(live.account_id);
+      if (live.account_id && !(live.kind === 'agent' && live.auth_method === 'passcode')) await revokeAllSessions(live.account_id);
       else await closeSession(token);
     } else if (token) {
       await closeSession(token);
