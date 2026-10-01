@@ -293,7 +293,14 @@ export function admissionFrom(html, node = {}) {
 
   if (found.free === null && !found.adult) {
     for (const m of flat.matchAll(FREE)) {
-      if (!QUALIFIED.test(flat.slice(m.index + m[0].length, m.index + m[0].length + 80))) { found.free = true; break; }
+      // A qualifier on either side disqualifies the claim: "free admission all year"
+      // is universal, but "Members enjoy free admission" and "free entry for children"
+      // are somebody's free, not everybody's. The after-window alone missed the
+      // qualifier that leads — "Members enjoy …" — and stored an unconditional Free
+      // over a paid place (Codex). Confidently wrong is worse than no price.
+      const after = flat.slice(m.index + m[0].length, m.index + m[0].length + 80);
+      const before = flat.slice(Math.max(0, m.index - 40), m.index);
+      if (!QUALIFIED.test(after) && !QUALIFIED.test(before)) { found.free = true; break; }
     }
   }
   // A place that charges is not free, whatever a "free parking" line elsewhere

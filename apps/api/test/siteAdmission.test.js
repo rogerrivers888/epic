@@ -1,0 +1,35 @@
+/**
+ * admissionFrom's free-entry guard (sources/site.js). A free claim counts only when
+ * nothing qualifies it on EITHER side — "Members enjoy free admission" and "free entry
+ * for children" are somebody's free, not everybody's. Confidently wrong is worse than
+ * no price (owner; the Dover Castle bug), and the owned cost row now trusts this to
+ * show Free, so the guard must hold both ways (Codex).
+ */
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { admissionFrom } from '../src/sources/site.js';
+
+const free = (html) => admissionFrom(html, {})?.free === true;
+
+test('an unqualified free claim is free', () => {
+  assert.equal(free('<p>Admission is free.</p>'), true);
+  assert.equal(free('<p>Free entry to the gardens, open all year.</p>'), true);
+  assert.equal(free('<p>There is no admission charge.</p>'), true);
+});
+
+test('a qualifier before the free claim disqualifies it', () => {
+  assert.equal(free('<p>Members enjoy free admission all year.</p>'), false, 'members-only free is not universal');
+  assert.equal(free('<p>Students get free entry with a valid card.</p>'), false);
+});
+
+test('a qualifier after the free claim disqualifies it', () => {
+  assert.equal(free('<p>Free entry for children under 5.</p>'), false);
+  assert.equal(free('<p>Free admission for NHS staff.</p>'), false);
+});
+
+test('a printed adult price is not free', () => {
+  const a = admissionFrom('<p>Adults £12.00, children £6.00.</p>', {});
+  assert.equal(a?.free, false, 'a place that charges is not free');
+  assert.equal(a?.adult, '£12.00');
+});

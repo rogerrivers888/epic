@@ -517,8 +517,14 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
     // number — a card and its detail can share a priceLevel while only the detail
     // carries the Google provenance — so every field the request reads is here
     // (Codex).
+    //
+    // `ownRecord` is in too: a place opened mid-research returns known:false before
+    // own.js writes its free admission, and ownRecord changing is the signal that
+    // research has landed — so the cost is asked again and Free appears without a
+    // reopen (Codex). It is local state set only on load and on research completion,
+    // so it does not churn like a rebuilt item.
   }, [item?.venueRef, item?.priceLevel, item?.source, item?.provenance?.priceLevel?.source,
-      country, venue?.priceLevel, venue?.source, venue?.provenance?.priceLevel?.source, crowd?.priceLevel]);
+      country, venue?.priceLevel, venue?.source, venue?.provenance?.priceLevel?.source, crowd?.priceLevel, ownRecord]);
   const onHeroScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (!heroW) return;
     const i = Math.round(e.nativeEvent.contentOffset.x / heroW);
