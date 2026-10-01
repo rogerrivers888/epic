@@ -13,7 +13,7 @@
 // Allergens are safety and everything else is preference; they never share a
 // code path here.
 
-import { conceptByKey, resolveConcept, venueHasConcept, norm } from './concepts.js';
+import { conceptByKey, resolveConcept, venueHasConcept, norm, allergenKeys } from './concepts.js';
 
 /** A stated preference hits a venue through its concept, or through text when it never resolved. */
 function preferenceHits(venue, pref) {
@@ -57,10 +57,18 @@ export function applyConstraints({ venues, attendees, learned = [] }) {
 
   for (const venue of venues) {
     // --- Allergens: exclude, and attribute the exclusion to the named member.
+    // Both sides are read through the one canonical UK-14 mapping, so a member
+    // whose profile says 'gluten' still excludes a venue whose data says
+    // 'wheat', and 'shellfish' on either side means crustaceans AND molluscs
+    // (Codex, 1 Oct 2026 — the vocabulary migration must not open a gap in the
+    // one filter that is a safety rule). A word the mapping doesn't know falls
+    // back to exact normalised equality, as before.
+    const keysOf = (val) => { const k = allergenKeys(val); return k.length ? k : [norm(val)]; };
     const allergenConflicts = [];
     for (const member of attendees) {
       for (const allergen of member.allergens) {
-        if ((venue.allergens || []).some((a) => norm(a) === norm(allergen))) {
+        const mine = keysOf(allergen);
+        if ((venue.allergens || []).some((a) => keysOf(a).some((k) => mine.includes(k)))) {
           allergenConflicts.push({ member: member.name, memberId: member.id, allergen });
         }
       }

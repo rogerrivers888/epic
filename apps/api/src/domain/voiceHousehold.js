@@ -18,7 +18,7 @@
  * Household tab uses, and only after the screen's "Looks right".
  */
 
-import { resolveConcept, ALLERGENS } from './concepts.js';
+import { resolveConcept, allergenKeys } from './concepts.js';
 
 // Settings revised v2 maps diet onto the person (one main diet + two faiths) and
 // allergens onto the UK 14 — so a spoken "vegetarian" or "shellfish" has to land
@@ -42,12 +42,10 @@ const dietSpill = (raw) => {
   if (v.includes('alcohol') || v.includes('teetotal')) return { kind: 'dislike', value: 'alcohol' };
   return null; // genuinely free-text diet from voice is left unstored (rare; the back-fill note is for historical rows)
 };
-const ALLERGEN_SYNONYM = { shellfish: 'crustaceans', egg: 'eggs', wheat: 'gluten', cereals: 'gluten', soybeans: 'soya', soy: 'soya', nuts: 'tree nuts', dairy: 'milk', mollusks: 'molluscs', sulfites: 'sulphites' };
-const allergenCanon = (raw) => {
-  const v = String(raw).toLowerCase().trim();
-  const c = ALLERGEN_SYNONYM[v] ?? v;
-  return ALLERGENS.includes(c) ? c : null; // only the UK 14 can filter
-};
+// Allergen words resolve through the ONE canonical mapping in concepts.js —
+// the same one the migration and the ranking comparison use — so a spoken
+// 'shellfish' stores BOTH crustaceans and molluscs, exactly as migration 319
+// expands it (Codex, 1 Oct 2026).
 
 const nullable = (type, extra = {}) => ({ type: [type, 'null'], ...extra });
 const str = (d) => nullable('string', { description: d });
@@ -218,10 +216,16 @@ export async function applyFood(items, { members, households, everyone, househol
       continue;
     }
     // Allergens are the UK 14; anything else can't filter, so it is dropped.
+    // A word naming two (shellfish) writes both constraints.
     if (it.kind === 'allergy') {
-      const canon = allergenCanon(it.value);
-      if (!canon) continue;
-      for (const m of targets) { await households.upsertConstraint(m.id, { kind: 'allergen', value: canon, conceptKey: null, conceptKind: null, favourite: false }); written.push({ memberId: m.id, kind: 'allergen', value: canon }); }
+      const keys = allergenKeys(it.value);
+      if (!keys.length) continue;
+      for (const m of targets) {
+        for (const key of keys) {
+          await households.upsertConstraint(m.id, { kind: 'allergen', value: key, conceptKey: null, conceptKind: null, favourite: false });
+          written.push({ memberId: m.id, kind: 'allergen', value: key });
+        }
+      }
       continue;
     }
     // dislike, or favourite → a lime-starred like.

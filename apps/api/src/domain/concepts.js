@@ -260,6 +260,27 @@ export const ALLERGENS = [
 // The eight shown before "Show all 14".
 export const ALLERGENS_COMMON = ALLERGENS.slice(0, 8);
 
+/**
+ * A spoken, stored or venue-side allergen word → the canonical UK-14 key(s).
+ * One mapping for every door — the migration, voice intake and the ranking
+ * comparison — so members and venues can never drift into different dialects
+ * (a member's 'gluten' must exclude a venue still saying 'wheat'). 'shellfish'
+ * deliberately names BOTH crustaceans and molluscs: it specified neither, and a
+ * filter errs towards hiding. Unknown words return [] — they cannot filter.
+ */
+const ALLERGEN_ALIASES = {
+  wheat: 'gluten', cereals: 'gluten', 'cereals containing gluten': 'gluten',
+  soybeans: 'soya', soy: 'soya', egg: 'eggs', dairy: 'milk',
+  nuts: 'tree nuts', treenuts: 'tree nuts', peanut: 'peanuts',
+  mollusks: 'molluscs', sulfites: 'sulphites', 'sulphur dioxide': 'sulphites', 'sulfur dioxide': 'sulphites',
+};
+export function allergenKeys(value) {
+  const v = String(value ?? '').toLowerCase().trim();
+  if (v === 'shellfish') return ['crustaceans', 'molluscs'];
+  const c = ALLERGEN_ALIASES[v] ?? v;
+  return ALLERGENS.includes(c) ? [c] : [];
+}
+
 function build(kind, rows) {
   return rows.map(([slug, label, aliases, cuisine]) => ({
     key: `${kind}:${slug}`,

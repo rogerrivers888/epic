@@ -453,7 +453,10 @@ router.get('/host/money', async (req, res, next) => {
     const ready = paymentsConfig().ready;
     const offers = await repo.offersOfHost(host.id);
     const bookings = await repo.bookingsOfOffers(offers.map((o) => o.id));
-    const live = bookings.filter((b) => b.state !== 'cancelled');
+    // Only fee-bearing bookings: a waitlisted request holds no place and earns
+    // nothing, and a pending one is still undecided — neither belongs in the
+    // money totals nor consumes one of the first-ten intro positions (Codex).
+    const live = bookings.filter((b) => b.state === 'confirmed' || b.state === 'attended');
     // Each booking is priced by the terms in force WHEN IT WAS MADE, not a single
     // current snapshot — otherwise the intro ending (ten bookings or 90 days)
     // retroactively re-charges the 0% bookings (Codex). So walk the host's
@@ -467,7 +470,8 @@ router.get('/host/money', async (req, res, next) => {
     const resolve = (b) => ({ amountPence: b.amount_pence ?? 0, level: host.trust, viaHostLink: Boolean(b.via_host_link), intro: introById.get(b.id) ?? null });
     // The host-wide figures the screen shows directly: how many completed
     // experiences so far (the Trusted ladder) and the current/next intro state.
-    const bookingsSoFar = live.filter((b) => b.state === 'confirmed' || b.state === 'attended').length;
+    // `live` is already the fee-bearing set, so its length is the count.
+    const bookingsSoFar = live.length;
     const intro = introState({ hostStartedAt: host.created_at, bookingsSoFar });
     const all = feesForPeriod(live.map(resolve));
     const byOffer = {};

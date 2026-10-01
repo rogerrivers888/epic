@@ -133,6 +133,9 @@ test('GET /api/host/money returns the Money screen (intro state defined — not 
   const host = await repo.insertHost(household.id, { name: 'Roger', type: 'skill' });
   const offer = await repo.insertOffer(host.id, 'oneoff');
   await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2026-12-01', party: [], heads: 1, state: 'confirmed', amountPence: 10000, viaHostLink: true }, null);
+  // A waitlisted request holds no place and earns nothing: it must not appear
+  // in the money totals nor burn one of the first-ten intro positions (Codex).
+  await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2026-12-03', party: [], heads: 1, state: 'waitlisted', amountPence: 77700 }, null);
   const srv = await hostServer(household);
   try {
     const r = await fetch(`${srv.url}/api/host/money`);
@@ -144,5 +147,7 @@ test('GET /api/host/money returns the Money screen (intro state defined — not 
     // A brand-new host's first booking is inside the 0% intro, which beats even
     // the 5% link rate — so the line is 0%, proving per-booking intro resolution.
     assert.ok(body.totals.lines.some((l) => l.rate === 0), 'the new host\'s booking is charged the 0% intro, not the level or link rate');
+    assert.equal(body.totals.grossPence, 10000, 'the waitlisted £777 request is not revenue');
+    assert.equal(body.trusted.completed, 1, 'nor a completed experience');
   } finally { await srv.close(); }
 });

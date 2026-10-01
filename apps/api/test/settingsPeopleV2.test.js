@@ -191,14 +191,14 @@ test('voice intake writes diet to the column and maps allergens onto the UK 14',
     { kind: 'diet', value: 'dairy-free' },    // → a Milk allergen (filters)
     { kind: 'diet', value: 'no-pork' },       // → a pork dislike (ranks)
     { kind: 'diet', value: 'no-alcohol' },    // → an alcohol dislike (ranks)
-    { kind: 'allergy', value: 'shellfish' },  // → crustaceans
+    { kind: 'allergy', value: 'shellfish' },  // → crustaceans AND molluscs, as migration 319 expands it
     { kind: 'favourite', value: 'ramen' },    // → a like
   ], { members: [member], everyone: [member], households, householdId: h.id });
   const row = (await query('select diet, halal from members where id = $1', [member.id])).rows[0];
   assert.equal(row.diet, 'vegetarian');
   assert.equal(row.halal, true);
   const allergens = (await query(`select value from member_constraints where member_id = $1 and kind='allergen' order by value`, [member.id])).rows.map((r) => r.value);
-  assert.deepEqual(allergens, ['crustaceans', 'gluten', 'milk'], 'gluten-free/dairy-free become filtering allergens; shellfish → crustaceans');
+  assert.deepEqual(allergens, ['crustaceans', 'gluten', 'milk', 'molluscs'], 'gluten-free/dairy-free become filtering allergens; spoken shellfish names both crustaceans and molluscs');
   const dislikes = (await query(`select value from member_constraints where member_id = $1 and kind='dislike' order by value`, [member.id])).rows.map((r) => r.value);
   assert.deepEqual(dislikes, ['alcohol', 'pork'], 'no-pork/no-alcohol become dislikes');
   const noDiet = (await query(`select count(*)::int n from member_constraints where member_id = $1 and kind='diet'`, [member.id])).rows[0].n;
@@ -215,4 +215,20 @@ test('Signed-in devices shows this account real devices only — never a test or
     const labels = body.sessions.map((s) => s.label).sort();
     assert.deepEqual(labels, ['Kitchen iPad', 'This phone'], 'only device sessions, never agent/service');
   } finally { await srv.close(); }
+});
+
+// The allergen filter is a safety rule: after the UK-14 migration, members and
+// venue data may speak different dialects, and the exclusion must still hold.
+const { applyConstraints } = await import('../src/domain/ranking.js');
+
+test('the allergen filter speaks one dialect: gluten excludes wheat, crustaceans excludes shellfish', () => {
+  const attendees = [{ id: 'm1', name: 'Maya', allergens: ['gluten', 'crustaceans'], diets: [], dislikes: [], likes: [], access: [] }];
+  const venues = [
+    { id: 'v1', name: 'Old Wheat House', allergens: ['wheat'] },
+    { id: 'v2', name: 'Shellfish Shack', allergens: ['shellfish'] },
+    { id: 'v3', name: 'Safe Soup', allergens: [] },
+  ];
+  const { candidates, excluded } = applyConstraints({ venues, attendees });
+  assert.deepEqual(excluded.map((v) => v.id).sort(), ['v1', 'v2'], 'old-vocabulary venue data still excludes');
+  assert.deepEqual(candidates.map((v) => v.id), ['v3']);
 });
