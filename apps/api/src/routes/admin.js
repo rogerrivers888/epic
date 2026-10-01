@@ -265,6 +265,11 @@ router.patch('/people/:id/role', requires('manage_roles'), async (req, res, next
     if (role?.is_owner || (account.role === 'owner')) {
       throw bad('The owner role is not granted or removed from this screen.');
     }
+    // Assigning a role that carries an owner-only capability is the same decision
+    // as granting that capability, so only the owner may: otherwise an
+    // Administrator could hand themselves a role holding manage_staff and manage
+    // staff without the owner (Codex, 1 Oct 2026).
+    refuseOwnerOnlyGrant(req, role?.capabilities);
     const before = account.role_id ? await rolesRepo.roleById(account.role_id) : null;
     await rolesRepo.setAccountRole(account.id, roleId);
     await rolesRepo.writeAudit({

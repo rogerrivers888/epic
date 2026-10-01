@@ -15,12 +15,11 @@
  */
 
 import React, { useState } from 'react';
-import { Modal, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Linking, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../components/press';
 import { Icon } from '../components/Icon';
 import { Wordmark } from '../components/Wordmark';
 import { useViewport } from '../hooks/useViewport';
-import { useRouter } from '../router';
 import { api, ApiError } from '../api';
 import { CREAM, INK, LIME, MOSS, fonts, HAIRLINE } from '../theme';
 
@@ -28,8 +27,18 @@ const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 export function LoginScreen() {
   const { width } = useViewport();
-  const { navigate } = useRouter();
   const wide = width >= 900;
+
+  // "Register your interest" leaves the app for the marketing homepage's form
+  // (out of scope here, Epic Website.dc.html). A real document navigation to the
+  // public site root, not an in-app route — `/inspire` is gated and an internal
+  // navigate would land a signed-out visitor on the lock screen (Codex, 1 Oct
+  // 2026). A deliberate exit from the SPA, which is the one time a screen leaves
+  // the router behind.
+  const registerInterest = () => {
+    const root = Platform.OS === 'web' && typeof window !== 'undefined' ? `${window.location.origin}/` : 'https://epic.day/';
+    void Linking.openURL(root);
+  };
   const [step, setStep] = useState<'email' | 'sent'>('email');
   const [email, setEmail] = useState('');
   const [err, setErr] = useState('');
@@ -83,9 +92,7 @@ export function LoginScreen() {
               <View style={styles.rule}>
                 <Text style={styles.ruleText}>
                   No account yet?{' '}
-                  {/* The marketing homepage's register-interest form is out of scope here
-                      (Epic Website.dc.html); the site root is where it lands. */}
-                  <Text style={styles.link} onPress={() => navigate('/')}>Register your interest</Text>
+                  <Text style={styles.link} onPress={registerInterest}>Register your interest</Text>
                 </Text>
               </View>
             </>

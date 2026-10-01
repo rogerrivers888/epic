@@ -127,8 +127,19 @@ export async function grantStaffRole(id, roleId) {
  * vs restore, having looked at the household; this does what it is told.
  */
 export async function removeStaffRole(id, { memberRoleId }) {
+  // Also lift a suspension: a staff member suspended and then removed is being
+  // returned to being a customer, and a customer who cannot log in is not a
+  // customer. Back to active, or invited if they never signed in — the same
+  // thing unsuspend does (Codex, 1 Oct 2026).
   await query(
-    'update accounts set role_id = coalesce(prior_role_id, $2), prior_role_id = null, updated_at = now() where id = $1',
+    `update accounts
+        set role_id = coalesce(prior_role_id, $2),
+            prior_role_id = null,
+            status = case when status = 'suspended'
+                          then (case when sign_in_count > 0 then 'active' else 'invited' end)
+                          else status end,
+            updated_at = now()
+      where id = $1`,
     [id, memberRoleId ?? null],
   );
 }

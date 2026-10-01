@@ -271,6 +271,30 @@ test('an Administrator cannot grant themselves staff management; the owner can',
   assert.ok((await rolesRepo.roleByKey('deputy')).capabilities.includes('manage_staff'), 'the owner may grant it');
 });
 
+test('an Administrator cannot assign a manage_staff role to anyone either', async () => {
+  // The same escalation by the back door: assigning an existing role that holds
+  // an owner-only capability is as owner-only as granting it (Codex, 1 Oct 2026).
+  const deputy = (await rolesRepo.roleByKey('deputy')) ?? await rolesRepo.createRole({ key: 'deputy', label: 'Deputy', doors: ['client', 'admin'], capabilities: ['manage_staff'] });
+  const target = await accounts.createAccount({ email: 'target@home.test', name: 'Target' });
+  const refused = await adminCall('PATCH', `/api/admin/people/${target.id}/role`, { roleId: deputy.id }, ROLES_ADMIN);
+  assert.equal(refused.status, 403);
+  assert.equal(refused.body.error, 'owner_only');
+  const allowed = await adminCall('PATCH', `/api/admin/people/${target.id}/role`, { roleId: deputy.id }, OWNER);
+  assert.equal(allowed.status, 200);
+});
+
+test('removing a suspended staff member returns them to a customer who can log in', async () => {
+  // Suspended then removed must not leave a customer who cannot sign in (Codex, P2).
+  const customer = await accounts.createAccount({ email: 'back@home.test', name: 'Back' });
+  const support = await roleId('support');
+  await call('POST', '/api/admin/staff', { name: 'Back', email: 'back@home.test', roleId: support });
+  await call('POST', `/api/admin/staff/${customer.id}/suspend`);
+  assert.equal((await accounts.accountById(customer.id)).status, 'suspended');
+  const removed = await call('DELETE', `/api/admin/staff/${customer.id}`);
+  assert.equal(removed.body.keptAsCustomer, true);
+  assert.notEqual((await accounts.accountById(customer.id)).status, 'suspended', 'they can log in again as a customer');
+});
+
 test('the owner cannot be suspended, re-roled or removed through staff', async () => {
   // Claim the owner account so there is a real row to aim at.
   const founding = await query('insert into households (name) values ($1) returning id', ['Founding']);
