@@ -53,13 +53,15 @@ export function Approvals() {
           <View key={r.id} style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.lineSoft, gap: 4 }}>
             {/* What it will do, in plain English, and the numbers affected. */}
             <Text style={[type.small, { color: colors.ink, fontWeight: '700' }]}>{r.description}</Text>
-            <Text style={type.tiny} numberOfLines={2}>
-              {`${nums ? `${nums} · ` : ''}${r.request} · ${r.requested_label ?? r.session_label ?? 'an agent'} · ${ago(r.created_at)}`}
+            {/* The exact call, in full — the owner authorises what he can see. */}
+            <Text style={type.tiny}>
+              {`${nums ? `${nums} · ` : ''}${r.request}`}
             </Text>
+            <Text style={type.tiny}>{`${r.requested_label ?? r.session_label ?? 'an agent'} · ${ago(r.created_at)}`}</Text>
             {/* The exact call that will run, so the owner authorises what he sees —
                 the description is the agent's claim; this is what executes. */}
             {r.payload != null && Object.keys(r.payload as object).length > 0 ? (
-              <Text style={[type.tiny, { color: colors.inkMuted, fontFamily: 'monospace' as any }]} numberOfLines={4}>
+              <Text style={[type.tiny, { color: colors.inkMuted, fontFamily: 'monospace' as any }]}>
                 {`It will send: ${JSON.stringify(r.payload)}`}
               </Text>
             ) : null}

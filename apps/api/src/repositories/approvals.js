@@ -30,7 +30,7 @@ export function parseApprovalRequest(request) {
   // allowed too (Compare, Ranked and named demand are owner-gated paid reads),
   // and a bounded query string is preserved for replay — a query cannot change
   // the path (Codex, 1 Oct 2026).
-  const m = /^(GET|POST|PUT|PATCH|DELETE) (\/api\/(?:admin|accounts)\/[A-Za-z0-9/_-]+)(\?[A-Za-z0-9=&,.%:+_-]{0,500})?$/.exec(String(request || '').trim());
+  const m = /^(GET|POST|PUT|PATCH|DELETE) (\/api\/(?:admin|accounts)\/[A-Za-z0-9/_-]{1,200})(\?[A-Za-z0-9=&,.%:+_-]{0,500})?$/.exec(String(request || '').trim());
   if (!m) return null;
   const method = m[1];
   const path = m[2];
@@ -45,7 +45,7 @@ export async function fileApproval({ sessionId = null, label = null, request, de
   const { rows: [row] } = await query(
     `insert into approvals (session_id, requested_label, request, description, numbers, payload)
      values ($1, $2, $3, $4, $5, $6) returning *`,
-    [sessionId, label, String(request).slice(0, 200), String(description).slice(0, 500),
+    [sessionId, label, String(request).slice(0, 800), String(description).slice(0, 500),
       numbers ? JSON.stringify(numbers) : null, payload == null ? null : JSON.stringify(payload)],
   );
   return row;
