@@ -92,6 +92,22 @@ async function fileFor(pathname) {
   return null;
 }
 
+/**
+ * The first segment of an address as the app's router reads it (routes.ts ›
+ * splitHref): empty segments dropped, each one decoded — so `//login` and
+ * `/%6cogin` are the login page here exactly as they are in the browser
+ * (Codex, 1 Oct 2026).
+ */
+function firstSegment(pathname) {
+  for (const raw of pathname.split('/')) {
+    if (!raw) continue;
+    try { return decodeURIComponent(raw).toLowerCase(); } catch { return raw.toLowerCase(); }
+  }
+  return '';
+}
+/** The pages never for an index: the sign-in doors, the account page, the back office. */
+const PRIVATE_FIRST = new Set(['login', 'account', 'admin', 'in']);
+
 const server = http.createServer(async (req, res) => {
   const pathname = (req.url || '/').split('?')[0].split('#')[0];
   // A health endpoint the deploy can watch — answered FIRST, before the canonical-host
@@ -120,6 +136,13 @@ const server = http.createServer(async (req, res) => {
   if (!found) { res.writeHead(404, { 'content-type': 'text/plain' }); res.end('Not found'); return; }
 
   const servedPath = found.path === resolve(join(ROOT, 'index.html')) ? '/index.html' : pathname;
+  // The sign-in doors, the account page and the back office are never for an
+  // index, gate or no gate (Decisions J4) — decided from the address asked for,
+  // not the file that renders it, because every SPA route is the same index.html
+  // and public pages (a host's profile, an experience, a tag) must stay findable
+  // (Codex, 1 Oct 2026). The gate's blanket noindex above comes down with the
+  // gate; this one stays.
+  if (PRIVATE_FIRST.has(firstSegment(pathname))) res.setHeader('x-robots-tag', 'noindex');
   res.writeHead(200, {
     'content-type': TYPES[extname(found.path).toLowerCase()] ?? 'application/octet-stream',
     'content-length': found.size,

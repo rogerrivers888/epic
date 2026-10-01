@@ -139,8 +139,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       // for the session this device already holds, and redeeming a spent link
       // while signed in must not sign anybody out (Virginia, 1 Oct 2026: her
       // invite link was posted twice, and the second 401 ended the session the
-      // first had just opened).
-      if (res.status === 401 && !['/api/session', '/api/session/link', '/api/session/request-link'].includes(path)) sessionExpired();
+      // first had just opened). The Google exchange is the same kind of door: a
+      // spent or stale `?code=` must not end the session already held.
+      if (res.status === 401 && !['/api/session', '/api/session/link', '/api/session/request-link', '/api/auth/google/exchange'].includes(path)) sessionExpired();
       // The API answering "no" is an answer; only an API that cannot answer at
       // all falls back to the copy.
       if (readOnly && [502, 503, 504].includes(res.status)) {
@@ -3247,6 +3248,22 @@ export const api = {
   signInWithLink: async (token: string): Promise<SessionState> => {
     const r = await post<{ token: string; session: SessionSummary; account: AccountSummary; isOwner?: boolean; access?: Access | null }>(
       '/api/session/link', { token, label: deviceLabel() },
+    );
+    await claimDeviceCopy(r.account);
+    setSessionToken(r.token);
+    void api.sendWaitingWrites();
+    return { signedIn: true, configured: true, session: r.session, account: r.account, isOwner: r.isOwner ?? (r.account?.role === 'owner'), access: r.access ?? null };
+  },
+
+  /**
+   * Swap the one-time code the Google callback handed back for a session. The
+   * same tail as the magic link — the API answers the same shape (token, account,
+   * isOwner, access), the token goes into the device's own store, and it is sent
+   * as a Bearer header from then on (api/src/routes/authGoogle.js).
+   */
+  googleExchange: async (code: string): Promise<SessionState> => {
+    const r = await post<{ token: string; session: SessionSummary; account: AccountSummary; isOwner?: boolean; access?: Access | null }>(
+      '/api/auth/google/exchange', { code, label: deviceLabel() },
     );
     await claimDeviceCopy(r.account);
     setSessionToken(r.token);

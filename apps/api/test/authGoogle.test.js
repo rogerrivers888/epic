@@ -199,3 +199,17 @@ test('the exchange refuses an ordinary magic link, and does not spend it', async
   const spent = await accounts.consumeSignInLink(link);
   assert.ok(spent && spent.account_id === staff.id, 'the ordinary link is untouched and still usable');
 });
+
+test('the return path after sign-in is only ever an in-app path', () => {
+  const { safeNext } = authGoogle;
+  assert.equal(safeNext('/admin'), '/admin');
+  assert.equal(safeNext('/trips/abc?x=1'), '/trips/abc?x=1');
+  // Protocol-relative, backslash and browser-normalised escapes all leave the origin.
+  // Nor back into a sign-in door, nor carrying a credential (login CSRF).
+  for (const bad of ['/login?code=x', '/%6cogin?code=x', '/login', '/in/tok', '/admin?signin=abc', '/x?code=1', '/foo/../login', '/foo/%2e%2e/login', '/./login', '/%E0%A4%A', '/login#done', '/admin#x']) {
+    assert.equal(safeNext(bad), null, `${bad} must be refused`);
+  }
+  for (const bad of ['//evil.example', '/\\evil.example', '/\n/evil.example', '/\t/evil.example', ' /admin', 'https://evil.example', '/', '', null]) {
+    assert.equal(safeNext(bad), null, `${JSON.stringify(bad)} must be refused`);
+  }
+});

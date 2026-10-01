@@ -6,6 +6,7 @@ User-agent: *
 Disallow: /join/
 Disallow: /order/
 Disallow: /admin
+Disallow: /login
 Disallow: /mockups/
 Allow: /
 

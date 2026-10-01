@@ -120,9 +120,27 @@ const clearHandshake = (res) => res.clearCookie(OAUTH_COOKIE, { httpOnly: true, 
  * slash, not protocol-relative (`//host`), and no backslash — a browser reads
  * `\` as `/`, so `/\host` would escape the origin (Codex, 1 Oct 2026).
  */
-function safeNext(value) {
+export function safeNext(value) {
   const s = String(value || '');
-  return /^\/[^/\\]/.test(s) && !s.includes('\\') ? s : null;
+  // No whitespace, control character or backslash anywhere: a browser drops a
+  // newline and reads "\\" as "/", so either could turn "/x" into "//host".
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u0020\u007f\\#]/.test(s)) return null; // `#`: a fragment is never a page, and would hide a sign-in door
+  if (!/^\/[^/]/.test(s)) return null;
+  // Never back into a sign-in door, and never carrying a credential: a crafted
+  // `next=/login?code=…` would spend somebody else's handoff right after this
+  // person signed in and swap their session (login CSRF).
+  const [path, query = ''] = s.split('?');
+  // Every segment decoded, and no dot segment at all: a browser resolves
+  // `/x/../login` and `/x/%2e%2e/login` to `/login` before it navigates, so the
+  // first segment is only the page once nothing can climb (Codex, 1 Oct 2026).
+  let segs;
+  try { segs = path.split('/').filter(Boolean).map((x) => decodeURIComponent(x).toLowerCase()); } catch { return null; }
+  if (segs.some((x) => x === '.' || x === '..')) return null;
+  if (segs[0] === 'login' || segs[0] === 'in') return null;
+  const q = new URLSearchParams(query);
+  if (q.has('code') || q.has('signin')) return null;
+  return s;
 }
 
 /** Where the web app lives, so the callback can hand control back to it. */
@@ -224,11 +242,13 @@ router.get('/auth/google/callback', async (req, res) => {
   });
   if (!resolved.ok) return res.redirect(loginUrl(req, 'e=no-account'));
 
-  // Hand the SPA a single-use code it trades for a session. Staff land on the
-  // back office; `next` only ever an in-app path.
+  // Hand the SPA a single-use code it trades for a session.
   const { token } = await createSignInLink(resolved.account.id, { requestedBy: 'google', ttlHours: HANDOFF_TTL_HOURS });
-  const next = safeNext(stash.next) || '/admin';
-  const params = new URLSearchParams({ code: token, next });
+  // `next` only when the start asked for one: with none, the screen lands the
+  // person where their role can open (firstAdminScreen), not on a fixed /admin.
+  const params = new URLSearchParams({ code: token });
+  const next = safeNext(stash.next);
+  if (next) params.set('next', next);
   res.redirect(loginUrl(req, params.toString()));
 });
 
