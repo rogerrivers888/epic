@@ -783,6 +783,8 @@ async function reindexWhileLocked({ onProgress }) {
   // place's country from its outcode. Whole index, not a queue.
   await normaliseOutcodeCountries();
   await settleCountryFromPostcode();
+  // A full rebuild corrects the whole index, so the backfill is caught up too.
+  await stampCountryBackfilled();
 
   // Every country the index holds places in gets a row you can point at.
   //
@@ -1245,6 +1247,9 @@ const normaliseOutcodeCountries = (q = query) => q(`update localities loc set co
    where loc.kind = 'postcode' and upper(loc.country_code) <> 'GB'
      and exists (select 1 from postcodes p where p.outcode = upper(loc.slug))`);
 
+/** Mark the country backfill as caught up to the postcode release that is loaded. */
+const stampCountryBackfilled = (q = query) => q('update postcode_releases set country_backfilled_release = loaded_release where one');
+
 /** Each place takes its country from its outcode's locality, requeued so settle refiles it. */
 const correctPlaceCountriesFromPostcode = async (q = query) => {
   const { rowCount } = await q(`
@@ -1291,7 +1296,24 @@ export async function backfillCountriesFromPostcodes() {
     return correctPlaceCountriesFromPostcode();
   }, BUSY, { wait: true });
   if (result === BUSY) return { corrected: 0, deferred: true };
+  await stampCountryBackfilled();
   return { corrected: result, deferred: false };
+}
+
+/**
+ * Apply a country backfill a post-load pass had to defer under build-lock contention
+ * (owner, 1 Oct 2026; Option C). Pending means the backfill has not caught up to the
+ * loaded postcode release. Called by settle, which holds the build lock, so a deferred
+ * backfill always lands within the hour — not only at a reindex (Codex). Idempotent:
+ * it does nothing once the backfill has caught up. Returns how many places it fixed.
+ */
+export async function applyPendingCountryBackfill(q = query) {
+  const { rows: [rel] } = await q('select loaded_release, country_backfilled_release from postcode_releases where one');
+  if (!rel?.loaded_release || rel.country_backfilled_release === rel.loaded_release) return 0;
+  await normaliseOutcodeCountries(q);
+  const n = await correctPlaceCountriesFromPostcode(q);
+  await stampCountryBackfilled(q);
+  return n;
 }
 
 export async function settleNew({ limit = 5000 } = {}) {
@@ -1306,6 +1328,10 @@ async function settleWhileLocked(limit) {
   // Same reason as `buildIfEmpty`: a first sweep on a fresh installation must
   // not score its places against a bar nobody has set.
   await seedBars();
+  // A country backfill a postcode load had to defer (the build lock was busy) is
+  // applied here, under the lock settle holds — so it always lands within the hour
+  // (Codex). A no-op once it has caught up.
+  await applyPendingCountryBackfill();
   // Oldest attempt first, never-tried first of all.
   //
   // In no order, a row that cannot be placed — the postcode service down, a

@@ -113,6 +113,27 @@ test('backfillCountriesFromPostcodes normalises the locality and requeues the pl
   assert.equal(pi.placed_at, null, 'and the place is requeued so settle refiles it under GB');
 });
 
+test('a deferred backfill is applied when it is pending, and stamped so it is not redone', async (t) => {
+  const ref = 'osm:node/cfp-pending';
+  t.after(() => query(`update postcode_releases set loaded_release = null, country_backfilled_release = null where one`));
+  await query(`insert into postcodes (pcds, sector, outcode, lat, lng, source)
+               values ('ZZ7 1AA','ZZ7 1','ZZ7',51.5,-0.6,'test') on conflict (pcds) do nothing`);
+  await query(`insert into localities (slug, name, kind, country_code) values ('zz7','ZZ7','postcode','IE')
+               on conflict (slug) do update set country_code = 'IE'`);
+  await index.noteMany([{ ref, lat: 51.5, lng: -0.6, countryCode: 'IE' }], { source: 'osm' });
+  await query(`insert into place_records (venue_ref, postcode, updated_at) values ($1,'ZZ7 1AA', now())
+               on conflict (venue_ref) do update set postcode = excluded.postcode`, [ref]);
+  await query('update place_index set placed_at = now() where venue_ref = $1', [ref]);
+  // A load happened but the backfill has not caught up — pending.
+  await query(`update postcode_releases set loaded_release = '2099-01', country_backfilled_release = null where one`);
+  const n = await index.applyPendingCountryBackfill();
+  assert.ok(n >= 1, 'the pending backfill ran');
+  assert.equal(await countryOf(ref), 'GB', 'and corrected the place');
+  const { rows: [rel] } = await query('select country_backfilled_release from postcode_releases where one');
+  assert.equal(rel.country_backfilled_release, '2099-01', 'and stamped the release');
+  assert.equal(await index.applyPendingCountryBackfill(), 0, 'running again is a no-op — no longer pending');
+});
+
 test('an Eircode routing key is not reclassified as GB — syntax overlaps but ONS does not know it', async () => {
   // D02 is a valid Eircode routing key and matches the UK outward-code shape, but it
   // is not a GB outcode, so ONS has no row for it and normalisation must leave it IE.

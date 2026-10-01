@@ -21,6 +21,12 @@
 -- next settle pass refiles it under the right country and refreshes the boards
 -- (Codex). Only the rows that actually changed are requeued — the WHERE sees to that.
 
+-- Which postcode release the country backfill has caught up to. When it lags
+-- `loaded_release` the backfill is pending, and the next settle pass (under the build
+-- lock) applies it — so a post-load backfill the build lock made it defer is never
+-- lost, not even until a reindex (Codex).
+alter table postcode_releases add column if not exists country_backfilled_release text;
+
 -- First, undo the legacy damage the backfill would otherwise trust and spread. The
 -- old admin postcode edit created a new outcode's locality with the place's current
 -- country_code — so an IE-stamped place moved to a UK outcode could leave that
@@ -54,3 +60,7 @@ update place_index pi
    and r.postcode is not null
    and loc.country_code is not null
    and upper(pi.country_code) is distinct from upper(loc.country_code);
+
+-- This pass has caught the backfill up to whatever release is in, so settle does not
+-- redo it. Null on a fresh install (no load yet); the load stamps it when it runs.
+update postcode_releases set country_backfilled_release = loaded_release where one;
