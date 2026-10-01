@@ -31,7 +31,7 @@ export function parseApprovalRequest(request) {
   const method = m[1];
   const path = m[2];
   if (path.includes('..') || path.includes('//')) return null;
-  if (/\/approvals(\/|$)/.test(path)) return null; // no approving an approval
+  if (/\/approvals(\/|$)/i.test(path)) return null; // no approving an approval, any case
   return { method, path };
 }
 
@@ -93,6 +93,25 @@ export async function startRun(id, { by }) {
  * the owner to check by hand, so a non-idempotent purge/grant is not run twice;
  * Codex, 1 Oct 2026).
  */
+/**
+ * A run claimed but never finished — the process died between the claim and the
+ * outcome — is left 'running', which is neither open nor done. After a grace
+ * period it becomes 'unknown' (NOT re-approvable; the owner checks it by hand),
+ * so a request can never vanish from the queue with no resolution (Codex, 1 Oct
+ * 2026). Run at boot and periodically (server.js).
+ */
+export async function reconcileStaleRuns({ olderThanMinutes = 10 } = {}) {
+  const { rowCount } = await query(
+    `update approvals
+        set state = 'unknown',
+            result = coalesce(result, jsonb_build_object('ok', false, 'status', 0,
+              'message', 'The run did not finish (the server restarted mid-run). Check before retrying.'))
+      where state = 'running' and decided_at < now() - make_interval(mins => $1)`,
+    [olderThanMinutes],
+  );
+  return rowCount;
+}
+
 export async function finishRun(id, { state, result }) {
   const { rows: [row] } = await query(
     `update approvals set state = $2, result = $3, ran_at = now()

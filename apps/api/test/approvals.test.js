@@ -29,6 +29,7 @@ test('only a replayable back-office write, never an approvals call, can be filed
   assert.equal(approvals.parseApprovalRequest('GET /api/admin/foo'), null, 'reads are not filed');
   assert.equal(approvals.parseApprovalRequest('POST /api/trips/x'), null, 'not a back-office path');
   assert.equal(approvals.parseApprovalRequest('POST /api/admin/approvals/1/decide'), null, 'no approving an approval');
+  assert.equal(approvals.parseApprovalRequest('POST /api/admin/Approvals/1/decide'), null, 'nor any case of it');
   assert.ok(approvals.parseApprovalRequest('DELETE /api/accounts/5'), 'an accounts path is allowed');
   assert.equal(approvals.parseApprovalRequest('POST /api/admin/../api/trips/x'), null, 'no path traversal');
   assert.equal(approvals.parseApprovalRequest('POST /api/admin/x/../../trips'), null, 'no dot segments');
@@ -77,6 +78,24 @@ test('a lost connection is unknown, not a re-approvable failure', async () => {
   assert.equal(row.state, 'unknown');
   // Not re-approvable: startRun (open states only) cannot claim it.
   assert.equal(await approvals.startRun(filed.id, { by: 'me' }), null, 'an unknown-outcome run is not re-approvable');
+});
+
+test('a 5xx is indeterminate, a 4xx is a re-approvable failure, and a stale run is reconciled', async () => {
+  const filed = await approvals.fileApproval({ sessionId: AGENT, request: REQ, description: 'x', payload: {} });
+  const claimed = await approvals.startRun(filed.id, { by: 'me' });
+  const five = await runApprovedCall(claimed, { headers: { authorization: 'Bearer t' } }, async () => ({ ok: false, status: 500, body: { message: 'boom' } }));
+  assert.equal(five.indeterminate, true, '5xx may have partly run');
+  const four = await runApprovedCall(claimed, { headers: { authorization: 'Bearer t' } }, async () => ({ ok: false, status: 409, body: { message: 'no' } }));
+  assert.equal(four.indeterminate, false, '4xx was rejected before acting');
+
+  // A stale running row becomes unknown.
+  await approvals.finishRun(filed.id, { state: 'done', result: null }); // clear running
+  const f2 = await approvals.fileApproval({ sessionId: AGENT, request: REQ, description: 'y', payload: {} });
+  await approvals.startRun(f2.id, { by: 'me' });
+  await query(`update approvals set decided_at = now() - interval '20 minutes' where id = $1`, [f2.id]);
+  const n = await approvals.reconcileStaleRuns({ olderThanMinutes: 10 });
+  assert.ok(n >= 1);
+  assert.equal((await query('select state from approvals where id = $1', [f2.id])).rows[0].state, 'unknown');
 });
 
 test('runApprovedCall refuses a bad recorded request or a missing token', async () => {

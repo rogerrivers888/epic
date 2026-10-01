@@ -27,6 +27,7 @@ import groupRoutes, { startReminderLoop } from './routes/groups.js';
 import hostingRoutes, { adminRouter as hostingAdminRoutes, publicRouter as hostingPublicRoutes, startHostingLoop } from './routes/hosting.js';
 import accountRoutes from './routes/accounts.js';
 import adminRoutes from './routes/admin.js';
+import * as approvalsRepo from './repositories/approvals.js';
 import suiteRoutes from './routes/suite.js';
 import postmarkRoutes from './routes/postmark.js';
 import openToRoutes, { adminRouter as openToAdminRoutes, startOpenToLoop } from './routes/openTo.js';
@@ -860,6 +861,12 @@ setInterval(() => { void runBarChecks('daily').catch(() => {}); }, BAR_CHECK_EVE
 const refreshRingsDue = () => { void ringTables.refreshDue().catch(() => {}); };
 void indexBuilt.then(refreshRingsDue);
 setInterval(refreshRingsDue, BAR_CHECK_EVERY_MS).unref?.();
+// A privileged approval claimed to run but never finished (a restart mid-run)
+// becomes 'unknown' after a grace period, so it never disappears from the queue
+// with no resolution (G11, Codex 1 Oct 2026). At boot and daily.
+const reconcileApprovals = () => { void approvalsRepo.reconcileStaleRuns().catch(() => {}); };
+void indexBuilt.then(reconcileApprovals);
+setInterval(reconcileApprovals, BAR_CHECK_EVERY_MS).unref?.();
 // The postcode directory: asked about once a month, loaded when the ONS has
 // a newer release than the one every place in the country is placed by
 // (owner, 26 Sep 2026: "Monthly check, quarterly load"). The daily tick asks;

@@ -860,8 +860,11 @@ export async function runApprovedCall(approval, req, dispatch) {
   if (!token) return { ok: false, status: 401, message: 'No owner token to run the request with.' };
   try {
     const out = await dispatch({ method: parsed.method, path: parsed.path, body: approval.payload ?? {}, token });
+    // A 2xx is done; a 4xx was rejected before acting (re-approvable); a 5xx may
+    // have partly run, so it is indeterminate — never a safe retry (Codex, 1 Oct).
+    const indeterminate = out.status >= 500;
     const message = out.ok ? 'Done.' : (out.body?.message || `The call answered ${out.status}.`);
-    return { ok: out.ok, status: out.status, message: String(message).slice(0, 300) };
+    return { ok: out.ok, indeterminate, status: out.status, message: String(message).slice(0, 300) };
   } catch (err) {
     // The call may have reached the server and completed before the connection
     // was lost — so its outcome is unknown, never a safe "failed" that invites a
