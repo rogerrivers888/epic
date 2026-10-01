@@ -517,8 +517,11 @@ function AtlasRoot({ data, error, homeTown, mode, onGo, onShowAll }: {
   // every place kept here, so a shortlisted-only area is still reachable.
   const cityN = (ci: AtlasCountry['cities'][number]) => (all ? ci.places : liked ? ci.special : ci.been);
   const countryN = (c: AtlasCountry) => (all ? c.places : liked ? c.cities.reduce((s, ci) => s + (ci.special ?? 0), 0) : c.been);
-  const cityShown = (ci: AtlasCountry['cities'][number]) => cityN(ci) > 0;
-  const countryShown = (c: AtlasCountry) => countryN(c) > 0;
+  // All shows every atlas destination, even one with no places yet — a city that
+  // was created or belongs to a trip is reachable from nowhere else (Codex). Been
+  // and Liked keep their positive-count filter.
+  const cityShown = (ci: AtlasCountry['cities'][number]) => all || cityN(ci) > 0;
+  const countryShown = (c: AtlasCountry) => all || countryN(c) > 0;
   // A country's subtitle names only its towns that have an entry for this tab, so
   // a Been/Liked row never advertises towns with nothing on the tab (Codex).
   const citiesOf = (c: AtlasCountry) => [...c.cities].filter(cityShown).sort((a, b) => cityN(b) - cityN(a)).slice(0, 3).map((ci) => ci.name).join(' · ');
@@ -528,7 +531,7 @@ function AtlasRoot({ data, error, homeTown, mode, onGo, onShowAll }: {
   // With no claimed place in the home radius the API gives no home country code,
   // so every country lands in `others`; heading them "Abroad" would be wrong, so
   // the heading is neutral until a home nation is known (Codex).
-  const abroadLabel = homeCountry ? 'Abroad' : all ? 'Countries' : 'Where you have been';
+  const abroadLabel = homeCountry ? 'Abroad' : 'Countries';
   const empty = !!data && homeN === 0 && homeCities.length === 0 && abroad.length === 0;
   const emptyTitle = all ? 'Nothing here yet' : liked ? 'Nothing loved yet' : 'Nowhere been yet';
   const emptyBody = liked
@@ -546,7 +549,7 @@ function AtlasRoot({ data, error, homeTown, mode, onGo, onShowAll }: {
           <Text style={styles.emptyBody}>{emptyBody}</Text>
         </View>
       ) : null}
-      {homeN > 0 && data?.home ? (
+      {data?.home && (all || homeN > 0) ? (
         <>
           <AtlasSection label="Close to home" />
           <NavRow
