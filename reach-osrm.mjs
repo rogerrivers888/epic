@@ -91,6 +91,21 @@ for (const m of modes) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// The router is started detached, so `--rm` only clears it once it stops — and
+// a `finally` does not run on SIGINT/SIGTERM. Without this, interrupting a long
+// resumable batch would leave osrm-routed alive, holding the port so the resumed
+// run cannot start (Codex). Track the live container and stop it on the way out.
+let liveContainer = null;
+const stopLive = () => {
+  if (liveContainer) {
+    try { execFileSync('docker', ['stop', liveContainer], { stdio: 'ignore' }); } catch { /* already gone */ }
+    liveContainer = null;
+  }
+};
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => { stopLive(); process.exit(130); });
+}
+
 /** Start osrm-routed for a profile's data, return its container id. */
 function startRouted(dataBase) {
   const dir = path.dirname(dataBase);
@@ -147,6 +162,7 @@ async function run() {
     }
     try {
       container = startRouted(DATA[mode]);
+      liveContainer = container;
       console.log(`osrm-routed ${container.slice(0, 12)} on :${PORT}, waiting…`);
       if (!(await waitReady(sample))) throw new Error('osrm-routed did not become ready in 60s');
       const table = osrmTable(`http://127.0.0.1:${PORT}`, { profile: PROFILE[mode] });
@@ -158,7 +174,7 @@ async function run() {
       const secs = Math.round((Date.now() - t0) / 1000);
       console.log(`  done: built ${res.built}, skipped ${res.skipped}, ${res.pairs} pairs in ${secs}s (run ${res.runId}).`);
     } finally {
-      if (container) { try { execFileSync('docker', ['stop', container], { stdio: 'ignore' }); } catch { /* already gone */ } }
+      stopLive();
     }
   }
   await pool.end();
