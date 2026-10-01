@@ -1531,6 +1531,24 @@ router.get('/census-ring-curve', requires('view_library'), async (req, res, next
     const subcategories = req.query.subcategories
       ? String(req.query.subcategories).split(',').map((s) => s.trim()).filter(Boolean)
       : null;
+    // The category must be a real one, and the drawers the count is taken over are
+    // the requested subcategories (each an active drawer of it) or — with none given
+    // — every active drawer. Resolved once and used for both the count and the
+    // completeness check, so a retired drawer never inflates a count the floor check
+    // treats as complete, and an unknown category is a 400 rather than a confident
+    // zero (Codex).
+    const { rows: [cat] } = await query('select key from shelf_categories where key = $1', [category]);
+    if (!cat) return res.status(400).json({ error: 'unknown_category', message: `No such category: ${category}` });
+    const { rows: activeSubs } = await query('select key from shelf_subcategories where category_key = $1 and active', [category]);
+    const activeKeys = new Set(activeSubs.map((r) => r.key));
+    let reqSubs;
+    if (subcategories && subcategories.length) {
+      const unknown = [...new Set(subcategories)].filter((s) => !activeKeys.has(s));
+      if (unknown.length) return res.status(400).json({ error: 'unknown_subcategories', unknown, message: `Not active drawers of ${category}: ${unknown.join(', ')}` });
+      reqSubs = [...new Set(subcategories)];
+    } else {
+      reqSubs = [...activeKeys];
+    }
     const minutes = [...new Set((req.query.minutes ? String(req.query.minutes).split(',') : ['10', '15', '20', '25', '30', '35', '40', '45', '50', '55', '60'])
       .map((m) => Math.min(90, Math.max(5, Math.trunc(Number(m)))))
       .filter((m) => Number.isFinite(m)))].sort((a, b) => a - b).slice(0, 20);
@@ -1552,7 +1570,7 @@ router.get('/census-ring-curve', requires('view_library'), async (req, res, next
       if (!ring) { curve.push({ minutes: m, count: null, unresolved: null, floor: null }); continue; }
       const c = await censusInRing({
         cells: ring.band ?? ring.cells, outcodes: ring.outcodes,
-        shownOnly: true, circle: ring.circle ?? null, subcategories,
+        shownOnly: true, circle: ring.circle ?? null, subcategories: reqSubs,
       });
       // A count over a reach whose districts the census has not finished is a floor,
       // the same way /census-ring reports it: a district never looked at, or one a
@@ -1563,16 +1581,9 @@ router.get('/census-ring-curve', requires('view_library'), async (req, res, next
       // drawer has a complete row there, not merely the ones that happen to exist.
       const floorOutcodes = ring.reachOutcodes ?? ring.outcodes;
       const floorSlugs = floorOutcodes.map((o) => o.toLowerCase());
-      // The drawers the count is over: the ones requested, or — for a whole-category
-      // curve — every active drawer of the category. A district is fully censused for
-      // the request only when each of these drawers has a complete row there; a drawer
-      // with no row at all was never examined, not finished (Codex).
-      let reqSubs = subcategories && subcategories.length ? [...new Set(subcategories)] : null;
-      if (!reqSubs) {
-        const { rows: active } = await query(
-          'select key from shelf_subcategories where category_key = $1 and active', [category]);
-        reqSubs = active.map((r) => r.key);
-      }
+      // A district is fully censused for the request only when each drawer the count
+      // is over (reqSubs, resolved above) has a complete row there; a drawer with no
+      // row at all was never examined, not finished (Codex).
       const fully = new Set();
       if (reqSubs.length) {
         const { rows } = await query(
