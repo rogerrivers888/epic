@@ -38,8 +38,14 @@ export function Approvals({ standalone = false, onCount }: { standalone?: boolea
     try {
       const got = (await api.approvals('review')).approvals;
       setRows(got);
+      setError(null);
       onCount?.(got.length);
-    } catch { setRows(null); }
+    } catch (e: any) {
+      // Leave `rows` null (not loaded) and say so — a failed read is not an
+      // empty queue. Embedded on the Overview this still draws nothing; on its
+      // own screen it shows the error, never a false "nothing is waiting".
+      setError(e instanceof ApiError ? e.message : 'Could not reach the approvals queue. Try again.');
+    }
   }, [onCount]);
   useEffect(() => { void load(); }, [load]);
 
@@ -60,12 +66,17 @@ export function Approvals({ standalone = false, onCount }: { standalone?: boolea
     } finally { setBusy(null); }
   };
 
-  // Embedded on the Overview, stay out of the way when nothing waits. On its
-  // own rail screen, always draw — the owner who clicked "Approvals" gets an
-  // answer, not a blank page.
-  if (!standalone && (!rows || (rows.length === 0 && !notice))) return null;
+  // Three states are kept apart, not conflated (Codex, 1 Oct 2026): not-yet-
+  // loaded (`rows` null, no error) is loading, not empty; a failed read carries
+  // an error, not an empty queue; only a successful load of zero rows is empty.
+  const loaded = rows !== null;
+  const loading = !loaded && !error;
+  const empty = loaded && rows!.length === 0 && !notice && !error;
+  // Embedded on the Overview, stay out of the way until a load returns rows. On
+  // its own rail screen, always draw — the owner who clicked "Approvals" gets an
+  // answer (loading, error, empty, or the list), never a blank page.
+  if (!standalone && (!loaded || (rows!.length === 0 && !notice))) return null;
   const list = rows ?? [];
-  const empty = list.length === 0 && !notice && !error;
   return (
     <Panel title="Waiting for you" sub="An agent has asked to do something only you may authorise.">
       {error ? <Text style={[type.small, { color: colors.overrun }]}>{error}</Text> : null}
@@ -73,6 +84,7 @@ export function Approvals({ standalone = false, onCount }: { standalone?: boolea
       {!elevated ? (
         <Text style={[type.small, { color: colors.ink }]}>Sign in with your e-mail link to approve or decline these.</Text>
       ) : null}
+      {loading ? <Text style={type.small}>Reading the queue…</Text> : null}
       {empty ? (
         <Text style={type.small}>Nothing is waiting for you right now. When an agent asks to do something only you may authorise, it appears here.</Text>
       ) : null}
