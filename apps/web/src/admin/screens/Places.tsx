@@ -3213,29 +3213,37 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
       const steps = i >= 0 ? r.steps.map((x, n) => (n === i ? s : x)) : [...r.steps, s];
       return { ...r, steps };
     });
+    // A run is over, however it ended. The server may have written facts even on a
+    // partial failure or an early close, so the boards it could have changed are
+    // invalidated whoever is looking; and if this tab is still the one on screen it
+    // re-reads its comparison and re-prices (research may have filled a website,
+    // making the next run cheaper). done, a failure frame and a broken connection
+    // all settle the same way (Codex, 1 Oct 2026).
+    const settle = () => {
+      onResearched?.(refId);
+      if (!mine()) return;
+      reload();
+      api.adminResearchQuote(refId).then((q) => { if (mine()) setQuote(q); }).catch(() => { /* keep the last known price */ });
+    };
     api.adminResearchStream(refId, (name, d) => {
-      // `done` means the server finished and wrote data, so the boards it changed
-      // are stale whoever is looking — invalidate them even if this tab has moved
-      // on or unmounted. Everything below only touches this tab's own state, and
-      // only while it is still the one on screen (Codex, 1 Oct 2026).
-      if (name === 'done') onResearched?.(refId);
-      if (!mine()) return; // a frame for a place the drawer has already left
+      if (!mine()) {
+        // A frame for a place the drawer has already left updates no state, but a
+        // terminal one still invalidates the boards the finished run may have changed.
+        if (name === 'done' || name === 'error') settle();
+        return;
+      }
       if (name === 'source') put(d as ResearchStep);
       // What the record holds now, and how the pipeline judged the run: `done`
       // (identified), `partial` (could not be pinned down) or `failed` (refused),
       // with any problems it hit. The outcome decides what the panel says — not
       // "filled in below" on a run that found nothing (Codex, 1 Oct 2026).
       else if (name === 'kept') setResearch((r) => (r ? { ...r, outcome: d?.state ?? null, problems: Array.isArray(d?.problems) ? d.problems : [] } : r));
-      else if (name === 'error') setResearch((r) => (r ? { ...r, running: false, error: String(d?.message ?? 'Research could not finish.') } : r));
-      else if (name === 'done') {
-        setResearch((r) => (r ? { ...r, running: false, outcome: d?.state ?? r.outcome } : r));
-        reload();
-        // Research may have filled a website, which makes the next run cheaper
-        // (identify only, not identify-plus-find-page); re-price so the button
-        // stops advertising the old ceiling.
-        api.adminResearchQuote(refId).then((q) => { if (mine()) setQuote(q); }).catch(() => { /* keep the last known price */ });
-      }
-    }).catch((e) => { if (mine()) setResearch((r) => (r ? { ...r, running: false, error: e?.body?.message ?? 'Research could not finish.' } : r)); });
+      else if (name === 'error') { setResearch((r) => (r ? { ...r, running: false, error: String(d?.message ?? 'Research could not finish.') } : r)); settle(); }
+      else if (name === 'done') { setResearch((r) => (r ? { ...r, running: false, outcome: d?.state ?? r.outcome } : r)); settle(); }
+    }).catch((e) => {
+      if (mine()) setResearch((r) => (r ? { ...r, running: false, error: e?.body?.message ?? 'Research could not finish.' } : r));
+      settle();
+    });
   }, [canManage, research?.running, quote, refId, reload, onResearched]);
 
   if (!data) return <Waiting />;
