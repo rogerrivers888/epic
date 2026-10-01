@@ -18,7 +18,7 @@ import { Press } from '../../components/press';
 import { Icon } from '../../components/Icon';
 import { useViewport } from '../../hooks/useViewport';
 import { api, ApiError, type StaffInvitation, type StaffMember, type StaffRole } from '../../api';
-import { desk, fonts, LIME, ON_LIME } from '../../theme';
+import { desk, fonts, LIME, MIC_TILE, ON_LIME } from '../../theme';
 
 type Filter = 'All' | 'Active' | 'Invited' | 'Suspended';
 type Mode = null | 'add' | 'sent' | 'person' | 'claim';
@@ -451,7 +451,7 @@ function SentView({ cur, invitation, sentExtra, copied, onCopy, onClose }: {
         <Text style={styles.linkNote}>Works once. Expires {fullDate(invitation?.expiresAt)}.</Text>
       </Field>
       <View style={styles.summary}>
-        <SummaryRow label="Name" value={cur?.name || '—'} />
+        <SummaryRow label="Name" value={cur?.name || '—'} strong />
         <SummaryRow label="Email" value={cur?.email || '—'} />
         <SummaryRow label="Role" value={cur?.role || '—'} last />
       </View>
@@ -559,6 +559,8 @@ function RoleOption({ role, selected, withDescription, onPick }: { role: StaffRo
 }
 
 function SummaryRow({ label, value, strong, last }: { label: string; value: string; strong?: boolean; last?: boolean }) {
+  // Two equal columns, both left-aligned — the prototype's grid, not a
+  // label-left/value-right ledger row (design audit, 1 Oct 2026).
   return (
     <View style={[styles.summaryRow, last && { borderBottomWidth: 0 }]}>
       <Text style={styles.summaryLabel}>{label}</Text>
@@ -568,10 +570,18 @@ function SummaryRow({ label, value, strong, last }: { label: string; value: stri
 }
 
 function Toast({ text }: { text: string }) {
-  const { framed, origin } = useViewport();
-  const at = framed && origin ? { position: 'absolute' as const, left: origin.x + 20, top: origin.y + 20 } : { position: 'absolute' as const, top: 20, right: 20 };
+  const { width, framed, origin } = useViewport();
+  // Top-right, 20px in — inside the phone frame too: a full-width wrapper at the
+  // frame's origin, content pushed to its right edge (design audit, 1 Oct 2026).
+  if (framed && origin) {
+    return (
+      <View pointerEvents="box-none" style={{ position: 'absolute', left: origin.x, top: origin.y + 20, width, alignItems: 'flex-end', paddingRight: 20, zIndex: 5 }}>
+        <View style={styles.toast} accessibilityRole="alert"><Text style={styles.toastText}>{text}</Text></View>
+      </View>
+    );
+  }
   return (
-    <View style={[styles.toast, at]} accessibilityRole="alert">
+    <View style={[styles.toast, { position: 'absolute', top: 20, right: 20 }]} accessibilityRole="alert">
       <Text style={styles.toastText}>{text}</Text>
     </View>
   );
@@ -590,11 +600,11 @@ const styles = StyleSheet.create({
   sub: { fontFamily: fonts.body, fontSize: 13.5, color: desk.inkDim, lineHeight: 20 },
 
   addBtn: { flexDirection: 'row', alignItems: 'center', gap: 22, backgroundColor: LIME, paddingVertical: 10, paddingHorizontal: 14 },
-  addBtnHover: { opacity: 0.88 },
+  addBtnHover: { backgroundColor: MIC_TILE },
   addLabel: { fontFamily: fonts.heading, fontSize: 13.5, fontWeight: '700', color: ON_LIME },
 
   banner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16, backgroundColor: LIME, paddingVertical: 14, paddingHorizontal: 16 },
-  bannerHover: { opacity: 0.9 },
+  bannerHover: { backgroundColor: MIC_TILE },
   bannerTitle: { fontFamily: fonts.heading, fontSize: 15, fontWeight: '800', letterSpacing: -0.3, color: ON_LIME },
   bannerSub: { fontFamily: fonts.body, fontSize: 13, color: ON_LIME, opacity: 0.85, lineHeight: 18 },
 
@@ -649,7 +659,7 @@ const styles = StyleSheet.create({
   // button its own width rather than a bar (owner, 1 Oct 2026).
   formFoot: { marginTop: 'auto', paddingTop: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16 },
   primary: { height: 46, backgroundColor: LIME, flexDirection: 'row', alignItems: 'center', gap: 22, paddingHorizontal: 16 },
-  primaryHover: { opacity: 0.88 },
+  primaryHover: { backgroundColor: MIC_TILE },
   primaryLabel: { fontFamily: fonts.body, fontSize: 14, fontWeight: '700', color: ON_LIME },
   cancel: { fontFamily: fonts.body, fontSize: 13.5, fontWeight: '600', color: desk.inkMuted },
 
@@ -667,9 +677,9 @@ const styles = StyleSheet.create({
   linkNote: { fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim },
 
   summary: { borderTopWidth: 2, borderTopColor: desk.ruleStrong },
-  summaryRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 24, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: desk.rule },
-  summaryLabel: { fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim },
-  summaryValue: { flexShrink: 1, textAlign: 'right', fontFamily: fonts.body, fontSize: 13.5, color: desk.ink },
+  summaryRow: { flexDirection: 'row', alignItems: 'center', gap: 24, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: desk.rule },
+  summaryLabel: { flex: 1, minWidth: 0, fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim },
+  summaryValue: { flex: 1, minWidth: 0, fontFamily: fonts.body, fontSize: 13.5, color: desk.ink },
 
   personEmail: { fontFamily: fonts.body, fontSize: 14, color: desk.inkMuted, marginTop: -14 },
   ownerNote: { fontFamily: fonts.body, fontSize: 13.5, color: desk.inkDim },

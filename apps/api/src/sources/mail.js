@@ -161,26 +161,37 @@ const FONT = "Archivo,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif";
 
 const originOf = (url) => { try { return new URL(url).origin; } catch { return null; } };
 
-function shell({ url, body, action = 'Open Epic', headline = null }) {
+function shell({ url, body, action = 'Open Epic', headline = null, width = 520, headPad = null, bodyPad = '24px', bodyFont = 16, barButton = false, strapline = true }) {
   const origin = originOf(url);
+  // With a headline (ST6) the band is the design's 30px lockup over the display
+  // line, so the mark renders small; alone it is the full 150px lockup.
   const mark = origin
-    ? `<img src="${origin}/brand/epic-wordmark-ink.png" width="150" height="117" alt="Epic" style="display:block;border:0;outline:none;text-decoration:none">`
-    : `<span style="font-family:${FONT};font-weight:800;font-size:44px;letter-spacing:-2.6px;color:${INK}">Epic</span>`;
+    ? `<img src="${origin}/brand/epic-wordmark-ink.png" width="${headline ? 51 : 150}" height="${headline ? 40 : 117}" alt="Epic" style="display:block;border:0;outline:none;text-decoration:none">`
+    : `<span style="font-family:${FONT};font-weight:800;font-size:${headline ? 30 : 44}px;letter-spacing:-1.5px;color:${INK}">Epic</span>`;
   // Some messages (the staff invitation, ST6) carry a headline inside the lime
   // band, under the mark, at the pack's display weight. Most do not and the band
   // is the mark alone.
   const banner = headline
     ? `${mark}<div style="font-family:${FONT};font-weight:800;font-size:40px;letter-spacing:-1.4px;line-height:1.02;color:${INK};margin-top:22px">${headline}</div>`
     : mark;
+  // ST6's button is the design's full-width 54px ink bar, label flush left and
+  // an arrow on the right (the one glyph an email client will keep — SVG dies
+  // in most inboxes). Everything else keeps the house inline button.
+  const button = barButton
+    ? `        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:24px 0 0"><tr>
+          <td style="background:${INK};height:54px;padding:0 0 0 20px"><a href="${url}" style="display:block;line-height:54px;font-family:${FONT};font-size:16px;font-weight:700;color:${CREAM};text-decoration:none">${action}</a></td>
+          <td style="background:${INK};height:54px;width:40px;padding:0 20px 0 0;text-align:right"><a href="${url}" style="font-family:${FONT};font-size:18px;font-weight:700;color:${CREAM};text-decoration:none">&rarr;</a></td>
+        </tr></table>`
+    : `        <p style="margin:24px 0 0"><a href="${url}" style="display:inline-block;background:${INK};color:${CREAM};font-weight:700;padding:14px 22px;text-decoration:none;border-radius:0">${action}</a></p>`;
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:${CREAM};margin:0;padding:0">
   <tr><td align="center" style="padding:24px 12px">
-    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="520" style="width:520px;max-width:100%;border:2px solid ${INK};background:${CREAM}">
-      <tr><td style="background:${LIME};padding:${headline ? '28px 24px 26px' : '18px 24px'};border-bottom:2px solid ${INK}">${banner}</td></tr>
-      <tr><td style="padding:24px;font-family:${FONT};font-size:16px;line-height:1.5;color:${INK}">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="${width}" style="width:${width}px;max-width:100%;border:2px solid ${INK};background:${CREAM}">
+      <tr><td style="background:${LIME};padding:${headPad ?? (headline ? '30px 28px 26px' : '18px 24px')};border-bottom:2px solid ${INK}">${banner}</td></tr>
+      <tr><td style="padding:${bodyPad};font-family:${FONT};font-size:${bodyFont}px;line-height:1.5;color:${INK}">
 ${body}
-        <p style="margin:24px 0 0"><a href="${url}" style="display:inline-block;background:${INK};color:${CREAM};font-weight:700;padding:14px 22px;text-decoration:none;border-radius:0">${action}</a></p>
+${button}
       </td></tr>
-      <tr><td style="border-top:2px solid ${INK};padding:14px 24px;font-family:${FONT};font-size:13px;font-weight:600;color:${INK}">Seize the day</td></tr>
+${strapline ? `      <tr><td style="border-top:2px solid ${INK};padding:14px 24px;font-family:${FONT};font-size:13px;font-weight:600;color:${INK}">Seize the day</td></tr>` : ''}
     </table>
   </td></tr>
 </table>`;
@@ -283,6 +294,9 @@ export function staffInviteEmail({ name, url, roleLabel, opens = [], expiresAt }
     url,
     action: 'Log in to the back office',
     headline: `You're on the team, ${first}.`,
+    // ST6's own frame (handover): 600 wide, 17px body, the paddings as drawn, a
+    // full-width 54px bar button, and no strapline band under the footnote.
+    width: 600, bodyFont: 17, bodyPad: '26px 28px 30px', barButton: true, strapline: false,
     body: [
       `        <p style="margin:0">${line}</p>`,
       note(foot),

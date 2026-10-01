@@ -146,13 +146,18 @@ const styles = StyleSheet.create({
   ctaLabel: { fontFamily: fonts.body, fontSize: 17, fontWeight: '700', color: CREAM },
   rule: { borderTopWidth: 2, borderTopColor: INK, paddingTop: 16 },
   ruleText: { fontFamily: fonts.body, fontSize: 16, color: INK },
-  link: { fontFamily: fonts.body, fontWeight: '700', color: INK },
+  // 16px set here, not inherited: L2's "Send it again" / "Use a different
+  // email" sit outside any sized parent and fell to the 14px default.
+  link: { fontFamily: fonts.body, fontSize: 16, fontWeight: '700', color: INK },
   sentBody: { fontFamily: fonts.body, fontSize: 19, lineHeight: 28, color: INK },
   sentActions: { flexDirection: 'row', gap: 28 },
 
   right: { flex: 1, backgroundColor: LIME, position: 'relative', overflow: 'hidden' },
-  grid: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, flexDirection: 'row', flexWrap: 'wrap', backgroundColor: CREAM },
+  // Inset by the tile border so the cream gap lines stay between tiles and
+  // never along the outer edges — the design's grid is full-bleed.
+  grid: { position: 'absolute', top: -1.5, left: -1.5, right: -1.5, bottom: -1.5, flexDirection: 'row', flexWrap: 'wrap', backgroundColor: CREAM },
   tile: { width: '33.3333%', height: '25%', borderWidth: 1.5, borderColor: CREAM },
-  band: { position: 'absolute', left: 0, right: 0, top: '50%', transform: [{ translateY: -44 }], backgroundColor: LIME, paddingVertical: 30, paddingHorizontal: 40 },
+  // −52 = half the band (30 + 44-line + 30), so it truly centres on the column.
+  band: { position: 'absolute', left: 0, right: 0, top: '50%', transform: [{ translateY: -52 }], backgroundColor: LIME, paddingVertical: 30, paddingHorizontal: 40 },
   bandText: { fontFamily: fonts.heading, fontWeight: '800', fontSize: 44, letterSpacing: -1.76, lineHeight: 44, color: INK },
 });
