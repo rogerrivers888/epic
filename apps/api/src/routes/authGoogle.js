@@ -185,7 +185,30 @@ export async function resolveGoogleAccount({ sub, email, emailVerified }) {
 
 // --- the routes ------------------------------------------------------------
 
-router.get('/auth/google', signInLimit, async (req, res) => {
+/**
+ * The configured API host, when this request arrived on another one. The
+ * handshake cookie is host-only and Google returns to `EPIC_API_BASE_URL`, so a
+ * start begun on a second name for the same service (the web app calls the
+ * railway.app hostname) would set its cookie where the callback never sees it
+ * and every sign-in would fail. Such a start is moved to the configured host
+ * first, query and all.
+ */
+export function canonicalStart(req) {
+  let base;
+  try { base = new URL(apiBase()); } catch { return null; }
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim().toLowerCase();
+  if (!host || host === base.host.toLowerCase()) return null;
+  return `${base.origin}${req.originalUrl}`;
+}
+
+// The move comes before the sign-in limit, so a start that is only passing
+// through to the right host does not spend one of the caller's attempts (Codex).
+const toCanonicalHost = (req, res, next) => {
+  const moved = configured() ? canonicalStart(req) : null;
+  return moved ? res.redirect(moved) : next();
+};
+
+router.get('/auth/google', toCanonicalHost, signInLimit, async (req, res) => {
   if (!configured()) return res.redirect(loginUrl(req, 'e=failed'));
   try {
     const cfg = await oidcConfig();

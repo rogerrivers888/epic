@@ -213,3 +213,18 @@ test('the return path after sign-in is only ever an in-app path', () => {
     assert.equal(safeNext(bad), null, `${JSON.stringify(bad)} must be refused`);
   }
 });
+
+test('a start on another hostname for the API is moved to the configured one first', () => {
+  const { canonicalStart } = authGoogle;
+  const before = process.env.EPIC_API_BASE_URL;
+  process.env.EPIC_API_BASE_URL = 'https://api.epic.day';
+  try {
+    const at = (host, url, fwd) => canonicalStart({ headers: { host, ...(fwd ? { 'x-forwarded-host': fwd } : {}) }, originalUrl: url });
+    assert.equal(at('api-production-20beb.up.railway.app', '/api/auth/google?next=%2Fadmin'), 'https://api.epic.day/api/auth/google?next=%2Fadmin');
+    assert.equal(at('api.epic.day', '/api/auth/google'), null);
+    assert.equal(at('API.EPIC.DAY', '/api/auth/google'), null);
+    assert.equal(at('internal:8080', '/api/auth/google', 'api.epic.day'), null);
+  } finally {
+    if (before === undefined) delete process.env.EPIC_API_BASE_URL; else process.env.EPIC_API_BASE_URL = before;
+  }
+});
