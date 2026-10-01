@@ -298,12 +298,15 @@ export function sectorsOfBox(box, universe) {
     ? universe.within(exp)
     : (Array.isArray(universe) ? universe.filter((p) => p.lat >= exp.minLat && p.lat <= exp.maxLat && p.lng >= exp.minLng && p.lng <= exp.maxLng) : []);
   const codes = new Set(); const outcodes = new Set(); let one = null;
-  for (const p of seeds) { codes.add(p.code); if (p.outcode != null) outcodes.add(p.outcode); one = p; }
-  if (!codes.size) {
-    // No seed in or near the box — very sparse ground; fall back to the nearest.
-    const best = nearestSector({ lat: midLat, lng: (box.minLng + box.maxLng) / 2 }, universe);
-    return best ? { kind: 'inside', code: best.code, outcode: best.outcode ?? null } : { kind: 'nowhere' };
-  }
+  const note = (best) => { if (best) { codes.add(best.code); if (best.outcode != null) outcodes.add(best.outcode); one = best; } };
+  for (const p of seeds) note({ code: p.code, outcode: p.outcode ?? null });
+  // Combined with the nearest sector to each corner and the middle: the seed scan
+  // catches a sector sitting inside or beside the box; the corner samples catch a
+  // far seed in sparse ground whose nearest-point region owns a corner from outside
+  // the margin (Codex). The union is more conservative than either alone — a box is
+  // inside only if neither test finds out-of-ring ground.
+  for (const p of cornersOf(box)) note(nearestSector(p, universe));
+  if (!codes.size) return { kind: 'nowhere' };
   if (codes.size === 1) return { kind: 'inside', code: one.code, outcode: one.outcode ?? null };
   return { kind: 'across', codes, outcodes };
 }
