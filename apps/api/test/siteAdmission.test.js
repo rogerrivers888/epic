@@ -35,6 +35,14 @@ test('a qualifier after the free claim disqualifies it', () => {
   assert.equal(free('<p>Free admission for NHS staff.</p>'), false);
 });
 
+test('a colon introduces the restriction, not a new sentence', () => {
+  // A colon must not be treated as a boundary, or the qualifier it introduces is lost.
+  assert.equal(free('<p>Free entry: members only.</p>'), false);
+  assert.equal(free('<p>Members: free admission all year.</p>'), false);
+  // But a real prior sentence with a colon list does not qualify a later free claim.
+  assert.equal(free('<p>Opening times: 9 to 5. Admission is free.</p>'), true);
+});
+
 test('a qualifier in the next sentence does not disqualify a free claim', () => {
   // The trailing check stops at the sentence boundary too, not only the leading one.
   assert.equal(free('<p>Admission is free.</p><p>Children can explore the play area.</p>'), true);

@@ -303,11 +303,15 @@ export function admissionFrom(html, node = {}) {
       // "Children can explore the play area. Admission is free." is free; "Admission is
       // free. Children can explore …" is free; only "free entry for children" or
       // "Members enjoy free admission" — same clause — are somebody's free (Codex).
+      // Only a full stop, question or exclamation ends a sentence here. A colon or
+      // semicolon INTRODUCES the restriction — "Free entry: members only", "Members:
+      // free admission" — so it must stay inside the window or the qualifier is lost
+      // and a paid venue reads Free (Codex). Terminators are . ! ? alone.
       const tail = flat.slice(m.index + m[0].length, m.index + m[0].length + 80);
-      const afterEnd = tail.search(/[.!?;:]/);
+      const afterEnd = tail.search(/[.!?]/);
       const after = afterEnd >= 0 ? tail.slice(0, afterEnd) : tail;
       const lead = flat.slice(Math.max(0, m.index - 40), m.index);
-      const before = lead.slice(lead.search(/[.!?;:][^.!?;:]*$/) + 1);
+      const before = lead.slice(lead.search(/[.!?][^.!?]*$/) + 1);
       if (!QUALIFIED.test(after) && !QUALIFIED.test(before)) { found.free = true; break; }
     }
   }
