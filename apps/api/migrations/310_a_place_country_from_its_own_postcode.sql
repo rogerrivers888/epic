@@ -19,6 +19,18 @@
 -- next settle pass refiles it under the right country and refreshes the boards
 -- (Codex). Only the rows that actually changed are requeued — the WHERE sees to that.
 
+-- First, undo the legacy damage the backfill would otherwise trust and spread. The
+-- old admin postcode edit created a new outcode's locality with the place's current
+-- country_code — so an IE-stamped place moved to a UK outcode could leave that
+-- outcode's locality stamped IE (Codex). A postcode locality whose slug is a UK
+-- outward code is in GB by definition (Eircodes and ZIPs do not match this shape),
+-- so those are corrected to GB before anything reads them as authoritative.
+update localities
+   set country_code = 'GB'
+ where kind = 'postcode'
+   and slug ~ '^[a-z]{1,2}[0-9][a-z0-9]?$'
+   and upper(country_code) <> 'GB';
+
 update place_index pi
    set country_code = upper(loc.country_code),
        placed_at = null,

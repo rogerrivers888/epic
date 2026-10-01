@@ -71,6 +71,23 @@ test('a postcode change requeues a placed row, so settle re-resolves its country
   assert.equal(pi.placed_at, null, 'the postcode change requeued the place for settling');
 });
 
+test('a UK outcode wrongly stamped non-GB is normalised, so its places resolve to GB', async () => {
+  const ref = 'osm:node/cfp-legacy';
+  // Legacy damage: a UK-format outcode locality the old edit path stamped IE.
+  await query(`insert into localities (slug, name, kind, country_code) values ('zz5','ZZ5','postcode','IE')
+               on conflict (slug) do update set country_code = 'IE'`);
+  await index.noteMany([{ ref, lat: 51.5, lng: -0.6, countryCode: 'IE' }], { source: 'osm' });
+  await query(`insert into place_records (venue_ref, postcode, updated_at) values ($1,'ZZ5 1AA', now())
+               on conflict (venue_ref) do update set postcode = excluded.postcode`, [ref]);
+  // Migration 310's normalisation: a UK-format postcode locality is GB by definition.
+  await query(`update localities set country_code = 'GB'
+                where kind = 'postcode' and slug ~ '^[a-z]{1,2}[0-9][a-z0-9]?$' and upper(country_code) <> 'GB'`);
+  const { rows: [loc] } = await query(`select country_code from localities where slug = 'zz5'`);
+  assert.equal(loc.country_code, 'GB', 'the UK outcode locality is corrected to GB');
+  await index.settleCountryFromPostcode([ref]);
+  assert.equal(await countryOf(ref), 'GB', 'and the place follows the corrected outcode, not its IE stamp');
+});
+
 test('the outward code is read from any postcode shape', async () => {
   // Full with a space, outcode-only, and no-space full all resolve to the same outcode.
   for (const [ref, pc] of [['osm:node/cfp-s', 'ZZ4 5DD'], ['osm:node/cfp-o', 'ZZ4'], ['osm:node/cfp-n', 'ZZ45DD']]) {
