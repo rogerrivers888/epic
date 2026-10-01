@@ -12,7 +12,7 @@
  *
  * The page scrolls here, not in the document: the app shell does not scroll.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { CREAM, HAIRLINE, INK, INK_HOVER, INK_RULE, LIME, LIME_TINT, ON_INK_MUTED, fonts } from '../theme';
@@ -53,9 +53,17 @@ export function SiteLayout({ locale, header, children }: { locale: SiteLocale; h
     if (Platform.OS === 'web' && typeof document !== 'undefined') document.documentElement.lang = HTML_LANG[locale];
   }, [locale]);
 
+  // One layout serves every public page, so its scroll view outlives a move
+  // between them: a new page starts at its top, not where the footer link that
+  // led there was (Codex, 1 Oct 2026). Keyed on the path, so a filter or a
+  // campaign query does not jump the page.
+  const { path } = useRouter();
+  const scroller = useRef<ScrollView>(null);
+  useEffect(() => { scroller.current?.scrollTo({ y: 0, animated: false }); }, [path]);
+
   return (
     <View style={styles.root}>
-      <ScrollView style={styles.root} contentContainerStyle={{ flexGrow: 1 }}>
+      <ScrollView ref={scroller} style={styles.root} contentContainerStyle={{ flexGrow: 1 }}>
         <SiteHeader locale={locale} header={header} />
         <View style={{ flexGrow: 1 }}>{children}</View>
         <SiteFooter locale={locale} />

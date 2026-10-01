@@ -432,3 +432,29 @@ test('past the hashing queue a password door answers busy, and the queue drains'
   assert.equal(out.filter((x) => x === 'ok').length, KDF_ACTIVE + KDF_WAITING, 'every one admitted verifies');
   assert.equal(await passwords.verifyPassword('queue password 1', stored), true, 'and the gate is open again after');
 });
+
+test('a set-credentials that fails part-way leaves the link usable and the devices signed in', async () => {
+  const acct = await makeAccount({ email: 'halfway@example.com', password: 'the old password 1' });
+  const { token } = await accounts.createSignInLink(acct.id, { requestedBy: 'self', purpose: 'reset', ttlHours: 0.5 });
+  const device = await openSession('phone', acct.id, 'device', 'password');
+  // The password write fails, after the link is spent and the devices revoked.
+  await query(`create or replace function halfway_refuse() returns trigger language plpgsql as $$
+    begin if new.email = 'halfway@example.com' and new.password_hash is distinct from old.password_hash then raise exception 'refused for the test'; end if; return new; end $$`);
+  await query('create trigger halfway_refuse before update on accounts for each row execute function halfway_refuse()');
+  let failed;
+  const quiet = console.error; console.error = () => {};
+  try { failed = await post('/api/auth/credentials', { token, password: 'the new password 2' }); }
+  finally {
+    console.error = quiet;
+    await query('drop trigger halfway_refuse on accounts');
+    await query('drop function halfway_refuse()');
+  }
+  assert.ok(failed.status >= 500, 'the request fails');
+  assert.ok(await accounts.inspectSignInLink(token), 'the link was not spent');
+  const live = await query('select count(*)::int as n from api_sessions where account_id = $1 and revoked_at is null', [acct.id]);
+  assert.ok(live.rows[0].n >= 1, 'nobody was signed out');
+  assert.ok(device.token);
+  // And the retry works.
+  const ok = await post('/api/auth/credentials', { token, password: 'the new password 2' });
+  assert.equal(ok.status, 201);
+});

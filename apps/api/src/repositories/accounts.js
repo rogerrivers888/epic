@@ -64,8 +64,8 @@ export async function accountByGoogleSub(sub) {
  * second Google identity can never quietly overwrite the first; the account
  * keeps the one it was first linked to, and a mismatched second returns no row.
  */
-export async function setGoogleSub(accountId, sub) {
-  const { rows } = await query(
+export async function setGoogleSub(accountId, sub, { db = null } = {}) {
+  const { rows } = await (db ?? { query }).query(
     `update accounts set google_sub = $2, updated_at = now()
       where id = $1 and google_sub is null
       returning ${COLUMNS}`,
@@ -93,8 +93,8 @@ export async function passwordFor(email) {
 }
 
 /** Store a new password hash (never the password) and when it was set. */
-export async function setPassword(accountId, hash) {
-  const { rows } = await query(
+export async function setPassword(accountId, hash, { db = null } = {}) {
+  const { rows } = await (db ?? { query }).query(
     `update accounts set password_hash = $2, password_set_at = now(), updated_at = now()
       where id = $1
       returning ${COLUMNS}`,
@@ -374,7 +374,7 @@ export function revokeAccountSessions(accountId) {
  * it again" taps cannot both leave a live link (the race `replaceSignInLink`
  * closes). Without a purpose it is the old single insert, untouched.
  */
-export async function createSignInLink(accountId, { requestedBy = 'owner', ttlHours = 24 * 7, purpose = null } = {}) {
+export async function createSignInLink(accountId, { requestedBy = 'owner', ttlHours = 24 * 7, purpose = null, db = null } = {}) {
   const token = crypto.randomBytes(32).toString('base64url');
   const insert = (db) => db.query(
     `insert into sign_in_links (account_id, token_hash, expires_at, requested_by, purpose)
@@ -383,7 +383,7 @@ export async function createSignInLink(accountId, { requestedBy = 'owner', ttlHo
     [accountId, digest(token), String(ttlHours), requestedBy, purpose],
   );
   if (!purpose) {
-    const { rows } = await insert({ query });
+    const { rows } = await insert(db ?? { query });
     return { token, link: rows[0] };
   }
   return withTransaction(async (client) => {
@@ -406,7 +406,7 @@ export async function createSignInLink(accountId, { requestedBy = 'owner', ttlHo
  * that somebody else opened first is simply spent. A suspended account's link
  * does not open anything either.
  */
-export async function consumeSignInLink(token, { requestedBy = null, purpose = null } = {}) {
+export async function consumeSignInLink(token, { requestedBy = null, purpose = null, db = null } = {}) {
   // A Google handoff code (requested_by 'google', five minutes) and an ordinary
   // magic link (owner/self, up to a week) are different credentials for different
   // doors, and neither redeems the other: the Google exchange asks for
@@ -436,7 +436,9 @@ export async function consumeSignInLink(token, { requestedBy = null, purpose = n
   } else {
     clause = "l.purpose is null and l.requested_by is distinct from 'google'";
   }
-  const { rows } = await query(
+  // `db` is a transaction's client when the spend must stand or fall with what
+  // follows it (authPassword.js, authGoogle.js › finishInvite).
+  const { rows } = await (db ?? { query }).query(
     `update sign_in_links l
         set used_at = now()
        from accounts a

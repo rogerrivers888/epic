@@ -102,9 +102,9 @@ export function revokeSession(token) {
  * inventory, 28 Sep 2026). With no account there is nothing to scope to, and
  * that is refused here rather than trusted to every caller.
  */
-export async function revokeAllSessions(accountId) {
+export async function revokeAllSessions(accountId, { db = null } = {}) {
   if (!accountId) throw new Error('revokeAllSessions needs an account; it never signs the whole estate out');
-  return query(
+  return (db ?? { query }).query(
     `update api_sessions set revoked_at = now()
       where revoked_at is null and account_id = $1`,
     [accountId],

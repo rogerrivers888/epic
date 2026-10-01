@@ -23,6 +23,7 @@
  */
 
 import express from 'express';
+import { withTransaction } from '../db.js';
 import { closeSession, deployed, openSession, sessionCookie, sessionKindFor } from '../auth.js';
 import { passwordLimit, signInLimit } from '../limits.js';
 import {
@@ -246,17 +247,25 @@ router.post('/auth/credentials', passwordLimit, signInLimit, async (req, res, ne
     if (await signInLockedOut(req, who)) return res.status(429).json(LOCKED);
 
     const hash = await hashPassword(password);
-    const spent = token ? await consumeSignInLink(token, { purpose: 'credentials' }) : null;
+    // Spending the link, signing the other devices out and setting the password
+    // stand or fall together: a failure part-way leaves the link usable, the
+    // devices signed in and the old password in place, never a spent link with
+    // nothing to show for it (Codex, 1 Oct 2026).
+    const spent = token ? await withTransaction(async (db) => {
+      const link = await consumeSignInLink(token, { purpose: 'credentials', db });
+      if (!link) return null;
+      if (link.purpose === 'reset') await revokeAllSessions(link.account_id, { db });
+      await setPassword(link.account_id, hash, { db });
+      return link;
+    }) : null;
     if (!spent) {
       await noteSignInFailure(req, { kind: 'link', contact: who, reason: 'link_spent' });
       return res.status(401).json(SPENT);
     }
-    if (spent.purpose === 'reset') await revokeAllSessions(spent.account_id);
-    await setPassword(spent.account_id, hash);
-    // And again, now the old password no longer verifies: a log-in that checked
-    // it before the change and opened its session after the first revoke is
-    // closed here, and one opening later re-reads the hash and closes itself
-    // (signIn). Nothing on the old password outlives the reset.
+    // And again once it is committed: a log-in that verified the old password and
+    // opened its session while the transaction was open is closed here, and one
+    // opening later re-reads the hash and closes itself (signIn). Nothing on the
+    // old password outlives the reset.
     if (spent.purpose === 'reset') await revokeAllSessions(spent.account_id);
     return signIn(req, res, spent.account_id);
   } catch (err) { next(err); }

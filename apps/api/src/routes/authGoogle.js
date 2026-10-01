@@ -30,6 +30,7 @@
 
 import express from 'express';
 import crypto from 'node:crypto';
+import { withTransaction } from '../db.js';
 import {
   authorizationCodeGrant, buildAuthorizationUrl, calculatePKCECodeChallenge,
   discovery, randomNonce, randomPKCECodeVerifier, randomState,
@@ -217,12 +218,18 @@ export async function finishInvite(req, res, token, claims) {
   // The same Google identity must not already be another account's.
   const holder = await accountByGoogleSub(sub);
   if (holder && holder.id !== account.id) return res.redirect(inviteUrl(req, token, 'e=failed'));
-  const spent = await consumeSignInLink(token, { purpose: 'invite' });
-  if (!spent || spent.account_id !== account.id) return res.redirect(inviteUrl(req, token));
-  if (!account.google_sub && !(await setGoogleSub(account.id, sub))) return res.redirect(loginUrl(req, 'e=failed'));
-  const bound = await accountById(account.id);
-  if (!bound || !(await isStaff(bound))) return res.redirect(loginUrl(req, 'e=no-account'));
-  const { token: code } = await createSignInLink(account.id, { requestedBy: 'google', ttlHours: HANDOFF_TTL_HOURS });
+  // Staff before anything is spent: an invitation that cannot sign in stays as it was.
+  if (!(await isStaff(account))) return res.redirect(loginUrl(req, 'e=no-account'));
+  // The invitation, the binding and the handoff code stand or fall together, so a
+  // failure part-way leaves the invitation usable for another try (Codex).
+  const code = await withTransaction(async (db) => {
+    const spent = await consumeSignInLink(token, { purpose: 'invite', db });
+    if (!spent || spent.account_id !== account.id) throw Object.assign(new Error('invite gone'), { code: 'invite_gone' });
+    if (!account.google_sub && !(await setGoogleSub(account.id, sub, { db }))) throw Object.assign(new Error('bound meanwhile'), { code: 'invite_gone' });
+    const { token: handoff } = await createSignInLink(account.id, { requestedBy: 'google', ttlHours: HANDOFF_TTL_HOURS, db });
+    return handoff;
+  }).catch((err) => { if (err?.code === 'invite_gone') return null; throw err; });
+  if (!code) return res.redirect(inviteUrl(req, token));
   return res.redirect(loginUrl(req, new URLSearchParams({ code }).toString()));
 }
 
@@ -304,7 +311,7 @@ router.get('/auth/google/callback', async (req, res) => {
     return res.redirect(loginUrl(req, 'e=failed'));
   }
 
-  if (stash.i) return finishInvite(req, res, stash.i, claims);
+  if (stash.i) return finishInvite(req, res, stash.i, claims).catch(() => res.redirect(loginUrl(req, 'e=failed')));
 
   // email_verified is part of trusting the address at all (J11 / brief step 2).
   const resolved = await resolveGoogleAccount({
