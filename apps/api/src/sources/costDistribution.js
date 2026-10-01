@@ -110,20 +110,24 @@ export async function start({ areaSlug, confirm, householdId = null, startedBy =
   const session = startedSessionId ?? currentSpender().sessionId ?? null;
   const existing = await latestRun(slug);
   if (existing && existing.state === 'running') {
-    const reclaim = reclaimable(existing);
-    // Only when reclaiming is the run handed to the new caller — and household and
-    // session move together, so the remaining paid calls are attributed to one
-    // caller. Never leave the original household paired with a second admin's
-    // session: paidGate validates the session but not that it belongs to the
-    // household, so that pairing would charge the wrong household (Codex). A run
-    // being actively worked is left entirely alone; touched_at is untouched so
-    // work() can claim it.
-    if (reclaim && session && householdId) {
-      await query('update cost_dist_runs set household_id = $2, started_session_id = $3 where id = $1', [existing.id, householdId, session]);
-      existing.household_id = householdId;
-      existing.started_session_id = session;
+    // Hand the run to the new caller only while its lease is actually free, in one
+    // atomic update, and read whether we reclaimed from its row count — never from
+    // the earlier read, which another worker may have leased in between (Codex).
+    // Household and session move together, so the remaining paid calls are always
+    // attributed to one caller: paidGate validates the session but not that it
+    // belongs to the household, so leaving the original household paired with a
+    // second admin's session would charge the wrong household.
+    if (session && householdId) {
+      const { rowCount } = await query(
+        `update cost_dist_runs set household_id = $2, started_session_id = $3
+          where id = $1 and state = 'running' and (leased_until is null or leased_until < now())`,
+        [existing.id, householdId, session]);
+      if (rowCount) { existing.household_id = householdId; existing.started_session_id = session; }
+      return { run: existing, created: false, reclaim: rowCount > 0 };
     }
-    return { run: existing, created: false, reclaim };
+    // No credentials to transfer: best-effort reclaim from the row we read; the
+    // worker's own lease acquisition is the real guard against double-work.
+    return { run: existing, created: false, reclaim: reclaimable(existing) };
   }
   const refs = await refsFor(slug);
   if (Number(confirm) !== refs.length) {
@@ -161,7 +165,7 @@ export async function start({ areaSlug, confirm, householdId = null, startedBy =
  * false stale id. The run finalises as 'done' only once every frozen place has a
  * committed outcome (Codex). Returns the finished or paused run.
  */
-export async function work(runId, { get = googleSource.priceLevel.bind(googleSource) } = {}) {
+export async function work(runId, { get = googleSource.priceLevel.bind(googleSource), record = providerCalls.record } = {}) {
   // Take the lease with a short pooled query — no connection is held for the pass,
   // so ten concurrent area-runs cannot exhaust the pool (Codex). A run whose lease
   // is live belongs to another worker: we return rather than double-work it.
@@ -199,8 +203,16 @@ export async function work(runId, { get = googleSource.priceLevel.bind(googleSou
     // paid background pass does (desk/pilot.js). Record whenever the meter carries
     // units OR observed health — a paidGate refusal is a symbol-keyed fault with no
     // enumerable units, and it must still reach provider_calls (Codex).
-    if (Object.keys(meter).length || healthOf(meter).ok !== null) {
-      await providerCalls.record(run.household_id, 'google', 'cost.distribution', meter, run.started_session_id, ref).catch(() => null);
+    const spent = Object.keys(meter).length > 0;
+    if (spent || healthOf(meter).ok !== null) {
+      const recorded = await record(run.household_id, 'google', 'cost.distribution', meter, run.started_session_id, ref).then(() => true).catch(() => false);
+      // A paid call we could not write to the ledger must not be committed: that
+      // would lose it from the monthly cap and the audit trail for good. Pause
+      // instead, so the resume retries it (one re-pay, never a silent gap) (Codex).
+      if (spent && !recorded) {
+        await query("update cost_dist_runs set problem = $2, leased_until = null, touched_at = now() where id = $1 and leased_by = $3 and state = 'running'", [runId, `paused at ${ref}: the paid call could not be recorded`, token]);
+        return reread(runId);
+      }
     }
     if (outcome.pause) {
       // Pause and release our lease so a resume can take over at once.
@@ -268,12 +280,17 @@ export async function status(areaSlug) {
   };
 }
 
-/** Reclaim a run whose lease is free — its worker gone (paused, or died) — the boot pickup. */
+/**
+ * Reclaim a run whose lease is free — its worker gone (paused, or died) — the boot
+ * pickup. Ordered by least-recently-attempted (touched_at), not by age: a run that
+ * cannot progress (its grant expired, Google off) re-pauses and so sorts last,
+ * giving every other reclaimable run a turn rather than starving behind it (Codex).
+ */
 export async function resume() {
   const { rows } = await query(
     `select id from cost_dist_runs
       where state = 'running' and (leased_until is null or leased_until < now())
-      order by started_at limit 1`);
+      order by touched_at limit 1`);
   if (!rows.length) return null;
   return work(rows[0].id);
 }

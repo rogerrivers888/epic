@@ -114,6 +114,35 @@ test('a transient failure pauses the run resumably, and never records a false st
   assert.equal(st.sampled, 5, 'all five counted after the resume');
 });
 
+test('a paid call that cannot be written to the ledger pauses the run, uncommitted', async (t) => {
+  await seed(); t.after(() => query(`delete from place_areas where area_slug = $1`, [AREA]));
+  const { run } = await dist.start({ areaSlug: AREA, confirm: 5, startedBy: 'test' });
+  // A billable lookup (the meter carries units) whose ledger write then fails.
+  const get = async (id, { meter }) => { meter.google = 1; meter['google-details'] = 1; return { priceLevel: 1 }; };
+  const record = async () => { throw new Error('ledger down'); };
+  const paused = await dist.work(run.id, { get, record });
+  assert.equal(paused.state, 'running', 'the run pauses rather than losing the paid call from the cap');
+  assert.match(paused.problem, /could not be recorded/);
+  const st = await dist.status(AREA);
+  assert.equal(st.sampled, 0, 'nothing is committed when the paid call could not be recorded');
+  const { rows } = await query('select 1 from cost_dist_samples where run_id = $1', [run.id]);
+  assert.equal(rows.length, 0, 'the place has no row, so the resume retries it');
+});
+
+test('resume rotates by least-recent attempt, not by age', async (t) => {
+  const a1 = 'zzres1'; const a2 = 'zzres2';
+  await query(`delete from cost_dist_runs`); // isolate: no leftover reclaimable run competes
+  t.after(() => query(`delete from cost_dist_runs where area_slug = any($1)`, [[a1, a2]]));
+  const { run: r1 } = await dist.start({ areaSlug: a1, confirm: 0, startedBy: 't' });
+  const { run: r2 } = await dist.start({ areaSlug: a2, confirm: 0, startedBy: 't' });
+  // r1 was started first but attempted just now; r2's attempt is the least recent,
+  // so it is taken first — a stuck oldest-started run cannot starve the others.
+  await query("update cost_dist_runs set leased_until = null, touched_at = now() where id = $1", [r1.id]);
+  await query("update cost_dist_runs set leased_until = null, touched_at = now() - interval '1 hour' where id = $1", [r2.id]);
+  const worked = await dist.resume();
+  assert.equal(worked.id, r2.id, 'the least-recently-attempted reclaimable run is taken first');
+});
+
 test('work resumes where it left off — a place with a committed outcome is not asked again', async (t) => {
   await seed(); t.after(() => query(`delete from place_areas where area_slug = $1`, [AREA]));
   const { run } = await dist.start({ areaSlug: AREA, confirm: 5, startedBy: 'test' });
