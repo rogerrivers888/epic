@@ -374,7 +374,9 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
               {/* Been · Liked, flush under the band (§5, 4b). No second menu. */}
               <InkMenu
                 tabs={[{ key: 'been', label: 'Been' }, { key: 'liked', label: 'Liked' }]}
-                selected={show}
+                // 'all' (the whole atlas) is the menu's nothing-selected state — neither
+                // tab marked — so it is passed as null (§5c, Codex).
+                selected={show === 'all' ? null : show}
                 onSelect={(k) => setShow(k as 'been' | 'liked')}
               />
             </>
@@ -587,8 +589,9 @@ function AtlasRoot({ data, error, homeTown, mode, onGo, onShowAll }: {
         </>
       ) : null}
       {/* The whole atlas, one tap away (owner): everything kept here, including
-          places only shortlisted, which the Been and Liked tabs leave out. */}
-      {!all && !empty ? (
+          places only shortlisted, which the Been and Liked tabs leave out — shown
+          even when this tab is empty, since that is exactly when it is needed. */}
+      {!all ? (
         <Press onPress={onShowAll} style={styles.allPlaces} accessibilityRole="button" accessibilityLabel="All your places">
           <Text style={styles.allPlacesText}>All your places</Text>
           <Icon name="more" size={16} color={colors.ink} strokeWidth={2.4} />
