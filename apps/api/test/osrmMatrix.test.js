@@ -35,6 +35,8 @@ const seed = async () => {
 const clean = async () => {
   await query(`delete from reach where from_cell like 'sector:ZZ%' or to_cell like 'sector:ZZ%'`);
   await query(`delete from cell_builds where from_cell like 'sector:ZZ%'`);
+  await query(`delete from ring_counts where cell like 'sector:ZZ%'`);
+  await query(`delete from ring_rankings where cell like 'sector:ZZ%'`);
   await query(`delete from geo_cells where code like 'sector:ZZ%'`);
   await query(`delete from reach_runs where scheme = 'test-osrm'`);
 };
@@ -124,6 +126,29 @@ test('buildOsrmMode resumes — an origin already built to the horizon is skippe
   const res = await buildOsrmMode({ mode: 'cycling', cells: CELLS, table, horizon: 130, scheme: 'test-osrm', resume: true });
   assert.equal(res.skipped, CELLS.length);
   assert.equal(res.built, 0);
+  await clean();
+});
+
+test('buildOsrmMode drops the stale ring for a rebuilt origin, and only its own mode', async () => {
+  await clean();
+  await seed();
+  // A walking ring and a driving ring already counted for this origin.
+  for (const mode of ['walking', 'driving']) {
+    await query(
+      `insert into ring_counts (cell, mode, minutes, category, places) values ('sector:ZZ1 1', $1, 30, 'fun', 5)`, [mode]);
+    await query(
+      `insert into ring_rankings (cell, mode, minutes, category, venue_ref, rank, epic_score) values ('sector:ZZ1 1', $1, 30, 'fun', 'ref:x', 1, 50)`, [mode]);
+  }
+  const table = async (origin, dests) => dests.map((d) => ({ to: d, seconds: 600, metres: 900 }));
+  await buildOsrmMode({ mode: 'walking', cells: CELLS, table, horizon: 130, scheme: 'test-osrm', resume: false });
+  // the walking ring, counted from the reach we just replaced, is gone
+  const walk = await query(`select 1 from ring_counts where cell='sector:ZZ1 1' and mode='walking'`);
+  assert.equal(walk.rows.length, 0);
+  // the driving ring, untouched by a walking build, stays
+  const drive = await query(`select 1 from ring_counts where cell='sector:ZZ1 1' and mode='driving'`);
+  assert.equal(drive.rows.length, 1);
+  const walkRank = await query(`select 1 from ring_rankings where cell='sector:ZZ1 1' and mode='walking'`);
+  assert.equal(walkRank.rows.length, 0);
   await clean();
 });
 

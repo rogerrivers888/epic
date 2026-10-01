@@ -118,9 +118,12 @@ async function run() {
     let origins = cells;
     if (BBOX.length === 4) {
       const km = boundKm(HORIZON, mode) * 1.5;
-      const midLat = (BBOX[1] + BBOX[3]) / 2;
       const dLat = km / 111;
-      const dLng = km / (111 * Math.cos((midLat * Math.PI) / 180));
+      // A degree of longitude is shortest at the poleward edge of the box, so
+      // the margin taken there is the one that holds everywhere in it — a
+      // midpoint cosine would leave the top edge short (Codex).
+      const poleward = Math.max(Math.abs(BBOX[1]), Math.abs(BBOX[3]));
+      const dLng = km / (111 * Math.cos((poleward * Math.PI) / 180));
       origins = cells.filter((c) => c.lng >= BBOX[0] + dLng && c.lat >= BBOX[1] + dLat
         && c.lng <= BBOX[2] - dLng && c.lat <= BBOX[3] - dLat);
       console.log(`  ${origins.length} interior origins (of ${cells.length} in box), routing to all ${cells.length}`);

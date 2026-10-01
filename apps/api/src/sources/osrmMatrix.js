@@ -22,6 +22,19 @@
  *
  * Nothing licensed goes near it: OSM is ODbL, a cell is an ONS sector, and a
  * routed time over open data is our own derived fact, kept like any other.
+ *
+ * **One contract for whoever surfaces these rows.** Nothing on the household
+ * display path asks for walking or cycling today — the picker offers driving
+ * only — so these rows are written and read by nothing until that path is
+ * wired. When it is: the display fence (`domain/band.js`'s `fenceToBand`, via
+ * `routes/inspire.js`) recomputes `estimateTravelMinutes` to fence a list to the
+ * band, and that estimator is the *driving* one's sibling, not OSRM. A place
+ * OSRM routes inside the band but the straight-line estimate overstates — a
+ * genuinely walkable 7km — would be dropped from the shown list though it is in
+ * this matrix. So the routed minutes must be carried into the fence (or an
+ * OSRM-backed ring must skip the estimator fence) at the same time as the mode
+ * is offered. The rows here are correct; the fence that reads them is the piece
+ * that has to learn `method = 'osrm'`.
  */
 
 import { pool, query } from '../db.js';
@@ -175,6 +188,14 @@ export async function buildOsrmMode({
                  built_lng = excluded.built_lng, at = excluded.at`,
           [from.code, canonical, horizon, edges.length, from.lat, from.lng],
         );
+        // A ring centred here for this mode was counted from this origin's old
+        // reach; now that the reach has changed, the cached counts and rankings
+        // are stale, and `censusForRing` would go on serving them for the rest
+        // of the 30-day cycle (Codex). Drop them in the same transaction, so the
+        // next request recomputes from the routed matrix — never a half-built
+        // run leaving a ring that disagrees with the rows under it.
+        await client.query('delete from ring_counts where cell = $1 and mode = $2', [from.code, canonical]);
+        await client.query('delete from ring_rankings where cell = $1 and mode = $2', [from.code, canonical]);
         await client.query('commit');
       } catch (err) {
         await client.query('rollback').catch(() => {});
