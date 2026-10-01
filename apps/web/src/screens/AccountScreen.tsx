@@ -21,6 +21,12 @@ import { CREAM, INK, LIME, MOSS, fonts, HAIRLINE, INK_MUTED } from '../theme';
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const fullDate = (iso?: string | null) => {
   if (!iso) return '—';
+  // trial_ends_on is a calendar date ("2026-10-01"), not an instant. new Date()
+  // would read it as UTC midnight and the local getters would then show the day
+  // before west of UTC, so the components are read straight off the string
+  // (Codex, 1 Oct 2026).
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (m) return `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}`;
   const d = new Date(iso);
   return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 };

@@ -263,7 +263,8 @@ export async function retentionCohorts({ weeks = 8 } = {}) {
     `select to_char(date_trunc('week', a.created_at), 'YYYY-MM-DD') as cohort,
             count(distinct a.household_id)::int as size
        from accounts a
-      where a.created_at >= date_trunc('week', now()) - (($1 - 1) || ' weeks')::interval
+      where a.household_id is not null
+        and a.created_at >= date_trunc('week', now()) - (($1 - 1) || ' weeks')::interval
       group by 1 order by 1`,
     [weeks],
   );
@@ -271,7 +272,8 @@ export async function retentionCohorts({ weeks = 8 } = {}) {
     `with joined as (
        select a.household_id, date_trunc('week', a.created_at) as cohort
          from accounts a
-        where a.created_at >= date_trunc('week', now()) - (($1 - 1) || ' weeks')::interval
+        where a.household_id is not null
+          and a.created_at >= date_trunc('week', now()) - (($1 - 1) || ' weeks')::interval
      )
      select to_char(j.cohort, 'YYYY-MM-DD') as cohort,
             floor(extract(epoch from (date_trunc('week', e.at) - j.cohort)) / 604800)::int as week_no,
@@ -338,6 +340,7 @@ export async function engagementByAccount({ days = 30 } = {}) {
        from accounts a
        left join activity_events e
               on e.household_id = a.household_id and e.at >= now() - ($1 || ' days')::interval
+      where a.household_id is not null
       group by a.id`,
     [String(days)],
   );
