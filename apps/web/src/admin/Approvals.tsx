@@ -27,7 +27,7 @@ export function Approvals() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    try { setRows((await api.approvals('open')).approvals); } catch { setRows(null); }
+    try { setRows((await api.approvals('review')).approvals); } catch { setRows(null); }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
@@ -48,6 +48,7 @@ export function Approvals() {
       {rows.map((r) => {
         const nums = numbersLine(r.numbers);
         const failed = r.state === 'failed';
+        const unknown = r.state === 'unknown';
         return (
           <View key={r.id} style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.lineSoft, gap: 4 }}>
             {/* What it will do, in plain English, and the numbers affected. */}
@@ -65,10 +66,14 @@ export function Approvals() {
             {failed && r.result ? (
               <Text style={[type.tiny, { color: colors.overrun }]}>{`Last run failed (${r.result.status}): ${r.result.message} — approve to try again.`}</Text>
             ) : null}
+            {unknown && r.result ? (
+              <Text style={[type.tiny, { color: colors.overrun }]}>{`Ran, but the outcome is unknown: ${r.result.message} Check whether it happened before doing anything — it will NOT run again automatically.`}</Text>
+            ) : null}
             {elevated ? (
               <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: 2 }}>
-                <Button kind="primary" label={failed ? 'Approve & run again' : 'Approve & run'} loading={busy === r.id} onPress={() => void decide(r.id, 'approved')} />
-                <Button kind="secondary" label="Decline" loading={busy === r.id} onPress={() => void decide(r.id, 'declined')} />
+                {/* An unknown run must not be re-run blindly: only close it once checked. */}
+                {unknown ? null : <Button kind="primary" label={failed ? 'Approve & run again' : 'Approve & run'} loading={busy === r.id} onPress={() => void decide(r.id, 'approved')} />}
+                <Button kind="secondary" label={unknown ? 'Checked — close' : 'Decline'} loading={busy === r.id} onPress={() => void decide(r.id, 'declined')} />
               </View>
             ) : null}
           </View>

@@ -782,7 +782,7 @@ router.post('/approvals', async (req, res, next) => {
 
 router.get('/approvals', requires('view_activity'), async (req, res, next) => {
   try {
-    const state = ['pending', 'running', 'done', 'declined', 'failed', 'open', 'all'].includes(String(req.query.state)) ? String(req.query.state) : 'open';
+    const state = ['pending', 'running', 'done', 'declined', 'failed', 'unknown', 'open', 'review', 'all'].includes(String(req.query.state)) ? String(req.query.state) : 'review';
     res.json({ approvals: await approvals.listApprovals({ state }) });
   } catch (err) { next(err); }
 });
@@ -809,7 +809,7 @@ router.post('/approvals/:id/decide', requires('view_activity'), requireOwnerSign
       const row = await withTransaction(async (client) => {
         const { rows } = await client.query(
           `update approvals set state = 'declined', decided_by = $2, decided_at = now() where id = $1 and state = any($3) returning *`,
-          [req.params.id, who.actorLabel ?? null, approvals.OPEN_STATES]);
+          [req.params.id, who.actorLabel ?? null, approvals.DECLINABLE]);
         const r = rows[0] ?? null;
         if (!r) return null;
         await auditRow(client, 'approval.declined', r.id, r.request, { description: r.description, numbers: r.numbers });

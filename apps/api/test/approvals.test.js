@@ -98,6 +98,17 @@ test('a 5xx is indeterminate, a 4xx is a re-approvable failure, and a stale run 
   assert.equal((await query('select state from approvals where id = $1', [f2.id])).rows[0].state, 'unknown');
 });
 
+test('the review list includes unknown runs, which the owner can close but not re-run', async () => {
+  const filed = await approvals.fileApproval({ sessionId: AGENT, request: REQ, description: 'z', payload: {} });
+  await approvals.startRun(filed.id, { by: 'me' });
+  await approvals.finishRun(filed.id, { state: 'unknown', result: { ok: false, status: 0, message: 'lost' } });
+  assert.ok((await approvals.listApprovals({ state: 'review' })).some((a) => a.id === filed.id), 'unknown shows for review');
+  assert.equal(await approvals.startRun(filed.id, { by: 'me' }), null, 'cannot be re-run');
+  const closed = await approvals.declineApproval(filed.id, { by: 'roger@epic.day' });
+  assert.ok(closed, 'can be closed after checking');
+  assert.equal(closed.state, 'declined');
+});
+
 test('runApprovedCall refuses a bad recorded request or a missing token', async () => {
   const noToken = await runApprovedCall({ request: REQ, payload: {} }, { headers: {} }, async () => ({ ok: true, status: 200 }));
   assert.equal(noToken.ok, false);

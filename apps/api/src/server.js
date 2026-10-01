@@ -866,7 +866,9 @@ setInterval(refreshRingsDue, BAR_CHECK_EVERY_MS).unref?.();
 // with no resolution (G11, Codex 1 Oct 2026). At boot and daily.
 const reconcileApprovals = () => { void approvalsRepo.reconcileStaleRuns().catch(() => {}); };
 void indexBuilt.then(reconcileApprovals);
-setInterval(reconcileApprovals, BAR_CHECK_EVERY_MS).unref?.();
+// Close to the 10-minute grace period, so a run stranded by a restart surfaces
+// as 'unknown' in minutes, not a day (Codex, 1 Oct 2026).
+setInterval(reconcileApprovals, 5 * 60_000).unref?.();
 // The postcode directory: asked about once a month, loaded when the ONS has
 // a newer release than the one every place in the country is placed by
 // (owner, 26 Sep 2026: "Monthly check, quarterly load"). The daily tick asks;

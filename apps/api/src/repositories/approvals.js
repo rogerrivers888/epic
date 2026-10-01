@@ -14,7 +14,9 @@
 import { query } from '../db.js';
 
 /** States a request can still be acted on from. */
-export const OPEN_STATES = ['pending', 'failed'];
+export const OPEN_STATES = ['pending', 'failed'];        // can be approved (run/re-run)
+export const DECLINABLE = ['pending', 'failed', 'unknown']; // can be closed by declining
+export const REVIEW_STATES = ['pending', 'failed', 'unknown']; // what the owner still needs to see
 
 /**
  * Which calls an approval may name: a back-office write, never the approvals
@@ -48,10 +50,11 @@ export async function fileApproval({ sessionId = null, label = null, request, de
 
 /** The queue, newest first. `state` may be a single state, 'open' (pending+failed) or 'all'. */
 export async function listApprovals({ state = 'open', limit = 100 } = {}) {
+  const listStates = state === 'open' ? OPEN_STATES : state === 'review' ? REVIEW_STATES : null;
   const where = state === 'all' ? 'true'
-    : state === 'open' ? `a.state = any($1)`
+    : listStates ? `a.state = any($1)`
     : `a.state = $1`;
-  const param = state === 'open' ? OPEN_STATES : state;
+  const param = listStates ?? state;
   const { rows } = await query(
     `select a.*, s.label as session_label
        from approvals a left join api_sessions s on s.id = a.session_id
