@@ -253,8 +253,16 @@ router.post('/research', requires('manage_library'), async (req, res, next) => {
     // Whatever happened — the lock refused, the lock query failing, the run
     // throwing — the lock is released before the connection goes back to the lock
     // pool, so the next holder of that connection never inherits it.
-    if (locked) await holder.query('select pg_advisory_unlock(hashtext($1))', [researchLock(ref)]).catch(() => null);
-    holder.release();
+    let unlockFailed = false;
+    if (locked) {
+      try { await holder.query('select pg_advisory_unlock(hashtext($1))', [researchLock(ref)]); }
+      catch { unlockFailed = true; }
+    }
+    // If the unlock did not land, the session may still hold the lock. Releasing
+    // with an error destroys the connection instead of returning it to the pool,
+    // where it would answer 409 for this place for ever and could reacquire the
+    // lock reentrantly (Codex, 1 Oct 2026).
+    holder.release(unlockFailed ? new Error('advisory unlock failed; connection discarded') : undefined);
   }
 });
 
