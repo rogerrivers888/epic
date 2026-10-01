@@ -55,6 +55,7 @@ import { whySourceFailed } from '../sources/why.js';
 import { healthOf } from '../sources/meter.js';
 import { sourceOff } from '../sources/switches.js';
 import { currentHousehold } from './household.js';
+import * as costDist from '../sources/costDistribution.js';
 import { enrich } from '../sources/own.js';
 import { crowdBand, countBand } from '../domain/scoring.js';
 import { pictureFor } from '../sources/placePicture.js';
@@ -845,6 +846,32 @@ export async function censusBoardRows(slugs) {
     [slugs, single, censusRun.MAX_TILE_TRIES]);
   return rows;
 }
+
+/**
+ * The cost-band distribution of an area: how often Google holds a price level for
+ * the places the census found, so the drawer's four-step scale can be judged
+ * against real coverage. A paid Place Details per place (priced below), spent
+ * through the granted session that starts it, resumable (sources/costDistribution.js).
+ */
+router.get('/cost-distribution', requires('view_library'), async (req, res, next) => {
+  try { res.json(await costDist.status(String(req.query.area ?? ''))); } catch (err) { next(err); }
+});
+router.get('/cost-distribution/estimate', requires('view_library'), async (req, res, next) => {
+  try { res.json(await costDist.estimate(String(req.query.area ?? ''))); } catch (err) { next(err); }
+});
+router.post('/cost-distribution/start', requires('manage_library'), async (req, res, next) => {
+  try {
+    const household = await currentHousehold();
+    const run = await costDist.start({
+      areaSlug: String(req.body?.area ?? ''),
+      confirm: req.body?.confirm,
+      householdId: household.id,
+      startedBy: req.account?.email ?? null,
+    });
+    res.json({ started: true, runId: run.id, requests: run.requests });
+    void costDist.work(run.id);
+  } catch (err) { next(err); }
+});
 
 router.get('/census', requires('view_library'), async (req, res, next) => {
   try {

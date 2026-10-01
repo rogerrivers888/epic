@@ -87,6 +87,7 @@ import { refreshIfDue as refreshPostcodesIfDue } from './sources/postcodeRefresh
 import * as ground from './sources/groundCounts.js';
 import { resumeCollections } from './routes/placeIndex.js';
 import { resume as resumeSweeps } from './sources/researchSweep.js';
+import { resume as resumeCostDist } from './sources/costDistribution.js';
 import * as providerCalls from './repositories/providerCalls.js';
 import closedRoutes from './routes/closed.js';
 import * as googlePlaces from './sources/google.js';
@@ -830,6 +831,14 @@ const trySweeps = () => resumeSweeps()
   .catch((err) => console.warn(`epic-api: sweep recovery: ${err.message}`));
 setTimeout(() => { void trySweeps(); }, RESUME_AFTER_MS).unref?.();
 setInterval(() => { void trySweeps(); }, RESUME_EVERY_MS).unref?.();
+
+// The cost-band distribution pass resumes the same way: a run interrupted by a
+// deploy is picked up and finished, spending through the session it stored.
+const tryCostDist = () => resumeCostDist()
+  .then((r) => { if (r) console.log(`epic-api: cost distribution — resumed run ${r.id} (${r.state})`); })
+  .catch((err) => console.warn(`epic-api: cost-distribution recovery: ${err.message}`));
+setTimeout(() => { void tryCostDist(); }, RESUME_AFTER_MS + 15_000).unref?.();
+setInterval(() => { void tryCostDist(); }, RESUME_EVERY_MS).unref?.();
 
 // The stations table fills itself in the same way, and for a stronger reason:
 // every stay search with a station condition reads it, and until it is complete
