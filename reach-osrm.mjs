@@ -1,0 +1,132 @@
+/**
+ * Stand OSRM up over an OSM extract, build the walking and cycling matrices,
+ * tear OSRM down.
+ *
+ * Owner, 1 Oct 2026: "build OSRM walking and cycling on our GB OSM extract, as a
+ * batch build (compute the matrices, then tear OSRM down, ~£0/month)."
+ *
+ * This is the operator's entry point; the matrix-writing core is
+ * `apps/api/src/sources/osrmMatrix.js`. OSRM runs only while this script does:
+ * it starts one `osrm-routed` container per profile, asks it the whole grid a
+ * `/table` request at a time, writes the rows (`method = 'osrm'`), and stops the
+ * container. Production never runs a router — the served path reads the stored
+ * rows. The script is at the repo root and `.dockerignore`d (`/*.mjs`), so it is
+ * the record in git and never ships in the image.
+ *
+ * Before running it, build the `.osrm` files once per profile (needs real RAM;
+ * the whole-GB extract wants ~16GB for `osrm-extract`, so do it on a machine
+ * with it, or a region at a time):
+ *
+ *   docker run --rm -v $DIR:/data $IMG osrm-extract   -p /opt/foot.lua    /data/<x>.pbf
+ *   docker run --rm -v $DIR:/data $IMG osrm-partition                     /data/<x>.osrm
+ *   docker run --rm -v $DIR:/data $IMG osrm-customize                     /data/<x>.osrm
+ *   (repeat with /opt/bicycle.lua into a second dir for cycling)
+ *
+ * Then:
+ *
+ *   EPIC_OSRM_DATA_WALKING=$DIR_FOOT/<x>.osrm \
+ *   EPIC_OSRM_DATA_CYCLING=$DIR_BIKE/<x>.osrm \
+ *   node reach-osrm.mjs both
+ *
+ * Cells OSRM cannot route to (off the extract, an island with no path) are
+ * dropped, never written as zero — so a regional extract honestly builds only
+ * the cells it covers, and the full-GB build fills the rest. Resumable: an
+ * origin already built to the horizon by OSRM is skipped.
+ *
+ * Usage: node reach-osrm.mjs [walking|cycling|both]
+ */
+import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { query, pool } from './apps/api/src/db.js';
+import { allCells } from './apps/api/src/repositories/reach.js';
+import { HORIZON_MINUTES } from './apps/api/src/domain/reach.js';
+import { osrmTable, buildOsrmMode } from './apps/api/src/sources/osrmMatrix.js';
+
+const IMAGE = process.env.EPIC_OSRM_IMAGE || 'ghcr.io/project-osrm/osrm-backend:latest';
+const PORT = Number(process.env.EPIC_OSRM_PORT || 5055);
+const SCHEME = process.env.EPIC_OSRM_SCHEME || 'sector';
+const HORIZON = Number(process.env.EPIC_OSRM_HORIZON || HORIZON_MINUTES);
+const RESUME = process.env.EPIC_OSRM_RESUME !== '0';
+const CHUNK = Number(process.env.EPIC_OSRM_CHUNK || 300);
+const PROFILE = { walking: 'foot', cycling: 'bike' };
+const DATA = { walking: process.env.EPIC_OSRM_DATA_WALKING, cycling: process.env.EPIC_OSRM_DATA_CYCLING };
+// A regional extract routes honestly only for cells inside it: OSRM snaps a
+// coordinate off the extract to the nearest node it *does* hold, which invents a
+// time rather than refusing one. So when building from a region (not whole-GB),
+// fence the cells to its bounding box — "minLng,minLat,maxLng,maxLat" — and the
+// rest of the grid is left for the build that covers it.
+const BBOX = (process.env.EPIC_OSRM_BBOX || '').split(',').map(Number).filter((n) => !Number.isNaN(n));
+const inBbox = BBOX.length === 4
+  ? (c) => c.lng >= BBOX[0] && c.lat >= BBOX[1] && c.lng <= BBOX[2] && c.lat <= BBOX[3]
+  : () => true;
+
+const want = (process.argv[2] || 'both').toLowerCase();
+const modes = want === 'both' ? ['walking', 'cycling'] : [want];
+for (const m of modes) {
+  if (!PROFILE[m]) { console.error(`Unknown mode "${m}" — walking, cycling or both.`); process.exit(1); }
+  if (!DATA[m]) { console.error(`Set EPIC_OSRM_DATA_${m.toUpperCase()} to the ${PROFILE[m]} .osrm base.`); process.exit(1); }
+  // The `.osrm` path is a base; the files on disk are `<base>.mldgr` and the
+  // rest. `.fileIndex` is written by osrm-extract for any dataset, so it is the
+  // one that says "this was built."
+  if (!existsSync(`${DATA[m]}.fileIndex`)) { console.error(`No OSRM data at ${DATA[m]}.* — build it first (see the header).`); process.exit(1); }
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Start osrm-routed for a profile's data, return its container id. */
+function startRouted(dataBase) {
+  const dir = path.dirname(dataBase);
+  const base = path.basename(dataBase);
+  const id = execFileSync('docker', [
+    'run', '-d', '--rm', '-p', `127.0.0.1:${PORT}:5000`, '-v', `${dir}:/data`,
+    IMAGE, 'osrm-routed', '--algorithm', 'mld', '--max-table-size', String(CHUNK + 50), `/data/${base}`,
+  ], { encoding: 'utf8' }).trim();
+  return id;
+}
+
+/** Wait until the router answers a /nearest, or give up. */
+async function waitReady(sampleCell) {
+  const url = `http://127.0.0.1:${PORT}/nearest/v1/driving/${sampleCell.lng},${sampleCell.lat}`;
+  for (let i = 0; i < 60; i += 1) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) { const b = await res.json(); if (b.code === 'Ok') return true; }
+    } catch { /* not up yet */ }
+    await sleep(1000);
+  }
+  return false;
+}
+
+async function run() {
+  const all = await allCells({ scheme: SCHEME });
+  if (!all.length) { console.error(`No cells for scheme "${SCHEME}".`); process.exit(1); }
+  const cells = all.filter(inBbox);
+  if (!cells.length) { console.error('The bounding box left no cells.'); process.exit(1); }
+  const sample = cells[Math.floor(cells.length / 2)];
+  console.log(`${cells.length}/${all.length} cells${BBOX.length === 4 ? ' in bbox' : ''}, horizon ${HORIZON} min, resume ${RESUME ? 'on' : 'off'}.`);
+
+  for (const mode of modes) {
+    let container = null;
+    const t0 = Date.now();
+    console.log(`\n== ${mode} (${PROFILE[mode]}) ==`);
+    try {
+      container = startRouted(DATA[mode]);
+      console.log(`osrm-routed ${container.slice(0, 12)} on :${PORT}, waiting…`);
+      if (!(await waitReady(sample))) throw new Error('osrm-routed did not become ready in 60s');
+      const table = osrmTable(`http://127.0.0.1:${PORT}`, { profile: PROFILE[mode] });
+      const res = await buildOsrmMode({
+        mode, cells, table, horizon: HORIZON, scheme: SCHEME, resume: RESUME, chunk: CHUNK,
+        onProgress: ({ done, of, built, skipped, pairs }) =>
+          console.log(`  ${done}/${of} (built ${built}, skipped ${skipped}, ${pairs} pairs)`),
+      });
+      const secs = Math.round((Date.now() - t0) / 1000);
+      console.log(`  done: built ${res.built}, skipped ${res.skipped}, ${res.pairs} pairs in ${secs}s (run ${res.runId}).`);
+    } finally {
+      if (container) { try { execFileSync('docker', ['stop', container], { stdio: 'ignore' }); } catch { /* already gone */ } }
+    }
+  }
+  await pool.end();
+}
+
+run().catch((err) => { console.error(err); process.exit(1); });

@@ -1,0 +1,165 @@
+/**
+ * The walking and cycling matrices, routed over the road network with OSRM.
+ *
+ * Owner, 1 Oct 2026: "build OSRM walking and cycling on our GB OSM extract, as
+ * a batch build (compute the matrices, then tear OSRM down, ~£0/month)."
+ *
+ * This is the half of the reach matrix that distance-from-a-straight-line
+ * cannot do honestly. Driving was fitted against real road times and is good to
+ * a p95 of seven minutes (`domain/travel.js`, 20 Sep 2026); walking and cycling
+ * were never fitted, because a footpath network is not a scaled-down road one —
+ * a towpath, a park, a bridge a car may not use all change the answer. So those
+ * two modes are routed for real, once, over the OpenStreetMap extract, and the
+ * answer is stored exactly like the estimator's: rows in `reach` keyed by mode,
+ * a `cell_builds` marker per origin, a `reach_runs` row for the whole pass. The
+ * only difference a reader sees is `method = 'osrm'` where the estimator writes
+ * `'estimate'` (migration 139 reserved the column for exactly this).
+ *
+ * OSRM itself does not run in production. The matrices are computed in a batch,
+ * written to Postgres, and then OSRM is torn down — the served path reads the
+ * stored rows and never calls a router. `reach-osrm.mjs` at the repo root is the
+ * operator entry point that stands OSRM up, calls `buildOsrmMode`, and stops it.
+ *
+ * Nothing licensed goes near it: OSM is ODbL, a cell is an ONS sector, and a
+ * routed time over open data is our own derived fact, kept like any other.
+ */
+
+import { query } from '../db.js';
+import { boundKm, HORIZON_MINUTES } from '../domain/reach.js';
+import { kmBetween, travelMode } from '../domain/travel.js';
+
+/**
+ * An OSRM `/table` client, bound to one running `osrm-routed`.
+ *
+ * `osrm-routed` serves whichever profile it was built with; the profile word in
+ * the path is only a label, so one base URL answers for whatever extract it was
+ * handed. One origin against many destinations, durations and distances in one
+ * request — the shape `buildOsrmMode` wants.
+ */
+export function osrmTable(baseUrl, { fetchImpl = fetch, profile = 'driving' } = {}) {
+  const base = baseUrl.replace(/\/$/, '');
+  return async function table(origin, dests) {
+    if (!dests.length) return [];
+    const coords = [origin, ...dests].map((c) => `${c.lng},${c.lat}`).join(';');
+    const destIdx = dests.map((_, i) => i + 1).join(';');
+    const url = `${base}/table/v1/${profile}/${coords}?sources=0&destinations=${destIdx}&annotations=duration,distance`;
+    const res = await fetchImpl(url);
+    if (!res.ok) throw new Error(`osrm table ${res.status}`);
+    const body = await res.json();
+    // A well-formed answer is the only thing that counts as one: a body without
+    // `code: 'Ok'` is a router that could not speak, not a table of zeroes
+    // (CLAUDE.md, the can't-speak rule). Let the caller decide, by throwing.
+    if (body.code !== 'Ok') throw new Error(`osrm ${body.code ?? 'no code'}`);
+    const durations = body.durations?.[0] ?? [];
+    const distances = body.distances?.[0] ?? [];
+    return dests.map((d, i) => ({
+      to: d,
+      // `null` where OSRM could not route to a cell (off the extract, an island
+      // with no path). Carried through as null, never coerced to 0.
+      seconds: durations[i] ?? null,
+      metres: distances[i] ?? null,
+    }));
+  };
+}
+
+/**
+ * Build one mode's matrix for the given cells, routed through `table`.
+ *
+ * Written exactly like `repositories/reach.js#buildMatrix`: the rows for an
+ * origin are replaced inside their own statement, and the `cell_builds` marker
+ * is written as the origin finishes, so an interrupted pass leaves a table that
+ * is short rather than wrong and `resume` can pick it up.
+ *
+ *   `cells`     the grid: `{ code, lat, lng }`, as `allCells` returns.
+ *   `table`     an OSRM client from `osrmTable` (or any `(origin, dests) =>`
+ *               `[{ to, seconds, metres }]` for a test).
+ *   `horizon`   how far out to build, in minutes — the cap plus the edge
+ *               allowance, same as the estimator.
+ *   `resume`    skip an origin already built to at least `horizon` by OSRM.
+ *   `chunk`     destinations per `/table` request (OSRM's `--max-table-size`
+ *               must be at least this plus one).
+ */
+export async function buildOsrmMode({
+  mode, cells, table, horizon = HORIZON_MINUTES, scheme = 'sector',
+  resume = true, chunk = 300, onProgress = null,
+} = {}) {
+  const canonical = travelMode(mode);
+  if (canonical !== 'walking' && canonical !== 'cycling') {
+    // Driving is the fitted estimator's and stays there; transit has no network
+    // here and keeps its marked straight-line estimate (owner, 1 Oct 2026).
+    throw new Error(`osrm matrix is walking or cycling, not ${mode}`);
+  }
+  const bound = boundKm(horizon, canonical);
+  const { rows: [run] } = await query(
+    `insert into reach_runs (scheme, mode, method, cap_minutes, cells)
+     values ($1, $2, 'osrm', $3, $4) returning id`,
+    [scheme, canonical, horizon, cells.length],
+  );
+  let pairs = 0;
+  let built = 0;
+  let skipped = 0;
+  try {
+    for (let i = 0; i < cells.length; i += 1) {
+      const from = cells[i];
+      if (resume) {
+        const { rows } = await query(
+          `select 1 from cell_builds where from_cell = $1 and mode = $2
+             and method = 'osrm' and cap_minutes >= $3`,
+          [from.code, canonical, horizon],
+        );
+        if (rows.length) { skipped += 1; continue; }
+      }
+      // The straight-line bound only decides which cells are worth asking OSRM
+      // about; OSRM decides the real time. Generous on purpose — a footpath or a
+      // towpath can be shorter than the open-road bound, never longer.
+      const cands = cells.filter((c) => c.code !== from.code
+        && Math.abs(c.lat - from.lat) * 111 <= bound
+        && kmBetween(from, c) <= bound);
+      // A cell always reaches itself in nothing, same as the estimator — a
+      // search that starts in SL5 0 must find the places in SL5 0.
+      const edges = [{ to_cell: from.code, minutes: 0, km: 0 }];
+      for (let j = 0; j < cands.length; j += chunk) {
+        const slice = cands.slice(j, j + chunk);
+        const ans = await table(from, slice);
+        for (const a of ans) {
+          if (a.seconds == null) continue; // OSRM could not route to it — drop, never 0
+          const minutes = Math.round(a.seconds / 60);
+          if (minutes > horizon) continue;
+          const km = a.metres != null
+            ? Math.round(a.metres / 10) / 100
+            : Math.round(kmBetween(from, a.to) * 100) / 100;
+          edges.push({ to_cell: a.to.code, minutes, km });
+        }
+      }
+      await query('delete from reach where from_cell = $1 and mode = $2', [from.code, canonical]);
+      await query(
+        `insert into reach (from_cell, to_cell, mode, minutes, km, method)
+         select $1, t, $2, m, k, 'osrm'
+           from unnest($3::text[], $4::smallint[], $5::real[]) as u(t, m, k)
+         on conflict (from_cell, to_cell, mode)
+           do update set minutes = excluded.minutes, km = excluded.km, method = excluded.method`,
+        [from.code, canonical, edges.map((e) => e.to_cell), edges.map((e) => e.minutes), edges.map((e) => e.km)],
+      );
+      await query(
+        `insert into cell_builds (from_cell, mode, cap_minutes, pairs, method, built_lat, built_lng, at)
+         values ($1, $2, $3, $4, 'osrm', $5, $6, now())
+         on conflict (from_cell, mode) do update
+           set cap_minutes = excluded.cap_minutes, pairs = excluded.pairs,
+               method = excluded.method, built_lat = excluded.built_lat,
+               built_lng = excluded.built_lng, at = excluded.at`,
+        [from.code, canonical, horizon, edges.length, from.lat, from.lng],
+      );
+      pairs += edges.length;
+      built += 1;
+      if (onProgress && i % 100 === 0) {
+        try { onProgress({ done: i + 1, of: cells.length, built, skipped, pairs }); } catch { /* not the build */ }
+      }
+    }
+    await query('update reach_runs set state = $2, pairs = $3, finished_at = now() where id = $1', [run.id, 'done', pairs]);
+  } catch (err) {
+    await query('update reach_runs set state = $2, why = $3, pairs = $4, finished_at = now() where id = $1',
+      [run.id, 'failed', String(err?.message ?? err).slice(0, 400), pairs]);
+    throw err;
+  }
+  return { mode: canonical, cells: cells.length, built, skipped, pairs, runId: run.id };
+}
