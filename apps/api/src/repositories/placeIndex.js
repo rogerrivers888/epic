@@ -1289,14 +1289,17 @@ const correctPlaceCountriesFromPostcode = async (q = query) => {
  * schedule), and the next settle/reindex applies it. A genuine error — a real SQL
  * fault, not mere contention — still propagates and is not swallowed.
  */
-export async function backfillCountriesFromPostcodes() {
+export async function backfillCountriesFromPostcodes(release = null) {
   const BUSY = Symbol('build-lock-busy');
   const result = await underTheBuildLock(async () => {
     await normaliseOutcodeCountries();
     return correctPlaceCountriesFromPostcode();
   }, BUSY, { wait: true });
   if (result === BUSY) return { corrected: 0, deferred: true };
-  await stampCountryBackfilled();
+  // Stamp the release just loaded, passed in — NOT loaded_release, which the caller
+  // records only after this returns, so reading it here would stamp the previous
+  // release and make the next settle redo the whole backfill (Codex).
+  if (release) await query('update postcode_releases set country_backfilled_release = $1 where one', [release]);
   return { corrected: result, deferred: false };
 }
 

@@ -95,7 +95,7 @@ test('a GB outcode wrongly stamped non-GB is normalised, so its places resolve t
   assert.equal(await countryOf(ref), 'GB', 'and the place follows the corrected outcode, not its IE stamp');
 });
 
-test('backfillCountriesFromPostcodes normalises the locality and requeues the place', async () => {
+test('backfillCountriesFromPostcodes normalises the locality and requeues the place', async (t) => {
   const ref = 'osm:node/cfp-backfill';
   await query(`insert into postcodes (pcds, sector, outcode, lat, lng, source)
                values ('ZZ6 1AA','ZZ6 1','ZZ6',51.5,-0.6,'test') on conflict (pcds) do nothing`);
@@ -105,12 +105,15 @@ test('backfillCountriesFromPostcodes normalises the locality and requeues the pl
   await query(`insert into place_records (venue_ref, postcode, updated_at) values ($1,'ZZ6 1AA', now())
                on conflict (venue_ref) do update set postcode = excluded.postcode`, [ref]);
   await query('update place_index set placed_at = now() where venue_ref = $1', [ref]);
-  const { corrected, deferred } = await index.backfillCountriesFromPostcodes();
+  t.after(() => query(`update postcode_releases set country_backfilled_release = null where one`));
+  const { corrected, deferred } = await index.backfillCountriesFromPostcodes('2099-03');
   assert.equal(deferred, false, 'the lock was free, so it ran');
   assert.ok(corrected >= 1, 'it corrected at least this place');
   const { rows: [pi] } = await query('select country_code, placed_at from place_index where venue_ref = $1', [ref]);
   assert.equal(pi.country_code, 'GB', 'the GB outcode (ZZ6) wins over the IE stamp');
   assert.equal(pi.placed_at, null, 'and the place is requeued so settle refiles it under GB');
+  const { rows: [rel] } = await query('select country_backfilled_release from postcode_releases where one');
+  assert.equal(rel.country_backfilled_release, '2099-03', 'it stamps the release it was handed, not the stale loaded_release');
 });
 
 test('a deferred backfill is applied when it is pending, and stamped so it is not redone', async (t) => {
