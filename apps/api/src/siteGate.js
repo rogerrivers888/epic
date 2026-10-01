@@ -125,6 +125,29 @@ export function basicAuthOk(header) {
   return okUser && okPass;
 }
 
+/**
+ * Whether a refused request should carry the `WWW-Authenticate: Basic` challenge.
+ *
+ * The challenge is what makes a browser pop its native username/password dialog.
+ * That is the intended way in for the owner and testers *typing the API's address
+ * into a browser* — a genuine top-level navigation. But the signed-in web app
+ * reaches this same 401 on its background XHR/fetch and on every `<img>` it loads
+ * before a session is in hand, and a challenge on those makes the browser throw
+ * the dialog again and again, every few minutes, with no way to dismiss it (owner
+ * blocked on exactly this, 1 Oct 2026). Those callers must get a plain JSON 401
+ * the app already handles, and no dialog.
+ *
+ * A navigation announces itself with `Sec-Fetch-Mode: navigate` wherever the
+ * browser sends fetch metadata (every current one). Where it does not, an
+ * `Accept` that asks for `text/html` is the fallback signal of a page load;
+ * XHR/fetch and `<img>` ask for JSON, `*\/*`, or an image type, never HTML.
+ */
+function wantsBasicChallenge(req) {
+  const mode = String(req.headers['sec-fetch-mode'] || '').toLowerCase();
+  if (mode) return mode === 'navigate';
+  return String(req.headers.accept || '').toLowerCase().includes('text/html');
+}
+
 /** The middleware, mounted first (server.js). See the file header for the model. */
 export async function siteGate(req, res, next) {
   if (!siteGateOn()) return next();
@@ -170,6 +193,9 @@ export async function siteGate(req, res, next) {
   // A session from before the gate's cutoff is treated as no session — it is a
   // token the launch is meant to have retired (see gateSince above).
   if (session && !predatesGate(session)) { req.siteGateSession = session; return next(); }
-  res.set('WWW-Authenticate', 'Basic realm="Epic", charset="UTF-8"');
+  // Only a genuine page navigation gets the Basic challenge; the app's XHR and
+  // images get a plain JSON 401, so the browser does not pop its password dialog
+  // on every background request (wantsBasicChallenge above).
+  if (wantsBasicChallenge(req)) res.set('WWW-Authenticate', 'Basic realm="Epic", charset="UTF-8"');
   return res.status(401).json({ error: 'coming_soon', message: 'Epic is not open yet.' });
 }

@@ -120,7 +120,40 @@ test('deny by default: no password and no session is refused, whatever the path'
       assert.equal(res.statusCode, 401);
       assert.equal(res.body.error, 'coming_soon');
       assert.equal(res.headers['x-robots-tag'], 'noindex');
-      assert.match(res.headers['www-authenticate'], /^Basic/);
+      // No fetch metadata and no HTML Accept: this is how the app's XHR looks, so
+      // it must get a plain JSON 401 with no Basic challenge — otherwise the
+      // browser pops its password dialog on every background request.
+      assert.equal(res.headers['www-authenticate'], undefined, `${req.path} must not challenge a non-navigation`);
+    }
+  });
+});
+
+test('the Basic challenge is sent only for a real page navigation, never for XHR or an <img>', async () => {
+  await withEnv({ SITE_GATE: null, GATE_USER: 'u', GATE_PASSWORD: 'p' }, async () => {
+    // A top-level navigation — the owner or a tester typing the API's address in a
+    // browser — gets the challenge, so the native sign-in dialog still appears.
+    const nav = await run(mockReq({ headers: { 'sec-fetch-mode': 'navigate' } }));
+    assert.equal(nav.res.statusCode, 401);
+    assert.match(nav.res.headers['www-authenticate'], /^Basic/, 'a navigation is challenged');
+
+    // Where a browser sends no fetch metadata, an HTML Accept is the fallback.
+    const html = await run(mockReq({ headers: { accept: 'text/html,application/xhtml+xml' } }));
+    assert.match(html.res.headers['www-authenticate'], /^Basic/, 'an HTML page load is challenged');
+
+    // The app's own calls must never be challenged — no dialog on a background poll.
+    const cases = {
+      'an XHR (cors) with a JSON Accept': { 'sec-fetch-mode': 'cors', accept: 'application/json' },
+      'an image load': { 'sec-fetch-mode': 'no-cors', accept: 'image/avif,image/webp,*/*' },
+      'a same-origin fetch': { 'sec-fetch-mode': 'same-origin' },
+      'a JSON Accept with no fetch metadata': { accept: 'application/json' },
+      'a wildcard Accept with no fetch metadata': { accept: '*/*' },
+    };
+    for (const [label, headers] of Object.entries(cases)) {
+      const { res, nexted } = await run(mockReq({ headers }));
+      assert.equal(nexted, false, `${label} is still refused`);
+      assert.equal(res.statusCode, 401, `${label} still gets a 401`);
+      assert.equal(res.body.error, 'coming_soon');
+      assert.equal(res.headers['www-authenticate'], undefined, `${label} is not challenged`);
     }
   });
 });
