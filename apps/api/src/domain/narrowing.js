@@ -171,11 +171,15 @@ export function cathedralAbbeyMinster(signals) {
 export function visitorFacilities(signals) {
   const out = [];
   const t = signals.osmTags ?? {};
-  if (signals.openingHours || t.opening_hours) out.push('opening hours');
-  if (signals.website || t.website || t['contact:website']) out.push('a website');
-  if (t.tourism) out.push(`OSM tourism=${t.tourism}`);
-  if (t.fee != null && t.fee !== '') out.push('an admission fee tag');
-  if (t.wheelchair) out.push('a wheelchair-access tag');
+  // A negative or sentinel value is not a facility: wheelchair=no says access is
+  // absent, opening_hours=closed/off is not a schedule, fee=no is not a fee
+  // (Codex). Treat only real values as evidence.
+  const neg = (v) => ['', 'no', 'none', 'false', '0', 'off', 'closed'].includes(String(v ?? '').trim().toLowerCase());
+  if (signals.openingHours || (t.opening_hours && !neg(t.opening_hours))) out.push('opening hours');
+  if (signals.website || (t.website && !neg(t.website)) || (t['contact:website'] && !neg(t['contact:website']))) out.push('a website');
+  if (t.tourism && !neg(t.tourism)) out.push(`OSM tourism=${t.tourism}`);
+  if (t.fee != null && !neg(t.fee)) out.push('an admission fee tag');
+  if (t.wheelchair && !neg(t.wheelchair)) out.push('a wheelchair-access tag');
   return [...new Set(out)];
 }
 

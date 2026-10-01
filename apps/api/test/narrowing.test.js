@@ -263,3 +263,51 @@ test('an atlas church whose attraction osm_ref carries opening_hours is kept on 
   assert.ok(kept, 'kept on OSM opening hours read through attractions.osm_ref');
   assert.match(kept.why, /opening hours/);
 });
+
+test('negative or sentinel OSM values are not visitor facilities (Codex)', () => {
+  // wheelchair=no is absence of access, not a facility; closed/off/no/fee=no too.
+  assert.deepEqual(visitorFacilities({ osmTags: { wheelchair: 'no', fee: 'no', opening_hours: 'closed', tourism: 'no' } }), []);
+  // Real values do fire.
+  assert.ok(visitorFacilities({ osmTags: { wheelchair: 'yes' } }).length === 1);
+  assert.ok(visitorFacilities({ osmTags: { opening_hours: 'Mo-Su 09:00-17:00' } }).includes('opening hours'));
+  assert.ok(visitorFacilities({ osmTags: { tourism: 'attraction' } }).length === 1);
+  assert.ok(visitorFacilities({ osmTags: { fee: 'yes' } }).length === 1);
+  // wheelchair=limited is partial provision — still a signal.
+  assert.ok(visitorFacilities({ osmTags: { wheelchair: 'limited' } }).length === 1);
+});
+
+test('an atlas place with a Wikidata id but no article is not kept on the article signal (Codex)', async () => {
+  const { rows: [reg] } = await query('select slug from regions limit 1');
+  // Two atlas churches: one with a Wikipedia article, one with only a wikidata id.
+  for (const [slug, ext, wurl] of [['nw-article', 'wikidata:Q77001', 'https://en.wikipedia.org/wiki/x'], ['nw-idonly', 'wikidata:Q77002', null]]) {
+    await query(
+      `insert into attractions (region_slug, name, slug, external_ref, wikidata_id, wikipedia_url)
+         values ($1, 'St Nowhere', $2, $3, substr($3,10), $4) on conflict do nothing`, [reg.slug, slug, ext, wurl]);
+    await query('insert into place_index (venue_ref) values ($1) on conflict do nothing', [ext]);
+    await query(`insert into place_subcategories (venue_ref, category, subcategory, area_slug) values ($1,'culture','churches','sl5') on conflict do nothing`, [ext]);
+  }
+  const out = await narrowing.narrowingPreview({ scope: 'estate' });
+  const ch = out.subcategories.find((s) => s.key === 'churches');
+  const kept = new Set(ch.examplesKept.map((e) => e.ref));
+  const notKept = new Set([...(ch.examplesDropped ?? []), ...(ch.examplesCantSpeak ?? [])].map((e) => e.ref));
+  assert.ok(kept.has('wikidata:Q77001'), 'the one with an article is kept');
+  assert.ok(!kept.has('wikidata:Q77002'), 'the id-only one is not kept on the article rule');
+  assert.ok(notKept.has('wikidata:Q77002'), 'it falls to dropped or can’t-speak, never a false keep');
+});
+
+test('a neighbour’s listing is not attributed by proximity alone — the names must agree (Codex)', async () => {
+  const load = '22222222-2222-2222-2222-222222222222';
+  await query(`update owned_source_loads set state='done', live_load=$1, load_id=$1, finished_at=now() where source='historic-england'`, [load]);
+  // A listed church, and a war memorial 20 m away in its churchyard.
+  await seedPlace('google:namech', { subcategory: 'churches', record: { name: 'St Andrew the Great' }, point: { lat: 52.20500, lng: 0.12100 } });
+  await seedPlace('google:yardmem', { subcategory: 'monuments-memorials', record: { name: 'War Memorial' }, point: { lat: 52.20503, lng: 0.12104 } });
+  const { rows: [eng] } = await query(`select slug from localities where kind='county' and nation='England' limit 1`);
+  for (const r of ['google:namech', 'google:yardmem']) await query('insert into place_areas (venue_ref, area_slug) values ($1,$2) on conflict do nothing', [r, eng.slug]);
+  await query(`insert into heritage_entries (list_entry, layer, name, grade, lat, lng, load_id)
+                 values (7654321,'listed-building','Church of St Andrew the Great','I',52.20502,0.12102,$1) on conflict do nothing`, [load]);
+  const out = await narrowing.narrowingPreview({ scope: 'estate' });
+  const kept = new Set(out.subcategories.find((s) => s.key === 'churches').examplesKept.map((e) => e.ref));
+  const memDropped = new Set(out.subcategories.find((s) => s.key === 'monuments-memorials').examplesDropped.map((e) => e.ref));
+  assert.ok(kept.has('google:namech'), 'the church whose name matches the listing is kept');
+  assert.ok(memDropped.has('google:yardmem'), 'the churchyard war memorial does not inherit the church’s Grade I');
+});

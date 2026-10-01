@@ -63,9 +63,9 @@ export async function gatherSignals(refs, { heritageLoad: heLoad = null } = {}) 
        coalesce(case when (pr.provenance ->> 'name') is not null then pr.name end, at.name) as name,
        pi.google_types,
        coalesce((select array_agg(l.label) from place_index_labels l where l.venue_ref = r.venue_ref), '{}') as labels,
-       (pr.wikidata_id is not null or pr.wikipedia_url is not null
-          or at.wikidata_id is not null or at.wikipedia_url is not null
-          or r.venue_ref like 'wikidata:%') as has_wikipedia,
+       -- A real encyclopedia article, not merely a Wikidata id (every atlas row
+       -- has one): the url is the evidence of an article (Codex).
+       (pr.wikipedia_url is not null or at.wikipedia_url is not null) as has_wikipedia,
        (pr.opening_hours is not null and pr.opening_hours <> '') as pr_hours,
        (pr.website is not null and pr.website <> '') as pr_website,
        osmf.tags as osm_tags,
@@ -112,11 +112,22 @@ export async function gatherSignals(refs, { heritageLoad: heLoad = null } = {}) 
        from heritage_entries h
        where $2::uuid is not null and h.load_id = $2::uuid
          and coalesce(op.lat, pi.lat, pr.lat) is not null
-         -- ~60-65 m box around the best point we hold. Grade I / scheduled /
-         -- World Heritage designations are sparse, so a hit this close is the
-         -- place itself; it is a proximity match for a preview, flagged as such.
+         -- ~60-65 m box around the best point we hold AND the listing's name
+         -- agreeing with the venue's — a churchyard clusters a plaque, a memorial
+         -- and the church within 60 m, so proximity alone attributed the church's
+         -- Grade I to its neighbours (Codex). Fail closed: no owned name, no match.
          and h.lat between coalesce(op.lat, pi.lat, pr.lat) - 0.0006 and coalesce(op.lat, pi.lat, pr.lat) + 0.0006
          and h.lng between coalesce(op.lng, pi.lng, pr.lng) - 0.0009 and coalesce(op.lng, pi.lng, pr.lng) + 0.0009
+         and exists (
+           select 1 from unnest(string_to_array(lower(regexp_replace(
+             coalesce(case when (pr.provenance ->> 'name') is not null then pr.name end, at.name, ''),
+             '[^a-z0-9 ]', ' ', 'g')), ' ')) as vt
+            where length(vt) >= 4
+              and vt not in ('church','saint','chapel','abbey','priory','friary','minster','cathedral',
+                             'house','hall','castle','tower','bridge','viaduct','memorial','monument',
+                             'garden','gardens','park','green','the','and','war','old','great','little',
+                             'grade','listed','building','former','parish')
+              and position(vt in lower(h.name)) > 0)
      ) her on true`,
     [refs, heLoad]);
 
