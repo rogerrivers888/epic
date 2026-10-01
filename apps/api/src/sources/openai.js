@@ -1,3 +1,4 @@
+import { assertBackOfficeSpendAllowed } from '../context.js';
 /**
  * OpenAI, for the two halves of hearing somebody (owner's brief, 8 Sep 2026).
  *

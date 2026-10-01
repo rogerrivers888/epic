@@ -76,6 +76,14 @@ export const runAsSpender = ({ householdId = null, sessionId = null, backOffice,
  * back office — never does. Background jobs enter with neither, so they are not
  * treated as back-office.
  */
+export function assertBackOfficeSpendAllowed(what = 'spend') {
+  const { backOffice, elevated } = currentSpender();
+  if (backOffice && !elevated) {
+    throw Object.assign(new Error(`A back-office ${what} needs you signed in personally with your e-mail link.`),
+      { code: 'needs_personal_sign_in', status: 403 });
+  }
+}
+
 export function currentSpender() {
   const store = storage.getStore();
   if (store?.spender) return store.spender;
