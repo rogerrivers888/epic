@@ -95,6 +95,23 @@ test('a GB outcode wrongly stamped non-GB is normalised, so its places resolve t
   assert.equal(await countryOf(ref), 'GB', 'and the place follows the corrected outcode, not its IE stamp');
 });
 
+test('backfillCountriesFromPostcodes normalises the locality and requeues the place', async () => {
+  const ref = 'osm:node/cfp-backfill';
+  await query(`insert into postcodes (pcds, sector, outcode, lat, lng, source)
+               values ('ZZ6 1AA','ZZ6 1','ZZ6',51.5,-0.6,'test') on conflict (pcds) do nothing`);
+  await query(`insert into localities (slug, name, kind, country_code) values ('zz6','ZZ6','postcode','IE')
+               on conflict (slug) do update set country_code = 'IE'`);
+  await index.noteMany([{ ref, lat: 51.5, lng: -0.6, countryCode: 'IE' }], { source: 'osm' });
+  await query(`insert into place_records (venue_ref, postcode, updated_at) values ($1,'ZZ6 1AA', now())
+               on conflict (venue_ref) do update set postcode = excluded.postcode`, [ref]);
+  await query('update place_index set placed_at = now() where venue_ref = $1', [ref]);
+  const n = await index.backfillCountriesFromPostcodes();
+  assert.ok(n >= 1, 'it corrected at least this place');
+  const { rows: [pi] } = await query('select country_code, placed_at from place_index where venue_ref = $1', [ref]);
+  assert.equal(pi.country_code, 'GB', 'the GB outcode (ZZ6) wins over the IE stamp');
+  assert.equal(pi.placed_at, null, 'and the place is requeued so settle refiles it under GB');
+});
+
 test('an Eircode routing key is not reclassified as GB — syntax overlaps but ONS does not know it', async () => {
   // D02 is a valid Eircode routing key and matches the UK outward-code shape, but it
   // is not a GB outcode, so ONS has no row for it and normalisation must leave it IE.

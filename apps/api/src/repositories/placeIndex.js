@@ -1226,6 +1226,32 @@ export async function settleCountryFromPostcode(refs = null, q = query) {
   return rowCount ?? 0;
 }
 
+/**
+ * The whole-corpus country correction, repeatable — run after the ONS postcode load
+ * (loadPostcodes.js) as well as once by migration 310 (owner, 1 Oct 2026; Option C).
+ * It has to be repeatable because `postcodes` is empty until `npm run postcodes`
+ * runs, which on a fresh install is after the migrations, so the migration alone
+ * would match nothing and never run again (Codex). Two steps: (1) a postcode
+ * locality ONS knows as a GB outcode is GB — undoing a legacy edit that could stamp
+ * it from a place's own country; (2) each place takes its country from its outcode's
+ * locality, requeued (placed_at, settle_tried_at nulled) so settle refiles it under
+ * the right country. Returns how many places were corrected.
+ */
+export async function backfillCountriesFromPostcodes() {
+  await query(`update localities loc set country_code = 'GB'
+     where loc.kind = 'postcode' and upper(loc.country_code) <> 'GB'
+       and exists (select 1 from postcodes p where lower(p.outcode) = loc.slug)`);
+  const { rowCount } = await query(`
+    update place_index pi
+       set country_code = upper(loc.country_code), placed_at = null, settle_tried_at = null
+      from place_records r
+      join localities loc on loc.kind = 'postcode' and loc.slug = ${OUTCODE_FROM('r.postcode')}
+     where pi.venue_ref = r.venue_ref and r.postcode is not null
+       and loc.country_code is not null
+       and upper(pi.country_code) is distinct from upper(loc.country_code)`);
+  return rowCount ?? 0;
+}
+
 export async function settleNew({ limit = 5000 } = {}) {
   // Under the same lock as a full rebuild: the two write the same tables, and a
   // settling pass running inside a rebuild can leave either half-done (Codex,

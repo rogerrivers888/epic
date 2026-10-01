@@ -252,7 +252,7 @@ export async function writeRecord(venueRef, columns, values, attribution, proven
        where place_records.venue_ref = w.venue_ref
        returning ${ownedRecordSql('place_records')} as holds_something)
      ${changed.length ? `, reshelve as (
-       update place_index pi set placed_at = null
+       update place_index pi set placed_at = null, settle_tried_at = null
          from was w
         where pi.venue_ref = w.venue_ref and (${changed.join(' or ')})
        returning 1)` : ''}

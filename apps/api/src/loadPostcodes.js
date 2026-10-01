@@ -24,6 +24,7 @@ import readline from 'node:readline';
 import { pipeline } from 'node:stream/promises';
 import { createRequire } from 'node:module';
 import { query, pool } from './db.js';
+import { backfillCountriesFromPostcodes } from './repositories/placeIndex.js';
 
 const require = createRequire(import.meta.url);
 const yauzl = require('yauzl');
@@ -184,6 +185,11 @@ if (isMain) {
       await query('update postcode_releases set loaded_release = $1, loaded_at = now() where one', [stats.release]).catch(() => null);
     }
     console.log({ ...stats, table: n });
+    // Now that ONS data is in, fix any place filed under the wrong country from its
+    // postcode (Option C). Migration 310 does this once, but on a fresh install the
+    // table is empty when it runs, so the load is where it actually takes effect.
+    const corrected = await backfillCountriesFromPostcodes().catch((err) => { console.error('country backfill:', err.message); return 0; });
+    console.log(`country backfill: ${corrected} place(s) corrected from their postcode`);
     if (!given) fs.rmSync(file, { force: true });
     await pool.end();
   })().catch((err) => { console.error(err); process.exit(1); });

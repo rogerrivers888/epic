@@ -8,10 +8,12 @@
 -- mentioned the place, so where the two disagree the postcode wins, and where the
 -- stamp was null it fills it.
 --
--- This one-time pass corrects the existing corpus. repositories/placeIndex.js
--- settleCountryFromPostcode() keeps new places right going forward (settle step 0a),
--- running the same derivation scoped to the places it is settling. The outward-code
--- expression is the one settle uses, kept in step with it.
+-- This one-time pass corrects a DB that already has the ONS postcode load in.
+-- backfillCountriesFromPostcodes() (repositories/placeIndex.js) runs the same two
+-- steps after `npm run postcodes`, which is where it takes effect on a fresh install
+-- (migrations run before that load, so `postcodes` is empty here and this matches
+-- nothing — Codex). settleCountryFromPostcode() then keeps new places right going
+-- forward (settle step 0a). The outward-code expression is the one settle uses.
 --
 -- Correcting the stamp is not enough on its own: a placed row's old country sits in
 -- place_areas and area_stats too, and settle only refiles rows whose placed_at is
