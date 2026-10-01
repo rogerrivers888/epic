@@ -36,26 +36,33 @@ test('estimate prices one Place Details per unsampled place; start gates on the 
   await seed(); t.after(() => query(`delete from place_areas where area_slug = $1`, [AREA]));
   const est = await dist.estimate(AREA);
   assert.equal(est.requests, 5);
-  assert.equal(est.costGbp, 0.13, '5 × 2.5p, to the penny');
+  assert.equal(est.costGbp, 0.10, '5 Place Details at $0.025, in GBP, to the penny');
   // The gate: confirm must equal the request count.
   await assert.rejects(() => dist.start({ areaSlug: AREA, confirm: 4, startedBy: 'test' }), /confirm the request count/);
-  const run = await dist.start({ areaSlug: AREA, confirm: 5, startedBy: 'test', startedSessionId: null });
+  const { run, created } = await dist.start({ areaSlug: AREA, confirm: 5, startedBy: 'test', startedSessionId: null });
   assert.ok(run.id);
+  assert.equal(created, true, 'a fresh run is created');
   assert.equal(run.requests, 5);
-  // A second start while one runs resumes rather than duplicates.
+  assert.deepEqual(run.refs, ['google:A', 'google:B', 'google:C', 'google:D', 'google:E'], 'the place set is frozen onto the run');
+  // A second start while one runs resumes rather than duplicates, and does not create.
   const again = await dist.start({ areaSlug: AREA, confirm: 0, startedBy: 'test' });
-  assert.equal(again.id, run.id, 'resumed, not a second run');
+  assert.equal(again.run.id, run.id, 'resumed, not a second run');
+  assert.equal(again.created, false, 'the loser does not create — it resumes the winner');
 });
 
 test('work records a sample per place, and status splits no-price from unresolved', async (t) => {
   await seed(); t.after(() => query(`delete from place_areas where area_slug = $1`, [AREA]));
-  const run = await dist.start({ areaSlug: AREA, confirm: 5, startedBy: 'test' });
+  const { run } = await dist.start({ areaSlug: AREA, confirm: 5, startedBy: 'test' });
   // Injected Place Details: a price, Free, the top (capped), a resolve with no
   // price, and an id that will not resolve at all.
   const answers = {
-    A: { priceLevel: 2 }, B: { priceLevel: 0 }, C: { priceLevel: 4 }, D: { priceLevel: null }, E: '__throw__',
+    A: { priceLevel: 2 }, B: { priceLevel: 0 }, C: { priceLevel: 4 }, D: { priceLevel: null }, E: '__notfound__',
   };
-  const get = async (id) => { if (answers[id] === '__throw__') throw new Error('not resolved'); return answers[id]; };
+  const get = async (id) => {
+    // A definite not-found is a stale id; the worker records it as unresolved.
+    if (answers[id] === '__notfound__') throw new Error('Google Places 404: NOT_FOUND');
+    return answers[id];
+  };
   const finished = await dist.work(run.id, { get });
   assert.equal(finished.state, 'done');
 
@@ -68,9 +75,25 @@ test('work records a sample per place, and status splits no-price from unresolve
   assert.equal(st.run.state, 'done');
 });
 
+test('a transient failure stops the run, and never records a false stale id', async (t) => {
+  await seed(); t.after(() => query(`delete from place_areas where area_slug = $1`, [AREA]));
+  const { run } = await dist.start({ areaSlug: AREA, confirm: 5, startedBy: 'test' });
+  // A rate limit on the second place: not a not-found, so the id is not stale.
+  const get = async (id) => {
+    if (id === 'B') throw new Error('Google Places 429: RESOURCE_EXHAUSTED');
+    return { priceLevel: 1 };
+  };
+  const stopped = await dist.work(run.id, { get });
+  assert.equal(stopped.state, 'stopped', 'a 429 stops the run to be resumed');
+  assert.match(stopped.problem, /google:B/, 'the stop names where it halted');
+  const st = await dist.status(AREA);
+  assert.equal(st.sampled, 1, 'only google:A was written; B was not recorded as unresolved');
+  assert.equal(st.unresolved, 0, 'a transient failure is not a stale id');
+});
+
 test('work resumes where it left off — a sample already written is not asked again', async (t) => {
   await seed(); t.after(() => query(`delete from place_areas where area_slug = $1`, [AREA]));
-  const run = await dist.start({ areaSlug: AREA, confirm: 5, startedBy: 'test' });
+  const { run } = await dist.start({ areaSlug: AREA, confirm: 5, startedBy: 'test' });
   // Pretend three were already done before a deploy.
   for (const ref of ['google:A', 'google:B', 'google:C']) {
     await query(`insert into cost_dist_samples (run_id, venue_ref, price_level, resolved) values ($1, $2, 1, true)`, [run.id, ref]);

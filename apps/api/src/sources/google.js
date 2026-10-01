@@ -671,6 +671,19 @@ export const googleSource = {
   },
 
   /**
+   * The price level alone for a known id — the narrowest Place Details the cost
+   * distribution needs (sources/costDistribution.js). The mask carries no rented
+   * content (no name, rating, reviews or editorial), so nothing here may be
+   * stored, and it bills at google-details, not google-pro. A 404/400 throws, so
+   * the caller can tell a stale id apart from a place that simply has no price.
+   */
+  async priceLevel(id, { meter = null } = {}) {
+    if (off(meter)) return null;
+    const p = await call(`/places/${id}`, { method: 'GET', fieldMask: 'id,priceLevel', meter });
+    return { priceLevel: priceLevelNumber(p.priceLevel) };
+  },
+
+  /**
    * Predictions as the household types (owner, 4 Sep 2026: "when I start
    * searching, it knows the location, and so it actually just starts suggesting
    * stuff as I type"). Autocomplete is the cheapest and fastest thing the

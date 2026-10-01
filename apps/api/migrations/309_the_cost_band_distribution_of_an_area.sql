@@ -23,6 +23,10 @@ create table if not exists cost_dist_runs (
   -- What the estimate reported: the gate refuses a start whose confirm does not
   -- match it, the same gate every paid run here uses.
   requests           integer     not null default 0,
+  -- The places as they stood when the run was priced and agreed, frozen — so a
+  -- census that adds places after the start cannot make the run spend on more
+  -- than was confirmed (Codex). The worker only ever asks about these.
+  refs               jsonb       not null default '[]'::jsonb,
   state              text        not null default 'running'
                      check (state in ('running', 'done', 'stopped')),
   problem            text,
@@ -32,6 +36,9 @@ create table if not exists cost_dist_runs (
 );
 -- The one going now, for the boot pickup.
 create index if not exists cost_dist_runs_going on cost_dist_runs (touched_at) where state = 'running';
+-- At most one running run per area: two Starts racing cannot each insert one and
+-- then each pay for the whole area (Codex). The loser resumes the winner's run.
+create unique index if not exists cost_dist_runs_one_running on cost_dist_runs (area_slug) where state = 'running';
 
 create table if not exists cost_dist_samples (
   run_id      uuid        not null references cost_dist_runs (id) on delete cascade,
