@@ -53,6 +53,13 @@ import { healthOf } from '../sources/meter.js';
 const router = express.Router();
 const bad = (message, code = 'bad_request') => Object.assign(new Error(message), { status: 400, code });
 
+// The places a research run is open on right now. The button's own guard is
+// component-local, so switching drawer tabs and coming back re-enables it and a
+// second forced, paid pass could start for the same place; the run forces and
+// writes, so two at once double the spend and the writes. Single-flight here is
+// the one guard that holds however the second press arrives (Codex, 1 Oct 2026).
+const researching = new Set();
+
 /** Pence at the list price, to two places — the same arithmetic the rest of Places prices with. */
 const gbpPence = (usd) => Math.round((Number(usd) || 0) * 100 * USD_TO_GBP * 100) / 100;
 // A name and a type is a Pro call (Codex, 19 Sep 2026); a detail with reviews is
@@ -186,38 +193,48 @@ router.post('/research', requires('manage_library'), async (req, res, next) => {
     if (!pi) return res.status(404).json({ error: 'not_indexed', message: 'Nothing indexed under that ref yet.' });
   } catch (err) { return next(err); }
 
-  // Reserve the worst case before a call goes out; a run over the ceiling is
-  // refused whole rather than half-done.
-  const quote = await quoteResearch(ref);
-  const room = await roomToSpend(Math.ceil(quote.pence), { holder: 'research' });
-  if (!room.ok) {
-    return res.status(422).json({
-      error: 'over_the_ceiling',
-      message: `That could spend ${money(quote.pence)} and there is ${money(room.leftPence)} left of this month's ${money(room.ceilingPence)}.`,
-    });
+  // One run per place at a time: a second press (a remounted tab, a retry) is
+  // turned away rather than left to spend and write beside the first.
+  if (researching.has(ref)) {
+    return res.status(409).json({ error: 'already_running', message: 'This place is being researched right now — give it a moment.' });
   }
-
-  // From here the answer is a stream. Headers first, then frames; the proxy is
-  // told not to buffer (the same as the shortlist search stream).
-  res.writeHead(200, {
-    'content-type': 'text/event-stream',
-    'cache-control': 'no-store, no-transform',
-    connection: 'keep-alive',
-    'x-accel-buffering': 'no',
-  });
-  res.flushHeaders?.();
-  const send = (event, data) => { if (!res.writableEnded) res.write(sse(event, data)); };
-  // A heartbeat so a proxy does not close a quiet connection while a slow source
-  // is being read.
-  const beat = setInterval(() => send('waiting', { at: Date.now() }), 5000);
+  researching.add(ref);
   try {
-    await runResearchStream({ ref, householdId: household.id, sessionId: req.session?.id ?? null, send });
-  } catch (err) {
-    send('error', { message: err?.message ? String(err.message).slice(0, 200) : 'Research could not finish.', status: err?.status ?? 500 });
+    // Reserve the worst case before a call goes out; a run over the ceiling is
+    // refused whole rather than half-done.
+    const quote = await quoteResearch(ref);
+    const room = await roomToSpend(Math.ceil(quote.pence), { holder: 'research' });
+    if (!room.ok) {
+      return res.status(422).json({
+        error: 'over_the_ceiling',
+        message: `That could spend ${money(quote.pence)} and there is ${money(room.leftPence)} left of this month's ${money(room.ceilingPence)}.`,
+      });
+    }
+
+    // From here the answer is a stream. Headers first, then frames; the proxy is
+    // told not to buffer (the same as the shortlist search stream).
+    res.writeHead(200, {
+      'content-type': 'text/event-stream',
+      'cache-control': 'no-store, no-transform',
+      connection: 'keep-alive',
+      'x-accel-buffering': 'no',
+    });
+    res.flushHeaders?.();
+    const send = (event, data) => { if (!res.writableEnded) res.write(sse(event, data)); };
+    // A heartbeat so a proxy does not close a quiet connection while a slow source
+    // is being read.
+    const beat = setInterval(() => send('waiting', { at: Date.now() }), 5000);
+    try {
+      await runResearchStream({ ref, householdId: household.id, sessionId: req.session?.id ?? null, send });
+    } catch (err) {
+      send('error', { message: err?.message ? String(err.message).slice(0, 200) : 'Research could not finish.', status: err?.status ?? 500 });
+    } finally {
+      clearInterval(beat);
+      await releaseSpend(room.reservation);
+      if (!res.writableEnded) res.end();
+    }
   } finally {
-    clearInterval(beat);
-    await releaseSpend(room.reservation);
-    if (!res.writableEnded) res.end();
+    researching.delete(ref);
   }
 });
 
