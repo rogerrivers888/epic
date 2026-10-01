@@ -23,9 +23,8 @@ const router = express.Router();
  * answers *before* the door — it is how the app finds out whether it is inside
  * — so it resolves them itself from the account it just looked up.
  */
-async function accessSummary(account, session = null) {
-  const access = await accessFor({ account, session });
-  return { doors: access.doors, capabilities: [...access.capabilities], role: access.role ? { key: access.role.key, label: access.role.label } : null, elevated: access.elevated };
+function summariseAccess(access) {
+  return { doors: access.doors, capabilities: [...access.capabilities], role: access.role ? { key: access.role.key, label: access.role.label } : null, elevated: Boolean(access.elevated) };
 }
 
 const bearerOf = (req) => {
@@ -53,6 +52,7 @@ router.get('/session', async (req, res, next) => {
     if (account && account.status === 'suspended') {
       return res.json({ signedIn: false, configured: true, session: null, account: null, suspended: true });
     }
+    const access = await accessFor({ account, session });
     res.json({
       signedIn: Boolean(session),
       configured: true,
@@ -62,11 +62,15 @@ router.get('/session', async (req, res, next) => {
       // which is why `isOwner` is answered here rather than inferred from
       // `account` being absent.
       account: account ? { id: account.id, email: account.email, name: account.name, role: account.role, plan: account.plan } : null,
-      isOwner: Boolean(session) && (!session.account_id || account?.role === 'owner'),
+      // Derived from the resolved access, not computed apart from it: an agent
+      // session on the owner's account is not the owner, and the app must be
+      // told so or it draws owner-only controls the API will then refuse
+      // (Codex, 1 Oct 2026).
+      isOwner: Boolean(session) && access.isOwner,
       // Which applications this session may enter and what it may do in them
       // (access.js). The app draws only the doors it is told it holds — and the
       // API refuses the rest whatever the app draws.
-      access: session ? await accessSummary(account, session) : null,
+      access: session ? summariseAccess(access) : null,
     });
   } catch (err) { next(err); }
 });
@@ -97,11 +101,14 @@ router.post('/session', async (req, res, next) => {
     const { token, session } = await openSession(label, owner?.id ?? null, sessionKindFor(req, label), 'passcode');
     if (owner) await recordSignIn(owner.id, { method: 'passcode', label });
     sessionCookie(res, token);
+    const access = await accessFor({ account: owner ?? null, session });
     res.status(201).json({
       token,
       session: { id: session.id, label: session.label, since: session.created_at, until: session.expires_at },
       account: owner ? { id: owner.id, email: owner.email, name: owner.name, role: owner.role, plan: owner.plan } : null,
-      isOwner: true,
+      // An agent on the passcode is not the owner, whoever claimed the account.
+      isOwner: access.isOwner,
+      access: summariseAccess(access),
     });
   } catch (err) { next(err); }
 });
@@ -159,10 +166,13 @@ router.post('/session/link', async (req, res, next) => {
     // A magic link is a personal sign-in: this is who a privileged action needs (G11).
     const { token: sessionToken, session } = await openSession(label, spent.account_id, sessionKindFor(req, label, { onAccount: true }), 'link');
     sessionCookie(res, sessionToken);
+    const access = await accessFor({ account, session });
     res.status(201).json({
       token: sessionToken,
       session: { id: session.id, label: session.label, since: session.created_at, until: session.expires_at },
       account: { id: account.id, email: account.email, name: account.name, role: account.role, plan: account.plan },
+      isOwner: access.isOwner,
+      access: summariseAccess(access),
     });
   } catch (err) { next(err); }
 });

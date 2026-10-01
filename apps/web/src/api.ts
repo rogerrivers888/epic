@@ -3125,14 +3125,15 @@ export const api = {
    * cookie the API also sets exists only so an `<img>` can load a photograph.
    */
   signIn: async (passcode: string): Promise<SessionState> => {
-    const r = await post<{ token: string; session: SessionSummary; account?: AccountSummary | null }>('/api/session', { passcode, label: deviceLabel() });
+    const r = await post<{ token: string; session: SessionSummary; account?: AccountSummary | null; isOwner?: boolean; access?: Access | null }>('/api/session', { passcode, label: deviceLabel() });
     await claimDeviceCopy(r.account);
     setSessionToken(r.token);
     // Anything written while they were signed out goes now.
     void api.sendWaitingWrites();
     // The passcode is the owner's own way in, whether or not he has claimed an
     // account row yet (api/src/auth.js `requireOwner`).
-    return { signedIn: true, configured: true, session: r.session, account: r.account ?? null, isOwner: true };
+    // The API decides who the owner is: an agent on the passcode is not (G11).
+    return { signedIn: true, configured: true, session: r.session, account: r.account ?? null, isOwner: r.isOwner ?? true, access: r.access ?? null };
   },
 
   /**
@@ -3158,13 +3159,13 @@ export const api = {
    * shared and pasted into a chat.
    */
   signInWithLink: async (token: string): Promise<SessionState> => {
-    const r = await post<{ token: string; session: SessionSummary; account: AccountSummary }>(
+    const r = await post<{ token: string; session: SessionSummary; account: AccountSummary; isOwner?: boolean; access?: Access | null }>(
       '/api/session/link', { token, label: deviceLabel() },
     );
     await claimDeviceCopy(r.account);
     setSessionToken(r.token);
     void api.sendWaitingWrites();
-    return { signedIn: true, configured: true, session: r.session, account: r.account, isOwner: r.account?.role === 'owner' };
+    return { signedIn: true, configured: true, session: r.session, account: r.account, isOwner: r.isOwner ?? (r.account?.role === 'owner'), access: r.access ?? null };
   },
 
   /**

@@ -164,13 +164,25 @@ export function recordPlanChange(accountId, { plan, status, pricePence, note = n
 // the audit trail
 // ---------------------------------------------------------------------------
 
-export function writeAudit({ actorId, actorLabel, action, subjectType, subjectId, subjectLabel, before, after }) {
+export function writeAudit(row) {
+  return writeAuditStrict(row).catch(() => null); // an audit row must never be the reason an *ordinary* action fails
+}
+
+/**
+ * The same row, but a failure is thrown rather than swallowed.
+ *
+ * A privileged action — a paid grant, lifting a hold — must be logged with the
+ * owner's name or not happen at all (owner, 1 Oct 2026). So the caller awaits
+ * this *before* the action, and a database that cannot record who did it stops
+ * the action rather than letting it go unrecorded (Codex, 1 Oct 2026).
+ */
+export function writeAuditStrict({ actorId, actorLabel, action, subjectType, subjectId, subjectLabel, before, after }) {
   return query(
     `insert into admin_audit (actor_id, actor_label, action, subject_type, subject_id, subject_label, before, after)
      values ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [actorId ?? null, actorLabel ?? null, action, subjectType ?? null, subjectId ?? null, subjectLabel ?? null,
       before ? JSON.stringify(before) : null, after ? JSON.stringify(after) : null],
-  ).catch(() => null); // an audit row must never be the reason an action fails
+  );
 }
 
 export async function listAudit({ limit = 200, subjectId = null } = {}) {

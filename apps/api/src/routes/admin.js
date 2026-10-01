@@ -724,7 +724,7 @@ router.post('/sessions/:id/grant', requires('manage_settings'), requireOwnerSign
     // The audit is written first and not swallowed: a money-spending action must
     // not succeed without the record this gate exists to guarantee (Codex, 1 Oct
     // 2026). A grant with no name against it is worse than a grant that failed.
-    await rolesRepo.writeAudit({
+    await rolesRepo.writeAuditStrict({
       ...actor(req), action: 'paid.grant', subjectType: 'session', subjectId: String(req.params.id), after: { hours },
     });
     const row = await grantPaid(String(req.params.id), hours);

@@ -297,10 +297,22 @@ app.use('/api/admin/questions', requireDoor('admin'), questionRoutes);
 // so it holds whatever the route file does, and named rather than prefixed so
 // browsing coverage never trips it.
 const OWNER_ONLY_PLACE_INDEX = new Map([
+  // Lift the hold, and estate-wide re-runs and rebuilds (owner, 1 Oct 2026).
   ['POST /census/uk/lift', 'lift the census hold'],
   ['POST /census/run', 'start an estate census run'],
   ['POST /census/edge/run', 'start an estate census run'],
+  ['POST /census/rollup', 'roll up the census over the estate'],
   ['POST /refresh', 'rebuild the place index'],
+  ['POST /reindex', 'reindex the estate'],
+  ['POST /rescore', 'rescore the estate'],
+  // Anything that spends money (Collect, Ask, the picture finder).
+  ['POST /collect', 'spend on collecting places'],
+  ['POST /ask', 'spend on asking a provider'],
+  ['POST /pictures/find', 'spend on finding pictures'],
+  // Loading the owned-point sources over the estate, matching them, and the purge.
+  ['POST /owned-points/load', 'load the owned-point sources'],
+  ['POST /owned-points/match', 'match the owned points over the estate'],
+  ['POST /owned-points/purge', 'purge owned points'],
 ]);
 // Any resume of a stored run is a lift of a hold, whatever its id.
 const ownerOnlyPlaceIndex = (req, res, next) => {
