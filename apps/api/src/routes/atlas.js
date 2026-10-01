@@ -16,6 +16,19 @@ import { searchAreas } from '../sources/areas.js';
 import { recallVenue } from '../sources/index.js';
 import { currentHousehold } from './household.js';
 import { fillWhere } from '../sources/where.js';
+import { closeToHomeRadiusMiles } from '../domain/travel.js';
+
+/**
+ * The household's "close to home" as a radius in miles, from the free distance
+ * estimate (Settings revised v2 SE7). Derives from the time + ticked modes;
+ * falls back to the old miles radius when "Any distance" is set. Never a paid
+ * route — see domain/travel.js.
+ */
+const nearHomeMiles = (h) => closeToHomeRadiusMiles({
+  minutes: h.close_to_home_minutes ?? null,
+  modes: Array.isArray(h.travel_modes) ? h.travel_modes : [],
+  fallbackMiles: h.home_radius_miles ?? 10,
+});
 import { fillTaxonomy, needsTaxonomy, taxonomyKept } from '../sources/taxonomy.js';
 import { fillPhotos, needsPhoto, photosKept } from '../sources/rentedPhoto.js';
 import { countryOutline, sketchFor, SKETCH_ATTRIBUTION } from '../sources/sketch.js';
@@ -229,7 +242,7 @@ atlas.get('/', async (_req, res, next) => {
     // door, whichever city it files under. Not a city — a standing view.
     let home = null;
     if (household.home_lat != null && household.home_lng != null) {
-      const radiusMiles = household.home_radius_miles ?? 10;
+      const radiusMiles = nearHomeMiles(household);
       const near = await atlasRepo.nearHomeCounts(household.id, household.home_lat, household.home_lng, radiusMiles);
       const nearRefs = await atlasRepo.nearHomePictureRefs(household.id, household.home_lat, household.home_lng, radiusMiles);
       const nearHeroes = await heroesForPlaces(nearRefs);
@@ -259,7 +272,7 @@ atlas.get('/places', async (req, res, next) => {
     const rows = await atlasRepo.placesIn(
       household.id,
       { country, city, kind, q, nearHome: Boolean(nearHome) },
-      { lat: household.home_lat, lng: household.home_lng, radiusMiles: household.home_radius_miles ?? 10 },
+      { lat: household.home_lat, lng: household.home_lng, radiusMiles: nearHomeMiles(household) },
     );
     let places = rows.map((r) => ({
       venueRef: r.venue_ref, name: r.known_label ?? r.label, unnamed: (r.known_label ?? r.label) === r.venue_ref, kind: r.category ? kindOfCategory(r.category) : r.kind, category: r.category, lat: r.lat, lng: r.lng,

@@ -1,860 +1,650 @@
+/**
+ * One person's profile (Settings revised v2 — SE3 editable, SE3b a joined adult
+ * read-only, SE4 a child, SE5 the opened states, SE6/SE6b the edit sheet).
+ *
+ * The page is the person: a head with their face and a camera badge, the pending
+ * invite or the host-profile row, a Food & drink / Things to do switch, their
+ * diet, likes and dislikes, then allergies and access needs collapsed above
+ * "What Epic has noticed". Everything saves as it is changed; the only Save is
+ * in the edit sheet. Once an adult has joined, only they can change any of it —
+ * for everyone else the page is read-only and the pencil only removes them.
+ */
+
 import React, { useEffect, useMemo, useState } from 'react';
-import { Image, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../components/press';
-import { useViewport } from '../hooks/useViewport';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { api, Constraint, Household, HouseholdInvitation, HouseholdResponse, Learned, Member, Place, SenderStatus, Suggestion } from '../api';
-import { colors, fonts, radius, spacing, TARGET, type, BORDER } from '../theme';
-import { Button, Card, Chip, Row, Segmented, Wrap } from '../components/ui';
-import { asFlag, asOneOf, useQueryState, useRouter } from '../router';
+import { api, AccessNeed, Constraint, HouseholdResponse, Learned, MainDiet, Member } from '../api';
+import { colors, fonts, spacing, TARGET, type, BORDER, LIME, INK, CREAM } from '../theme';
+import { Button, Chip, Row, Wrap } from '../components/ui';
+import { asOneOf, asFlag, useQueryState, useRouter } from '../router';
 import { paths, type Route } from '../routes';
 import { Avatar } from '../components/Faces';
-import { Icon, IconText } from '../components/Icon';
-import { PlacePicker } from '../components/PlacePicker';
+import { Icon } from '../components/Icon';
 import { SuggestInput } from '../components/SuggestInput';
 import { TastePicker } from '../components/TastePicker';
 import { BirthdayPicker } from '../components/BirthdayPicker';
+import { CompactBand } from '../components/Band';
+import { InkMenu } from '../components/InkMenu';
+import { Sheet } from '../components/Sheet';
+import { showToast } from '../components/Toast';
 
-// Everything a person can say about food: a dish, a cuisine, an ingredient
-// (chicken) or a style (healthy food).
 const FOOD_KINDS = ['dish', 'cuisine', 'ingredient', 'style'];
 const ACTIVITY_KINDS = ['experience'];
-const DIET_KINDS = ['diet'];
+const RELATIONSHIPS = ['parent', 'partner', 'child', 'grandparent', 'sibling', 'friend', 'other'];
 const RELATIONSHIP_LABEL: Record<string, string> = { parent: 'Parent', partner: 'Partner', child: 'Child', grandparent: 'Grandparent', sibling: 'Sibling', friend: 'Friend', other: 'Other' };
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const DIET_OPTS: MainDiet[] = ['none', 'vegetarian', 'vegan', 'pescatarian'];
+const DIET_LABEL: Record<MainDiet, string> = { none: 'None', vegetarian: 'Vegetarian', vegan: 'Vegan', pescatarian: 'Pescatarian' };
 
-type Section = 'food' | 'activities';
-type Mode = 'like' | 'dislike';
-// Where the last add happened, so its follow-up ("kept as typed — also add…")
-// shows under that list rather than somewhere else on the card.
-type Notice = { section: Section; kind: Constraint['kind']; hint: string | null; pending: Suggestion[] | null };
+// The UK 14, in reveal order with the labels the profile shows.
+const ALLERGEN_LABEL: Record<string, string> = {
+  peanuts: 'Peanuts', 'tree nuts': 'Tree nuts', milk: 'Milk', eggs: 'Eggs', gluten: 'Gluten (cereals containing gluten)',
+  sesame: 'Sesame', fish: 'Fish', crustaceans: 'Crustaceans', soya: 'Soya', celery: 'Celery', mustard: 'Mustard',
+  lupin: 'Lupin', molluscs: 'Molluscs', sulphites: 'Sulphites',
+};
+const ALLERGENS_COMMON = ['peanuts', 'tree nuts', 'milk', 'eggs', 'gluten', 'sesame', 'fish', 'crustaceans'];
+const ALLERGENS_REST = ['soya', 'celery', 'mustard', 'lupin', 'molluscs', 'sulphites'];
 
-/**
- * People down the left, one after another; the chosen person's tastes on the
- * right (owner, 3 Sep 2026). Nothing here has a Save button — every change is
- * stored as it is made.
- */
+const ACCESS_OPTS: { key: AccessNeed; label: string; filters?: boolean }[] = [
+  { key: 'step-free', label: 'Step-free access', filters: true },
+  { key: 'accessible-toilet', label: 'Accessible toilet' },
+  { key: 'lift', label: 'Lift' },
+  { key: 'quiet', label: 'Quiet space' },
+];
+
+const isActivity = (c: Constraint) => c.conceptKind === 'experience';
+const byFavourite = (a: Constraint, b: Constraint) => Number(Boolean(b.favourite)) - Number(Boolean(a.favourite));
+const first = (name: string) => name.split(/\s+/)[0];
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const prettyMobile = (m?: string | null) => m ?? null;
+
 export function HouseholdScreen({ data, refresh, route }: {
   data: HouseholdResponse | null; refresh: () => Promise<void>;
-  /** Whose tastes are open: `/household/<memberId>`, so one person is a page you can be sent to. */
   route: Extract<Route, { name: 'household' }>;
 }) {
-  const { width } = useViewport();
   const { navigate } = useRouter();
-  const sideBySide = width >= 900;
-  const selectedId = route.memberId;
-  const setSelectedId = (id: string | null) => navigate(paths.household(id), { replace: !id });
-  const [adding, setAdding] = useState(false);
-
-  const members = data?.members ?? [];
-  const selected = members.find((m) => m.id === selectedId) ?? (sideBySide ? members[0] : undefined);
-  // On a wide screen somebody is always open, so the address says who — a link
-  // to the household is a link to a person, not to "whoever is first today".
-  useEffect(() => { if (selected && selected.id !== selectedId && sideBySide) setSelectedId(selected.id); }, [selected?.id, sideBySide]);
-
-  if (!data) return <View style={styles.page}><Text style={type.small}>Loading household…</Text></View>;
-  const { learned, vocabulary, senders } = data;
-  const adult = members.find((m) => !m.isMinor);
-
-  const detail = (m: Member, i: number) => (
-    <MemberDetail
-      key={m.id}
-      member={m} index={i} managedBy={m.isMinor ? adult?.name : undefined}
-      relationships={vocabulary.relationships} allergens={vocabulary.allergens}
-      learned={learned.filter((l) => l.memberId === m.id)} refresh={refresh}
-      senders={senders}
-      onRemoved={() => navigate(paths.settings(), { replace: true })}
-    />
-  );
-
-  const addCard = (
-    <AddPerson
-      onAdded={async (id) => { setAdding(false); await refresh(); if (id) setSelectedId(id); }}
-      onCancel={() => setAdding(false)}
-    />
-  );
-
-  /**
-   * One person's page (Household folded into Settings, 12 Sep 2026). The
-   * list of people is "You and yours" now; this is what a row there opens. On
-   * a wide screen the people stay down the left so moving between them is one
-   * tap; on a phone the page is the person, with Back to the list.
-   */
+  if (!data) return <View style={styles.screen}><Text style={[type.small, { padding: spacing.lg }]}>Loading…</Text></View>;
+  const member = data.members.find((m) => m.id === route.memberId);
+  if (!member) {
+    return (
+      <View style={styles.screen}>
+        <CompactBand title={data.household.name} onBack={() => navigate(paths.settings())} />
+        <Text style={[type.small, { padding: spacing.lg }]}>Nobody by that name is in the household any more.</Text>
+      </View>
+    );
+  }
   return (
-    <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
-      <Press onPress={() => navigate(paths.settings())} accessibilityRole="button" style={{ alignSelf: 'flex-start' }}>
-        <Row><Icon name="back" size={18} /><Text style={type.h3}>You and yours</Text></Row>
-      </Press>
-      <Text style={type.small}>Allergens exclude places; diets, likes and dislikes only rank them. Everything saves as you go.</Text>
+    <View style={styles.screen}>
+      <CompactBand title={data.household.name} onBack={() => navigate(paths.settings())} />
+      <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+        <PersonProfile data={data} member={member} refresh={refresh} />
+      </ScrollView>
+    </View>
+  );
+}
 
-      {sideBySide ? (
-        <View style={{ flexDirection: 'row', gap: spacing.md, alignItems: 'flex-start' }}>
-          <View style={styles.sidebar}>
-            {members.map((m, i) => (
-              <PersonRow key={m.id} member={m} index={i} selected={!adding && selected?.id === m.id} onPress={() => { setAdding(false); setSelectedId(m.id); }} onTell={() => navigate(paths.householdTell(m.id))} />
-            ))}
-            <Button label="+ Add someone" kind={adding ? 'secondary' : 'ghost'} onPress={() => setAdding(true)} style={{ alignSelf: 'stretch' }} />
-          </View>
+function PersonProfile({ data, member, refresh }: { data: HouseholdResponse; member: Member; refresh: () => Promise<void> }) {
+  const { navigate } = useRouter();
+  const index = data.members.findIndex((m) => m.id === member.id);
+  const isYou = member.id === data.me;
+  const joined = member.access?.status === 'active';
+  const pending = member.access?.status === 'invited';
+  const canEdit = !(joined && !isYou);
+  const owner = Boolean(member.access?.isLead);
+  const isChild = member.age != null ? member.age < 18 : member.isMinor;
+  const role = owner ? 'OWNER' : isChild ? 'CHILD' : 'ADULT';
+  const adultName = data.members.find((m) => !m.isMinor && m.id !== member.id)?.name;
+
+  const [tab, setTab] = useQueryState<'food' | 'things'>('tastes', 'food', asOneOf(['food', 'things'] as const, 'food'));
+  const [edit, setEdit] = useQueryState('edit', false, asFlag);
+  const [noticed, setNoticed] = useQueryState('noticed', false, asFlag);
+  const [photo, setPhoto] = useState(false);
+
+  const relLine = owner ? 'Household owner' : [member.relationship ? RELATIONSHIP_LABEL[member.relationship] : null, member.age != null ? String(member.age) : null].filter(Boolean).join(' · ');
+  const learned = data.learned.filter((l) => l.memberId === member.id);
+
+  return (
+    <>
+      {/* Head */}
+      <View style={styles.head}>
+        <Press onPress={() => canEdit && setPhoto(true)} disabled={!canEdit} accessibilityRole="button" accessibilityLabel="Change photo">
+          <Avatar name={member.name} index={index} size={88} url={member.avatarUrl} />
+          {canEdit ? <View style={styles.cameraBadge}><Icon name="camera" size={15} color={CREAM} strokeWidth={2} /></View> : null}
+        </Press>
+        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+          <Text style={styles.name} numberOfLines={1}>{member.name}</Text>
+          {relLine ? <Text style={styles.relLine}>{relLine}</Text> : null}
+          <Row style={{ gap: 6, marginTop: 2 }}>
+            <View style={styles.roleChip}><Text style={styles.roleChipText}>{role}</Text></View>
+          </Row>
+          {isChild && adultName ? <Text style={type.tiny}>Managed by you and {first(adultName)}</Text> : null}
+        </View>
+        <Press onPress={() => setEdit(true, { replace: true })} accessibilityRole="button" accessibilityLabel="Edit details" style={styles.pencil}><Icon name="edit" size={18} color={colors.ink} /></Press>
+      </View>
+
+      {/* Status */}
+      {pending ? <PendingInvite member={member} refresh={refresh} /> : null}
+      {joined && !isYou ? (
+        <Row style={styles.joinedLine}><Icon name="phone" size={15} color={colors.accent} strokeWidth={2} /><Text style={styles.joinedText}>On their own phone{member.access?.activatedAt ? ` since ${shortDate(member.access.activatedAt)}` : ''}</Text></Row>
+      ) : null}
+      {isYou ? <HostProfileRow /> : null}
+
+      {/* Tastes */}
+      <View style={styles.menuWrap}>
+        <InkMenu<'food' | 'things'> tabs={[{ key: 'food', label: 'Food & drink' }, { key: 'things', label: 'Things to do' }]} selected={tab} onSelect={(k) => setTab(k, { replace: true })} />
+      </View>
+
+      <View style={styles.panel}>
+        {tab === 'food' ? (
+          <>
+            {canEdit ? <DietControl member={member} refresh={refresh} /> : (member.diet !== 'none' || member.halal || member.kosher ? <ReadOnlyDiet member={member} /> : null)}
+            <TasteGroup member={member} refresh={refresh} kind="like" activity={false} canEdit={canEdit} />
+            <TasteGroup member={member} refresh={refresh} kind="dislike" activity={false} canEdit={canEdit} />
+          </>
+        ) : (
+          <>
+            <TasteGroup member={member} refresh={refresh} kind="like" activity canEdit={canEdit} />
+            <TasteGroup member={member} refresh={refresh} kind="dislike" activity canEdit={canEdit} />
+          </>
+        )}
+      </View>
+
+      {!canEdit ? (
+        <Row style={styles.lockNote}><Icon name="locked" size={15} color={colors.inkMuted} strokeWidth={2} /><Text style={type.small}>{`Only ${first(member.name)} can change ${isChild ? 'their' : 'these'} tastes now they've joined.`}</Text></Row>
+      ) : null}
+
+      {/* Allergies (food only) */}
+      {/* Allergies sit below the tabbed panel as a profile-level section (SE3 item 5),
+          not inside Food & drink — present on either tab. */}
+      <AllergiesRow member={member} refresh={refresh} canEdit={canEdit} />
+
+      {/* Access needs */}
+      <AccessRow member={member} refresh={refresh} canEdit={canEdit} />
+
+      {/* What Epic has noticed */}
+      {canEdit && learned.length ? (
+        <Press onPress={() => setNoticed(true, { replace: true })} accessibilityRole="button" style={styles.collapsedRow}>
+          <View style={styles.rowTile}><Icon name="sparkle" size={18} color={colors.ink} strokeWidth={2} /></View>
           <View style={{ flex: 1 }}>
-            {adding ? addCard : selected ? detail(selected, members.indexOf(selected)) : <Card><Text style={type.small}>Choose someone on the left.</Text></Card>}
+            <Text style={styles.rowTitle}>What Epic has noticed</Text>
+            <Text style={type.tiny}>{learned.length} things learning from visits</Text>
           </View>
-        </View>
-      ) : (
-        <View style={{ gap: spacing.sm }}>
-          {adding ? addCard : selected ? (
-            <>
-              <PersonRow member={selected} index={members.indexOf(selected)} selected onPress={() => {}} onTell={() => navigate(paths.householdTell(selected.id))} />
-              {detail(selected, members.indexOf(selected))}
-            </>
-          ) : <Card><Text style={type.small}>Nobody by that name is in the household any more.</Text></Card>}
-        </View>
-      )}
-    </ScrollView>
+          <Icon name="more" size={18} color={colors.inkFaint} />
+        </Press>
+      ) : null}
+
+      {photo ? <PhotoSheet member={member} refresh={refresh} onClose={() => setPhoto(false)} /> : null}
+      {edit ? <EditSheet data={data} member={member} refresh={refresh} canEdit={canEdit} onClose={() => setEdit(false, { replace: true })} /> : null}
+      {noticed ? <NoticedSheet member={member} learned={learned} refresh={refresh} onClose={() => setNoticed(false, { replace: true })} /> : null}
+    </>
   );
 }
 
-/**
- * The household itself, at the top of its own tab: what it is called, where it
- * lives, and a picture of home (owner, 6 Sep 2026 — "I feel like maybe my
- * address should also be in my household, and the name of my household").
- *
- * The three of them were only in Settings, which is where the pace and the
- * radius and the export still are: this is the page about the household, so the
- * household's own name and front door belong here too. Settings keeps its
- * copies — same fields, same endpoint, both write the same row.
- *
- * Nothing has a Save button, like everything else on this page. The name is
- * stored when the box is left, the address when a real match is tapped, and the
- * picture when it is chosen.
- */
-export function HomeCard({ household, refresh, wide }: { household: Household; refresh: () => Promise<void>; wide: boolean }) {
-  const [name, setName] = useState(household.name);
-  const [changing, setChanging] = useState(false);
-  const [msg, setMsg] = useState<{ tone: 'good' | 'bad'; text: string } | null>(null);
-  useEffect(() => { setName(household.name); }, [household.name]);
-
-  const saveName = async () => {
-    const v = name.trim();
-    if (!v || v === household.name) { setName(household.name); return; }
-    try { await api.updateHousehold({ name: v }); await refresh(); setMsg({ tone: 'good', text: `Saved. This household is ${v}.` }); }
-    catch (e: any) { setMsg({ tone: 'bad', text: e.message }); }
-  };
-
-  const setHome = async (p: Place | null) => {
-    if (!p) return;
-    try { await api.updateHousehold({ home: p }); await refresh(); setChanging(false); setMsg({ tone: 'good', text: `Home saved: ${p.formatted ?? p.label}` }); }
-    catch (e: any) { setMsg({ tone: 'bad', text: e.message }); }
-  };
-
-  // A photograph of the household's own house — theirs, kept as they sent it,
-  // wide rather than square because a house is not a face.
-  const setPhoto = async () => {
-    const url = await pickPhoto({ aspect: [3, 2], width: 900, height: 600 });
-    if (!url) return;
-    try { await api.updateHousehold({ homePhotoUrl: url }); await refresh(); setMsg(null); }
-    catch (e: any) { setMsg({ tone: 'bad', text: e.message }); }
-  };
-
-  const removePhoto = async () => {
-    try { await api.updateHousehold({ homePhotoUrl: '' }); await refresh(); }
-    catch (e: any) { setMsg({ tone: 'bad', text: e.message }); }
-  };
-
-  const photo = household.homePhotoUrl ?? null;
-  const address = household.home?.formatted ?? household.home?.label ?? null;
-
+/** Your own page, if you host: a warm-grey row to your host profile (SE3 item 2). */
+function HostProfileRow() {
+  const { navigate } = useRouter();
+  const [hosts, setHosts] = useState(false);
+  useEffect(() => { api.hostHome().then((h) => setHosts(Boolean(h.host))).catch(() => setHosts(false)); }, []);
+  if (!hosts) return null;
   return (
-    <Card>
-      <View style={[styles.homeCard, wide && styles.homeCardWide]}>
-        <View style={{ gap: 4 }}>
-          <Press
-            onPress={setPhoto}
-            accessibilityRole="button"
-            accessibilityLabel={photo ? 'Change the picture of home' : 'Add a picture of home'}
-            style={[styles.homePhoto, wide && styles.homePhotoWide]}
-          >
-            {photo
-              ? <Image source={{ uri: photo }} style={StyleSheet.absoluteFill} resizeMode="cover" accessibilityLabel="Home" />
-              : (
-                <View style={{ alignItems: 'center', gap: 6 }}>
-                  <Icon name="home" size={26} color={colors.headerSub} />
-                  <Text style={type.tiny}>Add a picture of home</Text>
-                </View>
-              )}
-          </Press>
-          {photo ? (
-            <Row style={{ justifyContent: 'center', gap: spacing.md }}>
-              <Press onPress={setPhoto} accessibilityRole="button"><Text style={type.tiny}>change</Text></Press>
-              <Press onPress={removePhoto} accessibilityRole="button"><Text style={type.tiny}>remove</Text></Press>
-            </Row>
-          ) : null}
-        </View>
-
-        <View style={{ flex: 1, minWidth: 0, gap: spacing.sm }}>
-          <View style={{ gap: 4 }}>
-            <Text style={type.tiny}>This household is called</Text>
-            <TextInput
-              value={name}
-              onChangeText={setName}
-              onBlur={saveName}
-              onSubmitEditing={saveName}
-              returnKeyType="done"
-              placeholder="Household name"
-              placeholderTextColor={colors.inkFaint}
-              accessibilityLabel="Household name"
-              style={[styles.input, styles.homeName]}
-            />
-          </View>
-
-          <View style={{ gap: 4 }}>
-            <Text style={type.tiny}>Home</Text>
-            {address && !changing ? (
-              <Row style={{ gap: spacing.sm }}>
-                <Icon name="address" size={16} color={colors.headerSub} />
-                <Text style={[type.small, { flex: 1 }]}>{address}</Text>
-                <Button label="Change" kind="ghost" onPress={() => setChanging(true)} />
-              </Row>
-            ) : (
-              <>
-                <PlacePicker value={household.home} onPick={setHome} placeholder="House name or number, street, town, postcode" />
-                {address ? <Button label="Keep it as it is" kind="ghost" onPress={() => setChanging(false)} /> : null}
-              </>
-            )}
-            <Text style={type.tiny}>Used whenever you say "from home", and for everything Places keeps close to home.</Text>
-          </View>
-
-          {msg ? <Text style={[type.tiny, { color: msg.tone === 'good' ? colors.accent : colors.dislike }]}>{msg.text}</Text> : null}
-        </View>
-      </View>
-    </Card>
-  );
-}
-
-function PersonRow({ member, index, selected, onPress, onTell }: { member: Member; index: number; selected: boolean; onPress: () => void; onTell?: () => void }) {
-  return (
-    <Press onPress={onPress} accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={`Show ${member.name}`} style={[styles.personRow, selected && styles.personRowSelected]}>
-      <Avatar name={member.name} index={index} size={44} url={member.avatarUrl} />
-      <View style={{ flex: 1 }}>
-        <Row style={{ gap: 6 }}>
-          <Text style={[type.h3, { flexShrink: 1 }]} numberOfLines={1}>{member.name}</Text>
-          {/* Who has Epic on their own phone, without opening them. A tick is
-              somebody who has signed in; the paper plane is an invitation
-              nobody has opened yet. */}
-          {member.access && member.access.status !== 'none' ? (
-            <Icon
-              name={(member.access.signInCount ?? 0) > 0 ? 'check' : 'send'}
-              size={14}
-              color={(member.access.signInCount ?? 0) > 0 ? colors.accent : colors.headerSub}
-            />
-          ) : null}
-        </Row>
-        <Text style={type.tiny} numberOfLines={2}>{summarise(member)}</Text>
-        {summarise(member) === 'Nothing set yet' && onTell ? (
-          <Press onPress={onTell} accessibilityRole="button" accessibilityLabel={`Tell Epic about ${member.name}`} style={styles.tellLink} hitSlop={6}>
-            <Icon name="mic" size={14} color={colors.accent} strokeWidth={2.2} />
-            <Text style={styles.tellLinkText}>Tell Epic</Text>
-          </Press>
-        ) : null}
-        {prettyMobile(member.access?.mobile) ? (
-          <Text style={type.tiny} numberOfLines={1}>{prettyMobile(member.access?.mobile)}</Text>
-        ) : null}
-      </View>
+    <Press onPress={() => navigate(paths.host())} accessibilityRole="button" style={styles.hostRow}>
+      <View style={{ flex: 1 }}><Text style={styles.rowTitle}>Your host profile</Text><Text style={type.tiny}>On the Host tab</Text></View>
+      <Icon name="more" size={18} color={colors.inkFaint} />
     </Press>
   );
 }
 
-export function AddPerson({ onAdded, onCancel }: { onAdded: (id: string | null) => Promise<void>; onCancel: () => void }) {
-  const [name, setName] = useState('');
-  const [rel, setRel] = useState<string>('child');
-  const [birth, setBirth] = useState('');
+// --- diet -------------------------------------------------------------------
+
+function DietControl({ member, refresh }: { member: Member; refresh: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const setDiet = async (d: MainDiet) => { setOpen(false); await api.updateMember(member.id, { diet: d }); await refresh(); };
+  const faith = async (which: 'halal' | 'kosher') => { await api.updateMember(member.id, { [which]: !member[which] } as any); await refresh(); };
   return (
-    <Card>
-      <Text style={type.h3}>Add someone</Text>
-      <TextInput value={name} onChangeText={setName} placeholder="Name" placeholderTextColor={colors.inkFaint} style={styles.input} autoFocus />
-      <Text style={type.tiny}>Relationship to the household</Text>
-      <Wrap>{Object.entries(RELATIONSHIP_LABEL).map(([k, l]) => <Chip key={k} label={l} selected={rel === k} onPress={() => setRel(k)} />)}</Wrap>
-      <BirthdayPicker label="Birthday (optional)" value={birth || null} onChange={(iso) => setBirth(iso ?? '')} />
-      <Text style={type.tiny}>A child under 13 gets a full profile owned by an adult — no login, no voice capture.</Text>
-      <Row>
-        <Button label="Add" disabled={!name.trim()} onPress={async () => {
-          const r = await api.addMember({ name: name.trim(), relationship: rel, birthDate: DATE.test(birth) ? birth : null, birthYear: /^\d{4}$/.test(birth) ? Number(birth) : null });
-          await onAdded((r as any)?.member?.id ?? null);
-        }} />
-        <Button label="Cancel" kind="ghost" onPress={onCancel} />
+    <View style={{ gap: 10 }}>
+      <Press onPress={() => setOpen((o) => !o)} accessibilityRole="button" style={[styles.dropdown, open && styles.dropdownOpen]}>
+        <Text style={styles.dropdownLabel}>Diet</Text>
+        {/* Nothing is picked by default — the closed box shows only "Diet". */}
+        <Text style={styles.dropdownValue}>{member.diet === 'none' ? '' : DIET_LABEL[member.diet]}</Text>
+        <Icon name={open ? 'collapse' : 'expand'} size={16} color={colors.ink} strokeWidth={2.2} />
+      </Press>
+      {open ? (
+        <View style={styles.dropdownList}>
+          {DIET_OPTS.map((d) => {
+            const on = member.diet === d;
+            return (
+              <Press key={d} onPress={() => setDiet(on && d !== 'none' ? 'none' : d)} accessibilityRole="button" style={styles.dropdownItem}>
+                <Text style={[type.body, on && { fontWeight: '700' }]}>{DIET_LABEL[d]}</Text>
+                {on ? <View style={styles.limeTick}><Icon name="check" size={13} color={INK} strokeWidth={3} /></View> : null}
+              </Press>
+            );
+          })}
+        </View>
+      ) : null}
+      <Row style={{ gap: 8 }}>
+        <FaithTile label="Halal" on={member.halal} onPress={() => faith('halal')} />
+        <FaithTile label="Kosher" on={member.kosher} onPress={() => faith('kosher')} />
       </Row>
-    </Card>
+    </View>
+  );
+}
+
+function ReadOnlyDiet({ member }: { member: Member }) {
+  const bits = [member.diet !== 'none' ? DIET_LABEL[member.diet] : null, member.halal ? 'Halal' : null, member.kosher ? 'Kosher' : null].filter(Boolean);
+  return <View><Text style={styles.kicker}>Diet</Text><Text style={type.body}>{bits.join(' · ')}</Text></View>;
+}
+
+function FaithTile({ label, on, onPress }: { label: string; on: boolean; onPress: () => void }) {
+  return (
+    <Press onPress={onPress} accessibilityRole="checkbox" accessibilityState={{ checked: on }} style={styles.faithTile}>
+      <View style={[styles.square, on ? styles.squareOn : styles.squareOff]}>{on ? <Icon name="check" size={13} color={INK} strokeWidth={3} /> : null}</View>
+      <Text style={styles.faithLabel}>{label}</Text>
+    </Press>
+  );
+}
+
+// --- likes / dislikes -------------------------------------------------------
+
+function TasteGroup({ member, refresh, kind, activity, canEdit }: { member: Member; refresh: () => Promise<void>; kind: 'like' | 'dislike'; activity: boolean; canEdit: boolean }) {
+  const [picking, setPicking] = useState(false);
+  const all = kind === 'like' ? member.likes : member.dislikes;
+  const items = all.filter((c) => (activity ? isActivity(c) : !isActivity(c))).sort(kind === 'like' ? byFavourite : undefined);
+  const have = useMemo(() => new Set([...member.likes, ...member.dislikes].map((c) => c.conceptKey).filter(Boolean) as string[]), [member]);
+  const add = async (value: string, conceptKey?: string) => { try { await api.addConstraint(member.id, { kind, value, conceptKey }); } catch (e: any) { showToast(e?.body?.message || 'Already on the other list'); } await refresh(); };
+  const remove = async (c: Constraint) => { await api.deleteConstraint(c.id); await refresh(); };
+  const toggleFav = async (c: Constraint) => { if (kind !== 'like') return; await api.updateConstraint(c.id, { favourite: !c.favourite }); await refresh(); };
+  const title = kind === 'like' ? (activity ? 'Loves doing · tap for a favourite' : 'Likes · tap for a favourite') : (activity ? 'Would rather not' : 'Dislikes');
+
+  return (
+    <View style={{ gap: 8 }}>
+      <Text style={styles.kicker}>{title}</Text>
+      <Wrap>
+        {items.map((c) => (
+          <Chip key={c.id} label={c.value} tone={kind === 'like' ? 'like' : 'dislike'} icon={kind === 'like' && c.favourite ? 'favourite' : undefined} iconFill
+            onPress={kind === 'like' && canEdit ? () => toggleFav(c) : undefined}
+            onRemove={canEdit ? () => remove(c) : undefined} />
+        ))}
+        {!items.length && !canEdit ? <Text style={type.tiny}>Nothing set</Text> : null}
+      </Wrap>
+      {canEdit ? (
+        <>
+          <SuggestInput
+            placeholder={kind === 'like' ? `Add a ${activity ? 'thing you love' : 'like'}` : `Add a ${activity ? 'thing to avoid' : 'dislike'}`}
+            kinds={activity ? ACTIVITY_KINDS : FOOD_KINDS}
+            onPick={(s) => add(s.label, s.key)} onFree={(v) => add(v)}
+            onFocus={() => setPicking(true)}
+          />
+          {picking ? <TastePicker section={activity ? 'activities' : 'food'} mode={kind} already={have} onPick={(p) => add(p.label, p.key)} onClose={() => setPicking(false)} /> : null}
+        </>
+      ) : null}
+    </View>
+  );
+}
+
+// --- allergies (SE5) --------------------------------------------------------
+
+function AllergiesRow({ member, refresh, canEdit }: { member: Member; refresh: () => Promise<void>; canEdit: boolean }) {
+  const [open, setOpen] = useState(false);
+  const chosen = useMemo(() => new Set(member.allergens.map((c) => c.value)), [member.allergens]);
+  const anyRest = ALLERGENS_REST.some((a) => chosen.has(a));
+  const [showAll, setShowAll] = useState(anyRest);
+  const list = showAll ? [...ALLERGENS_COMMON, ...ALLERGENS_REST] : ALLERGENS_COMMON;
+  const toggle = async (key: string) => {
+    const existing = member.allergens.find((c) => c.value === key);
+    if (existing) await api.deleteConstraint(existing.id);
+    else await api.addConstraint(member.id, { kind: 'allergen', value: key });
+    await refresh();
+  };
+  const hasAny = member.allergens.length > 0;
+  const noteList = member.allergens.map((c) => ALLERGEN_LABEL[c.value] ?? cap(c.value)).join(', ');
+
+  if (!open) {
+    if (!canEdit && !hasAny) return <View style={styles.collapsedRow}><View style={[styles.rowTile, styles.rowTileRed]}><Icon name="allergen" size={18} color={colors.allergen} strokeWidth={2.2} /></View><Text style={styles.rowTitle}>No allergies</Text></View>;
+    return (
+      <Press onPress={() => canEdit && setOpen(true)} disabled={!canEdit} accessibilityRole="button" style={styles.collapsedRow}>
+        <View style={[styles.rowTile, styles.rowTileRed]}><Icon name="allergen" size={18} color={colors.allergen} strokeWidth={2.2} /></View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.rowTitle}>{hasAny ? 'Allergies' : 'Any allergies?'}</Text>
+          {hasAny ? <Text style={styles.allergenList}>{noteList}</Text> : null}
+        </View>
+        {canEdit ? <Text style={styles.rowAction}>{hasAny ? 'Edit' : 'Add'}</Text> : null}
+        <Icon name="expand" size={18} color={colors.inkFaint} />
+      </Press>
+    );
+  }
+  return (
+    <View style={styles.openBlock}>
+      <Row style={{ gap: 10, alignItems: 'flex-start' }}>
+        <Icon name="allergen" size={22} color={colors.allergen} strokeWidth={2.2} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.openTitle}>Allergies</Text>
+          <Text style={styles.openHint}>Hides places that can't avoid it</Text>
+        </View>
+        <Press onPress={() => setOpen(false)} accessibilityRole="button"><Icon name="collapse" size={18} color={colors.inkFaint} /></Press>
+      </Row>
+      <Wrap>
+        {list.map((key) => {
+          const on = chosen.has(key);
+          return (
+            <Press key={key} onPress={() => toggle(key)} accessibilityRole="button" accessibilityState={{ selected: on }} style={[styles.allergenChip, on ? styles.allergenOn : styles.allergenOff]}>
+              {on ? <Icon name="check" size={13} color={CREAM} strokeWidth={3} /> : null}
+              <Text style={[styles.allergenChipText, on && { color: CREAM }]}>{ALLERGEN_LABEL[key]}</Text>
+            </Press>
+          );
+        })}
+      </Wrap>
+      {!showAll ? <Press onPress={() => setShowAll(true)} accessibilityRole="button"><Text style={styles.showAll}>Show all 14</Text></Press> : null}
+    </View>
+  );
+}
+
+// --- access needs (SX4) -----------------------------------------------------
+
+function AccessRow({ member, refresh, canEdit }: { member: Member; refresh: () => Promise<void>; canEdit: boolean }) {
+  const [open, setOpen] = useState(false);
+  const chosen = member.accessNeeds ?? [];
+  const toggle = async (key: AccessNeed) => {
+    const next = chosen.includes(key) ? chosen.filter((a) => a !== key) : [...chosen, key];
+    await api.updateMember(member.id, { accessNeeds: next }); await refresh();
+  };
+  if (!open) {
+    if (!canEdit && !chosen.length) return <View style={styles.collapsedRow}><View style={styles.rowTile}><Icon name="accessible" size={18} color={colors.ink} strokeWidth={2} /></View><Text style={styles.rowTitle}>No access needs</Text></View>;
+    const label = chosen.length ? chosen.map((a) => ACCESS_OPTS.find((o) => o.key === a)?.label).filter(Boolean).join(', ') : null;
+    return (
+      <Press onPress={() => canEdit && setOpen(true)} disabled={!canEdit} accessibilityRole="button" style={styles.collapsedRow}>
+        <View style={styles.rowTile}><Icon name="accessible" size={18} color={colors.ink} strokeWidth={2} /></View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.rowTitle}>{chosen.length ? 'Access needs' : 'Any access needs?'}</Text>
+          {label ? <Text style={type.tiny}>{label}</Text> : null}
+        </View>
+        {canEdit ? <Text style={styles.rowAction}>{chosen.length ? 'Edit' : 'Add'}</Text> : null}
+        <Icon name="expand" size={18} color={colors.inkFaint} />
+      </Press>
+    );
+  }
+  return (
+    <View style={styles.openBlock}>
+      <Row style={{ gap: 10, alignItems: 'flex-start' }}>
+        <Icon name="accessible" size={22} color={colors.ink} strokeWidth={2} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.openTitle}>Access needs</Text>
+          <Text style={styles.openHintMuted}>Ranks places that suit {first(member.name)} higher</Text>
+        </View>
+        <Press onPress={() => setOpen(false)} accessibilityRole="button"><Icon name="collapse" size={18} color={colors.inkFaint} /></Press>
+      </Row>
+      {ACCESS_OPTS.map((o) => {
+        const on = chosen.includes(o.key);
+        return (
+          <Press key={o.key} onPress={() => toggle(o.key)} accessibilityRole="checkbox" accessibilityState={{ checked: on }} style={styles.checkRow}>
+            <View style={[styles.square, on ? styles.squareOn : styles.squareOff]}>{on ? <Icon name="check" size={13} color={INK} strokeWidth={3} /> : null}</View>
+            <View style={{ flex: 1 }}>
+              <Text style={type.body}>{o.label}</Text>
+              {o.filters ? <Text style={styles.openHintMuted}>Hides places without step-free access</Text> : null}
+            </View>
+          </Press>
+        );
+      })}
+    </View>
+  );
+}
+
+// --- What Epic has noticed (SX5) --------------------------------------------
+
+function NoticedSheet({ member, learned, refresh, onClose }: { member: Member; learned: Learned[]; refresh: () => Promise<void>; onClose: () => void }) {
+  const keep = async (l: Learned) => { await api.addConstraint(member.id, { kind: l.kind === 'dislike' ? 'dislike' : 'like', value: l.label, conceptKey: l.conceptKey }); showToast(`${l.label} kept`); await refresh(); };
+  const forget = async (l: Learned) => { await api.updateMember(member.id, { neverLearn: [...(member.neverLearn ?? []), l.label] }); showToast(`Epic will stop learning ${l.label}`); await refresh(); onClose(); };
+  return (
+    <Sheet title="What Epic has noticed" onDone={onClose} onClose={onClose}>
+      {learned.map((l) => {
+        const seen = Math.min(3, l.count);
+        return (
+          <View key={l.conceptKey} style={styles.noticedRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={type.h3}>{l.label}</Text>
+              <Text style={[type.tiny, l.confirmed && { color: colors.accent, fontWeight: '700' }]}>{l.confirmed ? 'Learned' : `${seen} of ${l.threshold} visits`}</Text>
+              <Row style={{ gap: 4, marginTop: 6 }}>
+                {[0, 1, 2].map((i) => <View key={i} style={[styles.seg, (l.confirmed || i < seen) && { backgroundColor: l.confirmed ? LIME : colors.ink }]} />)}
+              </Row>
+            </View>
+            <Press onPress={() => keep(l)} accessibilityRole="button"><Text style={styles.rowAction}>Keep</Text></Press>
+            <Press onPress={() => forget(l)} accessibilityRole="button"><Text style={[styles.rowAction, { color: colors.inkMuted }]}>Forget</Text></Press>
+          </View>
+        );
+      })}
+    </Sheet>
+  );
+}
+
+// --- pending invite (SE3 status) --------------------------------------------
+
+function PendingInvite({ member, refresh }: { member: Member; refresh: () => Promise<void> }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const resend = async () => { try { const r = await api.inviteMember(member.id, { channels: member.access?.email ? ['email'] : ['sms'] }); setUrl(r.invitation.url); showToast(r.invitation.sent ? 'Invite sent' : 'Link ready to copy'); await refresh(); } catch (e: any) { showToast(e?.body?.message || 'Could not resend'); } };
+  const copy = async () => { const link = url; if (link && typeof navigator !== 'undefined' && navigator.clipboard) { await navigator.clipboard.writeText(link); showToast('Link copied'); } else { await resend(); } };
+  return (
+    <View style={styles.tintBlock}>
+      <Text style={styles.tintTitle}>Invited{member.access?.invitedAt ? ` ${shortDate(member.access.invitedAt)}` : ''} · not opened yet</Text>
+      {member.access?.mobile || member.access?.email ? <Text style={styles.tintBody}>Sent to {member.access?.mobile ?? member.access?.email}</Text> : null}
+      <Row style={{ gap: 8, marginTop: 10 }}>
+        <Button kind="secondary" label="Resend" onPress={resend} />
+        <Button kind="secondary" label="Copy link" onPress={copy} />
+      </Row>
+    </View>
+  );
+}
+
+// --- photo flow (SX1–SX3) ---------------------------------------------------
+
+function PhotoSheet({ member, refresh, onClose }: { member: Member; refresh: () => Promise<void>; onClose: () => void }) {
+  const prev = member.avatarUrl;
+  const set = async (url: string | null) => {
+    await api.updateMember(member.id, { avatarUrl: url ?? '' }); await refresh(); onClose();
+    showToast(url ? 'Photo saved' : 'Photo removed', { undo: async () => { await api.updateMember(member.id, { avatarUrl: prev ?? '' }); await refresh(); } });
+  };
+  const pick = async (source: 'camera' | 'library') => { const url = await pickSquarePhoto(source); if (url) await set(url); };
+  return (
+    <Sheet title={`${first(member.name)}'s photo`} onClose={onClose}>
+      <Press onPress={() => pick('camera')} accessibilityRole="button" style={styles.sourceRow}><Icon name="camera" size={18} color={colors.ink} strokeWidth={2} /><Text style={type.body}>Take photo</Text></Press>
+      <Press onPress={() => pick('library')} accessibilityRole="button" style={styles.sourceRow}><Icon name="image" size={18} color={colors.ink} strokeWidth={2} /><Text style={type.body}>Choose photo</Text></Press>
+      {prev ? <Press onPress={() => set(null)} accessibilityRole="button" style={styles.sourceRow}><Icon name="delete" size={18} color={colors.overrun} strokeWidth={2} /><Text style={[type.body, { color: colors.overrun }]}>Remove photo</Text></Press> : null}
+      <Press onPress={onClose} accessibilityRole="button" style={[styles.sourceRow, { justifyContent: 'center' }]}><Text style={[type.body, { color: colors.inkMuted }]}>Cancel</Text></Press>
+    </Sheet>
   );
 }
 
 /**
- * A picture from this device, cropped and shrunk here so what leaves the phone
- * is small enough to store: a face is square and small, a house is wide and a
- * little bigger, and both arrive as a data URI the household owns.
+ * Take (camera) or choose (library), crop square, resize to 512 and re-encode —
+ * which strips EXIF and location (SX1 "Take photo" = capture, "Choose" = library).
  */
-async function pickPhoto({ aspect = [1, 1] as [number, number], width = 256, height = 256 } = {}): Promise<string | null> {
-  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (!perm.granted && Platform.OS !== 'web') return null;
-  const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect, quality: 0.9 });
-  if (res.canceled || !res.assets?.[0]) return null;
+async function pickSquarePhoto(source: 'camera' | 'library'): Promise<string | null> {
+  const opts = { mediaTypes: 'images' as const, allowsEditing: true, aspect: [1, 1] as [number, number], quality: 1, base64: false };
+  const res = await (source === 'camera' ? ImagePicker.launchCameraAsync(opts) : ImagePicker.launchImageLibraryAsync(opts)).catch(() => null);
+  if (!res || res.canceled || !res.assets?.[0]) return null;
   const ctx = ImageManipulator.ImageManipulator.manipulate(res.assets[0].uri);
-  ctx.resize({ width, height });
+  ctx.resize({ width: 512, height: 512 });
   const rendered = await ctx.renderAsync();
-  const saved = await rendered.saveAsync({ format: ImageManipulator.SaveFormat.JPEG, compress: 0.75, base64: true });
+  const saved = await rendered.saveAsync({ format: ImageManipulator.SaveFormat.JPEG, compress: 0.8, base64: true });
   return saved.base64 ? `data:image/jpeg;base64,${saved.base64}` : null;
 }
 
-/**
- * A stored number read back the way it was dialled.
- *
- * `+447779993777` is what a sender needs and what the database holds; it is not
- * what anybody in this household would recognise as their own number. Only the
- * British shape is spaced, because guessing at the grouping of a number from
- * somewhere else would make it less readable rather than more.
- */
-function prettyMobile(e164?: string | null): string | null {
-  const v = (e164 ?? '').trim();
-  if (!v) return null;
-  if (v.startsWith('+44') && v.length === 13) return `${v.slice(0, 3)} ${v.slice(3, 7)} ${v.slice(7)}`;
-  return v;
-}
+// --- edit sheet (SE6 / SE6b) ------------------------------------------------
 
-const isActivity = (c: Constraint) => c.conceptKind === 'experience';
-// Favourites first, then the order they were added.
-const byFavourite = (a: Constraint, b: Constraint) => Number(Boolean(b.favourite)) - Number(Boolean(a.favourite));
-const listOf = (cs: Constraint[], max = 4) => {
-  const labels = cs.map((c) => c.value);
-  return labels.length <= max ? labels.join(', ') : `${labels.slice(0, max).join(', ')} +${labels.length - max}`;
-};
-
-/** One line that says what this person is about, for the list. */
-export function summarise(m: Member): string {
-  const parts: string[] = [];
-  if (m.allergens.length) parts.push(`allergic to ${listOf(m.allergens)}`);
-  if (m.diets.length) parts.push(m.diets.map((c) => c.value).join(', '));
-  const likes = [...m.likes].sort(byFavourite);
-  if (likes.length) parts.push(`likes ${listOf(likes)}`);
-  if (m.dislikes.length) parts.push(`not ${listOf(m.dislikes, 3)}`);
-  return parts.length ? parts.join(' · ') : 'Nothing set yet';
-}
-
-function MemberDetail({ member, index, managedBy, relationships, allergens, learned, refresh, senders, onRemoved }: {
-  member: Member; index: number; managedBy?: string; relationships: string[]; allergens: string[]; learned: Learned[];
-  refresh: () => Promise<void>; senders?: { sms: SenderStatus; email: SenderStatus }; onRemoved: () => void;
-}) {
-  const [browse, setBrowse] = useState<null | { section: Section; mode: Mode }>(null);
-  const [detailFor, setDetailFor] = useState<Constraint | null>(null);
-  // Food or things to do: part of the address, so a person's tastes open where
-  // the link says (`/household/<id>?tastes=activities`).
-  const [section, setSection] = useQueryState<Section>('tastes', 'food', asOneOf(['food', 'activities'] as const, 'food'));
-  const [notice, setNotice] = useState<Notice | null>(null);
+function EditSheet({ data, member, refresh, canEdit, onClose }: { data: HouseholdResponse; member: Member; refresh: () => Promise<void>; canEdit: boolean; onClose: () => void }) {
+  const { navigate } = useRouter();
+  const isYou = member.id === data.me;
+  const owner = Boolean(member.access?.isLead);
+  const [name, setName] = useState(member.name);
+  const [rel, setRel] = useState(member.relationship ?? '');
+  const [birth, setBirth] = useState<string | null>(member.birthDate ?? null);
+  const [mobile, setMobile] = useState(member.mobile ?? '');
+  const [login, setLogin] = useState(Boolean(member.access && member.access.status !== 'none'));
+  const [resend, setResend] = useState(true);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  // Reset per-person UI when the selection changes.
-  useEffect(() => { setBrowse(null); setDetailFor(null); setNotice(null); setConfirmRemove(false); }, [member.id]);
+  const isPending = member.access?.status === 'invited';
+  const numberChanged = (mobile.trim() || null) !== (member.mobile ?? null);
+  const age = birth ? ageFromISO(birth) : member.age;
+  const thirteenPlus = age == null ? !member.isMinor : age >= 13;
+  // Who may remove: the owner anyone but self; a joined adult children only.
+  const callerOwner = data.members.find((m) => m.id === data.me)?.access?.isLead;
+  const targetIsChild = (member.age != null ? member.age < 18 : member.isMinor);
+  const mayRemove = !isYou && (callerOwner || targetIsChild);
 
-  const add = async (kind: Constraint['kind'], value: string, conceptKey?: string) => {
+  const save = async () => {
+    setBusy(true);
     try {
-      const r = await api.addConstraint(member.id, { kind, value, conceptKey });
-      const pending = !r.resolved && r.suggestions.length ? r.suggestions : null;
-      setNotice(pending || r.hint ? { section, kind, hint: r.hint, pending } : null);
-    } catch (e: any) {
-      // 409: it's already on the other list. Say so where they typed.
-      const msg = e?.body?.message ?? e?.message ?? 'Could not add that.';
-      setNotice({ section, kind, hint: msg, pending: null });
-    }
-    await refresh();
+      await api.updateMember(member.id, {
+        name: name.trim() || undefined,
+        relationship: isYou ? undefined : (rel || null),
+        birthDate: birth,
+        mobile: thirteenPlus ? (mobile.trim() || null) : null,
+      });
+      if (login && thirteenPlus && member.access?.status === 'none' && mobile.trim()) {
+        await api.inviteMember(member.id, { mobile: mobile.trim(), channels: ['sms'] }).catch(() => null);
+      }
+      // SE6b: a pending invite whose number changed, with the resend box on,
+      // re-sends to the new number on save.
+      if (isPending && numberChanged && resend && mobile.trim()) {
+        await api.inviteMember(member.id, { mobile: mobile.trim(), channels: ['sms'] }).catch(() => null);
+        await refresh(); onClose();
+        showToast(`Saved · invite sent to ${mobile.trim()}`);
+        return;
+      }
+      await refresh(); onClose();
+    } catch (e: any) { showToast(e?.body?.message || 'Could not save'); } finally { setBusy(false); }
   };
-  const remove = async (c: Constraint) => { if (detailFor?.id === c.id) setDetailFor(null); await api.deleteConstraint(c.id); await refresh(); };
-  const haveKeys = new Set([...member.likes, ...member.dislikes, ...member.diets].map((c) => c.conceptKey).filter(Boolean) as string[]);
-  const setLimit = async (c: Constraint, maxMinutes: number | null) => { await api.updateConstraint(c.id, { maxMinutes }); setDetailFor(null); await refresh(); };
-  const setFavourite = async (c: Constraint, favourite: boolean) => { await api.updateConstraint(c.id, { favourite }); setDetailFor(null); await refresh(); };
-  const prefLabel = (c: Constraint) => (c.maxMinutes ? `${c.value} · up to ${c.maxMinutes} min` : c.value);
-  const openBrowse = (s: Section, mode: Mode) => setBrowse({ section: s, mode });
 
-  const foodLikes = member.likes.filter((c) => !isActivity(c)).sort(byFavourite);
-  const foodDislikes = member.dislikes.filter((c) => !isActivity(c));
-  const actLikes = member.likes.filter(isActivity).sort(byFavourite);
-  const actDislikes = member.dislikes.filter(isActivity);
-  const learnedFood = learned.filter((l) => l.conceptKind !== 'experience');
-  const learnedAct = learned.filter((l) => l.conceptKind === 'experience');
-
-  const noticeFor = (s: Section, kind: Constraint['kind']) => (notice && notice.section === s && notice.kind === kind ? (
-    <View style={styles.pendingBox}>
-      {notice.hint ? <Text style={type.small}>{notice.hint}</Text> : null}
-      {notice.pending ? (
-        <>
-          <Text style={type.small}>Kept as typed. Also add the shared meaning?</Text>
-          <Wrap>{notice.pending.map((sg) => <Chip key={sg.key} label={sg.label} tone="accent" onPress={async () => { setNotice(null); await add(kind, sg.label, sg.key); }} />)}</Wrap>
-        </>
-      ) : null}
-      <Button label={notice.pending ? 'No, keep my words' : 'OK'} kind="ghost" onPress={() => setNotice(null)} style={{ alignSelf: 'flex-start' }} />
-    </View>
-  ) : null);
-
-  // Tapping a like: make it a favourite, and for activities set a time limit.
-  const detailBox = detailFor ? (
-    <View style={styles.pendingBox}>
-      <Text style={type.small}>{detailFor.value}</Text>
-      {detailFor.kind === 'like' ? (
-        <>
-          <Wrap>
-            <Chip label={detailFor.favourite ? 'A favourite' : 'Make it a favourite'} icon="favourite" iconFill={Boolean(detailFor.favourite)} tone="like" selected={Boolean(detailFor.favourite)} onPress={() => setFavourite(detailFor, !detailFor.favourite)} />
-          </Wrap>
-          <Text style={type.tiny}>A favourite is the one {member.name} would generally pick over the other things they like. It ranks higher; it never hides anything.</Text>
-        </>
-      ) : null}
-      {isActivity(detailFor) ? (
-        <>
-          <Text style={type.tiny}>How long is enough? Short ones are fine, longer ones count against a place.</Text>
-          <Wrap>
-            {[30, 45, 60, 90, 120, 180].map((m) => <Chip key={m} label={`up to ${m} min`} selected={detailFor.maxMinutes === m} onPress={() => setLimit(detailFor, m)} />)}
-            <Chip label="no limit" selected={!detailFor.maxMinutes} onPress={() => setLimit(detailFor, null)} />
-          </Wrap>
-        </>
-      ) : null}
-      <Row>
-        <Button label="Remove" kind="ghost" onPress={() => remove(detailFor)} />
-        <Button label="Done" kind="ghost" onPress={() => setDetailFor(null)} />
-      </Row>
-    </View>
-  ) : null;
-
-  const likeChip = (c: Constraint) => (
-    <Chip key={c.id} label={prefLabel(c)} tone="like" icon={c.favourite ? 'favourite' : undefined} iconFill selected={detailFor?.id === c.id} onPress={() => setDetailFor(detailFor?.id === c.id ? null : c)} onRemove={() => remove(c)} />
-  );
-  const picker = (s: Section, mode: Mode) => (browse?.section === s && browse.mode === mode ? (
-    <TastePicker section={s} mode={mode} already={haveKeys} onPick={(p) => add(mode, p.label, p.key)} onClose={() => setBrowse(null)} />
-  ) : null);
-
-  return (
-    <Card>
-      <Row>
-        <Press onPress={async () => { const url = await pickPhoto(); if (url) { await api.updateMember(member.id, { avatarUrl: url }); await refresh(); } }} accessibilityRole="button" accessibilityLabel={`Change photo for ${member.name}`}>
-          <Avatar name={member.name} index={index} size={56} url={member.avatarUrl} />
-          <Text style={[type.tiny, { textAlign: 'center' }]}>{member.avatarUrl ? 'change' : 'photo'}</Text>
-        </Press>
-        <View style={{ flex: 1 }}>
-          <Text style={type.h2}>{member.name}</Text>
-          {managedBy ? <Text style={type.tiny}>Managed by {managedBy}</Text> : null}
-          {/* How to reach them, beside their face — owner, 6 Sep 2026. Shown
-              here rather than only inside the invite panel, because "what is
-              Gina's number" is a thing to be able to read off the page without
-              opening the machinery for sending her something. */}
-          {prettyMobile(member.access?.mobile) ? (
-            <IconText name="phone">{prettyMobile(member.access?.mobile)}</IconText>
-          ) : null}
-          {member.access?.email ? <IconText name="mail">{member.access.email}</IconText> : null}
-        </View>
-      </Row>
-
-      <Segmented value={section} options={[{ value: 'food', label: 'Food & drink' }, { value: 'activities', label: 'Things to do' }]} onChange={(s) => { setSection(s); setBrowse(null); setDetailFor(null); }} />
-
-      {section === 'food' ? (
-        <View style={{ gap: spacing.md }}>
-          <AllergenGroup member={member} common={allergens} add={(v) => add('allergen', v)} remove={remove} notice={noticeFor('food', 'allergen')} />
-          <Group title="Diet" hint="Vegetarian, halal, gluten-free… ranks places by whether they have something suitable.">
-            <Wrap>{member.diets.map((c) => <Chip key={c.id} label={c.value} tone="accent" onRemove={() => remove(c)} />)}</Wrap>
-            <SuggestInput placeholder="e.g. vegetarian, halal, gluten-free" kinds={DIET_KINDS} onPick={(s) => add('diet', s.label, s.key)} onFree={(v) => add('diet', v)} />
-            {noticeFor('food', 'diet')}
-          </Group>
-          <Group title="Likes" hint="Tap into the box to pick from cuisines, styles and dishes, or type anything. Tap a pill to make it a favourite.">
-            <Wrap>{foodLikes.map(likeChip)}</Wrap>
-            {detailFor && !isActivity(detailFor) && detailFor.kind === 'like' ? detailBox : null}
-            <SuggestInput placeholder="e.g. Italian, chicken, healthy food, noodles" kinds={FOOD_KINDS} onPick={(s) => add('like', s.label, s.key)} onFree={(v) => add('like', v)} onFocus={() => openBrowse('food', 'like')} onBrowse={() => openBrowse('food', 'like')} />
-            {picker('food', 'like')}
-            {noticeFor('food', 'like')}
-          </Group>
-          <Group title="Dislikes" hint="Ranks a place lower — never hides it. Don't write 'not …' — this list is the 'not'.">
-            <Wrap>{foodDislikes.map((c) => <Chip key={c.id} label={prefLabel(c)} tone="dislike" onRemove={() => remove(c)} />)}</Wrap>
-            <SuggestInput placeholder="e.g. fried food, seafood, pubs, spicy food" kinds={FOOD_KINDS} onPick={(s) => add('dislike', s.label, s.key)} onFree={(v) => add('dislike', v)} onFocus={() => openBrowse('food', 'dislike')} onBrowse={() => openBrowse('food', 'dislike')} />
-            {picker('food', 'dislike')}
-            {noticeFor('food', 'dislike')}
-          </Group>
-          <LearnedList items={learnedFood} />
-        </View>
-      ) : (
-        <View style={{ gap: spacing.md }}>
-          <Group title="Loves doing" hint={'Tap a pill to make it a favourite or set a limit — "walks, up to 30 min" means short ones yes, long ones no.'}>
-            <Wrap>{actLikes.map(likeChip)}</Wrap>
-            {detailFor && isActivity(detailFor) ? detailBox : null}
-            <SuggestInput placeholder="e.g. playgrounds, museums, historical things, swimming" kinds={ACTIVITY_KINDS} onPick={(s) => add('like', s.label, s.key)} onFree={(v) => add('like', v)} onFocus={() => openBrowse('activities', 'like')} onBrowse={() => openBrowse('activities', 'like')} />
-            {picker('activities', 'like')}
-            {noticeFor('activities', 'like')}
-          </Group>
-          <Group title="Would rather not" hint="Ranks these lower for outings this person is on. Anything already in Loves doing isn't offered here.">
-            <Wrap>{actDislikes.map((c) => <Chip key={c.id} label={prefLabel(c)} tone="dislike" onRemove={() => remove(c)} />)}</Wrap>
-            <SuggestInput placeholder="e.g. art galleries, shopping" kinds={ACTIVITY_KINDS} onPick={(s) => add('dislike', s.label, s.key)} onFree={(v) => add('dislike', v)} onFocus={() => openBrowse('activities', 'dislike')} onBrowse={() => openBrowse('activities', 'dislike')} />
-            {picker('activities', 'dislike')}
-            {noticeFor('activities', 'dislike')}
-          </Group>
-          <LearnedList items={learnedAct} />
-        </View>
-      )}
-
-      <AboutGroup member={member} relationships={relationships} refresh={refresh} />
-
-      <AccessGroup member={member} senders={senders} refresh={refresh} />
-
-      <Row style={{ justifyContent: 'flex-end' }}>
-        {confirmRemove ? (
-          <>
-            <Text style={type.small}>Remove {member.name} and everything they like?</Text>
-            <Button label="Yes, remove" kind="danger" onPress={async () => { await api.deleteMember(member.id); onRemoved(); await refresh(); }} />
-            <Button label="Keep" kind="ghost" onPress={() => setConfirmRemove(false)} />
-          </>
-        ) : <Button label="Remove person" kind="ghost" onPress={() => setConfirmRemove(true)} />}
-      </Row>
-    </Card>
-  );
-}
-
-
-/**
- * Whether this person can open Epic on their own phone, and how to send them
- * the link (owner, 6 Sep 2026: "how can I invite Gina and anyone else that's in
- * my household to the app?").
- *
- * Below their tastes rather than above, because who somebody is comes before
- * how they sign in — and immediately above "Remove person", because taking
- * their sign-in away and removing them are next to each other in the mind and
- * must not be next to each other by accident: one leaves everything they have
- * ever rated in place, the other does not, and both say so before they act.
- *
- * A household member is a full peer once they are in (owner, 6 Sep 2026:
- * "Everything, no exceptions"), so this promises nothing about what they can
- * and cannot do. It says the true thing instead: it is the same Epic.
- *
- * With no sender configured nothing here fails. The link is minted, the screen
- * says plainly that it could not be sent, and shows it to be copied — the rule
- * the group screen and the admin screen already keep, rather than implying that
- * somebody has been texted when nobody has.
- */
-function AccessGroup({ member, senders, refresh }: {
-  member: Member; senders?: { sms: SenderStatus; email: SenderStatus }; refresh: () => Promise<void>;
-}) {
-  const access = member.access ?? null;
-  const [mobile, setMobile] = useState(access?.mobile ?? '');
-  const [email, setEmail] = useState(access?.email ?? '');
-  const [open, setOpen] = useQueryState<boolean>('invite', false, asFlag);
-  const [busy, setBusy] = useState<null | 'sms' | 'email' | 'both' | 'remove'>(null);
-  const [result, setResult] = useState<HouseholdInvitation | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [confirmRemove, setConfirmRemove] = useState(false);
-  /** What just happened outside the panel — "X can no longer sign in", and so on. */
-  const [sent, setSent] = useState<string | null>(null);
-
-  // Keyed on the person and nothing else, deliberately.
-  //
-  // Sending an invitation calls `refresh()`, which brings back a member whose
-  // contact details have just changed — a number typed as `07700 900123` comes
-  // back normalised to `+447700900123`. An effect that also watched those would
-  // therefore fire on every successful send and clear `result`, which holds the
-  // link. With no sender configured that link is the only copy there will ever
-  // be: it is minted once, never stored, and shown once. Wiping it here would
-  // mean the screen said "copy the link below" and then removed it.
-  useEffect(() => {
-    setMobile(access?.mobile ?? ''); setEmail(access?.email ?? '');
-    setResult(null); setError(null); setCopied(false); setConfirmRemove(false); setSent(null);
-  }, [member.id]);
-
-  // Their number and address as the server now holds them, but only into a box
-  // nobody has typed into. Somebody halfway through correcting a number must
-  // not have it changed underneath them by a refresh happening elsewhere.
-  useEffect(() => { if (!mobile && access?.mobile) setMobile(access.mobile); }, [access?.mobile]);
-  useEffect(() => { if (!email && access?.email) setEmail(access.email); }, [access?.email]);
-
-  // A profile Epic knows is under thirteen is looked after by an adult (Epic 1
-  // C8), so there is nothing to offer — only the reason there is nothing.
-  if (access?.blocked) {
-    return <Group title="Epic on their own phone"><Text style={type.tiny}>{access.blocked}</Text></Group>;
+  if (confirmRemove) {
+    const body = member.access?.status === 'invited'
+      ? `Their invite to ${member.access?.mobile ?? member.access?.email ?? 'them'} is cancelled, and their allergies, diet and likes are deleted.`
+      : member.access?.status === 'active'
+        ? `${first(member.name)} loses access to the household straight away. Their own profile and tastes leave with them.`
+        : `${first(member.name)}'s allergies, diet and likes are deleted.`;
+    return (
+      <Sheet title={`Remove ${first(member.name)} from the household?`} onCancel={() => setConfirmRemove(false)} cancelLabel="Cancel" onClose={onClose}>
+        <Text style={type.body}>{body}</Text>
+        <Button kind="danger" label={`Remove ${first(member.name)}`} onPress={async () => {
+          // Soft delete: hide at once, hard-delete when the 3.5s Undo lapses.
+          onClose();
+          let undone = false;
+          showToast(`${first(member.name)} removed`, { undo: () => { undone = true; } });
+          setTimeout(async () => { if (undone) return; try { await api.deleteMember(member.id); navigate(paths.settings(), { replace: true }); await refresh(); } catch (e: any) { showToast(e?.body?.message || 'Could not remove'); } }, 3500);
+        }} />
+      </Sheet>
+    );
   }
 
-  const send = async (channels: ('sms' | 'email')[]) => {
-    setBusy(channels.length > 1 ? 'both' : channels[0]);
-    setError(null); setResult(null); setCopied(false);
-    try {
-      const r = await api.inviteMember(member.id, { mobile: mobile.trim() || null, email: email.trim() || null, channels });
-      setResult(r.invitation);
-      await refresh();
-    } catch (e: any) {
-      setError(e?.body?.message ?? e?.message ?? 'Could not send that.');
-    } finally { setBusy(null); }
-  };
-
-  const removeAccess = async () => {
-    setBusy('remove'); setError(null);
-    try { const r = await api.removeMemberAccess(member.id); setResult(null); setConfirmRemove(false); setError(null); await refresh(); setSent(r.message); }
-    catch (e: any) { setError(e?.body?.message ?? e?.message ?? 'Could not do that.'); }
-    finally { setBusy(null); }
-  };
-
-  const invited = access && access.status !== 'none';
-  const signedInBefore = (access?.signInCount ?? 0) > 0;
-
-  // What is true right now, in one sentence. Three different facts and each is
-  // the one that matters at that moment: never asked, asked and not answered,
-  // and in.
-  const standing = (() => {
-    if (!invited) return `${member.name} can't open Epic yet.`;
-    if (access!.status === 'suspended') return `${member.name}'s sign-in is switched off.`;
-    if (!signedInBefore) {
-      const when = access!.lastInvite?.at ? new Date(access!.lastInvite.at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' }) : null;
-      return `Invited${when ? ` on ${when}` : ''} — not opened yet.`;
-    }
-    const seen = access!.lastSeenAt ? new Date(access!.lastSeenAt) : null;
-    const today = seen && seen.toDateString() === new Date().toDateString();
-    return `Signed in${seen ? `, last here ${today ? 'today' : `on ${seen.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })}`}` : ''}.`;
-  })();
-
-  const canText = Boolean(mobile.trim());
-  const canMail = Boolean(email.trim());
-  const sendLabel = signedInBefore || invited ? 'Send a new link' : 'Send the invite';
-
-  // Why a message would not leave the building, if it would not — one clause,
-  // beside the channel it applies to, so "texts are off" does not appear under
-  // an e-mail address that would send perfectly well. The variable names are
-  // said once, at the foot of the panel: they are for the one person who can
-  // set them, and repeating them beside every box turns a form into a stack
-  // trace.
-  const warn = (which: 'sms' | 'email') => {
-    const s = senders?.[which];
-    return s && !s.configured ? <Text style={type.tiny}>{s.short ?? s.message}</Text> : null;
-  };
-  const missing = (['sms', 'email'] as const).map((k) => senders?.[k]).filter((s) => s && !s.configured);
-
   return (
-    <Group title="Epic on their own phone">
-      <Row style={{ gap: spacing.sm }}>
-        <Icon name={invited && signedInBefore ? 'check' : invited ? 'send' : 'mobile'} size={16} color={invited && signedInBefore ? colors.accent : colors.headerSub} />
-        <Text style={[type.small, { flex: 1 }]}>{standing}</Text>
-        {!open ? (
-          <Button label={invited ? 'Manage' : 'Invite them'} kind={invited ? 'ghost' : 'secondary'} onPress={() => setOpen(true)} />
-        ) : null}
-      </Row>
-      <Text style={type.tiny}>
-        They get the same Epic you do — the same trips, the same saved places, and everybody's tastes and allergies already in it.
-      </Text>
-      {sent ? <Text style={[type.small, { color: colors.accent }]}>{sent}</Text> : null}
-
-      {open ? (
-        <View style={styles.pendingBox}>
-          <View style={{ gap: 4 }}>
-            <Text style={type.tiny}>Mobile</Text>
-            <Row style={{ gap: spacing.sm }}>
-              <Icon name="mobile" size={16} color={colors.headerSub} />
-              <TextInput
-                value={mobile} onChangeText={setMobile} placeholder="07700 900123"
-                placeholderTextColor={colors.inkFaint} keyboardType="phone-pad" autoCapitalize="none"
-                style={[styles.input, { flex: 1 }]}
-                accessibilityLabel={`Mobile number for ${member.name}`}
-              />
-            </Row>
-            {warn('sms')}
-          </View>
-
-          <View style={{ gap: 4 }}>
-            <Text style={type.tiny}>E-mail</Text>
-            <Row style={{ gap: spacing.sm }}>
-              <Icon name="mail" size={16} color={colors.headerSub} />
-              <TextInput
-                value={email} onChangeText={setEmail} placeholder="gina@example.com"
-                placeholderTextColor={colors.inkFaint} keyboardType="email-address" autoCapitalize="none" autoCorrect={false}
-                style={[styles.input, { flex: 1 }]}
-                accessibilityLabel={`E-mail address for ${member.name}`}
-              />
-            </Row>
-            {warn('email')}
-          </View>
-
-          <Wrap>
-            <Button label={busy === 'sms' ? 'Texting…' : `${sendLabel} by text`} icon="message" disabled={!canText || busy !== null} onPress={() => send(['sms'])} />
-            <Button label={busy === 'email' ? 'Sending…' : `${sendLabel} by e-mail`} icon="mail" kind="secondary" disabled={!canMail || busy !== null} onPress={() => send(['email'])} />
-            {canText && canMail ? (
-              <Button label={busy === 'both' ? 'Sending…' : 'Both'} kind="ghost" disabled={busy !== null} onPress={() => send(['sms', 'email'])} />
-            ) : null}
-          </Wrap>
-          <Text style={type.tiny}>
-            {canText || canMail
-              ? 'One link, however it goes out — it signs them in on the device they open it on, works once, and lasts a week.'
-              : 'Add a mobile number or an e-mail address — a link has to go somewhere.'}
-          </Text>
-          {/* Said once, and only to whoever can act on it. */}
-          {missing.map((s) => <Text key={s!.reason} style={type.tiny}>{s!.setup ?? s!.message}</Text>)}
-          {/* Configured, but something about it looks wrong enough to say so
-              before a send fails on it. Not an error — the buttons still work. */}
-          {(['sms', 'email'] as const).map((k) => senders?.[k]?.caution
-            ? <Text key={`caution-${k}`} style={[type.tiny, { color: colors.dislike }]}>{senders[k].caution}</Text>
-            : null)}
-
-          {error ? <Text style={[type.small, { color: colors.dislike }]}>{error}</Text> : null}
-
-          {result ? (
-            <View style={{ gap: spacing.sm }}>
-              <Text style={[type.small, { color: result.sent ? colors.accent : colors.ink }]}>{result.message}</Text>
-              {/* Only a real refusal — "Twilio would not take it", "that domain
-                  is not verified". A channel that is simply not switched on has
-                  already said so twice above, and saying it a third time next to
-                  the link buries the link. */}
-              {result.channels.filter((c) => !c.sent && c.message && senders?.[c.channel]?.configured).map((c) => (
-                <Text key={c.channel} style={[type.tiny, { color: colors.dislike }]}>{c.message}</Text>
-              ))}
-              {/* Shown once and never stored. With no sender configured this is
-                  the only way the invitation reaches anybody. */}
-              <Text style={type.tiny} selectable numberOfLines={2}>{result.url}</Text>
-              <Row>
-                <Button
-                  label={copied ? 'Copied' : 'Copy the link'} icon={copied ? 'check' : 'copy'} kind="secondary"
-                  onPress={async () => {
-                    try { await navigator.clipboard.writeText(result.url); setCopied(true); } catch { setCopied(false); }
-                  }}
-                />
-              </Row>
-            </View>
-          ) : null}
-
-          <Row style={{ justifyContent: 'space-between' }}>
-            <Button label="Done" kind="ghost" onPress={() => { setOpen(false); setResult(null); setError(null); }} />
-            {invited && !access?.isLead ? (
-              confirmRemove ? (
-                <Row style={{ gap: spacing.sm, flexWrap: 'wrap' }}>
-                  <Text style={type.small}>Take {member.name}'s sign-in away?</Text>
-                  <Button label={busy === 'remove' ? 'Removing…' : 'Yes, remove it'} kind="danger" disabled={busy !== null} onPress={removeAccess} />
-                  <Button label="Keep it" kind="ghost" onPress={() => setConfirmRemove(false)} />
-                </Row>
-              ) : <Button label="Remove their sign-in" kind="ghost" onPress={() => setConfirmRemove(true)} />
-            ) : null}
-          </Row>
-          {invited && !access?.isLead && confirmRemove ? (
-            <Text style={type.tiny}>Their profile, tastes and everything they have rated stay exactly where they are. Only the way in goes.</Text>
-          ) : null}
-        </View>
+    <Sheet title={`${first(member.name)}'s details`} fromTop={56} onCancel={onClose} cancelLabel="Cancel" onDone={canEdit ? save : onClose} doneLabel={canEdit ? 'Save' : 'Done'} doneDisabled={busy} onClose={onClose}>
+      <Field label="Name"><TextInput editable={canEdit} value={name} onChangeText={setName} style={styles.input} placeholderTextColor={colors.inkFaint} /></Field>
+      {!isYou ? (
+        <Field label={`Relationship to ${first(data.members.find((m) => m.access?.isLead)?.name ?? 'you')}`}>
+          <Wrap>{RELATIONSHIPS.map((r) => <Chip key={r} label={RELATIONSHIP_LABEL[r]} selected={rel === r} onPress={canEdit ? () => setRel(r) : undefined} />)}</Wrap>
+        </Field>
       ) : null}
-    </Group>
-  );
-}
-
-/** Name, birthday and relationship — below the tastes, saved as they are changed. */
-function AboutGroup({ member, relationships, refresh }: { member: Member; relationships: string[]; refresh: () => Promise<void> }) {
-  const [name, setName] = useState(member.name);
-  const [birth, setBirth] = useState(member.birthDate ?? '');
-  const [saved, setSaved] = useState<string | null>(null);
-  useEffect(() => { setName(member.name); setBirth(member.birthDate ?? ''); }, [member.id, member.name, member.birthDate]);
-
-  const flash = (what: string) => { setSaved(what); setTimeout(() => setSaved(null), 1500); };
-  const saveName = async () => {
-    const t = name.trim();
-    if (!t || t === member.name) { setName(member.name); return; }
-    await api.updateMember(member.id, { name: t }); await refresh(); flash('Name saved');
-  };
-  // Picked, not typed (owner, 12 Sep 2026): year, then month, then day — and saved the moment the day is tapped.
-  const saveBirth = async (iso: string | null) => {
-    const t = iso ?? '';
-    setBirth(t);
-    if (t === (member.birthDate ?? '')) return;
-    await api.updateMember(member.id, { birthDate: t || null }); await refresh(); flash(t ? 'Birthday saved' : 'Birthday cleared');
-  };
-  const ageText = member.age != null ? `${member.age}${member.birthDate ? '' : ' (approx.)'}${member.isMinor ? ' · under 13' : ''}` : null;
-
-  return (
-    <Group title="About" hint="Saves as you go.">
-      <View style={{ gap: 4 }}>
-        <Text style={type.tiny}>Name</Text>
-        <TextInput value={name} onChangeText={setName} onBlur={saveName} onSubmitEditing={saveName} returnKeyType="done" style={styles.input} />
+      <View>
+        <BirthdayPicker label="Birthday" value={birth} onChange={(iso) => setBirth(iso ?? null)} />
+        <Text style={type.tiny}>Only the age is shown{age != null ? `: ${age}` : ''}</Text>
       </View>
-      <BirthdayPicker label={`Birthday${ageText ? ` · ${ageText}` : ''}`} value={birth || null} onChange={(iso) => void saveBirth(iso)} />
-      <Text style={type.tiny}>Relationship to the household</Text>
-      <Wrap>{relationships.map((r) => <Chip key={r} label={RELATIONSHIP_LABEL[r] ?? r} selected={member.relationship === r} onPress={async () => { await api.updateMember(member.id, { relationship: r }); await refresh(); flash('Relationship saved'); }} />)}</Wrap>
-      {saved ? <Text style={[type.tiny, { color: colors.like }]}>{saved}</Text> : null}
-    </Group>
-  );
-}
-
-/**
- * Allergens: the person's own list in red, then one box to type into. The
- * common nine appear as you type (so "pea" offers peanuts) and behind a
- * "Common ones" toggle — not as a permanent row that looks like more choices.
- */
-function AllergenGroup({ member, common, add, remove, notice }: {
-  member: Member; common: string[]; add: (v: string) => Promise<void>; remove: (c: Constraint) => Promise<void>; notice: React.ReactNode;
-}) {
-  const [v, setV] = useState('');
-  const [showCommon, setShowCommon] = useState(false);
-  const have = new Set(member.allergens.map((c) => c.value.toLowerCase()));
-  const q = v.trim().toLowerCase();
-  const matches = q ? common.filter((a) => !have.has(a) && a.includes(q)) : [];
-  const commit = async (value = v) => { const t = value.trim(); if (!t) return; setV(''); await add(t); };
-  return (
-    <Group title="Allergens — will exclude places" hint="Safety, not preference. A place that can't avoid it is hidden, not ranked lower.">
-      {member.allergens.length ? (
-        <Wrap>{member.allergens.map((c) => <Chip key={c.id} label={c.value} tone="allergen" icon="allergen" onRemove={() => remove(c)} />)}</Wrap>
-      ) : <Text style={type.tiny}>None recorded.</Text>}
-      <Row>
-        <TextInput value={v} onChangeText={setV} placeholder="e.g. peanuts, milk, carrots" placeholderTextColor={colors.inkFaint} style={[styles.input, { flex: 1 }]} onSubmitEditing={() => commit(matches.length === 1 ? matches[0] : v)} returnKeyType="done" autoCapitalize="none" />
-        <Button label="Add" kind="secondary" onPress={() => commit()} disabled={!q} />
-        <Button label={showCommon ? 'Hide' : 'Common ones'} kind="secondary" onPress={() => setShowCommon((s) => !s)} />
-      </Row>
-      {matches.length ? <Wrap>{matches.map((a) => <Chip key={a} label={a} tone="allergen" onPress={() => commit(a)} />)}</Wrap> : null}
-      {showCommon ? (
-        <View style={{ gap: 4 }}>
-          <Text style={type.tiny}>The nine most common. Tap to add.</Text>
-          <Wrap>{common.filter((a) => !have.has(a)).map((a) => <Chip key={a} label={`+ ${a}`} onPress={() => { void add(a); }} />)}</Wrap>
+      {thirteenPlus ? (
+        <>
+          <Field label="Mobile"><TextInput editable={canEdit} value={mobile} onChangeText={setMobile} keyboardType="phone-pad" placeholder="07700 900000" placeholderTextColor={colors.inkFaint} style={styles.input} /></Field>
+          {member.access?.status === 'none' ? (
+            <Press onPress={() => canEdit && setLogin((v) => !v)} accessibilityRole="switch" accessibilityState={{ checked: login }} style={styles.checkRow}>
+              <View style={[styles.square, login ? styles.squareOn : styles.squareOff]}>{login ? <Icon name="check" size={13} color={INK} strokeWidth={3} /> : null}</View>
+              <View style={{ flex: 1 }}><Text style={type.body}>Give {first(member.name)} their own login</Text><Text style={type.tiny}>Sends an invite to the number above</Text></View>
+            </Press>
+          ) : null}
+          {/* SE6b: a pending invite whose number is being changed. On by default;
+              saving with it on re-sends to the new number. */}
+          {isPending && numberChanged ? (
+            <Press onPress={() => canEdit && setResend((v) => !v)} accessibilityRole="switch" accessibilityState={{ checked: resend }} style={[styles.checkRow, styles.resendTint]}>
+              <View style={[styles.square, resend ? styles.squareOn : styles.squareOff]}>{resend ? <Icon name="check" size={13} color={INK} strokeWidth={3} /> : null}</View>
+              <Text style={[type.body, { flex: 1, color: colors.accent }]}>Resend the invite to the new number</Text>
+            </Press>
+          ) : null}
+        </>
+      ) : null}
+      {mayRemove ? (
+        <View style={styles.removeFoot}>
+          <Press onPress={() => setConfirmRemove(true)} accessibilityRole="button"><Text style={styles.removeLink}>Remove {first(member.name)} from household</Text></Press>
         </View>
       ) : null}
-      {notice}
-    </Group>
+    </Sheet>
   );
 }
 
-function Group({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <View style={{ gap: 6 }}>
-      <Text style={type.h3}>{title}</Text>
-      {hint ? <Text style={type.tiny}>{hint}</Text> : null}
-      {children}
-    </View>
-  );
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <View style={{ gap: 6 }}><Text style={styles.kicker}>{label}</Text>{children}</View>;
 }
 
-function LearnedList({ items }: { items: Learned[] }) {
-  const sorted = useMemo(() => [...items].sort((a, b) => Number(b.confirmed) - Number(a.confirmed) || b.count - a.count), [items]);
-  return (
-    <Group title="Learned from visits" hint={items.length ? 'Counts toward recommendations once it has happened enough times.' : 'Nothing yet — rate a few visits in Places.'}>
-      <Wrap>
-        {sorted.map((l) => (
-          <Chip key={l.conceptKey} icon={l.kind === 'like' ? 'keep' : 'close'} label={`${l.label} · ${l.count}/${l.threshold}${l.confirmed ? '' : ' learning'}`} tone={l.confirmed ? (l.kind === 'like' ? 'like' : 'dislike') : 'neutral'} />
-        ))}
-      </Wrap>
-    </Group>
-  );
-}
+// --- helpers ----------------------------------------------------------------
+
+const shortDate = (iso: string) => { try { return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }); } catch { return ''; } };
+const ageFromISO = (iso: string) => { const b = new Date(iso); const n = new Date(); let a = n.getFullYear() - b.getFullYear(); if (n.getMonth() < b.getMonth() || (n.getMonth() === b.getMonth() && n.getDate() < b.getDate())) a -= 1; return a; };
 
 const styles = StyleSheet.create({
-  tellBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.accentSoft, paddingVertical: 14, paddingHorizontal: 16 },
-  tellTile: { width: 40, height: 40, backgroundColor: colors.selected, alignItems: 'center', justifyContent: 'center' },
-  tellLink: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
-  tellLinkText: { fontSize: 13, fontWeight: '600', color: colors.accent },
-  page: { padding: spacing.lg, gap: spacing.md, width: '100%', maxWidth: 1100, alignSelf: 'center' },
-  sidebar: { width: 300, gap: spacing.sm },
-  personRow: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md,
-    borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface,
-  },
-  personRowSelected: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
-  input: {
-    minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md,
-    borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink,
-  },
-  pendingBox: { padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.surfaceMuted, gap: spacing.sm },
-  // The household's own card. One tree, two shapes: the picture sits above the
-  // name on a phone and beside it on a wide window.
-  homeCard: { flexDirection: 'column', gap: spacing.md },
-  homeCardWide: { flexDirection: 'row', alignItems: 'flex-start' },
-  homePhoto: {
-    width: '100%', height: 150, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line,
-    backgroundColor: colors.surfaceMuted, alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
-  },
-  homePhotoWide: { width: 240, height: 160 },
-  homeName: { fontFamily: fonts.heading, fontSize: 20, fontWeight: '700' },
+  screen: { flex: 1, backgroundColor: colors.bg },
+  page: { padding: 0, paddingBottom: 60, width: '100%', maxWidth: 760, alignSelf: 'center' },
+  head: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: 20 },
+  cameraBadge: { position: "absolute", right: -2, bottom: -2, width: 30, height: 30, borderRadius: 15, backgroundColor: INK, borderWidth: 3, borderColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
+  name: { fontFamily: fonts.heading, fontSize: 28, fontWeight: '800', letterSpacing: -0.56, color: colors.ink },
+  relLine: { fontFamily: fonts.body, fontSize: 14, color: colors.inkMuted },
+  roleChip: { backgroundColor: colors.warm, paddingHorizontal: 8, paddingVertical: 3 },
+  roleChipText: { fontFamily: fonts.body, fontSize: 11, fontWeight: '700', letterSpacing: 0.5, color: colors.inkMuted },
+  pencil: { width: 44, height: 44, borderWidth: BORDER, borderColor: colors.ink, alignItems: 'center', justifyContent: 'center' },
+  joinedLine: { gap: 8, paddingHorizontal: 20, paddingBottom: 12 },
+  hostRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.warm, padding: 14, marginHorizontal: 20, marginBottom: 6 },
+  joinedText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.accent },
+  menuWrap: { marginTop: 4 },
+  panel: { padding: 22, gap: 16 },
+  kicker: { fontFamily: fonts.body, fontSize: 11, fontWeight: '700', letterSpacing: 0.88, textTransform: 'uppercase', color: colors.inkMuted },
+  // diet dropdown
+  dropdown: { height: 48, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, borderWidth: 1.5, borderColor: colors.ruleSoft },
+  dropdownOpen: { borderWidth: BORDER, borderColor: colors.ink },
+  dropdownLabel: { fontFamily: fonts.body, fontSize: 15, color: colors.inkMuted },
+  dropdownValue: { flex: 1, fontFamily: fonts.body, fontSize: 15, fontWeight: '700', color: colors.ink },
+  dropdownList: { borderWidth: BORDER, borderColor: colors.ink, borderTopWidth: 0, marginTop: -10 },
+  dropdownItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, height: 48, borderTopWidth: 1, borderTopColor: colors.ruleSoft },
+  faithTile: { flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, borderWidth: 1.5, borderColor: colors.ruleSoft },
+  faithLabel: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', color: colors.ink },
+  square: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center' },
+  squareOn: { backgroundColor: LIME },
+  limeTick: { width: 22, height: 22, backgroundColor: LIME, alignItems: 'center', justifyContent: 'center' },
+  squareOff: { borderWidth: 1.5, borderColor: colors.ruleSoft },
+  // collapsed rows
+  collapsedRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 15, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
+  rowTile: { width: 36, height: 36, backgroundColor: colors.warm, alignItems: 'center', justifyContent: 'center' },
+  rowTileRed: {},
+  rowTitle: { fontFamily: fonts.body, fontSize: 16, fontWeight: '600', color: colors.ink },
+  rowAction: { fontFamily: fonts.body, fontSize: 14.5, fontWeight: '700', color: colors.ink },
+  allergenList: { fontFamily: fonts.body, fontSize: 13.5, fontWeight: '700', color: colors.allergen, marginTop: 2 },
+  lockNote: { gap: 8, backgroundColor: colors.warm, padding: 12, marginHorizontal: 20 },
+  // open blocks
+  openBlock: { padding: 20, gap: 14, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
+  openTitle: { fontFamily: fonts.heading, fontWeight: '800', fontSize: 20, letterSpacing: -0.4, color: colors.ink },
+  openHint: { fontFamily: fonts.body, fontSize: 13.5, fontWeight: '600', color: colors.allergen, marginTop: 3 },
+  openHintMuted: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.inkMuted },
+  allergenChip: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 38, paddingHorizontal: 12 },
+  allergenOn: { backgroundColor: colors.allergen },
+  allergenOff: { borderWidth: 1.5, borderColor: colors.ruleSoft },
+  allergenChipText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '700', color: colors.ink },
+  showAll: { fontFamily: fonts.body, fontSize: 13.5, fontWeight: '700', color: colors.ink, textDecorationLine: 'underline' },
+  checkRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
+  resendTint: { backgroundColor: colors.surfaceMuted, paddingHorizontal: 12 },
+  // noticed
+  noticedRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
+  seg: { width: 26, height: 6, backgroundColor: colors.ruleSoft },
+  // tint block (pending)
+  tintBlock: { backgroundColor: colors.surfaceMuted, padding: 14, marginHorizontal: 20, marginBottom: 6 },
+  tintTitle: { fontFamily: fonts.body, fontSize: 15, fontWeight: '700', color: colors.accent },
+  tintBody: { fontFamily: fonts.body, fontSize: 13, color: colors.accent, marginTop: 2 },
+  // photo source
+  sourceRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 52, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
+  // edit
+  input: { minHeight: 48, paddingHorizontal: 12, borderWidth: 1.5, borderColor: colors.ruleSoft, backgroundColor: colors.surface, fontSize: 15, color: colors.ink },
+  removeFoot: { marginTop: 12, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.ruleSoft },
+  removeLink: { fontFamily: fonts.body, fontSize: 15, fontWeight: '700', color: colors.overrun },
 });

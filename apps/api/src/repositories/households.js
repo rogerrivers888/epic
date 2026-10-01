@@ -76,13 +76,24 @@ export async function updateHousehold(id, f) {
             -- How the household usually travels on a day out (set-up step 2).
             travel_mode           = coalesce($16, travel_mode),
             -- "Access needs in our household" (the visit question, migration 274).
-            access_needs          = coalesce($17, access_needs)
+            access_needs          = coalesce($17, access_needs),
+            -- How Epic plans (Settings revised v2, SE7–SE10). Close to home is a
+            -- time now; 0 means "any distance" (stored NULL). Travel modes are a
+            -- multi-select. The day window is start and finish hours.
+            close_to_home_minutes = case when $18::int is null then close_to_home_minutes
+                                         when $18 = 0 then null else $18 end,
+            travel_modes          = coalesce($19::jsonb, travel_modes),
+            day_start             = coalesce($20, day_start),
+            day_end               = coalesce($21, day_end)
       where id = $1 returning *`,
     [id, f.name ?? null, f.defaultVisitMinutes ?? null, f.maxTravelMinutes ?? null, f.defaultIntensity ?? null,
       f.homeLabel ?? null, f.homeLat ?? null, f.homeLng ?? null, f.pace ? JSON.stringify(f.pace) : null,
       f.timezone ?? null, f.homeRadiusMiles ?? null, f.homeCountryCode ?? null, f.homeCountry ?? null,
       f.homePhotoUrl ?? null, f.browseDefaults ? JSON.stringify(f.browseDefaults) : null, f.travelMode ?? null,
-      typeof f.accessNeeds === 'boolean' ? f.accessNeeds : null],
+      typeof f.accessNeeds === 'boolean' ? f.accessNeeds : null,
+      f.closeToHomeMinutes == null ? null : Number(f.closeToHomeMinutes),
+      f.travelModes ? JSON.stringify(f.travelModes) : null,
+      f.dayStart == null ? null : Number(f.dayStart), f.dayEnd == null ? null : Number(f.dayEnd)],
   );
   return rows[0] ?? null;
 }
@@ -191,13 +202,33 @@ export async function updateMember(id, m, householdId) {
                                          then age(coalesce($8::date, birth_date)) < interval '13 years'
                                          when coalesce($4, birth_year) is not null
                                          then (extract(year from now())::int - coalesce($4, birth_year)) < 13
-                                         else is_minor end
+                                         else is_minor end,
+            -- The person's own tastes, carried on the person now (Settings
+            -- revised v2): one main diet, the two faith flags, the access
+            -- needs, the words Epic must never learn, and whose ratings a
+            -- Places row shows for them. '' clears the private allergen note.
+            diet                  = coalesce($12, diet),
+            halal                 = coalesce($13::boolean, halal),
+            kosher                = coalesce($14::boolean, kosher),
+            access                = coalesce($15::jsonb, access),
+            allergen_note         = case when $16::text = '' then null else coalesce($16, allergen_note) end,
+            never_learn           = coalesce($17::jsonb, never_learn),
+            ratings_view          = coalesce($18::jsonb, ratings_view)
       where id = $1 and household_id = $11 returning *`,
     [id, m.name ?? null, m.relationship ?? null, m.birthYear ?? null, m.avatarUrl ?? null,
       m.typicalVisitMinutes ?? null, m.maxTravelMinutes ?? null, m.birthDate ?? null,
-      m.email ?? null, m.mobile ?? null, householdId],
+      m.email ?? null, m.mobile ?? null, householdId,
+      m.diet ?? null, typeof m.halal === 'boolean' ? m.halal : null, typeof m.kosher === 'boolean' ? m.kosher : null,
+      m.access ? JSON.stringify(m.access) : null, m.allergenNote ?? null,
+      m.neverLearn ? JSON.stringify(m.neverLearn) : null, m.ratingsView ? JSON.stringify(m.ratingsView) : null],
   );
   return rows[0] ?? null;
+}
+
+/** How many people are in a household — the plan cap (≤ 6) is checked against this. */
+export async function memberCount(householdId) {
+  const { rows } = await query('select count(*)::int n from members where household_id = $1', [householdId]);
+  return rows[0].n;
 }
 
 /** One person, on their own — the invite routes check who they are before acting. */
@@ -216,6 +247,14 @@ export async function deleteMember(id, householdId) {
 // ---------------------------------------------------------------------------
 // allergens, diets, likes and dislikes
 // ---------------------------------------------------------------------------
+
+/** The person a constraint belongs to, scoped to the household, for the edit guard. */
+export async function memberByConstraint(constraintId, householdId) {
+  const { rows } = await query(
+    `select m.* from member_constraints c join members m on m.id = c.member_id
+      where c.id = $1 and m.household_id = $2`, [constraintId, householdId]);
+  return rows[0] ?? null;
+}
 
 export async function constraintsOfKind(memberId, kind) {
   const { rows } = await query('select * from member_constraints where member_id = $1 and kind = $2', [memberId, kind]);

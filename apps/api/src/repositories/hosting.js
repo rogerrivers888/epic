@@ -10,6 +10,20 @@
 
 import { query, withTransaction } from '../db.js';
 import { categoryForPassion, passionBuckets, passionsForCategory } from '../domain/hostSkills.js';
+import { outstandingFrom } from '../domain/hosting.js';
+
+/**
+ * What the household's host still has outstanding (SX21), or a clear "nothing"
+ * when it does not host. Used by stop-hosting and delete-household to refuse
+ * while guests still hold places.
+ */
+export async function outstandingForHousehold(householdId) {
+  const host = await hostByHousehold(householdId);
+  if (!host) return { blocked: false, upcomingDates: 0, guests: 0, payout: null };
+  const offers = await offersOfHost(host.id);
+  const bookings = await bookingsOfOffers(offers.map((o) => o.id));
+  return outstandingFrom(offers, bookings);
+}
 import crypto from 'node:crypto';
 
 const newToken = () => crypto.randomBytes(9).toString('base64url');
@@ -47,6 +61,8 @@ const HOST_COLUMNS = {
   locationLabel: 'location_label', lat: 'lat', lng: 'lng', countryCode: 'country_code', idDocument: 'id_document',
   insuranceConfirmed: 'insurance_confirmed', taxReference: 'tax_reference', payoutStatus: 'payout_status', payoutLabel: 'payout_label',
   dateOfBirth: 'date_of_birth', trust: 'trust', checks: 'checks',
+  // Money (SX17/SX19): when payouts land, and company tax reporting.
+  paySchedule: 'pay_schedule', taxIsCompany: 'tax_is_company', companyNumber: 'company_number',
 };
 const HOST_JSON = { credentials: 'credentials', languages: 'languages', childrenAges: 'children_ages' };
 
@@ -64,6 +80,28 @@ export async function updateHost(id, patch) {
   sets.push('updated_at = now()');
   const { rows } = await query(`update hosts set ${sets.join(', ')} where id = $1 returning *`, params);
   return rows[0];
+}
+
+// --- payout accounts (SX16) ------------------------------------------------
+// Added by Stripe's own onboarding (out of this build); listed and switched
+// between here. Epic never holds the money, so only a label and the last four
+// digits are ever kept.
+
+export async function payoutAccountsOf(hostId) {
+  const { rows } = await query(
+    `select id, label, last4, holder_name, added_on, is_active
+       from host_payout_accounts where host_id = $1 order by added_on, created_at`, [hostId]);
+  return rows;
+}
+
+/** Make one account the payout account; the partial unique index keeps it to one. */
+export async function setActivePayoutAccount(hostId, accountId) {
+  return withTransaction(async (client) => {
+    await client.query('update host_payout_accounts set is_active = false where host_id = $1', [hostId]);
+    const { rows } = await client.query(
+      'update host_payout_accounts set is_active = true where id = $1 and host_id = $2 returning *', [accountId, hostId]);
+    return rows[0] ?? null;
+  });
 }
 
 /** Stop hosting: the host row goes, and its offers and bookings with it (cascade). */

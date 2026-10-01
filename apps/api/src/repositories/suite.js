@@ -54,7 +54,11 @@ export const GAPS = {
   forecast: 'No trial conversion history',
   runway: 'No salary or overhead ledger',
   listSize: 'Needs cancellation history',
-  commission: 'No commission rate is recorded',
+  // The rate schedule now exists (domain/hostFees.js — Verified 20 / Checked 15 /
+  // Epic Trusted 10, with 0% intro, 5% direct-link, £1.50 min); what is still
+  // missing is the per-booking join (host level, intro window, via_host_link)
+  // that would turn gross bookings into a commission figure here.
+  commission: 'Commission is by host level (hostFees.js); not yet joined to bookings in reporting',
   /**
    * Since migration 203 a call records whether it came back and how long it
    * took — but only through an adapter that observes it, and only from the day

@@ -9,7 +9,7 @@ import express from 'express';
 import {
   authConfigured, clearSessionCookie, closeSession, openSession, passcodeMatches, sessionKindFor, sessionCookie,
 } from '../auth.js';
-import { findLiveSession, liveSessions, revokeAllSessions } from '../repositories/sessions.js';
+import { findLiveSession, liveSessions, revokeAllSessions, revokeSessionById, revokeOtherSessions } from '../repositories/sessions.js';
 import {
   accountByContact, accountById, consumeSignInLink, linkContactFor, markLinkSent,
   ownerAccount, recordSignIn, replaceSignInLink,
@@ -297,9 +297,31 @@ export const devices = express.Router();
 
 devices.get('/sessions', async (req, res, next) => {
   try {
-    const rows = await liveSessions(req.session?.account_id ?? null);
+    // Only this account's real devices (SX6). Test and agent sessions are
+    // filtered out on the server, and another household member's phones never
+    // appear — the account scope already sees to that.
+    const rows = await liveSessions(req.session?.account_id ?? null, { kinds: ['device'] });
     res.json({
-      sessions: rows.map((s) => ({ id: s.id, label: s.label, since: s.created_at, lastSeen: s.last_seen_at, until: s.expires_at })),
+      sessions: rows.map((s) => ({ id: s.id, label: s.label, since: s.created_at, lastSeen: s.last_seen_at, until: s.expires_at, current: s.id === req.session?.id })),
     });
+  } catch (err) { next(err); }
+});
+
+/** DELETE /api/sessions/:id — sign one other device out (SX6). Confirmed first in the UI; no Undo. */
+devices.delete('/sessions/:id', async (req, res, next) => {
+  try {
+    const removed = await revokeSessionById(req.params.id, req.session?.account_id ?? null);
+    if (!removed) return res.status(404).json({ error: 'device_not_found', message: 'That device is not signed in, or is not yours.' });
+    res.status(204).end();
+  } catch (err) { next(err); }
+});
+
+/** DELETE /api/sessions — sign out every OTHER device of this account (SX6). */
+devices.delete('/sessions', async (req, res, next) => {
+  try {
+    const accountId = req.session?.account_id ?? null;
+    if (!accountId) return res.status(400).json({ error: 'no_account', message: 'This device signs out on its own.' });
+    await revokeOtherSessions(accountId, req.session.id);
+    res.status(204).end();
   } catch (err) { next(err); }
 });

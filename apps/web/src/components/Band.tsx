@@ -65,6 +65,23 @@ export function TallBand({ right }: { right?: React.ReactNode }) {
 }
 
 /**
+ * A title band: the lime band with a 34px screen title on the left and one
+ * optional action on the right (Settings revised v2 — SE1 "Settings", the Host
+ * tab's "Host" + New offer). A home that names itself rather than wearing the
+ * wordmark; the tab bar still sits under it. 22 above the title, 24 below.
+ */
+export function TitleBand({ title, right }: { title: string; right?: React.ReactNode }) {
+  return (
+    <View style={styles.limeTop}>
+      <View style={styles.titleRow}>
+        <Text numberOfLines={1} style={styles.bigTitle}>{title}</Text>
+        {right ?? null}
+      </View>
+    </View>
+  );
+}
+
+/**
  * The compact band (§3): everything below a home. Back, a one-line title, an
  * optional context line, and the mic. On a flow you finish (`close`) the back
  * chevron becomes a ✕ and the mic is dropped, because that screen is the mic.
@@ -110,6 +127,9 @@ const styles = StyleSheet.create({
   limeTop: { backgroundColor: LIME, paddingTop: TOP_INSET },
   // §2: the wordmark row, 22 above and 26 below, the control centred on it.
   tallRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 22, paddingBottom: 26 },
+  // Settings v2: the 34px screen title, 22 above and 24 below, action on the right.
+  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 22, paddingBottom: 24 },
+  bigTitle: { flex: 1, fontFamily: fonts.heading, fontWeight: '800', fontSize: 34, letterSpacing: 34 * -0.04, lineHeight: 36, color: INK },
   // §3: back · title+line · mic, 14 above and 16 below, 12 between.
   compactRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 16 },
   // A 32×44 hit area pulled 6px left so the chevron optically aligns to the gutter.

@@ -253,8 +253,8 @@ export type IdeasTab = typeof IDEAS_TABS[number];
  */
 export const TRIP_TABS: TripSection[] = ['itinerary', 'places', 'map', 'group'];
 
-export type SettingsSection = 'preferences' | 'providers' | 'notifications';
-export const SETTINGS_SECTIONS: SettingsSection[] = ['preferences', 'providers', 'notifications'];
+export type SettingsSection = 'preferences' | 'providers' | 'notifications' | 'devices';
+export const SETTINGS_SECTIONS: SettingsSection[] = ['preferences', 'providers', 'notifications', 'devices'];
 
 export type PrototypeSection = 'plan' | 'places' | 'trips' | 'household' | 'settings';
 export const PROTOTYPE_SECTIONS: PrototypeSection[] = ['plan', 'places', 'trips', 'household', 'settings'];
@@ -1036,6 +1036,12 @@ export function ownsHeader(route: Route): boolean {
    * its own back (Hosts and Events, H1–H4, W1–W5, D1).
    */
   if (route.name === 'host' || route.name === 'people' || route.name === 'booking' || route.name === 'collections') return true;
+  // Settings revised v2: Settings draws its own title band + Household/My Account
+  // tab bar, and its sub-screens their own back band; the person profile draws a
+  // back band with the household's name. The shell's wordmark header over either
+  // would be a second heading.
+  if (route.name === 'settings') return true;
+  if (route.name === 'household') return true;
   // Saying what you are up for is a form, and an introduction is one thing: each draws its own head.
   if (route.name === 'open') return true;
   // The booking sheet draws its own "Book this" head; the shell's band above it would be a second one.
@@ -1199,6 +1205,8 @@ export function parentOf(route: Route): string {
       if (route.tripId || route.creating || route.searching) return '/trips';
       return '/inspire';
     case 'household': return route.voice ? paths.household(route.memberId) : '/settings';
+    // A settings sub-screen (devices, providers, notifications) goes back to Settings.
+    case 'settings': return route.section === 'preferences' ? '/inspire' : '/settings';
     case 'host':
       if (route.page === 'edit' && route.offerId) return paths.hostOffer(route.offerId);
       if (route.page === 'offer' && route.chat && route.offerId) return route.chat.page === 'list' ? paths.hostOffer(route.offerId) : paths.hostOfferChat(route.offerId);
@@ -1263,7 +1271,7 @@ export function titleOf(route: Route): string {
     case 'welcome': return epic('Plan less. Live more.');
     case 'opening': return epic('Welcome to Epic');
     case 'setup': return epic('Set up your family');
-    case 'settings': return epic(route.section === 'notifications' ? 'Notifications' : 'You and yours');
+    case 'settings': return epic(route.section === 'notifications' ? 'Notifications' : route.section === 'devices' ? 'Signed-in devices' : route.section === 'providers' ? 'Providers' : 'Settings');
     case 'host': return epic(route.page === 'questions' ? 'Questions' : route.chat ? (route.chat.page === 'topic' ? 'A question' : route.chat.page === 'ask' ? 'Say something' : route.chat.page === 'bell' ? 'What you get told about' : 'Chat') : route.page === 'start' || route.page === 'profile' ? 'Host on Epic' : route.page === 'new' || route.page === 'edit' ? 'Your offer' : route.page === 'video' ? 'Your video' : route.page === 'offer' ? 'Your experience' : route.page === 'shape' ? 'How it works' : route.page === 'examples' || route.page === 'example' ? 'What people host' : route.page === 'who' ? 'Who can come' : 'Host');
     case 'invited': return epic('You are invited');
     case 'invitedLink': return epic('You are invited');

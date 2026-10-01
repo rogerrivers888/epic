@@ -1,54 +1,66 @@
 /**
- * The Host tab (Host Journey canvas, 13 Sep 2026).
+ * The Host tab (Settings revised v2 · Lane 3, SX7–SX21).
  *
- * Two states, both designed. Not yet a host: the learn layer — two kinds of
- * hosting, three ways to host, what people host, who can come — and nothing
- * to fill in. A host: the dashboard (S4) — who you are, live · booked · to
- * come, your offers as a menu, a full-width lime "Add another thing you do",
- * and what people have asked for that you do not offer yet.
+ * Two states. Not a host yet: the learn layer (H1), unchanged. A host: a title
+ * band with "Host" and an ink "+ New offer", then four tabs — Upcoming (SX15) ·
+ * Stats (SX12) · Money (SX9) · Profile (SX8). Everything below a tab pushes a
+ * screen with a back arrow, and every one of those is query state on this same
+ * /host address (there is no new route): ?tab=, ?activity=&when=, ?level=1,
+ * ?money=, ?skills=1, ?evidence=1 — the way this screen already carried ?view=.
  *
- * The set-up is a separate stack entered from a button (`/host/offers/new`);
- * the profile is its own page (`/host/profile`); the learn layer and the
- * dashboard keep the tab bar.
+ * The old onboarding, the offer wizard, the per-offer dashboard, the host inbox,
+ * the video recorder and the editable profile are untouched: they are the other
+ * `route.page`s and are dispatched first, exactly as before.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from '../../components/press';
-import { api, HostHome, OfferShape, OpenHome, OpenMatch, Visibility } from '../../api';
-import { colors, fonts, type, INK, LIME, CREAM } from '../../theme';
-import { Button } from '../../components/ui';
+import { api, HostHome, HostMoney, OfferShape, OwnOffer, Visibility } from '../../api';
+import { colors, fonts, BORDER, INK, LIME, CREAM } from '../../theme';
 import { Icon } from '../../components/Icon';
-import { TallBand, HostPhoto } from '../../components/Band';
+import { TitleBand, CompactBand } from '../../components/Band';
 import { InkMenu } from '../../components/InkMenu';
-import { SectionHeader } from '../../components/NavRows';
+import { Sheet } from '../../components/Sheet';
+import { showToast } from '../../components/Toast';
+import { OutstandingSheet, type Outstanding } from '../SettingsScreen';
 import { useViewport } from '../../hooks/useViewport';
 import { useRouter, useQueryState, asOneOf } from '../../router';
 import { paths, type Route } from '../../routes';
-import { SHAPE_ICON, SHAPE_LABEL, STATE_LABEL, TRUST_LABEL, TYPE_CHIP, VISIBILITY_CHIP, dateOnly, mediaUrl, money, priceWords } from '../../components/hosting';
-import { Tag, k, t } from '../../components/hostKit';
+import { HostFace, mediaUrl, priceWords, SHAPE_ICON, STATE_LABEL, TRUST_LABEL } from '../../components/hosting';
+import { t, k, Tag, Segments } from '../../components/hostKit';
+import { Section, Kicker, SummaryCells, Grid2, DateCol, FillBar, NavRow, gbp, todayIso, dateOf, offerDateGroups } from './hostTabKit';
 import { LearnExample, LearnExamples, LearnHome, LearnShape, LearnWho } from './Learn';
 import { OfferWizard } from './OfferWizard';
 import { OfferDashboard } from './OfferDashboard';
 import { VideoRecorder } from './VideoRecorder';
 import { ProfileScreen } from './ProfileScreen';
 import { HostInbox } from '../../components/chat/HostInbox';
+import { HostActivity } from './HostActivity';
+import { HostLevel } from './HostLevel';
+import { HostMoneyDetail, type MoneyScreen } from './HostMoneyDetail';
+import { HostSkills, HostEvidence } from './HostExtras';
 
 const WIDE = 900;
+const HostTab = ['upcoming', 'stats', 'money', 'profile'] as const;
+type HostTabKey = typeof HostTab[number];
+const MoneyScreens = ['account', 'schedule', 'history', 'tax', 'statements'] as const;
 
 export function HostScreen({ route }: { route: Extract<Route, { name: 'host' }> }) {
   const { width } = useViewport();
   const wide = width >= WIDE;
-  const { navigate, query } = useRouter();
+  const { navigate, query, setQuery, back } = useRouter();
   const [home, setHome] = useState<HostHome | null>(null);
+  const [money, setMoney] = useState<HostMoney | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // The ink menu's two views (New navigation, 30 Sep 2026): the offers dashboard
-  // and the bookings across them. Held in the address (every page has one), so a
-  // reload, a shared link and Back all land where you were (Codex).
-  const [tab, setTab] = useQueryState<'offers' | 'bookings'>('view', 'offers', asOneOf(['offers', 'bookings'] as const, 'offers'));
+  const [tab, setTab] = useQueryState<HostTabKey>('tab', 'upcoming', asOneOf(HostTab, 'upcoming'));
 
   const load = useCallback(async () => {
-    try { setHome(await api.hostHome()); setError(null); } catch (e: any) { setError(e.message); }
+    try {
+      const h = await api.hostHome();
+      setHome(h); setError(null);
+      if (h.host) { api.hostMoney().then(setMoney).catch(() => setMoney(null)); } else setMoney(null);
+    } catch (e: any) { setError(e.message); }
   }, []);
   useEffect(() => { void load(); }, [load, route.page]);
 
@@ -61,9 +73,9 @@ export function HostScreen({ route }: { route: Extract<Route, { name: 'host' }> 
     const vis = (query.get('vis') as Visibility | null) ?? undefined;
     api.createOffer(shape, vis).then((r) => navigate(paths.hostOfferEdit(r.offer.id, 'plan'), { replace: true })).catch((e) => { setError(e.message); creating.current = false; });
   }, [route.page]);
-  // The old four-step onboarding address lands on the profile.
   useEffect(() => { if (route.page === 'start') navigate(paths.hostMe(), { replace: true }); }, [route.page]);
 
+  // The existing sub-stacks, dispatched first and unchanged.
   if (route.page === 'shape' && route.param) return <LearnShape shape={route.param as OfferShape} wide={wide} />;
   if (route.page === 'examples') return <LearnExamples wide={wide} />;
   if (route.page === 'example' && route.param) return <LearnExample exampleKey={route.param} wide={wide} />;
@@ -71,7 +83,6 @@ export function HostScreen({ route }: { route: Extract<Route, { name: 'host' }> 
   if ((route.page === 'profile' || route.page === 'start') && home) return <ProfileScreen home={home} onChanged={load} />;
   if (route.page === 'edit' && route.offerId) return <OfferWizard offerId={route.offerId} home={home} onChanged={load} />;
   if (route.page === 'offer' && route.offerId) return <OfferDashboard offerId={route.offerId} hostName={home?.host?.name ?? ''} chat={route.chat ?? null} />;
-  // The host inbox (C5): every question across every offer, waiting first.
   if (route.page === 'questions') return <HostInbox onBack={() => navigate(paths.host())} onOpen={(offerId, topicId) => navigate(paths.hostOfferChatTopic(offerId, topicId))} />;
   if (route.page === 'video') {
     const offerId = query.get('offer');
@@ -82,210 +93,343 @@ export function HostScreen({ route }: { route: Extract<Route, { name: 'host' }> 
   if (!home) return <View style={styles.centre}><Text style={t.sub}>{error ?? 'Loading…'}</Text></View>;
   if (!home.host || !home.offers.length) return <LearnHome wide={wide} />;
 
-  // Every booking across every offer, so the tab can carry its count and the Bookings view can list them.
-  const bookingCount = home.offers.reduce((n, o) => n + o.bookings.filter((b) => b.state !== 'cancelled').length, 0);
+  // The Host tab's own sub-screens, all query state on /host. Opening one is a
+  // move (a push, below); Back walks the history, or one layer up to /host for
+  // somebody who arrived on a shared link.
+  const goBack = () => back(paths.host());
+  const open = (patch: Record<string, string | null>) => setQuery(patch, { replace: false });
+  const activityId = query.get('activity');
+  const activity = activityId ? home.offers.find((o) => o.id === activityId) ?? null : null;
+  if (activity) return <HostActivity offer={activity} money={money} onBack={goBack} />;
+  if (query.get('level')) return money ? <HostLevel money={money} host={home.host} onBack={goBack} /> : <Loading />;
+  const moneyScreen = query.get('money') as MoneyScreen | null;
+  if (moneyScreen && MoneyScreens.includes(moneyScreen)) {
+    return money ? <HostMoneyDetail which={moneyScreen} money={money} host={home.host} onBack={goBack} onChanged={load} /> : <Loading />;
+  }
+  if (query.get('skills')) return <HostSkills home={home} onBack={goBack} />;
+  if (query.get('evidence')) return <HostEvidence home={home} onBack={goBack} />;
 
+  // The four tabs.
   return (
     <View style={k.page}>
       <View style={wide ? k.wide : undefined}>
-        <TallBand right={<HostPhoto uri={mediaUrl(home.host.photo) ?? undefined} onPress={() => navigate(paths.hostMe())} />} />
-        <InkMenu
-          tabs={[{ key: 'offers' as const, label: 'Your offers' }, { key: 'bookings' as const, label: 'Bookings', count: bookingCount }]}
+        <TitleBand title="Host" right={<NewOfferButton onPress={() => navigate(paths.hostNewOffer())} />} />
+        <InkMenu<HostTabKey>
+          tabs={[{ key: 'upcoming', label: 'Upcoming' }, { key: 'stats', label: 'Stats' }, { key: 'money', label: 'Money' }, { key: 'profile', label: 'Profile' }]}
           selected={tab}
-          onSelect={setTab}
+          onSelect={(key) => setTab(key, { replace: true })}
         />
       </View>
       <ScrollView contentContainerStyle={[styles.body, wide && k.wide]}>
-        {tab === 'offers'
-          ? <Dashboard home={home} onReset={async () => { await load(); navigate(paths.host(), { replace: true }); }} />
-          : <BookingsList home={home} />}
+        {tab === 'upcoming' ? <UpcomingTab home={home} money={money} open={open} navigate={navigate} />
+          : tab === 'stats' ? <StatsTab home={home} money={money} open={open} onMoney={() => setTab('money', { replace: true })} />
+            : tab === 'money' ? <MoneyTab home={home} money={money} open={open} />
+              : <ProfileTab home={home} navigate={navigate} open={open} goTab={(key) => setTab(key, { replace: true })} onReset={load} />}
       </ScrollView>
     </View>
   );
 }
 
-/** Every booking across every offer, newest first — the Bookings tab (New navigation, 30 Sep 2026). */
-function BookingsList({ home }: { home: HostHome }) {
-  const rows = home.offers
-    .flatMap((o) => o.bookings.filter((b) => b.state !== 'cancelled').map((b) => ({ b, o })))
-    .sort((a, z) => z.b.bookedAt.localeCompare(a.b.bookedAt));
+function Loading() { return <View style={styles.centre}><Text style={t.sub}>One moment…</Text></View>; }
+
+function NewOfferButton({ onPress }: { onPress: () => void }) {
   return (
-    <View style={{ paddingTop: 16 }}>
-      <View style={k.gutter}><SectionHeader title="Bookings" count={rows.length} /></View>
-      <View style={[k.gutter, { paddingTop: 8 }]}>
-        {rows.length ? rows.map(({ b, o }) => (
-          <View key={b.id} style={styles.bookingRow}>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={[t.body, { fontWeight: '700', lineHeight: 18 }]} numberOfLines={1}>{b.name ?? 'A guest'}</Text>
-              <Text style={t.tiny} numberOfLines={1}>{[o.title ?? 'Untitled', `${b.heads} ${b.heads === 1 ? 'person' : 'people'}`, money(b.amountPence)].join(' · ')}</Text>
-              {b.state === 'pending' ? <Text style={t.tiny}>Held until the minimum</Text> : b.state === 'waitlisted' ? <Text style={t.tiny}>Waiting list</Text> : null}
-            </View>
-            <Text style={t.tiny}>{dateOnly(b.bookedAt.slice(0, 10))}</Text>
-          </View>
-        )) : <Text style={[t.small, { lineHeight: 18 }]}>No bookings yet. When someone books one of your offers, they show here.</Text>}
-      </View>
-    </View>
+    <Press onPress={onPress} accessibilityRole="button" accessibilityLabel="New offer" style={styles.newOffer}>
+      <Icon name="add" size={17} color={CREAM} strokeWidth={2.4} />
+      <Text style={styles.newOfferText}>New offer</Text>
+    </Press>
   );
 }
 
-/** S4 · live, with room to grow. */
-function Dashboard({ home, onReset }: { home: HostHome; onReset: () => Promise<void> }) {
-  const { navigate } = useRouter();
-  const h = home.host!;
-  const s = home.stats!;
-  const order = { live: 0, in_review: 1, paused: 2, draft: 3, ended: 4 } as const;
-  const offers = [...home.offers].sort((a, b) => order[a.state] - order[b.state]);
-  const bookedOn = (id: string) => home.offers.find((o) => o.id === id)?.bookings.filter((b) => b.state !== 'cancelled').reduce((n, b) => n + b.heads, 0) ?? 0;
-  const asks = home.asks ?? [];
-  const first = h.name.split(' ')[0];
-  return (
-    <View>
-      <View style={[k.gutter, { paddingTop: 14, gap: 10 }]}>
-        <Press onPress={() => navigate(paths.hostMe())} accessibilityRole="button">
-          <Text style={t.h27}>Hosting</Text>
-          <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center', marginTop: 5, flexWrap: 'wrap' }}>
-            {h.type ? <Tag tone="tint">{TYPE_CHIP[h.type].toUpperCase()}</Tag> : null}
-            <Tag>{h.checks === 'running' ? 'CHECKS RUNNING' : TRUST_LABEL[h.trust].toUpperCase()}</Tag>
-            <Text style={t.small}>{h.name}{h.location ? ` · ${h.location}` : ''}</Text>
-          </View>
-        </Press>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <Stat n={String(s.live)} label={s.live === 1 ? 'offer live' : 'offers live'} />
-          <Stat n={String(s.booked)} label="booked" />
-          <Stat n={s.toComePence ? money(s.toComePence) : '£0'} label={home.config.payments.ready ? 'to come' : 'recorded'} />
-        </View>
-      </View>
+// --- SX15 · Upcoming --------------------------------------------------------
 
-      <View style={{ paddingTop: 16 }}>
-        <View style={k.gutter}><SectionHeader title="Offers" count={offers.length} /></View>
-        <View style={[k.gutter, { paddingTop: 8, gap: 8 }]}>
-        <View>
-          {offers.map((o, i) => (
-            <Press key={o.id} onPress={() => navigate(o.state === 'draft' ? paths.hostOfferEdit(o.id, 'plan') : paths.hostOffer(o.id))} accessibilityRole="button" style={[styles.offer, k.rule, i === 0 && k.ruleTop]}>
-              <View style={styles.thumb}>
-                {mediaUrl(o.photos[0]) ? <Image source={{ uri: mediaUrl(o.photos[0])! }} style={[StyleSheet.absoluteFill, { borderRadius: 8 }]} resizeMode="cover" /> : <Icon name={SHAPE_ICON[o.shape]} size={18} color={colors.inkMuted} />}
-              </View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <View style={{ flexDirection: 'row', gap: 5, flexWrap: 'wrap' }}>
-                  <Tag tone="ink">{SHAPE_LABEL[o.shape].toUpperCase()}</Tag>
-                  <Tag tone={o.state === 'live' ? 'lime' : 'warm'}>{STATE_LABEL[o.state].toUpperCase()}</Tag>
-                  {o.visibility !== 'public' ? <Tag>{VISIBILITY_CHIP[o.visibility].toUpperCase()}</Tag> : null}
+type UpRow = { offer: OwnOffer; on: string | null; heads: number; bookings: number; pence: number };
+
+function UpcomingTab({ home, money, open, navigate }: { home: HostHome; money: HostMoney | null; open: (p: Record<string, string | null>) => void; navigate: (to: string) => void }) {
+  const today = todayIso();
+  const rows: UpRow[] = home.offers
+    .flatMap((offer) => offerDateGroups(offer).filter((g) => !g.on || g.on >= today).map((g) => ({ offer, ...g })))
+    .sort((a, z) => (a.on ?? '').localeCompare(z.on ?? ''));
+  const dates = rows.length;
+  const booked = rows.reduce((n, r) => n + r.heads, 0);
+  const collected = rows.reduce((n, r) => n + r.pence, 0);
+  const openRow = (r: UpRow) => {
+    const single = offerDateGroups(r.offer).filter((g) => !g.on || g.on >= today).length <= 1;
+    if (single) navigate(paths.hostOffer(r.offer.id)); else open({ activity: r.offer.id, when: 'upcoming' });
+  };
+  return (
+    <View style={styles.pad}>
+      <SummaryCells cells={[
+        { n: String(dates), label: dates === 1 ? 'date' : 'dates' },
+        { n: String(booked), label: 'booked' },
+        { n: gbp(collected), label: money?.paymentsReady ? 'collected' : 'recorded' },
+      ]} />
+      <Section title="Coming up" />
+      {rows.length === 0 ? <Text style={[t.sub, { lineHeight: 20 }]}>Nothing booked yet. New dates and bookings show here.</Text>
+        : rows.map((r, i) => {
+          const below = r.offer.minCount != null && r.heads < r.offer.minCount;
+          return (
+            <Press key={i} onPress={() => openRow(r)} accessibilityRole="button" style={styles.dateRow}>
+              {r.on ? <DateCol iso={r.on} /> : <View style={{ width: 46 }}><Text style={t.small}>TBC</Text></View>}
+              <View style={{ flex: 1, minWidth: 0, gap: 5 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
+                  <Text style={[t.body, { fontWeight: '600', flex: 1 }]} numberOfLines={1}>{r.offer.title ?? 'Untitled'}</Text>
+                  <Text style={[t.body, { fontWeight: '800' }]}>{gbp(r.pence)}</Text>
                 </View>
-                <Text style={[t.body, { fontWeight: '600', lineHeight: 18, marginTop: 3 }]} numberOfLines={2}>{o.title ?? 'Untitled'}</Text>
-                <Text style={t.tiny} numberOfLines={1}>{[priceWords(o), o.visibility !== 'public' && o.invites.length ? `${o.invites.filter((iv) => iv.rsvp === 'yes').length} of ${o.invites.length} said yes` : `${bookedOn(o.id)} booked`].join(' · ')}</Text>
+                <Text style={t.small}>{[r.offer.startsAt, priceWords(r.offer)].filter(Boolean).join(' · ')}</Text>
+                <FillBar value={r.heads} max={r.offer.maxCount} min={r.offer.minCount} below={below} />
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <Text style={t.tiny}>{[`${r.bookings} booked`, r.offer.minCount ? `min ${r.offer.minCount}` : null, r.offer.maxCount ? `max ${r.offer.maxCount}` : null].filter(Boolean).join(' · ')}</Text>
+                  {below && r.offer.minCount ? <View style={styles.needs}><Text style={styles.needsText}>NEEDS {r.offer.minCount - r.heads} MORE</Text></View> : null}
+                </View>
               </View>
             </Press>
-          ))}
+          );
+        })}
+    </View>
+  );
+}
+
+// --- SX12 · Stats -----------------------------------------------------------
+
+type Period = 'month' | 'year' | 'all';
+function inPeriod(on: string | null, period: Period): boolean {
+  if (period === 'all' || !on) return period === 'all';
+  const d = new Date(`${on}T12:00:00`); const now = new Date();
+  if (period === 'year') return d.getFullYear() === now.getFullYear();
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+}
+
+function StatsTab({ home, money, open, onMoney }: { home: HostHome; money: HostMoney | null; open: (p: Record<string, string | null>) => void; onMoney: () => void }) {
+  const [period, setPeriod] = useQueryState<Period>('period', 'month', asOneOf(['month', 'year', 'all'] as const, 'month'));
+  const today = todayIso();
+  const per = home.offers.map((offer) => {
+    const groups = offerDateGroups(offer).filter((g) => g.on && g.on < today && inPeriod(g.on, period));
+    return { offer, times: groups.length, guests: groups.reduce((n, g) => n + g.heads, 0), pence: groups.reduce((n, g) => n + g.pence, 0) };
+  });
+  const times = per.reduce((n, p) => n + p.times, 0);
+  const guests = per.reduce((n, p) => n + p.guests, 0);
+  const collected = per.reduce((n, p) => n + p.pence, 0);
+  const left = money ? Math.max(0, money.trusted.completedNeeded - money.trusted.completed) : null;
+  const pct = money && money.trusted.completedNeeded ? Math.min(100, Math.round((money.trusted.completed / money.trusted.completedNeeded) * 100)) : 0;
+  const trust = home.host?.trust ?? 'verified';
+
+  return (
+    <View style={styles.pad}>
+      {/* Level block. */}
+      <Press onPress={() => open({ level: '1' })} accessibilityRole="button" style={styles.levelBlock}>
+        <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
+          <View style={styles.levelTile}><Icon name={trust === 'trusted' ? 'trusted' : trust === 'checked' ? 'checked' : 'verified'} size={22} color={trust === 'trusted' ? LIME : INK} strokeWidth={2.2} /></View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.levelKicker}>YOUR LEVEL</Text>
+            <Text style={[t.h18, { color: colors.accent }]}>{TRUST_LABEL[trust]}</Text>
+          </View>
+          <Icon name="more" size={18} color={colors.accent} />
         </View>
-        <Press onPress={() => navigate(paths.hostNewOffer())} accessibilityRole="button" style={styles.addBar}>
-          <Text style={[t.body, { fontSize: 15, fontWeight: '700', color: CREAM }]}>Add another thing you do</Text>
-          <Icon name="add" size={18} color={CREAM} strokeWidth={2} />
-        </Press>
-        <UpFor />
-        {asks.length ? (
-          <View style={{ gap: 7, marginTop: 8 }}>
-            <Text style={t.kicker}>People have asked {first} about</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: -2 }}>{asks.map((a, i) => <Tag key={i} tone="plain">{a}</Tag>)}</View>
-            <Text style={[t.small, { lineHeight: 18 }]}>{asks.length === 1 ? 'One person' : `${['Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'][asks.length - 2] ?? asks.length} people`} asked for something you do not offer yet. Each one is a second offer waiting to be written.</Text>
+        {trust !== 'trusted' ? (
+          <View style={{ gap: 5, marginTop: 10 }}>
+            <View style={styles.levelTrack}><View style={[styles.levelFill, { width: `${pct}%` as any }]} /></View>
+            <Text style={[t.small, { color: colors.accent }]}>{left != null ? `${left} more completed ${left === 1 ? 'experience' : 'experiences'} to Epic Trusted` : 'Progress to Epic Trusted'}</Text>
           </View>
         ) : null}
-        {!h.introVideo || h.checks === 'running' ? (
-          <Text style={[t.small, { lineHeight: 18, marginTop: 8 }]}>{h.checks === 'running' ? 'Your checks are running; the profile says so until they pass. ' : ''}{!h.introVideo ? 'No intro video yet — people book the person. Record one from your profile.' : ''}</Text>
-        ) : null}
-        <DeleteAll onDone={onReset} />
-        </View>
+      </Press>
+
+      {/* Period switch — it changes every figure. */}
+      <View style={{ marginTop: 16 }}>
+        <Segments<Period>
+          value={period}
+          options={[{ value: 'month', label: 'This month' }, { value: 'year', label: 'This year' }, { value: 'all', label: 'All time' }]}
+          onPick={(v) => setPeriod(v, { replace: true })}
+        />
+      </View>
+
+      <View style={{ marginTop: 14 }}>
+        <Grid2 cells={[
+          { n: String(times), label: 'times hosted' },
+          { n: String(guests), label: 'guests' },
+          { n: gbp(collected), label: money?.paymentsReady ? 'collected' : 'recorded' },
+          { n: '—', label: 'profile views' },
+        ]} />
+      </View>
+
+      <Section title="Profile views" />
+      <Text style={[t.small, { lineHeight: 18 }]}>Profile views aren't tracked yet — this fills in once they are.</Text>
+
+      <Section title="By activity" />
+      <View style={styles.actHead}>
+        <Text style={[styles.actH, { flex: 2 }]}>Activity</Text>
+        <Text style={[styles.actH, { flex: 1, textAlign: 'center' }]}>Times</Text>
+        <Text style={[styles.actH, { flex: 1, textAlign: 'center' }]}>Guests</Text>
+        <Text style={[styles.actH, { flex: 1.2, textAlign: 'right' }]}>{money?.paymentsReady ? 'Collected' : 'Recorded'}</Text>
+      </View>
+      {per.filter((p) => p.times > 0).length === 0 ? <Text style={[t.small, { paddingVertical: 10 }]}>Nothing in this period yet.</Text>
+        : per.filter((p) => p.times > 0).map((p) => (
+          <Press key={p.offer.id} onPress={() => open({ activity: p.offer.id, when: 'past' })} accessibilityRole="button" style={styles.actRow}>
+            <Text style={[styles.actCell, { flex: 2, fontWeight: '600' }]} numberOfLines={1}>{p.offer.title ?? 'Untitled'}</Text>
+            <Text style={[styles.actCell, { flex: 1, textAlign: 'center' }]}>{p.times}</Text>
+            <Text style={[styles.actCell, { flex: 1, textAlign: 'center' }]}>{p.guests}</Text>
+            <Text style={[styles.actCell, { flex: 1.2, textAlign: 'right' }]}>{gbp(p.pence)}</Text>
+          </Press>
+        ))}
+
+      <Press onPress={onMoney} accessibilityRole="button" style={{ paddingVertical: 16 }}>
+        <Text style={[t.link, { fontSize: 13.5 }]}>Statements and payouts ›</Text>
+      </Press>
+    </View>
+  );
+}
+
+// --- SX9 · Money ------------------------------------------------------------
+
+function MoneyTab({ home, money, open }: { home: HostHome; money: HostMoney | null; open: (p: Record<string, string | null>) => void }) {
+  if (!money) return <View style={styles.pad}><Text style={t.sub}>One moment…</Text></View>;
+  const active = money.activeAccount;
+  const feeSummary = `Epic's fee: ${money.feeRate}% · ${money.levelLabel}, ${money.linkRate}% on your own links`;
+  return (
+    <View style={styles.pad}>
+      <View style={styles.payout}>
+        <Kicker>Next payout</Kicker>
+        {money.nextPayout ? (
+          <>
+            <Text style={styles.payoutBig}>{gbp(money.nextPayout.amountPence)}</Text>
+            <Text style={t.small}>{[money.nextPayout.on, money.nextPayout.account ? `to ${money.nextPayout.account}` : null].filter(Boolean).join(' · ')}</Text>
+          </>
+        ) : (
+          <>
+            <Text style={[styles.payoutBig, { fontSize: 24 }]}>No payout yet</Text>
+            <Text style={[t.small, { lineHeight: 18 }]}>{money.note}</Text>
+          </>
+        )}
+        <Press onPress={() => open({ level: '1' })} accessibilityRole="button" style={{ marginTop: 8 }}>
+          <Text style={[t.small, { lineHeight: 18 }]}>{feeSummary} · <Text style={{ color: colors.accent, fontWeight: '700' }}>See levels</Text></Text>
+        </Press>
+      </View>
+
+      <View style={{ marginTop: 8 }}>
+        <NavRow label="Payout account" value={active ? `${active.label} ••${active.last4}` : 'None yet'} icon="payout" onPress={() => open({ money: 'account' })} />
+        <NavRow label="When you're paid" value={scheduleWords(money.paySchedule)} icon="calendar" onPress={() => open({ money: 'schedule' })} />
+        <NavRow label="Payout history" icon="list" onPress={() => open({ money: 'history' })} />
+        <NavRow label="Tax details" value={money.tax.taxReference ?? 'To complete'} icon="identity" onPress={() => open({ money: 'tax' })} />
+        <NavRow label="Yearly statements" icon="download" onPress={() => open({ money: 'statements' })} />
       </View>
     </View>
   );
 }
 
-/**
- * Delete all events (owner, 13 Sep 2026: "I'm currently in testing mode on the
- * hosting tab… reset me back to the starting point so that I can continue my
- * testing"). Two taps: the host record, every offer, invitation and video go —
- * anyone still holding a place is called off and refunded on the way — and the
- * tab is the learn layer again.
- */
-function DeleteAll({ onDone }: { onDone: () => Promise<void> }) {
-  const [arm, setArm] = useState(false);
+const scheduleWords = (s: HostMoney['paySchedule']) => (s === 'weekday' ? 'Every weekday' : s === 'monthly' ? 'Once a month' : 'Every Friday');
+
+// --- SX8 · Profile ----------------------------------------------------------
+
+function ProfileTab({ home, navigate, open, goTab, onReset }: { home: HostHome; navigate: (to: string) => void; open: (p: Record<string, string | null>) => void; goTab: (k: HostTabKey) => void; onReset: () => Promise<void> }) {
+  const h = home.host!;
+  const first = h.name.split(/\s+/)[0];
+  const lastInitial = h.name.split(/\s+/)[1]?.[0];
+  const [stopping, setStopping] = useState(false);
+  const [outstanding, setOutstanding] = useState<Outstanding | null>(null);
+  const running = h.checks === 'running';
+
+  const outstandingNow = computeOutstanding(home);
+  const onStop = () => {
+    if (outstandingNow.blocked) { setOutstanding(outstandingNow); return; }
+    setStopping(true);
+  };
+
+  return (
+    <View style={styles.pad}>
+      {/* Head. */}
+      <View style={styles.profHead}>
+        <HostFace host={{ name: h.name, photo: h.photo }} size={72} />
+        <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
+          <Text style={t.h21} numberOfLines={1}>{first}{lastInitial ? ` ${lastInitial}.` : ''}</Text>
+          <Press onPress={() => open({ level: '1' })} accessibilityRole="button" style={styles.chip}>
+            <Icon name={h.trust === 'trusted' ? 'trusted' : h.trust === 'checked' ? 'checked' : 'verified'} size={12} color={h.trust === 'trusted' ? LIME : INK} strokeWidth={2.2} />
+            <Text style={[styles.chipText, ]}>{running ? 'CHECKS RUNNING' : TRUST_LABEL[h.trust].toUpperCase()}</Text>
+          </Press>
+          <Press onPress={() => navigate(paths.hostProfile(h.id))} accessibilityRole="button"><Text style={t.link}>See your public profile ›</Text></Press>
+        </View>
+      </View>
+
+      <Section title="What guests see" />
+      <NavRow label="Intro video" value={h.introVideo ? 'Recorded' : 'None yet'} onPress={() => navigate(paths.hostMe())} />
+      <NavRow label="Host name" value={h.name} onPress={() => navigate(paths.hostMe())} />
+      <NavRow label="Where you host from" value={h.location ?? 'Not set'} onPress={() => navigate(paths.hostMe())} />
+      <NavRow label="Languages" value={h.languages?.length ? h.languages.join(', ') : 'Not set'} onPress={() => navigate(paths.hostMe())} />
+      <NavRow label="Your skills" value={`${home.offers.length} ${home.offers.length === 1 ? 'offer' : 'offers'}`} onPress={() => open({ skills: '1' })} />
+
+      <Section title="What backs it up" />
+      <NavRow label="Qualifications and evidence" value={`${(h.evidence ?? []).length || 'none'}`} onPress={() => open({ evidence: '1' })} />
+      <NavRow label="Checks" value={running ? 'In progress' : 'ID verified'} />
+
+      <Press onPress={onStop} accessibilityRole="button" style={styles.stop}>
+        <Text style={styles.stopText}>Stop hosting</Text>
+      </Press>
+
+      {stopping ? <StopHostingSheet name={first} onReset={onReset} onBlocked={(o) => { setStopping(false); setOutstanding(o); }} onClose={() => setStopping(false)} /> : null}
+      {outstanding ? <OutstandingSheet what="stop hosting" outstanding={outstanding} onClose={() => setOutstanding(null)} onSeeUpcoming={() => { setOutstanding(null); goTab('upcoming'); }} /> : null}
+    </View>
+  );
+}
+
+/** Mirrors the server's outstandingFrom: places still held on dates still to come. */
+function computeOutstanding(home: HostHome): Outstanding {
+  const today = todayIso();
+  const held = home.offers.flatMap((o) => o.bookings
+    .filter((b) => ['pending', 'confirmed', 'waitlisted'].includes(b.state))
+    .map((b) => ({ o, b, on: dateOf(o, b.occurrence) }))
+    .filter((x) => !x.on || x.on >= today));
+  const dates = new Set(held.map((x) => `${x.o.id}|${x.b.occurrence ?? ''}`));
+  const guests = held.reduce((n, x) => n + (x.b.heads ?? 1), 0);
+  return { blocked: held.length > 0, upcomingDates: dates.size, guests, payout: null };
+}
+
+function StopHostingSheet({ name, onReset, onBlocked, onClose }: { name: string; onReset: () => Promise<void>; onBlocked: (o: Outstanding) => void; onClose: () => void }) {
   const [busy, setBusy] = useState(false);
-  const [said, setSaid] = useState<string | null>(null);
-  if (!arm) {
-    return (
-      <Press onPress={() => setArm(true)} accessibilityRole="button" style={{ paddingVertical: 14, marginTop: 8 }}>
-        <Text style={[t.small, { color: colors.overrun, fontWeight: '700', textAlign: 'center' }]}>Delete all events</Text>
-      </Press>
-    );
-  }
+  const stop = async () => {
+    setBusy(true);
+    try { await api.stopHosting(); showToast('You have stopped hosting'); await onReset(); onClose(); }
+    catch (e: any) {
+      if (e?.code === 'has_bookings') onBlocked(e.body?.details ?? { blocked: true });
+      else showToast(e?.body?.message || 'Could not stop hosting.');
+    } finally { setBusy(false); }
+  };
   return (
-    <View style={styles.deleteBox}>
-      <Text style={[t.sub, { color: colors.ink }]}>Everything goes: your host profile, every offer, every invitation and every video. Anyone holding a place is called off and refunded. You start again from the beginning.</Text>
-      {said ? <Text style={[t.small, { color: colors.overrun }]}>{said}</Text> : null}
-      <View style={{ flexDirection: 'row', gap: 8 }}>
-        <Button label="Delete all events" kind="danger" icon="delete" loading={busy} onPress={async () => { setBusy(true); try { await api.stopHosting(true); await onDone(); } catch (e: any) { setSaid(e.message); } finally { setBusy(false); } }} />
-        <Button label="Keep them" kind="ghost" onPress={() => setArm(false)} />
-      </View>
-    </View>
-  );
-}
-
-/**
- * What you are up for, and any introduction waiting on you (Casual meet ups).
- *
- * Nothing here is listed, so there is no menu of it — only what this household
- * said, and the one thing Epic has brought them. An introduction the other
- * side has not answered is not shown at all: they have not been told it exists.
- */
-function UpFor() {
-  const { navigate } = useRouter();
-  const [home, setHome] = useState<OpenHome | null>(null);
-  const [matches, setMatches] = useState<OpenMatch[]>([]);
-  useEffect(() => {
-    api.openHome().then(setHome).catch(() => setHome(null));
-    api.openMatches().then((r) => setMatches(r.matches)).catch(() => setMatches([]));
-  }, []);
-  const standing = home?.entries.find((e) => e.scope === 'standing') ?? null;
-  const yours = matches.filter((m) => m.waitingOn === 'you');
-  return (
-    <View style={{ gap: 8, marginTop: 14 }}>
-      <Text style={t.kicker}>What you are up for</Text>
-      {yours.map((m) => (
-        <Press key={m.id} onPress={() => navigate(paths.openMatch(m.id))} accessibilityRole="button" style={styles.introRow}>
-          <View style={[k.tile30, k.lime]}><Icon name="household" size={15} color={INK} strokeWidth={2} /></View>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={[t.body, { fontWeight: '700', lineHeight: 18 }]}>{m.stage === 'host_asked' ? 'We have a match' : m.stage === 'videos' ? 'Twenty seconds, when you are ready' : 'An introduction is waiting'}</Text>
-            <Text style={t.tiny} numberOfLines={1}>{m.interests.join(' · ') || 'Somebody is up for the same things'}</Text>
-          </View>
-          <Icon name="more" size={16} color={colors.inkMuted} strokeWidth={2} />
-        </Press>
-      ))}
-      <Press onPress={() => navigate(standing ? paths.openSaved() : paths.open())} accessibilityRole="button" style={styles.introRow}>
-        <View style={[k.tile30, k.warm]}><Icon name="mic" size={15} color={INK} strokeWidth={2} /></View>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[t.body, { fontWeight: '700', lineHeight: 18 }]}>{standing ? (standing.interests.length === 1 ? 'One thing you are up for' : `${standing.interests.length} things you are up for`) : 'Just say what you are up for'}</Text>
-          <Text style={t.tiny} numberOfLines={1}>{standing ? standing.interests.join(' · ') : 'No date, no price, nothing to cancel.'}</Text>
-        </View>
-        <Icon name="more" size={16} color={colors.inkMuted} strokeWidth={2} />
+    <Sheet title="Stop hosting?" onCancel={onClose} cancelLabel="Cancel" onClose={onClose}>
+      <Text style={t.body}>Your host profile and offers stay as they are until you confirm. Anyone with a place to come must be finished or called off first.</Text>
+      <Press onPress={() => void stop()} disabled={busy} accessibilityRole="button" style={styles.stopConfirm}>
+        <Text style={styles.stopConfirmText}>{busy ? 'One moment…' : `Stop hosting, ${name}`}</Text>
       </Press>
-    </View>
+    </Sheet>
   );
-}
-
-function Stat({ n, label }: { n: string; label: string }) {
-  return <View style={styles.stat}><Text style={t.h21}>{n}</Text><Text style={styles.statLabel}>{label}</Text></View>;
 }
 
 const styles = StyleSheet.create({
-  centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  body: { paddingBottom: 40 },
-  bookingRow: { flexDirection: 'row', gap: 12, alignItems: 'center', paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
-  stat: { flex: 1, backgroundColor: colors.surfaceMuted, paddingVertical: 12, paddingHorizontal: 10 },
-  statLabel: { fontFamily: fonts.body, fontSize: 10.5, fontWeight: '600', color: colors.inkMuted, lineHeight: 14 },
-  offer: { flexDirection: 'row', gap: 12, alignItems: 'center', paddingVertical: 11 },
-  thumb: { width: 74, height: 56, borderRadius: 8, backgroundColor: colors.warm, alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' },
-  // §1: lime is the header and nothing else — an action bar below the band is
-  // ink, not lime (cream type on ink).
-  addBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, height: 50, backgroundColor: INK, marginTop: 6 },
-  deleteBox: { padding: 14, gap: 10, borderWidth: 2, borderColor: colors.overrun, marginTop: 8 },
-  introRow: { flexDirection: 'row', gap: 11, alignItems: 'center', paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
+  centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: colors.bg },
+  body: { paddingBottom: 48 },
+  pad: { paddingHorizontal: 20, paddingTop: 16 },
+  newOffer: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 40, paddingHorizontal: 12, backgroundColor: INK },
+  newOfferText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '700', color: CREAM },
+  dateRow: { flexDirection: 'row', gap: 12, alignItems: 'flex-start', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
+  needs: { backgroundColor: colors.surfaceMuted, paddingHorizontal: 7, paddingVertical: 2 },
+  needsText: { fontFamily: fonts.body, fontSize: 10, fontWeight: '800', letterSpacing: 0.4, color: colors.accent },
+  // Stats level block.
+  levelBlock: { backgroundColor: colors.surfaceMuted, padding: 14 },
+  levelTile: { width: 44, height: 44, backgroundColor: LIME, alignItems: 'center', justifyContent: 'center' },
+  levelKicker: { fontFamily: fonts.body, fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8, color: colors.accent },
+  levelTrack: { height: 6, backgroundColor: colors.surface },
+  levelFill: { height: 6, backgroundColor: LIME },
+  actHead: { flexDirection: 'row', gap: 8, paddingBottom: 6, borderBottomWidth: BORDER, borderBottomColor: colors.line },
+  actH: { fontFamily: fonts.body, fontSize: 11, fontWeight: '700', letterSpacing: 0.4, textTransform: 'uppercase', color: colors.inkMuted },
+  actRow: { flexDirection: 'row', gap: 8, alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
+  actCell: { fontFamily: fonts.body, fontSize: 13.5, color: colors.ink },
+  // Money.
+  payout: { backgroundColor: colors.surfaceMuted, padding: 16, gap: 2 },
+  payoutBig: { fontFamily: fonts.heading, fontSize: 40, fontWeight: '800', letterSpacing: -1, color: colors.ink, lineHeight: 44 },
+  // Profile.
+  profHead: { flexDirection: 'row', gap: 14, alignItems: 'center', paddingVertical: 6 },
+  chip: { flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start", backgroundColor: LIME, paddingHorizontal: 8, paddingVertical: 4 },
+  chipText: { fontFamily: fonts.body, fontSize: 10.5, fontWeight: '800', letterSpacing: 0.4, color: INK },
+  stop: { paddingVertical: 18, marginTop: 10 },
+  stopText: { fontFamily: fonts.body, fontSize: 15.5, fontWeight: '700', color: colors.overrun },
+  stopConfirm: { height: 50, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.overrun },
+  stopConfirmText: { fontFamily: fonts.body, fontSize: 15.5, fontWeight: '700', color: CREAM },
 });

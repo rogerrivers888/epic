@@ -62,8 +62,6 @@ export const ADULT_AGE = 18;
 export const REVIEW_PUBLISH_AFTER_DAYS = 14;
 /** How long a held booking waits before the minimum is decided: two days before it runs. */
 export const DECIDE_DAYS_BEFORE = 2;
-/** Epic's fee is shown before publishing. TBC in the design; held here so one number changes it. */
-export const EPIC_FEE_PERCENT = Number(process.env.EPIC_HOST_FEE_PERCENT ?? 0);
 /** Checked is required for a Practitioner above this price (brief §8). */
 export const CHECKED_ABOVE_PENCE = 100_00;
 
@@ -195,10 +193,23 @@ export function takingsAt(offer, n) {
   return 0;
 }
 
-/** The fee, and what the host would keep, for the publish step. */
-export function payoutOf(pence) {
-  const fee = Math.round((pence * EPIC_FEE_PERCENT) / 100);
-  return { fee, net: pence - fee, percent: EPIC_FEE_PERCENT };
+// Epic's fee is no longer a flat number: it follows the host's level, the 0%
+// intro and the host's own links (domain/hostFees.js, Settings revised v2).
+// `feeForBooking`/`feesForPeriod` are imported where a fee is shown.
+
+/**
+ * What a host still has outstanding (SX21): places held on dates still to come,
+ * the guests on them, and — once payments are real — the next payout. Pure, so
+ * both stop-hosting and delete-household draw the same sheet from the same
+ * facts. A whole-run booking counts as held until its last week has passed.
+ */
+export function outstandingFrom(offers, bookings) {
+  const today = ymd(new Date());
+  const holding = bookings.filter((b) => ['pending', 'confirmed', 'waitlisted'].includes(b.state)
+    && (lastDate(offers.find((o) => o.id === b.offer_id), b.occurrence) ?? today) >= today);
+  const dates = new Set(holding.map((b) => `${b.offer_id}|${JSON.stringify(b.occurrence ?? null)}`));
+  const guests = holding.reduce((n, b) => n + (b.heads ?? 1), 0);
+  return { blocked: holding.length > 0, upcomingDates: dates.size, guests, payout: null };
 }
 
 /**

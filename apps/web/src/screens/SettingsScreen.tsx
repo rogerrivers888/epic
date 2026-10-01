@@ -1,429 +1,676 @@
 /**
- * You and yours — Household folded into Settings (Hosts and Events S1 · S2,
- * owner 12 Sep 2026: "merge the Household and Settings into 1 tab").
+ * Settings, revised (Settings revised v2, owner 1 Oct 2026). One long scroll
+ * becomes two tabs under a title band — Household (SE1) and My Account (SE2) —
+ * with the How-Epic-plans pickers as bottom sheets (SE7–SE11), the person's
+ * page a push of its own (HouseholdScreen), and the device log, providers and
+ * data export moved a level down.
  *
- * Merged, the screen reads as *you and yours*: your account, then the people,
- * then everything set once and forgotten. The household list keeps its full
- * row anatomy — avatar, name, adult/child, what they eat and do — and gains a
- * "Who's in for trips ›" link, which is where the per-trip ticking lives now.
- * Diets and access become one row rather than a wall of chips. Hosting sits as
- * its own group once you are a host, and is absent before that.
+ *   SE1  Household     the people as faces, the plan defaults
+ *   SE2  My Account    voice, appearance, whose ratings, devices, sign out
+ *   SE12 Solo           no face row; just you, and the upsell to Household
+ *   SX6  Signed-in devices (a push)
  *
- *   You                the account, or the household while there is no account
- *   Household          the people, each a page of their own (/household/<id>)
- *   Diets and access   one line, opening to who cannot eat what
- *   Where you are      home, how far "close to home" reaches, how you travel
- *   Suggestions        pace, how full a day, whose ratings a row shows
- *   Hosting            only once you host: your state, payouts, your profile
- *   Voice              how Epic listens
- *   Appearance         light / dark
- *   Account            this build, devices, what waits to send, your data
- *
- * Providers — the owner's table of what is wired in and what it costs — keeps
- * its own address, /settings/providers, and is a row at the foot.
+ * Providers (owner), data export and the on-device store are kept — the
+ * redesign does not mention them, so rather than drop features the owner has
+ * not asked to drop, they sit in a quiet "More" group at the foot of My Account.
  */
 
-import React, { useEffect, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../components/press';
-import { api, HostHome, HouseholdResponse, Member } from '../api';
-import { colors, fonts, radius, resolveTheme, spacing, TARGET, type, BORDER } from '../theme';
-import { Button, Card, Chip, FoldLine, Row, Segmented, SectionTitle, StatusLine, Stepper, minutes } from '../components/ui';
-import { useRouter } from '../router';
-import { paths, type Route, type SettingsSection } from '../routes';
+import { api, HouseholdResponse, Member, MainDiet, RatingsView, TravelMode } from '../api';
+import { colors, fonts, spacing, type, BORDER, TARGET, LIME, INK, CREAM } from '../theme';
+import { Button } from '../components/ui';
+import { useRouter, useQueryState, asOneOf, asFlag, asText } from '../router';
+import { paths, type Route } from '../routes';
 import { storage } from '../storage';
 import { NotificationsSettings } from '../components/chat/NotificationsSettings';
 import { ProvidersTable } from '../components/ProvidersTable';
+import { OfflineCard } from '../components/OfflineCard';
 import { useTheme } from '../hooks/useTheme';
 import { useSession } from '../hooks/useSession';
-import { getViewer, setViewer } from '../viewer';
-import { isAdmin, setAdmin } from '../admin';
 import { Icon } from '../components/Icon';
 import { Avatar } from '../components/Faces';
-import { OfflineCard } from '../components/OfflineCard';
-import { AccountCard } from '../components/AccountCard';
-import { VOICE_LANGUAGES, VOICE_MODES, VoiceMode, getVoiceConfirm, getVoiceLanguage, getVoiceMode, setVoiceConfirm, setVoiceLanguage, setVoiceMode, voiceLanguageLabel, voiceModeLabel } from '../voice/settings';
-import { AddPerson, HomeCard, summarise } from './HouseholdScreen';
-import { TRUST_LABEL, dateOnly } from '../components/hosting';
+import { TitleBand, CompactBand } from '../components/Band';
+import { InkMenu } from '../components/InkMenu';
+import { Sheet } from '../components/Sheet';
+import { showToast } from '../components/Toast';
+import { isAdmin } from '../admin';
 
 export const SPEAK_KEY = 'epic.speakReplies';
 export const getSpeakPref = () => storage.getItem(SPEAK_KEY) !== 'off';
+const VOICE_CONFIRM_KEY = 'epic.showWords';
+const getVoiceConfirmPref = () => storage.getItem(VOICE_CONFIRM_KEY) !== 'off';
 
-const MODE_LABEL: Record<string, string> = { driving: 'Drive', transit: 'Train & bus', walking: 'On foot', cycling: 'Cycle' };
+// --- labels for the How-Epic-plans rows -------------------------------------
 
-/**
- * Which build answered (owner, 4 Sep 2026: "It seems like it hasn't deployed
- * yet"). The app's own build is the hash in the bundle's file name; the API
- * says which commit it is running. Between them, "is it live" stops being a
- * guess, and a stale browser copy shows up as a build that does not match.
- */
-function BuildCard() {
-  const [api_, setApi] = useState<string | null>(null);
-  const [web, setWeb] = useState<string | null>(null);
-  useEffect(() => {
-    api.health().then((h: any) => setApi(h.commit ?? 'unknown')).catch(() => setApi('unreachable'));
-    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
-    const src = Array.from(document.querySelectorAll('script[src]')).map((el) => (el as HTMLScriptElement).src).find((u) => /_expo\/static\/js/.test(u));
-    setWeb(src?.match(/index-([0-9a-f]{8})/)?.[1] ?? 'unknown');
-  }, []);
-  const reload = () => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-    navigator.serviceWorker?.getRegistration().then((r) => { r?.waiting?.postMessage('skip-waiting'); r?.update(); }).finally(() => window.location.reload());
-  };
-  return (
-    <Card>
-      <Row style={{ justifyContent: 'space-between' }}><Text style={type.small}>App</Text><Text style={[type.small, { fontWeight: '700', color: colors.ink }]}>{web ?? '…'}</Text></Row>
-      <Row style={{ justifyContent: 'space-between' }}><Text style={type.small}>API</Text><Text style={[type.small, { fontWeight: '700', color: colors.ink }]}>{api_ ?? '…'}</Text></Row>
-      <Text style={[type.tiny, { marginTop: spacing.sm }]}>Quote these two if something looks older than it should be.</Text>
-      <Button label="Get the newest version" kind="secondary" onPress={reload} style={{ marginTop: spacing.sm }} />
-    </Card>
-  );
-}
+const HOUR = (h: number) => { const am = h < 12; const h12 = h % 12 === 0 ? 12 : h % 12; return `${h12}${am ? 'am' : 'pm'}`; };
+const CLOSE_LABEL = (m: number | null | undefined) =>
+  m == null ? 'Any distance' : m === 30 ? 'Up to 30 min' : m === 60 ? 'Up to 1 hr' : m === 90 ? 'Up to 1½ hrs' : m === 120 ? 'Up to 2 hrs' : `Up to ${m} min`;
+const MODE_LABEL: Record<TravelMode, string> = { car: 'Car', train: 'Train', bus: 'Bus', walking: 'Walking', bike: 'Bike' };
+const MODE_ORDER: TravelMode[] = ['car', 'train', 'bus', 'walking', 'bike'];
+const modesLabel = (modes: TravelMode[] = []) => (modes.length ? MODE_ORDER.filter((m) => modes.includes(m)).map((m) => MODE_LABEL[m]).join(' · ') : 'Not set');
+const INTENSITY_LABEL: Record<string, string> = { relaxed: 'Relaxed', balanced: 'Balanced', packed: 'Packed' };
+const DIET_LABEL: Record<MainDiet, string> = { none: 'None', vegetarian: 'Vegetarian', vegan: 'Vegan', pescatarian: 'Pescatarian' };
+
+// ---------------------------------------------------------------------------
 
 export function SettingsScreen({ data, refresh, route }: {
   data: HouseholdResponse | null; refresh: () => Promise<void>;
-  /** The merged screen is `/settings`; the owner's providers table is `/settings/providers`. */
   route: Extract<Route, { name: 'settings' }>;
 }) {
   const { navigate } = useRouter();
-  const section: SettingsSection = route.section;
-  if (!data) return <View style={styles.page}><Text style={type.small}>Loading…</Text></View>;
-  if (section === 'notifications') return <NotificationsSettings onBack={() => navigate(paths.settings())} />;
+  const section = route.section;
+
+  if (section === 'notifications') {
+    return (
+      <View style={styles.screen}>
+        <CompactBand title="Notifications" onBack={() => navigate(paths.settings())} />
+        <NotificationsSettings onBack={() => navigate(paths.settings())} />
+      </View>
+    );
+  }
   if (section === 'providers') {
     return (
-      <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
-        <Press onPress={() => navigate(paths.settings())} accessibilityRole="button"><Row><Icon name="back" size={18} /><Text style={type.h3}>You and yours</Text></Row></Press>
-        <Text style={type.title}>Providers</Text>
-        <Text style={type.small}>Every provider on one row: switch it on or off, what is free, what is paid, what it cost. Tap a row for the detail.</Text>
-        <Providers />
-      </ScrollView>
+      <View style={styles.screen}>
+        <CompactBand title="Providers" onBack={() => navigate(paths.settings())} />
+        <ScrollView contentContainerStyle={styles.page}><ProvidersTable /></ScrollView>
+      </View>
     );
   }
-  return (
-    <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
-      <YouAndYours data={data} refresh={refresh} />
-    </ScrollView>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// the merged screen
-// ---------------------------------------------------------------------------
-
-function YouAndYours({ data, refresh }: { data: HouseholdResponse; refresh: () => Promise<void> }) {
-  const { navigate } = useRouter();
-  const { account, isOwner } = useSession();
-  const { household, members } = data;
-  const [speak, setSpeak] = useState(getSpeakPref());
-  const [voiceMode, setVoiceModeState] = useState<VoiceMode>(getVoiceMode());
-  const [voiceLanguage, setVoiceLanguageState] = useState<string>(getVoiceLanguage() ?? 'auto');
-  const [voiceConfirm, setVoiceConfirmState] = useState(getVoiceConfirm());
-  const { pref: themePref, setPref: setThemePref } = useTheme();
-  const [viewer, setViewerState] = useState<string | null>(getViewer(members));
-  const [confirm, setConfirm] = useState('');
-  const [msg, setMsg] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
-  // Hosting is its own group once you host, and absent before that.
-  const [hosting, setHosting] = useState<HostHome | null>(null);
-  useEffect(() => { api.hostHome().then(setHosting).catch(() => setHosting(null)); }, []);
-
-  const you = account?.name ?? members.find((m) => !m.isMinor)?.name ?? household.name;
-  const initials = (you ?? 'Epic').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join('');
-  const diets = members.flatMap((m) => [...m.allergens.map((c) => ({ m, c, kind: 'allergen' as const })), ...m.diets.map((c) => ({ m, c, kind: 'diet' as const }))]);
-  const dietLine = diets.length ? Array.from(new Set(diets.map((d) => d.c.value))).slice(0, 3).join(' · ') + (new Set(diets.map((d) => d.c.value)).size > 3 ? ' …' : '') : 'Nothing set';
-
-  return (
-    <>
-      {/* You: who this is, before anything that can be changed. */}
-      <Text style={type.title}>You and yours</Text>
-      <View style={styles.identity}>
-        <View style={styles.identityTile}><Text style={styles.identityInitials}>{initials}</Text></View>
-        <View style={{ flex: 1, gap: 2 }}>
-          <Text style={styles.identityName} numberOfLines={1}>{you}</Text>
-          <Text style={type.small} numberOfLines={1}>{account?.email ?? `${members.length} ${members.length === 1 ? 'person' : 'people'} in the household`}</Text>
-        </View>
-      </View>
-
-      {/* Household: the people, each a page of their own. */}
-      <Row style={styles.groupHead}>
-        <Text style={styles.kicker}>Household · {members.length} {members.length === 1 ? 'person' : 'people'}</Text>
-        <Press onPress={() => navigate(paths.trips())} accessibilityRole="button"><Text style={styles.link}>Who's in for trips ›</Text></Press>
-      </Row>
-      <View>
-        {members.map((m, i) => (
-          <Press key={m.id} onPress={() => navigate(paths.household(m.id))} accessibilityRole="button" accessibilityLabel={`Open ${m.name}`} style={styles.personRow}>
-            <Avatar name={m.name} index={i} size={40} url={m.avatarUrl} />
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={type.h3} numberOfLines={1}>{m.name}</Text>
-              <Text style={type.tiny} numberOfLines={1}>{personLine(m, m.name === you)}</Text>
-            </View>
-            <Text style={type.tiny} numberOfLines={1}>{summarise(m) === 'Nothing set yet' ? 'Nothing set yet' : 'Rates places'}</Text>
-            <Icon name="more" size={16} color={colors.inkMuted} />
-          </Press>
-        ))}
-        {adding ? (
-          <View style={{ paddingTop: spacing.sm }}>
-            <AddPerson onAdded={async (id) => { setAdding(false); await refresh(); if (id) navigate(paths.household(id)); }} onCancel={() => setAdding(false)} />
-          </View>
-        ) : (
-          <Press onPress={() => setAdding(true)} accessibilityRole="button" style={styles.addRow}>
-            <View style={styles.addDot}><Icon name="add" size={14} color={colors.accent} /></View>
-            <Text style={[type.h3, { color: colors.accent }]}>Add someone</Text>
-          </Press>
-        )}
-        {members.some((m) => summarise(m) === 'Nothing set yet') || !household.home ? (
-          <Press onPress={() => navigate(paths.setup())} accessibilityRole="button" style={styles.tellBanner}>
-            <View style={styles.tellTile}><Icon name="mic" size={16} color={colors.selectedFg} strokeWidth={2.2} /></View>
-            <Text style={[type.small, { flex: 1, color: colors.ink }]}><Text style={{ fontWeight: '600' }}>Tell Epic about your family</Text> — two minutes, and we'll stop asking.</Text>
-            <Icon name="more" size={16} color={colors.inkMuted} />
-          </Press>
-        ) : null}
-      </View>
-
-      {/* Diets and access: one row, opening to who. */}
-      <View style={styles.rows}>
-        <FoldLine label="Diets and access" value={dietLine} icon="allergen">
-          <View style={{ gap: spacing.sm }}>
-            <Text style={type.tiny}>Allergens exclude places; diets, likes and dislikes only rank them. Change them on each person's page.</Text>
-            {members.map((m) => (
-              <Press key={m.id} onPress={() => navigate(paths.household(m.id))} accessibilityRole="button" style={{ gap: 4 }}>
-                <Text style={type.small}>{m.name}</Text>
-                <Row style={{ flexWrap: 'wrap', gap: 6 }}>
-                  {m.allergens.map((c) => <Chip key={c.id} label={c.value} tone="allergen" />)}
-                  {m.diets.map((c) => <Chip key={c.id} label={c.value} tone="like" />)}
-                  {!m.allergens.length && !m.diets.length ? <Text style={type.tiny}>Nothing to avoid</Text> : null}
-                </Row>
-              </Press>
-            ))}
-          </View>
-        </FoldLine>
-        {/* Off by default: access facts (step free…) are asked of a household
-            after a visit only once it has said access matters to it. */}
-        <SwitchRow label="Access needs in our household" hint="Step-free, accessible toilets and the like" value={!!household.accessNeeds}
-          onChange={async (v) => { await api.updateHousehold({ accessNeeds: v }); await refresh(); }} />
-      </View>
-
-      {/* Where you are. */}
-      {/* The household's name, its front door and a picture of home (owner,
-          6 Sep 2026) — the card the Household tab had, kept whole. */}
-      <Text style={styles.kicker}>Where you are</Text>
-      <HomeCard household={household} refresh={refresh} wide={false} />
-      <View style={styles.rows}>
-        {household.home ? (
-          <FoldLine label="Close to home reaches" value={`${household.homeRadiusMiles ?? 10} miles`} icon="here">
-            <Stepper label="Miles from home" value={household.homeRadiusMiles ?? 10} min={1} max={100} format={(v) => `${v} miles`} onChange={async (v) => { await api.updateHousehold({ homeRadiusMiles: v }); await refresh(); }} />
-          </FoldLine>
-        ) : null}
-        <FoldLine label="Default travel mode" value={household.travelMode ? MODE_LABEL[household.travelMode] ?? household.travelMode : 'Not said'} icon="driving">
-          <Segmented value={household.travelMode ?? 'driving'} options={[{ value: 'driving', label: 'Drive' }, { value: 'transit', label: 'Train & bus' }, { value: 'walking', label: 'On foot' }, { value: 'cycling', label: 'Cycle' }]} onChange={async (v) => { await api.updateHousehold({ travelMode: v } as any); await refresh(); }} />
-        </FoldLine>
-      </View>
-
-      {/* Suggestions: how Epic plans for this household. */}
-      <Text style={styles.kicker}>Suggestions</Text>
-      <View style={styles.rows}>
-        <FoldLine label="How full we like a day" value={household.defaultIntensity[0].toUpperCase() + household.defaultIntensity.slice(1)} icon="hours">
-          <Segmented value={household.defaultIntensity} options={[{ value: 'relaxed', label: 'Relaxed' }, { value: 'balanced', label: 'Balanced' }, { value: 'packed', label: 'Packed' }]} onChange={async (v) => { await api.updateHousehold({ defaultIntensity: v }); await refresh(); }} />
-        </FoldLine>
-        <FoldLine label="Our pace" value={`Eat ${minutes(household.pace.food.typicalMinutes)} · do ${minutes(household.pace.activity.typicalMinutes)}`} icon="duration">
-          <Text style={type.tiny}>Eating and doing have different rhythms. "Special" is the exception you'd make for somewhere worth going further for.</Text>
-          {(['food', 'activity'] as const).map((k) => (
-            <View key={k} style={{ gap: 4, marginBottom: spacing.md }}>
-              <Text style={type.h3}>{k === 'food' ? 'Food & drink' : 'Things to do'}</Text>
-              <Stepper label="Usually spend" value={household.pace[k].typicalMinutes} min={15} max={480} format={minutes} onChange={async (v) => { await api.updateHousehold({ pace: { [k]: { typicalMinutes: v } } }); await refresh(); }} />
-              <Stepper label="Longest we'd allow" value={household.pace[k].maxMinutes} min={30} max={720} format={minutes} onChange={async (v) => { await api.updateHousehold({ pace: { [k]: { maxMinutes: v } } }); await refresh(); }} />
-              <Stepper label="Usual max travel" value={household.pace[k].maxTravelMinutes} min={5} max={240} format={minutes} onChange={async (v) => { await api.updateHousehold({ pace: { [k]: { maxTravelMinutes: v } } }); await refresh(); }} />
-              <Stepper label="…if it's special" value={household.pace[k].maxTravelIfSpecialMinutes} min={5} max={360} format={minutes} onChange={async (v) => { await api.updateHousehold({ pace: { [k]: { maxTravelIfSpecialMinutes: v } } }); await refresh(); }} />
-            </View>
-          ))}
-        </FoldLine>
-        <FoldLine label="Ratings shown as" value={viewer ? members.find((m) => m.id === viewer)?.name.split(' ')[0] ?? 'Anyone' : 'Anyone'} icon="favourite">
-          <Text style={type.tiny}>A place's row in Places shows one score: this person's. Everyone's are in the drawer. Kept on this device.</Text>
-          <Segmented value={viewer ?? ''} options={[{ value: '', label: 'Anyone' }, ...members.map((m) => ({ value: m.id, label: m.name.split(' ')[0] }))]} onChange={(id) => { setViewer(id || null); setViewerState(id || null); }} />
-        </FoldLine>
-      </View>
-
-      {/* Hosting: only once you are a host. */}
-      {hosting?.host ? (
-        <>
-          <Text style={styles.kicker}>Hosting</Text>
-          <View style={styles.rows}>
-            <LinkRow label="Host on Epic" value={[hosting.host.checks === 'running' ? 'Checks running' : TRUST_LABEL[hosting.host.trust], `${hosting.stats?.live ?? 0} live`, hosting.stats?.nextPayoutOn ? `next ${dateOnly(hosting.stats.nextPayoutOn)}` : null].filter(Boolean).join(' · ')} onPress={() => navigate(paths.host())} icon="host" />
-            <LinkRow label="Payouts" value={hosting.host.payoutStatus === 'connected' ? hosting.host.payoutLabel ?? 'Connected' : 'Not connected'} onPress={() => navigate(`${paths.hostMe()}?at=payouts`)} icon="payout" />
-            <LinkRow label="Your host profile" value="Public" onPress={() => navigate(paths.hostProfile(hosting.host!.id))} icon="guest" />
-            <StopHosting onDone={() => { setHosting(null); navigate(paths.host()); }} />
-          </View>
-        </>
-      ) : null}
-
-      {/* Notifications: every trip and hosted date in one list (Chat screens E5). */}
-      <Text style={styles.kicker}>Notifications</Text>
-      <View style={styles.rows}>
-        <LinkRow label="What you get told about" value="Every trip and hosted date, the digest, quiet hours" onPress={() => navigate(paths.settingsNotifications())} icon="bell" />
-      </View>
-
-      {/* Voice. */}
-      <Text style={styles.kicker}>Voice</Text>
-      <View style={styles.rows}>
-        <FoldLine label="How Epic listens" value={voiceModeLabel(voiceMode)} icon="mic">
-          <View style={{ gap: spacing.sm }}>
-            {VOICE_MODES.map((m) => (
-              <Press key={m.value} onPress={() => { setVoiceMode(m.value); setVoiceModeState(m.value); }} accessibilityRole="button" accessibilityState={{ selected: voiceMode === m.value }} style={styles.voiceOption}>
-                <Chip label={m.label} selected={voiceMode === m.value} onPress={() => { setVoiceMode(m.value); setVoiceModeState(m.value); }} />
-                <Text style={type.tiny}>{m.blurb}</Text>
-              </Press>
-            ))}
-          </View>
-        </FoldLine>
-        <FoldLine label="Language" value={voiceLanguageLabel(voiceLanguage === 'auto' ? null : voiceLanguage)} icon="web">
-          <Text style={[type.tiny, { marginBottom: spacing.sm }]}>Telling Epic the language makes it quicker and more accurate. Left to detect, it works it out from the first words.</Text>
-          <Row style={{ flexWrap: 'wrap', gap: 6 }}>
-            {VOICE_LANGUAGES.map((l) => <Chip key={l.value} label={l.label} selected={voiceLanguage === l.value} onPress={() => { setVoiceLanguage(l.value); setVoiceLanguageState(l.value); }} />)}
-          </Row>
-        </FoldLine>
-        <SwitchRow label="Show me the words before planning" hint="After Done, what Epic heard is shown to check and change. Off, it plans straight away." value={voiceConfirm} onChange={(v) => { setVoiceConfirm(v); setVoiceConfirmState(v); }} />
-        <SwitchRow label="Speak replies back when I use my voice" hint="Recordings are never kept: they go to the server, are written down, and are forgotten in the same breath." value={speak} onChange={(v) => { setSpeak(v); storage.setItem(SPEAK_KEY, v ? 'on' : 'off'); }} />
-      </View>
-
-      {/* Appearance: two cells, and following the phone until the first tap. */}
-      <Text style={styles.kicker}>Appearance</Text>
-      <Segmented value={themePref === 'system' ? resolveTheme('system') : themePref} options={[{ value: 'light' as const, label: 'Light' }, { value: 'dark' as const, label: 'Dark' }]} onChange={setThemePref} />
-      <Text style={type.tiny}>{themePref === 'system' ? 'Epic follows your phone until you choose here.' : 'Set here. Epic no longer follows the phone.'}</Text>
-
-      {/* Account. */}
-      <SectionTitle hint="Which build you are looking at, so 'is that change live yet?' has an answer.">This build</SectionTitle>
-      <BuildCard />
-      {/* A way to see the opening again on a phone (Welcome screens, 1h): the
-          postcards opener and four intro screens play from the start. */}
-      <SectionTitle hint="The postcards opener and the four intro screens, played from the start so you can watch them on a phone.">Welcome screens</SectionTitle>
-      <Button label="Play the welcome screens" kind="secondary" onPress={() => navigate(paths.opening(0, true))} />
-      <SectionTitle hint="One passcode for the household, and which devices are using it. Anything written without signal waits here until it can be sent.">Account</SectionTitle>
-      <AccountCard />
-      <SectionTitle hint="What Epic keeps on this phone so it works with no signal, and what it has researched and owns outright.">On this device</SectionTitle>
-      <OfflineCard />
-      <SectionTitle hint="Everything the household has generated. Place content from licensed sources is never included, only identifiers and what you wrote.">Your data</SectionTitle>
-      <Card>
-        <Button label="Export everything (JSON)" kind="secondary" onPress={() => { void api.downloadExport(); }} />
-        <Text style={[type.small, { marginTop: spacing.sm }]}>Delete everything Epic holds about this household: people, trips, visits, ratings, captured menus. Type the household name to confirm.</Text>
-        <Row>
-          <TextInput value={confirm} onChangeText={setConfirm} placeholder={household.name} placeholderTextColor={colors.inkFaint} style={[styles.input, { flex: 1 }]} />
-          <Button label="Delete household" kind="danger" disabled={confirm !== household.name} onPress={async () => {
-            try { await api.deleteHousehold(confirm); setMsg('Deleted. Run the seed to start again.'); await refresh(); } catch (e: any) { setMsg(e.message); }
-          }} />
-        </Row>
-        {msg ? <StatusLine>{msg}</StatusLine> : null}
-      </Card>
-      {isOwner ? (
-        <View style={[styles.rows, { marginTop: spacing.lg }]}>
-          <LinkRow label="Providers and usage" value="The owner's table" onPress={() => navigate(paths.settings('providers'))} icon="owned" />
-        </View>
-      ) : null}
-    </>
-  );
-}
-
-/**
- * Stop hosting (owner, 12 Sep 2026: "reset me so that I get to see those
- * screens again"). Two taps: the host, every offer and every video go, and the
- * Host tab is the invitation again. Refused by the API while anybody holds a
- * place, and the refusal is shown in its own words.
- */
-function StopHosting({ onDone }: { onDone: () => void }) {
-  const [arm, setArm] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [said, setSaid] = useState<string | null>(null);
-  if (!arm) {
+  if (!data) return <View style={styles.screen}><Text style={[type.small, { padding: spacing.lg }]}>Loading…</Text></View>;
+  if (section === 'devices') {
     return (
-      <Press onPress={() => setArm(true)} accessibilityRole="button" style={styles.linkRow}>
-        <Icon name="delete" size={14} color={colors.overrun} />
-        <Text style={[type.small, { color: colors.overrun, fontWeight: '700' }]}>Stop hosting</Text>
-      </Press>
+      <View style={styles.screen}>
+        <CompactBand title="Signed-in devices" onBack={() => navigate(paths.settings())} />
+        <ScrollView contentContainerStyle={styles.page}><DevicesList /></ScrollView>
+      </View>
     );
   }
+  return <SettingsHome data={data} refresh={refresh} />;
+}
+
+function SettingsHome({ data, refresh }: { data: HouseholdResponse; refresh: () => Promise<void> }) {
+  const [tab, setTab] = useQueryState<'household' | 'account'>('tab', 'household', asOneOf(['household', 'account'], 'household'));
   return (
-    <View style={{ gap: spacing.sm, padding: spacing.md, borderWidth: BORDER, borderColor: colors.overrun }}>
-      <Text style={type.body}>Your host profile, every offer, every video and the record of what has run go. The Host tab starts you again from the beginning. Anyone still holding a place on an offer has to be told first — call those off on the offer's page.</Text>
-      {said ? <StatusLine tone="warn">{said}</StatusLine> : null}
-      <Row>
-        <Button label="Stop hosting" kind="danger" loading={busy} onPress={async () => { setBusy(true); try { await api.stopHosting(); onDone(); } catch (e: any) { setSaid(e.message); } finally { setBusy(false); } }} />
-        <Button label="Keep it" kind="ghost" onPress={() => setArm(false)} />
-      </Row>
+    <View style={styles.screen}>
+      <TitleBand title="Settings" />
+      <InkMenu<'household' | 'account'>
+        tabs={[{ key: 'household', label: 'Household' }, { key: 'account', label: 'My Account' }]}
+        selected={tab}
+        onSelect={(k) => setTab(k, { replace: true })}
+      />
+      <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+        {tab === 'household' ? <HouseholdTab data={data} refresh={refresh} /> : <MyAccountTab data={data} refresh={refresh} />}
+      </ScrollView>
     </View>
   );
 }
 
-/** "You · adult", "Adult", "Child · 9". */
-function personLine(m: Member, you: boolean): string {
-  const role = m.isMinor || (m.age != null && m.age < 18) ? `Child${m.age != null ? ` · ${m.age}` : ''}` : 'Adult';
-  return you ? `You · ${role.toLowerCase()}` : role;
-}
+// --- SE1 · Household --------------------------------------------------------
 
-function LinkRow({ label, value, onPress, icon }: { label: string; value?: string | null; onPress: () => void; icon: any }) {
-  return (
-    <Press onPress={onPress} accessibilityRole="button" style={styles.linkRow}>
-      <Icon name={icon} size={14} color={colors.inkMuted} />
-      <Text style={type.tiny}>{label}</Text>
-      <Text style={[type.small, { fontWeight: '600', color: colors.ink, flex: 1 }]} numberOfLines={1}>{value ?? ''}</Text>
-      <Icon name="more" size={14} color={colors.inkMuted} />
-    </Press>
-  );
-}
+function HouseholdTab({ data, refresh }: { data: HouseholdResponse; refresh: () => Promise<void> }) {
+  const { navigate } = useRouter();
+  const { account } = useSession();
+  const { household, members } = data;
+  const solo = account?.plan === 'solo';
+  if (solo) return <SoloHousehold data={data} refresh={refresh} />;
 
-function SwitchRow({ label, hint, value, onChange }: { label: string; hint: string; value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <Row style={{ justifyContent: 'space-between', paddingVertical: 6 }}>
-      <View style={{ flex: 1 }}>
-        <Text style={type.body}>{label}</Text>
-        <Text style={type.tiny}>{hint}</Text>
-      </View>
-      <Switch value={value} onValueChange={onChange} />
-    </Row>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Providers: one table for what is wired in, what it costs and what it has used.
-// ---------------------------------------------------------------------------
-
-function Providers() {
-  const [admin, setAdminState] = useState(isAdmin());
-  // The switch is estate-wide and the API asks for manage_settings: the owner,
-  // or any role that holds it (Codex).
-  const { isOwner, access } = useSession();
-  const canSwitch = isOwner || Boolean(access?.capabilities?.includes('manage_settings'));
+  const place = household.home?.label?.split(',')[0]?.trim();
   return (
     <>
-      <ProvidersTable canSwitch={canSwitch} />
-      <SectionTitle hint="For judging each provider's data before paying for it. On this device only; households never see it.">Admin</SectionTitle>
-      <Card>
-        <Row style={{ justifyContent: 'space-between' }}>
-          <View style={{ flex: 1 }}>
-            <Text style={type.body}>Show where every record came from</Text>
-            <Text style={type.tiny}>Adds a Data section to each trip on the web layout, a source filter on the plan's browse lists and shortlist searches, and a "via" line under each result.</Text>
-          </View>
-          <Switch value={admin} onValueChange={(v) => { setAdmin(v); setAdminState(v); }} />
-        </Row>
-      </Card>
+      {/* Household name + address edit (the editor itself is a later item). */}
+      <View style={styles.nameRow}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.householdName} numberOfLines={1}>{household.name}</Text>
+          <Text style={type.small}>{[place, `${members.length} ${members.length === 1 ? 'person' : 'people'}`].filter(Boolean).join(' · ')}</Text>
+        </View>
+        <Press onPress={() => showToast('Editing the household name is coming soon')} accessibilityRole="button"><Text style={styles.editLink}>Edit</Text></Press>
+      </View>
+
+      <FaceRow members={members} me={data.me} onOpen={(id) => navigate(paths.household(id))} onAdded={refresh} />
+
+      {/* How Epic plans */}
+      <SectionHead>How Epic plans</SectionHead>
+      <Text style={[type.small, { marginTop: -6, marginBottom: 6 }]}>Defaults for every plan. A trip request can change them.</Text>
+      <PlanRows household={household} refresh={refresh} />
     </>
   );
 }
 
+function PlanRows({ household, refresh }: { household: HouseholdResponse['household']; refresh: () => Promise<void> }) {
+  const [plan, setPlan] = useQueryState<string | null>('plan', null, asText as any);
+  const close = () => setPlan(null, { replace: true });
+  return (
+    <>
+      <ValueRow label="Close to home" value={CLOSE_LABEL(household.closeToHomeMinutes)} onPress={() => setPlan('close')} />
+      <ValueRow label="Getting there" value={modesLabel(household.travelModes)} onPress={() => setPlan('there')} />
+      <ValueRow label="How busy a day" value={INTENSITY_LABEL[household.defaultIntensity]} onPress={() => setPlan('busy')} />
+      <ValueRow label="When your day runs" value={`${HOUR(household.dayStart ?? 10)}–${HOUR(household.dayEnd ?? 18)}`} onPress={() => setPlan('day')} />
+      {plan === 'close' ? <CloseToHomeSheet household={household} refresh={refresh} onClose={close} /> : null}
+      {plan === 'there' ? <GettingThereSheet household={household} refresh={refresh} onClose={close} /> : null}
+      {plan === 'busy' ? <HowBusySheet household={household} refresh={refresh} onClose={close} /> : null}
+      {plan === 'day' ? <DayRunsSheet household={household} refresh={refresh} onClose={close} /> : null}
+    </>
+  );
+}
+
+// --- the face row -----------------------------------------------------------
+
+function FaceRow({ members, me, onOpen, onAdded }: { members: Member[]; me: string | null; onOpen: (id: string) => void; onAdded: () => Promise<void> }) {
+  const atCap = members.length >= 6;
+  const [adding, setAdding] = useState(false);
+  return (
+    <View style={{ marginTop: spacing.md }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.faces}>
+        {members.map((m, i) => {
+          const pending = m.access?.status === 'invited';
+          return (
+            <Press key={m.id} onPress={() => onOpen(m.id)} accessibilityRole="button" accessibilityLabel={`Open ${m.name}`} style={styles.faceCell}>
+              <View>
+                <Avatar name={m.name} index={i} size={60} url={m.avatarUrl} />
+                {pending ? <View style={styles.sendBadge}><Icon name="send" size={12} color={INK} strokeWidth={2.2} /></View> : null}
+              </View>
+              <Text style={styles.faceLabel} numberOfLines={1}>{m.id === me ? 'You' : m.name.split(/\s+/)[0]}</Text>
+              {pending ? <Text style={styles.invited} numberOfLines={1}>Invited</Text> : null}
+            </Press>
+          );
+        })}
+        <Press onPress={() => !atCap && setAdding(true)} disabled={atCap} accessibilityRole="button" accessibilityLabel="Add someone" style={[styles.faceCell, atCap && { opacity: 0.35 }]}>
+          <View style={styles.addCircle}><Icon name="add" size={22} color={colors.inkMuted} strokeWidth={2.2} /></View>
+          <Text style={styles.faceLabel}>Add</Text>
+        </Press>
+      </ScrollView>
+      <View style={styles.rule2} />
+      {atCap ? <Text style={[type.small, { marginTop: 8 }]}>Your Household plan covers up to 6 people.</Text> : null}
+      {adding ? <AddPersonInline onDone={async (id) => { setAdding(false); await onAdded(); if (id) onOpen(id); }} onCancel={() => setAdding(false)} /> : null}
+    </View>
+  );
+}
+
+/** A minimal add (the fuller flow is a later item): a name, and into the household. */
+function AddPersonInline({ onDone, onCancel }: { onDone: (id?: string) => void; onCancel: () => void }) {
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const add = async () => {
+    if (!name.trim()) return;
+    setBusy(true); setErr(null);
+    try { const r = await api.addMember({ name: name.trim() }); onDone(r.member?.id); }
+    catch (e: any) { setErr(e?.body?.message || e?.message || 'Could not add.'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <View style={{ marginTop: spacing.md, gap: 8 }}>
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        <TextInput value={name} onChangeText={setName} placeholder="Name" placeholderTextColor={colors.inkFaint} style={styles.input} autoFocus onSubmitEditing={add} />
+        <Button label="Add" onPress={add} loading={busy} />
+      </View>
+      {err ? <Text style={[type.small, { color: colors.overrun }]}>{err}</Text> : null}
+      <Press onPress={onCancel}><Text style={styles.cancelLink}>Cancel</Text></Press>
+    </View>
+  );
+}
+
+// --- SE12 · Solo ------------------------------------------------------------
+
+function SoloHousehold({ data, refresh }: { data: HouseholdResponse; refresh: () => Promise<void> }) {
+  const { navigate } = useRouter();
+  const you = data.members[0];
+  return (
+    <>
+      {you ? (
+        <Press onPress={() => navigate(paths.household(you.id))} accessibilityRole="button" style={styles.soloHead}>
+          <Avatar name={you.name} index={0} size={60} url={you.avatarUrl} />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={type.h2} numberOfLines={1}>{you.name}</Text>
+            <Text style={type.small}>Solo plan · just you</Text>
+          </View>
+        </Press>
+      ) : null}
+      {you ? <ValueRow label="Your tastes, allergies and access" onPress={() => navigate(paths.household(you.id))} /> : null}
+      <View style={styles.tintBlock}>
+        <Text style={styles.tintTitle}>Planning for more than you?</Text>
+        <Text style={styles.tintBody}>The Household plan covers up to 6 people, each with their own tastes and allergies.</Text>
+        <Button label="Switch to Household" onPress={() => showToast('Plan and billing is coming soon')} style={{ marginTop: 10 }} />
+      </View>
+      <SectionHead>How Epic plans</SectionHead>
+      <PlanRows household={data.household} refresh={refresh} />
+    </>
+  );
+}
+
+// --- SE2 · My Account -------------------------------------------------------
+
+function MyAccountTab({ data, refresh }: { data: HouseholdResponse; refresh: () => Promise<void> }) {
+  const { navigate } = useRouter();
+  const { account, isOwner } = useSession();
+  const { pref, setPref } = useTheme();
+  const [speak, setSpeak] = useState(getSpeakPref());
+  const [showWords, setShowWords] = useState(getVoiceConfirmPref());
+  const me = data.members.find((m) => m.id === data.me) ?? data.members[0];
+  const [ratingsOpen, setRatingsOpen] = useQueryState('ratings', false, asFlag);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const [devices, setDevices] = useState<number | null>(null);
+  useEffect(() => { api.devices().then((d) => setDevices(d.sessions.length)).catch(() => setDevices(null)); }, []);
+
+  return (
+    <>
+      <SectionHead>Voice</SectionHead>
+      <ToggleRow label="Show words before planning" value={showWords} onChange={(v) => { setShowWords(v); storage.setItem(VOICE_CONFIRM_KEY, v ? 'on' : 'off'); }} />
+      <ToggleRow label="Speak replies" value={speak} onChange={(v) => { setSpeak(v); storage.setItem(SPEAK_KEY, v ? 'on' : 'off'); }} />
+      <ValueRow label="Language" value="English (UK)" onPress={() => showToast('Language options are coming soon')} />
+
+      <SectionHead>Notifications</SectionHead>
+      <ValueRow label="Notifications" value="Trips and hosted dates" onPress={() => navigate(paths.settingsNotifications())} />
+
+      <SectionHead>Ratings</SectionHead>
+      <ValueRow label="Whose ratings to show" value={`${ratingsViewLabel(me?.ratingsView, data.members)} · your setting`} onPress={() => setRatingsOpen(true, { replace: true })} />
+
+      <SectionHead>Appearance</SectionHead>
+      <Appearance value={pref === 'system' ? 'match' : pref} onChange={(v) => setPref(v === 'match' ? 'system' : v)} />
+
+      <SectionHead>Account</SectionHead>
+      {isOwner ? <ValueRow label="Plan and billing" value={account?.plan === 'solo' ? 'Solo' : 'Household'} onPress={() => showToast('Plan and billing is coming soon')} /> : null}
+      <ValueRow label="Signed-in devices" value={devices == null ? undefined : String(devices)} onPress={() => navigate(paths.settings('devices'))} />
+      <ValueRow label="Sign out" onPress={async () => { await api.signOut(); if (Platform.OS === 'web' && typeof location !== 'undefined') location.reload(); }} />
+      {isOwner
+        ? <DangerRow label="Delete household" onPress={() => setConfirmDelete(true)} />
+        : <DangerRow label="Leave household" onPress={() => setConfirmLeave(true)} />}
+
+      <Footer />
+
+      {/* Kept, not dropped: the owner's providers table, the data export and the
+          on-device store have no home in the redesign, so they sit here. */}
+      <SectionHead>More</SectionHead>
+      {isOwner ? <ValueRow label="Providers and usage" value="The owner's table" onPress={() => navigate(paths.settings('providers'))} /> : null}
+      <ValueRow label="Export everything (JSON)" onPress={() => { void api.downloadExport(); }} />
+      <View style={{ marginTop: spacing.md }}><OfflineCard /></View>
+
+      {ratingsOpen && me ? <RatingsSheet member={me} members={data.members} refresh={refresh} onClose={() => setRatingsOpen(false, { replace: true })} /> : null}
+      {confirmDelete ? <DeleteHouseholdSheet name={data.household.name} refresh={refresh} onClose={() => setConfirmDelete(false)} /> : null}
+      {confirmLeave ? <LeaveHouseholdSheet name={data.household.name} me={data.me} ownerName={data.members.find((m) => m.access?.isLead)?.name ?? null} onClose={() => setConfirmLeave(false)} /> : null}
+    </>
+  );
+}
+
+function ratingsViewLabel(rv: RatingsView | undefined, members: Member[]): string {
+  if (!rv || rv.mode === 'all') return 'Everyone in the household';
+  if (rv.mode === 'mine') return 'Only mine';
+  return `${rv.who.length} ${rv.who.length === 1 ? 'person' : 'people'}`;
+}
+
+// --- Appearance (SE2) -------------------------------------------------------
+
+function Appearance({ value, onChange }: { value: 'light' | 'dark' | 'match'; onChange: (v: 'light' | 'dark' | 'match') => void }) {
+  const opts: { key: 'light' | 'dark' | 'match'; label: string; icon: string; flex: number }[] = [
+    { key: 'light', label: 'Light', icon: 'light', flex: 1 },
+    { key: 'dark', label: 'Dark', icon: 'dark', flex: 1 },
+    { key: 'match', label: 'Match phone', icon: 'phone', flex: 1.4 },
+  ];
+  return (
+    <View style={styles.apTrack}>
+      {opts.map((o) => {
+        const on = value === o.key;
+        return (
+          <Press key={o.key} onPress={() => onChange(o.key)} accessibilityRole="button" accessibilityState={{ selected: on }} style={[styles.apCell, { flex: o.flex }, on && styles.apCellOn]}>
+            <Icon name={o.icon as any} size={16} color={on ? LIME : colors.ink} strokeWidth={2.2} />
+            <Text numberOfLines={1} style={[styles.apLabel, on && styles.apLabelOn]}>{o.label}</Text>
+          </Press>
+        );
+      })}
+    </View>
+  );
+}
+
+// --- SX6 · Signed-in devices ------------------------------------------------
+
+function DevicesList() {
+  const [rows, setRows] = useState<{ id: string; label: string; lastSeen: string; current: boolean }[] | null>(null);
+  const [confirm, setConfirm] = useState<{ id?: string; all?: boolean; label: string } | null>(null);
+  const load = () => api.devices().then((d) => setRows(d.sessions as any)).catch(() => setRows([]));
+  useEffect(() => { load(); }, []);
+  if (!rows) return <Text style={type.small}>Loading…</Text>;
+  const others = rows.filter((r) => !r.current);
+  return (
+    <>
+      {rows.map((r) => (
+        <View key={r.id} style={styles.deviceRow}>
+          <View style={[styles.deviceTile, r.current && { backgroundColor: LIME }]}><Icon name={r.current ? "phone" : "laptop"} size={18} color={r.current ? INK : colors.ink} strokeWidth={2} /></View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={type.h3} numberOfLines={1}>{r.label || 'A device'}{r.current ? ' · this device' : ''}</Text>
+            <Text style={type.tiny}>Last active {whenAgo(r.lastSeen)}</Text>
+          </View>
+          {!r.current ? <Press onPress={() => setConfirm({ id: r.id, label: r.label || 'that device' })} accessibilityRole="button"><Text style={styles.signOut}>Sign out</Text></Press> : null}
+        </View>
+      ))}
+      {others.length ? <View style={{ marginTop: spacing.lg }}><Button kind="danger" label="Sign out all other devices" onPress={() => setConfirm({ all: true, label: 'all other devices' })} /></View> : null}
+      {confirm ? (
+        <ConfirmSheet
+          title={confirm.all ? 'Sign out all other devices?' : `Sign out of ${confirm.label}?`}
+          body={confirm.all ? "You'll need to sign in again on each of them." : "You'll need to sign in again on that device."}
+          danger="Sign out"
+          onConfirm={async () => {
+            if (confirm.all) { await api.signOutOtherDevices(); showToast('Signed out of all other devices'); }
+            else if (confirm.id) { await api.signOutDevice(confirm.id); showToast('Signed out'); }
+            setConfirm(null); await load();
+          }}
+          onClose={() => setConfirm(null)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+const whenAgo = (iso: string) => {
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hr ago`;
+  return `${Math.round(hrs / 24)} days ago`;
+};
+
+// --- the How-Epic-plans sheets (SE7–SE11) -----------------------------------
+
+function CloseToHomeSheet({ household, refresh, onClose }: SheetProps) {
+  const opts: { v: number; label: string }[] = [
+    { v: 30, label: 'Up to 30 min' }, { v: 60, label: 'Up to 1 hr' }, { v: 90, label: 'Up to 1½ hrs' }, { v: 120, label: 'Up to 2 hrs' }, { v: 0, label: 'Any distance' },
+  ];
+  const current = household.closeToHomeMinutes ?? 0;
+  const place = household.home?.label?.split(',')[0]?.trim();
+  const save = async (v: number) => { await api.updateHousehold({ closeToHomeMinutes: v }); await refresh(); setTimeout(onClose, 220); };
+  return (
+    <Sheet title="Close to home" onDone={onClose} onClose={onClose}>
+      {place ? <Text style={[type.small, { marginBottom: 6 }]}>{`From ${place}${(household.travelModes?.length ?? 0) > 1 ? ' · by any way you ticked' : ''}`}</Text> : null}
+      {opts.map((o) => <OptionRow key={o.v} label={o.label} on={current === o.v} onPress={() => save(o.v)} />)}
+    </Sheet>
+  );
+}
+
+function GettingThereSheet({ household, refresh, onClose }: SheetProps) {
+  const [modes, setModes] = useState<TravelMode[]>(household.travelModes ?? []);
+  const toggle = async (m: TravelMode) => {
+    const next = modes.includes(m) ? modes.filter((x) => x !== m) : [...modes, m];
+    setModes(next); await api.updateHousehold({ travelModes: next }); await refresh();
+  };
+  return (
+    <Sheet title="Getting there" onDone={onClose} onClose={onClose}>
+      <Text style={[type.small, { marginBottom: 6 }]}>Pick all that work.</Text>
+      {MODE_ORDER.map((m) => <OptionRow key={m} label={MODE_LABEL[m]} on={modes.includes(m)} onPress={() => toggle(m)} />)}
+    </Sheet>
+  );
+}
+
+function HowBusySheet({ household, refresh, onClose }: SheetProps) {
+  const cards: { v: 'relaxed' | 'balanced' | 'packed'; label: string; sub: string }[] = [
+    { v: 'relaxed', label: 'Relaxed', sub: '2–3 stops, long lunch' },
+    { v: 'balanced', label: 'Balanced', sub: '3–4 stops' },
+    { v: 'packed', label: 'Packed', sub: '5 or more stops' },
+  ];
+  const save = async (v: string) => { await api.updateHousehold({ defaultIntensity: v as any }); await refresh(); setTimeout(onClose, 220); };
+  return (
+    <Sheet title="How busy a day" onDone={onClose} onClose={onClose}>
+      {cards.map((c) => {
+        const on = household.defaultIntensity === c.v;
+        return (
+          <Press key={c.v} onPress={() => save(c.v)} accessibilityRole="button" style={[styles.busyCard, on && styles.busyCardOn]}>
+            <Text style={[type.h3, on && { color: colors.ink }]}>{c.label}</Text>
+            <Text style={type.small}>{c.sub}</Text>
+          </Press>
+        );
+      })}
+    </Sheet>
+  );
+}
+
+function DayRunsSheet({ household, refresh, onClose }: SheetProps) {
+  const [start, setStart] = useState(household.dayStart ?? 10);
+  const [end, setEnd] = useState(household.dayEnd ?? 18);
+  const save = async (s: number, e: number) => { setStart(s); setEnd(e); await api.updateHousehold({ dayStart: s, dayEnd: e }); await refresh(); };
+  return (
+    <Sheet title="When your day runs" onDone={onClose} onClose={onClose}>
+      <StepperRow label="Start" value={HOUR(start)} onMinus={start > 7 && end - (start - 1) >= 4 ? () => save(start - 1, end) : null} onPlus={start < 12 && end - (start + 1) >= 4 ? () => save(start + 1, end) : null} />
+      <StepperRow label="Finish" value={HOUR(end)} onMinus={end > 14 && (end - 1) - start >= 4 ? () => save(start, end - 1) : null} onPlus={end < 22 ? () => save(start, end + 1) : null} />
+    </Sheet>
+  );
+}
+
+function RatingsSheet({ member, members, refresh, onClose }: { member: Member; members: Member[]; refresh: () => Promise<void>; onClose: () => void }) {
+  const [rv, setRv] = useState<RatingsView>(member.ratingsView ?? { mode: 'all', who: [] });
+  const choose = async (next: RatingsView, close = false) => { setRv(next); await api.updateMember(member.id, { ratingsView: next }); await refresh(); if (close) setTimeout(onClose, 220); };
+  return (
+    <Sheet title="Whose ratings to show" onDone={onClose} onClose={onClose}>
+      <OptionRow label="Everyone in the household" on={rv.mode === 'all'} onPress={() => choose({ mode: 'all', who: [] }, true)} />
+      <OptionRow label="Only mine" on={rv.mode === 'mine'} onPress={() => choose({ mode: 'mine', who: [] }, true)} />
+      <OptionRow label="Choose people" on={rv.mode === 'some'} onPress={() => choose({ mode: 'some', who: rv.who })} />
+      {rv.mode === 'some' ? (
+        <View style={styles.whoGrid}>
+          {members.map((m, i) => {
+            const on = rv.who.includes(m.id);
+            return (
+              <Press key={m.id} onPress={() => choose({ mode: 'some', who: on ? rv.who.filter((x) => x !== m.id) : [...rv.who, m.id] })} accessibilityRole="button" style={styles.whoCell}>
+                <View style={on ? styles.whoOn : styles.whoOff}><Avatar name={m.name} index={i} size={52} url={m.avatarUrl} /></View>
+                <Text style={styles.faceLabel} numberOfLines={1}>{m.name.split(/\s+/)[0]}</Text>
+              </Press>
+            );
+          })}
+        </View>
+      ) : null}
+    </Sheet>
+  );
+}
+
+// --- the destructive confirms -----------------------------------------------
+
+function DeleteHouseholdSheet({ name, refresh, onClose }: { name: string; refresh: () => Promise<void>; onClose: () => void }) {
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [outstanding, setOutstanding] = useState<Outstanding | null>(null);
+  const del = async () => {
+    setBusy(true);
+    try { await api.deleteHousehold(typed); showToast('Deleted'); await refresh(); onClose(); }
+    catch (e: any) {
+      if (e?.code === 'has_outstanding') setOutstanding(e.body?.details ?? { blocked: true });
+      else showToast(e?.body?.message || 'Could not delete.');
+    } finally { setBusy(false); }
+  };
+  if (outstanding) return <OutstandingSheet what="delete the household" outstanding={outstanding} onClose={onClose} />;
+  return (
+    <Sheet title={`Delete ${name}?`} onCancel={onClose} cancelLabel="Cancel" onClose={onClose}>
+      <Text style={type.body}>Everything Epic holds for this household — people, trips, visits, ratings — is deleted. Type the household name to confirm.</Text>
+      <TextInput value={typed} onChangeText={setTyped} placeholder={name} placeholderTextColor={colors.inkFaint} style={styles.input} />
+      <Button kind="danger" label={`Delete ${name}`} disabled={typed !== name} loading={busy} onPress={del} />
+    </Sheet>
+  );
+}
+
+function LeaveHouseholdSheet({ name, me, ownerName, onClose }: { name: string; me: string | null; ownerName: string | null; onClose: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const owner = ownerName ? ownerName.split(/\s+/)[0] : 'the owner';
+  const leave = async () => {
+    if (!me) return;
+    setBusy(true);
+    // Leaving drops your own sign-in but keeps your profile and tastes; the
+    // household's trips and How-Epic-plans stay. Then this device signs out.
+    try { await api.removeMemberAccess(me); } catch (e: any) { setBusy(false); showToast(e?.body?.message || 'Could not leave'); return; }
+    await api.signOut();
+    if (Platform.OS === 'web' && typeof location !== 'undefined') location.reload();
+  };
+  return (
+    <Sheet title={`Leave ${name}?`} onCancel={onClose} cancelLabel="Cancel" onClose={onClose}>
+      <Text style={type.body}>You keep your own profile and tastes. Shared trips and How Epic plans stay with the household, and {owner} can invite you back.</Text>
+      <Button kind="danger" label="Leave household" loading={busy} onPress={leave} />
+    </Sheet>
+  );
+}
+
+export type Outstanding = { blocked: boolean; upcomingDates?: number; guests?: number; payout?: { amountPence: number; on: string } | null };
+
+/** SX21 — stop hosting / delete household, blocked while anything is outstanding. */
+export function OutstandingSheet({ what, outstanding, onClose, onSeeUpcoming }: { what: string; outstanding: Outstanding; onClose: () => void; onSeeUpcoming?: () => void }) {
+  const { navigate } = useRouter();
+  return (
+    <Sheet title={`You can't ${what} yet`} onClose={onClose}>
+      <Text style={type.body}>Finish or call off what's outstanding first.</Text>
+      {outstanding.upcomingDates ? <Text style={styles.outRow}>{`${outstanding.upcomingDates} upcoming ${outstanding.upcomingDates === 1 ? 'date' : 'dates'} · ${outstanding.guests ?? 0} ${outstanding.guests === 1 ? 'guest' : 'guests'} booked`}</Text> : null}
+      {outstanding.payout ? <Text style={styles.outRow}>{`Payout of ${gbp(outstanding.payout.amountPence)} on ${outstanding.payout.on}`}</Text> : null}
+      <Button label="See upcoming" onPress={() => { onClose(); (onSeeUpcoming ?? (() => navigate(paths.host())))(); }} />
+      <Button kind="ghost" label="OK" onPress={onClose} />
+    </Sheet>
+  );
+}
+
+const gbp = (pence: number) => `£${(pence / 100).toFixed(2)}`;
+
+function ConfirmSheet({ title, body, danger, onConfirm, onClose }: { title: string; body: string; danger: string; onConfirm: () => void; onClose: () => void }) {
+  return (
+    <Sheet title={title} onCancel={onClose} cancelLabel="Cancel" onClose={onClose}>
+      <Text style={type.body}>{body}</Text>
+      <Button kind="danger" label={danger} onPress={onConfirm} />
+    </Sheet>
+  );
+}
+
+// --- the footer (build) -----------------------------------------------------
+
+function Footer() {
+  const [hashes, setHashes] = useState<{ app: string | null; api: string | null } | null>(null);
+  const reveal = () => {
+    api.health().then((h: any) => {
+      let web: string | null = null;
+      if (Platform.OS === 'web' && typeof document !== 'undefined') {
+        const src = Array.from(document.querySelectorAll('script[src]')).map((el) => (el as HTMLScriptElement).src).find((u) => /_expo\/static\/js/.test(u));
+        web = src?.match(/index-([0-9a-f]{8})/)?.[1] ?? 'unknown';
+      }
+      setHashes({ app: web, api: h.commit ?? 'unknown' });
+    }).catch(() => setHashes({ app: 'unknown', api: 'unreachable' }));
+  };
+  return (
+    <Press onLongPress={reveal} delayLongPress={500} accessibilityRole="button" style={{ paddingVertical: 20 }}>
+      <Text style={styles.footer}>Epic 4.12.0 · <Text style={{ textDecorationLine: 'underline' }} onPress={() => { if (Platform.OS === 'web') window.location.reload(); }}>Get newest version</Text></Text>
+      {hashes ? <Text style={[styles.footer, { marginTop: 4 }]}>app {hashes.app} · api {hashes.api}</Text> : null}
+    </Press>
+  );
+}
+
+// --- small shared rows/controls ---------------------------------------------
+
+type SheetProps = { household: HouseholdResponse['household']; refresh: () => Promise<void>; onClose: () => void };
+
+function SectionHead({ children }: { children: React.ReactNode }) {
+  return <View style={styles.sectionHead}><Text style={styles.sectionHeadText}>{children}</Text></View>;
+}
+
+function ValueRow({ label, value, onPress }: { label: string; value?: string; onPress: () => void }) {
+  return (
+    <Press onPress={onPress} accessibilityRole="button" style={styles.row}>
+      <Text style={styles.rowLabel} numberOfLines={1}>{label}</Text>
+      {value != null ? <Text style={styles.rowValue} numberOfLines={1}>{value}</Text> : null}
+      <Icon name="more" size={18} color={colors.inkFaint} />
+    </Press>
+  );
+}
+
+function DangerRow({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <Press onPress={onPress} accessibilityRole="button" style={styles.row}>
+      <Text style={[styles.rowLabel, { color: colors.overrun, fontWeight: '700' }]}>{label}</Text>
+    </Press>
+  );
+}
+
+function ToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <View style={styles.row}>
+      <Text style={[styles.rowLabel, { flex: 1 }]}>{label}</Text>
+      <Toggle value={value} onChange={onChange} />
+    </View>
+  );
+}
+
+function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <Press onPress={() => onChange(!value)} accessibilityRole="switch" accessibilityState={{ checked: value }} style={[styles.track, { backgroundColor: value ? colors.ink : colors.ruleSoft }]}>
+      <View style={[styles.knob, { backgroundColor: value ? LIME : CREAM, alignSelf: value ? 'flex-end' : 'flex-start' }]} />
+    </Press>
+  );
+}
+
+function OptionRow({ label, on, onPress }: { label: string; on: boolean; onPress: () => void }) {
+  return (
+    <Press onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: on }} style={styles.optionRow}>
+      <Text style={[type.body, { flex: 1 }]}>{label}</Text>
+      <View style={[styles.tick, on ? styles.tickOn : styles.tickOff]}>{on ? <Icon name="check" size={16} color={INK} strokeWidth={2.6} /> : null}</View>
+    </Press>
+  );
+}
+
+function StepperRow({ label, value, onMinus, onPlus }: { label: string; value: string; onMinus: (() => void) | null; onPlus: (() => void) | null }) {
+  return (
+    <View style={styles.stepRow}>
+      <Text style={[type.body, { flex: 1 }]}>{label}</Text>
+      <Press onPress={onMinus ?? undefined} disabled={!onMinus} style={[styles.stepBtn, !onMinus && { opacity: 0.35 }]} accessibilityRole="button" accessibilityLabel="Less"><Icon name="minus" size={18} color={colors.ink} /></Press>
+      <Text style={styles.stepValue}>{value}</Text>
+      <Press onPress={onPlus ?? undefined} disabled={!onPlus} style={[styles.stepBtn, !onPlus && { opacity: 0.35 }]} accessibilityRole="button" accessibilityLabel="More"><Icon name="add" size={18} color={colors.ink} /></Press>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  voiceOption: { gap: 4, alignItems: 'flex-start' },
-  identity: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.md, borderBottomWidth: BORDER, borderBottomColor: colors.line, marginBottom: spacing.sm },
-  identityTile: { width: 52, height: 52, backgroundColor: colors.selected, alignItems: 'center', justifyContent: 'center' },
-  identityInitials: { fontFamily: fonts.heading, fontSize: 18, fontWeight: '800', color: colors.selectedFg },
-  identityName: { fontFamily: fonts.body, fontSize: 17, fontWeight: '600', color: colors.ink },
-  kicker: { fontFamily: fonts.body, fontSize: 11, fontWeight: '700', letterSpacing: 0.66, textTransform: 'uppercase', color: colors.inkMuted, marginTop: spacing.lg, marginBottom: 4 },
-  groupHead: { justifyContent: 'space-between', alignItems: 'baseline' },
-  link: { fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: colors.accent },
-  personRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, minHeight: 56, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
-  addRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: TARGET },
-  addDot: { width: 28, height: 28, borderRadius: 14, borderWidth: BORDER, borderStyle: 'dashed', borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
-  tellBanner: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md, backgroundColor: colors.surfaceMuted, marginTop: spacing.sm },
-  tellTile: { width: 30, height: 30, backgroundColor: colors.selected, alignItems: 'center', justifyContent: 'center' },
-  rows: { gap: 2 },
-  linkRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 34, paddingHorizontal: 4 },
-  page: { padding: spacing.lg, gap: spacing.sm, width: '100%', maxWidth: 760, alignSelf: 'center' },
-  input: { minHeight: TARGET, paddingHorizontal: spacing.md, borderRadius: radius.md, borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, fontSize: 15, color: colors.ink },
+  screen: { flex: 1, backgroundColor: colors.bg },
+  page: { padding: spacing.lg, paddingBottom: 60, width: '100%', maxWidth: 760, alignSelf: 'center' },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: 6 },
+  householdName: { fontFamily: fonts.heading, fontSize: 22, fontWeight: '800', letterSpacing: -0.4, color: colors.ink },
+  editLink: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', color: colors.ink, textDecorationLine: 'underline' },
+  faces: { gap: 6, paddingVertical: spacing.sm },
+  faceCell: { width: 68, alignItems: 'center', gap: 6 },
+  faceLabel: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.ink, maxWidth: 68, textAlign: 'center' },
+  invited: { fontFamily: fonts.body, fontSize: 11, fontWeight: '700', color: colors.accent },
+  sendBadge: { position: 'absolute', top: -2, right: -2, width: 22, height: 22, borderRadius: 11, backgroundColor: LIME, alignItems: 'center', justifyContent: 'center' },
+  addCircle: { width: 60, height: 60, borderRadius: 30, borderWidth: BORDER, borderStyle: 'dashed', borderColor: colors.ruleSoft, alignItems: 'center', justifyContent: 'center' },
+  rule2: { height: BORDER, backgroundColor: colors.line, marginTop: spacing.sm },
+  sectionHead: { marginTop: spacing.xl, marginBottom: spacing.md, borderBottomWidth: BORDER, borderBottomColor: colors.line, paddingBottom: 6 },
+  sectionHeadText: { fontFamily: fonts.heading, fontSize: 19, fontWeight: '800', letterSpacing: -0.38, color: colors.ink },
+  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, minHeight: 52, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
+  rowLabel: { fontFamily: fonts.body, fontSize: 16, fontWeight: '600', color: colors.ink },
+  rowValue: { flex: 1, textAlign: 'right', fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted },
+  // Solo
+  soloHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.md },
+  tintBlock: { backgroundColor: colors.surfaceMuted, padding: 14, marginTop: spacing.md },
+  tintTitle: { fontFamily: fonts.heading, fontSize: 17, fontWeight: '800', color: colors.accent },
+  tintBody: { fontFamily: fonts.body, fontSize: 13, color: colors.accent, marginTop: 4, lineHeight: 18 },
+  // Appearance
+  apTrack: { flexDirection: 'row', backgroundColor: colors.warm, padding: 4, gap: 4 },
+  apCell: { height: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 10 },
+  apCellOn: { backgroundColor: INK },
+  apLabel: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.ink },
+  apLabelOn: { color: CREAM },
+  // devices
+  deviceRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, minHeight: 56, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
+  deviceTile: { width: 40, height: 40, backgroundColor: colors.warm, alignItems: 'center', justifyContent: 'center' },
+  signOut: { fontFamily: fonts.body, fontSize: 14, fontWeight: '700', color: colors.ink },
+  // option rows / sheets
+  optionRow: { flexDirection: 'row', alignItems: 'center', minHeight: 52, paddingVertical: 12 },
+  tick: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
+  tickOn: { backgroundColor: LIME },
+  tickOff: { borderWidth: BORDER, borderColor: colors.ruleSoft },
+  busyCard: { padding: 14, borderWidth: BORDER, borderColor: colors.ruleSoft, gap: 2 },
+  busyCardOn: { backgroundColor: colors.surfaceMuted, borderColor: colors.ink },
+  stepRow: { flexDirection: 'row', alignItems: 'center', minHeight: 52, gap: spacing.sm },
+  stepBtn: { width: 44, height: 44, borderWidth: BORDER, borderColor: colors.ink, alignItems: 'center', justifyContent: 'center' },
+  stepValue: { width: 76, textAlign: 'center', fontFamily: fonts.heading, fontSize: 19, fontWeight: '800', color: colors.ink },
+  whoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 8 },
+  whoCell: { width: 64, alignItems: 'center', gap: 4 },
+  whoOn: { borderRadius: 999, borderWidth: 3, borderColor: LIME },
+  whoOff: { opacity: 0.45 },
+  outRow: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', color: colors.ink, marginTop: 2 },
+  // toggles
+  track: { width: 46, height: 26, padding: 2, justifyContent: 'center' },
+  knob: { width: 22, height: 22 },
+  // misc
+  input: { minHeight: TARGET, paddingHorizontal: spacing.md, borderWidth: 1.5, borderColor: colors.ruleSoft, backgroundColor: colors.surface, fontSize: 15, color: colors.ink, flex: 1 },
+  cancelLink: { fontFamily: fonts.body, fontSize: 14, color: colors.inkMuted, paddingVertical: 6 },
+  footer: { fontFamily: fonts.body, fontSize: 12, color: colors.inkFaint, textAlign: 'center' },
 });

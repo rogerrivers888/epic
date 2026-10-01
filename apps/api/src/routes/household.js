@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import * as households from '../repositories/households.js';
+import { outstandingForHousehold } from '../repositories/hosting.js';
 import { ALLERGENS, matchConcepts, resolveConcept, conceptByKey, isNegated } from '../domain/concepts.js';
 
 const NEGATION_PREFIX = /^(not|no|never|without|anything but|nothing)\s+/i;
@@ -28,7 +29,14 @@ const router = Router();
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const RELATIONSHIPS = ['parent', 'partner', 'child', 'grandparent', 'sibling', 'friend', 'other'];
-const KINDS = ['allergen', 'diet', 'dislike', 'like'];
+// Diet is a member column now (migration 318), not a constraint kind.
+const KINDS = ['allergen', 'dislike', 'like'];
+const DIETS = ['none', 'vegetarian', 'vegan', 'pescatarian'];
+// Access needs (SX4). Step-free filters places out; the rest rank.
+export const ACCESS_NEEDS = ['step-free', 'accessible-toilet', 'lift', 'quiet'];
+const RATINGS_MODES = ['all', 'mine', 'some'];
+// The household plan covers up to six people (server-enforced; the Add tile dims at six).
+export const HOUSEHOLD_PLAN_CAP = Number(process.env.EPIC_HOUSEHOLD_PLAN_CAP || 6);
 export const LEARN_THRESHOLD = Number(process.env.EPIC_LEARN_THRESHOLD || 3);
 const HALF_LIFE_DAYS = Number(process.env.EPIC_LEARN_HALF_LIFE_DAYS || 180);
 
@@ -101,6 +109,35 @@ export async function currentMember() {
   return people.find((m) => !m.is_minor) ?? people[0] ?? null;
 }
 
+/** The owner pays and may do everything; the shared passcode is the owner. */
+export function callerIsOwner() {
+  const account = currentAccount();
+  return !account || account.role === 'owner';
+}
+
+/**
+ * Once an adult has joined — has an activated account of their own — only they
+ * may change their details and tastes, not even the owner (Settings revised v2,
+ * Roles and permissions). Everyone else sees the page read-only; the owner
+ * keeps the pencil only to remove them. A pending adult (invited, not yet
+ * opened) is still editable by others, and a child is always managed by the
+ * adults. The caller editing their own profile is always allowed.
+ *
+ * Enforced here, in the write path, not only hidden in the UI (owner's ask).
+ */
+async function assertMayEditPerson(target) {
+  const account = await accountByMember(target.id);
+  const joined = Boolean(account && account.activated_at);
+  if (!joined) return;
+  const me = await currentMember();
+  if (me && me.id === target.id) return;
+  const first = target.name?.split(/\s+/)[0] ?? 'they';
+  const err = new Error(`Only ${first} can change this now they've joined.`);
+  err.status = 403;
+  err.code = 'joined_adult_read_only';
+  throw err;
+}
+
 const ageOf = (birthYear) => (birthYear ? new Date().getFullYear() - birthYear : null);
 /** Exact age from a birthday, else a rough one from the year. */
 function ageFrom(birthDate, birthYear) {
@@ -119,6 +156,15 @@ export async function loadMembers(householdId) {
 
   return rows.map((row) => {
     const age = ageFrom(row.birth_date, row.birth_year);
+    const diet = row.diet ?? 'none';
+    // Diet is scalar now (migration 318), but the ranking layer still reads a
+    // `diets` array of {value}; derive one from the main diet and the two faith
+    // flags so ranking is untouched while the UI reads the scalars.
+    const diets = [
+      ...(diet !== 'none' ? [diet] : []),
+      ...(row.halal ? ['halal'] : []),
+      ...(row.kosher ? ['kosher'] : []),
+    ].map((value) => ({ value, conceptKey: null, conceptKind: 'diet', maxMinutes: null, favourite: false }));
     return {
       id: row.id,
       name: row.name,
@@ -133,8 +179,22 @@ export async function loadMembers(householdId) {
       mobile: row.mobile ?? null,
       typicalVisitMinutes: row.typical_visit_minutes,
       maxTravelMinutes: row.max_travel_minutes,
+      // The person's own tastes, revised (Settings v2). `diet` is one of
+      // none|vegetarian|vegan|pescatarian; halal/kosher combine with it.
+      diet,
+      halal: Boolean(row.halal),
+      kosher: Boolean(row.kosher),
+      // Free-text allergens that can't filter, kept as a private note (SE "Other" is gone).
+      allergenNote: row.allergen_note ?? null,
+      // Per-person access needs (SX4); step-free filters, the rest rank. Named
+      // `accessNeeds` because `access` is already this person's sign-in block.
+      accessNeeds: Array.isArray(row.access) ? row.access : [],
+      // Words Epic must never learn again (Forget, SX5).
+      neverLearn: Array.isArray(row.never_learn) ? row.never_learn : [],
+      // Whose ratings a Places row shows for this person (SE11).
+      ratingsView: row.ratings_view ?? { mode: 'all', who: [] },
       allergens: row.constraints.filter((c) => c.kind === 'allergen'),
-      diets: row.constraints.filter((c) => c.kind === 'diet'),
+      diets,
       dislikes: row.constraints.filter((c) => c.kind === 'dislike'),
       likes: row.constraints.filter((c) => c.kind === 'like'),
     };
@@ -202,7 +262,11 @@ router.get('/', async (_req, res, next) => {
     // tab draws the whole family at once.
     const access = await accessForMembers(await households.membersWithConstraints(household.id));
     for (const m of members) m.access = access.get(m.id) ?? null;
+    // Who the signed-in person is, so the UI can label "You", lock a joined
+    // adult's page for everyone else, and read the right person's ratings view.
+    const me = await currentMember();
     res.json({
+      me: me?.id ?? null,
       household: {
         id: household.id,
         name: household.name,
@@ -216,6 +280,13 @@ router.get('/', async (_req, res, next) => {
         home: household.home_lat != null ? { label: household.home_label, lat: household.home_lat, lng: household.home_lng } : null,
         homeRadiusMiles: household.home_radius_miles ?? 10,
         homePhotoUrl: household.home_photo_url ?? null,
+        // How Epic plans (SE7–SE10): close to home is a time (null = any
+        // distance, a place counts if any ticked mode reaches it within it),
+        // travel is multi-select, and the day runs between these hours.
+        closeToHomeMinutes: household.close_to_home_minutes ?? null,
+        travelModes: Array.isArray(household.travel_modes) ? household.travel_modes : [],
+        dayStart: household.day_start ?? 10,
+        dayEnd: household.day_end ?? 18,
         pace: paceOf(household),
         timezone: household.timezone,
         /** What this household always wants when it goes looking (domain/browse.js). */
@@ -237,7 +308,18 @@ router.get('/', async (_req, res, next) => {
 router.patch('/', async (req, res, next) => {
   try {
     const household = await currentHousehold();
-    const { name, defaultVisitMinutes, maxTravelMinutes, defaultIntensity, home, homeText, pace, timezone, homeRadiusMiles, homePhotoUrl, browse, travelMode, accessNeeds } = req.body;
+    const { name, defaultVisitMinutes, maxTravelMinutes, defaultIntensity, home, homeText, pace, timezone, homeRadiusMiles, homePhotoUrl, browse, travelMode, accessNeeds, closeToHomeMinutes, travelModes, dayStart, dayEnd } = req.body;
+    // How Epic plans (SE7–SE10). Close to home: 0 = any distance, else a time in
+    // {30,60,90,120}. Travel modes: a subset of the five. The day window: start
+    // 7–12, finish 14–22, at least four hours apart.
+    const TRAVEL_MODES = ['car', 'train', 'bus', 'walking', 'bike'];
+    if (closeToHomeMinutes != null && ![0, 30, 60, 90, 120].includes(Number(closeToHomeMinutes))) return res.status(400).json({ error: 'invalid_close_to_home' });
+    if (travelModes != null && (!Array.isArray(travelModes) || travelModes.some((m) => !TRAVEL_MODES.includes(m)))) return res.status(400).json({ error: 'invalid_travel_modes' });
+    if ((dayStart != null || dayEnd != null)) {
+      const s = dayStart != null ? Number(dayStart) : (household.day_start ?? 10);
+      const e = dayEnd != null ? Number(dayEnd) : (household.day_end ?? 18);
+      if (!(s >= 7 && s <= 12 && e >= 14 && e <= 22 && e - s >= 4)) return res.status(400).json({ error: 'invalid_day_window', message: 'The day starts 7am–12pm, finishes 2pm–10pm, and runs at least four hours.' });
+    }
     // How far "close to home" reaches, in miles (owner, 4 Sep 2026).
     const radius = homeRadiusMiles == null ? null : Math.min(200, Math.max(1, Math.round(Number(homeRadiusMiles))));
     if (homeRadiusMiles != null && !Number.isFinite(radius)) return res.status(400).json({ error: 'invalid_radius' });
@@ -264,6 +346,7 @@ router.patch('/', async (req, res, next) => {
       homeCountryCode: homePlace?.countryCode, homeCountry: homePlace?.country,
       pace: mergedPace, timezone, homeRadiusMiles: radius, homePhotoUrl: photo,
       browseDefaults: browse ? mergeBrowse(household, browse) : null,
+      closeToHomeMinutes, travelModes, dayStart, dayEnd,
     });
     // A home that has moved is a ring that has to be counted (owner, 20 Sep
     // 2026: "On registration and on any home-location change, census the
@@ -303,7 +386,9 @@ router.patch('/', async (req, res, next) => {
     }
     res.json({ household: { id: h.id, name: h.name, defaultVisitMinutes: h.default_visit_minutes, maxTravelMinutes: h.max_travel_minutes, travelMode: h.travel_mode ?? null, accessNeeds: Boolean(h.access_needs), defaultIntensity: h.default_intensity,
       home: h.home_lat != null ? { label: h.home_label, lat: h.home_lat, lng: h.home_lng } : null, homeRadiusMiles: h.home_radius_miles ?? 10,
-      homePhotoUrl: h.home_photo_url ?? null, pace: paceOf(h), timezone: h.timezone, browse: browseOf(h) } });
+      homePhotoUrl: h.home_photo_url ?? null,
+      closeToHomeMinutes: h.close_to_home_minutes ?? null, travelModes: Array.isArray(h.travel_modes) ? h.travel_modes : [], dayStart: h.day_start ?? 10, dayEnd: h.day_end ?? 18,
+      pace: paceOf(h), timezone: h.timezone, browse: browseOf(h) } });
   } catch (err) {
     next(err);
   }
@@ -314,6 +399,11 @@ router.post('/members', async (req, res, next) => {
     const household = await currentHousehold();
     const { name, relationship = null, birthYear = null, birthDate = null, avatarUrl = null, typicalVisitMinutes, maxTravelMinutes, email = null, mobile = null } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: 'name_required' });
+    // The Household plan covers up to six people (server-enforced; the UI dims
+    // the Add tile at six, but the door is here).
+    if (await households.memberCount(household.id) >= HOUSEHOLD_PLAN_CAP) {
+      return res.status(403).json({ error: 'plan_cap', message: `Your Household plan covers up to ${HOUSEHOLD_PLAN_CAP} people.` });
+    }
     if (email && !EMAIL.test(email)) return res.status(400).json({ error: 'invalid_email', message: 'That does not look like an e-mail address.' });
     const number = mobile ? normaliseMobile(mobile) : null;
     if (mobile && !number) return res.status(400).json({ error: 'invalid_mobile', message: `“${mobile}” does not look like a mobile number. A UK one starts 07, or +44.` });
@@ -336,7 +426,8 @@ router.post('/members', async (req, res, next) => {
 
 router.patch('/members/:id', async (req, res, next) => {
   try {
-    const { name, relationship, birthYear, birthDate, avatarUrl, typicalVisitMinutes, maxTravelMinutes, email, mobile } = req.body;
+    const { name, relationship, birthYear, birthDate, avatarUrl, typicalVisitMinutes, maxTravelMinutes, email, mobile,
+      diet, halal, kosher, accessNeeds, allergenNote, neverLearn, ratingsView } = req.body;
     if (relationship && !RELATIONSHIPS.includes(relationship)) return res.status(400).json({ error: 'invalid_relationship' });
     // '' takes a contact detail off somebody, as it already does a face. A
     // number is normalised on the way in so that what is stored is what a
@@ -346,12 +437,25 @@ router.patch('/members/:id', async (req, res, next) => {
     if (mobile && !number) return res.status(400).json({ error: 'invalid_mobile', message: `“${mobile}” does not look like a mobile number. A UK one starts 07, or +44.` });
     if (birthDate && !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) return res.status(400).json({ error: 'invalid_birth_date', message: 'Use YYYY-MM-DD' });
     if (avatarUrl && avatarUrl.length > 600_000) return res.status(413).json({ error: 'avatar_too_large', message: 'Keep photos under ~400KB' });
+    // The revised person fields (Settings v2).
+    if (diet != null && !DIETS.includes(diet)) return res.status(400).json({ error: 'invalid_diet', message: `diet must be one of ${DIETS.join(', ')}` });
+    if (halal != null && typeof halal !== 'boolean') return res.status(400).json({ error: 'invalid_halal' });
+    if (kosher != null && typeof kosher !== 'boolean') return res.status(400).json({ error: 'invalid_kosher' });
+    if (accessNeeds != null && (!Array.isArray(accessNeeds) || accessNeeds.some((a) => !ACCESS_NEEDS.includes(a)))) return res.status(400).json({ error: 'invalid_access_needs' });
+    if (neverLearn != null && (!Array.isArray(neverLearn) || neverLearn.some((w) => typeof w !== 'string'))) return res.status(400).json({ error: 'invalid_never_learn' });
+    if (ratingsView != null && (typeof ratingsView !== 'object' || !RATINGS_MODES.includes(ratingsView.mode) || (ratingsView.who != null && !Array.isArray(ratingsView.who)))) return res.status(400).json({ error: 'invalid_ratings_view' });
     const household = await currentHousehold();
+    const target = await households.memberById(req.params.id);
+    if (!target || target.household_id !== household.id) return res.status(404).json({ error: 'member_not_found' });
+    await assertMayEditPerson(target);
     const member = await households.updateMember(req.params.id, {
       name, relationship,
       birthYear: birthYear ?? (birthDate ? Number(birthDate.slice(0, 4)) : null),
       avatarUrl, typicalVisitMinutes, maxTravelMinutes, birthDate,
       email, mobile: number,
+      diet, halal, kosher,
+      access: accessNeeds, allergenNote,
+      neverLearn, ratingsView: ratingsView ? { mode: ratingsView.mode, who: ratingsView.who ?? [] } : null,
     }, household.id);
     // Somebody else's member is "not found" rather than "not yours": whether it
     // exists is not a thing to tell them.
@@ -363,9 +467,27 @@ router.patch('/members/:id', async (req, res, next) => {
 });
 
 // Epic 1 M3 — deleting a member deletes their profile and rating history.
+// Who may remove whom (Settings revised v2, Roles): the owner removes anyone
+// but themselves; a joined adult removes children only; nobody removes
+// themselves. A pending invite is cancelled by the cascade; a joined adult
+// loses access immediately (their sessions are revoked before the row goes).
+// The 3.5s Undo is the client's — the server's delete is final.
 router.delete('/members/:id', async (req, res, next) => {
   try {
     const household = await currentHousehold();
+    const target = await households.memberById(req.params.id);
+    if (!target || target.household_id !== household.id) return res.status(404).json({ error: 'member_not_found' });
+    const me = await currentMember();
+    if (me && me.id === target.id) return res.status(400).json({ error: 'cannot_remove_self', message: 'You cannot remove yourself.' });
+    const targetAge = ageFrom(target.birth_date, target.birth_year);
+    const targetIsChild = targetAge != null ? targetAge < 18 : target.is_minor;
+    if (!callerIsOwner() && !targetIsChild) {
+      return res.status(403).json({ error: 'adults_removed_by_owner', message: 'Only the household owner can remove another adult.' });
+    }
+    // A joined adult is signed out of every device before their account goes
+    // with the cascade; a pending invite is simply cancelled.
+    const account = await accountByMember(target.id);
+    if (account) await revokeAccountSessions(account.id).catch(() => null);
     if (!await households.deleteMember(req.params.id, household.id)) return res.status(404).json({ error: 'member_not_found' });
     res.status(204).end();
   } catch (err) {
@@ -644,6 +766,12 @@ router.post('/members/:id/constraints', async (req, res, next) => {
     const household = await currentHousehold();
     const target = await households.memberById(req.params.id);
     if (!target || target.household_id !== household.id) return res.status(404).json({ error: 'member_not_found' });
+    await assertMayEditPerson(target);
+    // Allergens are the UK 14 and nothing else — a filter can't act on free
+    // text, so there is no "Other" (Settings revised v2).
+    if (kind === 'allergen' && !ALLERGENS.includes(value.trim().toLowerCase())) {
+      return res.status(400).json({ error: 'invalid_allergen', message: 'Allergens are the UK 14.' });
+    }
 
     let concept = explicitKey ? conceptByKey(explicitKey) : null;
     if (!concept && kind !== 'allergen') concept = resolveConcept(value, { kinds: kindsFor(kind) });
@@ -693,9 +821,7 @@ router.post('/members/:id/constraints', async (req, res, next) => {
       suggestions: concept || negated ? [] : matchConcepts(value, { kinds: kindsFor(kind), limit: 5 }).map((c) => ({ key: c.key, label: c.label, kind: c.kind })),
       hint: negated
         ? `Kept "${value.trim()}" as typed, but Epic doesn't read "not". Put "${value.trim().replace(NEGATION_PREFIX, '')}" in ${kind === 'like' ? 'Dislikes' : 'Likes'} instead — the two lists do the negating.`
-        : kind === 'allergen' && !ALLERGENS.includes(value.trim().toLowerCase())
-          ? `Added. Place listings rarely state "${value.trim()}", so it will flag menu items once a menu is captured rather than excluding venues today.`
-          : null,
+        : null,
     });
   } catch (err) {
     next(err);
@@ -710,6 +836,8 @@ router.post('/members/:id/constraints', async (req, res, next) => {
 router.patch('/constraints/:id', async (req, res, next) => {
   try {
     const household = await currentHousehold();
+    const owner = await households.memberByConstraint(req.params.id, household.id);
+    if (owner) await assertMayEditPerson(owner);
     const { nothingToDo, constraint } = await households.patchConstraint(req.params.id, req.body || {}, household.id);
     if (nothingToDo) return res.status(400).json({ error: 'nothing_to_update', message: 'send maxMinutes and/or favourite' });
     if (!constraint) return res.status(404).json({ error: 'constraint_not_found' });
@@ -722,6 +850,8 @@ router.patch('/constraints/:id', async (req, res, next) => {
 router.delete('/constraints/:id', async (req, res, next) => {
   try {
     const household = await currentHousehold();
+    const owner = await households.memberByConstraint(req.params.id, household.id);
+    if (owner) await assertMayEditPerson(owner);
     if (!await households.deleteConstraint(req.params.id, household.id)) return res.status(404).json({ error: 'constraint_not_found' });
     res.status(204).end();
   } catch (err) {
@@ -858,6 +988,13 @@ router.delete('/', async (req, res, next) => {
   try {
     const household = await currentHousehold();
     const { confirmName } = req.body || {};
+    // Refused while this household hosts anything still outstanding (SX21): the
+    // guests holding places have to be told and refunded first, by calling each
+    // date off, never by the household quietly vanishing underneath them.
+    const outstanding = await outstandingForHousehold(household.id);
+    if (outstanding.blocked) {
+      return res.status(409).json({ error: 'has_outstanding', message: "Finish or call off what's outstanding first.", details: outstanding });
+    }
     if (confirmName !== household.name) return res.status(400).json({ error: 'confirm_name_mismatch', message: 'Type the household name exactly to confirm deletion.' });
     await households.deleteHouseholdAndCalls(household.id);
     res.json({ deleted: true, household: household.name });

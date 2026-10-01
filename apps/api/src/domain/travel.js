@@ -210,6 +210,28 @@ export function searchRadiusKm(mode, minutes, { capKm = 50 } = {}) {
   return Math.max(0.5, Math.ceil(lo * 10) / 10);
 }
 
+/**
+ * "Close to home" as a radius, from the FREE distance estimate — never a
+ * provider call (Settings revised v2 SE7, owner 1 Oct 2026: wire it to
+ * domain/travel.js, £0; do not use Google Routes for this). A place is close if
+ * ANY ticked mode reaches it within the time, so the radius is the furthest any
+ * ticked mode reaches. `minutes == null` is "Any distance" and keeps the
+ * standing radius (`fallbackMiles`). Modes are the UI's words (car/train/bus/
+ * walking/bike); `searchRadiusKm` aliases them to the four it models.
+ *
+ * LATER: TravelTime is the intended provider for *real*, routed travel times
+ * (Technical Constraints §6.2/§16) — one catchment per household address and
+ * mode, cached and refreshed only when the address or modes change, priced and
+ * approved by the owner before it is used. This function stays the free default
+ * until then; nothing here ever calls a paid route.
+ */
+export function closeToHomeRadiusMiles({ minutes, modes = [], fallbackMiles = 10, capKm = 60 }) {
+  if (minutes == null) return fallbackMiles;
+  const list = modes && modes.length ? modes : ['driving'];
+  const km = Math.max(...list.map((m) => searchRadiusKm(m, minutes, { capKm })));
+  return Math.max(1, Math.round(km / 1.60934));
+}
+
 /** How far, in km, the mode plausibly reaches in the given minutes — for bounding a source query. */
 export function reachRadiusKm(mode, minutes) {
   const profile = MODE_PROFILE[mode] || MODE_PROFILE.driving;

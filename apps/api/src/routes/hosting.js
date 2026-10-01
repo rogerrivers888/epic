@@ -39,9 +39,11 @@ import { sendSms, smsConfigured } from '../sources/sms.js';
 import {
   ADULT_AGE, CHECK_KINDS, DAY_PARTS, EVIDENCE_FIELDS, HOST_TYPES, JOIN_MODES, LOCAL_KINDS, MEDIA_MAX_BYTES, MONEY, PASSIONS, PHOTO_MAX_BYTES, PRICE_MODES, REFUND_RULES,
   REGULATED_COUNTRIES, REPEATS, REVIEW_CHIPS, SHAPES, TRUST_LEVELS, VENUES, VIDEO_MAX_S, VISIBILITIES,
-  ageGate, anytimeSlots, decideBy, hostMediaPurpose, isRegulated, lastDate, missingCredentials, occurrenceDate, passionLabel, payoutOf, pitchChecklist, priceFor, publishBlockers,
+  ageGate, anytimeSlots, decideBy, hostMediaPurpose, isRegulated, lastDate, missingCredentials, occurrenceDate, passionLabel, pitchChecklist, priceFor, publishBlockers,
   opensPrivately, readsLikeCommentary, reviewPublishOn, seriesDates, standing, stepsFor, takingsAt, ymd,
+  outstandingFrom,
 } from '../domain/hosting.js';
+import { feeForBooking, feesForPeriod, introState, LEVEL_RATE, LEVEL_LABEL, LINK_RATE, MIN_FEE_PENCE, TRUSTED_THRESHOLDS } from '../domain/hostFees.js';
 import * as skills from '../repositories/hostSkills.js';
 import { FACET_CAP, TAG_CAP, categoryForPassion, categoryFrom, credentialDisplay } from '../domain/hostSkills.js';
 import { pdfText } from '../sources/menuRead.js';
@@ -51,7 +53,7 @@ export const router = Router();
 export const publicRouter = Router();
 export const adminRouter = Router();
 
-const refuse = (status, code, message) => { const e = new Error(message); e.status = status; e.code = code; return e; };
+const refuse = (status, code, message, details = null) => { const e = new Error(message); e.status = status; e.code = code; if (details) e.details = details; return e; };
 const str = (v, max = 2000) => (v == null ? null : String(v).trim().slice(0, max) || null);
 const int = (v) => (v == null || v === '' ? null : Math.max(0, Math.round(Number(v))) || null);
 const oneOf = (all, v) => (all.includes(v) ? v : null);
@@ -97,14 +99,24 @@ function publicHost(h, rating = { rating: null, count: 0, guests: 0 }, extra = {
 }
 
 /** The host's own view of themselves adds what a guest must never see. */
-function ownHost(h) {
+export function ownHost(h) {
   return {
     ...publicHost(h),
     address: h.address, idDocument: h.id_document, insuranceConfirmed: h.insurance_confirmed,
     taxReference: h.tax_reference ? `••••${String(h.tax_reference).slice(-3)}` : null,
     payoutStatus: h.payout_status, payoutLabel: h.payout_label, dateOfBirth: h.date_of_birth,
+    // Money (Settings revised v2, SX17/SX19): when payouts land, and company tax.
+    paySchedule: h.pay_schedule ?? 'weekly', taxIsCompany: h.tax_is_company ?? false, companyNumber: h.company_number ?? null,
   };
 }
+
+/**
+ * A bank a host is paid into (SX16). Epic never holds the money, so only a
+ * display label, the last four digits and the holder's name are ever shown.
+ */
+export const payoutAccountPayload = (a) => ({
+  id: a.id, label: a.label, last4: a.last4, holderName: a.holder_name ?? null, addedOn: ymd(a.added_on), isActive: Boolean(a.is_active),
+});
 
 /**
  * An offer as a guest sees it. `revealed` is whether this reader has a
@@ -172,7 +184,16 @@ function ownOffer(o, host, bookings, broadcasts = [], invites = [], evidence = n
     reviewNote: o.review_note, reviewChecklist: o.review_checklist, reviewedAt: o.reviewed_at, submittedAt: o.submitted_at, publishedAt: o.published_at,
     takings: {
       collectedPence: collected, recordedPence: recorded, refundedPence: refunded, payoutOn,
-      atMinimum: takingsAt(o, o.min_count), atExpected: takingsAt(o, o.expected_count), fee: payoutOf(takingsAt(o, o.expected_count) ?? 0),
+      atMinimum: takingsAt(o, o.min_count), atExpected: takingsAt(o, o.expected_count),
+      // Epic's fee at this host's level, shown before publishing. A host still
+      // inside their first 90 days pays 0% (the exact bookings-left reason is
+      // the Money screen's, which counts the host's real bookings); here the
+      // level rate and the intro-by-time are enough for the publish estimate.
+      fee: feeForBooking({
+        amountPence: takingsAt(o, o.expected_count) ?? 0,
+        level: host?.trust ?? 'verified',
+        intro: introState({ hostStartedAt: host?.created_at, bookingsSoFar: live.filter((b) => b.state === 'confirmed' || b.state === 'attended').length }),
+      }),
     },
     bookings: bookings.map((b) => ({
       id: b.id, name: b.booked_by, heads: b.heads, party: b.party ?? [], occurrence: b.occurrence, state: b.state, paymentStatus: b.payment_status,
@@ -254,9 +275,9 @@ router.get('/host', async (req, res, next) => {
     // The same credentials the submit endpoint checks, so the dashboard cannot
     // say "everything is in place" about an offer Publish will refuse (Codex,
     // 13 Sep 2026). And the tags, so the offer rows draw their chips.
-    const [credentials, withTags] = await Promise.all([evidenceFor(host), attachSkills(offers)]);
+    const [credentials, withTags, payoutAccounts] = await Promise.all([evidenceFor(host), attachSkills(offers), repo.payoutAccountsOf(host.id)]);
     res.json({
-      host: { ...ownHost(host), rating: rating.rating, reviewCount: rating.count, guests: rating.guests, isNew: rating.count === 0, evidence: evidence.map(evidencePayload) },
+      host: { ...ownHost(host), rating: rating.rating, reviewCount: rating.count, guests: rating.guests, isNew: rating.count === 0, evidence: evidence.map(evidencePayload), payoutAccounts: payoutAccounts.map(payoutAccountPayload) },
       // What guests wrote when they booked: each one is a second offer waiting to be written (S4).
       asks: live.map((b) => b.note_to_host).filter(Boolean).slice(-6),
       offers: withTags.map((o) => ownOffer(o, host, byOffer(o.id), [], [], credentials)),
@@ -321,6 +342,12 @@ router.patch('/host', async (req, res, next) => {
     if (b.idDocument !== undefined) patch.idDocument = oneOf(['passport', 'driving_licence'], b.idDocument);
     if (b.insuranceConfirmed !== undefined) patch.insuranceConfirmed = Boolean(b.insuranceConfirmed);
     if (b.taxReference !== undefined) patch.taxReference = str(b.taxReference, 20);
+    // Money (SX17/SX19). The schedule is one of three; company reporting turns
+    // the number on, and clearing the switch leaves the old number unused but
+    // never reported under.
+    if (b.paySchedule !== undefined) patch.paySchedule = oneOf(['weekly', 'weekday', 'monthly'], b.paySchedule) ?? 'weekly';
+    if (b.taxIsCompany !== undefined) patch.taxIsCompany = Boolean(b.taxIsCompany);
+    if (b.companyNumber !== undefined) patch.companyNumber = str(b.companyNumber, 20);
     if (b.payoutStatus !== undefined) {
       // 'connected' is what Stripe says back, and Stripe is not here yet.
       if (b.payoutStatus === 'connected' && !paymentsConfig().ready) throw refuse(409, 'payments_not_ready', paymentsConfig().note);
@@ -365,7 +392,7 @@ router.delete('/host', async (req, res, next) => {
       // goes with the host; what was cancelled was never a place.
       // A whole-run booking is still to come until its last week has been.
       const holding = bookings.filter((b) => ['pending', 'confirmed', 'waitlisted'].includes(b.state) && (lastDate(offers.find((o) => o.id === b.offer_id), b.occurrence) ?? today) >= today);
-      if (holding.length && !force) throw refuse(409, 'has_bookings', `${holding.length} ${holding.length === 1 ? 'person holds' : 'people hold'} a place on your offers. Call those off first, so they are told and refunded.`);
+      if (holding.length && !force) throw refuse(409, 'has_bookings', `${holding.length} ${holding.length === 1 ? 'person holds' : 'people hold'} a place on your offers. Call those off first, so they are told and refunded.`, outstandingFrom(offers, bookings));
       for (const b of holding) {
         await repo.updateBooking(b.id, { state: 'cancelled', cancelledAt: new Date(), cancelledBy: 'host', paymentStatus: b.payment_status === 'paid' ? 'refunded' : b.payment_status, refundedAt: b.payment_status === 'paid' ? new Date() : null }, client);
       }
@@ -381,6 +408,94 @@ router.delete('/host', async (req, res, next) => {
       await tellBooked(bookings, `${title ?? 'Your booking'} has been called off by the host. Anything paid is refunded to the card it was paid with.`);
     }
     res.status(204).end();
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// money (Settings revised v2 · the Host tab's Money screen, SX9/SX14/SX16–SX20)
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/host/payout-accounts/:id/activate — make one bank the payout
+ * account (SX16). One at a time: the partial unique index keeps it so, and the
+ * repo deactivates the rest in the same transaction. Adding an account is
+ * Stripe's own onboarding and is out of this build.
+ */
+router.post('/host/payout-accounts/:id/activate', async (req, res, next) => {
+  try {
+    const { host } = await myHost();
+    if (!host) throw refuse(404, 'not_a_host', 'You are not hosting yet.');
+    const active = await repo.setActivePayoutAccount(host.id, req.params.id);
+    if (!active) throw refuse(404, 'account_not_found', 'That bank account is not one of yours.');
+    const payoutAccounts = await repo.payoutAccountsOf(host.id);
+    res.json({ account: payoutAccountPayload(active), payoutAccounts: payoutAccounts.map(payoutAccountPayload) });
+  } catch (err) { next(err); }
+});
+
+/**
+ * Every fee shown on the Money screen comes from one place (SX14): the host's
+ * level, the 0% intro and the host's own links, through the fee engine. A
+ * booking is resolved to its own `{ amountPence, level, viaHostLink, intro }`
+ * and `feesForPeriod` groups the lines.
+ *
+ * Epic has no payment provider yet, so nothing has been *paid*: every booking
+ * is `recorded`. The screen says so (SX9 next-payout, SX18 history) rather than
+ * inventing a £0 payout — but the fee the host would pay is real arithmetic and
+ * is shown, the same figure the publish estimate already shows.
+ */
+router.get('/host/money', async (req, res, next) => {
+  try {
+    const { host } = await myHost();
+    if (!host) throw refuse(404, 'not_a_host', 'You are not hosting yet.');
+    const ready = paymentsConfig().ready;
+    const offers = await repo.offersOfHost(host.id);
+    const bookings = await repo.bookingsOfOffers(offers.map((o) => o.id));
+    const live = bookings.filter((b) => b.state !== 'cancelled');
+    // The intro is the host's: active only inside their first 90 days AND first
+    // ten bookings (confirmed or attended). Applied to every line, because
+    // nothing is paid yet and there is no per-booking payment date to anchor to.
+    const bookingsSoFar = live.filter((b) => b.state === 'confirmed' || b.state === 'attended').length;
+    const intro = introState({ hostStartedAt: host.created_at, bookingsSoFar });
+    const resolve = (b) => ({ amountPence: b.amount_pence ?? 0, level: host.trust, viaHostLink: Boolean(b.via_host_link), intro });
+    const all = feesForPeriod(live.map(resolve));
+    const byOffer = {};
+    for (const o of offers) {
+      const mine = live.filter((b) => b.offer_id === o.id);
+      byOffer[o.id] = feesForPeriod(mine.map(resolve));
+    }
+    const payoutAccounts = (await repo.payoutAccountsOf(host.id)).map(payoutAccountPayload);
+    const activeAccount = payoutAccounts.find((a) => a.isActive) ?? null;
+    const thisYear = new Date().getFullYear();
+
+    res.json({
+      paymentsReady: ready, note: paymentsConfig().note,
+      level: host.trust, levelLabel: LEVEL_LABEL[host.trust] ?? LEVEL_LABEL.verified,
+      feeRate: LEVEL_RATE[host.trust] ?? LEVEL_RATE.verified, linkRate: LINK_RATE, minFeePence: MIN_FEE_PENCE,
+      intro: { active: intro.active, bookingsLeft: intro.bookingsLeft, daysLeft: intro.daysLeft },
+      // SX9: a next payout only when there is a provider to pay it; otherwise the note.
+      nextPayout: null,
+      paySchedule: host.pay_schedule ?? 'weekly',
+      payoutAccounts, activeAccount,
+      // SX14 ladder: a line per level, "you are here" on the host's own.
+      ladder: ['verified', 'checked', 'trusted'].map((lvl) => ({ level: lvl, label: LEVEL_LABEL[lvl], feeRate: LEVEL_RATE[lvl], keep: 100 - LEVEL_RATE[lvl], here: host.trust === lvl })),
+      trusted: {
+        completed: bookingsSoFar, completedNeeded: TRUSTED_THRESHOLDS.completedExperiences,
+        ratingAtLeast: TRUSTED_THRESHOLDS.ratingAtLeast, ratingWindow: TRUSTED_THRESHOLDS.ratingWindow,
+      },
+      // SX18: real payouts need paid bookings; there are none, so the list is empty and honest.
+      history: [],
+      // SX20: calendar years. The current one is "Ready in January"; earlier ones
+      // would carry a statement once a year has closed under a real provider.
+      statements: [{ year: thisYear, feeLabel: `${LEVEL_RATE[host.trust] ?? LEVEL_RATE.verified}% · ${LEVEL_LABEL[host.trust] ?? LEVEL_LABEL.verified}`, netPence: null, ready: false }],
+      tax: {
+        legalName: host.name, address: host.address ?? null,
+        taxReference: host.tax_reference ? `••••${String(host.tax_reference).slice(-3)}` : null,
+        dateOfBirth: host.date_of_birth ?? null, taxIsCompany: host.tax_is_company ?? false, companyNumber: host.company_number ?? null,
+      },
+      // SX9 totals and SX13b per-offer.
+      totals: { grossPence: all.grossPence, feePence: all.feePence, netPence: all.netPence, lines: all.lines },
+      byOffer,
+    });
   } catch (err) { next(err); }
 });
 

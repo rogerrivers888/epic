@@ -258,6 +258,11 @@ test('Household, Settings, Prototypes and the back office', () => {
   assert.equal(hrefOf(parseRoute('/household/m1?invite=1')), '/household/m1');
   assert.deepEqual(roundTrip('/settings'), { name: 'settings', section: 'preferences' });
   assert.deepEqual(roundTrip('/settings/providers'), { name: 'settings', section: 'providers' });
+  // Signed-in devices (SX6) is its own pushed page under Settings, back to it.
+  assert.deepEqual(roundTrip('/settings/devices'), { name: 'settings', section: 'devices' });
+  assert.equal(parentOf(parseRoute('/settings/devices')), '/settings');
+  assert.equal(ownsHeader(parseRoute('/settings')), true);
+  assert.equal(ownsHeader(parseRoute('/household/m1')), true);
   assert.deepEqual(roundTrip('/prototypes'), { name: 'prototypes', section: null });
   assert.deepEqual(roundTrip('/prototypes/trips'), { name: 'prototypes', section: 'trips' });
   /**

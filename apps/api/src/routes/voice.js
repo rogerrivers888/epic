@@ -808,7 +808,7 @@ router.post('/household/apply', async (req, res, next) => {
     const members = await loadMembers(household.id).catch(() => []);
     const everyone = body.memberId ? members.filter((m) => m.id === body.memberId) : members;
     const written = [
-      ...await applyFood(body.food, { members, households, everyone }),
+      ...await applyFood(body.food, { members, households, everyone, householdId: household.id }),
       ...await applyLikes(body.likes, { members, households, everyone }),
     ];
     res.json({ written, members: await loadMembers(household.id) });

@@ -6,7 +6,7 @@ import {
   Clock, CloudOff, Coffee, Compass, Database, Download, ExternalLink, Footprints, GripVertical, Heart, Hourglass, House, Info, Landmark, List, LocateFixed, Lock, Map, MapPin, Mic, Minus, Monitor, Navigation, Pencil, Phone, Pin, Plus, Route, Search, Settings, Smartphone,
   MessageSquare, Moon, PoundSterling, RefreshCw, Sparkles, Square, Star, StarHalf, Sun, Ticket, TrainFront, Trash2, TriangleAlert, User, Users, Utensils, Wine, X,
   Copy, Mail, Send, UserCog, UserPlus, Ellipsis, ShoppingBasket, QrCode, Maximize2, SlidersHorizontal,
-  Eye, Upload, Image as ImageIcon, Gift, CreditCard, Wallet, Pause, Play, Keyboard, IdCard, ScanFace,
+  Eye, Upload, Image as ImageIcon, Gift, CreditCard, Wallet, Pause, Play, Keyboard, IdCard, ScanFace, Accessibility,
   Bike, Binoculars, Blocks, BookOpen, Castle, Clapperboard, Drama, Droplets, Dumbbell, FerrisWheel, Gamepad2,
   Mountain, Music, Palette, PartyPopper, Popcorn, Puzzle, Sandwich, Ship, ShoppingBag, Snowflake, Store, Tractor, TreePine, Trophy,
   HandPlatter, Shield, ShieldCheck, BadgeCheck, Video, Megaphone, Repeat, CalendarCheck, Banknote, Laptop, DoorOpen, Handshake, GraduationCap,
@@ -39,7 +39,7 @@ const ICONS = {
    */
   verified: Shield, checked: ShieldCheck, trusted: BadgeCheck,
   video: Video, broadcast: Megaphone, series: Repeat, oneoff: CalendarCheck, anytime: Clock, payout: Banknote,
-  online: Laptop, theirPlace: DoorOpen, yourPlace: House, outAbout: MapPin, handshake: Handshake, credential: GraduationCap,
+  online: Laptop, laptop: Laptop, theirPlace: DoorOpen, yourPlace: House, outAbout: MapPin, handshake: Handshake, credential: GraduationCap,
   share: Share2, alert: CircleAlert, guest: UserRound, award: Award, pitch: Presentation, family: HandHeart,
   // The chat module (13 Sep 2026): the bell, following, a link, a quoted reply, a report, reactions, the two audiences, a question, the FAQ.
   bell: Bell, bellOff: BellOff, link: Link, reply: Reply, flag: Flag, react: SmilePlus, emoji: Smile, everyone: Globe, question: CircleHelp, faq: BookOpen,
@@ -104,7 +104,9 @@ const ICONS = {
   addPerson: UserPlus, basket: ShoppingBasket, qr: QrCode,
   booked: CircleCheck, full: Ban, locked: Lock, money: PoundSterling, grip: GripVertical, list: List, map: Map, info: Info, search: Search, edit: Pencil,
   // the invite page: what it looks like, and where its picture comes from
-  preview: Eye, upload: Upload, picture: ImageIcon, gift: Gift, card: CreditCard,
+  preview: Eye, upload: Upload, picture: ImageIcon, image: ImageIcon, gift: Gift, card: CreditCard,
+  // Settings v2: the sparkle on "What Epic has noticed", the access-needs tile.
+  sparkle: Sparkles, accessible: Accessibility,
   // The one ID check (Casual meet ups, O9): the document, and the face that proves it is yours.
   identity: IdCard, face: ScanFace,
   // What a thing costs, on the filter line. `money` is the pound sign, which is

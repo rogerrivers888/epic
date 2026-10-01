@@ -112,6 +112,34 @@ export async function revokeAllSessions(accountId, { db = null } = {}) {
 }
 
 /**
+ * Sign one named device out (SX6). Scoped to the caller's own account so one
+ * household can never revoke another's device; `is not distinct from` lets the
+ * shared passcode (no account) sign out one of its own devices by id.
+ */
+export async function revokeSessionById(id, accountId) {
+  const { rowCount } = await query(
+    `update api_sessions set revoked_at = now()
+      where id = $1 and account_id is not distinct from $2 and revoked_at is null`,
+    [id, accountId],
+  );
+  return rowCount;
+}
+
+/**
+ * Sign out every OTHER device of this account, keeping the one asking (SX6's
+ * "Sign out all other devices"). Needs an account, for the same reason
+ * `revokeAllSessions` does — it never reaches across the estate.
+ */
+export async function revokeOtherSessions(accountId, exceptId) {
+  if (!accountId) throw new Error('revokeOtherSessions needs an account');
+  return query(
+    `update api_sessions set revoked_at = now()
+      where account_id = $1 and id <> $2 and revoked_at is null`,
+    [accountId, exceptId],
+  );
+}
+
+/**
  * The devices signed in, newest first, for Settings. Never the tokens.
  *
  * Scoped to one account once accounts exist: a customer's Settings screen shows
@@ -119,14 +147,18 @@ export async function revokeAllSessions(accountId, { db = null } = {}) {
  * nothing keeps the old behaviour — every device — which is what the shared
  * passcode (the owner, no account row) still wants.
  */
-export async function liveSessions(accountId = null) {
+export async function liveSessions(accountId = null, { kinds = null } = {}) {
+  // "Signed-in devices" (SX6) passes kinds:['device'] so test and agent
+  // sessions never leak to a household; the back office passes nothing and
+  // sees them all. The filter is the server's job, not the UI's.
   const { rows } = await query(
-    `select id, label, account_id, created_at, last_seen_at, expires_at
+    `select id, label, account_id, kind, created_at, last_seen_at, expires_at
        from api_sessions
       where revoked_at is null and expires_at > now()
         and ($1::uuid is null or account_id = $1)
+        and ($2::text[] is null or kind = any($2))
       order by last_seen_at desc`,
-    [accountId],
+    [accountId, kinds],
   );
   return rows;
 }

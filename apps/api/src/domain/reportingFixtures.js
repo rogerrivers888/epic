@@ -261,7 +261,10 @@ const BENEFITS = [
   ['Group trips and guest invites', '—', 'Yes', 'Yes'],
   ['Hotel and activity booking', 'Yes', 'Yes', 'Yes'],
   ['Host tools and event wizard', '—', '—', 'Yes'],
-  ['Commission on hosted events', '15%', '15%', '10%'],
+  // Commission is the host's fee by trust level (Verified 20 / Checked 15 /
+  // Epic Trusted 10), not a subscriber-plan benefit, so it reads the same down
+  // every column now (Settings revised v2; schedule in hostFees.js).
+  ['Commission on hosted events (by host level)', '10–20%', '10–20%', '10–20%'],
   ['Priority support', '—', '—', 'Yes'],
 ].map(([label, solo, household, pro], i) => ({
   id: `benefit-${i}`,
@@ -306,7 +309,7 @@ const STREAMS = [
     key: 'hosting', label: 'Hosting commission', revenue: 1315, cost: 91, margin: 1224, marginPct: 93.1,
     growth: 22, perSub: 2.27, units: 118, unitName: 'bookings', avgUnit: 11.14, churn: null,
     details: [
-      { label: 'Marketplace · 15%', units: 92, revenue: 1022, avgUnit: 11.11, growth: 26 },
+      { label: 'Marketplace · level rate (Verified 20 / Checked 15 / Epic Trusted 10)', units: 92, revenue: 1022, avgUnit: 11.11, growth: 26 },
       { label: 'Host’s own link · 5%', units: 26, revenue: 293, avgUnit: 11.27, growth: 9 },
       // The first ninety days are free, so those bookings earned nothing and
       // are **not** a third slice of the 118 that did. Shown as a memo row with

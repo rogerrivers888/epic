@@ -740,7 +740,10 @@ app.use((err, _req, res, _next) => {
   if (!err.status && err.code === '22P02') {
     return res.status(400).json({ error: 'not_an_id', message: 'That is not an id we could look anything up by.' });
   }
-  res.status(err.status || 500).json({ error: err.code || 'internal_error', message: err.message });
+  // A refusal may carry structured detail the screen needs to draw — the SX21
+  // "what's outstanding" sheet, for one. It is attached to the error so the
+  // handler stays the single place a status and body are decided.
+  res.status(err.status || 500).json({ error: err.code || 'internal_error', message: err.message, ...(err.details ? { details: err.details } : {}) });
 });
 
 const port = Number(process.env.PORT) || 4000;

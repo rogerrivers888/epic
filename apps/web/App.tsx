@@ -58,6 +58,7 @@ import { useOutbox } from './src/hooks/useOutbox';
 import { useSession } from './src/hooks/useSession';
 import { hydrateSession, onSessionChange } from './src/session';
 import { Icon, IconName } from './src/components/Icon';
+import { Toaster } from './src/components/Toast';
 import { RouterProvider, rememberedAddress, useRememberedAddress, useRouter } from './src/router';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { isFullBleed, isImmersive, isTabHome, legacyHref, ownsHeader, parseRoute, paths, Route, splitHref, Tab, TripSection, tabOf, titleOf } from './src/routes';
@@ -826,6 +827,9 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
             ))}
           </View>
         ) : null}
+        {/* One toaster for the app, inside the frame so it pins to the phone on
+            the Mobile toggle rather than across the whole window (Settings v2). */}
+        <Toaster />
       </View>
     </Edges>
   );

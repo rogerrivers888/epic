@@ -247,9 +247,18 @@ const DIETS = [
   ['no-alcohol', 'No alcohol', ['teetotal', 'alcohol free']],
 ];
 
-// The canonical allergen list. US FDA nine; the EU/UK fourteen remain an open
-// question in Epic 1 — adding them later is a vocabulary change, not a schema one.
-export const ALLERGENS = ['milk', 'eggs', 'fish', 'shellfish', 'tree nuts', 'peanuts', 'wheat', 'soybeans', 'sesame'];
+// The canonical allergen list: the UK's 14 (Settings revised v2, owner 1 Oct
+// 2026), in the order the profile reveals them — the eight commonest first,
+// then the rest behind "Show all 14". Allergens are a filter, so the list is
+// closed: free text cannot filter and is kept as a private note instead
+// (migration 319). 'gluten' stands for cereals containing gluten; 'crustaceans'
+// and 'molluscs' are the two the old 'shellfish' became.
+export const ALLERGENS = [
+  'peanuts', 'tree nuts', 'milk', 'eggs', 'gluten', 'sesame', 'fish', 'crustaceans',
+  'soya', 'celery', 'mustard', 'lupin', 'molluscs', 'sulphites',
+];
+// The eight shown before "Show all 14".
+export const ALLERGENS_COMMON = ALLERGENS.slice(0, 8);
 
 function build(kind, rows) {
   return rows.map(([slug, label, aliases, cuisine]) => ({

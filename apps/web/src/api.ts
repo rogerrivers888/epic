@@ -328,11 +328,31 @@ export type Member = {
   avatarUrl: string | null;
   typicalVisitMinutes: number | null;
   maxTravelMinutes: number | null;
+  // Settings revised v2 — the person's own tastes, carried per person.
+  /** One main diet; halal/kosher combine with it. */
+  diet: MainDiet;
+  halal: boolean;
+  kosher: boolean;
+  /** Free-text allergens that can't filter, kept as a private note (no "Other"). */
+  allergenNote: string | null;
+  /** Access needs (SX4): step-free filters, the rest rank. */
+  accessNeeds: AccessNeed[];
+  /** Words Epic must never learn again (Forget, SX5). */
+  neverLearn: string[];
+  /** Whose ratings a Places row shows for this person (SE11). */
+  ratingsView: RatingsView;
   allergens: Constraint[];
+  /** Derived for the ranking layer from diet/halal/kosher; the UI reads the scalars. */
   diets: Constraint[];
   dislikes: Constraint[];
   likes: Constraint[];
 };
+
+export type MainDiet = 'none' | 'vegetarian' | 'vegan' | 'pescatarian';
+export type AccessNeed = 'step-free' | 'accessible-toilet' | 'lift' | 'quiet';
+export type RatingsView = { mode: 'all' | 'mine' | 'some'; who: string[] };
+/** The UK 14 allergen keys, in the order the profile reveals them (8 common, then 6). */
+export const UK_ALLERGENS = ['peanuts', 'tree nuts', 'milk', 'eggs', 'gluten', 'sesame', 'fish', 'crustaceans', 'soya', 'celery', 'mustard', 'lupin', 'molluscs', 'sulphites'] as const;
 
 export type Place = {
   /** The source's own identifier for it, when the map had one: lets an idea open a drawer. */
@@ -438,6 +458,13 @@ export type Household = {
   homeRadiusMiles?: number;
   /** A picture of the house, taken by the household and held as a data URI (Household › Home). */
   homePhotoUrl?: string | null;
+  // How Epic plans (SE7–SE10). Close to home is a time (null = any distance; a
+  // place counts if any ticked mode reaches it within it). Travel is
+  // multi-select. The day runs between these hours.
+  closeToHomeMinutes?: number | null;
+  travelModes?: TravelMode[];
+  dayStart?: number;
+  dayEnd?: number;
   pace: Pace;
   timezone?: string;
   /**
@@ -448,6 +475,8 @@ export type Household = {
   browse?: BrowseDefaults;
 };
 
+export type TravelMode = 'car' | 'train' | 'bus' | 'walking' | 'bike';
+
 export type PaceKind = { typicalMinutes: number; maxMinutes: number; maxTravelMinutes: number; maxTravelIfSpecialMinutes: number };
 export type Pace = { food: PaceKind; activity: PaceKind };
 
@@ -457,6 +486,8 @@ export type Learned = {
 };
 
 export type HouseholdResponse = {
+  /** The signed-in person's member id: the "You" face, and whose page is read-only to others. */
+  me: string | null;
   household: Household;
   members: Member[];
   learned: Learned[];
@@ -2091,7 +2122,7 @@ export const api = {
 
   // household
   household: () => request<HouseholdResponse>('/api/household'),
-  updateHousehold: (body: Partial<Pick<Household, 'name' | 'defaultVisitMinutes' | 'maxTravelMinutes' | 'defaultIntensity' | 'travelMode' | 'accessNeeds'>> & { home?: Place; homeText?: string; homeRadiusMiles?: number; homePhotoUrl?: string | null; pace?: { food?: Partial<PaceKind>; activity?: Partial<PaceKind> }; timezone?: string; browse?: BrowseDefaultsPatch }) =>
+  updateHousehold: (body: Partial<Pick<Household, 'name' | 'defaultVisitMinutes' | 'maxTravelMinutes' | 'defaultIntensity' | 'travelMode' | 'accessNeeds'>> & { home?: Place; homeText?: string; homeRadiusMiles?: number; homePhotoUrl?: string | null; pace?: { food?: Partial<PaceKind>; activity?: Partial<PaceKind> }; timezone?: string; browse?: BrowseDefaultsPatch; closeToHomeMinutes?: number | null; travelModes?: TravelMode[]; dayStart?: number; dayEnd?: number }) =>
     patch<{ household: Household }>('/api/household', body),
   addMember: (body: { name: string; relationship?: string | null; birthYear?: number | null; birthDate?: string | null; avatarUrl?: string | null; email?: string | null; mobile?: string | null }) => post<{ member: any }>('/api/household/members', body),
 
@@ -2108,7 +2139,7 @@ export const api = {
 
   /** Take the sign-in away and leave the person, their tastes and their ratings. */
   removeMemberAccess: (id: string) => del<{ removed: boolean; access: MemberAccess; message: string }>(`/api/household/members/${id}/invite`),
-  updateMember: (id: string, body: { name?: string; relationship?: string | null; birthYear?: number | null; birthDate?: string | null; avatarUrl?: string | null; typicalVisitMinutes?: number; maxTravelMinutes?: number; email?: string | null; mobile?: string | null }) =>
+  updateMember: (id: string, body: { name?: string; relationship?: string | null; birthYear?: number | null; birthDate?: string | null; avatarUrl?: string | null; typicalVisitMinutes?: number; maxTravelMinutes?: number; email?: string | null; mobile?: string | null; diet?: MainDiet; halal?: boolean; kosher?: boolean; accessNeeds?: AccessNeed[]; allergenNote?: string | null; neverLearn?: string[]; ratingsView?: RatingsView }) =>
     patch<{ member: any }>(`/api/household/members/${id}`, body),
   deleteMember: (id: string) => del<void>(`/api/household/members/${id}`),
   addConstraint: (memberId: string, body: { kind: ConstraintKind; value: string; conceptKey?: string; maxMinutes?: number | null }) =>
@@ -2669,8 +2700,12 @@ export const api = {
   /** The Host tab: the invitation, or the dashboard. */
   hostHome: () => request<HostHome>('/api/host'),
   becomeHost: (body: HostInput) => post<{ host: OwnHost }>('/api/host', body),
-  updateHost: (body: Partial<HostInput> & { introVideoId?: string | null; photoId?: string | null; idDocument?: 'passport' | 'driving_licence' | null; insuranceConfirmed?: boolean; taxReference?: string | null; payoutStatus?: 'not_connected' | 'connected' }) =>
+  updateHost: (body: Partial<HostInput> & { introVideoId?: string | null; photoId?: string | null; idDocument?: 'passport' | 'driving_licence' | null; insuranceConfirmed?: boolean; taxReference?: string | null; payoutStatus?: 'not_connected' | 'connected'; paySchedule?: PaySchedule; taxIsCompany?: boolean; companyNumber?: string | null }) =>
     patch<{ host: OwnHost }>('/api/host', body),
+  /** The Host tab's Money screen: fee lines, the ladder, payouts, tax (SX9/SX14/SX16–SX20). */
+  hostMoney: () => request<HostMoney>('/api/host/money'),
+  /** Make one bank the payout account (SX16). One at a time. */
+  activatePayoutAccount: (id: string) => post<{ account: PayoutAccount; payoutAccounts: PayoutAccount[] }>(`/api/host/payout-accounts/${id}/activate`, {}),
   /** Stop hosting: the host, its offers and its videos go, and the Host tab is the invitation again. */
   stopHosting: (force = false) => del<void>(`/api/host${force ? '?force=1' : ''}`),
   /** A video or a photo, as bytes. Not `request`: the body is not JSON and is never queued. */
@@ -3290,8 +3325,12 @@ export const api = {
     setSessionToken(null);
   },
 
-  /** The devices signed in, for Settings. Their own, never the whole estate's. */
-  devices: () => request<{ sessions: (SessionSummary & { lastSeen: string })[] }>('/api/sessions'),
+  /** The devices signed in, for Settings (SX6). Their own, never the whole estate's; `current` marks this one. */
+  devices: () => request<{ sessions: (SessionSummary & { lastSeen: string; current: boolean })[] }>('/api/sessions'),
+  /** Sign one other device out (SX6). Confirmed first in the UI; no Undo. */
+  signOutDevice: (id: string) => del<void>(`/api/sessions/${id}`),
+  /** Sign out every other device of this account (SX6). */
+  signOutOtherDevices: () => del<void>('/api/sessions'),
 
   /**
    * A magic link, exchanged for a session.
@@ -5312,6 +5351,8 @@ export type SubDetail = {
   neighbourhood?: { what?: string[]; route?: string | null; stops?: string | null; gettingAround?: string[]; access?: string | null };
 };
 export type TrustLevel = 'verified' | 'checked' | 'trusted';
+/** Epic's fee on a booking or period: rate, the reason it carries, the label the UI prints, and the split (SX14/SX18). */
+export type HostFeeLine = { rate: number; reason: string; label: string; feePence: number; netPence: number };
 export type OfferShape = 'oneoff' | 'series' | 'anytime';
 export type OfferState = 'draft' | 'in_review' | 'live' | 'paused' | 'ended';
 export type OfferVenue = 'their_place' | 'your_place' | 'out_about' | 'online';
@@ -5336,10 +5377,34 @@ export type PublicHost = {
   rating: number | null; reviewCount: number; guests: number; isNew: boolean; since: string;
   otherOffers?: number; km?: number; liveOffers?: number;
 };
+export type PaySchedule = 'weekly' | 'weekday' | 'monthly';
+/** A bank a host is paid into (SX16). Epic never holds the money: only a label, the last four digits and the holder. */
+export type PayoutAccount = { id: string; label: string; last4: string; holderName: string | null; addedOn: string; isActive: boolean };
 export type OwnHost = PublicHost & {
   address: string | null; idDocument: 'passport' | 'driving_licence' | null; insuranceConfirmed: boolean; taxReference: string | null;
   payoutStatus: 'not_connected' | 'connected'; payoutLabel: string | null; dateOfBirth: string | null;
+  /** Money (Settings revised v2, SX17/SX19): when payouts land, company tax reporting, and the banks on file. */
+  paySchedule: PaySchedule; taxIsCompany: boolean; companyNumber: string | null; payoutAccounts?: PayoutAccount[];
   evidence?: Evidence[];
+};
+/** A fee line summed over a period: the engine's line plus the gross it was taken from and how many bookings (SX13b/SX18/SX20). */
+export type HostFeeAgg = HostFeeLine & { grossPence: number; count: number };
+export type HostFeePeriod = { lines: HostFeeAgg[]; grossPence: number; feePence: number; netPence: number };
+/** The Host tab's Money screen, computed server-side from bookings + the fee engine (SX9/SX14/SX16–SX20). */
+export type HostMoney = {
+  paymentsReady: boolean; note: string;
+  level: TrustLevel; levelLabel: string; feeRate: number; linkRate: number; minFeePence: number;
+  intro: { active: boolean; bookingsLeft: number; daysLeft: number };
+  nextPayout: { amountPence: number; on: string; account: string | null } | null;
+  paySchedule: PaySchedule;
+  payoutAccounts: PayoutAccount[]; activeAccount: PayoutAccount | null;
+  ladder: { level: TrustLevel; label: string; feeRate: number; keep: number; here: boolean }[];
+  trusted: { completed: number; completedNeeded: number; ratingAtLeast: number; ratingWindow: number };
+  history: { id: string; on: string; netPence: number; status: 'scheduled' | 'paid'; dates: { on: string; title: string | null; guests: number; grossPence: number; line: HostFeeLine }[]; lines: HostFeeLine[]; accountLabel: string | null }[];
+  statements: { year: number; feeLabel: string; netPence: number | null; ready: boolean }[];
+  tax: { legalName: string | null; address: string | null; taxReference: string | null; dateOfBirth: string | null; taxIsCompany: boolean; companyNumber: string | null };
+  totals: HostFeePeriod;
+  byOffer: Record<string, HostFeePeriod>;
 };
 export type HostInput = {
   name: string; type?: HostType | null; localKind?: LocalKind | null; introText?: string | null; address?: string | null;
@@ -5460,7 +5525,7 @@ export type OwnOffer = Experience & {
   seeded: string[]; checks: CheckKind[]; rulesAccepted: boolean; transcript: string | null;
   invites: OfferInvite[];
   reviewNote: string | null; reviewChecklist: Record<string, string> | null; reviewedAt: string | null; submittedAt: string | null; publishedAt: string | null;
-  takings: { collectedPence: number; recordedPence: number; refundedPence: number; payoutOn: string | null; atMinimum: number | null; atExpected: number | null; fee: { fee: number; net: number; percent: number } };
+  takings: { collectedPence: number; recordedPence: number; refundedPence: number; payoutOn: string | null; atMinimum: number | null; atExpected: number | null; fee: HostFeeLine };
   bookings: ExperienceBooking[];
   broadcasts: { id: string; body: string; sentTo: number; delivered: number; at: string }[];
 };

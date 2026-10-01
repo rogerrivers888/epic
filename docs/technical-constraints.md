@@ -227,6 +227,8 @@ The hardest problem in the multi-source strategy, and where projects like this u
 
 **TravelTime is the only provider returning public transport isochrones from timetabled data.** Google, HERE and Mapbox return driving, walking and cycling only.
 
+> **"Close to home" today runs on the free distance estimate, not a paid route** (Settings revised v2 SE7, owner 1 Oct 2026). The household's close-to-home time and ticked modes resolve to a radius through `domain/travel.js` (`closeToHomeRadiusMiles`) — distance-only, £0, no provider call; a place is "close" if the furthest ticked mode reaches it in the time. **TravelTime is the intended provider for *real*, routed travel times later**, held to one catchment per household address and mode, cached and refreshed only when the address or modes change, and **priced and approved by the owner before it is used** — Google Routes is explicitly not used for this (its terms forbid caching, so it would be paid on every search).
+
 When this product was UK-first, that made TravelTime close to mandatory. With the US primary, transit matters in New York, Chicago, San Francisco, Boston, Washington and Philadelphia, and much less elsewhere; most US metros are car-first, where any provider will do.
 
 **This is an accepted single point of dependency on a Critical requirement, not a reason to weaken the requirement.** Transit catchment either works or the feature does not exist; there is no third option in which a lesser supplier partially satisfies it. The risk is commercial — sales-led pricing, a one-time evaluation window, and regional gaps — and belongs in the open questions and supplier negotiation, not in a diluted acceptance criterion. Tracked as Requirements Appendix A3.

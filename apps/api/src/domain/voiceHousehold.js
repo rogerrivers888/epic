@@ -18,7 +18,36 @@
  * Household tab uses, and only after the screen's "Looks right".
  */
 
-import { resolveConcept } from './concepts.js';
+import { resolveConcept, ALLERGENS } from './concepts.js';
+
+// Settings revised v2 maps diet onto the person (one main diet + two faiths) and
+// allergens onto the UK 14 — so a spoken "vegetarian" or "shellfish" has to land
+// where the profile now reads it, not in the old free-text diet/allergen rows.
+const dietPatch = (raw) => {
+  const v = String(raw).toLowerCase();
+  if (v.includes('vegan')) return { diet: 'vegan' };
+  if (v.includes('pescatar')) return { diet: 'pescatarian' };
+  if (v.includes('vegetar') || v === 'veggie') return { diet: 'vegetarian' };
+  if (v.includes('halal')) return { halal: true };
+  if (v.includes('kosher')) return { kosher: true };
+  return null;
+};
+// The same safe-direction mapping the diet migration uses for spoken values
+// that aren't a main diet or a faith: a preference becomes a filter or a rank.
+const dietSpill = (raw) => {
+  const v = String(raw).toLowerCase();
+  if (v.includes('gluten') || v.includes('coeliac') || v.includes('celiac')) return { kind: 'allergen', value: 'gluten' };
+  if (v.includes('dairy') || v.includes('lactose')) return { kind: 'allergen', value: 'milk' };
+  if (v.includes('pork')) return { kind: 'dislike', value: 'pork' };
+  if (v.includes('alcohol') || v.includes('teetotal')) return { kind: 'dislike', value: 'alcohol' };
+  return null; // genuinely free-text diet from voice is left unstored (rare; the back-fill note is for historical rows)
+};
+const ALLERGEN_SYNONYM = { shellfish: 'crustaceans', egg: 'eggs', wheat: 'gluten', cereals: 'gluten', soybeans: 'soya', soy: 'soya', nuts: 'tree nuts', dairy: 'milk', mollusks: 'molluscs', sulfites: 'sulphites' };
+const allergenCanon = (raw) => {
+  const v = String(raw).toLowerCase().trim();
+  const c = ALLERGEN_SYNONYM[v] ?? v;
+  return ALLERGENS.includes(c) ? c : null; // only the UK 14 can filter
+};
 
 const nullable = (type, extra = {}) => ({ type: [type, 'null'], ...extra });
 const str = (d) => nullable('string', { description: d });
@@ -170,13 +199,35 @@ export function likesVocabularyText(vocab) {
  * (every member for a household breath; the one person for D3). Returns what was
  * written, so the screen can say so.
  */
-export async function applyFood(items, { members, households, everyone }) {
+export async function applyFood(items, { members, households, everyone, householdId }) {
   const written = [];
   for (const it of items) {
-    const kind = it.kind === 'allergy' ? 'allergen' : it.kind === 'favourite' ? 'like' : it.kind; // diet | dislike | like | allergen
     const targets = it.memberId ? members.filter((m) => m.id === it.memberId) : everyone;
+    // Diet is a column now (one main diet + halal/kosher), not a constraint row.
+    if (it.kind === 'diet') {
+      const patch = dietPatch(it.value);
+      if (patch) {
+        for (const m of targets) { await households.updateMember(m.id, patch, householdId); written.push({ memberId: m.id, kind: 'diet', value: it.value }); }
+        continue;
+      }
+      // gluten-free → a Gluten allergen, dairy-free → Milk, no-pork/no-alcohol → a dislike.
+      const spill = dietSpill(it.value);
+      if (spill) {
+        for (const m of targets) { await households.upsertConstraint(m.id, { kind: spill.kind, value: spill.value, conceptKey: null, conceptKind: null, favourite: false }); written.push({ memberId: m.id, kind: spill.kind, value: spill.value }); }
+      }
+      continue;
+    }
+    // Allergens are the UK 14; anything else can't filter, so it is dropped.
+    if (it.kind === 'allergy') {
+      const canon = allergenCanon(it.value);
+      if (!canon) continue;
+      for (const m of targets) { await households.upsertConstraint(m.id, { kind: 'allergen', value: canon, conceptKey: null, conceptKind: null, favourite: false }); written.push({ memberId: m.id, kind: 'allergen', value: canon }); }
+      continue;
+    }
+    // dislike, or favourite → a lime-starred like.
+    const kind = it.kind === 'favourite' ? 'like' : it.kind;
     for (const m of targets) {
-      const concept = kind === 'allergen' ? null : resolveConcept(it.value, { kinds: kind === 'diet' ? ['diet'] : ['dish', 'cuisine', 'ingredient', 'style'] });
+      const concept = resolveConcept(it.value, { kinds: ['dish', 'cuisine', 'ingredient', 'style'] });
       await households.upsertConstraint(m.id, { kind, value: (concept?.label ?? it.value).toLowerCase(), conceptKey: concept?.key ?? null, conceptKind: concept?.kind ?? null, favourite: it.kind === 'favourite' });
       written.push({ memberId: m.id, kind, value: concept?.label ?? it.value });
     }
