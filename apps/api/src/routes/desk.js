@@ -9,7 +9,7 @@
  */
 
 import { Router } from 'express';
-import { requires } from '../access.js';
+import { requires, requireOwnerSignedIn } from '../access.js';
 import { query } from '../db.js';
 import * as settingsRepo from '../desk/settings.js';
 import * as changesRepo from '../desk/changes.js';
@@ -125,7 +125,9 @@ deskRoutes.get('/settings', requires('view_library'), async (_req, res, next) =>
   } catch (err) { next(err); }
 });
 
-deskRoutes.put('/settings/:key', requires('manage_library'), async (req, res, next) => {
+// Desk settings include budgets, billing and osmRegions (which starts a GB
+// load) — safeguards, so the owner personally signed in (G11, epic-62 1 Oct).
+deskRoutes.put('/settings/:key', requires('manage_library'), requireOwnerSignedIn('change a desk setting'), async (req, res, next) => {
   try {
     // "What changed" is composed by the API from the key and value; a `what`
     // in the body is ignored (second audit CH.6).
@@ -468,7 +470,8 @@ deskRoutes.get('/billing/reconcile', requires('view_library'), async (req, res, 
  * `paid: false` is the sign-up pre-warm. Starting it again resumes an
  * unfinished run from the first place not done.
  */
-deskRoutes.post('/pilot', requires('manage_settings'), async (req, res, next) => {
+// Starting the pilot is a run that can spend (G11): the owner personally signed in.
+deskRoutes.post('/pilot', requires('manage_settings'), requireOwnerSignedIn('start the desk pilot run'), async (req, res, next) => {
   try {
     const { runPilot } = await import('../desk/pilot.js');
     const minutes = Number(req.body?.minutes ?? 30);

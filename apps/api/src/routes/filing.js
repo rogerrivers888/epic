@@ -41,7 +41,7 @@
  */
 
 import { Router } from 'express';
-import { requires, can } from '../access.js';
+import { requires, can, requireOwnerSignedIn } from '../access.js';
 import { query } from '../db.js';
 import * as filing from '../repositories/filing.js';
 import * as placeAttributes from '../repositories/placeAttributes.js';
@@ -622,7 +622,8 @@ filingRoutes.put('/subcategories/:key/defaults', requires('manage_library'), asy
  * default, and one already settled is left alone. The reply says how many, so
  * the screen reports what happened rather than what it asked for.
  */
-filingRoutes.post('/subcategories/:key/accept', requires('manage_library'), async (req, res, next) => {
+// Accepting a subcategory files many places at once — a bulk production change (G11).
+filingRoutes.post('/subcategories/:key/accept', requires('manage_library'), requireOwnerSignedIn('accept a subcategory'), async (req, res, next) => {
   try {
     const key = String(req.params.key);
     const d = await filing.drawers();
@@ -1025,7 +1026,8 @@ filingRoutes.get('/labels/vocabulary', requires('view_library'), async (_req, re
  * road bridge it is the correct one, and the counter on this screen treats it
  * as progress rather than as a gap.
  */
-filingRoutes.put('/mapping/:word', requires('manage_library'), async (req, res, next) => {
+// A mapping change moves every place carrying the word — a bulk production change (G11).
+filingRoutes.put('/mapping/:word', requires('manage_library'), requireOwnerSignedIn('change a word mapping'), async (req, res, next) => {
   try {
     const word = String(req.params.word);
     const { rows: was } = await query(
@@ -1105,7 +1107,7 @@ filingRoutes.put('/mapping/:word', requires('manage_library'), async (req, res, 
  * repository, and rightly — a word may raise a question about a place and
  * never answer one.
  */
-filingRoutes.put('/mapping/:word/carries', requires('manage_library'), async (req, res, next) => {
+filingRoutes.put('/mapping/:word/carries', requires('manage_library'), requireOwnerSignedIn('change what a word carries'), async (req, res, next) => {
   try {
     const word = String(req.params.word);
     const attribute = String(req.body?.label ?? '');
