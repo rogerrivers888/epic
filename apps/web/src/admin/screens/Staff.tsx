@@ -321,7 +321,11 @@ function Drawer(props: {
     <Modal visible transparent animationType={wide ? 'fade' : 'slide'} onRequestClose={props.onClose}>
       <View style={[styles.backdropWrap, frameBox]}>
         <Press style={styles.backdrop} onPress={props.onClose} accessibilityLabel="Close" effect="none" />
-        <ScrollView style={[styles.panel, wide ? styles.panelSide : styles.panelSheet]} contentContainerStyle={styles.panelInner}>
+        {/* A View carries the width: react-native-web's ScrollView has flexGrow
+            in its base style, so a bare ScrollView panel stretched to fill the
+            whole window (owner, 1 Oct 2026 — "why is this button so huge"). */}
+        <View style={[styles.panel, wide ? styles.panelSide : styles.panelSheet]}>
+          <ScrollView contentContainerStyle={styles.panelInner}>
           <View style={styles.drawerHead}>
             <View style={{ flexShrink: 1, gap: 6 }}>
               <Text style={styles.kicker}>{kicker}</Text>
@@ -344,7 +348,8 @@ function Drawer(props: {
               onSuspend={props.onSuspend} onUnsuspend={props.onUnsuspend}
               onLogoutAll={props.onLogoutAll} onRemove={props.onRemove} />
           )}
-        </ScrollView>
+          </ScrollView>
+        </View>
       </View>
     </Modal>
   );
@@ -379,11 +384,11 @@ function AddForm(props: {
         </View>
       </Field>
       <View style={styles.formFoot}>
+        <Press onPress={props.onClose} effect="none"><Text style={styles.cancel}>Cancel</Text></Press>
         <Press onPress={props.onSubmit} style={({ hovered }: any) => [styles.primary, hovered && styles.primaryHover]}>
           <Text style={styles.primaryLabel}>Add and send login link</Text>
           <Icon name="forward" size={16} color={ON_LIME} strokeWidth={2.4} />
         </Press>
-        <Press onPress={props.onClose} effect="none"><Text style={styles.cancel}>Cancel</Text></Press>
       </View>
     </>
   );
@@ -412,11 +417,11 @@ function ClaimForm(props: {
           style={[styles.input, focus === 'name' && styles.inputFocus]} />
       </Field>
       <View style={styles.formFoot}>
+        <Press onPress={props.onClose} effect="none"><Text style={styles.cancel}>Cancel</Text></Press>
         <Press onPress={props.onClaim} style={({ hovered }: any) => [styles.primary, hovered && styles.primaryHover]}>
           <Text style={styles.primaryLabel}>Claim and send login link</Text>
           <Icon name="forward" size={16} color={ON_LIME} strokeWidth={2.4} />
         </Press>
-        <Press onPress={props.onClose} effect="none"><Text style={styles.cancel}>Cancel</Text></Press>
       </View>
     </>
   );
@@ -620,7 +625,7 @@ const styles = StyleSheet.create({
   panel: { backgroundColor: desk.lifted },
   panelSide: { width: 440, maxWidth: '100%', height: '100%', borderLeftWidth: 2, borderLeftColor: desk.ruleStrong },
   panelSheet: { width: '100%', height: '100%' },
-  panelInner: { padding: 28, gap: 22 },
+  panelInner: { padding: 28, gap: 22, flexGrow: 1 },
 
   drawerHead: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 },
   kicker: { fontFamily: fonts.heading, fontSize: 10, fontWeight: '700', letterSpacing: 0.7, color: desk.inkDim },
@@ -640,11 +645,13 @@ const styles = StyleSheet.create({
   roleName: { fontFamily: fonts.body, fontSize: 14, fontWeight: '700', color: desk.ink },
   roleDesc: { fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim, lineHeight: 17 },
 
-  formFoot: { marginTop: 'auto', gap: 12, paddingTop: 4 },
-  primary: { height: 46, backgroundColor: LIME, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16 },
+  // Cancel on the left, the action on the right — opposite sides, and the lime
+  // button its own width rather than a bar (owner, 1 Oct 2026).
+  formFoot: { marginTop: 'auto', paddingTop: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16 },
+  primary: { height: 46, backgroundColor: LIME, flexDirection: 'row', alignItems: 'center', gap: 22, paddingHorizontal: 16 },
   primaryHover: { opacity: 0.88 },
   primaryLabel: { fontFamily: fonts.body, fontSize: 14, fontWeight: '700', color: ON_LIME },
-  cancel: { fontFamily: fonts.body, fontSize: 13.5, fontWeight: '600', color: desk.inkMuted, paddingLeft: 16 },
+  cancel: { fontFamily: fonts.body, fontSize: 13.5, fontWeight: '600', color: desk.inkMuted },
 
   outline: { height: 46, borderWidth: 1, borderColor: desk.ink, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 },
   outlineHover: { backgroundColor: desk.rule },

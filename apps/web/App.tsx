@@ -340,11 +340,19 @@ function Gate({ route }: { route: Route }) {
    * on and pasted into a chat, and this one signs somebody in.
    */
   const [link] = useState(() => query.get('signin'));
+  // One attempt per page load, whatever the effect's dependencies do. The
+  // landing navigation changes the URL, which hands navigate/setQuery new
+  // identities and re-runs the effect — and a second POST of the same token is
+  // a spent link: a 401 that read as "signed out" and ended the session the
+  // first POST had just opened (Virginia, 1 Oct 2026). A ref survives the
+  // re-run; the `dropped` flag below only covers unmount mid-flight.
+  const redeemAttempted = useRef(false);
   const [redeeming, setRedeeming] = useState(Boolean(link));
   const [linkFailed, setLinkFailed] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!link) return;
+    if (!link || redeemAttempted.current) return;
+    redeemAttempted.current = true;
     let dropped = false;
     (async () => {
       try {

@@ -133,8 +133,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
       // Signed out, or the token has run out. Drop it so the app shows the
-      // passcode screen; anything waiting in the outbox stays waiting.
-      if (res.status === 401 && path !== '/api/session') sessionExpired();
+      // passcode screen; anything waiting in the outbox stays waiting. The
+      // session door and the magic-link pair are exempt: their 401 answers for
+      // the credential being *presented* — a wrong passcode, a spent link — not
+      // for the session this device already holds, and redeeming a spent link
+      // while signed in must not sign anybody out (Virginia, 1 Oct 2026: her
+      // invite link was posted twice, and the second 401 ended the session the
+      // first had just opened).
+      if (res.status === 401 && !['/api/session', '/api/session/link', '/api/session/request-link'].includes(path)) sessionExpired();
       // The API answering "no" is an answer; only an API that cannot answer at
       // all falls back to the copy.
       if (readOnly && [502, 503, 504].includes(res.status)) {
