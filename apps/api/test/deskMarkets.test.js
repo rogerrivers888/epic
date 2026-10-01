@@ -72,6 +72,27 @@ test('cost bands carry who set them and when', async () => {
   assert.ok(gb.costBandsAt, 'and when');
 });
 
+test('setting a null-band market\'s cost bands fills four half-open bands, and is undoable', async () => {
+  const before = await m.getMarket('PT'); // Portugal is seeded with no bands
+  assert.equal(before.checklist.costBands, false, 'Portugal starts with no bands');
+  const res = await m.setCostBands('PT', { t1: 1200, t2: 3000 }, 'sarah@epic.day');
+  assert.ok(res.change, 'the change id comes back');
+  assert.deepEqual(res.bands.map((b) => [b.symbol, b.min, b.max]), [
+    ['Free', 0, 0], ['€', 1, 1200], ['€€', 1200, 3000], ['€€€', 3000, null],
+  ], 'four contiguous half-open bands in the market currency');
+  const after = await m.getMarket('PT');
+  assert.equal(after.checklist.costBands, true, 'now it has bands');
+  assert.equal(after.costBandsSetBy, 'sarah@epic.day', 'and says who set them');
+  // The two thresholds must be whole minor units, ascending and positive.
+  await assert.rejects(() => m.setCostBands('PT', { t1: 3000, t2: 1200 }, 'sarah@epic.day'), /0 < first < second/);
+  await assert.rejects(() => m.setCostBands('PT', { t1: 0, t2: 100 }, 'sarah@epic.day'), /0 < first < second/);
+  await assert.rejects(() => m.setCostBands('PT', { t1: 1200, t2: 3000 }, null), /says who made it/);
+  // Undo restores "not known yet".
+  const { rows: [chg] } = await query(`select * from bo_changes where subject_id='PT/cost-bands' order by at desc limit 1`);
+  await m.undoCostBands({ change: chg, who: 'sarah@epic.day' });
+  assert.equal((await m.getMarket('PT')).checklist.costBands, false, 'undo puts it back to not known yet');
+});
+
 test('the blocked list is the code constant, Vietnam included — never rows', async () => {
   const blocked = m.blockedMarkets();
   assert.ok(blocked.some((b) => b.name === 'Vietnam'));

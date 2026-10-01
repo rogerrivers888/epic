@@ -14,6 +14,7 @@ import { query, withTransaction } from '../db.js';
 import { logChange } from './changes.js';
 import { BLOCKED_MARKETS } from '../domain/markets.js';
 import { NAMESPACES, hasDrifted } from '../domain/wording.js';
+import { scaleFor } from '../domain/costBand.js';
 
 /* ------------------------------------------------------------------ markets */
 
@@ -76,6 +77,56 @@ export async function undoMarketSource({ change, who }) {
       const next = (m.sources ?? []).map((s) => (s.id === u.sourceId ? u.before : s));
       await client.query('update markets set sources = $2, updated_at = now() where code = $1', [u.code, JSON.stringify(next)]);
     }
+    await markUndone({ id: change.id, who, client });
+  });
+}
+
+/**
+ * Set a market's cost bands — the per-person money ranges a human judges, never
+ * derived from price data (owner, 29 Sep 2026). The caller gives the two internal
+ * thresholds in the currency's minor units: under `t1` is the first paid band,
+ * `t1`–`t2` the second, `t2` and over the third; Free is exactly 0. Kept half-open
+ * [min, max) — min inclusive, max exclusive, a null max unbounded — so the bands
+ * never overlap and every price lands in exactly one (migration 300). The symbols
+ * come from the market's own currency. `basis` is 'judgement' by default — a
+ * human's call — and could later be 'prices' if ever read from real pricing.
+ * Logged and undoable; the whole prior bands set is kept so undo is exact,
+ * including restoring a market to "not known yet" (null).
+ */
+export async function setCostBands(code, { t1, t2, basis = 'judgement' }, who) {
+  if (!who) throw bad('a change says who made it');
+  const c = String(code || '').toUpperCase();
+  const a = Math.round(Number(t1));
+  const b = Math.round(Number(t2));
+  if (!Number.isInteger(a) || !Number.isInteger(b) || a < 1 || b <= a) {
+    throw bad('the two thresholds must be whole minor units with 0 < first < second');
+  }
+  return withTransaction(async (client) => {
+    const { rows: [m] } = await client.query('select currency, cost_bands from markets where code = $1 for update', [c]);
+    if (!m) throw bad(`no market ${c}`);
+    const scale = scaleFor(m.currency);
+    const at = new Date().toISOString().slice(0, 10);
+    const bands = [
+      { symbol: scale[0], min: 0, max: 0, basis, set_by: who, at },
+      { symbol: scale[1], min: 1, max: a, basis, set_by: who, at },
+      { symbol: scale[2], min: a, max: b, basis, set_by: who, at },
+      { symbol: scale[3], min: b, max: null, basis, set_by: who, at },
+    ];
+    await client.query('update markets set cost_bands = $2, updated_at = now() where code = $1', [c, JSON.stringify(bands)]);
+    const change = await logChange({ client, who, area: 'Markets', what: `set cost bands for ${c}`,
+      before: m.cost_bands, after: bands, subjectType: 'market', subjectId: `${c}/cost-bands`,
+      undo: { kind: 'market_cost_bands', code: c, before: m.cost_bands ?? null } });
+    return { ok: true, change: change.id, bands };
+  });
+}
+
+/** Undo a cost-bands change — restore the market's prior bands (or null). */
+export async function undoCostBands({ change, who }) {
+  const u = change.undo ?? {};
+  const { markUndone } = await import('./changes.js');
+  return withTransaction(async (client) => {
+    await client.query('update markets set cost_bands = $2, updated_at = now() where code = $1',
+      [u.code, u.before == null ? null : JSON.stringify(u.before)]);
     await markUndone({ id: change.id, who, client });
   });
 }

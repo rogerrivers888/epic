@@ -16,7 +16,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Text, View } from 'react-native';
+import { Text, TextInput, View } from 'react-native';
 
 import { Press } from '../../components/press';
 import { useDeskGo, useDeskParam, useCrumbs } from './Desk';
@@ -68,6 +68,56 @@ function bandRange(b: Band, currency: string): string {
   if (b.max != null && b.min <= 1) return `under ${money(b.max, currency)}`;
   if (b.max == null) return `over ${money(b.min, currency)}`;
   return `${money(b.min, currency)}–${money(b.max, currency).replace(CURRENCY_SYMBOL[currency] ?? '', '')}`;
+}
+
+/**
+ * The cost-band editor: two per-person thresholds a person types, never derived
+ * from prices (owner, 29 Sep 2026). The first band runs up to the first
+ * threshold, the second between the two, the third above — Free is always £0, and
+ * the symbols come from the market's currency. Seeded from the current bands, or
+ * empty for a market that has none; typed into a small box, no steppers.
+ */
+function CostBandEditor({ code, currency, bands, onSaved, toast }: {
+  code: string; currency: string; bands: Band[] | null;
+  onSaved: () => void; toast: (msg: string, undo?: () => Promise<void>) => void;
+}) {
+  const sym = CURRENCY_SYMBOL[currency] ?? `${currency} `;
+  const majorOf = (minor: number | null | undefined) => (minor == null ? '' : String(minor / 100));
+  // Seed from the current bands: the first paid band's ceiling, and the second's.
+  const seeded = Array.isArray(bands) && bands.length === 4;
+  const [t1, setT1] = useState(seeded ? majorOf(bands![1].max) : '');
+  const [t2, setT2] = useState(seeded ? majorOf(bands![2].max) : '');
+  const [busy, setBusy] = useState(false);
+  const a = Number(t1); const b = Number(t2);
+  const valid = t1.trim() !== '' && t2.trim() !== '' && Number.isFinite(a) && Number.isFinite(b) && a > 0 && b > a;
+  const preview = valid
+    ? `Free · ${sym} under ${sym}${a} · ${sym}${sym} ${sym}${a}–${b} · ${sym}${sym}${sym} over ${sym}${b}, a person`
+    : 'Two amounts a person pays: where the first band tops out, and where the second does.';
+  const save = async () => {
+    if (!valid || busy) return;
+    setBusy(true);
+    try {
+      const res = await deskApi.post<{ change?: string }>(`/markets/${encodeURIComponent(code)}/cost-bands`,
+        { t1: Math.round(a * 100), t2: Math.round(b * 100) });
+      onSaved();
+      const changeId = res?.change;
+      if (changeId) toast(`Cost bands set for ${code}`, async () => { await deskApi.post(`/undo/${changeId}`, {}); onSaved(); });
+    } catch (err) { toast((err as Error)?.message || 'Could not set the bands.'); }
+    finally { setBusy(false); }
+  };
+  const box = { fontFamily: fonts.body, fontSize: 13.5, color: desk.ink, paddingVertical: 2, paddingHorizontal: 6, backgroundColor: desk.well, borderWidth: 1, borderColor: desk.rule, width: 90 } as const;
+  return (
+    <View style={{ gap: 6, marginTop: 4 }}>
+      <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        <T tone={desk.inkDim} size={12.5}>{sym} up to</T>
+        <TextInput value={t1} onChangeText={setT1} inputMode="decimal" placeholder="e.g. 15" placeholderTextColor={desk.inkFaint} onSubmitEditing={save} style={box} />
+        <T tone={desk.inkDim} size={12.5}>{sym}{sym} up to</T>
+        <TextInput value={t2} onChangeText={setT2} inputMode="decimal" placeholder="e.g. 40" placeholderTextColor={desk.inkFaint} onSubmitEditing={save} style={box} />
+        {valid ? <TextLink tone={LIME} onPress={save}>{busy ? 'Setting…' : seeded ? 'Change' : 'Set'}</TextLink> : null}
+      </View>
+      <T tone={desk.inkFaint} size={12}>{preview}</T>
+    </View>
+  );
 }
 
 /** Bands are set only when the array has entries — an empty array is "not set". */
@@ -291,6 +341,7 @@ function MarketPage({ code, canManage }: { code: string; canManage: boolean }) {
             ))}
           </>
         ) : <T tone={AMBER}>Not set — a judgement is needed. A market without bands shows cost as "don't know".</T>}
+        {canManage ? <CostBandEditor code={code} currency={m.currency} bands={m.costBands} onSaved={load} toast={toast} /> : null}
       </View>
 
       <View style={{ gap: 8 }}>

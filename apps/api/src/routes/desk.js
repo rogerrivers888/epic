@@ -97,6 +97,7 @@ deskRoutes.post('/undo/:id', requires('manage_library'), async (req, res, next) 
     else if (u.kind === 'wording') await markets.undoWording({ change, who: by });
     else if (u.kind === 'wording_looked') await markets.undoWordingLooked({ change, who: by });
     else if (u.kind === 'market_source') await markets.undoMarketSource({ change, who: by });
+    else if (u.kind === 'market_cost_bands') await markets.undoCostBands({ change, who: by });
     else if (u.kind === 'market_subcategory') await markets.undoNotApplicable({ change, who: by });
     else if (u.kind === 'fact_value') await mapping.undoFactValue({ change, who: by });
     else if (u.kind === 'carry') {
@@ -537,6 +538,11 @@ deskRoutes.get('/markets', requires('view_library'), async (_req, res, next) => 
 /** Connect a source that exists in a market but was not wired up yet. */
 deskRoutes.post('/markets/:code/sources/:id/connect', requires('manage_library'), async (req, res, next) => {
   try { res.json(await markets.connectSource(String(req.params.code), String(req.params.id), who(req))); } catch (err) { next(err); }
+});
+
+/** Set a market's cost bands — the two per-person thresholds, a human judgement. */
+deskRoutes.post('/markets/:code/cost-bands', requires('manage_library'), async (req, res, next) => {
+  try { res.json(await markets.setCostBands(String(req.params.code), { t1: req.body?.t1, t2: req.body?.t2, basis: req.body?.basis }, who(req))); } catch (err) { next(err); }
 });
 
 /** One market's page. */
