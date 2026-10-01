@@ -152,6 +152,21 @@ export function interestMailAllowed() {
   return hit('interest-mail', 'all', 60 * MINUTE, INTEREST_MAILS_PER_HOUR).ok;
 }
 
+/**
+ * The password doors (routes/authPassword.js), per connected address, on top of
+ * the sign-in limit: that one keys on `callerOf`, which reads headers a caller
+ * reaching api.epic.day directly can rotate, and every request here costs a
+ * memory-hard hash. This one keys on `req.ip` under the trusted-proxy count,
+ * which they cannot (Codex, 1 Oct 2026).
+ */
+export const passwordLimit = limit({
+  name: 'password',
+  windowMs: 15 * MINUTE,
+  max: 20,
+  message: 'Too many sign-in attempts. Try again in a few minutes.',
+  keyOf: (req) => req.ip || connectedCallerOf(req),
+});
+
 /** Anything that can reach a paid provider. */
 export const spendLimit = limit({
   name: 'spend',

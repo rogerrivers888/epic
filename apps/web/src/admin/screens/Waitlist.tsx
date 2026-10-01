@@ -54,8 +54,15 @@ export function Waitlist({ canManage = false }: { canManage?: boolean } = {}) {
     return () => clearTimeout(t);
   }, [search]);
 
+  // Only the newest request may draw: a slow answer for an older search must not
+  // land over the current one while the controls and the export say otherwise.
+  const generation = useRef(0);
   const load = useCallback(async () => {
-    try { setData(await api.waitlist(filters)); setError(null); } catch (e: any) { setError(e.message); }
+    const mine = ++generation.current;
+    try {
+      const got = await api.waitlist(filters);
+      if (mine === generation.current) { setData(got); setError(null); }
+    } catch (e: any) { if (mine === generation.current) setError(e.message); }
   }, [filters]);
   useEffect(() => { void load(); }, [load]);
 

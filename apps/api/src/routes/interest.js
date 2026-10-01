@@ -21,6 +21,7 @@
 
 import express from 'express';
 import { interestLimit, interestMailAllowed } from '../limits.js';
+import { deployed } from '../auth.js';
 import { readFileSync } from 'node:fs';
 
 /** What each form on epic.day says above its button, by source (`home`, `host`). */
@@ -118,7 +119,9 @@ export function interestRouter({ send = sendMail, configured = mailConfigured, m
       // A repeat is answered exactly as a first sign-up, and gets no second email.
       if (added && configured() && mailAllowed()) {
         try {
-          const mail = interestEmail({ source: signup.source, url: webUrl(req) });
+          // Deployed, never the request's Origin: anybody can post somebody else's
+          // address with their own Origin, and the button would carry it (Codex).
+          const mail = interestEmail({ source: signup.source, url: webUrl(deployed() ? { headers: {} } : req) });
           Promise.resolve(send({ to: signup.email, ...mail, purpose: 'interest' }))
             .catch((err) => console.error(`epic-api: interest — confirmation not sent: ${err.message}`));
         } catch (err) {

@@ -48,8 +48,33 @@ async function argon2id(password, salt, { memory, passes, parallelism, tagLength
   return argon2Async('argon2id', { message: Buffer.from(password, 'utf8'), nonce: salt, memory, passes, parallelism, tagLength });
 }
 
+/**
+ * How many key derivations run at once, and how many may wait. Each is tens of
+ * megabytes and tens of milliseconds by design, so a burst at the public doors —
+ * with a rate limit a forged header can step round — must not be able to take
+ * the whole API's memory and CPU (Codex, 1 Oct 2026). Past the queue the door
+ * answers "busy" rather than queueing without end.
+ */
+export const KDF_ACTIVE = 4;
+export const KDF_WAITING = 64;
+let active = 0;
+const waiting = [];
+export const kdfBusy = () => Object.assign(new Error('Too many sign-ins at once just now. Try again shortly.'), { code: 'kdf_busy', status: 429 });
+async function gated(work) {
+  if (active >= KDF_ACTIVE) {
+    if (waiting.length >= KDF_WAITING) throw kdfBusy();
+    await new Promise((resolve) => waiting.push(resolve));
+  }
+  active += 1;
+  try { return await work(); } finally {
+    active -= 1;
+    const next = waiting.shift();
+    if (next) next();
+  }
+}
+
 async function scrypt(password, salt, { N, r, p, keylen }) {
-  return scryptAsync(Buffer.from(password, 'utf8'), salt, keylen, { N, r, p, maxmem: scryptMaxmem({ N, r }) });
+  return gated(() => scryptAsync(Buffer.from(password, 'utf8'), salt, keylen, { N, r, p, maxmem: scryptMaxmem({ N, r }) }));
 }
 
 /** argon2id when the runtime has it. Exported apart so a test can pin the fallback. */
@@ -94,7 +119,7 @@ export async function verifyPassword(password, stored) {
     let got;
     if (algo === 'argon2id') {
       if (!argon2Async || !params.m || !params.t || !params.p) return false;
-      got = await argon2id(String(password ?? ''), salt, { memory: params.m, passes: params.t, parallelism: params.p, tagLength: expected.length });
+      got = await gated(() => argon2id(String(password ?? ''), salt, { memory: params.m, passes: params.t, parallelism: params.p, tagLength: expected.length }));
     } else if (algo === 'scrypt') {
       if (!params.N || !params.r || !params.p) return false;
       got = await scrypt(String(password ?? ''), salt, { N: params.N, r: params.r, p: params.p, keylen: expected.length });
@@ -102,7 +127,9 @@ export async function verifyPassword(password, stored) {
       return false;
     }
     return got.length === expected.length && crypto.timingSafeEqual(got, expected);
-  } catch {
+  } catch (err) {
+    // Busy is not a wrong password: it goes back to the door to say so.
+    if (err?.code === 'kdf_busy') throw err;
     return false;
   }
 }

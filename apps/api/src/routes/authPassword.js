@@ -24,7 +24,7 @@
 
 import express from 'express';
 import { closeSession, deployed, openSession, sessionCookie, sessionKindFor } from '../auth.js';
-import { signInLimit } from '../limits.js';
+import { passwordLimit, signInLimit } from '../limits.js';
 import {
   accountByEmail, accountById, consumeSignInLink, createSignInLink, inspectSignInLink, linkContactFor,
   markLinkSent, normaliseEmail, passwordFor, recentLinkCount, recordSignIn, setPassword,
@@ -51,6 +51,15 @@ const RESETS_PER_HOUR = 5;
 // Made now, not on the first failed log-in, so the first unknown address does not
 // take a hash's time longer than the rest and give itself away.
 dummyHash().catch(() => {});
+
+/** Per-account queue for the reset ceiling: each call waits for the one before it. */
+const resetQueues = new Map();
+async function oneAtATime(key, work) {
+  const before = resetQueues.get(key) ?? Promise.resolve();
+  const run = before.catch(() => {}).then(work);
+  resetQueues.set(key, run);
+  try { return await run; } finally { if (resetQueues.get(key) === run) resetQueues.delete(key); }
+}
 
 const WRONG = { error: 'wrong_credentials', message: 'Wrong email or password.' };
 const LOCKED = { error: 'locked_out', message: 'Too many attempts just now. Try again shortly.' };
@@ -113,7 +122,7 @@ export async function signIn(req, res, accountId, { verified = null, email = nul
  * checked instead, so an unknown address costs the same KDF run as a known one
  * and the response time cannot be used to find out who has an account.
  */
-router.post('/auth/login', signInLimit, async (req, res, next) => {
+router.post('/auth/login', passwordLimit, signInLimit, async (req, res, next) => {
   try {
     const email = normaliseEmail(req.body?.email);
     const password = passwordOf(req.body?.password);
@@ -166,7 +175,7 @@ async function sendReset(req, account) {
  * per account an hour, so it cannot be used to fill somebody's inbox. A lockout
  * on the address is honoured silently: still 200, nothing sent.
  */
-router.post('/auth/forgot', async (req, res) => {
+router.post('/auth/forgot', passwordLimit, async (req, res) => {
   const email = normaliseEmail(req.body?.email);
   res.json({ ok: true });
   if (!email) return;
@@ -174,8 +183,13 @@ router.post('/auth/forgot', async (req, res) => {
     if (await signInLockedOut(req, email)) return;
     const account = await accountByEmail(email);
     if (!account || account.status === 'suspended' || !account.email) return;
-    if (await recentLinkCount(account.id, { purpose: 'reset', minutes: 60 }) >= RESETS_PER_HOUR) return;
-    await sendReset(req, account);
+    // Counted and sent one at a time per account, so a burst of requests cannot
+    // all read "under five" before any of them has written its link (Codex,
+    // 1 Oct 2026). In-process: the API runs as one instance.
+    await oneAtATime(account.id, async () => {
+      if (await recentLinkCount(account.id, { purpose: 'reset', minutes: 60 }) >= RESETS_PER_HOUR) return;
+      await sendReset(req, account);
+    });
   } catch (err) {
     // The answer has gone; a failure here is the owner's to read, never the caller's.
     console.error('epic-api: password reset failed —', err.message);
@@ -191,7 +205,7 @@ router.post('/auth/forgot', async (req, res) => {
  * all). Looks only: the link is spent by the POST below, once a password has
  * been typed.
  */
-router.get('/auth/link/:token', signInLimit, async (req, res, next) => {
+router.get('/auth/link/:token', passwordLimit, signInLimit, async (req, res, next) => {
   try {
     const link = await inspectSignInLink(String(req.params.token || '').trim());
     const account = link ? await accountById(link.account_id) : null;
@@ -218,7 +232,7 @@ router.get('/auth/link/:token', signInLimit, async (req, res, next) => {
  * The password is hashed before the link is spent, so a hashing failure leaves
  * the link usable.
  */
-router.post('/auth/credentials', signInLimit, async (req, res, next) => {
+router.post('/auth/credentials', passwordLimit, signInLimit, async (req, res, next) => {
   try {
     const token = String(req.body?.token || '').trim();
     const password = passwordOf(req.body?.password);

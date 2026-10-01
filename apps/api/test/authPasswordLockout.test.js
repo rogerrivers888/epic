@@ -21,6 +21,8 @@ const { signInGuardConfig } = await import('../src/signInGuard.js');
 const authPassword = (await import('../src/routes/authPassword.js')).default;
 
 const app = express();
+// As server.js has it, so req.ip is the address the (test) proxy appended.
+app.set('trust proxy', 1);
 app.use(express.json());
 app.use('/api', authPassword);
 const server = app.listen(0);

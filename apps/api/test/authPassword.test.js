@@ -47,6 +47,8 @@ async function makeAccount({ email, name = null, staff = false, status = 'active
 }
 
 const app = express();
+// As server.js has it, so req.ip is the address the (test) proxy appended.
+app.set('trust proxy', 1);
 app.use(express.json());
 app.use('/api', authPassword);
 app.use('/api', sessionRoutes);
@@ -407,4 +409,26 @@ test('a log-in that verified the old password before a reset never keeps its ses
   assert.equal(body.error, 'wrong_credentials');
   const live = await query('select count(*)::int as n from api_sessions where account_id = $1 and revoked_at is null', [acct.id]);
   assert.equal(live.rows[0].n, 0, 'the session it opened is closed again');
+});
+
+test('a burst of resets for one account still sends at most five an hour', async () => {
+  const acct = await makeAccount({ email: 'burst@example.com', password: 'burst password 1' });
+  const log = captureLog();
+  try {
+    await Promise.all(Array.from({ length: 12 }, () => post('/api/auth/forgot', { email: 'burst@example.com' })));
+    await eventually(async () => (await query(`select count(*)::int n from sign_in_links where account_id = $1 and purpose = 'reset'`, [acct.id])).rows[0].n >= 5);
+    await new Promise((r) => setTimeout(r, 400));
+  } finally { log.restore(); }
+  const made = (await query(`select count(*)::int n from sign_in_links where account_id = $1 and purpose = 'reset'`, [acct.id])).rows[0].n;
+  assert.equal(made, 5, 'counted one at a time, so the ceiling holds under a burst');
+});
+
+test('past the hashing queue a password door answers busy, and the queue drains', async () => {
+  const { KDF_ACTIVE, KDF_WAITING } = passwords;
+  const stored = await passwords.hashPassword('queue password 1');
+  const all = Array.from({ length: KDF_ACTIVE + KDF_WAITING + 8 }, () => passwords.verifyPassword('queue password 1', stored).then((ok) => (ok ? 'ok' : 'no'), (err) => err.code));
+  const out = await Promise.all(all);
+  assert.ok(out.includes('kdf_busy'), 'beyond what may run or wait, busy');
+  assert.equal(out.filter((x) => x === 'ok').length, KDF_ACTIVE + KDF_WAITING, 'every one admitted verifies');
+  assert.equal(await passwords.verifyPassword('queue password 1', stored), true, 'and the gate is open again after');
 });
