@@ -10,3 +10,7 @@ alter table approvals add column if not exists ran_at timestamptz;
 alter table approvals drop constraint if exists approvals_state_check;
 alter table approvals add constraint approvals_state_check
   check (state in ('pending', 'approved', 'running', 'done', 'declined', 'failed', 'unknown', 'consumed', 'expired'));
+
+-- Legacy requests filed before approve-and-run have no stored payload, so they
+-- cannot be replayed faithfully — expire them; they are refiled if still wanted.
+update approvals set state = 'expired' where state in ('pending', 'approved', 'running');

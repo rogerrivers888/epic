@@ -25,6 +25,7 @@ export function Approvals() {
   const [rows, setRows] = useState<Approval[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try { setRows((await api.approvals('review')).approvals); } catch { setRows(null); }
@@ -32,16 +33,27 @@ export function Approvals() {
   useEffect(() => { void load(); }, [load]);
 
   const decide = async (id: string, decision: 'approved' | 'declined') => {
+    const was = rows?.find((r) => r.id === id);
     setBusy(id); setError(null);
-    try { await api.decideApproval(id, decision); await load(); } catch (e: any) {
+    try {
+      const out = await api.decideApproval(id, decision);
+      // Show what happened before the card clears from the review list.
+      const d = was?.description ?? 'The request';
+      if (decision === 'declined') setNotice(`${d} — ${was?.state === 'unknown' ? 'closed' : 'declined'}.`);
+      else if (out.result?.ok) setNotice(`${d} — done. ${out.result.message}`);
+      else if (out.approval.state === 'unknown') setNotice(`${d} — outcome unknown: ${out.result?.message ?? ''} Check before retrying.`);
+      else setNotice(`${d} — did not run (${out.result?.status}): ${out.result?.message ?? ''} It can be approved again.`);
+      await load();
+    } catch (e: any) {
       setError(e instanceof ApiError ? e.message : 'Could not reach Epic.');
     } finally { setBusy(null); }
   };
 
-  if (!rows || rows.length === 0) return null;
+  if (!rows || (rows.length === 0 && !notice)) return null;
   return (
     <Panel title="Waiting for you" sub="An agent has asked to do something only you may authorise.">
       {error ? <Text style={[type.small, { color: colors.overrun }]}>{error}</Text> : null}
+      {notice ? <Text style={[type.small, { color: colors.ink }]}>{notice}</Text> : null}
       {!elevated ? (
         <Text style={[type.small, { color: colors.ink }]}>Sign in with your e-mail link to approve or decline these.</Text>
       ) : null}
