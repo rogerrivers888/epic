@@ -13,6 +13,18 @@
  * rows. The script is at the repo root and `.dockerignore`d (`/*.mjs`), so it is
  * the record in git and never ships in the image.
  *
+ * ────────────────────────────────────────────────────────────────────────────
+ * DO NOT POINT THIS AT PRODUCTION BY HAND. Walking is already a live travel mode
+ * on Inspire, and until the read path consumes routed times — the display fence
+ * (`domain/band.js#fenceToBand`), the `/reach/from` provenance, and the guard
+ * that stops the estimator refresh writing `estimate` edges into an OSRM-owned
+ * mode — a production matrix would make the counts disagree with the list. The
+ * production build runs as a gated one-off Railway job behind an Approval card
+ * (owner, 1 Oct 2026: a larger instance if needed, torn down after, its cost and
+ * run time on the card). This stays the local and regional tool, and the shared
+ * core the Railway job calls.
+ * ────────────────────────────────────────────────────────────────────────────
+ *
  * Before running it, build the `.osrm` files once per profile (needs real RAM;
  * the whole-GB extract wants ~16GB for `osrm-extract`, so do it on a machine
  * with it, or a region at a time):
