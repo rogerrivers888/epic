@@ -24,11 +24,12 @@ router.patch('/sources/:key', requires('manage_settings'), requireOwnerSignedIn(
     if (!sourceKeys().includes(key)) return res.status(404).json({ error: 'unknown_source' });
     const on = Boolean(req.body?.on);
     if (on && !sourceHasKey(key)) return res.status(409).json({ error: 'no_key', message: 'This source has no key yet; the owner adds it through Doppler.' });
-    const off = await setSourceOff(key, !on);
+    // The owner's authorization, strictly and before the change: fail closed (G11).
     await writeAuditStrict({
       actorId: req.account?.id ?? null, actorLabel: req.account?.email ?? 'the owner',
       action: on ? 'source.on' : 'source.off', subjectType: 'source', subjectId: key, after: { on: on && sourceHasKey(key) },
     });
+    const off = await setSourceOff(key, !on);
     res.json({ key, on: on && sourceHasKey(key), off });
   } catch (err) {
     next(err);

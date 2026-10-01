@@ -41,7 +41,7 @@ import { firstHousehold } from '../repositories/households.js';
 import { invitationEmail, mailStatus, sendMail, webUrl } from '../sources/mail.js';
 import { HOUSEHOLD_MONTHLY_CALL_BOUND } from '../claude.js';
 import { requires, accessOf } from '../access.js';
-import { listPlans, recordPlanChange, priceOfPlan, writeAudit } from '../repositories/roles.js';
+import { listPlans, recordPlanChange, priceOfPlan, writeAudit, writeAuditStrict } from '../repositories/roles.js';
 
 const router = express.Router();
 
@@ -350,9 +350,18 @@ router.patch('/:id', requires('manage_accounts'), async (req, res, next) => {
     if (b.status === 'suspended' && before.role === 'owner') throw bad('The owner account cannot be suspended.');
     // A monthly call bound is a spend safeguard: changing it needs the owner
     // personally signed in, not the shared passcode (G11, 1 Oct 2026). Other
-    // fields (name, plan, status, note) stay ordinary manage.
-    if (b.monthlyCallBound !== undefined && Number(b.monthlyCallBound) !== Number(before.monthly_call_bound) && !accessOf(req).elevated) {
+    // fields (name, plan, status, note) stay ordinary manage. Compared without
+    // numeric coercion so null (the estate default) and 0 are not confused
+    // (Codex, 1 Oct 2026).
+    const newBound = b.monthlyCallBound === undefined ? undefined : (b.monthlyCallBound === null ? null : Number(b.monthlyCallBound));
+    const oldBound = before.monthly_call_bound == null ? null : Number(before.monthly_call_bound);
+    const boundChanging = newBound !== undefined && newBound !== oldBound;
+    if (boundChanging && !accessOf(req).elevated) {
       return res.status(403).json({ error: 'needs_personal_sign_in', message: 'Changing a spending bound needs you signed in personally with your e-mail link.' });
+    }
+    // Logged with the owner's name, strictly and before the change (G11).
+    if (boundChanging) {
+      await writeAuditStrict({ ...actor(req), action: 'account.bound', subjectType: 'account', subjectId: before.id, subjectLabel: before.email, before: { monthlyCallBound: oldBound }, after: { monthlyCallBound: newBound } });
     }
 
     const account = await updateAccount(req.params.id, {

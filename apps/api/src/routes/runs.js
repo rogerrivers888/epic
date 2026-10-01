@@ -69,10 +69,12 @@ router.put('/ceiling', requires('manage_settings'), requireOwnerSignedIn('change
     }
     const pence = Math.round(asked);
     const before = (await query("select value from app_settings where key = 'collect.ceiling_pence'")).rows[0]?.value ?? null;
+    // The owner's authorization, strictly and before the change: fail closed
+    // (G11) — if it cannot be recorded, the ceiling does not move.
+    await writeAuditStrict({ ...actor(req), action: 'collect.ceiling', subjectType: 'setting', subjectId: 'collect.ceiling_pence', before: { pence: before }, after: { pence } });
     await query(
       `insert into app_settings (key, value, updated_at) values ('collect.ceiling_pence', $1::jsonb, now())
        on conflict (key) do update set value = excluded.value, updated_at = now()`, [JSON.stringify(pence)]);
-    await writeAuditStrict({ ...actor(req), action: 'collect.ceiling', subjectType: 'setting', subjectId: 'collect.ceiling_pence', before: { pence: before }, after: { pence } });
     res.json({ pence });
   } catch (err) { next(err); }
 });
