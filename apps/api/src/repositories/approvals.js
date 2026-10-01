@@ -40,13 +40,55 @@ export function parseApprovalRequest(request) {
   return { method, path, query };
 }
 
+/**
+ * The plain-English brief every request must carry (owner, 1 Oct 2026: "show,
+ * in plain English, which chat asked, why, what will change, how many
+ * places/records are affected, and the expected cost (£0 if free), above the
+ * technical call. Reject filings that don't include these.").
+ *
+ *   chat        which chat is asking, as the owner would recognise it
+ *   why         the reason, in a sentence
+ *   change      what will be different once it has run
+ *   affected    { count, unit } — a whole number ≥ 0 and what it counts
+ *               ("places", "records", "owned points")
+ *   costPence   the expected cost in whole pence, 0 when it is free
+ *
+ * Returns `{ brief }`, or `{ missing }` naming every part that is absent or
+ * malformed, so one refusal tells the filer everything to fix. A count or a
+ * cost is a number the filer has to state: an absent one is missing, never
+ * read as nought. Kept in `numbers`, the column migration 314 set aside for
+ * "what it would affect (places, cost, rows)" — no schema change.
+ */
+export function parseApprovalBrief(body) {
+  const text = (v, max) => {
+    const s = typeof v === 'string' ? v.trim() : '';
+    return s ? s.slice(0, max) : null;
+  };
+  const whole = (v) => (Number.isSafeInteger(v) && v >= 0 ? v : null);
+  const chat = text(body?.chat, 120);
+  const why = text(body?.why, 600);
+  const change = text(body?.change, 600);
+  const count = whole(body?.affected?.count);
+  const unit = text(body?.affected?.unit, 40);
+  const costPence = whole(body?.costPence);
+  const missing = [];
+  if (!chat) missing.push('chat — which chat is asking');
+  if (!why) missing.push('why — the reason, in a sentence');
+  if (!change) missing.push('change — what will be different once it has run');
+  if (count == null || !unit) missing.push('affected — { count: a whole number, unit: "places" | "records" | … }');
+  if (costPence == null) missing.push('costPence — the expected cost in whole pence, 0 if free');
+  if (missing.length) return { missing };
+  return { brief: { chat, why, change, affected: { count, unit }, costPence } };
+}
+
 /** An agent files a request, with the fixed payload to replay. Returns the row. */
-export async function fileApproval({ sessionId = null, label = null, request, description, numbers = null, payload = null }) {
+export async function fileApproval({ sessionId = null, label = null, request, description, numbers = null, brief = null, payload = null }) {
+  const stored = brief ? { ...(numbers ?? {}), brief } : numbers;
   const { rows: [row] } = await query(
     `insert into approvals (session_id, requested_label, request, description, numbers, payload)
      values ($1, $2, $3, $4, $5, $6) returning *`,
     [sessionId, label, String(request).slice(0, 800), String(description).slice(0, 500),
-      numbers ? JSON.stringify(numbers) : null, payload == null ? null : JSON.stringify(payload)],
+      stored ? JSON.stringify(stored) : null, payload == null ? null : JSON.stringify(payload)],
   );
   return row;
 }

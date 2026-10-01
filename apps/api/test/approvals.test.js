@@ -149,3 +149,71 @@ test('the decide route runs an approved request end to end', async () => {
     assert.ok(rows.some((a) => a.action === 'approval.ran' && a.actor_label === 'roger@epic.day'));
   } finally { runApprovedCall.dispatch = prev; await new Promise((d) => s.close(d)); }
 });
+
+/**
+ * The plain-English brief (owner, 1 Oct 2026): every card says which chat
+ * asked, why, what will change, how many places/records, and the expected cost
+ * (£0 if free) above the technical call — and a filing without all of it is
+ * refused, with nothing written.
+ */
+const BRIEF = {
+  chat: 'epic-8c — G11 approvals',
+  why: 'The place index is stale after the re-fencing run.',
+  change: 'Every place is re-filed under the current categories.',
+  affected: { count: 11127, unit: 'places' },
+  costPence: 0,
+};
+
+test('parseApprovalBrief: all five parts are required, and a nought is a stated nought', () => {
+  const ok = approvals.parseApprovalBrief(BRIEF);
+  assert.deepEqual(ok.brief, BRIEF, 'a complete brief comes back whole');
+  assert.equal(approvals.parseApprovalBrief({ ...BRIEF, costPence: 0, affected: { count: 0, unit: 'records' } }).missing, undefined,
+    'free, and touching nothing, are both answers');
+
+  const none = approvals.parseApprovalBrief({});
+  assert.equal(none.missing.length, 5, 'an empty filing names all five');
+  for (const [field, bad] of [
+    ['chat', { chat: '  ' }], ['why', { why: '' }], ['change', { change: null }],
+    ['affected', { affected: { count: 12 } }], ['affected', { affected: { count: -1, unit: 'places' } }],
+    ['affected', { affected: { count: '12', unit: 'places' } }],
+    ['costPence', { costPence: undefined }], ['costPence', { costPence: -5 }], ['costPence', { costPence: 1.5 }],
+  ]) {
+    const r = approvals.parseApprovalBrief({ ...BRIEF, ...bad });
+    assert.equal(r.missing?.length, 1, `${field} ${JSON.stringify(bad)} is refused alone`);
+    assert.match(r.missing[0], new RegExp(`^${field}`));
+  }
+});
+
+test('the filing route refuses an incomplete brief and files a complete one', async () => {
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    req.access = { doors: ['admin'], capabilities: new Set(['view_activity']), isOwner: false, role: null, elevated: false };
+    req.session = { id: AGENT, label: 'epic-xx' };
+    next();
+  });
+  app.use('/admin', adminRoutes);
+  // eslint-disable-next-line no-unused-vars
+  app.use((err, _req, res, _next) => res.status(err.status ?? 500).json({ error: err.code, message: err.message }));
+  const s = app.listen(0);
+  await new Promise((r) => s.once('listening', r));
+  const file = (body) => fetch(`http://127.0.0.1:${s.address().port}/admin/approvals`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  try {
+    const before = (await query(`select count(*)::int as n from approvals where session_id = $1`, [AGENT])).rows[0].n;
+    const refused = await file({ request: REQ, description: 'Purge stale owned points', payload: {}, chat: 'epic-xx', why: 'stale' });
+    assert.equal(refused.status, 400);
+    const body = await refused.json();
+    assert.equal(body.error, 'brief_incomplete');
+    assert.match(body.message, /change/);
+    assert.match(body.message, /affected/);
+    assert.match(body.message, /costPence/);
+    const after = (await query(`select count(*)::int as n from approvals where session_id = $1`, [AGENT])).rows[0].n;
+    assert.equal(after, before, 'a refused filing writes nothing');
+
+    const filed = await file({ request: REQ, description: 'Purge stale owned points', payload: { ref: 'all' }, ...BRIEF });
+    assert.equal(filed.status, 201);
+    const { approval } = await filed.json();
+    assert.deepEqual(approval.numbers.brief, BRIEF, 'the brief is kept with the request');
+  } finally { await new Promise((d) => s.close(d)); }
+});

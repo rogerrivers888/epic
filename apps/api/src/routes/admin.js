@@ -838,16 +838,21 @@ router.post('/approvals', async (req, res, next) => {
   try {
     const request = String(req.body?.request || '').trim();
     const description = String(req.body?.description || '').trim();
-    if (!request || !description) throw bad('An approval needs the request (METHOD /path) and a one-line description.');
+    if (!request || !description) throw bad('An approval needs the request (METHOD /path), a one-line description, and the brief: chat, why, change, affected { count, unit }, costPence.');
     // The call must be a replayable back-office write, and never an approvals
     // endpoint (so approving cannot drive approving). The payload is fixed here
     // and cannot be edited after filing — what the owner approves is what runs.
     if (!approvals.parseApprovalRequest(request)) throw bad('That is not a request Approvals can run: a POST/PUT/PATCH/DELETE under /api/admin or /api/accounts, not an approvals call.');
+    // The owner reads the plain-English brief before the technical call; a
+    // filing without every part of it is refused, and nothing is written.
+    const parsed = approvals.parseApprovalBrief(req.body);
+    if (parsed.missing) throw bad(`Not filed. An approval must say, in plain English: ${parsed.missing.join('; ')}.`, 'brief_incomplete');
     const row = await approvals.fileApproval({
       sessionId: req.session?.id ?? null,
       label: req.session?.label ?? null,
       request, description,
       numbers: req.body?.numbers ?? null,
+      brief: parsed.brief,
       payload: req.body?.payload ?? null,
     });
     res.status(201).json({ approval: row });

@@ -1482,6 +1482,8 @@ export type SpendToday = {
 /** An agent session: anything holding the passcode that is not the app on a device (migration 264). */
 export type AgentSession = { id: string; label: string | null; created_at: string; last_seen_at: string | null; paid_grant_until: string | null; spent_24h_usd: number };
 export type ApprovalResult = { ok: boolean; status: number; message: string };
+/** The plain-English brief every approval carries (owner, 1 Oct 2026), held in `numbers.brief`. */
+export type ApprovalBrief = { chat: string; why: string; change: string; affected: { count: number; unit: string }; costPence: number };
 export type Approval = { id: string; request: string; description: string; numbers: Record<string, unknown> | null; payload: unknown | null; state: string; result: ApprovalResult | null; requested_label: string | null; session_label: string | null; decided_by: string | null; decided_at: string | null; ran_at: string | null; created_at: string };
 
 export type SpendLine = {
