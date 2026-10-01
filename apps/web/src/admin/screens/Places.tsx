@@ -3242,7 +3242,13 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
       else if (name === 'done') { setResearch((r) => (r ? { ...r, running: false, outcome: d?.state ?? r.outcome } : r)); settle(); }
     }).catch((e) => {
       if (mine()) setResearch((r) => (r ? { ...r, running: false, error: e?.body?.message ?? 'Research could not finish.' } : r));
-      settle();
+      // A preflight refusal — 409 already running, 422 over the ceiling, 503 busy,
+      // 401, 404 — means the run never started and nothing changed, so it is only
+      // reported, never settled: invalidating and reloading there would be wasted
+      // work and could itself spend. Only a break after the stream began may have
+      // left writes behind, and only that settles (Codex, 1 Oct 2026).
+      const preflight = typeof e?.status === 'number' && e.status >= 400;
+      if (!preflight) settle();
     });
   }, [canManage, research?.running, quote, refId, reload, onResearched]);
 
