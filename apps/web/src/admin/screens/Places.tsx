@@ -3082,7 +3082,7 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
   /** The price could not be fetched: the button says so and stays disabled rather than spend blind. */
   const [quoteErr, setQuoteErr] = useState(false);
   /** The stream, while it runs and after: the latest state per source, in order, and any fault. */
-  const [research, setResearch] = useState<{ running: boolean; steps: ResearchStep[]; error: string | null } | null>(null);
+  const [research, setResearch] = useState<{ running: boolean; steps: ResearchStep[]; error: string | null; outcome: string | null; problems: string[] } | null>(null);
   // The latest match setting, read through a ref so a reload fired by a stream
   // that started earlier uses the match state as it is now, not as it was when
   // the stream began — "Ask Google" pressed mid-research must not be undone by
@@ -3151,7 +3151,7 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
     if (!canManage || research?.running || !quote) return;
     const startedFor = refId;
     const mine = () => mountedRef.current && activeRef.current === startedFor; // tab still open, on this place
-    setResearch({ running: true, steps: [], error: null });
+    setResearch({ running: true, steps: [], error: null, outcome: null, problems: [] });
     const put = (s: ResearchStep) => setResearch((r) => {
       if (!r) return r;
       const i = r.steps.findIndex((x) => x.source === s.source);
@@ -3161,9 +3161,14 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
     api.adminResearchStream(refId, (name, d) => {
       if (!mine()) return; // a frame for a place the drawer has already left
       if (name === 'source') put(d as ResearchStep);
+      // What the record holds now, and how the pipeline judged the run: `done`
+      // (identified), `partial` (could not be pinned down) or `failed` (refused),
+      // with any problems it hit. The outcome decides what the panel says — not
+      // "filled in below" on a run that found nothing (Codex, 1 Oct 2026).
+      else if (name === 'kept') setResearch((r) => (r ? { ...r, outcome: d?.state ?? null, problems: Array.isArray(d?.problems) ? d.problems : [] } : r));
       else if (name === 'error') setResearch((r) => (r ? { ...r, running: false, error: String(d?.message ?? 'Research could not finish.') } : r));
       else if (name === 'done') {
-        setResearch((r) => (r ? { ...r, running: false } : r));
+        setResearch((r) => (r ? { ...r, running: false, outcome: d?.state ?? r.outcome } : r));
         reload();
         // Research may have filled a website, which makes the next run cheaper
         // (identify only, not identify-plus-find-page); re-price so the button
@@ -3243,9 +3248,18 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
               </Text>
             </View>
           ))}
+          {/* The outcome, said as the pipeline judged it — not "filled in below"
+              on a run that could not pin the place down or was refused (Codex,
+              1 Oct 2026). */}
           {research.error ? <Text style={styles.rowNote}>{research.error}</Text>
-            : !research.running && research.steps.length ? <Text style={styles.rowNote}>Done — our column is filled in below.</Text>
-            : null}
+            : research.running || !research.steps.length ? null
+            : research.outcome === 'partial'
+              ? <Text style={styles.rowNote} numberOfLines={3}>{`Couldn't pin this place down from the open sources, so our column may still be thin.${research.problems.length ? ` ${research.problems.join('; ')}` : ''}`}</Text>
+            : research.outcome && research.outcome !== 'done'
+              ? <Text style={styles.rowNote} numberOfLines={3}>{`Research couldn't finish.${research.problems.length ? ` ${research.problems.join('; ')}` : ''}`}</Text>
+            : <Text style={styles.rowNote} numberOfLines={3}>{research.problems.length
+                ? `Done — our column is filled in below. Some sources had nothing: ${research.problems.join('; ')}`
+                : 'Done — our column is filled in below.'}</Text>}
         </View>
       ) : null}
 
