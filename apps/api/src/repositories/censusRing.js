@@ -279,35 +279,55 @@ export function sectorsOfBox(box, universe) {
   }
   // Classify a wide box by the sectors that genuinely own ground in it — not by
   // sampling a handful of points (E9: owner 1 Oct 2026, "a box straddling the ring
-  // edge is unresolved, not inside"). Two exact sources, no guessing at whether a
-  // distant neighbour reaches in:
+  // edge is unresolved, not inside"). Three exact sources, no guessing:
   //   · every sector with a point physically inside the box — that point is in the
-  //     box, so that sector certainly owns ground there; and
-  //   · the sector nearest each corner and the middle — those box points are owned
-  //     by whatever is nearest them, near or far.
+  //     box, so that sector certainly owns ground there;
+  //   · the sector nearest each corner and the middle; and
+  //   · a sector just outside the box (within a fine tile) only when it owns the box
+  //     boundary point nearest it — its nearest-point region genuinely reaches in.
   // Any of those sectors being out of the ring means the box holds out-of-ring
   // ground and straddles. Every code added owns a real box point, so this never
-  // fences a wholly-in-ring box (no margin guesswork). The overstatement it fixes —
-  // a nine-kilometre tile counted "inside" off four in-ring corners while out-of-ring
-  // ground sat in its middle — cannot recur. The residual it cannot see — an
-  // out-of-ring seed just outside an edge, between the corners, whose region clips
-  // the edge — is the same the old corner test had, and the finer census (splitting
-  // these tiles to the fine grid) resolves it.
+  // fences a wholly-in-ring box, and the straddle an out-of-ring neighbour makes
+  // between the corners — which planEdge would never be told to resolve — is caught
+  // here rather than counted. The only residual is a neighbour whose region reaches
+  // the box at a boundary point other than the one nearest it, a measure-zero edge
+  // the finer census (splitting these tiles to the fine grid) settles.
   const codes = new Set(); const outcodes = new Set(); let one = null;
   const note = (best) => { if (best) { codes.add(best.code); if (best.outcode != null) outcodes.add(best.outcode); one = best; } };
-  const inside = typeof universe?.within === 'function'
-    ? universe.within(box)
-    : (Array.isArray(universe) ? universe.filter((p) => p.lat >= box.minLat && p.lat <= box.maxLat && p.lng >= box.minLng && p.lng <= box.maxLng) : []);
+  const midLat = (box.minLat + box.maxLat) / 2;
+  const mLat = FINE_M / 111320;
+  const mLng = FINE_M / (111320 * Math.max(0.2, Math.cos((midLat * Math.PI) / 180)));
+  const exp = { minLat: box.minLat - mLat, maxLat: box.maxLat + mLat, minLng: box.minLng - mLng, maxLng: box.maxLng + mLng };
+  const near = typeof universe?.within === 'function'
+    ? universe.within(exp)
+    : (Array.isArray(universe) ? universe.filter((p) => p.lat >= exp.minLat && p.lat <= exp.maxLat && p.lng >= exp.minLng && p.lng <= exp.maxLng) : []);
+  const inBox = (p) => p.lat >= box.minLat && p.lat <= box.maxLat && p.lng >= box.minLng && p.lng <= box.maxLng;
   // One owner per location: two points at the same spot with different sector codes
   // resolve, as `nearestSector` does, to the lexicographically lower code — so a
   // collocated pair does not invent a second sector and a false straddle (Codex).
   const byLoc = new Map();
-  for (const p of inside) {
+  for (const p of near) {
+    if (!inBox(p)) continue;
     const k = `${p.lat},${p.lng}`;
     const prev = byLoc.get(k);
     if (!prev || p.code < prev.code) byLoc.set(k, p);
   }
   for (const p of byLoc.values()) note({ code: p.code, outcode: p.outcode ?? null });
+  // A seed just OUTSIDE the box is added only when its nearest-point region actually
+  // reaches in — tested exactly, by whether it owns the box-boundary point nearest
+  // it (its clamp point). This catches an out-of-ring seed sitting beyond an edge,
+  // between the corners, whose region clips the box (the straddle planEdge would
+  // never be told to resolve), without fencing a neighbour whose region never
+  // reaches the box (Codex).
+  for (const p of near) {
+    if (inBox(p)) continue;
+    const q = {
+      lat: Math.min(Math.max(p.lat, box.minLat), box.maxLat),
+      lng: Math.min(Math.max(p.lng, box.minLng), box.maxLng),
+    };
+    const owner = nearestSector(q, universe);
+    if (owner && owner.code === p.code && owner.lat === p.lat && owner.lng === p.lng) note({ code: p.code, outcode: p.outcode ?? null });
+  }
   for (const p of cornersOf(box)) note(nearestSector(p, universe));
   if (!codes.size) return { kind: 'nowhere' };
   if (codes.size === 1) return { kind: 'inside', code: one.code, outcode: one.outcode ?? null };
