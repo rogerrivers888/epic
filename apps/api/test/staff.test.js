@@ -20,6 +20,7 @@ const { query, pool } = await testDatabase();
 const staffRepo = await import('../src/repositories/staff.js');
 const accounts = await import('../src/repositories/accounts.js');
 const rolesRepo = await import('../src/repositories/roles.js');
+const insights = await import('../src/repositories/insights.js');
 const mail = await import('../src/sources/mail.js');
 const access = await import('../src/access.js');
 const staffRoutes = (await import('../src/routes/staff.js')).default;
@@ -139,6 +140,31 @@ test('an e-mail that is already a customer is given back-office access, not refu
   assert.equal(rows[0].id, customer.id);
   assert.equal(rows[0].household_id, customer.household_id);
   assert.ok(await staffRepo.staffById(customer.id), 'they are on staff now');
+});
+
+test('a suspended customer is refused, not handed a link that cannot work', async () => {
+  const customer = await accounts.createAccount({ email: 'sus@home.test', name: 'Sus' });
+  await accounts.updateAccount(customer.id, { status: 'suspended' });
+  const support = await roleId('support');
+  const { status, body } = await call('POST', '/api/admin/staff', { name: 'Sus', email: 'sus@home.test', roleId: support });
+  assert.equal(status, 409);
+  assert.equal(body.error, 'suspended');
+  assert.equal(await staffRepo.staffById(customer.id), null, 'no back-office role was granted');
+});
+
+test('a staff account does not count as a customer in estate reporting', async () => {
+  // A staff account carries a plan but no household (migration 318); the estate
+  // figures count customers, so adding staff must not move them (Codex, P2).
+  const support = await roleId('support');
+  const before = await insights.estateTotals();
+  await call('POST', '/api/admin/staff', { name: 'Counted?', email: 'counted@epic.day', roleId: support });
+  const afterStaff = await insights.estateTotals();
+  assert.equal(afterStaff.accounts, before.accounts, 'a staff member is not a customer account');
+  assert.equal(afterStaff.invited, before.invited, 'nor an invited customer');
+  // A real customer does move the figure, so the test is not vacuous.
+  await accounts.createAccount({ email: 'real@home.test', name: 'Real' });
+  const afterCustomer = await insights.estateTotals();
+  assert.equal(afterCustomer.accounts, before.accounts + 1, 'a customer still counts');
 });
 
 // ---------------------------------------------------------------------------

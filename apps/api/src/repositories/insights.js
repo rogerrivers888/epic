@@ -37,7 +37,9 @@ export async function mrrByPlan() {
             coalesce(sum(p.price_pence) filter (where a.status <> 'suspended'), 0)::int          as mrr_pence,
             count(a.id) filter (where a.status <> 'suspended' and p.price_pence is null)::int    as unpriced
        from plans p
-       left join accounts a on a.plan = p.key
+       -- Customers only: a staff account carries a plan but no household
+       -- (migration 318), and counting it here would inflate a plan's households.
+       left join accounts a on a.plan = p.key and a.household_id is not null
       group by p.key, p.label, p.price_pence, p.position
       order by p.position`,
   );
@@ -76,7 +78,8 @@ export async function revenueByMonth({ months = 12 } = {}) {
          -- Left-joined, not cross-joined: with nobody on the books the months
          -- still come back as zeros, and a chart of nothing is a chart rather
          -- than an empty screen that looks broken.
-         from span s left join accounts a on true
+         -- Customers only: staff accounts have no household (migration 318).
+         from span s left join accounts a on a.household_id is not null
      )
      select to_char(st.month, 'YYYY-MM') as month,
             count(*) filter (where st.existed and st.status <> 'suspended')::int as households,
@@ -154,11 +157,13 @@ export async function estateTotals() {
   const { rows } = await query(
     `select
        (select count(*)::int from households)                                                 as households,
-       (select count(*)::int from accounts)                                                   as accounts,
-       (select count(*)::int from accounts where status = 'active')                           as active_accounts,
-       (select count(*)::int from accounts where status = 'invited')                          as invited,
-       (select count(*)::int from accounts where status = 'suspended')                        as suspended,
-       (select count(*)::int from accounts where created_at >= date_trunc('month', now()))    as joined_this_month,
+       -- Customers only: staff accounts have no household (migration 318), so
+       -- they are excluded from every "accounts" figure the estate reports.
+       (select count(*)::int from accounts where household_id is not null)                     as accounts,
+       (select count(*)::int from accounts where household_id is not null and status = 'active')    as active_accounts,
+       (select count(*)::int from accounts where household_id is not null and status = 'invited')   as invited,
+       (select count(*)::int from accounts where household_id is not null and status = 'suspended') as suspended,
+       (select count(*)::int from accounts where household_id is not null and created_at >= date_trunc('month', now())) as joined_this_month,
        (select count(*)::int from members)                                                    as people,
        (select count(*)::int from household_places)                                           as places,
        (select count(*)::int from trips)                                                      as trips,
@@ -182,7 +187,8 @@ export async function ceilingPressure() {
     `select a.id as account_id, a.email, a.monthly_call_bound,
             (select count(*)::int from provider_calls c
               where c.household_id = a.household_id and c.created_at >= date_trunc('month', now())) as calls
-       from accounts a`,
+       from accounts a
+      where a.household_id is not null`,
   );
   return rows;
 }

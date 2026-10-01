@@ -175,6 +175,13 @@ router.post('/', requires('manage_staff'), async (req, res, next) => {
       if (await staffById(existing.id)) {
         return res.status(409).json({ error: 'already_staff', message: 'Already on staff.', staff: await enriched(existing.id) });
       }
+      // A suspended customer cannot be handed a working link — consumeSignInLink
+      // refuses every link while an account is suspended — so granting the role
+      // and reporting an invitation sent would be a lie. Refuse, and say what to
+      // do: let them back in first, on the Accounts screen.
+      if (existing.status === 'suspended') {
+        throw bad('That account is suspended. Make it active on the Accounts screen before adding them to staff.', 'suspended', 409);
+      }
       // A customer being given back-office access. Keep everything they have;
       // add the door.
       account = await setStaffRole(existing.id, role.id);

@@ -118,7 +118,7 @@ export async function setAccountRole(accountId, roleId) {
 
 export async function listPlans({ includeInactive = true } = {}) {
   const { rows } = await query(
-    `select p.*, (select count(*)::int from accounts a where a.plan = p.key and a.status <> 'suspended') as people
+    `select p.*, (select count(*)::int from accounts a where a.plan = p.key and a.status <> 'suspended' and a.household_id is not null) as people
        from plans p
       where $1 or p.active
       order by p.position, p.key`,
