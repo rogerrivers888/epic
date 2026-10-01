@@ -39,9 +39,8 @@
  */
 
 import express from 'express';
-import pg from 'pg';
 import { requires } from '../access.js';
-import { connectionString, query } from '../db.js';
+import { lockPool, query } from '../db.js';
 import { currentHousehold } from './household.js';
 import { enrich } from '../sources/own.js';
 import { googleSource, rankedSlice } from '../sources/google.js';
@@ -61,11 +60,12 @@ const bad = (message, code = 'bad_request') => Object.assign(new Error(message),
 // A Postgres advisory lock keyed on the ref spans every process.
 //
 // A session advisory lock lives on its connection for the life of the run, and a
-// run is slow (external sources, Overpass timeouts). Holding a *pooled* connection
-// that long would starve the main pool — ten concurrent runs could take all ten
-// and then deadlock waiting for an eleventh for their own queries (Codex, 1 Oct
-// 2026). So the lock sits on a standalone client, opened and closed per run,
-// outside the pool the rest of the request uses.
+// run is slow (external sources, Overpass timeouts). It is held on a connection
+// from the small, separate `lockPool` (db.js), not the main pool and not an
+// unbounded standalone client (Codex, 1 Oct 2026): a long-held lock connection
+// must not starve ordinary API queries, and a bounded pool means enough
+// concurrent runs can never exhaust Postgres either. When every lock connection
+// is taken, a further run is told the desk is busy rather than left to wait.
 const researchLock = (ref) => `epic.research.${ref}`;
 
 /** Pence at the list price, to two places — the same arithmetic the rest of Places prices with. */
@@ -203,12 +203,14 @@ router.post('/research', requires('manage_library'), async (req, res, next) => {
 
   // One run per place at a time, across every worker: a second press (a remounted
   // tab, a retry, a request on another replica) is turned away rather than left to
-  // spend and write beside the first. A standalone connection, not a pooled one,
+  // spend and write beside the first. A connection from the bounded lock pool
   // holds the lock for the life of the run.
-  const holder = new pg.Client({ connectionString });
+  const holder = await lockPool.connect().catch(() => null);
+  if (!holder) {
+    return res.status(503).json({ error: 'lock_desk_busy', message: 'Too many places are being researched right now — give it a moment and try again.' });
+  }
   let locked = false;
   try {
-    await holder.connect();
     ({ rows: [{ locked }] } = await holder.query('select pg_try_advisory_lock(hashtext($1)) as locked', [researchLock(ref)]));
     if (!locked) {
       return res.status(409).json({ error: 'already_running', message: 'This place is being researched right now — give it a moment.' });
@@ -249,10 +251,10 @@ router.post('/research', requires('manage_library'), async (req, res, next) => {
     }
   } finally {
     // Whatever happened — the lock refused, the lock query failing, the run
-    // throwing — the lock goes back and the standalone connection is closed.
-    // (Closing it releases the lock in any case; the explicit unlock is tidy.)
+    // throwing — the lock is released before the connection goes back to the lock
+    // pool, so the next holder of that connection never inherits it.
     if (locked) await holder.query('select pg_advisory_unlock(hashtext($1))', [researchLock(ref)]).catch(() => null);
-    await holder.end().catch(() => null);
+    holder.release();
   }
 });
 

@@ -6,9 +6,8 @@ import pg from 'pg';
 // DATE columns come back as 'YYYY-MM-DD', not a local-midnight Date that shifts with timezone.
 pg.types.setTypeParser(1082, (v) => v);
 
-// The one place the database address is spelled, so the pool and any standalone
-// client (a long-held advisory lock that must not sit on a pooled connection)
-// agree on where to connect.
+// The one place the database address is spelled, so the main pool and the small
+// lock pool below agree on where to connect.
 export const connectionString =
   process.env.DATABASE_URL || 'postgres://epic:epic@localhost:5432/epic';
 
@@ -24,6 +23,22 @@ export const pool = new pg.Pool({
 });
 
 export const query = (text, params) => pool.query(text, params);
+
+/**
+ * A small, separate pool for session advisory locks that must be held for the
+ * length of a slow job (the "research this place" run holds one for the whole
+ * external-source pipeline). It is kept apart from the main pool on purpose
+ * (Codex, 1 Oct 2026): a long-held lock connection must not starve ordinary API
+ * queries, and it is bounded so enough concurrent holders can never exhaust
+ * Postgres's own connection limit either. A caller that cannot get one inside
+ * `connectionTimeoutMillis` is told the lock desk is busy rather than left to
+ * wait. Two under test, where connections are scarce and locks rare.
+ */
+export const lockPool = new pg.Pool({
+  connectionString,
+  max: process.env.NODE_ENV === 'test' || process.env.EPIC_TEST_POOL ? 1 : 3,
+  connectionTimeoutMillis: 3000,
+});
 
 /**
  * Is the database answering?
