@@ -76,7 +76,7 @@ test('the request\u2019s own account is the spender when nothing else says', asy
       () => runAsAccount({ household_id: HH }, () => googleSource.brief('ChIJ_capped_req', { meter: {} })),
       (e) => e.code === 'unattributed_paid_call');
     assert.equal(left(), 0);
-    assert.deepEqual(runAsAccount({ household_id: HH }, () => currentSpender()), { householdId: HH, sessionId: null });
+    assert.deepEqual(runAsAccount({ household_id: HH }, () => currentSpender()), { householdId: HH, sessionId: null, backOffice: false, elevated: false });
   });
 });
 
