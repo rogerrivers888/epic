@@ -379,7 +379,10 @@ export async function ownedNameGaps() {
   const { rows: [r] } = await query(`
     with owned as (
       select venue_ref from place_records where name is not null and (provenance ->> 'name') is not null
-      union select coalesce(venue_ref, 'atlas:' || id::text) from attractions where name is not null and display_source is distinct from 'google'
+      -- An owned attraction answers to all three of its references (Codex, 1 Oct 2026).
+      union select venue_ref from attractions where name is not null and display_source is distinct from 'google' and venue_ref is not null
+      union select external_ref from attractions where name is not null and display_source is distinct from 'google' and external_ref is not null
+      union select 'atlas:' || id::text from attractions where name is not null and display_source is distinct from 'google'
       union select venue_ref from scout_places where name is not null
         and (venue_ref like 'osm:%' or venue_ref like 'atlas:%' or venue_ref like 'wikidata:%' or venue_ref like 'own:%')
     )
