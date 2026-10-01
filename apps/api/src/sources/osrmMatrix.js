@@ -24,9 +24,22 @@
  * routed time over open data is our own derived fact, kept like any other.
  */
 
-import { query } from '../db.js';
+import { pool, query } from '../db.js';
 import { boundKm, HORIZON_MINUTES } from '../domain/reach.js';
 import { kmBetween, travelMode } from '../domain/travel.js';
+
+/**
+ * How much wider than the estimator's bound to cast the net for candidates.
+ *
+ * `boundKm` is derived from the straight-line estimator, and OSRM's foot profile
+ * is a touch faster than the estimator's walking speed — so a route OSRM would
+ * do inside the horizon can sit just past the estimator's bound and be filtered
+ * out before OSRM is ever asked (Codex, P2). The candidate bound only decides
+ * what to *ask* about; asking about a few cells OSRM then rejects is free, so it
+ * is cast half again as wide and the horizon filter on the real routed time is
+ * what actually decides.
+ */
+const CANDIDATE_SLACK = 1.5;
 
 /**
  * An OSRM `/table` client, bound to one running `osrm-routed`.
@@ -70,7 +83,13 @@ export function osrmTable(baseUrl, { fetchImpl = fetch, profile = 'driving' } = 
  * is written as the origin finishes, so an interrupted pass leaves a table that
  * is short rather than wrong and `resume` can pick it up.
  *
- *   `cells`     the grid: `{ code, lat, lng }`, as `allCells` returns.
+ *   `cells`     the candidate grid: `{ code, lat, lng }`, as `allCells` returns
+ *               — every cell an origin may reach to.
+ *   `origins`   the cells to build *from* (defaults to `cells`). A regional
+ *               build passes a smaller, interior set here while keeping the full
+ *               region as candidates, so a boundary origin is left unbuilt
+ *               rather than marked complete with its cross-boundary neighbours
+ *               missing (Codex, P1).
  *   `table`     an OSRM client from `osrmTable` (or any `(origin, dests) =>`
  *               `[{ to, seconds, metres }]` for a test).
  *   `horizon`   how far out to build, in minutes — the cap plus the edge
@@ -80,7 +99,7 @@ export function osrmTable(baseUrl, { fetchImpl = fetch, profile = 'driving' } = 
  *               must be at least this plus one).
  */
 export async function buildOsrmMode({
-  mode, cells, table, horizon = HORIZON_MINUTES, scheme = 'sector',
+  mode, cells, origins = cells, table, horizon = HORIZON_MINUTES, scheme = 'sector',
   resume = true, chunk = 300, onProgress = null,
 } = {}) {
   const canonical = travelMode(mode);
@@ -89,18 +108,18 @@ export async function buildOsrmMode({
     // here and keeps its marked straight-line estimate (owner, 1 Oct 2026).
     throw new Error(`osrm matrix is walking or cycling, not ${mode}`);
   }
-  const bound = boundKm(horizon, canonical);
+  const bound = boundKm(horizon, canonical) * CANDIDATE_SLACK;
   const { rows: [run] } = await query(
     `insert into reach_runs (scheme, mode, method, cap_minutes, cells)
      values ($1, $2, 'osrm', $3, $4) returning id`,
-    [scheme, canonical, horizon, cells.length],
+    [scheme, canonical, horizon, origins.length],
   );
   let pairs = 0;
   let built = 0;
   let skipped = 0;
   try {
-    for (let i = 0; i < cells.length; i += 1) {
-      const from = cells[i];
+    for (let i = 0; i < origins.length; i += 1) {
+      const from = origins[i];
       if (resume) {
         const { rows } = await query(
           `select 1 from cell_builds where from_cell = $1 and mode = $2
@@ -110,8 +129,8 @@ export async function buildOsrmMode({
         if (rows.length) { skipped += 1; continue; }
       }
       // The straight-line bound only decides which cells are worth asking OSRM
-      // about; OSRM decides the real time. Generous on purpose — a footpath or a
-      // towpath can be shorter than the open-road bound, never longer.
+      // about; OSRM decides the real time. Cast wide (CANDIDATE_SLACK) — a
+      // footpath or a towpath can be shorter than the open-road bound.
       const cands = cells.filter((c) => c.code !== from.code
         && Math.abs(c.lat - from.lat) * 111 <= bound
         && kmBetween(from, c) <= bound);
@@ -131,28 +150,42 @@ export async function buildOsrmMode({
           edges.push({ to_cell: a.to.code, minutes, km });
         }
       }
-      await query('delete from reach where from_cell = $1 and mode = $2', [from.code, canonical]);
-      await query(
-        `insert into reach (from_cell, to_cell, mode, minutes, km, method)
-         select $1, t, $2, m, k, 'osrm'
-           from unnest($3::text[], $4::smallint[], $5::real[]) as u(t, m, k)
-         on conflict (from_cell, to_cell, mode)
-           do update set minutes = excluded.minutes, km = excluded.km, method = excluded.method`,
-        [from.code, canonical, edges.map((e) => e.to_cell), edges.map((e) => e.minutes), edges.map((e) => e.km)],
-      );
-      await query(
-        `insert into cell_builds (from_cell, mode, cap_minutes, pairs, method, built_lat, built_lng, at)
-         values ($1, $2, $3, $4, 'osrm', $5, $6, now())
-         on conflict (from_cell, mode) do update
-           set cap_minutes = excluded.cap_minutes, pairs = excluded.pairs,
-               method = excluded.method, built_lat = excluded.built_lat,
-               built_lng = excluded.built_lng, at = excluded.at`,
-        [from.code, canonical, horizon, edges.length, from.lat, from.lng],
-      );
+      // The delete, the rows and the marker are one transaction per origin, so
+      // an interruption leaves an origin either fully built or untouched —
+      // never wiped-then-marked-complete, which a reader would trust and a
+      // resume would skip for good (Codex).
+      const client = await pool.connect();
+      try {
+        await client.query('begin');
+        await client.query('delete from reach where from_cell = $1 and mode = $2', [from.code, canonical]);
+        await client.query(
+          `insert into reach (from_cell, to_cell, mode, minutes, km, method)
+           select $1, t, $2, m, k, 'osrm'
+             from unnest($3::text[], $4::smallint[], $5::real[]) as u(t, m, k)
+           on conflict (from_cell, to_cell, mode)
+             do update set minutes = excluded.minutes, km = excluded.km, method = excluded.method`,
+          [from.code, canonical, edges.map((e) => e.to_cell), edges.map((e) => e.minutes), edges.map((e) => e.km)],
+        );
+        await client.query(
+          `insert into cell_builds (from_cell, mode, cap_minutes, pairs, method, built_lat, built_lng, at)
+           values ($1, $2, $3, $4, 'osrm', $5, $6, now())
+           on conflict (from_cell, mode) do update
+             set cap_minutes = excluded.cap_minutes, pairs = excluded.pairs,
+                 method = excluded.method, built_lat = excluded.built_lat,
+                 built_lng = excluded.built_lng, at = excluded.at`,
+          [from.code, canonical, horizon, edges.length, from.lat, from.lng],
+        );
+        await client.query('commit');
+      } catch (err) {
+        await client.query('rollback').catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
       pairs += edges.length;
       built += 1;
       if (onProgress && i % 100 === 0) {
-        try { onProgress({ done: i + 1, of: cells.length, built, skipped, pairs }); } catch { /* not the build */ }
+        try { onProgress({ done: i + 1, of: origins.length, built, skipped, pairs }); } catch { /* not the build */ }
       }
     }
     await query('update reach_runs set state = $2, pairs = $3, finished_at = now() where id = $1', [run.id, 'done', pairs]);

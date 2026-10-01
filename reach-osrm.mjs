@@ -40,7 +40,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { query, pool } from './apps/api/src/db.js';
 import { allCells } from './apps/api/src/repositories/reach.js';
-import { HORIZON_MINUTES } from './apps/api/src/domain/reach.js';
+import { HORIZON_MINUTES, boundKm } from './apps/api/src/domain/reach.js';
 import { osrmTable, buildOsrmMode } from './apps/api/src/sources/osrmMatrix.js';
 
 const IMAGE = process.env.EPIC_OSRM_IMAGE || 'ghcr.io/project-osrm/osrm-backend:latest';
@@ -110,13 +110,28 @@ async function run() {
     let container = null;
     const t0 = Date.now();
     console.log(`\n== ${mode} (${PROFILE[mode]}) ==`);
+    // A regional (bbox) build must not mark a boundary origin complete when its
+    // reach crosses out of the extract: route to every cell in the box, but
+    // build *from* only the origins whose whole horizon stays inside it, by the
+    // same wide bound the candidate search uses (Codex, P1). The rest are left
+    // for the build that covers them. Whole-GB (no bbox) builds every origin.
+    let origins = cells;
+    if (BBOX.length === 4) {
+      const km = boundKm(HORIZON, mode) * 1.5;
+      const midLat = (BBOX[1] + BBOX[3]) / 2;
+      const dLat = km / 111;
+      const dLng = km / (111 * Math.cos((midLat * Math.PI) / 180));
+      origins = cells.filter((c) => c.lng >= BBOX[0] + dLng && c.lat >= BBOX[1] + dLat
+        && c.lng <= BBOX[2] - dLng && c.lat <= BBOX[3] - dLat);
+      console.log(`  ${origins.length} interior origins (of ${cells.length} in box), routing to all ${cells.length}`);
+    }
     try {
       container = startRouted(DATA[mode]);
       console.log(`osrm-routed ${container.slice(0, 12)} on :${PORT}, waiting…`);
       if (!(await waitReady(sample))) throw new Error('osrm-routed did not become ready in 60s');
       const table = osrmTable(`http://127.0.0.1:${PORT}`, { profile: PROFILE[mode] });
       const res = await buildOsrmMode({
-        mode, cells, table, horizon: HORIZON, scheme: SCHEME, resume: RESUME, chunk: CHUNK,
+        mode, cells, origins, table, horizon: HORIZON, scheme: SCHEME, resume: RESUME, chunk: CHUNK,
         onProgress: ({ done, of, built, skipped, pairs }) =>
           console.log(`  ${done}/${of} (built ${built}, skipped ${skipped}, ${pairs} pairs)`),
       });
