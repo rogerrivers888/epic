@@ -29,7 +29,7 @@
  * no name here at all, and the nameless row *is* the finding.
  */
 
-import React, { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../../components/press';
 import { Icon } from '../../components/Icon';
@@ -3084,9 +3084,14 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
   const reload = useCallback(() => { setData(null); api.adminPlaceCompare(refId, match).then(setData).catch(() => setData(null)); }, [refId, match]);
   useEffect(() => { reload(); }, [reload]);
   useEffect(() => { api.adminPlaceReach(refId).then(setReach).catch(() => setReach(null)); }, [refId]);
+  // Which place the drawer is on now. A research stream outlives a change of
+  // place — the drawer is one component the ref flows through, not a remount —
+  // so every frame checks this before it touches state: a late frame or final
+  // reload from the place you just left must never overwrite the one you are on.
+  const activeRef = useRef<string>(refId);
   // The quote and any running stream belong to the place on screen; both reset
   // when it changes, so a half-finished run is never read against another place.
-  useEffect(() => { setResearch(null); setQuote(null); api.adminResearchQuote(refId).then(setQuote).catch(() => setQuote(null)); }, [refId]);
+  useEffect(() => { activeRef.current = refId; setResearch(null); setQuote(null); api.adminResearchQuote(refId).then(setQuote).catch(() => setQuote(null)); }, [refId]);
 
   /**
    * Research this place — run the owned pipeline now and watch it. Each `source`
@@ -3096,6 +3101,8 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
    */
   const runResearch = useCallback(() => {
     if (!canManage || research?.running) return;
+    const startedFor = refId;
+    const mine = () => activeRef.current === startedFor; // the drawer has not moved on
     setResearch({ running: true, steps: [], error: null });
     const put = (s: ResearchStep) => setResearch((r) => {
       if (!r) return r;
@@ -3104,6 +3111,7 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
       return { ...r, steps };
     });
     api.adminResearchStream(refId, (name, d) => {
+      if (!mine()) return; // a frame for a place the drawer has already left
       if (name === 'source') put(d as ResearchStep);
       else if (name === 'error') setResearch((r) => (r ? { ...r, running: false, error: String(d?.message ?? 'Research could not finish.') } : r));
       else if (name === 'done') {
@@ -3111,7 +3119,7 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
         reload();
         onResearched?.();
       }
-    }).catch((e) => setResearch((r) => (r ? { ...r, running: false, error: e?.body?.message ?? 'Research could not finish.' } : r)));
+    }).catch((e) => { if (mine()) setResearch((r) => (r ? { ...r, running: false, error: e?.body?.message ?? 'Research could not finish.' } : r)); });
   }, [canManage, research?.running, refId, reload, onResearched]);
 
   if (!data) return <Waiting />;
@@ -3204,21 +3212,25 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
             const v = say(r.cells[c.key]);
             return (
               <View key={c.key} style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                {/* A whole column that was never asked says so on every row of
-                    it: three different facts had collapsed into one dash
-                    (Codex, 17 Sep 2026). */}
-                {c.state !== 'held' ? missing(c)
+                {/* The "ours" column is read for what is absent, so a hole here
+                    speaks. A hole Google could fill reads "Google has this" — the
+                    marker points at it, the content stays Google's, shown and
+                    never copied in (owner, 29 Sep 2026). This has to win over the
+                    column-wide state: an identified-only place has no owned record
+                    at all, so every "ours" cell is no-match, yet the gaps are real
+                    and were counted (Codex, 1 Oct 2026). Otherwise our own blank
+                    is said in words, not a dash (18 Sep 2026, the separate audit).
+                    A whole provider column never asked says so on every row — three
+                    different facts had collapsed into one dash (Codex, 17 Sep). */}
+                {c.key === 'ours'
+                  ? (v ? <Text style={styles.fieldValue} numberOfLines={2}>{v}</Text>
+                      : isGap(r) ? <Explain tip={['Google has this', 'Google holds a value for this and we do not. “Research this place” may fill ours from what the place publishes; a provider’s value is only ever shown, never kept.']}><Word accent>Google has this</Word></Explain>
+                      : c.state === 'held' ? <Explain tip="weHoldNoneOfThis"><Word muted>we hold none</Word></Explain>
+                      : missing(c))
+                  : c.state !== 'held' ? missing(c)
                   : v ? <Text style={styles.fieldValue} numberOfLines={2}>{v}</Text>
-                  /* Our own hole is said in words, not as a dash: the board is
-                     read for what is absent, and "we hold none" is the finding
-                     (18 Sep 2026, the separate audit). A provider's blank cell
-                     stays a dash — they answered, they just hold nothing. */
-                  : c.key === 'ours' ? (isGap(r)
-                      /* A hole Google could fill: the marker points at it, and
-                         the content stays Google's — shown, never copied into
-                         ours (owner, 29 Sep 2026). */
-                      ? <Explain tip={['Google has this', 'Google holds a value for this and we do not. “Research this place” may fill ours from what the place publishes; a provider’s value is only ever shown, never kept.']}><Word accent>Google has this</Word></Explain>
-                      : <Explain tip="weHoldNoneOfThis"><Word muted>we hold none</Word></Explain>)
+                  /* A provider's blank cell stays a dash — they answered, they
+                     just hold nothing. */
                   : <Blank />}
                 {c.key === 'ours' && v && r.editable && canManage ? (
                   <Explain tip="editableColumn">

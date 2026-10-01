@@ -2960,6 +2960,12 @@ export const api = {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
+    // Whether a terminal frame arrived. A connection that closes cleanly without
+    // one — a proxy timeout, a server restart mid-run — otherwise resolves this
+    // promise with no `done`/`error` ever delivered, and the screen sits on
+    // "Researching…" for ever (Codex, 1 Oct 2026). On an early close we throw, so
+    // the caller's `.catch` can clear the running state and say what happened.
+    let terminated = false;
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -2976,9 +2982,11 @@ export const api = {
           if (line.startsWith('event:')) event = line.slice(6).trim();
           else if (line.startsWith('data:')) data += line.slice(5).trim();
         }
+        if (event === 'done' || event === 'error') terminated = true;
         try { onEvent(event, data ? JSON.parse(data) : {}); } catch { /* one unreadable frame is not the stream */ }
       }
     }
+    if (!terminated) throw new ApiError(0, { message: 'The connection closed before research finished.' });
   },
   /** BO2r — literally the fields each source returned, and which were never asked. */
   adminPlaceRaw: (ref: string) => request<{ ref: string; sources: RawSource[] }>(`/api/admin/place-index/place/raw${qs({ ref })}`),
