@@ -3083,8 +3083,14 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
   const [quoteErr, setQuoteErr] = useState(false);
   /** The stream, while it runs and after: the latest state per source, in order, and any fault. */
   const [research, setResearch] = useState<{ running: boolean; steps: ResearchStep[]; error: string | null } | null>(null);
-  const reload = useCallback(() => { setData(null); api.adminPlaceCompare(refId, match).then(setData).catch(() => setData(null)); }, [refId, match]);
-  useEffect(() => { reload(); }, [reload]);
+  // The latest match setting, read through a ref so a reload fired by a stream
+  // that started earlier uses the match state as it is now, not as it was when
+  // the stream began — "Ask Google" pressed mid-research must not be undone by
+  // the run's final reload (Codex, 1 Oct 2026).
+  const matchRef = useRef(match);
+  matchRef.current = match;
+  const reload = useCallback(() => { setData(null); api.adminPlaceCompare(refId, matchRef.current).then(setData).catch(() => setData(null)); }, [refId]);
+  useEffect(() => { reload(); }, [reload, match]);
   useEffect(() => { api.adminPlaceReach(refId).then(setReach).catch(() => setReach(null)); }, [refId]);
   // Which place the drawer is on now. A research stream outlives a change of
   // place — the drawer is one component the ref flows through, not a remount —
@@ -3143,8 +3149,11 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
   // for, and the one "Research this place" or "Ask Google" might fill. A
   // provider's value is shown live and never written down — the marker points at
   // the hole, it does not copy the content into ours.
-  const cellBlank = (v: unknown) => v == null || v === '' || (Array.isArray(v) && v.length === 0)
-    || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v as object).length === 0);
+  // Blank the way the row is drawn: a cell reads through `saidValue`, and a
+  // composite of only empty values (`{ wheelchair: null, stepFree: null }`)
+  // renders as nothing, so it must count as nothing here too — otherwise a row
+  // that says "we hold none" would be left out of the gap count (Codex, 1 Oct 2026).
+  const cellBlank = (v: unknown) => saidValue(v) === '';
   const isGap = (r: CompareRow) => !cellBlank(r.cells.google) && cellBlank(r.cells.ours);
   const gaps = data.rows.filter(isGap).length;
 
