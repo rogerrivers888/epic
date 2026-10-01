@@ -40,7 +40,7 @@ import {
 import { firstHousehold } from '../repositories/households.js';
 import { invitationEmail, mailStatus, sendMail, webUrl } from '../sources/mail.js';
 import { HOUSEHOLD_MONTHLY_CALL_BOUND } from '../claude.js';
-import { requires } from '../access.js';
+import { requires, accessOf } from '../access.js';
 import { listPlans, recordPlanChange, priceOfPlan, writeAudit } from '../repositories/roles.js';
 
 const router = express.Router();
@@ -348,6 +348,12 @@ router.patch('/:id', requires('manage_accounts'), async (req, res, next) => {
     const before = await accountById(req.params.id);
     if (!before) return res.status(404).json({ error: 'not_found', message: 'No such account.' });
     if (b.status === 'suspended' && before.role === 'owner') throw bad('The owner account cannot be suspended.');
+    // A monthly call bound is a spend safeguard: changing it needs the owner
+    // personally signed in, not the shared passcode (G11, 1 Oct 2026). Other
+    // fields (name, plan, status, note) stay ordinary manage.
+    if (b.monthlyCallBound !== undefined && Number(b.monthlyCallBound) !== Number(before.monthly_call_bound) && !accessOf(req).elevated) {
+      return res.status(403).json({ error: 'needs_personal_sign_in', message: 'Changing a spending bound needs you signed in personally with your e-mail link.' });
+    }
 
     const account = await updateAccount(req.params.id, {
       name: b.name,

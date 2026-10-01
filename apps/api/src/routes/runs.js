@@ -10,7 +10,8 @@
 import express from 'express';
 import { requires } from '../access.js';
 import * as runs from '../repositories/runs.js';
-import { writeAudit } from '../repositories/roles.js';
+import { writeAuditStrict } from '../repositories/roles.js';
+import { requireOwnerSignedIn } from '../access.js';
 import { query } from '../db.js';
 
 const router = express.Router();
@@ -51,7 +52,9 @@ router.get('/:key/history', requires('view_library'), async (req, res, next) => 
  * The ceiling. Nothing spends past it, and it is set here rather than in an
  * environment variable so the number on the screen is the number in force.
  */
-router.put('/ceiling', requires('manage_settings'), async (req, res, next) => {
+// Changing the collection spend ceiling is a safeguard override: the owner,
+// personally signed in, logged by name (G11, 1 Oct 2026).
+router.put('/ceiling', requires('manage_settings'), requireOwnerSignedIn('change the spend ceiling'), async (req, res, next) => {
   try {
     // A number, or nothing happens.
     //
@@ -69,7 +72,7 @@ router.put('/ceiling', requires('manage_settings'), async (req, res, next) => {
     await query(
       `insert into app_settings (key, value, updated_at) values ('collect.ceiling_pence', $1::jsonb, now())
        on conflict (key) do update set value = excluded.value, updated_at = now()`, [JSON.stringify(pence)]);
-    await writeAudit({ ...actor(req), action: 'collect.ceiling', subjectType: 'setting', subjectId: 'collect.ceiling_pence', before: { pence: before }, after: { pence } });
+    await writeAuditStrict({ ...actor(req), action: 'collect.ceiling', subjectType: 'setting', subjectId: 'collect.ceiling_pence', before: { pence: before }, after: { pence } });
     res.json({ pence });
   } catch (err) { next(err); }
 });

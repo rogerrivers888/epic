@@ -59,7 +59,8 @@ app.use(async (req, _res, next) => {
     const id = req.headers['x-account'];
     const account = id ? await accountById(String(id)) : null;
     req.account = account;
-    req.session = { id: null, account_id: account?.id ?? null };
+    // x-link marks a personal (magic-link) sign-in, so accessFor yields `elevated`.
+    req.session = { id: null, account_id: account?.id ?? null, kind: 'device', auth_method: req.headers['x-link'] ? 'link' : 'passcode' };
     req.access = await accessFor(req);
     return runAsAccount(account, next);
   } catch (err) { return next(err); }
@@ -81,6 +82,13 @@ test.after(async () => { server.close(); await pool.end(); });
 const as = (who, method, path, body) => fetch(`${base}${path}`, {
   method,
   headers: { 'content-type': 'application/json', ...(who ? { 'x-account': who.account.id } : {}) },
+  body: body === undefined ? undefined : JSON.stringify(body),
+});
+
+/** The same, but signed in personally by e-mail link (elevated) — for G11 privileged actions. */
+const asLink = (who, method, path, body) => fetch(`${base}${path}`, {
+  method,
+  headers: { 'content-type': 'application/json', 'x-link': '1', ...(who ? { 'x-account': who.account.id } : {}) },
   body: body === undefined ? undefined : JSON.stringify(body),
 });
 
@@ -274,14 +282,20 @@ test('"sign out everywhere" from an account signs out that account\'s devices on
 // 6. the estate-wide source switch
 // ---------------------------------------------------------------------------
 
-test('switching a source estate-wide needs the settings capability', async () => {
+test('switching a source estate-wide needs the settings capability and personal sign-in', async () => {
   const customer = await as(ours, 'PATCH', '/api/sources/google', { on: false });
-  assert.equal(customer.status, 403, 'a household account is refused');
+  assert.equal(customer.status, 403, 'a household account is refused on the capability');
   assert.equal((await customer.json()).capability, 'manage_settings');
 
-  // The owner (the passcode, no account) passes the capability; an unknown key
-  // then answers 404 without touching any setting.
-  const owner = await as(null, 'PATCH', '/api/sources/not-a-source', { on: false });
+  // The shared passcode holds the capability but re-enabling a paid source is a
+  // safeguard override (G11): refused until the owner is personally signed in.
+  const passcode = await as(null, 'PATCH', '/api/sources/not-a-source', { on: false });
+  assert.equal(passcode.status, 403);
+  assert.equal((await passcode.json()).error, 'needs_personal_sign_in');
+
+  // The owner signed in by e-mail link passes the gate; an unknown key then
+  // answers 404 without touching any setting.
+  const owner = await asLink(null, 'PATCH', '/api/sources/not-a-source', { on: false });
   assert.equal(owner.status, 404);
   assert.equal((await owner.json()).error, 'unknown_source');
 });

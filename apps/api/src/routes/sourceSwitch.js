@@ -10,18 +10,25 @@
  */
 
 import { Router } from 'express';
-import { requires } from '../access.js';
+import { requires, requireOwnerSignedIn } from '../access.js';
 import { setSourceOff, sourceHasKey, sourceKeys } from '../sources/index.js';
+import { writeAuditStrict } from '../repositories/roles.js';
 
 const router = Router();
 
-router.patch('/sources/:key', requires('manage_settings'), async (req, res, next) => {
+// Switching a keyed source back on re-enables its paid calls estate-wide — a
+// safeguard override, so the owner personally, logged by name (G11, 1 Oct 2026).
+router.patch('/sources/:key', requires('manage_settings'), requireOwnerSignedIn('change a provider source'), async (req, res, next) => {
   try {
     const key = String(req.params.key);
     if (!sourceKeys().includes(key)) return res.status(404).json({ error: 'unknown_source' });
     const on = Boolean(req.body?.on);
     if (on && !sourceHasKey(key)) return res.status(409).json({ error: 'no_key', message: 'This source has no key yet; the owner adds it through Doppler.' });
     const off = await setSourceOff(key, !on);
+    await writeAuditStrict({
+      actorId: req.account?.id ?? null, actorLabel: req.account?.email ?? 'the owner',
+      action: on ? 'source.on' : 'source.off', subjectType: 'source', subjectId: key, after: { on: on && sourceHasKey(key) },
+    });
     res.json({ key, on: on && sourceHasKey(key), off });
   } catch (err) {
     next(err);
