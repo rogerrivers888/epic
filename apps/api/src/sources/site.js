@@ -234,7 +234,7 @@ const TEMPORAL = new RegExp([
 ].map((p) => `(?:${p})`).join('|').replace(/^/, '\\b(?:').concat(')'), 'i');
 
 // A structured offer label that names the general ticket.
-const GENERAL_OFFER = /\b(?:general|standard|adult|admission|entry|entrance)\b/i;
+const GENERAL_OFFER = /\b(?:general|standard|admission|entry|entrance)\b/i; // not 'adult': an adult ticket is not everyone's
 
 // The words that may stand before a free claim in its own sentence (see admissionFrom).
 const LEAD_WORDS = new Set([
@@ -302,8 +302,14 @@ export function admissionFrom(html, node = {}) {
     // an unlabelled or unknown label — "Members", "Carer" — defaulted to the adult
     // slot and read as free for everyone (Codex). So free needs a general label and
     // nothing in it that names an audience or a date.
+    // And only a fixed nought: an AggregateOffer from £0 to £20 reached here as its
+    // lowPrice and read as free while its £20 was never seen (Codex). A range that
+    // starts at nought is a paid place's cheapest ticket.
+    const fixedZero = Number(offer.price ?? offer.priceSpecification?.price) === 0
+      && !(Number(offer.highPrice) > 0) && offer['@type'] !== 'AggregateOffer';
     if (Number(price) === 0) {
-      if (GENERAL_OFFER.test(label) && !QUALIFIED.test(label) && !TEMPORAL.test(label)) found.free = true;
+      if (fixedZero && GENERAL_OFFER.test(label) && !QUALIFIED.test(label) && !TEMPORAL.test(label)) found.free = true;
+      else if (Number(offer.highPrice) > 0) found[slot] ??= currency === 'GBP' ? `£${offer.highPrice}` : `${offer.highPrice} ${currency}`;
       continue;
     }
     found[slot] ??= shown;

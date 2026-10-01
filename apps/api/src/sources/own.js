@@ -588,6 +588,7 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
   // OpenStreetMap entry five metres away, because Overpass happened to be busy
   // on the afternoon it was claimed (owner, 5 Sep 2026).
   let identified = 0;
+  let admissionRead = null;     // the venue page's admission, written once the postcode is known
   let admissionFailed = false; // the owned cost-band write failed; leave the version behind
   // Going out to look for a venue's own page is the one step here that costs
   // money, so it is remembered: once a month at the very most, and never twice
@@ -770,23 +771,12 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
           // the body is for the extractor (owner, 26 Sep 2026).
           put('body', site.body),
         ]);
-        // Admission is an owned fact (owner, 1 Oct 2026; parks admission): a free
-        // entry read from the venue's own page is written as the owned cost-band
-        // answer the drawer's cost row prefers over Google (B11). Only when the page
-        // was actually read — `sourceUrl` present — so a menu-only result (the page
-        // did not answer but a menu URL was found) does not overwrite a stored
-        // free answer with asked_nothing_found (Codex). A failed write is not
-        // recorded as done: the run is stamped one version short, so the free
-        // backfill comes round for it again — a free top-up stays `done` whatever
-        // its problems, and stamping it version 5 would never retry the write (Codex).
-        if (site.sourceUrl) {
-          try {
-            await recordAdmissionAnswer(venueRef, site.admission, { sourceUrl: site.sourceUrl, postcode: site.postcode ?? seed.postcode ?? null });
-          } catch (err) {
-            admissionFailed = true;
-            problems.push(`the admission answer: ${String(err?.message || err).slice(0, 120)}`);
-          }
-        }
+        // Admission is an owned fact (owner, 1 Oct 2026; parks admission), written
+        // after the address step below — not here — so a place with no country yet
+        // can be settled GB by the postcode the reverse geocode finds (Codex). Only
+        // when the page was actually read (`sourceUrl`), so a menu-only result does
+        // not overwrite a stored free answer with asked_nothing_found (Codex).
+        if (site.sourceUrl) admissionRead = { admission: site.admission, sourceUrl: site.sourceUrl };
         identified += 1;
         step('venue-site', 'found', { url: site.sourceUrl ?? seed.website });
       } else {
@@ -830,6 +820,24 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
       // A terminal event on every outcome, so the page does not leave the
       // address lookup spinning after `done` (Codex, 1 Oct 2026).
       step('address', 'failed');
+    }
+  }
+
+  // 3a. The venue's admission as its owned cost-band answer (sources/admission.js).
+  //     After the address, so its postcode — the page's own before a reverse-geocoded
+  //     one — can settle a place the index has no country for yet as GB (Codex). A
+  //     failed write is not recorded as done: the run is stamped one version short,
+  //     so the free backfill comes round for it again — a free top-up stays `done`
+  //     whatever its problems, and stamping it current would never retry it (Codex).
+  if (admissionRead) {
+    try {
+      const held = await owned.liveFacts(venueRef, { keepableOnly: true });
+      const postcodeBy = (source) => held.find((x) => x.field === 'postcode' && x.source === source && !empty(x.value))?.value ?? null;
+      const postcode = (PRECEDENCE.postcode ?? []).map(postcodeBy).find(Boolean) ?? seed.postcode ?? null;
+      await recordAdmissionAnswer(venueRef, admissionRead.admission, { sourceUrl: admissionRead.sourceUrl, postcode });
+    } catch (err) {
+      admissionFailed = true;
+      problems.push(`the admission answer: ${String(err?.message || err).slice(0, 120)}`);
     }
   }
 

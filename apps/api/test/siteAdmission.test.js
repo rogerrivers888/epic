@@ -129,3 +129,9 @@ test('a zero-priced offer is free only when its label names the general ticket',
   }
   assert.equal(admissionFrom('<p></p>', { offers: [{ price: 0, name: 'Standard entry' }] })?.free, true);
 });
+
+test('a price range from nought is a paid place, not a free one', () => {
+  const a = admissionFrom('<p></p>', { offers: [{ '@type': 'AggregateOffer', name: 'Admission', lowPrice: 0, highPrice: 20 }] });
+  assert.notEqual(a?.free, true, 'the cheapest ticket of a range is not free entry');
+  assert.equal(admissionFrom('<p></p>', { offers: [{ price: 0, name: 'Adult' }] })?.free === true, false, 'an adult-only nought is not everyone');
+});
