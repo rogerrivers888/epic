@@ -402,7 +402,7 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
         ) : null}
 
         {country && !country.city && !ui.adding ? (
-          <CountryCities row={countryRow} data={data} list={st.list} onCity={(name) => navigate(paths.placesCity(country.country, name) + (st.list === 'loved' ? '?list=loved' : ''))} />
+          <CountryCities row={countryRow} data={data} onCity={(name) => navigate(paths.placesCity(country.country, name))} />
         ) : null}
 
         {inArea && (city || home) && !ui.adding ? (
@@ -507,9 +507,6 @@ function AtlasRoot({ data, error, homeTown, mode, onGo }: {
   const homeCountry = homeCode ? countries.find((c) => c.code === homeCode) ?? null : null;
   const others = countries.filter((c) => c.code !== homeCode).sort((a, b) => a.name.localeCompare(b.name));
   const citiesOf = (c: AtlasCountry) => [...c.cities].sort((a, b) => b.places - a.places).slice(0, 3).map((ci) => ci.name).join(' · ');
-  // Drilling into a row keeps the tab you are on: Liked opens the area on its
-  // Loved list, not the default Been (Codex).
-  const listQ = liked ? '?list=loved' : '';
   // The count a row carries, and whether the row shows at all. Liked: how many
   // places here the household has loved (a country has no `special` of its own, so
   // it sums its cities'). Been: how many it has been to — and a place reached only
@@ -553,7 +550,7 @@ function AtlasRoot({ data, error, homeTown, mode, onGo }: {
             label={homeTown ?? 'Near home'}
             sub={`Within ${data.home.radiusMiles} miles of home`}
             count={String(homeN)}
-            onPress={() => onGo(paths.placesHome() + listQ)}
+            onPress={() => onGo(paths.placesHome())}
           />
         </>
       ) : null}
@@ -567,7 +564,7 @@ function AtlasRoot({ data, error, homeTown, mode, onGo }: {
               label={ci.name}
               sub={ci.lastTrip ? `Last: ${tripWhen(ci.lastTrip)}` : homeCountry.name}
               count={cityCount(ci)}
-              onPress={() => onGo(paths.placesCity(homeCountry.code, ci.name) + listQ)}
+              onPress={() => onGo(paths.placesCity(homeCountry.code, ci.name))}
             />
           ))}
         </>
@@ -582,7 +579,7 @@ function AtlasRoot({ data, error, homeTown, mode, onGo }: {
               label={c.name}
               sub={citiesOf(c) || c.name}
               count={countryCount(c)}
-              onPress={() => onGo(paths.placesCountry(c.code) + listQ)}
+              onPress={() => onGo(paths.placesCountry(c.code))}
             />
           ))}
         </>
@@ -592,15 +589,11 @@ function AtlasRoot({ data, error, homeTown, mode, onGo }: {
   );
 }
 
-/** One country's towns and cities. Honours the list (Been · Loved) carried in. */
-function CountryCities({ row, data, list, onCity }: {
-  row: AtlasCountry | null; data: { home: AtlasHome | null } | null; list: ListKey; onCity: (name: string) => void;
+/** One country's towns and cities. */
+function CountryCities({ row, data, onCity }: {
+  row: AtlasCountry | null; data: { home: AtlasHome | null } | null; onCity: (name: string) => void;
 }) {
-  const loved = list === 'loved';
-  const all = [...(row?.cities ?? [])].sort((a, b) => a.name.localeCompare(b.name));
-  // On Loved, only towns with a loved place, counting those; otherwise every town
-  // with its place count (Codex).
-  const cities = loved ? all.filter((ci) => ci.special > 0) : all;
+  const cities = [...(row?.cities ?? [])].sort((a, b) => a.name.localeCompare(b.name));
   if (!row) return data ? <View style={styles.emptyRoot}><Text style={styles.emptyBody}>Nothing in your atlas here yet.</Text></View> : null;
   return (
     <View style={styles.list}>
@@ -610,11 +603,11 @@ function CountryCities({ row, data, list, onCity }: {
           tile={<Flag code={row.code} width={FLAG_W} height={FLAG_H} bare />}
           label={ci.name}
           sub={ci.nextTrip ? `Next: ${tripWhen(ci.nextTrip)}` : ci.lastTrip ? `Last: ${tripWhen(ci.lastTrip)}` : row.name}
-          count={loved ? String(ci.special) : plural(ci.places, 'place')}
+          count={plural(ci.places, 'place')}
           onPress={() => onCity(ci.name)}
         />
       ))}
-      {!cities.length ? <View style={styles.emptyRoot}><Text style={styles.emptyBody}>{loved ? `Nothing loved in ${row.name} yet.` : `No towns in ${row.name} yet.`}</Text></View> : null}
+      {!cities.length ? <View style={styles.emptyRoot}><Text style={styles.emptyBody}>No towns in {row.name} yet.</Text></View> : null}
     </View>
   );
 }
