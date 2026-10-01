@@ -4,6 +4,7 @@ import { Press } from '../components/press';
 import { Booking, TripSummary } from '../api';
 import { colors, fonts, type } from '../theme';
 import { useScrollMemory } from '../cache/resourceCache';
+import { useViewport } from '../hooks/useViewport';
 import { TallBand, MicTile } from '../components/Band';
 import { InkMenu } from '../components/InkMenu';
 import { SectionHeader } from '../components/NavRows';
@@ -107,6 +108,13 @@ export function TripsList({ trips, bookings, loading, error, span, when, onSpan,
   wide: boolean;
 }) {
   const all = trips ?? [];
+  // Whether a trip is a fixed 280-wide card in a wrapping grid, or the full-width
+  // phone card. The `wide` prop turns on at 1000 (Trips' own breakpoint, with the
+  // 860 reading cap); the card picture must switch at the 900 the desktop shell
+  // and its sidebar turn on, or a trip image fills the whole 900–999 column
+  // instead of the shared size (Codex, 1 Oct 2026).
+  const { width } = useViewport();
+  const grid = width >= 900;
 
   /**
    * A night away is a holiday; everything else is a day out, whatever it calls
@@ -128,7 +136,7 @@ export function TripsList({ trips, bookings, loading, error, span, when, onSpan,
   const nothing = !upcoming.length && !ideas.length && !past.length && !hostsLive.length;
   // A deep link to bookings (?when=hosts) focuses the list on them (Codex).
   const focusHosts = when === 'hosts';
-  const row = (t: TripSummary) => <TripRow key={t.id} trip={t} wide={wide} onPress={() => onOpen(t)} onHold={() => onHold(t)} />;
+  const row = (t: TripSummary) => <TripRow key={t.id} trip={t} grid={grid} onPress={() => onOpen(t)} onHold={() => onHold(t)} />;
 
   // Keep the scroll position across tab switches, per span/when view.
   const scroll = useScrollMemory(`trips:${span}:${when}`, trips != null);
@@ -164,13 +172,13 @@ export function TripsList({ trips, bookings, loading, error, span, when, onSpan,
         ) : (
           <>
             {upcoming.length ? (
-              <View style={styles.section}><SectionHeader title="Coming up" count={upcoming.length} /><View style={wide ? styles.cardGrid : undefined}>{upcoming.map(row)}</View></View>
+              <View style={styles.section}><SectionHeader title="Coming up" count={upcoming.length} /><View style={grid ? styles.cardGrid : undefined}>{upcoming.map(row)}</View></View>
             ) : null}
             {ideas.length ? (
-              <View style={styles.section}><SectionHeader title="Ideas" count={ideas.length} /><View style={wide ? styles.cardGrid : undefined}>{ideas.map(row)}</View></View>
+              <View style={styles.section}><SectionHeader title="Ideas" count={ideas.length} /><View style={grid ? styles.cardGrid : undefined}>{ideas.map(row)}</View></View>
             ) : null}
             {past.length ? (
-              <View style={styles.section}><SectionHeader title="Past" count={past.length} /><View style={wide ? styles.cardGrid : undefined}>{past.map(row)}</View></View>
+              <View style={styles.section}><SectionHeader title="Past" count={past.length} /><View style={grid ? styles.cardGrid : undefined}>{past.map(row)}</View></View>
             ) : null}
             {hostsLive.length ? (
               <View style={styles.section}><SectionHeader title="Booked with hosts" count={hostsLive.length} /><BookingRows bookings={bookings ?? []} onOpen={(b) => onOpenBooking?.(b)} /></View>
@@ -226,7 +234,7 @@ function BookingRows({ bookings, onOpen }: { bookings: Booking[]; onOpen: (b: Bo
   );
 }
 
-function TripRow({ trip, wide, onPress, onHold }: { trip: TripSummary; wide: boolean; onPress: () => void; onHold: () => void }) {
+function TripRow({ trip, grid, onPress, onHold }: { trip: TripSummary; grid: boolean; onPress: () => void; onHold: () => void }) {
   const status = statusWords(trip);
   const meta = [
     whenWords(trip),
@@ -239,7 +247,7 @@ function TripRow({ trip, wide, onPress, onHold }: { trip: TripSummary; wide: boo
       onPress={onPress}
       onLongPress={onHold}
       delayLongPress={400}
-      style={[styles.card, wide && styles.cardWide]}
+      style={[styles.card, grid && styles.cardWide]}
       accessibilityRole="button"
       accessibilityLabel={`${tripTitle(trip)}. Hold for rename, share and delete`}
     >
@@ -247,10 +255,10 @@ function TripRow({ trip, wide, onPress, onHold }: { trip: TripSummary; wide: boo
           way to say it — so it is the photograph on top now, the same size the
           browse and Inspire cards use (owner, 1 Oct 2026: "everywhere I go, I
           want them to be this size"). On a phone that is the full-width 3:2
-          picture; on a wide screen the fixed 280×187 card in a wrapping grid, as
-          Places does, so "that size" holds there too rather than one image
+          picture; on the desktop shell the fixed 280×187 card in a wrapping grid,
+          as Places does, so "that size" holds there too rather than one image
           swallowing the whole column (Codex). 3:2 and rounded either way. */}
-      {wide
+      {grid
         ? <VenueThumb name={tripTitle(trip)} image={trip.image} category={null} width={CARD_W} height={CARD_H} credit={false} rounded={MEDIA_RADIUS} />
         : <VenueThumb name={tripTitle(trip)} image={trip.image} category={null} fill credit={false} rounded={MEDIA_RADIUS} />}
       <View style={styles.cardBody}>
