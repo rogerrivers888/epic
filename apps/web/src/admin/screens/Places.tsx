@@ -3077,8 +3077,10 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
   const [data, setData] = useState<Awaited<ReturnType<typeof api.adminPlaceCompare>> | null>(null);
   const [match, setMatch] = useState(false);
   const [reach, setReach] = useState<{ rule: string | null; places: number; counties: number; onlyThis: boolean } | null>(null);
-  /** What "Research this place" could spend, said before the button is pressed. */
+  /** What "Research this place" could spend, said before the button is pressed. Null until it loads. */
   const [quote, setQuote] = useState<Awaited<ReturnType<typeof api.adminResearchQuote>> | null>(null);
+  /** The price could not be fetched: the button says so and stays disabled rather than spend blind. */
+  const [quoteErr, setQuoteErr] = useState(false);
   /** The stream, while it runs and after: the latest state per source, in order, and any fault. */
   const [research, setResearch] = useState<{ running: boolean; steps: ResearchStep[]; error: string | null } | null>(null);
   const reload = useCallback(() => { setData(null); api.adminPlaceCompare(refId, match).then(setData).catch(() => setData(null)); }, [refId, match]);
@@ -3091,7 +3093,15 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
   const activeRef = useRef<string>(refId);
   // The quote and any running stream belong to the place on screen; both reset
   // when it changes, so a half-finished run is never read against another place.
-  useEffect(() => { activeRef.current = refId; setResearch(null); setQuote(null); api.adminResearchQuote(refId).then(setQuote).catch(() => setQuote(null)); }, [refId]);
+  // The quote response is tied to the ref it was asked for: a slow one for the
+  // place you just left must not set the price for the one you are on now.
+  useEffect(() => {
+    activeRef.current = refId; setResearch(null); setQuote(null); setQuoteErr(false);
+    const forRef = refId;
+    api.adminResearchQuote(refId)
+      .then((q) => { if (activeRef.current === forRef) setQuote(q); })
+      .catch(() => { if (activeRef.current === forRef) setQuoteErr(true); });
+  }, [refId]);
 
   /**
    * Research this place — run the owned pipeline now and watch it. Each `source`
@@ -3100,7 +3110,8 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
    * column has changed, so the comparison and the boards behind it are re-read.
    */
   const runResearch = useCallback(() => {
-    if (!canManage || research?.running) return;
+    // Cost-first: never start the (possibly paid) run until its price is in hand.
+    if (!canManage || research?.running || !quote) return;
     const startedFor = refId;
     const mine = () => activeRef.current === startedFor; // the drawer has not moved on
     setResearch({ running: true, steps: [], error: null });
@@ -3117,10 +3128,14 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
       else if (name === 'done') {
         setResearch((r) => (r ? { ...r, running: false } : r));
         reload();
+        // Research may have filled a website, which makes the next run cheaper
+        // (identify only, not identify-plus-find-page); re-price so the button
+        // stops advertising the old ceiling.
+        api.adminResearchQuote(startedFor).then((q) => { if (mine()) setQuote(q); }).catch(() => { /* keep the last known price */ });
         onResearched?.();
       }
     }).catch((e) => { if (mine()) setResearch((r) => (r ? { ...r, running: false, error: e?.body?.message ?? 'Research could not finish.' } : r)); });
-  }, [canManage, research?.running, refId, reload, onResearched]);
+  }, [canManage, research?.running, quote, refId, reload, onResearched]);
 
   if (!data) return <Waiting />;
 
@@ -3152,9 +3167,14 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
           from what the place publishes and keeps it; Ask Google fills *theirs*,
           live, and keeps nothing. Each says what it spends before it runs. */}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md }}>
+        {/* Cost-first: disabled until the price is in hand, and if it could not
+            be fetched the button says so rather than letting a paid run start
+            with no cost shown (Codex, 1 Oct 2026). */}
         <Act label={research?.running ? 'Researching…'
-                     : `Research this place · ${quote ? (quote.off ? 'free' : quote.human.replace(/^about /, '')) : '…'}`}
-             icon="search" disabled={!canManage || Boolean(research?.running)} onPress={runResearch} />
+                     : quote ? `Research this place · ${quote.off ? 'free' : quote.human.replace(/^about /, '')}`
+                     : quoteErr ? 'Research — cost unavailable'
+                     : 'Research — pricing…'}
+             icon="search" disabled={!canManage || Boolean(research?.running) || !quote} onPress={runResearch} />
         {/* Ask Google — fill their column now. A place we already hold Google's
             id for needs no match and its column is already here; so this shows
             only where a match would actually spend. */}
