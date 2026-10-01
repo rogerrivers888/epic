@@ -16,5 +16,5 @@
 alter table api_sessions add column if not exists auth_method text not null default 'passcode';
 alter table api_sessions drop constraint if exists api_sessions_auth_method_check;
 alter table api_sessions add constraint api_sessions_auth_method_check
-  check (auth_method in ('passcode', 'link', 'google', 'service'));
+  check (auth_method in ('passcode', 'link', 'google', 'service', 'invite'));
 update api_sessions set auth_method = 'service' where token_hash like 'service:%' and auth_method <> 'service';

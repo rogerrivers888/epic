@@ -116,3 +116,13 @@ test('an agent is restricted only on the shared passcode — a personal sign-in 
   assert.ok([...linkFromAutomated.capabilities].some((k) => k.startsWith('manage_')), 'a personal link keeps manage, even from an automated client');
   assert.equal(linkFromAutomated.elevated, false, 'but an automated session is still never elevated');
 });
+
+test('a group invite or code sign-in never elevates — only the e-mail magic link does', async () => {
+  // Codex, 1 Oct 2026: a participant six-digit code recorded as 'link' would
+  // have cleared the owner gate without the magic link.
+  for (const auth_method of ['invite', 'passcode', 'code', 'service']) {
+    const a = await accessFor({ account: owner, session: { kind: 'device', auth_method } });
+    assert.equal(a.elevated, false, auth_method);
+  }
+  assert.equal((await accessFor({ account: owner, session: { kind: 'device', auth_method: 'link' } })).elevated, true);
+});

@@ -41,7 +41,7 @@ import { firstHousehold } from '../repositories/households.js';
 import { invitationEmail, mailStatus, sendMail, webUrl } from '../sources/mail.js';
 import { HOUSEHOLD_MONTHLY_CALL_BOUND } from '../claude.js';
 import { requires, accessOf } from '../access.js';
-import { listPlans, recordPlanChange, priceOfPlan, writeAudit, writeAuditStrict } from '../repositories/roles.js';
+import { listPlans, recordPlanChange, priceOfPlan, writeAudit } from '../repositories/roles.js';
 
 const router = express.Router();
 
@@ -372,10 +372,9 @@ router.patch('/:id', requires('manage_accounts'), async (req, res, next) => {
     if (boundChanging && !accessOf(req).elevated) {
       return res.status(403).json({ error: 'needs_personal_sign_in', message: 'Changing a spending bound needs you signed in personally with your e-mail link.' });
     }
-    // Logged with the owner's name, strictly and before the change (G11).
-    if (boundChanging) {
-      await writeAuditStrict({ ...actor(req), action: 'account.bound', subjectType: 'account', subjectId: before.id, subjectLabel: before.email, before: { monthlyCallBound: oldBound }, after: { monthlyCallBound: newBound } });
-    }
+    // The change is logged by the account update's own audit below, with the
+    // owner's name and the bound in before/after — no separate pre-audit that
+    // could diverge from the write (owner: no extra audit rows; Codex, 1 Oct 2026).
 
     const account = await updateAccount(req.params.id, {
       name: b.name,
