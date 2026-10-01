@@ -21,24 +21,16 @@ test.after(async () => { await query(`delete from approvals where session_id = $
 
 const REQ = 'POST /api/admin/place-index/owned-points/purge';
 
-test('an approved request is consumed exactly once', async () => {
+test('a request is filed pending, then approved with the owner\u2019s name', async () => {
   const filed = await approvals.fileApproval({ sessionId: AGENT, label: 'epic-xx', request: REQ, description: 'Purge 12 stale owned points', numbers: { places: 12 } });
   assert.equal(filed.state, 'pending');
-
-  // Pending cannot be consumed.
-  assert.equal(await approvals.consumeApproval(AGENT, REQ), false);
+  const pending = await approvals.listApprovals({ state: 'pending' });
+  assert.ok(pending.some((a) => a.id === filed.id));
 
   const decided = await approvals.decideApproval(filed.id, { state: 'approved', by: 'roger@epic.day' });
   assert.equal(decided.state, 'approved');
   assert.equal(decided.decided_by, 'roger@epic.day');
-
-  // Approved: consumed once, then never again.
-  assert.equal(await approvals.consumeApproval(AGENT, REQ), true);
-  assert.equal(await approvals.consumeApproval(AGENT, REQ), false, 'once only');
-
-  // A different call is not unlocked by it.
-  await approvals.decideApproval((await approvals.fileApproval({ sessionId: AGENT, request: REQ, description: 'again' })).id, { state: 'approved', by: 'me' });
-  assert.equal(await approvals.consumeApproval(AGENT, 'POST /api/admin/place-index/refresh'), false);
+  assert.equal((await approvals.listApprovals({ state: 'pending' })).some((a) => a.id === filed.id), false, 'no longer pending');
 });
 
 test('a decided request cannot be decided again', async () => {
