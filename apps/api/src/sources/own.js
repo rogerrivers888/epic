@@ -774,8 +774,11 @@ async function research(venueRef, { householdId, given, force, replace, paid, se
         // answer the drawer's cost row prefers over Google (B11). Only when the page
         // was actually read — `sourceUrl` present — so a menu-only result (the page
         // did not answer but a menu URL was found) does not overwrite a stored
-        // free answer with asked_nothing_found (Codex).
-        if (site.sourceUrl) await recordAdmissionAnswer(venueRef, site.admission, { sourceUrl: site.sourceUrl }).catch(() => null);
+        // free answer with asked_nothing_found (Codex). A failure here is NOT
+        // swallowed: it throws into the site step's catch below, which marks the
+        // research failed so the version-5 backfill retries rather than recording the
+        // write as done without it (Codex).
+        if (site.sourceUrl) await recordAdmissionAnswer(venueRef, site.admission, { sourceUrl: site.sourceUrl });
         identified += 1;
         step('venue-site', 'found', { url: site.sourceUrl ?? seed.website });
       } else {

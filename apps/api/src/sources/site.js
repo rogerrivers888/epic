@@ -298,13 +298,16 @@ export function admissionFrom(html, node = {}) {
       // are somebody's free, not everybody's. The after-window alone missed the
       // qualifier that leads — "Members enjoy …" — and stored an unconditional Free
       // over a paid place (Codex). Confidently wrong is worse than no price.
-      const after = flat.slice(m.index + m[0].length, m.index + m[0].length + 80);
-      // The leading check is bound to the current clause: flatten() drops element and
-      // sentence boundaries, so an unrelated earlier sentence ("Children can explore
-      // the play area. Admission is free.") must not qualify it — cut the window at the
-      // last sentence terminator before the claim (Codex).
-      const window = flat.slice(Math.max(0, m.index - 40), m.index);
-      const before = window.slice(window.search(/[.!?;:][^.!?;:]*$/) + 1);
+      // Both checks are bound to the claim's own sentence: flatten() drops element and
+      // sentence boundaries, so a qualifier in a neighbouring sentence must not count.
+      // "Children can explore the play area. Admission is free." is free; "Admission is
+      // free. Children can explore …" is free; only "free entry for children" or
+      // "Members enjoy free admission" — same clause — are somebody's free (Codex).
+      const tail = flat.slice(m.index + m[0].length, m.index + m[0].length + 80);
+      const afterEnd = tail.search(/[.!?;:]/);
+      const after = afterEnd >= 0 ? tail.slice(0, afterEnd) : tail;
+      const lead = flat.slice(Math.max(0, m.index - 40), m.index);
+      const before = lead.slice(lead.search(/[.!?;:][^.!?;:]*$/) + 1);
       if (!QUALIFIED.test(after) && !QUALIFIED.test(before)) { found.free = true; break; }
     }
   }

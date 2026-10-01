@@ -57,6 +57,14 @@ export function admissionToAnswer(admission) {
 export async function recordAdmissionAnswer(venueRef, admission, { sourceUrl = null } = {}) {
   const questionId = await costBandQuestionId();
   if (!questionId) return null;
+  // The extractor recognises only £ prices, so it can tell free from paid only in GB:
+  // elsewhere a €/$ charge goes undetected and "free … on some days" would be stored as
+  // an unconditional Free over a paid venue (Codex). Restrict the writer to GB, the one
+  // currency it validates. A settled non-GB country is skipped; a null country defaults
+  // to GB — the only market with live data (as everywhere this session; non-GB is
+  // deferred groundwork), revisited when another market's currency is understood.
+  const { rows: [pi] } = await query('select country_code from place_index where venue_ref = $1', [venueRef]);
+  if (String(pi?.country_code || 'GB').toUpperCase() !== 'GB') return null;
   const answer = admissionToAnswer(admission);
   await saveAnswer({
     venueRef,

@@ -51,6 +51,17 @@ test('a priced or silent page records asked_nothing_found, and the cost row fall
   }
 });
 
+test('a non-GB venue is skipped — the extractor only validates £', async () => {
+  const ref = 'osm:node/adm-ie';
+  await seedPlace(ref, 'IE');
+  // Even a free claim is not trusted outside GB: a €/$ charge would go undetected.
+  const out = await admission.recordAdmissionAnswer(ref, { free: true }, { sourceUrl: 'https://x.ie' });
+  assert.equal(out, null, 'nothing written for a settled non-GB country');
+  assert.equal(await ownedCostBand(ref), null);
+  const { rows } = await query(`select 1 from place_answers where venue_ref = $1`, [ref]);
+  assert.equal(rows.length, 0, 'no owned cost-band answer for a non-GB place');
+});
+
 test('ownedCostBand ignores a disagreement between two owned sources', async () => {
   const ref = 'osm:node/adm-clash';
   await seedPlace(ref);

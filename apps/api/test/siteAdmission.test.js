@@ -35,6 +35,12 @@ test('a qualifier after the free claim disqualifies it', () => {
   assert.equal(free('<p>Free admission for NHS staff.</p>'), false);
 });
 
+test('a qualifier in the next sentence does not disqualify a free claim', () => {
+  // The trailing check stops at the sentence boundary too, not only the leading one.
+  assert.equal(free('<p>Admission is free.</p><p>Children can explore the play area.</p>'), true);
+  assert.equal(free('Entry is free. Students are welcome.'), true);
+});
+
 test('a printed adult price is not free', () => {
   const a = admissionFrom('<p>Adults £12.00, children £6.00.</p>', {});
   assert.equal(a?.free, false, 'a place that charges is not free');
