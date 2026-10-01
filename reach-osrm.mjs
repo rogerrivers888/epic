@@ -131,8 +131,12 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 
 /** Start osrm-routed for a profile's data, return its container id. */
 function startRouted(dataBase) {
-  const dir = path.dirname(dataBase);
-  const base = path.basename(dataBase);
+  // Resolve to absolute first: Docker reads `-v data/foo:/data` (a relative
+  // path) as a named volume, which may not contain a slash, so the documented
+  // relative invocation would fail at the mount though existsSync passed (Codex).
+  const abs = path.resolve(dataBase);
+  const dir = path.dirname(abs);
+  const base = path.basename(abs);
   const id = execFileSync('docker', [
     'run', '-d', '--rm', '-p', `127.0.0.1:${PORT}:5000`, '-v', `${dir}:/data`,
     IMAGE, 'osrm-routed', '--algorithm', 'mld', '--max-table-size', String(CHUNK + 50), `/data/${base}`,

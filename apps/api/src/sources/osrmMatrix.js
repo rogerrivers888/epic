@@ -84,8 +84,16 @@ export function osrmTable(baseUrl, { fetchImpl = fetch, profile = 'driving' } = 
     // `code: 'Ok'` is a router that could not speak, not a table of zeroes
     // (CLAUDE.md, the can't-speak rule). Let the caller decide, by throwing.
     if (body.code !== 'Ok') throw new Error(`osrm ${body.code ?? 'no code'}`);
-    const durations = body.durations?.[0] ?? [];
+    const durations = body.durations?.[0];
     const distances = body.distances?.[0] ?? [];
+    // A short or missing duration row is a malformed answer, not a grid of
+    // unroutable cells: without this, the missing entries would read as null,
+    // the origin would commit self-only and mark itself complete, and resume
+    // would skip the corrupted origin for good (Codex). One entry per
+    // destination or it does not count as an answer.
+    if (!Array.isArray(durations) || durations.length !== dests.length) {
+      throw new Error(`osrm table row has ${Array.isArray(durations) ? durations.length : 'no'} of ${dests.length} destinations`);
+    }
     return dests.map((d, i) => ({
       to: d,
       // `null` where OSRM could not route to a cell (off the extract, an island

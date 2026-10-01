@@ -73,6 +73,14 @@ test('osrmTable throws on a body that is not Ok — a router that cannot speak',
   await assert.rejects(() => table(CELLS[0], [CELLS[1]]), /osrm NoSegment/);
 });
 
+test('osrmTable throws on a short duration row — Ok but incomplete is not an answer', async () => {
+  // code Ok, but one duration for two destinations: a malformed answer, not a
+  // cell that happens to be unroutable.
+  const fetchImpl = async () => ({ ok: true, json: async () => ({ code: 'Ok', durations: [[600]], distances: [[900]] }) });
+  const table = osrmTable('http://osrm:5000', { fetchImpl });
+  await assert.rejects(() => table(CELLS[0], [CELLS[1], CELLS[2]]), /1 of 2 destinations/);
+});
+
 test('buildOsrmMode writes routed rows as osrm, with the self-pair, the drop and the horizon', async () => {
   await clean();
   await seed();
