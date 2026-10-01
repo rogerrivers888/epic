@@ -3094,6 +3094,13 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
   // so every frame checks this before it touches state: a late frame or final
   // reload from the place you just left must never overwrite the one you are on.
   const activeRef = useRef<string>(refId);
+  // Whether this tab is still mounted. Switching drawer tabs *does* unmount
+  // CompareTab (it is a conditional child), and a research stream outlives that
+  // too; its terminal frame must not reload, re-price or repeat a paid match from
+  // a tab that is gone (Codex, 1 Oct 2026). The server's single-flight stops a
+  // duplicate research run; this stops the dead tab's own callbacks.
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
   // Only one comparison fetch is ever in flight. A compare with match=true makes
   // a paid googleMatchFor, and two of them racing — "Ask Google" pressed just as
   // a research run finishes and reloads — could both reach it before either had
@@ -3143,7 +3150,7 @@ function CompareTab({ refId, canManage, onEdit, onResearched }: { refId: string;
     // Cost-first: never start the (possibly paid) run until its price is in hand.
     if (!canManage || research?.running || !quote) return;
     const startedFor = refId;
-    const mine = () => activeRef.current === startedFor; // the drawer has not moved on
+    const mine = () => mountedRef.current && activeRef.current === startedFor; // tab still open, on this place
     setResearch({ running: true, steps: [], error: null });
     const put = (s: ResearchStep) => setResearch((r) => {
       if (!r) return r;
