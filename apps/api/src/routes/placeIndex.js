@@ -1531,9 +1531,9 @@ router.get('/census-ring-curve', requires('view_library'), async (req, res, next
     const subcategories = req.query.subcategories
       ? String(req.query.subcategories).split(',').map((s) => s.trim()).filter(Boolean)
       : null;
-    const minutes = (req.query.minutes ? String(req.query.minutes).split(',') : ['10', '15', '20', '25', '30', '35', '40', '45', '50', '55', '60'])
+    const minutes = [...new Set((req.query.minutes ? String(req.query.minutes).split(',') : ['10', '15', '20', '25', '30', '35', '40', '45', '50', '55', '60'])
       .map((m) => Math.min(90, Math.max(5, Math.trunc(Number(m)))))
-      .filter((m) => Number.isFinite(m));
+      .filter((m) => Number.isFinite(m)))].sort((a, b) => a - b).slice(0, 20);
     const locus = { where: req.query.where ?? null, lat: req.query.lat ?? null, lng: req.query.lng ?? null };
     if (!locus.where && !(locus.lat != null && locus.lng != null)) {
       return res.status(400).json({ error: 'where_required', message: 'Pass ?where= or ?lat=&lng=.' });

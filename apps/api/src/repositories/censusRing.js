@@ -65,32 +65,6 @@ const boxFrom = (slice) => {
   return { minLat: n[0], minLng: n[1], maxLat: n[2], maxLng: n[3] };
 };
 
-/**
- * A grid of points across a box, no two more than `stepM` metres apart.
- *
- * E9 (owner, 1 Oct 2026): a box straddling the ring edge counts as *unresolved*,
- * not inside — so "within 30 minutes" is never overstated for a place known only
- * to a census box. Five points (the corners and the middle) could not see a ring
- * edge that cut a wide box between them: a nine-kilometre tile read "inside" on
- * four in-ring corners while much of its area sat in sectors the ring never
- * reached. A grid stepped at the fine-tile width leaves no such gap, so a wide box
- * is called inside only when its whole area is.
- */
-const gridOf = (box, stepM = FINE_M) => {
-  const midLat = (box.minLat + box.maxLat) / 2;
-  const latStep = stepM / 111320;
-  const lngStep = stepM / (111320 * Math.max(0.2, Math.cos((midLat * Math.PI) / 180)));
-  const nLat = Math.min(40, Math.max(1, Math.ceil((box.maxLat - box.minLat) / latStep)));
-  const nLng = Math.min(40, Math.max(1, Math.ceil((box.maxLng - box.minLng) / lngStep)));
-  const pts = [];
-  for (let i = 0; i <= nLat; i += 1) {
-    const lat = box.minLat + ((box.maxLat - box.minLat) * i) / nLat;
-    for (let j = 0; j <= nLng; j += 1) {
-      pts.push({ lat, lng: box.minLng + ((box.maxLng - box.minLng) * j) / nLng });
-    }
-  }
-  return pts;
-};
 
 export const widthOf = (box) => (box
   ? Math.max((box.maxLat - box.minLat) * 111320, (box.maxLng - box.minLng) * 70000)
@@ -289,9 +263,11 @@ export async function placingPoints({ minLat, minLng, maxLat, maxLng }, { padLat
  * its width, went through the corner test, so a district a few streets wide —
  * smaller than any box — could never resolve a single place: Bloomsbury
  * counted 3 with hundreds unresolved, and the one-kilometre re-census made it
- * worse. Wider boxes keep the corner test, because a box that big really can
- * be on either side of the line: five points, the corners and the middle, and
- * the set of sectors they fall nearest to.
+ * worse. Wider boxes are judged over their whole area, because a box that big
+ * really can be on either side of the line: every sector with ground in the box,
+ * or within a fine-tile margin of it, decides it (E9, owner 1 Oct 2026) — so a
+ * ring edge cutting the box can no longer pass as "inside" the way the old
+ * five-point corner sample let it.
  *
  * @returns {{kind:'inside', code:string} | {kind:'across', codes:Set<string>} | {kind:'nowhere'}}
  */
@@ -301,19 +277,28 @@ export function sectorsOfBox(box, universe) {
     const best = nearestSector({ lat: (box.minLat + box.maxLat) / 2, lng: (box.minLng + box.maxLng) / 2 }, universe);
     return best ? { kind: 'inside', code: best.code, outcode: best.outcode ?? null } : { kind: 'nowhere' };
   }
+  // Classify a wide box by every sector whose ground lies in it, or within a
+  // fine-tile margin of it — not by sampling a handful of points (E9, conservative:
+  // owner 1 Oct 2026). A seed inside the box proves that sector has ground there; a
+  // seed just outside, within the margin, is a neighbour whose nearest-point region
+  // can reach into the box. If any such sector is out of the ring, the box straddles
+  // and is unresolved — so "within the minutes" is never overstated. The finer
+  // census resolves whatever is left unresolved. Over-fencing a box whose neighbour
+  // does not quite reach it only ever errs toward unresolved, never toward inside.
+  const midLat = (box.minLat + box.maxLat) / 2;
+  const mLat = FINE_M / 111320;
+  const mLng = FINE_M / (111320 * Math.max(0.2, Math.cos((midLat * Math.PI) / 180)));
+  const exp = { minLat: box.minLat - mLat, maxLat: box.maxLat + mLat, minLng: box.minLng - mLng, maxLng: box.maxLng + mLng };
+  const seeds = typeof universe?.within === 'function'
+    ? universe.within(exp)
+    : (Array.isArray(universe) ? universe.filter((p) => p.lat >= exp.minLat && p.lat <= exp.maxLat && p.lng >= exp.minLng && p.lng <= exp.maxLng) : []);
   const codes = new Set(); const outcodes = new Set(); let one = null;
-  const note = (best) => { if (best) { codes.add(best.code); if (best.outcode != null) outcodes.add(best.outcode); one = best; } };
-  // The grid covers the box's area and edges; a ring edge can no longer slip
-  // between five points.
-  for (const p of gridOf(box)) note(nearestSector(p, universe));
-  // And every sector with a point physically inside the box is added exactly — a
-  // point in the box proves that sector has ground there, so an out-of-ring sector
-  // in the box forces the box to straddle even if the grid missed it (E9).
-  const inside = typeof universe?.within === 'function'
-    ? universe.within(box)
-    : (Array.isArray(universe) ? universe.filter((p) => p.lat >= box.minLat && p.lat <= box.maxLat && p.lng >= box.minLng && p.lng <= box.maxLng) : []);
-  for (const p of inside) note({ code: p.code, outcode: p.outcode ?? null });
-  if (!codes.size) return { kind: 'nowhere' };
+  for (const p of seeds) { codes.add(p.code); if (p.outcode != null) outcodes.add(p.outcode); one = p; }
+  if (!codes.size) {
+    // No seed in or near the box — very sparse ground; fall back to the nearest.
+    const best = nearestSector({ lat: midLat, lng: (box.minLng + box.maxLng) / 2 }, universe);
+    return best ? { kind: 'inside', code: best.code, outcode: best.outcode ?? null } : { kind: 'nowhere' };
+  }
   if (codes.size === 1) return { kind: 'inside', code: one.code, outcode: one.outcode ?? null };
   return { kind: 'across', codes, outcodes };
 }
