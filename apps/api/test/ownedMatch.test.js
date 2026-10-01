@@ -393,3 +393,12 @@ test('an unmatched sweep placeholder name does not count as an owned name', asyn
   finally { await query('alter table household_places enable trigger keep_owned_point'); }
   assert.equal((await ownedNameGaps()).saved_places - before.saved_places, 1, 'the placeholder is not an owned name');
 });
+
+test('a household photo place\'s own name counts as owned', async () => {
+  const { ownedNameGaps } = await import('../src/sources/ownedMatch.js');
+  const { rows: [h] } = await query(`insert into households (name) values ('Photo name test') returning id`);
+  const ref = `photo:${randomUUID()}`;
+  const before = await ownedNameGaps();
+  await query(`insert into household_places (household_id, venue_ref, label) values ($1, $2, 'Our secret cove')`, [h.id, ref]);
+  assert.equal((await ownedNameGaps()).saved_places - before.saved_places, 0, 'the household gave it a name');
+});

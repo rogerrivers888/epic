@@ -387,6 +387,9 @@ export async function ownedNameGaps() {
       union select 'atlas:' || id::text from attractions where name is not null and display_source is distinct from 'google' and not (source = 'google' and osm_ref is null)
       union select venue_ref from scout_places where name is not null
         and (venue_ref like 'osm:%' or venue_ref like 'atlas:%' or venue_ref like 'wikidata:%' or venue_ref like 'own:%')
+      -- A household's own name for a photo place it added: an owned annotation,
+      -- with no provider name to be confused with (Codex, 1 Oct 2026).
+      union select venue_ref from household_places where venue_ref like 'photo:%' and label is not null and label <> venue_ref
     )
     select
       (select count(*)::int from household_places hp where not exists (select 1 from owned o where o.venue_ref = hp.venue_ref)) as saved_places,
