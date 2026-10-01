@@ -181,7 +181,9 @@ router.get('/', requires('manage_staff'), async (req, res, next) => {
       // screen uses these to offer the owner-claim bootstrap and to explain why
       // "Add staff" is waiting on a personal sign-in.
       ownerClaimed: staff.some((s) => s.isOwner && !s.synthetic),
-      personal: req.session?.auth_method !== 'passcode',
+      // The same allowlist the mutations enforce — a flag that said "personal"
+      // while requirePersonal refused would draw controls that always fail.
+      personal: isPersonalSession(req.session),
     });
   } catch (err) { next(err); }
 });

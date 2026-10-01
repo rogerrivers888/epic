@@ -570,16 +570,10 @@ function SummaryRow({ label, value, strong, last }: { label: string; value: stri
 }
 
 function Toast({ text }: { text: string }) {
-  const { width, framed, origin } = useViewport();
-  // Top-right, 20px in — inside the phone frame too: a full-width wrapper at the
-  // frame's origin, content pushed to its right edge (design audit, 1 Oct 2026).
-  if (framed && origin) {
-    return (
-      <View pointerEvents="box-none" style={{ position: 'absolute', left: origin.x, top: origin.y + 20, width, alignItems: 'flex-end', paddingRight: 20, zIndex: 5 }}>
-        <View style={styles.toast} accessibilityRole="alert"><Text style={styles.toastText}>{text}</Text></View>
-      </View>
-    );
-  }
+  // Unlike the drawer, this never portals: it is absolute inside the screen's
+  // own tree, whose container IS the frame's content in mobile view — so
+  // top/right here are already frame-local in both modes, and adding the
+  // frame's origin shifted it outside the clipped phone (Codex, 1 Oct 2026).
   return (
     <View style={[styles.toast, { position: 'absolute', top: 20, right: 20 }]} accessibilityRole="alert">
       <Text style={styles.toastText}>{text}</Text>

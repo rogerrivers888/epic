@@ -503,6 +503,10 @@ test('personal is an allowlist: an invitation session cannot manage staff', asyn
     { name: 'Inv', email: 'inv@epic.day', roleId: support }, OWNER_STAFF, { auth_method: 'invite' });
   assert.equal(res.status, 403);
   assert.equal(res.body.error, 'needs_personal');
+  // And the list tells the screen the same thing, so no control is drawn that
+  // would only ever answer needs_personal.
+  const list = await call('GET', '/api/admin/staff', undefined, OWNER_STAFF, { auth_method: 'invite' });
+  assert.equal(list.body.personal, false);
 });
 
 test('asking for a self-serve login link voids an older unused link', async () => {
