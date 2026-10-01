@@ -21,7 +21,7 @@ import { api, ApiError, type StaffInvitation, type StaffMember, type StaffRole }
 import { desk, fonts, LIME, ON_LIME } from '../../theme';
 
 type Filter = 'All' | 'Active' | 'Invited' | 'Suspended';
-type Mode = null | 'add' | 'sent' | 'person';
+type Mode = null | 'add' | 'sent' | 'person' | 'claim';
 
 // ---------------------------------------------------------------------------
 // dates
@@ -66,6 +66,8 @@ export function Staff({ canManage = true }: { canManage?: boolean } = {}) {
   const [mode, setMode] = useState<Mode>(null);
   const [curId, setCurId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [ownerClaimed, setOwnerClaimed] = useState(true);
+  const [personal, setPersonal] = useState(true);
 
   // add form
   const [fName, setFName] = useState('');
@@ -92,6 +94,8 @@ export function Staff({ canManage = true }: { canManage?: boolean } = {}) {
       const data = await api.adminStaff();
       setStaff(data.staff);
       setRoles(data.roles);
+      setOwnerClaimed(data.ownerClaimed);
+      setPersonal(data.personal);
       setError(null);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not load the staff list.');
@@ -109,7 +113,27 @@ export function Staff({ canManage = true }: { canManage?: boolean } = {}) {
     setFName(''); setFEmail(''); setFRole(supportRole?.id ?? null); setFErr('');
     setCurId(null); setMode('add');
   };
+  const openClaim = () => {
+    setFName(''); setFEmail(''); setFErr(''); setCurId(null); setMode('claim');
+  };
   const close = () => { setMode(null); setError(null); };
+
+  const submitClaim = async () => {
+    const name = fName.trim();
+    const email = fEmail.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return setFErr("That email doesn't look right");
+    try {
+      const res = await api.adminClaimOwner({ email, name: name || undefined });
+      await load();
+      setCurId(res.staff.id);
+      setInvitation(res.invitation);
+      setSentExtra('');
+      setCopied(false);
+      setMode('sent');
+    } catch (e) {
+      setFErr(e instanceof ApiError ? e.message : 'Could not claim the owner account.');
+    }
+  };
 
   const submit = async () => {
     const name = fName.trim();
@@ -175,13 +199,32 @@ export function Staff({ canManage = true }: { canManage?: boolean } = {}) {
             <Text style={styles.title}>Staff</Text>
             <Text style={styles.sub}>Who can log in to the back office, and what their role lets them open</Text>
           </View>
-          {canManage ? (
+          {canManage && personal ? (
             <Press onPress={openAdd} style={({ hovered }: any) => [styles.addBtn, hovered && styles.addBtnHover]}>
               <Text style={styles.addLabel}>Add staff</Text>
               <Icon name="add" size={14} color={ON_LIME} strokeWidth={2.4} />
             </Press>
           ) : null}
         </View>
+
+        {/* The passcode bootstrap: claim the owner account, then sign in as
+            yourself. Managing staff needs a personal sign-in, not the passcode. */}
+        {canManage && !ownerClaimed ? (
+          <Press onPress={openClaim} style={({ hovered }: any) => [styles.banner, hovered && styles.bannerHover]}>
+            <View style={{ flexShrink: 1, gap: 3 }}>
+              <Text style={styles.bannerTitle}>Claim your owner account</Text>
+              <Text style={styles.bannerSub}>You're on the shared passcode. Claim your account to sign in as yourself — adding staff needs a personal sign-in.</Text>
+            </View>
+            <Icon name="forward" size={16} color={ON_LIME} strokeWidth={2.4} />
+          </Press>
+        ) : canManage && !personal ? (
+          <View style={styles.banner}>
+            <View style={{ flexShrink: 1, gap: 3 }}>
+              <Text style={styles.bannerTitle}>Sign in as yourself to manage staff</Text>
+              <Text style={styles.bannerSub}>You're on the shared passcode. Follow your login link — or request one at epic.day/login — to add, suspend or remove staff.</Text>
+            </View>
+          </View>
+        ) : null}
 
         {/* filter */}
         <View style={styles.filters}>
@@ -226,7 +269,7 @@ export function Staff({ canManage = true }: { canManage?: boolean } = {}) {
           setFEmail={(v) => { setFEmail(v); setFErr(''); }}
           setFRole={setFRole}
           invitation={invitation} sentExtra={sentExtra} copied={copied}
-          onSubmit={submit} onClose={close} onCopy={copyLink}
+          onSubmit={submit} onClaim={submitClaim} onClose={close} onCopy={copyLink}
           onChangeRole={changeRole} onSendLink={sendLink}
           onSuspend={() => cur && act(() => api.adminStaffSuspend(cur.id), `${firstName(cur.name)} is suspended and logged out`)}
           onUnsuspend={() => cur && act(() => api.adminStaffUnsuspend(cur.id), `${firstName(cur.name)} can log in again`)}
@@ -252,7 +295,7 @@ function Drawer(props: {
   fName: string; fEmail: string; fRole: string | null; fErr: string;
   setFName: (v: string) => void; setFEmail: (v: string) => void; setFRole: (v: string) => void;
   invitation: StaffInvitation | null; sentExtra: string; copied: boolean;
-  onSubmit: () => void; onClose: () => void; onCopy: () => void;
+  onSubmit: () => void; onClaim: () => void; onClose: () => void; onCopy: () => void;
   onChangeRole: (id: string) => void; onSendLink: () => void;
   onSuspend: () => void; onUnsuspend: () => void; onLogoutAll: () => void; onRemove: () => void;
 }) {
@@ -266,8 +309,11 @@ function Drawer(props: {
   // Whether it actually went by e-mail, from the delivery the API reported — not
   // the global mail state: a configured sender can still fail on one address.
   const emailed = props.invitation?.delivery === 'email';
-  const kicker = mode === 'add' ? 'NEW STAFF' : mode === 'sent' ? (emailed ? 'LOGIN LINK SENT' : 'LOGIN LINK READY') : 'STAFF';
+  const kicker = mode === 'add' ? 'NEW STAFF'
+    : mode === 'claim' ? 'OWNER ACCOUNT'
+    : mode === 'sent' ? (emailed ? 'LOGIN LINK SENT' : 'LOGIN LINK READY') : 'STAFF';
   const title = mode === 'add' ? 'Add staff'
+    : mode === 'claim' ? 'Claim your account'
     : mode === 'sent' ? (emailed ? `Sent to ${first}` : `Copy the link to ${first}`)
     : (cur?.name || '');
 
@@ -288,6 +334,8 @@ function Drawer(props: {
 
           {mode === 'add' ? (
             <AddForm {...props} />
+          ) : mode === 'claim' ? (
+            <ClaimForm {...props} />
           ) : mode === 'sent' ? (
             <SentView {...props} />
           ) : (
@@ -333,6 +381,39 @@ function AddForm(props: {
       <View style={styles.formFoot}>
         <Press onPress={props.onSubmit} style={({ hovered }: any) => [styles.primary, hovered && styles.primaryHover]}>
           <Text style={styles.primaryLabel}>Add and send login link</Text>
+          <Icon name="forward" size={16} color={ON_LIME} strokeWidth={2.4} />
+        </Press>
+        <Press onPress={props.onClose} effect="none"><Text style={styles.cancel}>Cancel</Text></Press>
+      </View>
+    </>
+  );
+}
+
+// Claim the owner account (the passcode bootstrap)
+function ClaimForm(props: {
+  fName: string; fEmail: string; fErr: string;
+  setFName: (v: string) => void; setFEmail: (v: string) => void;
+  onClaim: () => void; onClose: () => void;
+}) {
+  const [focus, setFocus] = useState<string | null>(null);
+  return (
+    <>
+      <Text style={styles.sentLine}>This binds your email to the founding household and makes you the owner — once. You'll get a login link to sign in as yourself, and then you can manage staff.</Text>
+      <Field label="Your email">
+        <TextInput value={props.fEmail} onChangeText={props.setFEmail} placeholder="you@epic.day" placeholderTextColor={desk.inkFaint}
+          autoCapitalize="none" keyboardType="email-address"
+          onFocus={() => setFocus('email')} onBlur={() => setFocus(null)}
+          style={[styles.input, focus === 'email' && styles.inputFocus]} />
+        {props.fErr ? <Text style={styles.fieldErr}>{props.fErr}</Text> : null}
+      </Field>
+      <Field label="Your name">
+        <TextInput value={props.fName} onChangeText={props.setFName} placeholder="Full name" placeholderTextColor={desk.inkFaint}
+          onFocus={() => setFocus('name')} onBlur={() => setFocus(null)}
+          style={[styles.input, focus === 'name' && styles.inputFocus]} />
+      </Field>
+      <View style={styles.formFoot}>
+        <Press onPress={props.onClaim} style={({ hovered }: any) => [styles.primary, hovered && styles.primaryHover]}>
+          <Text style={styles.primaryLabel}>Claim and send login link</Text>
           <Icon name="forward" size={16} color={ON_LIME} strokeWidth={2.4} />
         </Press>
         <Press onPress={props.onClose} effect="none"><Text style={styles.cancel}>Cancel</Text></Press>
@@ -506,6 +587,11 @@ const styles = StyleSheet.create({
   addBtn: { flexDirection: 'row', alignItems: 'center', gap: 22, backgroundColor: LIME, paddingVertical: 10, paddingHorizontal: 14 },
   addBtnHover: { opacity: 0.88 },
   addLabel: { fontFamily: fonts.heading, fontSize: 13.5, fontWeight: '700', color: ON_LIME },
+
+  banner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16, backgroundColor: LIME, paddingVertical: 14, paddingHorizontal: 16 },
+  bannerHover: { opacity: 0.9 },
+  bannerTitle: { fontFamily: fonts.heading, fontSize: 15, fontWeight: '800', letterSpacing: -0.3, color: ON_LIME },
+  bannerSub: { fontFamily: fonts.body, fontSize: 13, color: ON_LIME, opacity: 0.85, lineHeight: 18 },
 
   filters: { flexDirection: 'row', alignSelf: 'flex-start', borderWidth: 1, borderColor: desk.ruleStrong },
   segment: { paddingVertical: 9, paddingHorizontal: 22 },

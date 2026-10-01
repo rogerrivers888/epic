@@ -20,6 +20,7 @@ import * as activity from '../repositories/activity.js';
 import * as insights from '../repositories/insights.js';
 import * as rolesRepo from '../repositories/roles.js';
 import { accountById, listAccounts, signInsFor } from '../repositories/accounts.js';
+import { grantStaffRole, clearPriorRole } from '../repositories/staff.js';
 import { householdById, membersWithConstraints } from '../repositories/households.js';
 import { liveSessions, liveAgentSessions } from '../repositories/sessions.js';
 import { todayStatus, alarmsToday } from '../sources/dailyCeiling.js';
@@ -288,8 +289,19 @@ router.patch('/people/:id/role', requires('manage_roles'), async (req, res, next
     const before = account.role_id ? await rolesRepo.roleById(account.role_id) : null;
     // Giving somebody a back-office role, or taking one away, makes or unmakes a
     // staff member — a staff decision, whatever the role's capabilities are.
-    needManageStaff(req, opensAdmin(before?.doors) || opensAdmin(role?.doors));
-    await rolesRepo.setAccountRole(account.id, roleId);
+    const opensNew = opensAdmin(role?.doors);
+    const opensOld = opensAdmin(before?.doors);
+    needManageStaff(req, opensOld || opensNew);
+    // Keep the Staff screen's prior-role bookkeeping honest even when the
+    // transition happens through this general endpoint (Codex, 1 Oct 2026):
+    // becoming staff remembers the customer role; ceasing to be staff here sets
+    // the chosen role and forgets any stale prior.
+    if (opensNew && !opensOld) {
+      await grantStaffRole(account.id, roleId);
+    } else {
+      await rolesRepo.setAccountRole(account.id, roleId);
+      if (opensOld && !opensNew) await clearPriorRole(account.id);
+    }
     await rolesRepo.writeAudit({
       ...actor(req), action: 'role.grant', subjectType: 'account', subjectId: account.id, subjectLabel: account.email,
       before: before ? { role: before.key } : null, after: role ? { role: role.key } : null,
@@ -516,6 +528,10 @@ router.delete('/roles/:id', requires('manage_roles'), async (req, res, next) => 
     const role = await rolesRepo.roleById(req.params.id);
     if (!role) return res.status(404).json({ error: 'not_found', message: 'No such role.' });
     if (role.is_system) throw bad('That role is one Epic ships with. It can be changed, but not deleted.');
+    // Deleting a back-office role closes back-office access for everyone on it
+    // (accounts.role_id is ON DELETE SET NULL), so it is a staff decision too
+    // (Codex, 1 Oct 2026).
+    needManageStaff(req, opensAdmin(role.doors));
     const removed = await rolesRepo.deleteRole(req.params.id);
     await rolesRepo.writeAudit({ ...actor(req), action: 'role.delete', subjectType: 'role', subjectId: role.id, subjectLabel: role.label, before: role });
     res.json({ removed: removed > 0 });

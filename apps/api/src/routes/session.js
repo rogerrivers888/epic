@@ -11,8 +11,8 @@ import {
 } from '../auth.js';
 import { findLiveSession, liveSessions, revokeAllSessions } from '../repositories/sessions.js';
 import {
-  accountByContact, accountById, consumeSignInLink, createSignInLink, invalidateUnusedLinks,
-  linkContactFor, markLinkSent, ownerAccount, recordSignIn,
+  accountByContact, accountById, consumeSignInLink, linkContactFor, markLinkSent,
+  ownerAccount, recordSignIn, replaceSignInLink,
 } from '../repositories/accounts.js';
 import { loginLinkEmail, mailStatus, sendMail, webUrl } from '../sources/mail.js';
 import { sendSms, smsStatus } from '../sources/sms.js';
@@ -217,11 +217,11 @@ router.post('/session/link', async (req, res, next) => {
  * lock it out for good.
  */
 async function sendLoginLink(req, account) {
-  // The new link is the only one that works: any older unused link — including a
-  // seven-day staff invite — is voided, so a leaked or forwarded one cannot still
-  // open a ninety-day session (Codex, 1 Oct 2026).
-  await invalidateUnusedLinks(account.id);
-  const { token, link } = await createSignInLink(account.id, { requestedBy: 'self', ttlHours: 0.25 });
+  // The new link is the only one that works: replaceSignInLink voids any older
+  // unused link — including a seven-day staff invite — and mints the new one in
+  // one atomic step, so a leaked or forwarded one cannot still open a ninety-day
+  // session, even if two requests race (Codex, 1 Oct 2026).
+  const { token, link } = await replaceSignInLink(account.id, { requestedBy: 'self', ttlHours: 0.25 });
   const url = `${webUrl(req)}/?signin=${token}`;
   let delivery; let error = null; let channel = null;
   if (account.email) {

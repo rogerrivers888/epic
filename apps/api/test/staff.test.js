@@ -33,11 +33,13 @@ const adminRoutes = (await import('../src/routes/admin.js')).default;
 // it; here they are simply granted, because what is under test is the router.
 const OWNER_STAFF = { isOwner: true, doors: ['client', 'admin'], capabilities: new Set(['manage_staff']) };
 let staffAccess = OWNER_STAFF; // most tests act as the owner; a few flip this per call.
+let staffSession = { auth_method: 'link' }; // personal by default; a test flips it to the passcode.
 const app = express();
 app.use(express.json());
 app.use((req, res, next) => {
   req.account = { id: null, email: 'owner@epic.day' };
   req.access = staffAccess;
+  req.session = staffSession;
   next();
 });
 app.use('/api/admin/staff', staffRoutes);
@@ -67,8 +69,9 @@ const OWNER = { isOwner: true, doors: ['client', 'admin'], capabilities: new Set
 const server = app.listen(0);
 await new Promise((r) => server.on('listening', r));
 const base = `http://127.0.0.1:${server.address().port}`;
-const call = async (method, path, body, acc) => {
+const call = async (method, path, body, acc, sess) => {
   staffAccess = acc ?? OWNER_STAFF; // default: act as the owner; reset every call.
+  staffSession = sess ?? { auth_method: 'link' }; // default: a personal session.
   const res = await fetch(base + path, {
     method,
     headers: body ? { 'content-type': 'application/json' } : {},
@@ -116,6 +119,37 @@ test('the staff list shows the owner even before an owner account exists', async
   assert.equal(owner.role, 'Owner');
   assert.deepEqual(body.roles.map((r) => r.key).sort(), ['admin', 'analyst', 'support']);
   assert.ok(body.roles.every((r) => r.description), 'each role option carries its description');
+  assert.equal(body.ownerClaimed, false, 'no owner account yet');
+});
+
+test('on the passcode, managing staff is blocked but claiming the owner account is not', async () => {
+  const PASSCODE = { auth_method: 'passcode' };
+  // claim-owner binds to the founding household, so one must exist.
+  await query('insert into households (name) values ($1)', ['Founding']);
+  // A mutation on the shared passcode is refused — managing staff is personal.
+  const blocked = await call('POST', '/api/admin/staff',
+    { name: 'Nope', email: 'nope@epic.day', roleId: await roleId('support') }, OWNER_STAFF, PASSCODE);
+  assert.equal(blocked.status, 403);
+  assert.equal(blocked.body.error, 'needs_personal');
+
+  // The claim bootstrap works on the passcode, creates the owner, and sends a link.
+  const claim = await call('POST', '/api/admin/staff/claim-owner',
+    { email: 'roger@epic.day', name: 'Roger' }, OWNER_STAFF, PASSCODE);
+  assert.equal(claim.status, 201);
+  assert.match(claim.body.invitation.url, /\/\?signin=/);
+  const owner = await accounts.ownerAccount();
+  assert.ok(owner && owner.email === 'roger@epic.day', 'the owner account now exists');
+
+  // Once only.
+  const again = await call('POST', '/api/admin/staff/claim-owner',
+    { email: 'other@epic.day' }, OWNER_STAFF, PASSCODE);
+  assert.equal(again.status, 409);
+  assert.equal(again.body.error, 'owner_exists');
+
+  // The list now reports the owner as claimed, and a personal session may manage.
+  const after = await call('GET', '/api/admin/staff');
+  assert.equal(after.body.ownerClaimed, true);
+  assert.equal(after.body.personal, true);
 });
 
 // ---------------------------------------------------------------------------
@@ -308,10 +342,14 @@ test('removing a suspended staff member returns them to a customer who can log i
 });
 
 test('the owner cannot be suspended, re-roled or removed through staff', async () => {
-  // Claim the owner account so there is a real row to aim at.
-  const founding = await query('insert into households (name) values ($1) returning id', ['Founding']);
-  const owner = await accounts.createAccountOnHousehold(founding.rows[0].id, { email: 'roger@epic.day', name: 'Roger', role: 'owner', plan: 'owner' });
-  await query('update accounts set role_id = (select id from roles where key = $1) where id = $2', ['owner', owner.id]);
+  // The owner account was claimed earlier in this file; reuse it (claim it here
+  // if this test is run on its own).
+  let owner = await accounts.ownerAccount();
+  if (!owner) {
+    const founding = await query('insert into households (name) values ($1) returning id', ['Founding']);
+    owner = await accounts.createAccountOnHousehold(founding.rows[0].id, { email: 'roger@epic.day', name: 'Roger', role: 'owner', plan: 'owner' });
+    await query('update accounts set role_id = (select id from roles where key = $1) where id = $2', ['owner', owner.id]);
+  }
   for (const path of [`/api/admin/staff/${owner.id}/suspend`, `/api/admin/staff/${owner.id}/link`, `/api/admin/staff/${owner.id}/logout-all`]) {
     assert.equal((await call('POST', path)).status, 409, `${path} must refuse the owner`);
   }
@@ -414,10 +452,25 @@ test('manage_roles alone cannot open back-office access; that needs manage_staff
   const openDoor = await adminCall('PATCH', `/api/admin/roles/${clientRole.id}`, { doors: ['client', 'admin'] }, ROLES_ADMIN);
   assert.equal(openDoor.status, 403);
 
-  // The owner may do all three.
+  // Deleting a back-office role closes access for everyone on it — also a staff
+  // decision (clientRole gains the admin door below, so delete it last).
+  assert.equal((await adminCall('PATCH', `/api/admin/roles/${clientRole.id}`, { doors: ['client', 'admin'] }, OWNER)).status, 200);
+  assert.equal((await adminCall('DELETE', `/api/admin/roles/${clientRole.id}`, undefined, ROLES_ADMIN)).status, 403);
+
+  // The owner may do all of them.
   assert.equal((await adminCall('PATCH', `/api/admin/people/${cust.id}/role`, { roleId: support }, OWNER)).status, 200);
   assert.equal((await adminCall('POST', '/api/admin/roles', { key: 'bo_role2', label: 'BO2', doors: ['client', 'admin'], capabilities: ['view_accounts'] }, OWNER)).status, 201);
-  assert.equal((await adminCall('PATCH', `/api/admin/roles/${clientRole.id}`, { doors: ['client', 'admin'] }, OWNER)).status, 200);
+  assert.equal((await adminCall('DELETE', `/api/admin/roles/${clientRole.id}`, undefined, OWNER)).body.removed, true);
+
+  // And the prior-role bookkeeping holds through the general endpoint: a customer
+  // on a custom client role, made staff here, is restored to it on removal.
+  const power = await rolesRepo.createRole({ key: 'power2', label: 'Power2', doors: ['client'], capabilities: [] });
+  const dual = await accounts.createAccount({ email: 'dual2@home.test', name: 'Dual2' });
+  await rolesRepo.setAccountRole(dual.id, power.id);
+  await adminCall('PATCH', `/api/admin/people/${dual.id}/role`, { roleId: support }, OWNER);
+  assert.equal((await accounts.accountById(dual.id)).role_id, support, 'now staff');
+  await call('DELETE', `/api/admin/staff/${dual.id}`); // personal owner session
+  assert.equal((await accounts.accountById(dual.id)).role_id, power.id, 'restored to their client role, not member');
 });
 
 test('asking for a self-serve login link voids an older unused link', async () => {

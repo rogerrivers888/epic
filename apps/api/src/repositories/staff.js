@@ -148,5 +148,10 @@ export function deleteStaffAccount(id) {
   return query('delete from accounts where id = $1', [id]);
 }
 
+/** Forget a remembered prior role — when staff access is taken away by a route that sets the new role itself. */
+export function clearPriorRole(id) {
+  return query('update accounts set prior_role_id = null where id = $1', [id]);
+}
+
 // invalidateUnusedLinks moved to repositories/accounts.js (it is a sign_in_links
 // operation, shared by the staff invite and the self-serve login path).

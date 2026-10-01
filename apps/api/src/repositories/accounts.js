@@ -385,6 +385,34 @@ export function invalidateUnusedLinks(accountId) {
   );
 }
 
+/**
+ * Void the older links and mint one, atomically, so there is only ever one live
+ * link for an account.
+ *
+ * `invalidateUnusedLinks` then `createSignInLink` as two statements races itself:
+ * two requests can both finish the invalidate before either inserts, and end with
+ * two live links (Codex, 1 Oct 2026). A row lock on the account serialises the
+ * pair per account, so the invariant actually holds under concurrency.
+ */
+export async function replaceSignInLink(accountId, { requestedBy = 'owner', ttlHours = 24 * 7 } = {}) {
+  const token = crypto.randomBytes(32).toString('base64url');
+  return withTransaction(async (client) => {
+    await client.query('select id from accounts where id = $1 for update', [accountId]);
+    await client.query(
+      `update sign_in_links set expires_at = now()
+        where account_id = $1 and used_at is null and expires_at > now()`,
+      [accountId],
+    );
+    const { rows } = await client.query(
+      `insert into sign_in_links (account_id, token_hash, expires_at, requested_by)
+       values ($1, $2, now() + ($3 || ' hours')::interval, $4)
+       returning id, account_id, expires_at, created_at`,
+      [accountId, digest(token), String(ttlHours), requestedBy],
+    );
+    return { token, link: rows[0] };
+  });
+}
+
 /** The most recent link for an account, so the admin screen can say what happened to it. */
 export async function lastLinkFor(accountId) {
   const { rows } = await query(

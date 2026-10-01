@@ -3265,6 +3265,8 @@ export const api = {
   adminStaffSuspend: (id: string) => post<{ staff: StaffMember }>(`/api/admin/staff/${id}/suspend`, {}),
   adminStaffUnsuspend: (id: string) => post<{ staff: StaffMember }>(`/api/admin/staff/${id}/unsuspend`, {}),
   adminRemoveStaff: (id: string) => del<{ removed: boolean; keptAsCustomer: boolean; message: string }>(`/api/admin/staff/${id}`),
+  adminClaimOwner: (body: { email: string; name?: string }) =>
+    post<{ staff: StaffMember; invitation: StaffInvitation }>('/api/admin/staff/claim-owner', body),
   adminActivity: (days = 30) => request<{ window: { days: number }; feed: FeedRow[]; screens: ScreenRow[]; daily: DailyRow[]; active: Engagement['active'] }>(`/api/admin/activity?days=${days}`),
   /**
    * The reporting suite: Overview, Money, Customers, Suppliers and Behaviour,
@@ -4919,7 +4921,13 @@ export type StaffMember = {
 };
 export type StaffRole = { id: string; key: string; label: string; description: string | null };
 export type StaffInvitation = { url: string; expiresAt: string; delivery: string; fresh?: boolean; message: string | null };
-export type StaffList = { staff: StaffMember[]; roles: StaffRole[]; mail: { configured: boolean; reason?: string } };
+export type StaffList = {
+  staff: StaffMember[];
+  roles: StaffRole[];
+  mail: { configured: boolean; reason?: string };
+  ownerClaimed: boolean;
+  personal: boolean;
+};
 
 export type PersonRecord = {
   account: { id: string; email: string; name: string | null; status: string; plan: string; trialEndsOn: string | null; note: string | null; createdAt: string; activatedAt: string | null; lastSeenAt: string | null; signInCount: number; monthlyCallBound: number | null; role: { id: string; key: string; label: string; doors: string[] } | null };

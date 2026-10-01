@@ -24,10 +24,11 @@ import {
   listStaff, removeStaffRole, setStaffRole, staffById,
 } from '../repositories/staff.js';
 import {
-  accountByEmail, accountById, createSignInLink, invalidateUnusedLinks, markLinkSent,
-  normaliseEmail, revokeAccountSessions, updateAccount,
+  accountByEmail, accountById, createAccountOnHousehold, markLinkSent,
+  normaliseEmail, ownerAccount, replaceSignInLink, revokeAccountSessions, updateAccount,
 } from '../repositories/accounts.js';
-import { roleById, roleByKey, writeAudit } from '../repositories/roles.js';
+import { firstHousehold } from '../repositories/households.js';
+import { roleById, roleByKey, setAccountRole, writeAudit } from '../repositories/roles.js';
 import { loginLinkEmail, mailStatus, sendMail, staffInviteEmail, webUrl } from '../sources/mail.js';
 
 const router = express.Router();
@@ -50,6 +51,24 @@ function refuseOwnerOnlyRole(req, role) {
 
 /** Who is doing this. The shared passcode has no account row behind it. */
 const actor = (req) => ({ actorId: req.account?.id ?? null, actorLabel: req.account?.email ?? 'the owner (passcode)' });
+
+/**
+ * Managing staff is a personal act. The shared passcode may read the list and
+ * claim the owner account (the bootstrap below), but adding, re-roling,
+ * suspending or removing staff needs a real sign-in — so a leaked passcode, or a
+ * coding agent that happens to hold manage_staff, cannot create back-office
+ * access. A magic-link or Google session is personal; the passcode is not
+ * (auth_method, migration 264 / G11).
+ */
+function requirePersonal(req, res, next) {
+  if (req.session?.auth_method === 'passcode') {
+    return res.status(403).json({
+      error: 'needs_personal',
+      message: 'Sign in as yourself to manage staff. Claim your owner account and follow the login link.',
+    });
+  }
+  return next();
+}
 
 /** What the owner sees for one staff member. Never a token, never a link. */
 const staffView = (row) => {
@@ -95,10 +114,10 @@ async function enriched(id) {
  * out of the screen (ST4).
  */
 async function issueLink(req, account, { fresh = false } = {}) {
-  await invalidateUnusedLinks(account.id);
   // Seven days for a staff invite — the table default, and what the handover
-  // asks for ("Expires 8 Oct 2026" for a link sent on 1 Oct).
-  const { token, link } = await createSignInLink(account.id, { requestedBy: 'owner' });
+  // asks for ("Expires 8 Oct 2026" for a link sent on 1 Oct). replaceSignInLink
+  // voids any older unused link and mints this one atomically.
+  const { token, link } = await replaceSignInLink(account.id, { requestedBy: 'owner' });
   const url = `${webUrl(req)}/?signin=${token}`;
   const mail = mailStatus();
   let delivery = mail.configured ? 'email' : 'no_sender';
@@ -153,7 +172,50 @@ router.get('/', requires('manage_staff'), async (req, res, next) => {
         signInCount: null, hasHousehold: false, synthetic: true,
       }, ...staff];
     }
-    res.json({ staff, roles: await rolesForScreen(), mail: mailStatus() });
+    res.json({
+      staff,
+      roles: await rolesForScreen(),
+      mail: mailStatus(),
+      // Whether a real owner account exists yet, and whether this session may
+      // actually manage staff (a personal sign-in, not the shared passcode). The
+      // screen uses these to offer the owner-claim bootstrap and to explain why
+      // "Add staff" is waiting on a personal sign-in.
+      ownerClaimed: staff.some((s) => s.isOwner && !s.synthetic),
+      personal: req.session?.auth_method !== 'passcode',
+    });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST /api/admin/staff/claim-owner — the one-time bootstrap.
+ *
+ * The owner starts on the shared passcode with no account of his own, and
+ * managing staff needs a personal sign-in (requirePersonal). This is the door
+ * out of that: on the passcode he claims the owner account against the founding
+ * household — once, guarded by the single-owner index — and is sent a login link.
+ * Following it signs him in personally, and from then on he manages staff as
+ * himself. It is NOT behind requirePersonal, by design — it is how a personal
+ * session is first obtained. (Replaces the Settings "Include mine" claim, which
+ * is not reachable from the menu.)
+ */
+router.post('/claim-owner', requires('manage_staff'), async (req, res, next) => {
+  try {
+    const email = normaliseEmail(req.body?.email);
+    if (!email || !EMAIL.test(email)) throw bad("That email doesn't look right.", 'bad_email');
+    if (await ownerAccount()) throw bad('There is already an owner account.', 'owner_exists', 409);
+    if (await accountByEmail(email)) throw bad('That email already has an Epic account.', 'account_exists', 409);
+    const founding = await firstHousehold();
+    if (!founding) throw bad('There is no household to own yet.', 'no_household', 409);
+
+    const created = await createAccountOnHousehold(founding.id, {
+      email, name: String(req.body?.name || '').trim() || null, role: 'owner', plan: 'owner',
+    });
+    const ownerRole = await roleByKey('owner');
+    if (ownerRole) await setAccountRole(created.id, ownerRole.id);
+    await writeAudit({ ...actor(req), action: 'staff.claim_owner', subjectType: 'account', subjectId: created.id, subjectLabel: email });
+
+    const invitation = await issueLink(req, await accountById(created.id), { fresh: true });
+    res.status(201).json({ staff: await enriched(created.id), invitation });
   } catch (err) { next(err); }
 });
 
@@ -168,7 +230,7 @@ router.get('/', requires('manage_staff'), async (req, res, next) => {
  * given the back-office role and a link, and keeps its household — one e-mail is
  * one account (handover). An e-mail already on staff is refused.
  */
-router.post('/', requires('manage_staff'), async (req, res, next) => {
+router.post('/', requires('manage_staff'), requirePersonal, async (req, res, next) => {
   try {
     const b = req.body || {};
     const name = String(b.name || '').trim();
@@ -226,7 +288,7 @@ router.post('/', requires('manage_staff'), async (req, res, next) => {
 // ---------------------------------------------------------------------------
 
 /** PATCH /api/admin/staff/:id/role — change the role, applied at once. */
-router.patch('/:id/role', requires('manage_staff'), async (req, res, next) => {
+router.patch('/:id/role', requires('manage_staff'), requirePersonal, async (req, res, next) => {
   try {
     const row = await staffById(req.params.id);
     if (!row) return res.status(404).json({ error: 'not_found', message: 'That person is not on staff.' });
@@ -245,7 +307,7 @@ router.patch('/:id/role', requires('manage_staff'), async (req, res, next) => {
 });
 
 /** POST /api/admin/staff/:id/link — a fresh link; every older unused one is made invalid. */
-router.post('/:id/link', requires('manage_staff'), async (req, res, next) => {
+router.post('/:id/link', requires('manage_staff'), requirePersonal, async (req, res, next) => {
   try {
     const row = await staffById(req.params.id);
     if (!row) return res.status(404).json({ error: 'not_found', message: 'That person is not on staff.' });
@@ -258,7 +320,7 @@ router.post('/:id/link', requires('manage_staff'), async (req, res, next) => {
 });
 
 /** POST /api/admin/staff/:id/logout-all — every device that account is signed in on. */
-router.post('/:id/logout-all', requires('manage_staff'), async (req, res, next) => {
+router.post('/:id/logout-all', requires('manage_staff'), requirePersonal, async (req, res, next) => {
   try {
     const row = await staffById(req.params.id);
     if (!row) return res.status(404).json({ error: 'not_found', message: 'That person is not on staff.' });
@@ -270,7 +332,7 @@ router.post('/:id/logout-all', requires('manage_staff'), async (req, res, next) 
 });
 
 /** POST /api/admin/staff/:id/suspend — sessions revoked, links refused, data untouched. */
-router.post('/:id/suspend', requires('manage_staff'), async (req, res, next) => {
+router.post('/:id/suspend', requires('manage_staff'), requirePersonal, async (req, res, next) => {
   try {
     const row = await staffById(req.params.id);
     if (!row) return res.status(404).json({ error: 'not_found', message: 'That person is not on staff.' });
@@ -283,7 +345,7 @@ router.post('/:id/suspend', requires('manage_staff'), async (req, res, next) => 
 });
 
 /** POST /api/admin/staff/:id/unsuspend — back to active, or invited if they never signed in. */
-router.post('/:id/unsuspend', requires('manage_staff'), async (req, res, next) => {
+router.post('/:id/unsuspend', requires('manage_staff'), requirePersonal, async (req, res, next) => {
   try {
     const row = await staffById(req.params.id);
     if (!row) return res.status(404).json({ error: 'not_found', message: 'That person is not on staff.' });
@@ -302,7 +364,7 @@ router.post('/:id/unsuspend', requires('manage_staff'), async (req, res, next) =
  * keep, so the account goes. Either way their sessions are revoked and it is
  * written to the audit trail.
  */
-router.delete('/:id', requires('manage_staff'), async (req, res, next) => {
+router.delete('/:id', requires('manage_staff'), requirePersonal, async (req, res, next) => {
   try {
     const row = await staffById(req.params.id);
     if (!row) return res.status(404).json({ error: 'not_found', message: 'That person is not on staff.' });
