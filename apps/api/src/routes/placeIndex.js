@@ -27,6 +27,7 @@ import * as index from '../repositories/placeIndex.js';
 import { decodeEntities } from '../repositories/placeIndex.js';
 import { phoneOf } from '../domain/contact.js';
 import { censusInRing, censusByOutcodeSum, placingPoints, nearestSector, widthOf, FINE_M } from '../repositories/censusRing.js';
+import { TEXT_QUESTIONS, textStillAsked } from '../sources/censusQuestions.js';
 import { ownSite } from '../sources/logo.js';
 import * as reach from '../repositories/reach.js';
 import { OURS_TO_KEEP, slicePlan } from '../sources/census.js';
@@ -1246,16 +1247,28 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
     const addedRefs = [...outerRefs].filter((r) => !innerRefs.has(r));
     const removedRefs = [...innerRefs].filter((r) => !outerRefs.has(r));
 
-    // Detail for the changed places only — their drawers, point and slice — from the
-    // same surfacing rows the count was taken over.
+    // The districts both rings cover, for the detail scope and the placement universe.
+    const slugs = [...new Set([...ringOuter.outcodes, ...ringInner.outcodes].map((o) => o.toLowerCase()))];
+
+    // Detail for the changed places only — their drawers, point and slice — and ONLY
+    // from the surfacing rows the census would have counted: the same area/tile scope
+    // and active-text filter censusInRing applies, so a drawer the count excluded (a
+    // surfacing in another district, or a retired text drawer) never appears in the
+    // breakdown (Codex).
     const allRefs = [...new Set([...addedRefs, ...removedRefs])];
+    const textDrawers = Object.keys(TEXT_QUESTIONS).filter(textStillAsked);
     const detail = new Map();
     if (allRefs.length) {
       const { rows: dr } = await query(
         `select ps.venue_ref, ps.subcategory, pi.lat, pi.lng, pi.slice
            from place_subcategories ps
            join place_index pi on pi.venue_ref = ps.venue_ref
-          where ps.category = $2 and ps.venue_ref = any($1)`, [allRefs, category]);
+          where ps.category = $2 and ps.venue_ref = any($1)
+            and (ps.area_slug = any($3)
+              or ps.area_slug in (select grid_key from census_tiles
+                                   where outcodes && (select array_agg(upper(s)) from unnest($3::text[]) s)))
+            and (ps.sourced is distinct from 'text' or ps.subcategory = any($4::text[]))`,
+        [allRefs, category, slugs, textDrawers]);
       for (const r of dr) {
         let e = detail.get(r.venue_ref);
         if (!e) { e = { subcats: new Set(), lat: r.lat, lng: r.lng, slice: r.slice }; detail.set(r.venue_ref, e); }
@@ -1264,7 +1277,6 @@ router.get('/census-ring-breakdown', requires('view_library'), async (req, res, 
     }
 
     // A universe to name each changed place's district.
-    const slugs = [...new Set(ringOuter.outcodes.map((o) => o.toLowerCase()))];
     const { rows: sectors } = await query(
       'select lat, lng, upper(outcode) as outcode from geo_cells where lower(outcode) = any($1)', [slugs]);
     const bbox = sectors.reduce((b, u) => ({
