@@ -172,7 +172,9 @@ const WRITE = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 app.use((req, res, next) => {
   // Only a coding agent on the shared passcode, never a personal sign-in from
   // an automated user agent (a future native app signs in by link) (Codex, 1 Oct).
-  if (req.session?.kind === 'agent' && req.session?.auth_method === 'passcode' && WRITE.has(req.method)) {
+  // Filing an approval is the one write an agent may make — it is how it asks.
+  const filingApproval = req.method === 'POST' && req.path === '/api/admin/approvals';
+  if (req.session?.kind === 'agent' && req.session?.auth_method === 'passcode' && WRITE.has(req.method) && !filingApproval) {
     return res.status(403).json({
       error: 'agent_read_only',
       message: 'This sign-in is an agent: it may read and propose, but not change anything. Sign in on your own device to make this change.',

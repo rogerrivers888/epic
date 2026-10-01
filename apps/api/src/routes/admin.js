@@ -24,6 +24,7 @@ import { householdById, membersWithConstraints } from '../repositories/household
 import { liveSessions, liveAgentSessions } from '../repositories/sessions.js';
 import { todayStatus, alarmsToday } from '../sources/dailyCeiling.js';
 import { forgetSession } from '../sources/paidGate.js';
+import * as approvals from '../repositories/approvals.js';
 import { CHECKED_ON, DOMAINS, PROVIDERS, SERVICES, cellsOf, matrix } from '../sources/catalogue.js';
 import { callVolume, ownedFacts, ownedLibrary } from '../repositories/sourceStats.js';
 import { sourceHasKey, sourceOff } from '../sources/index.js';
@@ -747,6 +748,54 @@ router.post('/sessions/:id/grant', requires('manage_settings'), requireOwnerSign
     if (!row) return res.status(404).json({ error: 'not_an_agent', message: 'No live agent session by that id.' });
     forgetSession(row.id);
     res.json({ session: row });
+  } catch (err) { next(err); }
+});
+
+/**
+ * The Approvals queue (G11, 1 Oct 2026).
+ *
+ * An agent files a request for a privileged action; the owner, personally
+ * signed in, approves or declines it. An approved request lets that one call
+ * through once (access.js `requireOwnerSignedIn`). Filing is the one write an
+ * agent may make (server.js), so this has no `manage` capability — the admin
+ * door is enough, and the decision is the gated part.
+ */
+router.post('/approvals', async (req, res, next) => {
+  try {
+    const request = String(req.body?.request || '').trim();
+    const description = String(req.body?.description || '').trim();
+    if (!request || !description) throw bad('An approval needs the request (METHOD /path) and a one-line description.');
+    const row = await approvals.fileApproval({
+      sessionId: req.session?.id ?? null,
+      label: req.session?.label ?? null,
+      request, description,
+      numbers: req.body?.numbers ?? null,
+    });
+    res.status(201).json({ approval: row });
+  } catch (err) { next(err); }
+});
+
+router.get('/approvals', requires('view_activity'), async (req, res, next) => {
+  try {
+    const state = ['pending', 'approved', 'declined', 'consumed', 'all'].includes(String(req.query.state)) ? String(req.query.state) : 'pending';
+    res.json({ approvals: await approvals.listApprovals({ state }) });
+  } catch (err) { next(err); }
+});
+
+// Deciding spends the owner's authority, so it needs him personally signed in,
+// and is logged with his name.
+router.post('/approvals/:id/decide', requires('view_activity'), requireOwnerSignedIn('decide an approval'), async (req, res, next) => {
+  try {
+    const decision = String(req.body?.decision || '');
+    if (!['approved', 'declined'].includes(decision)) throw bad('A decision is approved or declined.');
+    const who = actor(req);
+    const row = await approvals.decideApproval(req.params.id, { state: decision, by: who.actorLabel });
+    if (!row) return res.status(409).json({ error: 'not_pending', message: 'That request is not waiting for a decision.' });
+    await rolesRepo.writeAuditStrict({
+      ...who, action: `approval.${decision}`, subjectType: 'approval', subjectId: row.id, subjectLabel: row.request,
+      after: { description: row.description, numbers: row.numbers },
+    });
+    res.json({ approval: row });
   } catch (err) { next(err); }
 });
 

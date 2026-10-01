@@ -23,6 +23,7 @@ import {
 } from '../kit';
 import { Columns, RankedBars } from '../charts';
 import { AgentSessions } from '../AgentSessions';
+import { Approvals } from '../Approvals';
 
 /** What each daily measure is called, and how it reads. One at a time: never two y-axes. */
 const MEASURES = [
@@ -108,6 +109,7 @@ export function Overview({ onOpenPerson }: { onOpenPerson?: (id: string) => void
             <Withheld what="Revenue and provider cost" capability="view_financials" />
           )}
 
+          <Approvals />
           <AgentSessions />
 
           <Panel

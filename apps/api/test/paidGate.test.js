@@ -412,3 +412,22 @@ test('a back-office spend needs the owner personally signed in; a household sear
     assert.equal(out(), 2);
   });
 });
+
+test('a scheduled server job runs as the server, not an agent, and G11 does not block it', async () => {
+  // Owner, 1 Oct 2026: prove the daily census auto-resume, billing watch, OSM
+  // refresh and Monday summary are not caught by the privileged gates. They run
+  // from setInterval, never through requireSession, so backOffice is false; the
+  // census is IDs-only and free, so it never reaches the paid door at all.
+  const { assertBackOfficeSpendAllowed } = await import('../src/context.js');
+  const service = await serviceSessionId();
+  await withGoogle(async (out) => {
+    await runAsSpender({ householdId: null, sessionId: service, backOffice: false, elevated: false }, async () => {
+      // Not a back-office spend: a background job is free to spend what it may.
+      assert.doesNotThrow(() => assertBackOfficeSpendAllowed('census'));
+      // The census auto-resume's own call: IDs Only, free, and it goes out —
+      // the service session and the lack of elevation do not stop it.
+      await googleSource.censusSlice({ box: { minLat: 51.4, minLng: -0.7, maxLat: 51.41, maxLng: -0.69 }, includedType: 'park', pages: 1, meter: {} });
+    });
+    assert.equal(out(), 1, 'the scheduled census pass went out on its own');
+  });
+});

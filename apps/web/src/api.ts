@@ -1475,6 +1475,7 @@ export type SpendToday = {
 };
 /** An agent session: anything holding the passcode that is not the app on a device (migration 264). */
 export type AgentSession = { id: string; label: string | null; created_at: string; last_seen_at: string | null; paid_grant_until: string | null; spent_24h_usd: number };
+export type Approval = { id: string; request: string; description: string; numbers: Record<string, unknown> | null; state: string; requested_label: string | null; session_label: string | null; decided_by: string | null; decided_at: string | null; created_at: string };
 
 export type SpendLine = {
   key: string; label: string; source: string; on: boolean; unit: string; unitPlural: string; what: string; hardStop: string | null;
@@ -3236,6 +3237,9 @@ export const api = {
   /** The agent sessions, and the owner's grant of paid hours (0 takes it away). */
   agentSessions: (all = false) => request<{ sessions: AgentSession[]; total: number; canGrant?: boolean; you?: string | null }>(`/api/admin/sessions/agents${all ? '?all=1' : ''}`),
   grantAgent: (id: string, hours: number) => post<{ session: AgentSession }>(`/api/admin/sessions/${id}/grant`, { hours }),
+  /** The Approvals queue: what agents have asked the owner to authorise (G11). */
+  approvals: (state = 'pending') => request<{ approvals: Approval[] }>(`/api/admin/approvals?state=${state}`),
+  decideApproval: (id: string, decision: 'approved' | 'declined') => post<{ approval: Approval }>(`/api/admin/approvals/${id}/decide`, { decision }),
   /** Data › Sources: the catalogue of providers and fields, joined to what we hold. */
   adminSources: () => request<SourcesReport>('/api/admin/data/sources'),
   /** The correctness bench: runs so far, and what one can ask. */
