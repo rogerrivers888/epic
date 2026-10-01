@@ -110,14 +110,24 @@ export async function start({ areaSlug, confirm, householdId = null, startedBy =
   const session = startedSessionId ?? currentSpender().sessionId ?? null;
   const existing = await latestRun(slug);
   if (existing && existing.state === 'running') {
-    // Hand the run to the new caller only while its lease is actually free, in one
-    // atomic update, and read whether we reclaimed from its row count — never from
-    // the earlier read, which another worker may have leased in between (Codex).
-    // Household and session move together, so the remaining paid calls are always
-    // attributed to one caller: paidGate validates the session but not that it
-    // belongs to the household, so leaving the original household paired with a
-    // second admin's session would charge the wrong household.
-    if (session && householdId) {
+    const canReclaim = reclaimable(existing);
+    // Reclaiming a run transfers its remaining spend to the caller, so — exactly as
+    // a fresh run confirms its full request count — the caller must confirm the
+    // count still left (Codex). Without this, because a running run is unique by
+    // area, a second household could inherit a paused run and be billed for its
+    // remaining Place Details without ever approving the estimate.
+    if (session && householdId && canReclaim) {
+      const done = await claimedRefs(existing.id);
+      const remaining = (existing.refs ?? []).filter((r) => !done.has(r)).length;
+      if (Number(confirm) !== remaining) {
+        throw bad(`confirm the request count: ${remaining} place${remaining === 1 ? '' : 's'} left to look up`);
+      }
+      // Hand it over only while the lease is actually free, in one atomic update,
+      // and read whether we reclaimed from its row count — never from the read
+      // above, which another worker may have leased in between (Codex). Household
+      // and session move together, so the remaining calls are attributed to one
+      // caller: paidGate validates the session but not that it belongs to the
+      // household, so a mixed pairing would charge the wrong household.
       const { rowCount } = await query(
         `update cost_dist_runs set household_id = $2, started_session_id = $3
           where id = $1 and state = 'running' and (leased_until is null or leased_until < now())`,
@@ -125,9 +135,10 @@ export async function start({ areaSlug, confirm, householdId = null, startedBy =
       if (rowCount) { existing.household_id = householdId; existing.started_session_id = session; }
       return { run: existing, created: false, reclaim: rowCount > 0 };
     }
-    // No credentials to transfer: best-effort reclaim from the row we read; the
-    // worker's own lease acquisition is the real guard against double-work.
-    return { run: existing, created: false, reclaim: reclaimable(existing) };
+    // An actively-worked run (its lease live) is left alone — no transfer, no new
+    // spend to confirm. A caller carrying no credentials cannot transfer either;
+    // its reclaim flag is best-effort, and the worker's lease is the real guard.
+    return { run: existing, created: false, reclaim: (session && householdId) ? false : canReclaim };
   }
   const refs = await refsFor(slug);
   if (Number(confirm) !== refs.length) {

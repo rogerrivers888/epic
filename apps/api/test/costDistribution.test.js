@@ -170,10 +170,14 @@ test('a reclaim transfers household and session together; an active re-start doe
   let row = (await query('select household_id, started_session_id from cost_dist_runs where id = $1', [run.id])).rows[0];
   assert.equal(row.household_id, h1, 'active run keeps its household');
   assert.equal(row.started_session_id, s1, 'active run keeps its session');
-  // Once the lease lapses it is reclaimable, and a reclaim moves both to the new caller.
+  // Once the lease lapses it is reclaimable. A reclaim is a spend the new caller
+  // takes on, so it must confirm the count still left — the wrong count is refused.
   await query("update cost_dist_runs set leased_until = now() - interval '1 minute' where id = $1", [run.id]);
-  const reclaimed = await dist.start({ areaSlug: AREA, confirm: 0, startedBy: 'b', householdId: h2, startedSessionId: s2 });
-  assert.equal(reclaimed.reclaim, true, 'a paused run is reclaimable');
+  await assert.rejects(
+    () => dist.start({ areaSlug: AREA, confirm: 1, startedBy: 'b', householdId: h2, startedSessionId: s2 }),
+    /confirm the request count: 5 places left/, 'a reclaim with the wrong count is refused');
+  const reclaimed = await dist.start({ areaSlug: AREA, confirm: 5, startedBy: 'b', householdId: h2, startedSessionId: s2 });
+  assert.equal(reclaimed.reclaim, true, 'a paused run with the right count is reclaimed');
   row = (await query('select household_id, started_session_id from cost_dist_runs where id = $1', [run.id])).rows[0];
   assert.equal(row.household_id, h2, 'a reclaim takes the new household');
   assert.equal(row.started_session_id, s2, 'and the new session, paired with it');
