@@ -1,0 +1,322 @@
+<title>Epic Data Policy</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#F6F7F4;--surface:#FFFFFF;--ink:#1B2430;--ink-2:#4A5563;--ink-3:#7A8592;--line:#DDE2DC;--head:#EEF1EC;
+  --accent:#1F6F78;--accent-ink:#155158;--own:#2E7D4F;--own-bg:#E6F2EA;--cache:#B8760B;--cache-bg:#FBF0DC;--closed:#9C3B3B;--closed-bg:#F6E4E4;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --ground:#151A1E;--surface:#1D2429;--ink:#E7EBE8;--ink-2:#B4BDC4;--ink-3:#7F8A93;--line:#2E373E;--head:#232B31;
+  --accent:#63B8C0;--accent-ink:#8FD3DA;--own:#6FC391;--own-bg:#1C3327;--cache:#E0A64A;--cache-bg:#3A2E16;--closed:#E08A8A;--closed-bg:#3C2222;
+}}
+:root[data-theme="dark"]{
+  --ground:#151A1E;--surface:#1D2429;--ink:#E7EBE8;--ink-2:#B4BDC4;--ink-3:#7F8A93;--line:#2E373E;--head:#232B31;
+  --accent:#63B8C0;--accent-ink:#8FD3DA;--own:#6FC391;--own-bg:#1C3327;--cache:#E0A64A;--cache-bg:#3A2E16;--closed:#E08A8A;--closed-bg:#3C2222;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:"Source Serif 4",Georgia,serif;font-size:17px;line-height:1.6;padding-inline:20px;padding-block:48px 96px}
+.wrap{max-width:760px;margin:0 auto}
+h1,h2,h3{font-family:"Bricolage Grotesque","Helvetica Neue",Arial,sans-serif;text-wrap:balance;margin:0;letter-spacing:-.01em}
+h1{font-size:clamp(34px,6vw,50px);font-weight:700;line-height:1.02;letter-spacing:-.02em}
+h2{font-size:24px;font-weight:700;margin-top:60px;margin-bottom:12px;padding-top:18px;border-top:2px solid var(--ink)}
+h3{font-size:18px;font-weight:700;margin-top:28px;margin-bottom:6px}
+p{margin:0 0 14px}
+.eyebrow{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin-bottom:14px}
+.meta{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:13px;color:var(--ink-2);margin-top:12px}
+.lede{font-size:19px;line-height:1.55;margin-top:26px}
+nav{margin-top:28px;font-family:"Bricolage Grotesque",Arial,sans-serif;font-size:14px;display:flex;flex-wrap:wrap;gap:6px 14px}
+nav a{color:var(--accent-ink);text-decoration:none;border-bottom:1px solid var(--line)}
+table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:14px;line-height:1.45;margin:14px 0 18px;font-variant-numeric:tabular-nums}
+th,td{padding:8px 8px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left;overflow-wrap:anywhere}
+th{background:var(--head);font-family:"Bricolage Grotesque",Arial,sans-serif;font-weight:700;font-size:13px;border-bottom:2px solid var(--ink)}
+td.n,th.n{text-align:right;white-space:nowrap}
+tr.total td{font-weight:600;border-top:2px solid var(--ink);background:var(--head)}
+.tag{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;padding:2px 7px;border-radius:3px;font-weight:500;white-space:nowrap}
+.t-own{color:var(--own);background:var(--own-bg)}.t-cache{color:var(--cache);background:var(--cache-bg)}.t-closed{color:var(--closed);background:var(--closed-bg)}
+.note{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);padding:12px 16px;margin:18px 0;font-size:15.5px}
+.note p:last-child{margin:0}
+code{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:.88em;background:var(--head);padding:1px 5px;border-radius:3px}
+pre{background:var(--surface);border:1px solid var(--line);padding:16px;font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12.5px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;margin:14px 0}
+ol,ul{padding-left:22px;margin:0 0 14px}li{margin-bottom:8px}
+a{color:var(--accent-ink)}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sources{font-size:13.5px;color:var(--ink-2);line-height:1.7}
+@media (max-width:520px){table{font-size:12.5px}th,td{padding:6px 5px}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="wrap">
+<div class="eyebrow">Epic · Data policy · V1</div>
+<h1>Epic Data Policy</h1>
+<div class="meta">19 September 2026 · revised after experiments 1–4 · supersedes the Claude Doc draft of the same name</div>
+
+<p class="lede">Google is the spine everywhere; nothing rented is stored; knowing what exists is free and permanent; ranking is done from what we own; we buy only for what is shown. Every rule below is one of those five applied.</p>
+
+<p class="note"><strong>Corrections (1 Oct 2026).</strong> Fixes for internal consistency: (1) ranking is done on the Google search response — one search per category, no per-ID Place Details calls to surface an owned place Google did not return — and the "rank the top ten from the census" instruction is withdrawn; (2) the OSM "Not on Google" match fence is 400&nbsp;m everywhere, matching <code>matchFence</code>, not 150&nbsp;m; (3) the SL5 worked example counts the live TripAdvisor fetch in each drawer open (3.2p an open, 9.6p for three, ~69.6p for a fresh search); (4) Google ratings are never stored beyond the 12&nbsp;h search pool — only the derived, dated <code>epic_score</code> is kept, never Google's raw rating (the "ratings 7&nbsp;d" cache is removed); (5) a maxed-out category pages with Google's page token only once a household goes past the 20, never by tiling another ring slice; (6) "Google is the only source a household sees" is scoped to discovery results, with the drawer's live, attributed TripAdvisor rating named as the exception. <strong>Under review:</strong> whether Google place <em>types</em> are stored per place indefinitely — <code>place_index.google_types</code> and <code>place_index_labels</code> are written on display and are not expired with coordinates — rather than held only in the working set; reported to the owner, pending his decision, so the "google types are written … to <code>place_index</code>" line is left unchanged for now.</p>
+
+<nav>
+<a href="#rules">Rules</a><a href="#sources">Sources</a><a href="#example">SL5 worked example</a><a href="#tripadvisor">TripAdvisor verdict</a><a href="#score">Owning the score</a><a href="#app">What the app shows</a><a href="#cost">Cost model</a><a href="#pool">Once-a-day question</a><a href="#census">Census &amp; Places tab</a><a href="#experiments">Experiments</a><a href="#v1v2">Now and later</a><a href="#claude-code">Claude Code instructions</a>
+</nav>
+
+<h2 id="rules">The rules</h2>
+<ol>
+<li><strong>Google is called on every search, and in discovery results Google is the only source a household sees in V1</strong> — the one exception is an opened place's drawer, which also shows TripAdvisor's rating and reviews, fetched live and shown with attribution (the TripAdvisor rule below). Photographs and ratings have no substitute. Google's search results already carry rating, review count, price band, hours, website and photo references for up to 20 places per request, so a search-shaped call is the unit of purchase.</li>
+<li><strong>Knowing what exists is free and permanent.</strong> The first search of an area, by anyone on any surface, leaves a census: every place ID Google returned, with our category and subcategory (from the query), the slice it came from and its rank, written to <code>place_index</code> with no cap. From then on the area's count is known and shown in the back office without calling Google. The census uses Google's IDs Only field mask, which is free with no cap; location and types are Pro-tier on Text Search and arrive the first time a place is bought for display. The census refreshes every 30 days or when the taxonomy changes.</li>
+<li><strong>A place is a place ID.</strong> The Google place ID is the only Google content stored indefinitely. Coordinates may be held 30 days. Names, ratings, reviews, hours and photos live in memory for hours and are never written to the database or a device. Everything keyed on a place, reachability included, keys on the ID and coordinates, not a postcode.</li>
+<li><strong>Prefer search over detail.</strong> A Text Search returns 20 places with ratings for one request price (0.16p a place). A Place Details call is one place for 2p. Never buy detail for a place a search could have covered.</li>
+<li><strong>Rank the search response.</strong> One Text Search per category returns 20 places; order those by the Epic score (section <a href="#score">Owning the score</a>) and Google's rank, and show the top 10. Google's search decides which places appear — an owned place Google did not return is not fetched to force it in, because that would be a per-ID Place Details call. One search per category, never one per place.</li>
+<li><strong>Photos are fetched for tiles on screen</strong>, a row at a time, never for a result set.</li>
+<li><strong>TripAdvisor is drawer-only.</strong> Fetched live when a household opens a place and shown beside Google with its logo; never a discovery source and never an input to the Epic score. Experiment 3 (19 September) settled it: a 33% match on what Epic shows, a quarter of Google's review depth, no family signal, and blending demoted the attractions a family day out is built on.</li>
+<li><strong>Free data is a check on Google, not a second source of discovery or opinion.</strong> OSM and the FSA register give the count the census is measured against. Every OSM place is looked up on Google by name (free); what Google returns is Google's, what it doesn't is a "Not on Google" residual shown only in the back office. If the credible residual is under 5% of visitable places, free data never surfaces new places in the app. This does not touch the owned layer: <code>place_records</code> remains what a device holds offline, menu links from venue pages stay in scope, and owned facts may fill any field Google leaves empty on a place page.</li>
+<li><strong>No paid research per place in V1.</strong> Buying nine Google results and researching the tenth saves nothing.</li>
+<li><strong>No new data source until the Places tab shows a material, reliable, cleansable gap.</strong> Google-first is what lets Epic open a new country by changing a bounding box.</li>
+</ol>
+
+<div class="note"><p><strong>Decision to revisit — rented photo bytes cached 10&nbsp;hours in the browser (1&nbsp;Oct&nbsp;2026).</strong> A Google Place Photo is streamed through <code>/api/photos/google</code> and the response carries <code>Cache-Control: private, max-age=36000</code> (<code>EPIC_PHOTO_CACHE_SECONDS</code>) — a per-device browser cache only, never server-stored, never a shared/edge cache, never redistributed. (The 10&nbsp;hours is this browser cache; the server holds a photo in memory for only about an hour — a separate, shorter layer — so the "photos 1&nbsp;h" in the implementation notes and this 10&nbsp;h describe different caches and are not in conflict.) <strong>This is not justified by Google's 30-day caching allowance: that allowance is for latitude/longitude, not for photo content.</strong> It is kept for now as a performance measure (reopening the app within the day shows the photos it already had rather than re-buying every one), and flagged here as a decision to revisit against the Maps Platform terms for photo media — reduce or remove it if the terms do not permit a temporary byte cache. Lazy-loading (photos fetched only for tiles in or near the viewport, each Google photo fetched once a session) already removes the eager, result-set-wide buying this rule has always forbidden.</p></div>
+
+<h2 id="sources">Where data comes from</h2>
+<table>
+<colgroup><col style="width:22%"><col style="width:30%"><col style="width:16%"><col style="width:32%"></colgroup>
+<thead><tr><th>Source</th><th>Role in V1</th><th>Stored?</th><th>Cost</th></tr></thead>
+<tbody>
+<tr><td><span class="tag t-cache">Rented</span> Google Places (New)</td><td>Everything a household sees: discovery, ranking signal, opinion, photos; the census</td><td>Place ID indefinitely; lat/lng 30 days</td><td>Census £0 (IDs Only, no cap); 3.2p per display search of 20 places; 2p per detail; 0.55p per photo</td></tr>
+<tr><td><span class="tag t-cache">Rented</span> TripAdvisor Content API</td><td>Drawer only: rating and 3 reviews beside Google's when a place is opened</td><td>Nothing (location ID only if the terms allow)</td><td>Discover: 1,000 places free, then $0.015 (1.2p) a place, $0.009 (0.7p) at volume; one entity per drawer open</td></tr>
+<tr><td><span class="tag t-own">Own</span> OpenStreetMap</td><td>Completeness check and the "Not on Google" residual, back office only</td><td>Yes, ODbL</td><td>£0</td></tr>
+<tr><td><span class="tag t-own">Own</span> FSA hygiene register</td><td>Ground count of food outlets per box, back office only</td><td>Yes, OGL</td><td>£0</td></tr>
+<tr><td><span class="tag t-own">Own</span> Venue page, Wikipedia, Wikidata</td><td>Already built; run on a household act, not surfaced in V1</td><td>Yes</td><td>£0</td></tr>
+<tr><td><span class="tag t-cache">Rented</span> Ticketmaster, SeatGeek, PredictHQ, Data Thistle</td><td>Events</td><td>Nothing</td><td>Free tiers</td></tr>
+<tr><td><span class="tag t-closed">V2</span> Claude web research</td><td>Clean prose where a venue page is raw markup</td><td>Own derived text</td><td>11.7p per place, once</td></tr>
+</tbody></table>
+<p>Not used: Yelp (24-hour cache limit, thin UK coverage, $229/month), scrapers of Google or TripAdvisor reviews (terms, UK database right, GDPR), and the other UK open-government sets from the <a href="https://claude.ai/code/artifact/68113608-6027-47b5-a2de-7fbe36d67259">data sources brief</a>. The only opinion data Epic will ever own outright is first-party: visits and three-state ratings already exist in the schema.</p>
+
+<h2 id="example">Worked example: a household searches SL5</h2>
+<p>Google returns at most 20 places per request and 60 per query, so "1,000 results" is not a thing Google does. The app fans out one query per category and buys only what it shows. Ten categories, a 3.2 km circle on Ascot, five visible tiles a row, three drawers opened; Google's <a href="https://developers.google.com/maps/billing-and-pricing/pricing">rate card</a> at $1.25 to the pound.</p>
+<table>
+<colgroup><col style="width:14%"><col style="width:36%"><col style="width:10%"><col style="width:12%"><col style="width:28%"></colgroup>
+<thead><tr><th>Step</th><th>Google call</th><th class="n">Calls</th><th class="n">Cost</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>A. Census</td><td>Text Search, IDs Only mask, one query per Google type within each subcategory, sliced by tile until no slice returns 60</td><td class="n">~400</td><td class="n">£0</td><td>Free with no cap. Every ID to <code>place_index</code> with subcategory, slice and rank. Permanent. Skipped if the box was censused in the last 30 days.</td></tr>
+<tr><td>B. Rank</td><td>none</td><td class="n">0</td><td class="n">£0</td><td>The display search's 20 are ordered by Epic score and Google rank; 10 shown.</td></tr>
+<tr><td>C. Display</td><td>Text Search, Enterprise + Atmosphere mask, one page per category</td><td class="n">10</td><td class="n">32p</td><td>20 places per request; 10 shown. Memory 12 h.</td></tr>
+<tr><td>D. Photos</td><td>Place Photo, per tile on screen</td><td class="n">~50</td><td class="n">28p</td><td>Ten rows of five. Scrolling buys the next five. Memory 1 h.</td></tr>
+<tr><td>E. Drawer</td><td>Place Details (Enterprise + Atmosphere: reviews, phone, AI summary) + a live TripAdvisor fetch</td><td class="n">6</td><td class="n">9.6p</td><td>Only on tap. Three opens; each a 2p Google Details and a 1.2p live TripAdvisor fetch = 3.2p an open.</td></tr>
+<tr class="total"><td>Fresh search</td><td></td><td class="n"></td><td class="n">~69.6p</td><td>Measured 19 Sep: a 12-request sweep of SL5 cost 30p, consistent.</td></tr>
+</tbody></table>
+<p>A second household searching SL5 within 12 hours pays nothing for A–C, about 28p for photos if the hour has passed, and 3.2p per drawer. "Within an hour of London" keeps A free however big the box is; C is where discipline matters: one page per category from the owned ranking (32p), never one page per tile (£5 and up).</p>
+
+<h2 id="tripadvisor">TripAdvisor: what the experiment showed</h2>
+<p>Drawer only. Experiment 3 on 19 September matched TripAdvisor against the 102 places a fresh SL5 search shows, by coordinates at the 400 m fence, and it did not earn a place on the search path.</p>
+<table>
+<colgroup><col style="width:56%"><col style="width:44%"></colgroup>
+<thead><tr><th>Measure</th><th class="n">Result</th></tr></thead>
+<tbody>
+<tr><td>Places shown that TripAdvisor matched</td><td class="n">34 of 102 (33%)</td></tr>
+<tr><td>Matched places where TripAdvisor held more reviews than Google</td><td class="n">2 of 34</td></tr>
+<tr><td>Median review count, Google vs TripAdvisor</td><td class="n">1,020 vs 267</td></tr>
+<tr><td>Matched places with a family trip-type signal</td><td class="n">0 of 34</td></tr>
+<tr><td>Top-10 changes if blended</td><td class="n">3 of 10, all demoting attractions for pubs and a curry house</td></tr>
+<tr><td>Cost of the experiment</td><td class="n">222 of the 1,000 free places; nothing stored</td></tr>
+</tbody></table>
+<p>So the Epic score takes nothing from TripAdvisor, no mapping is built on the search path, and the per-category cost table this section used to carry is moot. What remains is the drawer: one TripAdvisor entity per place a household opens, 1.2p at list, 0.7p at volume, fetched live with the panel filling in behind Google's. The standing verdict is recorded in <code>data_verdicts</code> with its re-open trigger: a match rate above 50% on a future re-run.</p>
+
+<h2 id="score">Owning the score</h2>
+<p>The Epic score is ours; the rating behind it is not. It is built from Google's rating, review count and rank as returned by the display search already bought, plus Epic's own signals (visits, household ratings, review recency), scaled to 0–100 and stamped with a date. It is a derived number, not a stored copy of Google's 4.6; the code already does this as <code>crowd_band</code>, and the score extends the same principle. It refreshes whenever a display search returns the place and the score is older than 90 days.</p>
+<table>
+<colgroup><col style="width:26%"><col style="width:44%"><col style="width:30%"></colgroup>
+<thead><tr><th>Moment</th><th>What happens</th><th>Who gets paid</th></tr></thead>
+<tbody>
+<tr><td>First search of SL5 by anyone</td><td>Census (free). Google display search per category buys 20 places with ratings; each gets an Epic score from that result.</td><td>Google 60p.</td></tr>
+<tr><td>Any later search touching those places</td><td>Rank from the Epic score. The Google display search still runs because names, hours and photo references are rented and expire; it is the cheap part, and it refreshes the score for free.</td><td>Google 60p (28p in the pool).</td></tr>
+<tr><td>Someone searches SL4</td><td>The census and the score are keyed on place ID and tile, not on the search. SL4's ring overlaps SL5's almost entirely; only tiles not censused in 30 days are sliced (free). New places get a score the first time they are bought for display.</td><td>Google 60p.</td></tr>
+<tr><td>Household opens a place</td><td>Google details and TripAdvisor details fetched live; both ratings side by side with logos, both review sets.</td><td>Google 2p, TripAdvisor 1.2p (0.7p), every open.</td></tr>
+</tbody></table>
+<div class="note"><p>Nothing here removes the Google display search on a fresh search. It cannot: photos, names and hours are rented, so they are re-bought at 3.2p a category. What the owned score removes is Google from the ranking decision, and it is what lets the Places tab show the app's exact top 10 for any area at any time.</p></div>
+
+<h2 id="app">What the app shows</h2>
+<p>Every place the census knows about is showable, because names, ratings and photos are rented at the moment they are displayed, not owned. The list is bought, and <strong>the only number a household ever sees is the length of a list we can put in front of them</strong>.</p>
+
+<p class="note"><strong>No unbacked counts (owner, 20 Sep 2026).</strong> The census count was on Inspire as a free headline and it said <em>23</em> over a ring holding three to five. It was wrong in five directions at once and no wording fixed it: it summed whole postcode districts rather than the ring; it summed drawers, so one place could count twice; most of the ring had never been censused; a saturated slice makes it a floor; and it is only ever as of the last run. So: <strong>no household-facing number unless we can show the places behind it. Where we cannot produce a list, show no number.</strong> The census keeps its job — it is what the back office counts with and what decides where to collect next — and it is not a number a household is shown.</p>
+<table>
+<colgroup><col style="width:24%"><col style="width:48%"><col style="width:28%"></colgroup>
+<thead><tr><th>Moment</th><th>What happens</th><th class="n">Cost</th></tr></thead>
+<tbody>
+<tr><td>Inspire opens</td><td>Each category shows its top 5 and <strong>no count but the length of the list</strong>. One display search per category, restricted to the ring's bounding box and filtered to the ring's own sectors; the 20 returned are ranked by Epic score where one exists, Google order otherwise, and every returned place gets a score written on the spot.</td><td class="n">3.2p per category; 32p for ten</td></tr>
+<tr><td>Tap a category</td><td>The 20 already bought, ranked. Photos for the tiles on screen.</td><td class="n">0.55p per visible tile</td></tr>
+<tr><td>Scroll past the 20</td><td>Buy the next page with Google's page token (nextPageToken). Never tile a further ring slice for a paid search.</td><td class="n">3.2p per 20</td></tr>
+<tr><td>Open a place</td><td>Google details and TripAdvisor live, side by side.</td><td class="n">3.2p</td></tr>
+<tr><td>Second household, same area, same day</td><td>Served from the 12-hour pool keyed on ring, category and page.</td><td class="n">Photos and drawers only</td></tr>
+</tbody></table>
+<p>Nothing is bought for a category nobody opens. The fence is the reachability ring, never a kilometre radius derived from minutes. The atlas and the food sweep are no longer pools the app searches; they remain sources of images and summaries for owned records.</p>
+
+<h2 id="cost">Cost model</h2>
+<p>Per household per month, ten categories, before the free allowances. "Warm" means the area was searched within 12 hours. Each figure includes three drawer opens a search at 3.2p (Google 2p plus TripAdvisor 1.2p).</p>
+<table>
+<colgroup><col style="width:28%"><col style="width:24%"><col style="width:24%"><col style="width:24%"></colgroup>
+<thead><tr><th>Searches a month</th><th class="n">All fresh</th><th class="n">Half warm</th><th class="n">Four-fifths warm</th></tr></thead>
+<tbody>
+<tr><td>5</td><td class="n">£3.48</td><td class="n">£2.68</td><td class="n">£2.20</td></tr>
+<tr><td>10</td><td class="n">£6.96</td><td class="n">£5.36</td><td class="n">£4.40</td></tr>
+<tr><td>20</td><td class="n">£13.92</td><td class="n">£10.72</td><td class="n">£8.80</td></tr>
+</tbody></table>
+<p>Photographs are the largest line in every column. What flattens the curve: three visible tiles a row instead of five (photos 28p to 17p); drawers on demand only; density (the 12-hour pool); Google's free allowance of 1,000 Enterprise + Atmosphere searches, 1,000 photos and 1,000 details a month, roughly 100 fresh ten-category searches at £0.</p>
+
+<h2 id="pool">The once-a-day-per-area idea</h2>
+<p>Partly true. Google's <a href="https://cloud.google.com/maps-platform/terms/maps-service-terms">service terms</a> permit place IDs indefinitely and coordinates for 30 days; everything else is "no pre-fetching, caching or storing". Serving household B a rating bought for household A that morning is caching by that definition. The 12-hour in-memory pool is tolerated practice as a working set, not a right; keep it in memory, keep it short, and don't let the subscription price depend on it. A deploy emptying it is a warm-up cost of one 32p search per district. What is legitimately free after the first search: knowing what exists (the census), ranking (the Epic score), and re-buying cheaply (20 places per 3.2p search rather than 2p per place).</p>
+
+<h2 id="census">The census and the Places back office</h2>
+<p>Google cannot count. Every query returns its top 20 and pages to a hard stop at 60. A count is built by slicing: one query per Google place type inside each subcategory, restricted to the box; a slice returning a full 60 is saturated and split into four tiles or finer types until every slice returns fewer than 60. The union of IDs is the census. With one query per Google type inside 46 subcategories, SL5 is about 400 requests and a 30-minute ring about 69,000; at the IDs Only mask both are £0, so the request count is a pacing question, not a cost one.</p>
+<p>Per place the census stores: place ID, the subcategory query it surfaced under, rank, slice, seen date. Coordinates (30 days) and Google types are added the first time a display search returns the place; where the by-name lookup matches an OSM place, OSM's coordinates may be stored as a fallback. Category and subcategory are a mapping table from Google types and queries to Epic's taxonomy; a taxonomy change re-maps for free and runs new slices only for new subcategories. OSM and, for food, the FSA register give the count the census is measured against: a subcategory well below either has a query gap, fixed by widening the fan-out at no cost.</p>
+<table>
+<colgroup><col style="width:22%"><col style="width:46%"><col style="width:18%"><col style="width:14%"></colgroup>
+<thead><tr><th>Level</th><th>What appears</th><th>Reads from</th><th class="n">Cost</th></tr></thead>
+<tbody>
+<tr><td>Area board</td><td>Category → subcategory rows: census count, OSM count, FHRS count (food), "Not on Google" count, saturated slices, last census date. Same numbers on every visit until the census re-runs.</td><td>place_index, OSM, FHRS</td><td class="n">£0, always</td></tr>
+<tr><td>Click a subcategory</td><td>The top 10 exactly as the app ranks and shows them</td><td>One display search</td><td class="n">3.2p</td></tr>
+<tr><td>Show another 10</td><td>The next page</td><td>Page token</td><td class="n">3.2p</td></tr>
+<tr><td>Tiles</td><td>Photographs for the tiles on screen</td><td>Place Photo</td><td class="n">0.55p each</td></tr>
+<tr><td>Open a place</td><td>Google and TripAdvisor side by side, both review sets</td><td>Details, both</td><td class="n">3.2p</td></tr>
+<tr><td>Not on Google</td><td>The OSM residual after a free by-name lookup: name, tags, website, hours, phone, last edited, for the owner to judge</td><td>place_index, OSM</td><td class="n">£0</td></tr>
+<tr><td>Cost counter</td><td>This action, this session, today, live from <code>provider_calls</code>; every paid control shows its price before the click</td><td>Ledger</td><td class="n">—</td></tr>
+</tbody></table>
+<p>The census runs on any search of an area not censused in 30 days, on a taxonomy change for the affected subcategories, or on demand. Google is never asked twice for the same knowledge.</p>
+
+<h2 id="experiments">Does Google give us everything?</h2>
+<p>Yes. All four experiments ran on 19 September for $4.59 in total, and the census itself cost nothing. The 53 "open map only" places from the earlier diff were a fence problem: OSM marks the centre of a golf course, Google marks the clubhouse, and a 150 m match radius called Wentworth, Ascot Racecourse and Swinley Forest "not on Google". The match fence is now 400 m, or a polygon's own extent plus 100 m, everywhere.</p>
+<table>
+<colgroup><col style="width:6%"><col style="width:24%"><col style="width:40%"><col style="width:10%"><col style="width:20%"></colgroup>
+<thead><tr><th>#</th><th>Experiment</th><th>Method</th><th class="n">Cost</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Is the gap real?</td><td>Census SL5, look up each OSM place on Google by name (IDs Only), count found / not found, show the residual's credibility signals in the Places tab.</td><td class="n">£0</td><td><strong>No gap.</strong> 114 OSM places: 93 on Google at 150 m, 14 more at 400 m, 7 residual, none credible. Free data stays in the back office.</td></tr>
+<tr><td>2</td><td>Does the fan-out cover the categories that matter?</td><td>Census slices for soft play, playgrounds, holiday clubs, farm parks, nature reserves, golf, theatre, swimming, climbing; compare with OSM and FHRS.</td><td class="n">£0</td><td>Of 17 empty subcategories in SL5, 9 genuinely empty, 5 thin, 1 rule fixed (community centres), 1 correct as is (no mountain peaks in Ascot).</td></tr>
+<tr><td>3</td><td>How much does TripAdvisor change the answer?</td><td>For the 200 places a fresh SL5 search buys, fetch TripAdvisor. Measure match rate, how often it has more reviews than Google, how often the blended score changes which 10 are shown, the family share of reviewers.</td><td class="n">£0 (222 of 1,000 free)</td><td><strong>Drawer only.</strong> 33% match, fewer reviews, no family signal, blending demotes attractions.</td></tr>
+<tr><td>4</td><td>How often is a place page thin?</td><td>For the 100 shown, count Google fields present; thin = missing two of hours, photo, summary.</td><td class="n">£1</td><td><strong>2% thin</strong> (2 of 102; none without a photo). V2 enrichment does not reopen.</td></tr>
+</tbody></table>
+
+<h2 id="v1v2">Now and later</h2>
+<p><strong>V1, any country.</strong> Google for everything a household sees; the free census; the Epic score built from Google plus Epic's own signals; opinion and photos bought per screen; TripAdvisor live in the drawer only; first-party visits and ratings. OSM and FHRS in the back office only. No paid research per place, no country-specific sets in the app.</p>
+<p><strong>V2 trigger.</strong> A thin-page rate above ~15% on what households open, or a credible "Not on Google" residual above 5% in a district. Only then do the Claude pass and country-specific facts earn a build.</p>
+<p><strong>Open with TripAdvisor:</strong> whether a location ID may be stored under their standard terms, which decides if a drawer open is one call or two. Nothing else.</p>
+<p><strong>Next runs:</strong> the 30-minute ring around SL5 (172 outcodes, free) to check the total against the 2,571 previously held and to confirm the water park appears; SE1 as the density test; then the Places tab, deployed.</p>
+
+<h2 id="claude-code">Instructions to Claude Code</h2>
+<p>Paste into <code>CLAUDE.md</code> under the existing two-layer rule.</p>
+<pre>## Data policy (19 Sep 2026)
+
+V1 is Google for everything a household sees. Rented vs owned is unchanged:
+nothing from Google or TripAdvisor is written to the database or a device
+except identifiers (Google place ID; TripAdvisor location ID only if the
+terms allow) and lat/lng (30 days). The Epic score is ours.
+
+The census (free, permanent, runs on every first search of an area)
+- Trigger: ANY search of an area not censused in the last 30 days, from
+  the app, the back office, or on demand; also a taxonomy change, for the
+  affected subcategories only.
+- Google cannot count. One Text Search per Google place type within each
+  Epic subcategory, locationRestriction to the box, IDs Only field mask
+  (free, no cap; anything more on Text Search bills at Pro or above and
+  skuFor must say so). A slice returning 60 is saturated: split it (4
+  tiles or finer types) until every slice returns < 60. Request count is
+  a pacing question: keep a per-run ceiling for throughput and stay
+  under Google's QPS.
+- Write EVERY id seen to place_index: id, subcategory query, rank, slice,
+  seen_at. No keep cap of any kind. lat/lng (expires 30 d) and google
+  types are written the first time a display search returns the place;
+  OSM coordinates may be stored as a fallback where the by-name lookup
+  matched. The area board never needs coordinates.
+- Category/subcategory come from a mapping table (google type + query ->
+  Epic taxonomy). A taxonomy change re-maps for free.
+- Cross-checks per box and subcategory, stored beside the census count:
+  OSM count via Overpass; FHRS count via api.ratings.food.gov.uk (new
+  adapter, OGL, free, daily) for food.
+- Not on Google: for every OSM place in the box, one IDs Only Text Search
+  by name within 400 m (the match fence, matching matchFence). Found -> record the mapping. Not found -> flag
+  not_on_google with OSM's credibility signals.
+- Retire the sweep's per-place Google research (own.seed / own.lead) as a
+  discovery tool and the match-then-rate path (atlas.rating).
+- Reachability and area pages key on place ID + lat/lng, not postcode.
+
+The Epic score (owned)
+- Inputs: Google rating + userRatingCount + rank from the display search
+  already bought; Epic's own visits, household ratings, review recency.
+  No TripAdvisor input (verdict tripadvisor.second-opinion, 19 Sep).
+- Output: epic_score 0-100 per place ID with scored_at, plus a band. Never
+  store Google's raw rating. Refresh from the next display search that
+  returns the place when scored_at > 90 days.
+
+Match fence (domain/matchFence.js, used by every by-name lookup)
+- 400 m, or a polygon's half-extent + 100 m, capped at 5 km; boxes
+  corrected by cos(latitude). Fail closed.
+
+Search behaviour (app)
+- The app reads the census index and the reachability ring. Names,
+  ratings and photos are rented at display time; there is no "can show"
+  subset. Every censused place is showable.
+- Inspire: per category, the top 5 from one Enterprise+Atmosphere Text
+  Search, locationRestriction = the ring's bounding box, results filtered
+  to the ring's own sectors. No census count on a household screen.
+  Rank the 20 returned by epic_score where present, Google order
+  otherwise. Never call Place Details for a place a search returned.
+- Category list: the 20 from that search. Only when a household goes past
+  the 20 does the next page follow, by Google's page token (nextPageToken),
+  the way the enrichment rule pages on demand. Never a further ring slice
+  for a paid search (see "never tile for the paid search" below and the
+  one-page-per-category cost model). Pool key: ring + category + page, 12 h.
+- Retire Inspire's atlas and food-sweep pools and the minutes-to-km
+  conversion; the atlas stays as a source of images and summaries only.
+- Score any returned place with no epic_score from the search result.
+- Photos only for tiles in the viewport, a row at a time.
+- Drawer open: Google Place Details + TripAdvisor Location Details, live;
+  TripAdvisor matched on latLong at the fence, fail closed; show both
+  ratings side by side with logos and both review sets per the
+  TripAdvisor display requirements. Purpose tripadvisor.drawer. If the
+  terms allow, store the location ID after the first open; else look up
+  each time. On 429, Google only.
+- Wide areas: tile for the census (free), never tile for the paid search.
+- OSM, FHRS, venue pages, Wikipedia and Wikidata are never presented to a
+  household as a discovery or rating source in V1. The owned layer stays:
+  place_records backs the device's offline store, menu links from venue
+  pages remain in scope, and owned facts may fill fields Google leaves
+  empty. No Claude research pass in V1.
+- Drawer: render at once from epic_score + Google; the TripAdvisor panel
+  fills when its call returns, never blocking. Offline, the drawer shows
+  epic_score and owned facts only.
+
+Places tab (back office)
+- Input: postcode or outcode + reach (outcode | 30 min | 60 min).
+- Area board: category -> subcategory rows with census count, OSM count,
+  FHRS count (food), not-on-Google count, scored count, saturated slices,
+  last census. Reads only place_index/OSM/FHRS. Cannot trigger a paid call.
+- Click subcategory: run the exact app ranking and the same display
+  search; show the top 10 as the app would. "Show another 10" = next
+  page. Tiles fetch photos; opening a place fetches both details. All
+  with purpose admin.explore.
+- Not on Google drill-down with credibility signals and a free
+  check-by-name action.
+- Cost counter: this action / this session / today, live from
+  provider_calls. Every paid control shows its price before the click.
+
+Caches
+- Search pool 12 h, photos 1 h, in memory, bounded, never persisted. A
+  rented rating lives in the search pool and nowhere longer; only the
+  derived, dated epic_score is kept, never Google's raw rating. Warm
+  searches are served from the pool without a Google call. A deploy
+  warming up is expected.
+
+Ledger
+- Every call to provider_calls with purpose, household, session, units,
+  estimated cost. Purposes are stable strings; add, never rename.
+- Log every search to searches with what was asked, shown and triggered.
+
+First run
+1. Census SL5 (outcode). Report per subcategory: census, OSM, FHRS,
+   not-on-Google, saturated slices, requests used, Google cost from the
+   ledger (expect 0).
+2. Widen to the 30-minute ring. Same report, per outcode and in total.
+3. Experiments 1-4 are closed; their verdicts and re-open triggers live
+   in data_verdicts. Next: the 30-minute ring, SE1 density test, then the
+   Places tab deployed. Codex review before anything is called done.</pre>
+
+<h2>Sources</h2>
+<p class="sources"><a href="https://developers.google.com/maps/billing-and-pricing/pricing">Google Maps Platform pricing</a> · <a href="https://developers.google.com/maps/documentation/places/web-service/policies">Google Places policies</a> · <a href="https://cloud.google.com/maps-platform/terms/maps-service-terms">Google Maps service terms</a> · <a href="https://developers.google.com/maps/documentation/places/web-service/text-search">Text Search (New)</a> · <a href="https://www.tripadvisor.com/developers">TripAdvisor Content API plans</a> · <a href="https://tripadvisor-content-api.readme.io/reference/display-requirements">TripAdvisor display requirements</a> · <a href="https://ratings.food.gov.uk/open-data">FSA FHRS open data</a> · Epic handover, "The Data Model", 19 September 2026 · <a href="https://claude.ai/code/artifact/68113608-6027-47b5-a2de-7fbe36d67259">Data We Can Own (sources brief)</a></p>
+</div>
