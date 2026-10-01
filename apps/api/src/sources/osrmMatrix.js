@@ -35,6 +35,14 @@
  * OSRM-backed ring must skip the estimator fence) at the same time as the mode
  * is offered. The rows here are correct; the fence that reads them is the piece
  * that has to learn `method = 'osrm'`.
+ *
+ * The same batch-2 moment needs the race `refreshWhileLocked` already handles:
+ * a ring count that began before a rebuild can read the old reach and write its
+ * stale total afterwards. There is no walking/cycling ring counter today (ring
+ * counting is driving-only), so the per-origin invalidation below is enough for
+ * now; when walk/cycle rings are first counted, the build must reconcile with a
+ * recorded cutoff (force-recount rings counted before it), not lean on the
+ * delete alone.
  */
 
 import { pool, query } from '../db.js';

@@ -56,7 +56,24 @@ const DATA = { walking: process.env.EPIC_OSRM_DATA_WALKING, cycling: process.env
 // time rather than refusing one. So when building from a region (not whole-GB),
 // fence the cells to its bounding box — "minLng,minLat,maxLng,maxLat" — and the
 // rest of the grid is left for the build that covers it.
-const BBOX = (process.env.EPIC_OSRM_BBOX || '').split(',').map(Number).filter((n) => !Number.isNaN(n));
+//
+// A present-but-malformed box is refused, never quietly ignored: dropping the
+// bad components and falling back to "no fence" would build every GB origin
+// against a regional router, and OSRM would snap them in and mark the invented
+// rows complete (Codex). Absent (unset/empty) is the only thing that means
+// whole-GB; anything else must be four ordered numbers.
+const rawBbox = (process.env.EPIC_OSRM_BBOX || '').trim();
+let BBOX = [];
+if (rawBbox) {
+  const parts = rawBbox.split(',').map((s) => Number(s.trim()));
+  const ok = parts.length === 4 && parts.every((n) => Number.isFinite(n))
+    && parts[0] < parts[2] && parts[1] < parts[3];
+  if (!ok) {
+    console.error(`EPIC_OSRM_BBOX must be "minLng,minLat,maxLng,maxLat" — four ordered numbers — not "${rawBbox}".`);
+    process.exit(1);
+  }
+  BBOX = parts;
+}
 const inBbox = BBOX.length === 4
   ? (c) => c.lng >= BBOX[0] && c.lat >= BBOX[1] && c.lng <= BBOX[2] && c.lat <= BBOX[3]
   : () => true;
