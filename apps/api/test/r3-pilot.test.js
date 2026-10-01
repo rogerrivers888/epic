@@ -249,11 +249,12 @@ test('POST /pilot needs manage_settings and starts for the caller’s household 
   const express = (await import('express')).default;
   const { deskRoutes } = await import('../src/routes/desk.js');
   const session = await seed();
-  const serve = (caps) => {
+  const serve = (caps, elevated = false) => {
     const app = express();
     app.use(express.json());
     app.use((req, _res, next) => {
-      req.access = { doors: ['admin'], capabilities: new Set(caps), isOwner: false, role: null };
+      // Starting the pilot needs personal sign-in now (G11): the owner serve is elevated.
+      req.access = { doors: ['admin'], capabilities: new Set(caps), isOwner: false, role: null, elevated };
       req.account = { email: 'pilot@test', household_id: HH };
       req.session = { id: session };
       next();
@@ -269,7 +270,7 @@ test('POST /pilot needs manage_settings and starts for the caller’s household 
     const refused = await fetch(`${viewer.url}/pilot`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cell: 'PILOT-NONE', paid: false }) });
     assert.equal(refused.status, 403);
   } finally { await viewer.close(); }
-  const owner = await serve(['view_library', 'manage_settings']);
+  const owner = await serve(['view_library', 'manage_settings'], true);
   try {
     const bad = await fetch(`${owner.url}/pilot`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cell: 'PILOT-NONE', minutes: 45 }) });
     assert.equal(bad.status, 400);

@@ -26,7 +26,8 @@ async function server() {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    req.access = { doors: ['admin'], capabilities: new Set(['view_library', 'manage_library']), isOwner: false, role: null };
+    // Changing a desk setting needs personal sign-in now (G11): elevated.
+    req.access = { doors: ['admin'], capabilities: new Set(['view_library', 'manage_library']), isOwner: false, role: null, elevated: true };
     req.account = { email: WHO };
     next();
   });
