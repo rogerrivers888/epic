@@ -6,9 +6,14 @@ import pg from 'pg';
 // DATE columns come back as 'YYYY-MM-DD', not a local-midnight Date that shifts with timezone.
 pg.types.setTypeParser(1082, (v) => v);
 
+// The one place the database address is spelled, so the pool and any standalone
+// client (a long-held advisory lock that must not sit on a pooled connection)
+// agree on where to connect.
+export const connectionString =
+  process.env.DATABASE_URL || 'postgres://epic:epic@localhost:5432/epic';
+
 export const pool = new pg.Pool({
-  connectionString:
-    process.env.DATABASE_URL || 'postgres://epic:epic@localhost:5432/epic',
+  connectionString,
   // The driver's default is ten, which is right for one server and wrong for
   // eighty-eight test files. `node --test` runs about ten at once and each one
   // imports this module, so a single suite reaches Postgres's hundred on its
