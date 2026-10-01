@@ -25,7 +25,7 @@ router.patch('/sources/:key', requires('manage_settings'), async (req, res, next
     // Re-enabling a paid source is a safeguard override (G11): the owner
     // personally signed in. Turning one off is tightening and stays ordinary.
     if (on && !accessOf(req).elevated) {
-      return res.status(403).json({ error: 'needs_personal_sign_in', message: 'Re-enabling a provider needs you signed in personally with your e-mail link.' });
+      return res.status(403).json({ error: 'needs_personal_sign_in', message: 'Re-enabling a provider needs you logged in personally — Google, your password or an e-mail link.' });
     }
     // The owner's authorization, strictly and before the change: fail closed (G11).
     await writeAuditStrict({

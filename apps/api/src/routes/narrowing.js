@@ -96,7 +96,7 @@ narrowingRoutes.post('/apply', requires('manage_settings'), async (req, res, nex
     if (!req.access?.elevated) {
       return res.status(403).json({
         error: 'needs_personal_sign_in',
-        message: 'Applying the narrowing needs you signed in personally — open Epic and sign in with your e-mail link. A shared-passcode or agent session can’t; file it for approval instead.',
+        message: 'Applying the narrowing needs you signed in personally — log in at epic.day/login with Google, your password or an e-mail link. A shared-passcode or agent session can’t; file it for approval instead.',
         request: `${req.method} ${String(req.originalUrl || req.url || '').split('?')[0]}`,
         action: 'apply the narrowing',
       });

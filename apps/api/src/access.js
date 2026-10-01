@@ -273,7 +273,7 @@ export function requireOwnerSignedIn(action = 'do that') {
     // then does it. The request line names the call for the approval.
     return res.status(403).json({
       error: 'needs_personal_sign_in',
-      message: `This needs you signed in personally to ${action} — open Epic and sign in with your e-mail link. A shared-passcode or agent session can't; file it for approval instead.`,
+      message: `This needs you signed in personally to ${action} — log in at epic.day/login with Google, your password or an e-mail link. A shared-passcode or agent session can't; file it for approval instead.`,
       request: `${req.method} ${String(req.originalUrl || req.url || '').split('?')[0]}`,
       action,
     });

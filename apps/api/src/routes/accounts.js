@@ -370,7 +370,7 @@ router.patch('/:id', requires('manage_accounts'), async (req, res, next) => {
     const oldBound = before.monthly_call_bound == null ? null : Number(before.monthly_call_bound);
     const boundChanging = newBound !== undefined && newBound !== oldBound;
     if (boundChanging && !accessOf(req).elevated) {
-      return res.status(403).json({ error: 'needs_personal_sign_in', message: 'Changing a spending bound needs you signed in personally with your e-mail link.' });
+      return res.status(403).json({ error: 'needs_personal_sign_in', message: 'Changing a spending bound needs you logged in personally — Google, your password or an e-mail link.' });
     }
     // The change is logged by the account update's own audit below, with the
     // owner's name and the bound in before/after — no separate pre-audit that

@@ -79,7 +79,7 @@ export const runAsSpender = ({ householdId = null, sessionId = null, backOffice,
 export function assertBackOfficeSpendAllowed(what = 'spend') {
   const { backOffice, elevated } = currentSpender();
   if (backOffice && !elevated) {
-    throw Object.assign(new Error(`A back-office ${what} needs you signed in personally with your e-mail link.`),
+    throw Object.assign(new Error(`A back-office ${what} needs you logged in personally — Google, your password or an e-mail link.`),
       { code: 'needs_personal_sign_in', status: 403 });
   }
 }

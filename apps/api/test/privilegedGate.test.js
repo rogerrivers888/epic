@@ -96,7 +96,7 @@ test('requireOwnerSignedIn lets an elevated session through and refuses the rest
     assert.equal(out.passed, false, JSON.stringify(session));
     assert.equal(out.r.code, 403);
     assert.equal(out.r.body.error, 'needs_personal_sign_in');
-    assert.match(out.r.body.message, /e-mail link/);
+    assert.match(out.r.body.message, /Google, your password or an e-mail link/);
   }
 
   // No access resolved at all (a request that never reached requireSession).
