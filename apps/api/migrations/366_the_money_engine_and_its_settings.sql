@@ -372,10 +372,11 @@ create table if not exists notifications (
   link          text,                   -- the screen it is about
   dedupe_key    text,                   -- one notification per thing, however often a job runs
   email_state   text not null default 'none',
+  email_claimed_at timestamptz,          -- a send in progress; one that never finished goes back to the queue
   read_at       timestamptz,
   created_at    timestamptz not null default now(),
   constraint notifications_audience_check check (audience in ('guest', 'host')),
-  constraint notifications_email_state_check check (email_state in ('none', 'queued', 'sent', 'failed', 'skipped')),
+  constraint notifications_email_state_check check (email_state in ('none', 'queued', 'sending', 'sent', 'failed', 'skipped')),
   constraint notifications_owner_check check (household_id is not null or account_id is not null)
 );
 create unique index if not exists notifications_dedupe_idx on notifications (dedupe_key) where dedupe_key is not null;

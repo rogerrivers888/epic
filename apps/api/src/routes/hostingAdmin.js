@@ -471,10 +471,9 @@ router.get('/money/streams', requires('view_hosting'), async (req, res, next) =>
     );
     const pub = b.filter((x) => x.visibility === 'public');
     const sum = (rows, k) => rows.reduce((t, x) => t + x[k], 0);
-    const pubValue = sum(pub, 'value');
     const row = (key, name, rows, rate) => ({ key, stream: name, bookingValuePence: rows.length ? sum(rows, 'value') : null, ratePct: rate, count: sum(rows, 'n'), epicPence: sum(rows, 'epic'), toHostsPence: sum(rows, 'host') });
     const streams = [
-      row('public', 'Public commission', pub.filter((x) => ['standard', 'override', 'minimum'].includes(x.fee_reason)), pubValue ? Math.round((sum(pub, 'epic') / pubValue) * 1000) / 10 : null),
+      (() => { const std = pub.filter((x) => ['standard', 'override', 'minimum'].includes(x.fee_reason)); const v = sum(std, 'value'); return row('public', 'Public commission', std, v ? Math.round((sum(std, 'epic') / v) * 1000) / 10 : null); })(),
       row('host_link', 'Host-link bookings', pub.filter((x) => x.fee_reason === 'host_link'), typeof (await settingsRepo.current()).host_link_rate === 'number' ? (await settingsRepo.current()).host_link_rate : null),
       row('intro', 'Intro 0%', pub.filter((x) => x.fee_reason === 'intro'), 0),
       row('private_payment', 'Private payment fee', b.filter((x) => x.fee_reason === 'private_payment'), (await settingsRepo.current()).private_payment_fee ?? null),

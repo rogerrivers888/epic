@@ -939,6 +939,15 @@ router.post('/host/lanes/requests/:id/accept', async (req, res, next) => {
       const end = endMin == null ? null : `${String(Math.floor(endMin / 60) % 24).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
       // Ending at or after midnight ends the next day (Codex, 2 Oct 2026).
       const endsOn = endMin != null && endMin >= 1440 ? plusDays(ymd(b.requested_date), Math.floor(endMin / 1440)) : null;
+      // Never two at once: an accepted slot that overlaps a session already on is refused (Codex, 2 Oct 2026).
+      const { rows: [clash] } = await c.query(
+        `select 1 from offer_sessions where offer_id = $1 and state = 'scheduled'
+            and (on_date + starts_at) < ($2::date + $3::time) + make_interval(mins => $4::int)
+            and (coalesce(ends_on, on_date) + coalesce(ends_at, starts_at)) > ($2::date + $3::time)
+          limit 1`,
+        [o.id, ymd(b.requested_date), hm(b.requested_time), b.requested_length_min ?? 60],
+      );
+      if (clash) throw refuse(409, 'clash', 'You have something on at that time already.');
       const { rows: [s] } = await c.query(
         `insert into offer_sessions (offer_id, on_date, starts_at, ends_at, ends_on, max_count) values ($1, $2, $3, $4, $5, $6) returning id`,
         [o.id, ymd(b.requested_date), hm(b.requested_time), end, endsOn, b.heads],
@@ -1000,7 +1009,17 @@ export async function dropUnpaid({ now = new Date() } = {}) {
       returning id`,
     [now],
   );
-  if (rows.length) await query(`update booking_sessions set state = 'cancelled' where booking_id = any($1::uuid[])`, [rows.map((r) => r.id)]);
+  if (rows.length) {
+    const ids = rows.map((r) => r.id);
+    await query(`update booking_sessions set state = 'cancelled' where booking_id = any($1::uuid[])`, [ids]);
+    // The invitation is open again, and a waiting-list offer still running is theirs again (Codex, 2 Oct 2026).
+    await query(`update offer_invites set rsvp = null, rsvp_heads = null, booking_id = null where booking_id = any($1::uuid[])`, [ids]);
+    await query(
+      `update offer_waitlist w set state = 'offered' from experience_bookings b
+        where b.id = any($1::uuid[]) and w.offer_id = b.offer_id and w.household_id = b.household_id and w.state = 'taken' and w.offer_expires_at > now()`,
+      [ids],
+    );
+  }
   return rows.length;
 }
 

@@ -121,8 +121,11 @@ export async function drainEmail({ batch = 20, send = sendMail, configured = mai
     const { rowCount } = await query(`update notifications set email_state = 'skipped' where email_state = 'queued' and created_at < now() - interval '1 day'`);
     return { sent: 0, failed: 0, skipped: rowCount };
   }
+  // A send that never finished (the process died mid-way) goes back to the queue after ten minutes (Codex, 2 Oct 2026).
+  await query(`update notifications set email_state = 'queued', email_claimed_at = null where email_state = 'sending' and email_claimed_at < now() - interval '10 minutes'`);
+  // Claimed as sending — not sent — so a crash can't lose it; marked sent only once it has gone.
   const { rows } = await query(
-    `update notifications set email_state = 'sent'
+    `update notifications set email_state = 'sending', email_claimed_at = now()
       where id in (select id from notifications where email_state = 'queued' order by created_at limit $1 for update skip locked)
       returning *`,
     [batch],
@@ -133,7 +136,7 @@ export async function drainEmail({ batch = 20, send = sendMail, configured = mai
     if (!to) { skipped += 1; await query(`update notifications set email_state = 'skipped' where id = $1`, [row.id]); continue; }
     const text = [row.body, row.link ? `${appUrl()}${row.link}` : null].filter(Boolean).join('\n\n');
     const r = await send({ to, subject: row.title, text: text || row.title, purpose: `notify_${row.kind}` }).catch((e) => ({ sent: false, message: e.message }));
-    if (r?.sent) sent += 1;
+    if (r?.sent) { sent += 1; await query(`update notifications set email_state = 'sent' where id = $1 and email_state = 'sending'`, [row.id]); }
     else { failed += 1; await query(`update notifications set email_state = 'failed' where id = $1`, [row.id]); }
   }
   return { sent, failed, skipped };

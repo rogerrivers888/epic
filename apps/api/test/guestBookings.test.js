@@ -503,3 +503,18 @@ test('Codex: two tips at once make one, and a request cancelled before its hold 
     assert.equal((await query('select payment_state from experience_bookings where id = $1', [req.body.booking.id])).rows[0].payment_state, 'released');
   } finally { await sb.close(); }
 });
+
+test('Codex: a host can’t accept two requests that overlap', async () => {
+  settings.forget();
+  const { o, host } = await anEvent({ lane: 'onrequest' });
+  const [a, b] = [await aPerson(), await aPerson()];
+  const [sa, sb, sh] = [await server(a.account), await server(b.account), await server(host.account)];
+  try {
+    const day = (await sa.get(`/api/experiences/${o.id}/booking/options`)).body.slots[1];
+    const ra = await sa.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'request', date: day.date, time: day.times[0], lengthMin: 60 }, party: { adults: 1 } });
+    const rb = await sb.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'request', date: day.date, time: day.times[0], lengthMin: 60 }, party: { adults: 1 } });
+    assert.equal((await sh.send('POST', `/api/host/lanes/requests/${ra.body.booking.id}/accept`)).status, 200);
+    const second = await sh.send('POST', `/api/host/lanes/requests/${rb.body.booking.id}/accept`);
+    assert.equal(second.body.error, 'clash');
+  } finally { await sa.close(); await sb.close(); await sh.close(); }
+});
