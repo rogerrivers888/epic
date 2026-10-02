@@ -746,9 +746,15 @@ test('a drawer that gains a question is asked again, and only that drawer', asyn
   // answered. This is not a new drawer, so the drawer-level re-open cannot see
   // it — and it is exactly what happened to High ropes & zip lines an hour and
   // a half into the London run (21 Sep 2026).
+  // Picked from the drawers the first pass answered, in a fixed order. This was
+  // `limit 1` with no order — any matching row — and 10 of the 22 candidates are
+  // drawers the first pass never asked; under a loaded suite Postgres returned one
+  // of those, adding the rule opened it, and the count went 17 → 18 (2 Oct 2026,
+  // captured in a pre-push run; never reproduced alone).
   const { rows: [existing] } = await query(
     `select r.subcategory from shelf_rules r join shelf_subcategories s on s.key = r.subcategory
-      where r.scope = 'labels' and s.active limit 1`);
+      where r.scope = 'labels' and s.active and r.subcategory = any($1::text[])
+      order by r.subcategory limit 1`, [done.done_subcategories]);
   if (!existing) return;
   await query(
     `insert into shelf_rules (scope, subject, labels, subcategory, weights, reason)
