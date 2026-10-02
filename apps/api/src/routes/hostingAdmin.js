@@ -328,7 +328,11 @@ router.post('/reviews/:id/shown', requires('manage_hosting'), async (req, res, n
 router.post('/hosts/:id/pause', requires('manage_hosting'), async (req, res, next) => {
   try {
     const paused = req.body?.paused === true;
-    const { rows: [h] } = await query('update hosts set paused = $2, paused_at = case when $2 then now() else null end where id = $1 returning id', [req.params.id, paused]);
+    const h = await withTransaction(async (c) => {
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-intro:${req.params.id}`]);
+      const { rows: [row] } = await c.query('update hosts set paused = $2, paused_at = case when $2 then now() else null end where id = $1 returning id', [req.params.id, paused]);
+      return row;
+    });
     if (!h) throw refuse(404, 'not_found', 'No such host.');
     await logChange({ subjectKind: 'host', subjectId: h.id, field: 'paused', after: { paused }, why: req.body?.why ?? null, by: by(), byLabel: 'staff' });
     res.json({ paused });

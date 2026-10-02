@@ -1024,7 +1024,11 @@ router.post('/host/desk/pause', async (req, res, next) => {
   try {
     const { host, account } = await me();
     const on = req.body?.paused === true;
-    await query('update hosts set paused = $2, paused_at = case when $2 then now() else null end, updated_at = now() where id = $1', [host.id, on]);
+    // The lock every booking takes: no booking slips in after the pause (Codex, 2 Oct 2026).
+    await withTransaction(async (c) => {
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-intro:${host.id}`]);
+      await c.query('update hosts set paused = $2, paused_at = case when $2 then now() else null end, updated_at = now() where id = $1', [host.id, on]);
+    });
     await logChange({ subjectKind: 'host', subjectId: host.id, field: 'paused', before: { paused: Boolean(host.paused) }, after: { paused: on }, by: account?.id ?? null, byLabel: 'host' });
     res.json({ paused: on });
   } catch (err) { next(err); }
