@@ -749,7 +749,12 @@ async function ownDoc(householdId, id) {
 router.post('/host/lanes/payouts', async (req, res, next) => {
   try {
     const { household, account } = await me();
-    const host = await ensureHost(household, account);
+    const first = await ensureHost(household, account);
+    // One Connect account per host, however many taps: created under a per-host lock, re-read inside it (Codex, 2 Oct 2026).
+    const lockClient = await pool.connect();
+    try {
+    await lockClient.query('select pg_advisory_lock(hashtext($1))', [`host-payouts:${first.id}`]);
+    const host = await repo.hostById(first.id);
     const back = `${appUrl()}/host/offers/${encodeURIComponent(str(req.body?.offerId, 40) ?? '')}/publish?back=payouts`;
     let accountId = host.stripe_account_id;
     if (!accountId) {
@@ -759,6 +764,10 @@ router.post('/host/lanes/payouts', async (req, res, next) => {
     }
     const link = await stripe.accountLink({ accountId, refreshUrl: back, returnUrl: back, householdId: household.id });
     res.json({ url: link.url });
+    } finally {
+      await lockClient.query('select pg_advisory_unlock(hashtext($1))', [`host-payouts:${first.id}`]).catch(() => null);
+      lockClient.release();
+    }
   } catch (err) { next(err); }
 });
 
