@@ -826,6 +826,8 @@ test('leaving now with no length said still ends with the day window (at least a
   const today = wallClock(new Date(), 'Europe/London').dateStr;
   const winEnd = wallToUtc(today, '18:00', 'Europe/London').getTime();
   assert.ok(minutes >= 60, `at least an hour out (${minutes} min)`);
+  const winStart = wallToUtc(today, '10:00', 'Europe/London').getTime();
+  assert.ok(new Date(t.depart_at).getTime() >= winStart, 'never before the window opens');
   assert.ok(new Date(t.return_at).getTime() <= Math.max(winEnd, new Date(t.depart_at).getTime() + 3600000),
     'ends by the window close, or an hour after leaving if that is later');
 });

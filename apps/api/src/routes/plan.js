@@ -497,8 +497,11 @@ export async function createTripFromIntent({ household, members, intent, origin,
     // window does — at 5pm with a 10–6 window that is an hour out, never
     // 5pm–1am — and never less than an hour (Codex, 2 Oct 2026).
     if (!intent.date && intent.duration_minutes == null) {
+      // Nor does it start before the window opens: at 6am with a 10–6 window,
+      // the day begins at 10 (Codex, 2 Oct 2026).
+      depart = new Date(Math.max(depart.getTime(), at(hourToTime(windowStart)).getTime()));
       const winEnd = at(hourToTime(household.day_end ?? 18)).getTime();
-      returnAt = new Date(Math.max(depart.getTime() + 60 * 60_000, Math.min(returnAt.getTime(), winEnd)));
+      returnAt = new Date(Math.max(depart.getTime() + 60 * 60_000, Math.min(depart.getTime() + duration * 60_000, winEnd)));
     }
   }
   const wc = (d) => wallClock(d, tz).hhmm;

@@ -673,13 +673,22 @@ router.post('/intake/:id/remember', async (req, res, next) => {
     const adults = members.filter((m) => !m.isMinor);
     const children = members.filter((m) => m.isMinor);
     const year = new Date().getFullYear();
-    // The children to be made all fit the plan, or nothing is written — checked
-    // before the diets too, so a refusal never leaves half a remember behind
-    // (Codex, 2 Oct 2026).
-    const making = (offer?.items ?? []).filter((i) => i.kind === 'kids')
-      .reduce((n, i) => n + Math.max(0, i.ages.length - children.filter((c) => c.age == null).length), 0);
-    const limit = await households.planCapFor(household.id);
-    if (making && members.length + making > limit.cap) throw households.planCapRefusal(limit);
+    // Children first: each said child either fills an unaged child already on
+    // file or is a new person, and the new ones are added together in one
+    // transaction under the household lock — before any diet or age is
+    // written — so a refusal at the plan's cap leaves nothing half-done, even
+    // with another add racing it (Codex, 2 Oct 2026).
+    const unaged = children.filter((c) => c.age == null);
+    const ageing = [];
+    const newChildren = [];
+    for (const item of (offer?.items ?? []).filter((i) => i.kind === 'kids')) {
+      for (const k of item.ages) {
+        const target = unaged.shift();
+        if (target) ageing.push({ target, age: k.age });
+        else newChildren.push({ name: k.name ?? `Child · ${k.age}`, isMinor: k.age < 13, relationship: 'child', birthYear: year - k.age });
+      }
+    }
+    for (const made of await households.insertMembers(household.id, newChildren)) written.push({ memberId: made.id, kind: 'member', value: made.name });
     for (const item of offer?.items ?? []) {
       if (item.kind === 'diet') {
         // Diet is a member column now (migration 351), never a constraint row —
@@ -711,17 +720,11 @@ router.post('/intake/:id/remember', async (req, res, next) => {
           written.push({ memberId: m.id, kind: 'allergen-note', value: String(d).trim() });
         }
       }
-      if (item.kind === 'kids') {
-        const unaged = children.filter((c) => c.age == null);
-        for (const k of item.ages) {
-          const target = unaged.shift();
-          if (target) { await households.updateMember(target.id, { birthYear: year - k.age }, household.id); written.push({ memberId: target.id, kind: 'age', value: k.age }); }
-          else {
-            const made = await households.insertMember(household.id, { name: k.name ?? `Child · ${k.age}`, isMinor: k.age < 13, relationship: 'child', birthYear: year - k.age });
-            written.push({ memberId: made.id, kind: 'member', value: made.name });
-          }
-        }
-      }
+      if (item.kind === 'kids') continue; // made above; ages below
+    }
+    for (const { target, age } of ageing) {
+      await households.updateMember(target.id, { birthYear: year - age }, household.id);
+      written.push({ memberId: target.id, kind: 'age', value: age });
     }
     await query('update voice_intakes set harvested_at = now(), updated_at = now() where id = $1', [row.id]);
     res.json({ written, intake: await intakePayload({ ...row, harvested_at: new Date() }, household, await loadMembers(household.id).catch(() => [])) });
