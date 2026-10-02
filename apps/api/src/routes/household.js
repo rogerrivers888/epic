@@ -337,6 +337,10 @@ router.get('/', async (_req, res, next) => {
         timezone: household.timezone,
         /** What this household always wants when it goes looking (domain/browse.js). */
         browse: browseOf(household),
+        // The people this household's plan covers, as the server enforces it —
+        // so the Add tile and its words never disagree with the door (Codex, 2 Oct 2026).
+        planCap: (await households.planCapFor(household.id)).cap,
+        householdPlanCap: households.HOUSEHOLD_PLAN_CAP,
       },
       members,
       learned: await loadLearnedPreferences(household.id),

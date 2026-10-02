@@ -741,6 +741,8 @@ test('Solo is just you: every door refuses a second person and says to upgrade',
     assert.equal(viaSettings.status, 403);
     assert.equal(viaSettings.body.error, 'plan_cap');
     assert.match(viaSettings.body.message, /Household plan/, 'the refusal names the upgrade');
+    const hh = (await srv.get('/api/household')).body.household;
+    assert.equal(hh.planCap, 1, 'the screen is told the cap the door enforces');
     const viaVoice = await srv.send('POST', '/api/voice/household/who/apply', { people: [{ name: 'Kid', role: 'child', age: 6 }] });
     assert.equal(viaVoice.status, 403, 'the spoken household is refused the same way');
     const { rows: [n] } = await query('select count(*)::int n from members where household_id = $1', [h.id]);
@@ -748,7 +750,7 @@ test('Solo is just you: every door refuses a second person and says to upgrade',
   } finally { await srv.close(); }
   // The shared door carries the flag the app turns into the upgrade prompt.
   const err = households.planCapRefusal(await households.planCapFor(h.id));
-  assert.deepEqual(err.details, { plan: 'solo', cap: 1, upgrade: true });
+  assert.deepEqual(err.details, { plan: 'solo', cap: 1, upgrade: true, householdCap: households.HOUSEHOLD_PLAN_CAP });
 });
 
 test('an outing around a fixed event stays inside the day window, never cutting the event', async () => {

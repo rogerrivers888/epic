@@ -213,7 +213,7 @@ export function planCapRefusal({ cap, plan }) {
     : `Your Household plan covers up to ${cap} people.`);
   err.status = 403;
   err.code = 'plan_cap';
-  err.details = { plan, cap, upgrade: plan === 'solo' };
+  err.details = { plan, cap, upgrade: plan === 'solo', householdCap: HOUSEHOLD_PLAN_CAP };
   return err;
 }
 

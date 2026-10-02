@@ -132,7 +132,7 @@ function HouseholdTab({ data, refresh }: { data: HouseholdResponse; refresh: () 
       </View>
       {editingHome ? <HouseholdEditSheet household={household} refresh={refresh} onClose={() => setEditingHome(false)} /> : null}
 
-      <FaceRow members={members} me={data.me} onOpen={(id) => navigate(paths.household(id))} onAdded={refresh} />
+      <FaceRow members={members} me={data.me} cap={household.planCap ?? 6} onOpen={(id) => navigate(paths.household(id))} onAdded={refresh} />
 
       {/* How Epic plans */}
       <SectionHead>How Epic plans</SectionHead>
@@ -210,8 +210,8 @@ function HouseholdEditSheet({ household, refresh, onClose }: { household: Househ
 
 // --- the face row -----------------------------------------------------------
 
-function FaceRow({ members, me, onOpen, onAdded }: { members: Member[]; me: string | null; onOpen: (id: string) => void; onAdded: () => Promise<void> }) {
-  const atCap = members.length >= 6;
+function FaceRow({ members, me, cap, onOpen, onAdded }: { members: Member[]; me: string | null; cap: number; onOpen: (id: string) => void; onAdded: () => Promise<void> }) {
+  const atCap = members.length >= cap;
   const [adding, setAdding] = useState(false);
   return (
     <View style={{ marginTop: spacing.md }}>
@@ -235,7 +235,7 @@ function FaceRow({ members, me, onOpen, onAdded }: { members: Member[]; me: stri
         </Press>
       </ScrollView>
       <View style={styles.rule2} />
-      {atCap ? <Text style={[type.small, { marginTop: 8 }]}>Your Household plan covers up to 6 people.</Text> : null}
+      {atCap ? <Text style={[type.small, { marginTop: 8 }]}>Your Household plan covers up to {cap} people.</Text> : null}
       {adding ? <AddPersonInline onDone={async (id) => { setAdding(false); await onAdded(); if (id) onOpen(id); }} onCancel={() => setAdding(false)} /> : null}
     </View>
   );
@@ -284,7 +284,7 @@ function SoloHousehold({ data, refresh }: { data: HouseholdResponse; refresh: ()
       {you ? <ValueRow label="Your tastes, allergies and access" onPress={() => navigate(paths.household(you.id))} /> : null}
       <View style={styles.tintBlock}>
         <Text style={styles.tintTitle}>Planning for more than you?</Text>
-        <Text style={styles.tintBody}>The Household plan covers up to 6 people, each with their own tastes and allergies.</Text>
+        <Text style={styles.tintBody}>The Household plan covers up to {data.household.householdPlanCap ?? 6} people, each with their own tastes and allergies.</Text>
         <Button label="Switch to Household" onPress={() => showToast('Plan and billing is coming soon')} style={{ marginTop: 10 }} />
       </View>
       <SectionHead>How Epic plans</SectionHead>

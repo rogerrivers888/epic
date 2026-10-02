@@ -6,11 +6,11 @@
  * without each screen catching it. A module emitter, like the toast, so
  * api.ts never imports a component.
  */
-type Listener = (message: string) => void;
+type Listener = (message: string, householdCap: number) => void;
 const listeners = new Set<Listener>();
 
-export function raiseUpgradePrompt(message: string) {
-  listeners.forEach((fn) => fn(message));
+export function raiseUpgradePrompt(message: string, householdCap = 6) {
+  listeners.forEach((fn) => fn(message, householdCap));
 }
 
 export function onUpgradePrompt(fn: Listener) {

@@ -178,7 +178,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         if (saved) { servingSaved(true); return saved.body; }
       }
       // An add past a Solo plan's one person: the same prompt from every door.
-      if (res.status === 403 && body?.details?.upgrade) raiseUpgradePrompt(body.message ?? 'Adding people needs the Household plan.');
+      if (res.status === 403 && body?.details?.upgrade) raiseUpgradePrompt(body.message ?? 'Adding people needs the Household plan.', Number(body.details.householdCap) || 6);
       throw new ApiError(res.status, body);
     }
     servingSaved(false);
@@ -449,6 +449,10 @@ export type VisitQuestion = { visitId: string; placeId: string; factId: string; 
 export type Household = {
   id: string;
   name: string;
+  /** How many people this household's plan covers, as the server enforces it (1 on Solo). */
+  planCap?: number;
+  /** How many the Household plan covers — the number an upgrade offers. */
+  householdPlanCap?: number;
   defaultVisitMinutes: number;
   maxTravelMinutes: number;
   /** How they usually travel on a day out (set-up step 2); null until said. */

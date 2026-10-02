@@ -13,13 +13,14 @@ import { type } from '../theme';
 
 export function UpgradePrompt() {
   const [message, setMessage] = useState<string | null>(null);
-  useEffect(() => onUpgradePrompt(setMessage), []);
+  const [cap, setCap] = useState(6);
+  useEffect(() => onUpgradePrompt((m, c) => { setMessage(m); setCap(c); }), []);
   if (!message) return null;
   const close = () => setMessage(null);
   return (
     <Sheet title="Planning for more than you?" onCancel={close} cancelLabel="Not now" onClose={close}>
       <Text style={type.body}>{message}</Text>
-      <Text style={[type.body, { marginTop: 8 }]}>The Household plan covers up to 6 people, each with their own tastes and allergies.</Text>
+      <Text style={[type.body, { marginTop: 8 }]}>The Household plan covers up to {cap} people, each with their own tastes and allergies.</Text>
       <Button label="Switch to Household" onPress={() => { close(); showToast('Plan and billing is coming soon'); }} style={{ marginTop: 14 }} />
     </Sheet>
   );
