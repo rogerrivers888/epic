@@ -373,3 +373,27 @@ test('a review site, social page or booking platform is never taken as the venue
   assert.equal(enrich.notTheVenue('https://m.facebook.com/x'), true);
   assert.equal(enrich.notTheVenue('https://www.sebastians.co.uk/'), false);
 });
+
+test('a listing or social page on record is not trusted as the venue\'s site, for facts or pictures', async () => {
+  const j = enrich.judge({
+    reply: { fields: { phone: { value: '0100', source_url: 'https://www.facebook.com/venue/about' } } },
+    fetched: ['https://www.facebook.com/venue/about'],
+    knownWebsite: 'https://www.facebook.com/venue',
+    asks: [],
+  });
+  assert.equal(j.website, null);
+  assert.deepEqual(j.siteFacts, {});
+  const hh = await household();
+  const ref = `google:fbsite-${randomUUID()}`;
+  await query(`insert into saved_place_enrichment (venue_ref, household_id, state) values ($1, $2, 'free')`, [ref, hh]);
+  await query(`insert into place_records (venue_ref, name, website, provenance) values ($1, 'Facebook Only', 'https://www.facebook.com/venue', '{}')`, [ref]);
+  const looked = []; let prompt = null;
+  await enrich.afterFree(ref, { householdId: hh, sessionId: null }, {
+    asks: [], openverse: async () => ({ ok: true, stored: [], refused: 0 }),
+    venuePictures: async (_r, site) => { looked.push(site); return { ok: true, kept: 0 }; },
+    searchWeb: async (args) => { prompt = args.prompt; return { text: '{"fields":{}}', fetched: [], searches: 1 }; },
+  });
+  assert.deepEqual(looked, [], 'no pictures taken from a Facebook page');
+  assert.match(prompt, /not known yet/, 'Claude is asked to find the real one');
+  assert.match((await enrich.enrichmentOf(ref)).found.fields.website.why, /not the venue's own site/);
+});

@@ -79,6 +79,8 @@ const sameSite = (a, b) => {
 // nothing read there is filed as `site` (Codex, 2 Oct 2026).
 const NOT_THE_VENUE = /(^|\.)(tripadvisor\.[a-z.]+|facebook\.com|instagram\.com|twitter\.com|x\.com|tiktok\.com|youtube\.com|linkedin\.com|yelp\.[a-z.]+|google\.[a-z.]+|goo\.gl|booking\.com|opentable\.[a-z.]+|resy\.com|sevenrooms\.com|designmynight\.com|bookatable\.[a-z.]+|thefork\.[a-z.]+|quandoo\.[a-z.]+|deliveroo\.[a-z.]+|ubereats\.com|just-eat\.[a-z.]+|justeat\.[a-z.]+|timeout\.com|squaremeal\.co\.uk|hardens\.com|visitengland\.com|visitbritain\.com|linktr\.ee|wikipedia\.org|wikidata\.org|yell\.com|foursquare\.com|restaurantguru\.com|groupon\.[a-z.]+|eventbrite\.[a-z.]+|airbnb\.[a-z.]+|expedia\.[a-z.]+|hotels\.com)$/i;
 export const notTheVenue = (u) => NOT_THE_VENUE.test(hostOf(u) ?? '');
+/** The website on record if it is the venue's own, else null. */
+export const ownWebsite = (u) => (u && !notTheVenue(u) ? u : null);
 const isWikipedia = (u) => /(^|\.)wikipedia\.org$/.test(hostOf(u) ?? '');
 // Fetched pages are compared without their fragment or trailing slash, so
 // "https://x.co/menu/" read and "https://x.co/menu" cited are the same page.
@@ -265,13 +267,22 @@ export async function afterFree(venueRef, ctx, deps = {}) {
       `select count(*)::int as n from image_links l join image_assets i on i.id = l.image_id
         where l.subject_type = 'place' and l.subject_id = $1 and i.source = 'openverse' and i.moderation <> 'rejected'`, [venueRef]);
     found.pictures.openverse = ov.ok ? { stored: heldOv.n, added: ov.stored.length, refused: ov.refused } : { error: ov.why, stored: heldOv.n };
-    if (record?.website) {
-      const vs = await (deps.venuePictures ?? venuePicturesFor)(venueRef, record.website).catch((err) => ({ ok: false, why: err.message }));
+    // A website on record is only the venue's own if it is not a listing, a
+    // social page or a booking platform — an OSM tag pointing at Facebook is
+    // not (Codex, 2 Oct 2026). Pictures and facts are read only from that.
+    const ownSite = ownWebsite(record?.website);
+    if (ownSite) {
+      const vs = await (deps.venuePictures ?? venuePicturesFor)(venueRef, ownSite).catch((err) => ({ ok: false, why: err.message }));
       found.pictures.venueSite = { ...(vs.ok ? {} : { error: vs.why }), kept: await venueHeld(venueRef) };
     }
 
     const asks = deps.asks ?? await questionsToAsk(venueRef);
-    const missing = ['website', 'phone', 'booking_url', 'menu_url', 'socials'].filter((f) => !found.fields[f]);
+    // A listing or social page on record is not the venue's website: shown for
+    // what it is, and looked for again.
+    if (record?.website && !ownSite) {
+      found.fields.website = { value: null, source: 'unknown', sourceUrl: null, checkedAt: null, why: `${hostOf(record.website)} on record is not the venue's own site` };
+    }
+    const missing = ['website', 'phone', 'booking_url', 'menu_url', 'socials'].filter((f) => !found.fields[f] || found.fields[f].source === 'unknown');
     if (!name) {
       found.notes.push('No name to research the place by.');
       await setState(venueRef, 'done', { found, claude_done_at: null, last_cost_usd: 0 });
@@ -304,7 +315,7 @@ export async function afterFree(venueRef, ctx, deps = {}) {
     found.notes.push(...pass.notes);
     // A website Claude found and opened is the venue's site now: its pictures
     // are looked for there and then, not on the next re-run (Codex, 2 Oct 2026).
-    if (!record?.website && pass.website) {
+    if (!ownSite && pass.website) {
       const vs = await (deps.venuePictures ?? venuePicturesFor)(venueRef, pass.website).catch((err) => ({ ok: false, why: err.message }));
       found.pictures.venueSite = { ...(vs.ok ? {} : { error: vs.why }), kept: await venueHeld(venueRef) };
     }
@@ -397,7 +408,7 @@ export function judge({ reply, fetched, knownWebsite = null, asks = [] }) {
 
   // The venue's site: the one it already had, or the one Claude found and
   // actually opened. A website nobody opened is a guess about a website.
-  let website = knownWebsite;
+  let website = ownWebsite(knownWebsite);
   const w = reply?.fields?.website;
   if (!website && w?.value && !notTheVenue(w.value) && (wasRead(w.value) || [...read].some((u) => sameSite(u, w.value)))) {
     website = w.value;
@@ -477,7 +488,7 @@ async function claudePass({ venueRef, name, record, missing, asks, ctx }, deps =
     record?.address ? `Address: ${record.address}` : null,
     record?.postcode ? `Postcode: ${record.postcode}` : null,
     record?.category ? `Kind of place: ${record.category}` : null,
-    record?.website ? `Its website (already known): ${record.website}` : 'Its website: not known yet — find it.',
+    ownWebsite(record?.website) ? `Its website (already known): ${record.website}` : 'Its own website: not known yet — find it (not a listing, review or social page).',
     missing.length ? `Find: ${missing.join(', ')}.` : 'All contact fields are known.',
     asks.length ? `Questions (answer each by key):\n${asks.map((q) => `- ${q.key}: ${q.label}?`).join('\n')}` : 'No questions.',
   ].filter(Boolean).join('\n');
@@ -504,7 +515,7 @@ async function claudePass({ venueRef, name, record, missing, asks, ctx }, deps =
 
 async function writePass({ venueRef, reply, out, record, asks, costUsd }) {
 
-  const j = judge({ reply, fetched: out.fetched, knownWebsite: record?.website ?? null, asks });
+  const j = judge({ reply, fetched: out.fetched, knownWebsite: ownWebsite(record?.website), asks });
   if (Object.keys(j.siteFacts).length) await recordSiteFacts(venueRef, j.siteFacts);
   for (const a of j.answers) {
     await sets.saveAnswer({ venueRef, questionId: a.questionId, source: a.source, state: 'answered', value: { yesno: a.yesno }, sourceUrl: a.sourceUrl });
