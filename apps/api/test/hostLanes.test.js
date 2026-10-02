@@ -289,6 +289,8 @@ test('the profile sheet: date of birth always, eighteen or over; tax and Checked
     assert.equal(r.body.host.mobile, '07700900118');
     assert.equal((await srv.send('POST', '/api/host/lanes/tax', { reference: '12345' })).body.error, 'bad_tax_reference');
     assert.equal((await srv.send('POST', '/api/host/lanes/tax', { reference: 'QQ 12 34 56 C' })).body.error, 'bad_tax_reference', 'HMRC’s specimen prefix is never a real number');
+    assert.equal((await srv.send('POST', '/api/host/lanes/tax', { reference: 'AO123456A' })).body.error, 'bad_tax_reference', 'O is never the second letter');
+    assert.equal((await srv.send('POST', '/api/host/lanes/tax', { reference: 'GB123456A' })).body.error, 'bad_tax_reference', 'GB is never issued');
     r = await srv.send('POST', '/api/host/lanes/tax', { reference: 'AB 12 34 56 C' });
     assert.equal(r.body.host.tax, '••••56C', 'shown back only masked');
     assert.equal((await srv.send('POST', '/api/host/lanes/checked', { dbsNumber: '123', referees: [] })).body.error, 'bad_dbs');

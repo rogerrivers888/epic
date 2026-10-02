@@ -79,7 +79,10 @@ async function hostingPro(account, householdId) {
   const { rows: [r] } = await query("select 1 from hosting_payments where household_id = $1 and kind = 'pro' and state = 'succeeded' limit 1", [householdId]);
   return Boolean(r);
 }
-const NI = /^[A-CEGHJ-PR-TW-Z]{2}\s?\d{2}\s?\d{2}\s?\d{2}\s?[A-D]$/i;
+// HMRC's shape: the second letter is never O, and BG, GB, KN, NK, NT, TN and ZZ are never issued (Codex, 2 Oct 2026).
+const NI_SHAPE = /^[A-CEGHJ-PR-TW-Z][A-CEGHJ-NPR-TW-Z]\d{6}[A-D]$/;
+const NI_NEVER = new Set(['BG', 'GB', 'KN', 'NK', 'NT', 'TN', 'ZZ']);
+const NI = { test: (v) => { const x = String(v).toUpperCase().replace(/\s+/g, ''); return NI_SHAPE.test(x) && !NI_NEVER.has(x.slice(0, 2)); } };
 const UTR = /^\d{10}$/;
 
 async function me() {

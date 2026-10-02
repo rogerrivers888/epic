@@ -944,7 +944,7 @@ export async function ratedEventsOf(hostId) {
     `select count(distinct (r.offer_id, coalesce(b.session_id::text, b.occurrence, '')))::int as rated_events,
             round(avg(r.stars)::numeric, 2)::float as avg
        from host_reviews r join experience_bookings b on b.id = r.booking_id
-      where r.host_id = $1 and r.side = 'guest' and r.publish_on <= current_date`,
+      where r.host_id = $1 and r.side = 'guest' and r.publish_on <= current_date and not coalesce(r.hidden, false)`,
     [hostId],
   );
   return { ratedEvents: r?.rated_events ?? 0, avg: r?.avg ?? null };
