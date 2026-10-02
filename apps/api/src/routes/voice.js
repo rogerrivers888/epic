@@ -673,6 +673,14 @@ router.post('/intake/:id/remember', async (req, res, next) => {
     const adults = members.filter((m) => !m.isMinor);
     const children = members.filter((m) => m.isMinor);
     const year = new Date().getFullYear();
+    // The children to be made all fit the plan, or nothing is written — checked
+    // before the diets too, so a refusal never leaves half a remember behind
+    // (Codex, 2 Oct 2026).
+    const making = (offer?.items ?? []).filter((i) => i.kind === 'kids')
+      .reduce((n, i) => n + Math.max(0, i.ages.length - children.filter((c) => c.age == null).length), 0);
+    if (making && members.length + making > households.HOUSEHOLD_PLAN_CAP) {
+      return res.status(403).json({ error: 'plan_cap', message: `Your Household plan covers up to ${households.HOUSEHOLD_PLAN_CAP} people.` });
+    }
     for (const item of offer?.items ?? []) {
       if (item.kind === 'diet') {
         // Diet is a member column now (migration 327), never a constraint row —

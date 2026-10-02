@@ -29,6 +29,7 @@ import { CompactBand } from '../components/Band';
 import { InkMenu } from '../components/InkMenu';
 import { Sheet } from '../components/Sheet';
 import { showToast } from '../components/Toast';
+import { useSession } from '../hooks/useSession';
 
 const FOOD_KINDS = ['dish', 'cuisine', 'ingredient', 'style'];
 const ACTIVITY_KINDS = ['experience'];
@@ -518,8 +519,11 @@ function EditSheet({ data, member, refresh, canEdit, onClose }: { data: Househol
   const numberChanged = (mobile.trim() || null) !== (member.mobile ?? null);
   const age = birth ? ageFromISO(birth) : member.age;
   const thirteenPlus = age == null ? !member.isMinor : age >= 13;
-  // Who may remove: the owner anyone but self; a joined adult children only.
-  const callerOwner = data.members.find((m) => m.id === data.me)?.access?.isLead;
+  // Who may remove: the lead anyone but self; another adult children only. The
+  // shared passcode is the founding household's lead though its person may
+  // have no account to carry `isLead` (Codex, 2 Oct 2026).
+  const { isOwner } = useSession();
+  const callerOwner = isOwner || Boolean(data.members.find((m) => m.id === data.me)?.access?.isLead);
   const targetIsChild = (member.age != null ? member.age < 18 : member.isMinor);
   const mayRemove = !isYou && (callerOwner || targetIsChild);
 

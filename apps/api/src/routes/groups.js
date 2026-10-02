@@ -1407,9 +1407,19 @@ router.post('/join/:token/household', async (req, res, next) => {
     // never to the organiser's.
     if (account?.household_id) {
       const already = await householdsRepo.membersWithConstraints(account.household_id);
+      const isNew = (m) => {
+        const name = String(m.name ?? '').trim();
+        return name && !already.some((x) => x.name.trim().toLowerCase() === name.toLowerCase());
+      };
+      // All of them fit the plan or none is added: one insert at a time
+      // half-added a list and then failed (Codex, 2 Oct 2026).
+      const adding = new Set(rows.filter(isNew).map((m) => String(m.name).trim().toLowerCase())).size;
+      if (adding && already.length + adding > householdsRepo.HOUSEHOLD_PLAN_CAP) {
+        return res.status(403).json({ error: 'plan_cap', message: `Your Household plan covers up to ${householdsRepo.HOUSEHOLD_PLAN_CAP} people.` });
+      }
       for (const m of rows) {
         const name = String(m.name ?? '').trim();
-        if (!name || already.some((x) => x.name.trim().toLowerCase() === name.toLowerCase())) continue;
+        if (!isNew(m)) continue;
         await householdsRepo.insertMember(account.household_id, {
           name,
           isMinor: Boolean(m.child),

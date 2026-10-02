@@ -828,7 +828,10 @@ router.post('/members/:id/constraints', async (req, res, next) => {
       return res.status(400).json({ error: 'invalid_allergen', message: 'Allergens are the UK 14.' });
     }
 
-    let concept = explicitKey ? conceptByKey(explicitKey) : null;
+    // An allergen is exactly one of the fourteen keys and never a concept: a
+    // supplied conceptKey used to replace the checked value with its label,
+    // so 'peanuts' + dish:ramen stored "ramen" as a safety filter (Codex, 2 Oct 2026).
+    let concept = explicitKey && kind !== 'allergen' ? conceptByKey(explicitKey) : null;
     if (!concept && kind !== 'allergen') concept = resolveConcept(value, { kinds: kindsFor(kind) });
     const stored = concept ? concept.label : value.trim();
 

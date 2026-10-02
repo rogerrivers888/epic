@@ -646,3 +646,30 @@ test('a spoken household too big for the plan adds nobody, rather than half of i
     assert.equal(rows[0].n, 4, 'nobody was added');
   } finally { await srv.close(); }
 });
+
+test('an allergen is stored as its own key, whatever concept rides along with it', async () => {
+  const { household: h, member: roger } = await aHousehold(query);
+  const srv = await server(owner(h, roger.id));
+  try {
+    const res = await srv.send('POST', `/api/household/members/${roger.id}/constraints`, { kind: 'allergen', value: 'peanuts', conceptKey: 'dish:ramen' });
+    assert.ok(res.status < 300, `accepted (${res.status})`);
+    const { rows } = await query(`select value, concept_key from member_constraints where member_id = $1 and kind = 'allergen'`, [roger.id]);
+    assert.deepEqual(rows.map((r) => [r.value, r.concept_key]), [['peanuts', null]], 'never "ramen" as a safety filter');
+  } finally { await srv.close(); }
+});
+
+test('Remember with more children than the plan has room for writes nothing at all', async () => {
+  const { household: h, member: roger } = await aHousehold(query);
+  for (let i = 0; i < 4; i += 1) await addMember(h.id, `P${i}`); // 5 with Roger, 1 place left
+  const facts = normaliseTripFacts({ food: { diets: ['vegan'] }, kids_ages: [{ age: 4 }, { age: 7 }] });
+  const { rows: [intake] } = await query('insert into voice_intakes (household_id, facts) values ($1, $2) returning id', [h.id, JSON.stringify(facts)]);
+  const srv = await server(owner(h, roger.id));
+  try {
+    const res = await srv.send('POST', `/api/voice/intake/${intake.id}/remember`);
+    assert.equal(res.status, 403);
+    const { rows: [n] } = await query('select count(*)::int n from members where household_id = $1', [h.id]);
+    assert.equal(n.n, 5, 'no child was added');
+    const { rows: [me] } = await query('select diet from members where id = $1', [roger.id]);
+    assert.equal(me.diet, 'none', 'and the diet was not half-written before the refusal');
+  } finally { await srv.close(); }
+});
