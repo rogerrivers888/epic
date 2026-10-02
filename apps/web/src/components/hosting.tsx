@@ -79,7 +79,7 @@ export function priceWords(o: Experience): string {
   if (o.money === 'free' || o.priceMode === 'free' || o.price.pence === 0) return 'Free';
   // Weekly (hosting v7) is priced a session, drop in or booked ahead — never "the run" (Codex, 2 Oct 2026).
   if (o.lane === 'weekly') return [o.dropInPence ? `${money(o.dropInPence)} drop in` : null, o.bookAheadPence ? `${money(o.bookAheadPence)} booked ahead` : null].filter(Boolean).join(' · ') + ' a session';
-  if (o.lane === 'onrequest' && o.per === 'booking') return `${money(o.pricePence)} a booking`;
+  if (o.lane === 'onrequest' && o.per === 'booking' && o.priceMode === 'same_each') return `${money(o.pricePence)} a booking`;
   if (o.shape === 'series') return `${money(o.pricePence)} the run`;
   if (o.priceMode === 'by_numbers') return `about ${money(o.price.each)} each`;
   return `${money(o.pricePence)}${o.per === 'household' ? ' a household' : ' each'}`;

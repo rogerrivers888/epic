@@ -263,8 +263,16 @@ router.patch('/host/lanes/offers/:id', async (req, res, next) => {
     const b = req.body ?? {};
     const patch = derive(laneBody(b, offer), offer);
     if (b.photoIds !== undefined) patch.photoIds = await ownMediaList(host.household_id, b.photoIds, 'photo', 8);
-    const updated = Object.keys(patch).length ? await repo.updateOffer(offer.id, patch) : offer;
-    if (b.cohosts !== undefined) await repo.setCohosts(offer.id, await ownCohosts(host.household_id, b.cohosts));
+    const cohosts = b.cohosts !== undefined ? await ownCohosts(host.household_id, b.cohosts) : null;
+    // Written under the row's lock, and only while it is still a draft: an edit that arrives as
+    // the offer is being sent never changes what went out (Codex, 2 Oct 2026).
+    const updated = await withTransaction(async (client) => {
+      const { rows: [now] } = await client.query('select state from host_offers where id = $1 for update', [offer.id]);
+      if (now?.state !== 'draft') throw refuse(409, 'already_sent', 'This one is out already.');
+      const row = Object.keys(patch).length ? await repo.updateOffer(offer.id, patch, client) : offer;
+      if (cohosts) await repo.setCohosts(offer.id, cohosts, client);
+      return row;
+    });
     res.json({ offer: await lanePayload(updated, host, account) });
   } catch (err) { next(err); }
 });
@@ -421,7 +429,8 @@ export function derive(patch, current) {
   const mode = p.priceMode ?? current.price_mode;
   if (p.priceMode === 'free' && current.lane !== 'weekly') { p.pricePence = null; p.childPence = null; p.totalPence = null; }
   if (p.priceMode === 'same_each') p.totalPence = null;
-  if (p.priceMode === 'by_numbers') { p.pricePence = null; p.childPence = null; }
+  if (p.priceMode === 'by_numbers') { p.pricePence = null; p.childPence = null; p.per = 'person'; }
+  if (p.priceMode === 'free' && current.lane !== 'weekly') p.per = 'person';
   // Money: free is free; public and paid is Epic-collects only; paid defaults to Epic.
   const paid = isPaid({ ...next, price_mode: mode, lane: current.lane });
   if (!paid) { if (current.money !== 'free' || p.money) p.money = 'free'; p.refundPolicy = p.refundPolicy ?? (current.refund_policy ? null : undefined); }
