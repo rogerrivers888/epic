@@ -37,7 +37,7 @@ import { linkUrl, mediaRef, ownHost, sendInvites } from './hosting.js';
 import {
   LANES, SEQ, SHAPE_OF, PROMPTS, VENUE_KINDS, PRICE_MODES, REFUND_POLICIES, DIET_TICKS, hostingConfig, holidaySet, sessionsFor, decidesOn,
   checklist, sendBlockers, publishAction, chargesFor, refundWords, missingSteps, isPaid, paidThroughEpic, ageOn, dow, ymd, plusDays,
-  needsChecked, laneGaps, CHECK_WORDS, courseRun, weeklyRun, asksParentsOnWho, localInstant,
+  needsChecked, laneGaps, CHECK_WORDS, courseRun, weeklyRun, asksParentsOnWho, localInstant, localDay,
 } from '../domain/lanes.js';
 
 export const router = Router();
@@ -427,7 +427,7 @@ export function derive(patch, current) {
   // Decides by comes before the first session, or it decides nothing (Codex, 2 Oct 2026).
   const startDay = current.lane === 'oneoff' ? ymd(next.starts_on) : current.lane === 'course' ? ymd(next.first_date) : null;
   if (p.decidesOn && startDay && p.decidesOn >= startDay) throw refuse(400, 'decides_after_start', 'Decides by has to be before the first session.');
-  if (p.decidesOn && p.decidesOn < ymd(new Date())) throw refuse(400, 'decides_in_past', 'Decides by can’t be a day that has gone.');
+  if (p.decidesOn && p.decidesOn < localDay(new Date(), next.time_zone ?? current.time_zone ?? 'Europe/London')) throw refuse(400, 'decides_in_past', 'Decides by can’t be a day that has gone.');
   if (p.firstDate !== undefined && current.lane === 'course') p.weekday = p.firstDate ? dow(p.firstDate) : null;
   if (p.weekdays !== undefined && current.lane === 'weekly') p.weekday = p.weekdays[0] ?? null;
   // Prices: free clears every figure; Weekly's four boxes keep the old readers' one price in step.
@@ -567,7 +567,7 @@ export function patchFromExtract(lane, x, { step = null } = {}) {
 async function readWords({ household, lane, step, input }) {
   if (!openaiEnabled()) throw refuse(503, 'no_listener', 'Epic can’t read it for you yet. Type it in instead — it takes a minute.');
   await assertWithinBounds({ householdId: household.id });
-  const today = ymd(new Date());
+  const today = localDay(new Date());
   const started = Date.now();
   try {
     const out = await extractWith({ system: extractSystem(lane, step, today), input, schema: EXTRACT_SCHEMA, name: 'host_draft' });
@@ -934,7 +934,7 @@ async function publishLocked(req, res, household, account, offerId) {
     // Nothing is sent, paid for or reviewed for a date that has gone (Codex, 2 Oct 2026). A
     // weekly class rolls on, so only a one-off or a course is held to its first date.
     const first = offer.lane === 'oneoff' || offer.lane === 'course' ? sessionsFor(offer, holidays, cfg)[0]?.onDate : null;
-    if (first && first < ymd(new Date())) throw refuse(422, 'in_the_past', 'That date has gone. Pick a new one and send it then.', { steps: [offer.lane === 'oneoff' ? 'when' : 'run'] });
+    if (first && first < localDay(new Date(), offer.time_zone ?? 'Europe/London')) throw refuse(422, 'in_the_past', 'That date has gone. Pick a new one and send it then.', { steps: [offer.lane === 'oneoff' ? 'when' : 'run'] });
 
     if (offer.visibility === 'invite') {
       // One publish at a time per offer: two presses at once must not each open a Checkout

@@ -304,7 +304,7 @@ export function decidesOn(offer, holidays = new Map(), cfg = DEFAULT_CONFIG) {
   if (!first) return null;
   // Never already gone: an event starting within the week decides today, and one starting today
   // has nothing left to decide (Codex, 2 Oct 2026).
-  const today = ymd(new Date());
+  const today = localDay(new Date(), offer.time_zone ?? offer.timeZone ?? 'Europe/London');
   const day = plusDays(first, -cfg.decidesDaysBefore);
   if (day >= today) return day;
   return today < first ? today : null;
@@ -455,7 +455,7 @@ export function stepFilled(offer, step, cfg = DEFAULT_CONFIG) {
       const own = ymd(offer.decides_on ?? offer.decidesOn);
       const start = offer.lane === 'oneoff' ? ymd(offer.starts_on ?? offer.startsOn) : offer.lane === 'course' ? ymd(offer.first_date ?? offer.firstDate) : null;
       if (own && start && own >= start) return false;
-      if (own && own < ymd(new Date())) return false;
+      if (own && own < localDay(new Date(), offer.time_zone ?? offer.timeZone ?? 'Europe/London')) return false;
       return true;
     }
     case 'wprice': {
@@ -577,6 +577,7 @@ export function laneBlockers(offer, host, cfg = DEFAULT_CONFIG, holidays = new M
   // after a review that ran past it (Codex, 2 Oct 2026). A weekly class rolls on.
   // A course's first *actual* session: a skipped first date pushes it on (Codex, 2 Oct 2026).
   const first = offer.lane === 'oneoff' ? ymd(offer.starts_on ?? offer.startsOn) : offer.lane === 'course' ? (courseRun(offer, holidays, cfg).dates[0] ?? ymd(offer.first_date ?? offer.firstDate)) : null;
-  const past = first && first < ymd(new Date()) ? ['That date has gone. Pick a new one.'] : [];
+  // Today where the host is, not in UTC (Codex, 2 Oct 2026).
+  const past = first && first < localDay(new Date(), offer.time_zone ?? offer.timeZone ?? 'Europe/London') ? ['That date has gone. Pick a new one.'] : [];
   return [...past, ...laneGaps(offer, cfg), ...items.filter((i) => (i.blocks === 'send' || i.blocks === 'live') && !i.done).map((i) => CHECK_WORDS[i.key])];
 }

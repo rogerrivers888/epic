@@ -1213,7 +1213,9 @@ router.post('/host/offers/:id/invites', async (req, res, next) => {
     // A draft is not sent: it may not have its title, date or place yet.
     // Invitations go out when the host publishes (submit), or at once on an
     // offer that is already live (Codex, 13 Sep 2026).
-    if ((offer.state === 'live' || offer.state === 'paused') && req.body?.send !== false) await sendInvites(host, offer, made);
+    // Read again after saving: an offer sent while these were being added still sends them (Codex, 2 Oct 2026).
+    const now = await repo.offerById(offer.id);
+    if ((now?.state === 'live' || now?.state === 'paused') && (req.body?.send !== false || offer.state === 'draft')) await sendInvites(host, now, made);
     res.status(201).json({ offer: await ownOfferPayload(offer, host) });
   } catch (err) { next(err); }
 });
