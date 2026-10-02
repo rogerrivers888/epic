@@ -165,7 +165,11 @@ export function Setup({ lane: laneIn, offerId }: { lane: HostLane | null; offerI
   const finishLater = async () => {
     setBusy(true);
     try {
-      if (offer && (offer.id || offer.whatLabel)) await ensureSaved({ draftStep: step } as LanePatch);
+      if (offer && (offer.id || offer.whatLabel)) {
+        // Only leave once it is saved: a failed save keeps the host here, with the message shown (Codex, 2 Oct 2026).
+        const saved = await ensureSaved({ draftStep: step } as LanePatch);
+        if (!saved) return;
+      }
       navigate(paths.host());
     } catch (e: any) { showToast(e.message); } finally { setBusy(false); }
   };

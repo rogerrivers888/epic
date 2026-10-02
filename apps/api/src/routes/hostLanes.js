@@ -222,7 +222,9 @@ router.post('/host/lanes/offers', async (req, res, next) => {
     const host = await ensureHost(household, account);
     let offer = await repo.insertOffer(host.id, SHAPE_OF[lane], { lane, state: 'draft', visibility: 'invite', money: 'free', priceMode: 'free', ...(lane === 'course' ? { joinMode: 'whole' } : {}) });
     const patch = laneBody(req.body ?? {}, offer);
-    if (Object.keys(patch).length) offer = await repo.updateOffer(offer.id, derive(patch, offer));
+    // The photo picked on step 1 travels with the first save (Codex, 2 Oct 2026).
+    if (req.body?.photoIds !== undefined) patch.photoIds = await ownMediaList(household.id, req.body.photoIds, 'photo', 8);
+    if (Object.keys(patch).length) offer = await repo.updateOffer(offer.id, { ...derive(patch, offer), ...(patch.photoIds ? { photoIds: patch.photoIds } : {}) });
     if (req.body?.cohosts !== undefined) await repo.setCohosts(offer.id, cohostList(req.body.cohosts));
     res.status(201).json({ offer: await lanePayload(offer, host, account) });
   } catch (err) { next(err); }
@@ -818,6 +820,10 @@ router.post('/host/lanes/offers/:id/publish', async (req, res, next) => {
     const blocking = sendBlockers(items);
     if (blocking.length) throw refuse(422, 'checklist', CHECK_WORDS[blocking[0]], { blocking });
     const holidays = await holidaysFor(household.id);
+    // Nothing is sent, paid for or reviewed for a date that has gone (Codex, 2 Oct 2026). A
+    // weekly class rolls on, so only a one-off or a course is held to its first date.
+    const first = offer.lane === 'oneoff' || offer.lane === 'course' ? sessionsFor(offer, holidays, cfg)[0]?.onDate : null;
+    if (first && first < ymd(new Date())) throw refuse(422, 'in_the_past', 'That date has gone. Pick a new one and send it then.', { steps: [offer.lane === 'oneoff' ? 'when' : 'run'] });
 
     if (offer.visibility === 'invite') {
       // One publish at a time per offer: two presses at once must not each open a Checkout

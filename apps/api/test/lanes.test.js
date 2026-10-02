@@ -292,3 +292,9 @@ test('a parent comes to a 5–18 event whatever their age; an adults’ event ho
   assert.deepEqual(ageGate({ lane: 'weekly', age_min: 5, age_max: 18 }, [{ name: 'Dad', age: 40, child: false }, { name: 'Kit', age: 9, child: true }]).blocked, []);
   assert.equal(ageGate({ lane: 'oneoff', age_min: 30, age_max: 50 }, [{ name: 'Jo', age: 25, child: false }]).blocked.length, 1);
 });
+
+test('a weekly class rolls on: its window starts today once the first session has passed', () => {
+  const run = weeklyRun({ first_date: '2026-01-06', weekdays: [2], skipped_dates: [] }, new Map(), { weeks: 2, from: '2026-10-02' });
+  assert.deepEqual(run.dates, ['2026-10-06', '2026-10-13']);
+  assert.deepEqual(weeklyRun({ first_date: '2026-11-03', weekdays: [2], skipped_dates: [] }, new Map(), { weeks: 1, from: '2026-10-02' }).dates, ['2026-11-03'], 'a start still to come is kept');
+});

@@ -189,6 +189,19 @@ test('weekly: more than one day, its own price boxes, and the run skipping bank 
   } finally { await srv.close(); }
 });
 
+test('the photo picked on step 1 travels with the first save', async () => {
+  const { household: h, member } = await aHousehold(query);
+  const srv = await server(await anAccount(h, member));
+  try {
+    const { rows: [m] } = await query("insert into host_media (household_id, kind, mime, bytes, size) values ($1, 'photo', 'image/jpeg', '\\x00', 1) returning id", [h.id]);
+    const r = await srv.send('POST', '/api/host/lanes/offers', { lane: 'oneoff', whatLabel: 'BBQ', title: 'A BBQ', photoIds: [m.id] });
+    assert.deepEqual(r.body.offer.photos.map((p) => p.id), [m.id]);
+    const other = await aHousehold(query);
+    const { rows: [theirs] } = await query("insert into host_media (household_id, kind, mime, bytes, size) values ($1, 'photo', 'image/jpeg', '\\x00', 1) returning id", [other.household.id]);
+    assert.equal((await srv.send('POST', '/api/host/lanes/offers', { lane: 'oneoff', photoIds: [theirs.id] })).body.error, 'not_your_media');
+  } finally { await srv.close(); }
+});
+
 test('somebody else’s draft is not yours', async () => {
   const a = await aHousehold(query);
   const b = await aHousehold(query);
@@ -292,7 +305,7 @@ async function readyHost(h, member, { mobile = `077${String(Math.floor(Math.rand
 async function filledOneoff(srv, extra = {}) {
   const { body: { offer } } = await srv.send('POST', '/api/host/lanes/offers', { lane: 'oneoff', whatLabel: 'Birthday party', title: 'Maya’s 40th' });
   const r = await srv.send('PATCH', `/api/host/lanes/offers/${offer.id}`, {
-    startsOn: '2026-06-13', startsAt: '13:00', endsAt: '23:00', venue: 'your_place', venueLabel: 'The Old Rectory, Henley', priceMode: 'free', maxCount: 60, visibility: 'invite', ...extra,
+    startsOn: '2027-06-12', startsAt: '13:00', endsAt: '23:00', venue: 'your_place', venueLabel: 'The Old Rectory, Henley', priceMode: 'free', maxCount: 60, visibility: 'invite', ...extra,
   });
   assert.equal(r.status, 200, JSON.stringify(r.body));
   return r.body.offer;
@@ -305,6 +318,10 @@ test('private: nothing is sent before the £10 is paid through Stripe (test mode
     const offer = await filledOneoff(srv);
     assert.deepEqual(offer.blockers, []);
     assert.equal(offer.action.label, 'Pay £10 · send the invites');
+    // A date that has gone is never sent or paid for.
+    await query("update host_offers set starts_on = '2026-01-10' where id = $1", [offer.id]);
+    assert.equal((await srv.send('POST', `/api/host/lanes/offers/${offer.id}/publish`, { plan: 'event' })).body.error, 'in_the_past');
+    await query("update host_offers set starts_on = '2027-06-12' where id = $1", [offer.id]);
     await query("insert into offer_invites (offer_id, name, contact, contact_kind, heads, token) values ($1, 'Auntie Carol', '07700900412', 'mobile', 2, $2)", [offer.id, crypto.randomUUID()]);
 
     await withStripe(null, async () => {

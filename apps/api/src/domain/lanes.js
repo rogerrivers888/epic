@@ -161,8 +161,11 @@ export function courseRun(offer, holidays = new Map(), cfg = DEFAULT_CONFIG) {
  * bank holidays (when excluded) and the host's own dates. Ongoing — the guest
  * booking brief extends the run as it rolls.
  */
-export function weeklyRun(offer, holidays = new Map(), { weeks = DEFAULT_CONFIG.weeklyHorizonWeeks } = {}) {
-  const start = ymd(offer.first_date ?? offer.firstDate);
+export function weeklyRun(offer, holidays = new Map(), { weeks = DEFAULT_CONFIG.weeklyHorizonWeeks, from = null } = {}) {
+  // Ongoing: the window rolls — it starts at the first session, or at \`from\` (today) once
+  // that has passed, so a class never runs out of dates (Codex, 2 Oct 2026).
+  const first = ymd(offer.first_date ?? offer.firstDate);
+  const start = first && from && ymd(from) > first ? ymd(from) : first;
   const days = new Set((offer.weekdays ?? []).map(Number));
   if (!start || !days.size) return { dates: [], skipped: [] };
   const own = new Set((offer.skipped_dates ?? offer.skippedDates ?? []).map(ymd));

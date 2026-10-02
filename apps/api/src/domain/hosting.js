@@ -93,7 +93,7 @@ const plusDays = (iso, n) => { const d = dateAt(iso); d.setUTCDate(d.getUTCDate(
 export function seriesDates(offer) {
   // A Weekly or Course made in the four lanes (hosting v7) runs by the lane's
   // own rules: several weekdays, bank holidays left out, the run pushed back.
-  if (offer.lane === 'weekly') return weeklyRun(offer, holidaySet(knownBankHolidays()), { weeks: hostingConfig().weeklyHorizonWeeks }).dates;
+  if (offer.lane === 'weekly') return weeklyRun(offer, holidaySet(knownBankHolidays()), { weeks: hostingConfig().weeklyHorizonWeeks, from: new Date() }).dates;
   if (offer.lane === 'course') return courseRun(offer, holidaySet(knownBankHolidays()), hostingConfig()).dates;
   if (!offer.first_date || (!offer.sessions && !offer.end_date)) return [];
   const skipped = new Set((offer.skipped_dates ?? []).map(ymd));
