@@ -107,6 +107,7 @@ export async function areaKeyCheck() {
   // Every place still without a country that holds an address, and why its address
   // did not settle it.
   const addressVerdicts = (await nullCountryAddresses(null, undefined, { limit: null })).map((r) => {
+    if (r.source_country) return { venue_ref: r.venue_ref, addresses: r.addresses, country: null, reason: 'a source area names its country; settle reads that first' };
     const v = countryFromAddresses(r.addresses ?? []);
     return { venue_ref: r.venue_ref, addresses: r.addresses, country: v.code, reason: v.reason ?? null };
   });

@@ -124,3 +124,13 @@ test('a country is judged from the address as it is when stamped, read under a l
   const out = await index.settleCountriesFromAddresses([ref]);
   assert.deepEqual(out.settled.map((x) => x.country), ['VA'], 'stamped from the address held at the moment of stamping');
 });
+
+test('a source area\'s country comes before the address', async () => {
+  const ref = 'google:addr-sourced';
+  await place(ref, { facts: [['nominatim', 'Somewhere, Rome, Italy']] });
+  await query(`insert into scout_areas (code, country_code, lat, lng) values ('ZS1', 'GB', 51.5, -0.1) on conflict (code) do nothing`);
+  await query(`insert into scout_places (area_code, venue_ref, name, rank, outcode, from_sources) values ('ZS1', $1, 'X', 1, 'ZS1', '["osm"]') on conflict do nothing`, [ref]);
+  const out = await index.settleCountriesFromAddresses([ref]);
+  assert.deepEqual(out.unsettled, [{ ref, reason: 'a source area names its country; settle reads that first' }]);
+  assert.equal(await countryOf(ref), null, 'left for settle step 0 to read from the source');
+});

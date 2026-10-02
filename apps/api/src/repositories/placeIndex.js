@@ -1393,6 +1393,7 @@ export async function settleCountriesFromAddresses(refs = null, q = query) {
     // Judged from the plain read first: an address that names no country costs
     // nothing more, so the places that can never settle do not each hold a
     // transaction on every pass (Codex). Only a candidate goes on to the lock.
+    if (row.source_country) { unsettled.push({ ref: row.venue_ref, reason: 'a source area names its country; settle reads that first' }); continue; }
     const first = countryFromAddresses(row.addresses ?? []);
     if (!first.code) { unsettled.push({ ref: row.venue_ref, reason: first.reason }); continue; }
     // One short transaction a place: the geocoded address is locked, read again,
@@ -1422,7 +1423,14 @@ const NULL_COUNTRY_PASS = 5000;
 /** Places with no country, each with its reverse-geocoded address(es). Read-only. */
 export async function nullCountryAddresses(refs = null, q = query, { limit = NULL_COUNTRY_PASS } = {}) {
   const { rows } = await q(`
-    select pi.venue_ref, array_agg(f.value #>> '{}') as addresses
+    select pi.venue_ref, array_agg(f.value #>> '{}') as addresses,
+           -- A source area or region that names a country comes first (settle step
+           -- 0); the address is the fallback and must not get ahead of it (Codex).
+           (exists (select 1 from scout_places sp join scout_areas sa on sa.code = sp.area_code
+                     where sp.venue_ref = pi.venue_ref and sa.country_code is not null)
+            or exists (select 1 from attractions a join regions reg on reg.slug = a.region_slug
+                     where (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref)
+                       and reg.country_code is not null)) as source_country
       from place_index pi
       join place_facts f on f.venue_ref = pi.venue_ref and f.field = 'address'
                         and f.source = 'nominatim' and f.expires_at is null
