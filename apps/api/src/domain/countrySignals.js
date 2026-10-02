@@ -16,6 +16,14 @@
 
 import { countryNamedIn } from './countryFromAddress.js';
 
+/** A country named as the address's very last component, with nothing after it — or null. */
+function strictLastCountry(address) {
+  const parts = String(address).split(',').map((p) => p.trim()).filter(Boolean);
+  const last = parts[parts.length - 1];
+  if (!last || /\d/.test(last)) return null;
+  return countryNamedIn(last);
+}
+
 // Calling codes → the countries that use them. Longest prefix wins. Not every code
 // on earth — the markets, their neighbours and the commonest elsewhere; a prefix not
 // listed is reported as "international, unrecognised", never matched to a guess.
@@ -71,12 +79,23 @@ export function disagreements({ country, addresses = [], phone, website, priceRa
   const out = [];
   const stamp = String(country || '').toUpperCase();
   if (!stamp) return out;
+  // Addresses come as { source, value }. The geocoder's own format is read by its
+  // rule (domain/countryFromAddress.js); anyone else's ends with a town as often as
+  // a country, so it counts only when its very last component, with nothing after,
+  // is a country's name — "…, Lebanon" alone is not read (Codex).
   for (const a of addresses) {
-    const named = countryNamedIn(a);
-    if (named && named !== stamp) { out.push({ signal: 'address', says: named, evidence: a }); break; }
+    const value = typeof a === 'string' ? a : a?.value;
+    const source = typeof a === 'string' ? 'nominatim' : a?.source;
+    if (!value) continue;
+    const named = source === 'nominatim' ? countryNamedIn(value) : strictLastCountry(value);
+    if (named && named !== stamp) { out.push({ signal: 'address', says: named, evidence: value, source }); break; }
   }
+  // Only a conclusive phone objects: the stamp must have a calling code this table
+  // holds, and the number a recognised prefix that is not one of its countries'.
+  // An unrecognised prefix, or a stamp the table does not cover, says nothing (Codex).
   const p = phoneCountries(phone);
-  if (p && !p.includes(stamp)) out.push({ signal: 'phone', says: p.join('/'), evidence: phone });
+  const stampHasCode = Object.values(CALLING).some((list) => list.includes(stamp));
+  if (p && !p.includes('?') && stampHasCode && !p.includes(stamp)) out.push({ signal: 'phone', says: p.join('/'), evidence: phone });
   const w = websiteCountry(website);
   if (w && w !== stamp) out.push({ signal: 'website', says: w, evidence: website });
   const mine = currencyOf(stamp);

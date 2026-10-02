@@ -218,12 +218,13 @@ export async function countryContradictions() {
   for (;;) {
     const { rows } = await query(`
       select pi.venue_ref, upper(pi.country_code) as country, r.name, r.phone, r.website, r.price_range,
-             array_remove(array_agg(distinct f.value #>> '{}') || array[r.address], null) as addresses
+             coalesce(jsonb_agg(distinct jsonb_build_object('source', f.source, 'value', f.value #>> '{}'))
+                        filter (where f.venue_ref is not null), '[]'::jsonb) as addresses
         from place_index pi
         join place_records r on r.venue_ref = pi.venue_ref
         left join place_facts f on f.venue_ref = pi.venue_ref and f.field = 'address' and f.expires_at is null
        where pi.country_code is not null and pi.venue_ref > $1
-       group by pi.venue_ref, pi.country_code, r.name, r.phone, r.website, r.price_range, r.address
+       group by pi.venue_ref, pi.country_code, r.name, r.phone, r.website, r.price_range
        order by pi.venue_ref limit 5000`, [after]);
     if (!rows.length) break;
     for (const r of rows) {

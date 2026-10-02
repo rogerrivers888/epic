@@ -31,7 +31,7 @@ test('each signal names a country, or says nothing', () => {
 test('Iris Bay Tower: three of its own signals say the UAE against a GB stamp', () => {
   const d = disagreements({
     country: 'GB',
-    addresses: ['38 Lampton Road, Heston, London, England, TW3 1JH, United Kingdom', 'Iris Bay Tower, Business Bay, Dubai, Dubai, 00000'],
+    addresses: [{ source: 'nominatim', value: '38 Lampton Road, Heston, London, England, TW3 1JH, United Kingdom' }, { source: 'site', value: 'Iris Bay Tower, Business Bay, Dubai, Dubai, 00000' }],
     phone: '+971585072674', website: 'https://dunebuggyrentaldubai.ae/', priceRange: 'AED 399 - AED 1499',
   }, (c) => ({ GB: 'GBP', AE: 'AED' })[c] ?? null);
   assert.deepEqual(d.map((x) => [x.signal, x.says]), [['phone', 'AE'], ['website', 'AE'], ['currency', 'AED']]);
@@ -40,7 +40,14 @@ test('Iris Bay Tower: three of its own signals say the UAE against a GB stamp', 
 });
 
 test('a place whose own text agrees with its stamp raises nothing', () => {
-  assert.deepEqual(disagreements({ country: 'GB', addresses: ['High St, Windsor, SL4 1NJ, United Kingdom'], phone: '+44 1753 1', website: 'https://x.co.uk', priceRange: '££' }, () => 'GBP'), []);
+  assert.deepEqual(disagreements({ country: 'GB', addresses: [{ source: 'site', value: 'High St, Windsor, SL4 1NJ, United Kingdom' }], phone: '+44 1753 1', website: 'https://x.co.uk', priceRange: '££' }, () => 'GBP'), []);
+  // Codex: a town that shares a country's name is not read from a venue's address…
+  assert.deepEqual(disagreements({ country: 'US', addresses: [{ source: 'site', value: '123 Main St, Lebanon, 37087' }] }), []);
+  // …and an unrecognised prefix, or a stamp the table does not cover, says nothing.
+  assert.deepEqual(disagreements({ country: 'ID', phone: '+62 21 1234' }), []);
+  assert.deepEqual(disagreements({ country: 'GB', phone: '+62 21 1234' }), []);
+  // But a venue's own address that ends with a country is read.
+  assert.deepEqual(disagreements({ country: 'GB', addresses: [{ source: 'site', value: 'Iris Bay, Dubai, United Arab Emirates' }] }).map((d) => d.says), ['AE']);
   assert.deepEqual(disagreements({ country: 'VA', phone: '+39 06 1' }), [], 'the Vatican shares Italy\'s calling code');
 });
 
@@ -48,6 +55,9 @@ test('the check reads every settled place with a record and names the contradict
   const m = await import('../src/desk/markets.js');
   await query(`insert into place_index (venue_ref, country_code) values ('google:cs-iris', 'GB'), ('google:cs-fine', 'GB')
                on conflict (venue_ref) do update set country_code = excluded.country_code`);
+  await query(`insert into place_facts (venue_ref, field, source, value, licence, retention) values
+               ('google:cs-iris', 'address', 'site', to_jsonb('Iris Bay Tower, Business Bay, Dubai, Dubai, 00000'::text), 'own', 'indefinite')
+               on conflict (venue_ref, field, source) do nothing`);
   await query(`insert into place_records (venue_ref, phone, website, price_range, address) values
                ('google:cs-iris', '+971585072674', 'https://dunebuggyrentaldubai.ae/', 'AED 399 - AED 1499', 'Iris Bay Tower, Business Bay, Dubai, Dubai, 00000'),
                ('google:cs-fine', '+44 1753 1', 'https://x.co.uk', '££', 'High St, Windsor, SL4 1NJ')
