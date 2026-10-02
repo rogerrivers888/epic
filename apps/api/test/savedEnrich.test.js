@@ -315,3 +315,22 @@ test('a re-run is only of a place already researched; social links keep the page
   });
   assert.equal(j.fields.socials.sourceUrl, 'https://soc.example/contact', 'the page read, not the root assumed');
 });
+
+test('the website keeps a page that was fetched as its source; a venue picture seen again keeps when it was first found', async () => {
+  const j = enrich.judge({
+    reply: { fields: { website: { value: 'https://root.example/', source_url: 'https://root.example/' } } },
+    fetched: ['https://root.example/menu'],
+    asks: [],
+  });
+  assert.equal(j.fields.website.sourceUrl, 'https://root.example/menu', 'never the unread root');
+
+  const { venuePicturesFor } = await import('../src/sources/venueImages.js');
+  const ref = `google:seen-${randomUUID()}`;
+  const page = { url: 'https://seen.example/', html: '<meta property="og:image" content="/a.jpg">' };
+  const deps = { fetchHtmlImpl: async () => page, politeness: async () => ({ ok: true }) };
+  await venuePicturesFor(ref, 'https://seen.example/', deps);
+  await query(`update venue_site_images set found_at = now() - interval '2 days' where venue_ref = $1`, [ref]);
+  await venuePicturesFor(ref, 'https://seen.example/', deps);
+  const { rows: [r] } = await query(`select found_at < now() - interval '1 day' as old from venue_site_images where venue_ref = $1`, [ref]);
+  assert.equal(r.old, true, 'seen again is not found again');
+});

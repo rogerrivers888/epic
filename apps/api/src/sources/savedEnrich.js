@@ -384,7 +384,13 @@ export function judge({ reply, fetched, knownWebsite = null, asks = [] }) {
   if (!website && w?.value && (wasRead(w.value) || [...read].some((u) => sameSite(u, w.value)))) {
     website = w.value;
     siteFacts.website = w.value;
-    fields.website = { value: w.value, source: 'site', sourceUrl: w.source_url && wasRead(w.source_url) ? w.source_url : w.value, checkedAt: at };
+    // The page that vouches for it is one that was fetched in this call —
+    // the cited page if it was read, the site itself if that was, or else the
+    // fetched page on the same site (Codex, 2 Oct 2026). Never an unread root.
+    const vouch = (w.source_url && wasRead(w.source_url) && w.source_url)
+      || (wasRead(w.value) && w.value)
+      || (fetched ?? []).find((u) => sameSite(u, w.value));
+    fields.website = { value: w.value, source: 'site', sourceUrl: vouch, checkedAt: at };
   } else if (!website && w?.value) {
     fields.website = { value: null, source: 'unknown', sourceUrl: null, checkedAt: at, why: 'found in search only, never opened' };
   }

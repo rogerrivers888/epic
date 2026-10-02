@@ -86,7 +86,9 @@ export async function venuePicturesFor(venueRef, website, { fetchHtmlImpl = fetc
     await query(
       `insert into venue_site_images (venue_ref, image_url, page_url, found_how)
        values ($1, $2, $3, $4)
-       on conflict (venue_ref, image_url) do update set page_url = excluded.page_url, found_at = now()`,
+       -- found_at is when the picture was first found, and stays so: a re-run
+       -- that sees the same picture has found nothing new (Codex, 2 Oct 2026).
+       on conflict (venue_ref, image_url) do update set page_url = excluded.page_url`,
       [venueRef, p.url, page.url, p.why]);
   }
   return { ok: true, kept: pics.length, why: null };
