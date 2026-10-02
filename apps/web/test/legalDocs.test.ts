@@ -32,10 +32,11 @@ test('nothing in square brackets goes public, and the owner fills are in', () =>
   assert.match(PRIVACY, /If you are unhappy, contact support@epic\.day\./);
   assert.match(PRIVACY, /within 30 days/);
   assert.match(COOKIES, /use the Cookie settings link in the footer of any page/);
+  assert.doesNotMatch(COOKIES, /\| Statistics \|[^\n]*On by default/, 'statistics are opt-in, as built (consent.ts)');
 });
 
 test('the cookie list is what epic.day stores, and nothing for analytics while the banner is off', () => {
-  for (const name of ['epic.session', 'epic_session', 'epic_oauth', 'epic_locale', 'epic-offline', 'epic.after-sign-in']) {
+  for (const name of ['epic.session', 'epic_session', 'roam_session', 'epic_oauth', 'epic_locale', 'epic-offline', 'epic.after-sign-in']) {
     assert.ok(COOKIES.includes(name), `${name} is listed`);
   }
   assert.doesNotMatch(COOKIES, /\b_ga\b|_gcl|epic_consent/, 'no GA4/Ads or consent cookie until the banner is on');
