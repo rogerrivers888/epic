@@ -411,3 +411,22 @@ test('Codex: Stripe failing mid-way never strands a booking, a tip, an accepted 
     assert.equal((await sc.send('POST', `/api/experiences/${paid.o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 2 } })).status, 201, 'the two places came back');
   } finally { await sc.close(); }
 });
+
+test('Codex: a guest who cancels inside the no-refund window gives the place back, and the host is still paid for it', async () => {
+  settings.forget();
+  const ev = await anEvent({ price: 3000, priceMode: 'same_each', firstIn: 5, max: 2 });
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const id = await paidBooking(srv, ev.o, { kind: 'whole' }, { adults: 2 });
+    const soon = new Date(Date.now() + 3 * 3_600_000);
+    await query(`update offer_sessions set on_date = $2, starts_at = $3, ends_at = null where offer_id = $1`, [ev.o.id, localDay(soon, 'Europe/London'), soon.toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })]);
+    const c = await srv.send('POST', `/api/booked/${id}/cancel`, {});
+    assert.equal(c.body.refundPence, 0, 'flexible, three hours out: nothing back');
+    assert.equal((await query('select state from booking_sessions where booking_id = $1', [id])).rows[0].state, 'forfeited');
+    assert.equal((await srv.get(`/api/experiences/${ev.o.id}/booking/options`)).body.sessions[0].placesLeft, 2, 'the places are free again');
+    const ledger = await import('../src/repositories/hostingLedger.js');
+    const rows = await ledger.paidBookingsOfSession(ev.sessions[0].id);
+    assert.equal(rows.length, 1, 'the payout still counts the money kept');
+  } finally { await srv.close(); }
+});

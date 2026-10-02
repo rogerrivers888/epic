@@ -117,7 +117,7 @@ async function sharesOf(hostId) {
     `select b.id, b.offer_id, b.charged_pence, b.refunded_pence, b.host_pence, b.fee_pence, b.fee_rate_pct, b.fee_reason, b.value_pence,
             b.via_host_link, b.source, b.created_at, b.household_id,
             o.title, o.time_zone,
-            array(select bs.session_id::text from booking_sessions bs where bs.booking_id = b.id and bs.state = 'booked') as session_ids
+            array(select bs.session_id::text from booking_sessions bs where bs.booking_id = b.id and bs.state in ('booked', 'forfeited')) as session_ids
        from experience_bookings b join host_offers o on o.id = b.offer_id
       where b.host_id = $1 and b.payment_state in ('charged', 'partially_refunded', 'refunded')`,
     [hostId],
@@ -737,7 +737,7 @@ router.get('/host/desk/statements/:period.csv', async (req, res, next) => {
     const { rows } = await query(
       `select p.created_at, p.kind, p.amount_pence, p.epic_pence, p.host_pence, p.rate_pct, p.cause, p.reason, p.state, o.title
          from hosting_payments p left join host_offers o on o.id = p.offer_id
-        where p.host_id = $1 and p.state = 'succeeded' and p.created_at >= $2::date and p.created_at < $3::date
+        where p.host_id = $1 and p.state = 'succeeded' and p.kind <> 'tip' and p.created_at >= $2::date and p.created_at < $3::date
         order by p.created_at`,
       [host.id, from, to],
     );

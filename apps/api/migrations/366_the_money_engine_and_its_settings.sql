@@ -109,7 +109,9 @@ create table if not exists booking_sessions (
   state        text not null default 'booked',
   created_at   timestamptz not null default now(),
   primary key (booking_id, session_id),
-  constraint booking_sessions_state_check check (state in ('booked', 'cancelled', 'moved'))
+  -- 'forfeited': the guest gave the session up inside the no-refund window. The place is free again, and the
+  -- money kept is still the host's, so its payout counts it.
+  constraint booking_sessions_state_check check (state in ('booked', 'cancelled', 'moved', 'forfeited'))
 );
 create index if not exists booking_sessions_session_idx on booking_sessions (session_id);
 

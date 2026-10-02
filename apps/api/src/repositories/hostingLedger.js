@@ -78,7 +78,7 @@ export async function sessionsEndedWithoutPayout({ now = new Date(), limit = 200
         and ((coalesce(s.ends_on, s.on_date) + coalesce(s.ends_at, s.starts_at, time '23:59'))
                at time zone coalesce(o.time_zone, 'Europe/London')) <= $1
         and exists (select 1 from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
-                     where bs.session_id = s.id and bs.state = 'booked' and b.payment_state in ('charged', 'partially_refunded'))
+                     where bs.session_id = s.id and bs.state in ('booked', 'forfeited') and b.payment_state in ('charged', 'partially_refunded'))
       order by 5 limit $2`,
     [now, limit],
   );
@@ -90,9 +90,9 @@ export async function paidBookingsOfSession(sessionId, client = null) {
   const q = client ? (t, p) => client.query(t, p) : query;
   const { rows } = await q(
     `select b.id, b.charged_pence, b.refunded_pence, b.host_pence, b.confirmed_happened,
-            array(select bs2.session_id::text from booking_sessions bs2 where bs2.booking_id = b.id and bs2.state = 'booked') as session_ids
+            array(select bs2.session_id::text from booking_sessions bs2 where bs2.booking_id = b.id and bs2.state in ('booked', 'forfeited')) as session_ids
        from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
-      where bs.session_id = $1 and bs.state = 'booked' and b.payment_state in ('charged', 'partially_refunded')`,
+      where bs.session_id = $1 and bs.state in ('booked', 'forfeited') and b.payment_state in ('charged', 'partially_refunded')`,
     [sessionId],
   );
   return rows;

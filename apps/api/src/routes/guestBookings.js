@@ -305,7 +305,9 @@ async function book({ offerId, body, household, account, invite = null }) {
         await c.query('insert into booking_children (booking_id, name, age, date_of_birth, needs, emergency_contact) values ($1, $2, $3, $4, $5::jsonb, $6)',
           [b.id, k.name, k.dob ? null : childAge(k), k.dob, JSON.stringify(k.needs), k.emergencyContact]);
       }
-      if (mine.length) await c.query(`update offer_waitlist set state = 'taken' where id = any($1::uuid[])`, [mine.map((w) => w.id)]);
+      // Only the offers this booking uses: a household's offer on another session stays theirs (Codex, 2 Oct 2026).
+      const used = mine.filter((w) => w.session_id == null || when.sessionIds.includes(w.session_id));
+      if (used.length) await c.query(`update offer_waitlist set state = 'taken' where id = any($1::uuid[])`, [used.map((w) => w.id)]);
       if (invite) {
         const { rowCount } = await c.query(`update offer_invites set rsvp = 'yes', rsvp_heads = $2, answered_at = now(), household_id = $3, booking_id = $4 where id = $1 and booking_id is null`, [invite.id, check.heads, household.id, b.id]);
         if (!rowCount) throw refuse(409, 'answered', 'This invitation is answered already.');
@@ -655,7 +657,12 @@ router.post('/booked/:id/cancel', async (req, res, next) => {
       } else {
         if (q.pence == null) throw refuse(409, 'needs_a_person', q.words);
         if (q.pence > 0) await owe(c, b, { amountPence: q.pence, cause: q.cause, key: `guest_cancel:${b.id}:${[...q.losing].sort().join(',')}`, wholeBooking: whole });
-        await c.query(`update booking_sessions set state = 'cancelled' where booking_id = $1 and session_id = any($2::uuid[])`, [b.id, q.losing]);
+        // Money the policy keeps is still the host's: those sessions are forfeited, not cancelled, so their
+        // payout counts it; the place itself is free again either way (Codex, 2 Oct 2026).
+        const { rows: [{ n: allN }] } = await c.query('select count(*)::int as n from booking_sessions where booking_id = $1', [b.id]);
+        const due = whole ? Math.max(0, Number(b.charged_pence ?? 0) - Number(b.refunded_pence ?? 0)) : Math.floor((Number(b.charged_pence ?? 0) * q.losing.length) / Math.max(1, allN));
+        const kept = ['charged', 'partially_refunded'].includes(b.payment_state) && q.pence < due;
+        await c.query(`update booking_sessions set state = $3 where booking_id = $1 and session_id = any($2::uuid[])`, [b.id, q.losing, kept ? 'forfeited' : 'cancelled']);
         if (whole) await c.query(`update experience_bookings set state = 'cancelled', cancelled_by = 'guest', cancel_cause = $2 where id = $1`, [b.id, q.cause]);
       }
       await logChange({ subjectKind: 'booking', subjectId: b.id, field: 'cancelled', after: { sessions: q.losing.length, refund: q.pence, cause: q.cause }, by: account?.id ?? null, byLabel: 'guest' }, c);
@@ -701,7 +708,9 @@ async function finishedBooking(id, householdId) {
   const ends = held.map((x) => endOf(x, o));
   const lastEnd = ends.length ? new Date(Math.max(...ends.map((d) => d.getTime()))) : null;
   const firstEnd = ends.length ? new Date(Math.min(...ends.map((d) => d.getTime()))) : null;
-  if (!firstEnd || firstEnd > new Date() || b.state === 'cancelled') throw refuse(409, 'not_yet', 'This is for after the event.');
+  // After the whole of it: a course or a run of weekly sessions is rated once, when its last session is over (Codex, 2 Oct 2026).
+  void firstEnd;
+  if (!lastEnd || lastEnd > new Date() || b.state === 'cancelled') throw refuse(409, 'not_yet', 'This is for after the event.');
   return { b, o, held, lastEnd };
 }
 
