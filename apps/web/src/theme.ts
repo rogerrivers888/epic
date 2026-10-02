@@ -114,6 +114,15 @@ export const SHEET_SCRIM = 'rgba(32,30,29,0.5)';
 export const EMPTY_BLOCK = '#E6E2DC'; // Preview's grey block for a part not filled in yet
 export const DISABLED_GREY = '#C3BEBA'; // a calendar day nobody can book
 export const TICK_EDGE = '#B5B0AE';   // an unticked box's edge
+// Host home for existing hosts (hosting v4, E1): the four tiles, all greens dark to light, and
+// the amber that says "under its minimum" or "waiting on a reply".
+export const DESK_MESSAGES = '#224209'; // oklch(0.34 0.09 135), cream text
+export const DESK_TODO = MOSS;          // oklch(0.48 0.13 130), cream text
+export const DESK_RISK = '#A4CF5E';     // oklch(0.80 0.15 127), ink text
+export const DESK_REVIEWS = '#DFF5BB';  // oklch(0.94 0.08 125), ink text
+export const AMBER = '#FBECD0';         // At risk above 0, Waiting on numbers, Request
+export const AMBER_DARK = '#8A5A00';    // "· min 5" under a minimum
+export const CHIP_GREY = '#E6E2DC';     // Changed, In review
 
 /**
  * Dark, from the v2 handoff's own table. Not a dimming of the light palette: a

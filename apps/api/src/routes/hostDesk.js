@@ -31,12 +31,13 @@ import { currentAccount } from '../context.js';
 import { currentHousehold } from './household.js';
 import {
   hostState, draftProgress, sessionChip, CHIP_WORDS, groupTodo, lastMonths, changePct, standingOf,
-  responseMinutes, responseWords, movesBack, ladderLine, phoneVisible, paymentWords, cohostView, gbpWords,
+  responseMinutes, responseWords, movesBack, ladderLine, phoneVisible, paymentWords, cohostView, gbpWords, dayWords, monthName,
 } from '../domain/hostDesk.js';
 import { ladderProgress, feeWords, introState } from '../domain/money.js';
 import { localInstant, localDay, SEQ } from '../domain/lanes.js';
 import { bookingHostShare, shareForSession } from '../repositories/hostingLedger.js';
 import { mediaRef } from './hosting.js';
+import * as notifications from '../repositories/notifications.js';
 
 export const router = Router();
 
@@ -305,7 +306,7 @@ async function todoItems(host, household, offers, now, s) {
       const end = endOf(x, o);
       if (end > now || now - end > 7 * 86_400_000 || !x.booked) continue;
       const { rows: [m] } = await query('select count(*)::int as n from session_attendance where session_id = $1', [x.id]);
-      if (!m.n) items.push({ kind: 'attendance', title: 'Mark attendance', line: `${o.title} · ${ymd(x.on_date)} · records no-shows`, due: new Date(end.getTime() + 2 * 86_400_000), offerId: o.id, ref: x.id });
+      if (!m.n) items.push({ kind: 'attendance', title: 'Mark attendance', line: `${o.title} · ${dayWords(ymd(x.on_date))} · records no-shows`, due: new Date(end.getTime() + 2 * 86_400_000), offerId: o.id, ref: x.id });
     }
     if (o.state === 'draft' && o.review_note && o.submitted_at) items.push({ kind: 'changes', title: 'Changes requested', line: `${o.title} · ${String(o.review_note).slice(0, 80)}`, due: null, offerId: o.id });
     else if (o.state === 'draft') {
@@ -328,7 +329,7 @@ async function todoItems(host, household, offers, now, s) {
   return items;
 }
 
-const todoPayload = (it) => ({ kind: it.kind, title: it.title, line: it.line, due: it.due ? new Date(it.due).toISOString() : null, now: Boolean(it.now), red: it.red, offerId: it.offerId ?? null, ref: it.ref ?? null });
+const todoPayload = (it) => ({ kind: it.kind, title: it.title, line: it.line, due: it.due ? new Date(it.due).toISOString() : null, asked: it.asked ? new Date(it.asked).toISOString() : null, now: Boolean(it.now), red: it.red, offerId: it.offerId ?? null, ref: it.ref ?? null });
 
 router.get('/host/desk/todo', async (_req, res, next) => {
   try {
@@ -363,9 +364,9 @@ async function atRiskEvents(offers, now, { days = 14 } = {}) {
         [first.id],
       );
       out.push({
-        offerId: o.id, sessionId: first.id, title: o.title, lane: o.lane, booked: first.booked, min, decidesOn: ymd(localDay(decides, tzOf(o))),
+        offerId: o.id, sessionId: first.id, title: o.title, lane: o.lane, booked: first.booked, min, max: first.max_count ?? o.max_count ?? null, decidesOn: ymd(localDay(decides, tzOf(o))),
         refundPence: paid.pence, bookings: paid.n, byNumbers: o.price_mode === 'by_numbers', calledOff: false,
-        line: `Under ${min} on ${localDay(decides, tzOf(o))}: called off, and the ${first.booked} booked get ${gbpWords(paid.pence)} back in full`,
+        line: `Under ${min} on ${dayWords(localDay(decides, tzOf(o)))}: called off, and the ${first.booked} booked get ${gbpWords(paid.pence)} back in full`,
       });
     }
   }
@@ -380,7 +381,8 @@ router.get('/host/desk/at-risk', async (_req, res, next) => {
     const risk = await atRiskEvents(offers, now);
     // Called off in the last 30 days, with the refunds made.
     const { rows: off } = await query(
-      `select o.id, o.title, o.lane, s.called_off_at, s.id as session_id
+      `select o.id, o.title, o.lane, s.called_off_at, s.id as session_id, coalesce(s.max_count, o.max_count) as max,
+              (select coalesce(sum(b.heads), 0) from booking_sessions bs join experience_bookings b on b.id = bs.booking_id where bs.session_id = s.id)::int as booked
          from offer_sessions s join host_offers o on o.id = s.offer_id
         where o.host_id = $1 and s.state = 'called_off' and s.called_off_at > now() - interval '30 days'
         order by s.called_off_at desc`,
@@ -399,7 +401,7 @@ router.get('/host/desk/at-risk', async (_req, res, next) => {
           order by p.created_at`,
         r.lane === 'weekly' ? [r.id, r.session_id] : [r.id],
       );
-      calledOff.push({ offerId: r.id, title: r.title, on: ymd(r.called_off_at), refunds: refunds.map((x) => ({ household: x.household, heads: x.heads, pence: x.amount_pence, state: x.state })), totalPence: refunds.reduce((n, x) => n + x.amount_pence, 0) });
+      calledOff.push({ offerId: r.id, title: r.title, on: ymd(r.called_off_at), booked: r.booked, max: r.max ?? null, refunds: refunds.map((x) => ({ household: x.household, heads: x.heads, pence: x.amount_pence, state: x.state })), totalPence: refunds.reduce((n, x) => n + x.amount_pence, 0) });
     }
     res.json({ atRisk: risk, calledOff });
   } catch (err) { next(err); }
@@ -604,6 +606,48 @@ router.post('/host/desk/events/:id/minimum', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/**
+ * Edit, once people have booked (README E8): the description yes, and guests
+ * are told; the most not below the number booked; the date only through
+ * Change date, and the price never for people already booked.
+ */
+router.post('/host/desk/events/:id/edit', async (req, res, next) => {
+  try {
+    const { offer: o, view, account } = await eventFor(req.params.id);
+    if (!view.owner) throw refuse(403, 'not_yours', 'Only the host edits this.');
+    const b = req.body ?? {};
+    const patch = {};
+    if (b.description !== undefined) {
+      const d = String(b.description ?? '').trim().slice(0, 4000);
+      if (!d) throw refuse(400, 'empty', 'The description can’t be empty.');
+      patch.description = d;
+    }
+    if (b.maxCount !== undefined) {
+      const n = Number(b.maxCount);
+      if (!Number.isInteger(n) || n < 1 || n > 100_000) throw refuse(400, 'bad_max', 'The most is a whole number.');
+      const most = Math.max(0, ...o.sessionsList.filter((x) => x.state === 'scheduled').map((x) => x.booked));
+      if (n < most) throw refuse(409, 'below_booked', `The most can’t go below the ${most} already booked.`);
+      patch.maxCount = n;
+    }
+    if (!Object.keys(patch).length) throw refuse(400, 'nothing', 'Nothing to change.');
+    await withTransaction(async (c) => {
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-publish:${o.id}`]);
+      await repo.updateOffer(o.id, patch, c);
+      await logChange({ subjectKind: 'event', subjectId: o.id, field: Object.keys(patch).join(','), before: { description: o.description, maxCount: o.max_count }, after: patch, by: account?.id ?? null, byLabel: 'host' }, c);
+    });
+    if (patch.description) {
+      const { rows } = await query(
+        `select distinct b.household_id from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
+          join offer_sessions s on s.id = bs.session_id where s.offer_id = $1 and s.state = 'scheduled' and bs.state = 'booked' and b.state in ('pending', 'confirmed')`,
+        [o.id],
+      );
+      const stamp = new Date().toISOString().slice(0, 16);
+      for (const r of rows) await notifications.notify({ householdId: r.household_id, kind: 'event_changed', title: `${o.title ?? 'Your booking'}: the host updated the details`, link: '/trips', dedupeKey: `event_changed:${o.id}:${r.household_id}:${stamp}` }).catch(() => null);
+    }
+    res.json({ saved: true });
+  } catch (err) { next(err); }
+});
+
 // ---------------------------------------------------------------------------
 // E9 · earnings
 // ---------------------------------------------------------------------------
@@ -737,6 +781,9 @@ router.get('/host/desk/fees', async (_req, res, next) => {
         where b.host_id = $1 and b.fee_reason is not null order by b.created_at desc limit 100`,
       [host.id],
     );
+    const { rows: [vis] } = await query(
+      `select count(*) filter (where visibility = 'public')::int as pub, count(*)::int as all_out from host_offers where host_id = $1 and lane is not null and state <> 'draft'`, [host.id],
+    );
     const REASON = { standard: 'Standard rate', host_link: 'Through your link', minimum: `Minimum ${s.minimum_fee == null ? '' : gbpWords(s.minimum_fee)}`.trim(), intro: 'Intro', override: 'Agreed rate', private_payment: 'Payment fee', free: 'Free' };
     res.json({
       ratePct: intro.active ? 0 : progress?.rate ?? null,
@@ -746,6 +793,7 @@ router.get('/host/desk/fees', async (_req, res, next) => {
       movesBack: movesBack(s.public_commission, progress?.rate),
       bookings: rows.map((r) => ({ title: r.title, household: r.household, reason: r.fee_reason, reasonWords: REASON[r.fee_reason] ?? r.fee_reason, ratePct: r.fee_reason === 'minimum' ? null : Number(r.fee_rate_pct), feePence: r.fee_pence, words: feeWords({ ratePct: Number(r.fee_rate_pct), reason: r.fee_reason, feePence: r.fee_pence }) })),
       link: { url: `${appUrl()}/hosts/${host.id}?via=link`, ratePct: s.host_link_rate ?? null },
+      privateOnly: vis.all_out > 0 && vis.pub === 0,
       private: { eventPence: s.private_event_fee ?? null, proPence: s.pro_monthly ?? null, paymentFeePct: s.private_payment_fee ?? null },
     });
   } catch (err) { next(err); }
@@ -792,7 +840,7 @@ router.get('/host/desk/reviews', async (_req, res, next) => {
     for (const r of rows) for (const c of r.chips ?? []) chips.set(c, (chips.get(c) ?? 0) + 1);
     res.json({
       avg, count, tips: { count: tipSum.n, pence: tipSum.pence }, stars,
-      overTime: { months: over, ratingLine: firstAvg != null && lastAvg != null && lastAvg !== firstAvg ? `${lastAvg > firstAvg ? 'Up' : 'Down'} ${Math.abs(Math.round((lastAvg - firstAvg) * 10) / 10)} since ${over.find((o) => o.avg != null).month}` : null },
+      overTime: { months: over, ratingLine: firstAvg != null && lastAvg != null && lastAvg !== firstAvg ? `${lastAvg > firstAvg ? 'Up' : 'Down'} ${Math.abs(Math.round((lastAvg - firstAvg) * 10) / 10)} since ${monthName(over.find((o) => o.avg != null).month)}` : null },
       mentions: [...chips.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([label, n]) => ({ label, count: n })),
       reviews: [
         ...rows.map((r) => ({ id: r.id, kind: 'review', who: r.who, stars: r.stars, tipPence: r.tip_pence ?? null, title: r.title, on: ymd(r.on_date ?? r.publish_on), text: r.text, reply: r.reply ?? null, reported: Boolean(r.reported_at), byProxy: r.by_proxy })),

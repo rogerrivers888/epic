@@ -844,6 +844,23 @@ test('the Host tab, and every page inside it', () => {
   assert.equal(parseRoute('/invited').name, 'unknown');
   assert.equal(paths.hostVideo('o1'), '/host/video?offer=o1');
   assert.deepEqual(roundTrip('/host/offers'), { name: 'host', page: 'manage', offerId: null });
+  // Hosting v4, existing hosts: one address per screen, and each keeps the tab bar.
+  assert.deepEqual(roundTrip('/host/messages'), { name: 'host', page: 'messages', offerId: null });
+  assert.deepEqual(roundTrip('/host/messages/auto'), { name: 'host', page: 'auto', offerId: null });
+  assert.deepEqual(roundTrip('/host/todo'), { name: 'host', page: 'todo', offerId: null });
+  assert.deepEqual(roundTrip('/host/at-risk'), { name: 'host', page: 'risk', offerId: null });
+  assert.deepEqual(roundTrip('/host/events'), { name: 'host', page: 'events', offerId: null });
+  assert.deepEqual(roundTrip('/host/events/o1'), { name: 'host', page: 'event', offerId: 'o1' });
+  for (const p of ['earnings', 'fees', 'reviews', 'insights', 'me'] as const) assert.deepEqual(roundTrip(`/host/${p}`), { name: 'host', page: p, offerId: null });
+  for (const bad of ['/host/events/o1/x', '/host/todo/x', '/host/messages/x', '/host/me/x']) assert.equal(parseRoute(bad).name, 'unknown', bad);
+  assert.equal(paths.hostEvent('o1', { session: 's1', sheet: 'dates' }), '/host/events/o1?session=s1&sheet=dates');
+  assert.equal(paths.hostEarnings({ tab: 'payouts' }), '/host/earnings?tab=payouts');
+  assert.equal(paths.hostReviews({ stars: 5 }), '/host/reviews?stars=5');
+  assert.equal(paths.hostSettings('checks'), '/host/me?tab=checks');
+  assert.equal(isImmersive(parseRoute('/host/events/o1')), false, 'the event page keeps the tab bar');
+  assert.equal(parentOf(parseRoute('/host/events/o1')), '/host/events');
+  assert.equal(parentOf(parseRoute('/host/messages/auto')), '/host/messages');
+  assert.match(titleOf(parseRoute('/host/earnings')), /Earnings/);
   assert.equal(parseRoute('/host/offers/o1/nonsense').name, 'unknown');
   for (const href of ['/host', '/host/start', '/host/offers/o1']) assert.equal(tabOf(parseRoute(href)), 'host');
   // The tab keeps the bar; the forms inside it take the phone whole, and every page draws its own head.

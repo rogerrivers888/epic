@@ -176,3 +176,14 @@ export function gbpWords(p) {
   const n = Number(p ?? 0) / 100;
   return `£${n.toLocaleString('en-GB', { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 })}`;
 }
+
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTH = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+/** "Thu 8 Oct" from 'YYYY-MM-DD', as the design writes it. */
+export function dayWords(ymd) {
+  const d = new Date(`${String(ymd).slice(0, 10)}T12:00:00Z`);
+  return `${DOW[d.getUTCDay()]} ${d.getUTCDate()} ${MON[d.getUTCMonth()]}`;
+}
+/** "September" from 'YYYY-MM'. */
+export const monthName = (ym) => MONTH[Number(String(ym).slice(5, 7)) - 1];

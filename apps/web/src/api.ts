@@ -48,6 +48,7 @@ import { copyHolder, deviceLabel, holderOf, sessionExpired, sessionToken, setCop
 import { raiseUpgradePrompt } from './upgradePrompt';
 import type { HostLane } from './routes';
 import type { HostSheet, LaneHome, LaneOffer, LanePatch } from './screens/host/v7/model';
+import type { AtRisk, DeskEarnings, DeskEvent, DeskEvents, DeskFees, DeskHome, DeskInsights, DeskProfile, DeskReviews, DeskTodo } from './screens/host/desk/model';
 
 export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000').replace(/\/$/, '');
 
@@ -2790,6 +2791,49 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, body);
     return body.media as HostMedia;
   },
+  // --- hosting v4: once it is out, and the Host tab for hosts who already host (E1–E13) ---
+  laneChangeDate: (id: string, body: { sessionId: string; toDate: string; toTime?: string | null; scope: 'this' | 'after'; preview?: boolean }) =>
+    post<{ moved: { id: string; from: { date: string; time: string | null }; to: { date: string; time: string | null }; late: boolean }[]; late: boolean; guests: number; preview: boolean }>(`/api/host/lanes/offers/${id}/change-date`, body),
+  laneCancel: (id: string, body: { sessionIds?: string[] | null; reason: 'illness' | 'weather' | 'venue' | 'numbers' | 'other'; note?: string | null }) =>
+    post<{ cancelled: number; refunds: number; late: boolean }>(`/api/host/lanes/offers/${id}/cancel`, body),
+  desk: () => request<DeskHome>('/api/host/desk'),
+  deskTodo: () => request<DeskTodo>('/api/host/desk/todo'),
+  deskAtRisk: () => request<AtRisk>('/api/host/desk/at-risk'),
+  deskEvents: () => request<DeskEvents>('/api/host/desk/events'),
+  deskEvent: (id: string, session?: string | null) => request<DeskEvent>(`/api/host/desk/events/${encodeURIComponent(id)}${qs({ session: session ?? undefined })}`),
+  deskAttendance: (id: string, sessionId: string, marks: { bookingId: string; present: boolean }[]) => post<{ saved: true; in: number; out: number }>(`/api/host/desk/events/${encodeURIComponent(id)}/attendance`, { sessionId, marks }),
+  deskWaitlist: (id: string, on: boolean) => post<{ on: boolean }>(`/api/host/desk/events/${encodeURIComponent(id)}/waitlist`, { on }),
+  deskEdit: (id: string, body: { description?: string; maxCount?: number }) => post<{ saved: true }>(`/api/host/desk/events/${encodeURIComponent(id)}/edit`, body),
+  deskLowerMinimum: (id: string, minCount: number) => post<{ minCount: number }>(`/api/host/desk/events/${encodeURIComponent(id)}/minimum`, { minCount }),
+  deskEarnings: (month?: string | null) => request<DeskEarnings>(`/api/host/desk/earnings${qs({ month: month ?? undefined })}`),
+  /** A statement as a CSV download: fetched with the session, then saved — a bare link would carry no sign-in. */
+  deskStatement: async (period: string): Promise<void> => {
+    const token = sessionToken();
+    const res = await fetch(`${API_URL}/api/host/desk/statements/${encodeURIComponent(period)}.csv`, { credentials: 'include', headers: token ? { authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => ({})));
+    const blob = await res.blob();
+    if (typeof document === 'undefined') return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `epic-statement-${period}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  },
+  deskFees: () => request<DeskFees>('/api/host/desk/fees'),
+  deskReviews: () => request<DeskReviews>('/api/host/desk/reviews'),
+  deskReply: (id: string, text: string) => post<{ replied: true }>(`/api/host/desk/reviews/${encodeURIComponent(id)}/reply`, { text }),
+  deskReport: (id: string, reason: string) => post<{ reported: true }>(`/api/host/desk/reviews/${encodeURIComponent(id)}/report`, { reason }),
+  deskInsights: () => request<DeskInsights>('/api/host/desk/insights'),
+  deskProfile: () => request<DeskProfile>('/api/host/desk/profile'),
+  deskSaveProfile: (body: { goalPence?: number | null; notifications?: Record<string, boolean> }) => patch<{ saved: true }>('/api/host/desk/profile', body),
+  deskPause: (paused: boolean) => post<{ paused: boolean }>('/api/host/desk/pause', { paused }),
+  deskStop: () => post<{ stopped: true }>('/api/host/desk/stop', {}),
+  deskAddCohost: (body: { name: string; contact: string; guests: boolean; messages: boolean; money: boolean; offerIds?: string[] }) => post<{ added: number }>('/api/host/desk/cohosts', body),
+  deskChangeCohost: (key: string, body: { guests?: boolean; messages?: boolean; money?: boolean; remove?: boolean }) => patch<{ changed: number }>(`/api/host/desk/cohosts/${encodeURIComponent(key)}`, body),
+  deskAutoMessage: (kind: string, body: { on: boolean; body?: string | null }) => put<{ saved: true }>(`/api/host/desk/auto-messages/${encodeURIComponent(kind)}`, body),
+  deskAddQuickReply: (body: string) => post<{ id: string; body: string }>('/api/host/desk/quick-replies', { body }),
+  deskDeleteQuickReply: (id: string) => del<{ deleted: true }>(`/api/host/desk/quick-replies/${encodeURIComponent(id)}`),
+  deskIncident: (body: { sessionId?: string | null; body: string; children?: string[] }) => post<{ id: string; at: string }>('/api/host/desk/incidents', body),
   // --- four ways to host (hosting v7, 2 Oct 2026) ------------------------------
   laneHome: () => request<LaneHome>('/api/host/lanes'),
   createLaneOffer: (lane: HostLane, body: LanePatch = {}) => post<{ offer: LaneOffer }>('/api/host/lanes/offers', { lane, ...body }),

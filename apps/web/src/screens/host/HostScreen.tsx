@@ -46,6 +46,18 @@ import { Setup } from './v7/Setup';
 import { Publish } from './v7/Publish';
 import { Ending } from './v7/Ending';
 import { HOST_LANES, type HostLane } from '../../routes';
+// Hosting v4, existing hosts (E1–E13): a host with a draft or an event lands on E1, not 4e.
+import { HostDesk } from './desk/Desk';
+import { DeskEventScreen } from './desk/Event';
+import { DeskTodo } from './desk/Todo';
+import { DeskAtRisk } from './desk/AtRisk';
+import { DeskEvents } from './desk/Events';
+import { DeskEarnings } from './desk/Earnings';
+import { DeskFees } from './desk/Fees';
+import { DeskInsights } from './desk/Insights';
+import { DeskMessages, DeskAutoMessages } from './desk/Messages';
+import { DeskReviews } from './desk/Reviews';
+import { DeskMe } from './desk/Me';
 
 const WIDE = 900;
 const LANE_TAG: Record<HostLane, string> = { oneoff: 'One-off', weekly: 'Weekly', course: 'Course', onrequest: 'On request' };
@@ -84,6 +96,18 @@ export function HostScreen({ route }: { route: Extract<Route, { name: 'host' }> 
 
   // Four ways to host — dispatched before anything else, and needing nothing loaded here.
   if (route.page === 'lanes') return <HostLanes />;
+  if (route.page === 'home') return <HostDesk />;
+  if (route.page === 'event' && route.offerId) return <DeskEventScreen offerId={route.offerId} />;
+  if (route.page === 'todo') return <DeskTodo />;
+  if (route.page === 'risk') return <DeskAtRisk />;
+  if (route.page === 'events') return <DeskEvents />;
+  if (route.page === 'earnings') return <DeskEarnings />;
+  if (route.page === 'fees') return <DeskFees />;
+  if (route.page === 'insights') return <DeskInsights />;
+  if (route.page === 'messages') return <DeskMessages />;
+  if (route.page === 'auto') return <DeskAutoMessages />;
+  if (route.page === 'reviews') return <DeskReviews />;
+  if (route.page === 'me') return <DeskMe />;
   if (route.page === 'lane' && route.param && (HOST_LANES as readonly string[]).includes(route.param)) return <LaneScreen lane={route.param as HostLane} />;
   if (route.page === 'compose' && route.param && (HOST_LANES as readonly string[]).includes(route.param)) return <Setup lane={route.param as HostLane} offerId={null} />;
   if (route.page === 'setup' && route.offerId) return <Setup lane={null} offerId={route.offerId} />;

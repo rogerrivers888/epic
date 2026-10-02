@@ -30,6 +30,7 @@ export const KINDS = Object.freeze({
   guest_message: { audience: 'guest', email: false },
   waitlist_offered: { audience: 'guest', email: true },
   after_event: { audience: 'guest', email: true },
+  event_changed: { audience: 'guest', email: false },
   // hosts
   new_booking: { audience: 'host', email: true },
   ask_to_book_request: { audience: 'host', email: true },
