@@ -539,3 +539,17 @@ test('a picture address from a provider is fetched only from a public address, r
   assert.equal(out, null, 'a redirect to a private host is not followed');
   assert.equal(asked, 1);
 });
+
+test('an IPv4 address dressed as IPv6, in any form, is judged as the IPv4 it is', async () => {
+  const { isPrivate } = await import('../src/sources/safeFetch.js');
+  for (const ip of ['::ffff:7f00:1', '::ffff:a9fe:a9fe', '::ffff:127.0.0.1', '0:0:0:0:0:ffff:0a00:0001', '::1', '::', 'fe80::1', 'fd12::1', '64:ff9b::7f00:1']) {
+    assert.equal(isPrivate(ip), true, ip);
+  }
+  for (const ip of ['2a00:1450:4009:81f::200e', '::ffff:5db8:d822', '93.184.216.34']) assert.equal(isPrivate(ip), false, ip);
+});
+
+test('robots.txt is fetched through the address guard: a private host is never asked', async () => {
+  const { safeRobots } = await import('../src/sources/politeness.js');
+  assert.equal(await safeRobots('http://127.0.0.1:4000/robots.txt'), null);
+  assert.equal(await safeRobots('http://[::1]/robots.txt'), null);
+});

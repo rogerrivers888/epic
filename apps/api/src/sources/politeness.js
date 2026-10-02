@@ -40,7 +40,41 @@ const robots = new Map();   // host -> { rules, delayMs, at }
 const lastFetch = new Map(); // host -> timestamp
 
 /** Forget everything, for the tests. */
-export const forget = () => { robots.clear(); lastFetch.clear(); };
+/**
+ * How robots.txt is fetched. The host is somebody else's word — a venue's
+ * website from a provider or the open map — so it is fetched like any page from
+ * such an address: a public address only, resolved once and pinned, every
+ * redirect re-checked, the body capped as it arrives (sources/safeFetch.js;
+ * Codex, 2 Oct 2026). Returns `{ status, body }`, or null when there is no
+ * public address to ask.
+ */
+export async function safeRobots(url) {
+  const { publicAddress, requestPinned } = await import('./safeFetch.js');
+  let at = await publicAddress(url);
+  for (let hop = 0; at && hop < 5; hop += 1) {
+    const res = await requestPinned(at, { accept: 'text/plain', maxBytes: 500_000 });
+    if (res.status >= 300 && res.status < 400 && res.location) {
+      let next;
+      try { next = new URL(res.location, at.url).toString(); } catch { return null; }
+      at = await publicAddress(next);
+      continue;
+    }
+    return { status: res.status, body: res.body };
+  }
+  return null;
+}
+
+/** The same through the global `fetch`, unguarded — for tests that stand in for the network with a stub. */
+export async function fetchTransport(url) {
+  const res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(ROBOTS_TIMEOUT_MS), headers: { 'user-agent': UA, accept: 'text/plain' } });
+  return { status: res.status, body: res.ok ? await res.text() : '' };
+}
+
+let robotsTransport = safeRobots;
+/** Tests only: fetch robots.txt another way until `forget()`. */
+export const useRobotsTransport = (fn) => { robotsTransport = fn; };
+
+export const forget = () => { robots.clear(); lastFetch.clear(); robotsTransport = safeRobots; };
 
 /**
  * A site that does not answer is a site that has not said no.
@@ -56,13 +90,9 @@ async function robotsFor(host, scheme = 'https') {
   if (held && Date.now() - held.at < ROBOTS_TTL_MS) return held;
   let parsed = { rules: [], delayMs: DEFAULT_DELAY_MS, at: Date.now() };
   try {
-    const res = await fetch(`${scheme}://${host}/robots.txt`, {
-      redirect: 'follow',
-      signal: AbortSignal.timeout(ROBOTS_TIMEOUT_MS),
-      headers: { 'user-agent': UA, accept: 'text/plain' },
-    });
-    if (res.status === 401 || res.status === 403) parsed = { rules: [{ allow: false, path: '/' }], delayMs: DEFAULT_DELAY_MS, at: Date.now() };
-    else if (res.ok) parsed = { ...parse(await res.text()), at: Date.now() };
+    const res = await robotsTransport(`${scheme}://${host}/robots.txt`);
+    if (res && (res.status === 401 || res.status === 403)) parsed = { rules: [{ allow: false, path: '/' }], delayMs: DEFAULT_DELAY_MS, at: Date.now() };
+    else if (res && res.status >= 200 && res.status < 300) parsed = { ...parse(res.body), at: Date.now() };
   } catch { /* no answer is not a refusal */ }
   robots.set(host, parsed);
   return parsed;

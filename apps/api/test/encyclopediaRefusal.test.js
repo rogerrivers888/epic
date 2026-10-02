@@ -100,6 +100,8 @@ test('a venue page that redirects to a host whose robots.txt refuses us is never
   const { siteFacts } = await import('../src/sources/site.js');
   const polite = await import('../src/sources/politeness.js');
   polite.forget();
+  // The network is a stub here, so robots.txt is read through it.
+  polite.useRobotsTransport(polite.fetchTransport);
   const real = globalThis.fetch;
   const asked = [];
   t.after(() => { globalThis.fetch = real; polite.forget(); });
