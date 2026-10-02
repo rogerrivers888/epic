@@ -183,6 +183,8 @@ export async function siteGate(req, res, next) {
   // (POSTMARK_WEBHOOK_TOKEN) and checks it in its handler; it must reach that
   // handler, not be measured against the gate password (routes/postmark.js).
   if (req.method === 'POST' && path === '/api/postmark/events') return next();
+  // Stripe's events (routes/hostLanes.js) are admitted by their own signature, as Postmark's are by its token.
+  if (req.method === 'POST' && path === '/api/stripe/webhook') return next();
   // The sign-in door stays open (guarded by the passcode/link + signInGuard.js) —
   // but only the GET status check and the POST sign-in verbs. DELETE /api/session
   // (sign out, and `?all=1` signs every device out) must pass through the gate's

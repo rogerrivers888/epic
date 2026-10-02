@@ -366,6 +366,8 @@ test('health, the Postmark webhook, and a CORS preflight answer without a creden
 
     const postmark = await run(mockReq({ path: '/api/postmark/events', method: 'POST' }));
     assert.equal(postmark.nexted, true, 'the webhook reaches its own token check');
+    const stripe = await run(mockReq({ path: '/api/stripe/webhook', method: 'POST' }));
+    assert.equal(stripe.nexted, true, 'Stripe reaches its own signature check');
 
     const preflight = await run(mockReq({ method: 'OPTIONS' }));
     assert.equal(preflight.nexted, true, 'a preflight is let through');

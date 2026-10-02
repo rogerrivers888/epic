@@ -283,3 +283,10 @@ test('the collections a household sees are kept, cut to the fields that are ours
   assert.equal(kept.inspire[0].rating, undefined);
   assert.deepEqual(kept.inspire[0].shelf[0], { ref: 'google:x', name: 'Pool', kind: 'Pools', image: { id: 'i1' } });
 });
+
+test('a hosting draft is kept offline without its roster or its invite link', () => {
+  const kept = storable('/api/host/lanes/offers/o1', { offer: { id: 'o1', title: 'Party', invites: [{ name: 'Carol', contact: '07700900412' }], inviteUrl: 'https://epic.day/i/secret' } }) as any;
+  assert.equal(kept.offer.title, 'Party');
+  assert.deepEqual(kept.offer.invites, []);
+  assert.equal(kept.offer.inviteUrl, '');
+});
