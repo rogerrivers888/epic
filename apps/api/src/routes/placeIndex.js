@@ -60,6 +60,7 @@ import { enrich } from '../sources/own.js';
 import { crowdBand, countBand } from '../domain/scoring.js';
 import { pictureFor } from '../sources/placePicture.js';
 import * as dayOut from '../sources/dayOutTest.js';
+import { googleTypesCheck } from '../repositories/googleTypesCheck.js';
 
 /** Who did it, said the same way every other back-office route says it. */
 const actor = (req) => ({ actorId: req.account?.id ?? null, actorLabel: req.account?.email ?? 'the owner (passcode)' });
@@ -1021,6 +1022,16 @@ router.get('/verdicts', requires('view_library'), async (_req, res, next) => {
       `select key, question, verdict, evidence, scope, method, revisit_when, decided_on, decided_by
          from data_verdicts order by decided_on desc, key`);
     res.json({ verdicts: rows });
+  } catch (err) { next(err); }
+});
+
+/**
+ * Item 6's after-check: one fixed read, no parameters, counts only
+ * (repositories/googleTypesCheck.js). Read-only, so an agent session may ask.
+ */
+router.get('/google-types-check', requires('view_library'), async (_req, res, next) => {
+  try {
+    res.json({ rows: await googleTypesCheck() });
   } catch (err) { next(err); }
 });
 
