@@ -896,6 +896,12 @@ test('a set shared with a drawer that ignored the word is not asked, and says so
   assert.equal((await query("select count(*)::int n from questions where attribute_key = $1 and set_key = 'c30-si-set'", [res.attributeKey])).rows[0].n, 0, 'no question on the shared set');
   assert.deepEqual(res.waiting, [subC], 'C is owed it');
 
+  // B, held back by the shared set, is still owed it: moved to a set of its own, it is asked.
+  assert.equal((await query('select count(*)::int n from feature_pending_asks where attribute_key = $1 and subcategory_key = $2', [res.attributeKey, subB])).rows[0].n, 1, 'B is still owed it');
+  await query("insert into question_sets (key, name) values ('c30-si-own-b', 'C30 si own B') on conflict do nothing");
+  await sets.attach('c30-si-own-b', subB);
+  assert.equal((await query("select count(*)::int n from questions where attribute_key = $1 and set_key = 'c30-si-own-b' and active", [res.attributeKey])).rows[0].n, 1, 'and asked once B is on a set nobody vetoes');
+
   // Attaching C to the same shared set does not ask it over A's ignore; C stays owed.
   await sets.attach('c30-si-set', subC);
   assert.equal((await query("select count(*)::int n from questions where attribute_key = $1 and set_key = 'c30-si-set'", [res.attributeKey])).rows[0].n, 0, 'still not asked on the shared set');
@@ -1052,6 +1058,32 @@ test('a drawer that ignored another wording of the fact still holds back its sha
   assert.equal(res.attributeKey, 'mud-room');
   assert.deepEqual(res.blocked, [{ setKey: 'c30-ai-set', ignoredIn: [subA] }], 'the shared set is held back for the other wording');
   assert.equal((await query("select count(*)::int n from questions where attribute_key = 'mud-room' and set_key = 'c30-ai-set'")).rows[0].n, 0, 'no question over the ignore');
+});
+
+test('restoring an older per-drawer ignore leaves a later word-level Ignore standing', async () => {
+  // Codex, 2 Oct 2026: restore lifts only the tombstone its own ignore wrote.
+  const subA = 'c30-tomb-scope-a'; const subB = 'c30-tomb-scope-b';
+  const a = 'google:ChIJ_c30_ts_a'; const b = 'google:ChIJ_c30_ts_b';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 ts A', 'c30-test-cat') on conflict do nothing", [subA]);
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 ts B', 'c30-test-cat') on conflict do nothing", [subB]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [a, subA]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [b, subB]);
+  await query('delete from harvest_candidates where subcategory = any($1)', [[subA, subB]]);
+  await query('delete from review_sightings where venue_ref = any($1)', [[a, b]]);
+  await query("delete from feature_tombstones where norm = 'trophy room'");
+
+  await spotFromDetail({ venueRef: a, detail: { reviewSummary: 'A trophy room.' } });
+  const { rows: [candA] } = await query("select id from harvest_candidates where norm = 'trophy room' and subcategory = $1", [subA]);
+  await sets.ignoreCandidate(candA.id, { actor: 'tester' });               // an older, per-drawer ignore
+  await spotFromDetail({ venueRef: b, detail: { reviewSummary: 'A trophy room.' } });
+  await sets.ignoreFeature('trophy room', { actor: 'tester' });            // the later word-level Ignore
+  const { rows: [candB] } = await query("select id from harvest_candidates where norm = 'trophy room' and subcategory = $1", [subB]);
+
+  await sets.unignore(candA.id);
+  assert.equal((await query("select count(*)::int n from feature_tombstones where norm = 'trophy room'")).rows[0].n, 1, 'the word-level Ignore stands');
+  await sets.unignore(candB.id);
+  assert.equal((await query("select count(*)::int n from feature_tombstones where norm = 'trophy room'")).rows[0].n, 0, 'restoring a candidate that Ignore closed lifts it');
 });
 
 test.after(async () => { await pool.end(); });

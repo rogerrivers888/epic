@@ -941,6 +941,10 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
     const { rows: [globalQ] } = await client.query("select id, active from questions where attribute_key = $1 and scope = 'global' limit 1", [key]);
     const waiting = [];
     const blocked = [];
+    // Drawers that wanted the fact but sit on a set another drawer's ignore holds
+    // back: still owed it, so moving them to another set asks it (Codex, 2 Oct 2026).
+    const heldBack = [];
+    const heldSets = new Set();
     const { rows: aliasRows2 } = await client.query('select norm from attribute_aliases where target_key = $1', [key]);
     const wordings = [...new Set([norm, ...aliasRows2.map((r) => r.norm)])];
     if (globalQ) {
@@ -954,6 +958,8 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
         // the drawer is remembered, so attaching a set to it asks it (owner, 2 Oct
         // 2026: "create the fact anyway and start asking once a set is attached").
         if (!set?.set_key) { waiting.push(sub); continue; }
+        // A drawer on a set already held back is owed the question too (below).
+        if (heldSets.has(set.set_key)) { heldBack.push(sub); continue; }
         // A set shared across several of these drawers is asked once, not per drawer.
         if (seenSets.has(set.set_key)) continue;
         seenSets.add(set.set_key);
@@ -964,7 +970,12 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
         // Every wording of the fact, not just this spelling: a drawer that ignored
         // another alias of it has refused the same fact (Codex, 2 Oct 2026).
         const vetoes = await setIgnores(client, set.set_key, wordings);
-        if (vetoes.length) { blocked.push({ setKey: set.set_key, ignoredIn: vetoes }); continue; }
+        if (vetoes.length) {
+          blocked.push({ setKey: set.set_key, ignoredIn: vetoes });
+          heldSets.add(set.set_key);
+          heldBack.push(sub);
+          continue;
+        }
         const { rows: [existing] } = await client.query(
           "select id, active from questions where attribute_key = $1 and scope = 'set' and set_key = $2 limit 1", [key, set.set_key]);
         if (existing) {
@@ -976,7 +987,7 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
           if (q) asked += 1;
         } catch { /* a global was added in a race — the fact stands */ }
       }
-      for (const sub of waiting) {
+      for (const sub of [...waiting, ...heldBack]) {
         await client.query(
           'insert into feature_pending_asks (attribute_key, subcategory_key) values ($1, $2) on conflict do nothing',
           [key, sub]);
@@ -1207,8 +1218,10 @@ export async function globalFromCandidate(id, { label = null, kind = 'yesno', re
 /** Put an ignored word back in the queue — the way back the design brief asks for. */
 export async function unignore(id) {
   return withTransaction(async (client) => {
-    // Exclusive against harvests, like ignoreFeature: the tombstone changes here.
-    await client.query('select pg_advisory_xact_lock(hashtext($1)::bigint)', ['feature-tombstones']);
+    // The word's locks, like every decision on a word: the tombstone may change here.
+    await lockWordOf(client, id);
+    // As text: a JS Date keeps milliseconds, the column keeps microseconds.
+    const { rows: [before] } = await client.query('select norm, decided_at::text as decided_at from harvest_candidates where id = $1', [id]);
     const { rows } = await client.query(
       // Back to the queue only if it belongs there (C21): an ignored word that
       // was never quoted comes back to the pen, not to the promotable list.
@@ -1220,7 +1233,13 @@ export async function unignore(id) {
     // Restoring is the way back from an ignore, including the review queue's
     // norm-level one: a tombstone left in place would report the word restored
     // while every later harvest and spot quietly discarded it (Codex, 2 Oct 2026).
-    if (rows[0]) await client.query('delete from feature_tombstones where norm = $1', [rows[0].norm]);
+    // But only the tombstone this candidate's own ignore wrote: ignoreFeature closes
+    // the candidates and writes the tombstone in one transaction, so they share its
+    // now(). Restoring an older per-drawer ignore leaves a later, separate
+    // review-queue Ignore of the word standing (Codex, 2 Oct 2026).
+    if (rows[0] && before?.decided_at) {
+      await client.query('delete from feature_tombstones where norm = $1 and decided_at = $2::timestamptz', [before.norm, before.decided_at]);
+    }
     return rows[0] ?? null;
   });
 }
