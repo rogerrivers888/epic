@@ -26,7 +26,9 @@ type Person = Pick<Member, 'id' | 'age' | 'isMinor' | 'access'>;
 
 /** Whether this person is the household's owner (the lead who pays). */
 export function isHouseholdOwner(data: Who, member: Person): boolean {
-  if (data.me != null && member.id === data.me && data.meIsLead) return true;
+  // On your own page the session's answer decides, yes or no; the linked account
+  // is only the fallback for an older response that does not carry it (Codex).
+  if (data.me != null && member.id === data.me && typeof data.meIsLead === 'boolean') return data.meIsLead;
   return Boolean(member.access?.isLead);
 }
 

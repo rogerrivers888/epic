@@ -34,3 +34,10 @@ test("the owner is still read from the person's own access record when somebody 
   assert.equal(isHouseholdOwner({ me: 'm-maya', meIsLead: false }, lead), true);
   assert.equal(isHouseholdOwner({ me: null, meIsLead: true }, maya), false);
 });
+
+test("on your own page the session's 'not the owner' wins over a linked lead account (Codex)", () => {
+  const linkedLead = { ...maya, access: { status: 'active', isLead: true } as any };
+  assert.equal(isHouseholdOwner({ me: 'm-maya', meIsLead: false }, linkedLead), false);
+  // An older response without meIsLead still falls back to the linked account.
+  assert.equal(isHouseholdOwner({ me: 'm-maya' } as any, linkedLead), true);
+});
