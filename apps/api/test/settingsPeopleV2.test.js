@@ -541,3 +541,68 @@ test('"Getting there" reaches the planner: the single mode it reads follows the 
     assert.equal(row.travel_mode, 'driving', 'with a car ticked, the car reaches furthest');
   } finally { await srv.close(); }
 });
+
+test("the shared passcode's device list is its own devices, never every customer's", async () => {
+  const { household: h, member: roger } = await aHousehold(query);
+  const other = await aHousehold(query);
+  const acct = await createAccountOnHousehold(other.household.id, { memberId: other.member.id, name: 'Else', role: 'customer', plan: 'household', email: 'else-list@example.com' });
+  const { rows: seeded } = await query(
+    `insert into api_sessions (token_hash, label, account_id, kind) values
+       ('pl-d1','Hall tablet',null,'device'),('pl-x1','Somebody else''s phone',$1,'device')
+     returning id, label`, [acct.id]);
+  const srv = await server(owner(h, roger.id), { id: seeded[0].id, account_id: null });
+  try {
+    const labels = (await srv.get('/api/sessions')).body.sessions.map((s) => s.label);
+    assert.ok(labels.includes('Hall tablet'), 'the passcode sees its own device');
+    assert.ok(!labels.includes("Somebody else's phone"), "and never another account's");
+  } finally { await srv.close(); }
+});
+
+test('"No birthday" and an erased mobile really clear, with the empty string', async () => {
+  const { household: h, member: roger } = await aHousehold(query);
+  const kid = await addMember(h.id, 'Kit', { minor: true, birthDate: '2016-04-01' });
+  await query("update members set mobile = '+447700900123' where id = $1", [roger.id]);
+  const srv = await server(owner(h, roger.id));
+  try {
+    assert.equal((await srv.send('PATCH', `/api/household/members/${kid.id}`, { birthDate: '' })).status, 200);
+    assert.equal((await srv.send('PATCH', `/api/household/members/${roger.id}`, { mobile: '' })).status, 200);
+    const { rows: [k] } = await query('select birth_date, birth_year, is_minor from members where id = $1', [kid.id]);
+    assert.equal(k.birth_date, null, 'the birthday is gone');
+    assert.equal(k.birth_year, null, 'and the year it implied with it');
+    assert.equal(k.is_minor, true, 'a child with no birthday stays a child');
+    const { rows: [r] } = await query('select mobile from members where id = $1', [roger.id]);
+    assert.equal(r.mobile, null, 'the number is gone');
+    // null is still "keep".
+    await srv.send('PATCH', `/api/household/members/${kid.id}`, { birthDate: '2015-02-02' });
+    await srv.send('PATCH', `/api/household/members/${kid.id}`, { birthDate: null, name: 'Kit' });
+    const { rows: [k2] } = await query('select birth_date::text from members where id = $1', [kid.id]);
+    assert.equal(k2.birth_date, '2015-02-02');
+  } finally { await srv.close(); }
+});
+
+test("a day outing with no mode said travels the household's own way", async () => {
+  const { household: h, member } = await aHousehold(query);
+  await query("update households set travel_mode = 'cycling' where id = $1", [h.id]);
+  const { rows: [household] } = await query('select * from households where id = $1', [h.id]);
+  const out = await createTripFromIntent({
+    household, members: [{ ...member, isMinor: false }], intent: { date: '2099-07-01', attending: [] },
+    origin: { label: 'Home', lat: 51.5, lng: -0.1 },
+    destination: { label: 'Kew', lat: 51.48, lng: -0.29, countryCode: 'GB', locality: 'Kew' },
+    anchorPlace: null, title: 'Kew · bike',
+  });
+  const { rows: [t] } = await query('select travel_mode from trips where id = $1', [out.id ?? out.trip?.id]);
+  assert.equal(t.travel_mode, 'cycling', 'not the old transit default');
+});
+
+test('a day outing that names its mode is created, not thrown (a stray travelMode() call on main)', async () => {
+  const { household: h, member } = await aHousehold(query);
+  const { rows: [household] } = await query('select * from households where id = $1', [h.id]);
+  const out = await createTripFromIntent({
+    household, members: [{ ...member, isMinor: false }], intent: { date: '2099-07-02', attending: [], travel_mode: 'walking' },
+    origin: { label: 'Home', lat: 51.5, lng: -0.1 },
+    destination: { label: 'Kew', lat: 51.48, lng: -0.29, countryCode: 'GB', locality: 'Kew' },
+    anchorPlace: null, title: 'Kew · walk',
+  });
+  const { rows: [t] } = await query('select travel_mode from trips where id = $1', [out.id ?? out.trip?.id]);
+  assert.equal(t.travel_mode, 'walking');
+});

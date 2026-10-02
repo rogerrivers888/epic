@@ -485,7 +485,9 @@ export async function createTripFromIntent({ household, members, intent, origin,
     returnAt = new Date(depart.getTime() + duration * 60_000);
   }
   const wc = (d) => wallClock(d, tz).hhmm;
-  const mode = isTravelMode(intent.travel_mode) ? travelMode(intent.travel_mode) : 'transit';
+  // Unsaid, the household's own "Getting there" decides (Codex, 2 Oct 2026).
+  const said = isTravelMode(intent.travel_mode) ? intent.travel_mode : isTravelMode(household.travel_mode) ? household.travel_mode : null;
+  const mode = said ? asTravelMode(said) : 'transit';
   const intensity = intent.intensity && INTENSITY_TARGETS[intent.intensity] ? intent.intensity : household.default_intensity;
   // Where the day happens: the anchor's venue, else the destination, else the origin.
   const base = anchorPlace ?? destination ?? origin;
@@ -540,7 +542,8 @@ async function createStayFromIntent({ household, members, intent, destination })
     intent.wants?.length ? `Wants: ${intent.wants.join(', ')}` : null,
     intent.avoids?.length ? `Avoid: ${intent.avoids.join(', ')}` : null,
   ].filter(Boolean).join('\n') || null;
-  const travelMode = isTravelMode(intent.travel_mode) ? asTravelMode(intent.travel_mode) : 'driving';
+  const said = isTravelMode(intent.travel_mode) ? intent.travel_mode : isTravelMode(household.travel_mode) ? household.travel_mode : null;
+  const travelMode = said ? asTravelMode(said) : 'driving';
   const intensity = intent.intensity && INTENSITY_TARGETS[intent.intensity] ? intent.intensity : household.default_intensity;
   const base = { label: `${city} (centre)`, lat: destination.lat, lng: destination.lng };
   const attendingNames = new Set((intent.attending || []).map((n) => n.toLowerCase()));
@@ -1870,7 +1873,9 @@ router.post('/inspire/trip', async (req, res, next) => {
     const date = now.hhmm < '11:00' ? now.dateStr : addDays(now.dateStr, 1);
     const city = idea.place.locality || String(idea.place.label).split(',')[0].trim();
     const title = new RegExp(`^${city.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(idea.title) ? idea.title : `${city} · ${idea.title}`;
-    const intent = { date, duration_minutes: 600, travel_mode: 'driving', intensity: null, anchor: null, depart_time: null, attending: attending.map((m) => m.name), wants: idea.do || [] };
+    // The household's own day window and travel mode, not a fixed ten hours by
+    // car (Codex, 2 Oct 2026).
+    const intent = { date, duration_minutes: null, travel_mode: household.travel_mode ?? null, intensity: null, anchor: null, depart_time: null, attending: attending.map((m) => m.name), wants: idea.do || [] };
     const { trip } = await createTripFromIntent({ household, members, intent, origin: home, destination: idea.place, anchorPlace: null, title });
     const seeded = await seedShortlistFromIdea({ household, session, trip, idea });
     idea.tripId = trip.id;

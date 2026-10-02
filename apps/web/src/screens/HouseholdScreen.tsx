@@ -529,8 +529,10 @@ function EditSheet({ data, member, refresh, canEdit, onClose }: { data: Househol
       await api.updateMember(member.id, {
         name: name.trim() || undefined,
         relationship: isYou ? undefined : (rel || null),
-        birthDate: birth,
-        mobile: thirteenPlus ? (mobile.trim() || null) : null,
+        // '' is the clear sentinel the server honours; null means "keep", so
+        // "No birthday" and an erased number used to change nothing (Codex, 2 Oct 2026).
+        birthDate: birth ?? (member.birthDate ? '' : undefined),
+        mobile: thirteenPlus ? mobile.trim() : undefined,
       });
       if (login && thirteenPlus && member.access?.status === 'none' && mobile.trim()) {
         await api.inviteMember(member.id, { mobile: mobile.trim(), channels: ['sms'] }).catch(() => null);

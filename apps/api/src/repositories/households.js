@@ -236,20 +236,20 @@ export async function updateMember(id, m, householdId) {
     `update members
         set name                  = coalesce($2, name),
             relationship          = coalesce($3, relationship),
-            birth_year            = coalesce($4, birth_year),
+            birth_year            = (case when $8::text = '' then $4 else coalesce($4, birth_year) end),
             avatar_url            = case when $5::text = '' then null else coalesce($5, avatar_url) end,
             typical_visit_minutes = coalesce($6, typical_visit_minutes),
             max_travel_minutes    = coalesce($7, max_travel_minutes),
-            birth_date            = coalesce($8::date, birth_date),
+            birth_date            = (case when $8::text = '' then null else coalesce(nullif($8::text, '')::date, birth_date) end),
             -- How to reach them, so they can be invited (migration 056). '' is
             -- how the Household tab takes a contact detail back off somebody,
             -- the way it already takes a face off them.
             email                 = case when $9::text = '' then null else coalesce($9, email) end,
             mobile                = case when $10::text = '' then null else coalesce($10, mobile) end,
-            is_minor              = case when coalesce($8::date, birth_date) is not null
-                                         then age(coalesce($8::date, birth_date)) < interval '13 years'
-                                         when coalesce($4, birth_year) is not null
-                                         then (extract(year from now())::int - coalesce($4, birth_year)) < 13
+            is_minor              = case when (case when $8::text = '' then null else coalesce(nullif($8::text, '')::date, birth_date) end) is not null
+                                         then age((case when $8::text = '' then null else coalesce(nullif($8::text, '')::date, birth_date) end)) < interval '13 years'
+                                         when (case when $8::text = '' then $4 else coalesce($4, birth_year) end) is not null
+                                         then (extract(year from now())::int - (case when $8::text = '' then $4 else coalesce($4, birth_year) end)) < 13
                                          else is_minor end,
             -- The person's own tastes, carried on the person now (Settings
             -- revised v2): one main diet, the two faith flags, the access

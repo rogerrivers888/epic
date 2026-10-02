@@ -300,7 +300,7 @@ devices.get('/sessions', async (req, res, next) => {
     // Only this account's real devices (SX6). Test and agent sessions are
     // filtered out on the server, and another household member's phones never
     // appear — the account scope already sees to that.
-    const rows = await liveSessions(req.session?.account_id ?? null, { kinds: ['device'] });
+    const rows = await liveSessions(req.session?.account_id ?? null, { kinds: ['device'], ownOnly: true });
     res.json({
       sessions: rows.map((s) => ({ id: s.id, label: s.label, since: s.created_at, lastSeen: s.last_seen_at, until: s.expires_at, current: s.id === req.session?.id })),
     });

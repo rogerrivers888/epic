@@ -484,7 +484,8 @@ router.post('/tastes/trip', async (req, res, next) => {
     const destination = { label: place.name, lat: place.lat, lng: place.lng, locality, how: 'place' };
     const title = `${locality ? `${locality} · ` : ''}${table.label} at ${place.name}`;
     const wants = (Array.isArray(around) ? around : []).map((a) => String(a)).slice(0, 4);
-    const intent = { date, duration_minutes: 480, travel_mode: 'driving', intensity: null, anchor: null, depart_time: null, attending: attending.map((m) => m.name), wants };
+    // The household's own day window and travel mode (Codex, 2 Oct 2026).
+    const intent = { date, duration_minutes: null, travel_mode: household.travel_mode ?? null, intensity: null, anchor: null, depart_time: null, attending: attending.map((m) => m.name), wants };
     const { trip } = await createTripFromIntent({ household, members, intent, origin: home, destination, anchorPlace: null, title });
 
     // What the family was shown around it goes on by name, exactly as Inspire

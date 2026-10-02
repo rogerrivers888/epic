@@ -370,11 +370,15 @@ function ProfileTab({ home, navigate, open, goTab, onReset }: { home: HostHome; 
   );
 }
 
-/** Mirrors the server's outstandingFrom: places still held on dates still to come. */
+/**
+ * Mirrors the server's outstandingFrom: places still held on dates still to
+ * come. A waitlisted request holds no place, so it never blocks — the server
+ * calls the waitlist off and tells them on the way out (Codex, 2 Oct 2026).
+ */
 function computeOutstanding(home: HostHome): Outstanding {
   const today = todayIso();
   const held = home.offers.flatMap((o) => o.bookings
-    .filter((b) => ['pending', 'confirmed', 'waitlisted'].includes(b.state))
+    .filter((b) => ['pending', 'confirmed'].includes(b.state))
     .map((b) => ({ o, b, on: dateOf(o, b.occurrence) }))
     .filter((x) => !x.on || x.on >= today));
   const dates = new Set(held.map((x) => `${x.o.id}|${x.b.occurrence ?? ''}`));

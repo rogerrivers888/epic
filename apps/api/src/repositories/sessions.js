@@ -153,18 +153,23 @@ export async function revokeOtherSessions(accountId, exceptId) {
  * nothing keeps the old behaviour — every device — which is what the shared
  * passcode (the owner, no account row) still wants.
  */
-export async function liveSessions(accountId = null, { kinds = null } = {}) {
+export async function liveSessions(accountId = null, { kinds = null, ownOnly = false } = {}) {
   // "Signed-in devices" (SX6) passes kinds:['device'] so test and agent
   // sessions never leak to a household; the back office passes nothing and
   // sees them all. The filter is the server's job, not the UI's.
+  // `ownOnly` is a person's own list: a null account then means the shared
+  // passcode's own no-account devices — the scope the revoke buttons use —
+  // never "no filter", which showed the passcode every customer's devices
+  // (Codex, 2 Oct 2026).
   const { rows } = await query(
     `select id, label, account_id, kind, created_at, last_seen_at, expires_at
        from api_sessions
       where revoked_at is null and expires_at > now()
-        and ($1::uuid is null or account_id = $1)
+        and (case when $3::boolean then account_id is not distinct from $1::uuid
+                  else ($1::uuid is null or account_id = $1) end)
         and ($2::text[] is null or kind = any($2))
       order by last_seen_at desc`,
-    [accountId, kinds],
+    [accountId, kinds, ownOnly],
   );
   return rows;
 }
