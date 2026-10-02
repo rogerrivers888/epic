@@ -242,14 +242,14 @@ router.post('/host/lanes/offers', async (req, res, next) => {
     const lane = oneOf(LANES, req.body?.lane);
     if (!lane) throw refuse(400, 'lane_required', 'Pick one of the four: one-off, weekly, course or on request.');
     // Everything is checked before the row exists, so a refused first save leaves no empty draft behind (Codex, 2 Oct 2026).
-    const blank = { lane, state: 'draft', visibility: 'invite', money: 'free', price_mode: 'free', age_min: 18, venue: 'out_about', venue_ref: null };
+    const blank = { lane, state: 'draft', visibility: 'invite', money: 'free', price_mode: 'free', age_min: hostingConfig().adultAge, venue: 'out_about', venue_ref: null };
     const patch = laneBody(req.body ?? {}, blank);
     const derived = Object.keys(patch).length ? derive(patch, blank) : {};
     // The photo picked on step 1 travels with the first save.
     const photoIds = req.body?.photoIds !== undefined ? await ownMediaList(household.id, req.body.photoIds, 'photo', 8) : null;
     const cohosts = req.body?.cohosts !== undefined ? await ownCohosts(household.id, req.body.cohosts) : null;
     const host = await ensureHost(household, account);
-    let offer = await repo.insertOffer(host.id, SHAPE_OF[lane], { lane, state: 'draft', visibility: 'invite', money: 'free', priceMode: 'free', ageMin: 18, ...(lane === 'course' ? { joinMode: 'whole' } : {}) });
+    let offer = await repo.insertOffer(host.id, SHAPE_OF[lane], { lane, state: 'draft', visibility: 'invite', money: 'free', priceMode: 'free', ageMin: hostingConfig().adultAge, ...(lane === 'course' ? { joinMode: 'whole' } : {}) });
     if (Object.keys(derived).length || photoIds) offer = await repo.updateOffer(offer.id, { ...derived, ...(photoIds ? { photoIds } : {}) });
     if (cohosts) await repo.setCohosts(offer.id, cohosts);
     res.status(201).json({ offer: await lanePayload(offer, host, account) });
@@ -590,7 +590,7 @@ async function applyFound({ household, account, lane, offerId, step, patch, foun
   let offer = offerId ? await repo.offerOfHost(offerId, host.id) : null;
   if (offerId && (!offer || offer.lane !== lane)) throw refuse(404, 'offer_not_found', 'That is not one of your offers.');
   if (offer && offer.state !== 'draft') throw refuse(409, 'already_sent', 'This one is out already.');
-  if (!offer) offer = await repo.insertOffer(host.id, SHAPE_OF[lane], { lane, state: 'draft', visibility: 'invite', money: 'free', priceMode: 'free', ageMin: 18, ...(lane === 'course' ? { joinMode: 'whole' } : {}) });
+  if (!offer) offer = await repo.insertOffer(host.id, SHAPE_OF[lane], { lane, state: 'draft', visibility: 'invite', money: 'free', priceMode: 'free', ageMin: hostingConfig().adultAge, ...(lane === 'course' ? { joinMode: 'whole' } : {}) });
   const current = await lanePayload(offer, host, account);
   const keep = {};
   for (const [k, v] of Object.entries(patch)) {
@@ -598,7 +598,7 @@ async function applyFound({ household, account, lane, offerId, step, patch, foun
     const now = k === 'line' ? current.line : current[k];
     const empty = now == null || now === '' || (Array.isArray(now) && !now.length) || (typeof now === 'object' && !Array.isArray(now) && !Object.keys(now).length) || (k === 'priceMode' && now === 'free') || (k === 'venue' && !current.venueLabel && !current.venueArea && !current.onlineMode)
       // Adults is where a draft starts, not an answer: a said or read age range replaces it.
-      || ((k === 'ageMin' || k === 'ageMax') && current.ageMin === 18 && current.ageMax == null && !offer.who_chosen);
+      || ((k === 'ageMin' || k === 'ageMax') && current.ageMin === hostingConfig().adultAge && current.ageMax == null && !offer.who_chosen);
     if (step || empty) keep[k] = v;
   }
   if (keep.line) keep.lineSuggested = false;

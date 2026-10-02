@@ -551,3 +551,24 @@ test('a Checkout paid before Epic wrote it down is still recorded by the webhook
     assert.equal((await query("select state from hosting_payments where stripe_ref = 'cs_race_1'")).rows[0].state, 'succeeded');
   } finally { await srv.close(); }
 });
+
+test('the older offer routes refuse a lane offer: it is sent only through its own checklist', async () => {
+  const { household: h, member } = await aHousehold(query);
+  const account = await anAccount(h, member);
+  const srv = await server(account);
+  const legacy = (await import('../src/routes/hosting.js')).default;
+  const app = express(); app.use(express.json());
+  app.use((req, _res, next) => { req.session = null; runAsAccount(account, next); });
+  app.use('/api', legacy);
+  // eslint-disable-next-line no-unused-vars
+  app.use((err, _req, res, _next) => res.status(err.status ?? 500).json({ error: err.code ?? 'x' }));
+  const s = app.listen(0, '127.0.0.1'); await new Promise((r) => s.once('listening', r));
+  const base = `http://127.0.0.1:${s.address().port}`;
+  try {
+    const { body: { offer } } = await srv.send('POST', '/api/host/lanes/offers', { lane: 'oneoff', whatLabel: 'BBQ', title: 'A BBQ' });
+    const r = await fetch(`${base}/api/host/offers/${offer.id}/submit`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    assert.equal((await r.json()).error, 'use_lane_setup');
+    const p = await fetch(`${base}/api/host/offers/${offer.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'x' }) });
+    assert.equal((await p.json()).error, 'use_lane_setup');
+  } finally { await srv.close(); await new Promise((r) => s.close(r)); }
+});

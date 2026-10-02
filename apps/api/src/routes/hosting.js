@@ -696,6 +696,15 @@ publicRouter.get('/media/:id', async (req, res, next) => {
 
 // --- offers ----------------------------------------------------------------
 
+/**
+ * An offer made in the four lanes (hosting v7) is set up, edited and sent only through
+ * /api/host/lanes, which holds its own rules — the checklist, the £10 or Pro, the sessions.
+ * These older doors refuse it rather than publish around them (Codex, 2 Oct 2026).
+ */
+function notALane(offer) {
+  if (offer?.lane) throw refuse(409, 'use_lane_setup', 'Carry on with this one from its own set-up.');
+}
+
 async function myOffer(id) {
   const { household, host } = await myHost();
   if (!host) throw refuse(404, 'not_a_host', 'You are not hosting yet.');
@@ -844,6 +853,7 @@ function offerBody(b, current) {
 router.patch('/host/offers/:id', async (req, res, next) => {
   try {
     const { household, host, offer } = await myOffer(req.params.id);
+    notALane(offer);
     const b = req.body ?? {};
     const patch = offerBody(b, offer);
     if (b.videoId !== undefined) patch.videoId = b.videoId ? await ownMedia(household.id, b.videoId, 'video') : null;
@@ -992,6 +1002,7 @@ router.delete('/host/offers/:id', async (req, res, next) => {
 router.post('/host/offers/:id/submit', async (req, res, next) => {
   try {
     const { host, offer } = await myOffer(req.params.id);
+    notALane(offer);
     // The offer's own tags decide its category, and the category decides which
     // credentials are a condition rather than a badge — so this is loaded here
     // as well as on the payload, because this is the call that publishes.
@@ -1075,6 +1086,7 @@ router.post('/host/offers/:id/broadcast', async (req, res, next) => {
 router.post('/host/offers/:id/doc', async (req, res, next) => {
   try {
     const { household, host, offer } = await myOffer(req.params.id);
+    notALane(offer);
     if (!req.body?.mediaId) {
       const updated = await repo.updateOffer(offer.id, { docId: null, seeded: (offer.seeded ?? []).filter((k) => !k.startsWith('doc:')) });
       return res.json({ offer: await ownOfferPayload(updated, host), seeded: [] });
@@ -1132,6 +1144,7 @@ export function seedFromText(offer, text) {
 router.post('/host/offers/:id/extract', async (req, res, next) => {
   try {
     const { host, offer } = await myOffer(req.params.id);
+    notALane(offer);
     if (!offer.video_id) throw refuse(409, 'no_video', 'Record the video first — the listing is written from what you say.');
     if (!openaiEnabled()) throw refuse(503, 'no_listener', "Epic can't listen to the video yet — the owner adds the transcription key. Write the listing yourself below.");
     const m = await repo.mediaById(offer.video_id);
@@ -1358,6 +1371,7 @@ router.delete('/host/evidence/:id', async (req, res, next) => {
 router.post('/host/offers/:id/dates', async (req, res, next) => {
   try {
     const { host, offer } = await myOffer(req.params.id);
+    notALane(offer);
     if (offer.shape !== 'oneoff') throw refuse(409, 'not_oneoff', 'Only a one-off gets another date; a series has its weeks and an anytime offer its diary.');
     const startsOn = req.body?.startsOn ? ymd(req.body.startsOn) : null;
     if (!startsOn) throw refuse(400, 'date_required', 'Pick the date.');
