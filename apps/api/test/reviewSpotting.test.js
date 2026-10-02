@@ -353,4 +353,59 @@ test('a legacy Google-pass candidate with no sighting cannot be approved or igno
   assert.equal((await query("select status from harvest_candidates where subcategory = $1 and norm = 'legacy pavilion'", [sub])).rows[0].status, 'unresolved', 'the legacy candidate is left as it was');
 });
 
+test('approving does not re-ask a drawer where the word was ignored per-subcategory, nor count its sighting', async () => {
+  // Codex, 2 Oct 2026: ignoreCandidate keeps a drawer's sightings but means "never
+  // ask here again". A later spot in another drawer must not let approval add the
+  // question back to the ignored drawer, and the queue must not count its sighting.
+  // "sensory room" raises one feature (room alone is a head, not a solo noun).
+  const subA = 'c30-pd2-a'; const subB = 'c30-pd2-b';
+  const a = 'google:ChIJ_c30_pd2_a'; const b = 'google:ChIJ_c30_pd2_b';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 pd2 A', 'c30-test-cat') on conflict do nothing", [subA]);
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 pd2 B', 'c30-test-cat') on conflict do nothing", [subB]);
+  await query("insert into question_sets (key, name) values ('c30-pd2-set-a', 'A'), ('c30-pd2-set-b', 'B') on conflict do nothing");
+  await query("insert into question_set_subcategories (subcategory_key, set_key) values ($1, 'c30-pd2-set-a') on conflict do nothing", [subA]);
+  await query("insert into question_set_subcategories (subcategory_key, set_key) values ($1, 'c30-pd2-set-b') on conflict do nothing", [subB]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [a, subA]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [b, subB]);
+  await query('delete from harvest_candidates where subcategory = any($1)', [[subA, subB]]);
+  await query('delete from review_sightings where venue_ref = any($1)', [[a, b]]);
+  await query("delete from feature_tombstones where norm = 'sensory room'");
+  await query("delete from attribute_aliases where norm = 'sensory room'").catch(() => {});
+  await query("delete from place_attributes where key = 'sensory-room'").catch(() => {});
+
+  await spotFromDetail({ venueRef: a, detail: { reviewSummary: 'A sensory room.' } });
+  const { rows: [candA] } = await query("select id from harvest_candidates where norm = 'sensory room' and subcategory = $1", [subA]);
+  await sets.ignoreCandidate(candA.id, { actor: 'tester', reason: 'not this drawer' }); // per-drawer: keeps the sighting
+  await spotFromDetail({ venueRef: b, detail: { reviewSummary: 'A sensory room.' } });
+
+  // The queue counts only drawer B — the ignored drawer A's sighting is stale.
+  const q = (await reviewQueue()).find((f) => f.norm === 'sensory room');
+  assert.ok(q, 'in the queue from drawer B');
+  assert.equal(q.places, 1, 'drawer A’s ignored sighting is not counted');
+
+  const res = await sets.approveFeature('sensory room', { actor: 'tester' });
+  assert.deepEqual(res.subcategories, [subB], 'asked only in the drawer that was not ignored');
+  assert.equal(res.asked, 1, 'one set asked');
+});
+
+test('a spotted synonym aliased onto an active fact reads as known, not new', async () => {
+  // Codex, 2 Oct 2026: knownFeatureKeys only held keys and labels, so a wording
+  // aliased onto an existing fact looked new and offered Approve. "splash zone"
+  // raises one feature and is aliased onto an active splash-pad fact.
+  const sub = 'c30-alias-parks';
+  const ref = 'google:ChIJ_c30_alias';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 alias parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
+  await query("insert into place_attributes (key, label, kind) values ('splash-pad', 'Splash pad', 'yesno') on conflict (key) do update set active = true");
+  await query("insert into attribute_aliases (norm, target_key, raw) values ('splash zone', 'splash-pad', 'splash zone') on conflict (norm) do update set target_key = 'splash-pad'");
+
+  const report = await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A splash zone.' } });
+  assert.equal(report.features.find((f) => f.norm === 'splash zone')?.known, true, 'the aliased synonym is known');
+  assert.equal((await reviewQueue({ subcategory: sub })).find((f) => f.norm === 'splash zone')?.known, true, 'and the queue marks it known');
+});
+
 test.after(async () => { await pool.end(); });

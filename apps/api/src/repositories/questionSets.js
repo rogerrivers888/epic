@@ -785,8 +785,18 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
     // Codex, 2 Oct 2026). A drawer with no set is not a failure — the fact exists and
     // can be asked there once a set is attached; a set already asking it (or asking
     // it globally) is left as it is.
+    //
+    // Only drawers that still have an UNDECIDED candidate for the word: a drawer where
+    // it was ignored per-subcategory (ignoreCandidate — "never ask about this word
+    // here again") keeps its sightings but must not be asked (Codex, 2 Oct 2026).
     const { rows: drawerRows } = await client.query(
-      'select distinct p.subcategory from review_sightings s join place_index p on p.venue_ref = s.venue_ref where s.norm = $1 and p.subcategory is not null',
+      `select distinct p.subcategory
+         from review_sightings s
+         join place_index p on p.venue_ref = s.venue_ref
+         join harvest_candidates c
+           on c.norm = s.norm and c.subcategory = p.subcategory
+          and c.sources ? 'google' and c.status in ('new', 'unresolved')
+        where s.norm = $1 and p.subcategory is not null`,
       [norm]);
     const subs = drawerRows.map((r) => r.subcategory);
     let asked = 0;

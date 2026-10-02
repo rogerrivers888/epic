@@ -162,6 +162,13 @@ async function knownFeatureKeys(client = null) {
     keys.add(String(r.key).replace(/[_-]+/g, ' ').trim().toLowerCase());
     keys.add(String(r.label).trim().toLowerCase());
   }
+  // A wording deliberately aliased onto an active fact is known too — otherwise a
+  // spotted synonym reads as new and offers Approve, though approveFeature would
+  // only reuse the aliased fact (Codex, 2 Oct 2026). The alias norm is stored in
+  // our normalised form, so it matches a spotting norm directly.
+  const { rows: aliases } = await run(
+    'select a.norm from attribute_aliases a join place_attributes p on p.key = a.target_key and p.active');
+  for (const r of aliases) keys.add(String(r.norm).trim().toLowerCase());
   return keys;
 }
 
@@ -284,11 +291,13 @@ export function spotInBackground(args) {
  */
 export async function reviewQueue({ limit = 200, subcategory = null } = {}) {
   const known = await knownFeatureKeys();
-  // Only features still awaiting a decision: a norm whose candidate was ignored or
-  // promoted is gone from the queue. An ignored norm is not even re-spotted (the
-  // tombstone check in spotFromDetail drops it), and a promoted one has no
-  // undecided candidate, so neither can return here — Codex, 2 Oct 2026.
-  const undecided = "exists (select 1 from harvest_candidates c where c.norm = s.norm and c.sources ? 'google' and c.status in ('new', 'unresolved'))";
+  // Count a sighting only where its CURRENT drawer still has an undecided candidate
+  // for the word. A promoted or review-queue-ignored word has no undecided candidate
+  // anywhere; a word ignored per-subcategory (ignoreCandidate) keeps its sightings in
+  // that drawer, but that drawer's candidate is 'ignored', so correlating the exists
+  // to `p.subcategory` drops those stale sightings from the count rather than letting
+  // a global predicate inflate it (Codex, 2 Oct 2026).
+  const undecided = "exists (select 1 from harvest_candidates c where c.norm = s.norm and c.subcategory = p.subcategory and c.sources ? 'google' and c.status in ('new', 'unresolved'))";
   const where = subcategory ? `where p.subcategory = $2 and ${undecided}` : `where ${undecided}`;
   const params = subcategory ? [limit, subcategory] : [limit];
   const { rows } = await query(
