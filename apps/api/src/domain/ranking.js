@@ -59,11 +59,20 @@ const ACCESS_WORD = { 'step-free': 'Step-free access', 'accessible-toilet': 'An 
  */
 function accessSignal(venue, need) {
   const a = venue.accessibility || {};
-  const read = (v) => (v == null ? null : v === true || v === 'yes' || v === 'designated' ? true : v === false || v === 'no' ? false : null);
-  if (need === 'step-free') return read(a.stepFree ?? a.wheelchair ?? venue.stepFree);
-  if (need === 'accessible-toilet') return read(a.wheelchairToilet ?? a.accessibleToilet);
-  if (need === 'lift') return read(a.lift);
-  if (need === 'quiet') return read(a.quiet ?? venue.quiet);
+  const read = (v) => {
+    if (v === true || v === false) return v;
+    const w = typeof v === 'string' ? v.trim().toLowerCase() : null;
+    return w === 'yes' || w === 'designated' ? true : w === 'no' ? false : null;
+  };
+  // The first source that is definite wins, not the first that is present: a
+  // descriptive step-free note beside OSM's wheelchair=no must not hide the
+  // no, and so leave a known-stepped place in a step-free search (Codex,
+  // 2 Oct 2026).
+  const first = (...vals) => { for (const v of vals) { const r = read(v); if (r !== null) return r; } return null; };
+  if (need === 'step-free') return first(a.stepFree, a.wheelchair, venue.stepFree);
+  if (need === 'accessible-toilet') return first(a.wheelchairToilet, a.accessibleToilet);
+  if (need === 'lift') return first(a.lift);
+  if (need === 'quiet') return first(a.quiet, venue.quiet);
   return null;
 }
 

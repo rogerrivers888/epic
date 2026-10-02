@@ -840,3 +840,18 @@ test('a founding account with no person linked is still the lead', async () => {
     assert.equal(body.meIsLead, true, 'Delete household and Plan and billing are theirs');
   } finally { await srv.close(); }
 });
+
+test('a definite wheelchair=no is read even beside a descriptive step-free note', () => {
+  const attendees = [{ id: 'm1', name: 'Maya', allergens: [], diets: [], dislikes: [], likes: [], access: ['step-free'] }];
+  const venues = [
+    { id: 'stepped', name: 'Stepped', allergens: [], accessibility: { stepFree: 'two steps at the door', wheelchair: 'no' } },
+    { id: 'level', name: 'Level', allergens: [], accessibility: { stepFree: 'ramp round the side', wheelchair: 'Yes' } },
+    { id: 'vague', name: 'Vague', allergens: [], accessibility: { stepFree: 'ask at the door' } },
+  ];
+  const { candidates, excluded } = applyConstraints({ venues, attendees });
+  assert.deepEqual(excluded.map((v) => v.id), ['stepped'], 'the definite no still hides it');
+  assert.deepEqual(candidates.map((v) => v.id).sort(), ['level', 'vague'], 'and a note that says neither never hides');
+  const level = candidates.find((v) => v.id === 'level');
+  const vague = candidates.find((v) => v.id === 'vague');
+  assert.ok(level.score > vague.score, 'the definite yes ranks up');
+});
