@@ -1095,7 +1095,11 @@ export async function ignoreFeature(norm, { actor = null, reason = null } = {}) 
           and ($4 = false
                or subcategory in (select p.subcategory from review_sightings s
                                     join place_index p on p.venue_ref = s.venue_ref
-                                   where s.norm = $1))`,
+                                   where s.norm = $1)
+               -- A place reclassified since it was spotted left its candidate under
+               -- the drawer it was spotted in; the candidate names the place in its
+               -- examples, so it is found that way too (Codex, 2 Oct 2026).
+               or examples && coalesce((select array_agg(s.venue_ref) from review_sightings s where s.norm = $1), '{}'))`,
       [norm, actor, reason ? String(reason).slice(0, 300) : null, dismissal]);
     if (!rowCount) throw bad(`"${norm}" is not a feature waiting in the review queue.`);
     // One transaction: the queue can never be left holding an actionable sighting

@@ -1099,6 +1099,25 @@ test('moving the ignoring drawer to another set re-asks the set it left', async 
   assert.equal((await query("select count(*)::int n from questions where attribute_key = $1 and set_key = 'c30-move-set' and active", [res.attributeKey])).rows[0].n, 1, 'B’s set is asked once A has left it');
 });
 
+test('dismissing a known fact reaches a candidate left in the drawer its place has moved out of', async () => {
+  // Codex, 2 Oct 2026: the candidate stays filed under the spotting-time drawer.
+  const subOld = 'c30-dm-old'; const subNew = 'c30-dm-new';
+  const ref = 'google:ChIJ_c30_dm';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 dm old', 'c30-test-cat') on conflict do nothing", [subOld]);
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 dm new', 'c30-test-cat') on conflict do nothing", [subNew]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, subOld]);
+  await query('delete from harvest_candidates where subcategory = any($1)', [[subOld, subNew]]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
+  await query("insert into place_attributes (key, label, kind) values ('sport-hall', 'Sport hall', 'yesno') on conflict (key) do update set active = true");
+
+  await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A sports hall.' } });       // filed under old
+  await query('update place_index set subcategory = $2 where venue_ref = $1', [ref, subNew]);   // moved, no re-spot
+  const res = await sets.ignoreFeature('sport hall', { actor: 'tester' });
+  assert.equal(res.dismissed, true);
+  assert.equal((await query("select status from harvest_candidates where norm = 'sport hall' and subcategory = $1", [subOld])).rows[0].status, 'ignored', 'the old-drawer candidate is closed, not orphaned');
+});
+
 test('restoring an older per-drawer ignore leaves a later word-level Ignore standing', async () => {
   // Codex, 2 Oct 2026: restore lifts only the tombstone its own ignore wrote.
   const subA = 'c30-tomb-scope-a'; const subB = 'c30-tomb-scope-b';
