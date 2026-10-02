@@ -18,7 +18,7 @@ import { colors, spacing, type, BORDER } from '../../theme';
 import { useViewport } from '../../hooks/useViewport';
 import {
   api, API_URL, ownedImageUrl, type SavedPlaceDetail, type SavedPlaceRow, type SavedPlacesSummary,
-  type PhotoReviewRow, type PhotoCompare, type PhotoVerdict, type ReviewPicture, type VenuePhotoRef,
+  type PhotoReviewRow, type PhotoCompare, type PhotoVerdict, type ReviewPicture, type VenuePhotoRef, type PhotoReviewSummary,
 } from '../../api';
 import { Ladder, Num, Word, Blank, Tick, Act, Kicker, Stat, type Col } from '../table';
 import { Dropdown, ago, pounds } from '../kit';
@@ -58,7 +58,12 @@ const Page = ({ url }: { url: string | null }) => {
 export function SavedPlacesBoard({ canManage }: { canManage: boolean }) {
   const [data, setData] = useState<{ places: SavedPlaceRow[]; summary: SavedPlacesSummary } | null>(null);
   const [open, setOpen] = useState<string | null>(null);
-  const load = useCallback(() => { api.adminSavedPlaces().then(setData).catch(() => setData({ places: [], summary: null as any })); }, []);
+  const [quote, setQuote] = useState<{ places: number; pence: number; enrolled: boolean } | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const load = useCallback(() => {
+    api.adminSavedPlaces().then(setData).catch(() => setData({ places: [], summary: null as any }));
+    api.adminSavedBackfillQuote().then(setQuote).catch(() => setQuote(null));
+  }, []);
   useEffect(() => { load(); }, [load]);
   if (!data) return <Waiting />;
   const s = data.summary;
@@ -86,6 +91,19 @@ export function SavedPlacesBoard({ canManage }: { canManage: boolean }) {
           </View>
         </View>
       ) : null}
+      {quote?.enrolled && quote.places > 0 ? (
+        <View style={[styles.detailHead, { paddingBottom: spacing.md }]}>
+          <Kicker tip={['Not yet researched', 'Your places already in Places from before this was built. Priced at the 12p target each; refused if the count changes before the press.']}>
+            {`${quote.places} NOT YET RESEARCHED`}
+          </Kicker>
+          <Act label={`Research them · up to ${pence(quote.pence)}`} icon="search" small disabled={!canManage}
+               onPress={async () => {
+                 setMsg(null);
+                 try { const r = await api.adminSavedBackfill(quote.places); setMsg(`${r.started} started`); load(); } catch (err: any) { setMsg(err.message); load(); }
+               }} />
+        </View>
+      ) : null}
+      {msg ? <Text style={styles.note}>{msg}</Text> : null}
       <Ladder columns={columns} rows={data.places} keyOf={(r) => r.venueRef}
               onRow={(r) => setOpen(open === r.venueRef ? null : r.venueRef)}
               highlight={(r) => r.venueRef === open}
@@ -209,11 +227,11 @@ export function PhotoReviewBoard({ canManage }: { canManage: boolean }) {
   const [q, setQ] = useState('');
   const [asked, setAsked] = useState('');
   const [reviewed, setReviewed] = useState<'' | 'yes' | 'no'>('no');
-  const [data, setData] = useState<{ places: PhotoReviewRow[]; more: boolean; comparePence: number } | null>(null);
+  const [data, setData] = useState<{ places: PhotoReviewRow[]; more: boolean; comparePence: number; summary: PhotoReviewSummary } | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const load = useCallback(() => {
     setData(null);
-    api.adminPhotoReview({ q: asked || undefined, reviewed: reviewed || undefined }).then(setData).catch(() => setData({ places: [], more: false, comparePence: 0 }));
+    api.adminPhotoReview({ q: asked || undefined, reviewed: reviewed || undefined }).then(setData).catch(() => setData({ places: [], more: false, comparePence: 0, summary: null as any }));
   }, [asked, reviewed]);
   useEffect(() => { load(); }, [load]);
 
@@ -236,6 +254,17 @@ export function PhotoReviewBoard({ canManage }: { canManage: boolean }) {
       </View>
       {!data ? <Waiting /> : (
         <>
+          {data.summary ? (
+            <View style={styles.subRow}>
+              <View style={styles.five}>
+                <Stat label="With owned pictures" value={String(data.summary.places)} tip={['With owned pictures', 'Places holding at least one picture of ours, waiting for a look or approved.']} />
+                <Stat label="Reviewed" value={String(data.summary.reviewed)} tip={['Reviewed', 'Places you have given a verdict.']} />
+                <Stat label="Owned is fine" value={data.summary.reviewed ? `${Math.round((data.summary.fine / data.summary.reviewed) * 100)}%` : '—'} tip={['Owned is fine', 'Of the places reviewed.']} />
+                <Stat label="Worse, acceptable" value={data.summary.reviewed ? `${Math.round((data.summary.acceptable / data.summary.reviewed) * 100)}%` : '—'} tip={['Worse but acceptable', 'Of the places reviewed.']} />
+                <Stat label="Not fit" value={data.summary.reviewed ? `${Math.round((data.summary.not_fit / data.summary.reviewed) * 100)}%` : '—'} tip={['Not fit', 'Of the places reviewed.']} />
+              </View>
+            </View>
+          ) : null}
           <Ladder columns={columns} rows={data.places} keyOf={(r) => r.venueRef}
                   onRow={(r) => setOpen(open === r.venueRef ? null : r.venueRef)}
                   highlight={(r) => r.venueRef === open}

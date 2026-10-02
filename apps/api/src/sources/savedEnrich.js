@@ -125,23 +125,74 @@ export async function requestEnrichment({ venueRef, account, householdId, sessio
   return { started: true, onDone: followOn(venueRef, ctx) };
 }
 
-const followOn = (venueRef, ctx) => () => {
-  afterFree(venueRef, ctx).catch((err) => {
-    console.warn(`savedEnrich: ${venueRef}: ${err.message}`);
-    setState(venueRef, 'failed', { error: String(err.message).slice(0, 300) }).catch(() => null);
-  });
+// The places this process has set going and not yet finished. A row waiting
+// its turn in the research line looks stale by the clock, and `resumeStale`
+// must not start it a second time — that would be a second paid pass. A
+// restart empties this, which is exactly when the waiting rows need picking up.
+const inProcess = new Set();
+
+const followOn = (venueRef, ctx) => {
+  inProcess.add(venueRef);
+  return () => {
+    afterFree(venueRef, ctx)
+      .catch((err) => {
+        console.warn(`savedEnrich: ${venueRef}: ${err.message}`);
+        return setState(venueRef, 'failed', { error: String(err.message).slice(0, 300) }).catch(() => null);
+      })
+      .finally(() => inProcess.delete(venueRef));
+  };
 };
 
-/** A re-run, or a pass a restart cut short: queue the free research with the rest to follow. */
+/** A re-run, a backfill, or a pass a restart cut short: queue the free research with the rest to follow. */
 function start(venueRef, ctx) {
   setState(venueRef, 'free').catch(() => null);
   queueEnrichment(venueRef, { householdId: ctx.householdId, sessionId: ctx.sessionId, onDone: followOn(venueRef, ctx) });
 }
 
+/**
+ * The owner's places already in Places when this was built, not yet
+ * researched: saved, loved or been, not dismissed, not a photograph-only place.
+ * The back office prices them before anything is spent (`backfill`).
+ */
+export async function backfillCandidates(householdId) {
+  const { rows } = await query(
+    `select hp.venue_ref from household_places hp
+      where hp.household_id = $1
+        and hp.venue_ref like '%:%' and hp.venue_ref not like 'photo:%'
+        and not exists (select 1 from saved_place_enrichment e where e.venue_ref = hp.venue_ref)
+        and (exists (select 1 from place_ledger l where l.household_id = hp.household_id
+                       and l.source || ':' || l.source_place_id = hp.venue_ref and l.status in ('saved', 'special'))
+             or exists (select 1 from visits v where v.household_id = hp.household_id and v.venue_ref = hp.venue_ref))
+      order by hp.venue_ref`, [householdId]);
+  return rows.map((r) => r.venue_ref);
+}
+
+/** The target ceiling a place is priced at before the click: the brief's 12p. */
+export const TARGET_PENCE = 12;
+
+/**
+ * Research every one of the owner's places not yet researched. Refused unless
+ * handed the count its own quote showed, so a list that grew between the quote
+ * and the press is priced again rather than spent (the sweep's rule).
+ */
+export async function backfill({ account, householdId, sessionId = null, expectPlaces }) {
+  if (!isEnrichAccount(account)) return { started: 0, why: 'not_enrolled' };
+  const refs = await backfillCandidates(householdId);
+  if (Number(expectPlaces) !== refs.length) return { started: 0, why: 'quote_changed', places: refs.length };
+  let started = 0;
+  for (const ref of refs) {
+    const out = await requestEnrichment({ venueRef: ref, account, householdId, sessionId });
+    if (!out.started) continue;
+    queueEnrichment(ref, { householdId, sessionId, onDone: out.onDone });
+    started += 1;
+  }
+  return { started, why: null };
+}
+
 /** The back office's "Re-run": research the place again, free pass first. */
 export async function rerun(venueRef, { account = null, householdId, sessionId = null }) {
   const out = await requestEnrichment({ venueRef, account, householdId, sessionId, rerun: true });
-  if (out.started) start(venueRef, { householdId, sessionId });
+  if (out.started) queueEnrichment(venueRef, { householdId, sessionId, onDone: out.onDone });
   return { started: out.started };
 }
 
@@ -410,8 +461,9 @@ export async function resumeStale({ olderThanMinutes = 15 } = {}) {
       where state in ('queued', 'free', 'claude')
         and coalesce(last_run_at, requested_at) < now() - make_interval(mins => $1)
       order by requested_at limit 20`, [olderThanMinutes]);
-  for (const r of rows) start(r.venue_ref, { householdId: r.household_id, sessionId: r.session_id });
-  return rows.length;
+  const due = rows.filter((r) => !inProcess.has(r.venue_ref));
+  for (const r of due) start(r.venue_ref, { householdId: r.household_id, sessionId: r.session_id });
+  return due.length;
 }
 
 let loop = null;

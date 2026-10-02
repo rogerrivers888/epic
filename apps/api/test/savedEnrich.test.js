@@ -191,3 +191,30 @@ test('saving through claimPlace asks for the research only when the owner saves,
     assert.equal(await enrich.enrichmentOf(trip), null, 'a trip shortlist is not adding to Places');
   } finally { globalThis.fetch = realFetch; }
 });
+
+test('the backfill: saved, loved or been and not yet researched; refused when the count moved since the quote', async () => {
+  const hh = await household();
+  const saved = `google:bf-${randomUUID()}`; const been = `google:bf-${randomUUID()}`;
+  const dismissed = `google:bf-${randomUUID()}`; const done = `google:bf-${randomUUID()}`;
+  for (const r of [saved, been, dismissed, done]) {
+    await query(`insert into household_places (household_id, venue_ref, label) values ($1, $2, 'x')`, [hh, r]);
+  }
+  const ledger = (ref, status) => query(`insert into place_ledger (household_id, source, source_place_id, status) values ($1, 'google', $2, $3)`, [hh, ref.slice(7), status]);
+  await ledger(saved, 'saved'); await ledger(dismissed, 'dismissed'); await ledger(done, 'saved');
+  await query(`insert into visits (household_id, venue_ref, venue_label, visited_on) values ($1, $2, 'x', current_date)`, [hh, been]);
+  await query(`insert into saved_place_enrichment (venue_ref, household_id, state) values ($1, $2, 'done')`, [done, hh]);
+  const refs = await enrich.backfillCandidates(hh);
+  assert.deepEqual(refs.sort(), [been, saved].sort());
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('network closed in tests'); };
+  try {
+    const owner = { id: null, email: 'roger@epic.day' };
+    assert.equal((await enrich.backfill({ account: { email: 'x@y.z' }, householdId: hh, expectPlaces: 2 })).why, 'not_enrolled');
+    const moved = await enrich.backfill({ account: owner, householdId: hh, expectPlaces: 5 });
+    assert.equal(moved.why, 'quote_changed', 'a list that changed is priced again, not spent');
+    assert.equal(moved.started, 0);
+    const ok = await enrich.backfill({ account: owner, householdId: hh, expectPlaces: 2 });
+    assert.equal(ok.started, 2);
+    assert.deepEqual(await enrich.backfillCandidates(hh), [], 'once started, they are no longer candidates');
+  } finally { globalThis.fetch = realFetch; }
+});

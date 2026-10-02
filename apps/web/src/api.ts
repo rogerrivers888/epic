@@ -559,6 +559,7 @@ export type SavedPlaceDetail = {
   review: { verdict: PhotoVerdict; note: string | null; reviewed_at: string } | null;
 };
 export type PhotoVerdict = 'owned_fine' | 'owned_worse_acceptable' | 'owned_not_fit';
+export type PhotoReviewSummary = { places: number; reviewed: number; fine: number; acceptable: number; not_fit: number };
 export type PhotoReviewRow = { venueRef: string; name: string | null; category: string | null; postcode: string | null; pictures: number; verdict: PhotoVerdict | null; reviewedAt: string | null };
 export type PhotoCompare = {
   venueRef: string; google: VenuePhotoRef[]; googleWhy: string | null;
@@ -3070,9 +3071,11 @@ export const api = {
   adminSavedPlaces: () => request<{ places: SavedPlaceRow[]; summary: SavedPlacesSummary }>('/api/admin/saved-places'),
   adminSavedPlace: (ref: string) => request<SavedPlaceDetail>(`/api/admin/saved-places/place${qs({ ref })}`),
   adminSavedPlaceRerun: (ref: string) => post<{ started: boolean }>('/api/admin/saved-places/rerun', { ref }),
+  adminSavedBackfillQuote: () => request<{ places: number; pence: number; perPlacePence?: number; enrolled: boolean }>('/api/admin/saved-places/backfill/quote'),
+  adminSavedBackfill: (expectPlaces: number) => post<{ started: number }>('/api/admin/saved-places/backfill', { expectPlaces }),
   /** Photo review (Part 3): places with owned pictures; Google's fetched live on Compare, never stored. */
   adminPhotoReview: (p: { q?: string; category?: string; reviewed?: 'yes' | 'no' } = {}) =>
-    request<{ places: PhotoReviewRow[]; more: boolean; comparePence: number }>(`/api/admin/photo-review${qs(p)}`),
+    request<{ places: PhotoReviewRow[]; more: boolean; comparePence: number; summary: PhotoReviewSummary }>(`/api/admin/photo-review${qs(p)}`),
   adminPhotoCompare: (ref: string) => post<PhotoCompare>('/api/admin/photo-review/compare', { ref }),
   adminPhotoVerdict: (ref: string, verdict: PhotoVerdict, note?: string) =>
     post<{ venue_ref: string; verdict: PhotoVerdict; note: string | null; reviewed_at: string }>('/api/admin/photo-review/verdict', { ref, verdict, note }),

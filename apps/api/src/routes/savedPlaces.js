@@ -29,7 +29,7 @@ import { sourceOff } from '../sources/switches.js';
 import { recordProviderCall } from '../repositories/visits.js';
 import { healthOf } from '../sources/meter.js';
 import { stampImage } from '../sources/photoLinks.js';
-import { enrichmentList, enrichmentOf, rerun, PURPOSE as ENRICH_PURPOSE } from '../sources/savedEnrich.js';
+import { enrichmentList, enrichmentOf, rerun, backfill, backfillCandidates, isEnrichAccount, TARGET_PENCE, PURPOSE as ENRICH_PURPOSE } from '../sources/savedEnrich.js';
 import { venuePicturesOf } from '../sources/venueImages.js';
 import { USD_TO_GBP, PRICE_PER_UNIT_USD } from '../domain/providerPrices.js';
 
@@ -139,6 +139,30 @@ savedPlacesRouter.post('/rerun', requires('manage_library'), requireOwnerSignedI
   } catch (err) { next(err); }
 });
 
+/**
+ * The owner's places already in Places, not yet researched, priced before the
+ * click at the brief's 12p target each. Only the enrolled account has any.
+ */
+savedPlacesRouter.get('/backfill/quote', requires('view_library'), async (_req, res, next) => {
+  try {
+    const account = currentAccount();
+    if (!isEnrichAccount(account)) return res.json({ places: 0, pence: 0, enrolled: false });
+    const household = await currentHousehold();
+    const refs = await backfillCandidates(household.id);
+    res.json({ places: refs.length, pence: refs.length * TARGET_PENCE, perPlacePence: TARGET_PENCE, enrolled: true });
+  } catch (err) { next(err); }
+});
+
+savedPlacesRouter.post('/backfill', requires('manage_library'), requireOwnerSignedIn('research your saved places'), async (req, res, next) => {
+  try {
+    const household = await currentHousehold();
+    const out = await backfill({ account: currentAccount(), householdId: household.id, sessionId: req.session?.id ?? null, expectPlaces: req.body?.expectPlaces });
+    if (out.why === 'quote_changed') return res.status(409).json({ error: 'quote_changed', message: `There are ${out.places} places now — price it again.`, places: out.places });
+    if (out.why) return res.status(403).json({ error: out.why });
+    res.status(202).json(out);
+  } catch (err) { next(err); }
+});
+
 // ---------------------------------------------------------------------------
 // Part 3: photo review
 // ---------------------------------------------------------------------------
@@ -163,8 +187,20 @@ photoReviewRouter.get('/', requires('view_library'), async (req, res, next) => {
         where ${where.join(' and ')}
         order by (pr.venue_ref is null) desc, r.name nulls last
         limit 201`, args);
+    // Over every place with owned pictures, whatever the filter: the numbers
+    // the owner's policy call is made from.
+    const { rows: [sum] } = await query(
+      `select count(*)::int as places,
+              count(pr.venue_ref)::int as reviewed,
+              count(*) filter (where pr.verdict = 'owned_fine')::int as fine,
+              count(*) filter (where pr.verdict = 'owned_worse_acceptable')::int as acceptable,
+              count(*) filter (where pr.verdict = 'owned_not_fit')::int as not_fit
+         from place_records r left join photo_reviews pr on pr.venue_ref = r.venue_ref
+        where exists (select 1 from image_links l join image_assets i on i.id = l.image_id
+                       where l.subject_type = 'place' and l.subject_id = r.venue_ref and i.moderation <> 'rejected')`);
     // A capped list says what it found, not what is absent (CLAUDE.md).
     res.json({
+      summary: sum,
       places: rows.slice(0, 200).map((r) => ({ venueRef: r.venue_ref, name: r.name, category: r.category, postcode: r.postcode, pictures: Number(r.pictures), verdict: r.verdict, reviewedAt: r.reviewed_at })),
       more: rows.length > 200,
       comparePence: comparePence(),
