@@ -237,12 +237,12 @@ export function PriceStep(props: StepProps) {
   const tot = pence(total) ?? 0;
   return (
     <>
-      <Option title="Free" on={mode === 'free'} onPick={() => update({ priceMode: 'free' })}>
+      <Option title="Free" on={mode === 'free'} onPick={() => { setEach(''); setChild(''); setTotal(''); update({ priceMode: 'free' }); }}>
         {minMax}
         <DecidesBy {...props} />
       </Option>
       <Option title="Same each" sub={offer.lane === 'onrequest' ? 'Per person or per booking' : 'Per person, with an optional child price'} on={mode === 'same_each'}
-        onPick={() => update({ priceMode: 'same_each', per: offer.per === 'booking' ? 'booking' : 'person' })}>
+        onPick={() => { setTotal(''); update({ priceMode: 'same_each', per: offer.per === 'booking' ? 'booking' : 'person' }); }}>
         {offer.lane === 'onrequest' ? (
           <View style={{ flexDirection: 'row', gap: 2 }}>
             {(['person', 'booking'] as const).map((p) => (
@@ -262,7 +262,7 @@ export function PriceStep(props: StepProps) {
         </View>
         {paidExtras}
       </Option>
-      <Option title="Depends on numbers" sub="A fixed total, split" on={mode === 'by_numbers'} onPick={() => update({ priceMode: 'by_numbers', minCount: offer.minCount ?? 1 })}>
+      <Option title="Depends on numbers" sub="A fixed total, split" on={mode === 'by_numbers'} onPick={() => { setEach(''); setChild(''); update({ priceMode: 'by_numbers', minCount: offer.minCount ?? 1 }); }}>
         <Labelled label="Total cost of the event"><MoneyBox value={total} onChange={(s) => { setTotal(s); update({ totalPence: pence(s) }); }} placeholder="0" /></Labelled>
         <View style={{ flexDirection: 'row', gap: 6 }}>
           {([['Min people', offer.minCount, (n: number) => update({ minCount: n }), INACTIVE, 1, offer.maxCount ?? 100000],
