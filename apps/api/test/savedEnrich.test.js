@@ -457,16 +457,29 @@ test('a venue page that redirects off its own site gives up no pictures', async 
 test('a redirect off the venue\'s site is refused before the other site is contacted; on-site hops are each asked politely', async () => {
   const { fetchVenuePage } = await import('../src/sources/venueImages.js');
   const contacted = []; const asked = [];
-  const fetchImpl = async (url) => {
-    contacted.push(url);
-    if (url === 'https://v.example/') return new Response(null, { status: 301, headers: { location: 'https://www.v.example/home' } });
-    if (url === 'https://www.v.example/home') return new Response(null, { status: 302, headers: { location: 'https://www.facebook.com/v' } });
-    return new Response('<html></html>', { status: 200, headers: { 'content-type': 'text/html' } });
+  const resolve = async (u) => ({ url: new URL(u), address: '93.184.216.34', family: 4 });
+  const request = async (at) => {
+    const u = at.url.href;
+    contacted.push(u);
+    if (u === 'https://v.example/') return { status: 301, location: 'https://www.v.example/home', type: '', body: '' };
+    if (u === 'https://www.v.example/home') return { status: 302, location: 'https://www.facebook.com/v', type: '', body: '' };
+    return { status: 200, location: null, type: 'text/html', body: '<html></html>' };
   };
-  const out = await fetchVenuePage('https://v.example/', { fetchImpl, politeness: async (u) => { asked.push(u); return { ok: true }; } });
+  const out = await fetchVenuePage('https://v.example/', { resolve, request, politeness: async (u) => { asked.push(u); return { ok: true }; } });
   assert.deepEqual(out, { refused: 'redirected_off_site' });
   assert.ok(!contacted.some((u) => u.includes('facebook')), 'Facebook never contacted');
   assert.deepEqual(asked, ['https://v.example/', 'https://www.v.example/home'], 'each on-site hop asked first');
+});
+
+test('a venue website at a private address is never fetched', async () => {
+  const { fetchVenuePage } = await import('../src/sources/venueImages.js');
+  let contacted = 0;
+  const out = await fetchVenuePage('http://127.0.0.1:4000/', { request: async () => { contacted += 1; return { status: 200, type: 'text/html', body: '' }; }, politeness: async () => ({ ok: true }) });
+  assert.deepEqual(out, { refused: 'not_a_public_address' });
+  assert.equal(contacted, 0);
+  const { isPrivate } = await import('../src/sources/safeFetch.js');
+  assert.equal(isPrivate('10.1.2.3'), true);
+  assert.equal(isPrivate('93.184.216.34'), false);
 });
 
 test('Claude fills only what was missing: a field the free research holds is not overwritten', async () => {

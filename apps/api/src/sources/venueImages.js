@@ -15,7 +15,7 @@
 // per-domain delay as every other read of a venue page (sources/politeness.js).
 
 import { query } from '../db.js';
-import { UA } from './pictureBytes.js';
+import { publicAddress, requestPinned } from './safeFetch.js';
 import { beforeFetching } from './politeness.js';
 
 const MAX_KEEP = 8;
@@ -84,24 +84,27 @@ export function picturesOnPage(html, pageUrl) {
  * and crawl delay are asked first (Codex, 2 Oct 2026). Returns `{ url, html }`,
  * or `{ refused: why }`.
  */
-export async function fetchVenuePage(website, { politeness = beforeFetching, fetchImpl = fetch, maxHops = 5 } = {}) {
+export async function fetchVenuePage(website, { politeness = beforeFetching, resolve = publicAddress, request = requestPinned, maxHops = 5 } = {}) {
   let url = website;
   for (let hop = 0; hop <= maxHops; hop += 1) {
     if (!sameSite(url, website)) return { refused: 'redirected_off_site' };
+    // A public address only — never localhost, a private range or a link-local
+    // one — resolved once and then the one the request goes to, so a second
+    // DNS answer cannot differ (sources/safeFetch.js; Codex, 2 Oct 2026).
+    const at = await resolve(url);
+    if (!at) return { refused: 'not_a_public_address' };
     const may = await politeness(url);
     if (!may.ok) return { refused: may.why ?? 'not_allowed' };
     let res;
-    try {
-      res = await fetchImpl(url, { redirect: 'manual', signal: AbortSignal.timeout(8000), headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml' } });
-    } catch { return { refused: 'page_unreadable' }; }
+    // The body is capped as it arrives, not after (safeFetch's BODY_MAX).
+    try { res = await request(at, { accept: 'text/html,application/xhtml+xml' }); } catch { return { refused: 'page_unreadable' }; }
     if (res.status >= 300 && res.status < 400) {
-      const next = res.headers.get('location');
-      if (!next) return { refused: 'page_unreadable' };
-      try { url = new URL(next, url).href; } catch { return { refused: 'page_unreadable' }; }
+      if (!res.location) return { refused: 'page_unreadable' };
+      try { url = new URL(res.location, url).href; } catch { return { refused: 'page_unreadable' }; }
       continue;
     }
-    if (!res.ok || !/text\/html|xhtml/i.test(res.headers.get('content-type') || '')) return { refused: 'page_unreadable' };
-    return { url, html: (await res.text()).slice(0, 1_500_000) };
+    if (res.status < 200 || res.status >= 300 || !/text\/html|xhtml/i.test(res.type)) return { refused: 'page_unreadable' };
+    return { url, html: res.body };
   }
   return { refused: 'too_many_redirects' };
 }
@@ -112,7 +115,7 @@ export async function fetchVenuePage(website, { politeness = beforeFetching, fet
  * Returns `{ ok, kept, why }`. A page that could not be read is `ok: false`
  * with its reason — not "this venue has no pictures".
  */
-export async function venuePicturesFor(venueRef, website, { fetchHtmlImpl = null, politeness = beforeFetching, fetchImpl = fetch } = {}) {
+export async function venuePicturesFor(venueRef, website, { fetchHtmlImpl = null, politeness = beforeFetching, resolve, request } = {}) {
   if (!venueRef || !website) return { ok: false, kept: 0, why: 'no_website' };
   let page;
   if (fetchHtmlImpl) {
@@ -122,7 +125,7 @@ export async function venuePicturesFor(venueRef, website, { fetchHtmlImpl = null
     page = await fetchHtmlImpl(website);
     if (!page) return { ok: false, kept: 0, why: 'page_unreadable' };
   } else {
-    page = await fetchVenuePage(website, { politeness, fetchImpl });
+    page = await fetchVenuePage(website, { politeness, ...(resolve ? { resolve } : {}), ...(request ? { request } : {}) });
     if (page.refused) return { ok: false, kept: 0, why: page.refused };
   }
   // A redirect off the venue's own site — to Facebook, a booking platform, a
