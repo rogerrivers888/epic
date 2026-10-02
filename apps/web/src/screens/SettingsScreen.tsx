@@ -609,7 +609,30 @@ function ConfirmSheet({ title, body, danger, onConfirm, onClose }: { title: stri
 
 function Footer() {
   const [hashes, setHashes] = useState<{ app: string | null; api: string | null } | null>(null);
+  const [screenLine, setScreenLine] = useState<string | null>(null);
   const reveal = () => {
+    // What this phone actually reports about its screen (owner, 2 Oct 2026: the tab
+    // bar still sat ~71pt above the glass on his iPhone after three simulated fixes).
+    // Read once on the long press, never sent anywhere.
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const probe = document.createElement('div');
+      probe.style.cssText = 'position:fixed;visibility:hidden;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)';
+      document.body.appendChild(probe);
+      const cs = getComputedStyle(probe);
+      const sat = Math.round(parseFloat(cs.paddingTop) || 0), sab = Math.round(parseFloat(cs.paddingBottom) || 0);
+      probe.remove();
+      const root = document.getElementById('root')?.getBoundingClientRect();
+      const bar = Array.from(document.querySelectorAll('[role="tablist"]')).pop()?.getBoundingClientRect();
+      const nav = navigator as Navigator & { standalone?: boolean };
+      const dm = window.matchMedia?.('(display-mode: standalone)').matches;
+      setScreenLine([
+        `inner ${window.innerWidth}×${window.innerHeight}`, `screen ${screen.width}×${screen.height}`,
+        `vv ${Math.round(window.visualViewport?.height ?? 0)}`, `doc ${document.documentElement.clientHeight}`,
+        `root ${Math.round(root?.top ?? 0)}–${Math.round(root?.bottom ?? 0)}`, `bar ${Math.round(bar?.top ?? 0)}–${Math.round(bar?.bottom ?? 0)}`,
+        `sat ${sat} sab ${sab}`, `standalone ${nav.standalone === true ? 'yes' : nav.standalone === false ? 'no' : '?'} dm ${dm ? 'yes' : 'no'}`,
+        `fix ${document.documentElement.classList.contains('epic-screen-h') ? 'on' : 'off'}`,
+      ].join(' · '));
+    }
     api.health().then((h: any) => {
       let web: string | null = null;
       if (Platform.OS === 'web' && typeof document !== 'undefined') {
@@ -623,6 +646,7 @@ function Footer() {
     <Press onLongPress={reveal} delayLongPress={500} accessibilityRole="button" style={{ paddingTop: 16, paddingBottom: 20 }}>
       <Text style={styles.footer}>Epic 4.12.0 · <Text style={{ textDecorationLine: 'underline' }} onPress={() => { if (Platform.OS === 'web') window.location.reload(); }}>Get newest version</Text></Text>
       {hashes ? <Text style={[styles.footer, { marginTop: 4 }]}>app {hashes.app} · api {hashes.api}</Text> : null}
+      {screenLine ? <Text selectable style={[styles.footer, { marginTop: 4 }]}>{screenLine}</Text> : null}
     </Press>
   );
 }
