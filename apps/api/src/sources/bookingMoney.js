@@ -206,23 +206,32 @@ export async function changeDate({ offerId, hostId, sessionId, toDate, toTime = 
     const plan = moving.map((x) => {
       const onDate = plusDays(ymd(x.on_date), delta);
       const startsAt = x.starts_at && shiftMin ? timeOf(minutesOf(x.starts_at) + shiftMin) : hm(x.starts_at);
-      const endsAt = x.ends_at && shiftMin ? timeOf(minutesOf(x.ends_at) + shiftMin) : hm(x.ends_at);
+      // The end keeps the session's own length, so a move across midnight lands its end on the right day (Codex, 2 Oct 2026).
+      let endsAt = hm(x.ends_at);
+      let endsOn = x.ends_on ? plusDays(ymd(x.ends_on), delta) : null;
+      if (x.starts_at && x.ends_at) {
+        const len = daysBetween(x.on_date, x.ends_on ?? x.on_date) * 1440 + minutesOf(x.ends_at) - minutesOf(x.starts_at);
+        const end = minutesOf(startsAt) + Math.max(0, len);
+        endsAt = timeOf(end);
+        endsOn = end >= 1440 ? plusDays(onDate, Math.floor(end / 1440)) : null;
+      }
       if (onDate < today || localInstant(onDate, startsAt ?? '00:00', tzOf(offer)) <= now) throw refuse(400, 'in_the_past', 'The new date has to be in the future.');
-      return { x, onDate, startsAt, endsAt, late: isLate(sessionStart(x, offer), s, now) === true };
+      return { x, onDate, startsAt, endsAt, endsOn, late: isLate(sessionStart(x, offer), s, now) === true };
     });
     const moved = plan.map(({ x, onDate, startsAt, late }) => ({ id: x.id, from: { date: ymd(x.on_date), time: hm(x.starts_at) }, to: { date: onDate, time: startsAt }, late }));
     if (dryRun) {
       const guests = (await bookingsOn(c, moving.map((x) => x.id))).length;
       return { moved, late: moved.some((m) => m.late), guests, told: [] };
     }
-    for (const { x, onDate, startsAt, endsAt, late } of plan) {
-      const decidesAt = x.decides_at ? new Date(new Date(x.decides_at).getTime() + delta * 86_400_000) : null;
+    for (const { x, onDate, startsAt, endsAt, endsOn, late } of plan) {
+      // A weekly session decides a set number of hours before it starts, so its deadline moves with the time too (Codex, 2 Oct 2026).
+      const decidesAt = x.decides_at ? new Date(new Date(x.decides_at).getTime() + delta * 86_400_000 + (offer.lane === 'weekly' ? shiftMin * 60_000 : 0)) : null;
       await c.query(
         `update offer_sessions
-            set on_date = $2, starts_at = $3, ends_at = $4, ends_on = case when ends_on is null then null else ends_on + $5::int end,
+            set on_date = $2, starts_at = $3, ends_at = $4, ends_on = $5::date,
                 decides_at = $6, changed_from = $7::jsonb, late = late or $8
           where id = $1`,
-        [x.id, onDate, startsAt, endsAt, delta, decidesAt, JSON.stringify({ onDate: ymd(x.on_date), startsAt: hm(x.starts_at), at: now.toISOString() }), late],
+        [x.id, onDate, startsAt, endsAt, endsOn, decidesAt, JSON.stringify({ onDate: ymd(x.on_date), startsAt: hm(x.starts_at), at: now.toISOString() }), late],
       );
     }
     // The event's own dates follow its sessions; decides-by follows the first one.

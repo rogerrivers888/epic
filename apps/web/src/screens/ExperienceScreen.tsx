@@ -29,6 +29,7 @@ import { useViewport } from '../hooks/useViewport';
 import { useRouter } from '../router';
 import { paths, type Route } from '../routes';
 import { signedIn } from '../session';
+import { rememberHostLink } from '../hostLink';
 import { Faq } from '../components/chat/Faq';
 import { AskScreen } from '../components/chat/AskScreen';
 import { TopicScreen } from '../components/chat/TopicScreen';
@@ -44,6 +45,8 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
   const { width } = useViewport();
   const wide = width >= WIDE;
   const { navigate, back, query, href } = useRouter();
+  // An event page shared with the host's own token keeps it for the booking (hosting v4, E10).
+  const viaToken = query.get('via');
   // Signing in is /login, with the way straight back here (owner, 2 Oct 2026: no passcode screen for people).
   const logIn = () => navigate(`${paths.login()}?next=${encodeURIComponent(href)}`);
   // An invite-only offer opens only with the invitation's token (`?i=`).
@@ -59,6 +62,7 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
   const credential = inviteToken ? `i=${encodeURIComponent(inviteToken)}` : linkToken ? `l=${encodeURIComponent(linkToken)}` : null;
   const keyed = useCallback((href: string) => (credential ? `${href}${href.includes('?') ? '&' : '?'}${credential}` : href), [credential]);
   const [data, setData] = useState<{ offer: Experience; payments: PaymentsConfig } | null>(null);
+  useEffect(() => { if (data?.offer.hostId) rememberHostLink(data.offer.hostId, viaToken); }, [data?.offer.hostId, viaToken]);
   const [mine, setMine] = useState<{ bookings: Booking[]; party: PartyMember[]; you: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reporting, setReporting] = useState(false);

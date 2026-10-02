@@ -198,3 +198,14 @@ test('the host hears once when an event is under its minimum close to decides-by
   await engine.warnUnderMinimum();
   assert.equal((await query(`select count(*)::int as n from notifications where kind = 'under_minimum' and household_id = $1`, [hostHousehold.id])).rows[0].n, 1);
 });
+
+test('Codex: a time move keeps the session’s length across midnight, and a weekly deadline follows the new time', async () => {
+  settings.forget();
+  const { host, offer, sessions } = await anEvent({ lane: 'weekly', inDays: 6, days: 1, decidesInHours: 24 * 5 });
+  await query(`update offer_sessions set starts_at = '23:00', ends_at = '01:00', ends_on = on_date + 1 where id = $1`, [sessions[0].id]);
+  const { rows: [before] } = await query('select decides_at from offer_sessions where id = $1', [sessions[0].id]);
+  await engine.changeDate({ offerId: offer.id, hostId: host.id, sessionId: sessions[0].id, toDate: plusDays(today(), 6), toTime: '01:00', scope: 'this' });
+  const { rows: [after] } = await query(`select to_char(starts_at, 'HH24:MI') as s, to_char(ends_at, 'HH24:MI') as e, ends_on, decides_at from offer_sessions where id = $1`, [sessions[0].id]);
+  assert.deepEqual([after.s, after.e, after.ends_on], ['01:00', '03:00', null], 'two hours, all on the one day');
+  assert.equal(Math.round((new Date(after.decides_at) - new Date(before.decides_at)) / 3_600_000), -22, 'the deadline moves with the start');
+});

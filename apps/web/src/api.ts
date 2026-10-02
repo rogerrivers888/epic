@@ -48,6 +48,7 @@ import { copyHolder, deviceLabel, holderOf, sessionExpired, sessionToken, setCop
 import { raiseUpgradePrompt } from './upgradePrompt';
 import type { HostLane } from './routes';
 import type { HostSheet, LaneHome, LaneOffer, LanePatch } from './screens/host/v7/model';
+import { hostLinkFor } from './hostLink';
 import type { AtRisk, DeskEarnings, DeskEvent, DeskEvents, DeskFees, DeskHome, DeskInsights, DeskProfile, DeskReviews, DeskTodo } from './screens/host/desk/model';
 
 export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000').replace(/\/$/, '');
@@ -2812,6 +2813,13 @@ export const api = {
     post<{ moved: { id: string; from: { date: string; time: string | null }; to: { date: string; time: string | null }; late: boolean }[]; late: boolean; guests: number; preview: boolean }>(`/api/host/lanes/offers/${id}/change-date`, body),
   laneCancel: (id: string, body: { sessionIds?: string[] | null; reason: 'illness' | 'weather' | 'venue' | 'numbers' | 'other'; note?: string | null }) =>
     post<{ cancelled: number; refunds: number; late: boolean }>(`/api/host/lanes/offers/${id}/cancel`, body),
+  /**
+   * Book a lane event (hosting v4). The host's link token, when the guest came by it, rides along so the
+   * host-link rate applies; the booking screens arrive with the guest design.
+   */
+  laneBook: (offerId: string, hostId: string | null, body: Record<string, unknown>) =>
+    post<{ booking: { id: string; state: string }; pay: { clientSecret: string | null; paymentIntent: string; amountPence: number; hold: boolean } | null }>(
+      `/api/experiences/${encodeURIComponent(offerId)}/booking`, { ...body, hostLink: hostLinkFor(hostId) ?? undefined }),
   desk: () => request<DeskHome>('/api/host/desk'),
   deskCohostInvites: () => request<{ invites: { id: string; offerId: string; title: string | null; host: string; guests: boolean; messages: boolean; money: boolean }[] }>('/api/host/desk/cohost-invites'),
   deskAcceptCohost: (id: string) => post<{ accepted: true; offerId: string }>(`/api/host/desk/cohost-invites/${encodeURIComponent(id)}/accept`, {}),

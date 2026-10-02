@@ -22,6 +22,7 @@ import { Icon } from '../components/Icon';
 import { Wordmark } from '../components/Wordmark';
 import { useViewport } from '../hooks/useViewport';
 import { useRouter } from '../router';
+import { rememberHostLink } from '../hostLink';
 import { paths, type Route } from '../routes';
 import { HostFace, Kicker, LOCAL_LABEL, NewOnEpic, OfferRow, RatingLine, TRUST_LABEL, TrustBadge, TypeChip, VideoHero, dateOnly } from '../components/hosting';
 import { ReportBox } from './ExperienceScreen';
@@ -31,7 +32,9 @@ const WIDE = 900;
 export function HostProfileScreen({ route }: { route: Extract<Route, { name: 'hostProfile' }> }) {
   const { width } = useViewport();
   const wide = width >= WIDE;
-  const { navigate, back } = useRouter();
+  const { navigate, back, query } = useRouter();
+  // Arrived by the host's own link: keep its token for the booking (hosting v4, E10).
+  useEffect(() => { rememberHostLink(route.hostId, query.get('via')); }, [route.hostId]);
   const [data, setData] = useState<HostProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reporting, setReporting] = useState(false);

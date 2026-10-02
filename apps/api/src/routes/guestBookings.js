@@ -115,7 +115,12 @@ async function feeOn(o, host, valuePence, viaHostLink, s, client = null) {
       where r.host_id = $1 and r.side = 'guest' and r.publish_on <= current_date and not coalesce(r.hidden, false)`, [host.id],
   );
   // The intro's places are counted as they are promised, not only once confirmed: a booking still paying already holds one (Codex, 2 Oct 2026).
-  const { rows: [n] } = await q(`select count(*)::int as n from experience_bookings where host_id = $1 and (intro_ordinal is not null or (fee_reason = 'intro' and state <> 'cancelled'))`, [host.id]);
+  // …and a place used stays used, cancelled or not; only a booking that never got as far as paying gives it back (Codex, 2 Oct 2026).
+  const { rows: [n] } = await q(
+    `select count(*)::int as n from experience_bookings
+      where host_id = $1 and (intro_ordinal is not null or (fee_reason = 'intro' and coalesce(cancel_cause, '') not in ('unpaid', 'payment_setup_failed', 'payment_failed')))`,
+    [host.id],
+  );
   return feeFor(
     { visibility: o.visibility === 'public' ? 'public' : 'private', valuePence, viaHostLink, throughEpic: paidThroughEpic(o) },
     { rating: { ratedEvents: r?.rated ?? 0, avg: r?.avg ?? null }, hostStartedAt: host.created_at, bookingsSoFar: n?.n ?? 0, feeOverridePct: host.fee_override_pct },
