@@ -31,6 +31,7 @@
  */
 
 import { query } from '../db.js';
+import { IN_CENSUS_MARKET } from '../domain/markets.js';
 import { ringFor, placesWithin } from '../repositories/reach.js';
 import { censusInRing } from '../repositories/censusRing.js';
 import { CAP_MINUTES } from '../domain/reach.js';
@@ -143,7 +144,7 @@ export async function censusCovered(outcodes = []) {
   const { rows } = await query(
     `select o as code from unnest($1::text[]) o
       where exists (select 1 from census_tiles t where t.state = 'done' and o = any(t.outcodes))
-         or exists (select 1 from area_counts a where upper(a.area_slug) = o)
+         or exists (select 1 from area_counts a where upper(a.area_slug) = o and ${IN_CENSUS_MARKET('a.country_code')})
          or exists (select 1 from place_subcategories ps where upper(ps.area_slug) = o)`, [up]).catch(() => ({ rows: [] }));
   return new Set(rows.map((r) => r.code));
 }

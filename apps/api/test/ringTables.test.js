@@ -55,8 +55,8 @@ const seed = async ({ censused = true } = {}) => {
      on conflict (venue_ref) do update set epic_score = excluded.epic_score, scored_at = excluded.scored_at`);
   if (censused) {
     await query(
-      `insert into area_counts (area_slug, category, subcategory, census_count, censused_at)
-       values ('zt1', 'fun', 'theme-parks', 3, now())`);
+      `insert into area_counts (country_code, area_slug, category, subcategory, census_count, censused_at)
+       values ('GB', 'zt1', 'fun', 'theme-parks', 3, now())`);
   }
 };
 

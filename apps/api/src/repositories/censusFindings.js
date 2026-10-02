@@ -34,6 +34,7 @@
  */
 
 import { query } from '../db.js';
+import { IN_CENSUS_MARKET } from '../domain/markets.js';
 import { slicePlan, CENSUS_MAX_DEPTH } from '../sources/census.js';
 import { OSM_GROUND, FHRS_GROUND } from '../sources/groundCounts.js';
 
@@ -117,7 +118,7 @@ export async function coverageFor(outcodes = null) {
        select distinct upper(o) as code from census_tiles t, unnest(t.outcodes) o where ${where}
        union
        select distinct upper(area_slug) from area_counts
-        where ${outcodes ? 'upper(area_slug) = any($1::text[])' : 'true'}
+        where ${outcodes ? 'upper(area_slug) = any($1::text[])' : 'true'} and ${IN_CENSUS_MARKET()}
      ) covered`, params);
   // The districts censused the old way, before the grid. They hold real places,
   // and leaving them out would make the coverage sentence contradict the count
@@ -125,7 +126,7 @@ export async function coverageFor(outcodes = null) {
   const { rows: [a] } = await query(
     `select count(distinct area_slug)::int as areas, max(censused_at) as last_at
        from area_counts
-      where ${outcodes ? 'upper(area_slug) = any($1::text[])' : 'true'}`, params);
+      where ${outcodes ? 'upper(area_slug) = any($1::text[])' : 'true'} and ${IN_CENSUS_MARKET()}`, params);
 
   // Compared as dates, not as strings: a text sort of two timestamps agrees
   // with time only while they share a format, and these come from two tables.

@@ -34,6 +34,7 @@
  */
 
 import { query } from '../db.js';
+import { CENSUS_MARKET } from '../domain/markets.js';
 import { overpassQuery } from './overpass.js';
 import * as providerCalls from '../repositories/providerCalls.js';
 
@@ -779,7 +780,7 @@ export async function groundForArea(areaSlug) {
  * for this, and they have been null since the table was made. Filled from the
  * tiles, never by a second measurement — see `groundForArea`.
  */
-export async function rollUpGround(areaSlug) {
+export async function rollUpGround(areaSlug, { countryCode = CENSUS_MARKET } = {}) {
   const ground = await groundForArea(areaSlug);
   let written = 0;
   for (const [subcategory, g] of Object.entries(ground)) {
@@ -787,8 +788,8 @@ export async function rollUpGround(areaSlug) {
       `update area_counts
           set osm_count = coalesce($3, osm_count), osm_at = coalesce($4, osm_at),
               fhrs_count = coalesce($5, fhrs_count), fhrs_at = coalesce($6, fhrs_at)
-        where area_slug = $1 and subcategory = $2`,
-      [areaSlug, subcategory, g.osm, g.osmAt, g.fhrs, g.fhrsAt]);
+        where area_slug = $1 and subcategory = $2 and country_code = $7`,
+      [areaSlug, subcategory, g.osm, g.osmAt, g.fhrs, g.fhrsAt, countryCode]);
     written += rowCount;
   }
   return { written };

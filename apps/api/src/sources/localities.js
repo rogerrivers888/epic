@@ -169,7 +169,12 @@ export async function townAt(lat, lng) {
  */
 export async function ensureLocality({ name, kind, parentSlug = null, lat = null, lng = null, council = null, nation = null, osmRef = null, countryCode = 'GB' }) {
   if (!name) return null;
-  const slug = slugify(name);
+  // A slug names its country outside GB (markets step 6, migration 357): two
+  // Newports, or a Dublin routing key and a London outcode, are two rows, never one.
+  // A country's own row is its code alone. GB slugs are unchanged.
+  const cc = String(countryCode || 'GB').toUpperCase();
+  const base = slugify(name);
+  const slug = cc === 'GB' || (kind === 'country' && base === cc.toLowerCase()) ? base : `${cc.toLowerCase()}-${base}`;
   const { rows } = await query(
     `insert into localities (slug, name, kind, country_code, nation, parent_slug, lat, lng, council, osm_ref)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)

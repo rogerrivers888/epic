@@ -23,10 +23,10 @@ const SLUGS = ['zz7a', 'zz7b', 'zz7c'];
 const clean = () => query('delete from area_counts where area_slug = any($1)', [SLUGS]);
 
 const row = (slug, { unresolved = 0, sourced = null, text = 0 } = {}) => query(
-  `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, scored_count, saturated,
+  `insert into area_counts (country_code, area_slug, category, subcategory, census_count, surfaced_count, scored_count, saturated,
                             censused_at, complete, unresolved, sourced, text_count)
-   values ($1, 'culture', 'museums', 10, 10, 0, 0, now(), true, $2, $3, $4)
-   on conflict (area_slug, category, subcategory) do update
+   values ('GB', $1, 'culture', 'museums', 10, 10, 0, 0, now(), true, $2, $3, $4)
+   on conflict (country_code, area_slug, category, subcategory) do update
      set unresolved = excluded.unresolved, sourced = excluded.sourced, text_count = excluded.text_count`,
   [slug, unresolved, sourced, text]);
 
@@ -81,10 +81,10 @@ test('a row drawn while a sweep is in flight says so, carries its tiles, and sor
   });
   // Two drawers on one district: a big one part way through, a small one done.
   await query(
-    `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, scored_count, saturated, censused_at, complete, unresolved, sourced, text_count)
-     values ('zz7a', 'culture', 'museums', 340, 340, 0, 0, now(), false, 0, 'type', 0),
-            ('zz7a', 'culture', 'galleries', 12, 12, 0, 0, now(), true, 0, 'type', 0)
-     on conflict (area_slug, category, subcategory) do update set census_count = excluded.census_count, surfaced_count = excluded.surfaced_count, complete = excluded.complete`);
+    `insert into area_counts (country_code, area_slug, category, subcategory, census_count, surfaced_count, scored_count, saturated, censused_at, complete, unresolved, sourced, text_count)
+     values ('GB', 'zz7a', 'culture', 'museums', 340, 340, 0, 0, now(), false, 0, 'type', 0),
+            ('GB', 'zz7a', 'culture', 'galleries', 12, 12, 0, 0, now(), true, 0, 'type', 0)
+     on conflict (country_code, area_slug, category, subcategory) do update set census_count = excluded.census_count, surfaced_count = excluded.surfaced_count, complete = excluded.complete`);
   // An old run over the same ground on another grid, all done — its tiles
   // must not be counted into this sweep's progress (Codex, 25 Sep 2026) —
   // then the latest run: eleven tiles planned for the district, four answered.

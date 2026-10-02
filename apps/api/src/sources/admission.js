@@ -26,7 +26,7 @@
 
 import { query } from '../db.js';
 import { saveAnswer, markDisagreement } from '../repositories/questionSets.js';
-import { isGbPostcode } from '../repositories/placeIndex.js';
+import { postcodeSaysGb } from '../repositories/placeIndex.js';
 
 let costBandQuestion; // the global cost-band question id, resolved once
 
@@ -70,14 +70,17 @@ export async function recordAdmissionAnswer(venueRef, admission, { sourceUrl = n
   // route stays GB-only until the extractor learns € and $.
   //
   // GB must be KNOWN, not assumed: an unknown country is skipped like a foreign one
-  // (Codex). Where the index has no country yet, a GB postcode — the page's own, or
-  // the record's — settles it, the same test settleCountryFromPostcode uses.
+  // (Codex). A postcode decides it by the one rule every settle uses (markets step 6,
+  // POSTCODE_SAYS_GB): a full postcode in the ONS list is GB even over a stale stamp
+  // — Codex asked for that four times, and it is safe now an Eircode can never match —
+  // while an outcode alone only fills a missing country, never overrides one.
   const { rows: [pi] } = await query(
     `select pi.country_code, r.postcode from place_index pi
        left join place_records r on r.venue_ref = pi.venue_ref where pi.venue_ref = $1`, [venueRef]);
-  const country = pi?.country_code
-    ? String(pi.country_code).toUpperCase()
-    : (await isGbPostcode(postcode) || await isGbPostcode(pi?.postcode)) ? 'GB' : null;
+  const stamped = pi?.country_code ? String(pi.country_code).toUpperCase() : null;
+  const country = stamped === 'GB'
+    || await postcodeSaysGb(postcode, stamped) || await postcodeSaysGb(pi?.postcode, stamped)
+    ? 'GB' : stamped;
   if (country !== 'GB') {
     // A venue outside GB, or not yet known to be in it — clear any site answer written
     // before (Codex), so the cost row stops serving a band from a currency the extractor

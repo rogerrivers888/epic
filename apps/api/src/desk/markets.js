@@ -15,7 +15,7 @@ import { logChange } from './changes.js';
 import { BLOCKED_MARKETS } from '../domain/markets.js';
 import { NAMESPACES, hasDrifted } from '../domain/wording.js';
 import { scaleFor } from '../domain/costBand.js';
-import { OUTCODE_FROM } from '../repositories/placeIndex.js';
+import { OUTCODE_FROM, PCDS_FROM as AS_PCDS } from '../repositories/placeIndex.js';
 
 /* ------------------------------------------------------------------ markets */
 
@@ -43,9 +43,6 @@ export async function listMarkets() {
  * W12 is a London outcode and a Dublin routing key, and an Eircode's four-character
  * second part can never be a GB pcds.
  */
-// Today's rule is measured with today's own expression, not a copy of it (Codex).
-const NORMAL_PC = (col) => `upper(regexp_replace(${col}, '\\s', '', 'g'))`;
-const AS_PCDS = (col) => `(left(${NORMAL_PC(col)}, length(${NORMAL_PC(col)}) - 3) || ' ' || right(${NORMAL_PC(col)}, 3))`;
 export async function areaKeyCheck() {
   const n = async (sql, params = []) => (await query(sql, params)).rows;
   const [{ loaded }] = await n('select exists (select 1 from postcodes) as loaded');

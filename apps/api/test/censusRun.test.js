@@ -1270,9 +1270,9 @@ test('a text-sourced surfacing stops counting once its drawer is no longer asked
      values ('google:refence_lido_estate_agent', 'fun', 'lidos', 'text', 'text', 'test/refence', now(), now())
      on conflict (venue_ref, subcategory, coalesce(area_slug, '')) do update set sourced = excluded.sourced`);
   await query(
-    `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, scored_count, saturated, censused_at, complete, tiles, tiles_saturated, unresolved, sourced, text_count)
-     values ('zz6a', 'fun', 'lidos', 1987, 1987, 0, 0, now(), true, 1, 0, 0, 'text', 1987)
-     on conflict (area_slug, category, subcategory) do update set census_count = 1987, text_count = 1987, sourced = 'text'`);
+    `insert into area_counts (country_code, area_slug, category, subcategory, census_count, surfaced_count, scored_count, saturated, censused_at, complete, tiles, tiles_saturated, unresolved, sourced, text_count)
+     values ('GB', 'zz6a', 'fun', 'lidos', 1987, 1987, 0, 0, now(), true, 1, 0, 0, 'text', 1987)
+     on conflict (country_code, area_slug, category, subcategory) do update set census_count = 1987, text_count = 1987, sourced = 'text'`);
 
   await rollUpOutcodes({ outcodes: ['ZZ6A'] });
   const { rows: [lidos] } = await query(
@@ -1355,17 +1355,17 @@ test('a drawer the ground was asked about and answered nothing is written again,
      on conflict (venue_ref, subcategory, coalesce(area_slug, '')) do update set last_seen = excluded.last_seen`);
   // What the board said last week.
   await query(
-    `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, scored_count, saturated, censused_at, complete, tiles, tiles_saturated, unresolved, sourced, text_count)
-     values ('zz7a', 'adrenaline', 'ski-resort', 125, 125, 0, 0, now() - interval '8 days', true, 1, 0, 0, 'text', 125)
-     on conflict (area_slug, category, subcategory) do update set census_count = 125, text_count = 125`);
+    `insert into area_counts (country_code, area_slug, category, subcategory, census_count, surfaced_count, scored_count, saturated, censused_at, complete, tiles, tiles_saturated, unresolved, sourced, text_count)
+     values ('GB', 'zz7a', 'adrenaline', 'ski-resort', 125, 125, 0, 0, now() - interval '8 days', true, 1, 0, 0, 'text', 125)
+     on conflict (country_code, area_slug, category, subcategory) do update set census_count = 125, text_count = 125`);
 
   // And a drawer still asked, on a tile this sweep has not reached it on: the
   // tile is part way through, with the drawer not yet checkpointed.
   await query(`update census_tiles set state = 'doing', done_subcategories = array['museums'] where grid_key = 'test/gone'`);
   await query(
-    `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, scored_count, saturated, censused_at, complete, tiles, tiles_saturated, unresolved, sourced, text_count)
-     values ('zz7a', 'sport', 'golf', 44, 44, 0, 0, now() - interval '8 days', true, 1, 0, 0, 'type', 0)
-     on conflict (area_slug, category, subcategory) do update set census_count = 44`);
+    `insert into area_counts (country_code, area_slug, category, subcategory, census_count, surfaced_count, scored_count, saturated, censused_at, complete, tiles, tiles_saturated, unresolved, sourced, text_count)
+     values ('GB', 'zz7a', 'sport', 'golf', 44, 44, 0, 0, now() - interval '8 days', true, 1, 0, 0, 'type', 0)
+     on conflict (country_code, area_slug, category, subcategory) do update set census_count = 44`);
 
   await rollUpOutcodes({ outcodes: ['ZZ7A'] });
   const { rows: [row] } = await query(
@@ -1652,9 +1652,9 @@ test('a run rolls up the districts it censused, not the fresh ones it walked pas
   // meantime, which is the case a timestamp could not tell apart (Codex,
   // 28 Sep 2026). Only the run's own slices say where it asked.
   await query(
-    `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, complete)
-     values ('zz7a', 'sport', 'golf', 999, 999, true)
-     on conflict (area_slug, category, subcategory) do update set census_count = 999`);
+    `insert into area_counts (country_code, area_slug, category, subcategory, census_count, surfaced_count, complete)
+     values ('GB', 'zz7a', 'sport', 'golf', 999, 999, true)
+     on conflict (country_code, area_slug, category, subcategory) do update set census_count = 999`);
   const run = await startTestRun({ label: 'test walked past' });
   await query(
     `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, state, censused_at, saturated) values
@@ -1812,9 +1812,9 @@ test('a district asked again and stopped part-way reads as partial, dated from t
   // written, and the old rows went on saying complete (Codex, 28 Sep 2026).
   await seaDistrict({ outcode: 'ZZ4C', sectors: [['ZZ4C 1', 49.64, -4.54]] });
   await query(
-    `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, complete, censused_at)
-     values ('zz4c', 'sport', 'golf', 7, 7, true, now() - interval '40 days')
-     on conflict (area_slug, category, subcategory) do update set complete = true, census_count = 7`);
+    `insert into area_counts (country_code, area_slug, category, subcategory, census_count, surfaced_count, complete, censused_at)
+     values ('GB', 'zz4c', 'sport', 'golf', 7, 7, true, now() - interval '40 days')
+     on conflict (country_code, area_slug, category, subcategory) do update set complete = true, census_count = 7`);
   const run = await startTestRun({ label: 'test asked again' });
   await query(
     `insert into census_tiles (grid_key, min_lat, min_lng, max_lat, max_lng, outcodes, run_id, state, censused_at, started_at)

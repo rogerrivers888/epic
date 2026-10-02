@@ -781,7 +781,6 @@ async function reindexWhileLocked({ onProgress }) {
   // of settle's reach afterwards (Codex). Already under the build lock here, so the
   // helpers are called directly: normalise the GB outcode localities, then take each
   // place's country from its outcode. Whole index, not a queue.
-  await normaliseOutcodeCountries();
   await settleCountryFromPostcode();
   // A full rebuild corrects the whole index, so the backfill is caught up too.
   await stampCountryBackfilled();
@@ -897,8 +896,9 @@ async function reindexWhileLocked({ onProgress }) {
     on conflict do nothing`);
   await query(`
     insert into place_areas (venue_ref, area_slug)
-    select coalesce(a.venue_ref, 'atlas:' || a.id::text), lower(a.outcode)
-      from attractions a where a.state <> 'hidden' and a.outcode is not null
+    select coalesce(a.venue_ref, 'atlas:' || a.id::text), ${AREA_SLUG('reg.country_code', 'lower(a.outcode)')}
+      from attractions a left join regions reg on reg.slug = a.region_slug
+     where a.state <> 'hidden' and a.outcode is not null
     on conflict do nothing`);
   await query(`
     insert into place_areas (venue_ref, area_slug)
@@ -906,28 +906,15 @@ async function reindexWhileLocked({ onProgress }) {
     on conflict do nothing`);
   await query(`
     insert into place_areas (venue_ref, area_slug)
-    select sp.venue_ref, lower(sp.outcode) from scout_places sp where sp.outcode is not null
+    select sp.venue_ref, ${AREA_SLUG('sa.country_code', 'lower(sp.outcode)')}
+      from scout_places sp left join scout_areas sa on sa.code = sp.area_code
+     where sp.outcode is not null
     on conflict do nothing`);
   await query(`
     insert into place_areas (venue_ref, area_slug)
-    select r.venue_ref, lower(case
-             -- Already an outward code, which is what the place editor stores
-             -- and what half the sources give us. Taking the last three
-             -- characters off "ZZ99" leaves "Z" — so a full reindex deleted the
-             -- link the editor had just made and never put it back, and the
-             -- place vanished off that outcode's board (Codex, 18 Sep 2026).
-             when btrim(upper(r.postcode)) ~ '^[A-Z]{1,2}[0-9][A-Z0-9]?$'
-               then btrim(upper(r.postcode))
-             -- The outward code is everything before the space. Stripping the
-             -- space first and then matching let the pattern eat the incode's
-             -- first digit, so "SL4 1DE" was filed under "SL41" — an outcode
-             -- that does not exist (the invariant check, 18 Sep 2026).
-             when position(' ' in btrim(r.postcode)) > 0
-               then split_part(btrim(upper(r.postcode)), ' ', 1)
-             -- Written without one, the incode is always the last three.
-             else left(upper(btrim(r.postcode)), greatest(0, length(btrim(r.postcode)) - 3))
-           end)
+    select r.venue_ref, ${AREA_SLUG('pi.country_code', OUTCODE_FROM('r.postcode'))}
       from place_records r
+      left join place_index pi on pi.venue_ref = r.venue_ref
      where r.postcode is not null
        and lower(case
              -- Already an outward code, which is what the place editor stores
@@ -1208,6 +1195,16 @@ export const OUTCODE_FROM = (col) => `lower(case
 end)`;
 
 /**
+ * An area's slug from its own code and the country it is in (markets step 6;
+ * migration 357). GB keeps the bare code (`w12`), so nothing live moves; anywhere
+ * else carries its country (`ie-w12`), so a Dublin routing key and a London outcode
+ * are two areas, never one. A row with no country is filed as GB, as it always was.
+ */
+export const AREA_SLUG = (countryCol, codeExpr) => `(case
+  when ${countryCol} is null or upper(${countryCol}) = 'GB' then ${codeExpr}
+  else lower(${countryCol}) || '-' || ${codeExpr} end)`;
+
+/**
  * A place's country from owned data, not a rented coordinate (owner, 1 Oct 2026;
  * Option C). Its durable postcode — a fact of ours (migration 162) — resolves to an
  * outcode, and the authoritative record of which outcodes are British is the ONS
@@ -1228,15 +1225,35 @@ end)`;
  * Pass the refs being settled, or null for the whole corpus. Returns how many rows
  * it corrected.
  */
+/** A postcode written the way ONS writes `pcds` ('SL4 1DE'): every space out, one back before the last three. */
+const NO_SPACE = (col) => `upper(regexp_replace(${col}, '\\s', '', 'g'))`;
+export const PCDS_FROM = (col) => `(left(${NO_SPACE(col)}, length(${NO_SPACE(col)}) - 3) || ' ' || right(${NO_SPACE(col)}, 3))`;
+
 /**
- * Whether a postcode's outcode is a GB one we hold — the same test
- * `settleCountryFromPostcode` settles a country on, for a caller that has the
- * postcode in hand before the record is composed (sources/admission.js).
+ * The one rule for a postcode deciding a country (markets step 6; owner, 2 Oct 2026:
+ * "structural, not a heuristic"). Used by every place that lets a postcode set a
+ * country — the per-place settle, the whole-corpus correction and the admission
+ * check — and the reason the area correction no longer exists.
+ *
+ *   - A FULL postcode in the ONS list is GB, whatever country the row had. ONS
+ *     (`postcodes`, migration 253) is GB-only and every `pcds` has a three-character
+ *     second part, so an Eircode — whose second part is four — can never be one.
+ *   - An outcode alone can only FILL a missing country. W12 is a London outcode and
+ *     a Dublin routing key, so an outcode never overrides a country already set.
  */
-export async function isGbPostcode(postcode, q = query) {
+export const POSTCODE_SAYS_GB = (postcodeCol, countryCol) => `(
+  exists (select 1 from postcodes p where p.pcds = ${PCDS_FROM(postcodeCol)})
+  or (${countryCol} is null
+      and exists (select 1 from postcodes p where p.outcode = upper(${OUTCODE_FROM(postcodeCol)}))))`;
+
+/**
+ * Whether a postcode settles a place in GB under that rule, for a caller holding
+ * the postcode before the record is composed (sources/admission.js). `country` is
+ * what the place is stamped with now (null when nobody knows).
+ */
+export async function postcodeSaysGb(postcode, country = null, q = query) {
   if (!postcode || !String(postcode).trim()) return false;
-  const { rows } = await q(
-    `select exists (select 1 from postcodes p where p.outcode = upper(${OUTCODE_FROM('$1::text')})) as gb`, [String(postcode)]);
+  const { rows } = await q(`select ${POSTCODE_SAYS_GB('$1::text', '$2::text')} as gb`, [String(postcode), country || null]);
   return rows[0]?.gb === true;
 }
 
@@ -1249,30 +1266,21 @@ export async function settleCountryFromPostcode(refs = null, q = query) {
      where pi.venue_ref = r.venue_ref
        and r.postcode is not null
        and upper(pi.country_code) is distinct from 'GB'
-       and exists (select 1 from postcodes p where p.outcode = upper(${OUTCODE_FROM('r.postcode')}))
+       and ${POSTCODE_SAYS_GB('r.postcode', 'pi.country_code')}
        ${scope}`, refs ? [refs] : []);
   return rowCount ?? 0;
 }
 
-/**
- * A postcode locality ONS knows as a GB outcode is GB — undoing a legacy edit that
- * could have stamped it from a place's own country. ONS (`postcodes`, GB-only) is the
- * authority, not the outward-code syntax, because Eircode routing keys share the
- * shape (Codex). An Irish routing key is not in `postcodes` and is left alone.
- *
- * SCOPE — GB only, deliberately. A `localities` slug is an outcode and is NOT
- * country-unique: W12 is both a London outcode and a Dublin Eircode routing key, and
- * the table keys on slug alone, so one row cannot be both. A slug shared with a GB
- * outcode is treated as GB here. That is correct for the only live market and cannot
- * misfile real Irish data, because there is none — Ireland is groundwork, and giving
- * areas a (country, slug) key is the deferred US-census prerequisite the markets work
- * records as step 6 (migration 300: "folding [country_code] into the primary key is a
- * prerequisite of the US census … not of this migration"). The IE/GB slug collision
- * is resolved there, not here (Codex).
+/*
+ * The area correction (`normaliseOutcodeCountries`) is gone (markets step 6). It set a
+ * postcode locality to GB whenever its slug was an ONS outcode — an outcode overriding
+ * a country already set, which is exactly the W12 collision: a Dublin routing key's
+ * locality would be flipped to GB. Under the one rule an outcode never overrides a set
+ * country, and a locality always has one (not null, migration 048), so the correction
+ * has nothing left it may do. Its other job — repairing localities a legacy place edit
+ * stamped with the place's country — is held by migration 357 instead: a non-GB
+ * locality must carry its country prefix, so an unprefixed slug is GB by construction.
  */
-const normaliseOutcodeCountries = (q = query) => q(`update localities loc set country_code = 'GB'
-   where loc.kind = 'postcode' and upper(loc.country_code) <> 'GB'
-     and exists (select 1 from postcodes p where p.outcode = upper(loc.slug))`);
 
 /** Mark the country backfill as caught up to the postcode release that is loaded. */
 const stampCountryBackfilled = (q = query) => q('update postcode_releases set country_backfilled_release = loaded_release where one');
@@ -1285,7 +1293,7 @@ const correctPlaceCountriesFromPostcode = async (q = query) => {
       from place_records r
      where pi.venue_ref = r.venue_ref and r.postcode is not null
        and upper(pi.country_code) is distinct from 'GB'
-       and exists (select 1 from postcodes p where p.outcode = upper(${OUTCODE_FROM('r.postcode')}))`);
+       and ${POSTCODE_SAYS_GB('r.postcode', 'pi.country_code')}`);
   return rowCount ?? 0;
 };
 
@@ -1318,7 +1326,6 @@ const correctPlaceCountriesFromPostcode = async (q = query) => {
 export async function backfillCountriesFromPostcodes(release = null) {
   const BUSY = Symbol('build-lock-busy');
   const result = await underTheBuildLock(async () => {
-    await normaliseOutcodeCountries();
     return correctPlaceCountriesFromPostcode();
   }, BUSY, { wait: true });
   if (result === BUSY) return { corrected: 0, deferred: true };
@@ -1339,7 +1346,6 @@ export async function backfillCountriesFromPostcodes(release = null) {
 export async function applyPendingCountryBackfill(q = query) {
   const { rows: [rel] } = await q('select loaded_release, country_backfilled_release from postcode_releases where one');
   if (!rel?.loaded_release || rel.country_backfilled_release === rel.loaded_release) return 0;
-  await normaliseOutcodeCountries(q);
   const n = await correctPlaceCountriesFromPostcode(q);
   await stampCountryBackfilled(q);
   return n;
@@ -1455,7 +1461,8 @@ async function settleWhileLocked(limit) {
     insert into place_areas (venue_ref, area_slug)
     select coalesce(a.venue_ref, 'atlas:' || a.id::text), x.slug
       from attractions a
-      cross join lateral (values (a.region_slug), (a.locality_slug), (lower(a.outcode))) as x(slug)
+      left join regions reg on reg.slug = a.region_slug
+      cross join lateral (values (a.region_slug), (a.locality_slug), (${AREA_SLUG('reg.country_code', 'lower(a.outcode)')})) as x(slug)
      where a.state <> 'hidden' and x.slug is not null
        and coalesce(a.venue_ref, 'atlas:' || a.id::text) = any($1)
     on conflict do nothing`, [refs]);
@@ -1463,29 +1470,15 @@ async function settleWhileLocked(limit) {
     insert into place_areas (venue_ref, area_slug)
     select sp.venue_ref, x.slug
       from scout_places sp
-      cross join lateral (values (sp.locality_slug), (lower(sp.outcode))) as x(slug)
+      left join scout_areas sa on sa.code = sp.area_code
+      cross join lateral (values (sp.locality_slug), (${AREA_SLUG('sa.country_code', 'lower(sp.outcode)')})) as x(slug)
      where x.slug is not null and sp.venue_ref = any($1)
     on conflict do nothing`, [refs]);
   await query(`
     insert into place_areas (venue_ref, area_slug)
-    select r.venue_ref, lower(case
-             -- Already an outward code, which is what the place editor stores
-             -- and what half the sources give us. Taking the last three
-             -- characters off "ZZ99" leaves "Z" — so a full reindex deleted the
-             -- link the editor had just made and never put it back, and the
-             -- place vanished off that outcode's board (Codex, 18 Sep 2026).
-             when btrim(upper(r.postcode)) ~ '^[A-Z]{1,2}[0-9][A-Z0-9]?$'
-               then btrim(upper(r.postcode))
-             -- The outward code is everything before the space. Stripping the
-             -- space first and then matching let the pattern eat the incode's
-             -- first digit, so "SL4 1DE" was filed under "SL41" — an outcode
-             -- that does not exist (the invariant check, 18 Sep 2026).
-             when position(' ' in btrim(r.postcode)) > 0
-               then split_part(btrim(upper(r.postcode)), ' ', 1)
-             -- Written without one, the incode is always the last three.
-             else left(upper(btrim(r.postcode)), greatest(0, length(btrim(r.postcode)) - 3))
-           end)
+    select r.venue_ref, ${AREA_SLUG('pi.country_code', OUTCODE_FROM('r.postcode'))}
       from place_records r
+      left join place_index pi on pi.venue_ref = r.venue_ref
      where r.venue_ref = any($1) and r.postcode is not null
        and lower(case
              -- Already an outward code, which is what the place editor stores

@@ -40,12 +40,12 @@ async function seed(ref, { stamp, postcode, outcode, inOns = true, localityCount
 }
 const countryOf = async (ref) => (await query('select country_code from place_index where venue_ref = $1', [ref])).rows[0]?.country_code ?? null;
 
-test('a place whose outcode ONS knows becomes GB over a disagreeing stamp', async () => {
+test('a place whose full postcode ONS holds becomes GB over a disagreeing stamp', async () => {
   const ref = 'osm:node/cfp-wrong';
   await seed(ref, { stamp: 'US', postcode: 'ZZ1 1AA', outcode: 'ZZ1' });
   const n = await index.settleCountryFromPostcode([ref]);
   assert.ok(n >= 1, 'it corrected the row');
-  assert.equal(await countryOf(ref), 'GB', 'ZZ1 is a GB outcode ONS knows, so the US stamp is overruled');
+  assert.equal(await countryOf(ref), 'GB', 'ZZ1 1AA is a GB postcode ONS holds, so the US stamp is overruled');
 });
 
 test('a null stamp is filled from the postcode', async () => {
@@ -82,27 +82,20 @@ test('a postcode change requeues a placed row, so settle re-resolves its country
   assert.equal(pi.placed_at, null, 'the postcode change requeued the place for settling');
 });
 
-// Migration 311's locality normalisation, run against the test's own data: a postcode
-// locality is corrected to GB only where its slug is a GB outcode ONS knows.
-const normaliseLegacyOutcodes = () => query(`update localities loc set country_code = 'GB'
-   where loc.kind = 'postcode' and upper(loc.country_code) <> 'GB'
-     and exists (select 1 from postcodes p where p.outcode = upper(loc.slug))`);
-
-test('a GB outcode locality wrongly stamped non-GB is normalised, and its places resolve to GB', async () => {
-  const ref = 'osm:node/cfp-legacy';
-  // Legacy damage: a GB outcode's locality the old edit path stamped IE. It is a real
-  // GB outcode, so ONS knows it, and both the locality and the place must end GB.
-  await seed(ref, { stamp: 'IE', postcode: 'ZZ5 1AA', outcode: 'ZZ5', localityCountry: 'IE' });
-  await normaliseLegacyOutcodes();
-  const { rows: [loc] } = await query(`select country_code from localities where slug = 'zz5'`);
-  assert.equal(loc.country_code, 'GB', 'the GB outcode locality is corrected to GB');
-  await index.settleCountryFromPostcode([ref]);
-  assert.equal(await countryOf(ref), 'GB', 'and the place resolves to GB from ONS, not its IE stamp');
+test('a non-GB locality must name its country — the database refuses a bare slug (migration 357)', async () => {
+  // What the old area correction repaired after the fact — a GB outcode's locality
+  // stamped IE by a legacy edit — cannot be written any more: outside GB a slug
+  // carries its country, so a bare `zz5` is GB by construction.
+  await assert.rejects(
+    () => query(`insert into localities (slug, name, kind, country_code) values ('zz5x', 'ZZ5X', 'postcode', 'IE')`),
+    /localities_slug_names_its_country/);
+  await query(`insert into localities (slug, name, kind, country_code) values ('ie-zz5x', 'ZZ5X', 'postcode', 'IE') on conflict (slug) do nothing`);
+  await query(`insert into localities (slug, name, kind, country_code) values ('ie', 'Ireland', 'country', 'IE') on conflict (slug) do nothing`);
 });
 
 test('backfillCountriesFromPostcodes corrects the place and requeues it', async (t) => {
   const ref = 'osm:node/cfp-backfill';
-  await seed(ref, { stamp: 'IE', postcode: 'ZZ6 1AA', outcode: 'ZZ6', localityCountry: 'IE' });
+  await seed(ref, { stamp: 'IE', postcode: 'ZZ6 1AA', outcode: 'ZZ6' });
   await query('update place_index set placed_at = now() where venue_ref = $1', [ref]);
   t.after(() => query(`update postcode_releases set country_backfilled_release = null where one`));
   const { corrected, deferred } = await index.backfillCountriesFromPostcodes('2099-03');
@@ -130,27 +123,36 @@ test('a deferred backfill is applied when it is pending, and stamped so it is no
   assert.equal(await index.applyPendingCountryBackfill(), 0, 'running again is a no-op — no longer pending');
 });
 
-test('an Eircode routing key is not reclassified as GB — syntax overlaps but ONS does not know it', async () => {
-  // D02 is a valid Eircode routing key and matches the UK outward-code shape, but it
-  // is not a GB outcode, so ONS has no row for it and normalisation leaves it IE.
-  await query(`delete from postcodes where outcode = 'D02'`);
-  await query(`insert into localities (slug, name, kind, country_code) values ('d02','D02','postcode','IE')
-               on conflict (slug) do update set country_code = 'IE'`);
-  await normaliseLegacyOutcodes();
-  const { rows: [loc] } = await query(`select country_code from localities where slug = 'd02'`);
-  assert.equal(loc.country_code, 'IE', 'the Irish routing key stays IE');
-  // And a place on that Eircode is not made GB either.
-  const ref = 'osm:node/cfp-eircode';
-  await seed(ref, { stamp: 'IE', postcode: 'D02 AF30', outcode: 'D02', inOns: false });
-  await index.settleCountryFromPostcode([ref]);
-  assert.equal(await countryOf(ref), 'IE', 'the place keeps IE — D02 is not a GB outcode');
+test('an Eircode is never GB: its routing key may be a GB outcode, but the full code is never in ONS', async () => {
+  // W12 is a London outcode and a Dublin-area routing key (markets step 6). ONS
+  // knows W12 as an outcode, so the outcode alone can no longer decide a set country.
+  await seed('osm:node/cfp-w12-seed', { stamp: 'GB', postcode: null, outcode: 'W12' }); // ONS: W12 1AA
+  const eircode = 'osm:node/cfp-w12-eircode';
+  await seed(eircode, { stamp: 'IE', postcode: 'W12 X2Y3', outcode: null });
+  await index.settleCountryFromPostcode([eircode]);
+  assert.equal(await countryOf(eircode), 'IE', 'an Irish place on routing key W12 stays IE');
+  // The same outcode with a full GB postcode ONS holds overrides the stamp.
+  const london = 'osm:node/cfp-w12-london';
+  await seed(london, { stamp: 'IE', postcode: 'W12 1AA', outcode: null });
+  await index.settleCountryFromPostcode([london]);
+  assert.equal(await countryOf(london), 'GB', 'a full ONS postcode is GB whatever the stamp said');
+  // And a place with no country is filled from the outcode alone.
+  const bare = 'osm:node/cfp-w12-bare';
+  await seed(bare, { stamp: null, postcode: 'W12', outcode: null });
+  await index.settleCountryFromPostcode([bare]);
+  assert.equal(await countryOf(bare), 'GB', 'an outcode fills a missing country');
 });
 
-test('the outward code is read from any postcode shape', async () => {
-  // Full with a space, outcode-only, and no-space full all resolve to the same outcode.
+test('the outward code fills a missing country from any postcode shape, but never overrides one', async () => {
   for (const [ref, pc] of [['osm:node/cfp-s', 'ZZ4 5DD'], ['osm:node/cfp-o', 'ZZ4'], ['osm:node/cfp-n', 'ZZ45DD']]) {
+    await seed(ref, { stamp: null, postcode: pc, outcode: 'ZZ4' });
+    await index.settleCountryFromPostcode([ref]);
+    assert.equal(await countryOf(ref), 'GB', `${pc} fills GB from ZZ4`);
+  }
+  for (const [ref, pc, want] of [['osm:node/cfp-us-full', 'ZZ4 1AA', 'GB'], ['osm:node/cfp-us-nospace', 'zz41aa', 'GB'],
+    ['osm:node/cfp-us-out', 'ZZ4', 'US'], ['osm:node/cfp-us-unknown', 'ZZ4 5DD', 'US']]) {
     await seed(ref, { stamp: 'US', postcode: pc, outcode: 'ZZ4' });
     await index.settleCountryFromPostcode([ref]);
-    assert.equal(await countryOf(ref), 'GB', `${pc} resolves to ZZ4, a GB outcode`);
+    assert.equal(await countryOf(ref), want, `${pc} over a US stamp: ${want === 'GB' ? 'a full ONS postcode overrides' : 'an outcode alone does not'}`);
   }
 });

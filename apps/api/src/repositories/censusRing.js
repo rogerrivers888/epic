@@ -30,6 +30,7 @@
  */
 
 import { query } from '../db.js';
+import { IN_CENSUS_MARKET } from '../domain/markets.js';
 import { kmBetween } from '../domain/travel.js';
 import { TEXT_QUESTIONS, textStillAsked } from '../sources/censusQuestions.js';
 import { SHOWN_REF } from './placeStatus.js';
@@ -473,7 +474,7 @@ export async function censusByOutcodeSum(outcodes = []) {
   const slugs = outcodes.map((o) => String(o).toLowerCase());
   const { rows } = await query(
     `select category, sum(census_count)::int as places
-       from area_counts where area_slug = any($1) and category <> ''
+       from area_counts where area_slug = any($1) and category <> '' and ${IN_CENSUS_MARKET()}
       group by category`, [slugs]);
   return Object.fromEntries(rows.map((r) => [r.category, r.places]));
 }

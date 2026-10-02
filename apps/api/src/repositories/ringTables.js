@@ -43,6 +43,7 @@
  */
 
 import { query, withTransaction } from '../db.js';
+import { IN_CENSUS_MARKET } from '../domain/markets.js';
 import { censusInRing } from './censusRing.js';
 import { ringFor, cellAt, hasMatrix } from './reach.js';
 import { travelMode } from '../domain/travel.js';
@@ -134,7 +135,7 @@ async function countRing({ cell, lat = null, lng = null, kind, minutes }) {
 
   const [placed, seen] = await Promise.all([
     censusInRing({ cells: band, outcodes: ring.outcodes, shownOnly: true, circle: ring.circle ?? null }),
-    query('select distinct area_slug, category, complete from area_counts where area_slug = any($1)',
+    query(`select distinct area_slug, category, complete from area_counts where area_slug = any($1) and ${IN_CENSUS_MARKET()}`,
       [floorOutcodes.map((o) => o.toLowerCase())]),
   ]);
   // Looked at whole: a district with any row marked incomplete — a run stopped

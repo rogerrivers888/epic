@@ -39,8 +39,8 @@ test('the box holds every cell, with room at the edges', () => {
 test('the census count for a reach is summed from area_counts, and says what it has not seen', async () => {
   await query(`delete from area_counts where area_slug in ('zz1','zz2')`);
   await query(
-    `insert into area_counts (area_slug, category, subcategory, census_count, censused_at)
-     values ('zz1','fun','theme-parks',40, now()), ('zz1','food','pubs-bars',100, now()), ('zz2','fun','zoos-wildlife',2, now())`);
+    `insert into area_counts (country_code, area_slug, category, subcategory, census_count, censused_at)
+     values ('GB', 'zz1','fun','theme-parks',40, now()), ('GB', 'zz1','food','pubs-bars',100, now()), ('GB', 'zz2','fun','zoos-wildlife',2, now())`);
 
   const out = await search.censusCounts(['ZZ1', 'ZZ2', 'ZZ3']);
   assert.equal(out.counts.fun, 42, 'the ring is the sum of its outcodes');

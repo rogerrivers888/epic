@@ -33,6 +33,7 @@
 import { OWNED_SOURCES } from './ownedPoints.js';
 import { randomUUID } from 'node:crypto';
 import { query } from '../db.js';
+import { CENSUS_MARKET } from '../domain/markets.js';
 import { googleSource } from './google.js';
 import { NOT_ASKABLE } from './googleTypes.js';
 import { wordQuestionsFor, WORD_QUESTION_SUBCATEGORIES, SOURCED } from './censusQuestions.js';
@@ -324,6 +325,9 @@ export async function censusArea({
   // (`rollUpOutcodes`), and writing tile keys into `area_counts` would put
   // rows on the board for places nobody can navigate to.
   rollUpCounts = true,
+  // The market whose board these counts land on (migration 357: area_counts keys
+  // on the country and no longer defaults it).
+  countryCode = CENSUS_MARKET,
 } = {}) {
   if (!box || box.minLat == null) throw Object.assign(new Error('a census needs a box'), { status: 400 });
   const plan = await slicePlan({ subcategories });
@@ -392,7 +396,7 @@ export async function censusArea({
     await writeSurfacings(batch, runId);
     if (censusRunId) await writeRunSurfacings(batch, censusRunId);
   }
-  if (rollUpCounts) await rollUp({ areaSlug, runId, done, found: places, surfaced: [...surfaced.values()] });
+  if (rollUpCounts) await rollUp({ areaSlug, countryCode, runId, done, found: places, surfaced: [...surfaced.values()] });
 
   return {
     noted: places.length, surfacings: surfaced.size, ...stats,
@@ -573,7 +577,7 @@ async function writeRunSurfacings(rows, censusRunId) {
  * clocks. A null is honest — it says nobody has checked — and is not the same
  * as a nought.
  */
-async function rollUp({ areaSlug, runId, done, found, surfaced }) {
+async function rollUp({ areaSlug, countryCode, runId, done, found, surfaced }) {
   if (!areaSlug) return;
   for (const { category, subcategory } of done) {
     // Filed here — one per place, the shelving answer.
@@ -601,9 +605,9 @@ async function rollUp({ areaSlug, runId, done, found, surfaced }) {
       ? await query(`select count(*)::int n from epic_scores where venue_ref = any($1)`, [refs])
       : { rows: [{ n: 0 }] };
     await query(
-      `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, scored_count, saturated, censused_at, run_id, complete)
-       values ($1,$2,$3,$4,$5,$6,$7, now(), $8, true)
-       on conflict (area_slug, category, subcategory) do update
+      `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, scored_count, saturated, censused_at, run_id, complete, country_code)
+       values ($1,$2,$3,$4,$5,$6,$7, now(), $8, true, $9)
+       on conflict (country_code, area_slug, category, subcategory) do update
           set census_count   = excluded.census_count,
               surfaced_count = excluded.surfaced_count,
               scored_count   = excluded.scored_count,
@@ -611,16 +615,16 @@ async function rollUp({ areaSlug, runId, done, found, surfaced }) {
               censused_at    = excluded.censused_at,
               run_id         = excluded.run_id,
               complete       = true`,
-      [areaSlug, category, subcategory, mine.length, surfacedHere.length, scored.n, sat.n, runId],
+      [areaSlug, category, subcategory, mine.length, surfacedHere.length, scored.n, sat.n, runId, countryCode],
     );
   }
 }
 
 /** Has this area been censused recently enough to leave alone? */
-export async function censusIsFresh(areaSlug, { days = CENSUS_FRESH_DAYS } = {}) {
+export async function censusIsFresh(areaSlug, { days = CENSUS_FRESH_DAYS, countryCode = CENSUS_MARKET } = {}) {
   if (!areaSlug) return false;
   const { rows: [row] } = await query(
-    `select max(censused_at) at from area_counts where area_slug = $1`, [areaSlug],
+    `select max(censused_at) at from area_counts where area_slug = $1 and country_code = $2`, [areaSlug, countryCode],
   );
   return Boolean(row?.at) && Date.now() - new Date(row.at).getTime() < days * 86_400_000;
 }
@@ -735,7 +739,7 @@ export async function expireRentedCoordinates({ days = 30 } = {}) {
  * travel and costs nothing. It is also what makes the zeroing survivable at
  * all: a derived table that cannot be rebuilt is not derived, it is the record.
  */
-export async function rebuildCounts(areaSlug) {
+export async function rebuildCounts(areaSlug, { countryCode = CENSUS_MARKET } = {}) {
   const { rows } = await query(
     `select ps.category, ps.subcategory,
             count(*)::int                                            as surfaced,
@@ -759,15 +763,15 @@ export async function rebuildCounts(areaSlug) {
       [areaSlug, r.subcategory, MAX_DEPTH],
     );
     await query(
-      `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, scored_count, saturated, censused_at, complete)
+      `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, scored_count, saturated, censused_at, complete, country_code)
        values ($1,$2,$3,$4,$5,$6,$7,
                (select max(ran_at) from census_slices where area_slug = $1 and subcategory = $3 and problem is null),
-               true)
-       on conflict (area_slug, category, subcategory) do update
+               true, $8)
+       on conflict (country_code, area_slug, category, subcategory) do update
           set census_count = excluded.census_count, surfaced_count = excluded.surfaced_count,
               scored_count = excluded.scored_count, saturated = excluded.saturated,
               censused_at = excluded.censused_at, complete = true`,
-      [areaSlug, r.category, r.subcategory, r.filed, r.surfaced, r.scored, sat.n],
+      [areaSlug, r.category, r.subcategory, r.filed, r.surfaced, r.scored, sat.n, countryCode],
     );
     written += 1;
   }
@@ -775,10 +779,10 @@ export async function rebuildCounts(areaSlug) {
   // and a row of noughts asserts an answer nobody got.
   await query(
     `delete from area_counts a
-      where a.area_slug = $1
+      where a.area_slug = $1 and a.country_code = $2
         and not exists (select 1 from place_subcategories ps
                          where ps.area_slug = a.area_slug and ps.subcategory = a.subcategory)`,
-    [areaSlug],
+    [areaSlug, countryCode],
   );
   return { written };
 }

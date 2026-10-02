@@ -44,6 +44,7 @@ import { textStillAsked } from './censusQuestions.js';
 import { runAsSpender, currentSpender } from '../context.js';
 import { refreshAllBefore as refreshRingsBefore } from '../repositories/ringTables.js';
 import { USD_TO_GBP } from '../domain/providerPrices.js';
+import { CENSUS_MARKET } from '../domain/markets.js';
 
 /**
  * The grid.
@@ -1679,7 +1680,7 @@ export async function rollUpOutcodes({ outcodes = null, runId = null, alsoSquare
     // truth — or when every tile planned for the district has checkpointed
     // it. Otherwise the row it has stands until the ground answers.
     const { rows: standing } = await query(
-      'select category, subcategory from area_counts where area_slug = $1', [code.toLowerCase()]);
+      'select category, subcategory from area_counts where area_slug = $1 and country_code = $2', [code.toLowerCase(), CENSUS_MARKET]);
     for (const r of standing) {
       const key = `${r.category}/${r.subcategory}`;
       if (drawer.has(key)) continue;
@@ -1719,9 +1720,9 @@ export async function rollUpOutcodes({ outcodes = null, runId = null, alsoSquare
       await query(
         `insert into area_counts (area_slug, category, subcategory, census_count, surfaced_count, scored_count,
                                   saturated, censused_at, complete, tiles, tiles_saturated, unresolved,
-                                  sourced, text_count)
-         values ($1,$2,$3,$4,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-         on conflict (area_slug, category, subcategory) do update
+                                  sourced, text_count, country_code)
+         values ($1,$2,$3,$4,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+         on conflict (country_code, area_slug, category, subcategory) do update
             set census_count = excluded.census_count, surfaced_count = excluded.surfaced_count,
                 scored_count = excluded.scored_count, saturated = excluded.saturated,
                 censused_at = excluded.censused_at, complete = excluded.complete,
@@ -1736,7 +1737,9 @@ export async function rollUpOutcodes({ outcodes = null, runId = null, alsoSquare
           // One word where a drawer was answered one way, "mixed" where it was
           // not — and how many of the places came from a text query either way,
           // because that is the number a person is being asked to trust.
-          kinds.length === 1 ? kinds[0] : 'mixed', b.fromText.get(key)?.size ?? 0]);
+          kinds.length === 1 ? kinds[0] : 'mixed', b.fromText.get(key)?.size ?? 0,
+          // Outcodes from the ONS sectors are GB's (migration 357: named, never defaulted).
+          CENSUS_MARKET]);
       written += 1;
     }
     // Partial is a fact about the district, not about the drawers this pass
@@ -1745,7 +1748,7 @@ export async function rollUpOutcodes({ outcodes = null, runId = null, alsoSquare
     // earlier census went on reading whole while it was being asked again
     // (Codex, 28 Sep 2026). So every row it has says so. A district with no
     // rows reads as not looked at, which is a floor already.
-    if (!complete) await query('update area_counts set complete = false where area_slug = $1 and complete', [code.toLowerCase()]);
+    if (!complete) await query('update area_counts set complete = false where area_slug = $1 and country_code = $2 and complete', [code.toLowerCase(), CENSUS_MARKET]);
   }
   // Places that fell in a district their tile was never tagged with: counted
   // there all the same, and reported so the tagging can be judged. And what

@@ -318,7 +318,8 @@ test('outstanding misses only: once the key is registered (en-GB exists), its mi
 });
 
 test('the area-key check names an unprefixed non-GB area and reads both postcode rules', async () => {
-  await query(`insert into localities (slug, name, kind, country_code) values ('w12', 'W12', 'postcode', 'IE') on conflict (slug) do update set country_code = 'IE'`);
+  // Since migration 357 the database refuses an unprefixed non-GB area, so the
+  // list the check names can only ever be empty from here on; a prefixed one is fine.
   await query(`insert into localities (slug, name, kind, country_code) values ('ie-d02', 'D02', 'postcode', 'IE') on conflict (slug) do nothing`);
   await query(`insert into postcodes (pcds, sector, outcode, lat, lng, source) values ('W12 7RJ', 'W12 7', 'W12', 51.5, -0.23, 'test') on conflict (pcds) do nothing`);
   const place = (ref, pc) => query(`insert into place_index (venue_ref, country_code) values ($1, 'IE') on conflict (venue_ref) do update set country_code = 'IE'`, [ref])
@@ -326,7 +327,7 @@ test('the area-key check names an unprefixed non-GB area and reads both postcode
   await place('osm:node/akc-eircode', 'W12 AB34'); // a Dublin-shaped Eircode on the shared W12
   await place('osm:node/akc-gb', 'W12 7RJ');        // a real GB postcode under a stale IE stamp
   const out = await m.areaKeyCheck();
-  assert.deepEqual(out.unprefixed.map((r) => r.slug), ['w12'], 'only the unprefixed one is named');
+  assert.deepEqual(out.unprefixed, [], 'a prefixed non-GB area is not named, and an unprefixed one cannot exist');
   const ie = out.postcodeRule.find((r) => r.country === 'IE');
   assert.equal(ie.with_postcode, 2);
   assert.equal(ie.outcode_rule_says_gb, 2, 'today: the outcode flips the Eircode to GB too');

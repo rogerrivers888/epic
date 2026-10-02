@@ -1194,14 +1194,14 @@ test('a country reads its counties, and a town reads its own cells', async () =>
   await query(
     `insert into localities (slug, name, kind, country_code, parent_slug)
      values ('zz', 'Zedland', 'country', 'ZZ', null),
-            ('zedshire', 'Zedshire', 'county', 'ZZ', null),
-            ('zedtown', 'Zedtown', 'town', 'ZZ', 'zedshire')
+            ('zz-zedshire', 'Zedshire', 'county', 'ZZ', null),
+            ('zz-zedtown', 'Zedtown', 'town', 'ZZ', 'zz-zedshire')
      on conflict (slug) do nothing`);
 
   // A search in Zedtown is filed against Zedshire, because that is the grain
   // `whereOf` records at.
-  const where = await log.whereOf({ areaSlug: 'zedtown' });
-  assert.equal(where.areaSlug, 'zedshire');
+  const where = await log.whereOf({ areaSlug: 'zz-zedtown' });
+  assert.equal(where.areaSlug, 'zz-zedshire');
   const id = await log.noteSearch({ surface: 'places', areaSlug: where.areaSlug, subject: 'museums' });
   assert.ok(id);
 
@@ -1209,13 +1209,13 @@ test('a country reads its counties, and a town reads its own cells', async () =>
   // for the slug itself found nothing at all, which is what the standalone
   // board did (Codex, 18 Sep 2026).
   const country = await index.demandScope(await index.areaBySlug('zz'));
-  assert.ok(country.slugs.includes('zedshire'), 'a country is its localities, not its own slug');
+  assert.ok(country.slugs.includes('zz-zedshire'), 'a country is its localities, not its own slug');
   assert.ok((await log.totals({ areaSlugs: country.slugs, since: 30 })).searches >= 1);
   assert.equal((await log.totals({ areaSlugs: ['zz'], since: 30 })).searches, 0, 'nothing is filed under the country itself');
 
   // A town with no cells of its own reads its county's figures and says so.
-  const town = await index.demandScope(await index.areaBySlug('zedtown'));
-  assert.equal(town.asCounty?.slug, 'zedshire');
+  const town = await index.demandScope(await index.areaBySlug('zz-zedtown'));
+  assert.equal(town.asCounty?.slug, 'zz-zedshire');
   assert.ok((await log.totals({ areaSlugs: town.slugs, cells: town.cells, since: 30 })).searches >= 1);
 });
 

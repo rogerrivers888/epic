@@ -29,6 +29,7 @@
  */
 
 import { query } from '../db.js';
+import { IN_CENSUS_MARKET } from '../domain/markets.js';
 import { censusInRing } from '../repositories/censusRing.js';
 import { displaySlice } from './google.js';
 import { outcodeOfCell } from '../domain/ring.js';
@@ -259,7 +260,7 @@ export async function censusCounts(outcodes = []) {
     `select category, sum(census_count)::int as places,
             count(distinct area_slug)::int as areas
        from area_counts
-      where area_slug = any($1) and category <> ''
+      where area_slug = any($1) and category <> '' and ${IN_CENSUS_MARKET()}
       group by category`, [slugs]);
   // Reached, and reached whole, are different facts. A district a run
   // stopped part-way across has rows on the board marked incomplete, and a
@@ -267,7 +268,7 @@ export async function censusCounts(outcodes = []) {
   // floor it is (Codex, 28 Sep 2026, on the one-day census of the rest of the
   // UK). So `partial` is kept beside `missing`, and either makes a floor.
   const { rows: seen } = await query(
-    `select area_slug, bool_and(complete) as whole from area_counts where area_slug = any($1) group by area_slug`, [slugs]);
+    `select area_slug, bool_and(complete) as whole from area_counts where area_slug = any($1) and ${IN_CENSUS_MARKET()} group by area_slug`, [slugs]);
   const censused = seen.map((r) => r.area_slug);
   return {
     counts: Object.fromEntries(rows.map((r) => [r.category, r.places])),

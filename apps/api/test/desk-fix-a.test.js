@@ -48,7 +48,7 @@ test('a ring whose districts the census never covered cannot speak; one it cover
   assert.equal(before.speaks, false, 'no census of ZX9: the counts cannot speak');
   assert.equal(before.atLeast, true);
   assert.deepEqual(before.uncovered, ['ZX9']);
-  await query(`insert into area_counts (area_slug, category, subcategory, census_count) values ('zx9', 'fun', 'desk-fixa', 0)`);
+  await query(`insert into area_counts (country_code, area_slug, category, subcategory, census_count) values ('GB', 'zx9', 'fun', 'desk-fixa', 0)`);
   const after = await location.resolveLocation({ where: 'ZX9', minutes: 30, mode: 'car' });
   assert.equal(after.speaks, true, 'censused: a 0 there is a real 0');
   assert.deepEqual(after.uncovered, []);

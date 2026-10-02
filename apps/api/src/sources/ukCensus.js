@@ -27,6 +27,7 @@
 
 import crypto from 'node:crypto';
 import { query, pool } from '../db.js';
+import { IN_CENSUS_MARKET } from '../domain/markets.js';
 import * as censusRun from './censusRun.js';
 import { sendMail, mailStatus } from './mail.js';
 import { searchTextDailyLimit } from './googleQuota.js';
@@ -594,7 +595,7 @@ export async function status(now = new Date()) {
   }
   const { rows: [districts] } = await query(
     `select count(*)::int as whole from (
-       select area_slug from area_counts where area_slug ~ '^[a-z]{1,2}[0-9]' group by area_slug having bool_and(complete)) x`);
+       select area_slug from area_counts where area_slug ~ '^[a-z]{1,2}[0-9]' and ${IN_CENSUS_MARKET()} group by area_slug having bool_and(complete)) x`);
   const latest = d.latest;
   // Counted from the tiles, every one not done: a square given up on within a
   // run is tried again the next day, so it is work left like any other

@@ -23,6 +23,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { looksLikeHash, verifyResumeKey } from '../domain/resumeKey.js';
 import { can, requires } from '../access.js';
 import { query, withTransaction } from '../db.js';
+import { IN_CENSUS_MARKET } from '../domain/markets.js';
 import * as index from '../repositories/placeIndex.js';
 import { decodeEntities } from '../repositories/placeIndex.js';
 import { phoneOf } from '../domain/contact.js';
@@ -837,7 +838,7 @@ export async function censusBoardRows(slugs) {
                        and (t.state in ('todo', 'doing') or (t.state = 'failed' and t.failures < $3))
                        and r.state in ('running', 'waiting')) as sweeping
        from area_counts a
-      where a.area_slug = any($1)
+      where a.area_slug = any($1) and ${IN_CENSUS_MARKET('a.country_code')}
       group by 1, 2
       -- Finished rows first, by size; rows drawn while a sweep is in flight
       -- after them, whatever their number. A half-answered district ranked
@@ -913,7 +914,7 @@ router.get('/census', requires('view_library'), async (req, res, next) => {
     const { rows: empties } = await query(
       `select a.category, a.subcategory, upper(a.area_slug) as outcode, a.censused_at
          from area_counts a
-        where a.area_slug = any($1) and coalesce(a.surfaced_count, 0) = 0
+        where a.area_slug = any($1) and coalesce(a.surfaced_count, 0) = 0 and ${IN_CENSUS_MARKET('a.country_code')}
         order by a.category, a.subcategory, a.area_slug`,
       [slugs]);
 
@@ -932,6 +933,7 @@ router.get('/census', requires('view_library'), async (req, res, next) => {
          join area_counts a
            on a.area_slug = ps.area_slug and a.subcategory = ps.subcategory
           and a.run_id is not distinct from ps.run_id
+          and ${IN_CENSUS_MARKET('a.country_code')}
         where ps.area_slug = any($1)
           and i.subcategory is not null
           and i.subcategory <> ps.subcategory
@@ -947,7 +949,7 @@ router.get('/census', requires('view_library'), async (req, res, next) => {
     // has never reached at all is a third state again.
     const { rows: [seen] } = await query(
       `select count(*)::int censused, min(censused_at) oldest, max(censused_at) newest
-         from area_counts where area_slug = any($1)`, [slugs]);
+         from area_counts where area_slug = any($1) and ${IN_CENSUS_MARKET()}`, [slugs]);
     // The residual, which is held on the places themselves rather than the
     // counts: an open-map place nobody could find on Google.
     const { rows: [resid] } = await query(
@@ -1286,7 +1288,7 @@ router.get('/census-ring', requires('view_library'), async (req, res, next) => {
       // A matrix-less mode counts over its circle, the same shape Inspire does.
       censusInRing({ cells: ring.band ?? ring.cells, outcodes: ring.outcodes, circle: ring.circle ?? null }),
       censusByOutcodeSum(ring.outcodes),
-      query('select area_slug, bool_and(complete) as whole from area_counts where area_slug = any($1) group by area_slug',
+      query(`select area_slug, bool_and(complete) as whole from area_counts where area_slug = any($1) and ${IN_CENSUS_MARKET()} group by area_slug`,
         [reachOutcodes.map((o) => o.toLowerCase())]),
     ]);
     // A district nobody has censused contributes nought, and nought is not an
@@ -1606,7 +1608,7 @@ router.get('/census-ring-curve', requires('view_library'), async (req, res, next
       if (reqSubs.length) {
         const { rows } = await query(
           `select area_slug, count(distinct subcategory) filter (where complete and coalesce(saturated, 0) = 0) as n
-             from area_counts where area_slug = any($1) and category = $2 and subcategory = any($3)
+             from area_counts where area_slug = any($1) and category = $2 and subcategory = any($3) and ${IN_CENSUS_MARKET()}
             group by area_slug`, [floorSlugs, category, reqSubs]);
         for (const r of rows) if (Number(r.n) >= reqSubs.length) fully.add(r.area_slug);
       }
@@ -2095,18 +2097,24 @@ router.patch('/place', requires('manage_library'), async (req, res, next) => {
           // slug (a genuinely new GB outcode, or an Irish routing key) it falls back
           // to the place's own country rather than guessing GB. A real outcode we
           // already hold keeps its own country (on conflict does nothing).
+          //
+          // Markets step 6: an outcode never overrides a country already set — W12 is
+          // a London outcode and a Dublin routing key — so the place's own country
+          // decides. A place with none is filed as GB, as it always was: this editor
+          // only accepts UK-shaped outcodes. The locality's slug names its country
+          // outside GB (`ie-w12`), so the edit can never file an Irish place under a
+          // London district (migration 357).
           const place = (await client.query(
             'select country_code from place_index where venue_ref = $1', [ref])).rows[0] ?? null;
+          const country = String(place?.country_code || 'GB').toUpperCase();
+          const areaSlug = country === 'GB' ? lower(outcode) : `${country.toLowerCase()}-${lower(outcode)}`;
           await client.query(
-            `insert into localities (slug, name, kind, country_code)
-             select $1, $2, 'postcode',
-                    case when exists (select 1 from postcodes p where p.outcode = upper($1)) then 'GB'
-                         else $3 end
+            `insert into localities (slug, name, kind, country_code) values ($1, $2, 'postcode', $3)
              on conflict (slug) do nothing`,
-            [lower(outcode), outcode, place?.country_code ?? 'GB']);
+            [areaSlug, outcode, country]);
           await client.query(
             'insert into place_areas (venue_ref, area_slug) values ($1,$2) on conflict do nothing',
-            [ref, lower(outcode)]);
+            [ref, areaSlug]);
         }
         // Requeue so settle re-resolves the country from the new postcode (step 0a)
         // and refiles the country-level area membership: an edited postcode can move
