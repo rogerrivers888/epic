@@ -27,6 +27,7 @@ import { checklist, laneBlockers, hostingConfig, localDay, localInstant, SEQ, ag
 import { ladderProgress, introState } from '../domain/money.js';
 import { standingOf } from '../domain/hostDesk.js';
 import { mediaRef } from './hosting.js';
+import { stripeMode } from '../sources/stripe.js';
 
 export const router = Router();
 
@@ -228,7 +229,8 @@ router.get('/hosts', requires('view_hosting'), async (req, res, next) => {
       if (req.query.flag === 'rating' && !(h.rating != null && h.rating < 4)) continue;
       const rating = await hostRating(h.id);
       const progress = ladderProgress(s.public_commission, { ratedEvents: rating.ratedEvents, avg: rating.avg });
-      const intro = introState(s.intro_zero, { hostStartedAt: h.created_at, bookingsSoFar: 0 });
+      const { rows: [{ n: used }] } = await query('select count(*)::int as n from experience_bookings where host_id = $1 and intro_ordinal is not null', [h.id]);
+      const intro = introState(s.intro_zero, { hostStartedAt: h.created_at, bookingsSoFar: used });
       out.push({
         id: h.id, name: h.name, town: h.location_label ?? null,
         hosting: h.public_events ? 'Public' : h.events ? 'Private only' : null, kinds: h.kinds ?? [],
@@ -257,6 +259,7 @@ router.get('/hosts/:id', requires('view_hosting'), async (req, res, next) => {
     const { rows: [nextPayout] } = await query(`select amount_pence + tips_pence as pence, release_at, state, hold_reason from host_payouts where host_id = $1 and state in ('scheduled', 'held') order by release_at limit 1`, [h.id]);
     const { rows: events } = await query(`select id, title, lane, state, visibility, starts_on from host_offers where host_id = $1 and lane is not null order by updated_at desc limit 100`, [h.id]);
     const { rows: [late] } = await query(`select count(*)::int as n from offer_sessions x join host_offers o on o.id = x.offer_id where o.host_id = $1 and x.late and x.created_at > now() - interval '90 days'`, [h.id]);
+    const { rows: [{ n: introUsedN }] } = await query('select count(*)::int as n from experience_bookings where host_id = $1 and intro_ordinal is not null', [h.id]);
     const { rows: [open] } = await query(`select count(*)::int as n from hosting_complaints where host_id = $1 and state = 'open'`, [h.id]);
     const { rows: [outstanding] } = await query(
       `select (select count(*) from experience_bookings b where b.host_id = $1 and b.state in ('pending', 'confirmed'))::int as bookings,
@@ -266,7 +269,11 @@ router.get('/hosts/:id', requires('view_hosting'), async (req, res, next) => {
       host: { id: h.id, name: h.name, town: h.location_label, photo: mediaRef(h.photo_id), since: h.created_at, paused: Boolean(h.paused), stopped: Boolean(h.stopped_at), adult: h.date_of_birth ? ageOn(h.date_of_birth) >= 18 : null },
       trust: { verified: { state: h.identity_state, on: ymd(h.identity_verified_at) }, checked: { state: h.checked_state, level: h.checked_level ?? null, on: ymd(h.checked_on), submittedAt: h.checked_submitted_at ?? null }, insurance: { expires: ymd(h.insurance_expires) } },
       money: { stripe: h.payouts_state, tax: mask(h.tax_reference), takenPence: m.taken, epicPence: m.epic, paidOutPence: m.paid_out, nextPayout: nextPayout ? { pence: nextPayout.pence, on: ymd(nextPayout.release_at), state: nextPayout.state, holdReason: nextPayout.hold_reason } : null },
-      fee: { override: h.fee_override_pct != null ? Number(h.fee_override_pct) : null, progress },
+      fee: (() => {
+        const intro = introState(s.intro_zero, { hostStartedAt: h.created_at, bookingsSoFar: introUsedN });
+        const override = h.fee_override_pct != null ? Number(h.fee_override_pct) : null;
+        return { override, progress, intro: intro.active ? { daysLeft: intro.daysLeft, bookingsLeft: intro.bookingsLeft } : null, now: override ?? (intro.active ? 0 : progress?.rate ?? null) };
+      })(),
       ratings: rating,
       standing: standingOf({ thresholds: s.rating_escalation, avg: rating.avg, ratedEvents: rating.ratedEvents, lateChanges90d: late.n, openComplaints: open.n }),
       events: events.map((e) => ({ id: e.id, title: e.title, kind: e.lane, state: e.state, visibility: e.visibility, startsOn: ymd(e.starts_on) })),
@@ -649,9 +656,10 @@ async function dac7Rows(year) {
             coalesce(sum(case when p.kind = 'tip' then p.host_pence end), 0)::int as tips,
             count(*) filter (where p.kind = 'charge')::int as activities
        from hosting_payments p join hosts h on h.id = p.host_id
-      where p.state = 'succeeded' and p.mode = 'test' and p.created_at >= make_date($1, 1, 1) and p.created_at < make_date($1 + 1, 1, 1)
+      where p.state = 'succeeded' and p.mode = $2 and p.created_at >= make_date($1, 1, 1) and p.created_at < make_date($1 + 1, 1, 1)
       group by h.id, h.name, h.tax_reference, h.tax_address order by h.name`,
-    [year],
+    // The mode Stripe is in: test rows never count once Epic is live, and live rows never in test.
+    [year, stripeMode() === 'live' ? 'live' : 'test'],
   );
   return rows;
 }

@@ -2791,6 +2791,22 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, body);
     return body.media as HostMedia;
   },
+  // --- hosting v4: the back office's Hosting tab (BO8a–BO8r) and its settings ---
+  /** A read under /api/admin/hosting; the screens type what they read. */
+  hostingAdmin: <T = any,>(path: string, q: Record<string, string | number | null | undefined> = {}) => request<T>(`/api/admin/hosting${path}${qs(Object.fromEntries(Object.entries(q).filter(([, v]) => v != null && v !== '')))}`),
+  hostingAdminPost: <T = any,>(path: string, body: unknown = {}) => post<T>(`/api/admin/hosting${path}`, body),
+  hostingAdminPut: <T = any,>(path: string, body: unknown = {}) => put<T>(`/api/admin/hosting${path}`, body),
+  /** The DAC7 file: produced only by the owner, personally (the server refuses anyone else), and saved as a CSV. */
+  hostingDac7: async (year: number): Promise<void> => {
+    const token = sessionToken();
+    const res = await fetch(`${API_URL}/api/admin/hosting/reports/dac7`, { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ year }) });
+    if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => ({})));
+    const blob = await res.blob();
+    if (typeof document === 'undefined') return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = `epic-dac7-${year}.csv`;
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  },
   // --- hosting v4: once it is out, and the Host tab for hosts who already host (E1–E13) ---
   laneChangeDate: (id: string, body: { sessionId: string; toDate: string; toTime?: string | null; scope: 'this' | 'after'; preview?: boolean }) =>
     post<{ moved: { id: string; from: { date: string; time: string | null }; to: { date: string; time: string | null }; late: boolean }[]; late: boolean; guests: number; preview: boolean }>(`/api/host/lanes/offers/${id}/change-date`, body),

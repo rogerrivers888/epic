@@ -55,7 +55,7 @@ import { Lookup } from './screens/Lookup';
 import { Scout } from './screens/Scout';
 import { HowItWorks } from './screens/HowItWorks';
 import { VoiceLab } from './screens/VoiceLab';
-import { Hosting } from './screens/Hosting';
+import { HostingTab } from './hosting/HostingTab';
 import { Mail } from './screens/Mail';
 import { Waitlist } from './screens/Waitlist';
 import { Staff } from './screens/Staff';
@@ -173,7 +173,7 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
    */
   { key: 'filing', label: 'Categories', icon: 'filters', needs: 'view_library', sub: 'Overview, categories, facts, mapping, collections, fact automations and changes', group: 'Data' },
   { key: 'voice', label: 'Voice lab', icon: 'mic', needs: 'manage_settings', sub: 'The ways of hearing, compared on the same sentences', group: 'Data' },
-  { key: 'hosting', label: 'Hosting', icon: 'host', needs: 'view_hosting', sub: 'First pitches to read within 48 hours, the trust ladder, and reports', group: 'Data' },
+  { key: 'hosting', label: 'Hosting', icon: 'host', needs: 'view_hosting', sub: 'Review · Hosts · Events · Money · Safety · Settings · Reports · Changes', group: 'Data' },
   { key: 'skills', label: 'Skills', icon: 'credential', needs: 'view_skills', sub: 'What hosts say they are expert in, the sixteen buckets it is browsed by, and the words Epic has not heard before', group: 'Data' },
   { key: 'queue', label: 'Content queue', icon: 'preview', needs: 'view_library', sub: 'What households have sent us, and whether it is fit to publish', group: 'Data' },
   { key: 'review', label: 'Review queue', icon: 'list', needs: 'view_questions', sub: 'Features Google review-spotting found, to approve into facts or ignore', group: 'Data' },
@@ -184,7 +184,8 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
   { key: 'roles', label: 'Roles', icon: 'locked', needs: 'view_accounts', sub: 'Doors and capabilities', group: 'Admin' },
   { key: 'mail', label: 'Mail', icon: 'mail', needs: 'view_activity', sub: 'Every e-mail sent, and whether it was delivered, opened or bounced', group: 'Admin' },
   { key: 'plans', label: 'Plans', icon: 'money', needs: 'view_accounts', sub: 'What a household can be on', group: 'Admin' },
-  { key: 'audit', label: 'Audit', icon: 'info', needs: 'view_audit', sub: 'Who did what to whom', group: 'Admin' },
+  // "Audit" is called Changes (hosting v4 handover §3.8); the address stays /admin/audit so every kept link lands.
+  { key: 'audit', label: 'Changes', icon: 'info', needs: 'view_audit', sub: 'Who did what to whom', group: 'Admin' },
   // No capability: the decisions behind what Epic does are not a privilege, and
   // an account that can see any of this should be able to see why.
   { key: 'how', label: 'How it works', icon: 'owned', sub: 'The decisions, what they cost, and where each rule lives', group: 'Admin' },
@@ -322,7 +323,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
       {screen === 'categories' || screen === 'shelves'
         ? <Categories canManage={can('manage_library')} startAt={screen === 'shelves' ? 'shelves' : undefined} /> : null}
       {screen === 'voice' ? <VoiceLab /> : null}
-      {screen === 'hosting' ? <Hosting canManage={can('manage_hosting')} /> : null}
+      {screen === 'hosting' ? <HostingTab canManage={can('manage_hosting')} /> : null}
       {screen === 'skills' ? <Skills canManage={can('manage_skills')} /> : null}
       {screen === 'staff' ? <Staff canManage={can('manage_staff')} /> : null}
       {screen === 'mail' ? <Mail canSend={can('manage_settings')} /> : null}
