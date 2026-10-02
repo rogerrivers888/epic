@@ -242,7 +242,7 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
             {offer.priceMode === 'by_numbers' ? <Text style={type.small}>Depends on numbers: never more than {money(offer.price.ceilingPence)} each.</Text> : null}
             {needsLine(offer) ? <Text style={[type.small, { color: colors.ink, fontWeight: '600' }]}>{needsLine(offer)}</Text> : null}
             <Text style={type.small}>
-              {offer.money === 'direct' ? `Paid to ${host.name.split(' ')[0]} directly, however you normally would. ` : `${REFUND_WORDS[offer.refundRule]}.`}{offer.minCount ? ` Under ${offer.minCount} and it is called off — everybody is told and nothing is taken.` : ''}
+              {offer.money === 'direct' ? `Paid to ${host.name.split(' ')[0]} directly, however you normally would. ` : `${offer.refundWords ?? REFUND_WORDS[offer.refundRule]}.`}{offer.minCount ? ` Under ${offer.minCount} and it is called off — everybody is told and nothing is taken.` : ''}
             </Text>
             {offer.ageLimit ? <Text style={type.small}>Over {offer.ageLimit}s only. We ask for the age of everyone in the party when you book.</Text> : null}
           </View>
@@ -643,7 +643,7 @@ function BookSheet({ offer, payments, party, you, wide, keys, onBack, onBooked }
                 ? `Needs ${offer.standing.minimum} people. You are number ${offer.standing.heads + heads}, so it is going ahead. `
                 : `Needs ${offer.standing.minimum} people and ${offer.standing.heads} ${offer.standing.heads === 1 ? 'is' : 'are'} in. Your place is held and nothing leaves your account until it is certain. `
               : ''}
-            {REFUND_WORDS[offer.refundRule]}.
+            {offer.refundWords ?? REFUND_WORDS[offer.refundRule]}.
           </Text>
           {!payments.ready ? <Text style={type.tiny}>{payments.note}</Text> : null}
         </View>

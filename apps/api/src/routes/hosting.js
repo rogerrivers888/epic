@@ -48,6 +48,7 @@ import * as skills from '../repositories/hostSkills.js';
 import { FACET_CAP, TAG_CAP, categoryForPassion, categoryFrom, credentialDisplay } from '../domain/hostSkills.js';
 import { pdfText } from '../sources/menuRead.js';
 import { extract as extractWith, openaiEnabled, transcribe } from '../sources/openai.js';
+import { refundWords, hostingConfig } from '../domain/lanes.js';
 
 export const router = Router();
 export const publicRouter = Router();
@@ -135,6 +136,8 @@ function publicOffer(o, bookings = [], { revealed = false, host = null } = {}) {
     // …and a one-off over several days says when it ends (Codex, 2 Oct 2026); the age range is the lane's.
     multiDay: Boolean(o.multi_day), endsOn: ymd(o.ends_on), ageMin: o.age_min ?? null, ageMax: o.age_max ?? null,
     bookAheadPence: o.book_ahead_pence ?? null, childPence: o.child_pence ?? null,
+    // The lane's own refund terms, in the configured words (Codex, 2 Oct 2026).
+    refundWords: o.lane && o.refund_policy ? refundWords(o.refund_policy, hostingConfig()) : null,
     title: o.title, summary: o.summary, description: o.description, whyYou: o.why_you, includes: o.includes, category: o.category,
     // The five fields. `tags` and `facets` are in the host's own order — the
     // first tag is what shows on the card — and a pending one is live on the

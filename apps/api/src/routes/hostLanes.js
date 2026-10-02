@@ -780,6 +780,8 @@ router.post('/host/lanes/offers/:id/sync', async (req, res, next) => {
 router.post('/host/lanes/offers/:id/video', async (req, res, next) => {
   try {
     const { household, host, account, offer } = await myLaneOffer(req.params.id);
+    // A video that has been sent for review, or reviewed, is not swapped from here (Codex, 2 Oct 2026).
+    if (offer.state !== 'draft') throw refuse(409, 'already_sent', offer.state === 'live' ? 'This one is out already.' : 'This one is with us for review.');
     const b = req.body ?? {};
     const cfg = hostingConfig();
     const patch = {};
