@@ -2576,9 +2576,10 @@ async function planDayForTrip({ household, tripId, dayId, minActivities, minFood
       ? { ...shared, candidates: JSON.parse(JSON.stringify(shared.candidates)), excluded: [...shared.excluded] }
       : await retrievePool({ household, trip, attendees, intent: { wants, special: false }, sessionId: session.id });
     const shortlist = await tripsRepo.shortlistOf(tripId);
-    // Named as the trip shows them (the live names are already in memory from
-    // the trip screen, so this is rarely a paid call).
-    await resolveInto([{ rows: shortlist, refKey: 'venue_ref', nameKey: 'venue_label' }], { purpose: 'plan.displayName' });
+    // Owned names only: what the planner builds from these is saved with the
+    // plan (plan_sessions), and a live Google name may be shown but never kept
+    // (Codex, 2 Oct 2026).
+    await resolveInto([{ rows: shortlist, refKey: 'venue_ref', nameKey: 'venue_label' }], { purpose: 'plan.displayName', live: false });
     const byRef = new Map(pool.candidates.map((c) => [`${c.source}:${c.sourcePlaceId}`, c]));
     const extra = [];
     const mustKeys = [];
@@ -2611,7 +2612,7 @@ async function planDayForTrip({ household, tripId, dayId, minActivities, minFood
     // is fixed: every option is built around it, and the pool treats it as the
     // day's one ticketed thing.
     const booked = await tripsRepo.anchorStops(dayId);
-    await resolveInto([{ rows: booked, refKey: 'venue_ref', nameKey: 'venue_name' }], { purpose: 'plan.displayName' });
+    await resolveInto([{ rows: booked, refKey: 'venue_ref', nameKey: 'venue_name' }], { purpose: 'plan.displayName', live: false });
     const tzD = trip.timezone || DEFAULT_TZ;
     const fixedStops = booked.map((s) => {
       const startsAt = wallToUtc(day.date, (s.start_time || trip.depart_at.slice(11, 16) || '12:00').slice(0, 5), tzD).toISOString();
