@@ -269,7 +269,8 @@ test('the purge counts and clears a plan session saved before the rule', async (
   let id;
   try {
     ({ rows: [{ id }] } = await query(`insert into plan_sessions (household_id, state) values ($1, $2) returning id`,
-      [hh, JSON.stringify({ pool: { candidates: [{ source: 'google', sourcePlaceId: randomUUID(), name: 'Legacy Plan Name' }] } })]));
+      [hh, JSON.stringify({ pool: { candidates: [{ source: 'google', sourcePlaceId: randomUUID(), name: 'Legacy Plan Name' }] },
+        transcript: [{ role: 'assistant', text: 'Legacy Plan Name is open until six.' }] })]));
   } finally {
     await query('alter table plan_sessions enable trigger no_rented_name');
   }
@@ -288,4 +289,31 @@ test('a fixed stop in a plan — source "anchor", key a provider\'s — loses th
     [hh, JSON.stringify({ fixed: [{ key: g, source: 'anchor', sourcePlaceId: g.split(':')[1], name: 'Google Theatre Name' }] })]);
   assert.equal(s.state.fixed[0].name, null);
   assert.equal(s.state.fixed[0].key, g, 'the reference stays');
+});
+
+test('a provider\'s name in a plan\'s words is kept as its reference and named again on read; the household\'s own words stay as said', async () => {
+  const planSessions = await import('../src/repositories/planSessions.js');
+  const hh = await household();
+  const id = randomUUID();
+  const ref = `google:${id}`;
+  await query(`insert into place_records (venue_ref, name, provenance) values ($1, 'The Owned Aquarium', '{"name":"wikipedia"}')`, [ref]);
+  const state = {
+    pool: { candidates: [{ source: 'google', sourcePlaceId: id, name: 'Sea Life Google Name' }] },
+    options: [{ title: 'A morning at Sea Life Google Name', stops: [{ venueRef: ref, name: 'Sea Life Google Name' }] }],
+    transcript: [
+      { role: 'user', text: 'Somewhere like Sea Life Google Name please' },
+      { role: 'assistant', text: 'I have put Sea Life Google Name first.' },
+    ],
+  };
+  const s = await planSessions.insertPlanSession(hh, state);
+  assert.equal(state.options[0].title, 'A morning at Sea Life Google Name', 'the state in hand is not changed');
+  const { rows: [raw] } = await query('select state from plan_sessions where id = $1', [s.id]);
+  const text = JSON.stringify(raw.state);
+  assert.equal(raw.state.transcript[0].text, 'Somewhere like Sea Life Google Name please', 'the household\'s own words stay as said');
+  assert.equal(raw.state.transcript[1].text, `I have put ⟦${ref}⟧ first.`);
+  assert.equal(raw.state.options[0].title, `A morning at ⟦${ref}⟧`);
+  assert.equal((text.match(/Sea Life Google Name/g) ?? []).length, 1, 'only in the household\'s own turn');
+  const read = await planSessions.livePlanSession(s.id, hh);
+  assert.equal(read.state.transcript[1].text, 'I have put The Owned Aquarium first.');
+  assert.equal(read.state.options[0].title, 'A morning at The Owned Aquarium');
 });

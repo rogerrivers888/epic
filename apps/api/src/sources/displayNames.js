@@ -53,12 +53,13 @@ export async function ownedNamesFor(refs, householdId = null) {
 const LIVE_TTL_MS = 60 * 60_000;
 const liveCache = new Map(); // ref -> { name, at }
 const cachedLive = (ref) => {
-  const hit = liveCache.get(ref);
-  if (hit && Date.now() - hit.at < LIVE_TTL_MS) return hit;
-  // Or a name Google gave in any answer this past hour — a search, a drawer —
-  // held in memory by sources/liveNames.js: no need to ask again.
+  // A name Google gave in any answer this past hour — a search, a drawer —
+  // held in memory by sources/liveNames.js, first: it outranks a lookup of
+  // ours that came back empty earlier (Codex, 2 Oct 2026).
   const name = heldName(ref);
-  return name ? { name, at: Date.now() } : undefined;
+  if (name) return { name, at: Date.now() };
+  const hit = liveCache.get(ref);
+  return hit && Date.now() - hit.at < LIVE_TTL_MS ? hit : undefined;
 };
 
 // A fetch already in flight for a ref, so concurrent lookups — a place page
@@ -237,6 +238,8 @@ const refsOfJson = (o) => [
  * is written back by itself; a save goes through the trigger again.
  */
 export async function nameJson(doc, { purpose = 'plan.displayName', householdId = null, cap = 25 } = {}) {
+  // Words first: a name tokenised into a title or a reply (tokeniseJson).
+  await untokenise(doc, { purpose, householdId, cap });
   const found = [];
   const walk = (node) => {
     if (Array.isArray(node)) { node.forEach(walk); return; }
@@ -270,4 +273,86 @@ export async function nameJson(doc, { purpose = 'plan.displayName', householdId 
   return doc;
 }
 
-export default { ownedNamesFor, resolveNames, resolveInto, nameJson };
+const TOKEN = /⟦([a-z]+:[^⟧\s]+)⟧/g;
+const escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * A copy of a JSON document ready to be written down (owner, 2 Oct 2026: "no
+ * stored provider names anywhere"). Migration 343 empties a provider's name
+ * where it sits beside its place's reference; this catches the same name
+ * where it was copied into words — an option's title, a reason, the
+ * assistant's reply in the transcript — and puts the place's reference there
+ * as a token, ⟦google:…⟧, which nameJson turns back into a name on read. The
+ * household's own words are theirs and are left exactly as said: their turns
+ * in the transcript, and the intent parsed from them. Never mutates `doc`.
+ */
+export async function tokeniseJson(doc) {
+  if (!doc || typeof doc !== 'object') return doc;
+  const copy = JSON.parse(JSON.stringify(doc));
+  const pairs = [];
+  const collect = (node) => {
+    if (Array.isArray(node)) { node.forEach(collect); return; }
+    if (!node || typeof node !== 'object') return;
+    for (const v of Object.values(node)) if (v && typeof v === 'object') collect(v);
+    const refs = refsOfJson(node);
+    if (!refs.length) return;
+    for (const k of NAME_KEYS) if (typeof node[k] === 'string' && node[k].trim().length >= 3) pairs.push({ name: node[k].trim(), refs });
+  };
+  collect(copy);
+  if (!pairs.length) return copy;
+  const rentedSet = await rentedRefs([...new Set(pairs.flatMap((p) => p.refs))]);
+  const byName = new Map();
+  for (const p of pairs) {
+    const ref = p.refs.find((r) => rentedSet.has(r));
+    if (ref && !byName.has(p.name)) byName.set(p.name, ref);
+  }
+  if (!byName.size) return copy;
+  // Longest first, so "The Crown Inn" is not half-replaced by "The Crown".
+  const names = [...byName.keys()].sort((a, b) => b.length - a.length);
+  const re = new RegExp(names.map(escapeRe).join('|'), 'g');
+  const swap = (text) => text.replace(re, (m) => `⟦${byName.get(m)}⟧`);
+  const own = (key, node) => key === 'intent' || (node && node.role === 'user');
+  const walk = (node) => {
+    if (Array.isArray(node)) { node.forEach((v, i) => { if (typeof v === 'string') node[i] = swap(v); else walk(v); }); return; }
+    if (!node || typeof node !== 'object' || own(null, node)) return;
+    for (const [k, v] of Object.entries(node)) {
+      if (own(k, null)) continue;
+      // The name fields are emptied by migration 343 and the references are not words.
+      if (NAME_KEYS.includes(k) || ['ref', 'key', 'venueRef', 'source', 'sourcePlaceId'].includes(k)) continue;
+      if (typeof v === 'string') node[k] = swap(v);
+      else walk(v);
+    }
+  };
+  walk(copy);
+  return copy;
+}
+
+/** Turn ⟦ref⟧ tokens in every string of `doc` back into names, in place. */
+async function untokenise(doc, opts) {
+  const refs = new Set();
+  const seek = (node) => {
+    if (Array.isArray(node)) { node.forEach((v) => (typeof v === 'string' ? [...v.matchAll(TOKEN)].forEach((m) => refs.add(m[1])) : seek(v))); return; }
+    if (!node || typeof node !== 'object') return;
+    for (const v of Object.values(node)) {
+      if (typeof v === 'string') for (const m of v.matchAll(TOKEN)) refs.add(m[1]);
+      else seek(v);
+    }
+  };
+  seek(doc);
+  if (!refs.size) return;
+  const rows = [...refs].map((ref) => ({ ref, name: null }));
+  await resolveNames(rows, { refKey: 'ref', nameKey: 'name', ...opts });
+  const by = new Map(rows.map((r) => [r.ref, r.name]));
+  const swap = (text) => text.replace(TOKEN, (_, ref) => by.get(ref) ?? 'a place');
+  const walk = (node) => {
+    if (Array.isArray(node)) { node.forEach((v, i) => { if (typeof v === 'string') node[i] = swap(v); else walk(v); }); return; }
+    if (!node || typeof node !== 'object') return;
+    for (const [k, v] of Object.entries(node)) {
+      if (typeof v === 'string') node[k] = swap(v);
+      else walk(v);
+    }
+  };
+  walk(doc);
+}
+
+export default { ownedNamesFor, resolveNames, resolveInto, nameJson, tokeniseJson };

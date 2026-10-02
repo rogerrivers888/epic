@@ -14,7 +14,7 @@
 
 import { query } from '../db.js';
 import * as providerCalls from './providerCalls.js';
-import { nameJson } from '../sources/displayNames.js';
+import { nameJson, tokeniseJson } from '../sources/displayNames.js';
 
 /**
  * Delete sessions whose time is up.
@@ -32,7 +32,8 @@ export async function sweepExpiredPlanSessions() {
 export async function insertPlanSession(householdId, state, tripId = null) {
   const { rows } = await query(
     'insert into plan_sessions (household_id, state, trip_id) values ($1, $2, $3) returning *',
-    [householdId, JSON.stringify(state), tripId],
+    // A provider's name copied into words is written as its reference (migration 343 empties the rest).
+    [householdId, JSON.stringify(await tokeniseJson(state)), tripId],
   );
   return rows[0];
 }
@@ -59,11 +60,15 @@ async function named(session) {
 }
 
 export async function savePlanState(id, state, tripId) {
+  // A provider's name copied into words is written as its reference, and the
+  // names beside their references are emptied by migration 343 — the state in
+  // hand is not changed; only what is written down is.
+  const kept = JSON.stringify(await tokeniseJson(state));
   if (tripId === undefined) {
-    await query('update plan_sessions set state = $2 where id = $1', [id, JSON.stringify(state)]);
+    await query('update plan_sessions set state = $2 where id = $1', [id, kept]);
     return;
   }
-  await query('update plan_sessions set state = $2, trip_id = coalesce($3, trip_id) where id = $1', [id, JSON.stringify(state), tripId]);
+  await query('update plan_sessions set state = $2, trip_id = coalesce($3, trip_id) where id = $1', [id, kept, tripId]);
 }
 
 /** The session a trip's day was last planned in, so "come back to it" can. */

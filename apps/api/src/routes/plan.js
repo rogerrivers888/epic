@@ -2146,7 +2146,7 @@ async function executePlan({ household, members, session, state, res }) {
     // What this pool was fetched for, so pressing Plan it again on the same day
     // composes it afresh instead of asking every source the same question.
     state.retrievalKey = retrievalKey(state);
-    state.excludedByAllergen = pool.excluded.map((e) => ({ name: e.name, reasons: e.exclusionReasons }));
+    state.excludedByAllergen = pool.excluded.map((e) => ({ name: e.name, reasons: e.exclusionReasons, source: e.source, sourcePlaceId: e.sourcePlaceId }));
     // Must-haves come from the time left once a fixed commitment is placed:
     // a 2½-hour show in a 5½-hour window leaves room for lunch and one thing,
     // not two things and no lunch. A named want counts as a thing to do.

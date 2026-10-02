@@ -22,6 +22,7 @@
  */
 
 import { query, pool } from '../db.js';
+import { tokeniseJson } from './displayNames.js';
 
 const RENTED = (ref) => `coalesce(epic_ref_true_source(${ref}), '') = any(epic_rented_sources())`;
 
@@ -71,13 +72,26 @@ const CHAT = {
             and ts.venue_name is distinct from ts.venue_ref and position(ts.venue_name in chat_topics.tag_label) > 0)))`,
 };
 
-// A plan session's saved search results and options (migration 343): a
-// session counts when stripping its state of providers' names would change it.
-// The place ids stay; the names come back from the resolver on read.
-const PLAN = {
-  key: 'plan_sessions.state', said: 'saved plan sessions',
-  where: 'state is distinct from epic_strip_rented_names(state)',
-};
+// A plan session's saved search results, options and replies (migration 343,
+// plansHolding below). The place ids stay; names come back from the resolver.
+const PLAN = { key: 'plan_sessions.state', said: 'saved plan sessions' };
+
+/**
+ * The plan sessions still holding a provider's name: beside its reference
+ * (migration 343 would empty it), or copied into words — a title, a reply —
+ * which tokeniseJson puts back as the reference. Each with the state to write;
+ * writing it goes through the trigger, which empties the rest.
+ */
+async function plansHolding(client) {
+  const { rows } = await client.query(
+    `select id, state, state is distinct from epic_strip_rented_names(state) as stripped from plan_sessions`);
+  const out = [];
+  for (const r of rows) {
+    const kept = await tokeniseJson(r.state);
+    if (r.stripped || JSON.stringify(kept) !== JSON.stringify(r.state)) out.push({ id: r.id, kept });
+  }
+  return out;
+}
 
 /** What each store holds that the purge would clear. Changes nothing. */
 export async function quote(client = { query }) {
@@ -88,8 +102,7 @@ export async function quote(client = { query }) {
   }
   const { rows: [c] } = await client.query(`select count(*)::int as n from chat_topics where ${CHAT.where}`);
   byStore[CHAT.key] = c.n;
-  const { rows: [pl] } = await client.query(`select count(*)::int as n from plan_sessions where ${PLAN.where}`);
-  byStore[PLAN.key] = pl.n;
+  byStore[PLAN.key] = (await plansHolding(client)).length;
   const total = Object.values(byStore).reduce((a, b) => a + b, 0);
   return { total, byStore, said: Object.fromEntries([...STORES.map((s) => [keyOf(s), s.said]), [CHAT.key, CHAT.said], [PLAN.key, PLAN.said]]) };
 }
@@ -108,8 +121,9 @@ export async function run({ by = null, expected = null } = {}) {
       const { rowCount: n } = await c.query(`update ${s.table} set ${set} where ${heldWhere(s)}`);
       byStore[keyOf(s)] = n;
     }
-    const { rowCount: plans } = await c.query(`update plan_sessions set state = epic_strip_rented_names(state) where ${PLAN.where}`);
-    byStore[PLAN.key] = plans;
+    const plans = await plansHolding(c);
+    for (const p of plans) await c.query('update plan_sessions set state = $2 where id = $1', [p.id, JSON.stringify(p.kept)]);
+    byStore[PLAN.key] = plans.length;
     const cleared = Object.values(byStore).reduce((a, b) => a + b, 0);
     // Nothing is left behind: the same question asked again must answer nought.
     const after = await quote(c);
