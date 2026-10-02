@@ -90,7 +90,7 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
   const revealed = booked.length > 0;
 
   // --- the booking sheet, over the page -----------------------------------
-  if (route.layer === 'book') {
+  if (route.layer === 'book' && !offer.lane) {
     if (!signedIn()) {
       return (
         <View style={{ flex: 1 }}>
@@ -150,7 +150,10 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
   const past = offer.shape === 'oneoff' ? Boolean(offer.startsOn && offer.startsOn < today) : offer.shape === 'series' ? offer.dates.length > 0 && !offer.dates.some((d) => d >= today) : false;
   const ended = offer.state === 'ended' || past;
   const full = offer.standing.full;
-  const cta = past ? 'This has happened' : ended ? 'This one is off'
+  // An offer from the four lanes (hosting v7) is booked by its own rules, which are the guest
+  // booking brief's; until then its page says so rather than opening the old sheet (Codex, 2 Oct 2026).
+  const notYet = Boolean(offer.lane);
+  const cta = notYet ? 'Booking opens soon' : past ? 'This has happened' : ended ? 'This one is off'
     : paused ? `Paused${offer.pausedUntil ? ` · back ${dateOnly(offer.pausedUntil)}` : ''}`
       : full ? 'Full · join the waiting list'
         : offer.shape === 'series' ? `Join the ${offer.sessions ?? ''} weeks · ${money(offer.pricePence)}`
@@ -265,7 +268,7 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
         <Button
           label={cta}
           icon={full ? 'hours' : offer.shape === 'anytime' ? 'calendar' : 'forward'}
-          disabled={ended || paused}
+          disabled={ended || paused || notYet}
           onPress={() => navigate(keyed(paths.experienceBook(offer.id)))}
         />
         <Text style={[type.tiny, { textAlign: 'center' }]}>{ended ? (past ? 'This one has already happened.' : offer.cancelledNote ?? 'Called off.') : paused ? 'Not taking bookings just now.' : payments.ready ? 'Card charged when it is certain.' : 'Nothing is charged yet — a booking is recorded and honoured.'}</Text>

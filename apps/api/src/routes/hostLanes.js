@@ -413,6 +413,8 @@ export function derive(patch, current) {
   if ((p.ageMin !== undefined || p.ageMax !== undefined) && current.lane !== 'course' && !asksParentsOnWho({ ...next, lane: current.lane })) p.parents = null;
   // Where: the parts of other kinds of place do not stay behind.
   if (p.venue && p.venue !== current.venue) {
+    // A new kind of place starts clean: the old address or area never stands in for the new one (Codex, 2 Oct 2026).
+    for (const k of ['venueLabel', 'venueArea', 'venueRef', 'venueLat', 'venueLng', 'venueNotes']) if (p[k] === undefined) p[k] = null;
     if (p.venue !== 'online') { p.onlineMode = p.onlineMode ?? null; p.onlineLink = p.onlineLink ?? null; }
     if (p.venue === 'online') { p.venueLabel = null; p.venueArea = null; p.venueRef = null; p.venueLat = null; p.venueLng = null; p.travelRadiusMin = null; p.travelChargePence = null; }
     // `your_place` here is stored from the guest's side: the host travelling to them.

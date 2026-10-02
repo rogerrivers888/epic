@@ -169,7 +169,11 @@ export function storable(fullPath: string, body: any): any | null {
   // draft's set-up. Everything in them is the host's own words and choices,
   // Epic's own prices and terms, and gov.uk's bank holidays (open data) — and a
   // draft read back offline is how "Save and finish later" survives no signal.
-  if (p === '/api/host/lanes') return body;
+  if (p === '/api/host/lanes') {
+    // Referees are other people: their names and emails stay off the device (Codex, 2 Oct 2026).
+    const h = (body as { host?: Record<string, unknown> } | null)?.host;
+    return h ? { ...(body as object), host: { ...h, referees: [] } } : body;
+  }
   // A draft keeps no roster on the device: invitees' contacts and the invite link (a bearer
   // credential) are dropped before it is written (Codex, 2 Oct 2026).
   if (/^\/api\/host\/lanes\/offers\/[^/]+$/.test(p)) {

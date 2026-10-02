@@ -5463,6 +5463,9 @@ export type Availability = { days?: number[]; parts?: ('morning' | 'afternoon' |
 
 /** One experience, as a guest sees it. The exact address arrives only once booked. */
 export type Experience = {
+  /** Hosting v7: the lane a set-up was made in, and the step it was left on. Null for the old shapes. */
+  lane?: 'oneoff' | 'weekly' | 'course' | 'onrequest' | null; draftStep?: string | null;
+  bookAheadPence?: number | null; childPence?: number | null;
   id: string; hostId: string; shape: OfferShape; state: OfferState; pausedUntil: string | null; visibility: Visibility; money: Money;
   title: string | null; summary: string | null; description: string | null; whyYou: string | null; includes: string | null; category: string | null;
   photos: string[]; video: string | null; doc: string | null;
@@ -5471,7 +5474,7 @@ export type Experience = {
   venue: OfferVenue; venueArea: string | null; venueLabel: string | null; venueLat: number | null; venueLng: number | null; venueCountry: string | null;
   venueNotes: string | null; travelRadiusMin: number | null; travelChargePence: number | null; onlinePlatform: string | null;
   durationMin: number | null; minCount: number | null; expectedCount: number | null; maxCount: number | null; partyMax: number | null; ageLimit: number | null;
-  priceMode: PriceMode; pricePence: number | null; totalPence: number | null; per: 'person' | 'household'; refundRule: RefundRule;
+  priceMode: PriceMode; pricePence: number | null; totalPence: number | null; per: 'person' | 'household' | 'booking'; refundRule: RefundRule;
   startsOn: string | null; startsAt: string | null; runningOrder: RunningOrderRow[]; featuredPeople: FeaturedPerson[];
   weekday: number | null; firstDate: string | null; sessions: number | null; skippedDates: string[]; dates: string[];
   outcome: string | null; arc: string | null; weeks: Week[]; joinMode: 'whole' | 'drop_in' | 'both' | null; dropInPence: number | null; missedNote: string | null;
@@ -5556,8 +5559,6 @@ export type OpenMatch = {
 /** One of my Epic contacts: everyone this household has invited (lanes A and B, C2f). */
 export type HostContact = { id: string; name: string; mobile: string | null; email: string | null; timesInvited: number; lastInvitedAt: string | null };
 export type OwnOffer = Experience & {
-  /** Hosting v7: the lane a set-up was made in, and the step it was left on. Null for the old shapes. */
-  lane?: 'oneoff' | 'weekly' | 'course' | 'onrequest' | null; draftStep?: string | null;
   /** The old single word, offered as a starting suggestion on next edit. Never written by a migration. */
   categorySuggestion: string | null;
   blockers: string[]; checklist: PitchChecklist; licenceNumber: string | null; licenceExpiry: string | null;
