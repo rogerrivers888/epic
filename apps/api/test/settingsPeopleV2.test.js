@@ -750,3 +750,19 @@ test('Solo is just you: every door refuses a second person and says to upgrade',
   const err = households.planCapRefusal(await households.planCapFor(h.id));
   assert.deepEqual(err.details, { plan: 'solo', cap: 1, upgrade: true });
 });
+
+test('an outing around a fixed event stays inside the day window, never cutting the event', async () => {
+  const { household: h, member } = await aHousehold(query); // the default 10:00–18:00
+  const { rows: [household] } = await query('select * from households where id = $1', [h.id]);
+  const mk = (anchor, title) => createTripFromIntent({
+    household, members: [{ ...member, isMinor: false }], intent: { date: '2099-07-03', attending: [], anchor },
+    origin: { label: 'Home', lat: 51.5, lng: -0.1 },
+    destination: { label: 'Kew', lat: 51.48, lng: -0.29, countryCode: 'GB', locality: 'Kew' },
+    anchorPlace: null, title,
+  });
+  const dayOf = async (out) => (await query('select start_time::text, end_time::text from trip_days where trip_id = $1', [out.id ?? out.trip?.id])).rows[0];
+  const mid = await dayOf(await mk({ name: 'Matinee', start_time: '14:00', duration_minutes: 120 }, 'Kew · show'));
+  assert.deepEqual([mid.start_time, mid.end_time], ['10:00:00', '18:00:00'], 'a 2pm show: the day is the window, not 09:12–18:48');
+  const late = await dayOf(await mk({ name: 'Late show', start_time: '19:00', duration_minutes: 120 }, 'Kew · late'));
+  assert.equal(late.end_time, '21:00:00', 'an event past the window keeps its own end');
+});

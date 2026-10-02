@@ -477,6 +477,16 @@ export async function createTripFromIntent({ household, members, intent, origin,
     const before = Math.round(spare * 0.6);
     depart = new Date(start.getTime() - before * 60_000);
     returnAt = new Date(start.getTime() + (len + (spare - before)) * 60_000);
+    // With no length said, the household's window is the whole outing, not
+    // spare time around the event: keep it inside "When your day runs" —
+    // never cutting into the event itself (Codex, 2 Oct 2026).
+    if (intent.duration_minutes == null) {
+      const winStart = at(hourToTime(windowStart)).getTime();
+      const winEnd = at(hourToTime(household.day_end ?? 18)).getTime();
+      const eventEnd = start.getTime() + len * 60_000;
+      depart = new Date(Math.min(start.getTime(), Math.max(depart.getTime(), winStart)));
+      returnAt = new Date(Math.max(eventEnd, Math.min(returnAt.getTime(), winEnd)));
+    }
   } else if (intent.depart_time) {
     depart = at(intent.depart_time);
     returnAt = new Date(depart.getTime() + duration * 60_000);

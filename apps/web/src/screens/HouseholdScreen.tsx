@@ -525,7 +525,11 @@ function EditSheet({ data, member, refresh, canEdit, onClose }: { data: Househol
   const { isOwner } = useSession();
   const callerOwner = isOwner || Boolean(data.members.find((m) => m.id === data.me)?.access?.isLead);
   const targetIsChild = (member.age != null ? member.age < 18 : member.isMinor);
-  const mayRemove = !isYou && (callerOwner || targetIsChild);
+  // Only an adult removes anybody, as the server says — a signed-in teenager is
+  // not offered a Remove the API would refuse (Codex, 2 Oct 2026).
+  const viewer = data.members.find((m) => m.id === data.me);
+  const callerIsAdult = viewer ? !(viewer.age != null ? viewer.age < 18 : viewer.isMinor) : true;
+  const mayRemove = !isYou && callerIsAdult && (callerOwner || targetIsChild);
 
   const save = async () => {
     setBusy(true);

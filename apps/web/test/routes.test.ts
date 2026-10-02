@@ -860,6 +860,9 @@ test('a host and an experience have public addresses; a booking is ours', () => 
   assert.deepEqual(roundTrip('/hosts/h1'), { name: 'hostProfile', hostId: 'h1', layer: null });
   assert.deepEqual(roundTrip('/hosts/h1/trust'), { name: 'hostProfile', hostId: 'h1', layer: 'trust' });
   assert.deepEqual(roundTrip('/experiences/e1'), { name: 'experience', id: 'e1', layer: null });
+  // The host's share of a public offer carries their link token for the 5% fee.
+  assert.equal(paths.experience('e1', { l: 'tok' }), '/experiences/e1?l=tok');
+  assert.equal(paths.experience('e1'), '/experiences/e1');
   assert.deepEqual(roundTrip('/experiences/e1/book'), { name: 'experience', id: 'e1', layer: 'book' });
   assert.deepEqual(roundTrip('/experiences/e1/where'), { name: 'experience', id: 'e1', layer: 'where' });
   assert.deepEqual(roundTrip('/bookings/b1'), { name: 'booking', id: 'b1', rate: false });

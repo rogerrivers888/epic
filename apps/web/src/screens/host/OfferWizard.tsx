@@ -1345,7 +1345,11 @@ function Done({ offer: o }: { offer: OwnOffer }) {
   const [copied, setCopied] = useState(false);
   const share = async () => {
     const nav: any = (globalThis as any).navigator;
-    const url = pub ? (typeof window !== 'undefined' ? `${window.location.origin}${paths.experience(o.id)}` : paths.experience(o.id)) : o.linkUrl;
+    // A public offer shared by its host carries the host's link token, so the
+    // bookings it brings are charged the 5% host-link fee, not the level rate
+    // (Codex, 2 Oct 2026).
+    const page = paths.experience(o.id, { l: o.linkToken });
+    const url = pub ? (typeof window !== 'undefined' ? `${window.location.origin}${page}` : page) : o.linkUrl;
     try { if (nav?.share) await nav.share({ title: o.title ?? 'On Epic', url }); else if (nav?.clipboard) { await nav.clipboard.writeText(url); setCopied(true); } } catch { /* closed */ }
   };
   const moneyRow = each ? (o.money === 'epic'

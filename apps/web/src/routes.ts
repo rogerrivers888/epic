@@ -905,7 +905,9 @@ export const paths = {
   hostVideo: (offerId?: string | null) => (offerId ? `/host/video?offer=${encodeURIComponent(offerId)}` : '/host/video'),
   hostProfile: (hostId: string) => buildHref(['hosts', hostId]),
   hostTrust: (hostId: string) => buildHref(['hosts', hostId, 'trust']),
-  experience: (id: string) => buildHref(['experiences', id]),
+  // `l` is the host's own link token: a booking that arrives with it is the
+  // host's own (the 5% host-link fee), so the host's share carries it.
+  experience: (id: string, opts?: { l?: string | null }) => buildHref(['experiences', id], { l: opts?.l ?? null }),
   experienceBook: (id: string) => buildHref(['experiences', id, 'book']),
   experienceWhere: (id: string) => buildHref(['experiences', id, 'where']),
   booking: (id: string) => buildHref(['bookings', id]),
