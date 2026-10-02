@@ -25,6 +25,7 @@ import { requires } from '../access.js';
 import { CAP_MINUTES, EDGE_MINUTES, HORIZON_MINUTES, labelOf, sectorOf } from '../domain/reach.js';
 import { travelMode } from '../domain/travel.js';
 import * as reach from '../repositories/reach.js';
+import { approveOsrmBuild, osrmBuildState } from '../jobs/osrmBuild.js';
 import { refreshAllBefore as recountRingsBefore } from '../repositories/ringTables.js';
 import { query } from '../db.js';
 
@@ -218,6 +219,23 @@ router.post('/horizon', requires('manage_library'), async (req, res, next) => {
     }
     res.json(await reach.setApprovedHorizon(mode, minutes, { by: req.account?.email ?? req.session?.label ?? req.session?.id ?? null }));
   } catch (err) { next(err); }
+});
+
+/**
+ * GET /osrm-build — where the OSRM walking/cycling build stands.
+ * POST /osrm-build — approve one (what the Approval card replays). The
+ * osrm-build service picks it up on its next wake; nothing runs in the API.
+ */
+router.get('/osrm-build', requires('view_library'), async (req, res, next) => {
+  try { res.json(await osrmBuildState()); } catch (err) { next(err); }
+});
+router.post('/osrm-build', requires('manage_library'), async (req, res, next) => {
+  try {
+    res.json(await approveOsrmBuild({ by: req.account?.email ?? req.session?.label ?? req.session?.id ?? null }));
+  } catch (err) {
+    if (err.status === 409) return res.status(409).json({ error: err.message });
+    next(err);
+  }
 });
 
 /** A build cap from a request: null when left out (blank counts as left out),
