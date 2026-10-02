@@ -55,8 +55,12 @@ test('gate on with its password: asked for it, and let in with it', async () => 
     assert.equal((await page(base, '/en-gb/', basic('epic', 'wrong'))).status, 401);
     const inside = await page(base, '/en-gb/host', basic('epic', 'not-yet'));
     assert.equal(inside.status, 200);
-    assert.match(await inside.text(), /<title>Epic Hosting/);
+    const html = await inside.text();
+    assert.match(html, /<title>Epic Hosting/);
+    assert.match(html, /<meta name="epic-page" content="site" \/>/, 'marked as a site page for the app (served.ts)');
     assert.equal((await page(base, '/')).status, 200, 'still no redirect while the gate is up');
+    assert.equal((await page(base, '/', basic('epic', 'not-yet'))).status, 200, 'not even for someone holding the password');
+    assert.doesNotMatch(await (await page(base, '/login')).text(), /epic-page/, 'the app shell carries no site mark');
   });
 });
 

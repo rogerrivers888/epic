@@ -4,7 +4,8 @@
  * /{locale}/go/{name}, the host page, or a legal page — each in SiteLayout with
  * the header its design draws.
  */
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { fetchFromServerOnce, servedAsSite } from './served';
 import type { HomeDesign, Route } from '../routes';
 import type { SitePageProps } from './page';
 import { HOMEPAGE } from './config';
@@ -28,6 +29,15 @@ const DESIGNS: Record<HomeDesign, { Page: (p: SitePageProps) => React.ReactEleme
 };
 
 export function SiteScreen({ route }: { route: Extract<Route, { name: 'site' }> }) {
+  // Drawn only from a document the server sent as a website page — never from
+  // the app shell, which the gate does not cover (served.ts).
+  const [served] = useState(servedAsSite);
+  useEffect(() => { if (!served) fetchFromServerOnce(window.location.pathname); }, [served]);
+  if (!served) return null;
+  return <SitePage route={route} />;
+}
+
+function SitePage({ route }: { route: Extract<Route, { name: 'site' }> }) {
   const { locale, page } = route;
   if (page === 'home' || page === 'go') {
     const design = page === 'go' ? route.landing! : HOMEPAGE;

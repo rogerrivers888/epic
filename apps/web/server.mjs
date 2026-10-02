@@ -149,6 +149,8 @@ function withSiteHead(html, site) {
       `<link rel="alternate" hreflang="x-default" href="${attr(APP_URL)}/" />`,
     ];
   extra.push('<meta name="twitter:card" content="summary" />');
+  // The app draws a website page only from a document that carries this (src/site/served.ts).
+  extra.push('<meta name="epic-page" content="site" />');
   return html
     .replace(/<html lang="[^"]*"/, `<html lang="${SITE.htmlLang[site.locale]}"`)
     .replace(/<title>[\s\S]*?<\/title>/, `<title>${attr(copy.title)}</title>`)
@@ -219,7 +221,7 @@ const server = http.createServer(guarded(async (req, res) => {
   // While the gate is up the website is behind it (gate.mjs › siteLock): `/` stays
   // the app it has been, and the site's own pages ask for the gate's password.
   const locked = siteLock(req);
-  if (!locked && pathname === '/' && !APP_ROOT_PARAMS.some((k) => new URLSearchParams(search).has(k))) {
+  if (!siteGateOn() && pathname === '/' && !APP_ROOT_PARAMS.some((k) => new URLSearchParams(search).has(k))) {
     res.writeHead(302, { location: `/${localeOf(SITE, req)}/${search}`, 'cache-control': 'no-store', vary: 'Accept-Language, Cookie' });
     res.end();
     return;
