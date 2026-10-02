@@ -24,7 +24,8 @@ import { paths } from '../routes';
 import { API_URL, api, ApiError, type CredentialsLink } from '../api';
 import { firstAdminScreen } from '../admin/AdminApp';
 
-const MIN = 10;
+// The rule (owner, 2 Oct 2026): letters and numbers, any length — as the API checks it (passwords.js).
+const passwordOk = (p: string) => /\p{L}/u.test(p) && /\p{N}/u.test(p);
 
 export function InScreen({ token }: { token: string }) {
   const { width } = useViewport();
@@ -55,12 +56,12 @@ export function InScreen({ token }: { token: string }) {
     return () => { live = false; };
   }, [token, attempt]);
 
-  const long = pw.length >= MIN;
+  const long = passwordOk(pw);
   const invite = link?.mode === 'invite';
 
   const save = async () => {
     if (busy) return;
-    if (!long) { setErr('Use at least 10 characters.'); return; }
+    if (!long) { setErr('Use letters and numbers.'); return; }
     setErr(null); setBusy(true);
     try {
       const st = await api.setCredentials(token, pw);
@@ -69,7 +70,7 @@ export function InScreen({ token }: { token: string }) {
         ? (screen === 'filing' ? paths.filing('categories') : paths.admin(screen))
         : paths.account(), { replace: true });
     } catch (e) {
-      if (e instanceof ApiError && e.code === 'too_short') setErr('Use at least 10 characters.');
+      if (e instanceof ApiError && e.code === 'needs_letters_and_numbers') setErr('Use letters and numbers.');
       else if (e instanceof ApiError && e.code === 'link_spent') setSpent(true);
       else setErr('Could not reach Epic. Check your connection and try again.');
     } finally { setBusy(false); }
@@ -140,10 +141,10 @@ export function InScreen({ token }: { token: string }) {
                     <Text style={styles.toggleText}>{show ? 'Hide' : 'Show'}</Text>
                   </Pressable>
                 </View>
-                {/* The one rule, live: grey with a dash until long enough, then moss with a tick. */}
+                {/* The one rule, live: grey with a dash until it holds, then moss with a tick. */}
                 <View style={styles.ruleLine}>
                   <Svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={long ? MOSS : INK_MUTED} strokeWidth={3} strokeLinecap="square"><Path d={long ? 'M4 12l5 5L20 6' : 'M5 12h14'} /></Svg>
-                  <Text style={[styles.ruleText, { color: long ? MOSS : INK_MUTED }]}>At least 10 characters</Text>
+                  <Text style={[styles.ruleText, { color: long ? MOSS : INK_MUTED }]}>Letters and numbers</Text>
                 </View>
                 {err ? <Text style={styles.error} accessibilityLiveRegion="polite">{err}</Text> : null}
                 <Pressable accessibilityRole="button" disabled={busy} onPress={save} style={({ hovered }: any) => [styles.cta, hovered && { backgroundColor: INK_HOVER }]}>

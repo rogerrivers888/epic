@@ -35,7 +35,7 @@ import { accessFor } from '../access.js';
 import { signInLockedOut, noteSignInFailure } from '../signInGuard.js';
 import { summariseAccess } from './session.js';
 import { mailStatus, resetPasswordEmail, sendMail, webUrl } from '../sources/mail.js';
-import { MIN_PASSWORD, dummyHash, hashPassword, verifyPassword } from '../passwords.js';
+import { dummyHash, hashPassword, passwordProblem, verifyPassword } from '../passwords.js';
 
 const router = express.Router();
 
@@ -237,9 +237,8 @@ router.post('/auth/credentials', passwordEdgeLimit, passwordLimit, signInLimit, 
   try {
     const token = String(req.body?.token || '').trim();
     const password = passwordOf(req.body?.password);
-    if (password.length < MIN_PASSWORD) {
-      return res.status(400).json({ error: 'too_short', message: `Use at least ${MIN_PASSWORD} characters.` });
-    }
+    const problem = passwordProblem(password);
+    if (problem) return res.status(400).json({ error: 'needs_letters_and_numbers', message: problem });
     if (password.length > MAX_PASSWORD) {
       return res.status(400).json({ error: 'too_long', message: 'That password is too long.' });
     }

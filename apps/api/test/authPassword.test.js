@@ -289,24 +289,24 @@ test('L4 is told what a link is for, without spending it', async () => {
   assert.equal((await get('/api/auth/link/not-a-token')).status, 404);
 });
 
-test('too short is refused before anything is spent', async () => {
+test('a password needs letters and numbers, and nothing else; a refusal spends nothing', async () => {
   const acct = await makeAccount({ email: 'short@example.com', status: 'invited' });
   const { token } = await accounts.createSignInLink(acct.id, { purpose: 'invite' });
-  for (const password of ['', 'nine char', undefined, 12345678901]) {
+  for (const password of ['', 'onlyletters', '12345678', undefined, 12345678901, '!!!!']) {
     const r = await post('/api/auth/credentials', { token, password });
     assert.equal(r.status, 400);
-    assert.deepEqual(r.body, { error: 'too_short', message: 'Use at least 10 characters.' });
+    assert.deepEqual(r.body, { error: 'needs_letters_and_numbers', message: 'Use letters and numbers.' });
   }
-  assert.ok(await accounts.inspectSignInLink(token), 'the link still works after a short password');
-  const ok = await post('/api/auth/credentials', { token, password: 'ten chars!' });
-  assert.equal(ok.status, 201, 'exactly ten characters is enough');
+  assert.ok(await accounts.inspectSignInLink(token), 'the link still works after a refused password');
+  const ok = await post('/api/auth/credentials', { token, password: 'epic2' });
+  assert.equal(ok.status, 201, 'short is fine, as long as it has a letter and a number');
 });
 
 test('an invite sets the password, activates the account, and signs them in', async () => {
   const acct = await makeAccount({ email: 'newstaff@epic.day', name: 'New Staff', staff: true, status: 'invited' });
   const { token } = await accounts.createSignInLink(acct.id, { requestedBy: 'owner', purpose: 'invite' });
 
-  const r = await post('/api/auth/credentials', { token, password: 'my first password', label: 'laptop' });
+  const r = await post('/api/auth/credentials', { token, password: 'my first password 1', label: 'laptop' });
   assert.equal(r.status, 201);
   assert.equal(r.body.account.id, acct.id);
   assert.ok(r.body.access.doors.includes('admin'));
@@ -316,16 +316,16 @@ test('an invite sets the password, activates the account, and signs them in', as
   assert.equal(a.status, 'active');
   assert.ok(a.activated_at && a.password_set_at);
   assert.equal(a.sign_in_count, 1);
-  assert.ok(a.password_hash && !a.password_hash.includes('my first password'), 'a hash, never the password');
+  assert.ok(a.password_hash && !a.password_hash.includes('my first password 1'), 'a hash, never the password');
   const sess = await query('select kind, auth_method from api_sessions where account_id = $1', [acct.id]);
   assert.deepEqual(sess.rows, [{ kind: 'device', auth_method: 'password' }]);
 
   // Once.
-  const again = await post('/api/auth/credentials', { token, password: 'another password' });
+  const again = await post('/api/auth/credentials', { token, password: 'another password 2' });
   assert.equal(again.status, 401);
   assert.equal(again.body.error, 'link_spent');
   // And the password now logs in.
-  assert.equal((await post('/api/auth/login', { email: 'newstaff@epic.day', password: 'my first password' })).status, 201);
+  assert.equal((await post('/api/auth/login', { email: 'newstaff@epic.day', password: 'my first password 1' })).status, 201);
 });
 
 test('a reset changes the password and signs every other device out', async () => {
@@ -337,7 +337,7 @@ test('a reset changes the password and signs every other device out', async () =
   const { token: theirs } = await openSession('theirs', bystander.id, 'device', 'link');
 
   const { token } = await accounts.createSignInLink(acct.id, { requestedBy: 'self', ttlHours: 0.5, purpose: 'reset' });
-  const r = await post('/api/auth/credentials', { token, password: 'the new password' });
+  const r = await post('/api/auth/credentials', { token, password: 'the new password 3' });
   assert.equal(r.status, 201);
 
   const live = async (t) => (await fetch(`${base}/api/session`, { headers: { authorization: `Bearer ${t}` } }).then((x) => x.json())).signedIn;
@@ -347,7 +347,7 @@ test('a reset changes the password and signs every other device out', async () =
   assert.equal(await live(theirs), true, 'another account is untouched');
 
   assert.equal((await post('/api/auth/login', { email: 'compromised@example.com', password: 'the old password' })).status, 401);
-  assert.equal((await post('/api/auth/login', { email: 'compromised@example.com', password: 'the new password' })).status, 201);
+  assert.equal((await post('/api/auth/login', { email: 'compromised@example.com', password: 'the new password 3' })).status, 201);
 });
 
 test('a link is spent only at its own door: magic links, invites, resets and Google codes never cross', async () => {
@@ -366,7 +366,7 @@ test('a link is spent only at its own door: magic links, invites, resets and Goo
   }
   // The credentials door refuses a magic link and a Google code.
   for (const t of [magic, google]) {
-    const r = await post('/api/auth/credentials', { token: t, password: 'a perfectly good password' });
+    const r = await post('/api/auth/credentials', { token: t, password: 'a perfectly good password 4' });
     assert.equal(r.status, 401);
     assert.equal(r.body.error, 'link_spent');
   }
@@ -393,7 +393,7 @@ test('a new invite cancels the older unused invite, but not a reset; a suspended
 
   await query("update accounts set status = 'suspended' where id = $1", [acct.id]);
   assert.equal((await get(`/api/auth/link/${inviteNew}`)).status, 404);
-  assert.equal((await post('/api/auth/credentials', { token: inviteNew, password: 'a perfectly good password' })).status, 401);
+  assert.equal((await post('/api/auth/credentials', { token: inviteNew, password: 'a perfectly good password 4' })).status, 401);
 });
 
 test('a log-in that verified the old password before a reset never keeps its session', async () => {

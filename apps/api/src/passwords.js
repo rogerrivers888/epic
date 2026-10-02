@@ -23,7 +23,17 @@
 import crypto from 'node:crypto';
 import { promisify } from 'node:util';
 
-export const MIN_PASSWORD = 10;
+/**
+ * The password rule (owner, 2 Oct 2026: "We don't need that restriction. Just
+ * as long as there are numbers and letters, it's fine"): at least one letter and
+ * at least one number, in any script. No minimum length. Returns null when the
+ * password will do, or the one sentence to show.
+ */
+export const PASSWORD_RULE = 'Use letters and numbers.';
+export function passwordProblem(password) {
+  const p = String(password ?? '');
+  return /\p{L}/u.test(p) && /\p{N}/u.test(p) ? null : PASSWORD_RULE;
+}
 
 // OWASP's argon2id floor (19 MiB, two passes, one lane) and scrypt's N=2^15.
 const ARGON = { memory: 19456, passes: 2, parallelism: 1, tagLength: 32 };
