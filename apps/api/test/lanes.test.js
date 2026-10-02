@@ -269,3 +269,12 @@ test('the booking age gate reads a lane offer’s range (Codex, 2 Oct 2026)', as
   assert.equal(ageGate(adults, [{ name: 'Sam', child: false }, { name: 'Kid', age: 12, child: true }]).blocked.length, 1, 'adults only turns any child away');
   assert.deepEqual(ageGate(adults, [{ name: 'Sam', child: false }]).blocked, []);
 });
+
+test('times are the host’s wall clock: summer and winter in London; a zero notice is zero', async () => {
+  const { localInstant } = await import('../src/domain/lanes.js');
+  assert.equal(localInstant('2026-07-10', '19:00').toISOString(), '2026-07-10T18:00:00.000Z');
+  assert.equal(localInstant('2026-12-10', '19:00').toISOString(), '2026-12-10T19:00:00.000Z');
+  const { anytimeSlots } = await import('../src/domain/hosting.js');
+  const slots = anytimeSlots({ lane: 'onrequest', free_hours: { 6: [['14:00', '17:00']] }, session_lengths: [60], notice_hours: 0 }, { from: new Date('2026-10-10T08:00:00Z'), days: 0 });
+  assert.deepEqual(slots, [{ date: '2026-10-10', times: ['14:00', '15:00', '16:00'] }], 'no notice asked, so today’s afternoon is open');
+});

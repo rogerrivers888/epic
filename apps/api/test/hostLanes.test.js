@@ -30,7 +30,7 @@ const fake = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => { body += c; });
   req.on('end', () => {
-    calls.push({ method: req.method, url: req.url, body });
+    calls.push({ method: req.method, url: req.url, body, idem: req.headers['idempotency-key'] ?? null });
     const json = (o, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
     if (req.url === '/bank.json') return json({ 'england-and-wales': { events: [{ date: '2026-12-25', title: 'Christmas Day' }, { date: '2026-12-28', title: 'Boxing Day' }, { date: '2027-01-01', title: 'New Year’s Day' }] } });
     if (req.url.startsWith('/openai/responses')) return json({ model: 'gpt-5-mini', usage: { input_tokens: 400, output_tokens: 120 }, output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(modelAnswer) }] }] });
@@ -181,6 +181,7 @@ test('weekly: more than one day, its own price boxes, and the run skipping bank 
     assert.deepEqual(r.body.offer.weekdays, [2, 4]);
     const { body: { offer: c } } = await srv.send('POST', '/api/host/lanes/offers', { lane: 'course', sessions: 30 });
     assert.equal(c.sessions, 20, 'a course is held to the configured most sessions');
+    assert.equal((await query('select join_mode from host_offers where id = $1', [c.id])).rows[0].join_mode, 'whole', 'a course is booked whole, never one session');
     assert.deepEqual(r.body.offer.run.dates.slice(0, 3), ['2026-12-22', '2026-12-24', '2026-12-31'], 'Christmas Eve is no holiday; 29 Dec is the host’s');
     assert.equal(r.body.offer.paid, true);
     assert.equal(r.body.offer.priceMode, 'same_each');
@@ -319,6 +320,7 @@ test('private: nothing is sent before the £10 is paid through Stripe (test mode
       assert.equal(r.body.pay.url, 'https://checkout.stripe.test/pay');
       const checkout = calls.filter((c) => c.url === '/v1/checkout/sessions').at(-1);
       assert.match(checkout.body, /unit_amount%5D=1000/, 'the £10 placeholder, in pence');
+      assert.equal(checkout.idem, `fee-${offer.id}-event-0`, 'a lost answer retried gets the same Checkout back');
       assert.equal((await query('select state from host_offers where id = $1', [offer.id])).rows[0].state, 'draft', 'not sent before it is paid');
       const pay = (await query("select * from hosting_payments where offer_id = $1", [offer.id])).rows[0];
       assert.equal(pay.kind, 'private_fee'); assert.equal(pay.mode, 'test'); assert.equal(pay.amount_pence, 1000);

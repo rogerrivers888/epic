@@ -112,6 +112,20 @@ const minutesOf = (t) => { const m = /^(\d{1,2}):(\d{2})/.exec(String(t ?? ''));
 const timeOf = (mins) => `${String(Math.floor(mins / 60) % 24).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
 const addMinutes = (t, n) => { const m = minutesOf(t); return m == null || n == null ? null : timeOf(m + n); };
 
+/**
+ * A date and a wall-clock time where the host is (UK by default) as an instant.
+ * 19:00 on a summer evening in London is 18:00 UTC; appending Z would be an hour out.
+ */
+export function localInstant(day, time = '00:00', tz = 'Europe/London') {
+  const [y, m, d] = ymd(day).split('-').map(Number);
+  const [hh, mm] = String(time ?? '00:00').slice(0, 5).split(':').map(Number);
+  const guess = Date.UTC(y, m - 1, d, hh, mm);
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+    .formatToParts(new Date(guess)).filter((p) => p.type !== 'literal').map((p) => [p.type, Number(p.value)]));
+  const shown = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute);
+  return new Date(guess - (shown - guess));
+}
+
 /** Bank holidays as a set of 'YYYY-MM-DD', with their names. */
 export const holidaySet = (list) => new Map((list ?? []).map((h) => [ymd(h.date), h.title ?? 'Bank holiday']));
 

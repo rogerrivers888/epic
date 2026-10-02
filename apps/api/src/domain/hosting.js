@@ -12,7 +12,7 @@
  * regulated cities where guiding is a licensed profession.
  */
 
-import { laneBlockers, courseRun, weeklyRun, holidaySet, slotsFor as laneSlotsFor, hostingConfig } from './lanes.js';
+import { laneBlockers, courseRun, weeklyRun, holidaySet, slotsFor as laneSlotsFor, hostingConfig, localInstant } from './lanes.js';
 import { knownBankHolidays } from '../sources/bankHolidays.js';
 
 /**
@@ -136,13 +136,13 @@ export function anytimeSlots(offer, { from = new Date(), days = 14, taken = new 
   if (offer.lane === 'onrequest') {
     const cfg = hostingConfig();
     const len = Math.min(...((offer.session_lengths ?? []).length ? offer.session_lengths : [60]).map(Number));
-    const noticeMs = (Number(offer.notice_hours) || cfg.onRequest.noticeHours) * 3600_000;
+    const noticeMs = (offer.notice_hours == null ? cfg.onRequest.noticeHours : Number(offer.notice_hours)) * 3600_000;
     const out = [];
     for (let i = 0; i <= days; i++) {
       const d = new Date(from); d.setUTCHours(12, 0, 0, 0); d.setUTCDate(d.getUTCDate() + i);
       const day = ymd(d);
       const times = laneSlotsFor(offer.free_hours ?? {}, d.getUTCDay(), len)
-        .filter((t) => new Date(`${day}T${t}:00Z`).getTime() - new Date(from).getTime() >= noticeMs)
+        .filter((t) => localInstant(day, t, offer.time_zone ?? 'Europe/London').getTime() - new Date(from).getTime() >= noticeMs)
         .filter((t) => !taken.has(`${day}T${t}`));
       if (times.length) out.push({ date: day, times });
     }

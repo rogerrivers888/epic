@@ -37,7 +37,7 @@ import { linkUrl, mediaRef, ownHost, sendInvites } from './hosting.js';
 import {
   LANES, SEQ, SHAPE_OF, PROMPTS, VENUE_KINDS, PRICE_MODES, REFUND_POLICIES, DIET_TICKS, hostingConfig, holidaySet, sessionsFor, decidesOn,
   checklist, sendBlockers, publishAction, chargesFor, refundWords, missingSteps, isPaid, paidThroughEpic, ageOn, dow, ymd, plusDays,
-  needsChecked, laneGaps, CHECK_WORDS, courseRun, weeklyRun, asksParentsOnWho,
+  needsChecked, laneGaps, CHECK_WORDS, courseRun, weeklyRun, asksParentsOnWho, localInstant,
 } from '../domain/lanes.js';
 
 export const router = Router();
@@ -210,7 +210,7 @@ router.post('/host/lanes/offers', async (req, res, next) => {
     const lane = oneOf(LANES, req.body?.lane);
     if (!lane) throw refuse(400, 'lane_required', 'Pick one of the four: one-off, weekly, course or on request.');
     const host = await ensureHost(household, account);
-    let offer = await repo.insertOffer(host.id, SHAPE_OF[lane], { lane, state: 'draft', visibility: 'invite', money: 'free', priceMode: 'free' });
+    let offer = await repo.insertOffer(host.id, SHAPE_OF[lane], { lane, state: 'draft', visibility: 'invite', money: 'free', priceMode: 'free', ...(lane === 'course' ? { joinMode: 'whole' } : {}) });
     const patch = laneBody(req.body ?? {}, offer);
     if (Object.keys(patch).length) offer = await repo.updateOffer(offer.id, derive(patch, offer));
     if (req.body?.cohosts !== undefined) await repo.setCohosts(offer.id, cohostList(req.body.cohosts));
@@ -361,6 +361,8 @@ export function derive(patch, current) {
   if (next.multi_day && next.starts_on && next.ends_on && next.ends_on > plusDays(next.starts_on, cfg.oneoffMaxDays - 1)) {
     throw refuse(400, 'too_many_days', `A one-off runs over at most ${cfg.oneoffMaxDays} days.`);
   }
+  // A course is booked for the whole run, never one session of it (Codex, 2 Oct 2026).
+  if (current.lane === 'course' && current.join_mode !== 'whole') p.joinMode = 'whole';
   if (p.firstDate !== undefined && current.lane === 'course') p.weekday = p.firstDate ? dow(p.firstDate) : null;
   if (p.weekdays !== undefined && current.lane === 'weekly') p.weekday = p.weekdays[0] ?? null;
   // Prices: free clears every figure; Weekly's four boxes keep the old readers' one price in step.
@@ -519,7 +521,7 @@ async function applyFound({ household, account, lane, offerId, step, patch, foun
   let offer = offerId ? await repo.offerOfHost(offerId, host.id) : null;
   if (offerId && (!offer || offer.lane !== lane)) throw refuse(404, 'offer_not_found', 'That is not one of your offers.');
   if (offer && offer.state !== 'draft') throw refuse(409, 'already_sent', 'This one is out already.');
-  if (!offer) offer = await repo.insertOffer(host.id, SHAPE_OF[lane], { lane, state: 'draft', visibility: 'invite', money: 'free', priceMode: 'free' });
+  if (!offer) offer = await repo.insertOffer(host.id, SHAPE_OF[lane], { lane, state: 'draft', visibility: 'invite', money: 'free', priceMode: 'free', ...(lane === 'course' ? { joinMode: 'whole' } : {}) });
   const current = await lanePayload(offer, host, account);
   const keep = {};
   for (const [k, v] of Object.entries(patch)) {
@@ -768,8 +770,8 @@ async function laySessions(offer, holidays, client) {
   const withDecide = rows.map((s) => ({
     ...s,
     decidesAt: offer.lane === 'weekly' && offer.min_count
-      ? new Date(new Date(`${s.onDate}T${s.startsAt ?? '00:00'}:00Z`).getTime() - cfg.weeklyDecidesHoursBefore * 3600_000)
-      : deciding ? new Date(`${deciding}T23:59:00Z`) : null,
+      ? new Date(localInstant(s.onDate, s.startsAt ?? '00:00', offer.time_zone ?? 'Europe/London').getTime() - cfg.weeklyDecidesHoursBefore * 3600_000)
+      : deciding ? localInstant(deciding, '23:59', offer.time_zone ?? 'Europe/London') : null,
   }));
   return repo.replaceSessions(offer.id, withDecide, client);
 }
@@ -835,7 +837,11 @@ router.post('/host/lanes/offers/:id/publish', async (req, res, next) => {
         // The £10, or joining Pro: Stripe's hosted Checkout, test mode only.
         const amount = plan === 'pro' ? cfg.proMonthlyPence : cfg.privateEventPence;
         const back = `${appUrl()}/host/offers/${offer.id}/publish?back=paid`;
+        // Idempotent per offer, plan and attempt: a lost answer retried gets the same session
+        // back; only a session closed by switching plan lets a new one be made (Codex, 2 Oct 2026).
+        const { rows: [tries] } = await query("select count(*)::int as n from hosting_payments where offer_id = $1 and kind = $2 and state = 'cancelled'", [offer.id, plan === 'pro' ? 'pro' : 'private_fee']);
         const session = await stripe.checkout({
+          idempotencyKey: `fee-${offer.id}-${plan}-${tries.n}`,
           kind: plan === 'pro' ? 'pro' : 'event', amountPence: amount, name: plan === 'pro' ? 'Epic Pro' : `Private event · ${offer.title ?? 'Epic'}`,
           successUrl: back, cancelUrl: `${appUrl()}/host/offers/${offer.id}/publish`, email: account?.email, householdId: household.id, offerId: offer.id,
         });
