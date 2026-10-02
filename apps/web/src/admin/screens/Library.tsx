@@ -769,7 +769,7 @@ const STATUS_WORD: Record<string, string> = {
  * the owner's OK, and only a signed-in device can press it. Both are free: the
  * check reads Wikidata (keyless), our own open-map copy and the text we hold.
  */
-function Closed({ canManage }: { canManage: boolean }) {
+export function Closed({ canManage }: { canManage: boolean }) {
   const [data, setData] = useState<ClosedReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<'check' | 'apply' | null>(null);

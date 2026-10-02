@@ -43,6 +43,7 @@ import { api, type PlaceLevel, type PlaceStats, type PlaceCountry, type PlaceAre
   type CompareColumn, type CompareRow, type RawSource, type PlaceHistoryRow, type FactDef, type PlaceLabel, type PlaceCensusRow } from '../../api';
 import { AdminPage, Dropdown, ago, day, pounds, since } from '../kit';
 import { Explain, type TipKey } from '../explain';
+import { Closed } from './Library';
 import { Ladder, Num, Word, Blank, NotAsked, NoMatch, Na, Tick, Pct, ScoreCell, Bar, Progress, Act, Footer, Kicker, Stat, type Col } from '../table';
 
 /** How a required fact is said in a sentence, rather than as a column header. */
@@ -51,15 +52,15 @@ const NEEDS_WORD: Record<string, string> = {
   menu: 'a menu', prices: 'prices', step_free: 'step-free',
 };
 
-const LENSES = ['census', 'coverage', 'category', 'source', 'quality', 'demand', 'collect'] as const;
+const LENSES = ['census', 'coverage', 'category', 'source', 'quality', 'demand', 'collect', 'closed'] as const;
 /** What each way of cutting the same places is for. */
 const LENS_TIP: Record<string, TipKey> = {
   census: 'lensCensus', coverage: 'lensCoverage', category: 'lensCategory', source: 'lensSource',
-  quality: 'lensQuality', demand: 'lensDemand', collect: 'collect',
+  quality: 'lensQuality', demand: 'lensDemand', collect: 'collect', closed: 'lensClosed',
 };
 type Lens = typeof LENSES[number];
 const LENS_LABEL: Record<Lens, string> = {
-  census: 'Census', coverage: 'Coverage', category: 'Category', source: 'Source', quality: 'Quality', demand: 'Demand', collect: 'Collect',
+  census: 'Census', coverage: 'Coverage', category: 'Category', source: 'Source', quality: 'Quality', demand: 'Demand', collect: 'Collect', closed: 'Closed',
 };
 
 const BY = ['county', 'city', 'postcode'] as const;
@@ -518,6 +519,9 @@ function Level(props: {
     if (lensHere === 'source') return <SourceBoard q={q} onSub={props.onSub} />;
     if (lensHere === 'quality') return <QualityBoard q={q} onPlace={props.onPlace} canManage={props.canManage} />;
     if (lensHere === 'demand') return <DemandLens q={q} canManage={props.canManage} onCollect={() => props.onLens('collect')} />;
+    // The closed check (C57) is of every place held, wherever the board stands;
+    // it lived only on Library, which the menu has no entry for (2 Oct 2026).
+    if (lensHere === 'closed') return <Closed canManage={props.canManage} />;
     if (lensHere === 'collect') return <CollectBoard q={q} level={level} canManage={props.canManage} cat={cat} sub={sub} />;
     if (ringHere) return <RingBoard q={q} onSub={props.onSub} onLens={props.onLens} onWithin={props.onWithin} />;
     if (level.areaKind === 'country') return <BreakdownBoard q={q} by={props.breakdownBy} onBy={props.onBy} onWhere={props.onWhere} canManage={props.canManage}
@@ -538,6 +542,7 @@ function Level(props: {
   const kicker = lens === 'category' && sub ? `SUBCATEGORY · ${(names.cat ?? cat).toUpperCase()}`
     : lens === 'category' && cat ? `CATEGORY · ${names.subs ?? ''} SUBCATEGORIES`.replace(' · ', ' · ').trim()
     : lens === 'demand' ? `${kickerOf(level)} · LAST 30 DAYS`
+    : lens === 'closed' ? 'CLOSED PLACES · EVERY PLACE HELD'
     : kickerOf(level);
 
   return (
@@ -545,7 +550,7 @@ function Level(props: {
       <Trail level={level} onUp={props.onUp} onWhere={props.onWhere} extra={deep}
              onSelf={() => { props.onCat(''); props.onSub(''); props.onLens('coverage'); }} />
       <Band kicker={kicker} title={title}
-            stats={lens === 'demand' ? null : <Five stats={level.stats} ring={ringHere} kind={lens === 'category' && sub ? names.sub ?? null : null} needs={names.needs ?? null} />} />
+            stats={lens === 'demand' || lens === 'closed' ? null : <Five stats={level.stats} ring={ringHere} kind={lens === 'category' && sub ? names.sub ?? null : null} needs={names.needs ?? null} />} />
       {/* The word that is underlined is the board you are on, not the word in
           the address — otherwise an outcode drew its categories under a lit
           "Coverage" (18 Sep 2026). */}

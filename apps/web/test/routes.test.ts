@@ -407,6 +407,9 @@ test('Household, Settings, Prototypes and the back office', () => {
   assert.deepEqual(parseRoute('/admin/places?where=sl4-1qn&within=30&by=drive&cat=family&sub=play'), { name: 'admin', screen: 'places' });
   assert.equal(splitHref('/admin/places?where=sl4&place=google%3AChIJabc').query.get('place'), 'google:ChIJabc');
   assert.equal(splitHref('/admin/places?where=gb&by=city&sort=empty').query.get('sort'), 'empty');
+  // The closed check (C57) is a lens on Places, since Library has no menu entry (2 Oct 2026).
+  assert.deepEqual(parseRoute('/admin/places?lens=closed'), { name: 'admin', screen: 'places' });
+  assert.equal(splitHref('/admin/places?lens=closed').query.get('lens'), 'closed');
   // BO2j writes the picture board's own address, and its search has its own key:
   // `q` is the place-name filter on BO2q, and one key with two meanings meant a
   // picture search left behind became a place filter (17 Sep 2026).
