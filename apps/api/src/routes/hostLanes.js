@@ -19,7 +19,7 @@
  *   POST   /api/stripe/webhook                 (webhookRouter, public, raw body)
  *
  * Guest booking and payment, and host management, are their own briefs; the
- * tables they will write are laid down in migration 358.
+ * tables they will write are laid down in migration 365.
  */
 
 import express, { Router } from 'express';

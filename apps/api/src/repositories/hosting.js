@@ -80,7 +80,7 @@ const HOST_COLUMNS = {
   dateOfBirth: 'date_of_birth', trust: 'trust', checks: 'checks',
   // Money (SX17/SX19): when payouts land, and company tax reporting.
   paySchedule: 'pay_schedule', taxIsCompany: 'tax_is_company', companyNumber: 'company_number', legalName: 'legal_name', taxAddress: 'tax_address',
-  // Hosting v7 (migration 358): Stripe identity and payouts, and the children's check.
+  // Hosting v7 (migration 365): Stripe identity and payouts, and the children's check.
   stripeAccountId: 'stripe_account_id', stripeMode: 'stripe_mode', payoutsState: 'payouts_state', identityState: 'identity_state',
   identitySessionId: 'identity_session_id', identityVerifiedAt: 'identity_verified_at', checkedState: 'checked_state',
   dbsNumber: 'dbs_number', insuranceMediaId: 'insurance_media_id', checkedSubmittedAt: 'checked_submitted_at',
@@ -256,7 +256,7 @@ const OFFER_COLUMNS = {
   money: 'money', summary: 'summary', transcript: 'transcript', docId: 'doc_id', endsAt: 'ends_at', repeatEvery: 'repeat_every', endDate: 'end_date',
   themesDiffer: 'themes_differ', noticeDays: 'notice_days', rulesAccepted: 'rules_accepted',
   reviewNote: 'review_note', reviewedAt: 'reviewed_at', submittedAt: 'submitted_at', publishedAt: 'published_at', cancelledAt: 'cancelled_at', cancelledNote: 'cancelled_note',
-  // Four ways to host (migration 358).
+  // Four ways to host (migration 365).
   lane: 'lane', whatCategory: 'what_category', whatLabel: 'what_label', lineSuggested: 'line_suggested', multiDay: 'multi_day', endsOn: 'ends_on',
   excludeBankHolidays: 'exclude_bank_holidays', ageMin: 'age_min', ageMax: 'age_max', parents: 'parents', childPence: 'child_pence',
   bookAheadPence: 'book_ahead_pence', dropInGroupPct: 'drop_in_group_pct', dropInGroupMin: 'drop_in_group_min',
@@ -839,7 +839,7 @@ export async function waitlistOf(groupId) {
 }
 
 // ---------------------------------------------------------------------------
-// four ways to host (migration 358)
+// four ways to host (migration 365)
 // ---------------------------------------------------------------------------
 
 /** A host's unfinished v7 drafts, newest first — "Save and finish later" comes back to these. */
