@@ -66,3 +66,16 @@ test('gate down: the site is public, says so, and / sends a visitor to it', asyn
     assert.equal((await page(base, '/sitemap.xml')).status, 200);
   });
 });
+
+test('epic.day/ opens the app for somebody signed in on this browser, the website for everybody else', async () => {
+  await serve({ SITE_GATE: 'on' }, async (base) => {
+    const signedIn = await fetch(`${base}/`, { redirect: 'manual', headers: { accept: 'text/html', cookie: 'epic_locale=en-gb; epic_app=1' } });
+    assert.equal(signedIn.status, 302);
+    assert.equal(signedIn.headers.get('location'), '/inspire');
+    assert.match(signedIn.headers.get('vary') || '', /Cookie/);
+    const visitor = await page(base, '/');
+    assert.equal(visitor.headers.get('location'), '/en-gb/', 'a crawler or a stranger gets the website');
+    const notOurs = await fetch(`${base}/`, { redirect: 'manual', headers: { accept: 'text/html', cookie: 'epic_app=0' } });
+    assert.equal(notOurs.headers.get('location'), '/en-gb/');
+  });
+});

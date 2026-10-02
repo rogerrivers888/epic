@@ -44,8 +44,27 @@ export function setSessionToken(next: string | null) {
   token = next;
   if (next) secureStorage.setItem(TOKEN_KEY, next);
   else secureStorage.removeItem(TOKEN_KEY);
+  markSignedIn(Boolean(next));
   listeners.forEach((fn) => fn(token));
 }
+
+/**
+ * `epic_app=1` on epic.day while this browser holds a session — nothing else, never
+ * the token. The token lives in storage the server cannot read, and the server
+ * has to decide what epic.day/ is before any script runs: with this cookie it is
+ * the app, without it the website (owner, 2 Oct 2026: "epic.day/ with a valid
+ * session → go straight to the app"). Crawlers never carry it. A stale one costs
+ * a trip through /login, which sends a signed-in person straight on anyway.
+ */
+export const APP_COOKIE = 'epic_app';
+export function markSignedIn(on: boolean) {
+  if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+  document.cookie = on
+    ? `${APP_COOKIE}=1; Max-Age=${90 * 24 * 3600}; Path=/; SameSite=Lax; Secure`
+    : `${APP_COOKIE}=; Max-Age=0; Path=/; SameSite=Lax; Secure`;
+}
+// A browser already signed in before this cookie existed gets it on its next load.
+markSignedIn(Boolean(token));
 
 /**
  * Called when the API says the token is no longer good. Separate from signing

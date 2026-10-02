@@ -12,6 +12,7 @@
  * open, exactly as the other doors land them. A spent or expired link says so in
  * one line and offers the way back to log in.
  */
+import { insetBottom, insetLeft, insetRight, insetTop } from '../insets';
 import React, { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
@@ -86,7 +87,7 @@ export function InScreen({ token }: { token: string }) {
 
   return (
     <View style={[styles.root, wide && { flexDirection: 'row' }]}>
-      <ScrollView style={{ flex: 1, backgroundColor: CREAM }} contentContainerStyle={[styles.left, wide && { paddingHorizontal: 64 }]} keyboardShouldPersistTaps="handled">
+      <ScrollView style={{ flex: 1, backgroundColor: CREAM }} contentContainerStyle={[styles.left, { paddingTop: insetTop(32), paddingBottom: insetBottom(48), paddingLeft: insetLeft(wide ? 64 : 24), paddingRight: insetRight(wide ? 64 : 24) }]} keyboardShouldPersistTaps="handled">
         <Wordmark height={30} ink={INK} ground={CREAM} />
         <View style={styles.body}>
           {title ? <Text style={[styles.h1, !wide && { fontSize: 46, lineHeight: 46 }]} {...(Platform.OS === 'web' ? ({ role: 'heading', 'aria-level': 1 } as object) : {})}>{title}</Text> : null}

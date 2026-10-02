@@ -81,10 +81,20 @@ export async function grantPaid(sessionId, hours) {
  * last here" is a line on a settings card, not something worth a write on every
  * request the family makes.
  */
+/**
+ * Mark a session seen, and slide a person's forward: a device session in use
+ * runs 90 days from its last use rather than from its sign-in, so the app on a
+ * home screen stays signed in for as long as it keeps being opened (owner,
+ * 2 Oct 2026: "at least 30 days, sliding"). Never a revoked one, and never an
+ * agent's — those keep the life they were given.
+ */
+export const SLIDE_DAYS = 90;
 export function touchSession(id) {
   return query(
-    `update api_sessions set last_seen_at = now()
-      where id = $1 and last_seen_at < now() - interval '${SEEN_EVERY}'`,
+    `update api_sessions
+        set last_seen_at = now(),
+            expires_at = case when kind = 'device' then greatest(expires_at, now() + interval '${SLIDE_DAYS} days') else expires_at end
+      where id = $1 and revoked_at is null and last_seen_at < now() - interval '${SEEN_EVERY}'`,
     [id],
   ).catch(() => null);
 }

@@ -223,6 +223,14 @@ const server = http.createServer(guarded(async (req, res) => {
   // left for the app to answer (Codex, 1 Oct 2026).
   // While the gate is up the website is behind it (gate.mjs › siteLock): `/` stays
   // the app it has been, and the site's own pages ask for the gate's password.
+  // Somebody signed in on this browser opens the app, not the website (owner,
+  // 2 Oct 2026). The app sets `epic_app=1` while it holds a session (src/session.ts);
+  // crawlers never carry it, so what they see of epic.day/ does not change.
+  if (pathname === '/' && !APP_ROOT_PARAMS.some((k) => new URLSearchParams(search).has(k)) && /(?:^|;\s*)epic_app=1(?:;|$)/.test(String(req.headers.cookie || ''))) {
+    res.writeHead(302, { location: `/inspire${search}`, 'cache-control': 'no-store', vary: 'Cookie' });
+    res.end();
+    return;
+  }
   if (!siteClosed() && pathname === '/' && !APP_ROOT_PARAMS.some((k) => new URLSearchParams(search).has(k))) {
     res.writeHead(302, { location: `/${localeOf(SITE, req)}/${search}`, 'cache-control': 'no-store', vary: 'Accept-Language, Cookie' });
     res.end();

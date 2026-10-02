@@ -19,6 +19,7 @@ import { CREAM, HAIRLINE, INK, INK_HOVER, INK_RULE, LIME, LIME_TINT, ON_INK_MUTE
 import { SiteWordmark as Wordmark } from './SiteWordmark';
 import { useViewport } from '../hooks/useViewport';
 import { useRouter } from '../router';
+import { insetBottom, insetLeft, insetRight, insetTop } from '../insets';
 import { LIVE_SITE_LOCALES, paths, type SiteLocale, type SitePageName } from '../routes';
 import { COMPANY, TRACKING_ON } from './config';
 import { HTML_LANG, LOCALE_LABEL, pick, type Strings } from './i18n';
@@ -101,11 +102,12 @@ function SiteHeader({ locale, header }: { locale: SiteLocale; header: HeaderStyl
 
   if (header.float && !phone) {
     // W4: no header row — the links sit at the top right, over the lime column.
-    return <View style={styles.floatRight}>{right}</View>;
+    return <View style={[styles.floatRight, { top: insetTop(22), right: insetRight(56) }]}>{right}</View>;
   }
 
   return (
-    <View style={[styles.head, { backgroundColor: ground, height: phone ? 64 : 84, paddingHorizontal: phone ? 20 : 56 }]}>
+    // Clear of the status bar and the notch when opened from the home screen (insets.ts).
+    <View style={[styles.head, { backgroundColor: ground, height: insetTop(phone ? 64 : 84), paddingTop: insetTop(0), paddingLeft: insetLeft(phone ? 20 : 56), paddingRight: insetRight(phone ? 20 : 56) }]}>
       <Pressable accessibilityRole="link" accessibilityLabel="Epic" onPress={() => navigate(paths.siteHome(locale))} style={styles.headLeft}>
         {header.left === 'domain' && !phone
           ? <Text style={[styles.domain, { color: ink }]}>epic.day</Text>
@@ -201,7 +203,7 @@ function SiteFooter({ locale }: { locale: SiteLocale }) {
   );
 
   return (
-    <View style={[styles.foot, phone ? { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 20, gap: 16 } : { paddingHorizontal: 56, paddingTop: 28, paddingBottom: 20, gap: 20 }]}>
+    <View style={[styles.foot, phone ? { paddingLeft: insetLeft(20), paddingRight: insetRight(20), paddingTop: 24, paddingBottom: insetBottom(20), gap: 16 } : { paddingLeft: insetLeft(56), paddingRight: insetRight(56), paddingTop: 28, paddingBottom: insetBottom(20), gap: 20 }]}>
       {phone ? (
         <>
           <Wordmark height={26} ink={CREAM} ground={INK} />

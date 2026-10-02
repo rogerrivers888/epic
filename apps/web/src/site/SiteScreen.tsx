@@ -7,6 +7,7 @@
 import React, { useEffect } from 'react';
 import { Platform } from 'react-native';
 import { useSession } from '../hooks/useSession';
+import { sessionToken } from '../session';
 import { useRouter } from '../router';
 import { paths } from '../routes';
 import type { HomeDesign, Route } from '../routes';
@@ -47,7 +48,13 @@ export function SiteScreen({ route }: { route: Extract<Route, { name: 'site' }> 
   useEffect(() => {
     if (refused) navigate(`${paths.login()}?next=${encodeURIComponent(href)}`, { replace: true });
   }, [refused, href, navigate]);
-  if (!open) return null;
+  // Opened from the home screen by somebody signed in, a website page hands over
+  // to the app: a shortcut saved from epic.day must open Epic, not the brochure
+  // (owner, 2 Oct 2026).
+  const standaloneSignedIn = Platform.OS === 'web' && typeof window !== 'undefined' && Boolean(sessionToken())
+    && (window.matchMedia?.('(display-mode: standalone)').matches || (window.navigator as unknown as { standalone?: boolean }).standalone === true);
+  useEffect(() => { if (standaloneSignedIn) navigate(paths.inspire(), { replace: true }); }, [standaloneSignedIn, navigate]);
+  if (!open || standaloneSignedIn) return null;
   return <SitePage route={route} />;
 }
 

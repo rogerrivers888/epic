@@ -36,6 +36,8 @@ const CREW_TONES = [LIME, HAIRLINE, NEUTRAL];
 const EXPERT_TONES = [MOSS, INK];
 const KIND_TONES = [MOSS, INK, HAIRLINE, DEEP_GREEN];
 
+const NOWRAP = (Platform.OS === 'web' ? { whiteSpace: 'nowrap' } : {}) as object;
+
 export function W3Story({ locale, landingPage }: SitePageProps) {
   const w = pick(W3_WORDS, locale);
   const plan = pick(PLAN, locale);
@@ -45,7 +47,9 @@ export function W3Story({ locale, landingPage }: SitePageProps) {
   const twoByTwo = !phone && width < 1000;
 
   // Big type steps down between 700 and 1280 so nothing overflows; at 1280+ it is the design's.
-  const heroSize = phone ? 76 : Math.min(200, Math.floor((width - 112) / 5.9));
+  // "Coming soon." on one line at any width (owner, 2 Oct 2026, on his iPhone: "far
+  // too large at 390"): about 48px at 390, growing with the width to 200.
+  const heroSize = phone ? Math.max(40, Math.min(76, Math.floor((width - 40) / 7.2))) : Math.min(200, Math.floor((width - 112) / 5.9));
   const titleSize = phone ? 48 : Math.min(76, Math.round(width * 0.06));
   const hostSize = phone ? 72 : Math.min(120, Math.round(width * 0.094));
   const closeSize = phone ? 60 : Math.min(96, Math.round(width * 0.075));
@@ -112,13 +116,14 @@ export function W3Story({ locale, landingPage }: SitePageProps) {
     <View style={{ backgroundColor: CREAM }}>
       {/* Hero */}
       <View style={[t.hero, phone ? t.heroPhone : t.heroWide]}>
-        <SiteP style={[t.coming, { fontSize: heroSize, letterSpacing: -heroSize * (phone ? 0.055 : 0.06), lineHeight: heroSize * (phone ? 0.86 : 0.84) }]}>
+        <SiteP style={[t.coming, NOWRAP, { fontSize: heroSize, letterSpacing: -heroSize * (phone ? 0.055 : 0.06), lineHeight: heroSize * (phone ? 0.86 : 0.84) }]}>
           {w.comingSoon}
         </SiteP>
         <View style={[t.heroRow, phone ? t.heroRowPhone : t.heroRowWide]}>
           <View style={phone ? { gap: 6 } : { flex: 1, minWidth: 0, gap: 6 }}>
             <SiteH1 style={[t.heroLine, { fontSize: phone ? 19 : 24, lineHeight: phone ? 19 * 1.35 : 24 * 1.3 }]}>{w.h1}</SiteH1>
-            <SiteP style={[t.heroLine, { fontSize: phone ? 19 : 24, lineHeight: phone ? 19 * 1.35 : 24 * 1.3 }]}>{w.line}</SiteP>
+            {/* One line on a phone: the heading says it; the second sentence repeated it. */}
+            {phone ? null : <SiteP style={[t.heroLine, { fontSize: 24, lineHeight: 24 * 1.3 }]}>{w.line}</SiteP>}
           </View>
           <View style={phone ? undefined : { flex: 1, minWidth: 0 }}>
             <InterestForm locale={locale} source="home" label={w.remind} successMessage={w.success} ground="lime" landingPage={landingPage} maxWidth={phone ? 9999 : 640} />

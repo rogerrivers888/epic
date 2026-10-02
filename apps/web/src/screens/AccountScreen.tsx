@@ -7,6 +7,7 @@
  * pack's constants rather than palette tokens, like the login screen it follows.
  */
 
+import { insetBottom, insetLeft, insetRight, insetTop } from '../insets';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View, Image } from 'react-native';
 import { Press } from '../components/press';
@@ -64,7 +65,7 @@ export function AccountScreen() {
   return (
     <ScrollView style={styles.root} contentContainerStyle={{ flexGrow: 1 }}>
       {/* top bar */}
-      <View style={[styles.topBar, { paddingHorizontal: sidePad }]}>
+      <View style={[styles.topBar, { paddingLeft: insetLeft(sidePad), paddingRight: insetRight(sidePad), paddingTop: insetTop(28) }]}>
         <Wordmark height={30} ink={INK} ground={CREAM} />
         <View style={styles.topRight}>
           <Text style={styles.email}>{account?.email || ''}</Text>

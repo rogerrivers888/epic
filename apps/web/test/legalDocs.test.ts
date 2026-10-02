@@ -36,7 +36,7 @@ test('nothing in square brackets goes public, and the owner fills are in', () =>
 });
 
 test('the cookie list is what epic.day stores, and nothing for analytics while the banner is off', () => {
-  for (const name of ['epic.session', 'epic_session', 'roam_session', 'epic_oauth', 'epic_locale', 'epic-offline', 'epic.after-sign-in']) {
+  for (const name of ['epic.session', 'epic_app', 'epic_session', 'roam_session', 'epic_oauth', 'epic_locale', 'epic-offline', 'epic.after-sign-in']) {
     assert.ok(COOKIES.includes(name), `${name} is listed`);
   }
   assert.doesNotMatch(COOKIES, /\b_ga\b|_gcl|epic_consent/, 'no GA4/Ads or consent cookie until the banner is on');

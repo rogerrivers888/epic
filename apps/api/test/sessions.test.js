@@ -88,6 +88,22 @@ test('last-seen is lazy, and only ever moves forward', async () => {
   assert.ok(moved.rows[0].last_seen_at.getTime() > made.created_at.getTime() - 3600_000, 'an hour later it is');
 });
 
+test('a device session in use slides to 90 days from now; an agent session does not', async () => {
+  const device = await insertSession(aToken(), 'phone', null, 'device', 'password');
+  const agent = await insertSession(aToken(), 'agent', null, 'agent', 'passcode');
+  const revoked = await insertSession(aToken(), 'gone', null, 'device', 'password');
+  // Signed in 80 days ago, ten days left; last seen an hour ago.
+  for (const s of [device, agent, revoked]) {
+    await query("update api_sessions set expires_at = now() + interval '10 days', last_seen_at = now() - interval '1 hour' where id = $1", [s.id]);
+  }
+  await query('update api_sessions set revoked_at = now() where id = $1', [revoked.id]);
+  for (const s of [device, agent, revoked]) await touchSession(s.id);
+  const left = async (id) => (await query("select extract(epoch from expires_at - now()) / 86400 as days from api_sessions where id = $1", [id])).rows[0].days;
+  assert.ok((await left(device.id)) > 89, 'the phone in use runs another 90 days');
+  assert.ok((await left(agent.id)) < 11, 'an agent keeps the life it was given');
+  assert.ok((await left(revoked.id)) < 11, 'a revoked session is never revived');
+});
+
 test('the sweep takes only what is long dead', async () => {
   await query('delete from api_sessions');
   const live = aToken();

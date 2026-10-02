@@ -20,6 +20,7 @@
  * light/dark setting.
  */
 
+import { insetBottom, insetLeft, insetRight, insetTop } from '../insets';
 import React, { useEffect, useRef, useState } from 'react';
 import { Linking, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../components/press';
@@ -238,7 +239,7 @@ export function LoginScreen() {
     <View style={[styles.root, wide && styles.rootWide]}>
       {/* Scrolls, so every control stays reachable on a short viewport or with
           the keyboard open — the shell itself does not scroll. */}
-      <ScrollView style={styles.leftScroll} contentContainerStyle={[styles.left, wide && styles.leftWide]} keyboardShouldPersistTaps="handled">
+      <ScrollView style={styles.leftScroll} contentContainerStyle={[styles.left, wide && styles.leftWide, { paddingTop: insetTop(32), paddingBottom: insetBottom(48), paddingLeft: insetLeft(wide ? 64 : 24), paddingRight: insetRight(wide ? 64 : 24) }]} keyboardShouldPersistTaps="handled">
         <Wordmark height={30} ink={INK} ground={CREAM} />
         <View style={styles.leftBody}>
           {step === 'login' ? (
