@@ -201,10 +201,8 @@ export async function spotFromDetail({ venueRef, detail, client = null } = {}) {
       `insert into review_sightings (norm, venue_ref, raw, asserts, denies, asks)
          values ($1, $2, $3, $4, $5, $6)
        on conflict (norm, venue_ref) do update
-         set asserts = greatest(review_sightings.asserts, excluded.asserts),
-             denies  = greatest(review_sightings.denies,  excluded.denies),
-             asks    = greatest(review_sightings.asks,    excluded.asks),
-             last_seen = now()`,
+         set asserts = excluded.asserts, denies = excluded.denies, asks = excluded.asks,
+             raw = excluded.raw, last_seen = now()`,
       [norm, venueRef, e.raw, e.asserts, e.denies, e.asks]);
     entries.push({
       norm, raw: e.raw, rawForms: [e.raw],
