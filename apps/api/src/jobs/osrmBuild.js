@@ -189,11 +189,25 @@ export async function claimOsrmBuild({ by = 'osrm-build service' } = {}) {
   return out.changed ? out.value : null;
 }
 
-/** A `running` state older than STALE_RUN_HOURS is a container that died: say so, so it can be re-approved. */
+/**
+ * The running build's heartbeat: a light in-place stamp (not an audit row — no
+ * human changed anything), only while this run still holds the build. A long
+ * build that is still working is never retired for having started long ago
+ * (Codex).
+ */
+export async function heartbeat(runId) {
+  await query(
+    `update bo_settings set value = jsonb_set(value, '{heartbeatAt}', to_jsonb(now())), updated_at = now()
+      where key = $1 and value->>'state' = 'running' and value->>'runId' = $2`,
+    [OSRM_BUILD_KEY, String(runId)]);
+}
+
+/** A `running` state not heard from for STALE_RUN_HOURS is a container that died: say so, so it can be re-approved. */
 export async function retireStaleRun({ now = Date.now(), by = 'osrm-build service' } = {}) {
   const out = await writeState(
     { state: 'failed', finishedAt: new Date(now).toISOString(), why: `stopped without finishing (no word for ${STALE_RUN_HOURS}h) — approve again to retry` },
-    { who: by, expect: (was) => was.state === 'running' && was.startedAt && now - Date.parse(was.startedAt) > STALE_RUN_HOURS * 3600_000 },
+    { who: by, expect: (was) => was.state === 'running' && (was.heartbeatAt || was.startedAt)
+      && now - Date.parse(was.heartbeatAt || was.startedAt) > STALE_RUN_HOURS * 3600_000 },
   );
   return out.changed;
 }
@@ -256,8 +270,11 @@ export async function runOsrmBuildJob({
   dataDir = process.env.EPIC_OSRM_DATA_DIR || '/data',
   // The UK extract, Northern Ireland included: the sector grid has every BT
   // sector, and a Great-Britain-only extract would snap them onto GB roads and
-  // invent their routes (Codex).
-  extractUrl = process.env.EPIC_OSRM_EXTRACT_URL || 'https://download.geofabrik.de/europe/united-kingdom-latest.osm.pbf',
+  // invent their routes (Codex). Geofabrik publishes Great Britain and
+  // Ireland-with-Northern-Ireland separately; openstreetmap.fr publishes the
+  // United Kingdom as one file — the 2.4 GB extract this build was measured on
+  // (1 Oct 2026). EPIC_OSRM_EXTRACT_URL overrides it.
+  extractUrl = process.env.EPIC_OSRM_EXTRACT_URL || 'https://download.openstreetmap.fr/extracts/europe/united_kingdom-latest.osm.pbf',
   horizon = HORIZON_MINUTES,
   bbox = null,
   // How long to wait before a second sweep for ring counts that were already
@@ -269,7 +286,7 @@ export async function runOsrmBuildJob({
   const d = {
     claim: claimOsrmBuild, retire: retireStaleRun, record: writeState,
     download, run, startRouted, allCells, buildOsrmMode, osrmTable,
-    rememberRings, pendingRings, forgetRings, state: osrmBuildState,
+    rememberRings, pendingRings, forgetRings, state: osrmBuildState, heartbeat,
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     ringKeys: async ({ before = null, scope = null } = {}) => (await query(
       `select distinct cell, mode, minutes from ring_counts
@@ -337,9 +354,11 @@ export async function runOsrmBuildJob({
       const graph = path.join(dir, 'gb.osrm');
       // osrm-extract writes beside its input, so the extract is linked in.
       await d.run('ln', ['-f', pbf, path.join(dir, 'gb.osm.pbf')]);
-      d.log(p.label, 'extract'); await d.run('osrm-extract', ['-p', p.lua, path.join(dir, 'gb.osm.pbf')]);
-      d.log(p.label, 'partition'); await d.run('osrm-partition', [graph]);
-      d.log(p.label, 'customize'); await d.run('osrm-customize', [graph]);
+      const beat = () => d.heartbeat(claimed.runId).catch(() => {});
+      await beat(); d.log(p.label, 'extract'); await d.run('osrm-extract', ['-p', p.lua, path.join(dir, 'gb.osm.pbf')]);
+      await beat(); d.log(p.label, 'partition'); await d.run('osrm-partition', [graph]);
+      await beat(); d.log(p.label, 'customize'); await d.run('osrm-customize', [graph]);
+      await beat();
       const origins = originsByMode[p.mode];
       const routed = await d.startRouted(graph, { sample });
       try {
@@ -347,7 +366,7 @@ export async function runOsrmBuildJob({
           mode: p.mode, cells, origins, table: d.osrmTable(routed.url, { profile: p.label }), horizon,
           resume: true, since: claimed.epoch, chunk: 300,
           onRingsDropped: (keys, q) => d.rememberRings(keys, claimed.runId, q),
-          onProgress: ({ done, of, pairs }) => d.log(p.mode, `${done}/${of}`, `${pairs} pairs`),
+          onProgress: ({ done, of, pairs }) => { d.log(p.mode, `${done}/${of}`, `${pairs} pairs`); void beat(); },
         });
         result.modes[p.mode] = { built: out.built, skipped: out.skipped, pairs: out.pairs, runId: out.runId };
       } finally {

@@ -53,6 +53,7 @@ const mocks = (calls, overrides = {}) => ({
   ringKeys: (() => { let n = 0; return async () => (++n <= 2 ? [{ cell: 'sector:ZZ1 1', mode: 'walking', minutes: 30 }] : []); })(),
   recountRing: async (k) => { calls.push('recount'); calls.push(`recount ${k.cell}|${k.minutes}`); },
   rmrf: async (p) => { calls.push(`rm ${p.split('/').pop()}`); },
+  heartbeat: async () => {},
   log: () => {},
   ...overrides,
 });
@@ -226,5 +227,21 @@ test('a regional trial only owes the rings of the origins it rebuilds', async ()
   assert.ok(scopes.length >= 1 && scopes.every((sc) => Array.isArray(sc)), 'every ring query is scoped');
   assert.ok(scopes[0].includes('sector:IN1 1|walking'));
   assert.ok(!scopes[0].some((x) => x.startsWith('sector:EDG 1')), 'the boundary cell is neither rebuilt nor recounted');
+  await reset();
+});
+
+test('a long build that keeps beating is not retired; one that falls silent is', async () => {
+  await reset();
+  await job.approveOsrmBuild({ by: 'owner@test' });
+  const claimed = await job.claimOsrmBuild();
+  // Started long ago, but beating now: still working.
+  await query(`update bo_settings set value = jsonb_set(value, '{startedAt}', to_jsonb(now() - interval '20 hours')) where key = $1`, [job.OSRM_BUILD_KEY]);
+  await job.heartbeat(claimed.runId);
+  assert.equal(await job.retireStaleRun(), false);
+  // Silent past the limit: retired.
+  assert.equal(await job.retireStaleRun({ now: Date.now() + (job.STALE_RUN_HOURS + 1) * 3600_000 }), true);
+  // A beat from a run that no longer holds the build changes nothing.
+  await job.heartbeat(claimed.runId);
+  assert.equal((await job.osrmBuildState()).state, 'failed');
   await reset();
 });
