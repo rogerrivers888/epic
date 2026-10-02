@@ -488,9 +488,7 @@ router.get('/host/money', async (req, res, next) => {
     // current snapshot — otherwise the intro ending (ten bookings or 90 days)
     // retroactively re-charges the 0% bookings (Codex). So walk the host's
     // bookings oldest-first: the i-th booking is intro iff it was inside the
-    // first 90 days AND among the first ten. (The level rate still reads current
-    // `host.trust` — trust is not versioned historically, so past bookings move
-    // with a level change; a versioned trust ledger is the follow-on for that.)
+    // first 90 days AND among the first ten.
     // The position in the ten is the booking's stamped `intro_ordinal` (migration
     // 332), fixed when it first held a place and kept through a cancellation —
     // so cancelling an early booking never slides a later one into the 0%
@@ -499,7 +497,11 @@ router.get('/host/money', async (req, res, next) => {
     for (const b of live) {
       introById.set(b.id, introState({ hostStartedAt: host.created_at, bookingsSoFar: introPositionsBefore(b, bookings), now: new Date(b.created_at) }));
     }
-    const resolve = (b) => ({ amountPence: b.amount_pence ?? 0, level: host.trust, viaHostLink: Boolean(b.via_host_link), intro: introById.get(b.id) ?? null });
+    // The level in force when the booking first held a place (fee_level,
+    // migration 332), so a host moving up never re-prices what they earned
+    // before (Codex, 2 Oct 2026); a row stamped before that column falls back
+    // to the host's level today.
+    const resolve = (b) => ({ amountPence: b.amount_pence ?? 0, level: b.fee_level ?? host.trust, viaHostLink: Boolean(b.via_host_link), intro: introById.get(b.id) ?? null });
     // The host-wide figures the screen shows directly. The intro ladder counts
     // bookings MADE (a confirmed booking consumes an intro position whenever
     // its date is, matching the per-booking pricing above); the Trusted ladder

@@ -528,3 +528,16 @@ test('"When your day runs" sets a day outing\'s start and length when nothing wa
   assert.equal(day.start_time, '08:00:00', 'the day starts when the household says');
   assert.equal(day.end_time, '14:00:00', 'and runs as long as their window');
 });
+
+test('"Getting there" reaches the planner: the single mode it reads follows the ticked ones', async () => {
+  const { household: h, member: roger } = await aHousehold(query);
+  const srv = await server(owner(h, roger.id));
+  try {
+    await srv.send('PATCH', '/api/household', { travelModes: ['train', 'walking'] });
+    let { rows: [row] } = await query('select travel_mode from households where id = $1', [h.id]);
+    assert.equal(row.travel_mode, 'transit', 'train and walking plan as public transport');
+    await srv.send('PATCH', '/api/household', { travelModes: ['walking', 'car'] });
+    ({ rows: [row] } = await query('select travel_mode from households where id = $1', [h.id]));
+    assert.equal(row.travel_mode, 'driving', 'with a car ticked, the car reaches furthest');
+  } finally { await srv.close(); }
+});

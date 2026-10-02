@@ -20,6 +20,10 @@ alter table experience_bookings add column if not exists via_host_link boolean n
 -- column, filled for existing bookings in the order they were made.
 
 alter table experience_bookings add column if not exists intro_ordinal integer;
+-- The host's level when the booking first held a place, for the same reason:
+-- a host rising from Verified to Trusted must not re-price what they already
+-- earned at 20% down to 10% (Codex, 2 Oct 2026).
+alter table experience_bookings add column if not exists fee_level text;
 
 create or replace function epic_booking_intro_ordinal() returns trigger language plpgsql as $$
 begin
@@ -27,6 +31,7 @@ begin
     perform pg_advisory_xact_lock(hashtext('epic_booking_intro:' || new.host_id::text));
     select coalesce(max(intro_ordinal), 0) + 1 into new.intro_ordinal
       from experience_bookings where host_id = new.host_id;
+    select trust into new.fee_level from hosts where id = new.host_id;
   end if;
   return new;
 end $$;
@@ -36,7 +41,16 @@ create trigger experience_bookings_intro_ordinal
   before insert or update of state on experience_bookings
   for each row execute function epic_booking_intro_ordinal();
 
-update experience_bookings b set intro_ordinal = n.ordinal
-  from (select id, row_number() over (partition by host_id order by created_at, id) as ordinal
-          from experience_bookings where state in ('confirmed', 'attended')) n
- where b.id = n.id and b.intro_ordinal is null;
+-- Existing bookings, in the order they were made. A cancelled booking counts
+-- when there is evidence it held a place — money taken or given back — so the
+-- bookings after it are not renumbered down into the 0% (Codex, 2 Oct 2026).
+-- A cancelled booking with only a `recorded` payment cannot say whether it was
+-- ever confirmed, and is left out rather than guessed at. The level written
+-- is the host's level today: the past has no record of an earlier one.
+update experience_bookings b set intro_ordinal = n.ordinal, fee_level = h.trust
+  from (select id, host_id, row_number() over (partition by host_id order by created_at, id) as ordinal
+          from experience_bookings
+         where state in ('confirmed', 'attended')
+            or (state = 'cancelled' and (paid_at is not null or refunded_at is not null or payment_status in ('paid', 'refunded')))) n,
+       hosts h
+ where b.id = n.id and h.id = n.host_id and b.intro_ordinal is null;

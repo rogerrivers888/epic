@@ -8,6 +8,7 @@
 
 import { query, withTransaction } from '../db.js';
 import { settleClaims, refreshStats } from './placeIndex.js';
+import { primaryTravelMode } from '../domain/travel.js';
 
 // ---------------------------------------------------------------------------
 // the household
@@ -39,6 +40,12 @@ export async function householdById(id) {
  * the coordinates rather than merging with what was there.
  */
 export async function updateHousehold(id, f) {
+  // A saved "Getting there" also moves the single mode the planner reads, so
+  // the setting reaches generated trips (Codex, 2 Oct 2026).
+  if (Array.isArray(f.travelModes) && f.travelMode == null) {
+    const primary = primaryTravelMode(f.travelModes);
+    if (primary) f = { ...f, travelMode: primary };
+  }
   const { rows } = await query(
     `update households
         set name                  = coalesce($2, name),

@@ -268,3 +268,19 @@ export function straightLineReachKm(mode, minutes) {
   // to the reach geometry, and is applied there.
   return (Math.max(0, minutes) / 60) * kmh / factor;
 }
+
+/**
+ * The one legacy `travel_mode` the planner still reads, from the ticked
+ * "Getting there" modes: the furthest-reaching wins (car, then train or bus,
+ * then bike, then walking) — the same reading close-to-home takes. Saving the
+ * multi-select without it left every generated trip on the old single mode
+ * (Codex, 2 Oct 2026). Nothing ticked says nothing: null, never a car.
+ */
+export function primaryTravelMode(modes) {
+  const set = new Set((modes ?? []).map((m) => String(m).toLowerCase()));
+  if (set.has('car')) return 'driving';
+  if (set.has('train') || set.has('bus')) return 'transit';
+  if (set.has('bike')) return 'cycling';
+  if (set.has('walking')) return 'walking';
+  return null;
+}

@@ -200,3 +200,49 @@ test('cancelling an early booking never slides a later one into the 0% intro', a
   } finally { await srv.close(); }
   assert.equal(await repo.confirmedBookingsSoFar(host.id), 11, 'the host-wide count reads the stamps, cancelled one included');
 });
+
+test("a host moving up a level never re-prices what they already earned", async () => {
+  const { household } = await aHousehold(query, 'the frozen level');
+  const host = await repo.insertHost(household.id, { name: 'Lia', type: 'skill' });
+  // Past the intro, so the level rate is what applies.
+  await query("update hosts set created_at = now() - interval '200 days', trust = 'verified' where id = $1", [host.id]);
+  const offer = await repo.insertOffer(host.id, 'oneoff', { startsOn: '2099-04-01' });
+  const before = await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2099-04-01', party: [], heads: 1, state: 'confirmed', amountPence: 10000 }, null);
+  assert.equal(before.fee_level, 'verified', 'the level is stamped when the booking first holds a place');
+  await query("update hosts set trust = 'trusted' where id = $1", [host.id]);
+  await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2099-04-01', party: [], heads: 1, state: 'confirmed', amountPence: 10000 }, null);
+  const srv = await hostServer(household);
+  try {
+    const body = await (await fetch(`${srv.url}/api/host/money`)).json();
+    const rates = body.totals.lines.map((l) => [l.rate, l.count]).sort((a, b) => a[0] - b[0]);
+    assert.deepEqual(rates, [[LEVEL_RATE.trusted, 1], [LEVEL_RATE.verified, 1]],
+      'the earlier booking keeps the Verified rate; only the later one has the Trusted rate');
+  } finally { await srv.close(); }
+});
+
+test("migration 332's back-fill counts a paid-then-cancelled booking, so nobody after it slides into the 0%", async () => {
+  const { readFileSync } = await import('node:fs');
+  const sql = readFileSync(new URL('../migrations/332_a_booking_through_the_hosts_own_link.sql', import.meta.url), 'utf8');
+  const backfill = sql.slice(sql.lastIndexOf('update experience_bookings b set intro_ordinal'));
+  const { household } = await aHousehold(query, 'the back-fill');
+  const host = await repo.insertHost(household.id, { name: 'Bo', type: 'skill' });
+  const offer = await repo.insertOffer(host.id, 'oneoff', { startsOn: '2099-02-01' });
+  const add = (state) => repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2099-02-01', party: [], heads: 1, state, amountPence: 1000 }, null);
+  const first = await add('confirmed');
+  const refunded = await add('confirmed');
+  const neverHeld = await add('pending');
+  const last = await add('confirmed');
+  await query("update experience_bookings set state = 'cancelled', payment_status = 'refunded', refunded_at = now() where id = $1", [refunded.id]);
+  await query("update experience_bookings set state = 'cancelled' where id = $1", [neverHeld.id]);
+  // As if these rows predated the column: wipe the stamps, then run the
+  // migration's own back-fill statement over them.
+  await query('update experience_bookings set intro_ordinal = null, fee_level = null where host_id = $1', [host.id]);
+  await query(backfill);
+  const { rows } = await query('select id, intro_ordinal, fee_level from experience_bookings where host_id = $1', [host.id]);
+  const by = new Map(rows.map((r) => [r.id, r]));
+  assert.equal(by.get(first.id).intro_ordinal, 1);
+  assert.equal(by.get(refunded.id).intro_ordinal, 2, 'a refunded cancellation did hold a place, and keeps it');
+  assert.equal(by.get(neverHeld.id).intro_ordinal, null, 'a cancellation with no evidence of a place is not guessed at');
+  assert.equal(by.get(last.id).intro_ordinal, 3, 'so the last is third, never renumbered down');
+  assert.equal(by.get(last.id).fee_level, 'verified', "and carries the host's level");
+});
