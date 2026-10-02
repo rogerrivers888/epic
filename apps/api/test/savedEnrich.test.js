@@ -453,3 +453,41 @@ test('a venue page that redirects off its own site gives up no pictures', async 
   });
   assert.equal(sub.ok, true, 'its own www is still its own site');
 });
+
+test('a redirect off the venue\'s site is refused before the other site is contacted; on-site hops are each asked politely', async () => {
+  const { fetchVenuePage } = await import('../src/sources/venueImages.js');
+  const contacted = []; const asked = [];
+  const fetchImpl = async (url) => {
+    contacted.push(url);
+    if (url === 'https://v.example/') return new Response(null, { status: 301, headers: { location: 'https://www.v.example/home' } });
+    if (url === 'https://www.v.example/home') return new Response(null, { status: 302, headers: { location: 'https://www.facebook.com/v' } });
+    return new Response('<html></html>', { status: 200, headers: { 'content-type': 'text/html' } });
+  };
+  const out = await fetchVenuePage('https://v.example/', { fetchImpl, politeness: async (u) => { asked.push(u); return { ok: true }; } });
+  assert.deepEqual(out, { refused: 'redirected_off_site' });
+  assert.ok(!contacted.some((u) => u.includes('facebook')), 'Facebook never contacted');
+  assert.deepEqual(asked, ['https://v.example/', 'https://www.v.example/home'], 'each on-site hop asked first');
+});
+
+test('Claude fills only what was missing: a field the free research holds is not overwritten', async () => {
+  const hh = await household();
+  const ref = `google:onlymissing-${randomUUID()}`;
+  await query(`insert into place_records (venue_ref, name, website, phone, provenance) values ($1, 'Only Missing', 'https://om.example/', '0100 FREE', '{"phone":"osm","website":"osm"}')`, [ref]);
+  await query(`insert into saved_place_enrichment (venue_ref, household_id, state) values ($1, $2, 'free')`, [ref, hh]);
+  await enrich.afterFree(ref, { householdId: hh, sessionId: null }, {
+    asks: [], openverse: async () => ({ ok: true, stored: [], refused: 0 }), venuePictures: async () => ({ ok: true, kept: 0 }),
+    searchWeb: async () => ({
+      text: JSON.stringify({ fields: {
+        phone: { value: '0200 CLAUDE', source_url: 'https://om.example/contact' },
+        booking_url: { value: 'https://om.example/book', source_url: 'https://om.example/contact' },
+      } }),
+      fetched: ['https://om.example/contact'], searches: 0,
+    }),
+  });
+  const { rows } = await query(`select field, value from place_facts where venue_ref = $1 and source = 'site'`, [ref]);
+  const byField = Object.fromEntries(rows.map((r) => [r.field, r.value]));
+  assert.equal(byField.phone, undefined, 'the phone the open map gave stays the one on record');
+  assert.equal(byField.booking_url, 'https://om.example/book', 'the missing booking link is filled');
+  const found = (await enrich.enrichmentOf(ref)).found.fields;
+  assert.equal(found.phone.value, '0100 FREE');
+});

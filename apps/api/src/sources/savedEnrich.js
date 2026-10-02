@@ -533,15 +533,22 @@ async function claudePass({ venueRef, name, record, missing, asks, ctx }, deps =
   // a place with nothing to find (CLAUDE.md, the can't-speak rule).
   if (!reply) throw Object.assign(new Error('unparsed_reply'), { code: 'unparsed_reply', costUsd });
   try {
-    return await writePass({ venueRef, reply, out, record, asks, costUsd });
+    return await writePass({ venueRef, reply, out, record, asks, costUsd, missing });
   } catch (err) {
     throw Object.assign(err, { costUsd });
   }
 }
 
-async function writePass({ venueRef, reply, out, record, asks, costUsd }) {
+async function writePass({ venueRef, reply, out, record, asks, costUsd, missing = [] }) {
 
   const j = judge({ reply, fetched: out.fetched, knownWebsite: ownWebsite(record?.website), asks });
+  // Claude fills what was missing and nothing else: a field the free research
+  // already established is not overwritten by whatever came back beside the
+  // asked-for ones (Codex, 2 Oct 2026). The website stays usable as the
+  // boundary for reading the others, but is written only if it was missing.
+  const asked = new Set(missing);
+  for (const k of Object.keys(j.siteFacts)) if (!asked.has(k)) delete j.siteFacts[k];
+  for (const k of Object.keys(j.fields)) if (!asked.has(k)) delete j.fields[k];
   if (Object.keys(j.siteFacts).length) await recordSiteFacts(venueRef, j.siteFacts);
   for (const a of j.answers) {
     await sets.saveAnswer({ venueRef, questionId: a.questionId, source: a.source, state: 'answered', value: { yesno: a.yesno }, sourceUrl: a.sourceUrl });
