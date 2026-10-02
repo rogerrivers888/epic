@@ -290,7 +290,10 @@ export async function refreshCellCounts() {
  * rows for a cell are replaced one cell at a time inside its own statement, so
  * an interrupted run leaves a table that is short rather than one that is wrong.
  */
-export async function buildMatrix({ mode = 'driving', capMinutes = HORIZON_MINUTES, scheme = 'sector', onProgress = null } = {}) {
+export async function buildMatrix({ mode = 'driving', capMinutes = null, scheme = 'sector', onProgress = null } = {}) {
+  // To the approved horizon unless a cap is named outright: the wider driving
+  // build is the owner's to approve, and a default must not start it (Codex).
+  if (capMinutes == null) capMinutes = await approvedHorizon(mode);
   // Canonical from here down. `reachFrom` writes `driving`; a delete or a read
   // with the screen's word for it — `drive` — matches nothing at all, so a
   // rebuild would leave the old rows in place and a search would come back
@@ -745,17 +748,30 @@ export async function approvedHorizon(mode) {
 /** Set the approved horizon (the Approval card's action). Logged like every setting. */
 export async function setApprovedHorizon(mode, minutes, { by = null } = {}) {
   const canonical = travelMode(mode);
+  const who = String(by ?? '').trim() || 'unnamed caller';
   const was = await approvedHorizon(canonical);
-  const value = { minutes, approvedBy: by, at: new Date().toISOString() };
-  const { rows: [row] } = await query(
-    `insert into bo_settings (key, value, version, updated_by, updated_at) values ($1, $2::jsonb, 1, $3, now())
-     on conflict (key) do update set value = excluded.value, version = bo_settings.version + 1,
-       updated_by = excluded.updated_by, updated_at = now()
-     returning version`,
-    [horizonKey(canonical), JSON.stringify(value), by]);
-  await query(
-    'insert into bo_settings_log (key, version, before, after, who) values ($1, $2, $3::jsonb, $4::jsonb, $5)',
-    [horizonKey(canonical), row.version, JSON.stringify({ minutes: was }), JSON.stringify(value), by]).catch(() => null);
+  const value = { minutes, approvedBy: who, at: new Date().toISOString() };
+  // The setting and its audit row land together or not at all (Codex): a
+  // changed horizon with no log entry is a change nobody can account for.
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const { rows: [row] } = await client.query(
+      `insert into bo_settings (key, value, version, updated_by, updated_at) values ($1, $2::jsonb, 1, $3, now())
+       on conflict (key) do update set value = excluded.value, version = bo_settings.version + 1,
+         updated_by = excluded.updated_by, updated_at = now()
+       returning version`,
+      [horizonKey(canonical), JSON.stringify(value), who]);
+    await client.query(
+      'insert into bo_settings_log (key, version, before, after, who) values ($1, $2, $3::jsonb, $4::jsonb, $5)',
+      [horizonKey(canonical), row.version, JSON.stringify({ minutes: was }), JSON.stringify(value), who]);
+    await client.query('commit');
+  } catch (err) {
+    await client.query('rollback').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
   const { rows: [todo] } = await query(
     `select count(*)::int as n from geo_cells g
        left join cell_builds b on b.from_cell = g.code and b.mode = $1

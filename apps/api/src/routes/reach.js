@@ -178,7 +178,11 @@ router.post('/build', requires('manage_library'), async (req, res, next) => {
   try {
     // Built to the horizon rather than to the cap: the matrix has to hold the
     // edge allowance or the allowance does nothing at ninety minutes.
-    const capMinutes = Math.min(180, Math.max(5, Number(req.body?.capMinutes) || HORIZON_MINUTES));
+    // Named outright, an owner's cap is theirs to choose; left out, it is the
+    // approved horizon — never a default that starts the wider build (Codex).
+    const capMinutes = req.body?.capMinutes != null
+      ? Math.min(180, Math.max(5, Number(req.body.capMinutes) || 5))
+      : await reach.approvedHorizon(req.body?.mode ?? 'driving');
     const mode = travelMode(req.body?.mode ?? 'driving');
     if (await reach.osrmOwns(mode)) return res.status(409).json({ error: `${mode} is routed by OSRM; rebuild it with reach-osrm, not the estimator.` });
     if (req.body?.wait === true) return res.json(await reach.buildMatrix({ mode, capMinutes }));

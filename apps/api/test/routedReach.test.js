@@ -159,3 +159,15 @@ test('the refresh builds driving to the approved horizon, no further', async () 
   await query(`delete from reach where mode = 'driving'`);
   await query(`delete from cell_builds where mode = 'driving'`);
 });
+
+test('approving the horizon writes the setting and its audit row together', async () => {
+  await query(`delete from bo_settings where key = 'reach:horizon:driving'`);
+  await query(`delete from bo_settings_log where key = 'reach:horizon:driving'`);
+  await reach.setApprovedHorizon('driving', 130, { by: null });
+  const { rows: log } = await query(`select who, (after->>'minutes')::int as m from bo_settings_log where key = 'reach:horizon:driving'`);
+  assert.equal(log.length, 1);
+  assert.equal(log[0].m, 130);
+  assert.ok(log[0].who && log[0].who.length > 0, 'who is never empty');
+  await query(`delete from bo_settings where key = 'reach:horizon:driving'`);
+  await query(`delete from bo_settings_log where key = 'reach:horizon:driving'`);
+});

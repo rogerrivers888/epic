@@ -206,7 +206,11 @@ export async function censusForRing(ring, { mode = 'driving', minutes = 30 } = {
     // only on the ring as a whole never reached them (Codex, 28 Sep 2026).
     const partly = byOutcode.partial.length > 0;
     const floors = Object.fromEntries(Object.entries(stored).map(([k, v]) => [k, Boolean(v.floor) || partly]));
+    // A ring asked past what its origin's matrix was built to is a floor for a
+    // live reason (`shortOfHorizon`), not a stale one: recounting it changes
+    // nothing until the wider build lands, whose own recount replaces it (Codex).
     const stale = byOutcode.missing.length === 0 && byOutcode.partial.length === 0
+      && !ring.shortOfHorizon
       && Object.values(stored).some((v) => v.floor && !(v.unresolved > 0));
     if (stale) void refreshRing({ cell: ring.cell, mode, minutes }).catch(() => null);
     return {
