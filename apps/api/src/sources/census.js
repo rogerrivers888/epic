@@ -388,7 +388,7 @@ export async function censusArea({
     // `noteMany` coalesces, so a null cannot erase a point something else knew.
     await index.noteMany(
       batch.map((p) => ({ ref: p.ref, sourceId: p.ref.slice('google:'.length), sources: ['google'] })),
-      { source: 'google', countryCode: 'GB' },
+      { source: 'google', countryCode },
     );
     await writeCensusFacts(batch);
   }
