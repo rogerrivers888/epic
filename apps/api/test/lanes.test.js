@@ -241,3 +241,11 @@ test('the old readers see a lane offer’s dates and slots (the guest page and b
   const slots = anytimeSlots({ lane: 'onrequest', free_hours: { 6: [['14:00', '17:00']] }, session_lengths: [120, 180], notice_hours: 48 }, { from: new Date('2026-10-09T12:00:00Z'), days: 9 });
   assert.deepEqual(slots, [{ date: '2026-10-17', times: ['14:00', '15:00'] }], 'Sat 10 Oct is inside the 48 hours; Sat 17 is not');
 });
+
+test('an adult age set in config is the one the publish gate asks about', async () => {
+  const { stepFilled, hostingConfig } = await import('../src/domain/lanes.js');
+  const cfg = hostingConfig({ EPIC_HOSTING_CONFIG: JSON.stringify({ adultAge: 16 }) });
+  const offer = { lane: 'oneoff', age_max: 17, visibility: 'invite', who_chosen: true };
+  assert.equal(stepFilled(offer, 'who'), false, 'at 18, a top age of 17 is a children’s event');
+  assert.equal(stepFilled(offer, 'who', cfg), true, 'at 16 it is not');
+});

@@ -155,6 +155,11 @@ export function retrieveCheckout(id, { householdId } = {}) {
   return call('GET', `/checkout/sessions/${encodeURIComponent(id)}`, null, { householdId, purpose: 'host.checkout.read' });
 }
 
+/** Close a Checkout session nobody should pay any more (the host switched plan). */
+export function expireCheckout(id, { householdId } = {}) {
+  return call('POST', `/checkout/sessions/${encodeURIComponent(id)}/expire`, {}, { householdId, purpose: 'host.checkout.expire' });
+}
+
 /** Paid: a payment session marked paid, or a subscription session complete. */
 export const checkoutPaid = (s) => s?.payment_status === 'paid' || (s?.mode === 'subscription' && s?.status === 'complete');
 

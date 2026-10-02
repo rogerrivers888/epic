@@ -172,7 +172,7 @@ export function Setup({ lane: laneIn, offerId }: { lane: HostLane | null; offerI
         : step === 'what' ? <WhatStep {...props} onSay={() => setQuery({ mode: 'say' }, { replace: false })} onUpload={() => setQuery({ mode: 'upload' }, { replace: false })} />
           : View_ ? <View_ {...props} /> : null;
 
-  const ok = mode ? true : canGoOn(offer, step);
+  const ok = mode ? true : canGoOn(offer, step, home.config.adultAge);
   const label = mode === 'say' || mode === 'upload' ? '' : mode === 'draft' ? 'Go through it step by step'
     : index < steps.length - 1 ? `Next · ${SHORT[steps[index + 1]]}` : 'Next · Publish';
   const link = step === 'cohosts' && !mode ? { t: 'Just me — skip', go: () => { update({ cohosts: [] }); void next(); } }

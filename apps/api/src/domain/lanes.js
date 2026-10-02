@@ -372,7 +372,7 @@ const has = (v) => v != null && String(v).trim() !== '';
  * Whether a step has what it needs, for the draft rows and the publish check.
  * `true` filled · `false` still to do · `null` optional (nothing to fill).
  */
-export function stepFilled(offer, step) {
+export function stepFilled(offer, step, cfg = DEFAULT_CONFIG) {
   switch (step) {
     case 'what': return has(offer.what_label ?? offer.whatLabel) && has(offer.title);
     case 'when': return has(offer.starts_on ?? offer.startsOn) && has(offer.starts_at ?? offer.startsAt)
@@ -411,7 +411,7 @@ export function stepFilled(offer, step) {
     }
     case 'who': {
       if (!(offer.who_chosen ?? offer.whoChosen) || !['invite', 'public'].includes(offer.visibility)) return false;
-      if (asksParentsOnWho(offer) && !has(offer.parents)) return false;
+      if (asksParentsOnWho(offer, cfg) && !has(offer.parents)) return false;
       return true;
     }
     default: return null;
@@ -419,8 +419,8 @@ export function stepFilled(offer, step) {
 }
 
 /** The steps of this offer's lane that are still to do, in order. */
-export function missingSteps(offer) {
-  return (SEQ[offer.lane] ?? []).filter((s) => stepFilled(offer, s) === false);
+export function missingSteps(offer, cfg = DEFAULT_CONFIG) {
+  return (SEQ[offer.lane] ?? []).filter((s) => stepFilled(offer, s, cfg) === false);
 }
 
 /** Field-level blockers in the host's words, for an offer with a lane (what the old `publishBlockers` answers for the old shapes). */
@@ -431,7 +431,7 @@ const STEP_WORDS = {
   where: 'Say where it happens.', price: 'Finish the price: the numbers, and the refund policy if it’s paid.',
   wprice: 'Finish the price: the numbers each week, and the refund policy if it’s paid.', who: 'Say who can come.',
 };
-export const laneGaps = (offer) => missingSteps(offer).map((s) => STEP_WORDS[s] ?? 'Finish the set-up.');
+export const laneGaps = (offer, cfg = DEFAULT_CONFIG) => missingSteps(offer, cfg).map((s) => STEP_WORDS[s] ?? 'Finish the set-up.');
 
 // ---------------------------------------------------------------------------
 // the publish checklist
@@ -517,5 +517,5 @@ export const CHECK_WORDS = {
  */
 export function laneBlockers(offer, host, cfg = DEFAULT_CONFIG) {
   const items = checklist(offer, { host, account: { email: 'given', mobile: 'given' } }, cfg);
-  return [...laneGaps(offer), ...items.filter((i) => (i.blocks === 'send' || i.blocks === 'live') && !i.done).map((i) => CHECK_WORDS[i.key])];
+  return [...laneGaps(offer, cfg), ...items.filter((i) => (i.blocks === 'send' || i.blocks === 'live') && !i.done).map((i) => CHECK_WORDS[i.key])];
 }

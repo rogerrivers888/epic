@@ -127,7 +127,7 @@ async function lanePayload(offer, host, account, { holidays } = {}) {
   const run = offer.lane === 'course' ? courseRun(offer, hol, cfg) : offer.lane === 'weekly' ? weeklyRun(offer, hol, { weeks: cfg.weeklyHorizonWeeks }) : null;
   return {
     id: offer.id, lane: offer.lane, state: offer.state, visibility: offer.who_chosen ? offer.visibility : null, money: offer.money ?? 'free',
-    draftStep: offer.draft_step, draftSource: offer.draft_source, steps: SEQ[offer.lane], missing: missingSteps(offer),
+    draftStep: offer.draft_step, draftSource: offer.draft_source, steps: SEQ[offer.lane], missing: missingSteps(offer, hostingConfig()),
     whatCategory: offer.what_category, whatLabel: offer.what_label, title: offer.title, line: offer.summary, lineSuggested: Boolean(offer.line_suggested),
     photos: (offer.photo_ids ?? []).map((id) => ({ id, url: mediaRef(id) })),
     startsOn: ymd(offer.starts_on), startsAt: offer.starts_at?.slice(0, 5) ?? null, endsAt: offer.ends_at?.slice(0, 5) ?? null,
@@ -193,7 +193,7 @@ router.get('/host/lanes', async (req, res, next) => {
     const drafts = host ? await repo.laneDraftsOf(host.id) : [];
     res.json({
       config: configPayload(holidays),
-      drafts: drafts.map((o) => ({ id: o.id, lane: o.lane, title: o.title, whatLabel: o.what_label, step: o.draft_step, updatedAt: o.updated_at, missing: missingSteps(o).length })),
+      drafts: drafts.map((o) => ({ id: o.id, lane: o.lane, title: o.title, whatLabel: o.what_label, step: o.draft_step, updatedAt: o.updated_at, missing: missingSteps(o, hostingConfig()).length })),
       host: hostSheet(host, account), isPro: isPro(account),
     });
   } catch (err) { next(err); }
@@ -353,6 +353,12 @@ export function derive(patch, current) {
   if (next.age_min != null && next.age_max != null && Number(next.age_min) > Number(next.age_max)) throw refuse(400, 'ages_backwards', 'The youngest age is above the oldest.');
   if (next.min_count != null && next.max_count != null && Number(next.min_count) > Number(next.max_count)) throw refuse(400, 'min_over_max', 'The minimum is above the maximum.');
   if (next.multi_day && next.starts_on && next.ends_on && next.ends_on < next.starts_on) throw refuse(400, 'ends_before_start', 'The end date is before the start.');
+  // The configured limits hold however the answer arrived — typed, said or read off a flyer (Codex, 2 Oct 2026).
+  const cfg = hostingConfig();
+  if (p.sessions != null && current.lane === 'course') p.sessions = Math.min(cfg.courseSessions.max, Math.max(cfg.courseSessions.min, p.sessions));
+  if (next.multi_day && next.starts_on && next.ends_on && next.ends_on > plusDays(next.starts_on, cfg.oneoffMaxDays - 1)) {
+    throw refuse(400, 'too_many_days', `A one-off runs over at most ${cfg.oneoffMaxDays} days.`);
+  }
   if (p.firstDate !== undefined && current.lane === 'course') p.weekday = p.firstDate ? dow(p.firstDate) : null;
   if (p.weekdays !== undefined && current.lane === 'weekly') p.weekday = p.weekdays[0] ?? null;
   // Prices: free clears every figure; Weekly's four boxes keep the old readers' one price in step.
@@ -451,7 +457,8 @@ export function patchFromExtract(lane, x, { step = null } = {}) {
   const take = (key, value, field = key) => { if (!allowed.has(key) || value == null || (Array.isArray(value) && !value.length) || value === '') return; p[field] = value; found.push(key); };
   take('whatLabel', str(x.whatLabel, 80)); take('title', str(x.title, 120)); take('line', str(x.line, 300));
   take('startsOn', date(x.startsOn)); take('startsAt', time(x.startsAt)); take('endsAt', time(x.endsAt));
-  if (date(x.endsOn) && date(x.startsOn) && x.endsOn > x.startsOn) { take('endsOn', date(x.endsOn)); if (p.endsOn) p.multiDay = true; }
+  const maxDays = hostingConfig().oneoffMaxDays;
+  if (date(x.endsOn) && date(x.startsOn) && x.endsOn > x.startsOn && x.endsOn <= plusDays(x.startsOn, maxDays - 1)) { take('endsOn', date(x.endsOn)); if (p.endsOn) p.multiDay = true; }
   take('runningOrder', list(x.runningOrder, 24).map((r) => ({ day: 0, time: time(r?.time), title: str(r?.title, 120) })).filter((r) => r.title));
   take('venue', oneOf(VENUE_KINDS, x.venue));
   if (str(x.place, 240) && allowed.has('place')) { if ((p.venue ?? x.venue) === 'their_place') p.venueArea = str(x.place, 120); else p.venueLabel = str(x.place, 240); found.push('place'); }
@@ -459,7 +466,7 @@ export function patchFromExtract(lane, x, { step = null } = {}) {
   if (lane === 'weekly') take('weekdays', list(x.weekdays, 7).map((d) => whole(d, { min: 0, max: 6 })).filter((d) => d != null));
   if (lane === 'weekly' || lane === 'course') take('startsAt', time(x.startsAt));
   take('durationMin', whole(x.durationMin, { min: 5, max: 1440 }));
-  if (lane === 'course') { take('sessions', whole(x.sessions, { min: 2, max: 20 })); take('outcome', str(x.outcome, 600)); take('topics', list(x.topics, 20).map((t, i) => ({ n: i + 1, title: str(t, 160) })).filter((t) => t.title)); }
+  if (lane === 'course') { take('sessions', whole(x.sessions, { min: hostingConfig().courseSessions.min, max: hostingConfig().courseSessions.max })); take('outcome', str(x.outcome, 600)); take('topics', list(x.topics, 20).map((t, i) => ({ n: i + 1, title: str(t, 160) })).filter((t) => t.title)); }
   if (lane === 'onrequest') {
     take('whyYou', str(x.whyYou, 2000));
     const fh = {};
@@ -775,9 +782,9 @@ router.post('/host/lanes/offers/:id/publish', async (req, res, next) => {
     const host = await repo.hostByHousehold(household.id);
     let offer = o;
     if (offer.state !== 'draft') throw refuse(409, 'already_sent', offer.state === 'live' ? 'This one is out already.' : 'This one is with us for review.');
-    const gaps = laneGaps(offer);
-    if (gaps.length) throw refuse(422, 'not_ready', gaps[0], { steps: missingSteps(offer) });
     const cfg = hostingConfig();
+    const gaps = laneGaps(offer, cfg);
+    if (gaps.length) throw refuse(422, 'not_ready', gaps[0], { steps: missingSteps(offer, cfg) });
     const items = checklist(offer, { host, account }, cfg);
     const blocking = sendBlockers(items);
     if (blocking.length) throw refuse(422, 'checklist', CHECK_WORDS[blocking[0]], { blocking });
@@ -788,7 +795,21 @@ router.post('/host/lanes/offers/:id/publish', async (req, res, next) => {
       const plan = oneOf(['event', 'pro'], req.body?.plan) ?? offer.private_plan ?? (pro ? 'pro' : 'event');
       if (plan !== offer.private_plan) offer = await repo.updateOffer(offer.id, { privatePlan: plan });
       const feeDone = pro || ['paid', 'included'].includes(offer.private_fee_state);
-      if (!feeDone) {
+      if (!feeDone && offer.private_fee_state === 'pending' && offer.private_fee_ref) {
+        // One Checkout per offer and plan: a retry, or a host back from cancelling, gets the
+        // same session — never a second one that could also be paid (Codex, 2 Oct 2026).
+        const open = await stripe.retrieveCheckout(offer.private_fee_ref, { householdId: household.id });
+        if (stripe.checkoutPaid(open)) {
+          offer = await markFeePaid(offer, open, household, account);
+        } else {
+          const samePlan = (open?.metadata?.epic_kind === 'pro') === (plan === 'pro');
+          if (open?.status === 'open' && samePlan && open.url) return res.json({ pay: { url: open.url } });
+          if (open?.status === 'open') await stripe.expireCheckout(open.id, { householdId: household.id });
+          const old = await repo.paymentByRef(offer.private_fee_ref, open?.metadata?.epic_kind === 'pro' ? 'pro' : 'private_fee');
+          if (old && old.state === 'pending') await repo.updatePayment(old.id, { state: 'cancelled' });
+        }
+      }
+      if (!['paid', 'included'].includes(offer.private_fee_state) && !pro) {
         // The £10, or joining Pro: Stripe's hosted Checkout, test mode only.
         const amount = plan === 'pro' ? cfg.proMonthlyPence : cfg.privateEventPence;
         const back = `${appUrl()}/host/offers/${offer.id}/publish?back=paid`;

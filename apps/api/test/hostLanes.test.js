@@ -25,6 +25,7 @@ import express from 'express';
 // --- the fake outside world, up before any source reads its base URL --------
 const calls = [];
 let modelAnswer = {};
+let checkoutStatus = 'paid';
 const fake = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => { body += c; });
@@ -39,7 +40,8 @@ const fake = http.createServer((req, res) => {
     if (req.url === '/v1/identity/verification_sessions' && req.method === 'POST') return json({ id: 'vs_test_1', url: 'https://verify.stripe.test/start' });
     if (req.url.startsWith('/v1/identity/verification_sessions/')) return json({ id: 'vs_test_1', status: 'verified' });
     if (req.url === '/v1/checkout/sessions' && req.method === 'POST') return json({ id: 'cs_test_1', url: 'https://checkout.stripe.test/pay' });
-    if (req.url.startsWith('/v1/checkout/sessions/')) return json({ id: 'cs_test_1', mode: 'payment', payment_status: 'paid', metadata: { epic_kind: 'event' } });
+    if (req.url.endsWith('/expire')) return json({ id: 'cs_test_1', status: 'expired' });
+    if (req.url.startsWith('/v1/checkout/sessions/')) return json(checkoutStatus === 'paid' ? { id: 'cs_test_1', mode: 'payment', status: 'complete', payment_status: 'paid', metadata: { epic_kind: 'event' } } : { id: 'cs_test_1', mode: 'payment', status: 'open', payment_status: 'unpaid', url: 'https://checkout.stripe.test/pay', metadata: { epic_kind: 'event' } });
     return json({ error: { code: 'not_found' } }, 404);
   });
 });
@@ -129,6 +131,7 @@ test('a step saves; answers that contradict themselves are refused; the money fo
     assert.equal((await p({ minCount: 12, maxCount: 10 })).body.error, 'min_over_max');
     assert.equal((await p({ ageMin: 12, ageMax: 5 })).body.error, 'ages_backwards');
     assert.equal((await p({ multiDay: true, startsOn: '2026-06-13', endsOn: '2026-06-12' })).body.error, 'ends_before_start');
+    assert.equal((await p({ multiDay: true, startsOn: '2026-06-13', endsOn: '2026-06-20' })).body.error, 'too_many_days', 'a one-off runs over at most four days');
     let r = await p({ startsOn: '2026-06-13', startsAt: '13:00', endsAt: '23:00', draftStep: 'when' });
     assert.equal(r.status, 200);
     assert.equal(r.body.offer.startsAt, '13:00');
@@ -176,6 +179,8 @@ test('weekly: more than one day, its own price boxes, and the run skipping bank 
     const r = await srv.send('PATCH', `/api/host/lanes/offers/${offer.id}`, { weekdays: [4, 2], firstDate: '2026-12-22', startsAt: '19:00', durationMin: 60, excludeBankHolidays: true, skippedDates: ['2026-12-29'], dropInPence: 1200, bookAheadPence: 1000, dropInGroupPct: 10, dropInGroupMin: 4, minCount: 4, maxCount: 12, refundPolicy: 'flexible' });
     assert.equal(r.status, 200);
     assert.deepEqual(r.body.offer.weekdays, [2, 4]);
+    const { body: { offer: c } } = await srv.send('POST', '/api/host/lanes/offers', { lane: 'course', sessions: 30 });
+    assert.equal(c.sessions, 20, 'a course is held to the configured most sessions');
     assert.deepEqual(r.body.offer.run.dates.slice(0, 3), ['2026-12-22', '2026-12-24', '2026-12-31'], 'Christmas Eve is no holiday; 29 Dec is the host’s');
     assert.equal(r.body.offer.paid, true);
     assert.equal(r.body.offer.priceMode, 'same_each');
@@ -320,6 +325,19 @@ test('private: nothing is sent before the £10 is paid through Stripe (test mode
       const ledger = Number((await query("select count(*) from provider_calls where household_id = $1 and provider = 'stripe'", [h.id])).rows[0].count);
       assert.ok(ledger >= 1, 'every Stripe call is on the ledger');
 
+      // Pressed again before paying: the same session, never a second one that could also be paid.
+      checkoutStatus = 'open';
+      const made = calls.filter((c) => c.url === '/v1/checkout/sessions' && c.method === 'POST').length;
+      r = await srv.send('POST', `/api/host/lanes/offers/${offer.id}/publish`, { plan: 'event' });
+      assert.equal(r.body.pay.url, 'https://checkout.stripe.test/pay');
+      assert.equal(calls.filter((c) => c.url === '/v1/checkout/sessions' && c.method === 'POST').length, made, 'no second Checkout');
+      // Switching to Pro closes the open one first.
+      r = await srv.send('POST', `/api/host/lanes/offers/${offer.id}/publish`, { plan: 'pro' });
+      assert.ok(calls.some((c) => c.url.endsWith('/expire')), 'the £10 session is expired before Pro is offered');
+      assert.equal((await query("select state from hosting_payments where offer_id = $1 and kind = 'private_fee'", [offer.id])).rows[0].state, 'cancelled');
+      await srv.send('PATCH', `/api/host/lanes/offers/${offer.id}`, { privatePlan: 'event' });
+      await query("update host_offers set private_fee_state = 'pending', private_fee_ref = 'cs_test_1' where id = $1", [offer.id]);
+      checkoutStatus = 'paid';
       // Back from Checkout: Stripe is asked, not the return URL believed.
       r = await srv.send('POST', `/api/host/lanes/offers/${offer.id}/sync`);
       assert.equal(r.body.offer.privateFeeState, 'paid');
