@@ -226,6 +226,8 @@ create table if not exists booking_tips (
   constraint booking_tips_state_check check (state in ('pending', 'paid', 'failed', 'refunded'))
 );
 create index if not exists booking_tips_host_idx on booking_tips (host_id, created_at desc);
+-- One tip a booking: a double tap can't charge twice (Codex, 2 Oct 2026).
+create unique index if not exists booking_tips_once_idx on booking_tips (booking_id) where state in ('pending', 'paid');
 
 -- The waiting list: a freed place is offered to the first in line for a while.
 create table if not exists offer_waitlist (

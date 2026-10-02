@@ -285,8 +285,10 @@ test('the waiting list: join when full, a freed place is offered to the first in
     assert.equal((await sc.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 2 } })).status, 409);
     assert.equal((await sb.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 } })).status, 201);
     assert.equal((await query(`select state from offer_waitlist where household_id = $1`, [b.household.id])).rows[0].state, 'taken');
+    // Two places were freed: the next run offers the second one to C, first in line now.
+    await guest.offerFreedPlaces();
     const booked = await sc.get('/api/booked');
-    assert.equal(booked.body.upcoming.find((x) => x.chip === 'waitlist')?.chipWords, 'Waiting list #1', 'B took their place, so C is first in line now');
+    assert.equal(booked.body.upcoming.find((x) => x.chip === 'waitlist')?.chipWords, 'Your place is ready');
   } finally { await sa.close(); await sb.close(); await sc.close(); }
 });
 
@@ -473,5 +475,31 @@ test('Codex: a private event needs its link or an invitation, and the host-link 
       const real = await sc.send('POST', `/api/experiences/${pub.o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 }, hostLink: tok });
       assert.equal((await query('select fee_reason from experience_bookings where id = $1', [real.body.booking.id])).rows[0].fee_reason, 'host_link');
     } finally { await sc.close(); }
+  } finally { await sb.close(); }
+});
+
+test('Codex: two tips at once make one, and a request cancelled before its hold lands lets the card go', async () => {
+  settings.forget();
+  const { o } = await anEvent({ firstIn: 1 });
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const r = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 } });
+    await query(`update offer_sessions set on_date = $2 where offer_id = $1`, [o.id, plusDays(today(), -1)]);
+    const both = await Promise.all([srv.send('POST', `/api/booked/${r.body.booking.id}/tip`, { amountPence: 500 }), srv.send('POST', `/api/booked/${r.body.booking.id}/tip`, { amountPence: 500 })]);
+    assert.deepEqual(both.map((x) => x.status).sort(), [201, 409]);
+  } finally { await srv.close(); }
+
+  const ask = await anEvent({ lane: 'onrequest', price: 6000, priceMode: 'same_each' });
+  const b = await aPerson();
+  const sb = await server(b.account);
+  try {
+    const day = (await sb.get(`/api/experiences/${ask.o.id}/booking/options`)).body.slots[1];
+    const req = await sb.send('POST', `/api/experiences/${ask.o.id}/booking`, { when: { kind: 'request', date: day.date, time: day.times[0], lengthMin: 60 }, party: { adults: 1 } });
+    await sb.send('POST', `/api/booked/${req.body.booking.id}/cancel`, {});
+    pays(req.body.pay.paymentIntent);
+    await sb.send('POST', `/api/booked/${req.body.booking.id}/payment`, {});
+    assert.equal(intents.get(req.body.pay.paymentIntent).status, 'canceled', 'the hold is let go');
+    assert.equal((await query('select payment_state from experience_bookings where id = $1', [req.body.booking.id])).rows[0].payment_state, 'released');
   } finally { await sb.close(); }
 });

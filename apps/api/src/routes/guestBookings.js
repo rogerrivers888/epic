@@ -284,7 +284,7 @@ async function book({ offerId, body, household, account, invite = null }) {
       if (when.kind === 'request') {
         const weekStart = plusDays(when.slot.date, -((dow(when.slot.date) + 6) % 7));
         const { rows: [wk] } = await c.query(
-          `select count(*)::int as n from experience_bookings where offer_id = $1 and request_state in ('asked', 'accepted') and requested_date >= $2 and requested_date < $3`,
+          `select count(*)::int as n from experience_bookings where offer_id = $1 and request_state in ('asked', 'accepted') and state in ('pending', 'confirmed', 'attended') and requested_date >= $2 and requested_date < $3`,
           [o.id, weekStart, plusDays(weekStart, 7)],
         );
         const cap = o.per_week_max ?? hostingConfig().onRequest.perWeek;
@@ -345,6 +345,8 @@ async function book({ offerId, body, household, account, invite = null }) {
       await query(`update experience_bookings set state = 'cancelled', cancelled_by = 'epic', cancel_cause = 'payment_setup_failed' where id = $1 and state = 'pending'`, [b.id]);
       await query(`update booking_sessions set state = 'cancelled' where booking_id = $1`, [b.id]);
       if (invite) await query(`update offer_invites set rsvp = null, rsvp_heads = null, booking_id = null where id = $1 and booking_id = $2`, [invite.id, b.id]);
+      // A waiting-list place this booking took is theirs again while its offer lasts (Codex, 2 Oct 2026).
+      await query(`update offer_waitlist set state = 'offered' where offer_id = $1 and household_id = $2 and state = 'taken' and offer_expires_at > now()`, [o.id, b.household_id]);
       throw err;
     }
     await query('update experience_bookings set stripe_payment_intent = $2 where id = $1', [b.id, pi.id]);
@@ -393,6 +395,10 @@ export async function applyPaymentIntent(pi) {
       await query(`update hosting_payments set state = 'succeeded', kind = 'charge', updated_at = now() where stripe_ref = $1 and kind in ('charge', 'hold')`, [pi.id]).catch(() => null);
       await confirmed(b, o, host);
     }
+  } else if (pi.status === 'requires_capture' && b.payment_state === 'none' && b.state === 'cancelled') {
+    // Held after the request was already cancelled: let the card go at once, and tell nobody (Codex, 2 Oct 2026).
+    await stripe.cancelPayment(pi.id, { householdId: b.household_id, idempotencyKey: `release-late-${b.id}` }).catch(() => null);
+    await query(`update experience_bookings set payment_state = 'released' where id = $1 and payment_state = 'none'`, [b.id]);
   } else if (pi.status === 'requires_capture' && b.payment_state === 'none') {
     await query(`update experience_bookings set payment_state = 'held', held_pence = $2 where id = $1 and payment_state = 'none'`, [b.id, pi.amount_capturable ?? b.value_pence]);
     await notifications.notify({ householdId: host.household_id, kind: 'ask_to_book_request', title: `Ask to book: ${o?.title ?? 'your offer'}`, body: `${b.requested_date ? ymd(b.requested_date) : ''} ${hm(b.requested_time) ?? ''}`.trim(), link: hostLink(b.offer_id), dedupeKey: `ask:${b.id}` }).catch(() => null);
@@ -804,12 +810,13 @@ router.post('/booked/:id/tip', async (req, res, next) => {
     const fee = tipFee(amount, s);
     if (fee == null) throw refuse(503, 'fees_not_set', 'Tips open once Epic has finished setting its fees.');
     if (!stripe.stripeStatus().ready) throw refuse(503, 'payments_not_open', 'Paying for events opens soon.');
-    const { rows: [already] } = await query(`select id from booking_tips where booking_id = $1 and state in ('pending', 'paid')`, [b.id]);
-    if (already) throw refuse(409, 'tipped', 'You’ve tipped on this one.');
+    // One a booking, held by the database: a double tap can't make two (Codex, 2 Oct 2026).
     const { rows: [t] } = await query(
-      `insert into booking_tips (booking_id, offer_id, host_id, household_id, amount_pence, admin_fee_pence) values ($1, $2, $3, $4, $5, $6) returning *`,
+      `insert into booking_tips (booking_id, offer_id, host_id, household_id, amount_pence, admin_fee_pence) values ($1, $2, $3, $4, $5, $6)
+       on conflict (booking_id) where state in ('pending', 'paid') do nothing returning *`,
       [b.id, b.offer_id, b.host_id, household.id, amount, fee],
     );
+    if (!t) throw refuse(409, 'tipped', 'You’ve tipped on this one.');
     let pi;
     try { pi = await stripe.paymentIntent({ amountPence: amount + fee, bookingId: b.id, offerId: b.offer_id, householdId: household.id, idempotencyKey: `tip-${t.id}`, kind: 'tip', tipId: t.id }); }
     catch (err) {
