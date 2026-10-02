@@ -984,6 +984,10 @@ webhookRouter.post('/stripe/webhook', express.raw({ type: () => true, limit: '1m
     } else if (event.type?.startsWith('identity.verification_session.') && obj.id) {
       const host = await repo.hostByIdentitySession(obj.id);
       if (host) { const state = stripe.identityState(obj); await repo.updateHost(host.id, { identityState: state, identityVerifiedAt: state === 'verified' ? new Date() : null }); }
+    } else if (event.type === 'customer.subscription.updated' && obj.metadata?.epic_kind === 'pro' && obj.metadata?.epic_household_id) {
+      // A renewal that failed (past due, unpaid) stops Pro counting; paid again, it counts again (Codex, 2 Oct 2026).
+      const live = ['active', 'trialing'].includes(obj.status);
+      await query("update hosting_payments set state = $2, updated_at = now() where household_id = $1 and kind = 'pro' and state in ('succeeded', 'cancelled')", [obj.metadata.epic_household_id, live ? 'succeeded' : 'cancelled']);
     } else if (event.type === 'customer.subscription.deleted' && obj.metadata?.epic_kind === 'pro' && obj.metadata?.epic_household_id) {
       // Pro cancelled or lapsed: it stops counting for hosting from now.
       await query("update hosting_payments set state = 'cancelled', updated_at = now() where household_id = $1 and kind = 'pro' and state = 'succeeded'", [obj.metadata.epic_household_id]);

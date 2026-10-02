@@ -1890,6 +1890,9 @@ export async function settleHeldBookings() {
 }
 
 export function startHostingLoop() {
+  // gov.uk's bank holidays, read once at boot, so the date rules never fall back to the bundled
+  // list just because no host has asked yet (Codex, 2 Oct 2026). Free and keyless.
+  void import('../sources/bankHolidays.js').then((m) => m.bankHolidays({})).catch(() => null);
   const run = () => runOutsideRequest(() => settleHeldBookings()).catch((err) => console.error('held bookings sweep failed', err.message));
   setTimeout(run, 20_000);
   return setInterval(run, 30 * 60_000);

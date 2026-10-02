@@ -21,10 +21,13 @@ import type { StepProps } from '../Setup';
 // Any other hosts? / Who runs it?
 // ---------------------------------------------------------------------------
 
-const PERMS: [keyof Cohost, string][] = [['canEdit', 'Can edit the details'], ['canMessage', 'Can message guests'], ['shownOnPage', 'Shown on the page'], ['withPhoto', 'With their photo'], ['seesGuests', 'Sees who’s coming']];
+// What a co-host may *do* (edit, message guests, see who's coming) needs them signed in to this
+// offer, which is host management's to build; until then only how they are shown is asked
+// (Codex, 2 Oct 2026). The role still sets those flags, ready for it.
+const PERMS: [keyof Cohost, string][] = [['shownOnPage', 'Shown on the page'], ['withPhoto', 'With their photo']];
 const asRole = (role: 'cohost' | 'helper'): Pick<Cohost, 'canEdit' | 'canMessage' | 'shownOnPage' | 'withPhoto' | 'seesGuests'> =>
   role === 'cohost' ? { canEdit: true, canMessage: true, shownOnPage: true, withPhoto: true, seesGuests: true } : { canEdit: false, canMessage: false, shownOnPage: true, withPhoto: true, seesGuests: false };
-const roleWords = (c: Cohost) => `${c.role === 'cohost' ? 'Co-host' : 'Helper'} · ${c.canEdit ? 'can edit' : c.shownOnPage ? 'shown on the page' : 'behind the scenes'}`;
+const roleWords = (c: Cohost) => `${c.role === 'cohost' ? 'Co-host' : 'Helper'} · ${c.shownOnPage ? 'shown on the page' : 'behind the scenes'}`;
 
 export function CohostsStep({ offer, update }: StepProps) {
   const [list, setList] = useState<Cohost[]>(offer.cohosts);
@@ -112,9 +115,14 @@ function WhatTheyCanDo({ who, onClose, onSave, onRemove }: { who: Cohost; onClos
 // ---------------------------------------------------------------------------
 
 const OWNED_REF = /^(osm|atlas|own):/;
+/**
+ * A picked place keeps its reference, so whose words the label is stays known: a provider's
+ * name is never kept as if the host had typed it, and is named afresh when it is shown
+ * (data policy; Codex, 2 Oct 2026). Only an owned place's town is kept as the area.
+ */
 const placeFields = (p: Place | null) => (p ? {
-  venueLabel: p.formatted ?? p.displayName ?? p.label, venueArea: p.address?.town ?? p.locality ?? p.address?.area ?? null,
-  venueLat: p.lat, venueLng: p.lng, venueRef: p.ref && OWNED_REF.test(p.ref) ? p.ref : null,
+  venueLabel: p.formatted ?? p.displayName ?? p.label, venueArea: !p.ref || OWNED_REF.test(p.ref) ? (p.address?.town ?? p.locality ?? p.address?.area ?? null) : null,
+  venueLat: p.lat, venueLng: p.lng, venueRef: p.ref ?? null,
 } : { venueLabel: null, venueArea: null, venueLat: null, venueLng: null, venueRef: null });
 
 export function WhereStep({ offer, update }: StepProps) {

@@ -428,7 +428,8 @@ export function stepFilled(offer, step, cfg = DEFAULT_CONFIG) {
       if (v === 'online') return (offer.online_mode ?? offer.onlineMode) === 'epic' || has(offer.online_link ?? offer.onlineLink);
       // Stored from the guest's side, as the rest of Epic reads it: `your_place` is at the guest's — the host travels.
       if (v === 'your_place') return has(offer.venue_area ?? offer.venueArea) && Number(offer.travel_radius_min ?? offer.travelRadiusMin) > 0;
-      return has(offer.venue_label ?? offer.venueLabel) || has(offer.venue_area ?? offer.venueArea);
+      // A picked place counts by its reference: a provider's name is not kept, it is named when shown.
+      return has(offer.venue_label ?? offer.venueLabel) || has(offer.venue_area ?? offer.venueArea) || has(offer.venue_ref ?? offer.venueRef);
     }
     case 'price': {
       const mode = offer.price_mode ?? offer.priceMode;

@@ -501,3 +501,18 @@ test('a co-host list is replaced whole or not at all, and a time zone must be re
     assert.equal((await srv.send('PATCH', `/api/host/lanes/offers/${offer.id}`, { timeZone: 'Europe/London' })).status, 200);
   } finally { await srv.close(); }
 });
+
+test('a venue picked from a provider keeps its reference, and its name is never stored as the host’s', async () => {
+  const { household: h, member } = await aHousehold(query);
+  const srv = await server(await anAccount(h, member));
+  try {
+    const { body: { offer } } = await srv.send('POST', '/api/host/lanes/offers', { lane: 'oneoff' });
+    const r = await srv.send('PATCH', `/api/host/lanes/offers/${offer.id}`, { venue: 'out_about', venueLabel: 'Greenlands, Hambleden RG9 3AU', venueRef: 'google:ChIJabc123' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const row = (await query('select venue_label, venue_label_from, venue_ref from host_offers where id = $1', [offer.id])).rows[0];
+    assert.equal(row.venue_ref, 'google:ChIJabc123');
+    assert.notEqual(row.venue_label_from, 'host', 'never marked as the host’s own words');
+    assert.ok(!row.venue_label, 'the provider’s name is not kept');
+    assert.ok(!r.body.offer.missing.includes('where'), 'the reference is enough for the step');
+  } finally { await srv.close(); }
+});
