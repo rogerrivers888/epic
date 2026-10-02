@@ -1390,19 +1390,24 @@ export async function settleCountriesFromAddresses(refs = null, q = query) {
   const rows = await nullCountryAddresses(refs, q);
   const settled = []; const unsettled = [];
   for (const row of rows) {
-    const out = countryFromAddresses(row.addresses ?? []);
-    if (!out.code) { unsettled.push({ ref: row.venue_ref, reason: out.reason }); continue; }
-    // Only if the address read is still the one held: a geocode refreshed between
-    // the read and the write could name another country, and this stamp is for good
-    // because later passes fill only a null (Codex).
-    const { rowCount } = await q(
-      `update place_index set country_code = $2, placed_at = null, settle_tried_at = null
-        where venue_ref = $1 and country_code is null
-          and exists (select 1 from place_facts f where f.venue_ref = $1 and f.field = 'address'
-                       and f.source = 'nominatim' and f.expires_at is null and f.value #>> '{}' = $3)`,
-      [row.venue_ref, out.code, out.from]);
-    if (rowCount) settled.push({ ref: row.venue_ref, country: out.code, from: out.from });
-    else unsettled.push({ ref: row.venue_ref, reason: 'the address or country changed while it was being read; the next pass reads it again' });
+    // One short transaction a place: the geocoded address is locked, read again,
+    // judged and stamped before anyone may replace it. The stamp is for good —
+    // later passes fill only a null — so a refresh committing between a read and a
+    // write must not be able to leave a country its new address contradicts (Codex).
+    const out = await withTransaction(async (client) => {
+      const { rows: facts } = await client.query(
+        `select f.value #>> '{}' as address from place_facts f
+          where f.venue_ref = $1 and f.field = 'address' and f.source = 'nominatim' and f.expires_at is null
+          for update`, [row.venue_ref]);
+      const verdict = countryFromAddresses(facts.map((f) => f.address));
+      if (!verdict.code) return verdict;
+      const { rowCount } = await client.query(
+        `update place_index set country_code = $2, placed_at = null, settle_tried_at = null
+          where venue_ref = $1 and country_code is null`, [row.venue_ref, verdict.code]);
+      return rowCount ? verdict : { code: null, reason: 'the place took a country while it was being read' };
+    });
+    if (out.code) settled.push({ ref: row.venue_ref, country: out.code, from: out.from });
+    else unsettled.push({ ref: row.venue_ref, reason: out.reason });
   }
   return { settled, unsettled };
 }

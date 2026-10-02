@@ -86,7 +86,6 @@ test('the settle pass fills a missing country from the geocoded address, and rep
   await place('google:addr-dubai', { facts: [['nominatim', 'Iris Bay Tower, Business Bay, Dubai, 00000, United Arab Emirates']] });
   await place('google:addr-lebanon-tn', { facts: [['nominatim', '123 Main St, Lebanon, Tennessee, 37087, United States']] });
   const again = await index.settleCountriesFromAddresses(['google:addr-dubai', 'google:addr-lebanon-tn']);
-  // (A stale read cannot stamp: the update requires the address it read to still be held.)
   assert.deepEqual(again.settled.map((s) => [s.ref, s.country]).sort(), [['google:addr-dubai', 'AE'], ['google:addr-lebanon-tn', 'US']]);
 });
 
@@ -114,19 +113,14 @@ test('the area-key check names the settled, the unsettled with its reason, and t
   assert.equal(out.migration357.country_default, null);
 });
 
-test('a country is not stamped from an address that changed after it was read', async () => {
+test('a country is judged from the address as it is when stamped, read under a lock', async () => {
   const ref = 'google:addr-race';
   await place(ref, { facts: [['nominatim', 'Somewhere, Rome, Italy']] });
-  const rows = await index.nullCountryAddresses([ref]);
-  // The geocode is refreshed between the read and the write.
+  // The candidates are listed, then the geocode is refreshed before the stamp.
+  const listed = await index.nullCountryAddresses([ref]);
+  assert.equal(listed[0].addresses[0], 'Somewhere, Rome, Italy');
   await query(`update place_facts set value = to_jsonb('Somewhere, Vatican City'::text) where venue_ref = $1 and source = 'nominatim'`, [ref]);
-  const { countryFromAddresses: cfa } = await import('../src/domain/countryFromAddress.js');
-  const out = cfa(rows[0].addresses);
-  const { rowCount } = await query(
-    `update place_index set country_code = $2 where venue_ref = $1 and country_code is null
-       and exists (select 1 from place_facts f where f.venue_ref = $1 and f.field = 'address'
-                    and f.source = 'nominatim' and f.expires_at is null and f.value #>> '{}' = $3)`, [ref, out.code, out.from]);
-  assert.equal(rowCount, 0, 'the guard the pass uses refuses the stale read');
-  const settled = await index.settleCountriesFromAddresses([ref]);
-  assert.deepEqual(settled.settled.map((s) => s.country), ['VA'], 'the next pass reads the address as it is now');
+  // The pass re-reads the address inside its own locked transaction.
+  const out = await index.settleCountriesFromAddresses([ref]);
+  assert.deepEqual(out.settled.map((x) => x.country), ['VA'], 'stamped from the address held at the moment of stamping');
 });
