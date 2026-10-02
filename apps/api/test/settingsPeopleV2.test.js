@@ -385,3 +385,32 @@ test('step-free excludes only on a known no; unknown never hides; a known yes ra
   assert.ok(flat.score > unknown.score, 'known step-free + accessible toilet ranks above no-facts');
   assert.ok(flat.reasons.some((r) => r.kind === 'access'), 'and says why');
 });
+
+// Deleting a household withdraws its requests on other people's offers — a
+// waitlisted one included — and frees the place for the host, as well as
+// deleting its data (owner, 2 Oct 2026). The cascade does it; this pins it.
+const hostingRepo = await import('../src/repositories/hosting.js');
+const { standing } = await import('../src/domain/hosting.js');
+
+test('deleting a household withdraws its requests on another host\'s offer and frees the place', async () => {
+  const hostSide = await aHousehold(query);
+  const host = await hostingRepo.insertHost(hostSide.household.id, { name: 'Hana', type: 'skill' });
+  const offer = await hostingRepo.insertOffer(host.id, 'oneoff', { startsOn: '2099-05-01', maxCount: 2 });
+  const { household: leaving, member: lee } = await aHousehold(query);
+  const other = await aHousehold(query);
+  await hostingRepo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: other.household.id, occurrence: '2099-05-01', party: [], heads: 2, state: 'confirmed', amountPence: 0 }, null);
+  await hostingRepo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: leaving.id, occurrence: '2099-05-01', party: [], heads: 1, state: 'waitlisted', amountPence: 0 }, null);
+
+  const srv = await server(owner(leaving, lee.id));
+  try {
+    const res = await srv.send('DELETE', '/api/household', { confirmName: leaving.name });
+    assert.equal(res.status, 200, 'a household waiting on somebody else\'s offer is not blocked from leaving');
+  } finally { await srv.close(); }
+
+  const left = await hostingRepo.bookingsOfOffer(offer.id);
+  assert.deepEqual(left.map((b) => b.household_id), [other.household.id], 'the waitlisted request is withdrawn; the other guest is untouched');
+  const fresh = await hostingRepo.offerById(offer.id);
+  assert.equal(standing(fresh, left, '2099-05-01').heads, 2, 'the host counts only the guest still holding a place');
+  const gone = await query('select count(*)::int n from households where id = $1', [leaving.id]);
+  assert.equal(gone.rows[0].n, 0, 'and the household\'s own data is gone');
+});

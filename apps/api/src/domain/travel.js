@@ -219,11 +219,10 @@ export function searchRadiusKm(mode, minutes, { capKm = 50 } = {}) {
  * standing radius (`fallbackMiles`). Modes are the UI's words (car/train/bus/
  * walking/bike); `searchRadiusKm` aliases them to the four it models.
  *
- * LATER: TravelTime is the intended provider for *real*, routed travel times
- * (Technical Constraints §6.2/§16) — one catchment per household address and
- * mode, cached and refreshed only when the address or modes change, priced and
- * approved by the owner before it is used. This function stays the free default
- * until then; nothing here ever calls a paid route.
+ * LATER: real, routed journey times come from Epic's own OSRM routing (the
+ * New navigation work), not a paid provider — TravelTime was declined (owner,
+ * 2 Oct 2026). This function stays the free default until OSRM serves it;
+ * nothing here ever calls a paid route.
  */
 // The cap only bounds the binary search — close-to-home is a database radius,
 // not a provider query, so Google's 50 km answer ceiling does not apply here.
