@@ -4,8 +4,8 @@
 import type { HomeDesign } from '../routes';
 
 /**
- * Which of W1–W6 renders at /{locale}/ (owner, 1 Oct 2026: W2 or W6 — not yet
- * named). The other five run as noindex landing pages at /{locale}/go/{name}.
+ * Which of W1–W6 renders at /{locale}/ — W2, "sorted" (owner, 2 Oct 2026: "W2
+ * confirmed"). The other five run as noindex landing pages at /{locale}/go/{name}.
  */
 export const HOMEPAGE: HomeDesign = 'sorted';
 

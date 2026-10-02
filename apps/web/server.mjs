@@ -19,7 +19,7 @@ import { createReadStream, promises as fs } from 'node:fs';
 import http from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { siteGateOn } from './gate.mjs';
+import { siteGateOn, siteLock } from './gate.mjs';
 import { loadSite, localeFor as localeOf, siteAddress as addressOf } from './site.mjs';
 
 // The built app; a test points it at a folder of its own.
@@ -216,9 +216,20 @@ const server = http.createServer(guarded(async (req, res) => {
   // query carried along so a campaign's utm_*/gclid/fbclid reach the form. Only
   // the app's own links at the root (`/?signin=…`, `/?join=…`, `/?tab=…`) are
   // left for the app to answer (Codex, 1 Oct 2026).
-  if (pathname === '/' && !APP_ROOT_PARAMS.some((k) => new URLSearchParams(search).has(k))) {
+  // While the gate is up the website is behind it (gate.mjs › siteLock): `/` stays
+  // the app it has been, and the site's own pages ask for the gate's password.
+  const locked = siteLock(req);
+  if (!locked && pathname === '/' && !APP_ROOT_PARAMS.some((k) => new URLSearchParams(search).has(k))) {
     res.writeHead(302, { location: `/${localeOf(SITE, req)}/${search}`, 'cache-control': 'no-store', vary: 'Accept-Language, Cookie' });
     res.end();
+    return;
+  }
+  const site = addressOf(SITE, pathname);
+  if (locked && (site || pathname === '/sitemap.xml')) {
+    const headers = { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store', 'x-robots-tag': 'noindex' };
+    if (locked.status === 401) headers['www-authenticate'] = 'Basic realm="Epic", charset="UTF-8"';
+    res.writeHead(locked.status, headers);
+    res.end(locked.status === 401 ? 'Epic is not open yet.' : 'Not found');
     return;
   }
   if (pathname === '/sitemap.xml') {
@@ -228,7 +239,6 @@ const server = http.createServer(guarded(async (req, res) => {
     res.end(req.method === 'HEAD' ? undefined : body);
     return;
   }
-  const site = addressOf(SITE, pathname);
   if (site?.redirect) { res.writeHead(301, { location: site.redirect + search, 'cache-control': 'no-cache' }); res.end(); return; }
   if (site) {
     let html;
