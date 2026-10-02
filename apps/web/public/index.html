@@ -105,8 +105,41 @@
       */
       @media all and (display-mode: standalone) {
         #root { position: fixed; top: 0; right: 0; bottom: 0; left: 0; height: auto; }
+        /*
+          Pinning was not enough: on the owner's iPhone (2 Oct 2026, screenshot) the
+          home-screen app still ended ~53pt above the glass, 71pt of empty ground
+          under the labels where the bar asks for 18 — iOS reports the whole
+          viewport short, so bottom: 0 is short too. When the screen is taller than
+          the viewport iOS reports, the script below hands the screen's own height
+          over and the app is drawn to it; anywhere else the variable is never set.
+        */
       }
+      /* Outside the media query: the class is only ever set from the home screen. */
+      html.epic-screen-h, html.epic-screen-h body { height: var(--epic-screen-h); }
+      html.epic-screen-h #root { position: fixed; top: 0; right: 0; left: 0; bottom: auto; height: var(--epic-screen-h); }
     </style>
+    <script>
+      (function () {
+        var d = document.documentElement;
+        function fit() {
+          var standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+          var w = screen.width, h = screen.height;
+          var tall = innerWidth > innerHeight ? Math.min(w, h) : Math.max(w, h);
+          var short = tall - innerHeight;
+          // Only the status-bar-sized shortfall; a keyboard or anything larger is left alone.
+          if (standalone && short > 1 && short < 120) {
+            d.style.setProperty('--epic-screen-h', tall + 'px');
+            d.classList.add('epic-screen-h');
+          } else {
+            d.style.removeProperty('--epic-screen-h');
+            d.classList.remove('epic-screen-h');
+          }
+        }
+        fit();
+        addEventListener('resize', fit);
+        addEventListener('orientationchange', function () { setTimeout(fit, 300); });
+      })();
+    </script>
       <style>
       :root { --epic-bg: #FFFDF9; --epic-surface: #FFFDF9; --epic-ink: #201E1D; --epic-headerBg: #C8F542; color-scheme: light; }
       body { background: var(--epic-bg); }

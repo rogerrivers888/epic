@@ -65,6 +65,12 @@ test('the two ends of the app each apply the inset once', () => {
   // And from the home screen the app is pinned to the screen's four edges, so
   // iOS's short 100dvh in that mode cannot leave a band under the bar.
   assert.match(read('public/index.html'), /@media all and \(display-mode: standalone\) \{\s*#root \{ position: fixed; top: 0; right: 0; bottom: 0; left: 0;/);
+  // Pinning alone still came up ~53pt short on the owner's iPhone (2 Oct 2026):
+  // when the screen is taller than the viewport iOS reports, the app takes the
+  // screen's own height, and only then.
+  const html = read('public/index.html');
+  assert.match(html, /html\.epic-screen-h #root \{ position: fixed; top: 0; right: 0; left: 0; bottom: auto; height: var\(--epic-screen-h\); \}/);
+  assert.match(html, /standalone && short > 1 && short < 120/);
   // Inspire draws its own head, so it takes the top inset itself.
   assert.match(read('src/components/InspireHeader.tsx'), /max\(16px, calc\(var\(--epic-sat\) \+ 10px\)\)/);
 });

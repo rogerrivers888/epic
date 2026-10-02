@@ -985,7 +985,9 @@ const styles = StyleSheet.create({
   },
   // A 44pt target with no slack around it: the icon and its label are 37 of
   // those 44, and the ten extra were another few millimetres of nothing.
-  tab: { flex: 1, minHeight: TARGET, alignItems: 'center', justifyContent: 'center', gap: 2, paddingTop: 4 },
+  // The icons sit ~3mm under the bar's line, not on it (owner, 2 Oct 2026: "the
+  // icons are almost touching the bar above… move the icons down about 3 mm").
+  tab: { flex: 1, minHeight: TARGET, alignItems: 'center', justifyContent: 'flex-start', gap: 2, paddingTop: 22 },
   tabText: { fontSize: 10, fontWeight: '500', color: colors.inkMuted },  // §8: inactive 500, grey 700 both modes
   tabTextActive: { color: colors.ink, fontWeight: '700' },              // §8: active 700 ink
 });
