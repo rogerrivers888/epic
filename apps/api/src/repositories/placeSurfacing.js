@@ -497,12 +497,13 @@ export async function gateProof({ names = [], checkId = null } = {}) {
   const places = [];
   for (const raw of names.map((n) => String(n).trim()).filter(Boolean).slice(0, 40)) {
     const { rows } = await query(
-      // The name as written, case aside — never a pattern: `%` would match the
-      // whole estate (Codex). Capped, and the cap is said, never read as absence.
+      // The name as written, case aside — never a pattern: `%` and `_` are escaped,
+      // or `%` would match the whole estate (Codex); ILIKE keeps the trigram name
+      // indexes. Capped, and the cap is said, never read as absence.
       `select ref from (
-         select venue_ref as ref from place_records where lower(name) = lower($1)
-         union select coalesce(venue_ref, 'atlas:' || id::text) from attractions where lower(name) = lower($1)
-       ) x order by ref limit 21`, [raw]);
+         select venue_ref as ref from place_records where name ilike $1
+         union select coalesce(venue_ref, 'atlas:' || id::text) from attractions where name ilike $1
+       ) x order by ref limit 21`, [raw.replace(/[\\%_]/g, (ch) => `\\${ch}`)]);
     if (rows.length > 20) { places.push({ name: raw, records: null, held: null, why: 'more than 20 records go by that name — name a narrower one' }); continue; }
     const seeds = rows.map((r) => r.ref);
     if (!seeds.length) { places.push({ name: raw, records: 0, held: null, why: 'no record of that name is held' }); continue; }
