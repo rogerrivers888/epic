@@ -178,8 +178,23 @@ const refusedKey = (householdId, ref) => `${householdId}|${ref}`;
 /** True when this row still wants its postcode and station, and is not resting after a refusal. */
 export function whereDue(householdId, r) {
   if (r.lat == null || r.lng == null || r.where_checked) return false;
-  const at = refusedAt.get(refusedKey(householdId, r.venue_ref));
-  return !at || Date.now() - at >= RETRY_MS;
+  const key = refusedKey(householdId, r.venue_ref);
+  const at = refusedAt.get(key);
+  if (!at) return true;
+  if (Date.now() - at < RETRY_MS) return false;
+  // Rested long enough: forgotten here, so the memory holds only rows that are
+  // resting now and cannot grow for ever (Codex, 2 Oct 2026).
+  refusedAt.delete(key);
+  return true;
+}
+
+// And a ceiling, oldest first, for refusals nobody ever reads again — a place
+// deleted, or a household that never comes back.
+const REFUSED_MAX = 5000;
+function noteRefused(key) {
+  refusedAt.delete(key);
+  refusedAt.set(key, Date.now());
+  while (refusedAt.size > REFUSED_MAX) refusedAt.delete(refusedAt.keys().next().value);
 }
 
 /** Fill in postcode and station for atlas rows that have not been looked up yet, a few at a time. */
@@ -188,7 +203,7 @@ export async function fillWhere(householdId, rows, { limit = 6, lookup = whereIs
   for (const r of todo) {
     const w = await lookup(r.lat, r.lng, { householdId, postcode: r.postcode ?? null });
     const key = refusedKey(householdId, r.venue_ref);
-    if (w.failed) refusedAt.set(key, Date.now()); else refusedAt.delete(key);
+    if (w.failed) noteRefused(key); else refusedAt.delete(key);
     await atlasRepo.saveWhere(householdId, r.venue_ref, { ...w, checkedAt: w.failed ? null : new Date() }).catch(() => null);
   }
   return todo.length;
