@@ -88,7 +88,7 @@ const GB: HostLandingStrings = {
     {
       key: 'one-off', tag: 'One-off', title: 'A private or\npublic event.',
       line: 'A wedding for your guests, or a class open to all. Set the date; people RSVP or book.',
-      kicker: 'Public · Sat 14 Nov, 10am', card: 'Fossil hunting with a geologist', pills: ['Lyme Regis · 3 hrs'],
+      kicker: 'Public · Sat 14 Nov, 10am', card: 'Fossil hunting with a geologist', pills: ['Lyme Regis', '3 hrs'],
       eg: ['Birthday parties and weddings', 'Taster classes and workshops', 'Guided walks and tours'],
       who: 'Hannah', when: 'just now',
     },

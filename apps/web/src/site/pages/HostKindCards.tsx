@@ -31,7 +31,7 @@ const LOOPS = 3;
 const STAGGER = 350;
 /** The result chip's colours, by the name the strip gives them. */
 const RESULT = { lime: { backgroundColor: LIME, color: INK }, tint: { backgroundColor: LIME_TINT, color: DEEP_GREEN }, cream: { backgroundColor: CREAM, color: INK } } as const;
-const PHOTO: Record<KindKey, string> = { 'one-off': MOSS, weekly: DEEP_GREEN, course: HAIRLINE, 'on-request': INK };
+const PHOTO: Record<KindKey, string> = { 'one-off': MOSS, weekly: DEEP_GREEN, course: LIME, 'on-request': INK };
 
 const nowrap = (Platform.OS === 'web' ? { whiteSpace: 'nowrap' } : {}) as TextStyle;
 const tabular: TextStyle = { fontVariant: ['tabular-nums'] };

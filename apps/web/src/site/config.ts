@@ -4,10 +4,11 @@
 import type { HomeDesign } from '../routes';
 
 /**
- * Which of W1–W6 renders at /{locale}/ — W2, "sorted" (owner, 2 Oct 2026: "W2
- * confirmed"). The other five run as noindex landing pages at /{locale}/go/{name}.
+ * Which of W1–W6 renders at /{locale}/ — W3, "The story in four" (owner, 2 Oct
+ * 2026: "Switch to W3 … We want the full page, basically"; it replaced W2). The
+ * others run as noindex landing pages at /{locale}/go/{name}.
  */
-export const HOMEPAGE: HomeDesign = 'sorted';
+export const HOMEPAGE: HomeDesign = 'story';
 
 /**
  * The website is published on its own, ahead of the app (owner, 2 Oct 2026:

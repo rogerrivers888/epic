@@ -184,7 +184,9 @@ function Frame() {
   // "Viewing as Web / Mobile"; the site is fully responsive, so a narrow window
   // shows its phone layout.
   const { path } = useRouter();
-  if (window.width < DESKTOP || /^\/en-(gb|us)(\/|$)/.test(path)) return app;
+  // Nor the sign-in doors and the account page, which people reach signed out
+  // (design audit, 2 Oct 2026): /login, /in/<token> and /account.
+  if (window.width < DESKTOP || /^\/(en-(gb|us)(\/|$)|login\/?$|in\/|account\/?$)/.test(path)) return app;
 
   const frameHeight = Math.min(PHONE.height, window.height - TOOLBAR - spacing.xl * 2 - BEZEL * 2);
   // Where the phone's screen lands in the real window: the stage centres it below the toolbar.

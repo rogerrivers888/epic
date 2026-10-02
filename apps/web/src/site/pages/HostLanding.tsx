@@ -15,7 +15,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View, type TextStyle } from 'react-native';
 import {
-  CREAM, HAIRLINE, INACTIVE, INK, INK_MUTED, INK_RULE, LIGHT_GREY, LIME, LIME_TINT, MOSS, NEUTRAL, ON_INK_SOFT, fonts,
+  CREAM, HAIRLINE, INACTIVE, LIME_WASH, INK, INK_MUTED, INK_RULE, LIGHT_GREY, LIME, LIME_TINT, MOSS, NEUTRAL, ON_INK_SOFT, fonts,
 } from '../../theme';
 import { Icon } from '../../components/Icon';
 import { useViewport } from '../../hooks/useViewport';
@@ -30,8 +30,14 @@ import { STRINGS, type RsvpStatus } from './HostLanding.strings';
 const web = Platform.OS === 'web';
 const GUEST_FACE = [LIME, HAIRLINE, MOSS, INK];
 const BOOKED_FACE = [LIME, INK, MOSS, HAIRLINE];
-const RSVP: Record<RsvpStatus, string> = { coming: LIME, maybe: LIME_TINT, none: NEUTRAL };
+const RSVP: Record<RsvpStatus, string> = { coming: LIME, maybe: LIME_WASH, none: NEUTRAL };
 const ls = (size: number, em: number) => size * em;
+/** Two #RRGGBB colours, `k` of the way from `a` to `b` — the RSVP chip's fade. */
+const mix = (a: string, b: string, k: number) => {
+  const t = Math.max(0, Math.min(1, k));
+  const c = (h: string, i: number) => parseInt(h.slice(1 + i * 2, 3 + i * 2), 16);
+  return `#${[0, 1, 2].map((i) => Math.round(c(a, i) + (c(b, i) - c(a, i)) * t).toString(16).padStart(2, '0')).join('')}`;
+};
 
 export function HostLanding({ locale, landingPage }: SitePageProps) {
   const s = pick(STRINGS, locale);
@@ -61,21 +67,24 @@ export function HostLanding({ locale, landingPage }: SitePageProps) {
   // (6s loop, from 1.5s; three loops then hold; end state under reduced motion).
   const rsvpNode = useRef<View>(null);
   const beat = useStoryboard(rsvpNode, { loop: 6000, end: 4600, loops: 3 });
-  const replied = beat.t >= 1500;
-  const roll = Math.max(0, Math.min(1, (beat.t - 1500) / 700));
+  // As the mockup draws it: an eased roll from 1.5s to 2.2s, the chip flipping at
+  // its midpoint with a 350ms fade, and the beat back to its start at 5.4s.
+  const live = beat.t < 5400 ? beat.t : 0;
+  const x = Math.max(0, Math.min(1, (live - 1500) / 700));
+  const roll = x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2;
+  const replied = roll >= 0.5;
   const rsvp = {
     replied,
     coming: 37 + Math.round(roll),
     toReply: 4 - Math.round(roll),
-    // The chip's background fades over 350ms as the reply lands.
-    replyBg: beat.t >= 1500 + 350 ? LIME : beat.t >= 1500 ? LIME_TINT : RSVP.none,
+    replyBg: replied ? mix(RSVP.none, LIME, Math.min(1, (live - 1850) / 350)) : RSVP.none,
   };
 
   const heading = (i: number) => {
     const sec = s.sections[i];
     return (
       <>
-        <Text aria-hidden style={[styles.num, { fontSize: phone ? 17 : 20 }]}>{sec.n}</Text>
+        <Text aria-hidden style={[styles.num, { fontSize: phone ? 16 : 20 }]}>{sec.n}</Text>
         <SiteH2 style={[styles.chapter, phone ? styles.chapterPhone : null, i === 3 ? (phone ? styles.chapter04Phone : styles.chapter04) : null]}>
           <Text style={styles.srOnly}>{sec.n + s.sep}</Text>
           {sec.title}
@@ -120,7 +129,7 @@ export function HostLanding({ locale, landingPage }: SitePageProps) {
 
       {/* 01 · Four ways to host */}
       <View style={[styles.head, phone ? styles.headPhone : { paddingTop: 56, paddingHorizontal: pad }]}>{heading(0)}</View>
-      <View style={phone ? { paddingHorizontal: pad, paddingTop: 16, paddingBottom: 40 } : [styles.kindsWrap, { marginHorizontal: pad }]}>
+      <View style={phone ? { marginHorizontal: pad, marginTop: 20, borderTopWidth: 1, borderTopColor: HAIRLINE, paddingTop: 24, paddingBottom: 40 } : [styles.kindsWrap, { marginHorizontal: pad }]}>
         <HostKindCards kinds={s.kinds} strip={s.strip} running={s.running} cols={phone ? 1 : wide ? 4 : 2} />
       </View>
 
@@ -312,7 +321,7 @@ const styles = StyleSheet.create({
   num: { fontFamily: H, fontWeight: '800', color: INK },
   chapter: { fontFamily: H, fontWeight: '800', color: INK, fontSize: 96, letterSpacing: ls(96, -0.05), lineHeight: 96 * 0.92 },
   chapter04: { fontSize: 76, letterSpacing: ls(76, -0.045), lineHeight: 76 * 0.95 },
-  chapterPhone: { fontSize: 48, letterSpacing: ls(48, -0.045), lineHeight: 48 * 0.95 },
+  chapterPhone: { fontSize: 48, letterSpacing: ls(48, -0.05), lineHeight: 48 * 0.95 },
   chapter04Phone: { fontSize: 44, letterSpacing: ls(44, -0.045), lineHeight: 44 * 0.95 },
 
   grid: { flexDirection: 'row', flexWrap: 'wrap', borderTopWidth: 1, borderTopColor: HAIRLINE },
@@ -338,7 +347,7 @@ const styles = StyleSheet.create({
   session: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: INK_RULE },
   sessionCell: { flex: 1, minWidth: 0, fontFamily: B, color: CREAM },
 
-  steps: { backgroundColor: LIME_TINT, paddingVertical: 72, gap: 36 },
+  steps: { backgroundColor: LIME_WASH, paddingVertical: 72, gap: 36 },
   stepsPhone: { paddingTop: 32, paddingBottom: 12, paddingHorizontal: 20, gap: 10 },
   step: { paddingTop: 24, paddingBottom: 32, gap: 14 },
   stepPhone: { flexDirection: 'row', gap: 14, paddingTop: 16, paddingBottom: 20, borderTopWidth: 1, borderTopColor: HAIRLINE },

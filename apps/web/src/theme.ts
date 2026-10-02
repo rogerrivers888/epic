@@ -81,6 +81,7 @@ export const LIME_PALE = '#DCF8AD';  // oklch(0.94 0.10 125)
 export const TRACK = '#E2DED8';
 export const LIGHT_GREY = '#C9C4C2';
 export const ON_INK_SOFT = '#BDB8B5';
+export const LIME_WASH = '#E8FACE';  // oklch(0.96 0.06 125): the host page's steps band and a "Maybe"
 
 /**
  * Dark, from the v2 handoff's own table. Not a dimming of the light palette: a

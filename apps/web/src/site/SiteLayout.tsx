@@ -153,19 +153,21 @@ function SiteFooter({ locale }: { locale: SiteLocale }) {
     if (to !== locale) navigate(paths.siteHome(to));
   };
 
-  const linkGrid = (
-    <View style={[styles.linkGrid, { columnGap: phone ? 20 : 32 }]}>
+  // The compact footer (owner, 2 Oct 2026: "a third of the size, smaller text,
+  // smaller everything, and spread out across the rows"): the links run along one
+  // line and wrap only where they must, each still a 44px tap target on a phone.
+  const linkRow = (
+    <View accessibilityRole="list" style={[styles.linkRow, phone && { columnGap: 18, rowGap: 0 }]}>
       {links.map((l) => (
-        <Pressable key={l.label} accessibilityRole="link" onPress={l.go} style={[styles.footLinkCell, { minHeight: phone ? 48 : undefined }]}>
-          {({ hovered }: any) => <Text style={[styles.footLink, { fontSize: phone ? 15 : 16 }, hovered && { color: LIME }]}>{l.label}</Text>}
+        <Pressable key={l.label} accessibilityRole="link" onPress={l.go} style={[styles.footLinkCell, phone && { minHeight: 44 }]}>
+          {({ hovered }: any) => <Text style={[styles.footLink, hovered && { color: LIME }]}>{l.label}</Text>}
         </Pressable>
       ))}
     </View>
   );
 
   const switcher = (
-    <View style={{ gap: 8, position: 'relative', zIndex: 2 }}>
-      <Text style={styles.label}>{w.countryLanguage}</Text>
+    <View style={{ position: 'relative', zIndex: 2, minWidth: phone ? undefined : 220 }}>
       {picking ? (
         // Opens upwards, above the box, the current choice on lime.
         <View style={styles.pickList}>
@@ -179,12 +181,13 @@ function SiteFooter({ locale }: { locale: SiteLocale }) {
       ) : null}
       <Pressable
         accessibilityRole="button"
+        accessibilityLabel={`${w.countryLanguage}: ${LOCALE_LABEL[locale]}`}
         accessibilityState={{ expanded: picking }}
         onPress={() => setPicking((p) => !p)}
         style={({ hovered }: any) => [styles.pickBox, hovered && { backgroundColor: INK_HOVER }]}
       >
         <Text style={styles.pickBoxText}>{LOCALE_LABEL[locale]}</Text>
-        <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={CREAM} strokeWidth={2.4} strokeLinecap="square">
+        <Svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={CREAM} strokeWidth={2.4} strokeLinecap="square">
           <Path d={picking ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'} />
         </Svg>
       </Pressable>
@@ -198,18 +201,18 @@ function SiteFooter({ locale }: { locale: SiteLocale }) {
   );
 
   return (
-    <View style={[styles.foot, { padding: phone ? 20 : 56, paddingTop: phone ? 36 : 56, paddingBottom: 28, gap: phone ? 28 : 44 }]}>
+    <View style={[styles.foot, phone ? { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 20, gap: 16 } : { paddingHorizontal: 56, paddingTop: 28, paddingBottom: 20, gap: 20 }]}>
       {phone ? (
         <>
-          <Wordmark height={44} ink={CREAM} ground={INK} />
-          {linkGrid}
+          <Wordmark height={26} ink={CREAM} ground={INK} />
+          {linkRow}
           {switcher}
         </>
       ) : (
         <View style={styles.footRow}>
-          <View style={{ flex: 1 }}><Wordmark height={56} ink={CREAM} ground={INK} /></View>
-          <View style={{ flex: 2 }}>{linkGrid}</View>
-          <View style={{ flex: 1 }}>{switcher}</View>
+          <Wordmark height={28} ink={CREAM} ground={INK} />
+          <View style={{ flex: 1, minWidth: 0 }}>{linkRow}</View>
+          {switcher}
         </View>
       )}
       <View style={styles.smallRule}>{smallPrint}</View>
@@ -237,16 +240,15 @@ const styles = StyleSheet.create({
   floatRight: { position: 'absolute', top: 22, right: 56, zIndex: 3 },
 
   foot: { backgroundColor: INK },
-  footRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 48 },
-  linkGrid: { flexDirection: 'row', flexWrap: 'wrap', borderTopWidth: 2, borderTopColor: INK_RULE },
-  footLinkCell: { width: '48%', flexGrow: 1, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: INK_RULE, justifyContent: 'center' },
-  footLink: { fontFamily: fonts.body, fontWeight: '700', color: CREAM },
-  label: { fontFamily: fonts.body, fontSize: 13, fontWeight: '700', letterSpacing: 1.04, textTransform: 'uppercase', color: ON_INK_MUTED },
-  pickBox: { height: 48, borderWidth: 2, borderColor: CREAM, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingHorizontal: 14 },
-  pickBoxText: { fontFamily: fonts.body, fontSize: 16, fontWeight: '700', color: CREAM },
-  pickList: { position: 'absolute', left: 0, right: 0, bottom: 50, backgroundColor: CREAM, borderWidth: 2, borderColor: INK },
+  footRow: { flexDirection: 'row', alignItems: 'center', gap: 40 },
+  linkRow: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 24, rowGap: 6 },
+  footLinkCell: { justifyContent: 'center' },
+  footLink: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: CREAM },
+  pickBox: { height: 36, borderWidth: 1, borderColor: ON_INK_MUTED, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: 12 },
+  pickBoxText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: CREAM },
+  pickList: { position: 'absolute', left: 0, right: 0, bottom: 38, backgroundColor: CREAM, borderWidth: 2, borderColor: INK },
   pickRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: HAIRLINE },
   pickText: { fontFamily: fonts.body, fontSize: 15, fontWeight: '500', color: INK },
-  smallRule: { borderTopWidth: 2, borderTopColor: INK_RULE, paddingTop: 16 },
-  smallPrint: { fontFamily: fonts.body, fontSize: 13, lineHeight: 20, color: ON_INK_MUTED },
+  smallRule: { borderTopWidth: 1, borderTopColor: INK_RULE, paddingTop: 12 },
+  smallPrint: { fontFamily: fonts.body, fontSize: 12, lineHeight: 18, color: ON_INK_MUTED },
 });

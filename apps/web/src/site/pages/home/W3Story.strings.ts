@@ -73,12 +73,14 @@ const GB: W3Words = {
   },
   ch4: {
     n: '04', title: 'Host it.',
-    sub: "Epic isn't just trips. Run a wedding weekend, a fossil-hunting tour, a weekly class or a term of home-school lessons, for friends or for anyone.",
+    // The four ways to host as the host page now has them — how often it runs
+    // (host page v6, owner, 2 Oct 2026), with the hero line it uses.
+    sub: "Epic isn't just for planning trips. It's where you run things: a wedding weekend, a fossil-hunting tour, a weekly club, a ten-week course.",
     kinds: [
-      { tag: 'One-off', title: 'A wedding weekend.', card: "Jo & Sam's wedding weekend", meta: 'Invite only · 38 coming' },
-      { tag: 'Activity', title: 'A fossil hunt.', card: 'Fossil hunting with a geologist', meta: 'Once, or every Saturday' },
-      { tag: 'Class', title: 'A weekly class.', card: 'Weekly pottery workshop', meta: 'Open to all · 6 of 8 booked' },
-      { tag: 'Homeschool', title: 'A term of lessons.', card: 'Year 4 science co-op', meta: '5 families · 12 sessions' },
+      { tag: 'One-off', title: 'A private or public event.', card: 'Fossil hunting with a geologist', meta: 'Public · Sat 14 Nov, 10am' },
+      { tag: 'Weekly', title: 'Same time, every week.', card: 'Weekly pottery workshop', meta: 'Public · Thursdays 7pm' },
+      { tag: 'Course', title: 'A set number of weeks.', card: 'Junior tennis camp', meta: '10 Saturdays · 9 Jan – 13 Mar' },
+      { tag: 'On request', title: 'Your time, when they want it.', card: 'An hour on getting started with AI', meta: 'On request · 1–2 hours' },
     ],
     cta: 'Become a host',
   },
@@ -95,10 +97,11 @@ export const W3_WORDS: Strings<W3Words> = {
     },
     ch4: {
       ...GB.ch4,
-      sub: "Epic isn't just trips. Run a wedding weekend, a fossil-hunting tour, a weekly class or a semester of homeschool lessons, for friends or for anyone.",
       kinds: [
-        GB.ch4.kinds[0], GB.ch4.kinds[1], GB.ch4.kinds[2],
-        { tag: 'Homeschool', title: 'A semester of lessons.', card: '4th grade science co-op', meta: '5 families · 12 sessions' },
+        { ...GB.ch4.kinds[0], meta: 'Public · Sat, Nov 14, 10 am' },
+        { ...GB.ch4.kinds[1], meta: 'Public · Thursdays 7 pm' },
+        { ...GB.ch4.kinds[2], meta: '10 Saturdays · Jan 9 – Mar 13' },
+        GB.ch4.kinds[3],
       ],
     },
   },
