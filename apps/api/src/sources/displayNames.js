@@ -191,7 +191,14 @@ export async function resolveInto(specs, opts = {}) {
   for (const { rows, refKey, nameKey } of specs) {
     for (const r of rows ?? []) {
       const x = by.get(r?.[refKey]);
-      if (x) { r[nameKey] = x.name; r.nameSource = x.nameSource; }
+      if (!x) continue;
+      // An owned or live name belongs to the place, so every row of it takes
+      // that. A household's own words belong to the row they were written on:
+      // a stop "Meet at the north gate" and a shortlist "The Park" on the same
+      // open reference each keep their own (Codex, 2 Oct 2026).
+      const own = r[nameKey];
+      if (x.nameSource === 'stored' && typeof own === 'string' && own.trim() && own !== r[refKey]) { r.nameSource = 'stored'; continue; }
+      r[nameKey] = x.name; r.nameSource = x.nameSource;
     }
   }
 }

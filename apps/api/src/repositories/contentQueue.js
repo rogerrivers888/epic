@@ -537,8 +537,12 @@ export async function one(id) {
     out.picture = img ?? null;
   }
   if (q.subject_type === 'visit') {
-    const { rows: [v] } = await query('select note, venue_label, visited_on from visits where id = $1::uuid', [q.subject_id]);
-    out.detail = v ? { text: v.note, place: v.venue_label, on: v.visited_on } : null;
+    // The place under the name we own, or the household's own words — never a
+    // provider's stored name, nor the reference that now stands in for one.
+    const { rows: [v] } = await query(
+      `select note, coalesce(epic_shown_name(venue_ref, household_id, venue_label), 'a place') as place, visited_on
+         from visits where id = $1::uuid`, [q.subject_id]);
+    out.detail = v ? { text: v.note, place: v.place, on: v.visited_on } : null;
   }
   if (q.subject_type === 'rating') {
     const { rows: [r] } = await query(

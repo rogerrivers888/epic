@@ -154,3 +154,13 @@ test('the purge clears every stored provider name it quoted, logs the counts and
   assert.equal(log.expected, before.total);
   assert.doesNotMatch(JSON.stringify(log), /Legacy Google/, 'counts only, never a name');
 });
+
+test('rows of the same open reference keep their own words when resolved together', async () => {
+  const { resolveInto } = await import('../src/sources/displayNames.js');
+  const ref = `fixtures:${randomUUID()}`;
+  const stops = [{ venue_ref: ref, venue_name: 'Meet at the north gate' }];
+  const shortlist = [{ venue_ref: ref, venue_label: 'The Park' }];
+  await resolveInto([{ rows: stops, refKey: 'venue_ref', nameKey: 'venue_name' }, { rows: shortlist, refKey: 'venue_ref', nameKey: 'venue_label' }], { live: false });
+  assert.equal(stops[0].venue_name, 'Meet at the north gate');
+  assert.equal(shortlist[0].venue_label, 'The Park');
+});
