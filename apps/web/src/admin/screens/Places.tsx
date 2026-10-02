@@ -244,7 +244,18 @@ export function Places({ canManage }: { canManage: boolean }) {
                   onClose={() => { setPlace(''); setTab('record'); }} />
     );
   }
-  if (!where) return <Countries onPick={(slug) => setWhere(slug)} onPictures={() => setPictures(true)} onBar={() => setReadyFor('restaurants')} canManage={canManage} />;
+  // The closed check is of every place held, so it needs no level: the bare
+  // `/admin/places?lens=closed` is the page (Codex, 2 Oct 2026).
+  if (!where && lensAsked === 'closed') {
+    return (
+      <AdminPage>
+        <Band kicker="EVERY PLACE HELD" title="Closed places" />
+        <Closed canManage={canManage} />
+        <Footer><Act label="All countries" tone="secondary" onPress={() => setLens('coverage')} /></Footer>
+      </AdminPage>
+    );
+  }
+  if (!where) return <Countries onPick={(slug) => setWhere(slug)} onPictures={() => setPictures(true)} onBar={() => setReadyFor('restaurants')} onClosed={() => setLens('closed')} canManage={canManage} />;
 
   return (
     <Level
@@ -272,8 +283,8 @@ export function Places({ canManage }: { canManage: boolean }) {
 // BO2m — select a country
 // ---------------------------------------------------------------------------
 
-function Countries({ onPick, onPictures, onBar, canManage }: {
-  onPick: (slug: string) => void; onPictures: () => void; onBar: () => void; canManage: boolean;
+function Countries({ onPick, onPictures, onBar, onClosed, canManage }: {
+  onPick: (slug: string) => void; onPictures: () => void; onBar: () => void; onClosed: () => void; canManage: boolean;
 }) {
   const [data, setData] = useState<{ countries: PlaceCountry[]; refreshedAt: string | null } | null>(null);
   // In the address, so a sorted board is a link somebody can be sent.
@@ -359,6 +370,7 @@ function Countries({ onPick, onPictures, onBar, canManage }: {
       <Footer>
         <Act label="Pictures" icon="picture" tone="secondary" onPress={onPictures} />
         <Act label="What counts as ready" tone="secondary" onPress={onBar} />
+        <Act label="Closed" tone="secondary" onPress={onClosed} />
         {/* A country is a row in `localities` and its cells are stamped from the
             places in it, so adding one is the owner's to do in the back office's
             own data screens rather than a button that guesses. Said plainly
