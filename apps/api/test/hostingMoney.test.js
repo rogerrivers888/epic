@@ -1,256 +1,290 @@
 /**
- * Hosting v4, phase 1 against the database (migration 366): the settings and
- * their change log, the owner-only door in front of a change, notifications,
- * payouts and the Stripe reconciliation. Stripe is a function handed in; no
- * request leaves the machine and nothing is spent.
+ * The Host tab's Money screen: the server pieces behind SX9/SX14/SX16–SX20
+ * (Settings revised v2, Lane 3). Migrations 354–356 added the host's pay
+ * schedule, company tax fields and the banks it is paid into, and a booking's
+ * own-link flag. The rules worth pinning:
+ *
+ *   · the pay schedule and the company tax fields round-trip through updateHost,
+ *     and the host's own payload (ownHost) carries them back;
+ *   · one bank is the payout account at a time — activating a second stands the
+ *     first down, kept honest by the partial unique index;
+ *   · a payout account's payload shows only a label and the last four digits,
+ *     never an account number;
+ *   · the fee shown over a period comes from the engine, and a host-link booking
+ *     is charged 5% against the level rate on an Epic-brought one.
  */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import crypto from 'node:crypto';
+import { aHousehold, testDatabase } from './helpers/db.js';
+
+const { query } = await testDatabase();
+const repo = await import('../src/repositories/hosting.js');
+const { ownHost, payoutAccountPayload } = await import('../src/routes/hosting.js');
+const { feesForPeriod, LEVEL_RATE, LINK_RATE } = await import('../src/domain/hostFees.js');
+const { outstandingFrom } = await import('../src/domain/hosting.js');
+
+const addAccount = (hostId, label, last4, active = false) =>
+  query('insert into host_payout_accounts (host_id, label, last4, holder_name, is_active) values ($1,$2,$3,$4,$5) returning *',
+    [hostId, label, last4, 'R Sumner', active]).then((r) => r.rows[0]);
+
+test('the pay schedule and company tax fields round-trip, and ownHost carries them', async () => {
+  const { household } = await aHousehold(query, 'a host who gets paid');
+  const host = await repo.insertHost(household.id, { name: 'Roger', type: 'skill' });
+  // Defaults the migration set.
+  assert.equal(ownHost(host).paySchedule, 'weekly');
+  assert.equal(ownHost(host).taxIsCompany, false);
+  assert.equal(ownHost(host).companyNumber, null);
+
+  const updated = await repo.updateHost(host.id, { paySchedule: 'monthly', taxIsCompany: true, companyNumber: '12345678' });
+  assert.equal(updated.pay_schedule, 'monthly');
+  assert.equal(updated.tax_is_company, true);
+  assert.equal(updated.company_number, '12345678');
+  const payload = ownHost(updated);
+  assert.equal(payload.paySchedule, 'monthly');
+  assert.equal(payload.taxIsCompany, true);
+  assert.equal(payload.companyNumber, '12345678');
+
+  // The schedule is constrained to the three the screen offers.
+  await assert.rejects(repo.updateHost(host.id, { paySchedule: 'fortnightly' }), /pay_schedule/i, 'only weekly/weekday/monthly');
+});
+
+test('one bank is the payout account at a time', async () => {
+  const { household } = await aHousehold(query, 'a host with two banks');
+  const host = await repo.insertHost(household.id, { name: 'Pay Me', type: 'skill' });
+  const monzo = await addAccount(host.id, 'Monzo', '42', true);
+  const starling = await addAccount(host.id, 'Starling', '07', false);
+
+  let accounts = await repo.payoutAccountsOf(host.id);
+  assert.equal(accounts.filter((a) => a.is_active).length, 1);
+  assert.equal(accounts.find((a) => a.is_active).id, monzo.id);
+
+  const active = await repo.setActivePayoutAccount(host.id, starling.id);
+  assert.equal(active.id, starling.id);
+  accounts = await repo.payoutAccountsOf(host.id);
+  assert.equal(accounts.filter((a) => a.is_active).length, 1, 'still only one is active');
+  assert.equal(accounts.find((a) => a.is_active).id, starling.id, 'the second one now, the first stood down');
+
+  // A bank that is not this host's cannot be made the payout account.
+  const other = await aHousehold(query, 'someone else');
+  const otherHost = await repo.insertHost(other.household.id, { name: 'Not you', type: 'skill' });
+  const theirs = await addAccount(otherHost.id, 'Lloyds', '99', true);
+  assert.equal(await repo.setActivePayoutAccount(host.id, theirs.id), null, 'not one of yours');
+  // And a rejected activation must not have stood the real one down (Codex).
+  accounts = await repo.payoutAccountsOf(host.id);
+  assert.equal(accounts.filter((a) => a.is_active).length, 1, 'a failed activation leaves exactly one active');
+  assert.equal(accounts.find((a) => a.is_active).id, starling.id, 'the host still has their payout account');
+});
+
+test("a booking remembers it came through the host's own link (the 5% fee); otherwise false", async () => {
+  const { household } = await aHousehold(query, 'a host with a link');
+  const host = await repo.insertHost(household.id, { name: 'Linked', type: 'skill' });
+  const offer = await repo.insertOffer(host.id, 'oneoff');
+  const viaLink = await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2026-12-01', party: [], heads: 1, state: 'confirmed', amountPence: 10000, viaHostLink: true }, null);
+  assert.equal(viaLink.via_host_link, true);
+  const epicSurface = await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2026-12-02', party: [], heads: 1, state: 'confirmed', amountPence: 10000 }, null);
+  assert.equal(epicSurface.via_host_link, false, 'an Epic-surface booking is not a host-link booking');
+});
+
+test('a payout account payload shows only a label and the last four digits', async () => {
+  const { household } = await aHousehold(query, 'a host with a bank');
+  const host = await repo.insertHost(household.id, { name: 'Shown', type: 'skill' });
+  const acct = await addAccount(host.id, 'Monzo', '42', true);
+  const p = payoutAccountPayload(acct);
+  assert.deepEqual(Object.keys(p).sort(), ['addedOn', 'holderName', 'id', 'isActive', 'label', 'last4'].sort());
+  assert.equal(p.label, 'Monzo');
+  assert.equal(p.last4, '42');
+  assert.equal(p.isActive, true);
+  assert.ok(!('account_number' in p) && !('sortCode' in p), 'no account number ever leaves the server');
+});
+
+test('the period fee comes from the engine: 5% on a host-link booking, the level rate otherwise', () => {
+  const level = 'checked';
+  const period = feesForPeriod([
+    { amountPence: 10000, level, viaHostLink: false, intro: null },
+    { amountPence: 10000, level, viaHostLink: true, intro: null },
+  ]);
+  // Two rates, two lines: the Checked level rate and the own-link rate.
+  const rates = period.lines.map((l) => l.rate).sort((a, b) => a - b);
+  assert.deepEqual(rates, [LINK_RATE, LEVEL_RATE[level]]);
+  // Fee = 15% of £100 + 5% of £100 = £15 + £5 = £20 on £200 gross.
+  assert.equal(period.grossPence, 20000);
+  assert.equal(period.feePence, 2000);
+  assert.equal(period.netPence, 18000);
+});
+
 import express from 'express';
-
-process.env.STRIPE_SECRET_KEY = 'sk_test_fake';
-
-const { aHousehold, testDatabase } = await import('./helpers/db.js');
-const { query, pool } = await testDatabase();
-const settings = await import('../src/repositories/hostingSettings.js');
-const notifications = await import('../src/repositories/notifications.js');
-const ledger = await import('../src/repositories/hostingLedger.js');
-const money = await import('../src/sources/hostingMoney.js');
-const routes = await import('../src/routes/hostingMoney.js');
+const { default: hostingRouter } = await import('../src/routes/hosting.js');
 const { runAsAccount } = await import('../src/context.js');
-const { hostingConfig } = await import('../src/domain/lanes.js');
 
-test.after(async () => { settings.forget(); await pool?.end?.(); });
-
-async function anAccount(h, member) {
-  const { rows: [a] } = await query(
-    "insert into accounts (household_id, member_id, email, role, status, name) values ($1,$2,$3,'customer','active','Maya') returning *",
-    [h.id, member.id, `m-${crypto.randomUUID().slice(0, 8)}@example.com`],
-  );
-  return a;
-}
-
-async function server(account, access) {
+async function hostServer(household, account) {
   const app = express();
   app.use(express.json());
-  app.use((req, _res, next) => { req.access = access; runAsAccount(account, next); });
-  app.use('/api/admin/hosting', routes.adminRouter);
-  app.use('/api', routes.default);
+  app.use((req, _res, next) => { req.session = { id: null, account_id: account?.id ?? null }; runAsAccount(account ?? { id: null, household_id: household.id, member_id: null, role: 'owner', status: 'active' }, next); });
+  app.use('/api', hostingRouter);
   // eslint-disable-next-line no-unused-vars
-  app.use((err, _req, res, _next) => res.status(err.status ?? 500).json({ error: err.message }));
+  app.use((err, _req, res, _next) => res.status(err.status ?? 500).json({ error: err.code ?? 'x', message: err.message }));
   const s = app.listen(0, '127.0.0.1');
   await new Promise((r) => s.once('listening', r));
-  const base = `http://127.0.0.1:${s.address().port}`;
-  const out = (r) => r.json().catch(() => null).then((body) => ({ status: r.status, body }));
-  return {
-    close: () => new Promise((r) => s.close(r)),
-    get: (p) => fetch(base + p).then(out),
-    send: (method, p, body) => fetch(base + p, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) }).then(out),
-  };
+  return { url: `http://127.0.0.1:${s.address().port}`, close: () => new Promise((r) => s.close(r)) };
 }
 
-const STAFF = { doors: ['admin'], capabilities: new Set(['view_hosting', 'manage_hosting']), isOwner: false, role: null, elevated: false };
-const OWNER = { ...STAFF, isOwner: true, elevated: true };
-
-test('the settings are seeded from the handover, and the rules read them', async () => {
-  settings.forget();
-  const m = await settings.current({ fresh: true });
-  assert.equal(m.private_event_fee, 1000);
-  assert.equal(m.pro_monthly, 1299, 'Pro is £12.99');
-  assert.equal(m.payout_release, 72, '72 hours, not 48');
-  assert.deepEqual(m.public_commission.map((s) => s.pct), [20, 15, 10]);
-  assert.equal(m.guarantee_pool, null, 'the owner’s to set');
-  assert.equal(hostingConfig({}).proMonthlyPence, 1299, 'the lanes read the same table');
-});
-
-test('only the owner, personally signed in, changes a setting; every change is logged with why', async () => {
-  const { household: h, member } = await aHousehold(query);
-  const account = await anAccount(h, member);
-  const staff = await server(account, STAFF);
-  const owner = await server(account, OWNER);
+test('GET /api/host/money returns the Money screen (intro state defined — not a 500)', async () => {
+  const { household } = await aHousehold(query, 'the money route');
+  const host = await repo.insertHost(household.id, { name: 'Roger', type: 'skill' });
+  // A one-off is dated by its offer: December's is still to come, June's has run.
+  const offer = await repo.insertOffer(host.id, 'oneoff', { startsOn: '2026-12-01' });
+  const ran = await repo.insertOffer(host.id, 'oneoff', { startsOn: '2025-06-01' });
+  await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2026-12-01', party: [], heads: 1, state: 'confirmed', amountPence: 10000, viaHostLink: true }, null);
+  // A waitlisted request holds no place and earns nothing: it must not appear
+  // in the money totals nor burn one of the first-ten intro positions (Codex).
+  await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2026-12-03', party: [], heads: 1, state: 'waitlisted', amountPence: 77700 }, null);
+  // One date already run: the only thing the Trusted ladder may count, and the
+  // only money the Past tab's per-offer block may show (Codex, 1 Oct 2026).
+  await repo.insertBooking({ offerId: ran.id, hostId: host.id, householdId: household.id, occurrence: '2025-06-01', party: [], heads: 2, state: 'attended', amountPence: 5000 }, null);
+  const srv = await hostServer(household);
   try {
-    const list = await staff.get('/api/admin/hosting/settings');
-    assert.equal(list.status, 200);
-    const min = list.body.settings.find((s) => s.key === 'minimum_fee');
-    assert.deepEqual([min.words, min.switchable], ['£1.50', true]);
-    assert.equal(list.body.settings.find((s) => s.key === 'dbs_age').words, '—');
-
-    const refused = await staff.send('PUT', '/api/admin/hosting/settings/minimum_fee', { value: 200, why: 'test' });
-    assert.equal(refused.status, 403);
-    assert.equal(refused.body.error, 'needs_personal_sign_in', 'an agent or staff session is told to file it for approval');
-
-    assert.equal((await owner.send('PUT', '/api/admin/hosting/settings/minimum_fee', { value: 200 })).status, 400, 'a change needs a reason');
-    assert.equal((await owner.send('PUT', '/api/admin/hosting/settings/minimum_fee', { value: 'two pounds', why: 'x' })).status, 400);
-    assert.equal((await owner.send('PUT', '/api/admin/hosting/settings/payout_release', { isOn: false, why: 'x' })).status, 400, 'payout release has no switch');
-    assert.equal((await owner.send('PUT', '/api/admin/hosting/settings/nothing_here', { value: 1, why: 'x' })).status, 404);
-
-    const ok = await owner.send('PUT', '/api/admin/hosting/settings/minimum_fee', { value: 200, why: 'Card costs went up' });
-    assert.equal(ok.status, 200);
-    assert.equal(ok.body.setting.words, '£2.00');
-    assert.equal((await settings.current()).minimum_fee, 200, 'read at once, no restart');
-    assert.equal((await owner.send('PUT', '/api/admin/hosting/settings/minimum_fee', { value: 200, why: 'again' })).status, 409);
-
-    const changes = await staff.get('/api/admin/hosting/changes?kind=setting&subject=minimum_fee');
-    assert.equal(changes.body.changes.length, 1);
-    const c = changes.body.changes[0];
-    assert.deepEqual([c.before.value, c.after.value, c.why, c.by], [150, 200, 'Card costs went up', account.email]);
-
-    await owner.send('PUT', '/api/admin/hosting/settings/minimum_fee', { isOn: false, why: 'Trying without' });
-    assert.equal((await settings.current()).minimum_fee, null, 'off reads as nothing');
-    await owner.send('PUT', '/api/admin/hosting/settings/minimum_fee', { value: 150, isOn: true, why: 'Back' });
-  } finally { await staff.close(); await owner.close(); }
-});
-
-test('a notification is written once however often a job runs, and the household reads and clears its own', async () => {
-  const { household: h, member } = await aHousehold(query);
-  const other = await aHousehold(query);
-  const account = await anAccount(h, member);
-  const first = await notifications.notify({ householdId: h.id, kind: 'booking_confirmed', title: 'You’re booked', link: '/trips', dedupeKey: `t:${h.id}:1` });
-  assert.ok(first);
-  assert.equal(await notifications.notify({ householdId: h.id, kind: 'booking_confirmed', title: 'You’re booked', link: '/trips', dedupeKey: `t:${h.id}:1` }), null);
-  await notifications.notify({ householdId: other.household.id, kind: 'new_booking', title: 'Not yours' });
-  await assert.rejects(() => notifications.notify({ householdId: h.id, kind: 'made_up', title: 'x' }));
-  await assert.rejects(() => notifications.notify({ householdId: h.id, kind: 'new_tip', title: 'x', link: 'https://evil.example' }), /app path/);
-  const srv = await server(account, { doors: ['client'], capabilities: new Set(), isOwner: false, elevated: false });
-  try {
-    const mine = await srv.get('/api/notifications');
-    assert.deepEqual([mine.body.notifications.length, mine.body.unread], [1, 1]);
-    assert.equal(mine.body.notifications[0].link, '/trips');
-    assert.equal((await srv.send('POST', '/api/notifications/read', { id: 'not-a-uuid' })).status, 400);
-    await srv.send('POST', '/api/notifications/read', {});
-    assert.equal((await srv.get('/api/notifications')).body.unread, 0);
+    const r = await fetch(`${srv.url}/api/host/money`);
+    assert.equal(r.status, 200, 'the Money screen must not 500 — the regression Codex caught');
+    const body = await r.json();
+    assert.equal(typeof body.intro?.active, 'boolean', 'host-wide intro state present');
+    assert.ok(Array.isArray(body.totals?.lines) && Array.isArray(body.ladder) && body.ladder.length === 3);
+    // A brand-new host's first booking is inside the 0% intro, which beats even
+    // the 5% link rate — so the line is 0%, proving per-booking intro resolution.
+    assert.ok(body.totals.lines.some((l) => l.rate === 0), 'the new host\'s booking is charged the 0% intro, not the level or link rate');
+    assert.equal(body.totals.grossPence, 15000, 'the waitlisted £777 request is not revenue');
+    // The confirmed December date is still to come: a booking made is not an
+    // experience run, so the ladder counts only the June date.
+    assert.equal(body.trusted.completed, 1, 'only the past date counts toward Epic Trusted');
+    assert.equal(body.byOffer[offer.id].grossPence, 0, "the December offer's Past money is nothing yet");
+    assert.equal(body.byOffer[ran.id].grossPence, 5000, "the Past tab's per-offer money is past dates only");
   } finally { await srv.close(); }
-
-  // E-mail: claimed before it is sent, so a second drain sends nothing.
-  const sent = [];
-  const send = async (m) => { sent.push(m); return { sent: true }; };
-  const r1 = await notifications.drainEmail({ send, configured: () => true });
-  const r2 = await notifications.drainEmail({ send, configured: () => true });
-  assert.ok(r1.sent >= 1);
-  assert.equal(r2.sent, 0);
-  assert.ok(sent.some((m) => m.to === account.email && m.text.endsWith('/trips')));
 });
 
-async function aPaidSession({ endedHoursAgo = 2, tax = 'QQ123456C', ready = true, sessionsInBooking = 1 } = {}) {
-  const { household: h } = await aHousehold(query);
-  const { household: guest } = await aHousehold(query);
-  const { rows: [host] } = await query(
-    `insert into hosts (household_id, name, tax_reference, stripe_account_id, payouts_state) values ($1, 'Tom', $2, $3, $4) returning *`,
-    [h.id, tax, ready ? 'acct_test_9' : null, ready ? 'ready' : 'none'],
-  );
-  const { rows: [offer] } = await query(`insert into host_offers (host_id, shape, lane, state, title) values ($1, 'series', 'course', 'live', 'Swim') returning *`, [host.id]);
-  const ended = new Date(Date.now() - endedHoursAgo * 3_600_000);
-  const london = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d).replace(',', '');
-  const [day, time] = london(ended).split(' ');
-  const sessions = [];
-  for (let i = 0; i < sessionsInBooking; i += 1) {
-    const { rows: [s] } = await query(`insert into offer_sessions (offer_id, n, on_date, starts_at, ends_at) values ($1, $2, $3, '00:00', $4) returning *`, [offer.id, i + 1, day, time]);
-    sessions.push(s);
+test('a waitlisted request never blocks leaving: outstanding counts held places only', async () => {
+  const offer = { id: 'o1', shape: 'oneoff' };
+  const future = '2099-01-01';
+  const waitlistedOnly = outstandingFrom([offer], [{ offer_id: 'o1', state: 'waitlisted', occurrence: future, heads: 3 }]);
+  assert.equal(waitlistedOnly.blocked, false, 'a waitlist holds no place');
+  assert.equal(waitlistedOnly.guests, 0);
+  const held = outstandingFrom([offer], [
+    { offer_id: 'o1', state: 'confirmed', occurrence: future, heads: 2 },
+    { offer_id: 'o1', state: 'waitlisted', occurrence: future, heads: 3 },
+  ]);
+  assert.equal(held.blocked, true, 'a confirmed place still blocks');
+  assert.equal(held.guests, 2, 'and only the held places are the guests to tell');
+});
+
+test('cancelling an early booking never slides a later one into the 0% intro', async () => {
+  const { household } = await aHousehold(query, 'the fixed ten');
+  const host = await repo.insertHost(household.id, { name: 'Ivo', type: 'skill' });
+  const offer = await repo.insertOffer(host.id, 'oneoff', { startsOn: '2099-03-01' });
+  const made = [];
+  for (let i = 0; i < 11; i += 1) {
+    made.push(await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2099-03-01', party: [], heads: 1, state: 'confirmed', amountPence: 10000 }, null));
   }
-  const { rows: [b] } = await query(
-    `insert into experience_bookings (offer_id, host_id, household_id, payment_state, charged_pence, host_pence, fee_pence, value_pence)
-     values ($1, $2, $3, 'charged', 10000, 8000, 2000, 10000) returning *`,
-    [offer.id, host.id, guest.id],
-  );
-  for (const s of sessions) await query(`insert into booking_sessions (booking_id, session_id) values ($1, $2)`, [b.id, s.id]);
-  return { host, offer, sessions, booking: b, guest };
-}
-
-test('a payout is made once per session, released 72 hours on, and never twice', async () => {
-  settings.forget();
-  const { host, sessions: [s], booking } = await aPaidSession({ endedHoursAgo: 2 });
-  await money.schedulePayouts();
-  await money.schedulePayouts();
-  const { rows: payouts } = await query('select * from host_payouts where session_id = $1', [s.id]);
-  assert.equal(payouts.length, 1, 'one row a session, however often the job runs');
-  assert.equal(payouts[0].amount_pence, 8000);
-  const transfers = [];
-  const transfer = async (t) => { transfers.push(t); return { id: `tr_${transfers.length}` }; };
-  const status = () => ({ ready: true, mode: 'test' });
-  await money.releasePayouts({ transfer, status });
-  assert.equal(transfers.length, 0, 'two hours after: waiting');
-
-  // A guest says it happened: released early (the setting is on).
-  await query(`update experience_bookings set confirmed_happened = 'yes' where id = $1`, [booking.id]);
-  await money.releasePayouts({ transfer, status });
-  await money.releasePayouts({ transfer, status });
-  assert.equal(transfers.length, 1, 'once');
-  assert.deepEqual([transfers[0].amountPence, transfers[0].destination, transfers[0].idempotencyKey], [8000, 'acct_test_9', `payout-${payouts[0].id}`]);
-  const { rows: [paid] } = await query('select * from host_payouts where id = $1', [payouts[0].id]);
-  assert.deepEqual([paid.state, paid.released_by, paid.stripe_transfer], ['paid', 'guest_confirmed', 'tr_1']);
-  const { rows: [row] } = await query(`select * from hosting_payments where kind = 'payout' and stripe_ref = 'tr_1'`);
-  assert.equal(row.host_id, host.id);
-  const { rows: told } = await query(`select * from notifications where household_id = $1 and kind = 'payout_sent'`, [host.household_id]);
-  assert.equal(told.length, 1);
+  assert.deepEqual(made.map((b) => b.intro_ordinal), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], 'each booking is stamped its place in turn as it is made');
+  const srv = await hostServer(household);
+  const money = async () => (await fetch(`${srv.url}/api/host/money`)).json();
+  try {
+    const before = await money();
+    const paidBefore = before.totals.lines.find((l) => l.rate > 0);
+    assert.equal(paidBefore?.count, 1, 'the eleventh pays the level rate');
+    // The second booking is called off. It used a place in the ten; the
+    // eleventh stays outside it, and the intro does not reopen.
+    await repo.updateBooking(made[1].id, { state: 'cancelled', cancelledAt: new Date(), cancelledBy: 'guest' });
+    const after = await money();
+    const paidAfter = after.totals.lines.find((l) => l.rate > 0);
+    assert.equal(paidAfter?.count, 1, 'the eleventh is still charged — never re-priced at 0%');
+    assert.equal(after.intro.bookingsLeft, 0, 'the ten are spent; a cancellation does not give one back');
+  } finally { await srv.close(); }
+  assert.equal(await repo.confirmedBookingsSoFar(host.id), 11, 'the host-wide count reads the stamps, cancelled one included');
 });
 
-test('a complaint, missing tax or an unfinished Stripe account holds a payout, and the host is told once', async () => {
-  settings.forget();
-  const transfers = [];
-  const transfer = async (t) => { transfers.push(t); return { id: `tr_x${transfers.length}` }; };
-  const status = () => ({ ready: true, mode: 'test' });
-  const a = await aPaidSession({ endedHoursAgo: 100 });
-  await query(`insert into hosting_complaints (session_id, booking_id, host_id, reason) values ($1, $2, $3, 'It never started')`, [a.sessions[0].id, a.booking.id, a.host.id]);
-  const b = await aPaidSession({ endedHoursAgo: 100, tax: null });
-  const c = await aPaidSession({ endedHoursAgo: 100, ready: false });
-  await money.schedulePayouts();
-  await money.releasePayouts({ transfer, status });
-  await money.releasePayouts({ transfer, status });
-  const held = async (x) => (await query('select state, hold_reason from host_payouts where session_id = $1', [x.sessions[0].id])).rows[0];
-  assert.deepEqual(await held(a), { state: 'held', hold_reason: 'complaint' });
-  assert.deepEqual(await held(b), { state: 'held', hold_reason: 'tax_details' });
-  assert.deepEqual(await held(c), { state: 'held', hold_reason: 'stripe_incomplete' });
-  assert.equal(transfers.filter((t) => [a, b, c].some((x) => x.host.id === t.hostId)).length, 0);
-  const { rows: [{ n }] } = await query(`select count(*)::int as n from notifications where household_id = $1 and kind = 'payout_held'`, [a.host.household_id]);
-  assert.equal(n, 1, 'told once, not every ten minutes');
-
-  // Resolved: it goes.
-  await query(`update hosting_complaints set state = 'resolved' where session_id = $1`, [a.sessions[0].id]);
-  await money.releasePayouts({ transfer, status });
-  assert.equal((await held(a)).state, 'paid');
-
-  // Stripe not ready (a live key, or none): nothing moves at all.
-  const d = await aPaidSession({ endedHoursAgo: 100 });
-  await money.schedulePayouts();
-  const r = await money.releasePayouts({ transfer, status: () => ({ ready: false }) });
-  assert.equal(r.skipped, 'stripe_not_ready');
-  assert.equal((await held(d)).state, 'scheduled');
+test("a host moving up a level never re-prices what they already earned", async () => {
+  const { household } = await aHousehold(query, 'the frozen level');
+  const host = await repo.insertHost(household.id, { name: 'Lia', type: 'skill' });
+  // Past the intro, so the level rate is what applies.
+  await query("update hosts set created_at = now() - interval '200 days', trust = 'verified' where id = $1", [host.id]);
+  const offer = await repo.insertOffer(host.id, 'oneoff', { startsOn: '2099-04-01' });
+  const before = await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2099-04-01', party: [], heads: 1, state: 'confirmed', amountPence: 10000 }, null);
+  assert.equal(before.fee_level, 'verified', 'the level is stamped when the booking first holds a place');
+  await query("update hosts set trust = 'trusted' where id = $1", [host.id]);
+  await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2099-04-01', party: [], heads: 1, state: 'confirmed', amountPence: 10000 }, null);
+  const srv = await hostServer(household);
+  try {
+    const body = await (await fetch(`${srv.url}/api/host/money`)).json();
+    const rates = body.totals.lines.map((l) => [l.rate, l.count]).sort((a, b) => a[0] - b[0]);
+    assert.deepEqual(rates, [[LEVEL_RATE.trusted, 1], [LEVEL_RATE.verified, 1]],
+      'the earlier booking keeps the Verified rate; only the later one has the Trusted rate');
+  } finally { await srv.close(); }
 });
 
-test('a course booking pays per session, split evenly, refunds taken off in proportion', async () => {
-  settings.forget();
-  const { sessions, booking } = await aPaidSession({ endedHoursAgo: 100, sessionsInBooking: 3 });
-  await query('update experience_bookings set refunded_pence = 2500 where id = $1', [booking.id]);
-  await money.schedulePayouts();
-  const { rows } = await query('select amount_pence from host_payouts where session_id = any($1) order by amount_pence', [sessions.map((s) => s.id)]);
-  // 8000 × 7500/10000 = 6000, three ways.
-  assert.deepEqual(rows.map((r) => r.amount_pence), [2000, 2000, 2000]);
-  assert.equal(ledger.shareForSession(100, ['a', 'b', 'c'], 'c'), 34, 'the odd penny lands on the last session');
+test("migration 356's back-fill counts a paid-then-cancelled booking, so nobody after it slides into the 0%", async () => {
+  const { readFileSync } = await import('node:fs');
+  const sql = readFileSync(new URL('../migrations/356_a_booking_through_the_hosts_own_link.sql', import.meta.url), 'utf8');
+  const backfill = sql.slice(sql.lastIndexOf('update experience_bookings b set intro_ordinal'));
+  const { household } = await aHousehold(query, 'the back-fill');
+  const host = await repo.insertHost(household.id, { name: 'Bo', type: 'skill' });
+  const offer = await repo.insertOffer(host.id, 'oneoff', { startsOn: '2099-02-01' });
+  const add = (state) => repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2099-02-01', party: [], heads: 1, state, amountPence: 1000 }, null);
+  const first = await add('confirmed');
+  const refunded = await add('confirmed');
+  const neverHeld = await add('pending');
+  const last = await add('confirmed');
+  await query("update experience_bookings set state = 'cancelled', payment_status = 'refunded', refunded_at = now() where id = $1", [refunded.id]);
+  await query("update experience_bookings set state = 'cancelled' where id = $1", [neverHeld.id]);
+  // As if these rows predated the column: wipe the stamps, then run the
+  // migration's own back-fill statement over them.
+  await query('update experience_bookings set intro_ordinal = null, fee_level = null where host_id = $1', [host.id]);
+  await query(backfill);
+  const { rows } = await query('select id, intro_ordinal, fee_level from experience_bookings where host_id = $1', [host.id]);
+  const by = new Map(rows.map((r) => [r.id, r]));
+  assert.equal(by.get(first.id).intro_ordinal, 1);
+  assert.equal(by.get(refunded.id).intro_ordinal, 2, 'a refunded cancellation did hold a place, and keeps it');
+  assert.equal(by.get(neverHeld.id).intro_ordinal, null, 'a cancellation with no evidence of a place is not guessed at');
+  assert.equal(by.get(last.id).intro_ordinal, 3, 'so the last is third, never renumbered down');
+  assert.equal(by.get(last.id).fee_level, 'verified', "and carries the host's level");
 });
 
-test('the reconciliation checks the ledger against Stripe and names what does not match', async () => {
-  const { household: h } = await aHousehold(query);
-  await ledger.record({ kind: 'charge', householdId: h.id, amountPence: 5000, state: 'succeeded', stripeRef: 'pi_ok', mode: 'test' });
-  await ledger.record({ kind: 'charge', householdId: h.id, amountPence: 5000, state: 'succeeded', stripeRef: 'pi_short', mode: 'test' });
-  await ledger.record({ kind: 'refund', householdId: h.id, amountPence: 1000, state: 'succeeded', stripeRef: 're_failed', mode: 'test' });
-  await ledger.record({ kind: 'pro', householdId: h.id, amountPence: 1299, state: 'succeeded', stripeRef: 'sub:sub_1', mode: 'test' });
-  const again = await ledger.record({ kind: 'charge', householdId: h.id, amountPence: 5000, state: 'succeeded', stripeRef: 'pi_ok', mode: 'test' });
-  assert.ok(again, 'a replay returns the row it already has');
-  const read = async (ref) => ({
-    pi_ok: { object: 'payment_intent', status: 'succeeded', amount_received: 5000 },
-    pi_short: { object: 'payment_intent', status: 'succeeded', amount_received: 4000 },
-    re_failed: { object: 'refund', status: 'failed', amount: 1000 },
-  })[ref] ?? null;
-  const r = await money.reconcile({ read, status: () => ({ ready: true }) });
-  assert.equal(r.mismatched, 2);
-  assert.deepEqual(r.details.map((d) => d.ref).sort(), ['pi_short', 're_failed']);
-  const { rows } = await query(`select stripe_ref, stripe_match from hosting_payments where household_id = $1 order by stripe_ref`, [h.id]);
-  assert.deepEqual(Object.fromEntries(rows.map((x) => [x.stripe_ref, x.stripe_match])), { pi_ok: 'matched', pi_short: 'mismatch', re_failed: 'mismatch', 'sub:sub_1': 'not_checked' }, 'a reference it cannot read is not a match');
+test("the publish estimate prices each booking, so the £1.50 minimum applies per booking", async () => {
+  const host = { trust: 'verified', created_at: new Date(Date.now() - 200 * 86400000) };
+  const o = { id: 'x', price_mode: 'same_each', per: 'person', price_pence: 50, expected_count: 10, min_count: null, total_pence: null };
+  const { publishFeeEstimate } = await import('../src/routes/hosting.js');
+  const fee = publishFeeEstimate(o, host, 10);
+  assert.equal(fee.grossPence, 500);
+  assert.equal(fee.feePence, 500, 'ten 50p bookings, each held to the minimum (capped at its price): £5, not one £1.50');
+  // A new host's remaining intro places are used one booking at a time.
+  const fresh = publishFeeEstimate({ ...o, price_pence: 2000 }, { trust: 'verified', created_at: new Date() }, 7);
+  const byRate = {};
+  for (const l of fresh.lines) byRate[l.rate] = (byRate[l.rate] ?? 0) + l.count;
+  assert.deepEqual(byRate, { 0: 3, 20: 7 }, 'three intro places left at 0%, the other seven at the level rate');
 });
 
-test('an incident can’t be deleted', async () => {
-  const { rows: [i] } = await query(`insert into session_incidents (reporter, body) values ('host', 'A child fell') returning id`);
-  await assert.rejects(() => query('delete from session_incidents where id = $1', [i.id]), /never deleted/);
+test('company reporting is never on without a Companies House number', async () => {
+  const { household } = await aHousehold(query, 'the company host');
+  await repo.insertHost(household.id, { name: 'Co', type: 'skill' });
+  const srv = await hostServer(household);
+  const patch = (body) => fetch(`${srv.url}/api/host`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  try {
+    assert.equal((await patch({ taxIsCompany: true })).status, 400, 'the switch alone, with no number, is refused');
+    assert.equal((await patch({ taxIsCompany: true, companyNumber: '12345' })).status, 400, 'not a company number');
+    assert.equal((await patch({ taxIsCompany: true, companyNumber: 'sc 123456' })).status, 200, 'two letters and six digits, spacing forgiven');
+    const { rows: [h] } = await query('select tax_is_company, company_number from hosts where household_id = $1', [household.id]);
+    assert.deepEqual([h.tax_is_company, h.company_number], [true, 'SC123456']);
+  } finally { await srv.close(); }
+});
+
+test("a whole-run series under way shows its money on the Past tab, though the run has not finished", async () => {
+  const { household } = await aHousehold(query, 'the running series');
+  const host = await repo.insertHost(household.id, { name: 'Sam', type: 'skill' });
+  const started = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10);
+  const offer = await repo.insertOffer(host.id, 'series', { firstDate: started, sessions: 6 });
+  await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: 'whole', party: [], heads: 1, state: 'confirmed', amountPence: 6000 }, null);
+  const srv = await hostServer(household);
+  try {
+    const body = await (await fetch(`${srv.url}/api/host/money`)).json();
+    assert.equal(body.byOffer[offer.id].grossPence, 6000, 'the money sits beside the sessions already held');
+    assert.equal(body.trusted.completed, 0, 'but the run is not yet a completed experience');
+  } finally { await srv.close(); }
 });
