@@ -17,6 +17,8 @@ test('each signal names a country, or says nothing', () => {
   assert.deepEqual(phoneCountries('+971585072674'), ['AE']);
   assert.deepEqual(phoneCountries('+44 1753 123456'), ['GB', 'JE', 'GG', 'IM']);
   assert.deepEqual(phoneCountries('0039 06 1234'), ['IT', 'VA', 'SM']);
+  assert.deepEqual(disagreements({ country: 'GB', phone: '+1 246 555 0100' }).map((d) => d.says), ['North American plan (+1)'], 'Barbados is not "US/CA"');
+  assert.deepEqual(disagreements({ country: 'US', phone: '+1 212 555 0100' }), []);
   assert.equal(phoneCountries('01753 123456'), null, 'a local number names no country');
   assert.deepEqual(phoneCountries('+999 1'), ['?'], 'international but unrecognised is said so');
   assert.equal(websiteCountry('https://dunebuggyrentaldubai.ae/'), 'AE');

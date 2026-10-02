@@ -31,7 +31,10 @@ function strictLastCountry(address) {
 // on earth — the markets, their neighbours and the commonest elsewhere; a prefix not
 // listed is reported as "international, unrecognised", never matched to a guess.
 const CALLING = {
-  1: ['US', 'CA'], 7: ['RU', 'KZ'], 20: ['EG'], 27: ['ZA'], 30: ['GR'], 31: ['NL'], 32: ['BE'], 33: ['FR'],
+  // +1 is the North American plan: the US, Canada and some twenty Caribbean
+  // countries. It agrees with a US or Canada stamp and is reported as the plan, never
+  // as two of its countries (Codex).
+  1: ['US', 'CA', 'NANP'], 7: ['RU', 'KZ'], 20: ['EG'], 27: ['ZA'], 30: ['GR'], 31: ['NL'], 32: ['BE'], 33: ['FR'],
   34: ['ES'], 36: ['HU'], 39: ['IT', 'VA', 'SM'], 40: ['RO'], 41: ['CH'], 43: ['AT'], 44: ['GB', 'JE', 'GG', 'IM'],
   45: ['DK'], 46: ['SE'], 47: ['NO'], 48: ['PL'], 49: ['DE'], 52: ['MX'], 54: ['AR'], 55: ['BR'], 61: ['AU'],
   64: ['NZ'], 65: ['SG'], 81: ['JP'], 86: ['CN'], 90: ['TR'], 91: ['IN'], 212: ['MA'], 351: ['PT'], 352: ['LU'],
@@ -100,7 +103,9 @@ export function disagreements({ country, addresses = [], phone, website, priceRa
   // An unrecognised prefix, or a stamp the table does not cover, says nothing (Codex).
   const p = phoneCountries(phone);
   const stampHasCode = Object.values(CALLING).some((list) => list.includes(stamp));
-  if (p && !p.includes('?') && stampHasCode && !p.includes(stamp)) out.push({ signal: 'phone', says: p.join('/'), evidence: phone });
+  if (p && !p.includes('?') && stampHasCode && !p.includes(stamp)) {
+    out.push({ signal: 'phone', says: p.includes('NANP') ? 'North American plan (+1)' : p.join('/'), evidence: phone });
+  }
   const w = websiteCountry(website);
   if (w && w !== stamp) out.push({ signal: 'website', says: w, evidence: website });
   const mine = currencyOf(stamp);
