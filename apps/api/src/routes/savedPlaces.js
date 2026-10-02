@@ -28,7 +28,7 @@ import { googleSource } from '../sources/google.js';
 import { sourceOff } from '../sources/switches.js';
 import { recordProviderCall } from '../repositories/visits.js';
 import { healthOf } from '../sources/meter.js';
-import { stampImage } from '../sources/photoLinks.js';
+import { stampReviewImage } from '../sources/photoLinks.js';
 import { enrichmentList, enrichmentSummary, enrichmentOf, rerun, backfill, backfillCandidates, isEnrichAccount, TARGET_PENCE, PURPOSE as ENRICH_PURPOSE } from '../sources/savedEnrich.js';
 import { venuePicturesOf } from '../sources/venueImages.js';
 import { USD_TO_GBP, PRICE_PER_UNIT_USD } from '../domain/providerPrices.js';
@@ -60,7 +60,7 @@ async function ownedPicturesOf(venueRef) {
       -- reconsidering (Codex, 2 Oct 2026). Drawn on a signed link, here only.
       order by (i.moderation = 'rejected'), (l.role = 'hero') desc, l.position, i.fetched_at`, [venueRef]);
   return rows.map((r) => {
-    const signed = r.moderation === 'approved' ? { id: r.id } : stampImage({ id: r.id });
+    const signed = r.moderation === 'approved' ? { id: r.id } : stampReviewImage({ id: r.id });
     return {
       id: r.id, source: r.source, role: r.role, moderation: r.moderation,
       licence: r.licence, licenceUrl: r.licence_url, creator: r.creator, credit: r.credit_line,

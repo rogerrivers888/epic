@@ -265,3 +265,22 @@ test('accepting a verdict where a turned-down picture still holds the card puts 
     assert.equal(list.find((p) => p.venueRef === ref).pictures, 2, 'turned-down pictures counted, as shown');
   } finally { await close(); }
 });
+
+test('a household\'s pending link stops drawing a picture once it is turned down; only a review link does', async () => {
+  const { imageRouter } = await import('../src/routes/library.js');
+  const { stampImage, stampReviewImage } = await import('../src/sources/photoLinks.js');
+  const { rows: [img] } = await query(
+    `insert into image_assets (source, source_ref, licence, may_store, moderation) values ('household', $1, 'household', true, 'pending') returning id`, [`h-${randomUUID()}`]);
+  await query(`insert into image_variants (image_id, width, mime, bytes, body) values ($1, 500, 'image/jpeg', 3, $2)`, [img.id, Buffer.from([0xff, 0xd8, 0xff])]);
+  const app = express(); app.use('/img', imageRouter);
+  const s = app.listen(0, '127.0.0.1'); await new Promise((r) => s.once('listening', r));
+  const url = (st) => `http://127.0.0.1:${s.address().port}/img/${img.id}/500?s=${encodeURIComponent(st.sig)}&e=${st.exp}`;
+  try {
+    const householdLink = stampImage({ id: img.id });
+    const reviewLink = stampReviewImage({ id: img.id });
+    assert.equal((await fetch(url(householdLink))).status, 200, 'pending: the household link draws it');
+    await query(`update image_assets set moderation = 'rejected' where id = $1`, [img.id]);
+    assert.equal((await fetch(url(householdLink))).status, 404, 'turned down: that link no longer draws it');
+    assert.equal((await fetch(url(reviewLink))).status, 200, 'the review link still does, for reconsidering');
+  } finally { await new Promise((d) => s.close(d)); }
+});

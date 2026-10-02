@@ -178,3 +178,17 @@ export function stampImage(image) {
 
 /** Whether this request carries a good link for the image it is asking for. */
 export const imageLinkValid = (id, query) => photoLinkValid({ name: `image:${id}`, s: query?.s ?? query?.sig, e: query?.e ?? query?.exp });
+
+/**
+ * A link for Photo review alone (back office, 2 Oct 2026): signed over a
+ * different name from a household's pending-picture link, so the two never
+ * stand in for each other. Only this kind may draw a turned-down picture —
+ * a link handed out while a picture was pending stops working the moment it
+ * is turned down, as it always did (Codex, 2 Oct 2026).
+ */
+export function stampReviewImage(image) {
+  if (!image?.id) return image;
+  const expiry = Date.now() + LIFETIME_MS;
+  return { ...image, exp: expiry, sig: sign(`review:${image.id}`, expiry) };
+}
+export const reviewLinkValid = (id, query) => photoLinkValid({ name: `review:${id}`, s: query?.s ?? query?.sig, e: query?.e ?? query?.exp });
