@@ -749,13 +749,22 @@ export async function approvedHorizon(mode) {
 export async function setApprovedHorizon(mode, minutes, { by = null } = {}) {
   const canonical = travelMode(mode);
   const who = String(by ?? '').trim() || 'unnamed caller';
-  const was = await approvedHorizon(canonical);
   const value = { minutes, approvedBy: who, at: new Date().toISOString() };
+  const fallback = canonical === 'driving' ? DRIVING_BUILT_HORIZON : HORIZON_MINUTES;
+  let was = fallback;
   // The setting and its audit row land together or not at all (Codex): a
   // changed horizon with no log entry is a change nobody can account for.
   const client = await pool.connect();
   try {
     await client.query('begin');
+    // Serialised on the key, and the prior value read under that lock, so two
+    // overlapping approvals log the value each one actually replaced (Codex).
+    // An advisory lock rather than FOR UPDATE: the first approval has no row
+    // to lock.
+    await client.query('select pg_advisory_xact_lock(hashtext($1))', [horizonKey(canonical)]);
+    const { rows: [prior] } = await client.query('select value from bo_settings where key = $1', [horizonKey(canonical)]);
+    const p = Math.trunc(Number(prior?.value?.minutes));
+    if (Number.isFinite(p) && p > 0) was = Math.min(HORIZON_MINUTES, p);
     const { rows: [row] } = await client.query(
       `insert into bo_settings (key, value, version, updated_by, updated_at) values ($1, $2::jsonb, 1, $3, now())
        on conflict (key) do update set value = excluded.value, version = bo_settings.version + 1,
