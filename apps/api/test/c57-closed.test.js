@@ -420,7 +420,7 @@ test('Places suggest: a hidden place is not offered by name, whether Google\'s o
   const app = express();
   app.use((req, _res, next) => runAsAccount(account, next));
   app.use('/api/places', places);
-  const server = app.listen(0);
+  const server = app.listen(0, '127.0.0.1');
   await new Promise((r) => server.once('listening', r));
   try {
     const res = await fetch(`http://127.0.0.1:${server.address().port}/api/places/suggest?q=safari&kind=all`);
@@ -684,7 +684,7 @@ test('an atlas row known to the open map only through the matching pass is hidde
   const app = express();
   app.use((req, _res, next) => runAsAccount(account, next));
   app.use('/api/places', places);
-  const server = app.listen(0);
+  const server = app.listen(0, '127.0.0.1');
   await new Promise((r) => server.once('listening', r));
   try {
     const body = await (await fetch(`http://127.0.0.1:${server.address().port}/api/places/detail?ref=${encodeURIComponent('osm:way/888')}`)).json();
@@ -1069,7 +1069,7 @@ test('the /api/places/status endpoint labels a temporarily closed place, not onl
   const app = express();
   app.use((req, _res, next) => runAsAccount(account, next));
   app.use('/api/places', places);
-  const server = app.listen(0);
+  const server = app.listen(0, '127.0.0.1');
   await new Promise((r) => server.once('listening', r));
   try {
     const body = await (await fetch(`http://127.0.0.1:${server.address().port}/api/places/status?ref=${encodeURIComponent('google:c57-status-temp')}`)).json();

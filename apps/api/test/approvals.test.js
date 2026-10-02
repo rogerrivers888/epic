@@ -143,7 +143,7 @@ test('the decide route runs an approved request end to end', async () => {
   app.use('/admin', adminRoutes);
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => res.status(err.status ?? 500).json({ error: err.message }));
-  const s = app.listen(0);
+  const s = app.listen(0, '127.0.0.1');
   await new Promise((r) => s.once('listening', r));
   try {
     const res = await fetch(`http://127.0.0.1:${s.address().port}/admin/approvals/${filed.id}/decide`, {
@@ -197,7 +197,7 @@ test('the filing route refuses an incomplete brief and files a complete one', as
   app.use('/admin', adminRoutes);
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => res.status(err.status ?? 500).json({ error: err.code, message: err.message }));
-  const s = app.listen(0);
+  const s = app.listen(0, '127.0.0.1');
   await new Promise((r) => s.once('listening', r));
   const file = (body) => fetch(`http://127.0.0.1:${s.address().port}/admin/approvals`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -239,7 +239,7 @@ test('a request with no brief can be declined but never approved, whatever clien
   app.use('/admin', adminRoutes);
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => res.status(err.status ?? 500).json({ error: err.message }));
-  const s = app.listen(0);
+  const s = app.listen(0, '127.0.0.1');
   await new Promise((r) => s.once('listening', r));
   const decide = (id, decision) => fetch(`http://127.0.0.1:${s.address().port}/admin/approvals/${id}/decide`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ decision }) });

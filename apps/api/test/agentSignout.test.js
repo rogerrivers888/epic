@@ -16,7 +16,7 @@ const { findLiveSession } = await import('../src/repositories/sessions.js');
 const app = express();
 app.use(express.json());
 app.use('/api', sessionRoutes);
-const server = app.listen(0);
+const server = app.listen(0, '127.0.0.1');
 await new Promise((r) => server.once('listening', r));
 const base = `http://127.0.0.1:${server.address().port}`;
 test.after(async () => { server.close(); await pool.end(); });

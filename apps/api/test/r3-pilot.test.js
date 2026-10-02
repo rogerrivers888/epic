@@ -228,7 +228,7 @@ test('a drawer open with review text queues Verify, and a real answer lands from
   app.use('/places', places);
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => res.status(err.status ?? 500).json({ error: err.message }));
-  const s = app.listen(0);
+  const s = app.listen(0, '127.0.0.1');
   await new Promise((r) => s.once('listening', r));
   try {
     const res = await fetch(`http://127.0.0.1:${s.address().port}/places/detail?ref=${encodeURIComponent(ref)}`);
@@ -262,7 +262,7 @@ test('POST /pilot needs manage_settings and starts for the caller’s household 
     app.use('/desk', deskRoutes);
     // eslint-disable-next-line no-unused-vars
     app.use((err, _req, res, _next) => res.status(err.status ?? 500).json({ error: err.message }));
-    const s = app.listen(0);
+    const s = app.listen(0, '127.0.0.1');
     return new Promise((r) => s.once('listening', () => r({ url: `http://127.0.0.1:${s.address().port}/desk`, close: () => new Promise((d) => s.close(d)) })));
   };
   const viewer = await serve(['view_library']);

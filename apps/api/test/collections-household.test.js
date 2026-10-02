@@ -232,7 +232,7 @@ async function server(account) {
   app.use('/api/collections', collectionRoutes);
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => res.status(err.status ?? 500).json({ error: err.code ?? 'x', message: err.message }));
-  const s = app.listen(0);
+  const s = app.listen(0, '127.0.0.1');
   await new Promise((r) => s.once('listening', r));
   return { url: `http://127.0.0.1:${s.address().port}/api/collections`, close: () => new Promise((r) => s.close(r)) };
 }

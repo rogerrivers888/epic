@@ -490,7 +490,7 @@ test('Part B (Codex #1/#5): apply needs the owner personally signed in — a non
       next();
     });
     app.use('/api/admin/narrowing', narrowingRoutes);
-    const server = app.listen(0);
+    const server = app.listen(0, '127.0.0.1');
     return server;
   };
   // A delegated admin on a device, with manage_settings but NOT owner-elevated.
@@ -603,7 +603,7 @@ test('Part B (Codex #4): two concurrent /check calls do not split a run', async 
     next();
   });
   app.use('/api/admin/narrowing', narrowingRoutes);
-  const server = app.listen(0);
+  const server = app.listen(0, '127.0.0.1');
   await new Promise((r) => server.once('listening', r));
   const url = `http://127.0.0.1:${server.address().port}/api/admin/narrowing/check`;
   try {

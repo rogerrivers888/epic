@@ -53,7 +53,7 @@ app.use(express.json());
 app.use('/api', authPassword);
 app.use('/api', sessionRoutes);
 app.use((err, _req, res, _next) => res.status(err.status || 500).json({ error: err.code || 'error', message: err.message }));
-const server = app.listen(0);
+const server = app.listen(0, '127.0.0.1');
 await new Promise((r) => server.on('listening', r));
 const base = `http://127.0.0.1:${server.address().port}`;
 test.after(async () => { server.close(); await new Promise((r) => setTimeout(r, 50)); await pool.end(); });

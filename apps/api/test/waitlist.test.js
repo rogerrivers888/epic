@@ -29,7 +29,7 @@ app.use(express.json());
 app.use((req, _res, next) => { req.account = { id: null, email: 'owner@epic.day' }; req.access = who; next(); });
 app.use('/api/admin', waitlistRoutes);
 app.use((err, req, res, _next) => res.status(err.status || 500).json({ error: err.code || 'error', message: err.message }));
-const server = app.listen(0);
+const server = app.listen(0, '127.0.0.1');
 await new Promise((r) => server.on('listening', r));
 const base = `http://127.0.0.1:${server.address().port}`;
 test.after(() => { server.close(); return pool.end(); });

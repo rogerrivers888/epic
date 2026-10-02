@@ -73,7 +73,7 @@ app.use('/api', sessionRoutes);
 app.use('/api', sourceSwitchRoutes);
 app.use('/api', groupRoutes);
 app.use((err, _req, res, _next) => res.status(err.status || 500).json({ error: err.code || 'internal_error', message: err.message }));
-const server = app.listen(0);
+const server = app.listen(0, '127.0.0.1');
 await new Promise((r) => server.once('listening', r));
 const base = `http://127.0.0.1:${server.address().port}`;
 
@@ -318,7 +318,7 @@ test('every public door that sends a text or e-mail is held to the sign-in limit
   const limited = express();
   holdSendingDoors(limited);
   limited.use((_req, res) => res.json({ sent: true }));
-  const s = limited.listen(0);
+  const s = limited.listen(0, '127.0.0.1');
   await new Promise((r) => s.once('listening', r));
   try {
     const ip = `203.0.113.${Math.floor(Math.random() * 250) + 1}`;

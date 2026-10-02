@@ -56,7 +56,7 @@ adminApp.use(express.json());
 adminApp.use((req, _res, next) => { req.account = { id: null, email: 'actor@epic.day' }; req.access = adminAccess; req.session = adminSession; next(); });
 adminApp.use('/api/admin', adminRoutes);
 adminApp.use((err, req, res, _next) => res.status(err.status || 500).json({ error: err.code || 'error', message: err.message }));
-const adminServer = adminApp.listen(0);
+const adminServer = adminApp.listen(0, '127.0.0.1');
 await new Promise((r) => adminServer.on('listening', r));
 const adminBase = `http://127.0.0.1:${adminServer.address().port}`;
 const adminCall = async (method, path, body, acc, sess) => {
@@ -68,7 +68,7 @@ const adminCall = async (method, path, body, acc, sess) => {
 const ROLES_ADMIN = { isOwner: false, doors: ['client', 'admin'], capabilities: new Set(['manage_roles', 'view_accounts']) };
 const OWNER = { isOwner: true, doors: ['client', 'admin'], capabilities: new Set(access.CAPABILITIES.map((c) => c.key)) };
 
-const server = app.listen(0);
+const server = app.listen(0, '127.0.0.1');
 await new Promise((r) => server.on('listening', r));
 const base = `http://127.0.0.1:${server.address().port}`;
 const call = async (method, path, body, acc, sess) => {

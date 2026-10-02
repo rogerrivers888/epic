@@ -29,7 +29,7 @@ app.use('/api', interestRouter({
   configured: () => configured,
 }));
 app.use((err, req, res, _next) => res.status(err.status || 500).json({ error: err.code || 'error', message: err.message }));
-const server = app.listen(0);
+const server = app.listen(0, '127.0.0.1');
 await new Promise((r) => server.on('listening', r));
 const base = `http://127.0.0.1:${server.address().port}`;
 test.after(() => { server.close(); return pool.end(); });
@@ -183,7 +183,7 @@ test('a failed send does not fail the sign-up', async () => {
   failing.set('trust proxy', 1);
   failing.use(express.json());
   failing.use('/api', interestRouter({ send: async () => { throw new Error('postmark down'); }, configured: () => true }));
-  const s = failing.listen(0);
+  const s = failing.listen(0, '127.0.0.1');
   await new Promise((r) => s.on('listening', r));
   try {
     const res = await fetch(`http://127.0.0.1:${s.address().port}/api/interest`, {
@@ -215,7 +215,7 @@ test('past the hourly cap a sign-up is kept and answered, and only the e-mail is
   const mails = [];
   capped.use(express.json());
   capped.use('/api', interestRouter({ send: async (m) => { mails.push(m); }, configured: () => true, mailAllowed: () => false }));
-  const s = capped.listen(0);
+  const s = capped.listen(0, '127.0.0.1');
   await new Promise((r) => s.on('listening', r));
   try {
     const res = await fetch(`http://127.0.0.1:${s.address().port}/api/interest`, {
@@ -244,7 +244,7 @@ test('with one proxy too many trusted, rotating forged addresses still meets the
   loose.set('trust proxy', 2);
   loose.use(express.json());
   loose.use('/api', interestRouter({ send: async () => {}, configured: () => false }));
-  const s = loose.listen(0);
+  const s = loose.listen(0, '127.0.0.1');
   await new Promise((r) => s.on('listening', r));
   try {
     const statuses = [];

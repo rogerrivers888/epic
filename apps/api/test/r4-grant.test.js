@@ -24,7 +24,7 @@ async function serve(session, { elevated = false } = {}) {
   app.use('/admin', router);
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => res.status(err.status ?? 500).json({ error: err.message }));
-  const s = app.listen(0);
+  const s = app.listen(0, '127.0.0.1');
   await new Promise((r) => s.once('listening', r));
   return { url: `http://127.0.0.1:${s.address().port}/admin`, close: () => new Promise((d) => s.close(d)) };
 }

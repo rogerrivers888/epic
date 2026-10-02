@@ -136,7 +136,7 @@ const app = express();
 app.use(express.json());
 app.use('/api', authGoogle.default);
 app.use((err, _req, res, _next) => res.status(err.status || 500).json({ error: err.code || 'error', message: err.message }));
-const server = app.listen(0);
+const server = app.listen(0, '127.0.0.1');
 await new Promise((r) => server.on('listening', r));
 const base = `http://127.0.0.1:${server.address().port}`;
 test.after(() => server.close());
