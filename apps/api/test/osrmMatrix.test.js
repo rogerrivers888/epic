@@ -165,3 +165,20 @@ test('buildOsrmMode refuses driving and transit — those are not OSRM here', as
   await assert.rejects(() => buildOsrmMode({ mode: 'driving', cells: CELLS, table }), /walking or cycling/);
   await assert.rejects(() => buildOsrmMode({ mode: 'transit', cells: CELLS, table }), /walking or cycling/);
 });
+
+test('resume with `since` skips only origins built at or after it — never an older build\'s', async () => {
+  await clean();
+  await seed();
+  const table = async (origin, dests) => dests.map((d) => ({ to: d, seconds: 600, metres: 900 }));
+  await buildOsrmMode({ mode: 'walking', cells: CELLS, table, horizon: 130, scheme: 'test-osrm', resume: false });
+  const later = new Date(Date.now() + 60_000).toISOString();
+  // A rebuild that began after those markers: none of them is its own, nothing skipped.
+  const fresh = await buildOsrmMode({ mode: 'walking', cells: CELLS, table, horizon: 130, scheme: 'test-osrm', resume: true, since: later });
+  assert.equal(fresh.skipped, 0);
+  assert.equal(fresh.built, CELLS.length);
+  // A retry of a build that began before them: all its own, all skipped.
+  const earlier = new Date(Date.now() - 3600_000).toISOString();
+  const retry = await buildOsrmMode({ mode: 'walking', cells: CELLS, table, horizon: 130, scheme: 'test-osrm', resume: true, since: earlier });
+  assert.equal(retry.skipped, CELLS.length);
+  await clean();
+});

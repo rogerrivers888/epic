@@ -17,14 +17,15 @@
  *            stands `osrm-routed` up inside the container, writes the matrix
  *            (sources/osrmMatrix.js), stops the router and deletes that
  *            profile's graph before the next — about 12 GB of scratch disk at
- *            peak rather than 22. Then it recounts every ring counted before it
- *            finished, because a ring drawn from the old reach is stale (the
- *            race osrmMatrix.js recorded for whoever first runs the build), and
- *            marks the build done.
+ *            peak rather than 22. Then it recounts exactly the walking and
+ *            cycling rings the build affected — those that existed before it and
+ *            any counted from the old reach while it ran (the race osrmMatrix.js
+ *            recorded for whoever first runs the build) — and marks it done.
+ *            Driving rings are not touched.
  *
- * OSRM is only ever up inside that container while it builds, and the service
- * can be stopped or deleted afterwards: the served path reads the stored rows.
- * Nothing here calls a paid provider.
+ * Each build has an epoch (when it began). A retry after a failure keeps it and
+ * resumes over only what that build wrote; a first build or a rebuild gets a
+ * new one, so no origin is skipped over an older build's marker.
  */
 
 import { spawn } from 'node:child_process';
@@ -98,9 +99,14 @@ export async function approveOsrmBuild({ by = null } = {}) {
   // first build, or a rebuild after one finished — starts fresh, or every origin
   // would be skipped over its old marker and the rebuild would do nothing
   // (Codex). Read under the same lock the write takes.
+  // A retry keeps the failed build's epoch (when it began), so it resumes over
+  // only what that build itself wrote; anything else gets a new epoch at claim.
   const out = await writeState(
-    (was) => ({ state: 'approved', approvedBy: who, approvedAt: new Date().toISOString(), startedAt: null,
-      finishedAt: null, why: null, result: null, resume: was.state === 'failed' }),
+    (was) => {
+      const retry = was.state === 'failed' && Boolean(was.epoch);
+      return { state: 'approved', approvedBy: who, approvedAt: new Date().toISOString(), startedAt: null,
+        finishedAt: null, why: null, result: null, retry, epoch: retry ? was.epoch : null };
+    },
     { who, expect: (was) => was.state !== 'running' && was.state !== 'approved' },
   );
   if (!out.changed) {
@@ -116,7 +122,10 @@ export async function approveOsrmBuild({ by = null } = {}) {
 /** Claim the approved build for this run, atomically: two cron ticks cannot both start it. */
 export async function claimOsrmBuild({ by = 'osrm-build service' } = {}) {
   const out = await writeState(
-    { state: 'running', startedAt: new Date().toISOString(), runBy: by },
+    (was) => {
+      const startedAt = new Date().toISOString();
+      return { state: 'running', startedAt, runBy: by, epoch: was.epoch ?? startedAt };
+    },
     { who: by, expect: (was) => was.state === 'approved' },
   );
   return out.changed ? out.value : null;
@@ -195,7 +204,11 @@ export async function runOsrmBuildJob({
   const d = {
     claim: claimOsrmBuild, retire: retireStaleRun, record: writeState,
     download, run, startRouted, allCells, buildOsrmMode, osrmTable,
-    recountRings: async (before) => (await import('../repositories/ringTables.js')).refreshAllBefore({ before }),
+    ringKeys: async ({ before = null } = {}) => (await query(
+      `select distinct cell, mode, minutes from ring_counts
+        where mode in ('walking', 'cycling') and ($1::timestamptz is null or computed_at < $1::timestamptz)`,
+      [before])).rows,
+    recountRing: async (k) => (await import('../repositories/ringTables.js')).refreshRing({ ...k, force: true }),
     rmrf: (p) => rm(p, { recursive: true, force: true }),
     log: (...a) => console.log('[osrm-build]', ...a),
     ...deps,
@@ -209,10 +222,14 @@ export async function runOsrmBuildJob({
   try {
     await mkdir(dataDir, { recursive: true });
     const pbf = path.join(dataDir, 'gb.osm.pbf');
-    const resume = claimed.resume === true;
+    const retry = claimed.retry === true;
     // A fresh build takes today's extract; a retry may reuse the one it fetched.
-    if (!resume) await d.rmrf(pbf);
-    d.log(resume ? 'resuming a failed build' : 'fresh build', '— extract', extractUrl);
+    if (!retry) await d.rmrf(pbf);
+    d.log(retry ? `resuming the build begun ${claimed.epoch}` : 'fresh build', '— extract', extractUrl);
+    // The walking and cycling rings that exist now are the ones this build
+    // will make stale; their keys are kept so exactly those are recounted at
+    // the end, even though the build drops each one as its origin is rebuilt.
+    const ringKeys = await d.ringKeys();
     await d.download(extractUrl, pbf);
 
     let cells = await d.allCells({ scheme: 'sector' });
@@ -246,7 +263,7 @@ export async function runOsrmBuildJob({
       try {
         const out = await d.buildOsrmMode({
           mode: p.mode, cells, origins, table: d.osrmTable(routed.url, { profile: p.label }), horizon,
-          resume, chunk: 300,
+          resume: true, since: claimed.epoch, chunk: 300,
           onProgress: ({ done, of, pairs }) => d.log(p.mode, `${done}/${of}`, `${pairs} pairs`),
         });
         result.modes[p.mode] = { built: out.built, skipped: out.skipped, pairs: out.pairs, runId: out.runId };
@@ -257,11 +274,18 @@ export async function runOsrmBuildJob({
       await d.rmrf(dir);
     }
 
-    // Every ring counted from the old reach is stale now. Recounted from the
-    // finished matrix — the reconciliation a rebuild owes the ring tables.
-    const before = new Date().toISOString();
-    const rings = await d.recountRings(before);
-    result.ringsRecounted = Array.isArray(rings) ? rings.length : null;
+    // Recount exactly the walking and cycling rings this build affected — the
+    // ones that existed before it, and any counted while it ran from the reach
+    // it was replacing (the race osrmMatrix.js recorded). Driving is untouched
+    // by this build and is not recounted (Codex).
+    const finished = new Date().toISOString();
+    const keys = new Map([...ringKeys, ...(await d.ringKeys({ before: finished }))].map((k) => [`${k.cell}|${k.mode}|${k.minutes}`, k]));
+    let recounted = 0;
+    for (const k of keys.values()) {
+      await d.recountRing(k).catch((err) => d.log('ring recount failed', k, String(err?.message ?? err)));
+      recounted += 1;
+    }
+    result.ringsRecounted = recounted;
     result.minutes = Math.round((Date.now() - t0) / 60000);
     await d.record({ state: 'done', finishedAt: new Date().toISOString(), result, why: null }, { who: 'osrm-build service' });
     return { ran: true, result };

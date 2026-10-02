@@ -125,6 +125,9 @@ export function osrmTable(baseUrl, { fetchImpl = fetch, profile = 'driving' } = 
  *   `horizon`   how far out to build, in minutes — the cap plus the edge
  *               allowance, same as the estimator.
  *   `resume`    skip an origin already built to at least `horizon` by OSRM.
+ *   `since`     with resume, skip only origins built at or after this moment —
+ *               the start of the build being resumed — so a retry never trusts
+ *               an older build's markers.
  *               Resume is for continuing one interrupted run over one coverage:
  *               it cannot tell which extract built an origin, so a build over a
  *               *different* extract (a regional proof, then the full-GB run) must
@@ -137,7 +140,7 @@ export function osrmTable(baseUrl, { fetchImpl = fetch, profile = 'driving' } = 
  */
 export async function buildOsrmMode({
   mode, cells, origins = cells, table, horizon = HORIZON_MINUTES, scheme = 'sector',
-  resume = true, chunk = 300, onProgress = null,
+  resume = true, since = null, chunk = 300, onProgress = null,
 } = {}) {
   const canonical = travelMode(mode);
   if (canonical !== 'walking' && canonical !== 'cycling') {
@@ -158,10 +161,14 @@ export async function buildOsrmMode({
     for (let i = 0; i < origins.length; i += 1) {
       const from = origins[i];
       if (resume) {
+        // `since` scopes resume to one build: only an origin this build has
+        // already written is skipped — never one an earlier, finished build
+        // marked, which a rebuild exists to replace (Codex).
         const { rows } = await query(
           `select 1 from cell_builds where from_cell = $1 and mode = $2
-             and method = 'osrm' and cap_minutes >= $3`,
-          [from.code, canonical, horizon],
+             and method = 'osrm' and cap_minutes >= $3
+             and ($4::timestamptz is null or at >= $4::timestamptz)`,
+          [from.code, canonical, horizon, since],
         );
         if (rows.length) { skipped += 1; continue; }
       }

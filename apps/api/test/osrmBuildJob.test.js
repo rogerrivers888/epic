@@ -48,7 +48,8 @@ const mocks = (calls, overrides = {}) => ({
   allCells: async () => [{ code: 'sector:ZZ1 1', lat: 51.4, lng: -0.6 }],
   buildOsrmMode: async ({ mode }) => { calls.push(`build ${mode}`); return { built: 1, skipped: 0, pairs: 1, runId: 'r' }; },
   osrmTable: () => async () => [],
-  recountRings: async () => { calls.push('recount'); return [1, 2, 3]; },
+  ringKeys: async () => [{ cell: 'sector:ZZ1 1', mode: 'walking', minutes: 30 }],
+  recountRing: async () => { calls.push('recount'); },
   rmrf: async (p) => { calls.push(`rm ${p.split('/').pop()}`); },
   log: () => {},
   ...overrides,
@@ -79,7 +80,7 @@ test('an approved build runs walking then cycling, deletes each graph, recounts 
   assert.equal(calls.filter((c) => c === 'routed down').length, 2, 'each router is stopped');
   const st = await job.osrmBuildState();
   assert.equal(st.state, 'done');
-  assert.equal(st.result.ringsRecounted, 3);
+  assert.equal(st.result.ringsRecounted, 1, 'the affected ring, once, though seen before and after');
   await reset();
 });
 
@@ -99,27 +100,33 @@ test('a build that fails is recorded failed with its reason, and can be approved
   await reset();
 });
 
-test('a rebuild after a finished build starts fresh; a retry after a failure resumes', async () => {
+test('a rebuild gets a new epoch and skips nothing old; a retry resumes over its own build only', async () => {
   await reset();
-  const seen = [];
-  const deps = (calls) => mocks(calls, { buildOsrmMode: async ({ mode, resume }) => { seen.push(`${mode}:${resume}`); return { built: 1, skipped: 0, pairs: 1, runId: 'r' }; } });
+  const since = [];
+  const capture = (calls) => mocks(calls, { buildOsrmMode: async ({ mode, resume, since: s }) => { since.push({ mode, resume, s }); return { built: 1, skipped: 0, pairs: 1, runId: 'r' }; } });
   await job.approveOsrmBuild({ by: 'owner@test' });
-  assert.equal((await job.osrmBuildState()).resume, false, 'the first build is fresh');
-  await job.runOsrmBuildJob({ dataDir: '/tmp/osrm-job-test', deps: deps([]) });
-  // Approved again after it finished: a rebuild, so no origin is skipped.
+  await job.runOsrmBuildJob({ dataDir: '/tmp/osrm-job-test', deps: capture([]) });
+  const first = (await job.osrmBuildState()).epoch;
+  assert.ok(first);
+  assert.ok(since.every((x) => x.resume === true && x.s === first), 'resume is scoped to this build');
+  await new Promise((r) => setTimeout(r, 15));
+  // A rebuild after it finished: a new epoch, so the old markers are not trusted.
   await job.approveOsrmBuild({ by: 'owner@test' });
-  assert.equal((await job.osrmBuildState()).resume, false);
-  await job.runOsrmBuildJob({ dataDir: '/tmp/osrm-job-test', deps: deps([]) });
-  assert.deepEqual(seen, ['walking:false', 'cycling:false', 'walking:false', 'cycling:false']);
-  // A failure, then approval: a retry, which resumes and keeps its extract.
+  since.length = 0;
+  await job.runOsrmBuildJob({ dataDir: '/tmp/osrm-job-test', deps: capture([]) });
+  const second = (await job.osrmBuildState()).epoch;
+  assert.ok(Date.parse(second) > Date.parse(first));
+  assert.ok(since.every((x) => x.s === second));
+  // That rebuild fails part-way; approved again, the retry keeps its epoch.
   await job.approveOsrmBuild({ by: 'owner@test' });
   await job.runOsrmBuildJob({ dataDir: '/tmp/osrm-job-test', deps: mocks([], { buildOsrmMode: async () => { throw new Error('boom'); } }) }).catch(() => {});
+  const failedEpoch = (await job.osrmBuildState()).epoch;
   await job.approveOsrmBuild({ by: 'owner@test' });
-  assert.equal((await job.osrmBuildState()).resume, true);
+  assert.equal((await job.osrmBuildState()).retry, true);
+  since.length = 0;
   const calls = [];
-  seen.length = 0;
-  await job.runOsrmBuildJob({ dataDir: '/tmp/osrm-job-test', deps: { ...deps(calls) } });
-  assert.deepEqual(seen, ['walking:true', 'cycling:true']);
+  await job.runOsrmBuildJob({ dataDir: '/tmp/osrm-job-test', deps: capture(calls) });
+  assert.ok(since.every((x) => x.s === failedEpoch), 'the retry resumes over the failed build only');
   assert.ok(!calls.includes('rm gb.osm.pbf'), 'a retry keeps the extract it fetched');
   await reset();
 });
