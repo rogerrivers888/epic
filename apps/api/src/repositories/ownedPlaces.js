@@ -292,7 +292,9 @@ export async function seedFromHousehold(venueRef) {
   const { rows } = await query(
     // The place's point as a reader sees it (migration 307): owned, the
     // index's current one, or its census box.
-    `select label, category, epic_point_lat(venue_ref, lat, lng, point_from) as lat, epic_point_lng(venue_ref, lat, lng, point_from) as lng, venue, locality
+    // The name the household sees — their nickname, our own, their words —
+    // never a provider's, which is no longer kept (migration 341).
+    `select epic_shown_name(venue_ref, household_id, label) as label, category, epic_point_lat(venue_ref, lat, lng, point_from) as lat, epic_point_lng(venue_ref, lat, lng, point_from) as lng, venue, locality
        from household_places
       where venue_ref = $1 and epic_point_lat(venue_ref, lat, lng, point_from) is not null order by last_seen desc limit 1`,
     [venueRef],
