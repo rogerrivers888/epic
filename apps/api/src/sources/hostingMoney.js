@@ -133,6 +133,9 @@ export async function reconcile({ days = 3, read = stripe.retrieveRef, status = 
  * time; the reconciliation once a day; then queued e-mail.
  */
 export async function moneyTick({ now = new Date() } = {}) {
+  const guest = await import('../routes/guestBookings.js');
+  await guest.lapseRequests({ now });
+  await guest.dropUnpaid({ now });
   await warnUnderMinimum({ now });
   await decideDue({ now });
   await processRefunds();
@@ -141,6 +144,8 @@ export async function moneyTick({ now = new Date() } = {}) {
   const last = await ledger.lastReconciliation().catch(() => null);
   let reconciled = null;
   if (!last || now.getTime() - new Date(last.ran_at).getTime() > 24 * 3_600_000) reconciled = await reconcile();
+  await guest.offerFreedPlaces({ now });
+  await guest.guestPrompts({ now });
   const mailed = await notifications.drainEmail();
   return { released, reconciled, mailed };
 }

@@ -294,6 +294,8 @@ const PUBLIC = [
   (req) => req.method === 'GET' && /^\/api\/hosts\/[^/]+$/.test(req.path),
   // The FAQ on a listing: the host's answers to what people asked, before anyone books (Chat screens, C7).
   (req) => req.method === 'GET' && /^\/api\/experiences\/[^/]+\/faq$/.test(req.path),
+  // Hosting v4: what booking an event asks, so a public event page can show its button logged-out.
+  (req) => req.method === 'GET' && /^\/api\/experiences\/[^/]+\/booking\/options$/.test(req.path),
   (req) => req.method === 'POST' && /^\/api\/hosts\/[^/]+\/report$/.test(req.path),
   (req) => req.method === 'GET' && /^\/api\/media\/[^/]+$/.test(req.path),
   /**

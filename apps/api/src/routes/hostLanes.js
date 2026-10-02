@@ -1066,6 +1066,11 @@ webhookRouter.post('/stripe/webhook', express.raw({ type: () => true, limit: '1m
     } else if (event.type === 'customer.subscription.deleted' && obj.metadata?.epic_kind === 'pro' && obj.metadata?.epic_household_id) {
       // Pro cancelled or lapsed: it stops counting for hosting from now.
       await query("update hosting_payments set state = 'cancelled', updated_at = now() where household_id = $1 and kind = 'pro' and reason = $2 and state = 'succeeded'", [obj.metadata.epic_household_id, `sub:${obj.id}`]);
+    } else if (event.type?.startsWith('payment_intent.') && obj.object === 'payment_intent' && obj.id) {
+      // Hosting v4: a guest's booking or tip. Read back from Stripe rather than trusting the event body's state.
+      const { applyPaymentIntent } = await import('./guestBookings.js');
+      const pi = await stripe.retrievePaymentIntent(obj.id, { householdId: obj.metadata?.epic_household_id ?? null }).catch(() => obj);
+      await applyPaymentIntent(pi);
     } else if ((event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') && obj.id && stripe.checkoutPaid(obj)) {
       const kind = obj.metadata?.epic_kind === 'pro' ? 'pro' : 'private_fee';
       let pay = await repo.paymentByRef(obj.id, kind);

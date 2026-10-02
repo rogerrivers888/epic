@@ -27,6 +27,7 @@ import groupRoutes, { startReminderLoop } from './routes/groups.js';
 import hostingRoutes, { adminRouter as hostingAdminRoutes, publicRouter as hostingPublicRoutes, startHostingLoop } from './routes/hosting.js';
 import hostLanesRoutes, { webhookRouter as stripeWebhookRoutes } from './routes/hostLanes.js';
 import hostDeskRoutes from './routes/hostDesk.js';
+import guestBookingRoutes, { publicRouter as guestBookingPublicRoutes } from './routes/guestBookings.js';
 import hostingMoneyRoutes, { adminRouter as hostingMoneyAdminRoutes, startHostingMoneyLoop } from './routes/hostingMoney.js';
 import accountRoutes from './routes/accounts.js';
 import adminRoutes from './routes/admin.js';
@@ -529,6 +530,8 @@ app.use('/api', groupRoutes);
 // The tag landing pages and the browse row: public, because that is where the
 // long tail of search arrives (routes/hostSkills.js).
 app.use('/api', skillsPublicRoutes);
+// Hosting v4, the guest side: what booking asks (public), ahead of the old offer routes.
+app.use('/api', guestBookingPublicRoutes);
 app.use('/api', hostingPublicRoutes);
 // The FAQ on a listing is public for the same reason the listing is (Chat screens, C7).
 app.use('/api', chatPublicRoutes);
@@ -538,6 +541,8 @@ app.use('/api', hostLanesRoutes);
 app.use('/api', hostingMoneyRoutes);
 // Hosting v4: the Host tab for hosts who already host, E1–E13 (routes/hostDesk.js).
 app.use('/api', hostDeskRoutes);
+// Hosting v4, the guest side: booking, Trips › Booked, cancelling, after the event (routes/guestBookings.js).
+app.use('/api', guestBookingRoutes);
 app.use('/api', hostingRoutes);
 // What a host types into the expertise field, answered from Epic's own tables
 // and never from anybody else's API (Host Skills §5).

@@ -177,15 +177,15 @@ export const checkoutPaid = (s) => s?.payment_status === 'paid';
 // ---------------------------------------------------------------------------
 
 /** A guest's payment for a booking. `hold` holds the card without charging it. */
-export function paymentIntent({ amountPence, bookingId, offerId, householdId, hold = false, email = null, idempotencyKey }) {
+export function paymentIntent({ amountPence, bookingId, offerId, householdId, hold = false, email = null, idempotencyKey, kind = 'booking', tipId = null }) {
   return call('POST', '/payment_intents', {
     amount: amountPence, currency: 'gbp',
     automatic_payment_methods: { enabled: true },
     capture_method: hold ? 'manual' : 'automatic',
     receipt_email: email ?? undefined,
     transfer_group: `booking_${bookingId}`,
-    metadata: { epic_kind: 'booking', epic_booking_id: bookingId, epic_offer_id: offerId, epic_household_id: householdId },
-  }, { householdId, purpose: hold ? 'booking.hold' : 'booking.charge', idempotencyKey });
+    metadata: { epic_kind: kind, epic_booking_id: bookingId, epic_offer_id: offerId, epic_household_id: householdId, ...(tipId ? { epic_tip_id: tipId } : {}) },
+  }, { householdId, purpose: kind === 'tip' ? 'booking.tip' : hold ? 'booking.hold' : 'booking.charge', idempotencyKey });
 }
 
 export function retrievePaymentIntent(id, { householdId } = {}) {

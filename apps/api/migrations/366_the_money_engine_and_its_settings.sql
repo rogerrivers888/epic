@@ -139,7 +139,20 @@ alter table experience_bookings
   add column if not exists confirmed_at        timestamptz,
   add column if not exists rated_at            timestamptz,
   add column if not exists cancelled_by        text,
-  add column if not exists cancel_cause        text;
+  add column if not exists cancel_cause        text,
+  -- The guest saw a date change and chose Keep my place (guest brief §7).
+  add column if not exists change_seen_at      timestamptz,
+  -- Answers stop being editable 24 hours before the first session (guest brief §6).
+  add column if not exists answers_changed_at  timestamptz,
+  -- On request: the slot the guest asked for; a session is made from it when the host accepts.
+  add column if not exists requested_date      date,
+  add column if not exists requested_time      time,
+  add column if not exists requested_length_min integer;
+
+-- An invitation answered by a household on Epic becomes its booking, so it lives in Trips › Booked.
+alter table offer_invites
+  add column if not exists household_id uuid references households(id) on delete set null,
+  add column if not exists booking_id   uuid references experience_bookings(id) on delete set null;
 alter table experience_bookings drop constraint if exists experience_bookings_fee_reason_check;
 alter table experience_bookings add constraint experience_bookings_fee_reason_check
   check (fee_reason is null or fee_reason in ('standard', 'intro', 'host_link', 'minimum', 'override', 'private_payment', 'free'));
@@ -310,6 +323,7 @@ alter table offer_cohosts
 
 -- Reviews: one public reply each, a report, and a child's rating given by an adult.
 alter table host_reviews
+  add column if not exists host_stars    integer,
   add column if not exists reply         text,
   add column if not exists replied_at    timestamptz,
   add column if not exists reported_at   timestamptz,
