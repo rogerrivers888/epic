@@ -308,13 +308,17 @@ function OneOffBody({ offer }: { offer: Experience }) {
         <View style={styles.block}>
           <Kicker>THE RUNNING ORDER</Kicker>
           {offer.runningOrder.map((r, i) => (
-            <Row key={i} style={styles.orderRow}>
+            <React.Fragment key={i}>
+            {/* Over several days, each day is named where it starts (Codex, 2 Oct 2026). */}
+            {offer.multiDay && (i === 0 || (r.day ?? 0) !== (offer.runningOrder[i - 1].day ?? 0)) ? <Text style={[type.small, { marginTop: i ? spacing.sm : 0, fontWeight: '700' }]}>Day {(r.day ?? 0) + 1}</Text> : null}
+            <Row style={styles.orderRow}>
               <Text style={styles.orderTime}>{r.time ?? ''}</Text>
               <View style={{ flex: 1, gap: 1 }}>
                 <Text style={type.h3}>{r.title}</Text>
                 {r.detail ? <Text style={type.small}>{r.detail}</Text> : null}
               </View>
             </Row>
+            </React.Fragment>
           ))}
         </View>
       ) : null}

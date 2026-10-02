@@ -5458,7 +5458,7 @@ export type HostInput = {
 
 export type Standing = { heads: number; bookings: number; minimum: number | null; expected: number | null; maximum: number | null; needs: number; minimumMet: boolean; placesLeft: number | null; full: boolean };
 export type OfferPrice = { pence: number; each: number; ceilingPence: number | null; likelyPence: number | null; mode: 'free' | 'same_each' | 'by_numbers' | 'drop_in' };
-export type RunningOrderRow = { time: string | null; title: string; detail: string | null };
+export type RunningOrderRow = { day?: number; time: string | null; title: string; detail: string | null };
 export type FeaturedPerson = { name: string; role: string | null; photo: string | null };
 export type Week = { n: number; title: string };
 export type Availability = { days?: number[]; parts?: ('morning' | 'afternoon' | 'evening')[] };
@@ -5467,7 +5467,7 @@ export type Availability = { days?: number[]; parts?: ('morning' | 'afternoon' |
 export type Experience = {
   /** Hosting v7: the lane a set-up was made in, and the step it was left on. Null for the old shapes. */
   lane?: 'oneoff' | 'weekly' | 'course' | 'onrequest' | null; draftStep?: string | null;
-  bookAheadPence?: number | null; childPence?: number | null; refundWords?: string | null; ageMin?: number | null; ageMax?: number | null; multiDay?: boolean; endsOn?: string | null;
+  bookAheadPence?: number | null; childPence?: number | null; refundWords?: string | null; ageMin?: number | null; ageMax?: number | null; multiDay?: boolean; endsOn?: string | null; onlineMode?: 'epic' | 'own' | null; onlineLink?: string | null;
   id: string; hostId: string; shape: OfferShape; state: OfferState; pausedUntil: string | null; visibility: Visibility; money: Money;
   title: string | null; summary: string | null; description: string | null; whyYou: string | null; includes: string | null; category: string | null;
   photos: string[]; video: string | null; doc: string | null;

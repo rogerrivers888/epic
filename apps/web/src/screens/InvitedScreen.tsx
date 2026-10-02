@@ -39,7 +39,8 @@ export function InvitedScreen({ token }: { token: string }) {
   const { invite, offer, going } = v;
   const host = offer.host!;
   const first = host.name.split(' ')[0];
-  const when = offer.shape === 'oneoff' ? [offer.startsOn ? dayLong(offer.startsOn) : null, offer.startsAt ? `from ${offer.startsAt}` : null, offer.endsAt ? `until ${offer.endsAt}` : durationWords(offer.durationMin)].filter(Boolean).join(' · ')
+  // Over several days: the first and the last (Codex, 2 Oct 2026).
+  const when = offer.shape === 'oneoff' ? [offer.startsOn ? (offer.multiDay && offer.endsOn ? `${dayLong(offer.startsOn)} – ${dayLong(offer.endsOn)}` : dayLong(offer.startsOn)) : null, offer.startsAt ? `from ${offer.startsAt}` : null, offer.endsAt ? `until ${offer.endsAt}` : durationWords(offer.durationMin)].filter(Boolean).join(' · ')
     : offer.shape === 'series' ? [offer.firstDate ? `From ${dayShort(offer.firstDate)}` : null, offer.startsAt, offer.dates.length ? `${offer.dates.length} times` : null].filter(Boolean).join(' · ')
       : 'Whenever suits — book a time with them';
   const price = offer.money === 'free' ? null : `${money(offer.price.each)} ${offer.per === 'booking' ? 'a booking' : offer.per === 'household' ? 'a household' : 'each'}${offer.money === 'epic' ? ' · Epic collects, charged when you say yes' : ` · paid to ${first} directly`}`;
@@ -67,7 +68,7 @@ export function InvitedScreen({ token }: { token: string }) {
           <Kicker>WHERE</Kicker>
           <Row style={{ alignItems: 'flex-start' }}>
             <Icon name={VENUE_ICON[offer.venue]} size={16} />
-            <Text style={[type.body, { flex: 1 }]}>{offer.venueLabel ?? offer.venueArea ?? (offer.venue === 'online' ? offer.onlinePlatform ?? 'Online' : 'To be confirmed')}</Text>
+            <Text style={[type.body, { flex: 1 }]}>{offer.venueLabel ?? offer.venueArea ?? (offer.venue === 'online' ? offer.onlineLink ?? offer.onlinePlatform ?? 'Online' : 'To be confirmed')}</Text>
           </Row>
           {offer.venueNotes ? <Text style={type.small}>{offer.venueNotes}</Text> : null}
         </View>

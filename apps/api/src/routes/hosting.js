@@ -135,6 +135,8 @@ function publicOffer(o, bookings = [], { revealed = false, host = null } = {}) {
     lane: o.lane ?? null, draftStep: o.draft_step ?? null,
     // …and a one-off over several days says when it ends (Codex, 2 Oct 2026); the age range is the lane's.
     multiDay: Boolean(o.multi_day), endsOn: ymd(o.ends_on), ageMin: o.age_min ?? null, ageMax: o.age_max ?? null,
+    // Online with the host's own call: the link is for whoever is in — invited or booked — never the open page (Codex, 2 Oct 2026).
+    onlineMode: o.online_mode ?? null, onlineLink: revealed && o.online_mode === 'own' ? o.online_link ?? null : null,
     bookAheadPence: o.book_ahead_pence ?? null, childPence: o.child_pence ?? null,
     // The lane's own refund terms, in the configured words (Codex, 2 Oct 2026).
     refundWords: o.lane && o.refund_policy ? refundWords(o.refund_policy, hostingConfig()) : null,
