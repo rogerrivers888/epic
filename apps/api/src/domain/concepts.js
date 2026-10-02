@@ -251,7 +251,7 @@ const DIETS = [
 // 2026), in the order the profile reveals them — the eight commonest first,
 // then the rest behind "Show all 14". Allergens are a filter, so the list is
 // closed: free text cannot filter and is kept as a private note instead
-// (migration 328). 'gluten' stands for cereals containing gluten; 'crustaceans'
+// (migration 343). 'gluten' stands for cereals containing gluten; 'crustaceans'
 // and 'molluscs' are the two the old 'shellfish' became.
 export const ALLERGENS = [
   'peanuts', 'tree nuts', 'milk', 'eggs', 'gluten', 'sesame', 'fish', 'crustaceans',

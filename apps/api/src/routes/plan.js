@@ -457,7 +457,7 @@ export async function createTripFromIntent({ household, members, intent, origin,
   const tz = household.timezone || DEFAULT_TZ;
   const dateStr = intent.date && /^\d{4}-\d{2}-\d{2}$/.test(intent.date) ? intent.date : wallClock(new Date(), tz).dateStr;
   const at = (hhmm) => wallToUtc(dateStr, hhmm, tz);
-  // The household's "When your day runs" (migration 329) sets an outing's
+  // The household's "When your day runs" (migration 344) sets an outing's
   // default start and length when nothing was said; it reached only overnight
   // stays before (Codex, 2 Oct 2026).
   const windowStart = household.day_start ?? 10;
@@ -563,7 +563,7 @@ async function createStayFromIntent({ household, members, intent, destination })
       title, notes, placeLabel: destination.label, startDate: start, endDate: end,
       baseLabel: base.label, baseLat: base.lat, baseLng: base.lng,
       hasCar: travelMode !== 'transit',
-      // households.day_start/day_end are whole hours (smallint, migration 329);
+      // households.day_start/day_end are whole hours (smallint, migration 344);
       // the trip's columns are SQL times (Codex, 1 Oct 2026).
       dayStart: hourToTime(household.day_start ?? 10),
       dayEnd: hourToTime(household.day_end ?? 18),

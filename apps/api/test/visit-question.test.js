@@ -20,7 +20,7 @@ const YEAR = new Date().getFullYear();
 const PLACE = 'vq:magnet';
 
 async function household(name, { toddler = false, access = false } = {}) {
-  // Access needs are each person's (members.access, migration 326); the
+  // Access needs are each person's (members.access, migration 341); the
   // household-wide toggle is retired and no longer gates the questions.
   const { rows: [h] } = await query('insert into households (name) values ($1) returning id', [name]);
   await query(`insert into members (household_id, name, birth_year, is_minor, access) values ($1, 'Parent', $2, false, $3)`,

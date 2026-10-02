@@ -231,7 +231,7 @@ export function searchRadiusKm(mode, minutes, { capKm = 50 } = {}) {
 export function closeToHomeRadiusMiles({ minutes, modes = [], capKm = 200, fallbackMiles = 10 }) {
   // "Any distance" (null) is unbounded — not the old 10-mile radius. A radius
   // wide enough to hold any two points on Earth means the near-home view stops
-  // filtering by distance at all, as the setting and migration 329 intend.
+  // filtering by distance at all, as the setting and migration 344 intend.
   if (minutes == null) return ANY_DISTANCE_MILES;
   // No mode ticked ("Not set") says nothing about how they travel, so it is
   // never quietly read as a car: the household's standing radius holds until

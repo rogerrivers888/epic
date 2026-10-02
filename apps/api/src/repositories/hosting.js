@@ -437,7 +437,7 @@ export async function bookingById(id) {
 
 /** How many of a host's bookings count toward the intro (first-ten) threshold, host-wide. */
 export async function confirmedBookingsSoFar(hostId) {
-  // The intro places used: a stamp a cancellation keeps (migration 332).
+  // The intro places used: a stamp a cancellation keeps (migration 347).
   const { rows } = await query(`select coalesce(max(intro_ordinal), 0)::int n from experience_bookings where host_id = $1`, [hostId]);
   return rows[0].n;
 }

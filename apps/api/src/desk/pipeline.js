@@ -665,7 +665,7 @@ export function questionText({ question, label }, place) {
 /**
  * What a household is, for "only facts that matter to it": whether anybody in
  * it has an access need, and everyone's age. Access needs are each person's
- * now (`members.access`, migration 326), not the retired household-wide
+ * now (`members.access`, migration 341), not the retired household-wide
  * toggle — read from the toggle, adding a step-free need never raised an
  * access question, and clearing every need never stopped them (Codex, 2 Oct 2026).
  */
