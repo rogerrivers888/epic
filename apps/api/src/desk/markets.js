@@ -160,19 +160,18 @@ export async function areaKeyCheck() {
            count(*) filter (where r.venue_ref is not null)::int as with_record,
            count(*) filter (where r.address is not null or r.postcode is not null)::int as with_address,
            count(*) filter (where exists (select 1 from place_facts f where f.venue_ref = pi.venue_ref
-                                            and f.field = 'address' and f.source = 'nominatim'))::int as with_geocode
+                                            and f.field = 'address' and f.source = 'nominatim' and f.expires_at is null))::int as with_geocode
       from place_index pi left join place_records r on r.venue_ref = pi.venue_ref
      where pi.country_code is null`);
   const noCountryBy = {
     ownership: await n(`select ownership, count(*)::int as places from place_index where country_code is null group by 1 order by 2 desc`),
     refKind: await n(`select split_part(venue_ref, ':', 1) as ref_kind, count(*)::int as places from place_index where country_code is null group by 1 order by 2 desc`),
-    sources: await n(`select coalesce(string_agg(distinct s.source, '+' order by s.source), '(none)') as sources, count(*)::int as places
-                        from place_index pi left join place_index_sources s on s.venue_ref = pi.venue_ref and (${FOUND_IT('s')})
-                       where pi.country_code is null group by pi.venue_ref`).then((rows) => {
-      const tally = new Map();
-      for (const r of rows) tally.set(r.sources, (tally.get(r.sources) ?? 0) + 1);
-      return [...tally].map(([sources, places]) => ({ sources, places })).sort((a, b) => b.places - a.places);
-    }),
+    // Tallied in the database: only the combinations cross the wire, not a row a place (Codex).
+    sources: await n(`select sources, count(*)::int as places from (
+                        select coalesce(string_agg(distinct s.source, '+' order by s.source), '(none)') as sources
+                          from place_index pi left join place_index_sources s on s.venue_ref = pi.venue_ref and (${FOUND_IT('s')})
+                         where pi.country_code is null group by pi.venue_ref) x
+                       group by 1 order by 2 desc`),
     firstSeen: await n(`select to_char(date_trunc('month', first_seen), 'YYYY-MM') as month, count(*)::int as places
                           from place_index where country_code is null group by 1 order by 1`),
     derivedBy: await n(`select coalesce(derived_by, '(none)') as derived_by, count(*)::int as places from place_index where country_code is null group by 1 order by 2 desc`),
