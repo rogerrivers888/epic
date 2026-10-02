@@ -684,8 +684,28 @@ export async function unclassified({ subcategory = null, limit = 200 } = {}) {
  * The examples go here. They were scaffolding for the review and the brief is
  * explicit that the association has no reason to outlive the decision.
  */
+/**
+ * A word's locks, for every path that decides a word: its own advisory lock, then
+ * the harvest lock exclusively. Always in this order, always before any candidate
+ * row is locked, so review decisions, promotions and harvests cannot deadlock.
+ */
+async function lockWord(client, norm) {
+  await client.query('select pg_advisory_xact_lock(hashtext($1)::bigint)', [`feature:${norm}`]);
+  await client.query('select pg_advisory_xact_lock(hashtext($1)::bigint)', ['feature-tombstones']);
+}
+
+/** The same, for a path that names a candidate by id. */
+async function lockWordOf(client, id) {
+  const { rows: [r] } = await client.query('select norm from harvest_candidates where id = $1', [id]);
+  if (r) await lockWord(client, r.norm);
+}
+
 export async function promote(id, { gate = false, kind = 'yesno', label = null, attributeKey = null, refreshDays = null, actor = null, setKey: toSet = null } = {}) {
   return withTransaction(async (client) => {
+    // The word's locks before its row: the same order approveFeature and
+    // ignoreFeature take them, so a promotion and a review decision on one word
+    // serialize instead of choosing different facts or deadlocking (Codex, 2 Oct 2026).
+    await lockWordOf(client, id);
     const { rows } = await client.query("select * from harvest_candidates where id = $1 and status = 'new' for update", [id]);
     const candidate = rows[0];
     if (!candidate) throw bad('That word has already been decided.');
@@ -1003,6 +1023,12 @@ export async function ignoreFeature(norm, { actor = null, reason = null } = {}) 
     // One transaction: the queue can never be left holding an actionable sighting
     // for a word whose candidate is already ignored (Codex, 2 Oct 2026).
     await client.query('delete from review_sightings where norm = $1', [norm]);
+    // A word that is already one of our active facts is not retired by a review
+    // queue click: that would leave the fact asked while every later sighting of it
+    // was suppressed (Codex, 2 Oct 2026). Ignoring it dismisses this suggestion —
+    // the drawers it was raised in are closed to it, as a per-drawer ignore — and
+    // writes no tombstone. Retiring the fact itself is the facts screen's to do.
+    if (await isActiveFact(client, norm)) return { feature: norm, ignored: rowCount, dismissed: true };
     // The norm-level tombstone: this Ignore is a decision about the word, so a
     // later spot in a drawer it was never seen in before must not raise it again
     // (Codex, 2 Oct 2026). Only the review queue writes here; ignoreCandidate,
@@ -1013,6 +1039,18 @@ export async function ignoreFeature(norm, { actor = null, reason = null } = {}) 
       [norm, actor, reason ? String(reason).slice(0, 300) : null]);
     return { feature: norm, ignored: rowCount };
   });
+}
+
+/**
+ * Is this word one of our active facts — aliased onto one, or naming one by its key
+ * or label through the vocabulary normaliser? The same test knownFeatureKeys makes.
+ */
+async function isActiveFact(client, norm) {
+  const { rows: [alias] } = await client.query(
+    'select 1 from attribute_aliases a join place_attributes p on p.key = a.target_key and p.active where a.norm = $1', [norm]);
+  if (alias) return true;
+  const { rows: facts } = await client.query('select key, label from place_attributes where active');
+  return facts.some((f) => normalise(f.key) === norm || normalise(f.label) === norm);
 }
 
 /** The alias table says this wording means `key`, or the decision is refused rather than recorded against another. */
@@ -1036,6 +1074,10 @@ async function wordingMeans(client, norm, key) {
  */
 export async function aliasToGlobal(id, { attributeKey, actor = null } = {}) {
   return withTransaction(async (client) => {
+    // The word's locks before its row: the same order approveFeature and
+    // ignoreFeature take them, so a promotion and a review decision on one word
+    // serialize instead of choosing different facts or deadlocking (Codex, 2 Oct 2026).
+    await lockWordOf(client, id);
     // Undecided means no decision at all: a word filed under a drawer is
     // 'unresolved' too, and must not be overwritten (Codex, 26 Sep 2026).
     const { rows: [c] } = await client.query("select * from harvest_candidates where id = $1 and status in ('new', 'unresolved') and decided_at is null for update", [id]);
@@ -1074,6 +1116,10 @@ export async function aliasToGlobal(id, { attributeKey, actor = null } = {}) {
  */
 export async function globalFromCandidate(id, { label = null, kind = 'yesno', refreshDays = null, actor = null } = {}) {
   return withTransaction(async (client) => {
+    // The word's locks before its row: the same order approveFeature and
+    // ignoreFeature take them, so a promotion and a review decision on one word
+    // serialize instead of choosing different facts or deadlocking (Codex, 2 Oct 2026).
+    await lockWordOf(client, id);
     const { rows: [c] } = await client.query("select * from harvest_candidates where id = $1 and status = 'new' for update", [id]);
     if (!c) throw bad('That word has already been decided, or is not promotable.');
     if (!c.evidence || !(c.sources ?? {}).features) throw bad(`"${c.norm}" carries no evidence quote from an owned page.`);

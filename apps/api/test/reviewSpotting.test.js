@@ -935,4 +935,56 @@ test('a detail cached without a place is spotted, free, when read again for that
   }
 });
 
+test('ignoring a feature that is already a fact dismisses it, and retires nothing', async () => {
+  // Codex, 2 Oct 2026: a tombstone on an active fact's word would leave the fact
+  // asked while suppressing every later sighting of it.
+  const sub = 'c30-dismiss-parks';
+  const ref = 'google:ChIJ_c30_dismiss';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 dismiss parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
+  await query("delete from feature_tombstones where norm = 'card room'");
+  await query("insert into place_attributes (key, label, kind) values ('card-room', 'Card room', 'yesno') on conflict (key) do update set active = true");
+
+  await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A card room.' } });
+  const res = await sets.ignoreFeature('card room', { actor: 'tester' });
+  assert.equal(res.dismissed, true, 'dismissed, not ignored for good');
+  assert.equal((await query("select count(*)::int n from feature_tombstones where norm = 'card room'")).rows[0].n, 0, 'no tombstone on an active fact');
+  assert.equal((await query("select active from place_attributes where key = 'card-room'")).rows[0].active, true, 'the fact is still ours');
+  assert.ok(!(await reviewQueue({ subcategory: sub })).some((f) => f.norm === 'card room'), 'and the suggestion is gone from the queue');
+});
+
+test('an ordinary promotion waits for the word’s locks, like the review decisions', async () => {
+  // Codex, 2 Oct 2026: promote() took its row lock and no advisory lock, so it could
+  // race approval on the same word. It now takes the word's locks first.
+  const sub = 'c30-promlock-parks';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 promlock parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query("insert into question_sets (key, name) values ('c30-promlock-set', 'C30 promlock set') on conflict do nothing");
+  await query("insert into question_set_subcategories (subcategory_key, set_key) values ($1, 'c30-promlock-set') on conflict do nothing", [sub]);
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await query("delete from feature_tombstones where norm = 'wet room'");
+  await query("delete from attribute_aliases where norm = 'wet room'").catch(() => {});
+  await sets.recordCandidates(sub, [{ norm: 'wet room', raw: 'wet room', kind: 'feature', sources: ['features'], placesSeen: 1, examples: [], asserts: 1, evidence: 'there is a wet room by the pool', evidenceRef: 'osm:x' }], { placesTotal: 1 });
+  const { rows: [cand] } = await query("select id, status from harvest_candidates where norm = 'wet room' and subcategory = $1", [sub]);
+  assert.equal(cand.status, 'new', 'a quoted, promotable candidate');
+
+  const other = await pool.connect();
+  let done = false;
+  try {
+    await other.query('begin');
+    await other.query('select pg_advisory_xact_lock(hashtext($1)::bigint)', ['feature:wet room']); // a review decision on the word
+    const promoting = sets.promote(cand.id, { actor: 'tester' }).then(() => { done = true; });
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(done, false, 'the promotion waits for the word');
+    await other.query('commit');
+    await promoting;
+    assert.equal(done, true, 'and goes ahead once it is free');
+  } finally {
+    other.release();
+  }
+});
+
 test.after(async () => { await pool.end(); });

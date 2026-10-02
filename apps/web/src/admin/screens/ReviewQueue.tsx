@@ -39,7 +39,8 @@ export function ReviewQueue({ canManage }: { canManage: boolean }) {
       : api.adminIgnoreFeature(f.norm).then(() => ({}));
     Promise.resolve(run)
       .then((res) => {
-        if (how === 'ignore') { setSaid(`Ignored “${f.raw}”.`); return; }
+        // A feature that is already one of our facts is dismissed, not retired.
+        if (how === 'ignore') { setSaid(f.known ? `Dismissed “${f.raw}” — still one of our facts.` : `Ignored “${f.raw}”.`); return; }
         // A drawer with no question set yet is asked once a set is attached to it.
         const later = res?.waiting?.length ? ` Asked in ${res.waiting.map(drawerWord).join(', ')} once a set is attached.` : '';
         // A set shared with a drawer that ignored the word is not asked — the ignore stands.
@@ -80,7 +81,7 @@ export function ReviewQueue({ canManage }: { canManage: boolean }) {
               </View>
               <View style={styles.acts}>
                 <Act label={busy === f.norm ? 'Approving…' : f.known ? 'Ask here' : 'Approve'} small disabled={!canManage || busy != null} onPress={() => decide(f, 'approve')} />
-                <Act label="Ignore" tone="secondary" small disabled={!canManage || busy != null} onPress={() => decide(f, 'ignore')} />
+                <Act label={f.known ? 'Dismiss' : 'Ignore'} tone="secondary" small disabled={!canManage || busy != null} onPress={() => decide(f, 'ignore')} />
               </View>
             </View>
           ))}
