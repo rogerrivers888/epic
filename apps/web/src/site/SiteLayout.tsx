@@ -136,8 +136,10 @@ function SiteFooter({ locale }: { locale: SiteLocale }) {
     { label: w.links.privacy, go: page('privacy') },
     { label: w.links.terms, go: page('terms') },
     { label: w.links.cookies, go: page('cookies') },
-    // Nothing to set while nothing tracks (owner, 1 Oct 2026: banner off until GA4/Ads).
-    ...(TRACKING_ON ? [{ label: w.links.cookieSettings, go: openCookieSettings }] : []),
+    // On every page, because the cookie notice sends people to it (owner, 2 Oct
+    // 2026). With the banner on it reopens the banner; while nothing tracks
+    // (banner off until GA4/Ads) it opens the notice, which lists what is stored.
+    { label: w.links.cookieSettings, go: TRACKING_ON ? openCookieSettings : page('cookies') },
     { label: w.links.accessibility, go: page('accessibility') },
     { label: w.links.contact, go: page('contact') },
   ];
