@@ -1132,6 +1132,15 @@ test('Monday morning brings one weekly summary with the six figures', async (t) 
   for (const word of ['Calls:', 'New places:', 'Areas left:', 'Days to finish:', '£ spent', 'Billing export:']) {
     assert.ok(weekly[0].text.includes(word), word);
   }
+  // And the names (owner, 1 Oct 2026: "Report the counts in the Monday summary").
+  assert.match(weekly[0].text, /Without an owned name: [\d,]+ saved places · [\d,]+ trip stops · [\d,]+ shortlist rows · [\d,]+ visits/);
+  assert.match(weekly[0].text, /Name-check, last 7 days: [\d,]+ agreed · [\d,]+ set aside as doubtful \([\d,]+ re-matched\) · [\d,]+ matched at first sight/);
+});
+
+test('a names count that fails says so in the summary, never noughts', () => {
+  const st = { days: [], tilesLeft: 10, daysLeft: 3, dayRequests: 70000, complete: false };
+  assert.match(uk.weeklySummary(st, [], new Date('2026-10-05T07:10:00Z'), null).text, /Names: not counted this week — the count failed/);
+  assert.doesNotMatch(uk.weeklySummary(st, [], new Date('2026-10-05T07:10:00Z')).text, /Names|owned name/, 'left out when not asked for');
 });
 
 test('an empty billing export after Friday 2 October is said once', async (t) => {

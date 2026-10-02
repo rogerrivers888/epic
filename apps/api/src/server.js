@@ -1119,6 +1119,15 @@ const ukCensusDaily = () => import('./sources/ukCensus.js').then(({ daily }) => 
 setTimeout(() => { void ukCensusDaily(); }, RESUME_AFTER_MS + 90_000).unref?.();
 setInterval(() => { void ukCensusDaily(); }, 10 * 60_000).unref?.();
 
+// The name-check: each live Google name that went past in the last minute,
+// judged in memory against the owned match it should agree with, and a place
+// with no owned point matched on it at first sight (sources/nameCheck.js).
+// Database work only — it never calls a provider.
+const nameCheckDrain = () => import('./sources/nameCheck.js').then(({ drain }) => drain())
+  .then((r) => { if (r?.doubted || r?.firstSight) console.log(`epic-api: name-check — ${r.looked} looked, ${r.agreed} agreed, ${r.doubted} set aside (${r.rematched} re-matched), ${r.firstSight} matched at first sight`); })
+  .catch((err) => console.error('name-check', err.message));
+setInterval(() => { void nameCheckDrain(); }, 60_000).unref?.();
+
 /**
  * The free count the census is measured against (sources/groundCounts.js).
  *

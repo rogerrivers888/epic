@@ -19,7 +19,7 @@
 
 import { query, pool } from '../db.js';
 import { nameScore, metresBetween, significantStems } from './openMatch.js';
-import { recordOwnedPoint, RENTED_SOURCES } from './ownedPoints.js';
+import { recordOwnedPoint, RENTED_SOURCES, OWNED_POINT_NAME } from './ownedPoints.js';
 
 /** How far from the point each source's twin may be, and how alike the names must be. */
 export const RULES = {
@@ -245,7 +245,7 @@ async function pageOfPlaces(after, limit, { weekly }) {
   return rows;
 }
 
-const boxOf = (slice) => {
+export const boxOf = (slice) => {
   const b = String(slice ?? '').split(',').map(Number);
   if (b.length !== 4 || b.some((x) => !Number.isFinite(x))) return null;
   const lat = (b[0] + b[2]) / 2, lng = (b[1] + b[3]) / 2;
@@ -387,12 +387,25 @@ export async function ownedNameGaps() {
       union select 'atlas:' || id::text from attractions where name is not null and display_source is distinct from 'google' and not (source = 'google' and osm_ref is null)
       union select venue_ref from scout_places where name is not null
         and (venue_ref like 'osm:%' or venue_ref like 'atlas:%' or venue_ref like 'wikidata:%' or venue_ref like 'own:%')
-    )
+      -- The owned source a point was matched to, by the name it holds itself —
+      -- the same name the display resolver shows (sources/displayNames.js).
+      union select o.venue_ref from owned_points o where ${OWNED_POINT_NAME('o')} is not null
+    ),
+    -- A name the household typed is theirs alone, so it answers for their own
+    -- rows only (migration 310).
+    nicknamed as (select household_id, venue_ref from household_places where nickname is not null)
     select
-      (select count(*)::int from household_places hp where hp.venue_ref not like 'photo:%' and not exists (select 1 from owned o where o.venue_ref = hp.venue_ref)) as saved_places,
-      (select count(*)::int from trip_stops ts where ts.venue_ref not like 'photo:%' and not exists (select 1 from owned o where o.venue_ref = ts.venue_ref)) as trip_stops,
-      (select count(*)::int from trip_shortlist sl where sl.venue_ref not like 'photo:%' and not exists (select 1 from owned o where o.venue_ref = sl.venue_ref)) as shortlist,
-      (select count(*)::int from visits v where v.venue_ref not like 'photo:%' and not exists (select 1 from owned o where o.venue_ref = v.venue_ref)) as visits`);
+      (select count(*)::int from household_places hp where hp.venue_ref not like 'photo:%' and hp.nickname is null
+          and not exists (select 1 from owned o where o.venue_ref = hp.venue_ref)) as saved_places,
+      (select count(*)::int from trip_stops ts join trips t on t.id = ts.trip_id where ts.venue_ref not like 'photo:%'
+          and not exists (select 1 from owned o where o.venue_ref = ts.venue_ref)
+          and not exists (select 1 from nicknamed n where n.household_id = t.household_id and n.venue_ref = ts.venue_ref)) as trip_stops,
+      (select count(*)::int from trip_shortlist sl join trips t on t.id = sl.trip_id where sl.venue_ref not like 'photo:%'
+          and not exists (select 1 from owned o where o.venue_ref = sl.venue_ref)
+          and not exists (select 1 from nicknamed n where n.household_id = t.household_id and n.venue_ref = sl.venue_ref)) as shortlist,
+      (select count(*)::int from visits v where v.venue_ref not like 'photo:%'
+          and not exists (select 1 from owned o where o.venue_ref = v.venue_ref)
+          and not exists (select 1 from nicknamed n where n.household_id = v.household_id and n.venue_ref = v.venue_ref)) as visits`);
   return r;
 }
 

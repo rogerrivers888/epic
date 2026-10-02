@@ -21,6 +21,7 @@ import { stampPhotos } from './photoLinks.js';
 //   • The key never leaves the server; photos are proxied (/api/photos/google).
 
 import { GOOGLE_TYPES } from './googleTypes.js';
+import { noteLiveName } from './liveNames.js';
 
 const KEY = () => process.env.GOOGLE_MAPS_API_KEY?.trim();
 const PLACES = 'https://places.googleapis.com/v1';
@@ -287,6 +288,9 @@ function amenityFields(place) {
  * the live API actually returns. Nothing else calls it from outside this file.
  */
 export function toVenue(place, justification = null) {
+  // The name-check reads Google's name here, in memory, against the owned match
+  // it should agree with — and nowhere else keeps it (sources/liveNames.js).
+  if (place?.id) noteLiveName(`google:${place.id}`, place.displayName?.text ?? place.displayName, { lat: place.location?.latitude, lng: place.location?.longitude });
   const types = place.types || [];
   const primary = place.primaryType || types[0] || '';
   // The primary type decides. A museum with a café is a museum; Selfridges is
@@ -841,6 +845,7 @@ export const googleSource = {
     const p = await call(`/places/${id}`, { method: 'GET', fieldMask: 'id,displayName,location,websiteUri,businessStatus', meter });
     await handStatus(p);
     if (!p?.location) return null;
+    noteLiveName(`google:${id}`, p.displayName?.text ?? null, { lat: p.location.latitude, lng: p.location.longitude });
     return {
       name: p.displayName?.text ?? null,
       lat: p.location.latitude,

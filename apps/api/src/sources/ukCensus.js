@@ -30,6 +30,7 @@ import { query, pool } from '../db.js';
 import * as censusRun from './censusRun.js';
 import { sendMail, mailStatus } from './mail.js';
 import { searchTextDailyLimit } from './googleQuota.js';
+import { weekly as nameWeek } from './nameCheck.js';
 
 /** Every UK postcode area, Northern Ireland included (BT). */
 export const UK_AREAS = [
@@ -743,8 +744,13 @@ const londonParts = (now) => Object.fromEntries(new Intl.DateTimeFormat('en-GB',
 const londonDay = (now) => { const p = londonParts(now); return `${p.year}-${p.month}-${p.day}`; };
 const pacificHour = (now) => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: '2-digit', hour12: false }).format(now)) % 24;
 
-/** The week's figures, as one e-mail: the owner's six things, then each day's line. */
-export function weeklySummary(st, bills, now = new Date()) {
+/**
+ * The week's figures, as one e-mail: the owner's six things, then the names
+ * (owner, 1 Oct 2026: "Report the counts in the Monday summary"), then each
+ * day's line. `names` is sources/nameCheck.js weekly(): undefined leaves the
+ * section out, null says the count failed rather than printing noughts.
+ */
+export function weeklySummary(st, bills, now = new Date(), names = undefined) {
   const today = londonDay(now);
   const from = new Date(Date.parse(`${today}T12:00:00Z`) - 7 * 86_400_000).toISOString().slice(0, 10);
   const week = st.days.filter((d) => d.date >= from && d.date < today);
@@ -767,6 +773,14 @@ export function weeklySummary(st, bills, now = new Date()) {
     `£ spent (Places, after credits): ${weekBills.length ? `${gbp(spent)} over ${weekBills.length} billed day${weekBills.length === 1 ? '' : 's'}` : 'nothing billed yet'}`,
     `Billing export: ${lastBilled ? `rows up to ${lastBilled}` : 'empty — nothing delivered yet'}`,
   ];
+  if (names === null) lines.push('Names: not counted this week — the count failed');
+  else if (names) {
+    const g = names.gaps ?? {};
+    lines.push(
+      `Without an owned name: ${n(g.saved_places)} saved places · ${n(g.trip_stops)} trip stops · ${n(g.shortlist)} shortlist rows · ${n(g.visits)} visits`,
+      `Name-check, last 7 days: ${n(names.agreed)} agreed · ${n(names.doubted)} set aside as doubtful (${n(names.rematched)} re-matched) · ${n(names.first_sight)} matched at first sight`,
+    );
+  }
   return {
     subject: `Census — weekly summary, week to ${today}`,
     text: `${lines.join('\n')}\n\n${week.map((d) => reportLine(d)).join('\n') || 'No census days this week.'}`,
@@ -865,7 +879,10 @@ async function watch(now, tell, tellings, out) {
   // Not on a billing lookup that failed: the summary is sent once, and would
   // say "nothing billed" for good (Codex, 30 Sep 2026). The next tick tries.
   if (p.weekday === 'Mon' && Number(p.hour) >= 7 && !finishedLongAgo && bills) {
-    const w = weeklySummary(st, bills, now);
+    // The names' counts fail on their own: a broken count says so in the
+    // summary rather than holding the census's figures back.
+    const names = await nameWeek(now).catch(() => null);
+    const w = weeklySummary(st, bills, now, names);
     await tell(w.subject, w.text, 'census_report');
   }
   if (st.complete) await tell('Census — the rest of the UK is complete', lines, 'census_report');

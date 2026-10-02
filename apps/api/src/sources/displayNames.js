@@ -18,6 +18,8 @@ import { currentSpender } from '../context.js';
 import { googleSource } from './google.js';
 import * as providerCalls from '../repositories/providerCalls.js';
 import { ensureRecord } from '../repositories/ownedPlaces.js';
+import { noteLiveName } from './liveNames.js';
+import { OWNED_POINT_NAME } from './ownedPoints.js';
 
 const prefixOf = (ref) => String(ref ?? '').split(':')[0];
 // Only Google has a live display-name fetcher; a tripadvisor:/liteapi:/other
@@ -64,8 +66,14 @@ export async function ownedNamesFor(refs, householdId = null) {
          where ref = any($1) and a.name is not null and a.display_source is distinct from 'google'
            and not (a.source = 'google' and a.osm_ref is null)
         union all
+        -- the name the owned source a point was matched to holds itself — FSA,
+        -- Historic England, OS Open Names or the open map, all ours to keep
+        select o.venue_ref, ${OWNED_POINT_NAME('o')}, o.source, 4
+          from owned_points o
+         where o.venue_ref = any($1) and ${OWNED_POINT_NAME('o')} is not null
+        union all
         -- the open map's name, on an open reference only
-        select s.venue_ref, s.name, 'osm', 4
+        select s.venue_ref, s.name, 'osm', 5
           from scout_places s
          where s.venue_ref = any($1) and s.name is not null
            and (s.venue_ref like 'osm:%' or s.venue_ref like 'atlas:%' or s.venue_ref like 'wikidata:%' or s.venue_ref like 'own:%')
@@ -100,6 +108,8 @@ async function fetchLiveName(ref, purpose) {
     const meter = {};
     let name = null;
     try { name = await googleSource.displayName(id, { meter }); } catch { name = null; }
+    // And to the name-check, in memory, against any owned match it should agree with.
+    if (name) noteLiveName(ref, name);
     // The call is written down whether it landed or was refused — the fault the
     // gate noted on the meter is part of the record (G7/G8).
     if (householdId) {

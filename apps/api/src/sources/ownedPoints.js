@@ -31,6 +31,27 @@ export const LICENCES = {
   household: "the household's own",
 };
 
+/**
+ * The name an owned source itself holds for the place a point was matched to,
+ * as SQL over an `owned_points` row aliased `o` — read from our own copy of
+ * that source, the live load first and any held load after. Shared by the
+ * display resolver (an owned name, sources/displayNames.js) and the name-check
+ * (sources/nameCheck.js). Null where the source holds no name we can read, so
+ * the caller says nothing rather than guessing.
+ */
+export const OWNED_POINT_NAME = (o = 'o') => `(case ${o}.source
+  when 'fsa' then (select f.name from fsa_establishments f
+                    where ${o}.source_ref ~ '^[0-9]+$' and f.fhrsid = ${o}.source_ref::bigint
+                    order by (f.load_id = (select live_load from owned_source_loads where source = 'fsa')) desc limit 1)
+  when 'historic-england' then (select h.name from heritage_entries h
+                    where split_part(${o}.source_ref, ':', 2) ~ '^[0-9]+$'
+                      and h.list_entry = split_part(${o}.source_ref, ':', 2)::bigint and h.layer = split_part(${o}.source_ref, ':', 1)
+                    order by (h.load_id = (select live_load from owned_source_loads where source = 'historic-england')) desc limit 1)
+  when 'os-open-names' then (select n.name from os_names n where n.id = ${o}.source_ref
+                    order by (n.load_id = (select live_load from owned_source_loads where source = 'os-open-names')) desc limit 1)
+  when 'osm' then (select x.name from osm_features x where x.ref = ${o}.source_ref)
+  end)`;
+
 /** Whose a reference's own point is, read off the reference: the fallback when nothing says. */
 export function pointSourceOfRef(ref) {
   const prefix = String(ref ?? '').split(':')[0];
@@ -76,6 +97,13 @@ export async function recordOwnedPoint(args, client = null) {
 async function recordIn({ ref, lat, lng, source, sourceRef = null, method, distanceM = null }, client) {
   if (!ref || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return { written: false, why: 'no point' };
   if (!LICENCES[source]) throw new Error(`not an owned source: ${source}`);
+  // A match a live name has already doubted is never written back, by the
+  // weekly re-match or anything else: this is the one door every owned point
+  // comes through (owner, 1 Oct 2026; sources/nameCheck.js).
+  const { rows: [doubted] } = await client.query(
+    'select 1 from owned_point_suspects where venue_ref = $1 and source = $2 and source_ref = $3',
+    [ref, source, String(sourceRef ?? '')]);
+  if (doubted) return { written: false, why: 'set aside: a live name disagreed with this match' };
   const { rows: [kept] } = await client.query(
     `insert into owned_points (venue_ref, lat, lng, source, source_ref, licence, method, distance_m)
      values ($1, $2, $3, $4, $5, $6, $7, $8)
