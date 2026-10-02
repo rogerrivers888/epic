@@ -166,7 +166,7 @@ test('on request: hourly starts inside the ranges that leave room for the sessio
 });
 
 test('what is still to fill in, step by step', () => {
-  const offer = { lane: 'onrequest', what_label: 'Cooking lesson', title: 'A Thai cooking lesson', why_you: '', free_hours: {}, session_lengths: [], venue: 'their_place', venue_area: 'Reading', travel_radius_min: 10, price_mode: 'same_each', price_pence: 8000, visibility: null };
+  const offer = { lane: 'onrequest', what_label: 'Cooking lesson', title: 'A Thai cooking lesson', why_you: '', free_hours: {}, session_lengths: [], venue: 'your_place', venue_area: 'Reading', travel_radius_min: 10, price_mode: 'same_each', price_pence: 8000, visibility: null };
   assert.deepEqual(missingSteps(offer), ['why', 'avail', 'price', 'who']);
   assert.equal(stepFilled({ ...offer, refund_policy: 'moderate' }, 'price'), true, 'on request needs no maximum');
   assert.equal(stepFilled({ lane: 'oneoff', price_mode: 'by_numbers', total_pence: 42000, max_count: 40 }, 'price'), false, 'depends on numbers needs a minimum');
@@ -277,4 +277,12 @@ test('times are the host’s wall clock: summer and winter in London; a zero not
   const { anytimeSlots } = await import('../src/domain/hosting.js');
   const slots = anytimeSlots({ lane: 'onrequest', free_hours: { 6: [['14:00', '17:00']] }, session_lengths: [60], notice_hours: 0 }, { from: new Date('2026-10-10T08:00:00Z'), days: 0 });
   assert.deepEqual(slots, [{ date: '2026-10-10', times: ['14:00', '15:00', '16:00'] }], 'no notice asked, so today’s afternoon is open');
+});
+
+test('drop off: the children come without the parent who booked them', async () => {
+  const { ageGate } = await import('../src/domain/hosting.js');
+  const g = ageGate({ lane: 'oneoff', age_min: 5, age_max: 10, parents: 'drop_off' }, [{ name: 'Ada', age: 6, child: true }]);
+  assert.deepEqual(g.blocked, []);
+  assert.equal(g.hasAdult, true, 'no attending adult is asked for');
+  assert.equal(ageGate({ lane: 'oneoff', age_min: 5, age_max: 10, parents: 'stay' }, [{ name: 'Ada', age: 6, child: true }]).hasAdult, false, 'parents stay: one must come');
 });

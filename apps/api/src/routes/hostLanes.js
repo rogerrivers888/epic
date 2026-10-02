@@ -54,6 +54,16 @@ const time = (v) => { const s = str(v, 5); return s && TIME.test(s) ? s : null; 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 /** A real calendar day: 30 February is refused, not rolled into March. */
 const date = (v) => { const s = str(v, 10); if (!s || !DATE.test(s)) return null; const d = new Date(`${s}T12:00:00Z`); return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s ? s : null; };
+/**
+ * Where, from whose side. The set-up asks the host ("Your place: they come to you";
+ * "Their place: you go to them"); everything else in Epic — the guest page, booking,
+ * the address a guest gives — reads `venue` from the guest's side, where `their_place`
+ * is the host's home and `your_place` is the guest's (Codex, 2 Oct 2026). Translated
+ * here, at the door, both ways.
+ */
+const HOST_SIDE = { your_place: 'their_place', their_place: 'your_place' };
+const toStored = (v) => HOST_SIDE[v] ?? v;
+const toHostSide = (v) => HOST_SIDE[v] ?? v;
 const appUrl = () => (process.env.EPIC_APP_URL || process.env.APP_URL || 'https://epic.day').replace(/\/$/, '');
 const pubUrl = (offerId) => `${appUrl()}/experiences/${offerId}`;
 const isPro = (account) => account?.plan === 'pro' && account?.status !== 'suspended';
@@ -133,7 +143,7 @@ async function lanePayload(offer, host, account, { holidays } = {}) {
     startsOn: ymd(offer.starts_on), startsAt: offer.starts_at?.slice(0, 5) ?? null, endsAt: offer.ends_at?.slice(0, 5) ?? null,
     multiDay: Boolean(offer.multi_day), endsOn: ymd(offer.ends_on), runningOrder: offer.running_order ?? [],
     cohosts: cohosts.map((c) => ({ id: c.id, name: c.name, role: c.role, accountId: c.account_id, contactId: c.contact_id, canEdit: c.can_edit, canMessage: c.can_message, shownOnPage: c.shown_on_page, withPhoto: c.with_photo, seesGuests: c.sees_guests })),
-    venue: offer.venue, venueLabel: offer.venue_label, venueArea: offer.venue_area, venueRef: offer.venue_ref ?? null, venueNotes: offer.venue_notes,
+    venue: toHostSide(offer.venue), venueLabel: offer.venue_label, venueArea: offer.venue_area, venueRef: offer.venue_ref ?? null, venueNotes: offer.venue_notes,
     travelRadiusMin: offer.travel_radius_min, travelChargePence: offer.travel_charge_pence, onlineMode: offer.online_mode, onlineLink: offer.online_link, timeZone: offer.time_zone,
     guestQuestions: offer.guest_questions ?? {},
     weekdays: offer.weekdays ?? [], firstDate: ymd(offer.first_date), durationMin: offer.duration_min, sessions: offer.sessions,
@@ -306,7 +316,7 @@ export function laneBody(b, current) {
   set('whatCategory', str(b.whatCategory, 80)); set('whatLabel', str(b.whatLabel, 80)); set('lineSuggested', Boolean(b.lineSuggested));
   set('startsOn', date(b.startsOn)); set('startsAt', time(b.startsAt)); set('endsAt', time(b.endsAt)); set('multiDay', Boolean(b.multiDay)); set('endsOn', date(b.endsOn));
   set('runningOrder', list(b.runningOrder, 60).map((r) => ({ day: whole(r?.day, { min: 0, max: 3 }) ?? 0, time: time(r?.time), title: str(r?.title, 120), detail: str(r?.detail, 200) })).filter((r) => r.title));
-  set('venue', oneOf(VENUE_KINDS, b.venue)); set('venueLabel', str(b.venueLabel, 240)); set('venueArea', str(b.venueArea, 120)); set('venueNotes', str(b.venueNotes, 600));
+  set('venue', b.venue == null ? null : toStored(oneOf(VENUE_KINDS, b.venue))); set('venueLabel', str(b.venueLabel, 240)); set('venueArea', str(b.venueArea, 120)); set('venueNotes', str(b.venueNotes, 600));
   if (b.venueRef === null || (typeof b.venueRef === 'string' && /^(osm|google|atlas|own):[\w/.:-]{1,200}$/.test(b.venueRef))) p.venueRef = b.venueRef;
   if (b.venueLabel !== undefined) p.venueLabelFrom = (b.venueRef !== undefined ? b.venueRef : current.venue_ref) ? 'place' : 'host';
   set('venueLat', num(b.venueLat)); set('venueLng', num(b.venueLng));
@@ -390,7 +400,8 @@ export function derive(patch, current) {
   if (p.venue && p.venue !== current.venue) {
     if (p.venue !== 'online') { p.onlineMode = p.onlineMode ?? null; p.onlineLink = p.onlineLink ?? null; }
     if (p.venue === 'online') { p.venueLabel = null; p.venueArea = null; p.venueRef = null; p.venueLat = null; p.venueLng = null; p.travelRadiusMin = null; p.travelChargePence = null; }
-    if (p.venue !== 'their_place') { p.travelRadiusMin = p.travelRadiusMin ?? null; p.travelChargePence = p.travelChargePence ?? null; }
+    // `your_place` here is stored from the guest's side: the host travelling to them.
+    if (p.venue !== 'your_place') { p.travelRadiusMin = p.travelRadiusMin ?? null; p.travelChargePence = p.travelChargePence ?? null; }
   }
   if (p.multiDay === false) p.endsOn = null;
   return p;
@@ -527,7 +538,7 @@ async function applyFound({ household, account, lane, offerId, step, patch, foun
   for (const [k, v] of Object.entries(patch)) {
     if (k === 'cohosts') continue;
     const now = k === 'line' ? current.line : current[k];
-    const empty = now == null || now === '' || (Array.isArray(now) && !now.length) || (typeof now === 'object' && !Array.isArray(now) && !Object.keys(now).length) || (k === 'priceMode' && now === 'free');
+    const empty = now == null || now === '' || (Array.isArray(now) && !now.length) || (typeof now === 'object' && !Array.isArray(now) && !Object.keys(now).length) || (k === 'priceMode' && now === 'free') || (k === 'venue' && !current.venueLabel && !current.venueArea && !current.onlineMode);
     if (step || empty) keep[k] = v;
   }
   if (keep.line) keep.lineSuggested = false;
@@ -652,7 +663,10 @@ router.post('/host/lanes/checked', async (req, res, next) => {
     if (!insurance) throw refuse(400, 'insurance_required', 'Upload your insurance certificate.');
     const referees = list(req.body?.referees, 2).map((r) => ({ name: str(r?.name, 80), email: str(r?.email, 120) })).filter((r) => r.name && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email ?? ''));
     if (referees.length < 2) throw refuse(400, 'two_referees', 'Two references, each with a name and an email.');
-    const updated = await repo.updateHost(host.id, { dbsNumber: dbs, insuranceMediaId: insurance, referees, checkedState: host.checked_state === 'passed' ? 'passed' : 'submitted', checkedSubmittedAt: new Date() });
+    // A pass is for the evidence that was read: anything changed goes back to be read again (Codex, 2 Oct 2026).
+    const same = host.checked_state === 'passed' && host.dbs_number === dbs && host.insurance_media_id === insurance
+      && JSON.stringify(host.referees ?? []) === JSON.stringify(referees);
+    const updated = await repo.updateHost(host.id, { dbsNumber: dbs, insuranceMediaId: insurance, referees, checkedState: same ? 'passed' : 'submitted', checkedSubmittedAt: new Date() });
     res.json({ host: hostSheet(updated, account) });
   } catch (err) { next(err); }
 });
@@ -730,6 +744,12 @@ router.post('/host/lanes/offers/:id/video', async (req, res, next) => {
     if (b.photoIds !== undefined) {
       patch.videoPhotoIds = await ownMediaList(household.id, b.photoIds, 'photo', cfg.epicVideoPhotos.max);
     }
+    // The length the checklist shows is the take's own, and it is held to the configured
+    // range here, not only on the device (Codex, 2 Oct 2026). Two seconds' grace either way
+    // for a recorder that stops a beat late.
+    const lengthOk = async (id, lo, hi) => { const m = await repo.mediaMeta(id); const s = Number(m?.duration_s); return Number.isFinite(s) && s >= lo - 2 && s <= hi + 2; };
+    if (patch.videoId && !(await lengthOk(patch.videoId, cfg.videoSeconds.min, cfg.videoSeconds.max))) throw refuse(400, 'video_length', `The video should be ${cfg.videoSeconds.min} to ${cfg.videoSeconds.max} seconds.`);
+    if (patch.helloVideoId && !(await lengthOk(patch.helloVideoId, 3, cfg.videoSeconds.hello))) throw refuse(400, 'hello_length', `Ten seconds of you is plenty — up to ${cfg.videoSeconds.hello}.`);
     if (b.madeBy !== undefined) patch.videoMadeBy = oneOf(['self', 'epic'], b.madeBy);
     if (b.coverS !== undefined) patch.videoCoverS = num(b.coverS);
     if (b.onProfile !== undefined) patch.videoOnProfile = Boolean(b.onProfile);

@@ -304,7 +304,9 @@ export function ageGate(offer, party) {
     const blocked = party.filter((p) => (lo >= ADULT_AGE ? isChild(p)
       : isChild(p) && (p.age == null || p.age < lo || p.age > hi)) || (!isChild(p) && p.age != null && (p.age < lo || (hi < ADULT_AGE ? false : p.age > hi))));
     const adults = party.filter((p) => !isChild(p));
-    return { limit: lo || null, max: Number.isFinite(hi) ? hi : null, blocked, hasAdult: adults.length > 0, needsAdult: party.some(isChild) };
+    // Drop off: the children come on their own — the parent who booked is not in the party (Codex, 2 Oct 2026).
+    const dropOff = offer.parents === 'drop_off';
+    return { limit: lo || null, max: Number.isFinite(hi) ? hi : null, blocked, hasAdult: adults.length > 0 || dropOff, needsAdult: party.some(isChild) && !dropOff };
   }
   const limit = offer.age_limit ?? null;
   const blocked = limit ? party.filter((p) => p.age != null && p.age < limit || (p.age == null && p.child)) : [];

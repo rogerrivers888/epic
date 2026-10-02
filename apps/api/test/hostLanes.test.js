@@ -248,6 +248,8 @@ test('Upload it reads a text note, and refuses what it cannot read', async () =>
     assert.equal(r.body.offer.whyYou, 'Ten years in Bangkok kitchens.');
     assert.deepEqual(r.body.offer.freeHours, { 6: [['14:00', '17:00']] });
     assert.equal(r.body.offer.venueArea, 'Reading RG1', 'their place: the area, not an address');
+    assert.equal(r.body.offer.venue, 'their_place', 'the set-up speaks from the host’s side');
+    assert.equal((await query('select venue from host_offers where id = $1', [r.body.offer.id])).rows[0].venue, 'your_place', 'stored from the guest’s side, as the guest page and booking read it');
     assert.equal(r.body.offer.draftSource, 'uploaded');
     r = await srv.raw('/api/host/lanes/read?lane=onrequest', 'x', { 'content-type': 'application/zip' });
     assert.equal(r.status, 415);
@@ -396,6 +398,8 @@ test('public: Verified and the video block review; Checked and tax wait; then it
     const { rows: [v] } = await query("insert into host_media (household_id, kind, mime, bytes, size, duration_s) values ($1, 'video', 'video/webm', '\\x00', 1, 48) returning id", [h.id]);
     r = await srv.send('POST', `/api/host/lanes/offers/${o.id}/video`, { videoId: v.id, madeBy: 'self', coverS: 3, onProfile: true });
     assert.equal(r.body.offer.video.seconds, 48, 'the length shown is the take’s own');
+    const { rows: [tiny] } = await query("insert into host_media (household_id, kind, mime, bytes, size, duration_s) values ($1, 'video', 'video/webm', '\\x00', 1, 3) returning id", [h.id]);
+    assert.equal((await srv.send('POST', `/api/host/lanes/offers/${o.id}/video`, { videoId: tiny.id, madeBy: 'self' })).body.error, 'video_length', 'three seconds is not an offer video');
     assert.deepEqual(r.body.offer.blockers, []);
     assert.equal(r.body.offer.action.label, 'Send for review');
 
@@ -407,6 +411,17 @@ test('public: Verified and the video block review; Checked and tax wait; then it
     assert.deepEqual(r.body.ending.stillToDo, ['checked', 'tax']);
     assert.equal(r.body.offer.sessionRows.length, 8);
     assert.equal(r.body.offer.sessionRows[0].topic, 'In the water');
+    // Checked: evidence changed after a pass goes back to be read again.
+    const { rows: [ins] } = await query("insert into host_media (household_id, kind, mime, bytes, size) values ($1, 'doc', 'application/pdf', '\\x00', 1) returning id", [h.id]);
+    const referees = [{ name: 'A Ref', email: 'a@example.com' }, { name: 'B Ref', email: 'b@example.com' }];
+    r = await srv.send('POST', '/api/host/lanes/checked', { dbsNumber: '001234567890', insuranceMediaId: ins.id, referees });
+    assert.equal(r.body.host.checked, 'submitted');
+    await query("update hosts set checked_state = 'passed' where household_id = $1", [h.id]);
+    r = await srv.send('POST', '/api/host/lanes/checked', { dbsNumber: '001234567890', insuranceMediaId: ins.id, referees });
+    assert.equal(r.body.host.checked, 'passed', 'the same evidence keeps its pass');
+    r = await srv.send('POST', '/api/host/lanes/checked', { dbsNumber: '009999999999', insuranceMediaId: ins.id, referees });
+    assert.equal(r.body.host.checked, 'submitted', 'a new DBS number is read again');
+    await query("update hosts set checked_state = 'none' where household_id = $1", [h.id]);
     // The back office cannot put it live while Checked is outstanding.
     const row = await repo.offerById(o.id);
     const host = await repo.hostByHousehold(h.id);

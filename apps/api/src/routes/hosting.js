@@ -1765,7 +1765,11 @@ adminRouter.get('/', requires('view_hosting'), async (_req, res, next) => {
         // Hosting v7: which lane, and what the automatic check of the video found (a flag means a person must look).
         lane: o.lane ?? null, reviewAi: o.review_ai ?? null,
       })),
-      hosts: hosts.map((h) => ({ ...ownHost(h), liveOffers: Number(h.live_offers), inReview: Number(h.in_review), openReports: Number(h.open_reports) })),
+      hosts: hosts.map((h) => ({
+        ...ownHost(h), liveOffers: Number(h.live_offers), inReview: Number(h.in_review), openReports: Number(h.open_reports),
+        // Checked (hosting v7): what was sent, so it can be read before it is passed. Staff only.
+        checked: { state: h.checked_state ?? 'none', dbsNumber: h.dbs_number ?? null, referees: h.referees ?? [], insurance: h.insurance_media_id ? `/api/admin/hosting/hosts/${h.id}/insurance` : null, submittedAt: h.checked_submitted_at ?? null },
+      })),
       reports: reports.map((r) => ({ id: r.id, hostId: r.host_id, hostName: r.host_name, offerId: r.offer_id, title: r.title, reason: r.reason, at: r.created_at })),
       trustLevels: TRUST_LEVELS,
     });
@@ -1802,6 +1806,18 @@ adminRouter.post('/offers/:id/decide', requires('manage_hosting'), async (req, r
       reviewedAt: new Date(), reviewNote: note, reviewChecklist: checklist,
     });
     res.json({ offer: publicOffer(updated, [], { revealed: true }) });
+  } catch (err) { next(err); }
+});
+
+/** GET …/hosts/:id/insurance — the insurance certificate a host sent for Checked. Private evidence: staff only, never cached. */
+adminRouter.get('/hosts/:id/insurance', requires('manage_hosting'), async (req, res, next) => {
+  try {
+    const h = await repo.hostById(req.params.id);
+    const m = h?.insurance_media_id ? await repo.mediaById(h.insurance_media_id) : null;
+    if (!m) throw refuse(404, 'not_found', 'No certificate was sent.');
+    res.setHeader('content-type', m.mime);
+    res.setHeader('cache-control', 'private, no-store');
+    res.end(m.bytes);
   } catch (err) { next(err); }
 });
 
