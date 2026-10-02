@@ -180,9 +180,12 @@ router.post('/build', requires('manage_library'), async (req, res, next) => {
     // edge allowance or the allowance does nothing at ninety minutes.
     // Named outright, an owner's cap is theirs to choose; left out, it is the
     // approved horizon — never a default that starts the wider build (Codex).
-    const capMinutes = req.body?.capMinutes != null
-      ? Math.min(180, Math.max(5, Number(req.body.capMinutes) || 5))
-      : await reach.approvedHorizon(req.body?.mode ?? 'driving');
+    // A blank field is an omitted one; anything else that is not a whole number
+    // of minutes from 5 to 180 is refused — never quietly turned into a five-
+    // minute build that would strip every origin's wider rows (Codex).
+    const asked = parseBuildCap(req.body?.capMinutes);
+    if (asked === false) throw bad('capMinutes must be a whole number of minutes from 5 to 180, or left out for the approved horizon.');
+    const capMinutes = asked ?? await reach.approvedHorizon(req.body?.mode ?? 'driving');
     const mode = travelMode(req.body?.mode ?? 'driving');
     if (await reach.osrmOwns(mode)) return res.status(409).json({ error: `${mode} is routed by OSRM; rebuild it with reach-osrm, not the estimator.` });
     if (req.body?.wait === true) return res.json(await reach.buildMatrix({ mode, capMinutes }));
@@ -210,5 +213,13 @@ router.post('/horizon', requires('manage_library'), async (req, res, next) => {
     res.json(await reach.setApprovedHorizon(mode, minutes, { by: req.account?.email ?? req.session?.label ?? req.session?.id ?? null }));
   } catch (err) { next(err); }
 });
+
+/** A build cap from a request: null when left out (blank counts as left out),
+ *  the minutes when a whole number from 5 to 180, and false when it is neither. */
+export function parseBuildCap(given) {
+  if (given == null || (typeof given === 'string' && given.trim() === '')) return null;
+  const n = Number(given);
+  return Number.isInteger(n) && n >= 5 && n <= 180 ? n : false;
+}
 
 export default router;

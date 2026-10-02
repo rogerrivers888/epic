@@ -171,3 +171,17 @@ test('approving the horizon writes the setting and its audit row together', asyn
   await query(`delete from bo_settings where key = 'reach:horizon:driving'`);
   await query(`delete from bo_settings_log where key = 'reach:horizon:driving'`);
 });
+
+test('a build cap left blank is left out; a malformed one is refused, never read as five minutes', async () => {
+  const { parseBuildCap } = await import('../src/routes/reach.js');
+  assert.equal(parseBuildCap(undefined), null);
+  assert.equal(parseBuildCap(null), null);
+  assert.equal(parseBuildCap(''), null);
+  assert.equal(parseBuildCap('  '), null);
+  assert.equal(parseBuildCap(130), 130);
+  assert.equal(parseBuildCap('100'), 100);
+  assert.equal(parseBuildCap('abc'), false);
+  assert.equal(parseBuildCap(2), false);
+  assert.equal(parseBuildCap(500), false);
+  assert.equal(parseBuildCap(99.5), false);
+});
