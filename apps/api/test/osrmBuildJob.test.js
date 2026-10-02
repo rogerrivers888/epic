@@ -245,3 +245,15 @@ test('a long build that keeps beating is not retired; one that falls silent is',
   assert.equal((await job.osrmBuildState()).state, 'failed');
   await reset();
 });
+
+test('a new claim does not inherit the last run\'s old heartbeat', async () => {
+  await reset();
+  await job.approveOsrmBuild({ by: 'owner@test' });
+  await job.claimOsrmBuild();
+  // The last run beat long ago, then failed.
+  await query(`update bo_settings set value = value || jsonb_build_object('heartbeatAt', now() - interval '30 hours', 'state', 'failed') where key = $1`, [job.OSRM_BUILD_KEY]);
+  await job.approveOsrmBuild({ by: 'owner@test' });
+  await job.claimOsrmBuild();
+  assert.equal(await job.retireStaleRun(), false, 'the new run is not retired for the old run\'s silence');
+  await reset();
+});

@@ -183,7 +183,9 @@ export async function approveOsrmBuild({ by = null } = {}) {
 /** Claim the approved build for this run, atomically: two cron ticks cannot both start it. */
 export async function claimOsrmBuild({ by = 'osrm-build service' } = {}) {
   const out = await writeState(
-    (was, now) => ({ state: 'running', startedAt: now, runBy: by, runId: randomUUID(), epoch: was.epoch ?? now }),
+    // A fresh heartbeat with the claim: the state is merged with the last run's,
+    // and its old heartbeat must not make this run look silent (Codex).
+    (was, now) => ({ state: 'running', startedAt: now, heartbeatAt: now, runBy: by, runId: randomUUID(), epoch: was.epoch ?? now }),
     { who: by, expect: (was) => was.state === 'approved' },
   );
   return out.changed ? out.value : null;
