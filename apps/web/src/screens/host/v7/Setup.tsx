@@ -93,7 +93,11 @@ export function Setup({ lane: laneIn, offerId }: { lane: HostLane | null; offerI
       if (mine === version.current && !Object.keys(pending.current).length) setOffer(r.offer);
       setError(null);
       return r.offer;
-    }).catch((e) => { setError(e.message); showToast(e.message); return null; });
+    }).catch((e) => {
+      // Put what failed back, so the next save sends it again rather than losing it (Codex, 2 Oct 2026).
+      pending.current = { ...body, ...pending.current };
+      setError(e.message); showToast(e.message); return null;
+    });
     inflight.current = run;
     const out = await run;
     inflight.current = null;

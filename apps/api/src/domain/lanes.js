@@ -207,11 +207,13 @@ export function sessionsFor(offer, holidays = new Map(), cfg = DEFAULT_CONFIG) {
     return days.map((d, i) => ({ n: i + 1, onDate: d, startsAt: i === 0 ? start : null, endsAt: i === days.length - 1 ? endsAt : null, endsOn: null, topic: null, multi }));
   }
   if (lane === 'course') {
-    const topics = (offer.weeks ?? []).map((w) => w?.title ?? null);
-    return courseRun(offer, holidays, cfg).dates.map((d, i) => ({ n: i + 1, onDate: d, startsAt: start, endsAt: addMinutes(start, len), endsOn: null, topic: topics[i] ?? null }));
+    // By session number: a plan with session 2 left blank keeps session 3's topic on session 3 (Codex, 2 Oct 2026).
+    const topics = new Map((offer.weeks ?? []).filter((w) => w?.title).map((w, i) => [Number(w.n) || i + 1, w.title]));
+    return courseRun(offer, holidays, cfg).dates.map((d, i) => ({ n: i + 1, onDate: d, startsAt: start, endsAt: addMinutes(start, len), endsOn: null, topic: topics.get(i + 1) ?? null }));
   }
   if (lane === 'weekly') {
-    return weeklyRun(offer, holidays, { weeks: cfg.weeklyHorizonWeeks }).dates.map((d) => ({ n: null, onDate: d, startsAt: start, endsAt: addMinutes(start, len), endsOn: null, topic: null }));
+    // The rows laid down start from today once the first date has passed (Codex, 2 Oct 2026).
+    return weeklyRun(offer, holidays, { weeks: cfg.weeklyHorizonWeeks, from: new Date() }).dates.map((d) => ({ n: null, onDate: d, startsAt: start, endsAt: addMinutes(start, len), endsOn: null, topic: null }));
   }
   return [];
 }
@@ -543,5 +545,9 @@ export const CHECK_WORDS = {
  */
 export function laneBlockers(offer, host, cfg = DEFAULT_CONFIG) {
   const items = checklist(offer, { host, account: { email: 'given', mobile: 'given' } }, cfg);
-  return [...laneGaps(offer, cfg), ...items.filter((i) => (i.blocks === 'send' || i.blocks === 'live') && !i.done).map((i) => CHECK_WORDS[i.key])];
+  // A one-off or a course whose first date has gone cannot go out — at sending, or at approval
+  // after a review that ran past it (Codex, 2 Oct 2026). A weekly class rolls on.
+  const first = offer.lane === 'oneoff' ? ymd(offer.starts_on ?? offer.startsOn) : offer.lane === 'course' ? ymd(offer.first_date ?? offer.firstDate) : null;
+  const past = first && first < ymd(new Date()) ? ['That date has gone. Pick a new one.'] : [];
+  return [...past, ...laneGaps(offer, cfg), ...items.filter((i) => (i.blocks === 'send' || i.blocks === 'live') && !i.done).map((i) => CHECK_WORDS[i.key])];
 }

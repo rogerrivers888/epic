@@ -298,3 +298,11 @@ test('a weekly class rolls on: its window starts today once the first session ha
   assert.deepEqual(run.dates, ['2026-10-06', '2026-10-13']);
   assert.deepEqual(weeklyRun({ first_date: '2026-11-03', weekdays: [2], skipped_dates: [] }, new Map(), { weeks: 1, from: '2026-10-02' }).dates, ['2026-11-03'], 'a start still to come is kept');
 });
+
+test('a session plan keeps each topic on its own session, and a gone date blocks approval too', async () => {
+  const s = sessionsFor({ lane: 'course', first_date: '2027-01-08', sessions: 3, starts_at: '09:00', duration_min: 60, weeks: [{ n: 1, title: 'One' }, { n: 3, title: 'Three' }] });
+  assert.deepEqual(s.map((x) => x.topic), ['One', null, 'Three']);
+  const { laneBlockers } = await import('../src/domain/lanes.js');
+  const gone = laneBlockers({ lane: 'oneoff', starts_on: '2026-01-10', starts_at: '10:00', ends_at: '12:00', visibility: 'invite', who_chosen: true }, host());
+  assert.match(gone[0], /date has gone/);
+});

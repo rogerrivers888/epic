@@ -12,6 +12,7 @@
  *   …?preview=1                       the guest page
  */
 
+import { mediaUrl } from '../../../components/hosting';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from '../../../components/press';
@@ -71,7 +72,7 @@ export function Ending({ offerId }: { offerId: string }) {
     : offer.privateFeeState === 'paid' ? `${gbp(cfg.privateEventPence)} paid` : null;
   const meta = pub ? `${look.tag} · public · ${offer.state === 'in_review' ? 'in review' : 'live'}` : [look.tag, 'private', fee].filter(Boolean).join(' · ');
   const stillToDo = pub ? offer.checklist.filter((i) => (i.key === 'checked' || i.key === 'tax') && !i.done) : [];
-  const thumb = offer.photos?.[0]?.url ?? null;
+  const thumb = mediaUrl(offer.photos?.[0]?.url ?? null);
 
   return (
     <View style={[styles.page, wide && styles.wide]}>
