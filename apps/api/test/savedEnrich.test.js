@@ -417,3 +417,21 @@ test('a pass cut short while Claude was asked is not paid for twice; a re-run ke
   });
   assert.equal((await enrich.enrichmentOf(ref2)).found.fields.phone.sourceUrl, 'https://kp.example/contact');
 });
+
+test('a re-run shows the facts already answered beside its own', async () => {
+  const hh = await household();
+  const ref = `google:facts-${randomUUID()}`;
+  const key = `test-dogs-${randomUUID().slice(0, 8)}`;
+  await query(`insert into place_attributes (key, label, kind) values ($1, 'Dogs welcome', 'yesno')`, [key]);
+  const { rows: [q] } = await query(`insert into questions (attribute_key, scope, active) values ($1, 'global', true) returning id, attribute_key`, [key]);
+  await query(`insert into place_answers (venue_ref, question_id, source, state, yesno, source_url) values ($1, $2, 'osm', 'answered', true, 'https://www.openstreetmap.org/node/1')`, [ref, q.id]);
+  await query(`insert into place_records (venue_ref, name, provenance) values ($1, 'Answered Before', '{}')`, [ref]);
+  await query(`insert into saved_place_enrichment (venue_ref, household_id, state) values ($1, $2, 'free')`, [ref, hh]);
+  await enrich.afterFree(ref, { householdId: hh, sessionId: null }, {
+    asks: [], openverse: async () => ({ ok: true, stored: [], refused: 0 }),
+    searchWeb: async () => ({ text: '{"fields":{}}', fetched: [], searches: 0 }),
+  });
+  const f = (await enrich.enrichmentOf(ref)).found.facts[q.attribute_key];
+  assert.equal(f.answer, 'yes');
+  assert.equal(f.source, 'osm');
+});

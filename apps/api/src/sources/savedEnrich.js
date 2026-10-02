@@ -297,6 +297,7 @@ export async function afterFree(venueRef, ctx, deps = {}) {
       return { state: 'done', found, costUsd: 0 };
     }
     if (!missing.length && !asks.length) {
+      found.facts = await answeredFacts(venueRef);
       found.notes.push('The free research found everything; Claude was not asked.');
       await setState(venueRef, 'done', { found, last_cost_usd: 0 });
       return { state: 'done', found, costUsd: 0 };
@@ -320,7 +321,9 @@ export async function afterFree(venueRef, ctx, deps = {}) {
       return { state: 'failed', found, costUsd: spent };
     }
     Object.assign(found.fields, pass.fields);
-    found.facts = pass.facts;
+    // What is already answered — by the free research or an earlier pass — is
+    // shown beside this pass's answers, not dropped on a re-run (Codex, 2 Oct 2026).
+    found.facts = { ...(await answeredFacts(venueRef)), ...pass.facts };
     found.notes.push(...pass.notes);
     // A website Claude found and opened is the venue's site now: its pictures
     // are looked for there and then, not on the next re-run (Codex, 2 Oct 2026).
@@ -336,6 +339,16 @@ export async function afterFree(venueRef, ctx, deps = {}) {
       [venueRef, JSON.stringify(found), pass.costUsd ?? 0]);
     return { state: 'done', found, costUsd: pass.costUsd ?? 0 };
   });
+}
+
+/** The yes/no facts already answered for a place, in the shape the back office draws. */
+async function answeredFacts(venueRef) {
+  const out = {};
+  for (const a of await sets.answersFor(venueRef)) {
+    if (a.state !== 'answered' || a.kind !== 'yesno' || a.yesno == null) continue;
+    out[a.attribute_key] = { label: a.label, answer: a.yesno ? 'yes' : 'no', source: a.source, sourceUrl: a.source_url, checkedAt: a.checked_at };
+  }
+  return out;
 }
 
 /** The venue-site pictures the place holds now, whatever this run's read found (Codex, 2 Oct 2026). */
@@ -604,17 +617,22 @@ export async function enrichmentList({ limit = 500 } = {}) {
  */
 export async function enrichmentSummary() {
   const { rows: [r] } = await query(
-    `with done as (select * from saved_place_enrichment where state = 'done')
+    `with done as (select * from saved_place_enrichment where state = 'done'),
+          spent as (select coalesce(sum(paid_runs), 0)::int as paid, coalesce(sum(cost_usd), 0)::float as total_cost_usd,
+                           count(*) filter (where state in ('done', 'failed'))::int as researched
+                      from saved_place_enrichment)
      select count(*)::int as done,
             count(*) filter (where found->'fields'->'website'->>'value' is not null and found->'fields'->'website'->>'source' <> 'unknown')::int as website,
             count(*) filter (where found->'fields'->'menu_url'->>'value' is not null and found->'fields'->'menu_url'->>'source' <> 'unknown')::int as menu,
             count(*) filter (where coalesce((found->'pictures'->'openverse'->>'stored')::int, 0) + coalesce((found->'pictures'->'venueSite'->>'kept')::int, 0) > 0)::int as pictured,
-            coalesce(sum(paid_runs), 0)::int as paid,
-            coalesce(sum(cost_usd), 0)::float as total_cost_usd
+            (select paid from spent) as paid,
+            (select total_cost_usd from spent) as total_cost_usd,
+            (select researched from spent) as researched
        from done`);
-  // Per paid pass, over every pass ever paid for; per place, over every
-  // finished place (including those Claude was never needed for).
+  // Spend is every pass paid for, done or failed (Codex, 2 Oct 2026); the hit
+  // rates stay over the finished ones. Per place is over every place whose
+  // research has ended, including those Claude was never needed for.
   r.avg_cost_usd = r.paid ? r.total_cost_usd / r.paid : 0;
-  r.avg_cost_per_place_usd = r.done ? r.total_cost_usd / r.done : 0;
+  r.avg_cost_per_place_usd = r.researched ? r.total_cost_usd / r.researched : 0;
   return r;
 }
