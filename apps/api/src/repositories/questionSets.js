@@ -162,7 +162,27 @@ async function setIgnores(client, setKey, norms) {
 }
 
 export async function detach(subcategoryKey) {
-  await query('delete from question_set_subcategories where subcategory_key = $1', [subcategoryKey]);
+  return withTransaction(async (client) => {
+    await client.query('select pg_advisory_xact_lock(hashtext($1)::bigint)', ['feature-tombstones']);
+    await client.query('delete from question_set_subcategories where subcategory_key = $1', [subcategoryKey]);
+    // A drawer that left a set may have been what held the set back from a fact
+    // others are owed; ask again now the veto may be gone (Codex, 2 Oct 2026).
+    await reconcileWaiting(client);
+  });
+}
+
+/**
+ * Re-ask every drawer still owed a fact, on the set it is on now. Called when
+ * something that held a set back may have gone — a drawer detached, an ignore
+ * restored — so an approved fact is not left unasked because nobody re-attached a
+ * drawer (Codex, 2 Oct 2026). askWaiting re-checks the vetoes itself.
+ */
+async function reconcileWaiting(client) {
+  const { rows } = await client.query(
+    `select distinct w.subcategory_key, qs.set_key
+       from feature_pending_asks w
+       join question_set_subcategories qs on qs.subcategory_key = w.subcategory_key`);
+  for (const r of rows) await askWaiting(client, r.subcategory_key, r.set_key);
 }
 
 /** Which set a subcategory uses, or null — a state the design brief asks to be shown. */
@@ -1060,14 +1080,19 @@ export async function ignoreFeature(norm, { actor = null, reason = null } = {}) 
     // the ordinary candidate screen after a "never again" decision (Codex, 2 Oct 2026).
     //
     // Except for a word that is already one of our active facts: then this is a
-    // dismissal of the review suggestion, and only the review-raised (Google-sourced)
-    // candidates close — an owned-harvest candidate for the fact in a drawer the
-    // reviews never touched is left alone (Codex, 2 Oct 2026).
+    // dismissal of the review suggestion, and only the candidates in drawers this
+    // review pass actually sighted it in close — not every Google-sourced row, since
+    // sources merge and the flag is no proof of this pass; an owned-harvest candidate
+    // in a drawer the reviews never touched is left alone (Codex, 2 Oct 2026).
     const dismissal = await isActiveFact(client, norm);
     const { rowCount } = await client.query(
       `update harvest_candidates set status = 'ignored', decided_by = $2, decided_at = now(), examples = '{}',
               decision_reason = coalesce($3, decision_reason)
-        where norm = $1 and status in ('new', 'unresolved') and ($4 = false or sources ? 'google')`,
+        where norm = $1 and status in ('new', 'unresolved')
+          and ($4 = false
+               or subcategory in (select p.subcategory from review_sightings s
+                                    join place_index p on p.venue_ref = s.venue_ref
+                                   where s.norm = $1))`,
       [norm, actor, reason ? String(reason).slice(0, 300) : null, dismissal]);
     if (!rowCount) throw bad(`"${norm}" is not a feature waiting in the review queue.`);
     // One transaction: the queue can never be left holding an actionable sighting
@@ -1251,6 +1276,9 @@ export async function unignore(id) {
     if (rows[0] && before?.decided_at) {
       await client.query('delete from feature_tombstones where norm = $1 and decided_at = $2::timestamptz', [before.norm, before.decided_at]);
     }
+    // The restored ignore may have been what held a shared set back from a fact
+    // other drawers are owed; ask them now it is gone (Codex, 2 Oct 2026).
+    if (rows[0]) await reconcileWaiting(client);
     return rows[0] ?? null;
   });
 }

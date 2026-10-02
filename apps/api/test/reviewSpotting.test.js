@@ -906,6 +906,11 @@ test('a set shared with a drawer that ignored the word is not asked, and says so
   await sets.attach('c30-si-set', subC);
   assert.equal((await query("select count(*)::int n from questions where attribute_key = $1 and set_key = 'c30-si-set'", [res.attributeKey])).rows[0].n, 0, 'still not asked on the shared set');
   assert.equal((await query('select count(*)::int n from feature_pending_asks where attribute_key = $1 and subcategory_key = $2', [res.attributeKey, subC])).rows[0].n, 1, 'and C is still owed it');
+
+  // Restoring A's ignore lifts the veto, and C is asked without anyone re-attaching it.
+  await sets.unignore(candA.id);
+  assert.equal((await query("select count(*)::int n from questions where attribute_key = $1 and set_key = 'c30-si-set' and active", [res.attributeKey])).rows[0].n, 1, 'asked on the shared set once the veto is gone');
+  assert.equal((await query('select count(*)::int n from feature_pending_asks where attribute_key = $1 and subcategory_key = $2', [res.attributeKey, subC])).rows[0].n, 0, 'and C is no longer owed it');
 });
 
 test('a detail cached without a place is spotted, free, when read again for that place', async () => {
@@ -960,8 +965,15 @@ test('ignoring a feature that is already a fact dismisses it, and retires nothin
   await query('delete from harvest_candidates where subcategory = $1', [other]);
   await sets.recordCandidates(other, [{ norm: 'card room', raw: 'card room', rawForms: ['card room'], sources: ['venue'], examples: [], kind: 'feature', placesSeen: 1, asserts: 1, denies: 0, asks: 0 }], { placesTotal: 1 });
 
+  // And one whose sources merged with Google's somewhere, in a drawer with no sighting now.
+  const merged = 'c30-dismiss-merged';
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 dismiss merged', 'c30-test-cat') on conflict do nothing", [merged]);
+  await query('delete from harvest_candidates where subcategory = $1', [merged]);
+  await sets.recordCandidates(merged, [{ norm: 'card room', raw: 'card room', rawForms: ['card room'], sources: ['venue', 'google'], examples: [], kind: 'feature', placesSeen: 1, asserts: 1, denies: 0, asks: 0 }], { placesTotal: 1 });
+
   await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A card room.' } });
   const res = await sets.ignoreFeature('card room', { actor: 'tester' });
+  assert.notEqual((await query("select status from harvest_candidates where norm = 'card room' and subcategory = $1", [merged])).rows[0].status, 'ignored', 'a Google-sourced candidate in an unsighted drawer is left alone');
   assert.notEqual((await query("select status from harvest_candidates where norm = 'card room' and subcategory = $1", [other])).rows[0].status, 'ignored', 'the owned candidate elsewhere is left alone');
   assert.equal(res.dismissed, true, 'dismissed, not ignored for good');
   assert.equal((await query("select count(*)::int n from feature_tombstones where norm = 'card room'")).rows[0].n, 0, 'no tombstone on an active fact');
