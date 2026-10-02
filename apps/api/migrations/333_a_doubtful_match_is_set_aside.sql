@@ -28,6 +28,19 @@ create table if not exists owned_point_suspects (
 );
 create index if not exists owned_point_suspects_created_idx on owned_point_suspects (created_at);
 
+-- What the name-check did, one row per outcome, for the Monday summary
+-- (ukCensus.weeklySummary): counted from what happened, not reconstructed
+-- from rows that later change (Codex, 2 Oct 2026). A reference, an outcome and
+-- the owned source involved — never a name. Kept ninety days.
+create table if not exists name_checks (
+  id          bigserial primary key,
+  at          timestamptz not null default now(),
+  venue_ref   text not null,
+  outcome     text not null check (outcome in ('agreed', 'doubted', 'rematched', 'first-sight')),
+  source      text
+);
+create index if not exists name_checks_at_idx on name_checks (at);
+
 -- The two columns nothing ever wrote, and their index. `checked_at` stays: it
 -- is when a live name last agreed with the match.
 drop index if exists owned_points_suspect_idx;

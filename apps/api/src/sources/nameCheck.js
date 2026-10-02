@@ -154,6 +154,10 @@ export async function setAside(row, score) {
   } finally { c.release(); }
 }
 
+/** One outcome, written down for the Monday count: a reference and a source, never a name. */
+const noteOutcome = (ref, outcome, source = null) =>
+  query('insert into name_checks (venue_ref, outcome, source) values ($1, $2, $3)', [ref, outcome, source]);
+
 let draining = false;
 
 /**
@@ -169,28 +173,41 @@ export async function drain({ n = 100, now = Date.now() } = {}) {
     const batch = takeLiveNames(n).filter((x) => !seenRecently(x.ref, now));
     if (!batch.length) return out;
     const owned = await ownedFor(batch.map((x) => x.ref));
+    // Ninety days of outcomes is plenty for a weekly figure.
+    await query(`delete from name_checks where at < now() - interval '90 days'`).catch(() => null);
     for (const x of batch) {
       out.looked += 1;
+      // Marked as seen before the work, so a second sighting in this same
+      // batch is not judged twice, and un-marked if the work fails, so a
+      // transient fault does not hide the place for a day (Codex, 2 Oct 2026).
       remember(x.ref, now);
       try {
         const row = owned.get(x.ref);
         if (!row) {
           const m = await matchOnLiveName(x.ref, x.name, x);
-          if (m.matched) out.firstSight += 1;
+          if (m.matched) { out.firstSight += 1; await noteOutcome(x.ref, 'first-sight', m.source); }
           continue;
         }
         if (!NAMED_SOURCES.includes(row.source)) { out.cantSpeak += 1; continue; }
         const v = judge(x.name, row.owned_name);
         if (v.verdict === 'agrees') {
-          await query('update owned_points set checked_at = now() where venue_ref = $1', [x.ref]);
+          // Only the row that was judged: one the matcher put in its place since
+          // was not compared with anything (Codex, 2 Oct 2026).
+          const { rowCount } = await query(
+            `update owned_points set checked_at = now() where venue_ref = $1 and source = $2 and coalesce(source_ref, '') = $3`,
+            [x.ref, row.source, row.source_ref]);
+          if (!rowCount) { out.cantSpeak += 1; continue; }
           out.agreed += 1;
+          await noteOutcome(x.ref, 'agreed', row.source);
         } else if (v.verdict === 'doubtful') {
           const a = await setAside(row, v.score);
           if (!a.setAside) { out.cantSpeak += 1; continue; }
           out.doubted += 1;
+          await noteOutcome(x.ref, 'doubted', row.source);
           const m = await matchOnLiveName(x.ref, x.name, x, 'rematch');
           if (m.matched) {
             out.rematched += 1;
+            await noteOutcome(x.ref, 'rematched', m.source);
             await query(
               `update owned_point_suspects set rematched_source = $4, rematched_ref = $5
                 where venue_ref = $1 and source = $2 and source_ref = $3`,
@@ -201,6 +218,7 @@ export async function drain({ n = 100, now = Date.now() } = {}) {
         }
       } catch (err) {
         out.failed += 1;
+        recently.delete(x.ref);
         // The reference and the fault only — never the name.
         console.error(`epic-api: name-check — ${x.ref}: ${String(err?.message ?? err).slice(0, 160)}`);
       }
@@ -219,13 +237,15 @@ export async function drain({ n = 100, now = Date.now() } = {}) {
 export async function weekly(now = new Date()) {
   const since = new Date(now.getTime() - 7 * DAY_MS);
   const gaps = await ownedNameGaps();
+  // Places, not sightings: a place that agreed every day this week is one
+  // place that agreed. Counted from what happened (name_checks), so a match
+  // later replaced or set aside still counts for the week it was checked.
   const { rows: [r] } = await query(
-    `select (select count(*)::int from owned_points where checked_at >= $1) as agreed,
-            (select count(*)::int from owned_point_suspects where created_at >= $1) as doubted,
-            (select count(*)::int from owned_point_suspects where created_at >= $1 and rematched_source is not null) as rematched,
-            -- A re-match is written 'rematch:' and counted with the suspects, never here.
-            (select count(*)::int from owned_points where method like 'first sight:%' and matched_at >= $1) as first_sight,
-            (select count(*)::int from owned_point_suspects) as doubted_ever`, [since]);
+    `select count(distinct venue_ref) filter (where outcome = 'agreed')::int as agreed,
+            count(distinct venue_ref) filter (where outcome = 'doubted')::int as doubted,
+            count(distinct venue_ref) filter (where outcome = 'rematched')::int as rematched,
+            count(distinct venue_ref) filter (where outcome = 'first-sight')::int as first_sight
+       from name_checks where at >= $1`, [since]);
   return { gaps, ...r };
 }
 
