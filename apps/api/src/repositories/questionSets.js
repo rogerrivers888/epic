@@ -301,7 +301,14 @@ const PROMOTABLE_SQL = `(kind = 'feature' and evidence is not null and sources ?
 
 export async function recordCandidates(subcategory, entries = [], { placesTotal = 0, client = null } = {}) {
   if (!entries.length) return { written: 0, skipped: 0, held: 0 };
+  // The tombstone read below and the inserts after it must not straddle an
+  // ignoreFeature commit, or a harvest could re-raise a word ignored mid-run
+  // (Codex, 2 Oct 2026). Harvests share one advisory lock — they never wait on
+  // each other — and ignoreFeature takes it exclusively. A transaction-scoped lock
+  // needs a transaction, so a caller without one gets one here.
+  if (!client) return withTransaction((c) => recordCandidates(subcategory, entries, { placesTotal, client: c }));
   const run = on(client);
+  await run('select pg_advisory_xact_lock_shared(hashtext($1)::bigint)', ['feature-tombstones']);
   const { rows: ignored } = await run(
     "select norm from harvest_candidates where subcategory = $1 and status = 'ignored'", [subcategory],
   );
@@ -883,6 +890,11 @@ export async function ignoreFeature(norm, { actor = null, reason = null } = {}) 
     // Serialize with review-spotting on this norm, so a spot cannot write a fresh
     // sighting between our tombstone write and commit (Codex, 2 Oct 2026).
     await client.query('select pg_advisory_xact_lock(hashtext($1)::bigint)', [`feature:${norm}`]);
+    // And exclusively against every harvest (recordCandidates holds this shared),
+    // so none can read "no tombstone" and insert after we commit. Taken after the
+    // per-norm lock — the same order spotFromDetail takes them — so the two cannot
+    // deadlock (Codex, 2 Oct 2026).
+    await client.query('select pg_advisory_xact_lock(hashtext($1)::bigint)', ['feature-tombstones']);
     // Only a word review-spotting raised — one with a review_sighting — can be ignored
     // here. A legacy Google-pass candidate has `sources ? 'google'` but no sighting,
     // and ignoring it through this door would mark unrelated candidates ignored and
@@ -1031,15 +1043,23 @@ export async function globalFromCandidate(id, { label = null, kind = 'yesno', re
 
 /** Put an ignored word back in the queue — the way back the design brief asks for. */
 export async function unignore(id) {
-  const { rows } = await query(
-    // Back to the queue only if it belongs there (C21): an ignored word that
-    // was never quoted comes back to the pen, not to the promotable list.
-    `update harvest_candidates
-        set status = case when ${PROMOTABLE_SQL} then 'new' else 'unresolved' end,
-            decided_by = null, decided_at = null, decision_reason = null
-      where id = $1 and status = 'ignored' returning *`, [id],
-  );
-  return rows[0] ?? null;
+  return withTransaction(async (client) => {
+    // Exclusive against harvests, like ignoreFeature: the tombstone changes here.
+    await client.query('select pg_advisory_xact_lock(hashtext($1)::bigint)', ['feature-tombstones']);
+    const { rows } = await client.query(
+      // Back to the queue only if it belongs there (C21): an ignored word that
+      // was never quoted comes back to the pen, not to the promotable list.
+      `update harvest_candidates
+          set status = case when ${PROMOTABLE_SQL} then 'new' else 'unresolved' end,
+              decided_by = null, decided_at = null, decision_reason = null
+        where id = $1 and status = 'ignored' returning *`, [id],
+    );
+    // Restoring is the way back from an ignore, including the review queue's
+    // norm-level one: a tombstone left in place would report the word restored
+    // while every later harvest and spot quietly discarded it (Codex, 2 Oct 2026).
+    if (rows[0]) await client.query('delete from feature_tombstones where norm = $1', [rows[0].norm]);
+    return rows[0] ?? null;
+  });
 }
 
 /**

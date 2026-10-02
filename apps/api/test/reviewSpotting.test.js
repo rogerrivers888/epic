@@ -573,4 +573,62 @@ test('a label that takes a subcategory’s name is refused as a 400, not a 500',
   assert.equal((await query("select status from harvest_candidates where norm = 'sun deck' and subcategory = $1", [sub])).rows[0].status, 'unresolved', 'nothing was decided — it can be approved under another name');
 });
 
+test('restoring a review-queue-ignored word lifts its tombstone, so harvests raise it again', async () => {
+  // Codex, 2 Oct 2026: restore is the way back, so it must not report success while
+  // the norm-level tombstone keeps every later harvest discarding the word.
+  const sub = 'c30-restore-a'; const sub2 = 'c30-restore-b';
+  const ref = 'google:ChIJ_c30_restore';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 restore A', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 restore B', 'c30-test-cat') on conflict do nothing", [sub2]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
+  await query('delete from harvest_candidates where subcategory = any($1)', [[sub, sub2]]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
+  await query("delete from feature_tombstones where norm = 'boot room'");
+
+  await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A boot room.' } });
+  await sets.ignoreFeature('boot room', { actor: 'tester' });
+  const { rows: [cand] } = await query("select id from harvest_candidates where norm = 'boot room' and subcategory = $1", [sub]);
+  const restored = await sets.unignore(cand.id);
+  assert.ok(restored, 'the candidate came back');
+  assert.equal((await query("select count(*)::int n from feature_tombstones where norm = 'boot room'")).rows[0].n, 0, 'the tombstone is lifted');
+
+  const owned = [{ norm: 'boot room', raw: 'boot room', rawForms: ['boot room'], sources: ['venue'], examples: [], kind: 'feature', placesSeen: 1, asserts: 1, denies: 0, asks: 0 }];
+  const later = await sets.recordCandidates(sub2, owned, { placesTotal: 1 });
+  assert.equal(later.skipped, 0, 'a later harvest is no longer turned away');
+  assert.equal((await query("select count(*)::int n from harvest_candidates where norm = 'boot room' and subcategory = $1", [sub2])).rows[0].n, 1, 'and raises the word again');
+});
+
+test('a review-queue ignore waits for a harvest already writing, so it cannot be undone by it', async () => {
+  // Codex, 2 Oct 2026: a harvest holds the tombstone lock shared for its whole write;
+  // ignoreFeature takes it exclusively, so it waits rather than letting the harvest
+  // read "no tombstone" and insert after the ignore commits.
+  const sub = 'c30-race-parks';
+  const ref = 'google:ChIJ_c30_race';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 race parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
+  await query("delete from feature_tombstones where norm = 'music room'");
+  await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A music room.' } });
+
+  // A harvest mid-write: it holds the shared lock in an open transaction.
+  const harvest = await pool.connect();
+  let done = false;
+  try {
+    await harvest.query('begin');
+    await harvest.query('select pg_advisory_xact_lock_shared(hashtext($1)::bigint)', ['feature-tombstones']);
+    const ignoring = sets.ignoreFeature('music room', { actor: 'tester' }).then(() => { done = true; });
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(done, false, 'the ignore waits while the harvest is writing');
+    await harvest.query('commit');
+    await ignoring;
+    assert.equal(done, true, 'and completes once the harvest has committed');
+  } finally {
+    harvest.release();
+  }
+  assert.equal((await query("select count(*)::int n from feature_tombstones where norm = 'music room'")).rows[0].n, 1, 'the tombstone stands');
+});
+
 test.after(async () => { await pool.end(); });
