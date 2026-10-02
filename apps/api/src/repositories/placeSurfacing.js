@@ -491,7 +491,7 @@ export async function gateProof({ names = [], checkId = null } = {}) {
   // (Codex: never a mixed snapshot as a proof); a crashed run older than the six
   // hours `runningCheck` honours does not count as running.
   const LIVE_RUN = `state = 'running' and started_at > now() - interval '6 hours'`;
-  const { rows: [{ latest: startedBefore } = {}] } = await query(`select max(started_at) as latest from surfacing_checks`);
+  const { rows: [{ latest: startedBefore } = {}] } = await query(`select md5(coalesce(string_agg(id::text || ':' || state, ',' order by id), '')) as latest from surfacing_checks`);
   const { rows: [running] } = await query(`select id from surfacing_checks where ${LIVE_RUN} limit 1`);
   const { rows: [done] } = await query(
     `select id from surfacing_checks where state = 'done' ${checkId ? 'and id = $1' : ''}
@@ -552,8 +552,9 @@ export async function gateProof({ names = [], checkId = null } = {}) {
       where s.check_id = $1`, [readCheck]);
   const leaked = await filedElsewhere(snap.map((r) => r.ref));
   // A check that started while this was reading may have rewritten rows between
-  // the reads above: then none of the stored side can speak.
-  const { rows: [{ latest: startedAfter } = {}] } = await query(`select max(started_at) as latest from surfacing_checks`);
+  // the reads above: then none of the stored side can speak. Compared on every
+  // check's id and state, not a timestamp, which need not rise in commit order (Codex).
+  const { rows: [{ latest: startedAfter } = {}] } = await query(`select md5(coalesce(string_agg(id::text || ':' || state, ',' order by id), '')) as latest from surfacing_checks`);
   if (String(startedAfter ?? '') !== String(startedBefore ?? '')) {
     const why = 'a narrowing check started while the proof was reading';
     return { checkId: null, why, places: places.map((p) => ({ ...p, held: null, heldBy: [], why })), snapshotRecords: null, filedElsewhere: null, leakedExamples: [] };
