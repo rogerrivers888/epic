@@ -130,20 +130,29 @@ export function callerIsOwner() {
  * Enforced here, in the write path, not only hidden in the UI (owner's ask).
  */
 export async function canEditPerson(target) {
-  // A child is always managed by the adults — even one old enough (13+) to
-  // have signed in with an account of their own. The joined lock is for
-  // adults only. `is_minor` means under-13, so the 13–17s are found from
-  // their birthday, not the flag (Codex, 1 Oct 2026, twice).
-  // Takes a database row or a loadMembers person — the voice paths pass the
-  // latter, and reading only the snake_case fields there let a teenager's
-  // profile fall through to the joined-adult lock (Codex, 2 Oct 2026).
-  const age = ageFrom(target.birth_date ?? target.birthDate, target.birth_year ?? target.birthYear);
-  if (target.is_minor || target.isMinor || (age != null && age < 18)) return true;
-  const account = await accountByMember(target.id);
-  const joined = Boolean(account && account.activated_at);
-  if (!joined) return true;              // pending, or no account yet
+  // Who is asking comes first (Codex, 2 Oct 2026): everybody may edit
+  // themselves, and a child — under 18, signed in or not — edits nobody else.
+  // Checking the target first let a signed-in teenager change a sibling's
+  // allergens because the sibling was "a child, managed by the adults".
   const me = await currentMember();
-  return Boolean(me && me.id === target.id); // a joined adult's tastes are theirs alone
+  if (me && me.id === target.id) return true;
+  if (me && isChildPerson(me)) return false;
+  // An adult manages the children — even one old enough (13+) to have signed
+  // in — and anyone invited who has not yet joined. The joined lock is for
+  // adults only: once an adult has joined, their tastes are theirs alone.
+  if (isChildPerson(target)) return true;
+  const account = await accountByMember(target.id);
+  return !(account && account.activated_at);
+}
+
+/**
+ * Under 18, from the birthday where there is one — `is_minor` means under-13,
+ * so the 13–17s are found from the date, never the flag alone. Reads a
+ * database row or a loadMembers person: the voice paths pass the latter.
+ */
+function isChildPerson(p) {
+  const age = ageFrom(p.birth_date ?? p.birthDate, p.birth_year ?? p.birthYear);
+  return Boolean(p.is_minor || p.isMinor || (age != null && age < 18));
 }
 
 async function assertMayEditPerson(target) {

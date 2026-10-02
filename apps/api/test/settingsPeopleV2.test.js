@@ -461,3 +461,18 @@ test('voice apply keeps an unmapped diet in the private note, beside an unmapped
   const row = (await query('select allergen_note from members where id = $1', [member.id])).rows[0];
   assert.equal(row.allergen_note, 'low FODMAP, latex', 'neither is lost, and the second never overwrites the first');
 });
+
+test('a signed-in teenager edits themselves, and nobody else in the household', async () => {
+  const { household: h } = await aHousehold(query);
+  const yr = new Date().getFullYear();
+  const teen = await addMember(h.id, 'Tess', { minor: false, birthDate: `${yr - 15}-03-01` });
+  const sibling = await addMember(h.id, 'Theo', { minor: true, birthDate: `${yr - 9}-06-01` });
+  const invited = await addMember(h.id, 'Gina');
+  const asTeen = await server(asMember(h, teen.id));
+  try {
+    assert.equal((await asTeen.send('PATCH', `/api/household/members/${teen.id}`, { diet: 'vegetarian' })).status, 200, 'their own profile is theirs');
+    assert.equal((await asTeen.send('PATCH', `/api/household/members/${sibling.id}`, { diet: 'vegan' })).status, 403, "a sibling's profile is the adults' to manage");
+    assert.equal((await asTeen.send('POST', `/api/household/members/${sibling.id}/constraints`, { kind: 'allergen', value: 'peanuts' })).status, 403, "nor a sibling's allergens");
+    assert.equal((await asTeen.send('PATCH', `/api/household/members/${invited.id}`, { diet: 'vegan' })).status, 403, 'nor an adult who has not joined yet');
+  } finally { await asTeen.close(); }
+});
