@@ -251,7 +251,9 @@ export async function drain({ n = 100, now = Date.now() } = {}) {
               where venue_ref = $1 and rematched_source is null order by created_at desc limit 1`, [x.ref]);
           // A first sight only for a place we already hold, and only from a
           // sighting allowed to make one; a waiting re-match is always ours.
-          if (!awaiting && (!x.mayMatch || !known.has(x.ref))) {
+          // Every new match — a first sight or a waiting re-match — needs a
+          // sighting allowed to make one (Codex, 2 Oct 2026).
+          if (!x.mayMatch || (!awaiting && !known.has(x.ref))) {
             // Not a check that ran, so not remembered as one: an ordinary
             // sighting later today may still make the match (Codex, 2 Oct 2026).
             recently.delete(x.ref);
@@ -274,8 +276,12 @@ export async function drain({ n = 100, now = Date.now() } = {}) {
           const a = await setAside(row, v.score);
           if (!a.setAside) { out.cantSpeak += 1; continue; }
           out.doubted += 1;
-          const m = await matchOnLiveName(x.ref, x.name, x, row);
-          if (m.matched) out.rematched += 1;
+          // A sighting that may only judge sets the match aside but does not
+          // make the new one: the suspicion waits for an ordinary sighting.
+          if (x.mayMatch) {
+            const m = await matchOnLiveName(x.ref, x.name, x, row);
+            if (m.matched) out.rematched += 1;
+          }
         } else {
           out.cantSpeak += 1;
         }

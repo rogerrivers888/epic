@@ -127,8 +127,14 @@ test('a set-aside still waiting for its re-match is counted as a re-match when i
   live.noteLiveName(ref, 'Marram Surf Hire', P);
   let out = await nc.drain();
   assert.deepEqual([out.doubted, out.rematched], [1, 0]);
-  // Later the open register has it, and the place goes past again.
+  // Later the open register has it, and the place goes past again — first in
+  // the benchmark, which may only judge, so the re-match still waits…
   const newId = await fsaPlace('Marram Surf Hire', P.lat + 0.0002, P.lng);
+  nc.forgetChecks();
+  live.noteLiveName(ref, 'Marram Surf Hire', P, { mayMatch: false });
+  out = await nc.drain();
+  assert.equal(out.rematched, 0, 'a benchmark sighting never makes a match');
+  // …then in an ordinary read.
   nc.forgetChecks();
   live.noteLiveName(ref, 'Marram Surf Hire', P);
   out = await nc.drain();
