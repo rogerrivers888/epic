@@ -790,6 +790,11 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
         'insert into attribute_aliases (norm, target_key, raw) values ($1, $2, $3) on conflict (norm) do nothing',
         [norm, key, cands[0].raw_forms?.[0] ?? null]);
     }
+    // Approving a feature means it is a fact we ask. If the chosen target was a
+    // retired fact — an alias or an existing key can point at an inactive row — bring
+    // it back, so a question is never attached to a switched-off fact (Codex, 2 Oct
+    // 2026).
+    await client.query('update place_attributes set active = true, updated_at = now() where key = $1 and not active', [key]);
     // Ask it in every drawer it was seen in that uses a set — the CURRENT drawer of
     // each place, derived from the sightings joined to place_index, not the drawer a
     // candidate was filed under when it was spotted (a place may have moved since;
@@ -811,13 +816,20 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
                              and ci.sources ? 'google' and ci.status = 'ignored')`,
       [norm]);
     const subs = drawerRows.map((r) => r.subcategory);
+    const seenSets = new Set();
     let asked = 0;
     for (const sub of subs) {
       const { rows: [set] } = await client.query('select set_key from question_set_subcategories where subcategory_key = $1', [sub]);
-      if (!set?.set_key) continue;
+      // A set shared across several of these drawers is asked once, not per drawer.
+      if (!set?.set_key || seenSets.has(set.set_key)) continue;
+      seenSets.add(set.set_key);
+      // `asked` is NEW questions only: addQuestion returns the existing row too, so
+      // check whether this set already asks it before counting (Codex, 2 Oct 2026).
+      const { rows: had } = await client.query(
+        "select 1 from questions where attribute_key = $1 and scope = 'set' and set_key = $2 limit 1", [key, set.set_key]);
       try {
         const q = await addQuestion({ attributeKey: key, setKey: set.set_key, scope: 'set', fromCandidate: cands[0]?.id ?? null }, client);
-        if (q) asked += 1;
+        if (q && !had.length) asked += 1;
       } catch { /* already asked here, or asked globally — the fact stands */ }
     }
     await client.query(

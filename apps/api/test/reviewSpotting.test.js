@@ -453,4 +453,51 @@ test('a place reclassified after it was spotted still counts in its new drawer',
   assert.equal(q.exampleSubcategory, subNew, 'shown under the current drawer');
 });
 
+test('approving a feature whose fact was retired brings the fact back', async () => {
+  // Codex, 2 Oct 2026: an alias (or key) can point at a retired fact. Approving must
+  // not attach a question to a switched-off fact — it reactivates it.
+  const sub = 'c30-retired-parks';
+  const ref = 'google:ChIJ_c30_retired';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 retired parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query("insert into question_sets (key, name) values ('c30-retired-set', 'C30 retired set') on conflict do nothing");
+  await query("insert into question_set_subcategories (subcategory_key, set_key) values ($1, 'c30-retired-set') on conflict do nothing", [sub]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
+  await query("insert into place_attributes (key, label, kind, active) values ('dormant-fact', 'Dormant', 'yesno', false) on conflict (key) do update set active = false");
+  await query("insert into attribute_aliases (norm, target_key, raw) values ('sun terrace', 'dormant-fact', 'sun terrace') on conflict (norm) do update set target_key = 'dormant-fact'");
+
+  await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A sun terrace.' } });
+  const res = await sets.approveFeature('sun terrace', { actor: 'tester' });
+  assert.equal(res.attributeKey, 'dormant-fact', 'reused the aliased fact');
+  assert.equal((await query("select active from place_attributes where key = 'dormant-fact'")).rows[0].active, true, 'the retired fact was brought back');
+});
+
+test('asked counts new questions once, even when drawers share a set', async () => {
+  // Codex, 2 Oct 2026: addQuestion returns the existing row too, and two drawers can
+  // share one set, so asked must count genuinely new questions, once per set.
+  const subX = 'c30-shared-x'; const subY = 'c30-shared-y';
+  const x = 'google:ChIJ_c30_shared_x'; const y = 'google:ChIJ_c30_shared_y';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 shared X', 'c30-test-cat') on conflict do nothing", [subX]);
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 shared Y', 'c30-test-cat') on conflict do nothing", [subY]);
+  await query("insert into question_sets (key, name) values ('c30-shared-set', 'C30 shared set') on conflict do nothing");
+  await query("insert into question_set_subcategories (subcategory_key, set_key) values ($1, 'c30-shared-set'), ($2, 'c30-shared-set') on conflict do nothing", [subX, subY]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [x, subX]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [y, subY]);
+  await query('delete from harvest_candidates where subcategory = any($1)', [[subX, subY]]);
+  await query('delete from review_sightings where venue_ref = any($1)', [[x, y]]);
+  await query("delete from attribute_aliases where norm = 'paddling area'").catch(() => {});
+  await query("delete from place_attributes where key = 'paddling-area'").catch(() => {});
+  await query("delete from feature_tombstones where norm = 'paddling area'");
+
+  await spotFromDetail({ venueRef: x, detail: { reviewSummary: 'A paddling area.' } });
+  await spotFromDetail({ venueRef: y, detail: { reviewSummary: 'A paddling area.' } });
+  const res = await sets.approveFeature('paddling area', { actor: 'tester' });
+  assert.deepEqual(res.subcategories.sort(), [subX, subY], 'both drawers want it');
+  assert.equal(res.asked, 1, 'the shared set is asked once, counted once');
+  assert.equal((await query("select count(*)::int n from questions where attribute_key = $1 and set_key = 'c30-shared-set'", [res.attributeKey])).rows[0].n, 1, 'one question on the shared set');
+});
+
 test.after(async () => { await pool.end(); });
