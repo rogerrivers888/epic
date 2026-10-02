@@ -29,7 +29,6 @@ import { useViewport } from '../hooks/useViewport';
 import { useRouter } from '../router';
 import { paths, type Route } from '../routes';
 import { signedIn } from '../session';
-import { LockScreen } from './LockScreen';
 import { Faq } from '../components/chat/Faq';
 import { AskScreen } from '../components/chat/AskScreen';
 import { TopicScreen } from '../components/chat/TopicScreen';
@@ -44,7 +43,9 @@ const WIDE = 900;
 export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'experience' }> }) {
   const { width } = useViewport();
   const wide = width >= WIDE;
-  const { navigate, back, query } = useRouter();
+  const { navigate, back, query, href } = useRouter();
+  // Signing in is /login, with the way straight back here (owner, 2 Oct 2026: no passcode screen for people).
+  const logIn = () => navigate(`${paths.login()}?next=${encodeURIComponent(href)}`);
   // An invite-only offer opens only with the invitation's token (`?i=`).
   const inviteToken = query.get('i');
   // …or the host's own invitation link (`?l=`), passed round by hand (lanes A and B).
@@ -95,9 +96,9 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
         <View style={{ flex: 1 }}>
           <View style={[styles.gutter, { paddingTop: spacing.md, gap: 4 }]}>
             <Press onPress={() => back(keyed(paths.experience(offer.id)))} accessibilityRole="button"><Row><Icon name="back" size={18} /><Text style={type.h3}>{offer.title}</Text></Row></Press>
-            <Text style={type.small}>Booking needs an Epic account, so the host knows who is coming and your booking lands in Trips. Sign in, or ask for a link.</Text>
+            <Text style={type.small}>Booking needs an Epic account, so the host knows who is coming and your booking lands in Trips. Log in to carry on.</Text>
           </View>
-          <LockScreen onIn={() => void load()} />
+          <View style={[styles.gutter, { paddingTop: spacing.md }]}><Button label="Log in" onPress={logIn} /></View>
         </View>
       );
     }
@@ -130,9 +131,9 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
         <View style={{ flex: 1 }}>
           <View style={[styles.gutter, { paddingTop: spacing.md, gap: 4 }]}>
             <Press onPress={() => back(keyed(paths.experience(offer.id)))} accessibilityRole="button"><Row><Icon name="back" size={18} /><Text style={type.h3}>{offer.title}</Text></Row></Press>
-            <Text style={type.small}>Asking needs an Epic account, so {host.name.split(' ')[0]} can answer you. Sign in, or ask for a link.</Text>
+            <Text style={type.small}>Asking needs an Epic account, so {host.name.split(' ')[0]} can answer you. Log in to carry on.</Text>
           </View>
-          <LockScreen onIn={() => void load()} />
+          <View style={[styles.gutter, { paddingTop: spacing.md }]}><Button label="Log in" onPress={logIn} /></View>
         </View>
       );
     }

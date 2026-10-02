@@ -30,6 +30,8 @@ import { useViewport } from '../hooks/useViewport';
 import { useRouter } from '../router';
 import { paths } from '../routes';
 import { firstAdminScreen } from '../admin/AdminApp';
+import { useSession } from '../hooks/useSession';
+import { rememberNext } from '../afterSignIn';
 import { API_URL, api, ApiError } from '../api';
 import { CREAM, INK, LIME, LIME_TINT, MOSS, fonts, HAIRLINE } from '../theme';
 
@@ -42,7 +44,7 @@ const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
  * "/\\host" or "/%0A/host" would resolve cross-origin and throw in
  * history.replaceState after a successful exchange (Codex, 1 Oct 2026).
  */
-const safeNext = (value?: string | null) => {
+export const safeNext = (value?: string | null) => {
   const s = String(value || '');
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u0020\u007f\\#]/.test(s)) return null; // `#`: a fragment is never a page, and would hide a sign-in door
@@ -79,6 +81,8 @@ export function LoginScreen() {
   const shown = handoffFailed ? 'failed' : reason;
   const googleError = shown === 'no-account' ? "There's no Epic account for that Google address."
     : shown === 'failed' ? "Sorry — we couldn't sign you in. Try again." : null;
+  // An e-mail link that no longer works lands here too (App.tsx › Gate).
+  const linkError = reason === 'link' ? 'That link does not work any more. Ask for a new one below.' : null;
 
   /**
    * Google is a full-page hand-off to the API, which runs the OIDC handshake and
@@ -165,6 +169,16 @@ export function LoginScreen() {
       : paths.account(), { replace: true });
   };
 
+  // Somebody already signed in is never asked again: /login sends them on to
+  // where they were going, exactly as a fresh sign-in would (owner, 2 Oct 2026:
+  // "never asked to sign in again while I'm signed in"). Not while a Google code
+  // is being exchanged — that lands by itself.
+  const session = useSession();
+  useEffect(() => {
+    if (!code && session.state === 'in' && session.access) land({ access: session.access });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [code, session.state, session.access]);
+
   // L1: email + password. Wrong together, never separately (the API's one line).
   const logIn = async () => {
     const value = email.trim();
@@ -187,7 +201,8 @@ export function LoginScreen() {
     if (!EMAIL.test(value)) return setErr("That email doesn't look right.");
     setErr(''); setBusy(true);
     try {
-      if (step === 'forgot') await api.forgotPassword(value); else await api.requestSignInLink(value);
+      if (step === 'forgot') await api.forgotPassword(value);
+      else { rememberNext(safeNext(next)); await api.requestSignInLink(value); }
       setResent(false); setSent(true);
     } catch (e) { setErr(e instanceof ApiError ? e.message : 'Could not send a link just now.'); }
     finally { setBusy(false); }
@@ -229,6 +244,7 @@ export function LoginScreen() {
           {step === 'login' ? (
             <>
               <Text style={styles.h1} {...H1}>Log in.</Text>
+              {linkError ? <Text style={styles.error} accessibilityLiveRegion="polite">{linkError}</Text> : null}
               {/* Google is a web hand-off to the API; the native apps have no
                   handoff yet, so the button is drawn only where it works. */}
               {Platform.OS === 'web' ? (<>

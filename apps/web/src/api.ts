@@ -105,6 +105,28 @@ export class QueuedError extends Error {
  * thing later (offline/policy.ts `queueable`) it is kept and sent when there is
  * signal, and the caller is told which of the two happened.
  */
+/** Doors whose 401 is about the credential being presented, never the session held. */
+const SIGN_IN_DOORS = ['/api/session', '/api/session/link', '/api/session/request-link', '/api/auth/google/exchange', '/api/auth/login', '/api/auth/credentials'];
+
+/**
+ * Ask the session door whether `token` is still a session, once however many
+ * requests came back 401 together, and drop it only on a clear "signed out".
+ * A failure to ask is not an answer: the token stays.
+ */
+let confirming: Promise<void> | null = null;
+function confirmSignedOut(token: string): Promise<void> {
+  if (confirming) return confirming;
+  confirming = (async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/session`, { headers: { authorization: `Bearer ${token}` }, credentials: 'include' });
+      if (!res.ok) return;
+      const body = await res.json().catch(() => null) as { signedIn?: boolean; configured?: boolean } | null;
+      if (body && body.configured !== false && body.signedIn === false && sessionToken() === token) sessionExpired();
+    } catch { /* could not ask: keep the token */ } finally { confirming = null; }
+  })();
+  return confirming;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const method = (init?.method ?? 'GET').toUpperCase();
   const readOnly = method === 'GET';
@@ -141,7 +163,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       // invite link was posted twice, and the second 401 ended the session the
       // first had just opened). The Google exchange is the same kind of door: a
       // spent or stale `?code=` must not end the session already held.
-      if (res.status === 401 && !['/api/session', '/api/session/link', '/api/session/request-link', '/api/auth/google/exchange', '/api/auth/login', '/api/auth/credentials'].includes(path)) sessionExpired();
+      //
+      // And a 401 is a question, not a verdict (owner, 2 Oct 2026: "never asked to
+      // sign in again while I'm signed in"): the session door itself is asked once
+      // whether this token still opens anything, and only a plain "no" drops it.
+      // Any one route answering 401 for its own reasons — the launch gate, a
+      // mistake — can no longer sign the whole browser out of every tab.
+      if (res.status === 401 && token && !SIGN_IN_DOORS.includes(path)) void confirmSignedOut(token);
       // The API answering "no" is an answer; only an API that cannot answer at
       // all falls back to the copy.
       if (readOnly && [502, 503, 504].includes(res.status)) {
@@ -2985,7 +3013,7 @@ export const api = {
     // signed out — and is thrown like any other so the screen can say it.
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      if (res.status === 401) sessionExpired();
+      if (res.status === 401 && token) void confirmSignedOut(token);
       throw new ApiError(res.status, body);
     }
     // Whether a terminal frame arrived. A connection that closes cleanly without
@@ -4121,6 +4149,8 @@ export type AccountSummary = { id: string; email: string; name: string | null; r
 export type SessionState = {
   signedIn: boolean;
   configured: boolean;
+  /** The launch gate is up: the website is for signed-in people only until it comes down. */
+  gate?: boolean;
   session?: SessionSummary | null;
   message?: string;
   /** Who is signed in, when they are on an account rather than the shared passcode. */

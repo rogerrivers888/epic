@@ -19,7 +19,7 @@ import { createReadStream, promises as fs } from 'node:fs';
 import http from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { siteGateOn, siteLock } from './gate.mjs';
+import { siteGateOn } from './gate.mjs';
 import { loadSite, localeFor as localeOf, siteAddress as addressOf } from './site.mjs';
 
 // The built app; a test points it at a folder of its own.
@@ -149,8 +149,9 @@ function withSiteHead(html, site) {
       `<link rel="alternate" hreflang="x-default" href="${attr(APP_URL)}/" />`,
     ];
   extra.push('<meta name="twitter:card" content="summary" />');
-  // The app draws a website page only from a document that carries this (src/site/served.ts).
-  extra.push('<meta name="epic-page" content="site" />');
+  // Whether the launch gate is up, so the app can draw the page at once when it
+  // is down and ask for a sign-in only while it is up (src/site/SiteScreen.tsx).
+  extra.push(`<meta name="epic-gate" content="${siteGateOn() ? 'on' : 'off'}" />`);
   return html
     .replace(/<html lang="[^"]*"/, `<html lang="${SITE.htmlLang[site.locale]}"`)
     .replace(/<title>[\s\S]*?<\/title>/, `<title>${attr(copy.title)}</title>`)
@@ -220,18 +221,18 @@ const server = http.createServer(guarded(async (req, res) => {
   // left for the app to answer (Codex, 1 Oct 2026).
   // While the gate is up the website is behind it (gate.mjs › siteLock): `/` stays
   // the app it has been, and the site's own pages ask for the gate's password.
-  const locked = siteLock(req);
   if (!siteGateOn() && pathname === '/' && !APP_ROOT_PARAMS.some((k) => new URLSearchParams(search).has(k))) {
     res.writeHead(302, { location: `/${localeOf(SITE, req)}/${search}`, 'cache-control': 'no-store', vary: 'Accept-Language, Cookie' });
     res.end();
     return;
   }
   const site = addressOf(SITE, pathname);
-  if (locked && (site || pathname === '/sitemap.xml')) {
-    const headers = { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store', 'x-robots-tag': 'noindex' };
-    if (locked.status === 401) headers['www-authenticate'] = 'Basic realm="Epic", charset="UTF-8"';
-    res.writeHead(locked.status, headers);
-    res.end(locked.status === 401 ? 'Epic is not open yet.' : 'Not found');
+  // While the gate is up there is no public sitemap; the pages themselves are
+  // served (noindex, above) and the app draws them only for somebody signed in.
+  // No password dialog: a signed-in person must never see one (owner, 2 Oct 2026).
+  if (siteGateOn() && pathname === '/sitemap.xml') {
+    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+    res.end('Not found');
     return;
   }
   if (pathname === '/sitemap.xml') {

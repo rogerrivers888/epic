@@ -18,7 +18,7 @@ import { loginLinkEmail, mailStatus, sendMail, webUrl } from '../sources/mail.js
 import { sendSms, smsStatus } from '../sources/sms.js';
 import { accessFor } from '../access.js';
 import { signInLockedOut, noteSignInFailure } from '../signInGuard.js';
-import { sessionBlockedByGate } from '../siteGate.js';
+import { sessionBlockedByGate, siteGateOn } from '../siteGate.js';
 
 const router = express.Router();
 
@@ -52,6 +52,10 @@ router.get('/session', async (req, res, next) => {
     if (!authConfigured()) {
       return res.json({ signedIn: false, configured: false, message: 'This Epic API has no passcode set yet.' });
     }
+    // Whether the launch gate is up: the website draws only for somebody signed
+    // in until it comes down (web › SiteScreen), so the app needs to know.
+    res.set('cache-control', 'no-store');
+    const gate = siteGateOn();
     const token = bearerOf(req);
     let session = token ? await findLiveSession(token) : null;
     // While the launch gate is up, a session minted before its cutoff is not a
@@ -62,12 +66,13 @@ router.get('/session', async (req, res, next) => {
     // A suspended account is signed out here as well as at the door, so the app
     // shows the sign-in screen rather than five screens' worth of 403s.
     if (account && account.status === 'suspended') {
-      return res.json({ signedIn: false, configured: true, session: null, account: null, suspended: true });
+      return res.json({ signedIn: false, configured: true, gate, session: null, account: null, suspended: true });
     }
     const access = await accessFor({ account, session });
     res.json({
       signedIn: Boolean(session),
       configured: true,
+      gate,
       session: session ? { id: session.id, label: session.label, since: session.created_at, until: session.expires_at } : null,
       // Who they are, and whether the admin module is theirs to see. The shared
       // passcode carries no account and is the owner (auth.js `requireOwner`),

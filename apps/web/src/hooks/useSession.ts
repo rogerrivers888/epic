@@ -3,7 +3,7 @@
  *
  * Three states, not two: `checking` while the API is being asked, and
  * `unconfigured` for an API that has no passcode set at all — which is a
- * different thing to tell somebody than "wrong passcode" (LockScreen).
+ * different thing to tell somebody than "signed out".
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -12,7 +12,7 @@ import { onSessionChange, sessionToken } from '../session';
 
 export type SessionState = 'checking' | 'in' | 'out' | 'unconfigured' | 'unreachable';
 
-export function useSession(): { state: SessionState; isOwner: boolean; account: AccountSummary | null; access: Access | null; recheck: () => void } {
+export function useSession(): { state: SessionState; isOwner: boolean; account: AccountSummary | null; access: Access | null; gate: boolean | null; recheck: () => void } {
   const [state, setState] = useState<SessionState>('checking');
   // Whether the admin module is theirs to see. The API decides this and the app
   // only draws what it is told: a customer who edited their own copy of the
@@ -22,6 +22,8 @@ export function useSession(): { state: SessionState; isOwner: boolean; account: 
   // Which applications this session may enter (api/src/access.js). The shell
   // draws the Admin profile from this; the API refuses it regardless.
   const [access, setAccess] = useState<Access | null>(null);
+  // Whether the launch gate is up; null until the API has said.
+  const [gate, setGate] = useState<boolean | null>(null);
 
   const check = useCallback(async () => {
     try {
@@ -30,6 +32,7 @@ export function useSession(): { state: SessionState; isOwner: boolean; account: 
       setIsOwner(Boolean(r.isOwner));
       setAccount(r.account ?? null);
       setAccess(r.access ?? null);
+      setGate(r.gate ?? false);
       setState(r.signedIn ? 'in' : 'out');
     } catch (err: any) {
       // A 401 is a clear answer; anything else means the API could not be
@@ -49,5 +52,5 @@ export function useSession(): { state: SessionState; isOwner: boolean; account: 
     if (!token) { setIsOwner(false); setAccount(null); setAccess(null); }
   }), []);
 
-  return { state, isOwner, account, access, recheck: check };
+  return { state, isOwner, account, access, gate, recheck: check };
 }

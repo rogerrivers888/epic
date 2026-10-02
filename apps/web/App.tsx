@@ -46,8 +46,8 @@ import { JoinScreen } from './src/screens/JoinScreen';
 import { OrderTicketScreen } from './src/screens/OrderTicketScreen';
 import { AdminApp, firstAdminScreen } from './src/admin/AdminApp';
 import { useActivity } from './src/hooks/useActivity';
-import { LockScreen } from './src/screens/LockScreen';
-import { LoginScreen } from './src/screens/LoginScreen';
+import { LoginScreen, safeNext } from './src/screens/LoginScreen';
+import { takeRememberedNext } from './src/afterSignIn';
 import { InScreen } from './src/screens/InScreen';
 import { SiteScreen } from './src/site/SiteScreen';
 import { AccountScreen } from './src/screens/AccountScreen';
@@ -336,7 +336,7 @@ function Routed() {
  * take away the one thing that still works.
  */
 function Gate({ route }: { route: Route }) {
-  const { query, setQuery, navigate } = useRouter();
+  const { href, query, setQuery, navigate } = useRouter();
   const { state, isOwner, access, recheck } = useSession();
   // A change of session identity — signing out, a timeout, or a different person
   // signing in on this browser — remounts the app below the gate, so no hook is
@@ -385,9 +385,11 @@ function Gate({ route }: { route: Route }) {
         // Land on the first screen their role can open, not a fixed one: a
         // Support member has the admin door but not the Overview's capability.
         const screen = firstAdminScreen(st.access);
-        const landing = toAdmin
+        // The page they were going to when they asked for the link, if it was
+        // asked for on this device in the last hour (afterSignIn.ts).
+        const landing = takeRememberedNext(safeNext) ?? (toAdmin
           ? (screen === 'filing' ? paths.filing('categories') : paths.admin(screen))
-          : paths.account();
+          : paths.account());
         navigate(landing, { replace: true });
         setRedeeming(false);
       } catch (err: any) {
@@ -410,9 +412,21 @@ function Gate({ route }: { route: Route }) {
     return () => clearInterval(t);
   }, [accessUnknown, recheck]);
 
-  if (redeeming || state === 'checking') return <View style={styles.waiting} />;
-  if (state === 'out' || state === 'unconfigured') {
-    return <LockScreen onIn={recheck} configured={state !== 'unconfigured'} notice={linkFailed} />;
+  // Signed out: a person signs in at /login with their own account — Google or
+  // email + password — and comes straight back to the page they asked for. The
+  // household passcode is never shown to a person; it is only the agents' way in,
+  // through the API (owner, 2 Oct 2026).
+  const signedOut = state === 'out' && !redeeming;
+  useEffect(() => {
+    if (!signedOut) return;
+    const back = href && href !== '/' ? `?next=${encodeURIComponent(href)}` : '';
+    const why = linkFailed ? `${back ? '&' : '?'}e=link` : '';
+    navigate(`${paths.login()}${back}${why}`, { replace: true });
+  }, [signedOut, href, linkFailed, navigate]);
+
+  if (redeeming || state === 'checking' || signedOut) return <View style={styles.waiting} />;
+  if (state === 'unconfigured') {
+    return <NotHere title="Epic is not set up on this server yet" body="The API has no sign-in configured." href={paths.inspire()} />;
   }
 
   // Two applications behind one sign-in, and the address says which you are in
