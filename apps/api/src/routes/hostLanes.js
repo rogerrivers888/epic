@@ -765,7 +765,12 @@ router.post('/host/lanes/payouts', async (req, res, next) => {
 router.post('/host/lanes/verify', async (req, res, next) => {
   try {
     const { household, account } = await me();
-    const host = await ensureHost(household, account);
+    const first = await ensureHost(household, account);
+    // One identity check at a time per host: two taps at once never open two sessions (Codex, 2 Oct 2026).
+    const lockClient = await pool.connect();
+    try {
+    await lockClient.query('select pg_advisory_lock(hashtext($1))', [`host-verify:${first.id}`]);
+    const host = await repo.hostById(first.id);
     if (host.identity_state === 'verified') return res.json({ url: null, verified: true });
     const back = `${appUrl()}/host/offers/${encodeURIComponent(str(req.body?.offerId, 40) ?? '')}/publish?back=verified`;
     // One open check at a time: a second tap carries on with the first session rather than
@@ -778,6 +783,10 @@ router.post('/host/lanes/verify', async (req, res, next) => {
     const s = await stripe.identitySession({ returnUrl: back, hostId: host.id, householdId: household.id });
     await repo.updateHost(host.id, { identitySessionId: s.id, identityState: 'pending', stripeMode: 'test' });
     res.json({ url: s.url });
+    } finally {
+      await lockClient.query('select pg_advisory_unlock(hashtext($1))', [`host-verify:${first.id}`]).catch(() => null);
+      lockClient.release();
+    }
   } catch (err) { next(err); }
 });
 
