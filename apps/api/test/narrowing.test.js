@@ -869,5 +869,6 @@ test('the gate proof: held or not per named place, can’t-speak for an unknown 
   // A check id that names no completed check cannot speak for "held", but the trace still can.
   const none = await surfacing.gateProof({ names: ['St Gateproof Plain'], checkId: '00000000-0000-0000-0000-000000000000' });
   assert.equal(none.places[0].held, null, 'no completed check: never a false "surfaces"');
+  assert.equal(none.filedElsewhere, null, 'and the leak count cannot speak either');
   assert.equal(none.places[0].liveHeld, true);
 });

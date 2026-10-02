@@ -482,11 +482,16 @@ export async function surfacingReport({ examples = 10 } = {}) {
  * unchanged. Uncapped: absence is claimed from a count, not from a capped list.
  */
 export async function gateProof({ names = [], checkId = null } = {}) {
-  const scope = checkId ? 'and s.check_id = $2' : '';
   const he = await heritageLoad();
+  // One completed check, named or the latest, read the same way everywhere. A
+  // check running now rewrites the stored rows as it goes, so while one runs the
+  // stored side cannot speak (Codex: never a mixed snapshot as a proof).
+  const { rows: [running] } = await query(`select id from surfacing_checks where state = 'running' limit 1`);
   const { rows: [done] } = await query(
-    `select 1 as ok from surfacing_checks where state = 'done' ${checkId ? 'and id = $1' : ''} limit 1`, checkId ? [checkId] : []);
-  const haveCheck = Boolean(done);
+    `select id from surfacing_checks where state = 'done' ${checkId ? 'and id = $1' : ''}
+      order by finished_at desc nulls last limit 1`, checkId ? [checkId] : []);
+  const readCheck = !running && done ? done.id : null;
+  const cantRead = running ? 'a narrowing check is running now' : checkId ? 'that check did not complete' : 'no completed narrowing check to read';
   const places = [];
   for (const raw of names.map((n) => String(n).trim()).filter(Boolean).slice(0, 40)) {
     const { rows } = await query(
@@ -494,47 +499,51 @@ export async function gateProof({ names = [], checkId = null } = {}) {
         union select coalesce(venue_ref, 'atlas:' || id::text) from attractions where name ilike $1`, [raw]);
     const seeds = rows.map((r) => r.ref);
     if (!seeds.length) { places.push({ name: raw, records: 0, held: null, why: 'no record of that name is held' }); continue; }
-    const { membersOf } = await aliasClosure(seeds);
-    const members = [...new Set([...seeds, ...[...membersOf.values()].flat()])];
-    const { rows: heldRows } = await query(
-      `select distinct s.venue_ref, s.applied, s.check_id from place_surfacing_members m
-         join place_surfacing s on s.venue_ref = m.venue_ref and not s.surfaced
-        where m.member_ref = any($1::text[]) ${scope}`, checkId ? [members, checkId] : [members]);
-    // The live trace, so a place can be followed before any check has run: which
-    // drawers each copy is filed in, what we hold about it, and the bar's verdict.
-    const [signals, filings, elsewhere] = await Promise.all([
-      gatherSignals(members, { heritageLoad: he.load }),
-      query(`select f.venue_ref as ref, array_agg(distinct f.sub) as subs from (${FILED_SQL}) f
-              where f.venue_ref = any($1::text[]) group by f.venue_ref`, [members]),
-      filedElsewhere(members),
-    ]);
-    const filedIn = new Map(filings.rows.map((r) => [r.ref, r.subs]));
-    const trace = members.map((ref) => {
-      const sg = signals.get(ref) ?? { ref, heritageAvailable: false, heritage: null };
-      const v = notable(sg);
-      return {
-        ref, filedIn: filedIn.get(ref) ?? [], ownedName: sg.name ?? null, nation: sg.nation ?? null,
-        hasWikipedia: !!sg.hasWikipedia, heritage: sg.heritage, heritageAvailable: !!sg.heritageAvailable,
-        verdict: v.status, why: v.reason,
-      };
-    });
-    const narrowedOnly = trace.some((t) => t.filedIn.some((k) => NARROWED.includes(k)))
-      && !members.some((m) => elsewhere.has(m));
-    const liveHeld = narrowedOnly && !trace.some((t) => t.verdict === 'kept');
-    places.push({
-      name: raw, records: members.length,
-      // With no completed check there is nothing stored to be held by: can't speak,
-      // never a "surfaces" that only means no rows were written yet.
-      held: haveCheck ? heldRows.length > 0 : null,
-      ...(haveCheck ? {} : { why: 'no completed narrowing check to read' }),
-      heldBy: heldRows.map((r) => r.venue_ref),
-      liveHeld, trace,
-    });
+    const { rootOf, membersOf } = await aliasClosure(seeds);
+    // Two places can share a name ("St Mary's Church"): each alias cluster is its
+    // own place, judged on its own (Codex).
+    const roots = [...new Set(seeds.map((r) => rootOf.get(r) ?? r))];
+    for (const root of roots) {
+      const members = [...new Set(membersOf.get(root) ?? [root])];
+      const { rows: heldRows } = readCheck ? await query(
+        `select distinct s.venue_ref from place_surfacing_members m
+           join place_surfacing s on s.venue_ref = m.venue_ref and not s.surfaced
+          where m.member_ref = any($1::text[]) and s.check_id = $2`, [members, readCheck]) : { rows: [] };
+      // The live trace, so a place can be followed before any check has run: which
+      // drawers each copy is filed in, what we hold about it, and the bar's verdict.
+      const [signals, filings, elsewhere] = await Promise.all([
+        gatherSignals(members, { heritageLoad: he.load }),
+        query(`select f.venue_ref as ref, array_agg(distinct f.sub) as subs from (${FILED_SQL}) f
+                where f.venue_ref = any($1::text[]) group by f.venue_ref`, [members]),
+        filedElsewhere(members),
+      ]);
+      const filedIn = new Map(filings.rows.map((r) => [r.ref, r.subs]));
+      const trace = members.map((ref) => {
+        const sg = signals.get(ref) ?? { ref, heritageAvailable: false, heritage: null };
+        const v = notable(sg);
+        return {
+          ref, filedIn: filedIn.get(ref) ?? [], ownedName: sg.name ?? null, nation: sg.nation ?? null,
+          hasWikipedia: !!sg.hasWikipedia, heritage: sg.heritage, heritageAvailable: !!sg.heritageAvailable,
+          verdict: v.status, why: v.reason,
+        };
+      });
+      const narrowedOnly = trace.some((t) => t.filedIn.some((k) => NARROWED.includes(k)))
+        && !members.some((m) => elsewhere.has(m));
+      places.push({
+        name: raw, cluster: root, records: members.length,
+        held: readCheck ? heldRows.length > 0 : null,
+        ...(readCheck ? {} : { why: cantRead }),
+        heldBy: heldRows.map((r) => r.venue_ref),
+        liveHeld: narrowedOnly && !trace.some((t) => t.verdict === 'kept'),
+        trace,
+      });
+    }
   }
+  if (!readCheck) return { checkId: null, why: cantRead, places, snapshotRecords: null, filedElsewhere: null, leakedExamples: [] };
   const { rows: snap } = await query(
     `select distinct m.member_ref as ref from place_surfacing_members m
        join place_surfacing s on s.venue_ref = m.venue_ref and not s.surfaced
-      where true ${checkId ? 'and s.check_id = $1' : ''}`, checkId ? [checkId] : []);
+      where s.check_id = $1`, [readCheck]);
   const leaked = await filedElsewhere(snap.map((r) => r.ref));
-  return { checkId, places, snapshotRecords: snap.length, filedElsewhere: leaked.size, leakedExamples: [...leaked].slice(0, 10) };
+  return { checkId: readCheck, places, snapshotRecords: snap.length, filedElsewhere: leaked.size, leakedExamples: [...leaked].slice(0, 10) };
 }
