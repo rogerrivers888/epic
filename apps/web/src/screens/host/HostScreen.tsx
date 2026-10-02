@@ -29,7 +29,7 @@ import { useRouter, useQueryState, asOneOf } from '../../router';
 import { paths, type Route } from '../../routes';
 import { HostFace, mediaUrl, priceWords, SHAPE_ICON, STATE_LABEL, TRUST_LABEL } from '../../components/hosting';
 import { t, k, Tag, Segments } from '../../components/hostKit';
-import { Section, Kicker, SummaryCells, Grid2, DateCol, FillBar, NavRow, gbp, todayIso, dateOf, offerDateGroups } from './hostTabKit';
+import { Section, Kicker, SummaryCells, Grid2, EqualTable, DateCol, FillBar, NavRow, gbp, todayIso, dateOf, offerDateGroups } from './hostTabKit';
 import { LearnExample, LearnExamples, LearnHome, LearnShape, LearnWho } from './Learn';
 import { OfferWizard } from './OfferWizard';
 import { OfferDashboard } from './OfferDashboard';
@@ -158,7 +158,8 @@ function UpcomingTab({ home, money, open, navigate }: { home: HostHome; money: H
     if (single) navigate(paths.hostOffer(r.offer.id)); else open({ activity: r.offer.id, when: 'upcoming' });
   };
   return (
-    <View style={styles.pad}>
+    // The cells sit 6px under the tab bar (SX15), so no top pad here.
+    <View style={[styles.pad, { paddingTop: 0 }]}>
       <SummaryCells cells={[
         { n: String(dates), label: dates === 1 ? 'date' : 'dates' },
         { n: String(booked), label: 'booked' },
@@ -243,7 +244,7 @@ function StatsTab({ home, money, open, onMoney }: { home: HostHome; money: HostM
         />
       </View>
 
-      <View style={{ marginTop: 14 }}>
+      <View>
         <Grid2 cells={[
           { n: String(times), label: 'times hosted' },
           { n: String(guests), label: 'guests' },
@@ -255,22 +256,23 @@ function StatsTab({ home, money, open, onMoney }: { home: HostHome; money: HostM
       <Section title="Profile views" />
       <Text style={[t.small, { lineHeight: 18 }]}>Profile views aren't tracked yet — this fills in once they are.</Text>
 
-      <Section title="By activity" />
-      <View style={styles.actHead}>
-        <Text style={[styles.actH, { flex: 2 }]}>Activity</Text>
-        <Text style={[styles.actH, { flex: 1, textAlign: 'center' }]}>Times</Text>
-        <Text style={[styles.actH, { flex: 1, textAlign: 'center' }]}>Guests</Text>
-        <Text style={[styles.actH, { flex: 1.2, textAlign: 'right' }]}>{money?.paymentsReady ? 'Collected' : 'Recorded'}</Text>
-      </View>
-      {per.filter((p) => p.times > 0).length === 0 ? <Text style={[t.small, { paddingVertical: 10 }]}>Nothing in this period yet.</Text>
-        : per.filter((p) => p.times > 0).map((p) => (
-          <Press key={p.offer.id} onPress={() => open({ activity: p.offer.id, when: 'past' })} accessibilityRole="button" style={styles.actRow}>
-            <Text style={[styles.actCell, { flex: 2, fontWeight: '600' }]} numberOfLines={1}>{p.offer.title ?? 'Untitled'}</Text>
-            <Text style={[styles.actCell, { flex: 1, textAlign: 'center' }]}>{p.times}</Text>
-            <Text style={[styles.actCell, { flex: 1, textAlign: 'center' }]}>{p.guests}</Text>
-            <Text style={[styles.actCell, { flex: 1.2, textAlign: 'right' }]}>{gbp(p.pence)}</Text>
-          </Press>
-        ))}
+      {/* SX12: four equal, left-aligned columns. */}
+      <Section title="By activity" flush />
+      {per.filter((p) => p.times > 0).length === 0 ? (
+        <>
+          <EqualTable head={['Activity', 'Times', 'Guests', money?.paymentsReady ? 'Collected' : 'Recorded']} rows={[]} />
+          <Text style={[t.small, { paddingVertical: 10 }]}>Nothing in this period yet.</Text>
+        </>
+      ) : (
+        <EqualTable
+          head={['Activity', 'Times', 'Guests', money?.paymentsReady ? 'Collected' : 'Recorded']}
+          rows={per.filter((p) => p.times > 0).map((p) => ({
+            key: p.offer.id,
+            cells: [p.offer.title ?? 'Untitled', String(p.times), String(p.guests), gbp(p.pence)],
+            onPress: () => open({ activity: p.offer.id, when: 'past' }),
+          }))}
+        />
+      )}
 
       <Press onPress={onMoney} accessibilityRole="button" style={{ paddingVertical: 16 }}>
         <Text style={[t.link, { fontSize: 13.5 }]}>Statements and payouts ›</Text>
@@ -421,10 +423,6 @@ const styles = StyleSheet.create({
   levelKicker: { fontFamily: fonts.body, fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8, color: colors.accent },
   levelTrack: { height: 6, backgroundColor: colors.surface },
   levelFill: { height: 6, backgroundColor: LIME },
-  actHead: { flexDirection: 'row', gap: 8, paddingBottom: 6, borderBottomWidth: BORDER, borderBottomColor: colors.line },
-  actH: { fontFamily: fonts.body, fontSize: 11, fontWeight: '700', letterSpacing: 0.4, textTransform: 'uppercase', color: colors.inkMuted },
-  actRow: { flexDirection: 'row', gap: 8, alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
-  actCell: { fontFamily: fonts.body, fontSize: 13.5, color: colors.ink },
   // Money.
   payout: { backgroundColor: colors.surfaceMuted, padding: 16, gap: 2 },
   payoutBig: { fontFamily: fonts.heading, fontSize: 40, fontWeight: '800', letterSpacing: -1, color: colors.ink, lineHeight: 44 },

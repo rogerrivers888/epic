@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Press } from './press';
-import { LIME, INK, CREAM, TAB_UNSELECTED, MENU_DIVIDER, fonts } from '../theme';
+import { LIME, INK, CREAM, TAB_UNSELECTED, fonts } from '../theme';
 
 /**
  * The ink menu (New navigation, owner 30 Sep 2026, §5): the one treatment for
@@ -17,6 +17,9 @@ import { LIME, INK, CREAM, TAB_UNSELECTED, MENU_DIVIDER, fonts } from '../theme'
  * `selected == null` is the "nothing selected" state (a trip on arrival, 6a):
  * every cell is cream at one weight with no marker, so all options read as
  * equal. Tapping the selected tab again is the caller's job — pass `null` back.
+ *
+ * No rule between the cells (owner, 2 Oct 2026): the README's 1px × 20px
+ * divider is dropped to match the Settings revised v2 menus, which draw none.
  */
 export type InkTab<T extends string> = { key: T; label: string; count?: number };
 
@@ -34,34 +37,32 @@ export function InkMenu<T extends string>({ tabs, selected, onSelect, flyToKey }
   const nothing = selected == null;
   return (
     <View style={styles.bar} accessibilityRole="tablist">
-      {tabs.map((t, i) => {
+      {tabs.map((t) => {
         const on = !nothing && t.key === selected;
         // A count shows only while a tab is not the selected one — "Shortlist · 5"
         // — and drops when selected, because the bold label needs the room and the
         // drawer header already carries it (§5, Counts).
         const label = t.count != null && !on ? `${t.label} · ${t.count}` : t.label;
         return (
-          <React.Fragment key={t.key}>
-            {i > 0 ? <View style={[styles.divider, nothing ? styles.dividerFlush : styles.dividerNudged]} /> : null}
-            <Press
-              onPress={() => onSelect(t.key)}
-              style={[styles.cell, nothing ? styles.cellFlat : (on ? styles.cellOn : styles.cellOff)]}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: on }}
+          <Press
+            key={t.key}
+            onPress={() => onSelect(t.key)}
+            style={[styles.cell, nothing ? styles.cellFlat : (on ? styles.cellOn : styles.cellOff)]}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: on }}
+          >
+            <Text
+              numberOfLines={1}
+              style={[
+                styles.label,
+                { fontSize: fs, letterSpacing: fs * (on && tabs.length <= 2 ? -0.02 : -0.01) },
+                nothing ? styles.labelFlat : (on ? styles.labelOn : styles.labelOff),
+              ]}
             >
-              <Text
-                numberOfLines={1}
-                style={[
-                  styles.label,
-                  { fontSize: fs, letterSpacing: fs * (on && tabs.length <= 2 ? -0.02 : -0.01) },
-                  nothing ? styles.labelFlat : (on ? styles.labelOn : styles.labelOff),
-                ]}
-              >
-                {label}
-              </Text>
-              {t.key === flyToKey ? <View {...({ dataSet: { flyTo: '1' } } as object)} pointerEvents="none" style={styles.flyMark} /> : null}
-            </Press>
-          </React.Fragment>
+              {label}
+            </Text>
+            {t.key === flyToKey ? <View {...({ dataSet: { flyTo: '1' } } as object)} pointerEvents="none" style={styles.flyMark} /> : null}
+          </Press>
         );
       })}
     </View>
@@ -82,9 +83,4 @@ const styles = StyleSheet.create({
   labelOn: { fontWeight: '800', color: CREAM },
   labelOff: { fontWeight: '500', color: TAB_UNSELECTED },
   labelFlat: { fontWeight: '600', color: CREAM },
-  // A 1px × 20px rule between every pair, vertically centred; nudged up 4px to
-  // sit on the text rather than the marker when one is showing.
-  divider: { width: 1, height: 20, backgroundColor: MENU_DIVIDER, alignSelf: 'center' },
-  dividerNudged: { marginTop: -4 },
-  dividerFlush: { marginTop: 0 },
 });

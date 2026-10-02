@@ -35,9 +35,10 @@ export function DateCol({ iso }: { iso: string }) {
 }
 
 /** A section head: 19px/800 on a 2px ink rule. */
-export function Section({ title, right }: { title: string; right?: React.ReactNode }) {
+export function Section({ title, right, flush }: { title: string; right?: React.ReactNode; flush?: boolean }) {
+  // `flush`: a table's own header sits straight under the rule (SX12, SX13b).
   return (
-    <View style={kit.section}>
+    <View style={[kit.section, flush && { marginBottom: 0 }]}>
       <Text style={kit.sectionText}>{title}</Text>
       {right ?? null}
     </View>
@@ -49,30 +50,71 @@ export function Kicker({ children }: { children: React.ReactNode }) {
   return <Text style={kit.kicker}>{children}</Text>;
 }
 
-/** Equal summary cells with a 26px number and a label (SX15 Dates·Booked·Collected). */
+/**
+ * Equal summary cells (SX15 Dates · Booked · Collected), measured from the
+ * prototype: no fill — an 11px kicker over a 26px/800 number, 4px apart, each
+ * cell ruled 1px underneath and every cell after the first ruled 1px on its
+ * left, padded 14 / 10 / 16 with 12px inside that rule.
+ */
 export function SummaryCells({ cells }: { cells: { n: string; label: string }[] }) {
   return (
     <View style={kit.cells}>
       {cells.map((c, i) => (
-        <View key={i} style={kit.cell}>
+        <View key={i} style={[kit.cell, i > 0 && kit.cellNext]}>
+          <Text style={kit.kicker} numberOfLines={1}>{c.label}</Text>
           <Text style={kit.cellN} numberOfLines={1}>{c.n}</Text>
-          <Text style={kit.cellLabel} numberOfLines={1}>{c.label}</Text>
         </View>
       ))}
     </View>
   );
 }
 
-/** A 2×2 grid of labelled numbers (SX12, SX13b all-time). */
+/** A 2×2 grid of labelled numbers (SX12, SX13b all-time): the same cells at 30px, two to a row. */
 export function Grid2({ cells }: { cells: { n: string; label: string }[] }) {
   return (
     <View style={kit.grid}>
       {cells.map((c, i) => (
-        <View key={i} style={kit.gridCell}>
+        <View key={i} style={[kit.gridCell, i % 2 === 1 && kit.gridCellRight]}>
+          <Text style={kit.kicker} numberOfLines={1}>{c.label}</Text>
           <Text style={kit.gridN} numberOfLines={1}>{c.n}</Text>
-          <Text style={kit.cellLabel} numberOfLines={1}>{c.label}</Text>
         </View>
       ))}
+    </View>
+  );
+}
+
+/**
+ * A table of equal, left-aligned columns (SX12 By activity, SX13b Past dates):
+ * an 11px kicker header over a 1px rule, then 14px rows 12px tall-padded, each
+ * on its own 1px rule. The first column is bold; a row that opens something
+ * ends its last cell with a faint chevron.
+ */
+export function EqualTable({ head, rows, size = 14, firstWeight = '700' }: {
+  head: string[];
+  rows: { key: string; cells: React.ReactNode[]; onPress?: () => void }[];
+  size?: number;
+  /** SX12's activity names are 700; SX13b's dates are 600. */
+  firstWeight?: '600' | '700';
+}) {
+  return (
+    <View>
+      <View style={kit.tHead}>
+        {head.map((h, i) => <Text key={i} style={[kit.kicker, kit.tCol]} numberOfLines={1}>{h}</Text>)}
+      </View>
+      {rows.map((r) => {
+        const body = (
+          <View style={kit.tRow}>
+            {r.cells.map((c, i) => {
+              const last = i === r.cells.length - 1;
+              const text = <Text style={[kit.tCell, { fontSize: size }, i === 0 && [kit.tFirst, { fontWeight: firstWeight }]]}>{c}</Text>;
+              return last && r.onPress
+                ? <View key={i} style={[kit.tCol, kit.tLast]}>{text}<Icon name="more" size={14} color={colors.inkFaint} strokeWidth={2} /></View>
+                : <View key={i} style={kit.tCol}>{text}</View>;
+            })}
+          </View>
+        );
+        return r.onPress ? <Press key={r.key} onPress={r.onPress} accessibilityRole="button">{body}</Press> : <View key={r.key}>{body}</View>;
+      })}
     </View>
   );
 }
@@ -125,13 +167,21 @@ export const kit = StyleSheet.create({
   section: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: 24, marginBottom: 12, borderBottomWidth: BORDER, borderBottomColor: colors.line, paddingBottom: 6 },
   sectionText: { fontFamily: fonts.heading, fontSize: 19, fontWeight: '800', letterSpacing: -0.38, color: colors.ink },
   kicker: { fontFamily: fonts.body, fontSize: 11, fontWeight: '700', letterSpacing: 0.88, textTransform: 'uppercase', color: colors.inkMuted },
-  cells: { flexDirection: 'row', gap: 8 },
-  cell: { flex: 1, backgroundColor: colors.surfaceMuted, paddingVertical: 12, paddingHorizontal: 10, minWidth: 0 },
-  cellN: { fontFamily: fonts.heading, fontSize: 26, fontWeight: '800', letterSpacing: -0.6, color: colors.ink, lineHeight: 30 },
-  cellLabel: { fontFamily: fonts.body, fontSize: 11.5, fontWeight: '600', color: colors.inkMuted, lineHeight: 15 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  gridCell: { width: '48%' as any, flexGrow: 1, backgroundColor: colors.surfaceMuted, paddingVertical: 14, paddingHorizontal: 12, minWidth: 0 },
-  gridN: { fontFamily: fonts.heading, fontSize: 28, fontWeight: '800', letterSpacing: -0.7, color: colors.ink, lineHeight: 32 },
+  cells: { flexDirection: 'row', marginTop: 6 },
+  cell: { flex: 1, minWidth: 0, gap: 4, paddingTop: 14, paddingRight: 10, paddingBottom: 16, paddingLeft: 0, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
+  cellNext: { paddingLeft: 12, borderLeftWidth: 1, borderLeftColor: colors.ruleSoft },
+  cellN: { fontFamily: fonts.heading, fontSize: 26, fontWeight: '800', letterSpacing: -0.78, color: colors.ink, lineHeight: 26 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6 },
+  gridCell: { width: '50%' as any, minWidth: 0, gap: 4, paddingTop: 14, paddingRight: 14, paddingBottom: 16, paddingLeft: 0, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
+  gridCellRight: { paddingLeft: 14, borderLeftWidth: 1, borderLeftColor: colors.ruleSoft },
+  gridN: { fontFamily: fonts.heading, fontSize: 30, fontWeight: '800', letterSpacing: -0.9, color: colors.ink, lineHeight: 30 },
+  // equal-column tables (SX12, SX13b)
+  tHead: { flexDirection: 'row', gap: 10, paddingTop: 10, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
+  tRow: { flexDirection: 'row', gap: 10, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft, alignItems: 'baseline' },
+  tCol: { flex: 1, minWidth: 0 },
+  tLast: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4 },
+  tCell: { fontFamily: fonts.body, color: colors.ink, textAlign: 'left' },
+  tFirst: { lineHeight: 17.5 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 52, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
   rowTile: { width: 40, height: 40, backgroundColor: colors.warm, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   rowLabel: { flex: 1, fontFamily: fonts.body, fontSize: 16, fontWeight: '600', color: colors.ink },

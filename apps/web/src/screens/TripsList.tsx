@@ -50,7 +50,7 @@ export type TripsWhen = 'upcoming' | 'past' | 'ideas' | 'hosts';
 const WHENS: { key: TripsWhen; label: string }[] = [
   { key: 'upcoming', label: 'Upcoming' },
   { key: 'hosts', label: 'Booked with hosts' },
-  { key: 'past', label: 'Past' },
+  { key: 'past', label: 'Been' },
   { key: 'ideas', label: 'Ideas' },
 ];
 
@@ -178,7 +178,7 @@ export function TripsList({ trips, bookings, loading, error, span, when, onSpan,
               <View style={styles.section}><SectionHeader title="Ideas" count={ideas.length} /><View style={grid ? styles.cardGrid : undefined}>{ideas.map(row)}</View></View>
             ) : null}
             {past.length ? (
-              <View style={styles.section}><SectionHeader title="Past" count={past.length} /><View style={grid ? styles.cardGrid : undefined}>{past.map(row)}</View></View>
+              <View style={styles.section}><SectionHeader title="Been" count={past.length} /><View style={grid ? styles.cardGrid : undefined}>{past.map(row)}</View></View>
             ) : null}
             {hostsLive.length ? (
               <View style={styles.section}><SectionHeader title="Booked with hosts" count={hostsLive.length} /><BookingRows bookings={bookings ?? []} onOpen={(b) => onOpenBooking?.(b)} /></View>

@@ -134,6 +134,9 @@ export function MediaCard({ thumb, name, muted, wide, selected, onPress, childre
   );
 }
 
+/** The first letter raised and nothing else touched, so "Food & drink" stays as written. */
+export const sentenceCase = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+
 /**
  * A shelf's title, with "All N ›" opposite — the door into the whole of it.
  * One component so the shelves and the drill-down cannot drift apart.
@@ -155,12 +158,16 @@ export function SectionHead({ title, count, floor, estimated, onAll }: { title: 
    * 2026). It must not read as a measured journey-time count when it is not.
    */
   const said = `${estimated ? '~' : ''}${count.toLocaleString('en-GB')}${floor ? '+' : ''}`;
+  // Sentence case at render (4a: "Fun", "Culture"): a category's label arrives
+  // as the taxonomy holds it, often lowercase ("culture"), and the data keeps
+  // its own spelling — only the first letter is raised here.
+  const heading = sentenceCase(title);
   // New navigation (owner, 30 Sep 2026, §6): title case, the count beside the
   // title in muted, and "See all ›" right-aligned in moss — not a count and a
   // chevron on the right.
   const left = (
     <View style={styles.sectionLeft}>
-      <Text style={styles.sectionTitle}>{title}</Text>
+      <Text style={styles.sectionTitle}>{heading}</Text>
       <Text style={styles.sectionCount}>{said}</Text>
     </View>
   );
@@ -168,7 +175,7 @@ export function SectionHead({ title, count, floor, estimated, onAll }: { title: 
     return <View style={styles.sectionHead}>{left}</View>;
   }
   return (
-    <Press onPress={onAll} style={styles.sectionHead} accessibilityRole="button" accessibilityLabel={`See all ${title}, ${said}`}>
+    <Press onPress={onAll} style={styles.sectionHead} accessibilityRole="button" accessibilityLabel={`See all ${heading}, ${said}`}>
       {left}
       <Text style={styles.seeAll}>See all ›</Text>
     </Press>

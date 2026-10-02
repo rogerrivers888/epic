@@ -30,6 +30,7 @@ import { InkMenu } from '../components/InkMenu';
 import { Sheet } from '../components/Sheet';
 import { showToast } from '../components/Toast';
 import { useSession } from '../hooks/useSession';
+import { isHouseholdOwner, personRole } from './personRole';
 
 const FOOD_KINDS = ['dish', 'cuisine', 'ingredient', 'style'];
 const ACTIVITY_KINDS = ['experience'];
@@ -91,15 +92,16 @@ function PersonProfile({ data, member, refresh }: { data: HouseholdResponse; mem
   const isYou = member.id === data.me;
   const joined = member.access?.status === 'active';
   const isChild = member.age != null ? member.age < 18 : member.isMinor;
-  const pending = member.access?.status === 'invited';
+  // The role and the invite block come from personRole: the owner's own page
+  // asks the session, not the account linked to their person (design audit,
+  // 2 Oct 2026 — the owner saw "Invited", "Parent" and ADULT on themselves).
+  const { owner, pending, role } = personRole(data, member);
   // Matching the server's canEditPerson: everyone edits themselves; a child
   // edits nobody else; an adult manages the children (even with a phone of
   // their own) and anyone invited who has not joined (Codex, 2 Oct 2026).
   const viewer = data.members.find((m) => m.id === data.me);
   const viewerIsChild = viewer ? (viewer.age != null ? viewer.age < 18 : viewer.isMinor) : false;
   const canEdit = isYou || (!viewerIsChild && (isChild || !joined));
-  const owner = Boolean(member.access?.isLead);
-  const role = owner ? 'OWNER' : isChild ? 'CHILD' : 'ADULT';
   const adultName = data.members.find((m) => !m.isMinor && m.id !== member.id)?.name;
 
   const [tab, setTab] = useQueryState<'food' | 'things'>('tastes', 'food', asOneOf(['food', 'things'] as const, 'food'));
@@ -260,19 +262,21 @@ function TasteGroup({ member, refresh, kind, activity, canEdit }: { member: Memb
   const add = async (value: string, conceptKey?: string) => { try { await api.addConstraint(member.id, { kind, value, conceptKey }); } catch (e: any) { showToast(e?.body?.message || 'Already on the other list'); } await refresh(); };
   const remove = async (c: Constraint) => { await api.deleteConstraint(c.id); await refresh(); };
   const toggleFav = async (c: Constraint) => { if (kind !== 'like') return; await api.updateConstraint(c.id, { favourite: !c.favourite }); await refresh(); };
-  const title = kind === 'like' ? (activity ? 'Loves doing · tap for a favourite' : 'Likes · tap for a favourite') : (activity ? 'Would rather not' : 'Dislikes');
+  // "· tap for a favourite" only where a tap does something (SE3b: read-only reads "Likes").
+  const title = kind === 'like' ? `${activity ? 'Loves doing' : 'Likes'}${canEdit ? ' · tap for a favourite' : ''}` : (activity ? 'Would rather not' : 'Dislikes');
 
   return (
-    <View style={{ gap: 8 }}>
+    // The panel's 16px gap, with the chips pulled 6px up under their kicker (SE3).
+    <View style={{ gap: 16 }}>
       <Text style={styles.kicker}>{title}</Text>
-      <Wrap>
+      {items.length || !canEdit ? <Wrap style={{ gap: 8, marginTop: -6 }}>
         {items.map((c) => (
-          <Chip key={c.id} label={c.value} tone={kind === 'like' ? 'like' : 'dislike'} icon={kind === 'like' && c.favourite ? 'favourite' : undefined} iconFill
+          <TasteChip key={c.id} label={c.value} favourite={kind === 'like' && Boolean(c.favourite)}
             onPress={kind === 'like' && canEdit ? () => toggleFav(c) : undefined}
             onRemove={canEdit ? () => remove(c) : undefined} />
         ))}
         {!items.length && !canEdit ? <Text style={type.tiny}>Nothing set</Text> : null}
-      </Wrap>
+      </Wrap> : null}
       {canEdit ? (
         <>
           <SuggestInput
@@ -283,6 +287,34 @@ function TasteGroup({ member, refresh, kind, activity, canEdit }: { member: Memb
           />
           {picking ? <TastePicker section={activity ? 'activities' : 'food'} mode={kind} already={have} onPick={(p) => add(p.label, p.key)} onClose={() => setPicking(false)} /> : null}
         </>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * A like or dislike (SE3, measured from the prototype's chip): a 38px warm-grey
+ * block, no rule, 14px/600 ink; the label is its own target (12px in, 4px out)
+ * and toggles the favourite — a 15px star filled lime with an ink edge — and a
+ * separate 30px-wide × in muted grey removes it. Not the shared `Chip`: that
+ * one is a 2px-ruled tone chip, which is not what the person page draws.
+ */
+function TasteChip({ label, favourite, onPress, onRemove }: { label: string; favourite: boolean; onPress?: () => void; onRemove?: () => void }) {
+  const body = (
+    <>
+      {favourite ? <Icon name="favourite" size={15} color={INK} fill fillColor={LIME} strokeWidth={1.8} /> : null}
+      <Text style={styles.tasteText} numberOfLines={1}>{label}</Text>
+    </>
+  );
+  return (
+    <View style={styles.tasteChip}>
+      {onPress
+        ? <Press onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: favourite }} accessibilityLabel={favourite ? `${label}, a favourite` : label} style={styles.tasteLabel}>{body}</Press>
+        : <View style={styles.tasteLabel}>{body}</View>}
+      {onRemove ? (
+        <Press onPress={onRemove} accessibilityRole="button" accessibilityLabel={`Remove ${label}`} style={styles.tasteRemove}>
+          <Icon name="close" size={13} color={colors.inkMuted} strokeWidth={2.6} />
+        </Press>
       ) : null}
     </View>
   );
@@ -505,7 +537,6 @@ export async function pickSquarePhoto(source: 'camera' | 'library', { aspect = [
 function EditSheet({ data, member, refresh, canEdit, onClose }: { data: HouseholdResponse; member: Member; refresh: () => Promise<void>; canEdit: boolean; onClose: () => void }) {
   const { navigate } = useRouter();
   const isYou = member.id === data.me;
-  const owner = Boolean(member.access?.isLead);
   const [name, setName] = useState(member.name);
   const [rel, setRel] = useState(member.relationship ?? '');
   const [birth, setBirth] = useState<string | null>(member.birthDate ?? null);
@@ -515,7 +546,7 @@ function EditSheet({ data, member, refresh, canEdit, onClose }: { data: Househol
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const isPending = member.access?.status === 'invited';
+  const isPending = personRole(data, member).pending;
   const numberChanged = (mobile.trim() || null) !== (member.mobile ?? null);
   const age = birth ? ageFromISO(birth) : member.age;
   const thirteenPlus = age == null ? !member.isMinor : age >= 13;
@@ -600,7 +631,7 @@ function EditSheet({ data, member, refresh, canEdit, onClose }: { data: Househol
     <Sheet title={`${first(member.name)}'s details`} fromTop={56} onCancel={onClose} cancelLabel="Cancel" onDone={canEdit ? save : onClose} doneLabel={canEdit ? 'Save' : 'Done'} doneDisabled={busy} onClose={onClose}>
       <Field label="Name"><TextInput editable={canEdit} value={name} onChangeText={setName} style={styles.input} placeholderTextColor={colors.inkFaint} /></Field>
       {!isYou ? (
-        <Field label={`Relationship to ${first(data.members.find((m) => m.access?.isLead)?.name ?? 'you')}`}>
+        <Field label={`Relationship to ${first(data.members.find((m) => isHouseholdOwner(data, m))?.name ?? 'you')}`}>
           <Wrap>{RELATIONSHIPS.map((r) => <Chip key={r} label={RELATIONSHIP_LABEL[r]} selected={rel === r} onPress={canEdit ? () => setRel(r) : undefined} />)}</Wrap>
         </Field>
       ) : null}
@@ -660,6 +691,11 @@ const styles = StyleSheet.create({
   joinedText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.accent },
   menuWrap: { marginTop: 4 },
   panel: { padding: 22, gap: 16 },
+  // likes / dislikes (SE3)
+  tasteChip: { flexDirection: 'row', alignItems: 'center', height: 38, maxWidth: '100%', backgroundColor: colors.warm },
+  tasteLabel: { flexDirection: 'row', alignItems: 'center', gap: 6, height: '100%', paddingLeft: 12, paddingRight: 4, flexShrink: 1, minWidth: 0 },
+  tasteText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.ink, flexShrink: 1 },
+  tasteRemove: { width: 30, height: '100%', alignItems: 'center', justifyContent: 'center' },
   kicker: { fontFamily: fonts.body, fontSize: 11, fontWeight: '700', letterSpacing: 0.88, textTransform: 'uppercase', color: colors.inkMuted },
   // diet dropdown
   dropdown: { height: 48, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, borderWidth: 1.5, borderColor: colors.ruleSoft },

@@ -9,7 +9,7 @@ import {
   Eye, Upload, Image as ImageIcon, Gift, CreditCard, Wallet, Pause, Play, Keyboard, IdCard, ScanFace, Accessibility,
   Bike, Binoculars, Blocks, BookOpen, Castle, Clapperboard, Drama, Droplets, Dumbbell, FerrisWheel, Gamepad2,
   Mountain, Music, Palette, PartyPopper, Popcorn, Puzzle, Sandwich, Ship, ShoppingBag, Snowflake, Store, Tractor, TreePine, Trophy,
-  HandPlatter, Shield, ShieldCheck, BadgeCheck, Video, Megaphone, Repeat, CalendarCheck, Banknote, Laptop, DoorOpen, Handshake, GraduationCap,
+  HandPlatter, Shield, ShieldCheck, BadgeCheck, Video, Megaphone, Repeat, CalendarCheck, Banknote, Laptop, DoorOpen, Handshake, GraduationCap, Tablet,
   Share2, CircleAlert, UserRound, Award, Presentation, HandHeart,
   Bell, BellOff, Link, Reply, Flag, SmilePlus, Smile, Globe, CircleHelp,
   Tag, ArrowDownWideNarrow, ArrowUp, ArrowDown,
@@ -44,6 +44,8 @@ const ICONS = {
   // The chat module (13 Sep 2026): the bell, following, a link, a quoted reply, a report, reactions, the two audiences, a question, the FAQ.
   bell: Bell, bellOff: BellOff, link: Link, reply: Reply, flag: Flag, react: SmilePlus, emoji: Smile, everyone: Globe, question: CircleHelp, faq: BookOpen,
   web: Monitor, mobile: Smartphone, person: User,
+  // Signed-in devices (SX6): the tile draws what kind of device it is.
+  tablet: Tablet,
   // Light and dark mode, on the theme switch
   light: Sun, dark: Moon,
   // actions and states

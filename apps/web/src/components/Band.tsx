@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Image, Platform, StyleSheet, Text, View } from 'react-native';
 import { Press } from './press';
 import { Icon } from './Icon';
 import { Wordmark } from './Wordmark';
@@ -55,11 +55,18 @@ export function HostPhoto({ uri, onPress }: { uri?: string; onPress: () => void 
  */
 export function TallBand({ right }: { right?: React.ReactNode }) {
   return (
-    <View style={styles.limeTop}>
+    <View style={styles.tallTop}>
       <View style={styles.tallRow}>
         {/* Ink on lime in both modes (owner, 2 Oct 2026: white "Epic" was unreadable on
-            Inspire, Places and Trips): the theme's ink turns cream in dark mode. */}
-        <Wordmark height={40} ink={INK} ground={LIME} />
+            Inspire, Places and Trips): the theme's ink turns cream in dark mode.
+            4a–4d set the word at 40px with line-height 1, a 40px box. `Wordmark`
+            sizes its type at 1.05× the height it is given and sets a 1.15 line,
+            so 38 gives the design's 40px type in a 46px line; the -3 above and
+            below hands back the 6px of leading so the row lays out on the
+            design's 40px box and the glyphs sit where 4a draws them. */}
+        <View style={styles.tallMark}>
+          <Wordmark height={38} ink={INK} ground={LIME} />
+        </View>
         {right ?? null}
       </View>
     </View>
@@ -127,8 +134,18 @@ export function CompactBand({ title, titleLines = 1, context, onBack, onClose, r
 
 const styles = StyleSheet.create({
   limeTop: { backgroundColor: LIME, paddingTop: TOP_INSET },
-  // §2: the wordmark row, 22 above and 26 below, the control centred on it.
-  tallRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 22, paddingBottom: 26 },
+  // The tall band takes the status bar and nothing more: 4a–4d paint their
+  // status bar into the lime and start the 22px row directly beneath it, so on
+  // a phone the inset alone stands in for that painted bar. `TOP_INSET`'s extra
+  // 10px put the band 10px deeper than the design (owner, 2 Oct 2026). The 16px
+  // floor is unchanged, for a window that reports no inset at all.
+  tallTop: { backgroundColor: LIME, paddingTop: (Platform.OS === 'web' ? 'max(16px, var(--epic-sat))' : 16) as any },
+  // §2: the wordmark row, 22 above and 26 below, the control centred on it —
+  // 22 + 44 (the mic, taller than the 40px word) + 26 = 92 under the status
+  // bar. The floor holds that on a home with no mic (Places), so every tab's
+  // band is the same depth.
+  tallRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 22, paddingBottom: 26, minHeight: 92 },
+  tallMark: { marginVertical: -3 },
   // Settings v2: the 34px screen title, 22 above and 24 below, action on the right.
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 22, paddingBottom: 24 },
   bigTitle: { flex: 1, fontFamily: fonts.heading, fontWeight: '800', fontSize: 34, letterSpacing: 34 * -0.04, lineHeight: 36, color: INK },

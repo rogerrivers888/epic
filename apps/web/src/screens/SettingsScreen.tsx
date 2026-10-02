@@ -33,6 +33,7 @@ import { ProvidersTable } from '../components/ProvidersTable';
 import { useTheme } from '../hooks/useTheme';
 import { useSession } from '../hooks/useSession';
 import { Icon } from '../components/Icon';
+import { personRole } from './personRole';
 import { Avatar } from '../components/Faces';
 import { TitleBand, CompactBand } from '../components/Band';
 import { InkMenu } from '../components/InkMenu';
@@ -218,7 +219,8 @@ function FaceRow({ members, me, cap, onOpen, onAdded }: { members: Member[]; me:
     <View style={{ marginTop: spacing.md }}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.faces}>
         {members.map((m, i) => {
-          const pending = m.access?.status === 'invited';
+          // Never on your own face: you are signed in to see it (personRole).
+          const pending = personRole({ me }, m).pending;
           return (
             <Press key={m.id} onPress={() => onOpen(m.id)} accessibilityRole="button" accessibilityLabel={`Open ${m.name}`} style={styles.faceCell}>
               <View>
@@ -388,19 +390,30 @@ function DevicesList() {
   useEffect(() => { load(); }, []);
   if (!rows) return <Text style={type.small}>Loading…</Text>;
   const others = rows.filter((r) => !r.current);
+  const current = rows.filter((r) => r.current);
+  const row = (r: (typeof rows)[number]) => (
+    <View key={r.id} style={styles.deviceRow}>
+      <View style={[styles.deviceTile, r.current && { backgroundColor: LIME }]}><Icon name={deviceIcon(r.label)} size={20} color={r.current ? INK : colors.ink} strokeWidth={2} /></View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.deviceName} numberOfLines={1}>{r.label || 'A device'}</Text>
+        <Text style={styles.deviceMeta} numberOfLines={1}>{r.current ? 'Active now' : `Last active ${whenAgo(r.lastSeen)}`}</Text>
+      </View>
+      {!r.current ? <Press onPress={() => setConfirm({ id: r.id, label: r.label || 'that device' })} accessibilityRole="button"><Text style={styles.signOut}>Sign out</Text></Press> : null}
+    </View>
+  );
   return (
     <>
-      {rows.map((r) => (
-        <View key={r.id} style={styles.deviceRow}>
-          <View style={[styles.deviceTile, r.current && { backgroundColor: LIME }]}><Icon name={r.current ? "phone" : "laptop"} size={18} color={r.current ? INK : colors.ink} strokeWidth={2} /></View>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={type.h3} numberOfLines={1}>{r.label || 'A device'}{r.current ? ' · this device' : ''}</Text>
-            <Text style={type.tiny}>Last active {whenAgo(r.lastSeen)}</Text>
-          </View>
-          {!r.current ? <Press onPress={() => setConfirm({ id: r.id, label: r.label || 'that device' })} accessibilityRole="button"><Text style={styles.signOut}>Sign out</Text></Press> : null}
-        </View>
-      ))}
-      {others.length ? <View style={{ marginTop: spacing.lg }}><Button kind="danger" label="Sign out all other devices" onPress={() => setConfirm({ all: true, label: 'all other devices' })} /></View> : null}
+      {/* SX6: a kicker on a 2px ink rule over this device, then over the others. */}
+      {current.length ? <Text style={styles.deviceKicker}>This device</Text> : null}
+      {current.map(row)}
+      {others.length ? <Text style={[styles.deviceKicker, current.length ? { paddingTop: 26 } : null]}>Other devices</Text> : null}
+      {others.map(row)}
+      {others.length ? (
+        // An outlined red action, left-aligned (SX6) — not the filled danger Button.
+        <Press onPress={() => setConfirm({ all: true, label: 'all other devices' })} accessibilityRole="button" style={styles.signOutAll}>
+          <Text style={styles.signOutAllText}>Sign out all other devices</Text>
+        </Press>
+      ) : null}
       {confirm ? (
         <ConfirmSheet
           title={confirm.all ? 'Sign out all other devices?' : `Sign out of ${confirm.label}?`}
@@ -417,6 +430,10 @@ function DevicesList() {
     </>
   );
 }
+
+/** The tile's glyph from what the device called itself (`deviceLabel`): a tablet, a computer, or a phone. */
+const deviceIcon = (label: string | null | undefined): 'tablet' | 'laptop' | 'mobile' =>
+  /^tablet\b|ipad/i.test(label ?? '') ? 'tablet' : /^computer\b|mac|windows|linux/i.test(label ?? '') ? 'laptop' : 'mobile';
 
 const whenAgo = (iso: string) => {
   const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
@@ -704,9 +721,14 @@ const styles = StyleSheet.create({
   apLabel: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: colors.ink },
   apLabelOn: { color: CREAM },
   // devices
-  deviceRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, minHeight: 56, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
+  deviceKicker: { paddingBottom: 8, borderBottomWidth: BORDER, borderBottomColor: colors.line, fontFamily: fonts.body, fontSize: 11, fontWeight: '700', letterSpacing: 0.88, textTransform: 'uppercase', color: colors.inkMuted },
+  deviceRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
   deviceTile: { width: 40, height: 40, backgroundColor: colors.warm, alignItems: 'center', justifyContent: 'center' },
-  signOut: { fontFamily: fonts.body, fontSize: 14, fontWeight: '700', color: colors.ink },
+  deviceName: { fontFamily: fonts.body, fontSize: 16, fontWeight: '600', color: colors.ink },
+  deviceMeta: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted, marginTop: 1 },
+  signOut: { fontFamily: fonts.body, fontSize: 14, fontWeight: '700', color: colors.ink, textDecorationLine: 'underline' },
+  signOutAll: { marginTop: 28, height: 50, paddingHorizontal: 16, borderWidth: 1.5, borderColor: colors.overrun, flexDirection: 'row', alignItems: 'center' },
+  signOutAllText: { fontFamily: fonts.body, fontSize: 15, fontWeight: '700', color: colors.overrun },
   // option rows / sheets
   optionRow: { flexDirection: 'row', alignItems: 'center', minHeight: 52, paddingVertical: 12 },
   tick: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },

@@ -20,7 +20,7 @@ import { useQueryState, asOneOf } from '../../router';
 import { api, HostMoney, OwnOffer } from '../../api';
 import { mediaUrl, priceWords, STATE_LABEL, SHAPE_ICON } from '../../components/hosting';
 import { t, k, Tag } from '../../components/hostKit';
-import { SummaryCells, Grid2, DateCol, FillBar, MoneyLine, FeeLine, gbp, todayIso, offerDateGroups, DateGroup } from './hostTabKit';
+import { SummaryCells, Grid2, EqualTable, DateCol, FillBar, MoneyLine, FeeLine, gbp, todayIso, offerDateGroups, DateGroup } from './hostTabKit';
 
 type Group = DateGroup;
 
@@ -59,7 +59,8 @@ export function HostActivity({ offer, money, onBack }: { offer: OwnOffer; money:
         />
 
         {tab === 'upcoming' ? (
-          <View style={{ paddingHorizontal: 20, paddingTop: 16, gap: 14 }}>
+          // The cells sit 6px under the tab bar (SX13a), so no top pad here.
+          <View style={{ paddingHorizontal: 20, gap: 14 }}>
             <SummaryCells cells={[
               { n: String(upcoming.length), label: upcoming.length === 1 ? 'date' : 'dates' },
               { n: String(upcoming.reduce((n, g) => n + g.heads, 0)), label: 'booked' },
@@ -127,18 +128,16 @@ function PastTab({ offer, money, past }: { offer: OwnOffer; money: HostMoney | n
       {past.length ? (
         <View>
           <Text style={styles.sub}>Past dates</Text>
-          <View style={styles.pastHead}>
-            <Text style={[styles.pastH, { flex: 1 }]}>Date</Text>
-            <Text style={[styles.pastH, { flex: 1, textAlign: 'center' }]}>Guests</Text>
-            <Text style={[styles.pastH, { flex: 1, textAlign: 'right' }]}>Collected</Text>
-          </View>
-          {shown.map((g, i) => (
-            <View key={i} style={styles.pastRow}>
-              <Text style={[styles.pastCell, { flex: 1 }]}>{g.on ? new Date(`${g.on}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : 'TBC'}</Text>
-              <Text style={[styles.pastCell, { flex: 1, textAlign: 'center' }]}>{g.heads}</Text>
-              <Text style={[styles.pastCell, { flex: 1, textAlign: 'right' }]}>{gbp(g.pence)}</Text>
-            </View>
-          ))}
+          {/* SX13b: three equal, left-aligned columns. */}
+          <EqualTable
+            head={['Date', 'Guests', 'Collected']}
+            size={14.5}
+            firstWeight="600"
+            rows={shown.map((g, i) => ({
+              key: String(i),
+              cells: [g.on ? new Date(`${g.on}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : 'TBC', String(g.heads), gbp(g.pence)],
+            }))}
+          />
           {past.length > 3 ? <Text style={[t.link, { marginTop: 8 }]}>See all {past.length} dates ›</Text> : null}
         </View>
       ) : null}
@@ -155,8 +154,4 @@ const styles = StyleSheet.create({
   needs: { backgroundColor: colors.surfaceMuted, paddingHorizontal: 7, paddingVertical: 2 },
   needsText: { fontFamily: fonts.body, fontSize: 10, fontWeight: '800', letterSpacing: 0.4, color: colors.accent },
   sub: { fontFamily: fonts.heading, fontSize: 15, fontWeight: '800', letterSpacing: -0.3, color: colors.ink, marginBottom: 6 },
-  pastHead: { flexDirection: 'row', gap: 8, paddingBottom: 6, borderBottomWidth: BORDER, borderBottomColor: colors.line },
-  pastH: { fontFamily: fonts.body, fontSize: 11, fontWeight: '700', letterSpacing: 0.4, textTransform: 'uppercase', color: colors.inkMuted },
-  pastRow: { flexDirection: 'row', gap: 8, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
-  pastCell: { fontFamily: fonts.body, fontSize: 13.5, color: colors.ink },
 });
