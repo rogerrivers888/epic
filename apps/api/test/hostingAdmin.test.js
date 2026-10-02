@@ -46,6 +46,10 @@ async function inReview({ checked = false, adults = false } = {}) {
      values ($1, 'Kate', 'verified', 'ready', '1985-01-01', null, 'Potter', $2, $3, $4::jsonb, 'QQ123456C') returning *`,
     [household.id, checked ? 'passed' : 'none', checked ? '001' : null, JSON.stringify(checked ? [{ name: 'a', email: 'a@x' }, { name: 'b', email: 'b@x' }] : [])],
   );
+  // A complete host and event, so only Checked can stand in the way.
+  const { rows: [pic] } = await query(`insert into host_media (household_id, kind, mime, bytes, size) values ($1, 'photo', 'image/jpeg', '\\x00', 1) returning id`, [household.id]);
+  const { rows: [vid] } = await query(`insert into host_media (household_id, kind, mime, bytes, size) values ($1, 'video', 'video/webm', '\\x00', 1) returning id`, [household.id]);
+  await query('update hosts set photo_id = $2 where id = $1', [h.id, pic.id]);
   if (checked) {
     const { rows: [m] } = await query(`insert into host_media (household_id, kind, mime, bytes, size) values ($1, 'doc', 'application/pdf', '\\x00', 1) returning id`, [household.id]);
     await query('update hosts set insurance_media_id = $2 where id = $1', [h.id, m.id]);
@@ -55,6 +59,7 @@ async function inReview({ checked = false, adults = false } = {}) {
      values ($1, 'oneoff', 'oneoff', 'in_review', 'Clay for kids', 'public', $2, '10:00', $3, $4, $5, now() - interval '40 hours', 'free', '{"state":"done","needsPerson":true,"reasons":["Shows a phone number"]}') returning *`,
     [h.id, plusDays(localDay(new Date()), 20), adults ? 18 : 5, adults ? null : 9, adults ? null : 'drop_off'],
   );
+  await query(`update host_offers set video_id = $2, what_label = 'Clay', ends_at = '12:00', venue = 'my_place', venue_area = 'Marlow', max_count = 8, who_chosen = true where id = $1`, [o.id, vid.id]);
   return { h, o, household };
 }
 
@@ -79,7 +84,7 @@ test('approve with Checked missing: Approved · waiting on Checked, and live onc
   const srv = await server(STAFF);
   try {
     const r = await srv.send('POST', `/api/admin/hosting/review/${o.id}/approve`);
-    assert.equal(r.body.outcome, 'approved', 'never blocked, never live without Checked');
+    assert.equal(r.body.outcome, 'approved', JSON.stringify(r.body));
     assert.equal((await query('select state from host_offers where id = $1', [o.id])).rows[0].state, 'approved');
     assert.equal(await admin.releaseApproved(), 0, 'still waiting');
     const { rows: [m] } = await query(`insert into host_media (household_id, kind, mime, bytes, size) values ($1, 'doc', 'application/pdf', '\\x00', 1) returning id`, [h.household_id]);

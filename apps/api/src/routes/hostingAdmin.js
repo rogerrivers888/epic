@@ -23,7 +23,7 @@ import * as notifications from '../repositories/notifications.js';
 import { logChange } from '../repositories/hostingSettings.js';
 import { requires, requireOwnerSignedIn } from '../access.js';
 import { currentAccount } from '../context.js';
-import { checklist, laneBlockers, hostingConfig, localDay, localInstant, SEQ, ageOn } from '../domain/lanes.js';
+import { checklist, laneBlockers, hostingConfig, localDay, localInstant, SEQ, ageOn, CHECK_WORDS } from '../domain/lanes.js';
 import { ladderProgress, introState } from '../domain/money.js';
 import { standingOf } from '../domain/hostDesk.js';
 import { mediaRef } from './hosting.js';
@@ -134,8 +134,9 @@ router.post('/review/:id/approve', requires('manage_hosting'), async (req, res, 
       const blockers = laneBlockers(o, host, hostingConfig());
       const items = checklist(o, { host, account: { email: 'x', mobile: 'x' } }, hostingConfig());
       const checkedMissing = items.some((i) => i.key === 'checked' && !i.done);
-      const gone = blockers.find((b) => /date has gone/.test(b));
-      if (gone) throw refuse(409, 'date_gone', `${gone} Ask for changes instead.`);
+      // Checked is the one thing approval may wait on; anything else missing goes back to the host (Codex, 2 Oct 2026).
+      const other = blockers.find((b) => b !== CHECK_WORDS.checked);
+      if (other) throw refuse(409, 'not_ready', `${other} Ask for changes instead.`);
       const outcome = checkedMissing ? 'approved' : 'live';
       await c.query(
         `update host_offers set state = $2, approved_at = now(), reviewed_at = now(), published_at = case when $2 = 'live' then now() else published_at end, changes_requested = null where id = $1`,
@@ -190,7 +191,7 @@ export async function releaseApproved() {
     const items = checklist(o, { host, account: { email: 'x', mobile: 'x' } }, hostingConfig());
     if (items.some((i) => i.key === 'checked' && !i.done)) continue;
     // Checked came after the date had gone: it stays out, for the host to pick a new date (Codex, 2 Oct 2026).
-    if (laneBlockers(o, host, hostingConfig()).some((b) => /date has gone/.test(b))) continue;
+    if (laneBlockers(o, host, hostingConfig()).length) continue;
     const { rowCount } = await query(`update host_offers set state = 'live', published_at = now() where id = $1 and state = 'approved'`, [o.id]);
     if (rowCount) { n += 1; await logChange({ subjectKind: 'event', subjectId: o.id, field: 'state', before: { state: 'approved' }, after: { state: 'live' }, why: 'Checked done', byLabel: 'epic' }); }
   }

@@ -281,7 +281,12 @@ async function book({ offerId, body, household, account, invite = null }) {
       const linkToken = typeof body.linkToken === 'string' ? body.linkToken.slice(0, 64) : null;
       if (o.visibility !== 'public') {
         const inv = invite ?? (typeof body.inviteToken === 'string' ? await repo.inviteByToken(body.inviteToken.slice(0, 64), c) : null);
-        const { rows: [held] } = await c.query(`select 1 from experience_bookings where offer_id = $1 and household_id = $2 and state <> 'cancelled' limit 1`, [o.id, household.id]);
+        // A place offered from the waiting list is its own way in (Codex, 2 Oct 2026).
+        const { rows: [held] } = await c.query(
+          `select 1 from experience_bookings where offer_id = $1 and household_id = $2 and state <> 'cancelled'
+           union all select 1 from offer_waitlist where offer_id = $1 and household_id = $2 and state = 'offered' and offer_expires_at > now() limit 1`,
+          [o.id, household.id],
+        );
         if (!opensPrivately(o, { linkToken, invite: inv, hasBooking: Boolean(held) })) throw refuse(404, 'not_found', 'This one is invitation only.');
       }
       if (host.household_id === household.id) throw refuse(409, 'own_event', 'You can’t book your own event.');
@@ -705,7 +710,8 @@ router.get('/booked/:id/cancel-quote', async (req, res, next) => {
 router.post('/booked/:id/cancel', async (req, res, next) => {
   try {
     const { household, account } = await me();
-    const ids = Array.isArray(req.body?.sessionIds) ? req.body.sessionIds.filter((x) => UUID.test(String(x))) : null;
+    // Each session once, however often it was sent (Codex, 2 Oct 2026).
+    const ids = Array.isArray(req.body?.sessionIds) ? [...new Set(req.body.sessionIds.filter((x) => UUID.test(String(x))))] : null;
     const out = await withTransaction(async (c) => {
       const { rows: [b0] } = await c.query('select offer_id from experience_bookings where id = $1 and household_id = $2', [req.params.id, household.id]);
       if (!b0) throw refuse(404, 'not_found', 'That booking isn’t yours.');
@@ -916,7 +922,7 @@ async function myRequest(id, { retryCapture = false } = {}) {
   // A request whose payment never started, or that the guest withdrew, can't be accepted (Codex, 2 Oct 2026).
   if (b.state === 'cancelled') throw refuse(409, 'withdrawn', 'This request was withdrawn.');
   // A paid request can be answered only once the guest's card is held (Codex, 2 Oct 2026).
-  if (Number(b.value_pence ?? 0) > 0 && b.stripe_payment_intent && b.payment_state !== 'held') throw refuse(409, 'not_held', 'The guest hasn’t finished paying yet.');
+  if (Number(b.value_pence ?? 0) > 0 && b.payment_state !== 'held') throw refuse(409, 'not_held', 'The guest hasn’t finished paying yet.');
   return { host, b, o: await repo.offerById(b.offer_id), retry };
 }
 
@@ -929,10 +935,13 @@ router.post('/host/lanes/requests/:id/accept', async (req, res, next) => {
       await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-publish:${o.id}`]);
       const { rows: [again] } = await c.query('select request_state from experience_bookings where id = $1 for update', [b.id]);
       if (again.request_state !== 'asked') throw refuse(409, 'answered', 'This request has been answered.');
-      const end = b.requested_time && b.requested_length_min ? (() => { const [h, m] = hm(b.requested_time).split(':').map(Number); const t = h * 60 + m + b.requested_length_min; return `${String(Math.floor(t / 60) % 24).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; })() : null;
+      const endMin = b.requested_time && b.requested_length_min ? (() => { const [h, m] = hm(b.requested_time).split(':').map(Number); return h * 60 + m + b.requested_length_min; })() : null;
+      const end = endMin == null ? null : `${String(Math.floor(endMin / 60) % 24).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
+      // Ending at or after midnight ends the next day (Codex, 2 Oct 2026).
+      const endsOn = endMin != null && endMin >= 1440 ? plusDays(ymd(b.requested_date), Math.floor(endMin / 1440)) : null;
       const { rows: [s] } = await c.query(
-        `insert into offer_sessions (offer_id, on_date, starts_at, ends_at, max_count) values ($1, $2, $3, $4, $5) returning id`,
-        [o.id, ymd(b.requested_date), hm(b.requested_time), end, b.heads],
+        `insert into offer_sessions (offer_id, on_date, starts_at, ends_at, ends_on, max_count) values ($1, $2, $3, $4, $5, $6) returning id`,
+        [o.id, ymd(b.requested_date), hm(b.requested_time), end, endsOn, b.heads],
       );
       await c.query('insert into booking_sessions (booking_id, session_id) values ($1, $2)', [b.id, s.id]);
       await c.query(`update experience_bookings set request_state = 'accepted', session_id = $2 where id = $1`, [b.id, s.id]);
