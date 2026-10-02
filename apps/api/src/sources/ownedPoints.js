@@ -121,7 +121,12 @@ async function recordIn({ ref, lat, lng, source, sourceRef = null, method, dista
      values ($1, $2, $3, $4, $5, $6, $7, $8)
      on conflict (venue_ref) do update
         set lat = excluded.lat, lng = excluded.lng, source = excluded.source, source_ref = excluded.source_ref,
-            licence = excluded.licence, method = excluded.method, distance_m = excluded.distance_m, matched_at = now()
+            licence = excluded.licence, method = excluded.method, distance_m = excluded.distance_m, matched_at = now(),
+            -- A live name agreed with the match it was compared with, not with
+            -- whatever replaces it (Codex, 2 Oct 2026).
+            checked_at = case when owned_points.source is distinct from excluded.source
+                                or coalesce(owned_points.source_ref, '') is distinct from coalesce(excluded.source_ref, '')
+                              then null else owned_points.checked_at end
       where array_position($9::text[], excluded.source) <= array_position($9::text[], owned_points.source)
      returning lat, lng, source`,
     [ref, Number(lat), Number(lng), source, sourceRef, LICENCES[source], method, distanceM, ORDER]);

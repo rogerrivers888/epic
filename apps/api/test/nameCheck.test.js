@@ -70,6 +70,10 @@ test('a live name that agrees stamps the match as checked', async () => {
   assert.equal(out.agreed, 1);
   const { rows: [o] } = await query('select checked_at from owned_points where venue_ref = $1', [ref]);
   assert.ok(o.checked_at, 'checked');
+  // A better source replacing the match was never compared: not checked.
+  await recordOwnedPoint({ ref, lat: LAT, lng: LNG, source: 'wikidata', sourceRef: 'Q999999001', method: 'reference' });
+  const { rows: [w] } = await query('select source, checked_at from owned_points where venue_ref = $1', [ref]);
+  assert.deepEqual(w, { source: 'wikidata', checked_at: null });
 });
 
 test('a live name that clearly differs sets the match aside: its point is no longer trusted anywhere, and only the flag is kept', async () => {
