@@ -3211,6 +3211,17 @@ router.post('/subcategory-summary/compare-all', requires('manage_library'), asyn
     const room = await roomToSpend(want, { holder: 'compare-all' });
     if (!room.ok) return overTheCeiling(res, want, room);
     const household = await currentHousehold();
+    // A place already held costs nothing to read again, and reading it through
+    // detailFor with its ref lets review-spotting see reviews another path cached
+    // without naming the place — the demand screen does (Codex, 2 Oct 2026). No call
+    // goes out: detailFor answers a held detail from the cache.
+    if (held.size) {
+      const heldIds = await matchesFor([...held], 'google');
+      for (const ref of held) {
+        const id = ref.startsWith('google:') ? ref.slice('google:'.length) : heldIds.get(ref);
+        if (id && detailHeld('google', id)) await detailFor('google', id, household.id, { venueRef: ref }).catch(() => null);
+      }
+    }
     let fetched = 0;
     let failed = 0;
     try {
@@ -3220,7 +3231,8 @@ router.post('/subcategory-summary/compare-all', requires('manage_library'), asyn
       const ids = await matchesFor(toCall, 'google');
       for (const ref of toCall) {
         let id = ref.startsWith('google:') ? ref.slice('google:'.length) : ids.get(ref) ?? null;
-        if (id && detailHeld('google', id)) continue; // already compared — free
+        // Already compared — free; read through the cache so it is still spotted.
+        if (id && detailHeld('google', id)) { await detailFor('google', id, household.id, { venueRef: ref }).catch(() => null); continue; }
         if (!id) {
           // Match by name and distance, the way the per-place compare does; the
           // join is remembered, the content is not.

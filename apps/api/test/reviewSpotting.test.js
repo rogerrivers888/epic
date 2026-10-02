@@ -902,4 +902,37 @@ test('a set shared with a drawer that ignored the word is not asked, and says so
   assert.equal((await query('select count(*)::int n from feature_pending_asks where attribute_key = $1 and subcategory_key = $2', [res.attributeKey, subC])).rows[0].n, 1, 'and C is still owed it');
 });
 
+test('a detail cached without a place is spotted, free, when read again for that place', async () => {
+  // Codex, 2 Oct 2026: the demand screen caches Google's detail without naming the
+  // place; compare-all must still read it through detailFor with the ref so its
+  // reviews are spotted — and that read must not go back to Google.
+  const { detailFor } = await import('../src/sources/compare.js');
+  const { googleSource } = await import('../src/sources/google.js');
+  const sub = 'c30-cache-parks';
+  const id = 'ChIJ_c30_cachehit';
+  const ref = `google:${id}`;
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 cache parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
+
+  const real = googleSource.get;
+  let calls = 0;
+  googleSource.get = async () => { calls += 1; return { reviewSummary: 'A wet room.', reviews: [], photos: [] }; };
+  try {
+    await detailFor('google', id, null);                 // cached by a path that names no place
+    assert.equal(calls, 1, 'one call fills the cache');
+    await detailFor('google', id, null, { venueRef: ref }); // compare-all's read
+    assert.equal(calls, 1, 'the second read comes from the cache — no call');
+    let seen = 0;
+    for (let i = 0; i < 40 && !seen; i += 1) {
+      await new Promise((r) => setTimeout(r, 50));
+      seen = (await query("select count(*)::int n from review_sightings where venue_ref = $1 and norm = 'wet room'", [ref])).rows[0].n;
+    }
+    assert.equal(seen, 1, 'and its reviews are spotted for the place');
+  } finally {
+    googleSource.get = real;
+  }
+});
+
 test.after(async () => { await pool.end(); });
