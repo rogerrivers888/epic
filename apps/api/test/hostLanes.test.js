@@ -139,6 +139,7 @@ test('a step saves; answers that contradict themselves are refused; the money fo
     assert.ok(!r.body.offer.missing.includes('when'));
 
     r = await p({ priceMode: 'same_each', pricePence: 3500, childPence: 2000, minCount: 5, maxCount: 10, refundPolicy: 'moderate' });
+    assert.equal((await p({ decidesOn: '2026-06-20' })).body.error, 'decides_after_start', 'decides by comes before the first session');
     assert.equal(r.body.offer.money, 'epic', 'paid defaults to Epic collecting');
     assert.equal(r.body.offer.refundWords, 'Full refund up to 5 days before');
     assert.equal(r.body.offer.decidesOnDefault, '2026-06-06', 'a week before the first session');
@@ -366,6 +367,10 @@ test('private: nothing is sent before the £10 is paid through Stripe (test mode
       r = await srv.send('POST', `/api/host/lanes/offers/${offer.id}/publish`, {});
       assert.equal(r.status, 200, JSON.stringify(r.body));
       assert.equal(r.body.offer.state, 'live');
+      // A household that joined Pro from the checklist is Pro for its next private event too.
+      await query("insert into hosting_payments (kind, household_id, amount_pence, state, stripe_ref, mode) values ('pro', $1, 1299, 'succeeded', 'cs_pro_test', 'test')", [h.id]);
+      const next = await filledOneoff(srv);
+      assert.equal(next.action.label, 'Send the invites', 'not asked to buy Pro again');
       assert.equal(r.body.ending.kind, 'invites');
       assert.equal(r.body.ending.invited, 2);
       assert.equal(r.body.offer.sessionRows.length, 1, 'the one date laid down');

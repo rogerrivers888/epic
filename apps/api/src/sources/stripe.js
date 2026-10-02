@@ -148,6 +148,7 @@ export function checkout({ kind, amountPence, name, successUrl, cancelUrl, email
     customer_email: email ?? undefined,
     line_items: [{ quantity: 1, price_data: { currency: 'gbp', unit_amount: amountPence, product_data: { name }, ...(recurring ? { recurring: { interval: 'month' } } : {}) } }],
     metadata: { epic_kind: kind, epic_offer_id: offerId, epic_household_id: householdId },
+    ...(recurring ? { subscription_data: { metadata: { epic_kind: 'pro', epic_household_id: householdId } } } : {}),
   }, { householdId, purpose: recurring ? 'host.pro.checkout' : 'host.private_fee.checkout', idempotencyKey });
 }
 

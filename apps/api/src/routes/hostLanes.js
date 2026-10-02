@@ -66,7 +66,19 @@ const toStored = (v) => HOST_SIDE[v] ?? v;
 const toHostSide = (v) => HOST_SIDE[v] ?? v;
 const appUrl = () => (process.env.EPIC_APP_URL || process.env.APP_URL || 'https://epic.day').replace(/\/$/, '');
 const pubUrl = (offerId) => `${appUrl()}/experiences/${offerId}`;
-const isPro = (account) => account?.plan === 'pro' && account?.status !== 'suspended';
+const accountPro = (account) => account?.plan === 'pro' && account?.status !== 'suspended';
+/**
+ * Pro, for hosting: the account's own plan, or a Pro subscription this household joined from
+ * the checklist and has not cancelled (Codex, 2 Oct 2026). The account's billing plan is
+ * billing's to change and is never touched here — a test-mode card must not make anyone Pro
+ * across Epic — so hosting reads its own record of the subscription.
+ */
+async function hostingPro(account, householdId) {
+  if (accountPro(account)) return true;
+  if (!householdId) return false;
+  const { rows: [r] } = await query("select 1 from hosting_payments where household_id = $1 and kind = 'pro' and state = 'succeeded' limit 1", [householdId]);
+  return Boolean(r);
+}
 const NI = /^[A-CEGHJ-PR-TW-Z]{2}\s?\d{2}\s?\d{2}\s?\d{2}\s?[A-D]$/i;
 const UTR = /^\d{10}$/;
 
@@ -133,7 +145,7 @@ async function lanePayload(offer, host, account, { holidays } = {}) {
   ]);
   const sheet = hostSheet(host, account);
   const items = checklist(offer, { host, account }, cfg);
-  const pro = isPro(account);
+  const pro = await hostingPro(account, host?.household_id ?? null);
   const run = offer.lane === 'course' ? courseRun(offer, hol, cfg) : offer.lane === 'weekly' ? weeklyRun(offer, hol, { weeks: cfg.weeklyHorizonWeeks }) : null;
   return {
     id: offer.id, lane: offer.lane, state: offer.state, visibility: offer.who_chosen ? offer.visibility : null, money: offer.money ?? 'free',
@@ -204,7 +216,7 @@ router.get('/host/lanes', async (req, res, next) => {
     res.json({
       config: configPayload(holidays),
       drafts: drafts.map((o) => ({ id: o.id, lane: o.lane, title: o.title, whatLabel: o.what_label, step: o.draft_step, updatedAt: o.updated_at, missing: missingSteps(o, hostingConfig()).length })),
-      host: hostSheet(host, account), isPro: isPro(account),
+      host: hostSheet(host, account), isPro: await hostingPro(account, household.id),
     });
   } catch (err) { next(err); }
 });
@@ -388,6 +400,9 @@ export function derive(patch, current) {
   }
   // A course is booked for the whole run, never one session of it (Codex, 2 Oct 2026).
   if (current.lane === 'course' && current.join_mode !== 'whole') p.joinMode = 'whole';
+  // Decides by comes before the first session, or it decides nothing (Codex, 2 Oct 2026).
+  const startDay = current.lane === 'oneoff' ? ymd(next.starts_on) : current.lane === 'course' ? ymd(next.first_date) : null;
+  if (p.decidesOn && startDay && p.decidesOn >= startDay) throw refuse(400, 'decides_after_start', 'Decides by has to be before the first session.');
   if (p.firstDate !== undefined && current.lane === 'course') p.weekday = p.firstDate ? dow(p.firstDate) : null;
   if (p.weekdays !== undefined && current.lane === 'weekly') p.weekday = p.weekdays[0] ?? null;
   // Prices: free clears every figure; Weekly's four boxes keep the old readers' one price in step.
@@ -425,7 +440,7 @@ export function derive(patch, current) {
 }
 
 const SNAKE = {
-  startsAt: 'starts_at', endsAt: 'ends_at',
+  startsAt: 'starts_at', endsAt: 'ends_at', firstDate: 'first_date',
   ageMin: 'age_min', ageMax: 'age_max', minCount: 'min_count', maxCount: 'max_count', multiDay: 'multi_day', startsOn: 'starts_on', endsOn: 'ends_on',
   dropInPence: 'drop_in_pence', bookAheadPence: 'book_ahead_pence', priceMode: 'price_mode', visibility: 'visibility', money: 'money', parents: 'parents',
 };
@@ -854,7 +869,7 @@ router.post('/host/lanes/offers/:id/publish', async (req, res, next) => {
       }
     }
     async function publishPrivate() {
-      const pro = isPro(account);
+      const pro = await hostingPro(account, household.id);
       const plan = oneOf(['event', 'pro'], req.body?.plan) ?? offer.private_plan ?? (pro ? 'pro' : 'event');
       if (plan !== offer.private_plan) offer = await repo.updateOffer(offer.id, { privatePlan: plan });
       const feeDone = pro || ['paid', 'included'].includes(offer.private_fee_state);
@@ -954,6 +969,9 @@ webhookRouter.post('/stripe/webhook', express.raw({ type: () => true, limit: '1m
     } else if (event.type?.startsWith('identity.verification_session.') && obj.id) {
       const host = await repo.hostByIdentitySession(obj.id);
       if (host) { const state = stripe.identityState(obj); await repo.updateHost(host.id, { identityState: state, identityVerifiedAt: state === 'verified' ? new Date() : null }); }
+    } else if (event.type === 'customer.subscription.deleted' && obj.metadata?.epic_kind === 'pro' && obj.metadata?.epic_household_id) {
+      // Pro cancelled or lapsed: it stops counting for hosting from now.
+      await query("update hosting_payments set state = 'cancelled', updated_at = now() where household_id = $1 and kind = 'pro' and state = 'succeeded'", [obj.metadata.epic_household_id]);
     } else if (event.type === 'checkout.session.completed' && obj.id && stripe.checkoutPaid(obj)) {
       const kind = obj.metadata?.epic_kind === 'pro' ? 'pro' : 'private_fee';
       const pay = await repo.paymentByRef(obj.id, kind);

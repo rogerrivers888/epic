@@ -437,6 +437,10 @@ export function stepFilled(offer, step, cfg = DEFAULT_CONFIG) {
       if (mode === 'same_each' && !(offer.price_pence ?? offer.pricePence)) return false;
       if (mode === 'by_numbers' && !((offer.total_pence ?? offer.totalPence) && hasMinimum(offer))) return false;
       if (mode !== 'free' && !REFUND_POLICIES.includes(offer.refund_policy ?? offer.refundPolicy)) return false;
+      // A host's own decides-by must still come before the first session, even after the dates moved.
+      const own = ymd(offer.decides_on ?? offer.decidesOn);
+      const start = offer.lane === 'oneoff' ? ymd(offer.starts_on ?? offer.startsOn) : offer.lane === 'course' ? ymd(offer.first_date ?? offer.firstDate) : null;
+      if (own && start && own >= start) return false;
       return true;
     }
     case 'wprice': {
