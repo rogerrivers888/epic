@@ -90,8 +90,7 @@ import { sweepOldFailures } from './repositories/signInFailures.js';
 import { refresh as refreshReach } from './repositories/reach.js';
 import { buildIfEmpty, checkBars, seedBars, settleNew } from './repositories/placeIndex.js';
 import { health } from './health.js';
-import { failClosedUntilCutoff, siteGate, siteGateOn, setCleanSlateEpoch } from './siteGate.js';
-import { cleanSlateAppliedAt } from './repositories/sessions.js';
+import { siteGate } from './siteGate.js';
 import { noteInvariantRun } from './repositories/settings.js';
 import * as censusRun from './sources/censusRun.js';
 import * as ringTables from './repositories/ringTables.js';
@@ -747,29 +746,6 @@ app.use((err, _req, res, _next) => {
 const port = Number(process.env.PORT) || 4000;
 // 0.0.0.0 rather than localhost: the container/platform decides the interface.
 await loadSourceSettings();
-// The launch gate's automatic session cutoff: when the clean-slate migration ran
-// (siteGate.js). Resolved BEFORE the server listens, so no request is served while
-// the cutoff is still unknown. If it cannot be read and the gate is up, fail
-// closed on what cannot be dated — and keep retrying until the read succeeds
-// (Codex, 1 Oct 2026).
-//
-// "Closed" means: honour the sessions this process mints, refuse every older one
-// until the real cutoff loads (siteGate.js `failClosedUntilCutoff`). It used to be
-// a date a year ahead, which refused every session including one minted a second
-// ago — a passcode sign-in succeeded (the door is exempt) and handed back a token
-// the gate refused on every read, so agents signed in and saw only 401
-// coming_soon (owner, 2 Oct 2026: "any request carrying a valid Epic session …
-// passes the gate").
-const loadLaunchCutoff = async () => {
-  try { setCleanSlateEpoch(await cleanSlateAppliedAt()); return true; }
-  catch (err) { console.warn(`epic-api: launch-gate cutoff load failed: ${err.message}`); return false; }
-};
-if (!(await loadLaunchCutoff()) && siteGateOn()) {
-  failClosedUntilCutoff(cleanSlateAppliedAt);
-  const retry = setInterval(async () => { if (await loadLaunchCutoff()) clearInterval(retry); }, 60_000);
-  retry.unref?.();
-}
-
 // Say out loud which state the door is in. A deployed API with no passcode set
 // serves nothing (auth.js) — that is deliberate, and it must be obvious in the
 // logs why, rather than looking like the database is down.

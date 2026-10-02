@@ -19,7 +19,7 @@ const SEEN_EVERY = '5 minutes';
 export async function insertSession(token, label, accountId = null, kind = 'agent', authMethod = 'passcode') {
   const { rows } = await query(
     `insert into api_sessions (token_hash, label, account_id, kind, auth_method) values ($1, $2, $3, $4, $5)
-     returning id, label, account_id, kind, auth_method, created_at, expires_at`,
+     returning id, label, account_id, kind, auth_method, created_at, expires_at, before_clean_slate`,
     [digest(token), label || null, accountId, kind, authMethod],
   );
   return rows[0];
@@ -28,7 +28,7 @@ export async function insertSession(token, label, accountId = null, kind = 'agen
 /** The live session this token opens, or null. Never says which of the two it failed. */
 export async function findLiveSession(token) {
   const { rows } = await query(
-    `select id, label, account_id, kind, auth_method, created_at, last_seen_at, expires_at
+    `select id, label, account_id, kind, auth_method, created_at, last_seen_at, expires_at, before_clean_slate
        from api_sessions
       where token_hash = $1 and revoked_at is null and expires_at > now()`,
     [digest(token)],
@@ -135,18 +135,6 @@ export async function liveSessions(accountId = null) {
  * Throw away what has already lapsed. A revoked or expired row is a hash and a
  * date and holds nothing about anybody, but it is not needed either.
  */
-/**
- * When the launch-gate clean-slate migration ran, from `schema_migrations` — the
- * automatic cutoff the gate uses to retire pre-launch sessions without anyone
- * having to set a variable (siteGate.js; Codex, 1 Oct 2026). Null until it has run.
- */
-export async function cleanSlateAppliedAt() {
-  const { rows } = await query(
-    "select applied_at from schema_migrations where name like '%clean_slate_of_sessions%' order by applied_at limit 1",
-  );
-  return rows[0]?.applied_at ?? null;
-}
-
 export function sweepDeadSessions() {
   // A session the ledger names is kept: it is the answer to "which session
   // spent this", the ledger's foreign key refuses the delete anyway, and one

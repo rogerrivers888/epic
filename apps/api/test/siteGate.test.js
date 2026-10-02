@@ -15,8 +15,8 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { testDatabase } from './helpers/db.js';
 
-const { pool } = await testDatabase();
-const { siteGateOn, basicAuthOk, siteGate, sessionBlockedByGate, setCleanSlateEpoch, failClosedUntilCutoff } = await import('../src/siteGate.js');
+const { pool, query } = await testDatabase();
+const { siteGateOn, basicAuthOk, siteGate, sessionBlockedByGate } = await import('../src/siteGate.js');
 const { insertSession, revokeSession } = await import('../src/repositories/sessions.js');
 const { stampPhoto } = await import('../src/sources/photoLinks.js');
 
@@ -211,16 +211,57 @@ test('sessionBlockedByGate: true only when the gate is up and the session predat
   await withEnv({ SITE_GATE: null, EPIC_GATE_SINCE: null }, () => assert.equal(sessionBlockedByGate(recent), false, 'no cutoff — not blocked'));
 });
 
-test('the cutoff falls back to the automatic clean-slate epoch when no env override is set', async () => {
-  const recent = { created_at: new Date().toISOString() };
-  await withEnv({ SITE_GATE: null, EPIC_GATE_SINCE: null }, () => {
-    setCleanSlateEpoch(new Date(Date.now() + 3_600_000));
-    assert.equal(sessionBlockedByGate(recent), true, 'an automatic epoch in the future retires a recent session');
-    setCleanSlateEpoch(new Date(Date.now() - 3_600_000));
-    assert.equal(sessionBlockedByGate(recent), false, 'an epoch in the past does not');
-    setCleanSlateEpoch(null);
-    assert.equal(sessionBlockedByGate(recent), false, 'no epoch and no override — nothing is blocked');
+test('the session row says whether it predates the clean slate — nothing loaded, nothing held in memory', async () => {
+  // Migration 334: findLiveSession returns before_clean_slate in the same query
+  // that finds the session, so every replica and every boot gives the same answer.
+  await withEnv({ SITE_GATE: null, EPIC_GATE_SINCE: null, GATE_USER: null, GATE_PASSWORD: null }, async () => {
+    const fresh = aToken();
+    const freshRow = await insertSession(fresh, 'a fresh agent sign-in');
+    assert.equal(freshRow.before_clean_slate, false, 'every session made now is after the clean slate');
+    const old = aToken();
+    const oldRow = await insertSession(old, 'a session the clean slate dates as before it');
+    await query(`update api_sessions set before_clean_slate = true where id = $1`, [oldRow.id]);
+
+    const read = (t) => run(mockReq({ path: '/api/admin/narrowing/preview', headers: { authorization: bearer(t) } }));
+    assert.equal((await read(fresh)).nexted, true, 'a fresh sign-in reads at once, with no gate password set');
+    const stale = await read(old);
+    assert.equal(stale.nexted, false, 'a session marked before the clean slate is refused');
+    assert.equal(stale.res.statusCode, 401);
+
+    assert.equal(sessionBlockedByGate({ before_clean_slate: true }), true);
+    assert.equal(sessionBlockedByGate({ before_clean_slate: false }), false);
+    await withEnv({ SITE_GATE: 'off' }, () => assert.equal(sessionBlockedByGate({ before_clean_slate: true }), false, 'gate off — not blocked'));
   });
+});
+
+test("a malformed EPIC_GATE_SINCE is no override, and a real one adds to the row's answer", async () => {
+  const recent = { created_at: new Date().toISOString(), before_clean_slate: false };
+  await withEnv({ SITE_GATE: null, EPIC_GATE_SINCE: 'not a date' }, () => {
+    assert.equal(sessionBlockedByGate(recent), false, 'a non-date is ignored: the row decides');
+    assert.equal(sessionBlockedByGate({ ...recent, before_clean_slate: true }), true, 'and cannot reopen a session the row refuses');
+  });
+  await withEnv({ SITE_GATE: null, EPIC_GATE_SINCE: new Date(Date.now() + 3_600_000).toISOString() }, () => {
+    assert.equal(sessionBlockedByGate(recent), true, "the owner's own later cutoff refuses a recent session");
+  });
+});
+
+test('migration 334 marks only the sessions made before the recorded clean slate', async () => {
+  // The test database is built without schema_migrations; give it one, run the
+  // migration's own SQL again, and see which rows it marks.
+  const fs = await import('node:fs/promises');
+  const sql = await fs.readFile(new URL('../migrations/334_a_session_knows_if_it_predates_the_launch_gate.sql', import.meta.url), 'utf8');
+  const before = await insertSession(aToken(), 'made before the clean slate');
+  await query(`update api_sessions set created_at = now() - interval '2 days' where id = $1`, [before.id]);
+  const after = await insertSession(aToken(), 'made after it');
+  await query(`create table schema_migrations (name text primary key, applied_at timestamptz not null default now())`);
+  try {
+    await query(`insert into schema_migrations (name, applied_at) values ('315_a_clean_slate_of_sessions_before_the_launch_gate.sql', now() - interval '1 day')`);
+    await query(sql);
+    const { rows } = await query(`select id, before_clean_slate from api_sessions where id = any($1)`, [[before.id, after.id]]);
+    const flag = Object.fromEntries(rows.map((r) => [r.id, r.before_clean_slate]));
+    assert.equal(flag[before.id], true, 'a row older than the clean slate is marked');
+    assert.equal(flag[after.id], false, 'a row after it is not');
+  } finally { await query(`drop table schema_migrations`); }
 });
 
 test('the sign-in door is left open for native clients and the magic link', async () => {
@@ -333,69 +374,5 @@ test('health, the Postmark webhook, and a CORS preflight answer without a creden
     const near = await run(mockReq({ path: '/health/secret' }));
     assert.equal(near.nexted, false);
     assert.equal(near.res.statusCode, 401);
-  });
-});
-
-test('while the cutoff is unknown, a session this process minted passes and an older one waits — no clocks compared', async () => {
-  // server.js calls failClosedUntilCutoff when it cannot read the real cutoff. It
-  // used to set a cutoff a year ahead, so a passcode sign-in succeeded and every
-  // read after it was 401 coming_soon (2 Oct 2026).
-  const { openSession } = await import('../src/auth.js');
-  await withEnv({ SITE_GATE: null, EPIC_GATE_SINCE: null, GATE_USER: null, GATE_PASSWORD: null }, async () => {
-    const older = aToken();
-    await insertSession(older, 'opened before this process could date anything');
-    failClosedUntilCutoff();
-    try {
-      const { token: fresh } = await openSession('a fresh agent sign-in');
-      const read = (t) => run(mockReq({ path: '/api/admin/narrowing/preview', headers: { authorization: bearer(t) } }));
-      assert.equal((await read(fresh)).nexted, true, 'the fresh sign-in reads at once, with no gate password set');
-      const stale = await read(older);
-      assert.equal(stale.nexted, false, 'an older session waits for the real cutoff');
-      assert.equal(stale.res.statusCode, 401);
-      setCleanSlateEpoch(new Date(Date.now() - 3_600_000));
-      assert.equal((await read(older)).nexted, true, 'once the cutoff loads, the older session is judged by it');
-    } finally { setCleanSlateEpoch(null); }
-  });
-});
-
-test('a malformed override does not lift the fail-closed state, and a reachable database restores the cutoff on the next request', async () => {
-  await withEnv({ SITE_GATE: null, EPIC_GATE_SINCE: 'not a date', GATE_USER: null, GATE_PASSWORD: null }, async () => {
-    const older = aToken();
-    await insertSession(older, 'opened before the cutoff could be read');
-    const read = () => run(mockReq({ path: '/api/admin/narrowing/preview', headers: { authorization: bearer(older) } }));
-    let calls = 0;
-    failClosedUntilCutoff(async () => { calls += 1; throw new Error('database still down'); });
-    try {
-      assert.equal((await read()).nexted, false, 'a non-date EPIC_GATE_SINCE is no override — still closed');
-      assert.equal(calls, 1, 'it tried to load the cutoff on demand');
-      await read();
-      assert.equal(calls, 1, 'and does not retry more than every five seconds');
-    } finally { setCleanSlateEpoch(null); }
-
-    failClosedUntilCutoff(async () => new Date(Date.now() - 3_600_000));
-    try {
-      assert.equal((await read()).nexted, true, 'the database answering again restores the real cutoff at once');
-    } finally { setCleanSlateEpoch(null); }
-  });
-});
-
-test('a stalled cutoff retry never holds up health, the sign-in door, or a request without a session', async () => {
-  await withEnv({ SITE_GATE: null, EPIC_GATE_SINCE: null, GATE_USER: 'u', GATE_PASSWORD: 'p' }, async () => {
-    let calls = 0;
-    failClosedUntilCutoff(() => { calls += 1; return new Promise(() => {}); }); // never answers
-    try {
-      for (const req of [mockReq({ path: '/health' }), mockReq({ path: '/api/session', method: 'POST' }),
-        mockReq({ headers: { authorization: basic('u', 'p') } }), mockReq({ path: '/api/household' })]) {
-        await run(req);
-      }
-      assert.equal(calls, 0, 'nothing before a successful session lookup asks for the cutoff');
-      const token = aToken();
-      await insertSession(token, 'an older session');
-      const started = Date.now();
-      const r = await run(mockReq({ headers: { authorization: bearer(token) } }));
-      assert.equal(calls, 1, 'a session-bearing request tries once');
-      assert.ok(Date.now() - started < 4_500, 'and waits no more than about three seconds');
-      assert.equal(r.nexted, false, 'judged fail-closed meanwhile');
-    } finally { setCleanSlateEpoch(null); }
   });
 });

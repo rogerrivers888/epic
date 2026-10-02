@@ -35,92 +35,42 @@
  */
 
 import crypto from 'node:crypto';
-import { liveSessionFor, mintedSinceBoot, recordMintsSinceBoot, signedMediaOk } from './auth.js';
+import { liveSessionFor, signedMediaOk } from './auth.js';
 
 const GATE_OFF = new Set(['off', 'false', '0', 'no']);
 
 /**
- * The cutoff: while the gate is up, a session created before this instant is not
- * honoured, whatever its token. It defaults — automatically, with no variable to
- * set — to when the clean-slate migration ran (`cleanSlateAppliedAt`, loaded into
- * `cleanSlateMs` at boot), so a pre-launch session is retired even if its row was
- * somehow not revoked and even across a retried rollout (Codex, 1 Oct 2026).
- * `EPIC_GATE_SINCE` overrides it when the owner wants a precise post-switch cutoff.
+ * The cutoff: while the gate is up, a session from before the launch's clean slate
+ * is not honoured, whatever its token.
  *
- * (The seconds-long window between the migration running and the new process
- * taking traffic is inherent to a rolling deploy and cannot be closed by a single
- * timestamp without signing everyone out on every deploy; a session minted there
- * is a credentialled sign-in, not public access.)
+ * The session row says so itself (migration 334, owner 2 Oct 2026):
+ * `api_sessions.before_clean_slate`, written once for the rows that existed when
+ * the clean slate ran and false for every session since. findLiveSession returns it
+ * in the same query that finds the session, so there is no cutoff to load at boot,
+ * nothing held in memory, no comparison of one host's clock with another's, and
+ * every replica gives the same answer. It replaces a cutoff read at boot that, when
+ * it could not be read, refused every session — fresh sign-ins included — so
+ * agents signed in with the passcode and saw only 401 coming_soon.
+ *
+ * Migration 315 revoked every pre-gate session outright, so the flag is the second
+ * lock on a door already shut, which is why only an explicit `true` refuses.
+ *
+ * `EPIC_GATE_SINCE` is the owner's own cutoff when he wants a precise one: sessions
+ * created before it are refused. A value that is not a date is no override (Codex,
+ * 2 Oct 2026).
  */
-let cleanSlateMs = null;
-let cutoffUnknown = false;
-export function setCleanSlateEpoch(date) {
-  const t = date ? new Date(date).getTime() : NaN;
-  cleanSlateMs = Number.isFinite(t) ? t : null;
-  cutoffUnknown = false;
-  recordMintsSinceBoot(false);
-}
-
-/**
- * The cutoff could not be read at boot (server.js). Fail closed on what cannot
- * be dated, but never on a session this process minted itself: those are after
- * the clean slate by construction, so a fresh sign-in is honoured at once and an
- * agent that signs in is never handed a token the gate then refuses (owner, 2 Oct
- * 2026: "any request carrying a valid Epic session … passes the gate"). Every
- * older session waits for the real cutoff, which the retry restores
- * (setCleanSlateEpoch ends this state).
- */
-let loadCutoff = null;
-let lastTry = 0;
-let inFlight = null;
-export function failClosedUntilCutoff(load = null) {
-  cutoffUnknown = true;
-  loadCutoff = load;
-  lastTry = 0;           // a newly unknown cutoff is tried on the very next request
-  inFlight = null;       // and is not left waiting on an attempt from before
-  recordMintsSinceBoot(true);
-}
-
-/**
- * While the cutoff is unknown, try again on demand — at most every five seconds,
- * one attempt shared by every request in flight. A request carrying a session is
- * proof the database is answering again, so the real cutoff is restored at once
- * rather than on the next minute's retry, and from then on every replica judges
- * the same session the same way on the database's own clock (Codex, 2 Oct 2026).
- * A failure leaves the fail-closed state as it was.
- */
-async function ensureCutoff() {
-  if (!cutoffUnknown || !loadCutoff) return;
-  // Nobody waits more than three seconds for it: a stalled attempt carries on in
-  // the background and the request is judged fail-closed meanwhile.
-  const atMost = (p) => Promise.race([p, new Promise((r) => { const t = setTimeout(r, 3_000); t.unref?.(); })]);
-  if (inFlight) { await atMost(inFlight); return; }
-  if (Date.now() - lastTry < 5_000) return;
-  lastTry = Date.now();
-  const attempt = (async () => {
-    try { setCleanSlateEpoch(await loadCutoff()); }
-    catch { /* still unknown; fail closed as before */ }
-  })();
-  inFlight = attempt;
-  attempt.finally(() => { if (inFlight === attempt) inFlight = null; });
-  await atMost(attempt);
-}
-const gateSince = () => {
-  const env = process.env.EPIC_GATE_SINCE ? Date.parse(process.env.EPIC_GATE_SINCE) : NaN;
-  if (Number.isFinite(env)) return env;
-  return cleanSlateMs;
+const ownerCutoff = () => {
+  const t = process.env.EPIC_GATE_SINCE ? Date.parse(process.env.EPIC_GATE_SINCE) : NaN;
+  return Number.isFinite(t) ? t : null;
 };
 const predatesGate = (session) => {
-  // The owner's explicit override always wins; otherwise, while the automatic
-  // cutoff is unknown, only this process's own sessions are known to be after it.
-  // A malformed override is no override: it must not lift the fail-closed state
-  // (Codex, 2 Oct 2026).
-  const override = process.env.EPIC_GATE_SINCE ? Date.parse(process.env.EPIC_GATE_SINCE) : NaN;
-  if (!Number.isFinite(override) && cutoffUnknown) return !mintedSinceBoot(session?.id);
-  const since = gateSince();
-  if (since == null || !session?.created_at) return false;
-  const made = new Date(session.created_at).getTime();
-  return Number.isFinite(made) && made < since;
+  if (!session) return false;
+  const since = ownerCutoff();
+  if (since != null) {
+    const made = session.created_at ? new Date(session.created_at).getTime() : NaN;
+    if (Number.isFinite(made) && made < since) return true;
+  }
+  return session.before_clean_slate === true;
 };
 
 /**
@@ -266,12 +216,8 @@ export async function siteGate(req, res, next) {
   // left to throw (→ a retryable 5xx from the error handler), never swallowed into
   // a 401 that would make the client discard a good token (Codex, 1 Oct 2026).
   const session = await liveSessionFor(req);
-  // Only here, after a session lookup has just succeeded — proof the database is
-  // answering — and never ahead of /health, the sign-in door or any other
-  // credential, so a stalled retry cannot hold those up (Codex, 2 Oct 2026).
-  if (session && cutoffUnknown) await ensureCutoff();
   // A session from before the gate's cutoff is treated as no session — it is a
-  // token the launch is meant to have retired (see gateSince above).
+  // token the launch is meant to have retired (see predatesGate above).
   if (session && !predatesGate(session)) { req.siteGateSession = session; return next(); }
   // Only a genuine page navigation gets the Basic challenge; the app's XHR and
   // images get a plain JSON 401, so the browser does not pop its password dialog
