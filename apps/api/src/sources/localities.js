@@ -391,15 +391,19 @@ export async function refreshCounts() {
        updated_at   = now()
      where l.kind = 'town'`);
 
+  // A postcode locality's outcode is its slug less any country prefix (`ie-w12` →
+  // W12; migration 357), or a non-GB district would count nothing (Codex).
+  const OUTCODE = `upper(case when upper(l.country_code) <> 'GB' and l.slug like lower(l.country_code) || '-%'
+                              then substr(l.slug, length(l.country_code) + 2) else l.slug end)`;
   await query(
     `update localities l set
        to_go_count  = (select count(*) from attractions a
-                        where a.outcode = upper(l.slug) and a.state <> 'hidden'),
+                        where a.outcode = ${OUTCODE} and a.state <> 'hidden'),
        to_eat_count = (select count(distinct s.venue_ref) from scout_places s
-                        where s.outcode = upper(l.slug)),
+                        where s.outcode = ${OUTCODE}),
        image_count  = (select count(*) from image_links li
                          join attractions a on li.subject_type = 'attraction' and a.id::text = li.subject_id
-                        where a.outcode = upper(l.slug)),
+                        where a.outcode = ${OUTCODE}),
        updated_at   = now()
      where l.kind = 'postcode'`);
 

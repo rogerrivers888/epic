@@ -91,3 +91,17 @@ test('a full Eircode never fills a missing country from its routing key', async 
   assert.equal(await index.postcodeSaysGb('W12', null), true, 'an outcode alone still fills');
   assert.equal(await index.postcodeSaysGb('W12 9ZZ', null), true, 'a GB-shaped postcode ONS has not loaded yet still fills');
 });
+
+test('a non-GB postcode locality stands for its outcode without the prefix', async () => {
+  const { outcodeOfLocality } = await import('../src/repositories/localities.js');
+  assert.equal(outcodeOfLocality({ slug: 'ie-w12', country_code: 'IE' }), 'W12');
+  assert.equal(outcodeOfLocality({ slug: 'w12', country_code: 'GB' }), 'W12');
+  // refreshCounts reads the same outcode: an IE district counts its own places.
+  await query(`insert into localities (slug, name, kind, country_code) values ('ie-zq9', 'ZQ9', 'postcode', 'IE') on conflict (slug) do nothing`);
+  await query(`insert into scout_areas (code, country_code, lat, lng) values ('ZQ9', 'IE', 53.3, -6.3) on conflict (code) do nothing`);
+  await query(`insert into scout_places (area_code, venue_ref, name, rank, outcode, from_sources) values ('ZQ9', 'osm:node/ac-zq9', 'A place', 1, 'ZQ9', '["osm"]') on conflict do nothing`);
+  const { refreshCounts } = await import('../src/sources/localities.js');
+  await refreshCounts();
+  const { rows: [l] } = await query(`select to_eat_count from localities where slug = 'ie-zq9'`);
+  assert.equal(l.to_eat_count, 1);
+});

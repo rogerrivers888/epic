@@ -21,7 +21,17 @@ import { query } from '../db.js';
 const MATCH = { county: 'region_slug', town: 'locality_slug', postcode: 'outcode' };
 
 /** A postcode district is stored upper-case on a place and lower-case as a slug. */
-const matchValue = (loc) => (loc.kind === 'postcode' ? loc.slug.toUpperCase() : loc.slug);
+/**
+ * The outward code a postcode locality stands for: its slug, less the country
+ * prefix a non-GB area carries (`ie-w12` → `W12`; migration 357). Without this a
+ * non-GB district's page asked for an outcode `IE-W12` and showed nothing (Codex).
+ */
+export const outcodeOfLocality = (loc) => {
+  const cc = String(loc.country_code || 'GB').toLowerCase();
+  const slug = String(loc.slug);
+  return (cc !== 'gb' && slug.startsWith(`${cc}-`) ? slug.slice(cc.length + 1) : slug).toUpperCase();
+};
+const matchValue = (loc) => (loc.kind === 'postcode' ? outcodeOfLocality(loc) : loc.slug);
 
 export const bySlug = async (slug) => (await query(
   `select l.*, p.name as parent_name, p.slug as parent_slug_out
