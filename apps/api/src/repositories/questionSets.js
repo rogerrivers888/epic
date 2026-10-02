@@ -740,6 +740,15 @@ export async function ignoreCandidate(id, { actor = null, reason = null } = {}) 
  */
 export async function approveFeature(norm, { actor = null, kind = 'yesno', label = null } = {}) {
   return withTransaction(async (client) => {
+    // Serialize with review-spotting on this norm (Codex, 2 Oct 2026).
+    await client.query('select pg_advisory_xact_lock(hashtext($1)::bigint)', [`feature:${norm}`]);
+    // This is the review queue's door, not the general harvest's: it only acts on a
+    // word review-spotting actually raised, which leaves a review_sighting. A legacy
+    // Google-pass candidate carries `sources ? 'google'` too but has no sighting, and
+    // approving it here would mint a fact with no drawer to ask it in, bypassing the
+    // owned-evidence gate (Codex, 2 Oct 2026).
+    const { rows: seen } = await client.query('select 1 from review_sightings where norm = $1 limit 1', [norm]);
+    if (!seen.length) throw bad(`"${norm}" is not a feature waiting in the review queue.`);
     const { rows: cands } = await client.query(
       "select * from harvest_candidates where norm = $1 and status in ('new', 'unresolved') and sources ? 'google' order by subcategory for update",
       [norm]);
@@ -808,6 +817,15 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
  */
 export async function ignoreFeature(norm, { actor = null, reason = null } = {}) {
   return withTransaction(async (client) => {
+    // Serialize with review-spotting on this norm, so a spot cannot write a fresh
+    // sighting between our tombstone write and commit (Codex, 2 Oct 2026).
+    await client.query('select pg_advisory_xact_lock(hashtext($1)::bigint)', [`feature:${norm}`]);
+    // Only a word review-spotting raised — one with a review_sighting — can be ignored
+    // here. A legacy Google-pass candidate has `sources ? 'google'` but no sighting,
+    // and ignoring it through this door would mark unrelated candidates ignored and
+    // write a permanent tombstone for a word never shown in this queue (Codex, 2 Oct).
+    const { rows: seen } = await client.query('select 1 from review_sightings where norm = $1 limit 1', [norm]);
+    if (!seen.length) throw bad(`"${norm}" is not a feature waiting in the review queue.`);
     const { rowCount } = await client.query(
       `update harvest_candidates set status = 'ignored', decided_by = $2, decided_at = now(), examples = '{}',
               decision_reason = coalesce($3, decision_reason)

@@ -25,7 +25,7 @@
  * Google call, it reads a detail another request already paid for.
  */
 
-import { query } from '../db.js';
+import { query, withTransaction } from '../db.js';
 import { candidatesFor, plainKindOf, gateWord, ageWord } from '../domain/questions.js';
 import { recordCandidates } from '../repositories/questionSets.js';
 
@@ -178,7 +178,8 @@ async function knownFeatureKeys(client = null) {
  * queue). Nothing from Google's text is returned or stored.
  */
 export async function spotFromDetail({ venueRef, detail, client = null } = {}) {
-  if (!venueRef || !detail) return { subcategory: null, queued: 0, filtered: 0, known: 0, features: [] };
+  const empty = (filtered = 0) => ({ subcategory: null, queued: 0, filtered, known: 0, features: [] });
+  if (!venueRef || !detail) return empty();
   const raisedAll = candidatesFor({
     texts: [
       ...(detail.reviewSummary ? [{ source: 'google', text: String(detail.reviewSummary) }] : []),
@@ -188,72 +189,82 @@ export async function spotFromDetail({ venueRef, detail, client = null } = {}) {
   });
   const features = new Map([...raisedAll].filter(([norm]) => looksLikeFeature(norm)));
   const filtered = raisedAll.size - features.size;
-  if (!features.size) return { subcategory: null, queued: 0, filtered, known: 0, features: [] };
+  if (!features.size) return empty(filtered);
 
-  const run = client ? (t, p) => client.query(t, p) : query;
-  // Ignoring a feature in the review queue is for good, across every drawer (C30/C61,
-  // "Ignoring a word is permanent"). The scope is recorded explicitly in
-  // `feature_tombstones` — written only by `ignoreFeature`, the norm-level decision,
-  // never by the per-subcategory `ignoreCandidate` (Codex, 2 Oct 2026: a status-and-
-  // source guess could not tell the two apart). Drop any tombstoned norm before
-  // anything is written, so a fresh drawer can never reopen an ignored feature.
-  const { rows: tombstoned } = await run(
-    'select norm from feature_tombstones where norm = any($1)',
-    [[...features.keys()]]);
-  for (const t of tombstoned) features.delete(t.norm);
-  if (!features.size) return { subcategory: null, queued: 0, filtered, known: 0, features: [] };
+  // The tombstone read and the sighting/candidate writes run in one transaction,
+  // serialized per-norm against ignoreFeature by a transaction-scoped advisory lock
+  // (Codex, 2 Oct 2026). Without it, ignoreFeature could commit its tombstone
+  // between our read and our writes, and a fresh sighting would reopen a word that
+  // was permanently ignored. ignoreFeature/approveFeature take the same lock.
+  const work = async (tx) => {
+    const run = (t, p) => tx.query(t, p);
+    // Sorted, so two concurrent spots acquire overlapping locks in the same order
+    // and cannot deadlock; held until commit.
+    const locked = [...features.keys()].sort();
+    for (const n of locked) await run('select pg_advisory_xact_lock(hashtext($1)::bigint)', [`feature:${n}`]);
+    // Ignoring a feature in the review queue is for good, across every drawer (C30/C61,
+    // "Ignoring a word is permanent"). The scope is recorded explicitly in
+    // `feature_tombstones` — written only by `ignoreFeature`, the norm-level decision,
+    // never by the per-subcategory `ignoreCandidate`. Drop any tombstoned norm before
+    // anything is written, so a fresh drawer can never reopen an ignored feature.
+    const { rows: tombstoned } = await run('select norm from feature_tombstones where norm = any($1)', [locked]);
+    for (const t of tombstoned) features.delete(t.norm);
+    if (!features.size) return empty(filtered);
 
-  const subcategory = await subcategoryOf(venueRef, client);
-  if (!subcategory) return { subcategory: null, queued: 0, filtered, known: 0, features: [] };
+    const subcategory = await subcategoryOf(venueRef, tx);
+    if (!subcategory) return empty(filtered);
 
-  const known = await knownFeatureKeys(client);
-  const entries = [];
-  const norms = [...features.keys()];
-  for (const [norm, e] of features) {
-    // One sighting per (feature, place), idempotent: searching the same place
-    // again updates its polarity and does not count the place twice. The honest
-    // "how many places" is a count(distinct venue_ref) over these rows, read below.
-    await run(
-      `insert into review_sightings (norm, venue_ref, raw, asserts, denies, asks)
-         values ($1, $2, $3, $4, $5, $6)
-       on conflict (norm, venue_ref) do update
-         set asserts = excluded.asserts, denies = excluded.denies, asks = excluded.asks,
-             raw = excluded.raw, last_seen = now()`,
-      [norm, venueRef, e.raw, e.asserts, e.denies, e.asks]);
-    entries.push({
-      norm, raw: e.raw, rawForms: [e.raw],
-      sources: ['google'],            // rented: no evidence quote is kept (QUOTABLE_SOURCES)
-      examples: [venueRef],           // the place → feature link; cleared on promote/ignore
-      kind: 'feature',                // a candidate feature; still unpromotable without an owned quote
-      placesSeen: 1,
-      asserts: e.asserts, denies: e.denies, asks: e.asks,
+    const known = await knownFeatureKeys(tx);
+    const entries = [];
+    const norms = [...features.keys()];
+    for (const [norm, e] of features) {
+      // One sighting per (feature, place), idempotent: searching the same place
+      // again updates its polarity and does not count the place twice. The honest
+      // "how many places" is a count(distinct venue_ref) over these rows, read below.
+      await run(
+        `insert into review_sightings (norm, venue_ref, raw, asserts, denies, asks)
+           values ($1, $2, $3, $4, $5, $6)
+         on conflict (norm, venue_ref) do update
+           set asserts = excluded.asserts, denies = excluded.denies, asks = excluded.asks,
+               raw = excluded.raw, last_seen = now()`,
+        [norm, venueRef, e.raw, e.asserts, e.denies, e.asks]);
+      entries.push({
+        norm, raw: e.raw, rawForms: [e.raw],
+        sources: ['google'],            // rented: no evidence quote is kept (QUOTABLE_SOURCES)
+        examples: [venueRef],           // the place → feature link; cleared on promote/ignore
+        kind: 'feature',                // a candidate feature; still unpromotable without an owned quote
+        placesSeen: 1,
+        asserts: e.asserts, denies: e.denies, asks: e.asks,
+      });
+    }
+    // The candidate itself lives in the pen through the normal door, so the existing
+    // ignore/promote machinery covers it. recordCandidates merges a repeat with
+    // greatest(), which is safe — it never overwrites a count another source (the
+    // feature harvest) put there; the per-place totals are NOT written to the shared
+    // candidate, they are read from review_sightings (Codex, 2 Oct 2026).
+    await recordCandidates(subcategory, entries, { placesTotal: 1, client: tx });
+
+    // The accurate count per feature, for the report and the review queue: distinct
+    // places, in the place's CURRENT drawer, ignoring any since deleted — derived by
+    // joining place_index, never from a stored subcategory (Codex, 2 Oct 2026).
+    const { rows: counts } = await run(
+      `select s.norm,
+              count(distinct s.venue_ref) as places,
+              sum(s.asserts) as asserts, sum(s.denies) as denies, sum(s.asks) as asks
+         from review_sightings s
+         join place_index p on p.venue_ref = s.venue_ref
+        where s.norm = any($1) and p.subcategory = $2
+        group by s.norm`,
+      [norms, subcategory]);
+    const byNorm = Object.fromEntries(counts.map((r) => [r.norm, r]));
+    const report = norms.map((norm) => {
+      const c = byNorm[norm] ?? {};
+      return { norm, known: known.has(norm), places: Number(c.places ?? 1), asserts: Number(c.asserts ?? 0), denies: Number(c.denies ?? 0), asks: Number(c.asks ?? 0) };
     });
-  }
-  // The candidate itself lives in the pen through the normal door, so the existing
-  // ignore/promote machinery covers it. recordCandidates merges a repeat with
-  // greatest(), which is safe — it never overwrites a count another source (the
-  // feature harvest) put there; the per-place totals are NOT written to the shared
-  // candidate, they are read from review_sightings (Codex, 2 Oct 2026).
-  await recordCandidates(subcategory, entries, { placesTotal: 1, client });
+    return { subcategory, queued: entries.length, filtered, known: report.filter((r) => r.known).length, features: report };
+  };
 
-  // The accurate count per feature, for the report and the review queue: distinct
-  // places, in the place's CURRENT drawer, ignoring any since deleted — derived by
-  // joining place_index, never from a stored subcategory (Codex, 2 Oct 2026).
-  const { rows: counts } = await run(
-    `select s.norm,
-            count(distinct s.venue_ref) as places,
-            sum(s.asserts) as asserts, sum(s.denies) as denies, sum(s.asks) as asks
-       from review_sightings s
-       join place_index p on p.venue_ref = s.venue_ref
-      where s.norm = any($1) and p.subcategory = $2
-      group by s.norm`,
-    [norms, subcategory]);
-  const byNorm = Object.fromEntries(counts.map((r) => [r.norm, r]));
-  const report = norms.map((norm) => {
-    const c = byNorm[norm] ?? {};
-    return { norm, known: known.has(norm), places: Number(c.places ?? 1), asserts: Number(c.asserts ?? 0), denies: Number(c.denies ?? 0), asks: Number(c.asks ?? 0) };
-  });
-  return { subcategory, queued: entries.length, filtered, known: report.filter((r) => r.known).length, features: report };
+  return client ? work(client) : withTransaction(work);
 }
 
 /** Never let spotting break or slow the search that fed it (C30 is advisory only). */

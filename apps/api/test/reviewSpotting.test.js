@@ -330,4 +330,27 @@ test('approval refuses a custom label that collides with an unrelated fact', asy
   assert.equal((await query("select count(*)::int n from attribute_aliases where norm = 'bowling green' and target_key = 'picnic-area'")).rows[0].n, 0, 'no silent merge');
 });
 
+test('a legacy Google-pass candidate with no sighting cannot be approved or ignored here', async () => {
+  // Codex, 2 Oct 2026: the review queue's doors must act only on words review-spotting
+  // actually raised (they leave a review_sighting), never on the 21 Sep Google-pass
+  // candidates that carry sources ? 'google' but were never in this queue.
+  const sub = 'c30-legacy';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 legacy', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await query("delete from feature_tombstones where norm = 'legacy pavilion'");
+  // A Google candidate created straight through the harvest door — no review_sighting.
+  await sets.recordCandidates(sub, [{
+    norm: 'legacy pavilion', raw: 'legacy pavilion', rawForms: ['legacy pavilion'],
+    sources: ['google'], examples: [], kind: 'feature', placesSeen: 5, asserts: 5, denies: 0, asks: 0,
+  }], { placesTotal: 5 });
+  assert.equal((await query("select count(*)::int n from review_sightings where norm = 'legacy pavilion'")).rows[0].n, 0, 'no sighting, as a legacy candidate');
+
+  await assert.rejects(() => sets.approveFeature('legacy pavilion', { actor: 'tester' }), /not a feature waiting in the review queue/);
+  await assert.rejects(() => sets.ignoreFeature('legacy pavilion', { actor: 'tester' }), /not a feature waiting in the review queue/);
+  // Neither door touched it: no tombstone, and the legacy candidate is untouched.
+  assert.equal((await query("select count(*)::int n from feature_tombstones where norm = 'legacy pavilion'")).rows[0].n, 0, 'no tombstone written');
+  assert.equal((await query("select status from harvest_candidates where subcategory = $1 and norm = 'legacy pavilion'", [sub])).rows[0].status, 'unresolved', 'the legacy candidate is left as it was');
+});
+
 test.after(async () => { await pool.end(); });
