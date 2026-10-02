@@ -351,10 +351,25 @@ export async function afterFree(venueRef, ctx, deps = {}) {
 
 /** The yes/no facts already answered for a place, in the shape the back office draws. */
 async function answeredFacts(venueRef) {
-  const out = {};
+  const by = new Map();
   for (const a of await sets.answersFor(venueRef)) {
     if (a.state !== 'answered' || a.kind !== 'yesno' || a.yesno == null) continue;
-    out[a.attribute_key] = { label: a.label, answer: a.yesno ? 'yes' : 'no', source: a.source, sourceUrl: a.source_url, checkedAt: a.checked_at };
+    by.set(a.attribute_key, [...(by.get(a.attribute_key) ?? []), a]);
+  }
+  const out = {};
+  for (const [key, rows] of by) {
+    const answers = new Set(rows.map((r) => r.yesno));
+    // Two owned sources that disagree are shown disagreeing, never one of them
+    // as the answer (the question-sets rule; Codex, 2 Oct 2026).
+    if (answers.size > 1 || rows.some((r) => r.unresolved)) {
+      out[key] = {
+        label: rows[0].label, answer: 'unknown', source: null, sourceUrl: null, checkedAt: rows[0].checked_at,
+        why: `sources disagree: ${rows.map((r) => `${r.source} ${r.yesno ? 'yes' : 'no'}`).join(', ')}`,
+      };
+      continue;
+    }
+    const a = rows[0];
+    out[key] = { label: a.label, answer: a.yesno ? 'yes' : 'no', source: a.source, sourceUrl: a.source_url, checkedAt: a.checked_at };
   }
   return out;
 }

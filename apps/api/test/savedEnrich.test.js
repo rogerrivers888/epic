@@ -582,3 +582,21 @@ test('a photograph-only place is not researched; an Openverse picture stored but
   const { rows } = await query(`select count(*)::int as n from image_links where subject_type = 'place' and subject_id = $1`, [ref]);
   assert.equal(rows[0].n, 1);
 });
+
+test('two owned sources that disagree are shown disagreeing, not as one answer', async () => {
+  const hh = await household();
+  const ref = `google:disagree-${randomUUID()}`;
+  const key = `test-step-${randomUUID().slice(0, 8)}`;
+  await query(`insert into place_attributes (key, label, kind) values ($1, 'Step free', 'yesno')`, [key]);
+  const { rows: [q] } = await query(`insert into questions (attribute_key, scope, active) values ($1, 'global', true) returning id`, [key]);
+  await query(`insert into place_answers (venue_ref, question_id, source, state, yesno, unresolved) values ($1, $2, 'osm', 'answered', true, true), ($1, $2, 'site', 'answered', false, true)`, [ref, q.id]);
+  await query(`insert into place_records (venue_ref, name, provenance) values ($1, 'Disagreed', '{}')`, [ref]);
+  await query(`insert into saved_place_enrichment (venue_ref, household_id, state) values ($1, $2, 'free')`, [ref, hh]);
+  await enrich.afterFree(ref, { householdId: hh, sessionId: null }, {
+    asks: [], openverse: async () => ({ ok: true, stored: [], refused: 0 }),
+    searchWeb: async () => ({ text: '{"fields":{}}', fetched: [], searches: 0 }),
+  });
+  const f = (await enrich.enrichmentOf(ref)).found.facts[key];
+  assert.equal(f.answer, 'unknown');
+  assert.match(f.why, /disagree/);
+});
