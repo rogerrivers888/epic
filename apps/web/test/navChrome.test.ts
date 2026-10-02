@@ -40,3 +40,9 @@ test('the tab bar puts 4px between icon and label, and keeps its tuned padding',
   const app = read('App.tsx');
   assert.match(app, /tab: \{ flex: 1, minHeight: TARGET, alignItems: 'center', justifyContent: 'flex-start', gap: 4, paddingTop: 22 \}/);
 });
+
+test('the title band (Settings, Host) takes the same 14px trim: no extra 10px, 20 below', () => {
+  const src = read('src/components/Band.tsx');
+  assert.match(src, /export function TitleBand[\s\S]*?<View style=\{styles\.tallTop\}>/);
+  assert.match(src, /titleRow: \{[^}]*paddingTop: 22, paddingBottom: 20 \}/);
+});

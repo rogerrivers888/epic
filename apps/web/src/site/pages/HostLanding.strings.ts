@@ -1,6 +1,8 @@
 /**
  * Words for the host landing page (WH1), v6 "Four ways to host" (Website ›
- * "New hosting screen 021026", signed off 2 Oct 2026): the four kinds are how
+ * "New hosting screen 021026", signed off 2 Oct 2026), with the cards' photos,
+ * examples and "Hosts are running" lists from "Webstie & host v3" (2 Oct 2026)
+ * and the fee line from Host v3 RULINGS › Charges. The four kinds are how
  * often it runs — One-off · Weekly · Course · On request — and who can come
  * (Private / Public) is section 02. Every figure in a card's strip is an example,
  * which is why each strip says so.
@@ -46,7 +48,10 @@ export type HostLandingStrings = {
     oneOff: { status: (booked: number) => string; result: string };
     weekly: { status: (booked: number) => string; thisWeek: string; result: string };
     course: { status: (taken: number) => string; result: string };
-    onRequest: { status: string; progress: (n: number) => string; result: string };
+    /** The strip's figures are drawn with icons (a star, a tick, an arrow), never glyph characters; `said` is what a screen reader hears. */
+    onRequest: { status: string; statusSaid: string; progress: (n: number) => string; result: [from: string, to: string]; resultSaid: string };
+    oneOffSaid: string;
+    weeklySaid: string;
   };
   invite: {
     title: string; sub: string; body: string;
@@ -89,28 +94,29 @@ const GB: HostLandingStrings = {
       key: 'one-off', tag: 'One-off', title: 'A private or\npublic event.',
       line: 'A wedding for your guests, or a class open to all. Set the date; people RSVP or book.',
       kicker: 'Public · Sat 14 Nov, 10am', card: 'Fossil hunting with a geologist', pills: ['Lyme Regis', '3 hrs'],
-      eg: ['Birthday parties and weddings', 'Taster classes and workshops', 'Guided walks and tours'],
+      eg: ['Birthday party', 'Wedding', 'Quiz night', 'Craft fair'],
       who: 'Hannah', when: 'just now',
     },
     {
       key: 'weekly', tag: 'Weekly', title: 'Same time, every week.',
       line: 'A club or class that keeps going. People come every week or drop in when they can.',
       kicker: 'Public · Thursdays 7pm', card: 'Weekly pottery workshop', pills: ['£18 a session'],
-      eg: ['Running and walking clubs', 'Art and pottery classes', 'Scouts and youth groups'],
+      eg: ['Book club', 'Five-a-side', 'Running club', 'Yoga class'],
       who: 'Tom', when: 'just now',
     },
     {
       key: 'course', tag: 'Course', title: 'A set number of weeks.',
       line: 'Six weeks or a whole term. People sign up for the full run; you plan each session.',
-      kicker: '10 Saturdays · 9 Jan – 13 Mar', card: 'Junior tennis camp', pills: ['£120 per child'],
-      eg: ['Sports camps and coaching', 'Masterclasses and courses', 'Homeschool terms and co-ops'],
+      // A word joiner after the dash: "5–8" never breaks across two lines.
+      kicker: '8 Saturdays · 10 Jan – 7 Mar', card: 'Learn to swim, ages 5–\u20608', pills: ['£96 per child'],
+      eg: ['Swimming lessons', 'Couch to 5K', 'Cooking classes', 'Homeschool'],
       who: 'Ana', when: 'just now',
     },
     {
       key: 'on-request', tag: 'On request', title: 'Your time, when they want it.',
       line: "No fixed date. Say when you're free and people book you: a tour, a lesson, a day out.",
-      kicker: 'On request · 1–2 hours', card: 'An hour on getting started with AI', pills: ['Online or in person'],
-      eg: ['Tours with a local guide', 'Private lessons and coaching', 'Days out with a local'],
+      kicker: 'On request · 2 or 3 hours', card: 'A Thai cooking lesson at yours', pills: ['In your kitchen'],
+      eg: ['Walking tour', 'Cooking lesson', 'Personal trainer', 'Photo shoot'],
       who: 'Sam', when: 'Thu 2pm',
     },
   ],
@@ -118,10 +124,20 @@ const GB: HostLandingStrings = {
   strip: {
     example: 'Example',
     money: gbp,
-    oneOff: { status: (n) => `Min 5 · ${n} booked`, result: "It's on ✓" },
-    weekly: { status: (n) => `${n} of 8 booked`, thisWeek: 'this week', result: '↑ 17% on last week' },
+    oneOff: { status: (n) => `Min 5 · ${n} booked`, result: "It's on" },
+    oneOffSaid: "It's on",
+    weekly: { status: (n) => `${n} of 8 booked`, thisWeek: 'this week', result: '17% on last week' },
+    weeklySaid: 'Up 17% on last week',
     course: { status: (n) => `${n} of 16`, result: '1 place left' },
-    onRequest: { status: '★ 4.9 · 9 bookings this month', progress: (n) => `${n} of 25 to Epic Trusted`, result: 'Fee 15% → 10%' },
+    // Epic's share is earned by rating, not by a count of events (Host v3
+    // RULINGS › Charges: "15% after 5 rated events averaging 4.5+; 10% after 10
+    // rated events averaging 4.8+"). The v3 design's "25 to Epic Trusted" is the
+    // superseded event-count ladder.
+    onRequest: {
+      status: '4.9 · 9 bookings this month', statusSaid: 'Rated 4.9 · 9 bookings this month',
+      progress: (n) => `${n} of 10 rated events at 4.8+`,
+      result: ["Epic's share 15%", '10%'], resultSaid: "Epic's share falls from 15% to 10%",
+    },
   },
   invite: {
     title: 'Private',
@@ -191,8 +207,8 @@ const US: HostLandingStrings = {
   ...GB,
   kinds: [
     { ...GB.kinds[0], kicker: 'Public · Sat, Nov 14, 10 am' },
-    { ...GB.kinds[1], kicker: 'Public · Thursdays 7 pm', pills: ['$18 a session'] },
-    { ...GB.kinds[2], kicker: '10 Saturdays · Jan 9 – Mar 13', line: 'Six weeks or a whole semester. People sign up for the full run; you plan each session.', pills: ['$120 per child'], eg: ['Sports camps and coaching', 'Masterclasses and courses', 'Homeschool semesters and co-ops'] },
+    { ...GB.kinds[1], kicker: 'Public · Thursdays 7 pm', pills: ['$18 a session'], eg: ['Book club', 'Pickup soccer', 'Running club', 'Yoga class'] },
+    { ...GB.kinds[2], kicker: '8 Saturdays · Jan 10 – Mar 7', line: 'Six weeks or a whole semester. People sign up for the full run; you plan each session.', pills: ['$96 per child'] },
     { ...GB.kinds[3], when: 'Thu 2 pm' },
   ],
   strip: { ...GB.strip, money: usd },

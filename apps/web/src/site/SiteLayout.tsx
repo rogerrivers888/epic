@@ -15,7 +15,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
-import { CREAM, HAIRLINE, INK, INK_HOVER, INK_RULE, LIME, LIME_TINT, ON_INK_MUTED, fonts } from '../theme';
+import { CREAM, HAIRLINE, INK, INK_HOVER, INK_RULE, LIME, LIME_TINT, MOSS, ON_INK_MUTED, fonts } from '../theme';
 import { SiteWordmark as Wordmark } from './SiteWordmark';
 import { useViewport } from '../hooks/useViewport';
 import { useRouter } from '../router';
@@ -87,15 +87,17 @@ function SiteHeader({ locale, header }: { locale: SiteLocale; header: HeaderStyl
     <View style={[styles.headRight, phone && { gap: 0 }]}>
       {!phone && !header.host ? (
         <Pressable accessibilityRole="link" onPress={() => navigate(paths.siteHost(locale))}>
-          {({ hovered }: any) => <Text style={[styles.headLink, { color: ink }, hovered && styles.underline]}>{w.becomeHost}</Text>}
+          {({ hovered }: any) => <Text style={[styles.headLink, { color: ink }, hovered && (onInk ? styles.underline : { color: MOSS })]}>{w.becomeHost}</Text>}
         </Pressable>
       ) : null}
+      {/* A filled button (v3 handoff, 2 Oct 2026: "Log in as an ink button"): ink on
+          cream and lime, lime on an ink header — never cream type on lime. */}
       <Pressable
         accessibilityRole="link"
         onPress={() => navigate(paths.login())}
-        style={({ hovered }: any) => [styles.logIn, { borderColor: ink }, hovered && { backgroundColor: onInk ? INK_HOVER : LIME_TINT }]}
+        style={({ hovered }: any) => [styles.logIn, phone && styles.logInPhone, { backgroundColor: onInk ? (hovered ? LIME_TINT : LIME) : hovered ? INK_HOVER : INK }]}
       >
-        <Text style={[styles.headLink, { color: ink }]}>{w.logIn}</Text>
+        <Text style={[styles.headLink, phone && { fontSize: 15 }, { color: onInk ? INK : CREAM }]}>{w.logIn}</Text>
       </Pressable>
     </View>
   );
@@ -114,7 +116,7 @@ function SiteHeader({ locale, header }: { locale: SiteLocale; header: HeaderStyl
           : <Wordmark height={phone ? 26 : 30} ink={ink} ground={ground} />}
         {header.host && !phone ? (
           <>
-            <View style={[styles.hostRule, { backgroundColor: INK }]} />
+            <View style={styles.hostRule} />
             <Text style={styles.forHosts}>{w.forHosts}</Text>
           </>
         ) : null}
@@ -231,13 +233,15 @@ function Tick() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: CREAM },
   head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  headLeft: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  headLeft: { flexDirection: 'row', alignItems: 'center', gap: 18 },
   headRight: { flexDirection: 'row', alignItems: 'center', gap: 28 },
   headLink: { fontFamily: fonts.body, fontSize: 16, fontWeight: '700' },
   underline: { textDecorationLine: 'underline' },
-  logIn: { height: 44, borderWidth: 2, paddingHorizontal: 18, justifyContent: 'center' },
+  logIn: { height: 44, paddingHorizontal: 18, justifyContent: 'center' },
+  logInPhone: { paddingHorizontal: 16 },
   domain: { fontFamily: fonts.body, fontSize: 16, fontWeight: '700' },
-  hostRule: { width: 2, height: 28 },
+  // "Every rule is 1px #D7D3D3, never ink" (v3 handoff › Tokens).
+  hostRule: { width: 1, height: 28, backgroundColor: HAIRLINE },
   forHosts: { fontFamily: fonts.body, fontSize: 14, fontWeight: '700', letterSpacing: 1.12, textTransform: 'uppercase', color: INK },
   floatRight: { position: 'absolute', top: 22, right: 56, zIndex: 3 },
 

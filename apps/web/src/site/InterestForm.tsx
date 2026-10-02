@@ -13,11 +13,16 @@
  * landing page, the referrer, the UTM tags, gclid/fbclid — and the words the
  * person agreed to: the button they pressed is the consent (UK PECR). A hidden
  * honeypot field catches bots; whatever fills it is thanked and kept nowhere.
+ *
+ * Two looks. `boxed` (the default) is the one above. `flat` is the homepage v3's
+ * (approved 2 Oct 2026): no border — a cream field and an ink button on lime, a
+ * dark field and a lime button on ink; on a phone the field and the button are
+ * two blocks 6px apart; the success line replaces the form with no tick.
  */
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
-import { CREAM, INK, INK_HOVER, LIME, LIME_HOVER, LIME_TINT, MOSS, fonts } from '../theme';
+import { CREAM, INK, INK_FIELD, INK_HOVER, LIME, LIME_HOVER, LIME_TINT, MOSS, PLACEHOLDER, fonts } from '../theme';
 import { api, type InterestSignup } from '../api';
 import { type SiteLocale } from '../routes';
 import { useRouter } from '../router';
@@ -35,7 +40,7 @@ const WORDS: Strings<{ placeholder: string; bad: string; failed: string }> = {
 };
 
 export function InterestForm({
-  locale, source, label, successMessage, variant = 'inline', ground = 'cream', hostKind = null, landingPage = null, maxWidth = 520,
+  locale, source, label, successMessage, variant = 'inline', ground = 'cream', hostKind = null, landingPage = null, maxWidth = 520, look = 'boxed', gap = 10,
 }: {
   locale: SiteLocale;
   source: 'home' | 'host';
@@ -49,6 +54,10 @@ export function InterestForm({
   /** The campaign landing page this form sits on (`/go/{name}`), recorded on the sign-up. */
   landingPage?: string | null;
   maxWidth?: number;
+  /** `flat` is the homepage v3's borderless form (see above); `boxed` everywhere else. */
+  look?: 'boxed' | 'flat';
+  /** Flat look only: the space between the form and its error line (the page's own gap). */
+  gap?: number;
 }) {
   const w = pick(WORDS, locale);
   const { query } = useRouter();
@@ -62,6 +71,8 @@ export function InterestForm({
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [focused, setFocused] = useState(false);
+  // Two forms on one page (the homepage's hero and close) each need their own id.
+  const errId = `interest-err-${source}-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
 
   const submit = async () => {
     if (busy) return;
@@ -90,6 +101,69 @@ export function InterestForm({
     ? (stacked ? ({ backgroundColor: onInk ? 'transparent' : LIME_TINT } as object) : ({ boxShadow: `inset 0 -4px 0 ${onInk ? LIME : INK}` } as object))
     : null;
 
+  if (look === 'flat') {
+    const h = stacked ? 54 : 58;
+    const field = onInk ? INK_FIELD : CREAM;
+    const accent = onInk ? LIME : INK;
+    if (done) {
+      return (
+        <View style={[stacked ? null : styles.flatDone, { maxWidth }]} accessibilityLiveRegion="polite">
+          <Text style={[styles.doneText, { color: accent, fontSize: stacked ? 17 : 19 }]}>{successMessage}</Text>
+        </View>
+      );
+    }
+    return (
+      <View style={{ gap, maxWidth, width: '100%' }}>
+        <View style={stacked ? { gap: 6 } : { flexDirection: 'row', backgroundColor: field }}>
+          <TextInput
+            value={email}
+            onChangeText={(t) => { setEmail(t); if (err) setErr(null); }}
+            onSubmitEditing={submit}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            placeholder={w.placeholder}
+            placeholderTextColor={PLACEHOLDER}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+            accessibilityLabel={w.placeholder}
+            {...(Platform.OS === 'web' ? ({ autoComplete: 'email', 'aria-describedby': err ? errId : undefined } as object) : {})}
+            style={[
+              styles.input,
+              { color: onInk ? CREAM : INK, height: h, paddingHorizontal: stacked ? 16 : 18, fontSize: stacked ? 17 : 18 },
+              stacked ? { backgroundColor: field } : { flex: 1, minWidth: 0 },
+              focused && Platform.OS === 'web' && ({ boxShadow: `inset 0 -3px 0 ${accent}` } as object),
+              Platform.OS === 'web' && ({ outlineWidth: 0 } as object),
+            ]}
+          />
+          {/* The honeypot, as in the boxed look. */}
+          <TextInput
+            value={trap}
+            onChangeText={setTrap}
+            style={styles.trap}
+            {...(Platform.OS === 'web' ? ({ tabIndex: -1, 'aria-hidden': true, autoComplete: 'off', name: 'website' } as object) : {})}
+          />
+          <Pressable
+            onPress={submit}
+            disabled={busy}
+            accessibilityRole="button"
+            style={({ hovered }: any) => [
+              styles.button,
+              { height: h, paddingHorizontal: stacked ? 18 : 20, backgroundColor: onInk ? (hovered ? LIME_HOVER : LIME) : (hovered ? INK_HOVER : INK) },
+              stacked ? { justifyContent: 'space-between' } : { gap: 24, flexShrink: 0 },
+            ]}
+          >
+            <Text style={[styles.buttonText, { color: onInk ? INK : CREAM, fontSize: stacked ? 16 : 17 }]}>{label}</Text>
+            <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke={onInk ? INK : CREAM} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><Path d="M5 12h14M13 6l6 6-6 6" /></Svg>
+          </Pressable>
+        </View>
+        {err ? (
+          <Text nativeID={errId} style={[styles.err, { color: accent, fontSize: stacked ? 14 : 15 }]} accessibilityLiveRegion="polite">{err}</Text>
+        ) : null}
+      </View>
+    );
+  }
+
   if (done) {
     return (
       <View style={[styles.done, { borderTopColor: ink, maxWidth }]} accessibilityLiveRegion="polite">
@@ -114,7 +188,7 @@ export function InterestForm({
           autoCapitalize="none"
           autoCorrect={false}
           accessibilityLabel={w.placeholder}
-          {...(Platform.OS === 'web' ? ({ autoComplete: 'email', 'aria-describedby': err ? `interest-err-${source}` : undefined } as object) : {})}
+          {...(Platform.OS === 'web' ? ({ autoComplete: 'email', 'aria-describedby': err ? errId : undefined } as object) : {})}
           style={[
             styles.input,
             { color: ink, height: stacked ? 56 : 58 },
@@ -146,7 +220,7 @@ export function InterestForm({
         </Pressable>
       </View>
       {err ? (
-        <Text nativeID={`interest-err-${source}`} style={[styles.err, { color: errColor }]} accessibilityLiveRegion="polite">{err}</Text>
+        <Text nativeID={errId} style={[styles.err, { color: errColor }]} accessibilityLiveRegion="polite">{err}</Text>
       ) : null}
       {/* No privacy link under the box (owner, 2 Oct 2026: "We've already got privacy.
           We don't need to say it under every email box") — it is in the footer. */}
@@ -162,5 +236,6 @@ const styles = StyleSheet.create({
   buttonText: { fontFamily: fonts.body, fontSize: 17, fontWeight: '700' },
   err: { fontFamily: fonts.body, fontSize: 15, fontWeight: '700' },
   done: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 62, borderTopWidth: 2, paddingTop: 14 },
+  flatDone: { minHeight: 58, justifyContent: 'center' },
   doneText: { fontFamily: fonts.body, fontSize: 20, fontWeight: '700', flexShrink: 1 },
 });

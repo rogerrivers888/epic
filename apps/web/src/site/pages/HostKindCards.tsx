@@ -15,11 +15,15 @@
  * while hidden, stop after three loops, replay on a click, and show only the end
  * state under reduced motion (site/motion.ts › useStoryboard).
  *
- * The photos are flat brand blocks: the site carries no stock photography.
+ * The photos are the v3 handoff's ("Webstie & host v3", 2 Oct 2026): Unsplash
+ * placeholders, downloaded and served from public/site/host (its README says
+ * which is which), to be swapped for licensed photography before launch. The
+ * strip's figures carry a star, a tick and arrows drawn from the icon set, never
+ * glyph characters.
  */
 import React, { useRef } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View, type TextStyle } from 'react-native';
-import { CREAM, DEEP_GREEN, HAIRLINE, INACTIVE, INK, INK_MUTED, LIGHT_GREY, LIME, LIME_PALE, LIME_TINT, MOSS, TRACK, fonts } from '../../theme';
+import { Image, Platform, Pressable, StyleSheet, Text, View, type TextStyle } from 'react-native';
+import { CREAM, DEEP_GREEN, HAIRLINE, INACTIVE, INK, INK_MUTED, LIGHT_GREY, LIME, LIME_PALE, LIME_TINT, TRACK, fonts } from '../../theme';
 import { Icon } from '../../components/Icon';
 import { useStoryboard } from '../motion';
 import type { HostKindWords, HostLandingStrings, KindKey } from './HostLanding.strings';
@@ -31,7 +35,13 @@ const LOOPS = 3;
 const STAGGER = 350;
 /** The result chip's colours, by the name the strip gives them. */
 const RESULT = { lime: { backgroundColor: LIME, color: INK }, tint: { backgroundColor: LIME_TINT, color: DEEP_GREEN }, cream: { backgroundColor: CREAM, color: INK } } as const;
-const PHOTO: Record<KindKey, string> = { 'one-off': MOSS, weekly: DEEP_GREEN, course: LIME, 'on-request': INK };
+/** Each card's photo (public/site/host/README.md); the ground under it is the design's #D7D3D3 while it loads. */
+const PHOTO: Record<KindKey, string> = {
+  'one-off': '/site/host/host-one-off-durdle-door-700.jpg',
+  weekly: '/site/host/host-weekly-pottery-wheel-700.jpg',
+  course: '/site/host/host-course-swimming-goggles-700.jpg',
+  'on-request': '/site/host/host-on-request-cooking-kitchen-700.jpg',
+};
 
 const nowrap = (Platform.OS === 'web' ? { whiteSpace: 'nowrap' } : {}) as TextStyle;
 const tabular: TextStyle = { fontVariant: ['tabular-nums'] };
@@ -43,7 +53,7 @@ export function HostKindCards({ kinds, strip, running, cols }: { kinds: HostKind
         {kinds.map((k) => (
           <View key={k.key} style={{ gap: 18 }}>
             <Tag text={k.tag} />
-            <TitleAndLine k={k} />
+            <TitleAndLine k={k} gap={18} />
             <KindCard k={k} strip={strip} delay={0} />
             <Running title={running} items={k.eg} />
           </View>
@@ -77,9 +87,10 @@ function Tag({ text }: { text: string }) {
   return <View style={{ flexDirection: 'row' }}><Text style={styles.tag}>{text}</Text></View>;
 }
 
-function TitleAndLine({ k }: { k: HostKindWords }) {
+/** The design's `row` layout keeps title and line 10px apart; its `single` layout spaces them like everything else, 18. */
+function TitleAndLine({ k, gap = 10 }: { k: HostKindWords; gap?: number }) {
   return (
-    <View style={{ gap: 10 }}>
+    <View style={{ gap }}>
       <Text style={styles.title}>{k.title}</Text>
       <Text style={styles.line}>{k.line}</Text>
     </View>
@@ -101,7 +112,9 @@ function KindCard({ k, strip, delay }: { k: HostKindWords; strip: HostLandingStr
   const s = stripAt(k.key, t, looped, strip);
   return (
     <Pressable ref={node} onPress={replay} accessibilityRole="none" style={[styles.card, Platform.OS === 'web' && ({ cursor: 'default' } as object)]}>
-      <View aria-hidden style={[styles.photo, { backgroundColor: PHOTO[k.key] }]} />
+      <View aria-hidden style={styles.photo}>
+        <Image source={{ uri: PHOTO[k.key] }} accessible={false} resizeMode="cover" style={StyleSheet.absoluteFill} />
+      </View>
       <View style={styles.body}>
         <Text style={styles.kicker}>{k.kicker}</Text>
         <Text style={styles.cardTitle}>{k.card}</Text>
@@ -115,7 +128,10 @@ function KindCard({ k, strip, delay }: { k: HostKindWords; strip: HostLandingStr
             <Text style={[styles.chipText, nowrap]}><Text style={{ fontWeight: '700' }}>{k.who}</Text><Text style={{ color: INK_MUTED }}> · {k.when}</Text></Text>
           </View>
         </View>
-        <View style={[styles.stripRow, { height: 20 }]}><Text style={[styles.status, tabular, nowrap]}>{s.status}</Text></View>
+        <View style={[styles.stripRow, { height: 20, gap: 4 }]} accessibilityLabel={k.key === 'on-request' ? strip.onRequest.statusSaid : undefined}>
+          {k.key === 'on-request' ? <View aria-hidden><Icon name="favourite" size={14} color={INK} fill strokeWidth={2} /></View> : null}
+          <Text style={[styles.status, tabular, nowrap]}>{s.status}</Text>
+        </View>
         <View style={{ height: 34, justifyContent: 'center', gap: 5 }}>
           {k.key === 'one-off' ? (
             <View style={styles.bar8}><View style={{ height: '100%', width: `${s.pct ?? 0}%`, backgroundColor: s.full ? LIME : LIME_PALE }} /></View>
@@ -141,19 +157,33 @@ function KindCard({ k, strip, delay }: { k: HostKindWords; strip: HostLandingStr
           ) : null}
         </View>
         <View style={[styles.stripRow, { height: 24, opacity: s.rise, transform: [{ translateY: (1 - s.rise) * 6 }] }]}>
-          <Text style={[styles.result, nowrap, RESULT[s.result]]}>{resultText(k.key, strip)}</Text>
+          <Result kind={k.key} strip={strip} colours={RESULT[s.result]} />
         </View>
       </View>
     </Pressable>
   );
 }
 
-const resultText = (kind: KindKey, w: HostLandingStrings['strip']) =>
-  kind === 'one-off' ? w.oneOff.result : kind === 'weekly' ? w.weekly.result : kind === 'course' ? w.course.result : w.onRequest.result;
+/** The chip that rises at the end of a strip: words, with the tick or arrows the design draws as glyphs. */
+function Result({ kind, strip, colours }: { kind: KindKey; strip: HostLandingStrings['strip']; colours: { backgroundColor: string; color: string } }) {
+  const ink = colours.color;
+  const icon = (name: 'check' | 'ascending' | 'forward') => <View aria-hidden><Icon name={name} size={13} color={ink} strokeWidth={3} /></View>;
+  const words = (t: string) => <Text style={[styles.result, nowrap, { color: ink }]}>{t}</Text>;
+  const said = kind === 'one-off' ? strip.oneOffSaid : kind === 'weekly' ? strip.weeklySaid : kind === 'on-request' ? strip.onRequest.resultSaid : strip.course.result;
+  return (
+    <View accessibilityLabel={said} style={[styles.resultChip, { backgroundColor: colours.backgroundColor }]}>
+      {kind === 'one-off' ? <>{words(strip.oneOff.result)}{icon('check')}</> : null}
+      {kind === 'weekly' ? <>{icon('ascending')}{words(strip.weekly.result)}</> : null}
+      {kind === 'course' ? words(strip.course.result) : null}
+      {kind === 'on-request' ? <>{words(strip.onRequest.result[0])}{icon('forward')}{words(strip.onRequest.result[1])}</> : null}
+    </View>
+  );
+}
 
 const H = fonts.heading;
 const B = fonts.body;
-const text = (size: number, weight: TextStyle['fontWeight'], extra?: TextStyle): TextStyle => ({ fontFamily: B, fontSize: size, fontWeight: weight, color: INK, ...extra });
+/** Text the design gives no line height of its own sits at the page's 1.55 (measured: the card is 455px tall at 271 wide). */
+const text = (size: number, weight: TextStyle['fontWeight'], extra?: TextStyle): TextStyle => ({ fontFamily: B, fontSize: size, fontWeight: weight, color: INK, lineHeight: Math.round(size * 1.55 * 10) / 10, ...extra });
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: 28, alignItems: 'flex-start' },
@@ -165,7 +195,7 @@ const styles = StyleSheet.create({
   runningItem: text(15, '600', { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: HAIRLINE }),
 
   card: { flex: 1, borderWidth: 1, borderColor: HAIRLINE, backgroundColor: CREAM },
-  photo: { height: 160 },
+  photo: { height: 160, overflow: 'hidden', backgroundColor: HAIRLINE },
   body: { flex: 1, paddingTop: 16, paddingHorizontal: 16, paddingBottom: 14, gap: 8 },
   kicker: text(12, '700', { letterSpacing: 12 * 0.06, textTransform: 'uppercase', color: INK_MUTED }),
   cardTitle: { fontFamily: H, fontWeight: '800', color: INK, fontSize: 21, letterSpacing: -21 * 0.02, lineHeight: 21 * 1.15, minHeight: 21 * 1.15 * 2 },
@@ -182,7 +212,8 @@ const styles = StyleSheet.create({
   bar8: { height: 8, backgroundColor: TRACK },
   bar6: { height: 6, backgroundColor: TRACK },
   money: { fontFamily: H, fontWeight: '800', fontSize: 20, letterSpacing: -20 * 0.02, lineHeight: 20, color: INK },
-  thisWeek: text(13, '600', { letterSpacing: 0 }),
+  thisWeek: text(13, '600', { letterSpacing: 0, lineHeight: 20 }),
   progress: text(12.5, '600', { lineHeight: 12.5 }),
-  result: text(13.5, '800', { paddingVertical: 3, paddingHorizontal: 8 }),
+  resultChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 3, paddingHorizontal: 8 },
+  result: text(13.5, '800'),
 });

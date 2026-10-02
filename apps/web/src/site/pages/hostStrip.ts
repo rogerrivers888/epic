@@ -1,6 +1,7 @@
 /**
  * The live strip on a host-page card, frame by frame (HostKindCards draws it):
- * the storyboard of the v6 design, kind by kind. Pure, so it can be tested.
+ * the storyboard of the v6 design (unchanged in v3), kind by kind; the
+ * On request strip counts rated events, not events (Host v3 RULINGS). Pure, so it can be tested.
  */
 import type { HostLandingStrings, KindKey } from './HostLanding.strings';
 
@@ -38,6 +39,7 @@ export function stripAt(kind: KindKey, t: number, looped: boolean, w: HostLandin
   if (kind === 'course') {
     return { ...base, status: w.course.status(Math.round(14 + v)), result: 'lime' };
   }
-  const n = 22 + v;
-  return { ...base, status: w.onRequest.status, progress: w.onRequest.progress(Math.round(n)), pct: (n / 25) * 100, result: 'cream' };
+  // Rated events towards the 10% share (RULINGS › Charges: 10 rated events averaging 4.8+).
+  const n = 9 + v;
+  return { ...base, status: w.onRequest.status, progress: w.onRequest.progress(Math.round(n)), pct: (n / 10) * 100, result: 'cream' };
 }

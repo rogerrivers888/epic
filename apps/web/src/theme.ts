@@ -82,6 +82,11 @@ export const TRACK = '#E2DED8';
 export const LIGHT_GREY = '#C9C4C2';
 export const ON_INK_SOFT = '#BDB8B5';
 export const LIME_WASH = '#E8FACE';  // oklch(0.96 0.06 125): the host page's steps band and a "Maybe"
+// The homepage v3 (approved 2 Oct 2026): the email field on ink, chapter 01's
+// line on deep green, and the placeholder in either field.
+export const INK_FIELD = '#2E2B29';
+export const ON_DEEP_GREEN = '#DFE9CF';
+export const PLACEHOLDER = '#8A8482';
 
 /**
  * Dark, from the v2 handoff's own table. Not a dimming of the light palette: a

@@ -1,6 +1,7 @@
 /**
- * W3 · The story in four — every word on the page, by locale. `PLAN` is the
- * app's intro screen 1h-1 (Day out | Trip), shared with W4's phone.
+ * The homepage (registered as W3 · "story"; the v3 design approved 2 Oct 2026) —
+ * every word on the page, by locale. `PLAN` is the app's intro screen 1h-1
+ * (Day out | Trip): chapter 01's two lists, shared with W4's phone.
  */
 import type { Strings } from '../../i18n';
 
@@ -28,37 +29,41 @@ const PLAN_GB: PlanWords = {
 
 export const PLAN: Strings<PlanWords> = { 'en-gb': PLAN_GB, 'en-us': PLAN_GB };
 
-type Person = { name: string; likes: [string, string] };
+type Person = { name: string; likes: string[] };
 type Expert = { name: string; place: string; guide: string; rating: string };
-type HostKind = { tag: string; title: string; card: string; meta: string };
+type HostKind = { tag: string; title: string; eg: string };
 
 export type W3Words = {
   comingSoon: string;
+  /** The three lines read as one sentence after the wordmark: "Epic days out. / trips away. / events." */
+  lines: [string, string, string];
+  /** The page's one <h1>. */
   h1: string;
-  line: string;
+  /** The button on both email forms (owner, 2 Oct 2026: "Join the list", not the handoff's "Remind me"). */
   remind: string;
   success: string;
   ch1: { n: string; one: string; ten: string; sub: string };
-  ch2: { n: string; title: string; sub: string; head: string; crew: Person[] };
+  ch2: { n: string; title: string; sub: string; head: string; likes: string; crew: Person[] };
   ch3: { n: string; title: string; sub: string; head: string; rated: string; experts: Expert[] };
-  ch4: { n: string; title: string; sub: string; kinds: HostKind[]; cta: string };
+  /** Card titles carry a "\n" where the design breaks the line. */
+  ch4: { n: string; title: string; sub: string; kinds: HostKind[]; cta: string; small: string };
   close: string;
 };
 
 const GB: W3Words = {
-  comingSoon: 'Coming soon.',
-  h1: 'Every place worth going, planned around your crew',
-  line: "An app for days out and trips away. Here's what it does.",
-  remind: 'Remind me',
+  comingSoon: 'Coming soon',
+  lines: ['days out.', 'trips away.', 'events.'],
+  h1: 'Every place worth going, planned around your crew.',
+  remind: 'Join the list',
   success: "You're on the list. We'll email you when the app's out.",
   ch1: { n: '01', one: 'One day.', ten: 'Or ten.', sub: 'Plan a Saturday out or a week away. Same app, same crew.' },
   ch2: {
     n: '02', title: 'Built around your crew.',
     sub: "Tell us who's coming and what they love. Everything we suggest works for all of you.",
-    head: 'Your crew',
+    head: 'Your crew', likes: 'Likes',
     crew: [
-      { name: 'Sam', likes: ['Galleries', 'Flat whites'] },
-      { name: 'Maya, 7', likes: ['Dinosaurs', 'Swimming'] },
+      { name: 'Sam', likes: ['Galleries', 'Flat whites', 'Long walks'] },
+      { name: 'Maya, 7', likes: ['Dinosaurs', 'Swimming', 'Slides'] },
       { name: 'Nan', likes: ['Gardens', 'Not too far'] },
     ],
   },
@@ -73,16 +78,15 @@ const GB: W3Words = {
   },
   ch4: {
     n: '04', title: 'Host it.',
-    // The four ways to host as the host page now has them — how often it runs
-    // (host page v6, owner, 2 Oct 2026), with the hero line it uses.
     sub: "Epic isn't just for planning trips. It's where you run things: a wedding weekend, a fossil-hunting tour, a weekly club, a ten-week course.",
     kinds: [
-      { tag: 'One-off', title: 'A private or public event.', card: 'Fossil hunting with a geologist', meta: 'Public · Sat 14 Nov, 10am' },
-      { tag: 'Weekly', title: 'Same time, every week.', card: 'Weekly pottery workshop', meta: 'Public · Thursdays 7pm' },
-      { tag: 'Course', title: 'A set number of weeks.', card: 'Junior tennis camp', meta: '10 Saturdays · 9 Jan – 13 Mar' },
-      { tag: 'On request', title: 'Your time, when they want it.', card: 'An hour on getting started with AI', meta: 'On request · 1–2 hours' },
+      { tag: 'One-off', title: 'A private or\npublic event.', eg: 'Birthday party · Wedding · Quiz night' },
+      { tag: 'Weekly', title: 'Same time,\nevery week.', eg: 'Book club · Five-a-side · Yoga class' },
+      { tag: 'Course', title: 'A set number\nof weeks.', eg: 'Swimming lessons · Cooking classes' },
+      { tag: 'On request', title: 'Your time, when\nthey want it.', eg: 'Walking tour · Cooking lesson' },
     ],
     cta: 'Become a host',
+    small: 'Free events are free to host · Paid out through Stripe',
   },
   close: 'Be first in.',
 };
@@ -98,9 +102,9 @@ export const W3_WORDS: Strings<W3Words> = {
     ch4: {
       ...GB.ch4,
       kinds: [
-        { ...GB.ch4.kinds[0], meta: 'Public · Sat, Nov 14, 10 am' },
-        { ...GB.ch4.kinds[1], meta: 'Public · Thursdays 7 pm' },
-        { ...GB.ch4.kinds[2], meta: '10 Saturdays · Jan 9 – Mar 13' },
+        { ...GB.ch4.kinds[0], eg: 'Birthday party · Wedding · Trivia night' },
+        { ...GB.ch4.kinds[1], eg: 'Book club · Pickup soccer · Yoga class' },
+        GB.ch4.kinds[2],
         GB.ch4.kinds[3],
       ],
     },

@@ -81,7 +81,7 @@ export function TallBand({ right }: { right?: React.ReactNode }) {
  */
 export function TitleBand({ title, right }: { title: string; right?: React.ReactNode }) {
   return (
-    <View style={styles.limeTop}>
+    <View style={styles.tallTop}>
       <View style={styles.titleRow}>
         <Text numberOfLines={1} style={styles.bigTitle}>{title}</Text>
         {right ?? null}
@@ -146,8 +146,10 @@ const styles = StyleSheet.create({
   // band is the same depth.
   tallRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 22, paddingBottom: 26, minHeight: 92 },
   tallMark: { marginVertical: -3 },
-  // Settings v2: the 34px screen title, 22 above and 24 below, action on the right.
-  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 22, paddingBottom: 24 },
+  // Settings v2: the 34px screen title, 22 above, action on the right. Trimmed by
+  // the same 14px as the tall band (owner, 2 Oct 2026): the inset without
+  // TOP_INSET's extra 10 (tallTop), and 20 below instead of 24.
+  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 22, paddingBottom: 20 },
   bigTitle: { flex: 1, fontFamily: fonts.heading, fontWeight: '800', fontSize: 34, letterSpacing: 34 * -0.04, lineHeight: 36, color: INK },
   // §3: back · title+line · mic, 14 above and 16 below, 12 between.
   compactRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 16 },
