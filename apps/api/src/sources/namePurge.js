@@ -22,7 +22,7 @@
  */
 
 import { query, pool } from '../db.js';
-import { tokeniseJson } from './displayNames.js';
+import { tokeniseJson, refsInJson, rentedRefs } from './displayNames.js';
 
 const RENTED = (ref) => `coalesce(epic_ref_true_source(${ref}), '') = any(epic_rented_sources())`;
 
@@ -85,9 +85,14 @@ const PLAN = { key: 'plan_sessions.state', said: 'saved plan sessions' };
 async function plansHolding(client) {
   const { rows } = await client.query(
     `select id, state, state is distinct from epic_strip_rented_names(state) as stripped from plan_sessions`);
+  // Every session's references checked in one batch, not a query a session
+  // (Codex, 2 Oct 2026).
+  const all = new Set();
+  for (const r of rows) for (const ref of refsInJson(r.state)) all.add(ref);
+  const rented = await rentedRefs([...all]);
   const out = [];
   for (const r of rows) {
-    const kept = await tokeniseJson(r.state);
+    const kept = await tokeniseJson(r.state, { rented });
     if (r.stripped || JSON.stringify(kept) !== JSON.stringify(r.state)) out.push({ id: r.id, kept });
   }
   return out;

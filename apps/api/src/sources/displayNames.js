@@ -109,7 +109,7 @@ function queueForResearch(refs) {
 }
 
 /** Which of `refs` are a licensed provider's, by epic_ref_true_source (migration 307). */
-async function rentedRefs(refs) {
+export async function rentedRefs(refs) {
   if (!refs.length) return new Set();
   const { rows } = await query(
     `select r from unnest($1::text[]) r where coalesce(epic_ref_true_source(r), '') = any(epic_rented_sources())`, [refs]);
@@ -288,7 +288,27 @@ const escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
  * household's own words are theirs and are left exactly as said: their turns
  * in the transcript, and the intent parsed from them. Never mutates `doc`.
  */
-export async function tokeniseJson(doc) {
+// Only words written for people to read — a title, a reply, a reason — are
+// tokenised; a website, a photo link or any other value a machine reads is
+// left alone, so "Dishoom" never touches https://dishoom.com (Codex, 2 Oct 2026).
+const PROSE_KEYS = new Set(['text', 'title', 'subtitle', 'reply', 'summary', 'reason', 'reasons', 'why', 'message',
+  'question', 'detail', 'line', 'blurb', 'headline', 'caption', 'description', 'say', 'said']);
+const looksLikeLink = (t) => /^[a-z][a-z0-9+.-]*:\/\//i.test(t) || /^www\./i.test(t);
+
+/** Every place reference in a document — for one batched check across many. */
+export function refsInJson(doc) {
+  const out = new Set();
+  const seek = (node) => {
+    if (Array.isArray(node)) { node.forEach(seek); return; }
+    if (!node || typeof node !== 'object') return;
+    for (const v of Object.values(node)) if (v && typeof v === 'object') seek(v);
+    for (const r of refsOfJson(node)) out.add(r);
+  };
+  seek(doc);
+  return out;
+}
+
+export async function tokeniseJson(doc, { rented = null } = {}) {
   if (!doc || typeof doc !== 'object') return doc;
   const copy = JSON.parse(JSON.stringify(doc));
   const pairs = [];
@@ -304,7 +324,9 @@ export async function tokeniseJson(doc) {
   };
   collect(copy);
   if (!pairs.length) return copy;
-  const rentedSet = await rentedRefs([...new Set(pairs.flatMap((p) => p.refs))]);
+  // A caller scanning many documents passes the providers' references it has
+  // already checked in one batch (sources/namePurge.js).
+  const rentedSet = rented ?? await rentedRefs([...new Set(pairs.flatMap((p) => p.refs))]);
   // A name held by more than one place (two cafés of one chain) keeps all
   // their references: on read it is shown only if they all come back under
   // the same name, else as "a place" — never pinned to the wrong one (Codex,
@@ -340,15 +362,18 @@ export async function tokeniseJson(doc) {
   // (Codex, 2 Oct 2026).
   const OWN_KEYS = ['intent', 'input', 'rows', 'answer'];
   const own = (key, node) => OWN_KEYS.includes(key) || (node && node.role === 'user');
-  const walk = (node) => {
-    if (Array.isArray(node)) { node.forEach((v, i) => { if (typeof v === 'string') node[i] = swap(v); else walk(v); }); return; }
+  const prose = (key, v) => typeof v === 'string' && PROSE_KEYS.has(key) && !looksLikeLink(v);
+  const walk = (node, key = null) => {
+    if (Array.isArray(node)) {
+      // An array of words under a prose key (reasons: ['…']); anything else is walked.
+      node.forEach((v, i) => { if (prose(key, v)) node[i] = swap(v); else if (v && typeof v === 'object') walk(v, key); });
+      return;
+    }
     if (!node || typeof node !== 'object' || own(null, node)) return;
     for (const [k, v] of Object.entries(node)) {
       if (own(k, null)) continue;
-      // The name fields are emptied by migration 343 and the references are not words.
-      if (NAME_KEYS.includes(k) || ['ref', 'key', 'venueRef', 'source', 'sourcePlaceId'].includes(k)) continue;
-      if (typeof v === 'string') node[k] = swap(v);
-      else walk(v);
+      if (prose(k, v)) node[k] = swap(v);
+      else if (v && typeof v === 'object') walk(v, k);
     }
   };
   walk(copy);
@@ -385,4 +410,4 @@ function untokenise(doc, by) {
   walk(doc);
 }
 
-export default { ownedNamesFor, resolveNames, resolveInto, nameJson, tokeniseJson };
+export default { ownedNamesFor, resolveNames, resolveInto, nameJson, tokeniseJson, refsInJson };

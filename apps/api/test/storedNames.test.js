@@ -356,3 +356,13 @@ test('a provider\'s name is caught whatever its case, and the household\'s answe
   assert.equal(out.answered[0].answer, 'The Crown, please');
   assert.equal(out.input.brief, 'Somewhere like The Crown');
 });
+
+test('only words written for people are tokenised: a website is never touched', async () => {
+  const { tokeniseJson } = await import('../src/sources/displayNames.js');
+  const id = randomUUID();
+  const out = await tokeniseJson({ pool: [{ source: 'google', sourcePlaceId: id, name: 'Dishoom', website: 'https://dishoom.com' }],
+    options: [{ title: 'Breakfast at Dishoom', link: 'https://dishoom.com/menu' }] });
+  assert.equal(out.pool[0].website, 'https://dishoom.com');
+  assert.equal(out.options[0].link, 'https://dishoom.com/menu');
+  assert.equal(out.options[0].title, `Breakfast at ⟦google:${id}⟧`);
+});
