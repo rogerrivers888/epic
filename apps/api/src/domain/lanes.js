@@ -100,15 +100,31 @@ function sameShape(d, v) {
   return typeof v === typeof d;
 }
 
-/** The config in force: the defaults, with `EPIC_HOSTING_CONFIG` laid over them. A malformed override is ignored, never half-applied. */
+// The part the hosting settings own (hosting v4 §7), laid over last: the
+// settings table is the one place the owner changes a fee or a window, and it
+// is read at run time (repositories/hostingSettings.js keeps this fresh).
+let settingsOverlay = null;
+export function useSettingsOverlay(overlay) { settingsOverlay = overlay && Object.keys(overlay).length ? overlay : null; }
+
+/**
+ * The config in force: the defaults, `EPIC_HOSTING_CONFIG` over them, then the
+ * hosting settings over both. A malformed layer is ignored, never half-applied.
+ */
 export function hostingConfig(env = process.env) {
   const raw = env?.EPIC_HOSTING_CONFIG;
-  if (!raw) return DEFAULT_CONFIG;
-  try {
-    const merged = merge(DEFAULT_CONFIG, JSON.parse(raw));
-    // Same shape as the defaults, or not at all: valid JSON of the wrong shape is ignored too (Codex, 2 Oct 2026).
-    return sameShape(DEFAULT_CONFIG, merged) ? merged : DEFAULT_CONFIG;
-  } catch { return DEFAULT_CONFIG; }
+  let cfg = DEFAULT_CONFIG;
+  if (raw) {
+    try {
+      const merged = merge(DEFAULT_CONFIG, JSON.parse(raw));
+      // Same shape as the defaults, or not at all: valid JSON of the wrong shape is ignored too (Codex, 2 Oct 2026).
+      if (sameShape(DEFAULT_CONFIG, merged)) cfg = merged;
+    } catch { /* ignored */ }
+  }
+  if (settingsOverlay) {
+    const merged = merge(cfg, settingsOverlay);
+    if (sameShape(DEFAULT_CONFIG, merged)) cfg = merged;
+  }
+  return cfg;
 }
 
 // ---------------------------------------------------------------------------

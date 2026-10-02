@@ -166,6 +166,95 @@ export function expireCheckout(id, { householdId } = {}) {
 export const checkoutPaid = (s) => s?.payment_status === 'paid';
 
 // ---------------------------------------------------------------------------
+// guests' payments: separate charges and transfers (hosting v4 §5)
+//
+// Epic takes the guest's payment on its own account, and the host's share goes
+// to their Connect account as a transfer when the session's payout is released
+// (72 hours after it, with no complaint). An Ask to book is a card *held* —
+// a manual-capture PaymentIntent — captured on accept and cancelled on decline
+// or timeout. Every call carries an idempotency key built from Epic's own ids,
+// so a retry can never charge, refund or pay twice.
+// ---------------------------------------------------------------------------
+
+/** A guest's payment for a booking. `hold` holds the card without charging it. */
+export function paymentIntent({ amountPence, bookingId, offerId, householdId, hold = false, email = null, idempotencyKey }) {
+  return call('POST', '/payment_intents', {
+    amount: amountPence, currency: 'gbp',
+    automatic_payment_methods: { enabled: true },
+    capture_method: hold ? 'manual' : 'automatic',
+    receipt_email: email ?? undefined,
+    transfer_group: `booking_${bookingId}`,
+    metadata: { epic_kind: 'booking', epic_booking_id: bookingId, epic_offer_id: offerId, epic_household_id: householdId },
+  }, { householdId, purpose: hold ? 'booking.hold' : 'booking.charge', idempotencyKey });
+}
+
+export function retrievePaymentIntent(id, { householdId } = {}) {
+  return call('GET', `/payment_intents/${encodeURIComponent(id)}`, null, { householdId, purpose: 'booking.read' });
+}
+
+/** Charge a held card (Ask to book accepted). */
+export function capturePayment(id, { householdId, idempotencyKey }) {
+  return call('POST', `/payment_intents/${encodeURIComponent(id)}/capture`, {}, { householdId, purpose: 'booking.capture', idempotencyKey });
+}
+
+/** Let a held card go (declined, or the host did not answer in time). */
+export function cancelPayment(id, { householdId, idempotencyKey }) {
+  return call('POST', `/payment_intents/${encodeURIComponent(id)}/cancel`, {}, { householdId, purpose: 'booking.release', idempotencyKey });
+}
+
+/** Give money back on a charged payment. `cause` is Epic's own word for why, kept in Stripe's metadata. */
+export function refund({ paymentIntentId, amountPence, cause, bookingId, householdId, idempotencyKey }) {
+  return call('POST', '/refunds', {
+    payment_intent: paymentIntentId, amount: amountPence,
+    metadata: { epic_kind: 'refund', epic_booking_id: bookingId, epic_cause: cause },
+  }, { householdId, purpose: 'booking.refund', idempotencyKey });
+}
+
+export function retrieveRefund(id, { householdId } = {}) {
+  return call('GET', `/refunds/${encodeURIComponent(id)}`, null, { householdId, purpose: 'booking.refund.read' });
+}
+
+/** The host's share, to their Connect account, when a payout is released. */
+export function transfer({ amountPence, destination, payoutId, hostId, householdId, idempotencyKey }) {
+  return call('POST', '/transfers', {
+    amount: amountPence, currency: 'gbp', destination,
+    transfer_group: `payout_${payoutId}`,
+    metadata: { epic_kind: 'payout', epic_payout_id: payoutId, epic_host_id: hostId },
+  }, { householdId, purpose: 'host.payout.transfer', idempotencyKey });
+}
+
+export function retrieveTransfer(id, { householdId } = {}) {
+  return call('GET', `/transfers/${encodeURIComponent(id)}`, null, { householdId, purpose: 'host.payout.read' });
+}
+
+/**
+ * What Stripe holds for one ledger row, in Epic's terms: `{ amountPence, ok }`
+ * where ok means the money moved (succeeded, captured, paid). Null for a
+ * reference Epic does not know how to read — the reconciliation says it could
+ * not check that row rather than calling it a match.
+ */
+export function stripeView(obj) {
+  if (!obj || typeof obj !== 'object') return null;
+  switch (obj.object) {
+    case 'payment_intent': return { amountPence: obj.amount_received ?? 0, ok: obj.status === 'succeeded', held: obj.status === 'requires_capture' };
+    case 'refund': return { amountPence: obj.amount ?? 0, ok: obj.status === 'succeeded' };
+    case 'transfer': return { amountPence: (obj.amount ?? 0) - (obj.amount_reversed ?? 0), ok: !obj.reversed };
+    case 'checkout.session': return { amountPence: obj.amount_total ?? 0, ok: obj.payment_status === 'paid' };
+    default: return null;
+  }
+}
+
+/** Read whatever a ledger reference points at, by its prefix. Null for an unknown prefix. */
+export function retrieveRef(ref, { householdId } = {}) {
+  const r = String(ref ?? '');
+  if (r.startsWith('pi_')) return retrievePaymentIntent(r, { householdId });
+  if (r.startsWith('re_')) return retrieveRefund(r, { householdId });
+  if (r.startsWith('tr_')) return retrieveTransfer(r, { householdId });
+  if (r.startsWith('cs_')) return retrieveCheckout(r, { householdId });
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // webhooks
 // ---------------------------------------------------------------------------
 

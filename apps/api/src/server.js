@@ -26,6 +26,7 @@ import prototypeRoutes from './routes/prototypes.js';
 import groupRoutes, { startReminderLoop } from './routes/groups.js';
 import hostingRoutes, { adminRouter as hostingAdminRoutes, publicRouter as hostingPublicRoutes, startHostingLoop } from './routes/hosting.js';
 import hostLanesRoutes, { webhookRouter as stripeWebhookRoutes } from './routes/hostLanes.js';
+import hostingMoneyRoutes, { adminRouter as hostingMoneyAdminRoutes, startHostingMoneyLoop } from './routes/hostingMoney.js';
 import accountRoutes from './routes/accounts.js';
 import adminRoutes from './routes/admin.js';
 import * as approvalsRepo from './repositories/approvals.js';
@@ -356,6 +357,7 @@ app.use('/api/admin', requireDoor('admin'), waitlistRoutes);
 app.use('/api/postmark', postmarkRoutes);
 // Pitch review and the trust ladder (hosts and events, 12 Sep 2026). A host
 // never sets their own level; this is the only door that does.
+app.use('/api/admin/hosting', requireDoor('admin'), hostingMoneyAdminRoutes);
 app.use('/api/admin/hosting', requireDoor('admin'), hostingAdminRoutes);
 // The one ID check in Casual meet ups: nobody clears their own (routes/openTo.js).
 app.use('/api/admin/open', requireDoor('admin'), openToAdminRoutes);
@@ -531,6 +533,8 @@ app.use('/api', hostingPublicRoutes);
 app.use('/api', chatPublicRoutes);
 // Four ways to host (hosting v7): the lane set-ups, ahead of the old offer routes.
 app.use('/api', hostLanesRoutes);
+// Hosting v4: settings, the ledger's jobs and notifications (routes/hostingMoney.js).
+app.use('/api', hostingMoneyRoutes);
 app.use('/api', hostingRoutes);
 // What a host types into the expertise field, answered from Epic's own tables
 // and never from anybody else's API (Host Skills §5).
@@ -982,6 +986,8 @@ setTimeout(() => { ensureAttributeAliases().catch(() => null); }, 5000).unref?.(
 startReminderLoop();
 // Held bookings are decided on their day (routes/hosting.js).
 startHostingLoop();
+// Payouts 72h after a session, the daily Stripe reconciliation, queued notification e-mail.
+startHostingMoneyLoop();
 // Nudge an unanswered introduction once, let it go after a week, clear a trip entry when the trip has been.
 startOpenToLoop();
 startChatLoop();
