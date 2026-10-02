@@ -819,6 +819,8 @@ async function markFeePaid(offer, checkoutSession, household, account) {
   const kind = checkoutSession?.metadata?.epic_kind === 'pro' ? 'pro' : 'private_fee';
   const existing = await repo.paymentByRef(checkoutSession.id, kind);
   if (existing && existing.state !== 'succeeded') await repo.updatePayment(existing.id, { state: 'succeeded' });
+  // Which subscription this is, so its later events change this row and no other (Codex, 2 Oct 2026).
+  if (existing && kind === 'pro' && checkoutSession.subscription) await query('update hosting_payments set reason = $2 where id = $1', [existing.id, `sub:${checkoutSession.subscription}`]);
   // Joining Pro here is recorded against this offer and the payment row; the
   // account's plan is billing's to change, and a test-mode card must never make
   // anybody Pro for real.
@@ -987,15 +989,16 @@ webhookRouter.post('/stripe/webhook', express.raw({ type: () => true, limit: '1m
     } else if (event.type === 'customer.subscription.updated' && obj.metadata?.epic_kind === 'pro' && obj.metadata?.epic_household_id) {
       // A renewal that failed (past due, unpaid) stops Pro counting; paid again, it counts again (Codex, 2 Oct 2026).
       const live = ['active', 'trialing'].includes(obj.status);
-      await query("update hosting_payments set state = $2, updated_at = now() where household_id = $1 and kind = 'pro' and state in ('succeeded', 'cancelled')", [obj.metadata.epic_household_id, live ? 'succeeded' : 'cancelled']);
+      await query("update hosting_payments set state = $2, updated_at = now() where household_id = $1 and kind = 'pro' and reason = $3 and state in ('succeeded', 'cancelled')", [obj.metadata.epic_household_id, live ? 'succeeded' : 'cancelled', `sub:${obj.id}`]);
     } else if (event.type === 'customer.subscription.deleted' && obj.metadata?.epic_kind === 'pro' && obj.metadata?.epic_household_id) {
       // Pro cancelled or lapsed: it stops counting for hosting from now.
-      await query("update hosting_payments set state = 'cancelled', updated_at = now() where household_id = $1 and kind = 'pro' and state = 'succeeded'", [obj.metadata.epic_household_id]);
+      await query("update hosting_payments set state = 'cancelled', updated_at = now() where household_id = $1 and kind = 'pro' and reason = $2 and state = 'succeeded'", [obj.metadata.epic_household_id, `sub:${obj.id}`]);
     } else if ((event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') && obj.id && stripe.checkoutPaid(obj)) {
       const kind = obj.metadata?.epic_kind === 'pro' ? 'pro' : 'private_fee';
       const pay = await repo.paymentByRef(obj.id, kind);
       if (pay && pay.state !== 'succeeded') {
         await repo.updatePayment(pay.id, { state: 'succeeded' });
+        if (kind === 'pro' && obj.subscription) await query('update hosting_payments set reason = $2 where id = $1', [pay.id, `sub:${obj.subscription}`]);
         if (pay.offer_id) await repo.updateOffer(pay.offer_id, { privateFeeState: kind === 'pro' ? 'included' : 'paid' });
       }
     }

@@ -148,9 +148,12 @@ export async function lockOffersOfHost(hostId, client) {
  * somebody else (Codex, 12 Sep 2026).
  */
 export async function deleteMediaOfHost(host, offers, client) {
-  const ids = new Set([host.intro_video_id, host.photo_id].filter(Boolean));
+  // The Checked insurance certificate goes with the host — evidence never outlives the account (Codex, 2 Oct 2026).
+  const ids = new Set([host.intro_video_id, host.photo_id, host.insurance_media_id].filter(Boolean));
   for (const o of offers) {
     if (o.video_id) ids.add(o.video_id);
+    if (o.hello_video_id) ids.add(o.hello_video_id);
+    for (const id of o.video_photo_ids ?? []) ids.add(id);
     for (const id of o.photo_ids ?? []) ids.add(id);
     for (const p of o.featured_people ?? []) if (p.photoId) ids.add(p.photoId);
   }
