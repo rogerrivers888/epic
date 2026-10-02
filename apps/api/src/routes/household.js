@@ -392,7 +392,10 @@ router.patch('/', async (req, res, next) => {
       homeCountryCode: homePlace?.countryCode, homeCountry: homePlace?.country,
       pace: mergedPace, timezone, homeRadiusMiles: radius, homePhotoUrl: photo,
       browseDefaults: browse ? mergeBrowse(household, browse) : null,
-      closeToHomeMinutes, travelModes, dayStart, dayEnd,
+      // An explicit null is "Any distance", as the API type says; the store
+      // reads 0 as that and an absent field as "keep" (Codex, 2 Oct 2026).
+      closeToHomeMinutes: closeToHomeMinutes === null && Object.prototype.hasOwnProperty.call(req.body, 'closeToHomeMinutes') ? 0 : closeToHomeMinutes,
+      travelModes, dayStart, dayEnd,
     });
     // A home that has moved is a ring that has to be counted (owner, 20 Sep
     // 2026: "On registration and on any home-location change, census the

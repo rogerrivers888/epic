@@ -11,7 +11,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AppState, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../components/press';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -563,11 +563,26 @@ function EditSheet({ data, member, refresh, canEdit, onClose }: { data: Househol
       <Sheet title={`Remove ${first(member.name)} from the household?`} onCancel={() => setConfirmRemove(false)} cancelLabel="Cancel" onClose={onClose}>
         <Text style={type.body}>{body}</Text>
         <Button kind="danger" label={`Remove ${first(member.name)}`} onPress={async () => {
-          // Soft delete: hide at once, hard-delete when the 3.5s Undo lapses.
+          // Soft delete: hide at once, hard-delete when the 3.5s Undo lapses —
+          // or at once if the page is closed or the app sent away first, so a
+          // removal the screen announced is never lost with a timer (Codex, 2 Oct 2026).
           onClose();
-          let undone = false;
-          showToast(`${first(member.name)} removed`, { undo: () => { undone = true; } });
-          setTimeout(async () => { if (undone) return; try { await api.deleteMember(member.id); navigate(paths.settings(), { replace: true }); await refresh(); } catch (e: any) { showToast(e?.body?.message || 'Could not remove'); } }, 3500);
+          let state: 'pending' | 'undone' | 'done' = 'pending';
+          const timer = setTimeout(() => { void commit(); }, 3500);
+          const onHide = () => { if (state !== 'pending') return; state = 'done'; stop(); void api.deleteMember(member.id, { keepalive: true }).catch(() => null); };
+          const appState = AppState.addEventListener('change', (s) => { if (s === 'background') onHide(); });
+          if (Platform.OS === 'web' && typeof window !== 'undefined') window.addEventListener('pagehide', onHide);
+          function stop() {
+            clearTimeout(timer);
+            appState.remove();
+            if (Platform.OS === 'web' && typeof window !== 'undefined') window.removeEventListener('pagehide', onHide);
+          }
+          async function commit() {
+            if (state !== 'pending') return;
+            state = 'done'; stop();
+            try { await api.deleteMember(member.id); navigate(paths.settings(), { replace: true }); await refresh(); } catch (e: any) { showToast(e?.body?.message || 'Could not remove'); }
+          }
+          showToast(`${first(member.name)} removed`, { undo: () => { if (state === 'pending') { state = 'undone'; stop(); } } });
         }} />
       </Sheet>
     );

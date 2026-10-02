@@ -716,3 +716,17 @@ test('joining a group: the same new name twice is one person, and a full househo
     assert.equal(n.n, 6, 'nobody added');
   } finally { await new Promise((r) => s.close(r)); }
 });
+
+test('an explicit null for close to home is "Any distance"; leaving it out keeps the setting', async () => {
+  const { household: h, member: roger } = await aHousehold(query);
+  const srv = await server(owner(h, roger.id));
+  try {
+    await srv.send('PATCH', '/api/household', { closeToHomeMinutes: 90 });
+    await srv.send('PATCH', '/api/household', { name: h.name });
+    let hh = (await srv.get('/api/household')).body.household;
+    assert.equal(hh.closeToHomeMinutes, 90, 'an absent field keeps it');
+    await srv.send('PATCH', '/api/household', { closeToHomeMinutes: null });
+    hh = (await srv.get('/api/household')).body.household;
+    assert.equal(hh.closeToHomeMinutes, null, 'null is any distance, as the API type says');
+  } finally { await srv.close(); }
+});

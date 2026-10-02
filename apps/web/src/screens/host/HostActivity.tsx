@@ -118,7 +118,9 @@ function PastTab({ offer, money, past }: { offer: OwnOffer; money: HostMoney | n
         {period && period.lines.length ? period.lines.map((l, i) => (
           <View key={i} style={{ paddingVertical: 2 }}><FeeLine line={l} /></View>
         )) : <View style={{ paddingVertical: 2 }}><FeeLine line={{ label: `Epic's fee ${money?.feeRate ?? ''}% · ${money?.levelLabel ?? ''}` }} /></View>}
-        <MoneyLine label="Paid to you" value={gbp(period ? period.netPence : collected)} strong />
+        {/* Nothing is paid until a payment provider exists: the remainder is what
+            the host would keep, never "paid" (Codex, 2 Oct 2026). */}
+        <MoneyLine label={money?.paymentsReady ? 'Paid to you' : 'Yours after the fee'} value={gbp(period ? period.netPence : collected)} strong />
         {!money?.paymentsReady ? <Text style={[t.tiny, { marginTop: 4 }]}>{money?.note ?? 'Nothing has left anybody’s account yet.'}</Text> : null}
       </View>
 

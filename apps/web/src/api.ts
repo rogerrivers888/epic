@@ -2141,7 +2141,8 @@ export const api = {
   removeMemberAccess: (id: string) => del<{ removed: boolean; access: MemberAccess; message: string }>(`/api/household/members/${id}/invite`),
   updateMember: (id: string, body: { name?: string; relationship?: string | null; birthYear?: number | null; birthDate?: string | null; avatarUrl?: string | null; typicalVisitMinutes?: number; maxTravelMinutes?: number; email?: string | null; mobile?: string | null; diet?: MainDiet; halal?: boolean; kosher?: boolean; accessNeeds?: AccessNeed[]; allergenNote?: string | null; neverLearn?: string[]; ratingsView?: RatingsView }) =>
     patch<{ member: any }>(`/api/household/members/${id}`, body),
-  deleteMember: (id: string) => del<void>(`/api/household/members/${id}`),
+  // `keepalive` lets a removal finish while the page is closing (the Undo window).
+  deleteMember: (id: string, opts?: { keepalive?: boolean }) => request<void>(`/api/household/members/${id}`, { method: 'DELETE', keepalive: opts?.keepalive }),
   addConstraint: (memberId: string, body: { kind: ConstraintKind; value: string; conceptKey?: string; maxMinutes?: number | null }) =>
     post<{ constraint: Constraint; resolved: { key: string; label: string; kind: string } | null; suggestions: Suggestion[]; hint: string | null; limited?: boolean }>(`/api/household/members/${memberId}/constraints`, body),
   updateConstraint: (id: string, body: { maxMinutes?: number | null; favourite?: boolean }) => patch<{ constraint: any }>(`/api/household/constraints/${id}`, body),
