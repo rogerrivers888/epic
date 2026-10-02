@@ -332,4 +332,10 @@ test('the area-key check names an unprefixed non-GB area and reads both postcode
   assert.equal(ie.outcode_rule_says_gb, 2, 'today: the outcode flips the Eircode to GB too');
   assert.equal(ie.full_postcode_rule_says_gb, 1, 'the full postcode flips only the real GB one');
   assert.equal(out.postcodeRuleReason, null);
+  // A place with no country whose postcode is in neither list is named.
+  await query(`insert into place_index (venue_ref, country_code) values ('osm:node/akc-jersey', null) on conflict (venue_ref) do update set country_code = null`);
+  await query(`insert into place_records (venue_ref, name, postcode) values ('osm:node/akc-jersey', 'Mont Orgueil', 'JE3 6ET') on conflict (venue_ref) do update set postcode = 'JE3 6ET'`);
+  const again = await m.areaKeyCheck();
+  assert.ok(again.unsettled.some((r) => r.venue_ref === 'osm:node/akc-jersey' && r.postcode === 'JE3 6ET'));
+  assert.ok(!again.unsettled.some((r) => r.venue_ref === 'osm:node/akc-gb'), 'a place with a country is not listed');
 });

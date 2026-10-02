@@ -76,8 +76,19 @@ export async function areaKeyCheck() {
         from place_index pi join place_records r on r.venue_ref = pi.venue_ref
        where r.postcode is not null and upper(pi.country_code) is distinct from 'GB'
        group by 1 order by 1`) : null;
+  // The places a postcode cannot settle at all: no country, and neither rule finds
+  // the postcode in the GB list — Channel Islands, Isle of Man, a malformed value or
+  // somewhere abroad. Named, uncapped (owner, 2 Oct 2026: 21 of them on production).
+  const unsettled = loaded ? await n(`
+      select pi.venue_ref, r.name, r.postcode, r.address
+        from place_index pi join place_records r on r.venue_ref = pi.venue_ref
+       where r.postcode is not null and pi.country_code is null
+         and not exists (select 1 from postcodes p where p.outcode = upper(${OUTCODE_FROM('r.postcode')}))
+         and not exists (select 1 from postcodes p where p.pcds = ${AS_PCDS('r.postcode')})
+       order by r.postcode, pi.venue_ref`) : null;
   return {
     checkedAt: new Date().toISOString(),
+    unsettled,
     placesByCountry, localitiesByCountry, unprefixed, areaCountsByCountry, nonGbPlacesFiledByArea,
     postcodeRule: rule,
     postcodeRuleReason: loaded ? null : 'the ONS postcode table is empty here, so neither rule can be read',
