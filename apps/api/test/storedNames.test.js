@@ -335,3 +335,10 @@ test('a name two places share is shown only if both still read that way, else as
   await nameJson(kept, { householdId: null });
   assert.equal(kept.transcript[0].text, 'Coffee at a place.', 'never pinned to the wrong one');
 });
+
+test('a two-letter provider name in a plan\'s words is kept as its reference too', async () => {
+  const { tokeniseJson } = await import('../src/sources/displayNames.js');
+  const id = randomUUID();
+  const out = await tokeniseJson({ pool: [{ source: 'google', sourcePlaceId: id, name: 'XO' }], options: [{ title: 'Dinner at XO, then EXO-style dessert' }] });
+  assert.equal(out.options[0].title, `Dinner at ⟦google:${id}⟧, then EXO-style dessert`);
+});

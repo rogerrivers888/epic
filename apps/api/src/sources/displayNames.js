@@ -298,7 +298,9 @@ export async function tokeniseJson(doc) {
     for (const v of Object.values(node)) if (v && typeof v === 'object') collect(v);
     const refs = refsOfJson(node);
     if (!refs.length) return;
-    for (const k of NAME_KEYS) if (typeof node[k] === 'string' && node[k].trim().length >= 3) pairs.push({ name: node[k].trim(), refs });
+    // Every name, however short ("XO"): whole-name matching keeps it from
+    // touching any longer word (Codex, 2 Oct 2026).
+    for (const k of NAME_KEYS) if (typeof node[k] === 'string' && node[k].trim()) pairs.push({ name: node[k].trim(), refs });
   };
   collect(copy);
   if (!pairs.length) return copy;
