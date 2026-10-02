@@ -22,7 +22,7 @@ import crypto from 'node:crypto';
 import * as lib from '../repositories/library.js';
 import { query } from '../db.js';
 import { isStorableLicence } from './wikimedia.js';
-import { fetchPicture } from './pictureBytes.js';
+import { fetchPublicPicture } from './safeFetch.js';
 import { userAgent } from '../origins.js';
 
 const API = 'https://api.openverse.org/v1/images/';
@@ -88,7 +88,7 @@ export async function search(q, { pageSize = 10, fetchImpl = fetch } = {}) {
  * search is a guess until somebody has looked. Returns what happened, for the
  * enrichment record: `{ ok, stored: [{ imageId, licence, creator, landing }], refused, why }`.
  */
-export async function picturesFor({ venueRef, name, locality = null }, { keep = 3, fetchImpl, fetchPictureImpl = fetchPicture } = {}) {
+export async function picturesFor({ venueRef, name, locality = null }, { keep = 3, fetchImpl, fetchPictureImpl = fetchPublicPicture } = {}) {
   if (!venueRef || !name) return { ok: false, why: 'no_name', stored: [], refused: 0 };
   const q = [name, locality].filter(Boolean).join(' ');
   const found = await search(q, { fetchImpl });

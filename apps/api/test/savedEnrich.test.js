@@ -526,3 +526,16 @@ test('a re-read of the venue page drops pictures it no longer shows; a failed re
   await venuePicturesFor(ref, 'https://d.example/', { fetchHtmlImpl: async () => null, politeness: async () => ({ ok: true }) });
   assert.deepEqual(await urls(), ['https://d.example/new.jpg'], 'an unreadable page is not an empty one');
 });
+
+test('a picture address from a provider is fetched only from a public address, redirects included', async () => {
+  const { fetchPublicPicture } = await import('../src/sources/safeFetch.js');
+  assert.equal(await fetchPublicPicture('http://169.254.169.254/latest/meta-data'), null, 'cloud metadata never asked');
+  let asked = 0;
+  const resolve = async (u) => (new URL(u).hostname === 'internal.example' ? null : { url: new URL(u), address: '93.184.216.34', family: 4 });
+  const out = await fetchPublicPicture('https://pics.example/a.jpg', {
+    resolve,
+    request: async () => { asked += 1; return { status: 302, location: 'https://internal.example/x.jpg', type: '', raw: Buffer.alloc(0) }; },
+  });
+  assert.equal(out, null, 'a redirect to a private host is not followed');
+  assert.equal(asked, 1);
+});

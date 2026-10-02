@@ -46,7 +46,7 @@ const BODY_MAX = 1_500_000;
 const DEADLINE_MS = 15_000;
 
 /** One request to the checked address, with the site's own name kept for TLS and the Host header. */
-export function requestPinned({ url, address, family }, { accept = 'text/html' } = {}) {
+export function requestPinned({ url, address, family }, { accept = 'text/html', maxBytes = BODY_MAX } = {}) {
   return new Promise((resolve, reject) => {
     const mod = url.protocol === 'https:' ? https : http;
     const req = mod.request({
@@ -57,8 +57,8 @@ export function requestPinned({ url, address, family }, { accept = 'text/html' }
       timeout: 12_000,
     }, (res) => {
       const chunks = []; let size = 0;
-      res.on('data', (c) => { size += c.length; if (size > BODY_MAX) req.destroy(new Error('page too large')); else chunks.push(c); });
-      res.on('end', () => resolve({ status: res.statusCode ?? 0, location: res.headers.location ?? null, type: String(res.headers['content-type'] ?? ''), body: Buffer.concat(chunks).toString('utf8') }));
+      res.on('data', (c) => { size += c.length; if (size > maxBytes) req.destroy(new Error('page too large')); else chunks.push(c); });
+      res.on('end', () => { const raw = Buffer.concat(chunks); resolve({ status: res.statusCode ?? 0, location: res.headers.location ?? null, type: String(res.headers['content-type'] ?? ''), body: raw.toString('utf8'), raw }); });
       res.on('error', reject);
     });
     // `timeout` above is socket inactivity; this is the clock on the whole
@@ -72,3 +72,30 @@ export function requestPinned({ url, address, family }, { accept = 'text/html' }
   });
 }
 
+
+/**
+ * One picture from an address somebody else supplied — an Openverse result, a
+ * venue's page — public addresses only, pinned, every redirect re-checked,
+ * capped as it arrives (Codex, 2 Oct 2026). Returns the same shape as
+ * pictureBytes.fetchPicture, or null.
+ */
+export async function fetchPublicPicture(raw, { maxBytes = 8_000_000, resolve = publicAddress, request = requestPinned } = {}) {
+  const { sniff, dimensions } = await import('./pictureBytes.js');
+  let at = await resolve(raw);
+  for (let hop = 0; at && hop < 5; hop += 1) {
+    let res;
+    try { res = await request(at, { accept: 'image/*', maxBytes }); } catch { return null; }
+    if (res.status >= 300 && res.status < 400 && res.location) {
+      let next;
+      try { next = new URL(res.location, at.url).toString(); } catch { return null; }
+      at = await resolve(next);
+      continue;
+    }
+    if (res.status < 200 || res.status >= 300 || !res.raw?.length) return null;
+    const mime = sniff(res.raw);
+    if (!mime) return null;
+    const { width, height } = dimensions(res.raw, mime);
+    return { body: res.raw, mime, bytes: res.raw.length, width, height, url: at.url.toString() };
+  }
+  return null;
+}
