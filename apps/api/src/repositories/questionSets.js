@@ -696,9 +696,6 @@ export async function promote(id, { gate = false, kind = 'yesno', label = null, 
           set status = 'promoted', question_id = $2, decided_by = $3, decided_at = now(), examples = '{}', evidence = null, evidence_ref = null
         where id = $1`, [id, question?.id ?? null, actor],
     );
-    // A decided word drops its place-level scaffolding wherever it is kept — the
-    // examples above, and the review-spotting sightings too (C30, Codex 2 Oct).
-    await client.query('delete from review_sightings where norm = $1', [candidate.norm]);
     attrs.forget();
     return { candidate: candidate.norm, question, attributeKey: key, setKey };
   });
@@ -706,25 +703,24 @@ export async function promote(id, { gate = false, kind = 'yesno', label = null, 
 
 /** Never ask about this word here again. The examples go with the decision. */
 export async function ignoreCandidate(id, { actor = null, reason = null } = {}) {
-  return withTransaction(async (client) => {
-    const { rows } = await client.query(
-      // The examples go — they are the word-to-place scaffolding the brief says
-      // to drop on a decision. The quote stays: it is owned text, and under C21
-      // it is the only thing that can make a restored word promotable again.
-      // Clearing it here left an ignored-then-restored word an unresolved
-      // feature nothing could ever pick up (Codex, 26 Sep 2026).
-      // The reason is the owner's sentence for why (migration 265, C27).
-      `update harvest_candidates set status = 'ignored', decided_by = $2, decided_at = now(), examples = '{}',
-              decision_reason = coalesce($3, decision_reason)
-        where id = $1 and status in ('new', 'unresolved') returning *`, [id, actor, reason ? String(reason).slice(0, 300) : null],
-    );
-    if (!rows[0]) throw bad('That word has already been decided.');
-    // The review-spotting sightings are place-level scaffolding too: they go with
-    // the decision, like the examples, and in one transaction so the queue can
-    // never hold an actionable sighting for an already-decided word (C30, Codex 2 Oct).
-    await client.query('delete from review_sightings where norm = $1', [rows[0].norm]);
-    return rows[0];
-  });
+  // This is the per-subcategory harvest path (one candidate by id). It does not
+  // touch review_sightings, which are norm-level and belong to the review queue's
+  // own norm-level decisions (ignoreFeature/approveFeature) — deleting them here
+  // would clear the norm across every drawer on a single-drawer decision (Codex,
+  // 2 Oct 2026).
+  const { rows } = await query(
+    // The examples go — they are the word-to-place scaffolding the brief says
+    // to drop on a decision. The quote stays: it is owned text, and under C21
+    // it is the only thing that can make a restored word promotable again.
+    // Clearing it here left an ignored-then-restored word an unresolved
+    // feature nothing could ever pick up (Codex, 26 Sep 2026).
+    // The reason is the owner's sentence for why (migration 265, C27).
+    `update harvest_candidates set status = 'ignored', decided_by = $2, decided_at = now(), examples = '{}',
+            decision_reason = coalesce($3, decision_reason)
+      where id = $1 and status in ('new', 'unresolved') returning *`, [id, actor, reason ? String(reason).slice(0, 300) : null],
+  );
+  if (!rows[0]) throw bad('That word has already been decided.');
+  return rows[0];
 }
 
 /**

@@ -190,10 +190,23 @@ export async function spotFromDetail({ venueRef, detail, client = null } = {}) {
   const filtered = raisedAll.size - features.size;
   if (!features.size) return { subcategory: null, queued: 0, filtered, known: 0, features: [] };
 
+  const run = client ? (t, p) => client.query(t, p) : query;
+  // Ignoring a feature is for good, across every drawer (C30/C61, "Ignoring a word
+  // is permanent"). A norm ignored in ANY subcategory leaves a tombstone — its
+  // google candidate sits at status 'ignored' — and a later search that re-spots
+  // it in a NEW drawer must not raise it again. Drop the tombstoned norms before
+  // anything is written, so a fresh drawer can never reopen an ignored feature
+  // (Codex, 2 Oct 2026). recordCandidates already refuses to reopen an ignored
+  // candidate in the SAME drawer; this closes the cross-drawer gap it could not.
+  const { rows: tombstoned } = await run(
+    "select distinct norm from harvest_candidates where norm = any($1) and status = 'ignored' and sources ? 'google'",
+    [[...features.keys()]]);
+  for (const t of tombstoned) features.delete(t.norm);
+  if (!features.size) return { subcategory: null, queued: 0, filtered, known: 0, features: [] };
+
   const subcategory = await subcategoryOf(venueRef, client);
   if (!subcategory) return { subcategory: null, queued: 0, filtered, known: 0, features: [] };
 
-  const run = client ? (t, p) => client.query(t, p) : query;
   const known = await knownFeatureKeys(client);
   const entries = [];
   const norms = [...features.keys()];
@@ -262,9 +275,9 @@ export function spotInBackground(args) {
 export async function reviewQueue({ limit = 200, subcategory = null } = {}) {
   const known = await knownFeatureKeys();
   // Only features still awaiting a decision: a norm whose candidate was ignored or
-  // promoted is gone from the queue even if a later search re-spots it (its sighting
-  // may be re-inserted, but recordCandidates never reopens an ignored word, so there
-  // is no undecided candidate to act on) — Codex, 2 Oct 2026.
+  // promoted is gone from the queue. An ignored norm is not even re-spotted (the
+  // tombstone check in spotFromDetail drops it), and a promoted one has no
+  // undecided candidate, so neither can return here — Codex, 2 Oct 2026.
   const undecided = "exists (select 1 from harvest_candidates c where c.norm = s.norm and c.sources ? 'google' and c.status in ('new', 'unresolved'))";
   const where = subcategory ? `where p.subcategory = $2 and ${undecided}` : `where ${undecided}`;
   const params = subcategory ? [limit, subcategory] : [limit];

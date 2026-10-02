@@ -219,10 +219,39 @@ test('ignoring a feature drops it from the queue for good', async () => {
   assert.ok(!(await reviewQueue({ subcategory: sub })).some((f) => f.norm === 'climbing wall'), 'gone from the queue');
   assert.equal((await query("select status from harvest_candidates where subcategory = $1 and norm = 'climbing wall'", [sub])).rows[0].status, 'ignored');
   assert.equal((await query("select 1 from review_sightings where norm = 'climbing wall'")).rowCount, 0, 'sightings cleared');
-  // Re-spotting an ignored feature does not resurrect it: the sighting may be
-  // re-inserted, but there is no undecided candidate, so the queue leaves it out.
+  // Re-spotting an ignored feature does not resurrect it: the tombstone drops it
+  // before anything is written, so no sighting is even re-inserted.
   await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A climbing wall.' } });
   assert.ok(!(await reviewQueue({ subcategory: sub })).some((f) => f.norm === 'climbing wall'), 'an ignored feature does not come back');
+  assert.equal((await query("select 1 from review_sightings where norm = 'climbing wall'")).rowCount, 0, 'no sighting re-inserted for a tombstoned feature');
+});
+
+test('an ignore is permanent across a drawer it was never seen in before', async () => {
+  // Codex, 2 Oct 2026: ignoring a word only marked the candidate rows that already
+  // existed, so a later spot in a NEW subcategory re-raised it. The tombstone check
+  // in spotFromDetail closes that — an ignore in one drawer is for good everywhere.
+  const subA = 'c30-tomb-a'; const subB = 'c30-tomb-b';
+  const a = 'google:ChIJ_c30_tomb_a'; const b = 'google:ChIJ_c30_tomb_b';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 tomb A', 'c30-test-cat') on conflict do nothing", [subA]);
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 tomb B', 'c30-test-cat') on conflict do nothing", [subB]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [a, subA]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [b, subB]);
+  await query('delete from harvest_candidates where subcategory = any($1)', [[subA, subB]]);
+  await query('delete from review_sightings where venue_ref = any($1)', [[a, b]]);
+
+  // Seen and ignored in drawer A. "ball pit" is a two-word feature whose parts are
+  // not themselves features (pit is a head, not a solo noun), so the text raises it
+  // alone — a clean test of one norm's tombstone.
+  await spotFromDetail({ venueRef: a, detail: { reviewSummary: 'A ball pit.' } });
+  await sets.ignoreFeature('ball pit', { actor: 'tester', reason: 'not tracked' });
+
+  // Now a place in a DIFFERENT drawer mentions it for the first time.
+  const report = await spotFromDetail({ venueRef: b, detail: { reviewSummary: 'A ball pit.' } });
+  assert.ok(!report.features.some((f) => f.norm === 'ball pit'), 'the tombstoned feature is not re-raised in the new drawer');
+  assert.equal((await query("select count(*)::int n from review_sightings where norm = 'ball pit'")).rows[0].n, 0, 'no sighting written in the new drawer');
+  assert.equal((await query('select count(*)::int n from harvest_candidates where subcategory = $1', [subB])).rows[0].n, 0, 'no candidate raised in the new drawer');
+  assert.ok(!(await reviewQueue({ subcategory: subB })).some((f) => f.norm === 'ball pit'), 'and nothing in the new drawer’s queue');
 });
 
 test.after(async () => { await pool.end(); });
