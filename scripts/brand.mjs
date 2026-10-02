@@ -182,7 +182,7 @@ square('epic-favicon-ink.svg')('apps/web/public/favicon-dark-32.png', 32);
 square('epic-icon-maskable.svg')('apps/web/public/apple-touch-icon.png', 180);
 square('epic-icon-maskable.svg')('apps/web/public/app-icon-192.png', 192);
 square('epic-icon-maskable.svg')('apps/web/public/app-icon-512.png', 512);
-square('epic-app-icon.svg')('apps/web/assets/icon.png', 1024);
+square('epic-icon-maskable.svg')('apps/web/assets/icon.png', 1024);
 square('epic-icon-maskable.svg')('apps/web/public/favicon-maskable-512.png', 512);
 raster(S('epic-symbol-ink.svg'), join(ROOT, 'apps/web/assets/splash-icon.png'), Math.round(512 * ASPECT), 512, true);
 raster(S('epic-symbol-ink.svg'), join(ROOT, 'apps/web/assets/brand/epic-symbol-light.png'), Math.round(512 * ASPECT), 512, true);
