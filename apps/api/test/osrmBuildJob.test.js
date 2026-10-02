@@ -210,3 +210,21 @@ test('an older run cannot forget an obligation a newer run renewed', async () =>
   assert.deepEqual((await job.pendingRings()).map((e) => e.run), ['new-run'], 'still owed, to the newer run');
   await reset();
 });
+
+test('a regional trial only owes the rings of the origins it rebuilds', async () => {
+  await reset();
+  await job.approveOsrmBuild({ by: 'owner@test' });
+  const scopes = [];
+  const cells = [
+    { code: 'sector:IN1 1', lat: 51.40, lng: -0.60 },   // deep inside the box
+    { code: 'sector:EDG 1', lat: 50.51, lng: -1.99 },   // on its edge
+  ];
+  await job.runOsrmBuildJob({
+    graceMs: 0, dataDir: '/tmp/osrm-job-test', bbox: [-2.0, 50.5, 1.5, 52.1],
+    deps: mocks([], { allCells: async () => cells, ringKeys: async ({ scope } = {}) => { scopes.push(scope); return []; } }),
+  });
+  assert.ok(scopes.length >= 1 && scopes.every((sc) => Array.isArray(sc)), 'every ring query is scoped');
+  assert.ok(scopes[0].includes('sector:IN1 1|walking'));
+  assert.ok(!scopes[0].some((x) => x.startsWith('sector:EDG 1')), 'the boundary cell is neither rebuilt nor recounted');
+  await reset();
+});

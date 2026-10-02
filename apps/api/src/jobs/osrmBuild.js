@@ -271,10 +271,11 @@ export async function runOsrmBuildJob({
     download, run, startRouted, allCells, buildOsrmMode, osrmTable,
     rememberRings, pendingRings, forgetRings, state: osrmBuildState,
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-    ringKeys: async ({ before = null } = {}) => (await query(
+    ringKeys: async ({ before = null, scope = null } = {}) => (await query(
       `select distinct cell, mode, minutes from ring_counts
-        where mode in ('walking', 'cycling') and ($1::timestamptz is null or computed_at < $1::timestamptz)`,
-      [before])).rows,
+        where mode in ('walking', 'cycling') and ($1::timestamptz is null or computed_at < $1::timestamptz)
+          and ($2::text[] is null or (cell || '|' || mode) = any($2::text[]))`,
+      [before, scope])).rows,
     recountRing: async (k) => (await import('../repositories/ringTables.js')).refreshRing({ ...k, force: true }),
     rmrf: (p) => rm(p, { recursive: true, force: true }),
     log: (...a) => console.log('[osrm-build]', ...a),
@@ -305,13 +306,29 @@ export async function runOsrmBuildJob({
     // The walking and cycling rings that exist now are the ones this build
     // will make stale; their keys are kept so exactly those are recounted at
     // the end, even though the build drops each one as its origin is rebuilt.
-    // Persisted, not held in memory, so a retry after a failure still owes them.
-    await d.rememberRings(await d.ringKeys(), claimed.runId);
     await d.download(extractUrl, pbf);
 
     let cells = await d.allCells({ scheme: 'sector' });
     if (bbox) cells = cells.filter((c) => c.lng >= bbox[0] && c.lat >= bbox[1] && c.lng <= bbox[2] && c.lat <= bbox[3]);
     const sample = cells[Math.floor(cells.length / 2)] ?? null;
+    // The origins each mode rebuilds: every cell for the whole-UK build; for a
+    // regional trial only those whose whole reach stays inside the box, routing
+    // to every cell in it, so a boundary origin is never marked complete with
+    // its cross-boundary neighbours missing (the fence reach-osrm.mjs keeps).
+    const originsByMode = Object.fromEntries(PROFILES.map((p) => {
+      if (!bbox) return [p.mode, cells];
+      const km = boundKm(horizon, p.mode) * 1.5;
+      const dLat = km / 111;
+      const poleward = Math.max(Math.abs(bbox[1]), Math.abs(bbox[3]));
+      const dLng = km / (111 * Math.cos((poleward * Math.PI) / 180));
+      return [p.mode, cells.filter((c) => c.lng >= bbox[0] + dLng && c.lat >= bbox[1] + dLat
+        && c.lng <= bbox[2] - dLng && c.lat <= bbox[3] - dLat)];
+    }));
+    // A regional trial only touches its own origins' rings, so it only owes those
+    // (Codex); the whole-UK build owes every walking and cycling ring.
+    const scope = bbox ? PROFILES.flatMap((p) => originsByMode[p.mode].map((c) => `${c.code}|${p.mode}`)) : null;
+    // Persisted, not held in memory, so a retry after a failure still owes them.
+    await d.rememberRings(await d.ringKeys({ scope }), claimed.runId);
 
     for (const p of PROFILES) {
       const dir = path.join(dataDir, p.label);
@@ -323,19 +340,7 @@ export async function runOsrmBuildJob({
       d.log(p.label, 'extract'); await d.run('osrm-extract', ['-p', p.lua, path.join(dir, 'gb.osm.pbf')]);
       d.log(p.label, 'partition'); await d.run('osrm-partition', [graph]);
       d.log(p.label, 'customize'); await d.run('osrm-customize', [graph]);
-      // A trial over a regional box builds only the origins whose whole reach
-      // stays inside it, routing to every cell in the box — a boundary origin is
-      // never marked complete with its cross-boundary neighbours missing (the
-      // same fence reach-osrm.mjs keeps). The production run is whole-GB.
-      let origins = cells;
-      if (bbox) {
-        const km = boundKm(horizon, p.mode) * 1.5;
-        const dLat = km / 111;
-        const poleward = Math.max(Math.abs(bbox[1]), Math.abs(bbox[3]));
-        const dLng = km / (111 * Math.cos((poleward * Math.PI) / 180));
-        origins = cells.filter((c) => c.lng >= bbox[0] + dLng && c.lat >= bbox[1] + dLat
-          && c.lng <= bbox[2] - dLng && c.lat <= bbox[3] - dLat);
-      }
+      const origins = originsByMode[p.mode];
       const routed = await d.startRouted(graph, { sample });
       try {
         const out = await d.buildOsrmMode({
@@ -358,14 +363,14 @@ export async function runOsrmBuildJob({
     // by this build and is not recounted (Codex).
     // The cutoff on the database's clock — ring counts are stamped with it.
     const finished = new Date((await query('select now() as at')).rows[0].at).toISOString();
-    await d.rememberRings(await d.ringKeys({ before: finished }), claimed.runId);
+    await d.rememberRings(await d.ringKeys({ before: finished, scope }), claimed.runId);
     const first = await settleOwed(d);
     // A ring count another process had already begun from the old reach can
     // commit after that sweep; it is stamped with when it began, so a second
     // sweep after the grace period finds it by `computed_at < finished` and
     // nothing just recounted (stamped after) is touched again (Codex).
     if (graceMs > 0) await d.sleep(graceMs);
-    await d.rememberRings(await d.ringKeys({ before: finished }), claimed.runId);
+    await d.rememberRings(await d.ringKeys({ before: finished, scope }), claimed.runId);
     const second = await settleOwed(d);
     result.ringsRecounted = first.done + second.done;
     result.ringsStillOwed = second.failed;
