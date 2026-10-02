@@ -231,7 +231,10 @@ export async function backfill({ account, householdId, sessionId = null, expectP
 /** The back office's "Re-run": research the place again, free pass first. */
 export async function rerun(venueRef, { account = null, householdId, sessionId = null }) {
   const out = await requestEnrichment({ venueRef, account, householdId, sessionId, rerun: true });
-  if (out.started) queueEnrichment(venueRef, { householdId, sessionId, onDone: out.onDone, onFailed: out.onFailed });
+  // A deliberate Re-run reads the free sources again too — the open map, the
+  // venue's page, the encyclopedias — rather than taking a recent record as
+  // fresh (Codex, 2 Oct 2026). Backfills and restarts leave that to the queue.
+  if (out.started) queueEnrichment(venueRef, { householdId, sessionId, force: true, replace: false, onDone: out.onDone, onFailed: out.onFailed });
   return { started: out.started, why: out.why ?? null };
 }
 
