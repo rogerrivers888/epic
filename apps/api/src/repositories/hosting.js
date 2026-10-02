@@ -271,7 +271,8 @@ export async function updateOffer(id, patch, client) {
   if (!sets.length) return offerById(id);
   sets.push('updated_at = now()');
   const { rows } = await on(client)(`update host_offers set ${sets.join(', ')} where id = $1 returning *`, params);
-  return rows[0];
+  // Named as every read is: the trigger has just emptied a provider's label.
+  return (await named(rows))[0];
 }
 
 export async function deleteOffer(id, hostId) {

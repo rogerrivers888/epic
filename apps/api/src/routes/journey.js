@@ -222,16 +222,19 @@ async function buildJourney({ trip, day, household, items, source }) {
 /** The shortlist's places for this day, in the running, in order. Unassigned places belong to whichever day is open. */
 async function runningItems(trip, day) {
   const rows = await trips.runningShortlist(trip.id, day.id);
-  // Each stop on the day's plan is named by what we own, else Google live,
-  // else a neutral word — the stored label never (sources/displayNames.js).
-  await resolveInto([{ rows, refKey: 'venue_ref', nameKey: 'venue_label' }], { purpose: 'trip.displayName', householdId: trip.household_id });
+  // Each stop on the day's plan is named by what we own, else a neutral word —
+  // never the stored label, and never a live Google name either: a journey
+  // writes names into its own messages (a clash, a late arrival, the stop that
+  // tips the day) and an estimated one is kept on the device whole (Codex,
+  // 2 Oct 2026).
+  await resolveInto([{ rows, refKey: 'venue_ref', nameKey: 'venue_label' }], { purpose: 'trip.displayName', householdId: trip.household_id, live: false });
   return rows;
 }
 
 /** A saved day's stops, in the same shape the engine reads. */
 async function savedItems(trip, day) {
   const rows = await trips.stopsOnDay(trip.id, day.id);
-  await resolveInto([{ rows, refKey: 'venue_ref', nameKey: 'venue_name' }], { purpose: 'trip.displayName', householdId: trip.household_id });
+  await resolveInto([{ rows, refKey: 'venue_ref', nameKey: 'venue_name' }], { purpose: 'trip.displayName', householdId: trip.household_id, live: false });
   return rows.map((s) => ({
     id: s.id, venue_ref: s.venue_ref, venue_label: s.venue_name, nameSource: s.nameSource, category: s.category ?? null, kind: null, lat: s.lat, lng: s.lng, venue: null,
     status: s.booking_status ?? 'no_booking', booked_time: s.booking_status === 'booked' ? s.start_time : null, party_size: null, booking_ref: s.booking_ref ?? null, note: null,
@@ -254,7 +257,7 @@ router.get('/:id/journey', async (req, res, next) => {
     const journey = await buildJourney({ trip, day, household, items, source });
     if (source === 'shortlist') {
       const others = await trips.setAsideShortlist(trip.id, day.id);
-      await resolveInto([{ rows: others, refKey: 'venue_ref', nameKey: 'venue_label' }], { purpose: 'trip.displayName', householdId: trip.household_id });
+      await resolveInto([{ rows: others, refKey: 'venue_ref', nameKey: 'venue_label' }], { purpose: 'trip.displayName', householdId: trip.household_id, live: false });
       journey.others = others.map((o) => ({ id: o.id, name: o.venue_label, nameSource: o.nameSource, category: o.category, status: o.status, statusNote: o.status_note, statusOn: o.status_on }));
     }
     res.json(journey);
