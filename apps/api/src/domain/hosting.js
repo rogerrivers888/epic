@@ -301,8 +301,12 @@ export function ageGate(offer, party) {
     // child may come. A child with no age given cannot be checked, so is not let through.
     const lo = offer.age_min ?? 0; const hi = offer.age_max ?? Infinity;
     const isChild = (p) => p.child || (p.age != null && p.age < ADULT_AGE);
-    const blocked = party.filter((p) => (lo >= ADULT_AGE ? isChild(p)
-      : isChild(p) && (p.age == null || p.age < lo || p.age > hi)) || (!isChild(p) && p.age != null && (p.age < lo || (hi < ADULT_AGE ? false : p.age > hi))));
+    // Adults are held to the range only at an adults' event (from 18 up); anywhere else an
+    // adult in the party is the parent who stays, whatever the top age (Codex, 2 Oct 2026).
+    const adultsEvent = lo >= ADULT_AGE;
+    const blocked = party.filter((p) => (isChild(p)
+      ? adultsEvent || p.age == null || p.age < lo || p.age > hi
+      : adultsEvent && p.age != null && (p.age < lo || p.age > hi)));
     const adults = party.filter((p) => !isChild(p));
     // Drop off: the children come on their own — the parent who booked is not in the party (Codex, 2 Oct 2026).
     const dropOff = offer.parents === 'drop_off';

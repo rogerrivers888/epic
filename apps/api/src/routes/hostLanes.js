@@ -879,6 +879,10 @@ router.post('/host/lanes/offers/:id/publish', async (req, res, next) => {
 
 
     const sentForReview = await withTransaction(async (client) => {
+      // One publish at a time: the row is locked and read again, so a second press finds it
+      // already sent rather than laying the sessions down twice (Codex, 2 Oct 2026).
+      const { rows: [now] } = await client.query('select state from host_offers where id = $1 for update', [offer.id]);
+      if (now?.state !== 'draft') throw refuse(409, 'already_sent', 'This one is with us for review.');
       await laySessions(offer, holidays, client);
       return repo.updateOffer(offer.id, { state: 'in_review', submittedAt: new Date(), reviewAi: { state: offer.video_id ? 'queued' : 'not_needed' }, draftStep: null }, client);
     });

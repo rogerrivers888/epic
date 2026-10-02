@@ -1571,6 +1571,12 @@ router.post('/experiences/:id/book', async (req, res, next) => {
      * says nothing about the host's paperwork.
      */
     const ahead = await repo.offerById(req.params.id);
+    // An offer made in the four lanes (hosting v7) is booked by its own rules — per booking or
+    // per person with a child price, drop in or book ahead, held until a request is accepted —
+    // and those are the guest-booking brief's, not this route's. Until that lands, nothing is
+    // booked against a lane offer on the old arithmetic (Codex, 2 Oct 2026). Invitations to a
+    // private one are answered through /invited as before.
+    if (ahead?.lane) throw refuse(409, 'booking_not_open', 'Booking for this one opens soon.');
     if (ahead?.state === 'live') {
       const aheadHost = await repo.hostById(ahead.host_id);
       const [types, credentials] = aheadHost

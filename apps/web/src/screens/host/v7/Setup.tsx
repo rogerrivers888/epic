@@ -106,7 +106,22 @@ export function Setup({ lane: laneIn, offerId }: { lane: HostLane | null; offerI
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => { void flush(); }, 700);
   }, [flush]);
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  // Leaving by the browser's back, a reload or closing the tab still sends what was typed in
+  // the last moment before the save fired (Codex, 2 Oct 2026).
+  const idRef = useRef<string | null>(null);
+  idRef.current = offer?.id || null;
+  useEffect(() => {
+    const send = () => {
+      if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+      const body = pending.current; const id = idRef.current;
+      if (!id || !Object.keys(body).length) return;
+      pending.current = {};
+      void api.saveLaneOffer(id, body).catch(() => null);
+    };
+    const w = typeof window !== 'undefined' && typeof window.addEventListener === 'function' ? window : null;
+    w?.addEventListener('pagehide', send);
+    return () => { w?.removeEventListener('pagehide', send); send(); };
+  }, []);
 
   /** Make the draft if there is none yet, with everything chosen so far. */
   const ensureSaved = useCallback(async (extra: LanePatch = {}): Promise<LaneOffer | null> => {

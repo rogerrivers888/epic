@@ -286,3 +286,9 @@ test('drop off: the children come without the parent who booked them', async () 
   assert.equal(g.hasAdult, true, 'no attending adult is asked for');
   assert.equal(ageGate({ lane: 'oneoff', age_min: 5, age_max: 10, parents: 'stay' }, [{ name: 'Ada', age: 6, child: true }]).hasAdult, false, 'parents stay: one must come');
 });
+
+test('a parent comes to a 5–18 event whatever their age; an adults’ event holds adults to its range', async () => {
+  const { ageGate } = await import('../src/domain/hosting.js');
+  assert.deepEqual(ageGate({ lane: 'weekly', age_min: 5, age_max: 18 }, [{ name: 'Dad', age: 40, child: false }, { name: 'Kit', age: 9, child: true }]).blocked, []);
+  assert.equal(ageGate({ lane: 'oneoff', age_min: 30, age_max: 50 }, [{ name: 'Jo', age: 25, child: false }]).blocked.length, 1);
+});
