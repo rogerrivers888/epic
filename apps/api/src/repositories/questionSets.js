@@ -828,19 +828,25 @@ export async function ignoreCandidate(id, { actor = null, reason = null } = {}) 
   // own norm-level decisions (ignoreFeature/approveFeature) — deleting them here
   // would clear the norm across every drawer on a single-drawer decision (Codex,
   // 2 Oct 2026).
-  const { rows } = await query(
-    // The examples go — they are the word-to-place scaffolding the brief says
-    // to drop on a decision. The quote stays: it is owned text, and under C21
-    // it is the only thing that can make a restored word promotable again.
-    // Clearing it here left an ignored-then-restored word an unresolved
-    // feature nothing could ever pick up (Codex, 26 Sep 2026).
-    // The reason is the owner's sentence for why (migration 265, C27).
-    `update harvest_candidates set status = 'ignored', decided_by = $2, decided_at = now(), examples = '{}',
-            decision_reason = coalesce($3, decision_reason)
-      where id = $1 and status in ('new', 'unresolved') returning *`, [id, actor, reason ? String(reason).slice(0, 300) : null],
-  );
-  if (!rows[0]) throw bad('That word has already been decided.');
-  return rows[0];
+  return withTransaction(async (client) => {
+    // The word's locks, like every decision on a word: an approval reading which
+    // drawers want the word must not have one of them ignore it under its feet and
+    // still be asked there (Codex, 2 Oct 2026).
+    await lockWordOf(client, id);
+    const { rows } = await client.query(
+      // The examples go — they are the word-to-place scaffolding the brief says
+      // to drop on a decision. The quote stays: it is owned text, and under C21
+      // it is the only thing that can make a restored word promotable again.
+      // Clearing it here left an ignored-then-restored word an unresolved
+      // feature nothing could ever pick up (Codex, 26 Sep 2026).
+      // The reason is the owner's sentence for why (migration 265, C27).
+      `update harvest_candidates set status = 'ignored', decided_by = $2, decided_at = now(), examples = '{}',
+              decision_reason = coalesce($3, decision_reason)
+        where id = $1 and status in ('new', 'unresolved') returning *`, [id, actor, reason ? String(reason).slice(0, 300) : null],
+    );
+    if (!rows[0]) throw bad('That word has already been decided.');
+    return rows[0];
+  });
 }
 
 /**
@@ -874,8 +880,11 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
     // owned-evidence gate (Codex, 2 Oct 2026).
     const { rows: seen } = await client.query('select 1 from review_sightings where norm = $1 limit 1', [norm]);
     if (!seen.length) throw bad(`"${norm}" is not a feature waiting in the review queue.`);
+    // Every undecided row for the word is locked — the drawers approval asks are
+    // derived from all of them, owned ones included (Codex, 2 Oct 2026).
+    await client.query("select 1 from harvest_candidates where norm = $1 and status in ('new', 'unresolved') order by id for update", [norm]);
     const { rows: cands } = await client.query(
-      "select * from harvest_candidates where norm = $1 and status in ('new', 'unresolved') and sources ? 'google' order by subcategory for update",
+      "select * from harvest_candidates where norm = $1 and status in ('new', 'unresolved') and sources ? 'google' order by subcategory",
       [norm]);
     if (!cands.length) throw bad(`"${norm}" is not a feature waiting in the review queue.`);
     // Create or reuse the label — human-authorised, so no quote gate.

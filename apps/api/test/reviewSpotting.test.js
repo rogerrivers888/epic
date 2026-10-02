@@ -1118,6 +1118,32 @@ test('dismissing a known fact reaches a candidate left in the drawer its place h
   assert.equal((await query("select status from harvest_candidates where norm = 'sport hall' and subcategory = $1", [subOld])).rows[0].status, 'ignored', 'the old-drawer candidate is closed, not orphaned');
 });
 
+test('a per-drawer ignore waits for the word, so it cannot slip in under an approval', async () => {
+  // Codex, 2 Oct 2026: ignoreCandidate now takes the word's locks like every other
+  // decision on a word.
+  const sub = 'c30-iclock-parks';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 iclock parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await sets.recordCandidates(sub, [{ norm: 'tack shed', raw: 'tack shed', rawForms: ['tack shed'], sources: ['venue'], examples: [], kind: 'feature', placesSeen: 1, asserts: 1, denies: 0, asks: 0 }], { placesTotal: 1 });
+  const { rows: [cand] } = await query("select id from harvest_candidates where norm = 'tack shed' and subcategory = $1", [sub]);
+
+  const other = await pool.connect();
+  let done = false;
+  try {
+    await other.query('begin');
+    await other.query('select pg_advisory_xact_lock(hashtext($1)::bigint)', ['feature:tack shed']); // an approval on the word
+    const ignoring = sets.ignoreCandidate(cand.id, { actor: 'tester' }).then(() => { done = true; });
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(done, false, 'the per-drawer ignore waits for the word');
+    await other.query('commit');
+    await ignoring;
+    assert.equal(done, true, 'and goes ahead once it is free');
+  } finally {
+    other.release();
+  }
+});
+
 test('restoring an older per-drawer ignore leaves a later word-level Ignore standing', async () => {
   // Codex, 2 Oct 2026: restore lifts only the tombstone its own ignore wrote.
   const subA = 'c30-tomb-scope-a'; const subB = 'c30-tomb-scope-b';
