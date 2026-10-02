@@ -30,7 +30,7 @@ import { paths, type Route } from '../../routes';
 import { HostFace, mediaUrl, priceWords, SHAPE_ICON, STATE_LABEL, TRUST_LABEL } from '../../components/hosting';
 import { t, k, Tag, Segments } from '../../components/hostKit';
 import { Section, Kicker, SummaryCells, Grid2, EqualTable, DateCol, FillBar, NavRow, gbp, todayIso, dateOf, offerDateGroups } from './hostTabKit';
-import { LearnExample, LearnExamples, LearnHome, LearnShape, LearnWho } from './Learn';
+import { LearnExample, LearnExamples, LearnShape, LearnWho } from './Learn';
 import { OfferWizard } from './OfferWizard';
 import { OfferDashboard } from './OfferDashboard';
 import { VideoRecorder } from './VideoRecorder';
@@ -40,8 +40,15 @@ import { HostActivity } from './HostActivity';
 import { HostLevel } from './HostLevel';
 import { HostMoneyDetail, type MoneyScreen } from './HostMoneyDetail';
 import { HostSkills, HostEvidence } from './HostExtras';
+// Four ways to host (hosting v7): Host home 4e, a lane, its set-up, the checklist, the ending.
+import { HostLanes, LaneScreen } from './v7/HostHome';
+import { Setup } from './v7/Setup';
+import { Publish } from './v7/Publish';
+import { Ending } from './v7/Ending';
+import { HOST_LANES, type HostLane } from '../../routes';
 
 const WIDE = 900;
+const LANE_TAG: Record<HostLane, string> = { oneoff: 'One-off', weekly: 'Weekly', course: 'Course', onrequest: 'On request' };
 const HostTab = ['upcoming', 'stats', 'money', 'profile'] as const;
 type HostTabKey = typeof HostTab[number];
 const MoneyScreens = ['account', 'schedule', 'history', 'tax', 'statements'] as const;
@@ -75,6 +82,14 @@ export function HostScreen({ route }: { route: Extract<Route, { name: 'host' }> 
   }, [route.page]);
   useEffect(() => { if (route.page === 'start') navigate(paths.hostMe(), { replace: true }); }, [route.page]);
 
+  // Four ways to host — dispatched before anything else, and needing nothing loaded here.
+  if (route.page === 'lanes') return <HostLanes />;
+  if (route.page === 'lane' && route.param && (HOST_LANES as readonly string[]).includes(route.param)) return <LaneScreen lane={route.param as HostLane} />;
+  if (route.page === 'compose' && route.param && (HOST_LANES as readonly string[]).includes(route.param)) return <Setup lane={route.param as HostLane} offerId={null} />;
+  if (route.page === 'setup' && route.offerId) return <Setup lane={null} offerId={route.offerId} />;
+  if (route.page === 'publish' && route.offerId) return <Publish offerId={route.offerId} />;
+  if (route.page === 'done' && route.offerId) return <Ending offerId={route.offerId} />;
+
   // The existing sub-stacks, dispatched first and unchanged.
   if (route.page === 'shape' && route.param) return <LearnShape shape={route.param as OfferShape} wide={wide} />;
   if (route.page === 'examples') return <LearnExamples wide={wide} />;
@@ -91,7 +106,8 @@ export function HostScreen({ route }: { route: Extract<Route, { name: 'host' }> 
   if (route.page === 'new' || route.page === 'profile') return <View style={styles.centre}><Text style={t.sub}>{error ?? 'One moment…'}</Text></View>;
 
   if (!home) return <View style={styles.centre}><Text style={t.sub}>{error ?? 'Loading…'}</Text></View>;
-  if (!home.host || !home.offers.length) return <LearnHome wide={wide} />;
+  // Not hosting yet: Host home 4e (hosting v7) — the four ways in.
+  if (!home.host || !home.offers.length) return <HostLanes />;
 
   // The Host tab's own sub-screens, all query state on /host. Opening one is a
   // move (a push, below); Back walks the history, or one layer up to /host for
@@ -113,7 +129,7 @@ export function HostScreen({ route }: { route: Extract<Route, { name: 'host' }> 
   return (
     <View style={k.page}>
       <View style={wide ? k.wide : undefined}>
-        <TitleBand title="Host" right={<NewOfferButton onPress={() => navigate(paths.hostNewOffer())} />} />
+        <TitleBand title="Host" right={<NewOfferButton onPress={() => navigate(paths.hostLanes())} />} />
         <InkMenu<HostTabKey>
           tabs={[{ key: 'upcoming', label: 'Upcoming' }, { key: 'stats', label: 'Stats' }, { key: 'money', label: 'Money' }, { key: 'profile', label: 'Profile' }]}
           selected={tab}
@@ -147,7 +163,10 @@ type UpRow = { offer: OwnOffer; on: string | null; heads: number; bookings: numb
 
 function UpcomingTab({ home, money, open, navigate }: { home: HostHome; money: HostMoney | null; open: (p: Record<string, string | null>) => void; navigate: (to: string) => void }) {
   const today = todayIso();
+  // A set-up left part-way (hosting v7, "Save and finish later") is a draft to carry on, not a date coming up.
+  const drafts = home.offers.filter((o) => o.lane && o.state === 'draft');
   const rows: UpRow[] = home.offers
+    .filter((o) => !(o.lane && o.state === 'draft'))
     .flatMap((offer) => offerDateGroups(offer).filter((g) => !g.on || g.on >= today).map((g) => ({ offer, ...g })))
     .sort((a, z) => (a.on ?? '').localeCompare(z.on ?? ''));
   const dates = rows.length;
@@ -165,6 +184,20 @@ function UpcomingTab({ home, money, open, navigate }: { home: HostHome; money: H
         { n: String(booked), label: 'booked' },
         { n: gbp(collected), label: money?.paymentsReady ? 'collected' : 'recorded' },
       ]} />
+      {drafts.length ? (
+        <>
+          <Section title="Drafts" />
+          {drafts.map((o) => (
+            <Press key={o.id} onPress={() => navigate(paths.hostSetup(o.id, o.draftStep && o.draftStep !== 'publish' ? o.draftStep : null))} accessibilityRole="button" style={styles.dateRow}>
+              <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+                <Text style={[t.body, { fontWeight: '600' }]} numberOfLines={1}>{o.title ?? 'Untitled'}</Text>
+                <Text style={t.small}>{LANE_TAG[o.lane!]} · carry on</Text>
+              </View>
+              <Icon name="more" size={18} color={INK} />
+            </Press>
+          ))}
+        </>
+      ) : null}
       <Section title="Coming up" />
       {rows.length === 0 ? <Text style={[t.sub, { lineHeight: 20 }]}>Nothing booked yet. New dates and bookings show here.</Text>
         : rows.map((r, i) => {

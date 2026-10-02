@@ -69,7 +69,7 @@ export const paymentsConfig = () => ({ provider: null, ready: false, note: 'Epic
 // payloads
 // ---------------------------------------------------------------------------
 
-const mediaRef = (id) => (id ? `/api/media/${id}` : null);
+export const mediaRef = (id) => (id ? `/api/media/${id}` : null);
 
 function publicHost(h, rating = { rating: null, count: 0, guests: 0 }, extra = {}) {
   return {
@@ -105,6 +105,8 @@ export function ownHost(h) {
     address: h.address, idDocument: h.id_document, insuranceConfirmed: h.insurance_confirmed,
     taxReference: h.tax_reference ? `••••${String(h.tax_reference).slice(-3)}` : null,
     payoutStatus: h.payout_status, payoutLabel: h.payout_label, dateOfBirth: h.date_of_birth,
+    // Hosting v7: the states the checklist reads (never Stripe's ids).
+    identityState: h.identity_state ?? 'none', payoutsState: h.payouts_state ?? 'none', checkedState: h.checked_state ?? 'none',
     // Money (Settings revised v2, SX17/SX19): when payouts land, and company tax.
     paySchedule: h.pay_schedule ?? 'weekly', taxIsCompany: h.tax_is_company ?? false, companyNumber: h.company_number ?? null,
   };
@@ -128,6 +130,8 @@ function publicOffer(o, bookings = [], { revealed = false, host = null } = {}) {
   const taken = new Set(bookings.filter((b) => b.state !== 'cancelled').map((b) => b.occurrence));
   return {
     id: o.id, hostId: o.host_id, shape: o.shape, state: o.state, pausedUntil: ymd(o.paused_until), visibility: o.visibility, money: o.money ?? 'free',
+    // Hosting v7: which of the four lanes, and where its set-up was left (a draft opens there).
+    lane: o.lane ?? null, draftStep: o.draft_step ?? null,
     title: o.title, summary: o.summary, description: o.description, whyYou: o.why_you, includes: o.includes, category: o.category,
     // The five fields. `tags` and `facets` are in the host's own order — the
     // first tag is what shows on the card — and a pending one is live on the
@@ -1161,7 +1165,7 @@ router.post('/host/offers/:id/extract', async (req, res, next) => {
 
 const inviteUrl = (token) => `${process.env.EPIC_APP_URL || process.env.APP_URL || 'https://epic.day'}/invited/${token}`;
 /** The one link a host passes round: short, and the token is the credential (lanes A and B, C2). */
-const linkUrl = (token) => `${process.env.EPIC_APP_URL || process.env.APP_URL || 'https://epic.day'}/i/${token}`;
+export const linkUrl = (token) => `${process.env.EPIC_APP_URL || process.env.APP_URL || 'https://epic.day'}/i/${token}`;
 
 /** POST …/invites [{name, contact, heads}] — who is invited. A text with a link goes when a sender exists. */
 router.post('/host/offers/:id/invites', async (req, res, next) => {
@@ -1212,7 +1216,7 @@ router.delete('/host/offers/:id/invites/:iid', async (req, res, next) => {
 });
 
 /** Only a delivered send is marked sent; a refusal leaves the row to be tried again. */
-async function sendInvites(host, offer, invites) {
+export async function sendInvites(host, offer, invites) {
   let delivered = 0;
   for (const i of invites) {
     if (!i.contact) continue;
@@ -1756,6 +1760,8 @@ adminRouter.get('/', requires('view_hosting'), async (_req, res, next) => {
         ...publicOffer(o, [], { revealed: true }), venueLabel: o.venue_label,
         hostName: o.host_name, hostType: o.host_type, hostTrust: o.host_trust, submittedAt: o.submitted_at,
         checklist: pitchChecklist(o), commentary: isRegulated(o.venue_country) && readsLikeCommentary(`${o.title} ${o.description}`),
+        // Hosting v7: which lane, and what the automatic check of the video found (a flag means a person must look).
+        lane: o.lane ?? null, reviewAi: o.review_ai ?? null,
       })),
       hosts: hosts.map((h) => ({ ...ownHost(h), liveOffers: Number(h.live_offers), inReview: Number(h.in_review), openReports: Number(h.open_reports) })),
       reports: reports.map((r) => ({ id: r.id, hostId: r.host_id, hostName: r.host_name, offerId: r.offer_id, title: r.title, reason: r.reason, at: r.created_at })),
@@ -1805,6 +1811,8 @@ adminRouter.patch('/hosts/:id', requires('manage_hosting'), async (req, res, nex
     const patch = {};
     if (req.body?.trust !== undefined) { patch.trust = oneOf(TRUST_LEVELS, req.body.trust); if (!patch.trust) throw refuse(400, 'bad_trust', 'Verified, Checked or Epic Trusted.'); }
     if (req.body?.checks !== undefined) { patch.checks = oneOf(['running', 'passed'], req.body.checks); if (!patch.checks) throw refuse(400, 'bad_checks', 'Running or passed.'); }
+    // Checked (hosting v7: DBS, insurance, two references) is passed or failed here and only here.
+    if (req.body?.checkedState !== undefined) { patch.checkedState = oneOf(['submitted', 'passed', 'failed'], req.body.checkedState); if (!patch.checkedState) throw refuse(400, 'bad_checked', 'Passed or failed.'); }
     const updated = await repo.updateHost(h.id, patch);
     res.json({ host: ownHost(updated) });
   } catch (err) { next(err); }

@@ -12,6 +12,8 @@
  * regulated cities where guiding is a licensed profession.
  */
 
+import { laneBlockers } from './lanes.js';
+
 /**
  * The settled kinds (T-REC, 13 Sep 2026): "I have a skill" · "Meetups and mini
  * tours" · "Expert guide". Expert is defined by depth of knowledge, not by
@@ -290,6 +292,9 @@ export function ageGate(offer, party) {
  * 18+ with a minimum party; a regulated city needs its answer.
  */
 export function publishBlockers(offer, host, evidence = null) {
+  // An offer made in one of the four lanes (hosting v7) is held to its own
+  // rules: the lane's steps and the checklist, never the old shapes' questions.
+  if (offer.lane) return laneBlockers(offer, host ?? {});
   const out = [];
   const pub = offer.visibility === 'public';
   const paid = (offer.money ?? 'free') !== 'free';

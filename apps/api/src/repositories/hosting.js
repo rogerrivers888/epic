@@ -80,8 +80,12 @@ const HOST_COLUMNS = {
   dateOfBirth: 'date_of_birth', trust: 'trust', checks: 'checks',
   // Money (SX17/SX19): when payouts land, and company tax reporting.
   paySchedule: 'pay_schedule', taxIsCompany: 'tax_is_company', companyNumber: 'company_number', legalName: 'legal_name', taxAddress: 'tax_address',
+  // Hosting v7 (migration 358): Stripe identity and payouts, and the children's check.
+  stripeAccountId: 'stripe_account_id', stripeMode: 'stripe_mode', payoutsState: 'payouts_state', identityState: 'identity_state',
+  identitySessionId: 'identity_session_id', identityVerifiedAt: 'identity_verified_at', checkedState: 'checked_state',
+  dbsNumber: 'dbs_number', insuranceMediaId: 'insurance_media_id', checkedSubmittedAt: 'checked_submitted_at',
 };
-const HOST_JSON = { credentials: 'credentials', languages: 'languages', childrenAges: 'children_ages' };
+const HOST_JSON = { credentials: 'credentials', languages: 'languages', childrenAges: 'children_ages', referees: 'referees' };
 
 /** A PATCH touches only what it names. */
 export async function updateHost(id, patch) {
@@ -252,11 +256,22 @@ const OFFER_COLUMNS = {
   money: 'money', summary: 'summary', transcript: 'transcript', docId: 'doc_id', endsAt: 'ends_at', repeatEvery: 'repeat_every', endDate: 'end_date',
   themesDiffer: 'themes_differ', noticeDays: 'notice_days', rulesAccepted: 'rules_accepted',
   reviewNote: 'review_note', reviewedAt: 'reviewed_at', submittedAt: 'submitted_at', publishedAt: 'published_at', cancelledAt: 'cancelled_at', cancelledNote: 'cancelled_note',
+  // Four ways to host (migration 358).
+  lane: 'lane', whatCategory: 'what_category', whatLabel: 'what_label', lineSuggested: 'line_suggested', multiDay: 'multi_day', endsOn: 'ends_on',
+  excludeBankHolidays: 'exclude_bank_holidays', ageMin: 'age_min', ageMax: 'age_max', parents: 'parents', childPence: 'child_pence',
+  bookAheadPence: 'book_ahead_pence', dropInGroupPct: 'drop_in_group_pct', dropInGroupMin: 'drop_in_group_min',
+  bookAheadGroupPct: 'book_ahead_group_pct', bookAheadGroupMin: 'book_ahead_group_min', decidesOn: 'decides_on', refundPolicy: 'refund_policy',
+  noticeHours: 'notice_hours', perWeekMax: 'per_week_max', onlineMode: 'online_mode', onlineLink: 'online_link', timeZone: 'time_zone',
+  privatePlan: 'private_plan', privateFeeState: 'private_fee_state', privateFeeRef: 'private_fee_ref',
+  videoMadeBy: 'video_made_by', videoCoverS: 'video_cover_s', videoOnProfile: 'video_on_profile', helloVideoId: 'hello_video_id',
+  draftStep: 'draft_step', draftSource: 'draft_source', whoChosen: 'who_chosen',
 };
 const OFFER_JSON = {
   photoIds: 'photo_ids', runningOrder: 'running_order', featuredPeople: 'featured_people', skippedDates: 'skipped_dates', weeks: 'weeks',
   availability: 'availability', reviewChecklist: 'review_checklist',
   facts: 'facts', seeded: 'seeded', subDetail: 'sub_detail', checks: 'checks',
+  weekdays: 'weekdays', guestQuestions: 'guest_questions', freeHours: 'free_hours', sessionLengths: 'session_lengths',
+  videoPhotoIds: 'video_photo_ids', reviewAi: 'review_ai',
 };
 
 export async function updateOffer(id, patch, client) {
@@ -821,4 +836,107 @@ export async function releaseWaitlistTold(id) {
 export async function waitlistOf(groupId) {
   const { rows } = await query('select * from group_waitlist where group_id = $1 order by created_at', [groupId]);
   return rows;
+}
+
+// ---------------------------------------------------------------------------
+// four ways to host (migration 358)
+// ---------------------------------------------------------------------------
+
+/** A host's unfinished v7 drafts, newest first — "Save and finish later" comes back to these. */
+export async function laneDraftsOf(hostId) {
+  const { rows } = await query("select * from host_offers where host_id = $1 and lane is not null and state = 'draft' order by updated_at desc", [hostId]);
+  return named(rows);
+}
+
+/** Another host or a helper on an offer, and what each can do. */
+export async function cohostsOf(offerId) {
+  const { rows } = await query('select * from offer_cohosts where offer_id = $1 order by position, created_at', [offerId]);
+  return rows;
+}
+
+/** The whole list, in the host's order: what the step sends is what the offer has. */
+export async function setCohosts(offerId, list, client) {
+  const run = on(client);
+  await run('delete from offer_cohosts where offer_id = $1', [offerId]);
+  for (const [i, c] of list.entries()) {
+    await run(
+      `insert into offer_cohosts (offer_id, account_id, contact_id, name, role, can_edit, can_message, shown_on_page, with_photo, sees_guests, position)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [offerId, c.accountId ?? null, c.contactId ?? null, c.name, c.role, Boolean(c.canEdit), Boolean(c.canMessage), c.shownOnPage !== false, c.withPhoto !== false, Boolean(c.seesGuests), i],
+    );
+  }
+  return cohostsOf(offerId);
+}
+
+export async function sessionsOf(offerId) {
+  const { rows } = await query('select * from offer_sessions where offer_id = $1 order by on_date, starts_at nulls first, n nulls last', [offerId]);
+  return rows;
+}
+
+/**
+ * Lay an offer's sessions down again. Only while nobody has booked any of
+ * them: a session somebody holds a place on is never rewritten by an edit.
+ */
+export async function replaceSessions(offerId, sessions, client) {
+  const run = on(client);
+  const { rows: [held] } = await run('select count(*)::int as n from experience_bookings where session_id in (select id from offer_sessions where offer_id = $1)', [offerId]);
+  if (held.n > 0) return { replaced: false };
+  await run('delete from offer_sessions where offer_id = $1', [offerId]);
+  for (const s of sessions) {
+    await run(
+      `insert into offer_sessions (offer_id, n, on_date, starts_at, ends_at, ends_on, topic, decides_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [offerId, s.n ?? null, s.onDate, s.startsAt ?? null, s.endsAt ?? null, s.endsOn ?? null, s.topic ?? null, s.decidesAt ?? null],
+    );
+  }
+  return { replaced: true };
+}
+
+/** A payment row: what Stripe was asked to do, written before the call and updated after it. */
+export async function insertPayment(p, client) {
+  const { rows } = await on(client)(
+    `insert into hosting_payments (kind, booking_id, offer_id, host_id, household_id, amount_pence, epic_pence, state, stripe_ref, mode, reason)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning *`,
+    [p.kind, p.bookingId ?? null, p.offerId ?? null, p.hostId ?? null, p.householdId ?? null, p.amountPence ?? 0, p.epicPence ?? null, p.state ?? 'pending', p.stripeRef ?? null, p.mode ?? 'test', p.reason ?? null],
+  );
+  return rows[0];
+}
+
+export async function updatePayment(id, { state, stripeRef }, client) {
+  const { rows } = await on(client)(
+    'update hosting_payments set state = coalesce($2, state), stripe_ref = coalesce($3, stripe_ref), updated_at = now() where id = $1 returning *',
+    [id, state ?? null, stripeRef ?? null],
+  );
+  return rows[0] ?? null;
+}
+
+export async function paymentByRef(stripeRef, kind) {
+  const { rows } = await query('select * from hosting_payments where stripe_ref = $1 and kind = $2', [stripeRef, kind]);
+  return rows[0] ?? null;
+}
+
+export async function hostByStripeAccount(accountId) {
+  const { rows } = await query('select * from hosts where stripe_account_id = $1', [accountId]);
+  return rows[0] ?? null;
+}
+
+export async function hostByIdentitySession(sessionId) {
+  const { rows } = await query('select * from hosts where identity_session_id = $1', [sessionId]);
+  return rows[0] ?? null;
+}
+
+/**
+ * Rated events and their average, for the public share. An event is one
+ * occurrence — a one-off's date, a course's run, a weekly session — and it
+ * counts once it has a published guest review.
+ */
+export async function ratedEventsOf(hostId) {
+  const { rows: [r] } = await query(
+    `select count(distinct (r.offer_id, coalesce(b.session_id::text, b.occurrence, '')))::int as rated_events,
+            round(avg(r.stars)::numeric, 2)::float as avg
+       from host_reviews r join experience_bookings b on b.id = r.booking_id
+      where r.host_id = $1 and r.side = 'guest' and r.publish_on <= current_date`,
+    [hostId],
+  );
+  return { ratedEvents: r?.rated_events ?? 0, avg: r?.avg ?? null };
 }

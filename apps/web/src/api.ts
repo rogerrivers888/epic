@@ -46,6 +46,8 @@ function noteSavedState(path: string, method: string, rawBody: BodyInit | null |
 import { flush as flushOutbox, queue as queueWrite, refreshOutbox } from './offline/outbox';
 import { copyHolder, deviceLabel, holderOf, sessionExpired, sessionToken, setCopyHolder, setSessionToken } from './session';
 import { raiseUpgradePrompt } from './upgradePrompt';
+import type { HostLane } from './routes';
+import type { HostSheet, LaneHome, LaneOffer, LanePatch } from './screens/host/v7/model';
 
 export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000').replace(/\/$/, '');
 
@@ -2740,6 +2742,35 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, body);
     return body.media as HostMedia;
   },
+  // --- four ways to host (hosting v7, 2 Oct 2026) ------------------------------
+  laneHome: () => request<LaneHome>('/api/host/lanes'),
+  createLaneOffer: (lane: HostLane, body: LanePatch = {}) => post<{ offer: LaneOffer }>('/api/host/lanes/offers', { lane, ...body }),
+  laneOffer: (id: string) => request<{ offer: LaneOffer }>(`/api/host/lanes/offers/${id}`),
+  saveLaneOffer: (id: string, body: LanePatch) => patch<{ offer: LaneOffer }>(`/api/host/lanes/offers/${id}`, body),
+  deleteLaneOffer: (id: string) => del<void>(`/api/host/lanes/offers/${id}`),
+  /** Say it, or pasted words: the lane's fields read out of them. `step` scopes it to the step the header mic was used on. */
+  laneExtract: (body: { lane: HostLane; offerId?: string | null; step?: string | null; text: string; source?: 'said' | 'pasted' }) =>
+    post<{ offer: LaneOffer; found: string[] }>('/api/host/lanes/extract', body),
+  /** Upload it: a PDF, a photo or a text note, read and dropped — nothing uploaded is kept. Raw bytes, not `request`. */
+  laneRead: async (lane: HostLane, offerId: string | null, blob: Blob): Promise<{ offer: LaneOffer; found: string[] }> => {
+    const token = sessionToken();
+    const res = await fetch(`${API_URL}/api/host/lanes/read${qs({ lane, offerId: offerId ?? undefined })}`, {
+      method: 'POST', credentials: 'include', body: blob,
+      headers: { 'content-type': blob.type || 'text/plain', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new ApiError(res.status, body);
+    return body;
+  },
+  laneProfile: (body: { name?: string; line?: string | null; photoId?: string | null; dateOfBirth?: string; mobile?: string }) => patch<{ host: HostSheet }>('/api/host/lanes/profile', body),
+  laneTax: (reference: string) => post<{ host: HostSheet }>('/api/host/lanes/tax', { reference }),
+  laneChecked: (body: { dbsNumber: string; insuranceMediaId?: string | null; referees: { name: string; email: string }[] }) => post<{ host: HostSheet }>('/api/host/lanes/checked', body),
+  lanePayouts: (offerId: string) => post<{ url: string }>('/api/host/lanes/payouts', { offerId }),
+  laneVerify: (offerId: string) => post<{ url: string | null; verified?: boolean }>('/api/host/lanes/verify', { offerId }),
+  laneSync: (id: string) => post<{ offer: LaneOffer }>(`/api/host/lanes/offers/${id}/sync`, {}),
+  laneVideo: (id: string, body: { videoId?: string | null; madeBy?: 'self' | 'epic'; coverS?: number | null; onProfile?: boolean; photoIds?: string[]; helloId?: string | null }) =>
+    post<{ offer: LaneOffer }>(`/api/host/lanes/offers/${id}/video`, body),
+  lanePublish: (id: string, plan?: 'event' | 'pro') => post<{ offer?: LaneOffer; pay?: { url: string }; ending?: { kind: 'invites' | 'review'; invited?: number; reviewHours?: number; stillToDo?: string[] } }>(`/api/host/lanes/offers/${id}/publish`, plan ? { plan } : {}),
   // --- a place from a photograph (12 Sep 2026) ---------------------------------
   /** The picture and where it was taken. Raw bytes, not `request`: a photograph is neither JSON nor a thing to send later. */
   uploadPlacePhoto: async (blob: Blob, meta: { width: number; height: number; lqip: string | null; lat: number | null; lng: number | null }) => {
@@ -5525,6 +5556,8 @@ export type OpenMatch = {
 /** One of my Epic contacts: everyone this household has invited (lanes A and B, C2f). */
 export type HostContact = { id: string; name: string; mobile: string | null; email: string | null; timesInvited: number; lastInvitedAt: string | null };
 export type OwnOffer = Experience & {
+  /** Hosting v7: the lane a set-up was made in, and the step it was left on. Null for the old shapes. */
+  lane?: 'oneoff' | 'weekly' | 'course' | 'onrequest' | null; draftStep?: string | null;
   /** The old single word, offered as a starting suggestion on next edit. Never written by a migration. */
   categorySuggestion: string | null;
   blockers: string[]; checklist: PitchChecklist; licenceNumber: string | null; licenceExpiry: string | null;

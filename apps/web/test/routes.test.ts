@@ -856,6 +856,40 @@ test('the Host tab, and every page inside it', () => {
   assert.equal(parentOf(parseRoute('/host/start')), '/host');
 });
 
+test('four ways to host: the lanes, a lane, step 1, a draft’s set-up, its checklist and its ending', () => {
+  assert.deepEqual(roundTrip('/host/new'), { name: 'host', page: 'lanes', offerId: null });
+  for (const lane of ['oneoff', 'weekly', 'course', 'onrequest']) {
+    assert.deepEqual(roundTrip(`/host/new/${lane}`), { name: 'host', page: 'lane', offerId: null, param: lane });
+    assert.deepEqual(roundTrip(`/host/new/${lane}/what`), { name: 'host', page: 'compose', offerId: null, param: lane });
+  }
+  assert.equal(parseRoute('/host/new/fortnightly').name, 'unknown');
+  assert.equal(parseRoute('/host/new/course/when').name, 'unknown', 'only step 1 has an address before a draft exists');
+  assert.equal(parseRoute('/host/new/course/what/x').name, 'unknown');
+  assert.deepEqual(roundTrip('/host/offers/o1/setup'), { name: 'host', page: 'setup', offerId: 'o1' });
+  assert.deepEqual(roundTrip('/host/offers/o1/publish'), { name: 'host', page: 'publish', offerId: 'o1' });
+  assert.deepEqual(roundTrip('/host/offers/o1/done'), { name: 'host', page: 'done', offerId: 'o1' });
+  assert.equal(parseRoute('/host/offers/o1/done/x').name, 'unknown');
+  // The step and the layer are query state on the page; the first step is the bare address.
+  assert.equal(paths.hostSetup('o1'), '/host/offers/o1/setup');
+  assert.equal(paths.hostSetup('o1', 'what'), '/host/offers/o1/setup');
+  assert.equal(paths.hostSetup('o1', 'price'), '/host/offers/o1/setup?step=price');
+  assert.equal(paths.hostSetup('o1', 'what', 'draft'), '/host/offers/o1/setup?mode=draft');
+  assert.equal(paths.hostCompose('weekly', 'say'), '/host/new/weekly/what?mode=say');
+  assert.equal(paths.hostPublish('o1', 'payouts'), '/host/offers/o1/publish?sheet=payouts');
+  assert.equal(paths.hostDone('o1'), '/host/offers/o1/done');
+  // Host home 4e has the tab bar; a lane and everything after it is its own screen.
+  assert.equal(isTabHome(parseRoute('/host/new')), true);
+  assert.equal(isImmersive(parseRoute('/host/new')), false);
+  for (const href of ['/host/new/course', '/host/new/course/what', '/host/offers/o1/setup', '/host/offers/o1/publish', '/host/offers/o1/done']) {
+    assert.equal(isImmersive(parseRoute(href)), true, href);
+    assert.equal(tabOf(parseRoute(href)), 'host', href);
+  }
+  assert.equal(parentOf(parseRoute('/host/new/course')), '/host/new');
+  assert.equal(parentOf(parseRoute('/host/new/course/what')), '/host/new/course');
+  assert.equal(parentOf(parseRoute('/host/offers/o1/publish')), '/host/offers/o1/setup?step=who');
+  assert.equal(parentOf(parseRoute('/host/offers/o1/done')), '/host');
+});
+
 test('a host and an experience have public addresses; a booking is ours', () => {
   assert.deepEqual(roundTrip('/hosts/h1'), { name: 'hostProfile', hostId: 'h1', layer: null });
   assert.deepEqual(roundTrip('/hosts/h1/trust'), { name: 'hostProfile', hostId: 'h1', layer: 'trust' });

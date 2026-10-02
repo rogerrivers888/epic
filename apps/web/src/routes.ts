@@ -143,7 +143,14 @@ export type Tab = 'inspire' | 'plan' | 'places' | 'trips' | 'host' | 'settings' 
  * `examples`, `example` and `who` are the learn layer, which asks for nothing.
  * `param` carries the shape or the example's key.
  */
-export type HostPage = 'home' | 'shape' | 'examples' | 'example' | 'who' | 'profile' | 'start' | 'new' | 'offer' | 'edit' | 'video' | 'questions';
+export type HostPage = 'home' | 'shape' | 'examples' | 'example' | 'who' | 'profile' | 'start' | 'new' | 'offer' | 'edit' | 'video' | 'questions'
+  // Four ways to host (hosting v7, 2 Oct 2026): the four lanes (4e), one lane's screen, step 1 before a
+  // draft exists, a draft's set-up (?step=), its publish checklist (?sheet=) and the ending.
+  | 'lanes' | 'lane' | 'compose' | 'setup' | 'publish' | 'done';
+
+/** The four lanes, by how often the thing runs (hosting v7). */
+export const HOST_LANES = ['oneoff', 'weekly', 'course', 'onrequest'] as const;
+export type HostLane = typeof HOST_LANES[number];
 
 /**
  * The chat module's layers (Chat screens, 13 Sep 2026), the same four wherever
@@ -594,6 +601,14 @@ export function parseRoute(path: string): Route {
       if (a === 'profile') return b ? { name: 'unknown', path } : { name: 'host', page: 'profile', offerId: null };
       if (a === 'start') return b ? { name: 'unknown', path } : { name: 'host', page: 'start', offerId: null };
       if (a === 'video') return b ? { name: 'unknown', path } : { name: 'host', page: 'video', offerId: null };
+      // Four ways to host: /host/new (the four), /host/new/<lane> (its screen), /host/new/<lane>/what (step 1, nothing saved yet).
+      if (a === 'new') {
+        if (!b) return { name: 'host', page: 'lanes', offerId: null };
+        const lane = oneOf(HOST_LANES, b);
+        if (!lane || (c && c !== 'what') || segments[4]) return { name: 'unknown', path };
+        return { name: 'host', page: c ? 'compose' : 'lane', offerId: null, param: lane };
+      }
+      if (a === 'offers' && b && b !== 'new' && (c === 'setup' || c === 'publish' || c === 'done') && !segments[4]) return { name: 'host', page: c, offerId: b };
       if (a === 'offers' && b === 'new') return c ? { name: 'unknown', path } : { name: 'host', page: 'new', offerId: null };
       if (a === 'offers' && b && !c) return { name: 'host', page: 'offer', offerId: b };
       if (a === 'offers' && b && c === 'edit') return { name: 'host', page: 'edit', offerId: b };
@@ -777,6 +792,10 @@ export function hrefOf(route: Route): string {
                 : route.page === 'profile' ? '/host/profile'
                   : route.page === 'start' ? '/host/start'
                     : route.page === 'video' ? '/host/video'
+                      : route.page === 'lanes' ? '/host/new'
+                      : route.page === 'lane' ? buildHref(['host', 'new', route.param])
+                      : route.page === 'compose' ? buildHref(['host', 'new', route.param, 'what'])
+                      : route.page === 'setup' || route.page === 'publish' || route.page === 'done' ? buildHref(['host', 'offers', route.offerId, route.page])
                       : route.page === 'new' ? '/host/offers/new'
                         : buildHref(['host', 'offers', route.offerId, route.page === 'edit' ? 'edit' : null]);
     case 'invited': return buildHref(['invited', route.token]);
@@ -898,6 +917,13 @@ export const paths = {
   openMatchChatTopic: (id: string, topicId: string) => buildHref(['open', 'matches', id, 'chat', topicId]),
   openMatchChatAsk: (id: string, tag?: string | null) => buildHref(['open', 'matches', id, 'chat', 'ask'], { tag }),
   openMatchChatBell: (id: string) => buildHref(['open', 'matches', id, 'chat', 'bell']),
+  /** Four ways to host: the four lanes, one lane, step 1 of a new one, a draft's set-up, its checklist, its ending. */
+  hostLanes: () => '/host/new',
+  hostLane: (lane: HostLane) => buildHref(['host', 'new', lane]),
+  hostCompose: (lane: HostLane, mode?: 'say' | 'upload' | null) => buildHref(['host', 'new', lane, 'what'], { mode: mode ?? null }),
+  hostSetup: (id: string, step?: string | null, mode?: string | null) => buildHref(['host', 'offers', id, 'setup'], { step: step && step !== 'what' ? step : null, mode: mode ?? null }),
+  hostPublish: (id: string, sheet?: string | null) => buildHref(['host', 'offers', id, 'publish'], { sheet: sheet ?? null }),
+  hostDone: (id: string) => buildHref(['host', 'offers', id, 'done']),
   hostNewOffer: (shape?: string | null) => (shape ? `/host/offers/new?shape=${shape}` : '/host/offers/new'),
   hostOffer: (id: string) => buildHref(['host', 'offers', id]),
   /** A step is named, not numbered: the sequence differs by shape, visibility and money. */
@@ -1112,7 +1138,7 @@ export function isImmersive(route: Route, query?: URLSearchParams): boolean {
   // dashboard and a booking are one thing each. The tab itself keeps the bar.
   // The learn layer keeps the bar (it is still the tab); the set-up, the
   // profile and the recorder take the phone whole.
-  if (route.name === 'host') return !['home', 'shape', 'examples', 'example', 'who'].includes(route.page);
+  if (route.name === 'host') return !['home', 'shape', 'examples', 'example', 'who', 'lanes'].includes(route.page);
   if (route.name === 'open') return true;
   if (route.name === 'booking') return true;
   // The booking sheet is a form under a keyboard: it takes the phone whole. So is asking the host something.
@@ -1179,7 +1205,7 @@ export function isTabHome(route: Route): boolean {
   if (route.name === 'trips') return !route.tripId && !route.creating && !route.searching;
   // A person is a record, not the list: Settings is left pointing at itself.
   if (route.name === 'household') return false;
-  if (route.name === 'host') return ['home', 'shape', 'examples', 'example', 'who'].includes(route.page);
+  if (route.name === 'host') return ['home', 'shape', 'examples', 'example', 'who', 'lanes'].includes(route.page);
   if (route.name === 'booking' || route.name === 'people' || route.name === 'collections') return false;
   return true;
 }
@@ -1211,6 +1237,10 @@ export function parentOf(route: Route): string {
     case 'settings': return route.section === 'preferences' ? '/inspire' : '/settings';
     case 'host':
       if (route.page === 'edit' && route.offerId) return paths.hostOffer(route.offerId);
+      // Four ways to host: a lane goes back to the four; a draft's set-up, checklist and ending to the Host tab.
+      if (route.page === 'lane') return paths.hostLanes();
+      if (route.page === 'compose' && route.param) return paths.hostLane(route.param as HostLane);
+      if (route.page === 'publish' && route.offerId) return paths.hostSetup(route.offerId, 'who');
       if (route.page === 'offer' && route.chat && route.offerId) return route.chat.page === 'list' ? paths.hostOffer(route.offerId) : paths.hostOfferChat(route.offerId);
       if (route.page === 'questions') return '/host';
       if (route.page === 'example') return paths.hostExamples();
@@ -1274,7 +1304,7 @@ export function titleOf(route: Route): string {
     case 'opening': return epic('Welcome to Epic');
     case 'setup': return epic('Set up your family');
     case 'settings': return epic(route.section === 'notifications' ? 'Notifications' : route.section === 'devices' ? 'Signed-in devices' : route.section === 'providers' ? 'Providers' : 'Settings');
-    case 'host': return epic(route.page === 'questions' ? 'Questions' : route.chat ? (route.chat.page === 'topic' ? 'A question' : route.chat.page === 'ask' ? 'Say something' : route.chat.page === 'bell' ? 'What you get told about' : 'Chat') : route.page === 'start' || route.page === 'profile' ? 'Host on Epic' : route.page === 'new' || route.page === 'edit' ? 'Your offer' : route.page === 'video' ? 'Your video' : route.page === 'offer' ? 'Your experience' : route.page === 'shape' ? 'How it works' : route.page === 'examples' || route.page === 'example' ? 'What people host' : route.page === 'who' ? 'Who can come' : 'Host');
+    case 'host': return epic(route.page === 'questions' ? 'Questions' : route.chat ? (route.chat.page === 'topic' ? 'A question' : route.chat.page === 'ask' ? 'Say something' : route.chat.page === 'bell' ? 'What you get told about' : 'Chat') : route.page === 'start' || route.page === 'profile' ? 'Host on Epic' : route.page === 'new' || route.page === 'edit' || route.page === 'setup' || route.page === 'compose' ? 'Your offer' : route.page === 'lanes' || route.page === 'lane' ? 'Host it' : route.page === 'publish' ? 'Before it goes' : route.page === 'done' ? 'Sent' : route.page === 'video' ? 'Your video' : route.page === 'offer' ? 'Your experience' : route.page === 'shape' ? 'How it works' : route.page === 'examples' || route.page === 'example' ? 'What people host' : route.page === 'who' ? 'Who can come' : 'Host');
     case 'invited': return epic('You are invited');
     case 'invitedLink': return epic('You are invited');
     case 'open': return epic(route.matchId ? 'An introduction' : route.page === 'who' ? 'Who you would rather meet' : 'What you are up for');

@@ -267,6 +267,8 @@ const PUBLIC = [
   (req) => req.method === 'GET' && /^\/api\/auth\/link\/[^/]+$/.test(req.path),
   // Postmark's delivery, open and bounce events: admitted by their own token (routes/postmark.js), never by a session.
   (req) => req.method === 'POST' && req.path === '/api/postmark/events',
+  // Stripe's events (routes/hostLanes.js): admitted by their signature, never by a session.
+  (req) => req.method === 'POST' && req.path === '/api/stripe/webhook',
   // "Register your interest" on epic.day (routes/interest.js): the people it is
   // for cannot sign in yet. Validated, rate-limited per caller and honeypotted in
   // its own handler; it reads and writes nothing of any household's.

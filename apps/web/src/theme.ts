@@ -92,6 +92,30 @@ export const PLACEHOLDER = '#6E6967';
 export const PLACEHOLDER_ON_INK = '#ADA7A4';
 
 /**
+ * Four ways to host (hosting v7, 2 Oct 2026). Each lane is a block colour —
+ * One-off ink, Weekly deep green, Course lime tint, On request warm grey — and
+ * these are the tones that sit on them: the second line of text, the progress
+ * bars not yet reached, and the Preview chip on a dark band. The record control
+ * is the one red on these screens (README: "Record red"), and the camera and
+ * playback grounds are the video's own.
+ */
+export const LANE_SUB_ON_INK = '#DCD8D5';
+export const LANE_SUB_ON_GREEN = '#DFE9CF';
+export const LANE_BAR_ON_DARK = 'rgba(255,253,249,0.28)';
+export const LANE_BAR_ON_LIGHT = 'rgba(32,30,29,0.16)';
+export const LANE_CHIP_ON_DARK = 'rgba(255,253,249,0.14)';
+export const RECORD_RED = '#EE343B';   // oklch(0.62 0.22 25)
+export const VIDEO_TOP = '#3A3735';
+export const VIDEO_BOTTOM = '#24221F';
+export const VIDEO_SCRIM = 'rgba(32,30,29,0.55)';
+export const ON_VIDEO_SOFT = 'rgba(255,253,249,0.16)';
+export const ON_VIDEO_FAINT = 'rgba(255,253,249,0.3)';
+export const SHEET_SCRIM = 'rgba(32,30,29,0.5)';
+export const EMPTY_BLOCK = '#E6E2DC'; // Preview's grey block for a part not filled in yet
+export const DISABLED_GREY = '#C3BEBA'; // a calendar day nobody can book
+export const TICK_EDGE = '#B5B0AE';   // an unticked box's edge
+
+/**
  * Dark, from the v2 handoff's own table. Not a dimming of the light palette: a
  * deeper ground, a warmer off-white for type, and — the two that matter — a
  * lime tint that is a dark olive rather than a pale wash, and a *lifted* green

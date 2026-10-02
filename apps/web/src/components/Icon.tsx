@@ -13,6 +13,7 @@ import {
   Share2, CircleAlert, UserRound, Award, Presentation, HandHeart,
   Bell, BellOff, Link, Reply, Flag, SmilePlus, Smile, Globe, CircleHelp,
   Tag, ArrowDownWideNarrow, ArrowUp, ArrowDown,
+  RotateCcw, FileText, StickyNote, ClipboardPaste,
 } from 'lucide-react-native';
 import { colors, spacing, type } from '../theme';
 
@@ -126,6 +127,13 @@ const ICONS = {
   market: Store, shopping: ShoppingBag, bookshop: BookOpen, castle: Castle, history: Castle, cinemaSnack: Popcorn,
   // The ninth category (the axes brief, 25 Sep 2026): you come away knowing something.
   learn: GraduationCap,
+  // Four ways to host (hosting v7): open a lane block, play a take, retake it, and Upload it's sources.
+  expandOut: Maximize2,
+  play: Play,
+  retake: RotateCcw,
+  file: FileText,
+  note: StickyNote,
+  paste: ClipboardPaste,
 } as const;
 
 export type IconName = keyof typeof ICONS;

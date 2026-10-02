@@ -106,7 +106,7 @@ function Running({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function KindCard({ k, strip, delay }: { k: HostKindWords; strip: HostLandingStrings['strip']; delay: number }) {
+export function KindCard({ k, strip, delay }: { k: HostKindWords; strip: HostLandingStrings['strip']; delay: number }) {
   const node = useRef<View>(null);
   const { t, looped, replay } = useStoryboard(node, { loop: LOOP, end: END, loops: LOOPS, delay });
   const s = stripAt(k.key, t, looped, strip);

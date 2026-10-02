@@ -25,6 +25,7 @@ import conceptRoutes from './routes/concepts.js';
 import prototypeRoutes from './routes/prototypes.js';
 import groupRoutes, { startReminderLoop } from './routes/groups.js';
 import hostingRoutes, { adminRouter as hostingAdminRoutes, publicRouter as hostingPublicRoutes, startHostingLoop } from './routes/hosting.js';
+import hostLanesRoutes, { webhookRouter as stripeWebhookRoutes } from './routes/hostLanes.js';
 import accountRoutes from './routes/accounts.js';
 import adminRoutes from './routes/admin.js';
 import * as approvalsRepo from './repositories/approvals.js';
@@ -169,6 +170,9 @@ app.use((req, res, next) => {
 
 // JSON API only — no templates, no static assets, no server-rendered HTML.
 // The web app is a separate Expo workspace that talks to this over HTTP.
+// Stripe's webhook signs the raw body, so it is read before the JSON parser
+// touches it (routes/hostLanes.js; public in auth.js, admitted by its signature).
+app.use('/api', stripeWebhookRoutes);
 app.use(express.json({ limit: '1mb' })); // member photos travel as data URLs
 
 // --- the door ---------------------------------------------------------------
@@ -519,6 +523,8 @@ app.use('/api', skillsPublicRoutes);
 app.use('/api', hostingPublicRoutes);
 // The FAQ on a listing is public for the same reason the listing is (Chat screens, C7).
 app.use('/api', chatPublicRoutes);
+// Four ways to host (hosting v7): the lane set-ups, ahead of the old offer routes.
+app.use('/api', hostLanesRoutes);
 app.use('/api', hostingRoutes);
 // What a host types into the expertise field, answered from Epic's own tables
 // and never from anybody else's API (Host Skills §5).

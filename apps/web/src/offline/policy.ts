@@ -165,6 +165,11 @@ export function storable(fullPath: string, body: any): any | null {
   if (p === '/api/host' || p === '/api/bookings' || /^\/api\/bookings\/[^/]+$/.test(p)) return body;
   if (/^\/api\/experiences\/[^/]+$/.test(p) && !/\/(near|passions)$/.test(p)) return body;
   if (/^\/api\/hosts\/[^/]+$/.test(p)) return body;
+  // Four ways to host (hosting v7, 2 Oct 2026): the Host home's config and a
+  // draft's set-up. Everything in them is the host's own words and choices,
+  // Epic's own prices and terms, and gov.uk's bank holidays (open data) — and a
+  // draft read back offline is how "Save and finish later" survives no signal.
+  if (p === '/api/host/lanes' || /^\/api\/host\/lanes\/offers\/[^/]+$/.test(p)) return body;
 
   /**
    * The host-skills vocabulary (13 Sep 2026).
