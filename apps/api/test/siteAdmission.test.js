@@ -145,3 +145,12 @@ test('a heading or a menu above the claim is its own sentence', () => {
   // A qualifier in the claim's own block still bars it.
   assert.equal(free('<h2>Plan your visit</h2><p>Members receive free admission.</p>'), false);
 });
+
+test('the block after a claim can still qualify it', () => {
+  // A block boundary ends the lead, never the tail: a following cell or nested block
+  // that restricts the claim is read with it (Codex).
+  assert.equal(free('<table><tr><td>Free entry</td><td>Members only</td></tr></table>'), false);
+  assert.equal(free('<div>Free entry:<div>for members only</div></div>'), false);
+  assert.equal(free('<p>Free entry</p><p>Open daily</p>'), true, 'a harmless next block is fine');
+  assert.equal(free('<p>Admission is free.</p><p>Members can park nearby.</p>'), true, 'a full stop still ends it');
+});
