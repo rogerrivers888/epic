@@ -17,7 +17,7 @@ import { testDatabase } from './helpers/db.js';
 // imports `db.js` loads — `reviewSpotting.js` imports it, so it comes in here,
 // dynamically, after the switch (the same reason questions.test.js does).
 const { query, pool } = await testDatabase();
-const { looksLikeFeature, spotFeatures, spotFromDetail, reviewQueue } = await import('../src/sources/reviewSpotting.js');
+const { looksLikeFeature, spotFeatures, spotFromDetail, reviewQueue, reviewQueueCounts } = await import('../src/sources/reviewSpotting.js');
 const sets = await import('../src/repositories/questionSets.js');
 
 test('concrete features pass the filter; opinions, adjectives and service words do not', () => {
@@ -416,6 +416,8 @@ test('approving a known feature reuses the fact even when its key is noncanonica
   const ref = 'google:ChIJ_c30_rename';
   await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
   await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 rename parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query("insert into question_sets (key, name) values ('c30-rename-set', 'C30 rename set') on conflict do nothing");
+  await query("insert into question_set_subcategories (subcategory_key, set_key) values ($1, 'c30-rename-set') on conflict do nothing", [sub]);
   await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
   await query('delete from harvest_candidates where subcategory = $1', [sub]);
   await query('delete from review_sightings where venue_ref = $1', [ref]);
@@ -629,6 +631,47 @@ test('a review-queue ignore waits for a harvest already writing, so it cannot be
     harvest.release();
   }
   assert.equal((await query("select count(*)::int n from feature_tombstones where norm = 'music room'")).rows[0].n, 1, 'the tombstone stands');
+});
+
+test('approval is refused while none of the feature’s drawers uses a question set, and the item stays', async () => {
+  // Codex, 2 Oct 2026: approving with nothing to ask it in would clear the queue
+  // item and report it asked while nothing verifies it. Refused, like promote().
+  const sub = 'c30-noset-parks';
+  const ref = 'google:ChIJ_c30_noset';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 noset parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query('delete from question_set_subcategories where subcategory_key = $1', [sub]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
+  await query("delete from attribute_aliases where norm = 'game room'").catch(() => {});
+  await query("delete from place_attributes where key = 'game-room'").catch(() => {});
+
+  await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A games room.' } });
+  await assert.rejects(
+    () => sets.approveFeature('game room', { actor: 'tester' }),
+    (err) => err.status === 400 && /uses a question set/.test(err.message),
+  );
+  assert.equal((await query("select count(*)::int n from place_attributes where key = 'game-room'")).rows[0].n, 0, 'no fact was left behind');
+  assert.ok((await reviewQueue({ subcategory: sub })).some((f) => f.norm === 'game room'), 'still in the queue, to approve once a set is attached');
+});
+
+test('the queue counts are over the whole queue, not the page', async () => {
+  // Codex, 2 Oct 2026: newCount/knownCount were read off the capped page.
+  const sub = 'c30-count-all';
+  const refs = ['google:ChIJ_c30_ca_1', 'google:ChIJ_c30_ca_2', 'google:ChIJ_c30_ca_3'];
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 count all', 'c30-test-cat') on conflict do nothing", [sub]);
+  for (const r of refs) await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [r, sub]);
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await query('delete from review_sightings where venue_ref = any($1)', [refs]);
+  const texts = ['A splash zone.', 'A sensory room.', 'A crazy golf.'];
+  for (let i = 0; i < refs.length; i += 1) await spotFromDetail({ venueRef: refs[i], detail: { reviewSummary: texts[i] } });
+
+  const page = await reviewQueue({ subcategory: sub, limit: 1 });
+  const counts = await reviewQueueCounts({ subcategory: sub });
+  assert.equal(page.length, 1, 'the page is capped');
+  assert.equal(counts.newCount + counts.knownCount, 3, 'the counts cover all three waiting features');
 });
 
 test.after(async () => { await pool.end(); });

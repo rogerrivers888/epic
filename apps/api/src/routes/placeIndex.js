@@ -26,7 +26,7 @@ import { query, withTransaction } from '../db.js';
 import { IN_CENSUS_MARKET } from '../domain/markets.js';
 import * as index from '../repositories/placeIndex.js';
 import { decodeEntities } from '../repositories/placeIndex.js';
-import { reviewQueue } from '../sources/reviewSpotting.js';
+import { reviewQueue, reviewQueueCounts } from '../sources/reviewSpotting.js';
 import { approveFeature, ignoreFeature } from '../repositories/questionSets.js';
 import { phoneOf } from '../domain/contact.js';
 import { censusInRing, censusByOutcodeSum, placingPoints, nearestSector, sectorsOfBox, widthOf, FINE_M } from '../repositories/censusRing.js';
@@ -5011,8 +5011,10 @@ router.get('/review-queue', requires('view_questions'), async (req, res, next) =
   try {
     const subcategory = req.query.sub ? String(req.query.sub) : null;
     const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
-    const features = await reviewQueue({ limit, subcategory });
-    res.json({ features, newCount: features.filter((f) => !f.known).length, knownCount: features.filter((f) => f.known).length });
+    // The counts are over the whole queue; `features` is the first `limit` of it
+    // (Codex, 2 Oct 2026: counting the page understated a long queue).
+    const [features, counts] = await Promise.all([reviewQueue({ limit, subcategory }), reviewQueueCounts({ subcategory })]);
+    res.json({ features, ...counts });
   } catch (err) { next(err); }
 });
 

@@ -867,6 +867,14 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
           if (q) asked += 1;
         } catch { /* a global was added in a race — the fact stands */ }
       }
+      // Nothing to ask it in: none of the drawers it was seen in uses a question set,
+      // and it is not asked everywhere. Approving now would clear the queue item and
+      // report it asked while nothing verifies it — so refuse, as promote() does, and
+      // the transaction takes back the fact and alias made above. The item stays in
+      // the queue until a set is attached (Codex, 2 Oct 2026).
+      if (!seenSets.size) {
+        throw bad(`None of the drawers "${norm}" was seen in uses a question set yet. Attach one, then approve it.`);
+      }
     }
     await client.query(
       "update harvest_candidates set status = 'promoted', decided_by = $2, decided_at = now(), examples = '{}', evidence = null, evidence_ref = null where norm = $1 and status in ('new', 'unresolved') and sources ? 'google'",

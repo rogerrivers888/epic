@@ -298,11 +298,7 @@ export async function reviewQueue({ limit = 200, subcategory = null } = {}) {
   // its new drawer (Codex, 2 Oct 2026). A sighting is dropped only from a drawer that
   // explicitly ignored the word per-subcategory (ignoreCandidate) — that drawer said
   // "never ask here", so its places must not count or be asked.
-  const undecided = "exists (select 1 from harvest_candidates c where c.norm = s.norm and c.sources ? 'google' and c.status in ('new', 'unresolved'))";
-  const notIgnoredHere = "not exists (select 1 from harvest_candidates ci where ci.norm = s.norm and ci.subcategory = p.subcategory and ci.sources ? 'google' and ci.status = 'ignored')";
-  const where = subcategory
-    ? `where p.subcategory = $2 and ${undecided} and ${notIgnoredHere}`
-    : `where ${undecided} and ${notIgnoredHere}`;
+  const where = queueWhere(subcategory ? '$2' : null);
   const params = subcategory ? [limit, subcategory] : [limit];
   const { rows } = await query(
     `select s.norm,
@@ -328,4 +324,34 @@ export async function reviewQueue({ limit = 200, subcategory = null } = {}) {
     known: known.has(r.norm),
     lastSeen: r.last_seen,
   }));
+}
+
+/**
+ * Which sightings belong in the queue — one definition, shared by the page and
+ * the counts so the two can never disagree. `subParam` is the placeholder for a
+ * subcategory filter, or null for the whole queue.
+ */
+function queueWhere(subParam) {
+  const undecided = "exists (select 1 from harvest_candidates c where c.norm = s.norm and c.sources ? 'google' and c.status in ('new', 'unresolved'))";
+  const notIgnoredHere = "not exists (select 1 from harvest_candidates ci where ci.norm = s.norm and ci.subcategory = p.subcategory and ci.sources ? 'google' and ci.status = 'ignored')";
+  return subParam
+    ? `where p.subcategory = ${subParam} and ${undecided} and ${notIgnoredHere}`
+    : `where ${undecided} and ${notIgnoredHere}`;
+}
+
+/**
+ * How many features are waiting — new to approve and already facts — over the
+ * WHOLE queue, not the page `reviewQueue` returns. A count read off a capped page
+ * understates the queue once it passes the limit (Codex, 2 Oct 2026).
+ */
+export async function reviewQueueCounts({ subcategory = null } = {}) {
+  const known = await knownFeatureKeys();
+  const { rows } = await query(
+    `select distinct s.norm
+       from review_sightings s
+       join place_index p on p.venue_ref = s.venue_ref
+       ${queueWhere(subcategory ? '$1' : null)}`,
+    subcategory ? [subcategory] : []);
+  const knownCount = rows.filter((r) => known.has(r.norm)).length;
+  return { newCount: rows.length - knownCount, knownCount };
 }
