@@ -53,7 +53,8 @@ const tzOf = (o) => o?.time_zone ?? 'Europe/London';
 const startOf = (s, o) => localInstant(ymd(s.on_date), hm(s.starts_at) ?? '00:00', tzOf(o));
 const endOf = (s, o) => localInstant(ymd(s.ends_on ?? s.on_date), hm(s.ends_at) ?? hm(s.starts_at) ?? '23:59', tzOf(o));
 const LIVE = `b.state in ('pending', 'confirmed', 'attended')`;
-const guestLink = (id) => `/trips/booked/${id}`;
+// The app's booking page (routes.ts `paths.booking`) (Codex, 2 Oct 2026).
+const guestLink = (id) => `/bookings/${id}`;
 const hostLink = (offerId) => `/host/events/${offerId}`;
 
 async function me() {
@@ -113,7 +114,8 @@ async function feeOn(o, host, valuePence, viaHostLink, s, client = null) {
        from host_reviews r join experience_bookings b on b.id = r.booking_id
       where r.host_id = $1 and r.side = 'guest' and r.publish_on <= current_date and not coalesce(r.hidden, false)`, [host.id],
   );
-  const { rows: [n] } = await q('select count(*)::int as n from experience_bookings where host_id = $1 and intro_ordinal is not null', [host.id]);
+  // The intro's places are counted as they are promised, not only once confirmed: a booking still paying already holds one (Codex, 2 Oct 2026).
+  const { rows: [n] } = await q(`select count(*)::int as n from experience_bookings where host_id = $1 and (intro_ordinal is not null or (fee_reason = 'intro' and state <> 'cancelled'))`, [host.id]);
   return feeFor(
     { visibility: o.visibility === 'public' ? 'public' : 'private', valuePence, viaHostLink, throughEpic: paidThroughEpic(o) },
     { rating: { ratedEvents: r?.rated ?? 0, avg: r?.avg ?? null }, hostStartedAt: host.created_at, bookingsSoFar: n?.n ?? 0, feeOverridePct: host.fee_override_pct },
@@ -152,7 +154,9 @@ publicRouter.get('/experiences/:id/booking/options', async (req, res, next) => {
     const now = new Date();
     const s = await settingsRepo.current();
     const next = ahead(sessions, o, now);
-    const left = next.length ? Math.min(...next.map((x) => (placesLeft(x, o) ?? Infinity) - x.reserved)) : null;
+    // Weekly sessions are booked one by one: it is full only when every session is (Codex, 2 Oct 2026).
+    const lefts = next.map((x) => (placesLeft(x, o) ?? Infinity) - x.reserved);
+    const left = next.length ? (o.lane === 'weekly' ? Math.max(...lefts) : Math.min(...lefts)) : null;
     const cfg = hostingConfig();
     const slots = [];
     if (o.lane === 'onrequest') {
@@ -256,6 +260,8 @@ async function book({ offerId, body, household, account, invite = null }) {
     const out = await withTransaction(async (c) => {
       await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-publish:${offerId}`]);
       const e = await eventWithSessions(offerId, c);
+      // One booking at a time per host too, so two of their events can't both take the last intro place (Codex, 2 Oct 2026).
+      if (e) await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-intro:${e.offer.host_id}`]);
       if (!e || e.offer.state !== 'live') throw refuse(404, 'not_open', 'That event isn’t open for booking.');
       const { offer: o, sessions, host } = e;
       if (host.paused || host.stopped_at) throw refuse(409, 'host_paused', 'This host isn’t taking new bookings just now.');
@@ -884,6 +890,8 @@ async function myRequest(id, { retryCapture = false } = {}) {
   // Accepted with the card still only held: the capture failed last time, so it may be tried again (Codex, 2 Oct 2026).
   const retry = retryCapture && b.request_state === 'accepted' && b.payment_state === 'held';
   if (b.request_state !== 'asked' && !retry) throw refuse(409, 'answered', 'This request has been answered.');
+  // A request whose payment never started, or that the guest withdrew, can't be accepted (Codex, 2 Oct 2026).
+  if (b.state === 'cancelled') throw refuse(409, 'withdrawn', 'This request was withdrawn.');
   return { host, b, o: await repo.offerById(b.offer_id), retry };
 }
 
