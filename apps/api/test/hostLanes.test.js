@@ -245,6 +245,10 @@ test('Upload it reads a text note, and refuses what it cannot read', async () =>
     assert.equal(r.body.offer.draftSource, 'uploaded');
     r = await srv.raw('/api/host/lanes/read?lane=onrequest', 'x', { 'content-type': 'application/zip' });
     assert.equal(r.status, 415);
+    const before = calls.length;
+    r = await srv.raw('/api/host/lanes/read?lane=onrequest', 'x', { 'content-type': 'image/heic' });
+    assert.equal(r.body.error, 'heic', 'an iPhone photo the reader cannot look at is turned away');
+    assert.equal(calls.length, before, 'before anything is paid for');
   } finally { await srv.close(); }
 });
 

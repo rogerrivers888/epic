@@ -58,3 +58,6 @@ export async function bankHolidays({ householdId = null, now = Date.now(), fetch
 }
 
 export const bankHolidaySource = () => cache.source;
+
+/** What is known now, without asking: the last list fetched, else the bundled one. For the pure date rules. */
+export const knownBankHolidays = () => cache.list ?? BUNDLED;

@@ -39,7 +39,8 @@ export function WhenStep({ offer, update, config }: StepProps) {
   const moreDay = () => {
     if (!offer.startsOn) return;
     const n = days.length;
-    update({ endsOn: n < config.oneoffMaxDays ? plusDays(offer.startsOn, n) : plusDays(offer.startsOn, 1) });
+    // Add a day, or — at the most days — take exactly the last one off (Codex, 2 Oct 2026).
+    update({ endsOn: n < config.oneoffMaxDays ? plusDays(offer.startsOn, n) : plusDays(offer.startsOn, n - 2) });
   };
   return (
     <>

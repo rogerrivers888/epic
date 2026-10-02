@@ -541,7 +541,9 @@ router.post('/host/lanes/extract', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-const READ_TYPES = /^(application\/pdf|image\/(jpeg|png|webp|heic|heif|gif)|text\/plain)$/;
+// What the model can look at: JPEG, PNG, WebP, GIF. An iPhone's HEIC is turned away
+// before any call is paid for, with a plain way round it (Codex, 2 Oct 2026).
+const READ_TYPES = /^(application\/pdf|image\/(jpeg|png|webp|gif)|text\/plain)$/;
 /**
  * POST /host/lanes/read?lane=&offerId=&name= — Upload it: the file as the
  * body. A PDF's text is read here; a photo is read by the model; a text file or
@@ -556,6 +558,7 @@ router.post('/host/lanes/read', express.raw({ type: () => true, limit: '12mb' })
     const mime = String(req.headers['content-type'] || '').split(';')[0].trim();
     const bytes = Buffer.isBuffer(req.body) ? req.body : null;
     if (!bytes?.length) throw refuse(400, 'empty', 'That file is empty.');
+    if (/^image\/hei[cf]$/.test(mime)) throw refuse(415, 'heic', 'Epic can’t read that photo format. Take a screenshot of it and upload that instead.');
     if (!READ_TYPES.test(mime)) throw refuse(415, 'unreadable', 'Epic can read a PDF, a photo or a text note.');
     let input;
     if (mime === 'application/pdf') {

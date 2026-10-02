@@ -278,6 +278,17 @@ function chooseFile(accept: string, capture = false): Promise<File | null> {
   });
 }
 
+async function asJpeg(file: File): Promise<Blob> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    return (await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/jpeg', 0.85))) ?? file;
+  } catch { return file; }
+}
+
 const FOUND_LABEL: Record<string, string> = {
   whatLabel: 'What it is', title: 'Title', line: 'Under the title', startsOn: 'When', firstDate: 'When', weekdays: 'Which days', startsAt: 'Time', place: 'Where', venue: 'Where',
   runningOrder: 'Running order', whyYou: 'Why you', freeHours: 'When you’re free', outcome: 'By the end', topics: 'Session plan', sessions: 'How many sessions',
@@ -312,7 +323,9 @@ export function UploadIt({ offer, lane, onBuilt, setBar }: StepProps & { onBuilt
     if (s === 'Paste' || s === 'Notes') return;
     const f = await chooseFile(s === 'Photos' ? 'image/*' : 'application/pdf,text/plain,image/*', false);
     if (!f) return;
-    await read(f, f.name, f.type === 'application/pdf' ? 'PDF' : f.type.startsWith('image/') ? 'Photo' : 'Note');
+    // A photo goes up as a JPEG: an iPhone's HEIC is something the reader cannot look at, and the browser can redraw it.
+    const blob = f.type.startsWith('image/') || /\.hei[cf]$/i.test(f.name) ? await asJpeg(f) : f;
+    await read(blob, f.name, f.type === 'application/pdf' ? 'PDF' : f.type.startsWith('image/') ? 'Photo' : 'Note');
   };
   const readText = async () => {
     if (!text.trim()) return;

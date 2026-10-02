@@ -12,7 +12,8 @@
  * regulated cities where guiding is a licensed profession.
  */
 
-import { laneBlockers } from './lanes.js';
+import { laneBlockers, courseRun, weeklyRun, holidaySet, slotsFor as laneSlotsFor, hostingConfig } from './lanes.js';
+import { knownBankHolidays } from '../sources/bankHolidays.js';
 
 /**
  * The settled kinds (T-REC, 13 Sep 2026): "I have a skill" · "Meetups and mini
@@ -90,6 +91,10 @@ const plusDays = (iso, n) => { const d = dateAt(iso); d.setUTCDate(d.getUTCDate(
  * up at the end so the run is still the number of sessions promised.
  */
 export function seriesDates(offer) {
+  // A Weekly or Course made in the four lanes (hosting v7) runs by the lane's
+  // own rules: several weekdays, bank holidays left out, the run pushed back.
+  if (offer.lane === 'weekly') return weeklyRun(offer, holidaySet(knownBankHolidays()), { weeks: hostingConfig().weeklyHorizonWeeks }).dates;
+  if (offer.lane === 'course') return courseRun(offer, holidaySet(knownBankHolidays()), hostingConfig()).dates;
   if (!offer.first_date || (!offer.sessions && !offer.end_date)) return [];
   const skipped = new Set((offer.skipped_dates ?? []).map(ymd));
   // Monthly keeps the first session's day of the month, clamped to the last
@@ -126,6 +131,23 @@ export function seriesDates(offer) {
  */
 const PART_TIMES = { morning: ['09:00', '10:00', '11:00'], afternoon: ['13:00', '14:00', '15:00', '16:00'], evening: ['18:00', '19:00', '20:00'] };
 export function anytimeSlots(offer, { from = new Date(), days = 14, taken = new Set() } = {}) {
+  // On request (hosting v7): hourly starts inside the host's hour ranges, room left
+  // for the shortest session, nothing inside the notice in hours.
+  if (offer.lane === 'onrequest') {
+    const cfg = hostingConfig();
+    const len = Math.min(...((offer.session_lengths ?? []).length ? offer.session_lengths : [60]).map(Number));
+    const noticeMs = (Number(offer.notice_hours) || cfg.onRequest.noticeHours) * 3600_000;
+    const out = [];
+    for (let i = 0; i <= days; i++) {
+      const d = new Date(from); d.setUTCHours(12, 0, 0, 0); d.setUTCDate(d.getUTCDate() + i);
+      const day = ymd(d);
+      const times = laneSlotsFor(offer.free_hours ?? {}, d.getUTCDay(), len)
+        .filter((t) => new Date(`${day}T${t}:00Z`).getTime() - new Date(from).getTime() >= noticeMs)
+        .filter((t) => !taken.has(`${day}T${t}`));
+      if (times.length) out.push({ date: day, times });
+    }
+    return out;
+  }
   const a = offer.availability ?? {};
   const wanted = new Set((a.days ?? []).map(Number));
   const parts = (a.parts ?? []).filter((p) => PART_TIMES[p]);

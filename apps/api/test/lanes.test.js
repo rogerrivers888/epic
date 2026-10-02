@@ -229,3 +229,15 @@ test('the checklist button says what pressing it does', () => {
   assert.equal(publishAction({ visibility: 'invite', private_plan: 'event' }, [], { isPro: true }).label, 'Send the invites');
   assert.equal(publishAction({ visibility: 'invite', private_fee_state: 'paid' }, []).label, 'Send the invites');
 });
+
+test('the old readers see a lane offer’s dates and slots (the guest page and booking use them)', async () => {
+  const { seriesDates, anytimeSlots } = await import('../src/domain/hosting.js');
+  // Weekly: several weekdays, no session count, bank holidays out (Codex, 2 Oct 2026).
+  const weekly = seriesDates({ lane: 'weekly', first_date: '2026-12-22', weekdays: [2, 4], skipped_dates: [], exclude_bank_holidays: true });
+  assert.deepEqual(weekly.slice(0, 4), ['2026-12-22', '2026-12-24', '2026-12-29', '2026-12-31']);
+  const course = seriesDates({ lane: 'course', first_date: '2026-12-18', sessions: 3, skipped_dates: [], exclude_bank_holidays: true });
+  assert.deepEqual(course, ['2026-12-18', '2027-01-08', '2027-01-15'], 'Christmas Day and New Year’s Day pushed the run back');
+  // On request: the hour ranges, the shortest length, the notice in hours.
+  const slots = anytimeSlots({ lane: 'onrequest', free_hours: { 6: [['14:00', '17:00']] }, session_lengths: [120, 180], notice_hours: 48 }, { from: new Date('2026-10-09T12:00:00Z'), days: 9 });
+  assert.deepEqual(slots, [{ date: '2026-10-17', times: ['14:00', '15:00'] }], 'Sat 10 Oct is inside the 48 hours; Sat 17 is not');
+});
