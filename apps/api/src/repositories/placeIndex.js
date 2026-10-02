@@ -1420,7 +1420,7 @@ export async function settleCountriesFromAddresses(refs = null, q = query) {
 const NULL_COUNTRY_PASS = 5000;
 
 /** Places with no country, each with its reverse-geocoded address(es). Read-only. */
-export async function nullCountryAddresses(refs = null, q = query) {
+export async function nullCountryAddresses(refs = null, q = query, { limit = NULL_COUNTRY_PASS } = {}) {
   const { rows } = await q(`
     select pi.venue_ref, array_agg(f.value #>> '{}') as addresses
       from place_index pi
@@ -1429,9 +1429,10 @@ export async function nullCountryAddresses(refs = null, q = query) {
      where pi.country_code is null
        ${refs ? 'and pi.venue_ref = any($1)' : ''}
      group by pi.venue_ref
-     order by pi.venue_ref
-     -- Bounded, like the rest of settle: a read of at most this many a pass.
-     limit ${refs ? 'null' : NULL_COUNTRY_PASS}`, refs ? [refs] : []);
+     -- Bounded, like the rest of settle, and rotated: in a stable order the same
+     -- unsettleable prefix would be read every pass and a later candidate never
+     -- reached (Codex). The report passes no limit and reads them all.
+     ${refs || limit == null ? 'order by pi.venue_ref' : `order by random() limit ${Number(limit)}`}`, refs ? [refs] : []);
   return rows;
 }
 
