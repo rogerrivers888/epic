@@ -25,7 +25,7 @@ import { useRouter } from '../../../router';
 import { paths } from '../../../routes';
 import { useViewport } from '../../../hooks/useViewport';
 import { CREAM, HAIRLINE, INK, INK_MUTED, LIME, LIME_TINT, MOSS, TICK_EDGE, fonts } from '../../../theme';
-import { Note, Tick, hx, pointer, tx, v } from './kit';
+import { Note, Tick, goToStripe, hx, pointer, tx, v } from './kit';
 import { LANES, gbp, type CheckItem, type LaneHome, type LaneOffer } from './model';
 import { PublishSheet, SHEET_KINDS, type SheetKind } from './Sheets';
 import { mmss } from './VideoSheet';
@@ -73,7 +73,7 @@ export function Publish({ offerId }: { offerId: string }) {
     setBusy(true);
     try {
       const r = await api.lanePublish(o.id, o.visibility === 'public' ? undefined : chosen);
-      if (r.pay?.url) { window.location.assign(r.pay.url); return; }
+      if (r.pay?.url) { goToStripe(r.pay.url); return; }
       navigate(paths.hostDone(o.id), { replace: true });
     } catch (e: any) {
       showToast(e.message);

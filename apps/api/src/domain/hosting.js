@@ -295,6 +295,17 @@ export const reviewPublishOn = (offer, occurrence) => {
  * them cannot come, and whether an attending adult is in the party.
  */
 export function ageGate(offer, party) {
+  if (offer.lane && (offer.age_min != null || offer.age_max != null)) {
+    // Hosting v7: a from–to range. The range is the children's: an adult with them is the
+    // parent who stays, never turned away — unless the event is adults only, when no
+    // child may come. A child with no age given cannot be checked, so is not let through.
+    const lo = offer.age_min ?? 0; const hi = offer.age_max ?? Infinity;
+    const isChild = (p) => p.child || (p.age != null && p.age < ADULT_AGE);
+    const blocked = party.filter((p) => (lo >= ADULT_AGE ? isChild(p)
+      : isChild(p) && (p.age == null || p.age < lo || p.age > hi)) || (!isChild(p) && p.age != null && (p.age < lo || (hi < ADULT_AGE ? false : p.age > hi))));
+    const adults = party.filter((p) => !isChild(p));
+    return { limit: lo || null, max: Number.isFinite(hi) ? hi : null, blocked, hasAdult: adults.length > 0, needsAdult: party.some(isChild) };
+  }
   const limit = offer.age_limit ?? null;
   const blocked = limit ? party.filter((p) => p.age != null && p.age < limit || (p.age == null && p.child)) : [];
   const adults = party.filter((p) => p.age == null ? !p.child : p.age >= ADULT_AGE);

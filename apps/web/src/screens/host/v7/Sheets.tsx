@@ -20,7 +20,7 @@ import { BirthdayPicker } from '../../../components/BirthdayPicker';
 import { pickPhotoBlob } from '../../../components/pickPhoto';
 import { api } from '../../../api';
 import { CREAM, INACTIVE, INK, INK_MUTED, LIME_TINT } from '../../../theme';
-import { ActionBar, Field, Kicker, Labelled, Overlay, hx, pointer, tx, v } from './kit';
+import { ActionBar, Field, Kicker, Labelled, Overlay, goToStripe, hx, pointer, tx, v } from './kit';
 import { gbp, type LaneHome, type LaneOffer } from './model';
 import { VideoSheet, pickFiles } from './VideoSheet';
 
@@ -138,7 +138,7 @@ function PhoneSheet({ home, onClose, onChanged }: SheetProps) {
 function PayoutsSheet({ offer, home, onClose }: SheetProps) {
   const pending = home.host.payouts === 'pending';
   const { busy, run } = useSave();
-  const go = () => run(async () => { const r = await api.lanePayouts(offer.id); window.location.assign(r.url); });
+  const go = () => run(async () => { const r = await api.lanePayouts(offer.id); goToStripe(r.url); });
   return (
     <Overlay title="Payouts" onClose={onClose} footer={<ActionBar label={pending ? 'Carry on with Stripe' : 'Continue to Stripe'} onPress={() => { void go(); }} busy={busy} />}>
       <Text style={tx(15, '700')}>{pending ? 'Stripe is finishing it' : 'Paid out by Stripe'}</Text>
@@ -236,7 +236,7 @@ function VerifySheet({ offer, onClose, onChanged }: SheetProps) {
   const { busy, run } = useSave();
   const go = () => run(async () => {
     const r = await api.laneVerify(offer.id);
-    if (r.url) { window.location.assign(r.url); return; }
+    if (r.url) { goToStripe(r.url); return; }
     await onChanged();
     onClose();
   });

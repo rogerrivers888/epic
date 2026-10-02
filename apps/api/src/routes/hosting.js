@@ -132,6 +132,8 @@ function publicOffer(o, bookings = [], { revealed = false, host = null } = {}) {
     id: o.id, hostId: o.host_id, shape: o.shape, state: o.state, pausedUntil: ymd(o.paused_until), visibility: o.visibility, money: o.money ?? 'free',
     // Hosting v7: which of the four lanes, and where its set-up was left (a draft opens there).
     lane: o.lane ?? null, draftStep: o.draft_step ?? null,
+    // …and a one-off over several days says when it ends (Codex, 2 Oct 2026); the age range is the lane's.
+    multiDay: Boolean(o.multi_day), endsOn: ymd(o.ends_on), ageMin: o.age_min ?? null, ageMax: o.age_max ?? null,
     title: o.title, summary: o.summary, description: o.description, whyYou: o.why_you, includes: o.includes, category: o.category,
     // The five fields. `tags` and `facets` are in the host's own order — the
     // first tag is what shows on the card — and a pending one is live on the

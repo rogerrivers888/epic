@@ -375,8 +375,13 @@ const has = (v) => v != null && String(v).trim() !== '';
 export function stepFilled(offer, step, cfg = DEFAULT_CONFIG) {
   switch (step) {
     case 'what': return has(offer.what_label ?? offer.whatLabel) && has(offer.title);
-    case 'when': return has(offer.starts_on ?? offer.startsOn) && has(offer.starts_at ?? offer.startsAt)
-      && (!(offer.multi_day ?? offer.multiDay) || has(offer.ends_on ?? offer.endsOn));
+    case 'when': {
+      // A date, a start and an end ("Until"); on one day the end comes after the start.
+      const multi = offer.multi_day ?? offer.multiDay;
+      const from = hm(offer.starts_at ?? offer.startsAt); const to = hm(offer.ends_at ?? offer.endsAt);
+      if (!has(offer.starts_on ?? offer.startsOn) || !from || !to) return false;
+      return multi ? has(offer.ends_on ?? offer.endsOn) : to > from;
+    }
     case 'order': return null;
     case 'cohosts': return null;
     case 'rsvp': return null;
@@ -462,7 +467,10 @@ export function checklist(offer, { host, account } = {}, cfg = DEFAULT_CONFIG) {
   push('phone', 'send', has(account?.mobile));
   push('profile', 'send', profileDone);
   if (pub) push('verified', 'send', host?.identity_state === 'verified');
-  push('video', pub ? 'send' : null, Boolean(offer.video_id || (offer.video_made_by === 'epic' && (offer.video_photo_ids ?? []).length >= cfg.epicVideoPhotos.min && (!pub || offer.hello_video_id))), { optional: !pub });
+  // Public needs a video a person can watch in review and a guest on the page: a take of the
+  // host's own (Let Epic make it uses the ten-second hello as it). Private may ask Epic for one.
+  const epicAsked = offer.video_made_by === 'epic' && (offer.video_photo_ids ?? []).length >= cfg.epicVideoPhotos.min;
+  push('video', pub ? 'send' : null, pub ? Boolean(offer.video_id) : Boolean(offer.video_id || epicAsked), { optional: !pub });
   if (needsChecked(offer, cfg)) push('checked', 'live', host?.checked_state === 'passed', { submitted: host?.checked_state === 'submitted' });
   if (epic) push('payouts', 'send', host?.payouts_state === 'ready', { pending: host?.payouts_state === 'pending' });
   if (epic) push('tax', 'payout', has(host?.tax_reference));

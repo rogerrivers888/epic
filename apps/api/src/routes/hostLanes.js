@@ -25,7 +25,7 @@
 import express, { Router } from 'express';
 import * as repo from '../repositories/hosting.js';
 import * as providerCalls from '../repositories/providerCalls.js';
-import { query, withTransaction } from '../db.js';
+import { pool, query, withTransaction } from '../db.js';
 import { currentAccount } from '../context.js';
 import { currentHousehold } from './household.js';
 import { assertWithinBounds } from '../claude.js';
@@ -352,6 +352,8 @@ export function derive(patch, current) {
   const next = { ...current, ...snake(p) };
   if (next.age_min != null && next.age_max != null && Number(next.age_min) > Number(next.age_max)) throw refuse(400, 'ages_backwards', 'The youngest age is above the oldest.');
   if (next.min_count != null && next.max_count != null && Number(next.min_count) > Number(next.max_count)) throw refuse(400, 'min_over_max', 'The minimum is above the maximum.');
+  const sAt = (next.starts_at ?? '').slice(0, 5); const eAt = (next.ends_at ?? '').slice(0, 5);
+  if (current.lane === 'oneoff' && !next.multi_day && sAt && eAt && eAt <= sAt && (p.startsAt !== undefined || p.endsAt !== undefined)) throw refuse(400, 'ends_before_start', 'It ends before it starts.');
   if (next.multi_day && next.starts_on && next.ends_on && next.ends_on < next.starts_on) throw refuse(400, 'ends_before_start', 'The end date is before the start.');
   // The configured limits hold however the answer arrived — typed, said or read off a flyer (Codex, 2 Oct 2026).
   const cfg = hostingConfig();
@@ -393,6 +395,7 @@ export function derive(patch, current) {
 }
 
 const SNAKE = {
+  startsAt: 'starts_at', endsAt: 'ends_at',
   ageMin: 'age_min', ageMax: 'age_max', minCount: 'min_count', maxCount: 'max_count', multiDay: 'multi_day', startsOn: 'starts_on', endsOn: 'ends_on',
   dropInPence: 'drop_in_pence', bookAheadPence: 'book_ahead_pence', priceMode: 'price_mode', visibility: 'visibility', money: 'money', parents: 'parents',
 };
@@ -732,6 +735,10 @@ router.post('/host/lanes/offers/:id/video', async (req, res, next) => {
       throw refuse(400, 'more_photos', `Pick ${cfg.epicVideoPhotos.min} to ${cfg.epicVideoPhotos.max} photos.`);
     }
     if (patch.videoMadeBy === 'self') { patch.videoPhotoIds = []; patch.helloVideoId = null; }
+    // Let Epic make it: the film is made later, but the host's own ten seconds are a real
+    // video now — it is what review watches and what a guest sees until the film lands.
+    if ((patch.videoMadeBy ?? offer.video_made_by) === 'epic' && (patch.helloVideoId ?? offer.hello_video_id)) patch.videoId = patch.helloVideoId ?? offer.hello_video_id;
+    if (patch.videoMadeBy === 'epic' && patch.helloVideoId === undefined && !offer.hello_video_id && b.videoId === undefined) patch.videoId = null;
     const updated = await repo.updateOffer(offer.id, patch);
     if (b.onProfile && updated.video_id && !host.intro_video_id) await repo.updateHost(host.id, { introVideoId: updated.video_id });
     res.json({ offer: await lanePayload(updated, host, account) });
@@ -791,6 +798,21 @@ router.post('/host/lanes/offers/:id/publish', async (req, res, next) => {
     const holidays = await holidaysFor(household.id);
 
     if (offer.visibility === 'invite') {
+      // One publish at a time per offer: two presses at once must not each open a Checkout
+      // (Codex, 2 Oct 2026). The lock is a session-level advisory one, held across the Stripe
+      // call and released however this ends.
+      const lockClient = await pool.connect();
+      try {
+        await lockClient.query('select pg_advisory_lock(hashtext($1))', [`host-publish:${offer.id}`]);
+        offer = (await repo.offerOfHost(offer.id, host.id)) ?? offer;
+        if (offer.state !== 'draft') throw refuse(409, 'already_sent', 'This one is out already.');
+        return await publishPrivate();
+      } finally {
+        await lockClient.query('select pg_advisory_unlock(hashtext($1))', [`host-publish:${offer.id}`]).catch(() => null);
+        lockClient.release();
+      }
+    }
+    async function publishPrivate() {
       const pro = isPro(account);
       const plan = oneOf(['event', 'pro'], req.body?.plan) ?? offer.private_plan ?? (pro ? 'pro' : 'event');
       if (plan !== offer.private_plan) offer = await repo.updateOffer(offer.id, { privatePlan: plan });
@@ -828,6 +850,7 @@ router.post('/host/lanes/offers/:id/publish', async (req, res, next) => {
       const told = await sendInvites(host, sent, (await repo.invitesOf(sent.id)).filter((i) => !i.sent_at));
       return res.json({ offer: await lanePayload(sent, host, account, { holidays }), ending: { kind: 'invites', invited: (await repo.invitesOf(sent.id)).reduce((n, i) => n + (i.heads ?? 1), 0), told } });
     }
+
 
     const sentForReview = await withTransaction(async (client) => {
       await laySessions(offer, holidays, client);

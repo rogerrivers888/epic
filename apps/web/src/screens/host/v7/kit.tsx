@@ -7,7 +7,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, TextInput, TextStyle, View, ViewStyle } from 'react-native';
+import { Linking, Platform, ScrollView, StyleSheet, Text, TextInput, TextStyle, View, ViewStyle } from 'react-native';
 import { Press } from '../../../components/press';
 import { Icon, IconName } from '../../../components/Icon';
 import { CREAM, HAIRLINE, INACTIVE, INK, INK_MUTED, LIME, LIME_TINT, MOSS, DEEP_GREEN, SHEET_SCRIM, TICK_EDGE, fonts } from '../../../theme';
@@ -378,3 +378,12 @@ export function Overlay({ title, onClose, children, footer, full }: { title: str
 }
 
 export const textStyles = { ellipsis, preLine };
+
+/**
+ * Send the host to Stripe's hosted page. On the web the tab goes there and comes back
+ * to the checklist; in the apps it opens through the system (Codex, 2 Oct 2026).
+ */
+export function goToStripe(url: string) {
+  if (web && typeof window !== 'undefined') { window.location.assign(url); return; }
+  void Linking.openURL(url);
+}

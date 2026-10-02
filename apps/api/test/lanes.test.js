@@ -216,8 +216,9 @@ test('public checklist: verified and the video block review; Checked blocks goin
   assert.ok(!checklist({ ...offer, parents: 'stay' }, { host: host(), account }).some((i) => i.key === 'checked'));
   // Let Epic make it, public: the photos and ten seconds of the host.
   const epicMade = { ...offer, parents: 'stay', video_made_by: 'epic', video_photo_ids: ['a', 'b', 'c'] };
-  assert.equal(checklist(epicMade, { host: host(), account }).find((i) => i.key === 'video').done, false, 'public needs the hello take too');
-  assert.equal(checklist({ ...epicMade, hello_video_id: 'h' }, { host: host(), account }).find((i) => i.key === 'video').done, true);
+  assert.equal(checklist(epicMade, { host: host(), account }).find((i) => i.key === 'video').done, false, 'public needs a real video — photos alone are a request, not a video');
+  assert.equal(checklist({ ...epicMade, hello_video_id: 'h', video_id: 'h' }, { host: host(), account }).find((i) => i.key === 'video').done, true, 'the hello take stands as the video');
+  assert.equal(checklist({ ...epicMade, visibility: 'invite' }, { host: host(), account }).find((i) => i.key === 'video').done, true, 'private may ask Epic for one');
 });
 
 test('the checklist button says what pressing it does', () => {
@@ -248,4 +249,23 @@ test('an adult age set in config is the one the publish gate asks about', async 
   const offer = { lane: 'oneoff', age_max: 17, visibility: 'invite', who_chosen: true };
   assert.equal(stepFilled(offer, 'who'), false, 'at 18, a top age of 17 is a children’s event');
   assert.equal(stepFilled(offer, 'who', cfg), true, 'at 16 it is not');
+});
+
+test('a one-off needs its end, and on one day the end comes after the start', () => {
+  const base = { lane: 'oneoff', starts_on: '2026-06-13', starts_at: '13:00' };
+  assert.equal(stepFilled(base, 'when'), false, 'no end time');
+  assert.equal(stepFilled({ ...base, ends_at: '12:00' }, 'when'), false, 'ends before it starts');
+  assert.equal(stepFilled({ ...base, ends_at: '23:00' }, 'when'), true);
+  assert.equal(stepFilled({ ...base, ends_at: '12:00', multi_day: true, ends_on: '2026-06-14' }, 'when'), true, 'over two days, noon the next day is fine');
+});
+
+test('the booking age gate reads a lane offer’s range (Codex, 2 Oct 2026)', async () => {
+  const { ageGate } = await import('../src/domain/hosting.js');
+  const kids = { lane: 'course', age_min: 5, age_max: 8 };
+  assert.deepEqual(ageGate(kids, [{ name: 'Mum', child: false }, { name: 'Ada', age: 6, child: true }]).blocked, [], 'a parent with a six-year-old');
+  assert.equal(ageGate(kids, [{ name: 'Mum', child: false }, { name: 'Tom', age: 11, child: true }]).blocked.length, 1, 'eleven is over the top age');
+  assert.equal(ageGate(kids, [{ name: 'Mum', child: false }, { name: 'Bo', child: true }]).blocked.length, 1, 'a child with no age cannot be checked');
+  const adults = { lane: 'oneoff', age_min: 18 };
+  assert.equal(ageGate(adults, [{ name: 'Sam', child: false }, { name: 'Kid', age: 12, child: true }]).blocked.length, 1, 'adults only turns any child away');
+  assert.deepEqual(ageGate(adults, [{ name: 'Sam', child: false }]).blocked, []);
 });
