@@ -186,7 +186,8 @@ export function Preview({ offer: o, lane, config, home, step, onClose }: {
 
   if (lane === 'weekly') {
     const today = todayIso();
-    const next = weeklyRun(o, holidays).dates.filter((d) => d >= today).slice(0, 5);
+    // An ongoing class rolls on from today, as publishing and the guest page do.
+    const next = weeklyRun({ ...o, firstDate: o.firstDate && o.firstDate < today ? today : o.firstDate }, holidays).dates.filter((d) => d >= today).slice(0, 5);
     if (next.length) sec.push({ id: 'next', step: 'weekly', on: true, k: 'Next dates', v: next.map(dateShort).join(' · '), fw: '500' });
   }
 

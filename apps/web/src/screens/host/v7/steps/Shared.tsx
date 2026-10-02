@@ -133,10 +133,10 @@ export function WhereStep({ offer, update }: StepProps) {
   return (
     <>
       <Option title="Out and about" sub="A venue, a park, a hall" on={offer.venue === 'out_about'} onPick={() => update({ venue: 'out_about' })}>
-        <Labelled label="Address"><PlacePicker value={current} placeholder="Search for the place" onPick={(p) => update(placeFields(p) as never)} onText={(t) => { if (t.trim()) update({ venueLabel: t.trim(), venueRef: null } as never); }} /></Labelled>
+        <Labelled label="Address"><PlacePicker value={current} placeholder="Search for the place" onPick={(p) => update(placeFields(p) as never)} onText={(t) => update({ venueLabel: t.trim() || null, venueRef: null } as never)} /></Labelled>
       </Option>
       <Option title="Your place" sub="They come to you" on={offer.venue === 'your_place'} onPick={() => update({ venue: 'your_place' })}>
-        <Labelled label="Address"><PlacePicker value={current} placeholder="Your address" onPick={(p) => update(placeFields(p) as never)} onText={(t) => { if (t.trim()) update({ venueLabel: t.trim(), venueRef: null } as never); }} /></Labelled>
+        <Labelled label="Address"><PlacePicker value={current} placeholder="Your address" onPick={(p) => update(placeFields(p) as never)} onText={(t) => update({ venueLabel: t.trim() || null, venueRef: null } as never)} /></Labelled>
         <Labelled label="Getting there"><Field value={offer.venueNotes ?? ''} onChange={(venueNotes) => update({ venueNotes })} placeholder="Parking, the side gate, the bell" tinted /></Labelled>
       </Option>
       <Option title="Their place" sub="You go to them" on={offer.venue === 'their_place'} onPick={() => update({ venue: 'their_place', travelRadiusMin: offer.travelRadiusMin ?? 10 })}>

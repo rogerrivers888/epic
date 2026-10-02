@@ -120,7 +120,9 @@ export function Setup({ lane: laneIn, offerId }: { lane: HostLane | null; offerI
       const body = pending.current; const id = idRef.current;
       if (!id || !Object.keys(body).length) return;
       pending.current = {};
-      void api.saveLaneOfferOnLeave(id, body).catch(() => null);
+      // After any save still in flight, never alongside it, so the newest edit lands last (Codex, 2 Oct 2026).
+      const go = () => api.saveLaneOfferOnLeave(id, body).catch(() => null);
+      if (inflight.current) void inflight.current.then(go, go); else void go();
     };
     const w = typeof window !== 'undefined' && typeof window.addEventListener === 'function' ? window : null;
     w?.addEventListener('pagehide', send);
