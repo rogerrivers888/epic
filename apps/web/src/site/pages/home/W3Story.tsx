@@ -49,7 +49,8 @@ export function W3Story({ locale, landingPage }: SitePageProps) {
   // Big type steps down between 700 and 1280 so nothing overflows; at 1280+ it is the design's.
   // "Coming soon." on one line at any width (owner, 2 Oct 2026, on his iPhone: "far
   // too large at 390"): about 48px at 390, growing with the width to 200.
-  const heroSize = phone ? Math.max(40, Math.min(76, Math.floor((width - 40) / 7.2))) : Math.min(200, Math.floor((width - 112) / 5.9));
+  // Then two sizes smaller (owner, 2 Oct 2026): three quarters of that — 36 at 390.
+  const heroSize = Math.round(0.75 * (phone ? Math.max(40, Math.min(76, Math.floor((width - 40) / 7.2))) : Math.min(200, Math.floor((width - 112) / 5.9))));
   const titleSize = phone ? 48 : Math.min(76, Math.round(width * 0.06));
   const hostSize = phone ? 72 : Math.min(120, Math.round(width * 0.094));
   const closeSize = phone ? 60 : Math.min(96, Math.round(width * 0.075));
@@ -291,7 +292,8 @@ const t = {
   heroWide: { paddingTop: 40, paddingHorizontal: 56, paddingBottom: 56, gap: 26 },
   heroPhone: { paddingTop: 16, paddingHorizontal: 20, paddingBottom: 32, gap: 18 },
   coming: { fontFamily: fonts.heading, fontWeight: '800' as const, color: INK },
-  heroRow: { ...rule },
+  // No rule under "Coming soon." (owner, 2 Oct 2026: it "just makes it look very odd").
+  heroRow: {},
   heroRowWide: { flexDirection: 'row' as const, gap: 48, alignItems: 'flex-end' as const, paddingTop: 22 },
   heroRowPhone: { gap: 18, paddingTop: 14 },
   heroLine: { fontFamily: fonts.body, fontWeight: '600' as const, color: INK },

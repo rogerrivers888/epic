@@ -28,7 +28,8 @@ test('every public page has a title the app and the server agree on, inside the 
       assert.equal(siteTitleOf(route as never), copy.title, `${locale} ${page}: the tab and the HTML say the same title`);
       assert.ok(copy.title.startsWith('Epic'), `${page} title leads with the brand (J7)`);
       assert.ok(copy.title.length <= 60, `${page} title is ${copy.title.length} characters`);
-      assert.ok(copy.description.length >= 140 && copy.description.length <= 155, `${page} description is ${copy.description.length} characters`);
+      // 120 at the least: the host page's is the owner's own words at 136 (2 Oct 2026).
+      assert.ok(copy.description.length >= 120 && copy.description.length <= 155, `${page} description is ${copy.description.length} characters`);
     }
   }
 });

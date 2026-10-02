@@ -1357,7 +1357,7 @@ export function legacyHref(path: string, query: URLSearchParams): string | null 
  */
 export function siteTitleOf(route: Extract<Route, { name: 'site' }>): string {
   switch (route.page) {
-    case 'host': return 'Epic Hosting – Run events, classes, tours and homeschool';
+    case 'host': return 'Epic Hosting – Events, weekly clubs, courses and bookings';
     case 'privacy': return 'Epic – Privacy notice';
     case 'terms': return 'Epic – Terms';
     case 'cookies': return 'Epic – Cookies';

@@ -19,7 +19,7 @@ import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-na
 import Svg, { Path } from 'react-native-svg';
 import { CREAM, INK, INK_HOVER, LIME, LIME_HOVER, LIME_TINT, MOSS, fonts } from '../theme';
 import { api, type InterestSignup } from '../api';
-import { paths, type SiteLocale } from '../routes';
+import { type SiteLocale } from '../routes';
 import { useRouter } from '../router';
 import { useViewport } from '../hooks/useViewport';
 import { pick, type Strings } from './i18n';
@@ -29,9 +29,9 @@ export type FormGround = 'cream' | 'lime' | 'ink';
 
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-const WORDS: Strings<{ placeholder: string; bad: string; privacy: string; failed: string }> = {
-  'en-gb': { placeholder: 'Your email', bad: "That email doesn't look right.", privacy: 'Privacy notice', failed: "That didn't go through. Try again in a moment." },
-  'en-us': { placeholder: 'Your email', bad: "That email doesn't look right.", privacy: 'Privacy notice', failed: "That didn't go through. Try again in a moment." },
+const WORDS: Strings<{ placeholder: string; bad: string; failed: string }> = {
+  'en-gb': { placeholder: 'Your email', bad: "That email doesn't look right.", failed: "That didn't go through. Try again in a moment." },
+  'en-us': { placeholder: 'Your email', bad: "That email doesn't look right.", failed: "That didn't go through. Try again in a moment." },
 };
 
 export function InterestForm({
@@ -51,7 +51,7 @@ export function InterestForm({
   maxWidth?: number;
 }) {
   const w = pick(WORDS, locale);
-  const { query, navigate } = useRouter();
+  const { query } = useRouter();
   const { width } = useViewport();
   const stacked = variant === 'stacked' || width < 700;
   const onInk = ground === 'ink';
@@ -148,13 +148,8 @@ export function InterestForm({
       {err ? (
         <Text nativeID={`interest-err-${source}`} style={[styles.err, { color: errColor }]} accessibilityLiveRegion="polite">{err}</Text>
       ) : null}
-      <Text
-        accessibilityRole="link"
-        onPress={() => navigate(paths.sitePage('privacy', locale))}
-        style={[styles.privacy, { color: onInk ? CREAM : INK }]}
-      >
-        {w.privacy}
-      </Text>
+      {/* No privacy link under the box (owner, 2 Oct 2026: "We've already got privacy.
+          We don't need to say it under every email box") — it is in the footer. */}
     </View>
   );
 }
@@ -166,7 +161,6 @@ const styles = StyleSheet.create({
   button: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20 },
   buttonText: { fontFamily: fonts.body, fontSize: 17, fontWeight: '700' },
   err: { fontFamily: fonts.body, fontSize: 15, fontWeight: '700' },
-  privacy: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', textDecorationLine: 'underline', alignSelf: 'flex-start' },
   done: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 62, borderTopWidth: 2, paddingTop: 14 },
   doneText: { fontFamily: fonts.body, fontSize: 20, fontWeight: '700', flexShrink: 1 },
 });

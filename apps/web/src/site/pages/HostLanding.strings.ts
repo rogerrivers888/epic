@@ -73,7 +73,7 @@ const gbp = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
 const GB: HostLandingStrings = {
   comingSoon: 'Coming soon',
   hostIt: 'Host it.',
-  h1: 'Host it on Epic: one-off events, activities, weekly classes and homeschool',
+  h1: 'Host it on Epic: one-off events, weekly clubs, courses and time people book',
   intro: "Epic isn't just for planning trips. It's where you run things: a wedding weekend, a fossil-hunting tour, a weekly club, a ten-week course.",
   sep: ' · ',
   heroCta: 'Become a host',

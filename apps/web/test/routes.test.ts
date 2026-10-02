@@ -520,7 +520,7 @@ test('the public website lives under a live locale; an off locale is a 404', () 
   // No tab behind it; titles lead with the brand (J7).
   assert.equal(tabOf(parseRoute('/en-gb/')), null);
   assert.equal(titleOf(parseRoute('/en-gb/')), 'Epic – Days out and trips away, planned around your crew');
-  assert.equal(titleOf(parseRoute('/en-gb/host')), 'Epic Hosting – Run events, classes, tours and homeschool');
+  assert.equal(titleOf(parseRoute('/en-gb/host')), 'Epic Hosting – Events, weekly clubs, courses and bookings');
   assert.equal(parentOf(parseRoute('/en-gb/privacy')), '/en-gb/');
 });
 
