@@ -260,3 +260,17 @@ test("the publish estimate prices each booking, so the £1.50 minimum applies pe
   for (const l of fresh.lines) byRate[l.rate] = (byRate[l.rate] ?? 0) + l.count;
   assert.deepEqual(byRate, { 0: 3, 20: 7 }, 'three intro places left at 0%, the other seven at the level rate');
 });
+
+test('company reporting is never on without a Companies House number', async () => {
+  const { household } = await aHousehold(query, 'the company host');
+  await repo.insertHost(household.id, { name: 'Co', type: 'skill' });
+  const srv = await hostServer(household);
+  const patch = (body) => fetch(`${srv.url}/api/host`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  try {
+    assert.equal((await patch({ taxIsCompany: true })).status, 400, 'the switch alone, with no number, is refused');
+    assert.equal((await patch({ taxIsCompany: true, companyNumber: '12345' })).status, 400, 'not a company number');
+    assert.equal((await patch({ taxIsCompany: true, companyNumber: 'sc 123456' })).status, 200, 'two letters and six digits, spacing forgiven');
+    const { rows: [h] } = await query('select tax_is_company, company_number from hosts where household_id = $1', [household.id]);
+    assert.deepEqual([h.tax_is_company, h.company_number], [true, 'SC123456']);
+  } finally { await srv.close(); }
+});

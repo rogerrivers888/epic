@@ -364,7 +364,8 @@ router.patch('/', async (req, res, next) => {
     if ((dayStart != null || dayEnd != null)) {
       const s = dayStart != null ? Number(dayStart) : (household.day_start ?? 10);
       const e = dayEnd != null ? Number(dayEnd) : (household.day_end ?? 18);
-      if (!(s >= 7 && s <= 12 && e >= 14 && e <= 22 && e - s >= 4)) return res.status(400).json({ error: 'invalid_day_window', message: 'The day starts 7am–12pm, finishes 2pm–10pm, and runs at least four hours.' });
+      // Whole hours only: the columns are smallint, and 7.5 was a 500 (Codex, 2 Oct 2026).
+      if (!(Number.isInteger(s) && Number.isInteger(e) && s >= 7 && s <= 12 && e >= 14 && e <= 22 && e - s >= 4)) return res.status(400).json({ error: 'invalid_day_window', message: 'The day starts 7am–12pm, finishes 2pm–10pm, and runs at least four hours.' });
     }
     // How far "close to home" reaches, in miles (owner, 4 Sep 2026).
     const radius = homeRadiusMiles == null ? null : Math.min(200, Math.max(1, Math.round(Number(homeRadiusMiles))));

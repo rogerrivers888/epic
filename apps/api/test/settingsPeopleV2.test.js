@@ -781,3 +781,13 @@ test('two batches racing for the last places: one lands whole, the other writes 
   const won = names.includes('A1') ? 'A' : 'B';
   assert.ok(names.includes(`${won}2`) && !names.some((n) => n.startsWith(won === 'A' ? 'B' : 'A')), 'the winner whole, the loser not at all');
 });
+
+test('the day window takes whole hours: 7.5 is a 400, never a 500', async () => {
+  const { household: h, member: roger } = await aHousehold(query);
+  const srv = await server(owner(h, roger.id));
+  try {
+    const res = await srv.send('PATCH', '/api/household', { dayStart: 7.5 });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'invalid_day_window');
+  } finally { await srv.close(); }
+});

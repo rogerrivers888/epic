@@ -149,7 +149,11 @@ function Tax({ money, onChanged }: { money: HostMoney; onChanged: () => Promise<
   const [edit, setEdit] = useState<null | 'name' | 'address' | 'ref' | 'company'>(null);
   const tax = money.tax;
   const year = new Date().getFullYear();
+  // Company reporting needs the company's number, so switching it on with
+  // none on file asks for the number first; saving it turns the switch on in
+  // the same request (Codex, 2 Oct 2026).
   const toggleCompany = async () => {
+    if (!tax.taxIsCompany && !tax.companyNumber) { setEdit('company'); return; }
     try { await api.updateHost({ taxIsCompany: !tax.taxIsCompany }); await onChanged(); }
     catch (e: any) { showToast(e?.body?.message || 'Could not save.'); }
   };
@@ -194,7 +198,7 @@ function Tax({ money, onChanged }: { money: HostMoney; onChanged: () => Promise<
             // Tax identity only — the legal name and tax address have their own
             // columns; this never writes the guest-facing host name or the
             // operational hosting address (Codex).
-            const patch = edit === 'name' ? { legalName: v } : edit === 'address' ? { taxAddress: v } : edit === 'company' ? { companyNumber: v } : { taxReference: v };
+            const patch = edit === 'name' ? { legalName: v } : edit === 'address' ? { taxAddress: v } : edit === 'company' ? { companyNumber: v, taxIsCompany: true } : { taxReference: v };
             try { await api.updateHost(patch as any); showToast('Saved'); await onChanged(); } catch (e: any) { showToast(e?.body?.message || 'Could not save.'); }
             setEdit(null);
           }}

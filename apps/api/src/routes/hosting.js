@@ -380,7 +380,14 @@ router.patch('/host', async (req, res, next) => {
     // never reported under.
     if (b.paySchedule !== undefined) patch.paySchedule = oneOf(['weekly', 'weekday', 'monthly'], b.paySchedule) ?? 'weekly';
     if (b.taxIsCompany !== undefined) patch.taxIsCompany = Boolean(b.taxIsCompany);
-    if (b.companyNumber !== undefined) patch.companyNumber = str(b.companyNumber, 20);
+    if (b.companyNumber !== undefined) patch.companyNumber = str(b.companyNumber, 20)?.replace(/\s+/g, '').toUpperCase() || null;
+    // Reporting as a company needs a Companies House number: eight digits, or
+    // two letters and six digits (SC, NI…). Checked on the state the edit
+    // leaves behind, so the switch is never on without one (Codex, 2 Oct 2026).
+    const company = patch.taxIsCompany ?? host.tax_is_company;
+    const number = patch.companyNumber !== undefined ? patch.companyNumber : host.company_number;
+    if (patch.companyNumber && !/^(?:\d{8}|[A-Z]{2}\d{6})$/.test(patch.companyNumber)) throw refuse(400, 'invalid_company_number', 'A company number is 8 characters from Companies House — 8 digits, or 2 letters and 6 digits.');
+    if (company && !number) throw refuse(400, 'company_number_needed', 'Add the company number from Companies House first.');
     // Tax identity is its own record: editing the legal name or the tax address
     // never touches the guest-facing host name or the hosting location (Codex).
     if (b.legalName !== undefined) patch.legalName = str(b.legalName, 120);
