@@ -988,6 +988,7 @@ router.patch('/host/offers/:id', async (req, res, next) => {
 router.delete('/host/offers/:id', async (req, res, next) => {
   try {
     const { host, offer } = await myOffer(req.params.id);
+    notALane(offer);
     const bookings = await repo.bookingsOfOffer(offer.id);
     if (bookings.some((b) => b.state !== 'cancelled')) throw refuse(409, 'has_bookings', 'People have booked this. Call it off instead, so they are told and refunded.');
     await repo.deleteOffer(offer.id, host.id);

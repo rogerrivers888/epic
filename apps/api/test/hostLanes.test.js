@@ -570,5 +570,7 @@ test('the older offer routes refuse a lane offer: it is sent only through its ow
     assert.equal((await r.json()).error, 'use_lane_setup');
     const p = await fetch(`${base}/api/host/offers/${offer.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'x' }) });
     assert.equal((await p.json()).error, 'use_lane_setup');
+    const d = await fetch(`${base}/api/host/offers/${offer.id}`, { method: 'DELETE' });
+    assert.equal((await d.json()).error, 'use_lane_setup', 'nor deleted from the old door');
   } finally { await srv.close(); await new Promise((r) => s.close(r)); }
 });
