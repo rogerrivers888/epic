@@ -127,9 +127,12 @@ export function SavedPlacesBoard({ canManage }: { canManage: boolean }) {
 function SavedPlaceDetailView({ refId, canManage, onChanged }: { refId: string; canManage: boolean; onChanged: () => void }) {
   const [d, setD] = useState<SavedPlaceDetail | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  useEffect(() => { api.adminSavedPlace(refId).then(setD).catch(() => setD(null)); }, [refId]);
+  const reload = useCallback(() => { api.adminSavedPlace(refId).then(setD).catch(() => setD(null)); }, [refId]);
+  useEffect(() => { reload(); }, [reload]);
   if (!d) return <Waiting />;
   const e = d.enrichment;
+  // A pass under way cannot be re-run (the server refuses it); the button says so.
+  const running = !!e && ['queued', 'free', 'claude'].includes(e.state);
   const fields = Object.entries(e?.found?.fields ?? {});
   const facts = Object.entries(e?.found?.facts ?? {});
 
@@ -137,10 +140,12 @@ function SavedPlaceDetailView({ refId, canManage, onChanged }: { refId: string; 
     <View style={styles.detail}>
       <View style={styles.detailHead}>
         <Kicker>{e ? `${STATE_WORD[e.state].toUpperCase()} · ${e.runs} RUN${e.runs === 1 ? '' : 'S'} · ${pence(e.costPence)}` : 'NOT RESEARCHED'}</Kicker>
-        <Act label="Re-run" icon="refresh" tone="secondary" small disabled={!canManage}
+        <Act label={running ? 'Running' : 'Re-run'} icon="refresh" tone="secondary" small disabled={!canManage || running}
              onPress={async () => {
                setMsg(null);
-               try { const r = await api.adminSavedPlaceRerun(refId); setMsg(r.started ? 'Re-running' : 'Already running'); onChanged(); } catch (err: any) { setMsg(err.message); }
+               try { const r = await api.adminSavedPlaceRerun(refId); setMsg(r.started ? 'Re-running' : 'Already running'); } catch (err: any) { setMsg(err.message); }
+               // The detail as it now is, not as it was (Codex, 2 Oct 2026).
+               reload(); onChanged();
              }} />
       </View>
       {msg ? <Text style={styles.note}>{msg}</Text> : null}
