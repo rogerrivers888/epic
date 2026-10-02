@@ -1060,8 +1060,10 @@ function pump() {
     // before (an answer queued beside the research read nothing). It follows
     // the work itself, never the slot's deadline: a pass that outlives its
     // turn has not landed yet (Codex, 29 Sep 2026).
-    if (typeof job.onDone === 'function') {
-      work.then((out) => job.onDone(out)).catch(() => null);
+    if (typeof job.onDone === 'function' || typeof job.onFailed === 'function') {
+      // `onFailed` hears a pass that threw, so whoever was waiting is not left
+      // waiting for ever (Codex, 2 Oct 2026, the saved-place research).
+      work.then((out) => job.onDone?.(out), (err) => job.onFailed?.(err)).catch(() => null);
     }
     withDeadline(work, job.venueRef)
       .catch((err) => console.warn(`own: ${job.venueRef} failed: ${err.message}`))
@@ -1097,9 +1099,10 @@ export function queueEnrichment(venueRef, opts = {}) {
     // (Codex, 29 Sep 2026).
     const w = waiting.find((j) => j.venueRef === venueRef);
     const before = w?.onDone;
+    const beforeFailed = w?.onFailed;
     upgradeWaiting(waiting, venueRef, opts, opts.sessionId ?? currentSpender().sessionId ?? null);
     const now = waiting.find((j) => j.venueRef === venueRef);
-    if (now) now.onDone = chainDone(before, opts.onDone);
+    if (now) { now.onDone = chainDone(before, opts.onDone); now.onFailed = chainDone(beforeFailed, opts.onFailed); }
     return;
   }
   queued.add(venueRef);
@@ -1168,17 +1171,18 @@ export async function claimPlace(householdId, venueRef, reason, seed = {}) {
   // pass has landed (owner, 2 Oct 2026; sources/savedEnrich.js). Asked here so
   // every way of adding — saving, loving, "we've been" — is covered, and as
   // this job's `onDone` so the place is researched once, not twice.
-  let onDone;
+  let follow = {};
   if (['saved', 'special', 'visited'].includes(reason)) {
     try {
       const m = await import('./savedEnrich.js');
-      onDone = (await m.requestEnrichment({
+      const asked = await m.requestEnrichment({
         venueRef, account: currentAccount(), householdId,
         sessionId: currentSpender().sessionId ?? null, seedName: seed?.name ?? null,
-      })).onDone;
+      });
+      if (asked.started) follow = { onDone: asked.onDone, onFailed: asked.onFailed };
     } catch (err) { console.warn(`own: could not ask for the saved-place research on ${venueRef}: ${err.message}`); }
   }
-  queueEnrichment(venueRef, { householdId, seed, ...(onDone ? { onDone } : {}) });
+  queueEnrichment(venueRef, { householdId, seed, ...follow });
 
   // And put the menu in line (owner, 5 Sep 2026: "a user can request the menu
   // if they add it to a trip, and then we can go get the menu as soon as it's

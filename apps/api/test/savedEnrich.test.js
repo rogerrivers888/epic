@@ -218,3 +218,25 @@ test('the backfill: saved, loved or been and not yet researched; refused when th
     assert.deepEqual(await enrich.backfillCandidates(hh), [], 'once started, they are no longer candidates');
   } finally { globalThis.fetch = realFetch; }
 });
+
+test('a re-run is refused while a pass is under way; a pass that fails after Claude answered still records what it cost', async () => {
+  const hh = await household();
+  const ref = `google:rr-${randomUUID()}`;
+  await query(`insert into saved_place_enrichment (venue_ref, household_id, state) values ($1, $2, 'claude')`, [ref, hh]);
+  const busy = await enrich.requestEnrichment({ venueRef: ref, account: null, householdId: hh, rerun: true });
+  assert.equal(busy.started, false, 'never a second pipeline beside a running one');
+  await query(`update saved_place_enrichment set state = 'done' where venue_ref = $1`, [ref]);
+  assert.equal((await enrich.requestEnrichment({ venueRef: ref, account: null, householdId: hh, rerun: true })).started, true);
+
+  const ref2 = `google:cost-${randomUUID()}`;
+  await query(`insert into saved_place_enrichment (venue_ref, household_id, state) values ($1, $2, 'free')`, [ref2, hh]);
+  await query(`insert into place_records (venue_ref, name, provenance) values ($1, 'Costly', '{}')`, [ref2]);
+  const out = await enrich.afterFree(ref2, { householdId: hh, sessionId: null }, {
+    asks: [], openverse: async () => ({ ok: true, stored: [], refused: 0 }),
+    searchWeb: async ({ meta }) => { meta.costUsd = 0.07; return { text: 'not json', fetched: [], searches: 2 }; },
+  });
+  assert.equal(out.state, 'failed');
+  const row = await enrich.enrichmentOf(ref2);
+  assert.equal(Number(row.last_cost_usd), 0.07, 'the ledger and the row agree');
+  assert.equal(Number(row.cost_usd), 0.07);
+});

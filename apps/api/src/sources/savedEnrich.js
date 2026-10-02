@@ -113,16 +113,18 @@ export async function requestEnrichment({ venueRef, account, householdId, sessio
        state = 'queued', error = null, requested_at = now(),
        account_id = coalesce(excluded.account_id, saved_place_enrichment.account_id),
        household_id = excluded.household_id, session_id = excluded.session_id
-       where $5::boolean
+       where $5::boolean and saved_place_enrichment.state in ('done', 'failed')
      returning venue_ref`,
     [venueRef, account?.id ?? null, householdId, sessionId, rerun]);
+  // A place mid-pass is not started again, re-run or not: a second pipeline
+  // beside a running one would pay twice and race its writes (Codex, 2 Oct 2026).
   if (!rows.length) return { started: false, why: 'already' };
   const ctx = { householdId, sessionId, seedName };
   await setState(venueRef, 'free');
   // Handed back rather than queued here: a save already queues the free
   // research (sources/own.js claimPlace), and this joins that one job as its
   // `onDone`, so the place is researched once.
-  return { started: true, onDone: followOn(venueRef, ctx) };
+  return { started: true, onDone: followOn(venueRef, ctx), onFailed: onFreeFailed(venueRef) };
 }
 
 // The places this process has set going and not yet finished. A row waiting
@@ -130,6 +132,12 @@ export async function requestEnrichment({ venueRef, account, householdId, sessio
 // must not start it a second time — that would be a second paid pass. A
 // restart empties this, which is exactly when the waiting rows need picking up.
 const inProcess = new Set();
+
+/** When the free research itself throws: the place is free to be picked up again. */
+const onFreeFailed = (venueRef) => (err) => {
+  inProcess.delete(venueRef);
+  setState(venueRef, 'failed', { error: `free research failed: ${String(err?.message ?? err).slice(0, 200)}` }).catch(() => null);
+};
 
 const followOn = (venueRef, ctx) => {
   inProcess.add(venueRef);
@@ -146,7 +154,7 @@ const followOn = (venueRef, ctx) => {
 /** A re-run, a backfill, or a pass a restart cut short: queue the free research with the rest to follow. */
 function start(venueRef, ctx) {
   setState(venueRef, 'free').catch(() => null);
-  queueEnrichment(venueRef, { householdId: ctx.householdId, sessionId: ctx.sessionId, onDone: followOn(venueRef, ctx) });
+  queueEnrichment(venueRef, { householdId: ctx.householdId, sessionId: ctx.sessionId, onDone: followOn(venueRef, ctx), onFailed: onFreeFailed(venueRef) });
 }
 
 /**
@@ -183,7 +191,7 @@ export async function backfill({ account, householdId, sessionId = null, expectP
   for (const ref of refs) {
     const out = await requestEnrichment({ venueRef: ref, account, householdId, sessionId });
     if (!out.started) continue;
-    queueEnrichment(ref, { householdId, sessionId, onDone: out.onDone });
+    queueEnrichment(ref, { householdId, sessionId, onDone: out.onDone, onFailed: out.onFailed });
     started += 1;
   }
   return { started, why: null };
@@ -192,7 +200,7 @@ export async function backfill({ account, householdId, sessionId = null, expectP
 /** The back office's "Re-run": research the place again, free pass first. */
 export async function rerun(venueRef, { account = null, householdId, sessionId = null }) {
   const out = await requestEnrichment({ venueRef, account, householdId, sessionId, rerun: true });
-  if (out.started) queueEnrichment(venueRef, { householdId, sessionId, onDone: out.onDone });
+  if (out.started) queueEnrichment(venueRef, { householdId, sessionId, onDone: out.onDone, onFailed: out.onFailed });
   return { started: out.started };
 }
 
@@ -245,9 +253,16 @@ export async function afterFree(venueRef, ctx, deps = {}) {
     try {
       pass = await claudePass({ venueRef, name, record, missing, asks, ctx }, deps);
     } catch (err) {
+      // A call that was made was paid for, whatever became of its reply: the
+      // cost goes on the row as it went on the ledger (Codex, 2 Oct 2026).
+      const spent = Number(err.costUsd ?? 0);
       found.notes.push(`Claude pass failed: ${err.code ?? err.message}`);
-      await setState(venueRef, 'failed', { found, error: String(err.code ?? err.message).slice(0, 300) });
-      return { state: 'failed', found, costUsd: 0 };
+      await query(
+        `update saved_place_enrichment set state = 'failed', last_run_at = now(), found = $2, error = $3,
+                cost_usd = cost_usd + $4, last_cost_usd = $4
+          where venue_ref = $1`,
+        [venueRef, JSON.stringify(found), String(err.code ?? err.message).slice(0, 300), spent]);
+      return { state: 'failed', found, costUsd: spent };
     }
     Object.assign(found.fields, pass.fields);
     found.facts = pass.facts;
@@ -414,10 +429,19 @@ async function claudePass({ venueRef, name, record, missing, asks, ctx }, deps =
     maxSearches: MAX_SEARCHES, maxFetches: MAX_FETCHES, maxPageTokens: PAGE_TOKENS,
     meta,
   });
+  const costUsd = Number(meta.costUsd ?? 0);
   const reply = parseReply(out.text);
   // Can't speak: a reply that is not the shape asked for is a failed pass, not
   // a place with nothing to find (CLAUDE.md, the can't-speak rule).
-  if (!reply) throw Object.assign(new Error('unparsed_reply'), { code: 'unparsed_reply' });
+  if (!reply) throw Object.assign(new Error('unparsed_reply'), { code: 'unparsed_reply', costUsd });
+  try {
+    return await writePass({ venueRef, reply, out, record, asks, costUsd });
+  } catch (err) {
+    throw Object.assign(err, { costUsd });
+  }
+}
+
+async function writePass({ venueRef, reply, out, record, asks, costUsd }) {
 
   const j = judge({ reply, fetched: out.fetched, knownWebsite: record?.website ?? null, asks });
   if (Object.keys(j.siteFacts).length) await recordSiteFacts(venueRef, j.siteFacts);
@@ -442,7 +466,7 @@ async function claudePass({ venueRef, name, record, missing, asks, ctx }, deps =
   return {
     fields: j.fields, facts: j.facts,
     notes: [...j.notes, `Read ${out.fetched.length} page(s), ${out.searches} search(es).`],
-    costUsd: Number(meta.costUsd ?? 0),
+    costUsd,
   };
 }
 
