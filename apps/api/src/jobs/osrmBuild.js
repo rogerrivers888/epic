@@ -48,40 +48,6 @@ export const OSRM_RINGS_KEY = 'reach:osrm-build:rings';
 const ringId = (k) => `${k.cell}|${k.mode}|${k.minutes}`;
 const fromRingId = (id) => { const [cell, mode, minutes] = id.split('|'); return { cell, mode, minutes: Number(minutes) }; };
 
-/** Add ring keys to the persisted owed-a-recount set (a union; never loses one). */
-export async function rememberRings(keys) {
-  const ids = [...new Set((keys ?? []).map(ringId))];
-  if (!ids.length) return;
-  await query(
-    `insert into bo_settings (key, value, version, updated_by, updated_at)
-     values ($1, jsonb_build_object('rings', $2::jsonb), 1, 'osrm-build service', now())
-     on conflict (key) do update set
-       value = jsonb_build_object('rings', (
-         select coalesce(jsonb_agg(distinct x), '[]'::jsonb)
-           from jsonb_array_elements(coalesce(bo_settings.value->'rings', '[]'::jsonb) || $2::jsonb) as x)),
-       version = bo_settings.version + 1, updated_at = now()`,
-    [OSRM_RINGS_KEY, JSON.stringify(ids)]);
-}
-
-/** The persisted owed-a-recount set. */
-export async function pendingRings() {
-  const { rows: [row] } = await query('select value from bo_settings where key = $1', [OSRM_RINGS_KEY]);
-  return (row?.value?.rings ?? []).map(fromRingId);
-}
-
-/** Forget recounted keys — only those, so a key added meanwhile survives. */
-export async function forgetRings(keys) {
-  const ids = (keys ?? []).map(ringId);
-  if (!ids.length) return;
-  await query(
-    `update bo_settings set value = jsonb_build_object('rings', (
-       select coalesce(jsonb_agg(x), '[]'::jsonb)
-         from jsonb_array_elements(coalesce(value->'rings', '[]'::jsonb)) as x
-        where not (x #>> '{}' = any($2::text[])))), updated_at = now()
-      where key = $1`,
-    [OSRM_RINGS_KEY, ids]);
-}
-
 /** A run that has said `running` for this long without finishing died with its container. */
 export const STALE_RUN_HOURS = 12;
 
@@ -90,6 +56,56 @@ export const PROFILES = [
   { mode: 'walking', lua: '/opt/foot.lua', label: 'foot' },
   { mode: 'cycling', lua: '/opt/bicycle.lua', label: 'bike' },
 ];
+
+/**
+ * The owed-a-recount set: ring key -> the run that last owed it. A key re-added
+ * by a newer run carries that run, so an older run finishing its recount cannot
+ * forget an obligation the newer one renewed (Codex).
+ */
+export async function rememberRings(keys, run) {
+  const map = Object.fromEntries((keys ?? []).map((k) => [ringId(k), String(run)]));
+  if (!Object.keys(map).length) return;
+  await query(
+    `insert into bo_settings (key, value, version, updated_by, updated_at)
+     values ($1, jsonb_build_object('rings', $2::jsonb), 1, 'osrm-build service', now())
+     on conflict (key) do update set
+       value = jsonb_build_object('rings', coalesce(bo_settings.value->'rings', '{}'::jsonb) || $2::jsonb),
+       version = bo_settings.version + 1, updated_at = now()`,
+    [OSRM_RINGS_KEY, JSON.stringify(map)]);
+}
+
+/** The owed set, each key with the run that owes it. */
+export async function pendingRings() {
+  const { rows: [row] } = await query('select value from bo_settings where key = $1', [OSRM_RINGS_KEY]);
+  return Object.entries(row?.value?.rings ?? {}).map(([id, run]) => ({ ...fromRingId(id), run }));
+}
+
+/** Forget recounted entries — each only if it is still owed by the run it was read with. */
+export async function forgetRings(entries) {
+  const list = (entries ?? []).map((e) => [ringId(e), String(e.run)]);
+  if (!list.length) return;
+  await query(
+    `update bo_settings set value = jsonb_build_object('rings', coalesce((
+       select jsonb_object_agg(e.k, e.v)
+         from jsonb_each(coalesce(value->'rings', '{}'::jsonb)) as e(k, v)
+        where (e.k, e.v #>> '{}') not in (select * from unnest($2::text[], $3::text[]))), '{}'::jsonb)),
+       updated_at = now()
+      where key = $1`,
+    [OSRM_RINGS_KEY, list.map((x) => x[0]), list.map((x) => x[1])]);
+}
+
+/** Recount what is owed, forgetting only what was recounted. Returns { done, failed }. */
+async function settleOwed(d) {
+  const owed = await d.pendingRings();
+  const done = [];
+  for (const k of owed) {
+    try { await d.recountRing({ cell: k.cell, mode: k.mode, minutes: k.minutes }); done.push(k); } catch (err) {
+      d.log('ring recount failed (stays owed)', ringId(k), String(err?.message ?? err));
+    }
+  }
+  await d.forgetRings(done);
+  return { done: done.length, failed: owed.length - done.length };
+}
 
 /** The build's state, or `{ state: 'none' }` when nobody has asked for one. */
 export async function osrmBuildState() {
@@ -240,12 +256,17 @@ export async function runOsrmBuildJob({
   extractUrl = process.env.EPIC_OSRM_EXTRACT_URL || 'https://download.geofabrik.de/europe/great-britain-latest.osm.pbf',
   horizon = HORIZON_MINUTES,
   bbox = null,
+  // How long to wait before a second sweep for ring counts that were already
+  // under way in another process when the build finished (Codex): longer than a
+  // ring refresh takes.
+  graceMs = 5 * 60_000,
   deps = {},
 } = {}) {
   const d = {
     claim: claimOsrmBuild, retire: retireStaleRun, record: writeState,
     download, run, startRouted, allCells, buildOsrmMode, osrmTable,
-    rememberRings, pendingRings, forgetRings,
+    rememberRings, pendingRings, forgetRings, state: osrmBuildState,
+    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     ringKeys: async ({ before = null } = {}) => (await query(
       `select distinct cell, mode, minutes from ring_counts
         where mode in ('walking', 'cycling') and ($1::timestamptz is null or computed_at < $1::timestamptz)`,
@@ -257,7 +278,16 @@ export async function runOsrmBuildJob({
   };
   if (await d.retire()) return { ran: false, reason: 'retired a run that died' };
   const claimed = await d.claim();
-  if (!claimed) return { ran: false, reason: 'nothing approved' };
+  if (!claimed) {
+    // An idle wake settles any ring recount a finished build still owes (one
+    // that failed transiently), so it is never stranded until the next build
+    // (Codex). Not while a build is running — it will settle its own.
+    if ((await d.state()).state !== 'running' && (await d.pendingRings()).length) {
+      const owed = await settleOwed(d);
+      return { ran: false, reason: 'settled owed ring recounts', ...owed };
+    }
+    return { ran: false, reason: 'nothing approved' };
+  }
 
   const t0 = Date.now();
   const result = { modes: {} };
@@ -272,7 +302,7 @@ export async function runOsrmBuildJob({
     // will make stale; their keys are kept so exactly those are recounted at
     // the end, even though the build drops each one as its origin is rebuilt.
     // Persisted, not held in memory, so a retry after a failure still owes them.
-    await d.rememberRings(await d.ringKeys());
+    await d.rememberRings(await d.ringKeys(), claimed.runId);
     await d.download(extractUrl, pbf);
 
     let cells = await d.allCells({ scheme: 'sector' });
@@ -307,7 +337,7 @@ export async function runOsrmBuildJob({
         const out = await d.buildOsrmMode({
           mode: p.mode, cells, origins, table: d.osrmTable(routed.url, { profile: p.label }), horizon,
           resume: true, since: claimed.epoch, chunk: 300,
-          onRingsDropped: (keys) => d.rememberRings(keys),
+          onRingsDropped: (keys) => d.rememberRings(keys, claimed.runId),
           onProgress: ({ done, of, pairs }) => d.log(p.mode, `${done}/${of}`, `${pairs} pairs`),
         });
         result.modes[p.mode] = { built: out.built, skipped: out.skipped, pairs: out.pairs, runId: out.runId };
@@ -323,16 +353,17 @@ export async function runOsrmBuildJob({
     // it was replacing (the race osrmMatrix.js recorded). Driving is untouched
     // by this build and is not recounted (Codex).
     const finished = new Date().toISOString();
-    await d.rememberRings(await d.ringKeys({ before: finished }));
-    const owed = await d.pendingRings();
-    const done = [];
-    for (const k of owed) {
-      try { await d.recountRing(k); done.push(k); } catch (err) { d.log('ring recount failed', k, String(err?.message ?? err)); }
-    }
-    // Only what was recounted is forgotten: a failed recount stays owed.
-    await d.forgetRings(done);
-    result.ringsRecounted = done.length;
-    result.ringsStillOwed = owed.length - done.length;
+    await d.rememberRings(await d.ringKeys({ before: finished }), claimed.runId);
+    const first = await settleOwed(d);
+    // A ring count another process had already begun from the old reach can
+    // commit after that sweep; it is stamped with when it began, so a second
+    // sweep after the grace period finds it by `computed_at < finished` and
+    // nothing just recounted (stamped after) is touched again (Codex).
+    if (graceMs > 0) await d.sleep(graceMs);
+    await d.rememberRings(await d.ringKeys({ before: finished }), claimed.runId);
+    const second = await settleOwed(d);
+    result.ringsRecounted = first.done + second.done;
+    result.ringsStillOwed = second.failed;
     result.minutes = Math.round((Date.now() - t0) / 60000);
     const mine = (was) => was.state === 'running' && was.runId === claimed.runId;
     const rec = await d.record({ state: 'done', finishedAt: new Date().toISOString(), result, why: null }, { who: 'osrm-build service', expect: mine });
