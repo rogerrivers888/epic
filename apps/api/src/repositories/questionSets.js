@@ -757,23 +757,34 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
     const { rows: aliasRows } = await client.query('select target_key from attribute_aliases where norm = $1', [norm]);
     let key = aliasRows[0]?.target_key ?? null;
     if (!key) {
-      const text = label ?? cands[0].raw_forms?.[0] ?? norm;
-      const wanted = slug(text);
-      // `on conflict do nothing` suppresses the unique violation, so the old catch
-      // never fired and a colliding key silently mapped this feature onto an
-      // unrelated fact (Codex, 2 Oct 2026). Read the result: a new row is ours to
-      // keep; a conflict is accepted only when the wording itself IS that fact —
-      // slug(norm) is the key, i.e. a known-feature approval, not a custom label
-      // that happens to collide — and otherwise refused.
-      const { rows: made } = await client.query(
-        'insert into place_attributes (key, label, kind, position) values ($1, $2, $3, 200) on conflict (key) do nothing returning key',
-        [wanted, sentence(text), kind]);
-      if (made[0]) {
-        key = wanted;
-      } else if (wanted === slug(norm)) {
-        key = wanted; // the existing fact this very word names — approve onto it
+      // Reuse the exact fact that made this word "known" — matched the same way
+      // knownFeatureKeys matches it (its de-slugged key or its label), so a renamed
+      // or otherwise noncanonical key is asked, not duplicated (Codex, 2 Oct 2026).
+      const { rows: knownRow } = await client.query(
+        `select key from place_attributes where active
+           and (replace(replace(lower(key), '_', ' '), '-', ' ') = $1 or lower(label) = $1)
+         limit 1`,
+        [norm]);
+      if (knownRow[0]) {
+        key = knownRow[0].key;
       } else {
-        throw bad(`"${text}" is already one of our labels. Approve it onto the label we have, or give it another name.`);
+        const text = label ?? cands[0].raw_forms?.[0] ?? norm;
+        const wanted = slug(text);
+        // `on conflict do nothing` suppresses the unique violation, so the old catch
+        // never fired and a colliding key silently mapped this feature onto an
+        // unrelated fact (Codex, 2 Oct 2026). Read the result: a new row is ours to
+        // keep; a conflict is accepted only when the wording itself IS that fact —
+        // slug(norm) is the key — and otherwise refused.
+        const { rows: made } = await client.query(
+          'insert into place_attributes (key, label, kind, position) values ($1, $2, $3, 200) on conflict (key) do nothing returning key',
+          [wanted, sentence(text), kind]);
+        if (made[0]) {
+          key = wanted;
+        } else if (wanted === slug(norm)) {
+          key = wanted; // the existing fact this very word names — approve onto it
+        } else {
+          throw bad(`"${text}" is already one of our labels. Approve it onto the label we have, or give it another name.`);
+        }
       }
       await client.query(
         'insert into attribute_aliases (norm, target_key, raw) values ($1, $2, $3) on conflict (norm) do nothing',
@@ -786,17 +797,18 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
     // can be asked there once a set is attached; a set already asking it (or asking
     // it globally) is left as it is.
     //
-    // Only drawers that still have an UNDECIDED candidate for the word: a drawer where
-    // it was ignored per-subcategory (ignoreCandidate — "never ask about this word
-    // here again") keeps its sightings but must not be asked (Codex, 2 Oct 2026).
+    // A drawer is skipped only if it explicitly ignored the word per-subcategory
+    // (ignoreCandidate — "never ask about this word here again"); a place reclassified
+    // into a drawer with no candidate of its own is still asked there, since that
+    // drawer never ignored it (Codex, 2 Oct 2026).
     const { rows: drawerRows } = await client.query(
       `select distinct p.subcategory
          from review_sightings s
          join place_index p on p.venue_ref = s.venue_ref
-         join harvest_candidates c
-           on c.norm = s.norm and c.subcategory = p.subcategory
-          and c.sources ? 'google' and c.status in ('new', 'unresolved')
-        where s.norm = $1 and p.subcategory is not null`,
+        where s.norm = $1 and p.subcategory is not null
+          and not exists (select 1 from harvest_candidates ci
+                           where ci.norm = s.norm and ci.subcategory = p.subcategory
+                             and ci.sources ? 'google' and ci.status = 'ignored')`,
       [norm]);
     const subs = drawerRows.map((r) => r.subcategory);
     let asked = 0;

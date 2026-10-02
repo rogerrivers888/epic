@@ -408,4 +408,49 @@ test('a spotted synonym aliased onto an active fact reads as known, not new', as
   assert.equal((await reviewQueue({ subcategory: sub })).find((f) => f.norm === 'splash zone')?.known, true, 'and the queue marks it known');
 });
 
+test('approving a known feature reuses the fact even when its key is noncanonical', async () => {
+  // Codex, 2 Oct 2026: a fact can be known by its label while its key is something
+  // else (e.g. the label was renamed). Approval must ask that existing fact, not mint
+  // a second one at slug(norm). "sensory garden" is known only by label here.
+  const sub = 'c30-rename-parks';
+  const ref = 'google:ChIJ_c30_rename';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 rename parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
+  await query("delete from attribute_aliases where norm = 'sensory garden'").catch(() => {});
+  await query("delete from place_attributes where key = 'sensory-garden'").catch(() => {});
+  await query("insert into place_attributes (key, label, kind) values ('legacy-sg-key', 'Sensory garden', 'yesno') on conflict (key) do update set active = true, label = 'Sensory garden'");
+
+  const report = await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A sensory garden.' } });
+  assert.equal(report.features.find((f) => f.norm === 'sensory garden')?.known, true, 'known by its label');
+
+  const res = await sets.approveFeature('sensory garden', { actor: 'tester' });
+  assert.equal(res.attributeKey, 'legacy-sg-key', 'reused the existing fact by its real key');
+  assert.equal((await query("select count(*)::int n from place_attributes where key = 'sensory-garden'")).rows[0].n, 0, 'no duplicate fact was minted');
+});
+
+test('a place reclassified after it was spotted still counts in its new drawer', async () => {
+  // Codex, 2 Oct 2026: the queue is global on "awaiting a decision", so a place moved
+  // to a new drawer (its candidate still filed under the old one) is not stranded.
+  const subOld = 'c30-recat-old'; const subNew = 'c30-recat-new';
+  const ref = 'google:ChIJ_c30_recat';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 recat old', 'c30-test-cat') on conflict do nothing", [subOld]);
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 recat new', 'c30-test-cat') on conflict do nothing", [subNew]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, subOld]);
+  await query('delete from harvest_candidates where subcategory = any($1)', [[subOld, subNew]]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
+  await query("delete from feature_tombstones where norm = 'assault course'");
+
+  await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'An assault course.' } }); // filed under old
+  await query('update place_index set subcategory = $2 where venue_ref = $1', [ref, subNew]); // reclassified, no re-spot
+
+  const q = (await reviewQueue()).find((f) => f.norm === 'assault course');
+  assert.ok(q, 'still in the queue after the place moved drawer');
+  assert.equal(q.places, 1, 'counted in its new drawer');
+  assert.equal(q.exampleSubcategory, subNew, 'shown under the current drawer');
+});
+
 test.after(async () => { await pool.end(); });

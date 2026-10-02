@@ -291,14 +291,18 @@ export function spotInBackground(args) {
  */
 export async function reviewQueue({ limit = 200, subcategory = null } = {}) {
   const known = await knownFeatureKeys();
-  // Count a sighting only where its CURRENT drawer still has an undecided candidate
-  // for the word. A promoted or review-queue-ignored word has no undecided candidate
-  // anywhere; a word ignored per-subcategory (ignoreCandidate) keeps its sightings in
-  // that drawer, but that drawer's candidate is 'ignored', so correlating the exists
-  // to `p.subcategory` drops those stale sightings from the count rather than letting
-  // a global predicate inflate it (Codex, 2 Oct 2026).
-  const undecided = "exists (select 1 from harvest_candidates c where c.norm = s.norm and c.subcategory = p.subcategory and c.sources ? 'google' and c.status in ('new', 'unresolved'))";
-  const where = subcategory ? `where p.subcategory = $2 and ${undecided}` : `where ${undecided}`;
+  // The word must still be awaiting a decision somewhere (a promoted or
+  // review-queue-ignored word has no undecided candidate left, and an ignored one is
+  // tombstoned so it is never re-spotted). The exists is global, not tied to the
+  // sighting's drawer, so a place reclassified after it was spotted still counts in
+  // its new drawer (Codex, 2 Oct 2026). A sighting is dropped only from a drawer that
+  // explicitly ignored the word per-subcategory (ignoreCandidate) — that drawer said
+  // "never ask here", so its places must not count or be asked.
+  const undecided = "exists (select 1 from harvest_candidates c where c.norm = s.norm and c.sources ? 'google' and c.status in ('new', 'unresolved'))";
+  const notIgnoredHere = "not exists (select 1 from harvest_candidates ci where ci.norm = s.norm and ci.subcategory = p.subcategory and ci.sources ? 'google' and ci.status = 'ignored')";
+  const where = subcategory
+    ? `where p.subcategory = $2 and ${undecided} and ${notIgnoredHere}`
+    : `where ${undecided} and ${notIgnoredHere}`;
   const params = subcategory ? [limit, subcategory] : [limit];
   const { rows } = await query(
     `select s.norm,
