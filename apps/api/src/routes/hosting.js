@@ -1862,7 +1862,8 @@ adminRouter.patch('/hosts/:id', requires('manage_hosting'), async (req, res, nex
     const h = await repo.hostById(req.params.id);
     if (!h) throw refuse(404, 'not_found', 'No such host.');
     const patch = {};
-    if (req.body?.trust !== undefined) { patch.trust = oneOf(TRUST_LEVELS, req.body.trust); if (!patch.trust) throw refuse(400, 'bad_trust', 'Verified, Checked or Epic Trusted.'); }
+    // Epic Trusted is retired (hosting v4 §3.1): nobody is given it any more.
+    if (req.body?.trust !== undefined) { patch.trust = oneOf(['verified', 'checked'], req.body.trust); if (!patch.trust) throw refuse(400, 'bad_trust', 'Verified or Checked.'); }
     if (req.body?.checks !== undefined) { patch.checks = oneOf(['running', 'passed'], req.body.checks); if (!patch.checks) throw refuse(400, 'bad_checks', 'Running or passed.'); }
     // Checked (hosting v7: DBS, insurance, two references) is passed or failed here and only here.
     if (req.body?.checkedState !== undefined) { patch.checkedState = oneOf(['submitted', 'passed', 'failed'], req.body.checkedState); if (!patch.checkedState) throw refuse(400, 'bad_checked', 'Passed or failed.'); }

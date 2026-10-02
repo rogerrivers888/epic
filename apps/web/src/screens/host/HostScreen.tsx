@@ -93,6 +93,8 @@ export function HostScreen({ route }: { route: Extract<Route, { name: 'host' }> 
     api.createOffer(shape, vis).then((r) => navigate(paths.hostOfferEdit(r.offer.id, 'plan'), { replace: true })).catch((e) => { setError(e.message); creating.current = false; });
   }, [route.page]);
   useEffect(() => { if (route.page === 'start') navigate(paths.hostMe(), { replace: true }); }, [route.page]);
+  // The old dashboard is replaced by All events (hosting v4, E7); its address goes there.
+  useEffect(() => { if (route.page === 'manage' && !query.get('legacy')) navigate(paths.hostEvents(), { replace: true }); }, [route.page]);
 
   // Four ways to host — dispatched before anything else, and needing nothing loaded here.
   if (route.page === 'lanes') return <HostLanes />;
@@ -130,11 +132,11 @@ export function HostScreen({ route }: { route: Extract<Route, { name: 'host' }> 
   if (route.page === 'new' || route.page === 'profile') return <View style={styles.centre}><Text style={t.sub}>{error ?? 'One moment…'}</Text></View>;
 
   if (!home) return <View style={styles.centre}><Text style={t.sub}>{error ?? 'Loading…'}</Text></View>;
-  // Not hosting yet: Host home 4e (hosting v7) — the four ways in.
-  // Host home is 4e for everybody (owner, 2 Oct 2026: hosts with offers do not land on the
-  // dashboard). The dashboard lives at /host/offers until host management has its own design,
-  // and 4e links to it only when there is something there.
+  // Not hosting yet: Host home 4e (hosting v7) — the four ways in; a host who hosts gets E1 (above).
   if (route.page !== 'manage') return <HostLanes yours={home.host ? home.offers.length : 0} />;
+  // The old dashboard is replaced by All events (hosting v4, E7): /host/offers goes there (the
+  // effect above). What follows is its former body, kept until the owner says it can go.
+  if (!query.get('legacy')) return <Loading />;
   if (!home.host || !home.offers.length) return <HostLanes yours={0} />;
 
   // The Host tab's own sub-screens, all query state on /host. Opening one is a

@@ -9,7 +9,7 @@
  *     with a note. Coaching, not rejection: the note is required when it goes
  *     back, and the host reads it on their draft.
  *   * **Set a host's trust level.** Verified is the baseline once checks pass;
- *     Checked and Epic Trusted are earned and set here, never by the host.
+ *     Checked is earned and set here, never by the host (Epic Trusted is retired, hosting v4 §3.1).
  *
  * And the reports: what a guest said was wrong, resolved when somebody has
  * looked. The full due-diligence workflow behind the ladder is out of scope
@@ -117,7 +117,7 @@ export function Hosting({ canManage }: { canManage: boolean }) {
         })}
       </Panel>
 
-      <Panel title="Hosts" sub="Verified is the baseline once checks pass. Checked and Epic Trusted are set here.">
+      <Panel title="Hosts" sub="Verified is the baseline once checks pass. Checked is set here.">
         {!data?.hosts.length ? <Text style={type.small}>Nobody hosts yet.</Text> : data.hosts.map((h) => (
           <View key={h.id} style={styles.host}>
             <View style={{ flex: 1, gap: 2 }}>
@@ -130,7 +130,7 @@ export function Hosting({ canManage }: { canManage: boolean }) {
             </View>
             <View style={{ gap: 6, width: 300 }}>
               <Segmented value={h.checks} options={[{ value: 'running', label: 'Checks running' }, { value: 'passed', label: 'Checks passed' }]} onChange={(v) => canManage && void setTrust(h.id, { checks: v as any })} />
-              <Segmented value={h.trust} options={[{ value: 'verified', label: 'Verified' }, { value: 'checked', label: 'Checked' }, { value: 'trusted', label: 'Trusted' }]} onChange={(v) => canManage && void setTrust(h.id, { trust: v as TrustLevel })} />
+              <Segmented value={h.trust === 'trusted' ? 'checked' : h.trust} options={[{ value: 'verified', label: 'Verified' }, { value: 'checked', label: 'Checked' }]} onChange={(v) => canManage && void setTrust(h.id, { trust: v as TrustLevel })} />
             </View>
           </View>
         ))}

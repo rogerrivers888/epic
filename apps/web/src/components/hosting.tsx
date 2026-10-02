@@ -55,7 +55,8 @@ export const SHAPE_ICON: Record<OfferShape, IconName> = { oneoff: 'oneoff', seri
 export const STATE_LABEL: Record<OfferState, string> = { draft: 'Draft', in_review: 'In review', live: 'Live', paused: 'Paused', ended: 'Ended' };
 export const VENUE_LABEL: Record<OfferVenue, string> = { their_place: 'Their place', your_place: 'Your place', out_about: 'Out and about', online: 'Online' };
 export const VENUE_ICON: Record<OfferVenue, IconName> = { their_place: 'theirPlace', your_place: 'yourPlace', out_about: 'outAbout', online: 'online' };
-export const TRUST_LABEL: Record<TrustLevel, string> = { verified: 'Verified', checked: 'Checked', trusted: 'Epic Trusted' };
+// "Epic Trusted" is retired (hosting v4 handover §3.1): a host who held it shows as Checked, which it included.
+export const TRUST_LABEL: Record<TrustLevel, string> = { verified: 'Verified', checked: 'Checked', trusted: 'Checked' };
 export const REFUND_WORDS = { '24h': 'Full refund up to 24 hours before', '7d': 'Full refund up to 7 days before', none: 'No refunds' } as const;
 
 /** "her studio" / "out and about" / "online" — the venue in a meta line, in the host's own area words where there are any. */
@@ -134,15 +135,14 @@ export function StateChip({ state, pausedUntil }: { state: OfferState; pausedUnt
 
 /**
  * The trust ladder as a badge. Verified: grey shield. Checked: lime shield.
- * Epic Trusted: an ink square with a lime glyph. A new host with checks still
- * running says so beside it — never an empty star row, never "untrusted".
+ * (Epic Trusted is retired — hosting v4 §3.1 — and draws as Checked.) A new host
+ * with checks still running says so beside it — never an empty star row, never "untrusted".
  */
 export function TrustBadge({ trust, checks = 'passed', onPress, wide }: { trust: TrustLevel; checks?: 'running' | 'passed'; onPress?: () => void; wide?: boolean }) {
   const running = checks === 'running';
   const look = running
     ? { bg: colors.warm, fg: colors.inkMuted, icon: 'verified' as IconName, label: 'Checks running' }
-    : trust === 'trusted' ? { bg: INK, fg: LIME, icon: 'trusted' as IconName, label: TRUST_LABEL.trusted }
-      : trust === 'checked' ? { bg: LIME_TINT, fg: MOSS, icon: 'checked' as IconName, label: TRUST_LABEL.checked }
+    : trust === 'checked' || trust === 'trusted' ? { bg: LIME_TINT, fg: MOSS, icon: 'checked' as IconName, label: TRUST_LABEL.checked }
         : { bg: colors.warm, fg: colors.inkMuted, icon: 'verified' as IconName, label: TRUST_LABEL.verified };
   const body = (
     <View style={[styles.chip, { backgroundColor: look.bg }, wide && { paddingHorizontal: 10 }]}>

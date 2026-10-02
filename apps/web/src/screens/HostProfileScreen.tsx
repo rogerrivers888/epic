@@ -121,7 +121,7 @@ export function HostProfileScreen({ route }: { route: Extract<Route, { name: 'ho
           </View>
         ) : host.trust !== 'verified' ? (
           <Press onPress={() => navigate(paths.hostTrust(host.id))} accessibilityRole="button" style={styles.checks}>
-            <Text style={type.small}>{host.trust === 'trusted' ? 'Licence and insurance seen. ' : 'Documents seen. '}Tap to see what {TRUST_LABEL[host.trust]} covers ›</Text>
+            <Text style={type.small}>Documents seen. Tap to see what {TRUST_LABEL[host.trust]} covers ›</Text>
           </Press>
         ) : null}
 
@@ -189,16 +189,15 @@ export function TrustLadder({ host, wide, onBack }: { host: HostProfile['host'];
   const rungs = [
     { key: 'verified', title: 'Verified', body: 'Identity and contact confirmed against photo ID and the face in their video.', foot: 'Every host on Epic', bg: colors.warm, fg: colors.inkMuted, icon: 'verified' as const },
     { key: 'checked', title: 'Checked', body: 'Documents seen: qualifications, public liability insurance, a licence where the city or the activity needs one, plus references.', foot: 'Required at their place, with children, or above £100', bg: LIME_TINT, fg: MOSS, icon: 'checked' as const },
-    { key: 'trusted', title: 'Epic Trusted', body: 'Everything in Checked, plus a sustained record — completed experiences, ratings and no unresolved reports.', foot: 'Earned over time. It carries our name.', bg: INK, fg: LIME, icon: 'trusted' as const },
   ];
   return (
     <ScrollView contentContainerStyle={[styles.scroll, styles.gutter, wide && styles.scrollWide, { paddingTop: spacing.lg }]}>
       <Press onPress={onBack} accessibilityRole="button"><Row><Icon name="back" size={18} /><Text style={type.h3}>Back to {host.name.split(' ')[0]}</Text></Row></Press>
       <Kicker style={{ marginTop: spacing.lg }}>HOW EPIC CHECKS HOSTS</Kicker>
-      <Text style={type.title}>Three levels, and what each one means</Text>
+      <Text style={type.title}>Two levels, and what each one means</Text>
       <Text style={[type.small, { marginTop: 4 }]}>Every host clears the first. The other two are earned, and we say which one you are looking at on every card and profile.</Text>
       {rungs.map((r) => {
-        const mine = host.trust === r.key && host.checks !== 'running';
+        const mine = (host.trust === 'trusted' ? 'checked' : host.trust) === r.key && host.checks !== 'running';
         return (
           <View key={r.key} style={[styles.rung, mine && styles.rungOn]}>
             <View style={[styles.rungIcon, { backgroundColor: r.bg }]}><Icon name={r.icon} size={18} color={r.fg} strokeWidth={2.2} /></View>
