@@ -27,16 +27,12 @@ const RENTED = (ref) => `coalesce(epic_ref_true_source(${ref}), '') = any(epic_r
 
 /** Every column that keeps a name beside a place reference, as migration 341 lists them. */
 export const STORES = [
-  // Group items first: a legacy item is cleared only on evidence it was a copy
-  // — its label is the name the same trip's shortlist or stop held for that
-  // place — and that evidence must still be there when it is asked (Codex,
-  // 2 Oct 2026). An organiser's own words ('own') are never touched.
+  // A checklist item is cleared only when it is known to be a copy of the
+  // trip's own names ('trip' — written so from now on, and judged on the
+  // evidence for the items already there by migration 341). An organiser's
+  // own words ('own') are never touched (Codex, 2 Oct 2026).
   { table: 'group_items', col: 'label', ref: 'venue_ref', mode: 'ref', said: 'group checklist items',
-    only: `label_from is distinct from 'own' and (label_from = 'trip'
-             or exists (select 1 from trip_groups g join trip_shortlist sl on sl.trip_id = g.trip_id
-                         where g.id = group_items.group_id and sl.venue_ref = group_items.venue_ref and sl.venue_label = group_items.label)
-             or exists (select 1 from trip_groups g join trip_stops ts on ts.trip_id = g.trip_id
-                         where g.id = group_items.group_id and ts.venue_ref = group_items.venue_ref and ts.venue_name = group_items.label))` },
+    only: `label_from = 'trip'` },
   { table: 'household_places', col: 'label', ref: 'venue_ref', mode: 'ref', said: 'saved places' },
   { table: 'trip_stops', col: 'venue_name', ref: 'venue_ref', mode: 'ref', said: 'trip stops' },
   { table: 'trip_shortlist', col: 'venue_label', ref: 'venue_ref', mode: 'ref', said: 'shortlist rows' },
@@ -63,9 +59,16 @@ const heldWhere = (s) => `${s.mode === 'ref'
 // About a provider's stop it is that provider's name; about a day it reads
 // "Sat 4 · <the first stop>", built from the same names — both are cleared,
 // and the screen redraws them from the trip (routes/chat.js tagOf).
+// A day's label is cleared only when it holds a provider's stop name — the
+// name a stop on that day still keeps, so the topics go before the stops do
+// (Codex, 2 Oct 2026). A day named from our own words keeps its fallback.
 const CHAT = {
   key: 'chat_topics.tag_label', said: 'chat topic labels',
-  where: `tag_label is not null and ((tag_kind = 'stop' and tag_ref is not null and ${RENTED('tag_ref')}) or tag_kind = 'day')`,
+  where: `tag_label is not null and (
+    (tag_kind = 'stop' and tag_ref is not null and ${RENTED('tag_ref')})
+    or (tag_kind = 'day' and exists (select 1 from trip_stops ts
+          where ts.day_id::text = chat_topics.tag_ref and ${RENTED('ts.venue_ref')}
+            and ts.venue_name is distinct from ts.venue_ref and position(ts.venue_name in chat_topics.tag_label) > 0)))`,
 };
 
 // A plan session's saved search results and options (migration 343): a
@@ -97,13 +100,14 @@ export async function run({ by = null, expected = null } = {}) {
   try {
     await c.query('begin');
     const byStore = {};
-    for (const s of STORES) {
-      const set = s.mode === 'ref' ? `${s.col} = ${s.ref}` : `${s.col} = null`;
-      const { rowCount } = await c.query(`update ${s.table} set ${set} where ${heldWhere(s)}`);
-      byStore[keyOf(s)] = rowCount;
-    }
+    // The topics first, while the stops still hold the names a day's label is judged by.
     const { rowCount } = await c.query(`update chat_topics set tag_label = null where ${CHAT.where}`);
     byStore[CHAT.key] = rowCount;
+    for (const s of STORES) {
+      const set = s.mode === 'ref' ? `${s.col} = ${s.ref}` : `${s.col} = null`;
+      const { rowCount: n } = await c.query(`update ${s.table} set ${set} where ${heldWhere(s)}`);
+      byStore[keyOf(s)] = n;
+    }
     const { rowCount: plans } = await c.query(`update plan_sessions set state = epic_strip_rented_names(state) where ${PLAN.where}`);
     byStore[PLAN.key] = plans;
     const cleared = Object.values(byStore).reduce((a, b) => a + b, 0);

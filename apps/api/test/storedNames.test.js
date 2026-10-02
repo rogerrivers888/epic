@@ -128,15 +128,19 @@ test('the purge clears every stored provider name it quoted, logs the counts and
     values ($1, 'T', 'Home', 51.4, -0.6, now(), now(), '2026-10-04', '2026-10-05') returning id`, [hh])).rows[0];
   // The past, as it stands on production: written before the trigger, so it
   // is seeded with the trigger off.
-  const off = ['household_places', 'visits', 'place_menus', 'chat_topics'];
+  const day = (await query(`insert into trip_days (trip_id, date) values ($1, '2026-10-04') returning id`, [trip.id])).rows[0];
+  const ownDay = (await query(`insert into trip_days (trip_id, date) values ($1, '2026-10-05') returning id`, [trip.id])).rows[0];
+  const off = ['household_places', 'visits', 'place_menus', 'chat_topics', 'trip_stops'];
   for (const t of off) await query(`alter table ${t} disable trigger no_rented_name`);
   try {
+    await query(`insert into trip_stops (trip_id, day_id, position, venue_ref, venue_name, dwell_minutes) values ($1, $2, 1, $3, 'Legacy Google Stop', 60)`, [trip.id, day.id, g]);
     await query(`insert into household_places (household_id, venue_ref, label, nickname) values ($1, $2, 'Legacy Google Name', 'Ours'), ($1, $3, 'The Tree House', null)`, [hh, g, open]);
     await query(`insert into visits (household_id, venue_ref, venue_label, visited_on) values ($1, $2, 'Legacy Google Visit', '2026-09-01')`, [hh, g]);
     await query(`insert into place_menus (venue_ref, venue_label, source_url, source_kind) values ($1, 'Legacy Google Menu', 'https://example.org/m', 'html')`, [g]);
     await query(`insert into chat_topics (context_type, context_id, tag_kind, tag_ref, tag_label, audience, title, state)
                  values ('trip', $1, 'stop', $2, 'Legacy Google Stop', 'everyone', 'A', 'open'),
-                        ('trip', $1, 'day', $3, 'Sat 4 · Legacy Google Stop', 'everyone', 'B', 'open')`, [trip.id, g, randomUUID()]);
+                        ('trip', $1, 'day', $3, 'Sat 4 · Legacy Google Stop', 'everyone', 'B', 'open'),
+                        ('trip', $1, 'day', $4, 'Sun 5 · The Tree House', 'everyone', 'C', 'open')`, [trip.id, g, day.id, ownDay.id]);
   } finally {
     for (const t of off) await query(`alter table ${t} enable trigger no_rented_name`);
   }
@@ -145,6 +149,8 @@ test('the purge clears every stored provider name it quoted, logs the counts and
     && before.byStore['place_menus.venue_label'] >= 1 && before.byStore['chat_topics.tag_label'] >= 2, JSON.stringify(before));
   const out = await purge.run({ by: 'test', expected: before.total });
   assert.equal(out.cleared, before.total, 'exactly what was quoted');
+  const labels = (await query(`select title, tag_label from chat_topics where context_id = $1 order by title`, [trip.id])).rows.map((r) => r.tag_label);
+  assert.deepEqual(labels, [null, null, 'Sun 5 · The Tree House'], 'a day named from our own words keeps its fallback');
   assert.equal((await purge.quote()).total, 0, 'nothing left behind');
   const hp = Object.fromEntries((await query('select venue_ref, label, nickname from household_places where household_id = $1', [hh])).rows.map((r) => [r.venue_ref, r]));
   assert.deepEqual([hp[g].label, hp[g].nickname, hp[open].label], [g, 'Ours', 'The Tree House']);
@@ -192,9 +198,14 @@ test('a person\'s own words beside a provider\'s reference are kept; only a copy
     await query(`insert into trip_shortlist (trip_id, venue_ref, venue_label, kind) values ($1, $2, 'Legacy Google Name', 'activity')`, [trip.id, ev]);
     await query(`insert into group_items (group_id, kind, label, venue_ref, position) values
       ($1, 'activity', 'Legacy Google Name', $2, 2), ($1, 'activity', 'Bring a towel', $2, 3)`, [group.id, ev]);
+    // What migration 341 does to the items already there, before its triggers
+    // exist: judged on the evidence — a copy of the trip's name is 'trip',
+    // anything else the organiser's own.
+    await query('select epic_judge_group_item_provenance()');
   } finally {
     for (const t of ['group_items', 'trip_shortlist']) await query(`alter table ${t} enable trigger no_rented_name`);
   }
+  assert.deepEqual((await query('select label_from from group_items where group_id = $1 and position >= 2 order by position', [group.id])).rows.map((r) => r.label_from), ['trip', 'own']);
   await purge.run({ by: 'test' });
   assert.deepEqual((await query('select label from group_items where group_id = $1 and position >= 2 order by position', [group.id])).rows.map((r) => r.label),
     [ev, 'Bring a towel'], 'the copy goes, the organiser\'s words stay');

@@ -141,8 +141,8 @@ async function named(rows, groupId) {
   // Owned names only: a group's checklist is kept on a participant's device
   // whole (offline/policy.ts, the join page), so a live name may not ride in it.
   // An organiser's own words are shown as written, whatever the reference
-  // (migration 341): only an item copied from the trip is named afresh.
-  const copies = rows.filter((r) => r && r.label_from !== 'own');
+  // (migration 341): only an item known to be copied from the trip is named afresh.
+  const copies = rows.filter((r) => r && r.label_from === 'trip');
   await resolveInto([{ rows: copies, refKey: 'venue_ref', nameKey: 'label' }], { purpose: 'trip.displayName', householdId: g?.household_id ?? null, live: false });
   return rows;
 }

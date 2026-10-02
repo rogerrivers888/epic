@@ -782,11 +782,17 @@ function offerBody(b, current) {
   // family be asked about it after (the visit question, 28 Sep 2026).
   if (b.venueRef === null || (typeof b.venueRef === 'string' && /^(osm|google|atlas|own):[\w/.:-]{1,200}$/.test(b.venueRef))) set('venueRef', b.venueRef);
   set('venueLabel', str(b.venueLabel, 240)); set('venueArea', str(b.venueArea, 120));
-  // Whose words the label is (migration 341): one that arrives with a picked
-  // place is that place's own text ('place'), which on a provider's reference
-  // is a provider's and is not kept; anything else is the host's ('host'), and
-  // is never touched.
-  if (b.venueLabel !== undefined) p.venueLabelFrom = typeof b.venueRef === 'string' && b.venueRef ? 'place' : 'host';
+  // Whose words the label is (migration 341), judged by the place the offer
+  // will point at once this is saved — the one sent, else the one it has: a
+  // label on a picked place is that place's own text ('place'), which on a
+  // provider's reference is a provider's and is not kept; a label with no
+  // picked place is the host's ('host') and is never touched. A host's own
+  // words about the spot ("ring the side bell") belong in the venue notes
+  // (Codex, 2 Oct 2026).
+  if (b.venueLabel !== undefined) {
+    const ref = b.venueRef !== undefined ? b.venueRef : current.venue_ref;
+    p.venueLabelFrom = typeof ref === 'string' && ref ? 'place' : 'host';
+  }
   set('venueLat', b.venueLat == null ? null : Number(b.venueLat)); set('venueLng', b.venueLng == null ? null : Number(b.venueLng));
   set('venueCountry', str(b.venueCountry, 2)?.toUpperCase() ?? null); set('venueNotes', str(b.venueNotes, 600));
   set('travelRadiusMin', int(b.travelRadiusMin)); set('travelChargePence', int(b.travelChargePence)); set('onlinePlatform', str(b.onlinePlatform, 80));

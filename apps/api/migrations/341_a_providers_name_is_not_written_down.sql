@@ -22,6 +22,23 @@
 alter table group_items add column if not exists label_from text check (label_from in ('trip', 'own'));
 alter table host_offers add column if not exists venue_label_from text check (venue_label_from in ('place', 'host'));
 
+-- The items already written, judged on the evidence while it is still there:
+-- an item whose label is the name the same trip's shortlist or stop holds for
+-- that place was copied from the trip; any other item on a place is the
+-- organiser's own words (Codex, 2 Oct 2026). Items with no place stay as they are.
+create or replace function epic_judge_group_item_provenance() returns integer language sql as $$
+  with judged as (
+    update group_items i set label_from = case when
+        exists (select 1 from trip_groups g join trip_shortlist sl on sl.trip_id = g.trip_id
+                 where g.id = i.group_id and sl.venue_ref = i.venue_ref and sl.venue_label = i.label)
+        or exists (select 1 from trip_groups g join trip_stops ts on ts.trip_id = g.trip_id
+                 where g.id = i.group_id and ts.venue_ref = i.venue_ref and ts.venue_name = i.label)
+      then 'trip' else 'own' end
+     where i.label_from is null and i.venue_ref is not null
+    returning 1)
+  select count(*)::int from judged $$;
+select epic_judge_group_item_provenance();
+
 create or replace function epic_no_rented_name() returns trigger language plpgsql as $$
 declare
   name_col text := TG_ARGV[0];
