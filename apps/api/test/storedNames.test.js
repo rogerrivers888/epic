@@ -342,3 +342,17 @@ test('a two-letter provider name in a plan\'s words is kept as its reference too
   const out = await tokeniseJson({ pool: [{ source: 'google', sourcePlaceId: id, name: 'XO' }], options: [{ title: 'Dinner at XO, then EXO-style dessert' }] });
   assert.equal(out.options[0].title, `Dinner at ⟦google:${id}⟧, then EXO-style dessert`);
 });
+
+test('a provider\'s name is caught whatever its case, and the household\'s answers and brief stay as said', async () => {
+  const { tokeniseJson } = await import('../src/sources/displayNames.js');
+  const id = randomUUID();
+  const out = await tokeniseJson({
+    pool: [{ source: 'google', sourcePlaceId: id, name: 'The Crown' }],
+    options: [{ title: 'Dinner at the crown' }],
+    answered: [{ id: 'q1', text: 'Where shall we eat?', answer: 'The Crown, please' }],
+    input: { brief: 'Somewhere like The Crown' },
+  });
+  assert.equal(out.options[0].title, `Dinner at ⟦google:${id}⟧`);
+  assert.equal(out.answered[0].answer, 'The Crown, please');
+  assert.equal(out.input.brief, 'Somewhere like The Crown');
+});

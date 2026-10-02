@@ -317,15 +317,29 @@ export async function tokeniseJson(doc) {
     set.add(ref);
     refsByName.set(p.name, set);
   }
-  const byName = new Map([...refsByName].map(([n, set]) => [n, [...set].join('|')]));
+  // Matched whatever the case — a reply may say "the crown" for The Crown — so
+  // names that differ only in case are one name here (Codex, 2 Oct 2026).
+  const lowered = new Map();
+  for (const [n, set] of refsByName) {
+    const k = n.toLowerCase();
+    const had = lowered.get(k) ?? new Set();
+    for (const r of set) had.add(r);
+    lowered.set(k, had);
+  }
+  const byName = new Map([...lowered].map(([n, set]) => [n, [...set].join('|')]));
   if (!byName.size) return copy;
   // Longest first, so "The Crown Inn" is not half-replaced by "The Crown"; and
   // whole names only, so a place called "Spa" leaves "Spanish" alone (Codex,
   // 2 Oct 2026).
   const names = [...byName.keys()].sort((a, b) => b.length - a.length);
-  const re = new RegExp(`(?<![\\p{L}\\p{N}])(?:${names.map(escapeRe).join('|')})(?![\\p{L}\\p{N}])`, 'gu');
-  const swap = (text) => text.replace(re, (m) => `⟦${byName.get(m)}⟧`);
-  const own = (key, node) => key === 'intent' || (node && node.role === 'user');
+  const re = new RegExp(`(?<![\\p{L}\\p{N}])(?:${names.map(escapeRe).join('|')})(?![\\p{L}\\p{N}])`, 'giu');
+  const swap = (text) => text.replace(re, (m) => `⟦${byName.get(m.toLowerCase())}⟧`);
+  // The household's own words, left exactly as said: their turns in the
+  // transcript, their answers to the planner's questions, the intent and the
+  // criteria rows parsed from what they said, and a tastes run's input
+  // (Codex, 2 Oct 2026).
+  const OWN_KEYS = ['intent', 'input', 'rows', 'answer'];
+  const own = (key, node) => OWN_KEYS.includes(key) || (node && node.role === 'user');
   const walk = (node) => {
     if (Array.isArray(node)) { node.forEach((v, i) => { if (typeof v === 'string') node[i] = swap(v); else walk(v); }); return; }
     if (!node || typeof node !== 'object' || own(null, node)) return;
