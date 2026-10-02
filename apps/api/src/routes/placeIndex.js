@@ -5022,7 +5022,8 @@ router.post('/census/rollup', requires('manage_library'), async (req, res, next)
 router.get('/review-queue', requires('view_questions'), async (req, res, next) => {
   try {
     const subcategory = req.query.sub ? String(req.query.sub) : null;
-    const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
+    // A whole number: LIMIT takes an integer, and ?limit=1.5 would otherwise be a 500.
+    const limit = Math.min(Math.max(Math.trunc(Number(req.query.limit)) || 200, 1), 500);
     // The counts are over the whole queue; `features` is the first `limit` of it
     // (Codex, 2 Oct 2026: counting the page understated a long queue).
     const [features, counts, spotting] = await Promise.all([reviewQueue({ limit, subcategory }), reviewQueueCounts({ subcategory }), spottingTally()]);
