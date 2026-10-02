@@ -1411,25 +1411,23 @@ router.post('/join/:token/household', async (req, res, next) => {
         const name = String(m.name ?? '').trim();
         return name && !already.some((x) => x.name.trim().toLowerCase() === name.toLowerCase());
       };
-      // All of them fit the plan or none is added: one insert at a time
-      // half-added a list and then failed (Codex, 2 Oct 2026).
-      const adding = new Set(rows.filter(isNew).map((m) => String(m.name).trim().toLowerCase())).size;
-      const limit = await householdsRepo.planCapFor(account.household_id);
-      if (adding && already.length + adding > limit.cap) throw householdsRepo.planCapRefusal(limit);
-      // The same name twice is one person, here as in the count above, so the
-      // second never trips the cap after the first has landed (Codex, 2 Oct 2026).
+      // The same name twice is one person; then all of them go in together,
+      // under the household lock, or none does — even if another add lands a
+      // moment before (Codex, 2 Oct 2026).
       const seen = new Set();
+      const fresh = [];
       for (const m of rows) {
         const name = String(m.name ?? '').trim();
         if (!isNew(m) || seen.has(name.toLowerCase())) continue;
         seen.add(name.toLowerCase());
-        await householdsRepo.insertMember(account.household_id, {
+        fresh.push({
           name,
           isMinor: Boolean(m.child),
           relationship: m.relationship ?? null,
           birthYear: m.age ? new Date().getFullYear() - Number(m.age) : null,
         });
       }
+      await householdsRepo.insertMembers(account.household_id, fresh);
     }
 
     const coming = rows.filter((m) => m.coming !== false);

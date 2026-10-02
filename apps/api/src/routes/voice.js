@@ -769,30 +769,31 @@ router.post('/household/who/apply', async (req, res, next) => {
     })).max(20) }).parse(req.body ?? {});
     const year = new Date().getFullYear();
     const bandAge = { '0-4': 3, '5-8': 6, '9-12': 10, '13+': 15 };
-    // The whole spoken household fits the plan or none of it is added: each
-    // insert checks the cap on its own, so a list too long half-landed and then
-    // failed without saying who was written (Codex, 2 Oct 2026).
-    const adding = body.people.filter((p) => !p.existingId).length;
-    const limit = await households.planCapFor(household.id);
-    if (adding && (await households.memberCount(household.id)) + adding > limit.cap) throw households.planCapRefusal(limit);
-    const written = [];
-    for (const p of body.people) {
+    const shape = (p) => {
       const age = p.age ?? (p.band ? bandAge[p.band] : null);
       const isChild = p.role === 'child' || (age != null && age < 18);
       const relationship = p.relationship && ['partner', 'child', 'parent', 'friend', 'other', 'self'].includes(p.relationship) ? p.relationship : isChild ? 'child' : p.isSpeaker ? 'self' : null;
-      if (p.existingId) {
-        // The joined-adult rule holds on this door too: somebody who has
-        // joined is changed by nobody but themselves, so they are skipped and
-        // said so, never quietly rewritten (Codex, 2 Oct 2026).
-        const target = await households.memberById(p.existingId);
-        if (!target || target.household_id !== household.id) continue;
-        if (!(await canEditPerson(target))) { written.push({ id: target.id, name: target.name, updated: false, skipped: 'joined_adult_read_only' }); continue; }
-        const m = await households.updateMember(p.existingId, { name: p.name, birthYear: age != null ? year - age : null, relationship }, household.id);
-        if (m) written.push({ id: m.id, name: m.name, updated: true });
-      } else {
-        const m = await households.insertMember(household.id, { name: p.name, isMinor: isChild && (age == null || age < 13), relationship, birthYear: age != null ? year - age : null });
-        written.push({ id: m.id, name: m.name, updated: false });
-      }
+      return { age, isChild, relationship };
+    };
+    // The new people go in first, together, under the household lock: either
+    // they all fit the plan or nobody is written — even if another add lands
+    // a moment before (Codex, 2 Oct 2026). Edits to existing people follow.
+    const fresh = body.people.filter((p) => !p.existingId);
+    const made = await households.insertMembers(household.id, fresh.map((p) => {
+      const { age, isChild, relationship } = shape(p);
+      return { name: p.name, isMinor: isChild && (age == null || age < 13), relationship, birthYear: age != null ? year - age : null };
+    }));
+    const written = made.map((m) => ({ id: m.id, name: m.name, updated: false }));
+    for (const p of body.people.filter((x) => x.existingId)) {
+      const { age, relationship } = shape(p);
+      // The joined-adult rule holds on this door too: somebody who has
+      // joined is changed by nobody but themselves, so they are skipped and
+      // said so, never quietly rewritten (Codex, 2 Oct 2026).
+      const target = await households.memberById(p.existingId);
+      if (!target || target.household_id !== household.id) continue;
+      if (!(await canEditPerson(target))) { written.push({ id: target.id, name: target.name, updated: false, skipped: 'joined_adult_read_only' }); continue; }
+      const m = await households.updateMember(p.existingId, { name: p.name, birthYear: age != null ? year - age : null, relationship }, household.id);
+      if (m) written.push({ id: m.id, name: m.name, updated: true });
     }
     res.json({ members: await loadMembers(household.id), written });
   } catch (err) { next(err); }

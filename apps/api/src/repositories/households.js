@@ -221,22 +221,36 @@ export async function insertMember(householdId, m) {
   // The cap is enforced here, under the household's row lock, so every door
   // that adds a person — Settings, voice, a group invite — shares one check
   // and two concurrent adds cannot both squeeze under it (Codex, 1 Oct 2026).
-  let member;
+  const [member] = await insertMembers(householdId, [m]);
+  return member;
+}
+
+/**
+ * Several people at once, all or none: one transaction holding the household
+ * lock across the cap check and every insert, so a list that does not fit —
+ * even because another add landed a moment earlier — writes nobody (Codex,
+ * 2 Oct 2026).
+ */
+export async function insertMembers(householdId, list) {
+  if (!list.length) return [];
+  const made = [];
   await withTransaction(async (client) => {
     await client.query('select id from households where id = $1 for update', [householdId]);
     const { rows: counted } = await client.query('select count(*)::int n from members where household_id = $1', [householdId]);
     const limit = await planCapFor(householdId, client);
-    if (counted[0].n >= limit.cap) throw planCapRefusal(limit);
-    const { rows } = await client.query(
-      `insert into members (household_id, name, is_minor, relationship, birth_year, birth_date, avatar_url, typical_visit_minutes, max_travel_minutes, email, mobile)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning *`,
-      [householdId, m.name, m.isMinor, m.relationship ?? null, m.birthYear ?? null, m.birthDate ?? null,
-        m.avatarUrl ?? null, m.typicalVisitMinutes ?? null, m.maxTravelMinutes ?? null,
-        m.email ?? null, m.mobile ?? null],
-    );
-    member = rows[0];
+    if (counted[0].n + list.length > limit.cap) throw planCapRefusal(limit);
+    for (const m of list) {
+      const { rows } = await client.query(
+        `insert into members (household_id, name, is_minor, relationship, birth_year, birth_date, avatar_url, typical_visit_minutes, max_travel_minutes, email, mobile)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning *`,
+        [householdId, m.name, m.isMinor, m.relationship ?? null, m.birthYear ?? null, m.birthDate ?? null,
+          m.avatarUrl ?? null, m.typicalVisitMinutes ?? null, m.maxTravelMinutes ?? null,
+          m.email ?? null, m.mobile ?? null],
+      );
+      made.push(rows[0]);
+    }
   });
-  return member;
+  return made;
 }
 
 /**

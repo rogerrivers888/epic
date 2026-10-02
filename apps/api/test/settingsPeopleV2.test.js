@@ -766,3 +766,18 @@ test('an outing around a fixed event stays inside the day window, never cutting 
   const late = await dayOf(await mk({ name: 'Late show', start_time: '19:00', duration_minutes: 120 }, 'Kew · late'));
   assert.equal(late.end_time, '21:00:00', 'an event past the window keeps its own end');
 });
+
+test('two batches racing for the last places: one lands whole, the other writes nobody', async () => {
+  const { household: h } = await aHousehold(query);
+  for (let i = 0; i < 2; i += 1) await addMember(h.id, `P${i}`); // 3 with the first person: 3 places left
+  const results = await Promise.allSettled([
+    households.insertMembers(h.id, [{ name: 'A1', isMinor: false }, { name: 'A2', isMinor: false }]),
+    households.insertMembers(h.id, [{ name: 'B1', isMinor: false }, { name: 'B2', isMinor: false }]),
+  ]);
+  assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1, 'exactly one batch fits');
+  const { rows } = await query('select name from members where household_id = $1 order by name', [h.id]);
+  const names = rows.map((r) => r.name);
+  assert.equal(names.length, 5, 'never a half-written batch');
+  const won = names.includes('A1') ? 'A' : 'B';
+  assert.ok(names.includes(`${won}2`) && !names.some((n) => n.startsWith(won === 'A' ? 'B' : 'A')), 'the winner whole, the loser not at all');
+});
