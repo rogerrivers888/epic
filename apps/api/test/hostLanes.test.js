@@ -477,3 +477,16 @@ test('a child on a booking has an age or a date of birth — exactly one', async
   await assert.rejects(query('insert into booking_children (booking_id) values ($1)', [b.id]), /age_or_dob/);
   await assert.rejects(query("insert into booking_children (booking_id, age, date_of_birth) values ($1, 7, '2019-04-01')", [b.id]), /age_or_dob/);
 });
+
+test('a co-host list is replaced whole or not at all, and a time zone must be real', async () => {
+  const { household: h, member } = await aHousehold(query);
+  const srv = await server(await anAccount(h, member));
+  try {
+    const { body: { offer } } = await srv.send('POST', '/api/host/lanes/offers', { lane: 'oneoff', cohosts: [{ name: 'Dan Reid', role: 'cohost' }] });
+    const r = await srv.send('PATCH', `/api/host/lanes/offers/${offer.id}`, { cohosts: [{ name: 'Ollie', contactId: 'not-a-uuid' }, { name: 'Sam', contactId: '00000000-0000-0000-0000-000000000000' }] });
+    assert.equal(r.status, 200, 'a link that is not this household’s is dropped, not fatal');
+    assert.deepEqual(r.body.offer.cohosts.map((c) => [c.name, c.contactId]), [['Ollie', null], ['Sam', null]]);
+    assert.equal((await srv.send('PATCH', `/api/host/lanes/offers/${offer.id}`, { timeZone: 'Mars/Olympus' })).body.error, 'bad_time_zone');
+    assert.equal((await srv.send('PATCH', `/api/host/lanes/offers/${offer.id}`, { timeZone: 'Europe/London' })).status, 200);
+  } finally { await srv.close(); }
+});

@@ -225,7 +225,7 @@ router.post('/host/lanes/offers', async (req, res, next) => {
     // The photo picked on step 1 travels with the first save (Codex, 2 Oct 2026).
     if (req.body?.photoIds !== undefined) patch.photoIds = await ownMediaList(household.id, req.body.photoIds, 'photo', 8);
     if (Object.keys(patch).length) offer = await repo.updateOffer(offer.id, { ...derive(patch, offer), ...(patch.photoIds ? { photoIds: patch.photoIds } : {}) });
-    if (req.body?.cohosts !== undefined) await repo.setCohosts(offer.id, cohostList(req.body.cohosts));
+    if (req.body?.cohosts !== undefined) await repo.setCohosts(offer.id, await ownCohosts(household.id, req.body.cohosts));
     res.status(201).json({ offer: await lanePayload(offer, host, account) });
   } catch (err) { next(err); }
 });
@@ -248,7 +248,7 @@ router.patch('/host/lanes/offers/:id', async (req, res, next) => {
     const patch = derive(laneBody(b, offer), offer);
     if (b.photoIds !== undefined) patch.photoIds = await ownMediaList(host.household_id, b.photoIds, 'photo', 8);
     const updated = Object.keys(patch).length ? await repo.updateOffer(offer.id, patch) : offer;
-    if (b.cohosts !== undefined) await repo.setCohosts(offer.id, cohostList(b.cohosts));
+    if (b.cohosts !== undefined) await repo.setCohosts(offer.id, await ownCohosts(host.household_id, b.cohosts));
     res.json({ offer: await lanePayload(updated, host, account) });
   } catch (err) { next(err); }
 });
@@ -276,8 +276,16 @@ async function ownMediaList(householdId, ids, kind, max) {
 // what a step may write
 // ---------------------------------------------------------------------------
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const uuidOr = (v) => { const x = str(v, 40); return x && UUID.test(x) ? x : null; };
+/** A co-host's link to an Epic contact is kept only when the contact is this household's own (Codex, 2 Oct 2026). */
+async function ownCohosts(householdId, raw) {
+  const rows = cohostList(raw);
+  const mine = new Set((await repo.contactsOf(householdId)).map((c) => c.id));
+  return rows.map((c) => ({ ...c, contactId: c.contactId && mine.has(c.contactId) ? c.contactId : null, accountId: null }));
+}
 const cohostList = (v) => list(v, 12).map((c) => ({
-  name: str(c?.name, 80), role: oneOf(['cohost', 'helper'], c?.role) ?? 'helper', accountId: str(c?.accountId, 40), contactId: str(c?.contactId, 40),
+  name: str(c?.name, 80), role: oneOf(['cohost', 'helper'], c?.role) ?? 'helper', accountId: uuidOr(c?.accountId), contactId: uuidOr(c?.contactId),
   canEdit: Boolean(c?.canEdit), canMessage: Boolean(c?.canMessage), shownOnPage: c?.shownOnPage !== false, withPhoto: c?.withPhoto !== false, seesGuests: Boolean(c?.seesGuests),
 })).filter((c) => c.name);
 
@@ -307,6 +315,11 @@ function freeHours(v) {
   return out;
 }
 
+/** An IANA time zone this server knows, or a refusal — never one that breaks publishing later (Codex, 2 Oct 2026). */
+const zone = (v) => {
+  const z = str(v, 60);
+  try { new Intl.DateTimeFormat('en-GB', { timeZone: z }); return z; } catch { throw refuse(400, 'bad_time_zone', 'That isn’t a time zone Epic knows.'); }
+};
 const pence = (v) => whole(v, { min: 0, max: 10_000_000 });
 
 /** The fields a v7 step may send, checked one by one. A key not sent is left as it is. */
@@ -323,7 +336,7 @@ export function laneBody(b, current) {
   if (b.venueLabel !== undefined) p.venueLabelFrom = (b.venueRef !== undefined ? b.venueRef : current.venue_ref) ? 'place' : 'host';
   set('venueLat', num(b.venueLat)); set('venueLng', num(b.venueLng));
   set('travelRadiusMin', whole(b.travelRadiusMin, { min: 1, max: 200 })); set('travelChargePence', pence(b.travelChargePence));
-  set('onlineMode', oneOf(['epic', 'own'], b.onlineMode)); set('onlineLink', str(b.onlineLink, 300)); set('timeZone', str(b.timeZone, 60));
+  set('onlineMode', oneOf(['epic', 'own'], b.onlineMode)); set('onlineLink', str(b.onlineLink, 300)); set('timeZone', b.timeZone == null ? null : zone(b.timeZone));
   if (b.guestQuestions !== undefined) p.guestQuestions = guestQuestions(b.guestQuestions);
   set('weekdays', [...new Set(list(b.weekdays, 7).map((d) => whole(d, { min: 0, max: 6 })).filter((d) => d != null))].sort());
   set('firstDate', date(b.firstDate)); set('durationMin', whole(b.durationMin, { min: 5, max: 24 * 60 }));
@@ -549,7 +562,7 @@ async function applyFound({ household, account, lane, offerId, step, patch, foun
   keep.draftSource = source;
   const body = laneBody(keep, offer);
   const updated = await repo.updateOffer(offer.id, derive(body, offer));
-  if (patch.cohosts && (step === 'cohosts' || !current.cohosts.length)) await repo.setCohosts(offer.id, cohostList(patch.cohosts));
+  if (patch.cohosts && (step === 'cohosts' || !current.cohosts.length)) await repo.setCohosts(offer.id, await ownCohosts(household.id, patch.cohosts));
   return { offer: await lanePayload(updated, host, account), found };
 }
 

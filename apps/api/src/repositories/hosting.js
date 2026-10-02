@@ -856,6 +856,8 @@ export async function cohostsOf(offerId) {
 
 /** The whole list, in the host's order: what the step sends is what the offer has. */
 export async function setCohosts(offerId, list, client) {
+  // All or nothing: a bad row never leaves the offer with its old list deleted (Codex, 2 Oct 2026).
+  if (!client) return withTransaction((c) => setCohosts(offerId, list, c));
   const run = on(client);
   await run('delete from offer_cohosts where offer_id = $1', [offerId]);
   for (const [i, c] of list.entries()) {
@@ -865,7 +867,8 @@ export async function setCohosts(offerId, list, client) {
       [offerId, c.accountId ?? null, c.contactId ?? null, c.name, c.role, Boolean(c.canEdit), Boolean(c.canMessage), c.shownOnPage !== false, c.withPhoto !== false, Boolean(c.seesGuests), i],
     );
   }
-  return cohostsOf(offerId);
+  const { rows } = await run('select * from offer_cohosts where offer_id = $1 order by position, created_at', [offerId]);
+  return rows;
 }
 
 export async function sessionsOf(offerId) {
