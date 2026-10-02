@@ -25,12 +25,15 @@ import { resolveConcept, allergenKeys } from './concepts.js';
 // where the profile now reads it, not in the old free-text diet/allergen rows.
 export const dietPatch = (raw) => {
   const v = String(raw).toLowerCase();
-  if (v.includes('vegan')) return { diet: 'vegan' };
-  if (v.includes('pescatar')) return { diet: 'pescatarian' };
-  if (v.includes('vegetar') || v === 'veggie') return { diet: 'vegetarian' };
-  if (v.includes('halal')) return { halal: true };
-  if (v.includes('kosher')) return { kosher: true };
-  return null;
+  // Every fact in the words, not the first: "vegetarian halal" is a main diet
+  // AND a faith, and the second was being dropped (Codex, 2 Oct 2026).
+  const patch = {};
+  if (v.includes('vegan')) patch.diet = 'vegan';
+  else if (v.includes('pescatar')) patch.diet = 'pescatarian';
+  else if (v.includes('vegetar') || /\bveggie\b/.test(v)) patch.diet = 'vegetarian';
+  if (v.includes('halal')) patch.halal = true;
+  if (v.includes('kosher')) patch.kosher = true;
+  return Object.keys(patch).length ? patch : null;
 };
 // The same safe-direction mapping the diet migration uses for spoken values
 // that aren't a main diet or a faith: a preference becomes a filter or a rank.

@@ -572,7 +572,9 @@ async function createStayFromIntent({ household, members, intent, destination })
     const created = await tripsRepo.insertPlannedStay(household.id, {
       title, notes, placeLabel: destination.label, startDate: start, endDate: end,
       baseLabel: base.label, baseLat: base.lat, baseLng: base.lng,
-      hasCar: travelMode !== 'transit',
+      // Only a driving stay has a car: walking and cycling are car-free too,
+      // now that the household's own mode reaches stays (Codex, 2 Oct 2026).
+      hasCar: travelMode === 'driving',
       // households.day_start/day_end are whole hours (smallint, migration 353);
       // the trip's columns are SQL times (Codex, 1 Oct 2026).
       dayStart: hourToTime(household.day_start ?? 10),

@@ -857,3 +857,11 @@ test('a definite wheelchair=no is read even beside a descriptive step-free note'
   const vague = candidates.find((v) => v.id === 'vague');
   assert.ok(level.score > vague.score, 'the definite yes ranks up');
 });
+
+test('a compound spoken diet keeps every fact: "vegetarian halal" is both', async () => {
+  const { dietPatch } = await import('../src/domain/voiceHousehold.js');
+  assert.deepEqual(dietPatch('vegetarian halal'), { diet: 'vegetarian', halal: true });
+  assert.deepEqual(dietPatch('vegan and kosher'), { diet: 'vegan', kosher: true });
+  assert.deepEqual(dietPatch('halal'), { halal: true });
+  assert.equal(dietPatch('low FODMAP'), null);
+});
