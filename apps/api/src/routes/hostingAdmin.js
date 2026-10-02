@@ -652,7 +652,7 @@ async function dac7Rows(year) {
   const { rows } = await query(
     `select h.id, h.name, h.tax_reference, h.tax_address,
             coalesce(sum(case when p.kind = 'charge' then p.amount_pence when p.kind = 'refund' then -p.amount_pence end), 0)::int as consideration,
-            coalesce(sum(case when p.kind = 'charge' then p.epic_pence end), 0)::int as fees,
+            coalesce(sum(case when p.kind = 'charge' then p.epic_pence when p.kind = 'refund' then -coalesce(p.epic_pence, 0) end), 0)::int as fees,
             coalesce(sum(case when p.kind = 'tip' then p.host_pence end), 0)::int as tips,
             count(*) filter (where p.kind = 'charge')::int as activities
        from hosting_payments p join hosts h on h.id = p.host_id

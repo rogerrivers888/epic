@@ -276,3 +276,20 @@ test('Codex: Stripe unreachable leaves a payout released for the next run, not f
   await money.releasePayouts({ transfer: async () => { throw Object.assign(new Error('x'), { code: 'stripe_unreachable' }); }, status: () => ({ ready: true }) });
   assert.equal((await query('select state from host_payouts where id = $1', [p.id])).rows[0].state, 'released');
 });
+
+test('Codex: a refund after the first session was paid reduces only what is left, and a released hold matches Stripe', async () => {
+  settings.forget();
+  const { booking, sessions } = await aPaidSession({ endedHoursAgo: 100, sessionsInBooking: 2 });
+  // Only the first session has ended: pay it.
+  await query('update offer_sessions set on_date = current_date + 5 where id = $1', [sessions[1].id]);
+  await money.schedulePayouts();
+  const { rows: [first] } = await query('select amount_pence from host_payouts where session_id = $1', [sessions[0].id]);
+  assert.equal(first.amount_pence, 4000, 'half of the £80 host share');
+  // Half the booking comes back, then the second session ends.
+  await query('update experience_bookings set refunded_pence = 5000 where id = $1', [booking.id]);
+  await query('update offer_sessions set on_date = current_date - 5 where id = $1', [sessions[1].id]);
+  await money.schedulePayouts();
+  const { rows: [second] } = await query('select amount_pence from host_payouts where session_id = $1', [sessions[1].id]);
+  assert.equal(first.amount_pence + (second?.amount_pence ?? 0), 4000, 'the host is paid £40 in all — the share left after the refund — never more');
+  assert.equal(money.compareRow({ kind: 'release', state: 'succeeded', amount_pence: 100 }, { amountPence: 0, ok: false, held: false }), 'matched');
+});

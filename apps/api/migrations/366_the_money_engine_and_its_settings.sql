@@ -198,6 +198,8 @@ create table if not exists host_payouts (
   state           text not null default 'scheduled',
   hold_reason     text,
   released_by     text,
+  -- What each booking put into this payout, so a later refund only reduces what is still to be paid (Codex, 2 Oct 2026).
+  lines           jsonb not null default '[]'::jsonb,
   stripe_transfer text,
   mode            text not null default 'test',
   created_at      timestamptz not null default now(),

@@ -1488,7 +1488,8 @@ publicRouter.get('/experiences/:id', async (req, res, next) => {
   if (req.params.id === 'near' || req.params.id === 'passions') return next();
   try {
     const o = await repo.offerById(req.params.id);
-    if (!o || o.state === 'draft' || o.state === 'in_review') return res.status(404).json({ error: 'not_found', message: 'There is no experience at that address yet.' });
+    // 'approved' waits on Checked and is not live (hosting v4 §3.5; Codex, 2 Oct 2026).
+    if (!o || ['draft', 'in_review', 'approved'].includes(o.state)) return res.status(404).json({ error: 'not_found', message: 'There is no experience at that address yet.' });
     // Only the people named can open an invite-only offer, even with the link.
     // Only the credential opens an invite-only offer: a personal invitation's
     // token, or the host's own invitation link, which they pass round themselves.

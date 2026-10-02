@@ -101,6 +101,8 @@ export async function releasePayouts({ now = new Date(), transfer = stripe.trans
 /** Compare one ledger row with Stripe's view of it: 'matched', 'mismatch' or 'not_checked'. */
 export function compareRow(row, view) {
   if (!view) return 'not_checked';
+  // A released hold is a cancelled PaymentIntent: that is the match (Codex, 2 Oct 2026).
+  if (row.kind === 'release') return row.state === 'succeeded' ? (!view.ok && !view.held ? 'matched' : 'mismatch') : 'matched';
   const moved = row.state === 'succeeded';
   if (view.held) return row.kind === 'hold' && row.state === 'pending' ? 'matched' : 'mismatch';
   if (moved !== view.ok) return 'mismatch';

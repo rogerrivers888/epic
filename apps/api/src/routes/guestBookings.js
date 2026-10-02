@@ -452,6 +452,11 @@ router.post('/experiences/:id/waitlist', async (req, res, next) => {
     if (!e || e.offer.state !== 'live') throw refuse(404, 'not_open', 'That event isn’t open.');
     const { offer: o, sessions } = e;
     if (!o.waitlist_on) throw refuse(409, 'no_waitlist', 'This one has no waiting list.');
+    // A private event's list only with its link or an invitation (Codex, 2 Oct 2026).
+    if (o.visibility !== 'public') {
+      const invite = typeof req.body?.inviteToken === 'string' ? await repo.inviteByToken(req.body.inviteToken.slice(0, 64)) : null;
+      if (!opensPrivately(o, { linkToken: typeof req.body?.linkToken === 'string' ? req.body.linkToken.slice(0, 64) : null, invite })) throw refuse(404, 'not_found', 'This one is invitation only.');
+    }
     const party = Math.max(1, Math.min(o.party_max ?? 20, Math.floor(Number(req.body?.party) || 1)));
     let sessionId = null;
     if (o.lane === 'weekly') {

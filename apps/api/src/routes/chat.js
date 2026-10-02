@@ -1025,7 +1025,7 @@ const faqPayload = (e) => ({ id: e.id, question: e.question, answer: e.answer, a
 publicRouter.get('/experiences/:id/faq', async (req, res, next) => {
   try {
     const o = await hosting.offerById(req.params.id);
-    if (!o || o.state === 'draft' || o.state === 'in_review') return res.status(404).json({ error: 'not_found' });
+    if (!o || ['draft', 'in_review', 'approved'].includes(o.state)) return res.status(404).json({ error: 'not_found' });
     const h = await hosting.hostById(o.host_id);
     res.json({ faq: (await chat.faqOf(o.id)).map(faqPayload), hostName: h?.name ?? null });
   } catch (err) { next(err); }

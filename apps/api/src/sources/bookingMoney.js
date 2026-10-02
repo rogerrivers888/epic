@@ -84,11 +84,15 @@ export async function owe(c, booking, { amountPence, cause, key, sessionId = nul
   const left = Math.max(0, Number(booking.charged_pence ?? 0) - Number(booking.refunded_pence ?? 0));
   const amount = Math.min(left, Math.max(0, Math.round(amountPence)));
   if (amount <= 0) return null;
+  // What of the refund was Epic's fee and what was the host's, in the booking's own proportions, so DAC7 and
+  // the streams net it out (Codex, 2 Oct 2026).
+  const charged = Number(booking.charged_pence ?? 0) || 1;
+  const epicBack = Math.round((amount * Number(booking.fee_pence ?? 0)) / charged);
   const { rows: [row] } = await c.query(
-    `insert into hosting_payments (kind, booking_id, offer_id, host_id, household_id, session_id, amount_pence, state, mode, cause, idem_key)
-     values ('refund', $1, $2, $3, $4, $5, $6, 'pending', 'test', $7, $8)
+    `insert into hosting_payments (kind, booking_id, offer_id, host_id, household_id, session_id, amount_pence, epic_pence, host_pence, state, mode, cause, idem_key)
+     values ('refund', $1, $2, $3, $4, $5, $6, $9, $10, 'pending', 'test', $7, $8)
      on conflict (idem_key) where idem_key is not null do nothing returning *`,
-    [booking.id, booking.offer_id, booking.host_id, booking.household_id, sessionId, amount, cause, key],
+    [booking.id, booking.offer_id, booking.host_id, booking.household_id, sessionId, amount, cause, key, epicBack, amount - epicBack],
   );
   if (row) {
     await c.query('update experience_bookings set refunded_pence = refunded_pence + $2 where id = $1', [booking.id, amount]);

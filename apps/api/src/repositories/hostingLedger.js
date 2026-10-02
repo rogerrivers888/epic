@@ -105,15 +105,31 @@ export async function paidBookingsOfSession(sessionId, client = null) {
  */
 export async function schedulePayout({ sessionId, offerId, hostId, endsAt, releaseHours }) {
   return withTransaction(async (c) => {
+    await c.query('select pg_advisory_xact_lock(hashtext($1))', [`payouts:${hostId}`]);
     const bookings = await paidBookingsOfSession(sessionId, c);
-    const amount = bookings.reduce((n, b) => n + shareForSession(bookingHostShare(b), b.session_ids, String(sessionId)), 0);
+    // Each booking's share still to be paid — its share now, less what earlier payouts already took — spread
+    // over its sessions not yet paid out. A refund after one session was paid therefore reduces only what is
+    // left, never claws back or overpays (Codex, 2 Oct 2026).
+    const lines = [];
+    for (const b of bookings) {
+      const { rows: [done] } = await c.query(
+        `select coalesce(sum((l->>'pence')::int), 0)::int as paid from host_payouts p, jsonb_array_elements(p.lines) l where l->>'bookingId' = $1`,
+        [b.id],
+      );
+      const { rows: [{ paid_sessions: paidSessions }] } = await c.query(`select array(select session_id::text from host_payouts where session_id = any($1::uuid[])) as paid_sessions`, [b.session_ids]);
+      const remaining = Math.max(0, bookingHostShare(b) - (done?.paid ?? 0));
+      const open = b.session_ids.filter((id) => !paidSessions.includes(id));
+      const pence = shareForSession(remaining, open, String(sessionId));
+      if (pence > 0) lines.push({ bookingId: b.id, pence });
+    }
+    const amount = lines.reduce((n, l) => n + l.pence, 0);
     if (amount <= 0) return null;
     const releaseAt = releaseHours == null ? new Date(endsAt) : new Date(new Date(endsAt).getTime() + releaseHours * 3_600_000);
     const { rows: [row] } = await c.query(
-      `insert into host_payouts (host_id, offer_id, session_id, amount_pence, release_at, state)
-       values ($1, $2, $3, $4, $5, 'scheduled')
+      `insert into host_payouts (host_id, offer_id, session_id, amount_pence, release_at, state, lines)
+       values ($1, $2, $3, $4, $5, 'scheduled', $6::jsonb)
        on conflict (session_id) where session_id is not null do nothing returning *`,
-      [hostId, offerId, sessionId, amount, releaseAt],
+      [hostId, offerId, sessionId, amount, releaseAt, JSON.stringify(lines)],
     );
     return row ?? null;
   });
