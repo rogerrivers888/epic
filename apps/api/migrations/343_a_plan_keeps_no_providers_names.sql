@@ -35,7 +35,7 @@ begin
    where r is not null and coalesce(epic_ref_true_source(r), '') = any(epic_rented_sources())
    limit 1;
   if ref is not null then
-    foreach k in array array['name', 'venueName', 'venueLabel', 'venue_name', 'venue_label'] loop
+    foreach k in array array['name', 'label', 'venueName', 'venueLabel', 'venue_name', 'venue_label'] loop
       if jsonb_typeof(out -> k) = 'string' then out := jsonb_set(out, array[k], 'null'::jsonb); end if;
     end loop;
   end if;

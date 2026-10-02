@@ -366,3 +366,23 @@ test('only words written for people are tokenised: a website is never touched', 
   assert.equal(out.options[0].link, 'https://dishoom.com/menu');
   assert.equal(out.options[0].title, `Breakfast at ⟦google:${id}⟧`);
 });
+
+test('an idea\'s place { label, ref } keeps no provider\'s label, and a provider\'s snapshot of a saved place is never kept', async () => {
+  const purge = await import('../src/sources/namePurge.js');
+  const hh = await household();
+  const g = `google:${randomUUID()}`;
+  const { rows: [s] } = await query(`insert into plan_sessions (household_id, state) values ($1, $2) returning state`,
+    [hh, JSON.stringify({ idea: { place: { label: 'Google Idea Place', ref: g } } })]);
+  assert.equal(s.state.idea.place.label, null);
+  await query(`insert into household_places (household_id, venue_ref, label, venue) values ($1, $2, $2, $3)`, [hh, g, JSON.stringify({ name: 'Google Snapshot', category: 'cafe' })]);
+  assert.equal((await query('select venue from household_places where household_id = $1 and venue_ref = $2', [hh, g])).rows[0].venue, null);
+  // One kept before the rule is cleared by the purge.
+  const g2 = `google:${randomUUID()}`;
+  await query('alter table household_places disable trigger no_rented_venue');
+  try {
+    await query(`insert into household_places (household_id, venue_ref, label, venue) values ($1, $2, $2, $3)`, [hh, g2, JSON.stringify({ name: 'Legacy Snapshot' })]);
+  } finally { await query('alter table household_places enable trigger no_rented_venue'); }
+  assert.ok((await purge.quote()).byStore['household_places.venue'] >= 1);
+  await purge.run({ by: 'test' });
+  assert.equal((await query('select venue from household_places where household_id = $1 and venue_ref = $2', [hh, g2])).rows[0].venue, null);
+});

@@ -218,7 +218,8 @@ export async function resolveInto(specs, opts = {}) {
   }
 }
 
-const NAME_KEYS = ['name', 'venueName', 'venueLabel', 'venue_name', 'venue_label'];
+// The same keys migration 343 empties: an inspire idea's place is { label, ref }.
+const NAME_KEYS = ['name', 'label', 'venueName', 'venueLabel', 'venue_name', 'venue_label'];
 // Every reference an object carries, as migration 343 reads them: a fixed stop
 // is {source: 'anchor', …, key: 'google:…'}, so no one of them is enough alone.
 const refsOfJson = (o) => [

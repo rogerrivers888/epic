@@ -100,6 +100,17 @@ drop trigger if exists no_rented_name on content_queue;
 create trigger no_rented_name before insert or update of place_label, venue_ref on content_queue
   for each row execute function epic_no_rented_name('place_label', 'venue_ref', 'null');
 
+-- A saved or shortlisted place's snapshot (`venue`) is kept for an open source
+-- only — the data policy: a provider's details are "never written to
+-- household_places.venue for a licensed ref". The writers already hold to it;
+-- a snapshot copied from an older row is caught here (Codex, 2 Oct 2026).
+drop trigger if exists no_rented_venue on household_places;
+create trigger no_rented_venue before insert or update of venue, venue_ref on household_places
+  for each row execute function epic_no_rented_name('venue', 'venue_ref', 'null');
+drop trigger if exists no_rented_venue on trip_shortlist;
+create trigger no_rented_venue before insert or update of venue, venue_ref on trip_shortlist
+  for each row execute function epic_no_rented_name('venue', 'venue_ref', 'null');
+
 -- A chat topic about a stop keeps its anchor's label only as a fallback for
 -- when the stop has gone; a provider's name is not that fallback.
 create or replace function epic_no_rented_tag_label() returns trigger language plpgsql as $$

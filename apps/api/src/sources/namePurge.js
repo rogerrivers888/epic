@@ -35,6 +35,9 @@ export const STORES = [
   { table: 'group_items', col: 'label', ref: 'venue_ref', mode: 'ref', said: 'group checklist items',
     only: `label_from = 'trip'` },
   { table: 'household_places', col: 'label', ref: 'venue_ref', mode: 'ref', said: 'saved places' },
+  // A provider's snapshot of a saved or shortlisted place, kept before the rule.
+  { table: 'household_places', col: 'venue', ref: 'venue_ref', mode: 'null', said: 'saved-place snapshots' },
+  { table: 'trip_shortlist', col: 'venue', ref: 'venue_ref', mode: 'null', said: 'shortlist snapshots' },
   { table: 'trip_stops', col: 'venue_name', ref: 'venue_ref', mode: 'ref', said: 'trip stops' },
   { table: 'trip_shortlist', col: 'venue_label', ref: 'venue_ref', mode: 'ref', said: 'shortlist rows' },
   { table: 'visits', col: 'venue_label', ref: 'venue_ref', mode: 'ref', said: 'visits' },
