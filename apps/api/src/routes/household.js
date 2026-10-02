@@ -134,8 +134,11 @@ export async function canEditPerson(target) {
   // have signed in with an account of their own. The joined lock is for
   // adults only. `is_minor` means under-13, so the 13–17s are found from
   // their birthday, not the flag (Codex, 1 Oct 2026, twice).
-  const age = ageFrom(target.birth_date, target.birth_year);
-  if (target.is_minor || (age != null && age < 18)) return true;
+  // Takes a database row or a loadMembers person — the voice paths pass the
+  // latter, and reading only the snake_case fields there let a teenager's
+  // profile fall through to the joined-adult lock (Codex, 2 Oct 2026).
+  const age = ageFrom(target.birth_date ?? target.birthDate, target.birth_year ?? target.birthYear);
+  if (target.is_minor || target.isMinor || (age != null && age < 18)) return true;
   const account = await accountByMember(target.id);
   const joined = Boolean(account && account.activated_at);
   if (!joined) return true;              // pending, or no account yet

@@ -46,7 +46,7 @@ import {
 } from '../domain/voiceFacts.js';
 import {
   FOOD_SCHEMA, FOOD_SYSTEM, LIKES_SCHEMA, LIKES_SYSTEM, WHO_SCHEMA, WHO_SYSTEM,
-  applyFood, applyLikes, dietPatch, dietSpill, likesVocabularyText, normaliseFood, normaliseLikes, normaliseWho,
+  applyFood, applyLikes, dietPatch, dietSpill, likesVocabularyText, withNote, normaliseFood, normaliseLikes, normaliseWho,
 } from '../domain/voiceHousehold.js';
 import { searchAreas } from '../sources/areas.js';
 import { kmBetween } from '../domain/travel.js';
@@ -678,7 +678,12 @@ router.post('/intake/:id/remember', async (req, res, next) => {
         // Diet is a member column now (migration 327), never a constraint row —
         // the same mapping the apply path uses, or the remembered word would
         // vanish from the profile on the next read (Codex, 1 Oct 2026).
-        for (const d of item.values) for (const m of (adults.length ? adults : members)) {
+        // Only people the caller may edit: a joined adult's diet is theirs
+        // alone, here as on every other door (Codex, 2 Oct 2026).
+        const pool = [];
+        for (const m of (adults.length ? adults : members)) if (await canEditPerson(m)) pool.push(m);
+        const noteOf = new Map();
+        for (const d of item.values) for (const m of pool) {
           const patch = dietPatch(d);
           if (patch) {
             await households.updateMember(m.id, patch, household.id);
@@ -689,9 +694,14 @@ router.post('/intake/:id/remember', async (req, res, next) => {
           if (spill) {
             await households.upsertConstraint(m.id, { kind: spill.kind, value: spill.value, conceptKey: null, conceptKind: null, favourite: false });
             written.push({ memberId: m.id, kind: spill.kind, value: spill.value });
+            continue;
           }
-          // Neither a main diet, a faith, nor a mappable preference: left
-          // unwritten rather than stored where nothing reads it.
+          // Neither a main diet, a faith nor a mappable preference: kept in the
+          // private note, as migration 327 kept the old ones (Codex, 2 Oct 2026).
+          const note = withNote(noteOf.get(m.id) ?? m.allergenNote, d);
+          noteOf.set(m.id, note);
+          await households.updateMember(m.id, { allergenNote: note }, household.id);
+          written.push({ memberId: m.id, kind: 'allergen-note', value: String(d).trim() });
         }
       }
       if (item.kind === 'kids') {

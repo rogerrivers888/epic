@@ -414,3 +414,50 @@ test('deleting a household withdraws its requests on another host\'s offer and f
   const gone = await query('select count(*)::int n from households where id = $1', [leaving.id]);
   assert.equal(gone.rows[0].n, 0, 'and the household\'s own data is gone');
 });
+
+test('Remember keeps an unmapped diet in the note, and never touches a joined adult', async () => {
+  const { household: h, member: roger } = await aHousehold(query);
+  const dev = await addMember(h.id, 'Dev');
+  const devAcct = await createAccountOnHousehold(h.id, { memberId: dev.id, name: 'Dev', role: 'customer', plan: 'household', email: 'dev-remember@example.com' });
+  await query('update accounts set activated_at = now() where id = $1', [devAcct.id]);
+  const facts = normaliseTripFacts({ food: { diets: ['vegan', 'low FODMAP'] } });
+  const { rows: [intake] } = await query(
+    'insert into voice_intakes (household_id, facts) values ($1, $2) returning id',
+    [h.id, JSON.stringify(facts)]);
+  const srv = await server(owner(h, roger.id));
+  try {
+    assert.equal((await srv.send('POST', `/api/voice/intake/${intake.id}/remember`)).status, 200);
+    const people = (await srv.get('/api/household')).body.members;
+    const me = people.find((m) => m.id === roger.id);
+    const them = people.find((m) => m.id === dev.id);
+    assert.equal(me.diet, 'vegan');
+    assert.equal(me.allergenNote, 'low FODMAP', 'a diet that maps to nothing is kept where a person can read it');
+    assert.equal(them.diet, 'none', "a joined adult's diet is theirs alone — Remember does not reach it");
+    assert.equal(them.allergenNote, null);
+  } finally { await srv.close(); }
+});
+
+test('the voice apply path still lets an adult edit a signed-in teenager', async () => {
+  const { household: h, member: roger } = await aHousehold(query);
+  const yr = new Date().getFullYear() - 15;
+  const teen = await addMember(h.id, 'Tess', { minor: false, birthDate: `${yr}-03-01` });
+  const acct = await createAccountOnHousehold(h.id, { memberId: teen.id, name: 'Tess', role: 'customer', plan: 'household', email: 'tess-voice@example.com' });
+  await query('update accounts set activated_at = now() where id = $1', [acct.id]);
+  const { canEditPerson } = await import('../src/routes/household.js');
+  const { loadMembers } = await import('../src/routes/household.js');
+  const asLoaded = (await loadMembers(h.id)).find((m) => m.id === teen.id);
+  // The voice routes pass loadMembers' camelCase people, not database rows.
+  await new Promise((resolve, reject) => runAsAccount(owner(h, roger.id), () => canEditPerson(asLoaded).then((ok) => {
+    try { assert.equal(ok, true, 'a 15-year-old read through loadMembers is still a child'); resolve(); } catch (e) { reject(e); }
+  }, reject)));
+});
+
+test('voice apply keeps an unmapped diet in the private note, beside an unmapped allergy', async () => {
+  const { household: h, member } = await aHousehold(query);
+  await applyFood([
+    { kind: 'diet', value: 'low FODMAP' },
+    { kind: 'allergy', value: 'latex' },
+  ], { members: [member], everyone: [member], households, householdId: h.id });
+  const row = (await query('select allergen_note from members where id = $1', [member.id])).rows[0];
+  assert.equal(row.allergen_note, 'low FODMAP, latex', 'neither is lost, and the second never overwrites the first');
+});

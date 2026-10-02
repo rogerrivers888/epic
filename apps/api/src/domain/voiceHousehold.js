@@ -34,6 +34,18 @@ export const dietPatch = (raw) => {
 };
 // The same safe-direction mapping the diet migration uses for spoken values
 // that aren't a main diet or a faith: a preference becomes a filter or a rank.
+/**
+ * Add a spoken word to a person's private note once, keeping what is there.
+ * A diet or allergy that maps to nothing still lands somewhere a person can
+ * read — the same place migration 327/328 put the historical free text.
+ */
+export const withNote = (current, said) => {
+  const now = current ?? '';
+  const word = String(said).trim();
+  if (!word || now.toLowerCase().includes(word.toLowerCase())) return now || null;
+  return [now, word].filter(Boolean).join(', ');
+};
+
 export const dietSpill = (raw) => {
   const v = String(raw).toLowerCase();
   if (v.includes('gluten') || v.includes('coeliac') || v.includes('celiac')) return { kind: 'allergen', value: 'gluten' };
@@ -216,6 +228,16 @@ export async function applyFood(items, { members, households, everyone, househol
       const spill = dietSpill(it.value);
       if (spill) {
         for (const m of targets) { await households.upsertConstraint(m.id, { kind: spill.kind, value: spill.value, conceptKey: null, conceptKind: null, favourite: false }); written.push({ memberId: m.id, kind: spill.kind, value: spill.value }); }
+        continue;
+      }
+      // Neither a diet, a faith nor a mappable preference ("low FODMAP"): kept
+      // in the private note, as migration 327 kept the old ones — never a chip
+      // that reports success and stores nothing (Codex, 2 Oct 2026).
+      for (const m of targets) {
+        const note = withNote(noteOf.get(m.id) ?? m.allergenNote, it.value);
+        noteOf.set(m.id, note);
+        await households.updateMember(m.id, { allergenNote: note }, householdId);
+        written.push({ memberId: m.id, kind: 'allergen-note', value: String(it.value).trim() });
       }
       continue;
     }
@@ -233,9 +255,7 @@ export async function applyFood(items, { members, households, everyone, househol
           }
         } else {
           const said = String(it.value).trim();
-          const current = noteOf.get(m.id) ?? m.allergenNote ?? '';
-          const already = current.toLowerCase().includes(said.toLowerCase());
-          const note = already ? current : [current, said].filter(Boolean).join(', ');
+          const note = withNote(noteOf.get(m.id) ?? m.allergenNote, said);
           noteOf.set(m.id, note);
           await households.updateMember(m.id, { allergenNote: note }, householdId);
           written.push({ memberId: m.id, kind: 'allergen-note', value: said });
