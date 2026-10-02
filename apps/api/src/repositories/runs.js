@@ -280,7 +280,7 @@ export async function failures(runKey) {
   }
   const causes = await menuCauses();
   const { rows: ours } = await query(
-    `select venue_ref, coalesce(venue_label, venue_ref) as label, why, read_at
+    `select venue_ref, coalesce(epic_shown_name(venue_ref, null::uuid, venue_label), venue_ref) as label, why, read_at
        from place_menus where state <> 'read' and cause = 'ours'`);
   const byKind = new Map(OURS_KINDS.map((k) => [k.key, []]));
   for (const r of ours) byKind.get(oursKindOf(r.why))?.push(r);
@@ -314,7 +314,7 @@ export async function failures(runKey) {
  */
 export async function failing(cause, { oursKind = null, limit = 200 } = {}) {
   const { rows } = await query(
-    `select venue_ref, coalesce(venue_label, venue_ref) as label, why, menu_url, read_at, attempts
+    `select venue_ref, coalesce(epic_shown_name(venue_ref, null::uuid, venue_label), venue_ref) as label, why, menu_url, read_at, attempts
        from place_menus where state <> 'read' and cause = $1 order by read_at desc limit $2`,
     [cause, limit]);
   return oursKind ? rows.filter((r) => oursKindOf(r.why) === oursKind) : rows;

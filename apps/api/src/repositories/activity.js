@@ -117,10 +117,24 @@ export async function feedFor(householdId, { limit = 60, since = null } = {}) {
         join accounts a on a.id = s.account_id
        where a.household_id = $1
     )
-    select * from events
-     where ($3::timestamptz is null or at >= $3)
-     order by at desc
-     limit $2`,
+    -- Chosen first, then named: a place is named by what we own, else the
+    -- household's own words on a reference that is not a provider's, else the
+    -- branch's neutral word — never a provider's name stored at the time
+    -- (epic_shown_name, migration 340). Only the rows shown are named.
+    select e.kind, e.at,
+           case e.kind
+             when 'place' then coalesce(epic_shown_name(e.subject, $1, e.title), 'a place')
+             when 'visit' then coalesce(epic_shown_name(e.subject, $1, e.title), 'a place')
+             when 'shortlist' then coalesce(epic_shown_name(e.subject, $1, e.title), 'a place')
+             when 'menu' then coalesce(epic_shown_name(e.subject, $1, e.title), 'a menu')
+             when 'order' then coalesce(epic_shown_name(e.subject, $1, e.title), 'an order')
+             else e.title end as title,
+           e.detail, e.subject, e.weight
+      from (select * from events
+             where ($3::timestamptz is null or at >= $3)
+             order by at desc
+             limit $2) e
+     order by e.at desc`,
     [householdId, limit, since],
   );
   return rows;
@@ -307,23 +321,35 @@ export async function estateScreens({ days = 30 } = {}) {
  */
 export async function estateFeed({ limit = 100 } = {}) {
   const { rows } = await query(
-    `select k.kind, k.at, k.title, k.detail, k.household_id,
+    `select f.kind, f.at,
+            -- Named after the newest are chosen, by what we own — never a
+            -- provider's name stored at the time (epic_shown_name, migration 340).
+            case f.kind
+              when 'place' then coalesce(epic_shown_name(f.ref, f.household_id, f.title), 'a place')
+              when 'visit' then coalesce(epic_shown_name(f.ref, f.household_id, f.title), 'a place')
+              when 'order' then coalesce(epic_shown_name(f.ref, f.household_id, f.title), 'an order')
+              when 'menu' then coalesce(epic_shown_name(f.ref, f.household_id, f.title), 'a menu')
+              else f.title end as title,
+            f.detail, f.household_id, f.household_name, f.account_email
+       from (
+     select k.kind, k.at, k.title, k.detail, k.household_id, k.ref,
             h.name as household_name, a.email as account_email
        from (
-         select 'place' as kind, p.first_seen as at, p.label as title, coalesce(p.locality, '') as detail, p.household_id
+         select 'place' as kind, p.first_seen as at, p.label as title, coalesce(p.locality, '') as detail, p.household_id, p.venue_ref as ref
            from household_places p
          union all
-         select 'visit', v.created_at, coalesce(v.venue_label, 'a place'), coalesce(v.locality, ''), v.household_id from visits v
+         select 'visit', v.created_at, v.venue_label, coalesce(v.locality, ''), v.household_id, v.venue_ref from visits v
          union all
-         select 'trip', t.created_at, coalesce(t.title, t.place_label, 'a trip'), coalesce(t.locality, ''), t.household_id from trips t
+         select 'trip', t.created_at, coalesce(t.title, t.place_label, 'a trip'), coalesce(t.locality, ''), t.household_id, null from trips t
          union all
-         select 'order', o.created_at, coalesce(o.venue_label, 'an order'), '', o.household_id from orders o
+         select 'order', o.created_at, o.venue_label, '', o.household_id, o.venue_ref from orders o
          union all
-         select 'menu', m.created_at, coalesce(m.venue_label, 'a menu'), '', m.household_id from menus m
+         select 'menu', m.created_at, m.venue_label, '', m.household_id, m.venue_ref from menus m
        ) k
        join households h on h.id = k.household_id
        left join accounts a on a.household_id = k.household_id
-      order by k.at desc limit $1`,
+      order by k.at desc limit $1) f
+      order by f.at desc`,
     [limit],
   );
   return rows;

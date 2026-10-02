@@ -30,6 +30,7 @@ import * as topics from './chat.js';
 import { sendMail, mailConfigured } from '../sources/mail.js';
 import { sendSms, smsConfigured, normaliseMobile } from '../sources/sms.js';
 import { nightsOf } from './trips.js';
+import { resolveInto } from '../sources/displayNames.js';
 
 const router = Router();
 
@@ -64,6 +65,9 @@ async function guestPayload(trip, guest) {
     trips.daysOf(trip.id), trips.stopsOf(trip.id), trips.attendeesOf(trip.id),
     chat.guestsOf(trip.id), travel.legsOf(trip.id), householdOf(trip.household_id),
   ]);
+  // Named by what we own (the household's own nickname included), else a
+  // neutral word: a guest holds no account Google may be asked on.
+  await resolveInto([{ rows: stops, refKey: 'venue_ref', nameKey: 'venue_name' }], { purpose: 'trip.displayName', householdId: trip.household_id });
   const byDay = new Map();
   for (const s of stops) {
     const list = byDay.get(s.day_id) ?? [];
@@ -92,7 +96,7 @@ async function guestPayload(trip, guest) {
       stops: (byDay.get(d.id) ?? [])
         .sort((a, b) => (a.start_time ?? '').localeCompare(b.start_time ?? '') || a.position - b.position)
         .map((s) => ({
-          id: s.id, venueRef: s.venue_ref, name: s.venue_name,
+          id: s.id, venueRef: s.venue_ref, name: s.venue_name, nameSource: s.nameSource,
           startTime: s.start_time?.slice(0, 5) ?? null, dwellMinutes: s.dwell_minutes,
         })),
     })),

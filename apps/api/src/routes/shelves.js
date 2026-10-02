@@ -479,8 +479,10 @@ shelves.put('/place', requires('manage_library'), async (req, res, next) => {
 shelves.get('/rules/:id/overrides', requires('view_library'), async (req, res, next) => {
   try {
     const { rows } = await query(
-      `select venue_ref, venue_label, from_category, from_subcategory,
-              to_category, to_subcategory, reason, at, by
+      // Named by what we own, else the words kept for a reference that is not
+      // a provider's — never a provider's name stored with the override.
+      `select venue_ref, coalesce(epic_shown_name(venue_ref, null::uuid, venue_label), venue_ref) as venue_label,
+              from_category, from_subcategory, to_category, to_subcategory, reason, at, by
          from rule_overrides where rule_id = $1 order by at desc limit 200`, [req.params.id]);
     res.json({ overrides: rows, total: rows.length });
   } catch (err) { next(err); }

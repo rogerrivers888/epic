@@ -38,7 +38,7 @@ import { shelvesForVenue } from '../domain/moods.js';
 import { rules as shelfRules } from '../repositories/shelfRules.js';
 import { taxonomy as shelfTaxonomy } from '../repositories/shelfTaxonomy.js';
 import { hiddenAmong } from '../repositories/placeStatus.js';
-import { resolveNames } from '../sources/displayNames.js';
+import { resolveNames, resolveInto } from '../sources/displayNames.js';
 
 const router = Router();
 
@@ -172,6 +172,15 @@ export async function tripPayload(tripId) {
   const [days, stops, attendees, visitRows, shortlist] = await Promise.all([
     trips.daysOf(tripId), trips.stopsOf(tripId), trips.attendeesOf(tripId), trips.visitIdsOf(tripId), trips.shortlistOf(tripId),
   ]);
+  // Every place on this trip is named at the source — its owned name, else
+  // Google's live (in memory, never written down), else a neutral word — so
+  // everything built from these rows, a day's overrun warning included, reads
+  // the resolved name and never the stored one. One owned lookup and one
+  // capped live batch for the screen (sources/displayNames.js).
+  await resolveInto([
+    { rows: stops, refKey: 'venue_ref', nameKey: 'venue_name' },
+    { rows: shortlist, refKey: 'venue_ref', nameKey: 'venue_label' },
+  ], { purpose: 'trip.displayName' });
   const visitsByStop = new Map();
   // Embedded under stops the trip-wide resolve already names: owned or neutral
   // here, no per-visit live call outside that capped batch (Codex, 1 Oct 2026).
@@ -197,7 +206,7 @@ export async function tripPayload(tripId) {
       slots: SLOTS.map((slot) => ({
         slot,
         stops: dayStops.filter((s) => (s.slot || 'morning') === slot).map((s) => ({
-          id: s.id, position: s.position, venueRef: s.venue_ref, name: s.venue_name, lat: s.lat, lng: s.lng,
+          id: s.id, position: s.position, venueRef: s.venue_ref, name: s.venue_name, nameSource: s.nameSource, lat: s.lat, lng: s.lng,
           dwellMinutes: s.dwell_minutes, startTime: s.start_time?.slice(0, 5) ?? null, visit: visitsByStop.get(s.id) ?? null,
           bookingStatus: s.booking_status ?? null, bookingRef: s.booking_ref ?? null, legMode: s.leg_mode ?? null,
         })),
@@ -212,25 +221,16 @@ export async function tripPayload(tripId) {
     attendees: attendees.map((a) => ({ id: a.id, name: a.name, isMinor: a.is_minor, avatarUrl: a.avatar_url })),
     days: dayPayloads,
     shortlist: shortlist.map((s) => ({
-      id: s.id, venueRef: s.venue_ref, name: s.venue_label, kind: s.kind, category: s.category, lat: s.lat, lng: s.lng,
+      id: s.id, venueRef: s.venue_ref, name: s.venue_label, nameSource: s.nameSource, kind: s.kind, category: s.category, lat: s.lat, lng: s.lng,
       venue: s.venue, note: s.note, mustDo: s.must_do, preferredDayId: s.preferred_day_id, scheduled: scheduledRefs.has(s.venue_ref),
       // The working state (owner, 3 Sep 2026): booking status, order, length, way of travelling to it.
       status: s.status ?? 'to_call', bookedTime: s.booked_time?.slice(0, 5) ?? null, partySize: s.party_size ?? null, bookingRef: s.booking_ref ?? null,
       statusNote: s.status_note ?? null, statusOn: s.status_on ?? null, position: s.position ?? null, dwellMinutes: s.dwell_minutes ?? null, legMode: s.leg_mode ?? null, dayId: s.day_id ?? null,
     })),
     // Legacy single-window view for outings (the Plan screen and older clients).
-    stops: stops.map((s) => ({ id: s.id, position: s.position, venueRef: s.venue_ref, name: s.venue_name, lat: s.lat, lng: s.lng, dwellMinutes: s.dwell_minutes, visit: visitsByStop.get(s.id) ?? null })),
+    stops: stops.map((s) => ({ id: s.id, position: s.position, venueRef: s.venue_ref, name: s.venue_name, nameSource: s.nameSource, lat: s.lat, lng: s.lng, dwellMinutes: s.dwell_minutes, visit: visitsByStop.get(s.id) ?? null })),
     budget: computeBudget({ trip, stops, household }),
   };
-  // Every place on this trip shows its owned name, or Google's live (in memory,
-  // never written down), or a neutral word — never the stored provider label
-  // this used to carry in `venue_name`/`venue_label`. The stops appear twice
-  // (per-day and the legacy flat list); resolving them together means one owned
-  // lookup and one capped live batch for the screen (sources/displayNames.js).
-  await resolveNames(
-    [...payload.days.flatMap((d) => d.slots.flatMap((sl) => sl.stops)), ...payload.shortlist, ...payload.stops],
-    { refKey: 'venueRef', purpose: 'trip.displayName' },
-  );
   return payload;
 }
 
@@ -1392,6 +1392,9 @@ router.get('/:id/stays', async (req, res, next) => {
     const trip = await loadTrip(req.params.id);
     // What they mean to do, from the shortlist: the places with a point on the map.
     const plans = await trips.shortlistAnchors(trip.id);
+    // Named by what we own, else Google live, else a neutral word: these labels
+    // are said back on the Stay screen ("between X and Y").
+    await resolveInto([{ rows: plans, refKey: 'venue_ref', nameKey: 'venue_label' }], { purpose: 'trip.displayName' });
     const anchors = plans.map((p) => ({ label: p.venue_label, lat: Number(p.lat), lng: Number(p.lng), venueRef: p.venue_ref }));
     // The city itself: where the trip is, which for a trip away is its origin.
     const centre = { lat: trip.base_lat ?? trip.origin_lat, lng: trip.base_lng ?? trip.origin_lng };

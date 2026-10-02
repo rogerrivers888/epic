@@ -34,6 +34,7 @@ import { currentHousehold, householdOf } from './household.js';
 import { currentAccount } from '../context.js';
 import { CADENCES, DEFAULT_CADENCE, QUIET_HOURS, dueRuns, nextRun, reminderBody, schedule } from '../domain/reminders.js';
 import { channelReady, sendReminder } from '../sources/notify.js';
+import { resolveInto } from '../sources/displayNames.js';
 import * as hostingRepo from '../repositories/hosting.js';
 import { mailConfigured, sendMail } from '../sources/mail.js';
 import { normaliseMobile, sendSms, smsConfigured } from '../sources/sms.js';
@@ -408,6 +409,14 @@ async function syncFromTrip(group) {
     groupsRepo.stopsForChecklist(group.trip_id),
     groupsRepo.itemRefs(group.id),
   ]);
+  // A checklist item is written down, so it is written with the place's owned
+  // name or a neutral word — never the stored provider label, and never a live
+  // Google name, which may be shown but not kept (live: false).
+  const tripRow = await tripsRepo.tripById(group.trip_id).catch(() => null);
+  await resolveInto([
+    { rows: shortlist, refKey: 'venue_ref', nameKey: 'venue_label' },
+    { rows: stops, refKey: 'venue_ref', nameKey: 'venue_name' },
+  ], { purpose: 'trip.displayName', householdId: tripRow?.household_id ?? null, live: false });
   const known = new Set(existing.map((i) => i.venue_ref).filter(Boolean));
   const labels = new Set(existing.map((i) => (i.label ?? '').trim().toLowerCase()));
   const dropped = new Set(Array.isArray(group.dropped_refs) ? group.dropped_refs : []);
@@ -491,6 +500,8 @@ router.post('/trips/:id/group', async (req, res, next) => {
           }, client);
         }
         const shortlist = await groupsRepo.shortlistForChecklist(trip.id, client);
+        // Written down: owned name or a neutral word, never a live one.
+        await resolveInto([{ rows: shortlist, refKey: 'venue_ref', nameKey: 'venue_label' }], { purpose: 'trip.displayName', householdId: trip.household_id, live: false });
         for (const s of shortlist.slice(0, 8)) {
           // A meal is asked about, not required: the organiser books the table, and what they need is a number.
           await groupsRepo.insertItem(created.id, {

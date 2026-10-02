@@ -38,19 +38,29 @@ export function computeBudget({ trip, stops, household }) {
   const legs = [];
   let cursor = origin;
   let cursorLabel = trip.origin_label;
+  let cursorLive = false;
+  // A stop named live from Google (in memory only, sources/displayNames.js)
+  // marks the leg it names, so the device strips it before keeping the plan
+  // (apps/web/src/offline/policy.ts) — the name is shown, never stored.
+  const liveName = (stop) => stop?.nameSource === 'google-live';
 
   for (const stop of ordered) {
     const point = { lat: stop.lat, lng: stop.lng };
-    legs.push({ from: cursorLabel, to: stop.venue_name, minutes: estimateTravelMinutes(cursor, point, mode) });
+    const leg = { from: cursorLabel, to: stop.venue_name, minutes: estimateTravelMinutes(cursor, point, mode) };
+    if (cursorLive || liveName(stop)) leg.live = true;
+    legs.push(leg);
     cursor = point;
     cursorLabel = stop.venue_name;
+    cursorLive = liveName(stop);
   }
 
   // The final leg is part of the window: a plan that gets you there but not
   // to where the day ends has not been planned.
   const closesLoop = end.lat !== origin.lat || end.lng !== origin.lng || ordered.length > 0;
   if (closesLoop) {
-    legs.push({ from: cursorLabel, to: end.label, minutes: estimateTravelMinutes(cursor, end, mode) });
+    const leg = { from: cursorLabel, to: end.label, minutes: estimateTravelMinutes(cursor, end, mode) };
+    if (cursorLive) leg.live = true;
+    legs.push(leg);
   }
 
   const travelMinutes = legs.reduce((sum, leg) => sum + leg.minutes, 0);
@@ -70,7 +80,7 @@ export function computeBudget({ trip, stops, household }) {
       running += legs[i].minutes + ordered[i].dwell_minutes;
       const toEnd = estimateTravelMinutes({ lat: ordered[i].lat, lng: ordered[i].lng }, end, mode);
       if (running + toEnd > totalMinutes) {
-        overrunStop = { id: ordered[i].id, name: ordered[i].venue_name, position: ordered[i].position };
+        overrunStop = { id: ordered[i].id, name: ordered[i].venue_name, position: ordered[i].position, ...(liveName(ordered[i]) ? { nameSource: 'google-live' } : {}) };
         break;
       }
     }

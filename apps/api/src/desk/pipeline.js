@@ -716,8 +716,10 @@ const askRank = (r) => (r.state === 'conflict' && !r.unknown ? 0 : r.disputed_be
 /** The name a question uses for a place: our own record, else the household's own visit. */
 async function placeWord(ref, householdId) {
   const { rows: [r] } = await query(
+    // Our own record's name, else whatever the household sees under — never a
+    // provider's name stored with a visit (epic_shown_name, migration 340).
     `select coalesce((select name from place_records where venue_ref = $1),
-                     (select venue_label from visits where household_id = $2 and venue_ref = $1 order by visited_on desc limit 1)) as name`,
+                     epic_shown_name($1, $2::uuid, (select venue_label from visits where household_id = $2 and venue_ref = $1 order by visited_on desc limit 1))) as name`,
     [ref, householdId]);
   return shortName(r?.name);
 }

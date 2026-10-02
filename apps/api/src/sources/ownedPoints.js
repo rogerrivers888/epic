@@ -33,24 +33,14 @@ export const LICENCES = {
 
 /**
  * The name an owned source itself holds for the place a point was matched to,
- * as SQL over an `owned_points` row aliased `o` — read from our own copy of
- * that source, the live load first and any held load after. Shared by the
+ * as SQL over an `owned_points` row aliased `o` — the database's own
+ * epic_owned_point_name (migration 340), read from our own copy of that
+ * source, the live load first and any held load after. Shared by the
  * display resolver (an owned name, sources/displayNames.js) and the name-check
  * (sources/nameCheck.js). Null where the source holds no name we can read, so
  * the caller says nothing rather than guessing.
  */
-export const OWNED_POINT_NAME = (o = 'o') => `(case ${o}.source
-  when 'fsa' then (select f.name from fsa_establishments f
-                    where ${o}.source_ref ~ '^[0-9]+$' and f.fhrsid = ${o}.source_ref::bigint
-                    order by (f.load_id = (select live_load from owned_source_loads where source = 'fsa')) desc limit 1)
-  when 'historic-england' then (select h.name from heritage_entries h
-                    where split_part(${o}.source_ref, ':', 2) ~ '^[0-9]+$'
-                      and h.list_entry = split_part(${o}.source_ref, ':', 2)::bigint and h.layer = split_part(${o}.source_ref, ':', 1)
-                    order by (h.load_id = (select live_load from owned_source_loads where source = 'historic-england')) desc limit 1)
-  when 'os-open-names' then (select n.name from os_names n where n.id = ${o}.source_ref
-                    order by (n.load_id = (select live_load from owned_source_loads where source = 'os-open-names')) desc limit 1)
-  when 'osm' then (select x.name from osm_features x where x.ref = ${o}.source_ref)
-  end)`;
+export const OWNED_POINT_NAME = (o = 'o') => `epic_owned_point_name(${o}.source, ${o}.source_ref)`;
 
 /**
  * One place's owned point, held still for the rest of the transaction: taken

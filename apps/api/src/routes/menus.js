@@ -28,6 +28,7 @@ import { ownedRecord } from '../sources/own.js';
 import { readMenu, chromePath, renderProbe, describeDish } from '../sources/menuRead.js';
 import { resolveConcept, suggestConcept, conceptByKey } from '../domain/concepts.js';
 import { upsertHouseholdPlace } from './atlas.js';
+import { resolveInto } from '../sources/displayNames.js';
 
 export const menu = Router();
 export const orders = Router();
@@ -66,6 +67,9 @@ const money = (text) => {
 async function menuPayload(menuId) {
   const m = await menusRepo.menuById(menuId);
   if (!m) return null;
+  // The place a menu belongs to is named by what we own, else Google live,
+  // else a neutral word — never the label stored when it was read.
+  await resolveInto([{ rows: [m], refKey: 'venue_ref', nameKey: 'venue_label' }], { purpose: 'menu.displayName', householdId: m.household_id ?? null });
   const items = await menusRepo.menuItems(menuId);
   const sections = [];
   for (const i of items) {
@@ -96,9 +100,10 @@ function conceptOf(name) {
 async function orderPayload(orderId) {
   const o = await menusRepo.orderById(orderId);
   if (!o) return null;
+  await resolveInto([{ rows: [o], refKey: 'venue_ref', nameKey: 'venue_label' }], { purpose: 'menu.displayName', householdId: o.household_id ?? null });
   const [items, guests] = await Promise.all([menusRepo.orderItems(orderId), menusRepo.orderGuests(orderId)]);
   return {
-    id: o.id, clientId: o.client_id, venueRef: o.venue_ref, venueLabel: o.venue_label, menuId: o.menu_id,
+    id: o.id, clientId: o.client_id, venueRef: o.venue_ref, venueLabel: o.venue_label, nameSource: o.nameSource, menuId: o.menu_id,
     visitId: o.visit_id, createdAt: o.created_at, updatedAt: o.updated_at,
     // The code the waiter scans. It travels with the order so the phone can
     // draw it with no signal (repositories/menus.js).
@@ -580,6 +585,9 @@ ticket.get('/:token', async (req, res, next) => {
   try {
     const token = String(req.params.token || '').trim();
     const order = token ? await menusRepo.orderByShareToken(token) : null;
+    // The waiter's screen has no account behind it: the place reads under its
+    // owned name for the household that ordered, else a neutral word.
+    if (order) await resolveInto([{ rows: [order], refKey: 'venue_ref', nameKey: 'venue_label' }], { purpose: 'menu.displayName', householdId: order.household_id ?? null, live: false });
     if (!order) {
       return res.status(404).json({ error: 'order_not_found', message: 'That code does not open an order.' });
     }

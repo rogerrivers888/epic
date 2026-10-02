@@ -98,11 +98,23 @@ function stripLiveNames(node: any): any {
   if (!node || typeof node !== 'object') return node;
   const out: any = {};
   for (const [k, v] of Object.entries(node)) out[k] = (v && typeof v === 'object') ? stripLiveNames(v) : v;
-  if (out.nameSource === 'google-live') {
+  // Marked live by the server: a row named from Google (`nameSource`), or an
+  // object built from one — a budget leg, a journey point, a chat anchor
+  // (`live: true`). Every field that carries the name goes neutral.
+  if (out.nameSource === 'google-live' || out.live === true) {
     const neutral = out.locality ? `A place in ${out.locality}` : 'A place';
     if ('name' in out) out.name = neutral;
     if ('venueLabel' in out) out.venueLabel = neutral;
-    out.nameSource = 'none';
+    if (typeof out.label === 'string') {
+      // A day anchor reads "Sat 4 · <first stop>": the day stays, the place goes.
+      const day = out.label.includes(' · ') ? out.label.split(' · ')[0] : null;
+      out.label = day ? `${day} · ${neutral}` : neutral;
+    }
+    if (typeof out.from === 'string') out.from = neutral;
+    if (typeof out.to === 'string') out.to = neutral;
+    if (out.live === true && typeof out.sub === 'string' && out.kind === 'day') out.sub = neutral;
+    if (out.nameSource === 'google-live') out.nameSource = 'none';
+    if (out.live === true) out.live = false;
   }
   return out;
 }
@@ -239,12 +251,12 @@ export function storable(fullPath: string, body: any): any | null {
     const strip = (people: any) => (people
       ? { ...people, guests: (people.guests ?? []).map((g: any) => ({ ...g, contact: null })) }
       : people);
-    return {
+    return stripLiveNames({
       ...body,
       people: strip(body.people),
       // The topic model carries the people inside `context` (routes/chat.js).
       context: body.context ? { ...body.context, people: strip(body.context.people) } : body.context,
-    };
+    });
   }
 
   /**
@@ -282,7 +294,7 @@ export function storable(fullPath: string, body: any): any | null {
   // and is ours to keep, so the day someone is actually on is on their phone.
   // The same journey with real times in it is Google Routes' answer, which is
   // not, so that one is left behind and recomputed when there is signal.
-  if (isJourney(p)) return body.estimated === true ? body : null;
+  if (isJourney(p)) return body.estimated === true ? stripLiveNames(body) : null;
   if (isDirections(p)) return body.estimated === true ? body : null;
 
   // --- a place's drawer: our side of it only -----------------------------

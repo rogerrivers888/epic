@@ -472,7 +472,7 @@ export async function menuCauses() {
     `select m.cause, count(*)::int as n,
             count(*) filter (where m.attempts >= 4)::int as exhausted,
             min(m.read_at) as oldest,
-            (array_agg(coalesce(m.venue_label, m.venue_ref) order by m.read_at desc))[1:3] as examples
+            (array_agg(coalesce(epic_shown_name(m.venue_ref, null::uuid, m.venue_label), m.venue_ref) order by m.read_at desc))[1:3] as examples
        from place_menus m
       where m.state <> 'read' and m.cause is not null
       group by 1`);
@@ -519,7 +519,7 @@ export async function retryCause(cause) {
 /** Every menu Epic could not read, with the reason. The work list. */
 export async function menuMisses(limit = 100) {
   const { rows } = await query(
-    `select m.venue_ref, m.venue_label, m.state, m.why, m.cause, m.menu_url, m.attempts, m.read_at, r.website
+    `select m.venue_ref, epic_shown_name(m.venue_ref, null::uuid, m.venue_label) as venue_label, m.state, m.why, m.cause, m.menu_url, m.attempts, m.read_at, r.website
        from place_menus m left join place_records r on r.venue_ref = m.venue_ref
       where m.state <> 'read' order by m.read_at desc limit $1`,
     [limit],
@@ -568,7 +568,7 @@ export async function menusToRead(limit = 5, ref = null, { claimedOnly = false }
   // without it a particular restaurant can sit behind ninety others while
   // somebody is waiting to see whether a fix worked.
   const { rows } = await query(
-    `select m.venue_ref, m.venue_label, m.menu_url, p.area_code, p.rank,
+    `select m.venue_ref, epic_shown_name(m.venue_ref, null::uuid, m.venue_label) as venue_label, m.menu_url, p.area_code, p.rank,
             exists (select 1 from place_claims pc where pc.venue_ref = p.venue_ref) as claimed,
             (select pc.household_id from place_claims pc where pc.venue_ref = p.venue_ref
               order by pc.claimed_at, pc.household_id limit 1) as claimant,

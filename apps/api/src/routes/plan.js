@@ -40,6 +40,7 @@ import { wallToUtc, wallClock, DEFAULT_TZ, hourToTime } from '../domain/time.js'
 import { INTENSITY_TARGETS } from '../domain/budget.js';
 import { corridorStops, scheduleCorridor, MAX_DETOUR_MINUTES } from '../domain/corridor.js';
 import { currentHousehold, loadMembers, toAttendees, loadLearnedPreferences } from './household.js';
+import { resolveInto } from '../sources/displayNames.js';
 
 const router = Router();
 
@@ -1785,6 +1786,9 @@ export async function seedShortlistFromIdea({ household, session, trip, idea }) 
   const text = ` ${lines.map(normName).join(' . ')} `;
   const { venues } = searchKept(thingsSearch(idea.place)) ?? await thingsAround({ household, session, place: idea.place });
   const atlas = await atlasRepo.placedPlaces(household.id);
+  // The idea is matched against the names we own, never a provider's stored
+  // label; nothing paid is asked to match an idea's words.
+  await resolveInto([{ rows: atlas, refKey: 'venue_ref', nameKey: 'label' }], { purpose: 'plan.displayName', live: false });
   const candidates = [
     ...venues.map((v) => ({ venueRef: `${v.source}:${v.sourcePlaceId}`, venueLabel: v.name, kind: null, category: v.category, lat: v.lat, lng: v.lng, venue: v, weight: v.ratingCount ?? 0 })),
     ...atlas.filter((p) => kmBetween(p, idea.place) <= THINGS_RADIUS_KM + 1).map((p) => ({ venueRef: p.venue_ref, venueLabel: p.label, kind: p.kind, category: p.category, lat: p.lat, lng: p.lng, venue: p.venue, weight: Number.MAX_SAFE_INTEGER })),
@@ -2572,6 +2576,9 @@ async function planDayForTrip({ household, tripId, dayId, minActivities, minFood
       ? { ...shared, candidates: JSON.parse(JSON.stringify(shared.candidates)), excluded: [...shared.excluded] }
       : await retrievePool({ household, trip, attendees, intent: { wants, special: false }, sessionId: session.id });
     const shortlist = await tripsRepo.shortlistOf(tripId);
+    // Named as the trip shows them (the live names are already in memory from
+    // the trip screen, so this is rarely a paid call).
+    await resolveInto([{ rows: shortlist, refKey: 'venue_ref', nameKey: 'venue_label' }], { purpose: 'plan.displayName' });
     const byRef = new Map(pool.candidates.map((c) => [`${c.source}:${c.sourcePlaceId}`, c]));
     const extra = [];
     const mustKeys = [];
@@ -2604,6 +2611,7 @@ async function planDayForTrip({ household, tripId, dayId, minActivities, minFood
     // is fixed: every option is built around it, and the pool treats it as the
     // day's one ticketed thing.
     const booked = await tripsRepo.anchorStops(dayId);
+    await resolveInto([{ rows: booked, refKey: 'venue_ref', nameKey: 'venue_name' }], { purpose: 'plan.displayName' });
     const tzD = trip.timezone || DEFAULT_TZ;
     const fixedStops = booked.map((s) => {
       const startsAt = wallToUtc(day.date, (s.start_time || trip.depart_at.slice(11, 16) || '12:00').slice(0, 5), tzD).toISOString();

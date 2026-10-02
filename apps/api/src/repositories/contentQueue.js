@@ -132,7 +132,9 @@ export async function sync() {
   await query(`
     insert into content_queue (kind, subject_type, subject_id, household_id, account_id, maker_label, venue_ref, place_label, made_at)
     select 'review', 'visit', v.id::text, v.household_id, null, coalesce(h.name, 'A household'),
-           v.venue_ref, v.venue_label, v.created_at
+           -- The place under the name we own, or the household's own words —
+           -- never a provider's name copied from the visit (migration 340).
+           v.venue_ref, epic_shown_name(v.venue_ref, v.household_id, v.venue_label), v.created_at
       from visits v left join households h on h.id = v.household_id
      where coalesce(v.note, '') <> ''
     on conflict (subject_type, subject_id) do nothing`);
@@ -150,7 +152,7 @@ export async function sync() {
     insert into content_queue (kind, subject_type, subject_id, household_id, maker_label, venue_ref, place_label, made_at)
     select case when coalesce(r.concept_key, r.concept_id::text) is not null then 'note' else 'rating' end,
            'rating', r.id::text, v.household_id, coalesce(m.name, h.name, 'A household'),
-           v.venue_ref, v.venue_label, r.created_at
+           v.venue_ref, epic_shown_name(v.venue_ref, v.household_id, v.venue_label), r.created_at
       from ratings r
       join visits v on v.id = r.visit_id
       left join members m on m.id = r.member_id

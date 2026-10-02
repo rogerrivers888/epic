@@ -19,7 +19,6 @@ import { googleSource } from './google.js';
 import * as providerCalls from '../repositories/providerCalls.js';
 import { ensureRecord } from '../repositories/ownedPlaces.js';
 import { noteLiveName } from './liveNames.js';
-import { OWNED_POINT_NAME } from './ownedPoints.js';
 
 const prefixOf = (ref) => String(ref ?? '').split(':')[0];
 // Only Google has a live display-name fetcher; a tripadvisor:/liteapi:/other
@@ -40,45 +39,11 @@ export async function ownedNamesFor(refs, householdId = null) {
   const out = new Map();
   const list = [...new Set((refs ?? []).filter(Boolean))];
   if (!list.length) return out;
-  const { rows } = await query(`
-    select venue_ref, name, source from (
-      select venue_ref, name, source, row_number() over (partition by venue_ref order by pri) as rn from (
-        -- a) the household's own typed name wins outright — above even a photo
-        -- place's original label, so renaming a photo place takes effect
-        select hp.venue_ref, hp.nickname as name, 'household' as source, 0 as pri
-          from household_places hp where hp.venue_ref = any($1) and hp.household_id = $2 and hp.nickname is not null
-        union all
-        -- the label a household gave a photo place when they added it
-        select hp.venue_ref, hp.label, 'household', 1
-          from household_places hp
-         where hp.venue_ref = any($1) and hp.household_id = $2 and hp.venue_ref like 'photo:%' and hp.label is not null and hp.label <> hp.venue_ref
-        union all
-        -- our research's name, under the source its provenance records
-        select r.venue_ref, r.name, coalesce(r.provenance ->> 'name', 'own'), 2
-          from place_records r
-         where r.venue_ref = any($1) and r.name is not null and (r.provenance ->> 'name') is not null
-        union all
-        -- an owned attraction, by any of the three references it answers to —
-        -- but not an unmatched sweep placeholder (source google, no osm_ref)
-        select ref, a.name, case when a.osm_ref is not null then 'osm' else 'atlas' end, 3
-          from attractions a
-          cross join lateral (select unnest(array[a.venue_ref, a.external_ref, 'atlas:' || a.id::text]) as ref) refs
-         where ref = any($1) and a.name is not null and a.display_source is distinct from 'google'
-           and not (a.source = 'google' and a.osm_ref is null)
-        union all
-        -- the name the owned source a point was matched to holds itself — FSA,
-        -- Historic England, OS Open Names or the open map, all ours to keep
-        select o.venue_ref, ${OWNED_POINT_NAME('o')}, o.source, 4
-          from owned_points o
-         where o.venue_ref = any($1) and ${OWNED_POINT_NAME('o')} is not null
-        union all
-        -- the open map's name, on an open reference only
-        select s.venue_ref, s.name, 'osm', 5
-          from scout_places s
-         where s.venue_ref = any($1) and s.name is not null
-           and (s.venue_ref like 'osm:%' or s.venue_ref like 'atlas:%' or s.venue_ref like 'wikidata:%' or s.venue_ref like 'own:%')
-      ) all_names
-    ) ranked where rn = 1`, [list, householdId]);
+  // The database's own answer (epic_owned_name, migration 340), so a screen
+  // drawn here and a list drawn in SQL name a place the same way.
+  const { rows } = await query(
+    `select r as venue_ref, n.name, n.source
+       from unnest($1::text[]) r cross join lateral epic_owned_name(r, $2::uuid) n`, [list, householdId]);
   for (const r of rows) out.set(r.venue_ref, { name: r.name, source: r.source });
   return out;
 }
@@ -138,6 +103,14 @@ function queueForResearch(refs) {
   }
 }
 
+/** Which of `refs` are a licensed provider's, by epic_ref_true_source (migration 307). */
+async function rentedRefs(refs) {
+  if (!refs.length) return new Set();
+  const { rows } = await query(
+    `select r from unnest($1::text[]) r where coalesce(epic_ref_true_source(r), '') = any(epic_rented_sources())`, [refs]);
+  return new Set(rows.map((x) => x.r));
+}
+
 /** A neutral word for a place we cannot name at all, so it is never nameless. */
 const neutralName = (row) => (row.locality ? `A place in ${row.locality}` : 'A place');
 
@@ -146,18 +119,29 @@ const neutralName = (row) => (row.locality ? `A place in ${row.locality}` : 'A p
  * name (capped per screen), else a neutral word; queue every unnamed place for
  * research. `rows` are mutated; nothing is stored.
  */
-export async function resolveNames(rows, { refKey = 'ref', nameKey = 'name', live = true, purpose = 'places.displayName', cap = 25 } = {}) {
+export async function resolveNames(rows, { refKey = 'ref', nameKey = 'name', live = true, purpose = 'places.displayName', cap = 25, householdId: whose = null } = {}) {
   const refs = [...new Set(rows.map((r) => r[refKey]).filter(Boolean))];
   if (!refs.length) return rows;
-  // The household's own names are theirs alone; the active household is the
-  // request's spender (auth.js wraps every authenticated read in runAsSpender).
+  // The household's own names are theirs alone. Owned names are read for the
+  // household whose places these are — a guest reading a shared trip sees the
+  // trip's household's nickname — but Google is asked only on the signed-in
+  // household's account (auth.js wraps every authenticated read in runAsSpender).
   const { householdId } = currentSpender();
-  const owned = await ownedNamesFor(refs, householdId);
+  const owned = await ownedNamesFor(refs, whose ?? householdId);
   const unowned = refs.filter((r) => !owned.has(r));
   queueForResearch(unowned);
+  // Which references are a provider's, by the database's own reckoning
+  // (epic_ref_true_source — an atlas reference to an activity-sweep row is
+  // Google's): only those lose the words they were stored with. A place on an
+  // open or household reference — the open map, a fixture, a stop somebody
+  // typed — keeps its stored name when nothing owned names it better.
+  const rented = await rentedRefs(unowned);
 
   const liveNames = new Map();
-  if (live) {
+  // Google is asked only for a household: the paid gate refuses anything else
+  // (paidGate.js), and a page read with no household — a shared trip's public
+  // view — shows an owned name or a neutral word.
+  if (live && householdId) {
     const toFetch = [];
     for (const ref of unowned) {
       if (!fetchableLive(ref)) continue;
@@ -177,9 +161,39 @@ export async function resolveNames(rows, { refKey = 'ref', nameKey = 'name', liv
     const o = owned.get(ref);
     if (o) { row[nameKey] = o.name; row.nameSource = o.source; }
     else if (liveNames.has(ref)) { row[nameKey] = liveNames.get(ref); row.nameSource = 'google-live'; }
+    else if (!rented.has(ref) && typeof row[nameKey] === 'string' && row[nameKey].trim() && row[nameKey] !== ref) row.nameSource = 'stored';
     else { row[nameKey] = neutralName(row); row.nameSource = 'none'; }
   }
   return rows;
 }
 
-export default { ownedNamesFor, resolveNames };
+/**
+ * Resolve names straight into raw rows, across several arrays in one batch:
+ * each spec is { rows, refKey, nameKey, localityKey? } — stops by `venue_ref`/`venue_name`,
+ * shortlist rows by `venue_ref`/`venue_label`, and so on. One owned lookup and
+ * one capped live batch for the lot, and the resolved name written into the
+ * row's own column, so everything downstream — a budget's overrun warning, a
+ * chat anchor, a plan's anchors — reads the resolved name and never the stored
+ * one. `nameSource` goes on each row too, for the offline strip.
+ */
+export async function resolveInto(specs, opts = {}) {
+  const tmp = new Map();
+  for (const { rows, refKey, nameKey, localityKey = 'locality' } of specs) {
+    for (const r of rows ?? []) {
+      const ref = r?.[refKey];
+      if (ref && !tmp.has(ref)) tmp.set(ref, { ref, locality: r[localityKey] ?? null, name: r[nameKey] ?? null });
+    }
+  }
+  const list = [...tmp.values()];
+  if (!list.length) return;
+  await resolveNames(list, { ...opts, refKey: 'ref', nameKey: 'name' });
+  const by = new Map(list.map((x) => [x.ref, x]));
+  for (const { rows, refKey, nameKey } of specs) {
+    for (const r of rows ?? []) {
+      const x = by.get(r?.[refKey]);
+      if (x) { r[nameKey] = x.name; r.nameSource = x.nameSource; }
+    }
+  }
+}
+
+export default { ownedNamesFor, resolveNames, resolveInto };

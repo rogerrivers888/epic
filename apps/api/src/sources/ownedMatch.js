@@ -19,7 +19,7 @@
 
 import { query, pool } from '../db.js';
 import { nameScore, metresBetween, significantStems } from './openMatch.js';
-import { recordOwnedPoint, RENTED_SOURCES, OWNED_POINT_NAME } from './ownedPoints.js';
+import { recordOwnedPoint, RENTED_SOURCES } from './ownedPoints.js';
 
 /** How far from the point each source's twin may be, and how alike the names must be. */
 export const RULES = {
@@ -376,36 +376,21 @@ export async function weeklyDue({ now = Date.now() } = {}) {
  * Google's and is not counted (owner, 1 Oct 2026). Read only.
  */
 export async function ownedNameGaps() {
+  // A row lacks an owned name exactly when the display resolver would have to
+  // fall back to Google live or a neutral word: no owned name for its place
+  // (epic_owned_name, migration 340), and no words of the household's own on a
+  // reference that is not a provider's (epic_shown_name). The same rule the
+  // screens use, so the Monday count and the screens cannot disagree.
   const { rows: [r] } = await query(`
-    with owned as (
-      select venue_ref from place_records where name is not null and (provenance ->> 'name') is not null
-      -- An owned attraction answers to all three of its references, but an
-      -- unmatched sweep row (source google, no osm_ref) is a rented placeholder,
-      -- not owned (migration 307; Codex, 1 Oct 2026).
-      union select venue_ref from attractions where name is not null and display_source is distinct from 'google' and not (source = 'google' and osm_ref is null) and venue_ref is not null
-      union select external_ref from attractions where name is not null and display_source is distinct from 'google' and not (source = 'google' and osm_ref is null) and external_ref is not null
-      union select 'atlas:' || id::text from attractions where name is not null and display_source is distinct from 'google' and not (source = 'google' and osm_ref is null)
-      union select venue_ref from scout_places where name is not null
-        and (venue_ref like 'osm:%' or venue_ref like 'atlas:%' or venue_ref like 'wikidata:%' or venue_ref like 'own:%')
-      -- The owned source a point was matched to, by the name it holds itself —
-      -- the same name the display resolver shows (sources/displayNames.js).
-      union select o.venue_ref from owned_points o where ${OWNED_POINT_NAME('o')} is not null
-    ),
-    -- A name the household typed is theirs alone, so it answers for their own
-    -- rows only (migration 310).
-    nicknamed as (select household_id, venue_ref from household_places where nickname is not null)
     select
-      (select count(*)::int from household_places hp where hp.venue_ref not like 'photo:%' and hp.nickname is null
-          and not exists (select 1 from owned o where o.venue_ref = hp.venue_ref)) as saved_places,
-      (select count(*)::int from trip_stops ts join trips t on t.id = ts.trip_id where ts.venue_ref not like 'photo:%'
-          and not exists (select 1 from owned o where o.venue_ref = ts.venue_ref)
-          and not exists (select 1 from nicknamed n where n.household_id = t.household_id and n.venue_ref = ts.venue_ref)) as trip_stops,
-      (select count(*)::int from trip_shortlist sl join trips t on t.id = sl.trip_id where sl.venue_ref not like 'photo:%'
-          and not exists (select 1 from owned o where o.venue_ref = sl.venue_ref)
-          and not exists (select 1 from nicknamed n where n.household_id = t.household_id and n.venue_ref = sl.venue_ref)) as shortlist,
-      (select count(*)::int from visits v where v.venue_ref not like 'photo:%'
-          and not exists (select 1 from owned o where o.venue_ref = v.venue_ref)
-          and not exists (select 1 from nicknamed n where n.household_id = v.household_id and n.venue_ref = v.venue_ref)) as visits`);
+      (select count(*)::int from household_places hp
+        where epic_shown_name(hp.venue_ref, hp.household_id, hp.label) is null) as saved_places,
+      (select count(*)::int from trip_stops ts join trips t on t.id = ts.trip_id
+        where epic_shown_name(ts.venue_ref, t.household_id, ts.venue_name) is null) as trip_stops,
+      (select count(*)::int from trip_shortlist sl join trips t on t.id = sl.trip_id
+        where epic_shown_name(sl.venue_ref, t.household_id, sl.venue_label) is null) as shortlist,
+      (select count(*)::int from visits v
+        where epic_shown_name(v.venue_ref, v.household_id, v.venue_label) is null) as visits`);
   return r;
 }
 

@@ -10,6 +10,7 @@
  */
 
 import { query } from '../db.js';
+import { resolveInto } from '../sources/displayNames.js';
 
 const on = (client) => (client ? (text, params) => client.query(text, params) : query);
 
@@ -130,14 +131,27 @@ export async function cancelGroup(groupId, note) {
 // the checklist
 // ---------------------------------------------------------------------------
 
+/**
+ * A checklist item about a place is shown under the place's owned name, else
+ * Google's live, else a neutral word — never a provider's name stored when the
+ * item was made. An item with no place (a room, a meeting point) reads as written.
+ */
+async function named(rows, groupId) {
+  const { rows: [g] } = await query('select household_id from trip_groups where id = $1', [groupId]);
+  // Owned names only: a group's checklist is kept on a participant's device
+  // whole (offline/policy.ts, the join page), so a live name may not ride in it.
+  await resolveInto([{ rows, refKey: 'venue_ref', nameKey: 'label' }], { purpose: 'trip.displayName', householdId: g?.household_id ?? null, live: false });
+  return rows;
+}
+
 export async function itemsOf(groupId) {
   const { rows } = await query('select * from group_items where group_id = $1 order by position, created_at', [groupId]);
-  return rows;
+  return named(rows, groupId);
 }
 
 export async function itemOfGroup(itemId, groupId) {
   const { rows } = await query('select * from group_items where id = $1 and group_id = $2', [itemId, groupId]);
-  return rows[0] ?? null;
+  return (await named(rows, groupId))[0] ?? null;
 }
 
 export async function nextItemPosition(groupId) {

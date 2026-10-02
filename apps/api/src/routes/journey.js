@@ -18,6 +18,7 @@ import { dayAsTrip, slotFor } from '../domain/days.js';
 import { wallToUtc, wallClock, DEFAULT_TZ } from '../domain/time.js';
 import { currentHousehold } from './household.js';
 import { tripPayload, LEG_MODES, loadTrip, scopeTripParam } from './trips.js';
+import { resolveInto } from '../sources/displayNames.js';
 
 const router = Router();
 // The caller's trips only (G2, 28 Sep 2026): the reorder writes before it reads, so the check is the param's.
@@ -128,7 +129,7 @@ async function buildJourney({ trip, day, household, items, source }) {
   const mins = (a, b) => Math.round((b - a) / 60_000);
   const meter = { calls: 0, errors: [] };
   const legShape = (opts, mode, from, arrive) => ({
-    from: { label: from.label, lat: from.lat, lng: from.lng }, mode, minutes: opts[mode].minutes, estimated: opts[mode].estimated,
+    from: { label: from.label, lat: from.lat, lng: from.lng, ...(from.live ? { live: true } : {}) }, mode, minutes: opts[mode].minutes, estimated: opts[mode].estimated,
     leaveBy: fmt(new Date(arrive.getTime() - opts[mode].minutes * 60_000)),
     options: Object.fromEntries(Object.entries(opts).map(([m, o]) => [m, { minutes: o.minutes, estimated: o.estimated }])),
   });
@@ -138,7 +139,7 @@ async function buildJourney({ trip, day, household, items, source }) {
   let from = home;
   let estimated = false;
   for (const item of items) {
-    const point = item.lat != null && item.lng != null ? { label: item.venue_label, lat: item.lat, lng: item.lng } : null;
+    const point = item.lat != null && item.lng != null ? { label: item.venue_label, lat: item.lat, lng: item.lng, ...(item.nameSource === 'google-live' ? { live: true } : {}) } : null;
     const opts = point ? await legOptions(from, point, hasCar, cursor.toISOString(), meter) : { walking: { minutes: 0, estimated: true } };
     const mode = point ? pickMode(opts, hasCar, item.leg_mode) : 'walking';
     const legMin = opts[mode].minutes;
@@ -152,7 +153,7 @@ async function buildJourney({ trip, day, household, items, source }) {
     const dwell = defaultDwell(item, household);
     const leave = new Date(arrive.getTime() + dwell * 60_000);
     stops.push({
-      id: item.id, venueRef: item.venue_ref, name: item.venue_label, category: item.category, kind: item.kind, lat: item.lat, lng: item.lng, venue: item.venue ?? null,
+      id: item.id, venueRef: item.venue_ref, name: item.venue_label, nameSource: item.nameSource, category: item.category, kind: item.kind, lat: item.lat, lng: item.lng, venue: item.venue ?? null,
       status: item.status, bookedTime: item.booked_time ? String(item.booked_time).slice(0, 5) : null, partySize: item.party_size ?? null, bookingRef: item.booking_ref ?? null, note: item.note ?? null,
       mustDo: Boolean(item.must_do), position: stops.length + 1, dwellMinutes: dwell, dwellDefault: !item.dwell_minutes,
       fixed: Boolean(fixedAt), fixedAt: fixedAt ? fmt(fixedAt) : null, arriveAt: fmt(arrive), leaveAt: fmt(leave), spareBefore, lateBy,
@@ -220,14 +221,19 @@ async function buildJourney({ trip, day, household, items, source }) {
 
 /** The shortlist's places for this day, in the running, in order. Unassigned places belong to whichever day is open. */
 async function runningItems(trip, day) {
-  return trips.runningShortlist(trip.id, day.id);
+  const rows = await trips.runningShortlist(trip.id, day.id);
+  // Each stop on the day's plan is named by what we own, else Google live,
+  // else a neutral word — the stored label never (sources/displayNames.js).
+  await resolveInto([{ rows, refKey: 'venue_ref', nameKey: 'venue_label' }], { purpose: 'trip.displayName', householdId: trip.household_id });
+  return rows;
 }
 
 /** A saved day's stops, in the same shape the engine reads. */
 async function savedItems(trip, day) {
   const rows = await trips.stopsOnDay(trip.id, day.id);
+  await resolveInto([{ rows, refKey: 'venue_ref', nameKey: 'venue_name' }], { purpose: 'trip.displayName', householdId: trip.household_id });
   return rows.map((s) => ({
-    id: s.id, venue_ref: s.venue_ref, venue_label: s.venue_name, category: s.category ?? null, kind: null, lat: s.lat, lng: s.lng, venue: null,
+    id: s.id, venue_ref: s.venue_ref, venue_label: s.venue_name, nameSource: s.nameSource, category: s.category ?? null, kind: null, lat: s.lat, lng: s.lng, venue: null,
     status: s.booking_status ?? 'no_booking', booked_time: s.booking_status === 'booked' ? s.start_time : null, party_size: null, booking_ref: s.booking_ref ?? null, note: null,
     must_do: false, dwell_minutes: s.dwell_minutes, leg_mode: s.leg_mode ?? null,
   }));
@@ -248,7 +254,8 @@ router.get('/:id/journey', async (req, res, next) => {
     const journey = await buildJourney({ trip, day, household, items, source });
     if (source === 'shortlist') {
       const others = await trips.setAsideShortlist(trip.id, day.id);
-      journey.others = others.map((o) => ({ id: o.id, name: o.venue_label, category: o.category, status: o.status, statusNote: o.status_note, statusOn: o.status_on }));
+      await resolveInto([{ rows: others, refKey: 'venue_ref', nameKey: 'venue_label' }], { purpose: 'trip.displayName', householdId: trip.household_id });
+      journey.others = others.map((o) => ({ id: o.id, name: o.venue_label, nameSource: o.nameSource, category: o.category, status: o.status, statusNote: o.status_note, statusOn: o.status_on }));
     }
     res.json(journey);
   } catch (err) { next(err); }

@@ -323,7 +323,10 @@ export async function placesIn(householdId, f = {}, home = null) {
   if (f.country && !f.nearHome) { params.push(String(f.country).toUpperCase()); where.push(`hp.country_code = $${params.length}`); }
   if (f.city && !f.nearHome) { params.push(String(f.city)); where.push(`coalesce(hp.locality, 'Elsewhere') = $${params.length}`); }
   if (f.kind) { params.push(String(f.kind)); where.push(`hp.kind = $${params.length}`); }
-  if (f.q) { params.push(`%${String(f.q).toLowerCase()}%`); where.push(`(lower(coalesce(hp.nickname,'')) like $${params.length} or lower(hp.label) like $${params.length} or lower(coalesce(hp.note,'')) like $${params.length})`); }
+  // Searched by the name the household sees — owned, their nickname, or their
+  // own words on a reference that is not a provider's (epic_shown_name,
+  // migration 340) — and never by a provider's stored label.
+  if (f.q) { params.push(`%${String(f.q).toLowerCase()}%`); where.push(`(lower(coalesce(epic_shown_name(hp.venue_ref, hp.household_id, hp.label), '')) like $${params.length} or lower(coalesce(hp.note,'')) like $${params.length})`); }
 
   const { rows } = await query(
     `select hp.*, ${HP_LAT} as lat, ${HP_LNG} as lng,
@@ -351,7 +354,7 @@ export async function placesIn(householdId, f = {}, home = null) {
                 order by r.member_id, v.visited_on desc, r.created_at desc) s) as scores
        from household_places hp
       where ${where.join(' and ')}
-      order by hp.kind, hp.label`,
+      order by hp.kind, lower(coalesce(epic_shown_name(hp.venue_ref, hp.household_id, hp.label), ''))`,
     params,
   );
   return rows;
@@ -393,10 +396,14 @@ export async function claimedRefs(householdId) {
 /** What the household knows, in words, for the planner to read. */
 export async function atlasForPrompt(householdId, limit = 40) {
   const { rows } = await query(
-    `select hp.label, hp.kind, hp.category, hp.locality, hp.note,
+    // The planner reads each place under the name the household sees — owned,
+    // their nickname, their own words — and never a provider's stored label;
+    // a place we have no name of our own for is left out of its words.
+    `select epic_shown_name(hp.venue_ref, hp.household_id, hp.label) as label, hp.kind, hp.category, hp.locality, hp.note,
             (select string_agg(distinct l.status::text, ',') from place_ledger l
               where l.household_id = hp.household_id and l.source || ':' || l.source_place_id = hp.venue_ref) as statuses
        from household_places hp where hp.household_id = $1
+        and epic_shown_name(hp.venue_ref, hp.household_id, hp.label) is not null
         -- The planner is a suggestion: a closed place, once applied, is not offered (C57).
         and ${SHOWN_REF('hp.venue_ref')}
       order by hp.last_seen desc limit $2`,

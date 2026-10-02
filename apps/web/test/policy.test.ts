@@ -109,6 +109,26 @@ test('a live name nested in a trip day, and a visit’s live label, are both str
   assert.equal(visits.visits[0].venueLabel, 'A place in Ely');
 });
 
+test('a live name in a budget leg, a journey point or a chat day anchor never reaches the device', () => {
+  const trip: any = storable('/api/trips/abc-123', {
+    trip: { id: 'abc-123' }, shortlist: [], days: [],
+    budget: { legs: [{ from: 'Home', to: 'Live Name', minutes: 9, live: true }, { from: 'Home', to: 'Owned', minutes: 4 }],
+      overrunStop: { id: 1, name: 'Live Name', nameSource: 'google-live' } },
+  });
+  assert.deepEqual(trip.budget.legs[0], { from: 'A place', to: 'A place', minutes: 9, live: false });
+  assert.deepEqual(trip.budget.legs[1], { from: 'Home', to: 'Owned', minutes: 4 });
+  assert.equal(trip.budget.overrunStop.name, 'A place');
+  const journey: any = storable('/api/trips/t1/journey', { estimated: true, stops: [{ name: 'Live', nameSource: 'google-live', leg: { from: { label: 'Live', live: true } } }] });
+  assert.equal(journey.stops[0].name, 'A place');
+  assert.equal(journey.stops[0].leg.from.label, 'A place');
+  const chat: any = storable('/api/trips/t1/chat', {
+    anchors: { days: [{ kind: 'day', label: 'Sat 4 · Live Name', sub: 'Live Name, Owned', live: true }], stops: [{ kind: 'stop', label: 'Live Name', live: true }] },
+  });
+  assert.equal(chat.anchors.days[0].label, 'Sat 4 · A place', 'the day stays, the place goes');
+  assert.equal(chat.anchors.days[0].sub, 'A place');
+  assert.equal(chat.anchors.stops[0].label, 'A place');
+});
+
 test('a place drawer keeps our side of it and none of theirs', () => {
   const saved: any = storable('/api/places/detail', {
     venueRef: 'google:places/Y',

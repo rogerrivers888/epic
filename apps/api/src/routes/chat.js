@@ -32,6 +32,7 @@ import { accountsForHousehold } from '../repositories/accounts.js';
 import { currentHousehold, currentMember } from './household.js';
 import { withTransaction } from '../db.js';
 import { tell } from '../sources/chatNotify.js';
+import { resolveInto } from '../sources/displayNames.js';
 import { seriesDates, ymd } from '../domain/hosting.js';
 import {
   AUDIENCES, DEFAULT_PREFS, MEET_ASPECTS, OFFER_ASPECTS, QUICK_REACTIONS, COMMON_REACTIONS, SHOWING, SUGGEST_PUBLISH_AT, TAG_KINDS, TRIP_ANCHORS,
@@ -91,6 +92,9 @@ export async function tripContext(trip, me) {
   const [days, stops, attendees, guests, organiser, group] = await Promise.all([
     trips.daysOf(trip.id), trips.stopsOf(trip.id), trips.attendeesOf(trip.id), tripChat.guestsOf(trip.id), organiserOf(trip), groupOf(trip),
   ]);
+  // The anchors a conversation hangs on carry the place's owned name, else a
+  // neutral word — never the stored label.
+  await resolveInto([{ rows: stops, refKey: 'venue_ref', nameKey: 'venue_name' }], { purpose: 'trip.displayName', householdId: trip.household_id });
   // A guest row that stands for a group participant is in the conversation
   // only while that participant is still in the group: somebody who withdrew
   // is not told what the group says after they left (Codex, 13 Sep 2026).
@@ -145,13 +149,15 @@ export async function tripContext(trip, me) {
   for (const s of stops) { const l = byDay.get(s.day_id) ?? []; l.push(s); byDay.set(s.day_id, l); }
   const dayAnchors = days.map((d) => {
     const on = (byDay.get(d.id) ?? []).sort((a, b) => (a.start_time ?? '').localeCompare(b.start_time ?? '') || a.position - b.position);
-    return { kind: 'day', ref: d.id, label: `${fmtDay(d.date)} · ${on[0]?.venue_name ?? 'free day'}`, date: ymd(d.date), sub: on.length ? on.map((s) => s.venue_name).join(', ') : 'Nothing booked' };
+    return { kind: 'day', ref: d.id, label: `${fmtDay(d.date)} · ${on[0]?.venue_name ?? 'free day'}`, date: ymd(d.date), sub: on.length ? on.map((s) => s.venue_name).join(', ') : 'Nothing booked',
+      // A label carrying a live Google name may be shown but never written down.
+      live: on.some((s) => s.nameSource === 'google-live') };
   });
   const dayOf = new Map(days.map((d) => [d.id, ymd(d.date)]));
   // How many people each anchor reaches, by the roster where there is one.
   const onCount = (kind, ref) => people.filter((p) => isOnAnchor(p, { context_type: 'trip', tag_kind: kind, tag_ref: ref })).length;
   for (const a of dayAnchors) a.people = onCount('day', a.ref);
-  const stopAnchors = stops.map((s) => ({ kind: 'stop', ref: s.venue_ref, label: s.venue_name, date: dayOf.get(s.day_id) ?? null, sub: fmtDate(dayOf.get(s.day_id)) ?? null, dayId: s.day_id, people: onCount('stop', s.venue_ref) }));
+  const stopAnchors = stops.map((s) => ({ kind: 'stop', ref: s.venue_ref, label: s.venue_name, date: dayOf.get(s.day_id) ?? null, sub: fmtDate(dayOf.get(s.day_id)) ?? null, dayId: s.day_id, people: onCount('stop', s.venue_ref), live: s.nameSource === 'google-live' }));
   const name = trip.title || trip.place_label || trip.locality || 'the trip';
   const dates = trip.dates_fixed === false ? null : { start: ymd(trip.start_date), end: ymd(trip.end_date) };
   const meRow = me ? { ...me, isHost: Boolean(me.memberId && organiser?.id === me.memberId), booked: true, contextType: 'trip' } : null;
@@ -512,7 +518,11 @@ function tagFrom(body, ctx) {
   const all = [...ctx.anchors.level, ...ctx.anchors.days, ...ctx.anchors.stops];
   const known = all.find((a) => a.kind === kind && String(a.ref) === String(ref));
   if (!known) throw refuse(400, 'tag_unknown', 'That is not on this trip.');
-  return { kind, ref, label: known.label };
+  // What is written down with the topic is a fallback for when the anchor has
+  // gone; a live Google name may be shown on the anchor but is never kept
+  // (owner, 1 Oct 2026), so a live-named anchor stores no label — the screen
+  // reads the anchor's own, fresh, while it exists (tagOf).
+  return { kind, ref, label: known.live ? null : known.label };
 }
 
 async function notify(ctx, event) {

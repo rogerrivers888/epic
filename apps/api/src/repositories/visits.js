@@ -118,7 +118,8 @@ export async function visitsFor(householdId, f = {}, takes = []) {
   if (f.country) { params.push(String(f.country).toUpperCase()); where.push(`v.country_code = $${params.length}`); }
   if (f.q) {
     params.push(`%${String(f.q).toLowerCase()}%`);
-    where.push(`(lower(v.venue_label) like $${params.length} or lower(coalesce(v.locality,'')) like $${params.length} or lower(coalesce(v.note,'')) like $${params.length})`);
+    // By the name the household sees, never a provider's stored label (migration 340).
+    where.push(`(lower(coalesce(epic_shown_name(v.venue_ref, v.household_id, v.venue_label), '')) like $${params.length} or lower(coalesce(v.locality,'')) like $${params.length} or lower(coalesce(v.note,'')) like $${params.length})`);
   }
   if (f.memberId) { params.push(String(f.memberId)); where.push(`exists (select 1 from visit_attendees va where va.visit_id = v.id and va.member_id = $${params.length})`); }
   if (f.take && takes.includes(String(f.take))) {
@@ -167,15 +168,18 @@ export async function recordLedger(householdId, source, sourcePlaceId, status, c
 
 /** Somewhere already in the atlas, matched by name, to rank above a stranger. */
 export async function knownPlacesMatching(householdId, q, limit = 4) {
-  // A name a person typed now lives in `nickname` (migration 309), so a match
-  // on it — and the name shown — prefers it over the provider label that is
-  // being removed (Codex, 1 Oct 2026).
+  // Matched, and shown, by the name the household sees: owned, their own
+  // nickname, or their own words on a reference that is not a provider's
+  // (epic_shown_name, migration 340) — never a provider's stored label.
   const { rows } = await query(
-    `select hp.venue_ref, coalesce(hp.nickname, hp.label) as label, hp.category, hp.locality, hp.postcode,
-            exists (select 1 from visits v where v.household_id = hp.household_id and v.venue_ref = hp.venue_ref) as been
-       from household_places hp
-      where hp.household_id = $1 and (lower(hp.nickname) like $2 or lower(hp.label) like $2)
-      order by been desc, hp.last_seen desc limit $3`,
+    `select * from (
+       select hp.venue_ref, epic_shown_name(hp.venue_ref, hp.household_id, hp.label) as label, hp.category, hp.locality, hp.postcode,
+              exists (select 1 from visits v where v.household_id = hp.household_id and v.venue_ref = hp.venue_ref) as been,
+              hp.last_seen
+         from household_places hp
+        where hp.household_id = $1) named
+      where lower(coalesce(label, '')) like $2
+      order by been desc, last_seen desc limit $3`,
     [householdId, `%${String(q).toLowerCase()}%`, limit],
   );
   return rows;

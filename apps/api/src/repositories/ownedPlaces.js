@@ -302,7 +302,7 @@ export async function seedFromHousehold(venueRef) {
 
 export async function seedFromShortlist(venueRef) {
   const { rows } = await query(
-    `select venue_label as label, category, epic_point_lat(venue_ref, lat, lng, point_from) as lat, epic_point_lng(venue_ref, lat, lng, point_from) as lng, venue
+    `select epic_shown_name(venue_ref, null::uuid, venue_label) as label, category, epic_point_lat(venue_ref, lat, lng, point_from) as lat, epic_point_lng(venue_ref, lat, lng, point_from) as lng, venue
        from trip_shortlist
       where venue_ref = $1 and epic_point_lat(venue_ref, lat, lng, point_from) is not null order by added_at desc limit 1`,
     [venueRef],

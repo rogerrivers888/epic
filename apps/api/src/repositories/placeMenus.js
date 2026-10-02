@@ -58,7 +58,11 @@ export async function insertPlaceMenuItem(client, venueRef, item) {
 }
 
 export async function placeMenu(venueRef) {
-  const { rows } = await query('select * from place_menus where venue_ref = $1', [venueRef]);
+  // The place under the name we own — never a provider's name stored when the
+  // menu was read (epic_shown_name, migration 340).
+  const { rows } = await query(
+    `select m.*, epic_shown_name(m.venue_ref, null::uuid, m.venue_label) as venue_label
+       from place_menus m where m.venue_ref = $1`, [venueRef]);
   return rows[0] ?? null;
 }
 

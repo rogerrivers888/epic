@@ -41,6 +41,7 @@ export async function outstandingForHouseholdLocked(householdId, client) {
   return outstandingFrom(offers, bookings);
 }
 import crypto from 'node:crypto';
+import { resolveInto } from '../sources/displayNames.js';
 
 const newToken = () => crypto.randomBytes(9).toString('base64url');
 
@@ -194,19 +195,34 @@ export async function allHosts() {
 // offers
 // ---------------------------------------------------------------------------
 
+/**
+ * An offer's venue, named by what we own, else a neutral word in the host's own
+ * area — never a provider's name stored when the host picked the place. A
+ * host's own words on a reference that is not a provider's (a postcode, "my
+ * studio") are kept as written. No household's nickname is read: an offer is
+ * public. Google is never asked here: offers, bookings and host pages are kept
+ * on the device whole (offline/policy.ts) and carry no marker a live name
+ * could be stripped by, and a page of sixty offers must not be sixty calls.
+ */
+async function named(rows, { refKey = 'venue_ref' } = {}) {
+  await resolveInto([{ rows: rows.filter(Boolean), refKey, nameKey: 'venue_label', localityKey: 'venue_area' }],
+    { purpose: 'host.displayName', live: false, householdId: '00000000-0000-0000-0000-000000000000' });
+  return rows;
+}
+
 export async function offersOfHost(hostId) {
   const { rows } = await query('select * from host_offers where host_id = $1 order by created_at desc', [hostId]);
-  return rows;
+  return named(rows);
 }
 
 export async function offerById(id) {
   const { rows } = await query('select * from host_offers where id = $1', [id]);
-  return rows[0] ?? null;
+  return (await named(rows))[0] ?? null;
 }
 
 export async function offerOfHost(id, hostId) {
   const { rows } = await query('select * from host_offers where id = $1 and host_id = $2', [id, hostId]);
-  return rows[0] ?? null;
+  return (await named(rows))[0] ?? null;
 }
 
 export async function insertOffer(hostId, shape, fields = {}) {
@@ -328,7 +344,7 @@ export async function offersNear({ lat, lng, km = 40, category = null, limit = 6
       limit $4`,
     params,
   );
-  return rows;
+  return named(rows);
 }
 
 /**
@@ -367,7 +383,7 @@ export async function offersInReview() {
        from host_offers o join hosts h on h.id = o.host_id
       where o.state = 'in_review' order by o.submitted_at asc nulls last`,
   );
-  return rows;
+  return named(rows);
 }
 
 // ---------------------------------------------------------------------------
@@ -406,7 +422,7 @@ export async function bookingsOfOffers(offerIds) {
 export async function bookingsOfHousehold(householdId) {
   const { rows } = await query(
     `select b.*, o.title, o.shape, o.starts_on, o.starts_at, o.first_date, o.sessions, o.skipped_dates, o.duration_min, o.venue, o.venue_area, o.venue_label,
-            o.state as offer_state, o.cancelled_note as offer_cancelled_note, o.min_count, o.max_count,
+            o.venue_ref as offer_venue_ref, o.state as offer_state, o.cancelled_note as offer_cancelled_note, o.min_count, o.max_count,
             h.name as host_name, h.type as host_type, h.photo_id as host_photo_id,
             (select count(*) from host_reviews r where r.booking_id = b.id and r.side = 'guest') as reviewed
        from experience_bookings b
@@ -416,13 +432,13 @@ export async function bookingsOfHousehold(householdId) {
       order by coalesce(o.starts_on, o.first_date, b.created_at::date) asc, b.created_at asc`,
     [householdId],
   );
-  return rows;
+  return named(rows, { refKey: 'offer_venue_ref' });
 }
 
 export async function bookingById(id) {
   const { rows } = await query(
     `select b.*, o.title, o.shape, o.starts_on, o.starts_at, o.first_date, o.sessions, o.skipped_dates, o.duration_min, o.venue, o.venue_area, o.venue_label,
-            o.venue_notes, o.online_platform, o.refund_rule, o.min_count, o.max_count, o.state as offer_state, o.cancelled_note as offer_cancelled_note,
+            o.venue_ref as offer_venue_ref, o.venue_notes, o.online_platform, o.refund_rule, o.min_count, o.max_count, o.state as offer_state, o.cancelled_note as offer_cancelled_note,
             o.price_mode, o.price_pence, o.total_pence, o.per, o.expected_count, o.category,
             h.name as host_name, h.type as host_type, h.trust as host_trust, h.photo_id as host_photo_id, h.location_label as host_location,
             (select count(*) from host_reviews r where r.booking_id = b.id and r.side = 'guest') as reviewed
@@ -432,7 +448,7 @@ export async function bookingById(id) {
       where b.id = $1`,
     [id],
   );
-  return rows[0] ?? null;
+  return (await named(rows, { refKey: 'offer_venue_ref' }))[0] ?? null;
 }
 
 /** How many of a host's bookings count toward the intro (first-ten) threshold, host-wide. */
@@ -640,7 +656,7 @@ export async function deleteInvite(id, offerId) {
 /** The offer an invitation link opens (migration 091). */
 export async function offerByLinkToken(token) {
   const { rows } = await query('select * from host_offers where link_token = $1', [token]);
-  return rows[0] ?? null;
+  return (await named(rows))[0] ?? null;
 }
 
 // ---------------------------------------------------------------------------
