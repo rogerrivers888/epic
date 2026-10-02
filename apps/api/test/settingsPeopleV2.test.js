@@ -211,7 +211,7 @@ test('voice intake writes diet to the column and maps allergens onto the UK 14',
     { kind: 'diet', value: 'dairy-free' },    // → a Milk allergen (filters)
     { kind: 'diet', value: 'no-pork' },       // → a pork dislike (ranks)
     { kind: 'diet', value: 'no-alcohol' },    // → an alcohol dislike (ranks)
-    { kind: 'allergy', value: 'shellfish' },  // → crustaceans AND molluscs, as migration 319 expands it
+    { kind: 'allergy', value: 'shellfish' },  // → crustaceans AND molluscs, as migration 328 expands it
     { kind: 'allergy', value: 'latex' },      // → the private note (not a UK-14 word)
     { kind: 'allergy', value: 'nickel' },     // → the SAME note, beside latex — never over it
     { kind: 'favourite', value: 'ramen' },    // → a like

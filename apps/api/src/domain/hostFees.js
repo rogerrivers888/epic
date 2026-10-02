@@ -73,7 +73,7 @@ function line(rate, reason, feePence, amountPence) {
 /**
  * Epic's fee for one booking. `intro` is the result of `introState` at the time
  * the booking counts (null = not in intro). `viaHostLink` is the booking's own
- * flag (migration 323).
+ * flag (migration 332).
  */
 export function feeForBooking({ amountPence = 0, level = 'verified', viaHostLink = false, intro = null }) {
   if (intro?.active) {

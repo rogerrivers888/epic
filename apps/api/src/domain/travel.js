@@ -232,7 +232,7 @@ export function searchRadiusKm(mode, minutes, { capKm = 50 } = {}) {
 export function closeToHomeRadiusMiles({ minutes, modes = [], capKm = 200 }) {
   // "Any distance" (null) is unbounded — not the old 10-mile radius. A radius
   // wide enough to hold any two points on Earth means the near-home view stops
-  // filtering by distance at all, as the setting and migration 320 intend.
+  // filtering by distance at all, as the setting and migration 329 intend.
   if (minutes == null) return ANY_DISTANCE_MILES;
   const list = modes && modes.length ? modes : ['driving'];
   const km = Math.max(...list.map((m) => searchRadiusKm(m, minutes, { capKm })));

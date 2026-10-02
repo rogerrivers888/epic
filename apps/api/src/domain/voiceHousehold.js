@@ -44,7 +44,7 @@ export const dietSpill = (raw) => {
 };
 // Allergen words resolve through the ONE canonical mapping in concepts.js —
 // the same one the migration and the ranking comparison use — so a spoken
-// 'shellfish' stores BOTH crustaceans and molluscs, exactly as migration 319
+// 'shellfish' stores BOTH crustaceans and molluscs, exactly as migration 328
 // expands it (Codex, 1 Oct 2026).
 
 const nullable = (type, extra = {}) => ({ type: [type, 'null'], ...extra });

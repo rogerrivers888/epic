@@ -545,7 +545,7 @@ async function createStayFromIntent({ household, members, intent, destination })
       title, notes, placeLabel: destination.label, startDate: start, endDate: end,
       baseLabel: base.label, baseLat: base.lat, baseLng: base.lng,
       hasCar: travelMode !== 'transit',
-      // households.day_start/day_end are whole hours (smallint, migration 320);
+      // households.day_start/day_end are whole hours (smallint, migration 329);
       // the trip's columns are SQL times (Codex, 1 Oct 2026).
       dayStart: hourToTime(household.day_start ?? 10),
       dayEnd: hourToTime(household.day_end ?? 18),

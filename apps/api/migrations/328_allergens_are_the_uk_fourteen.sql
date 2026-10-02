@@ -15,7 +15,7 @@
 -- precisely, and a filter must err towards hiding). Transform + delete, so it
 -- is its own revertible number.
 
--- `allergen_note` was added in migration 317 (the person's private note).
+-- `allergen_note` was added in migration 326 (the person's private note).
 --
 -- RECOVERABLE: archive every kind='allergen' row before the transform touches
 -- anything, so the original list is kept whatever the mapping does. Named by

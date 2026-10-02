@@ -31,7 +31,7 @@ const router = Router();
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const RELATIONSHIPS = ['parent', 'partner', 'child', 'grandparent', 'sibling', 'friend', 'other'];
-// Diet is a member column now (migration 318), not a constraint kind.
+// Diet is a member column now (migration 327), not a constraint kind.
 const KINDS = ['allergen', 'dislike', 'like'];
 const DIETS = ['none', 'vegetarian', 'vegan', 'pescatarian'];
 // Access needs (SX4). Step-free filters places out; the rest rank.
@@ -171,7 +171,7 @@ export async function loadMembers(householdId) {
   return rows.map((row) => {
     const age = ageFrom(row.birth_date, row.birth_year);
     const diet = row.diet ?? 'none';
-    // Diet is scalar now (migration 318), but the ranking layer still reads a
+    // Diet is scalar now (migration 327), but the ranking layer still reads a
     // `diets` array of {value}; derive one from the main diet and the two faith
     // flags so ranking is untouched while the UI reads the scalars.
     const diets = [

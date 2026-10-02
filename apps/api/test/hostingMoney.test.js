@@ -1,6 +1,6 @@
 /**
  * The Host tab's Money screen: the server pieces behind SX9/SX14/SX16–SX20
- * (Settings revised v2, Lane 3). Migrations 321–323 added the host's pay
+ * (Settings revised v2, Lane 3). Migrations 330–332 added the host's pay
  * schedule, company tax fields and the banks it is paid into, and a booking's
  * own-link flag. The rules worth pinning:
  *

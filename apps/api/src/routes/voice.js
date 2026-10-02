@@ -675,7 +675,7 @@ router.post('/intake/:id/remember', async (req, res, next) => {
     const year = new Date().getFullYear();
     for (const item of offer?.items ?? []) {
       if (item.kind === 'diet') {
-        // Diet is a member column now (migration 318), never a constraint row —
+        // Diet is a member column now (migration 327), never a constraint row —
         // the same mapping the apply path uses, or the remembered word would
         // vanish from the profile on the next read (Codex, 1 Oct 2026).
         for (const d of item.values) for (const m of (adults.length ? adults : members)) {
