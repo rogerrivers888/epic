@@ -306,13 +306,21 @@ export async function recordCandidates(subcategory, entries = [], { placesTotal 
     "select norm from harvest_candidates where subcategory = $1 and status = 'ignored'", [subcategory],
   );
   const closed = new Set(ignored.map((r) => r.norm));
+  // A norm the review queue has permanently ignored is never re-raised, by ANY
+  // ingestion path — this is the single door every harvest comes through, so the
+  // tombstone is enforced here, not only in spotFromDetail (Codex, 2 Oct 2026).
+  const wantNorms = entries.map((e) => normalise(e.norm ?? e.raw)).filter(Boolean);
+  const { rows: tomb } = wantNorms.length
+    ? await run('select norm from feature_tombstones where norm = any($1)', [wantNorms])
+    : { rows: [] };
+  const tombstoned = new Set(tomb.map((r) => r.norm));
   const rows = [];
   let skipped = 0;
   let held = 0;
   for (const entry of entries) {
     const norm = normalise(entry.norm ?? entry.raw);
     if (!norm) continue;
-    if (closed.has(norm)) { skipped += 1; continue; }
+    if (closed.has(norm) || tombstoned.has(norm)) { skipped += 1; continue; }
     const sources = entry.sources instanceof Set ? [...entry.sources] : (entry.sources ?? []);
     // The free half of the kind test (brief §5.1). A word code can call is
     // called here; everything else starts in the holding pen and the
@@ -774,10 +782,18 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
         // never fired and a colliding key silently mapped this feature onto an
         // unrelated fact (Codex, 2 Oct 2026). Read the result: a new row is ours to
         // keep; a conflict is accepted only when the wording itself IS that fact —
-        // slug(norm) is the key — and otherwise refused.
-        const { rows: made } = await client.query(
-          'insert into place_attributes (key, label, kind, position) values ($1, $2, $3, 200) on conflict (key) do nothing returning key',
-          [wanted, sentence(text), kind]);
+        // slug(norm) is the key — and otherwise refused. The insert is wrapped because
+        // our labels are one vocabulary (migration 110): a key that is a subcategory's
+        // name trips the epic_label_key_claim trigger, which must read as a 400 like
+        // promote()'s does, not reach the screen as a 500 (Codex, 2 Oct 2026).
+        let made;
+        try {
+          ({ rows: made } = await client.query(
+            'insert into place_attributes (key, label, kind, position) values ($1, $2, $3, 200) on conflict (key) do nothing returning key',
+            [wanted, sentence(text), kind]));
+        } catch {
+          throw bad(`${wanted} is already one of our labels. Approve it onto the label we have, or give it another name.`);
+        }
         if (made[0]) {
           key = wanted;
         } else if (wanted === slug(norm)) {
@@ -816,21 +832,34 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
                              and ci.sources ? 'google' and ci.status = 'ignored')`,
       [norm]);
     const subs = drawerRows.map((r) => r.subcategory);
-    const seenSets = new Set();
     let asked = 0;
-    for (const sub of subs) {
-      const { rows: [set] } = await client.query('select set_key from question_set_subcategories where subcategory_key = $1', [sub]);
-      // A set shared across several of these drawers is asked once, not per drawer.
-      if (!set?.set_key || seenSets.has(set.set_key)) continue;
-      seenSets.add(set.set_key);
-      // `asked` is NEW questions only: addQuestion returns the existing row too, so
-      // check whether this set already asks it before counting (Codex, 2 Oct 2026).
-      const { rows: had } = await client.query(
-        "select 1 from questions where attribute_key = $1 and scope = 'set' and set_key = $2 limit 1", [key, set.set_key]);
-      try {
-        const q = await addQuestion({ attributeKey: key, setKey: set.set_key, scope: 'set', fromCandidate: cands[0]?.id ?? null }, client);
-        if (q && !had.length) asked += 1;
-      } catch { /* already asked here, or asked globally — the fact stands */ }
+    // `asked` is how many questions this approval newly put in force — a fresh insert
+    // or an inactive one switched back on. addQuestion returns the existing row too,
+    // and an inactive question stays inactive through its `on conflict do nothing`, so
+    // approving must reactivate rather than silently leave it off (Codex, 2 Oct 2026).
+    const reactivate = async (id) => { await client.query('update questions set active = true, updated_at = now() where id = $1 and not active', [id]); };
+    const { rows: [globalQ] } = await client.query("select id, active from questions where attribute_key = $1 and scope = 'global' limit 1", [key]);
+    if (globalQ) {
+      // Asked everywhere already: no set asks it, just make sure the global is on.
+      if (!globalQ.active) { await reactivate(globalQ.id); asked += 1; }
+    } else {
+      const seenSets = new Set();
+      for (const sub of subs) {
+        const { rows: [set] } = await client.query('select set_key from question_set_subcategories where subcategory_key = $1', [sub]);
+        // A set shared across several of these drawers is asked once, not per drawer.
+        if (!set?.set_key || seenSets.has(set.set_key)) continue;
+        seenSets.add(set.set_key);
+        const { rows: [existing] } = await client.query(
+          "select id, active from questions where attribute_key = $1 and scope = 'set' and set_key = $2 limit 1", [key, set.set_key]);
+        if (existing) {
+          if (!existing.active) { await reactivate(existing.id); asked += 1; }
+          continue;
+        }
+        try {
+          const q = await addQuestion({ attributeKey: key, setKey: set.set_key, scope: 'set', fromCandidate: cands[0]?.id ?? null }, client);
+          if (q) asked += 1;
+        } catch { /* a global was added in a race — the fact stands */ }
+      }
     }
     await client.query(
       "update harvest_candidates set status = 'promoted', decided_by = $2, decided_at = now(), examples = '{}', evidence = null, evidence_ref = null where norm = $1 and status in ('new', 'unresolved') and sources ? 'google'",
@@ -860,10 +889,14 @@ export async function ignoreFeature(norm, { actor = null, reason = null } = {}) 
     // write a permanent tombstone for a word never shown in this queue (Codex, 2 Oct).
     const { rows: seen } = await client.query('select 1 from review_sightings where norm = $1 limit 1', [norm]);
     if (!seen.length) throw bad(`"${norm}" is not a feature waiting in the review queue.`);
+    // A permanent ignore is about the WORD, so every undecided candidate for it is
+    // closed — not just the Google-sourced one that put it in this queue. An owned
+    // feature-harvest candidate for the same word would otherwise stay actionable on
+    // the ordinary candidate screen after a "never again" decision (Codex, 2 Oct 2026).
     const { rowCount } = await client.query(
       `update harvest_candidates set status = 'ignored', decided_by = $2, decided_at = now(), examples = '{}',
               decision_reason = coalesce($3, decision_reason)
-        where norm = $1 and status in ('new', 'unresolved') and sources ? 'google'`,
+        where norm = $1 and status in ('new', 'unresolved')`,
       [norm, actor, reason ? String(reason).slice(0, 300) : null]);
     if (!rowCount) throw bad(`"${norm}" is not a feature waiting in the review queue.`);
     // One transaction: the queue can never be left holding an actionable sighting

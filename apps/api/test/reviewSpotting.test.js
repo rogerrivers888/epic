@@ -500,4 +500,77 @@ test('asked counts new questions once, even when drawers share a set', async () 
   assert.equal((await query("select count(*)::int n from questions where attribute_key = $1 and set_key = 'c30-shared-set'", [res.attributeKey])).rows[0].n, 1, 'one question on the shared set');
 });
 
+test('a review-queue ignore closes owned candidates too, and no harvest can re-raise the word', async () => {
+  // Codex, 2 Oct 2026 (P1): the permanent ignore is about the word. An owned
+  // feature-harvest candidate for the same norm must be closed with it, and every
+  // ingestion path — recordCandidates is the one door — must honour the tombstone.
+  const sub = 'c30-p1-a'; const sub2 = 'c30-p1-b'; const sub3 = 'c30-p1-c';
+  const ref = 'google:ChIJ_c30_p1';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  for (const [k, l] of [[sub, 'C30 p1 A'], [sub2, 'C30 p1 B'], [sub3, 'C30 p1 C']]) {
+    await query("insert into shelf_subcategories (key, label, category_key) values ($1, $2, 'c30-test-cat') on conflict do nothing", [k, l]);
+  }
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
+  await query('delete from harvest_candidates where subcategory = any($1)', [[sub, sub2, sub3]]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
+  await query("delete from feature_tombstones where norm = 'roof terrace'");
+  const owned = [{ norm: 'roof terrace', raw: 'roof terrace', rawForms: ['roof terrace'], sources: ['venue'], examples: [], kind: 'feature', placesSeen: 1, asserts: 1, denies: 0, asks: 0 }];
+
+  await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A roof terrace.' } }); // Google-raised, in sub
+  await sets.recordCandidates(sub2, owned, { placesTotal: 1 });                          // owned, in another drawer
+  assert.equal((await query("select status from harvest_candidates where norm = 'roof terrace' and subcategory = $1", [sub2])).rows[0].status === 'ignored', false, 'the owned candidate starts undecided');
+
+  await sets.ignoreFeature('roof terrace', { actor: 'tester' });
+  assert.equal((await query("select status from harvest_candidates where norm = 'roof terrace' and subcategory = $1", [sub2])).rows[0].status, 'ignored', 'the owned candidate is closed with it');
+
+  // A later owned harvest in a drawer that never saw the word does not raise it.
+  const later = await sets.recordCandidates(sub3, owned, { placesTotal: 1 });
+  assert.equal(later.skipped, 1, 'the tombstoned word is skipped at the door');
+  assert.equal((await query("select count(*)::int n from harvest_candidates where norm = 'roof terrace' and subcategory = $1", [sub3])).rows[0].n, 0, 'no candidate raised in the new drawer');
+});
+
+test('approving switches an inactive question back on, and counts it', async () => {
+  // Codex, 2 Oct 2026: addQuestion's on-conflict leaves an inactive question inactive,
+  // so approval must reactivate it — otherwise "Ask here" asks nothing.
+  const sub = 'c30-react-parks';
+  const ref = 'google:ChIJ_c30_react';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 react parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query("insert into question_sets (key, name) values ('c30-react-set', 'C30 react set') on conflict do nothing");
+  await query("insert into question_set_subcategories (subcategory_key, set_key) values ($1, 'c30-react-set') on conflict do nothing", [sub]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
+  await query("insert into place_attributes (key, label, kind) values ('sunken-garden', 'Sunken garden', 'yesno') on conflict (key) do update set active = true");
+  await query("delete from questions where attribute_key = 'sunken-garden'");
+  await query("insert into questions (attribute_key, scope, set_key, active) values ('sunken-garden', 'set', 'c30-react-set', false)");
+
+  await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A sunken garden.' } });
+  const res = await sets.approveFeature('sunken garden', { actor: 'tester' });
+  assert.equal(res.asked, 1, 'the reactivated question counts as newly asked');
+  assert.equal((await query("select active from questions where attribute_key = 'sunken-garden' and set_key = 'c30-react-set'")).rows[0].active, true, 'the question is on again');
+});
+
+test('a label that takes a subcategory’s name is refused as a 400, not a 500', async () => {
+  // Codex, 2 Oct 2026: our labels are one vocabulary (migration 110); the
+  // epic_label_key_claim trigger raises 23505 on the insert, which approval must
+  // turn into the same actionable refusal promote() gives.
+  const sub = 'c30-claim-parks';
+  const ref = 'google:ChIJ_c30_claim';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 claim parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
+  await query("delete from attribute_aliases where norm = 'sun deck'").catch(() => {});
+
+  await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A sun deck.' } });
+  // Name it after an existing subcategory — the trigger's case.
+  await assert.rejects(
+    () => sets.approveFeature('sun deck', { actor: 'tester', label: sub }),
+    (err) => err.status === 400 && /already one of our labels/.test(err.message),
+  );
+  assert.equal((await query("select status from harvest_candidates where norm = 'sun deck' and subcategory = $1", [sub])).rows[0].status, 'unresolved', 'nothing was decided — it can be approved under another name');
+});
+
 test.after(async () => { await pool.end(); });
