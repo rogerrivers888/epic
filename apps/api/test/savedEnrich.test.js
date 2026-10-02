@@ -501,3 +501,15 @@ test('a re-run clears the last run\'s phase times', async () => {
   assert.equal(row.free_done_at, null);
   assert.equal(row.claude_done_at, null);
 });
+
+test('a re-read of the venue page drops pictures it no longer shows; a failed read drops nothing', async () => {
+  const { venuePicturesFor } = await import('../src/sources/venueImages.js');
+  const ref = `google:drop-${randomUUID()}`;
+  const page = (img) => ({ fetchHtmlImpl: async () => ({ url: 'https://d.example/', html: `<meta property="og:image" content="${img}">` }), politeness: async () => ({ ok: true }) });
+  await venuePicturesFor(ref, 'https://d.example/', page('/old.jpg'));
+  await venuePicturesFor(ref, 'https://d.example/', page('/new.jpg'));
+  const urls = async () => (await query('select image_url from venue_site_images where venue_ref = $1 order by image_url', [ref])).rows.map((r) => r.image_url);
+  assert.deepEqual(await urls(), ['https://d.example/new.jpg']);
+  await venuePicturesFor(ref, 'https://d.example/', { fetchHtmlImpl: async () => null, politeness: async () => ({ ok: true }) });
+  assert.deepEqual(await urls(), ['https://d.example/new.jpg'], 'an unreadable page is not an empty one');
+});

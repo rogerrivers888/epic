@@ -139,6 +139,12 @@ export async function venuePicturesFor(venueRef, website, { fetchHtmlImpl = null
        on conflict (venue_ref, image_url) do update set page_url = excluded.page_url`,
       [venueRef, p.url, page.url, p.why]);
   }
+  // The page was read: what it no longer shows is no longer held (Codex,
+  // 2 Oct 2026). A page that could not be read never gets here, so a
+  // transient failure removes nothing.
+  await query(
+    `delete from venue_site_images where venue_ref = $1 and not (image_url = any($2::text[]))`,
+    [venueRef, pics.map((p) => p.url)]);
   return { ok: true, kept: pics.length, why: null };
 }
 
