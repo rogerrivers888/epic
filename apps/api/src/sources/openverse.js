@@ -105,10 +105,10 @@ export async function picturesFor({ venueRef, name, locality = null }, { keep = 
     const { rows: held } = await query(
       `select i.id, i.moderation, exists (select 1 from image_links l where l.image_id = i.id and l.subject_type = 'place' and l.subject_id = $2) as here
          from image_assets i where i.source = 'openverse' and i.source_ref = $1`, [`openverse:${r.id}`, venueRef]);
-    if (held.length && !held[0].here) continue;
-    // One the owner has already turned down stays turned down, and is not
-    // counted again as found (Codex, 2 Oct 2026).
-    if (held.length && held[0].moderation === 'rejected') continue;
+    // Held already, for any place and in any state: left exactly as it is —
+    // its moderation, its link and its role (an approved card picture stays the
+    // card picture) — and not counted as found again (Codex, 2 Oct 2026).
+    if (held.length) continue;
     // Openverse's own thumbnail: a few hundred pixels, which is what a card
     // draws, and a polite size to take from somebody else's server.
     const pic = await fetchPictureImpl(r.thumbnail ?? r.url);

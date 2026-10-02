@@ -496,7 +496,8 @@ async function writePass({ venueRef, reply, out, record, asks, costUsd }) {
     const had = new Set((await sets.answersFor(venueRef)).filter((a) => a.source === 'site').map((a) => a.question_id));
     for (const q of asks) {
       if (j.facts[q.key]?.answer === 'unknown' && !had.has(q.id)) {
-        await sets.saveAnswer({ venueRef, questionId: q.id, source: 'site', state: 'asked_nothing_found', sourceUrl: j.website });
+        // The page actually read, never the site's root by assumption (Codex, 2 Oct 2026).
+        await sets.saveAnswer({ venueRef, questionId: q.id, source: 'site', state: 'asked_nothing_found', sourceUrl: j.venuePagesRead[0] });
       }
     }
   }

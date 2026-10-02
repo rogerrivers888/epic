@@ -334,3 +334,18 @@ test('the website keeps a page that was fetched as its source; a venue picture s
   const { rows: [r] } = await query(`select found_at < now() - interval '1 day' as old from venue_site_images where venue_ref = $1`, [ref]);
   assert.equal(r.old, true, 'seen again is not found again');
 });
+
+test('a re-run leaves an Openverse card picture it already holds exactly as it is', async () => {
+  const id = `hero-${randomUUID()}`;
+  const ref = `google:hero-${randomUUID()}`;
+  const body = { results: [{ id, title: 'Kept', thumbnail: 'https://x/k', license: 'by', license_version: '2.0' }] };
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16]);
+  const deps = { fetchImpl: async () => ({ ok: true, json: async () => body }), fetchPictureImpl: async () => ({ body: jpeg, mime: 'image/jpeg', bytes: jpeg.length, width: 600, height: 400 }) };
+  await picturesFor({ venueRef: ref, name: 'Kept' }, deps);
+  await query(`update image_assets set moderation = 'approved' where source_ref = $1`, [`openverse:${id}`]);
+  await query(`update image_links set role = 'hero' where subject_id = $1`, [ref]);
+  const again = await picturesFor({ venueRef: ref, name: 'Kept' }, deps);
+  assert.equal(again.stored.length, 0, 'not counted as found again');
+  const { rows: [l] } = await query(`select role from image_links where subject_id = $1`, [ref]);
+  assert.equal(l.role, 'hero', 'still the card picture');
+});
