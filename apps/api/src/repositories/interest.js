@@ -20,9 +20,13 @@ const CAMPAIGN = `coalesce(nullif(utm_campaign, ''), nullif(utm_source, ''), 'Di
 /** The host kinds in the order WL1 lists them, with "Not given" last. */
 export const KINDS = [
   { key: 'one-off', label: 'One-off' },
-  { key: 'activity', label: 'Activity' },
-  { key: 'class', label: 'Class' },
-  { key: 'homeschool', label: 'Homeschool' },
+  { key: 'weekly', label: 'Weekly' },
+  { key: 'course', label: 'Course' },
+  { key: 'on-request', label: 'On request' },
+  // Offered before 2 Oct 2026 (migration 335); listed so an older sign-up still has a name.
+  { key: 'activity', label: 'Activity (earlier)' },
+  { key: 'class', label: 'Class (earlier)' },
+  { key: 'homeschool', label: 'Homeschool (earlier)' },
   { key: 'none', label: 'Not given' },
 ];
 

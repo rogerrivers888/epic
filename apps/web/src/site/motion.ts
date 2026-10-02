@@ -11,7 +11,7 @@
  * On React Native Web a View's ref is its DOM node, so `animate(ref.current, …)`
  * reaches `Element.animate`. On native these are no-ops.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
 const web = Platform.OS === 'web' && typeof window !== 'undefined';
@@ -60,4 +60,54 @@ export function onFirstView(node: unknown, run: () => void): () => void {
   }, { threshold: 0.2 });
   io.observe(el);
   return () => io.disconnect();
+}
+
+/**
+ * A storyboard clock for a short looping beat (the host page's live cards and
+ * RSVP; v6, 2 Oct 2026). Runs only while `node` is at least 40% in view and the
+ * tab is showing; stops after `loops` loops and holds the end state; with reduced
+ * motion — or off the web — it is the end state from the start.
+ *
+ * Returns the time inside the current loop (ms; held at `end` once done), whether
+ * a loop has already gone round (so the next one fades back in), and `replay`.
+ * `delay` holds this beat back behind its neighbours (a stagger).
+ */
+export function useStoryboard(node: { current: unknown }, { loop, end, loops, delay = 0 }: { loop: number; end: number; loops: number; delay?: number }) {
+  const reduced = usePrefersReducedMotion();
+  const visible = useTabVisible();
+  const still = !web || reduced;
+  const [elapsed, setElapsed] = useState(0);
+  const [inView, setInView] = useState(false);
+  const [done, setDone] = useState(false);
+  const total = loop * (loops - 1) + end + delay;
+
+  useEffect(() => {
+    const el = node.current as Element | null;
+    if (still || !el) return;
+    if (typeof IntersectionObserver === 'undefined') { setInView(true); return; }
+    const io = new IntersectionObserver((entries) => setInView(entries.some((e) => e.isIntersecting)), { threshold: 0.4 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [node, still]);
+
+  // Elapsed time lives in a ref so the frame loop reads and ends on it directly;
+  // the state copy is only what draws.
+  const clock = useRef(0);
+  useEffect(() => {
+    if (still || done || !inView || !visible) return;
+    let last = performance.now();
+    let raf = requestAnimationFrame(function tick(now) {
+      clock.current = Math.min(total, clock.current + Math.min(64, now - last));
+      last = now;
+      setElapsed(clock.current);
+      if (clock.current >= total) { setDone(true); return; }
+      raf = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [still, done, inView, visible, total]);
+
+  const replay = () => { if (still) return; clock.current = 0; setElapsed(0); setDone(false); };
+  if (still || done) return { t: end, looped: false, replay };
+  const local = elapsed - delay;
+  return { t: local < 0 ? 0 : local % loop, looped: local >= loop, replay };
 }

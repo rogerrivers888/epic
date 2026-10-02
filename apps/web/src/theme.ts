@@ -75,6 +75,12 @@ export const MUTED = '#7D7979';         // a section-header count, the Filters c
 export const TAB_UNSELECTED = '#A8A4A2';// the ink menu's unselected tab label (cream is 800/selected)
 export const MENU_DIVIDER = '#55514F';  // the 1px rule between two ink-menu cells
 export const DEEP_GREEN = '#335200';    // oklch(0.40 0.11 130), the compact band's context line on lime
+// The host page's live cards (v6, 2 Oct 2026): a bar on its way to full, its track,
+// the bars already past, and the quiet line under a title on ink.
+export const LIME_PALE = '#DCF8AD';  // oklch(0.94 0.10 125)
+export const TRACK = '#E2DED8';
+export const LIGHT_GREY = '#C9C4C2';
+export const ON_INK_SOFT = '#BDB8B5';
 
 /**
  * Dark, from the v2 handoff's own table. Not a dimming of the light palette: a

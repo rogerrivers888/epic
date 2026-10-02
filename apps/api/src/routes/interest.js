@@ -30,7 +30,9 @@ import { addSignup } from '../repositories/interest.js';
 import { interestEmail, mailConfigured, sendMail, webUrl } from '../sources/mail.js';
 
 export const SOURCES = new Set(['home', 'host']);
-export const HOST_KINDS = new Set(['one-off', 'activity', 'class', 'homeschool']);
+// How often it runs (host page v6, 2 Oct 2026). The old four — activity, class,
+// homeschool — are no longer offered; rows that carry them are still read (migration 335).
+export const HOST_KINDS = new Set(['one-off', 'weekly', 'course', 'on-request']);
 export const LOCALES = new Set(['en-gb', 'en-us']);
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

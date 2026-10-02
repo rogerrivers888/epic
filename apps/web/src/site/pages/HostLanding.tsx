@@ -3,25 +3,31 @@
  * (1280) and `EpicMobile.dc.html` `screen` = host (390, used below 700 wide).
  * SiteLayout draws the "For hosts" header; this page starts at the hero.
  *
+ * v6, "Four ways to host" (Website › "New hosting screen 021026", signed off
+ * 2 Oct 2026): section 01 is HostKindCards — four kinds by how often they run,
+ * each with a live card; section 02's panels are Private and Public, and the
+ * Private panel's RSVP count ticks over once in view. Every rule on the page is
+ * 1px #D7D3D3, never ink and never 2px (the design's standing rule).
+ *
  * The card photos and guest faces of the drawing are flat brand blocks and
  * initials here: the site carries no stock photography.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View, type TextStyle } from 'react-native';
 import {
-  CREAM, DEEP_GREEN, HAIRLINE, INK, INK_MUTED, INK_RULE, LIME, LIME_TINT, MOSS, NEUTRAL, fonts,
+  CREAM, HAIRLINE, INACTIVE, INK, INK_MUTED, INK_RULE, LIGHT_GREY, LIME, LIME_TINT, MOSS, NEUTRAL, ON_INK_SOFT, fonts,
 } from '../../theme';
 import { Icon } from '../../components/Icon';
 import { useViewport } from '../../hooks/useViewport';
 import { InterestForm, type HostKind } from '../InterestForm';
 import { pick } from '../i18n';
-import { EASE, animate, onFirstView, usePrefersReducedMotion } from '../motion';
+import { EASE, animate, onFirstView, usePrefersReducedMotion, useStoryboard } from '../motion';
+import { HostKindCards } from './HostKindCards';
 import type { SitePageProps } from '../page';
 import { SiteH1, SiteH2, SiteP } from '../type';
 import { STRINGS, type RsvpStatus } from './HostLanding.strings';
 
 const web = Platform.OS === 'web';
-const PHOTO = [MOSS, DEEP_GREEN, HAIRLINE, INK];
 const GUEST_FACE = [LIME, HAIRLINE, MOSS, INK];
 const BOOKED_FACE = [LIME, INK, MOSS, HAIRLINE];
 const RSVP: Record<RsvpStatus, string> = { coming: LIME, maybe: LIME_TINT, none: NEUTRAL };
@@ -34,7 +40,7 @@ export function HostLanding({ locale, landingPage }: SitePageProps) {
   const wide = width >= 1000;
   const pad = phone ? 20 : 56;
   const heroSize = phone ? 96 : Math.min(232, Math.max(120, Math.floor((width - 2 * pad) / 3.1)));
-  const [kind, setKind] = useState<HostKind>('activity');
+  const [kind, setKind] = useState<HostKind>('one-off');
 
   // The four steps rise in once, when scrolled into view; reduced motion leaves them at rest.
   const reduced = usePrefersReducedMotion();
@@ -50,6 +56,20 @@ export function HostLanding({ locale, landingPage }: SitePageProps) {
       setStepsWaiting(false);
     });
   }, [reduced, stepsWaiting]);
+
+  // Section 02's beat: the Okafors reply, and the count ticks from 37 to 38 coming
+  // (6s loop, from 1.5s; three loops then hold; end state under reduced motion).
+  const rsvpNode = useRef<View>(null);
+  const beat = useStoryboard(rsvpNode, { loop: 6000, end: 4600, loops: 3 });
+  const replied = beat.t >= 1500;
+  const roll = Math.max(0, Math.min(1, (beat.t - 1500) / 700));
+  const rsvp = {
+    replied,
+    coming: 37 + Math.round(roll),
+    toReply: 4 - Math.round(roll),
+    // The chip's background fades over 350ms as the reply lands.
+    replyBg: beat.t >= 1500 + 350 ? LIME : beat.t >= 1500 ? LIME_TINT : RSVP.none,
+  };
 
   const heading = (i: number) => {
     const sec = s.sections[i];
@@ -72,9 +92,9 @@ export function HostLanding({ locale, landingPage }: SitePageProps) {
       width: wide ? '25%' : '50%',
       paddingLeft: col === 0 ? 0 : gutter,
       paddingRight: col === cols - 1 ? 0 : gutter,
-      borderRightWidth: col < cols - 1 ? 2 : 0,
-      borderTopWidth: i >= cols ? 2 : 0,
-      borderColor: INK,
+      borderRightWidth: col < cols - 1 ? 1 : 0,
+      borderTopWidth: i >= cols ? 1 : 0,
+      borderColor: HAIRLINE,
     } as const;
   };
 
@@ -100,63 +120,38 @@ export function HostLanding({ locale, landingPage }: SitePageProps) {
 
       {/* 01 · Four ways to host */}
       <View style={[styles.head, phone ? styles.headPhone : { paddingTop: 56, paddingHorizontal: pad }]}>{heading(0)}</View>
-      <View style={phone ? { paddingHorizontal: pad } : [styles.grid, { marginHorizontal: pad, marginTop: 36 }]}>
-        {s.kinds.map((k, i) => (
-          <View key={k.tag} style={phone ? styles.kindPhone : [styles.kind, cell(i, 22)]}>
-            <View style={styles.kindTop}>
-              <Text style={[styles.kindTag, phone && styles.kindTagPhone]}>{k.tag}</Text>
-              <Text style={[styles.freq, phone && { fontSize: 13 }]}>{k.freq}</Text>
-            </View>
-            <Text style={phone ? styles.kindTitlePhone : styles.kindTitle}>{k.title}</Text>
-            <Text style={phone ? styles.kindSubPhone : styles.kindSub}>{k.sub}</Text>
-            <View style={[styles.card, phone && { flexDirection: 'row' }]}>
-              <View style={[phone ? styles.photoPhone : styles.photo, { backgroundColor: PHOTO[i % PHOTO.length] }]} />
-              <View style={phone ? styles.cardBodyPhone : styles.cardBody}>
-                <Text style={[styles.kicker, phone && { fontSize: 11, letterSpacing: ls(11, 0.06) }]}>{phone ? k.kickerShort : k.kicker}</Text>
-                <Text style={phone ? styles.cardTitlePhone : styles.cardTitle}>{k.card}</Text>
-                <View style={styles.pills}>
-                  {k.pills.map((p, j) => (
-                    <View key={p.t} accessibilityLabel={p.label} style={[styles.pill, phone && styles.pillPhone, { backgroundColor: j === 0 ? LIME : LIME_TINT }]}>
-                      <Text style={[styles.pillText, phone && { fontSize: 12 }]}>{p.t}</Text>
-                      {p.rating ? (
-                        <>
-                          <Icon name="favourite" size={phone ? 11 : 12} color={INK} fill />
-                          <Text style={[styles.pillText, phone && { fontSize: 12 }]}>{p.rating}</Text>
-                        </>
-                      ) : null}
-                    </View>
-                  ))}
-                </View>
-              </View>
-            </View>
-            {!phone ? (
-              <View>
-                <Text style={styles.running}>{s.running}</Text>
-                {k.eg.map((e) => <Text key={e} style={styles.eg}>{e}</Text>)}
-              </View>
-            ) : null}
-          </View>
-        ))}
+      <View style={phone ? { paddingHorizontal: pad, paddingTop: 16, paddingBottom: 40 } : [styles.kindsWrap, { marginHorizontal: pad }]}>
+        <HostKindCards kinds={s.kinds} strip={s.strip} running={s.running} cols={phone ? 1 : wide ? 4 : 2} />
       </View>
 
       {/* 02 · Friends only, or everyone */}
       <View style={[styles.head, phone ? styles.headPhone : [styles.ruleTop, { paddingTop: 72, paddingHorizontal: pad, marginTop: 8 }], phone && { paddingBottom: 0 }]}>{heading(1)}</View>
       <View style={[styles.panels, wide && { flexDirection: 'row' }, phone ? { margin: pad, marginTop: 24, marginBottom: 36 } : { marginHorizontal: pad, marginTop: 36, marginBottom: 72 }]}>
         <View style={[styles.panel, phone && styles.panelPhone, wide ? styles.ruleRight : styles.ruleBottom, wide && styles.half]}>
-          <Text style={[styles.panelTitle, phone && styles.panelTitlePhone]}>{s.invite.title}</Text>
+          <View style={{ gap: 6 }}>
+            <Text style={[styles.panelTitle, phone && styles.panelTitlePhone]}>{s.invite.title}</Text>
+            <Text style={styles.panelSub}>{s.invite.sub}</Text>
+          </View>
           <Text style={[styles.panelBody, phone && styles.panelBodyPhone]}>{s.invite.body}</Text>
-          <View style={[styles.ruleTop, !phone && { marginTop: 6 }]}>
+          <View ref={rsvpNode} style={[styles.rsvpHead, !phone && { marginTop: 6 }]}>
+            <Text style={[styles.rsvpCount, phone && { fontSize: 15 }]}>{s.invite.count(rsvp.coming, rsvp.toReply)}</Text>
+            <Text style={styles.example}>{s.strip.example}</Text>
+          </View>
+          <View>
             {s.invite.guests.map((g, i) => (
               <View key={g.name} style={[styles.guest, phone && { gap: 10, paddingVertical: 9 }]}>
                 <Face name={g.name} size={phone ? 32 : 36} color={GUEST_FACE[i % GUEST_FACE.length]} />
                 <Text style={[styles.guestName, phone && { fontSize: 15 }]}>{g.name}</Text>
-                <Text style={[styles.rsvp, phone && styles.rsvpPhone, { backgroundColor: RSVP[g.status] }]}>{s.invite.status[g.status]}</Text>
+                <Text style={[styles.rsvp, phone && styles.rsvpPhone, { backgroundColor: g.name === s.invite.replying ? rsvp.replyBg : RSVP[g.status] }]}>{g.name === s.invite.replying ? s.invite.status[rsvp.replied ? 'coming' : g.status] : s.invite.status[g.status]}</Text>
               </View>
             ))}
           </View>
         </View>
         <View style={[styles.panel, phone && styles.panelPhone, { backgroundColor: INK }, wide && styles.half]}>
-          <Text style={[styles.panelTitle, phone && styles.panelTitlePhone, { color: LIME }]}>{s.open.title}</Text>
+          <View style={{ gap: 6 }}>
+            <Text style={[styles.panelTitle, phone && styles.panelTitlePhone, { color: LIME }]}>{s.open.title}</Text>
+            <Text style={[styles.panelSub, { color: ON_INK_SOFT }]}>{s.open.sub}</Text>
+          </View>
           <Text style={[styles.panelBody, phone && styles.panelBodyPhone, { color: CREAM }]}>{s.open.body}</Text>
           <View style={[styles.ruleTop, { borderTopColor: CREAM }, !phone && { marginTop: 6 }]}>
             {s.open.sessions.map((x) => (
@@ -297,9 +292,9 @@ const styles = StyleSheet.create({
   half: { flex: 1, minWidth: 0 },
   shrink: { flex: 1, minWidth: 0 },
   bold: { fontWeight: '700' },
-  ruleTop: { borderTopWidth: 2, borderTopColor: INK },
-  ruleBottom: { borderBottomWidth: 2, borderBottomColor: INK },
-  ruleRight: { borderRightWidth: 2, borderRightColor: INK },
+  ruleTop: { borderTopWidth: 1, borderTopColor: HAIRLINE },
+  ruleBottom: { borderBottomWidth: 1, borderBottomColor: HAIRLINE },
+  ruleRight: { borderRightWidth: 1, borderRightColor: HAIRLINE },
   srOnly: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 },
 
   hero: { backgroundColor: LIME, paddingTop: 32, paddingBottom: 56, gap: 26 },
@@ -307,46 +302,29 @@ const styles = StyleSheet.create({
   tag: t(14, '700', { alignSelf: 'flex-start', backgroundColor: INK, color: CREAM, letterSpacing: ls(14, 0.08), textTransform: 'uppercase', paddingVertical: 6, paddingHorizontal: 10 }),
   tagPhone: { fontSize: 13, letterSpacing: ls(13, 0.08), paddingVertical: 5, paddingHorizontal: 9 },
   hostIt: { fontFamily: H, fontWeight: '800', color: INK },
-  heroRow: { borderTopWidth: 2, borderTopColor: INK, paddingTop: 22 },
+  heroRow: { borderTopWidth: 1, borderTopColor: HAIRLINE, paddingTop: 22 },
   heroRowWide: { flexDirection: 'row', gap: 48, alignItems: 'flex-end' },
   intro: t(26, '600', { lineHeight: 26 * 1.3 }),
   introPhone: { fontSize: 19, lineHeight: 19 * 1.35 },
 
   head: { gap: 12 },
-  headPhone: { gap: 10, paddingTop: 32, paddingBottom: 8, paddingHorizontal: 20, borderTopWidth: 2, borderTopColor: INK },
+  headPhone: { gap: 10, paddingTop: 32, paddingBottom: 8, paddingHorizontal: 20, borderTopWidth: 1, borderTopColor: HAIRLINE },
   num: { fontFamily: H, fontWeight: '800', color: INK },
   chapter: { fontFamily: H, fontWeight: '800', color: INK, fontSize: 96, letterSpacing: ls(96, -0.05), lineHeight: 96 * 0.92 },
   chapter04: { fontSize: 76, letterSpacing: ls(76, -0.045), lineHeight: 76 * 0.95 },
   chapterPhone: { fontSize: 48, letterSpacing: ls(48, -0.045), lineHeight: 48 * 0.95 },
   chapter04Phone: { fontSize: 44, letterSpacing: ls(44, -0.045), lineHeight: 44 * 0.95 },
 
-  grid: { flexDirection: 'row', flexWrap: 'wrap', borderTopWidth: 2, borderTopColor: INK },
-  kind: { gap: 18, paddingTop: 28, paddingBottom: 48 },
-  kindPhone: { gap: 12, paddingTop: 22, paddingBottom: 26, borderTopWidth: 2, borderTopColor: INK },
-  kindTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  kindTag: t(14, '800', { backgroundColor: LIME, paddingVertical: 4, paddingHorizontal: 8 }),
-  kindTagPhone: { fontSize: 13, paddingVertical: 3, paddingHorizontal: 7 },
-  freq: t(14, '700', { color: INK_MUTED }),
-  kindTitle: { fontFamily: H, fontWeight: '800', color: INK, fontSize: 36, letterSpacing: ls(36, -0.035), lineHeight: 36, minHeight: 108 },
-  kindTitlePhone: { fontFamily: H, fontWeight: '800', color: INK, fontSize: 30, letterSpacing: ls(30, -0.035), lineHeight: 30 },
-  kindSub: t(17, '400', { lineHeight: 17 * 1.45, minHeight: 100 }),
-  kindSubPhone: t(16, '400', { lineHeight: 16 * 1.45 }),
-  card: { borderWidth: 2, borderColor: INK },
-  photo: { height: 170 },
-  photoPhone: { width: 110 },
-  cardBody: { paddingTop: 16, paddingHorizontal: 16, paddingBottom: 18, gap: 8 },
-  cardBodyPhone: { padding: 12, gap: 6, flex: 1, minWidth: 0 },
-  kicker: t(12, '700', { letterSpacing: ls(12, 0.06), textTransform: 'uppercase', color: INK_MUTED }),
-  cardTitle: { fontFamily: H, fontWeight: '800', color: INK, fontSize: 21, letterSpacing: ls(21, -0.02), lineHeight: 21 * 1.15 },
-  cardTitlePhone: { fontFamily: H, fontWeight: '800', color: INK, fontSize: 17, lineHeight: 17 * 1.15 },
-  pills: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  pill: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingVertical: 3, paddingHorizontal: 8 },
-  pillPhone: { paddingHorizontal: 7 },
-  pillText: t(13, '600'),
-  running: t(13, '700', { letterSpacing: ls(13, 0.06), textTransform: 'uppercase', paddingBottom: 8, borderBottomWidth: 2, borderBottomColor: INK }),
-  eg: t(17, '600', { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: HAIRLINE }),
+  grid: { flexDirection: 'row', flexWrap: 'wrap', borderTopWidth: 1, borderTopColor: HAIRLINE },
+  // Section 01: a light rule over the four, 28px above them (v6).
+  kindsWrap: { marginTop: 36, marginBottom: 56, borderTopWidth: 1, borderTopColor: HAIRLINE, paddingTop: 28 },
+  card: { borderWidth: 1, borderColor: HAIRLINE },
 
-  panels: { borderWidth: 2, borderColor: INK },
+  panels: { borderWidth: 1, borderColor: HAIRLINE },
+  panelSub: t(15, '700', { color: INK_MUTED }),
+  rsvpHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingVertical: 12, paddingHorizontal: 14, backgroundColor: INACTIVE },
+  rsvpCount: t(16, '700', { fontVariant: ['tabular-nums'] }),
+  example: t(10.5, '700', { letterSpacing: ls(10.5, 0.07), textTransform: 'uppercase', color: INK_MUTED, borderWidth: 1, borderColor: LIGHT_GREY, paddingVertical: 2, paddingHorizontal: 6 }),
   panel: { padding: 32, gap: 16 },
   panelPhone: { padding: 20, gap: 12 },
   panelTitle: { fontFamily: H, fontWeight: '800', color: INK, fontSize: 40, letterSpacing: ls(40, -0.035), lineHeight: 40 },
@@ -363,7 +341,7 @@ const styles = StyleSheet.create({
   steps: { backgroundColor: LIME_TINT, paddingVertical: 72, gap: 36 },
   stepsPhone: { paddingTop: 32, paddingBottom: 12, paddingHorizontal: 20, gap: 10 },
   step: { paddingTop: 24, paddingBottom: 32, gap: 14 },
-  stepPhone: { flexDirection: 'row', gap: 14, paddingTop: 16, paddingBottom: 20, borderTopWidth: 2, borderTopColor: INK },
+  stepPhone: { flexDirection: 'row', gap: 14, paddingTop: 16, paddingBottom: 20, borderTopWidth: 1, borderTopColor: HAIRLINE },
   stepNum: { width: 48, height: 48, backgroundColor: INK, alignItems: 'center', justifyContent: 'center' },
   stepNumText: { fontFamily: H, fontWeight: '800', fontSize: 20, color: LIME },
   stepTitle: { fontFamily: H, fontWeight: '800', color: INK, fontSize: 30, letterSpacing: ls(30, -0.03), lineHeight: 30 * 1.05 },
@@ -373,7 +351,7 @@ const styles = StyleSheet.create({
   adminWide: { flexDirection: 'row' },
   adminBody: t(21, '400', { lineHeight: 21 * 1.4, maxWidth: 500 }),
   adminBodyPhone: { fontSize: 17, lineHeight: 17 * 1.4 },
-  dashHead: { backgroundColor: LIME, paddingVertical: 18, paddingHorizontal: 20, gap: 4, borderBottomWidth: 2, borderBottomColor: INK },
+  dashHead: { backgroundColor: LIME, paddingVertical: 18, paddingHorizontal: 20, gap: 4, borderBottomWidth: 1, borderBottomColor: HAIRLINE },
   dashKicker: t(12, '700', { letterSpacing: ls(12, 0.06), textTransform: 'uppercase' }),
   dashDate: { fontFamily: H, fontWeight: '800', color: INK, fontSize: 28, letterSpacing: ls(28, -0.03) },
   statsRow: { flexDirection: 'row' },

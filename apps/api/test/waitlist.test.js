@@ -58,7 +58,8 @@ test.before(async () => {
   ids.a = await add('a@example.com', { campaign: 'october', daysAgo: 1 });
   ids.b = await add('b@example.com', { utmSource: 'newsletter', locale: 'en-us', daysAgo: 2 });
   ids.c = await add('c@example.com', { daysAgo: 20 });
-  ids.d = await add('d@example.com', { source: 'host', kind: 'class', campaign: 'october', daysAgo: 3 });
+  ids.d = await add('d@example.com', { source: 'host', kind: 'weekly', campaign: 'october', daysAgo: 3 });
+  // e signed up before the host page asked how often it runs (migration 335): an old kind, still named.
   ids.e = await add('e@example.com', { source: 'host', kind: 'homeschool', landing: 'Half term', daysAgo: 30 });
   ids.f = await add('=cmd|evil@example.com', { source: 'host', daysAgo: 0 });
 });
@@ -72,10 +73,11 @@ test('the list: totals and breakdowns over everybody, rows newest first', async 
     ['=cmd|evil@example.com', 'a@example.com', 'b@example.com', 'd@example.com', 'c@example.com', 'e@example.com']);
 
   const kinds = Object.fromEntries(body.byKind.map((k) => [k.key, k]));
-  assert.deepEqual(body.byKind.map((k) => k.key), ['one-off', 'activity', 'class', 'homeschool', 'none']);
+  assert.deepEqual(body.byKind.map((k) => k.key), ['one-off', 'weekly', 'course', 'on-request', 'activity', 'class', 'homeschool', 'none']);
   assert.equal(kinds['one-off'].signups, 0);
   assert.equal(kinds['one-off'].share, 0);
-  assert.equal(kinds.class.signups, 1);
+  assert.equal(kinds.weekly.signups, 1);
+  assert.equal(kinds.homeschool.signups, 1);
   assert.equal(kinds.none.signups, 4);
   assert.equal(kinds.none.label, 'Not given');
   assert.equal(kinds.none.share, 0.6667);
@@ -87,7 +89,7 @@ test('the list: totals and breakdowns over everybody, rows newest first', async 
 
   const e = body.rows.find((r) => r.email === 'e@example.com');
   assert.equal(e.sourceLabel, 'Landing · Half term');
-  assert.equal(e.hostKindLabel, 'Homeschool');
+  assert.equal(e.hostKindLabel, 'Homeschool (earlier)');
   assert.equal(body.rows.find((r) => r.email === 'd@example.com').sourceLabel, 'Host page');
   assert.equal(body.rows.find((r) => r.email === 'a@example.com').sourceLabel, 'Homepage');
   assert.equal(body.rows.find((r) => r.email === 'b@example.com').campaign, 'newsletter');
@@ -101,7 +103,7 @@ test('filters narrow the rows and the count, never the totals', async () => {
 
   assert.deepEqual((await call('GET', '/api/admin/waitlist?kind=none')).body.rows.map((r) => r.email).sort(),
     ['=cmd|evil@example.com', 'a@example.com', 'b@example.com', 'c@example.com']);
-  assert.deepEqual((await call('GET', '/api/admin/waitlist?kind=class')).body.rows.map((r) => r.email), ['d@example.com']);
+  assert.deepEqual((await call('GET', '/api/admin/waitlist?kind=weekly')).body.rows.map((r) => r.email), ['d@example.com']);
   assert.deepEqual((await call('GET', '/api/admin/waitlist?locale=en-us')).body.rows.map((r) => r.email), ['b@example.com']);
   assert.deepEqual((await call('GET', '/api/admin/waitlist?campaign=Direct')).body.rows.map((r) => r.email).sort(),
     ['=cmd|evil@example.com', 'c@example.com', 'e@example.com']);
@@ -131,7 +133,7 @@ test('the CSV: the filtered rows, the columns, quoting, and formulas neutralised
   assert.equal(lines[0], 'email,source,host_kind,locale,campaign,signed_up');
   assert.equal(lines.length, 4, 'the header and the three host rows');
   assert.ok(lines[1].startsWith("'=cmd|evil@example.com,Host page,,en-gb,Direct,"), 'a formula arrives as text');
-  assert.ok(lines.some((l) => l.startsWith('d@example.com,Host page,class,en-gb,october,')));
+  assert.ok(lines.some((l) => l.startsWith('d@example.com,Host page,weekly,en-gb,october,')));
   assert.ok(lines.some((l) => l.startsWith('e@example.com,Landing · Half term,homeschool,en-gb,Direct,')));
   assert.match(lines[1].split(',').pop(), /^\d{4}-\d{2}-\d{2}T/);
 

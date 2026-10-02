@@ -94,10 +94,10 @@ test('a repeat is the same 200, one row, and no second email — whatever the ca
 test('the homepage and the hosts page are two lists', async () => {
   sent.length = 0;
   await post({ ...HOME, email: 'both@example.com' });
-  await post({ source: 'host', hostKind: 'class', locale: 'en-gb', consentWording: HOST_WORDS, email: 'both@example.com' });
+  await post({ source: 'host', hostKind: 'course', locale: 'en-gb', consentWording: HOST_WORDS, email: 'both@example.com' });
   const rows = await rowsFor('both@example.com');
   assert.deepEqual(rows.map((r) => r.source), ['home', 'host']);
-  assert.equal(rows[1].host_kind, 'class');
+  assert.equal(rows[1].host_kind, 'course');
   assert.equal(sent.length, 2);
   assert.match(sent[1].text, /You're on the hosts list\. We'll be in touch before launch\./);
 });
@@ -140,6 +140,13 @@ test('a host kind is kept only for the hosts page, and only the four', async () 
   assert.equal((await rowsFor('homekind@example.com'))[0].host_kind, null, 'the homepage has no picker');
   await post({ source: 'host', hostKind: 'juggling', locale: 'en-gb', consentWording: HOST_WORDS, email: 'oddkind@example.com' });
   assert.equal((await rowsFor('oddkind@example.com'))[0].host_kind, null, 'an unknown kind is not given');
+  // The page asks how often it runs now; an old kind from a stale form is not kept either.
+  await post({ source: 'host', hostKind: 'homeschool', locale: 'en-gb', consentWording: HOST_WORDS, email: 'oldkind@example.com' });
+  assert.equal((await rowsFor('oldkind@example.com'))[0].host_kind, null);
+  for (const k of ['one-off', 'weekly', 'course', 'on-request']) {
+    await post({ source: 'host', hostKind: k, locale: 'en-gb', consentWording: HOST_WORDS, email: `kind-${k}@example.com` });
+    assert.equal((await rowsFor(`kind-${k}@example.com`))[0].host_kind, k, `${k} is kept`);
+  }
 });
 
 test('the country comes from Cloudflare, two letters or nothing', async () => {

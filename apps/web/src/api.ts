@@ -5900,7 +5900,8 @@ export type FilingVocabulary = {
 export type InterestSignup = {
   email: string;
   source: 'home' | 'host';
-  hostKind?: 'one-off' | 'activity' | 'class' | 'homeschool' | null;
+  /** How often it runs (host page v6, 2 Oct 2026). */
+  hostKind?: 'one-off' | 'weekly' | 'course' | 'on-request' | null;
   locale: string;
   landingPage?: string | null;
   referrer?: string | null;
