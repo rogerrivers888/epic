@@ -55,6 +55,8 @@ import { inspire as inspireRoutes } from './routes/inspire.js';
 import { menu as menuRoutes, orders as orderRoutes, ticket as orderTicketRoutes } from './routes/menus.js';
 import { offline as offlineRoutes } from './routes/offline.js';
 import { startOwnLoop } from './sources/own.js';
+import { startSavedEnrichLoop } from './sources/savedEnrich.js';
+import { savedPlacesRouter, photoReviewRouter } from './routes/savedPlaces.js';
 import scoutRoutes, { areaRouter } from './routes/scout.js';
 import shelfRoutes from './routes/shelves.js';
 import taxonomyRoutes, { ensureTaxonomyReady } from './routes/taxonomy.js';
@@ -420,6 +422,10 @@ app.use('/api/admin/place-index', requireDoor('admin'), ownerOnlyPlaceIndex, pla
 // file and own leaf paths (/research, /research/quote, /ranked, /ranked/quote),
 // so nothing in the index router is shadowed.
 app.use('/api/admin/place-index', requireDoor('admin'), placeResearchRoutes);
+// The owner's saved places, researched once, and Photo review: owned pictures
+// beside Google's live ones (routes/savedPlaces.js, 2 Oct 2026).
+app.use('/api/admin/saved-places', requireDoor('admin'), savedPlacesRouter);
+app.use('/api/admin/photo-review', requireDoor('admin'), photoReviewRouter);
 // Narrowing (Option 2, owner, 1 Oct 2026): the church / landmark / monument
 // surfacing rule — the read-only measurement (preview/report) and the gated,
 // reversible apply path (check/apply). Mirrors C57: apply is device-only, and
@@ -955,6 +961,7 @@ setInterval(() => { void sweep(); }, 3600_000).unref?.();
 // claimed but that has not been looked at yet, and the sweep that discards any
 // fact whose licence has run out (sources/own.js).
 startOwnLoop();
+startSavedEnrichLoop();
 // The sweep: one area at a time, then the menus it claimed (sources/scoutArea.js).
 startScoutLoop();
 // The taxonomy's own decisions — which of Google's words are not a day out,

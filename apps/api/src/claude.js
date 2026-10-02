@@ -284,27 +284,38 @@ export async function parseStructured({
  * call is written to provider_calls with the per-search charge included, so
  * the spend bounds apply to it exactly as to the planner's own calls.
  */
-export async function searchWeb({ system, prompt, householdId, sessionId, purpose, maxSearches = 6, maxFetches = 6, effort = 'medium', meta = null }) {
+export async function searchWeb({ system, prompt, householdId, sessionId, purpose, maxSearches = 6, maxFetches = 6, effort = 'medium', meta = null, model = MODEL, maxPageTokens = null }) {
   await assertWithinBounds({ householdId, sessionId });
 
+  // Haiku 4.5 is the cheapest model with the web tools, and it takes their
+  // basic versions and no effort setting; the dynamic-filtering versions are
+  // for the Opus and Sonnet lines only.
+  const basic = model === 'claude-haiku-4-5';
+  const fetchTool = { type: basic ? 'web_fetch_20250910' : 'web_fetch_20260209', name: 'web_fetch', max_uses: maxFetches };
+  if (maxPageTokens) fetchTool.max_content_tokens = maxPageTokens;
   const response = await ask({ householdId, sessionId, purpose }, () => client.messages.create({
-    model: MODEL,
+    model,
     max_tokens: 8000,
     system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
     messages: [{ role: 'user', content: prompt }],
     tools: [
-      { type: 'web_search_20260209', name: 'web_search', max_uses: maxSearches },
-      { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: maxFetches },
+      { type: basic ? 'web_search_20250305' : 'web_search_20260209', name: 'web_search', max_uses: maxSearches },
+      fetchTool,
     ],
-    thinking: { type: 'adaptive' },
-    output_config: { effort },
+    ...(basic ? {} : { thinking: { type: 'adaptive' }, output_config: { effort } }),
   }));
 
-  const spend = await recordCall({ householdId, sessionId, provider: 'anthropic', purpose, usage: response.usage });
+  const spend = await recordCall({ householdId, sessionId, provider: 'anthropic', purpose, usage: response.usage, model });
   if (meta) Object.assign(meta, spend);
 
   const text = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
-  return { text, searches: response.usage?.server_tool_use?.web_search_requests ?? 0, stopReason: response.stop_reason };
+  // The pages actually read, as opposed to the ones a search merely listed.
+  // A fact is only as good as the page it came from (owner, 2 Oct 2026: "a
+  // search snippet alone is not a source"), so callers check against this.
+  const fetched = response.content
+    .filter((b) => b.type === 'web_fetch_tool_result' && b.content?.type === 'web_fetch_result' && b.content.url)
+    .map((b) => b.content.url);
+  return { text, fetched, searches: response.usage?.server_tool_use?.web_search_requests ?? 0, stopReason: response.stop_reason };
 }
 
 /** Cost and call counts, for the session and for the household this month. */

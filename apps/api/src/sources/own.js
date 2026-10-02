@@ -52,7 +52,7 @@ import { sweepPictures } from './placePicture.js';
 // The last resort when no open source and no licensed one can say where a
 // claimed place's own page is (owner, 5 Sep 2026).
 import { searchWeb } from '../claude.js';
-import { runAsSpender, currentSpender } from '../context.js';
+import { runAsSpender, currentSpender, currentAccount } from '../context.js';
 import * as fsa from './fsa.js';
 import { FSA_ATTRIBUTION } from './fsa.js';
 
@@ -251,6 +251,26 @@ async function compose(venueRef, { without = [] } = {}) {
   });
   await owned.writeRecord(venueRef, cols, values, attribution, provenance);
   return { fields: Object.keys(provenance).length, provenance };
+}
+
+/**
+ * Facts read from the venue's own published page by another pass — the Claude
+ * research on a place the owner saved (sources/savedEnrich.js) — written
+ * exactly as this pass writes its own: as the `site` source, under the site's
+ * terms, then composed into the record. Only fields the venue's page can be
+ * the authority for are accepted; anything else is ignored rather than filed
+ * under the wrong source.
+ */
+const SITE_FIELDS = new Set(['website', 'phone', 'email', 'booking_url', 'menu_url', 'menu_label', 'socials']);
+export async function recordSiteFacts(venueRef, facts = {}) {
+  let wrote = 0;
+  for (const [field, value] of Object.entries(facts)) {
+    if (!SITE_FIELDS.has(field) || empty(value)) continue;
+    await putFact(venueRef, field, 'site', value);
+    wrote += 1;
+  }
+  if (wrote) await compose(venueRef);
+  return wrote;
 }
 
 // ---------------------------------------------------------------------------
@@ -1144,7 +1164,21 @@ export async function claimPlace(householdId, venueRef, reason, seed = {}) {
     console.warn(`own: could not claim ${venueRef}: ${err.message}`);
     return;
   }
-  queueEnrichment(venueRef, { householdId, seed });
+  // A place the owner adds to Places is researched further once this free
+  // pass has landed (owner, 2 Oct 2026; sources/savedEnrich.js). Asked here so
+  // every way of adding — saving, loving, "we've been" — is covered, and as
+  // this job's `onDone` so the place is researched once, not twice.
+  let onDone;
+  if (['saved', 'special', 'visited'].includes(reason)) {
+    try {
+      const m = await import('./savedEnrich.js');
+      onDone = (await m.requestEnrichment({
+        venueRef, account: currentAccount(), householdId,
+        sessionId: currentSpender().sessionId ?? null, seedName: seed?.name ?? null,
+      })).onDone;
+    } catch (err) { console.warn(`own: could not ask for the saved-place research on ${venueRef}: ${err.message}`); }
+  }
+  queueEnrichment(venueRef, { householdId, seed, ...(onDone ? { onDone } : {}) });
 
   // And put the menu in line (owner, 5 Sep 2026: "a user can request the menu
   // if they add it to a trip, and then we can go get the menu as soon as it's

@@ -90,6 +90,9 @@ export const PURPOSE_CLASSES = {
   'admin.lookup': 'office',
   'admin.lookup.rate': 'office',
   'admin.compare': 'office',
+  // Google's photographs of a place, fetched live beside ours on one click in
+  // back office › Photo review, never stored (2 Oct 2026).
+  'admin.photo_compare': 'office',
   'admin.reading': 'office',
 
   // Learning something on purpose.
@@ -119,6 +122,9 @@ export const PURPOSE_CLASSES = {
   'atlas.venue.research': 'library',
   'census.notongoogle': 'library',
   'own.findPage': 'library',
+  // The owner's saved places, researched once by Claude after the free pass
+  // (sources/savedEnrich.js, 2 Oct 2026).
+  'claude.enrich.saved_place': 'library',
   'own.match': 'library',
   'own.where': 'library',
   'places.areas': 'library',

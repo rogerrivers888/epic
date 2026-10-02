@@ -270,6 +270,8 @@ export const TIPS = {
   lensCategory: ['Category', 'The same places cut by our own shelves, driven by the taxonomy rather than the data \u2014 so a subcategory with nothing in it is a row that says so.'],
   lensSource: ['Source', 'The same places cut by who told us about them, so a place only one source has returned is visible as a risk.'],
   lensQuality: ['Quality', 'The same places cut by how good the record is: the score, how old the oldest fact is, and what is worth owning next.'],
+  lensSaved: ['Saved places', 'Every place the owner added to Places, researched once: the free sources first, then Claude for what was still missing. Each fact names the page it was read on.'],
+  lensPhotos: ['Photo review', "Places with pictures we own. Compare fetches Google's photographs live, priced before the click, and nothing of Google's is kept. The verdict is yours."],
   lensClosed: ['Closed', 'Every place held, checked for closure from free sources. Check hides nothing; Apply hides the permanent closures only.'],
   lensDemand: ['Demand', 'The same places cut by what was actually searched for here \u2014 so a gap can be ranked by whether anybody asked.'],
   weHoldNoneOfThis: ['We hold none', 'Nobody has filled this one in on our side. A hole is a finding: it is what Curate, Collect or a household upload would answer.'],

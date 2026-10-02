@@ -531,6 +531,40 @@ export type Review = { text: string; rating: number | null; author: string | nul
  * browser that blocks those. Neither is ever stored — `offline/policy.ts` takes
  * the whole photo off before anything reaches a device.
  */
+/** One of the owner's saved places in back office › Places › Saved places. */
+export type SavedPlaceRow = {
+  venueRef: string; name: string; category: string | null;
+  state: 'queued' | 'free' | 'claude' | 'done' | 'failed';
+  requestedAt: string; lastRunAt: string | null; runs: number;
+  costPence: number | null; lastCostPence: number | null;
+  website: boolean; menu: boolean; pictures: number; error: string | null;
+};
+/** Rates over the finished passes; null until there is one, never a nought for "not yet". */
+export type SavedPlacesSummary = {
+  done: number; websitePct: number | null; menuPct: number | null; ownedImagePct: number | null;
+  avgCostPence: number | null; paidPasses: number; purpose: string;
+};
+export type FoundField = { value: unknown; source: string; sourceUrl: string | null; checkedAt: string | null; why?: string };
+export type FoundFact = { label: string; answer: 'yes' | 'no' | 'unknown'; source: string | null; sourceUrl: string | null; checkedAt: string; why?: string };
+export type ReviewPicture = OwnedImage & { role?: string; moderation?: string; creator?: string | null; width?: number | null; height?: number | null };
+export type SavedPlaceDetail = {
+  venueRef: string;
+  enrichment: null | {
+    state: SavedPlaceRow['state']; requestedAt: string; freeDoneAt: string | null; claudeDoneAt: string | null;
+    lastRunAt: string | null; runs: number; costPence: number | null; lastCostPence: number | null; error: string | null;
+    found: { fields?: Record<string, FoundField>; facts?: Record<string, FoundFact>; pictures?: Record<string, any>; notes?: string[] };
+  };
+  venuePictures: { url: string; pageUrl: string; how: string | null; foundAt: string; licence: string }[];
+  ownedPictures: ReviewPicture[];
+  review: { verdict: PhotoVerdict; note: string | null; reviewed_at: string } | null;
+};
+export type PhotoVerdict = 'owned_fine' | 'owned_worse_acceptable' | 'owned_not_fit';
+export type PhotoReviewRow = { venueRef: string; name: string | null; category: string | null; postcode: string | null; pictures: number; verdict: PhotoVerdict | null; reviewedAt: string | null };
+export type PhotoCompare = {
+  venueRef: string; google: VenuePhotoRef[]; googleWhy: string | null;
+  owned: ReviewPicture[]; venuePictures: { url: string; pageUrl: string }[];
+};
+
 export type VenuePhotoRef = { ref?: string; url?: string; attribution?: string; sig?: string; exp?: number };
 
 export type Venue = {
@@ -3032,6 +3066,16 @@ export const api = {
     request<PlaceLevel & { sources: PlaceSourceDef[]; rows: PlaceSourceRow[]; subcategories: number }>(`/api/admin/place-index/sources${qs(p)}`),
   /** BO2e — the score distribution, staleness, and what is worth owning next. */
   adminPlaceQuality: (p: PlaceWhere) => request<PlaceLevel & PlaceQuality>(`/api/admin/place-index/quality${qs(p)}`),
+  /** The owner's saved places and where each one's research has got to (Part 2, 2 Oct 2026). */
+  adminSavedPlaces: () => request<{ places: SavedPlaceRow[]; summary: SavedPlacesSummary }>('/api/admin/saved-places'),
+  adminSavedPlace: (ref: string) => request<SavedPlaceDetail>(`/api/admin/saved-places/place${qs({ ref })}`),
+  adminSavedPlaceRerun: (ref: string) => post<{ started: boolean }>('/api/admin/saved-places/rerun', { ref }),
+  /** Photo review (Part 3): places with owned pictures; Google's fetched live on Compare, never stored. */
+  adminPhotoReview: (p: { q?: string; category?: string; reviewed?: 'yes' | 'no' } = {}) =>
+    request<{ places: PhotoReviewRow[]; more: boolean; comparePence: number }>(`/api/admin/photo-review${qs(p)}`),
+  adminPhotoCompare: (ref: string) => post<PhotoCompare>('/api/admin/photo-review/compare', { ref }),
+  adminPhotoVerdict: (ref: string, verdict: PhotoVerdict, note?: string) =>
+    post<{ venue_ref: string; verdict: PhotoVerdict; note: string | null; reviewed_at: string }>('/api/admin/photo-review/verdict', { ref, verdict, note }),
   /** BO2f — the gaps ranked by what was actually searched for. */
   adminPlaceDemand: (p: PlaceWhere & { since?: number }) =>
     request<PlaceLevel & {

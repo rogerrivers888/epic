@@ -150,8 +150,11 @@ imageRouter.get('/:id/:width', async (req, res, next) => {
     // card of their own place must not sit blank while it waits. It is served
     // only on the signed link the atlas hands that household (photoLinks.js
     // `stampImage`) — the bare id gets the same 404 as any other pending row —
-    // and it is not cached in public (Codex, 12 Sep 2026).
-    const theirs = !!image?.contributor_household_id && image.moderation === 'pending' && imageLinkValid(image.id, req.query);
+    // and it is not cached in public (Codex, 12 Sep 2026). The same holds for a
+    // picture found for a saved place and waiting for the owner's look beside
+    // Google's (Openverse, sources/openverse.js): only the back office signs a
+    // link to it (routes/savedPlaces.js), and only that link draws it.
+    const theirs = image?.moderation === 'pending' && imageLinkValid(image.id, req.query);
     if (!image || (image.moderation !== 'approved' && !theirs)) return res.status(404).end();
     const variant = await lib.variantFor(image.id, Number(req.params.width));
     if (!variant) return res.status(404).end();
