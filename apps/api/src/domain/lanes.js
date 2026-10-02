@@ -410,7 +410,8 @@ export function stepFilled(offer, step, cfg = DEFAULT_CONFIG) {
       const multi = offer.multi_day ?? offer.multiDay;
       const from = hm(offer.starts_at ?? offer.startsAt); const to = hm(offer.ends_at ?? offer.endsAt);
       if (!has(offer.starts_on ?? offer.startsOn) || !from || !to) return false;
-      return multi ? has(offer.ends_on ?? offer.endsOn) : to > from;
+      // Over several days the last day comes after the first (Codex, 2 Oct 2026).
+      return multi ? has(offer.ends_on ?? offer.endsOn) && ymd(offer.ends_on ?? offer.endsOn) > ymd(offer.starts_on ?? offer.startsOn) : to > from;
     }
     case 'order': return null;
     case 'cohosts': return null;

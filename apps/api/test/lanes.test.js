@@ -255,6 +255,7 @@ test('a one-off needs its end, and on one day the end comes after the start', ()
   assert.equal(stepFilled({ ...base, ends_at: '12:00' }, 'when'), false, 'ends before it starts');
   assert.equal(stepFilled({ ...base, ends_at: '23:00' }, 'when'), true);
   assert.equal(stepFilled({ ...base, ends_at: '12:00', multi_day: true, ends_on: '2026-06-14' }, 'when'), true, 'over two days, noon the next day is fine');
+  assert.equal(stepFilled({ ...base, ends_at: '12:00', multi_day: true, ends_on: '2026-06-13' }, 'when'), false, 'several days that end on the first is not several days');
 });
 
 test('the booking age gate reads a lane offer’s range (Codex, 2 Oct 2026)', async () => {

@@ -415,7 +415,7 @@ export function derive(patch, current) {
   if (next.min_count != null && next.max_count != null && Number(next.min_count) > Number(next.max_count)) throw refuse(400, 'min_over_max', 'The minimum is above the maximum.');
   const sAt = (next.starts_at ?? '').slice(0, 5); const eAt = (next.ends_at ?? '').slice(0, 5);
   if (current.lane === 'oneoff' && !next.multi_day && sAt && eAt && eAt <= sAt && (p.startsAt !== undefined || p.endsAt !== undefined)) throw refuse(400, 'ends_before_start', 'It ends before it starts.');
-  if (next.multi_day && next.starts_on && next.ends_on && next.ends_on < next.starts_on) throw refuse(400, 'ends_before_start', 'The end date is before the start.');
+  if (next.multi_day && next.starts_on && next.ends_on && next.ends_on <= next.starts_on) throw refuse(400, 'ends_before_start', 'The end date is before the start.');
   // The configured limits hold however the answer arrived — typed, said or read off a flyer (Codex, 2 Oct 2026).
   const cfg = hostingConfig();
   if (p.sessions != null && current.lane === 'course') p.sessions = Math.min(cfg.courseSessions.max, Math.max(cfg.courseSessions.min, p.sessions));
