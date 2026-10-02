@@ -98,6 +98,13 @@ async function ensureHost(household, account) {
     ?? repo.insertHost(household.id, { name: account?.name ?? household.name ?? 'A host', type: null, accountId: account?.id ?? null });
 }
 
+/** The set-up's write lock: the same one publishing holds, then the row, and only a draft is written. */
+async function lockDraft(client, id) {
+  await client.query('select pg_advisory_xact_lock(hashtext($1))', [`host-publish:${id}`]);
+  const { rows: [now] } = await client.query('select state from host_offers where id = $1 for update', [id]);
+  if (now?.state !== 'draft') throw refuse(409, 'already_sent', 'This one is out already.');
+}
+
 async function myLaneOffer(id) {
   const ctx = await me();
   if (!ctx.host) throw refuse(404, 'not_a_host', 'You are not hosting yet.');
@@ -270,8 +277,7 @@ router.patch('/host/lanes/offers/:id', async (req, res, next) => {
     // Written under the row's lock, and only while it is still a draft: an edit that arrives as
     // the offer is being sent never changes what went out (Codex, 2 Oct 2026).
     const updated = await withTransaction(async (client) => {
-      const { rows: [now] } = await client.query('select state from host_offers where id = $1 for update', [offer.id]);
-      if (now?.state !== 'draft') throw refuse(409, 'already_sent', 'This one is out already.');
+      await lockDraft(client, offer.id);
       const row = Object.keys(patch).length ? await repo.updateOffer(offer.id, patch, client) : offer;
       if (cohosts) await repo.setCohosts(offer.id, cohosts, client);
       return row;
@@ -284,7 +290,10 @@ router.delete('/host/lanes/offers/:id', async (req, res, next) => {
   try {
     const { host, offer } = await myLaneOffer(req.params.id);
     if (offer.state !== 'draft') throw refuse(409, 'not_a_draft', 'Only a draft can be thrown away.');
-    await repo.deleteOffer(offer.id, host.id);
+    await withTransaction(async (client) => {
+      await lockDraft(client, offer.id);
+      await client.query('delete from host_offers where id = $1 and host_id = $2 and state = $3', [offer.id, host.id, 'draft']);
+    });
     res.status(204).end();
   } catch (err) { next(err); }
 });
@@ -813,7 +822,7 @@ router.post('/host/lanes/offers/:id/video', async (req, res, next) => {
     if (b.videoId !== undefined) { patch.videoMadeBy = patch.videoId ? 'self' : null; patch.videoPhotoIds = []; patch.helloVideoId = null; }
     if (b.coverS !== undefined) patch.videoCoverS = num(b.coverS);
     if (b.onProfile !== undefined) patch.videoOnProfile = Boolean(b.onProfile);
-    const updated = await repo.updateOffer(offer.id, patch);
+    const updated = await withTransaction(async (client) => { await lockDraft(client, offer.id); return repo.updateOffer(offer.id, patch, client); });
     // The profile shows this offer's video only while the toggle says so, and the current take,
     // never one replaced since (Codex, 2 Oct 2026).
     const wasThis = host.intro_video_id && host.intro_video_id === offer.video_id;
@@ -866,8 +875,26 @@ async function laySessions(offer, holidays, client) {
 router.post('/host/lanes/offers/:id/publish', async (req, res, next) => {
   try {
     const { household, account, offer: o } = await myLaneOffer(req.params.id);
+    // One thing at a time on an offer while it is being sent: publishing holds this lock across
+    // its checks, the Stripe call and the state change, and every set-up write (an edit, the
+    // video, a delete) takes the same lock and then finds it no longer a draft (Codex, 2 Oct 2026).
+    const lockClient = await pool.connect();
+    try {
+      await lockClient.query('select pg_advisory_lock(hashtext($1))', [`host-publish:${o.id}`]);
+      await publishLocked(req, res, household, account, o.id);
+    } finally {
+      await lockClient.query('select pg_advisory_unlock(hashtext($1))', [`host-publish:${o.id}`]).catch(() => null);
+      lockClient.release();
+    }
+  } catch (err) { next(err); }
+});
+
+async function publishLocked(req, res, household, account, offerId) {
+  {
     const host = await repo.hostByHousehold(household.id);
-    let offer = o;
+    // Read again under the lock: every check below is made on the offer as it is now (Codex, 2 Oct 2026).
+    let offer = (await repo.offerOfHost(offerId, host.id));
+    if (!offer) throw refuse(404, 'offer_not_found', 'That is not one of your offers.');
     if (offer.state !== 'draft') throw refuse(409, 'already_sent', offer.state === 'live' ? 'This one is out already.' : 'This one is with us for review.');
     const cfg = hostingConfig();
     const gaps = laneGaps(offer, cfg);
@@ -885,16 +912,7 @@ router.post('/host/lanes/offers/:id/publish', async (req, res, next) => {
       // One publish at a time per offer: two presses at once must not each open a Checkout
       // (Codex, 2 Oct 2026). The lock is a session-level advisory one, held across the Stripe
       // call and released however this ends.
-      const lockClient = await pool.connect();
-      try {
-        await lockClient.query('select pg_advisory_lock(hashtext($1))', [`host-publish:${offer.id}`]);
-        offer = (await repo.offerOfHost(offer.id, host.id)) ?? offer;
-        if (offer.state !== 'draft') throw refuse(409, 'already_sent', 'This one is out already.');
-        return await publishPrivate();
-      } finally {
-        await lockClient.query('select pg_advisory_unlock(hashtext($1))', [`host-publish:${offer.id}`]).catch(() => null);
-        lockClient.release();
-      }
+      return await publishPrivate();
     }
     async function publishPrivate() {
       let pro = await hostingPro(account, household.id);
@@ -954,8 +972,8 @@ router.post('/host/lanes/offers/:id/publish', async (req, res, next) => {
     if (sentForReview.video_id) void checkVideo(sentForReview, household.id).catch(() => null);
     const stillToDo = items.filter((i) => (i.blocks === 'live' || i.blocks === 'payout') && !i.done).map((i) => i.key);
     res.json({ offer: await lanePayload(sentForReview, host, account, { holidays }), ending: { kind: 'review', reviewHours: cfg.reviewHours, stillToDo } });
-  } catch (err) { next(err); }
-});
+  }
+}
 
 /**
  * The 48-hour review's first pass (RULINGS: "AI checks the offer video and
