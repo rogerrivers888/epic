@@ -297,7 +297,12 @@ export async function updateMember(id, m, householdId) {
             kosher                = coalesce($14::boolean, kosher),
             access                = coalesce($15::jsonb, access),
             allergen_note         = case when $16::text = '' then null else coalesce($16, allergen_note) end,
-            never_learn           = coalesce($17::jsonb, never_learn),
+            -- Forgetting is permanent: a save adds to the list and never
+            -- takes from it, so a stale tab cannot un-forget (Codex, 2 Oct 2026).
+            never_learn           = case when $17::jsonb is null then never_learn else (
+                                      select coalesce(jsonb_agg(distinct v order by v), '[]'::jsonb)
+                                        from (select jsonb_array_elements_text(never_learn) v
+                                              union select jsonb_array_elements_text($17::jsonb)) x) end,
             ratings_view          = coalesce($18::jsonb, ratings_view)
       where id = $1 and household_id = $11 returning *`,
     [id, m.name ?? null, m.relationship ?? null, m.birthYear ?? null, m.avatarUrl ?? null,

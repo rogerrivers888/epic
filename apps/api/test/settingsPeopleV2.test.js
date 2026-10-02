@@ -791,3 +791,18 @@ test('the day window takes whole hours: 7.5 is a 400, never a 500', async () => 
     assert.equal(res.body.error, 'invalid_day_window');
   } finally { await srv.close(); }
 });
+
+test('forgetting is permanent: a stale save adds to the never-learn list and never takes from it', async () => {
+  const { household: h, member: roger } = await aHousehold(query);
+  const srv = await server(owner(h, roger.id));
+  try {
+    // Two tabs open on the same profile, each forgetting something different.
+    await srv.send('PATCH', `/api/household/members/${roger.id}`, { neverLearn: ['italian'] });
+    await srv.send('PATCH', `/api/household/members/${roger.id}`, { neverLearn: ['sushi'] });
+    let got = (await srv.get('/api/household')).body.members.find((m) => m.id === roger.id);
+    assert.deepEqual([...got.neverLearn].sort(), ['italian', 'sushi'], 'the second tab does not undo the first');
+    await srv.send('PATCH', `/api/household/members/${roger.id}`, { neverLearn: [] });
+    got = (await srv.get('/api/household')).body.members.find((m) => m.id === roger.id);
+    assert.deepEqual([...got.neverLearn].sort(), ['italian', 'sushi'], 'nor does an empty list clear it');
+  } finally { await srv.close(); }
+});
