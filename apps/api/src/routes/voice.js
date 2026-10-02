@@ -762,6 +762,13 @@ router.post('/household/who/apply', async (req, res, next) => {
     })).max(20) }).parse(req.body ?? {});
     const year = new Date().getFullYear();
     const bandAge = { '0-4': 3, '5-8': 6, '9-12': 10, '13+': 15 };
+    // The whole spoken household fits the plan or none of it is added: each
+    // insert checks the cap on its own, so a list too long half-landed and then
+    // failed without saying who was written (Codex, 2 Oct 2026).
+    const adding = body.people.filter((p) => !p.existingId).length;
+    if (adding && (await households.memberCount(household.id)) + adding > households.HOUSEHOLD_PLAN_CAP) {
+      return res.status(403).json({ error: 'plan_cap', message: `Your Household plan covers up to ${households.HOUSEHOLD_PLAN_CAP} people.` });
+    }
     const written = [];
     for (const p of body.people) {
       const age = p.age ?? (p.band ? bandAge[p.band] : null);

@@ -42,9 +42,10 @@ export async function householdById(id) {
 export async function updateHousehold(id, f) {
   // A saved "Getting there" also moves the single mode the planner reads, so
   // the setting reaches generated trips (Codex, 2 Oct 2026).
+  // Every mode unticked clears it too ('' is the clear), so a trip never
+  // keeps travelling a way the screen no longer shows (Codex, 2 Oct 2026).
   if (Array.isArray(f.travelModes) && f.travelMode == null) {
-    const primary = primaryTravelMode(f.travelModes);
-    if (primary) f = { ...f, travelMode: primary };
+    f = { ...f, travelMode: primaryTravelMode(f.travelModes) ?? '' };
   }
   const { rows } = await query(
     `update households
@@ -81,7 +82,7 @@ export async function updateHousehold(id, f) {
             -- What the household always wants when it goes looking (domain/browse.js).
             browse_defaults       = coalesce($15::jsonb, browse_defaults),
             -- How the household usually travels on a day out (set-up step 2).
-            travel_mode           = coalesce($16, travel_mode),
+            travel_mode           = case when $16::text = '' then null else coalesce($16, travel_mode) end,
             -- "Access needs in our household" (the visit question, migration 274).
             access_needs          = coalesce($17, access_needs),
             -- How Epic plans (Settings revised v2, SE7–SE10). Close to home is a

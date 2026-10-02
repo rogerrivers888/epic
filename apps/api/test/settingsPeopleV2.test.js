@@ -606,3 +606,43 @@ test('a day outing that names its mode is created, not thrown (a stray travelMod
   const { rows: [t] } = await query('select travel_mode from trips where id = $1', [out.id ?? out.trip?.id]);
   assert.equal(t.travel_mode, 'walking');
 });
+
+test('only the lead may delete the household', async () => {
+  const { household: h, member: lead } = await aHousehold(query);
+  const gina = await addMember(h.id, 'Gina');
+  await createAccountOnHousehold(h.id, { memberId: lead.id, name: 'Lead', role: 'customer', plan: 'household', email: 'lead-del@example.com' });
+  await createAccountOnHousehold(h.id, { memberId: gina.id, name: 'Gina', role: 'customer', plan: 'household', email: 'gina-del@example.com' });
+  const { rows: [ginaAcct] } = await query('select * from accounts where member_id = $1', [gina.id]);
+  const asGina = await server({ ...ginaAcct, status: 'active' });
+  try {
+    const res = await asGina.send('DELETE', '/api/household', { confirmName: h.name });
+    assert.equal(res.status, 403, 'a non-lead adult cannot delete everybody');
+    const { rows } = await query('select count(*)::int n from households where id = $1', [h.id]);
+    assert.equal(rows[0].n, 1, 'and the household is still there');
+  } finally { await asGina.close(); }
+});
+
+test('unticking every travel mode clears the mode the planner reads', async () => {
+  const { household: h, member: roger } = await aHousehold(query);
+  const srv = await server(owner(h, roger.id));
+  try {
+    await srv.send('PATCH', '/api/household', { travelModes: ['car'] });
+    await srv.send('PATCH', '/api/household', { travelModes: [] });
+    const { rows: [row] } = await query('select travel_mode, travel_modes from households where id = $1', [h.id]);
+    assert.equal(row.travel_mode, null, 'no car left behind for the planner');
+    assert.deepEqual(row.travel_modes, []);
+  } finally { await srv.close(); }
+});
+
+test('a spoken household too big for the plan adds nobody, rather than half of it', async () => {
+  const { household: h, member: roger } = await aHousehold(query);
+  for (let i = 0; i < 3; i += 1) await addMember(h.id, `P${i}`); // 4 with Roger, 2 places left
+  const srv = await server(owner(h, roger.id));
+  try {
+    const res = await srv.send('POST', '/api/voice/household/who/apply', { people: [{ name: 'A', role: 'adult' }, { name: 'B', role: 'adult' }, { name: 'C', role: 'adult' }] });
+    assert.equal(res.status, 403);
+    assert.equal(res.body.error, 'plan_cap');
+    const { rows } = await query('select count(*)::int n from members where household_id = $1', [h.id]);
+    assert.equal(rows[0].n, 4, 'nobody was added');
+  } finally { await srv.close(); }
+});

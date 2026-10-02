@@ -1042,6 +1042,9 @@ router.get('/export', async (_req, res, next) => {
 router.delete('/', async (req, res, next) => {
   try {
     const household = await currentHousehold();
+    // Deleting the household is the lead's alone — the Settings row is theirs,
+    // and the door is here, not only in the UI (Codex, 2 Oct 2026).
+    if (!(await callerIsLead())) return res.status(403).json({ error: 'not_the_lead', message: 'Only the person who set up this household can delete it.' });
     const { confirmName } = req.body || {};
     // Refused while this household hosts anything still outstanding (SX21): the
     // guests holding places have to be told and refunded first, by calling each
