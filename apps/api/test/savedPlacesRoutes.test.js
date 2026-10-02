@@ -169,3 +169,22 @@ test('a changed verdict re-settles its pictures both ways, and a picture found a
     assert.equal(await listed(), true, 'a new picture since the verdict puts it back in the queue');
   } finally { await close(); }
 });
+
+test('a venue-site picture found after the verdict reopens the review, and a reopened place leaves the verdict counts', async () => {
+  const ref = `google:reopen-${randomUUID()}`;
+  await query(`insert into place_records (venue_ref, name, provenance) values ($1, 'Reopened Venue', '{}')`, [ref]);
+  await query(`insert into venue_site_images (venue_ref, image_url, page_url, found_at) values ($1, 'https://ro.example/a.jpg', 'https://ro.example/', now() - interval '1 day')`, [ref]);
+  await query(`insert into photo_reviews (venue_ref, verdict) values ($1, 'owned_fine')`, [ref]);
+  const { base, close } = await serve();
+  try {
+    const listed = async () => (await (await fetch(`${base}/review?q=Reopened&reviewed=no`)).json()).places.some((p) => p.venueRef === ref);
+    const before = (await (await fetch(`${base}/review`)).json()).summary;
+    assert.equal(await listed(), false);
+    await query(`insert into venue_site_images (venue_ref, image_url, page_url, found_at) values ($1, 'https://ro.example/b.jpg', 'https://ro.example/', now() + interval '1 minute')`, [ref]);
+    assert.equal(await listed(), true, 'the new picture has never been assessed');
+    const after = (await (await fetch(`${base}/review`)).json()).summary;
+    assert.equal(after.reviewed, before.reviewed - 1);
+    assert.equal(after.fine, before.fine - 1, 'its old verdict no longer counts');
+    assert.ok(after.fine + after.acceptable + after.not_fit <= after.reviewed);
+  } finally { await close(); }
+});

@@ -135,7 +135,7 @@ savedPlacesRouter.post('/rerun', requires('manage_library'), requireOwnerSignedI
     if (!ref) throw bad('Which place? Pass its ref.');
     const household = await currentHousehold();
     const out = await rerun(ref, { account: currentAccount(), householdId: household.id, sessionId: req.session?.id ?? null });
-    res.status(out.started ? 202 : 409).json(out);
+    res.status(out.started ? 202 : out.why === 'not_found' ? 404 : 409).json(out);
   } catch (err) { next(err); }
 });
 
@@ -172,7 +172,10 @@ savedPlacesRouter.post('/backfill', requires('manage_library'), requireOwnerSign
 const REVIEWED = `(pr.venue_ref is not null and not exists (
                     select 1 from image_links l join image_assets i on i.id = l.image_id
                      where l.subject_type = 'place' and l.subject_id = r.venue_ref
-                       and i.moderation = 'pending' and i.fetched_at > pr.reviewed_at))`;
+                       and i.moderation = 'pending' and i.fetched_at > pr.reviewed_at)
+                  and not exists (
+                    select 1 from venue_site_images v
+                     where v.venue_ref = r.venue_ref and v.found_at > pr.reviewed_at))`;
 
 photoReviewRouter.get('/', requires('view_library'), async (req, res, next) => {
   try {
@@ -204,9 +207,9 @@ photoReviewRouter.get('/', requires('view_library'), async (req, res, next) => {
     const { rows: [sum] } = await query(
       `select count(*)::int as places,
               count(*) filter (where ${REVIEWED})::int as reviewed,
-              count(*) filter (where pr.verdict = 'owned_fine')::int as fine,
-              count(*) filter (where pr.verdict = 'owned_worse_acceptable')::int as acceptable,
-              count(*) filter (where pr.verdict = 'owned_not_fit')::int as not_fit
+              count(*) filter (where ${REVIEWED} and pr.verdict = 'owned_fine')::int as fine,
+              count(*) filter (where ${REVIEWED} and pr.verdict = 'owned_worse_acceptable')::int as acceptable,
+              count(*) filter (where ${REVIEWED} and pr.verdict = 'owned_not_fit')::int as not_fit
          from place_records r left join photo_reviews pr on pr.venue_ref = r.venue_ref
         where ${anyPicture}`);
     // A capped list says what it found, not what is absent (CLAUDE.md).

@@ -114,16 +114,25 @@ async function setState(venueRef, state, extra = {}) {
 export async function requestEnrichment({ venueRef, account, householdId, sessionId = null, rerun = false, seedName = null }) {
   if (!venueRef || !householdId) return { started: false, why: 'no_place' };
   if (!rerun && !isEnrichAccount(account)) return { started: false, why: 'not_enrolled' };
+  // A re-run is of a place already researched, and nothing else: never a way
+  // to start the paid pass on an arbitrary reference (Codex, 2 Oct 2026).
+  if (rerun) {
+    const { rows } = await query(
+      `update saved_place_enrichment set state = 'queued', error = null, requested_at = now(),
+              household_id = $2, session_id = $3
+        where venue_ref = $1 and state in ('done', 'failed')
+        returning venue_ref`, [venueRef, householdId, sessionId]);
+    if (!rows.length) return { started: false, why: (await enrichmentOf(venueRef)) ? 'already' : 'not_found' };
+    const ctx = { householdId, sessionId, seedName };
+    await setState(venueRef, 'free');
+    return { started: true, onDone: followOn(venueRef, ctx), onFailed: onFreeFailed(venueRef) };
+  }
   const { rows } = await query(
     `insert into saved_place_enrichment (venue_ref, account_id, household_id, session_id)
      values ($1, $2, $3, $4)
-     on conflict (venue_ref) do update set
-       state = 'queued', error = null, requested_at = now(),
-       account_id = coalesce(excluded.account_id, saved_place_enrichment.account_id),
-       household_id = excluded.household_id, session_id = excluded.session_id
-       where $5::boolean and saved_place_enrichment.state in ('done', 'failed')
+     on conflict (venue_ref) do nothing
      returning venue_ref`,
-    [venueRef, account?.id ?? null, householdId, sessionId, rerun]);
+    [venueRef, account?.id ?? null, householdId, sessionId]);
   // A place mid-pass is not started again, re-run or not: a second pipeline
   // beside a running one would pay twice and race its writes (Codex, 2 Oct 2026).
   if (!rows.length) return { started: false, why: 'already' };
@@ -215,7 +224,7 @@ export async function backfill({ account, householdId, sessionId = null, expectP
 export async function rerun(venueRef, { account = null, householdId, sessionId = null }) {
   const out = await requestEnrichment({ venueRef, account, householdId, sessionId, rerun: true });
   if (out.started) queueEnrichment(venueRef, { householdId, sessionId, onDone: out.onDone, onFailed: out.onFailed });
-  return { started: out.started };
+  return { started: out.started, why: out.why ?? null };
 }
 
 /**
@@ -396,13 +405,20 @@ export function judge({ reply, fetched, knownWebsite = null, asks = [] }) {
     }
   }
   const socials = {};
+  const socialPages = {};
   for (const s of reply?.fields?.socials ?? []) {
     if (!s?.url || !s.network) continue;
-    if (onVenueSite(s.source_url)) socials[String(s.network).toLowerCase()] = s.url;
+    if (!onVenueSite(s.source_url)) continue;
+    const net = String(s.network).toLowerCase();
+    socials[net] = s.url;
+    socialPages[net] = s.source_url;
   }
   if (Object.keys(socials).length) {
     siteFacts.socials = socials;
-    fields.socials = { value: socials, source: 'site', sourceUrl: website, checkedAt: at };
+    // Each link keeps the page it was read on (Codex, 2 Oct 2026): the page
+    // shown is one that was fetched, never the site's root by assumption.
+    const pages = [...new Set(Object.values(socialPages))];
+    fields.socials = { value: socials, source: 'site', sourceUrl: pages[0], ...(pages.length > 1 ? { sourceUrls: socialPages } : {}), checkedAt: at };
   }
 
   const byKey = new Map(asks.map((q) => [q.key, q]));

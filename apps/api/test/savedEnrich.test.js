@@ -302,3 +302,16 @@ test('a cited page must match the page read in its path case; a rejected Openver
   await query(`update image_assets set moderation = 'rejected' where source_ref = $1`, [`openverse:${id}`]);
   assert.equal((await picturesFor({ venueRef: ref, name: 'Turned down' }, deps)).stored.length, 0);
 });
+
+test('a re-run is only of a place already researched; social links keep the page they were read on', async () => {
+  const hh = await household();
+  const out = await enrich.requestEnrichment({ venueRef: `google:never-${randomUUID()}`, account: null, householdId: hh, rerun: true });
+  assert.equal(out.started, false);
+  assert.equal(out.why, 'not_found', 'never a way to start the paid pass on an arbitrary place');
+  const j = enrich.judge({
+    reply: { fields: { website: { value: 'https://soc.example/', source_url: 'https://soc.example/' }, socials: [{ network: 'Instagram', url: 'https://instagram.com/soc', source_url: 'https://soc.example/contact' }] } },
+    fetched: ['https://soc.example/', 'https://soc.example/contact'],
+    asks: [],
+  });
+  assert.equal(j.fields.socials.sourceUrl, 'https://soc.example/contact', 'the page read, not the root assumed');
+});
