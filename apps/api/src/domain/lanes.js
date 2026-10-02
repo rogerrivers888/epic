@@ -92,11 +92,23 @@ const merge = (base, over) => {
   return out;
 };
 
+/** Every key the defaults have, with the same kind of value; arrays non-empty and of the same shape. */
+function sameShape(d, v) {
+  if (Array.isArray(d)) return Array.isArray(v) && v.length > 0 && v.every((x) => sameShape(d[0], x) || (isObj(d[0]) && isObj(x) && typeof x.pct === 'number'));
+  if (isObj(d)) return isObj(v) && Object.keys(d).every((k) => sameShape(d[k], v[k]));
+  if (typeof d === 'number') return typeof v === 'number' && Number.isFinite(v);
+  return typeof v === typeof d;
+}
+
 /** The config in force: the defaults, with `EPIC_HOSTING_CONFIG` laid over them. A malformed override is ignored, never half-applied. */
 export function hostingConfig(env = process.env) {
   const raw = env?.EPIC_HOSTING_CONFIG;
   if (!raw) return DEFAULT_CONFIG;
-  try { return merge(DEFAULT_CONFIG, JSON.parse(raw)); } catch { return DEFAULT_CONFIG; }
+  try {
+    const merged = merge(DEFAULT_CONFIG, JSON.parse(raw));
+    // Same shape as the defaults, or not at all: valid JSON of the wrong shape is ignored too (Codex, 2 Oct 2026).
+    return sameShape(DEFAULT_CONFIG, merged) ? merged : DEFAULT_CONFIG;
+  } catch { return DEFAULT_CONFIG; }
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +186,9 @@ export function weeklyRun(offer, holidays = new Map(), { weeks = DEFAULT_CONFIG.
   // that has passed, so a class never runs out of dates (Codex, 2 Oct 2026).
   const first = ymd(offer.first_date ?? offer.firstDate);
   const start = first && from && ymd(from) > first ? ymd(from) : first;
+  // Today's class once it has started is not a session to come (Codex, 2 Oct 2026).
+  const startsAt = (offer.starts_at ?? offer.startsAt ?? '').slice(0, 5);
+  const gone = (d) => Boolean(from && startsAt && d === ymd(from) && localInstant(d, startsAt, offer.time_zone ?? offer.timeZone ?? 'Europe/London') <= new Date(from));
   const days = new Set((offer.weekdays ?? []).map(Number));
   if (!start || !days.size) return { dates: [], skipped: [] };
   const own = new Set((offer.skipped_dates ?? offer.skippedDates ?? []).map(ymd));
@@ -181,7 +196,7 @@ export function weeklyRun(offer, holidays = new Map(), { weeks = DEFAULT_CONFIG.
   const dates = []; const skipped = [];
   for (let i = 0; i < weeks * 7; i += 1) {
     const d = plusDays(start, i);
-    if (!days.has(dow(d))) continue;
+    if (!days.has(dow(d)) || gone(d)) continue;
     if (bank && holidays.has(d)) skipped.push({ date: d, why: 'bank', name: holidays.get(d) });
     else if (own.has(d)) skipped.push({ date: d, why: 'host' });
     else dates.push(d);

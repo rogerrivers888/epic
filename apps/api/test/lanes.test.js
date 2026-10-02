@@ -353,3 +353,11 @@ test('on-request slots are listed by the host’s own date', async () => {
   const slots = anytimeSlots({ lane: 'onrequest', time_zone: 'America/New_York', free_hours: { 1: [['22:00', '23:30']] }, session_lengths: [60], notice_hours: 0 }, { from: new Date('2026-10-13T01:30:00Z'), days: 0 });
   assert.deepEqual(slots, [{ date: '2026-10-12', times: ['22:00'] }]);
 });
+
+test('a weekly class published after today’s start begins with the next one, and a wrongly shaped config is ignored', () => {
+  const run = weeklyRun({ first_date: '2026-01-05', weekdays: [1], starts_at: '09:00', skipped_dates: [] }, new Map(), { weeks: 2, from: new Date('2026-10-05T17:00:00Z') });
+  assert.equal(run.dates[0], '2026-10-12', 'Monday 9am has gone by Monday 6pm');
+  assert.equal(hostingConfig({ EPIC_HOSTING_CONFIG: JSON.stringify({ courseSessions: null }) }), DEFAULT_CONFIG);
+  assert.equal(hostingConfig({ EPIC_HOSTING_CONFIG: JSON.stringify({ publicShare: [] }) }), DEFAULT_CONFIG);
+  assert.equal(hostingConfig({ EPIC_HOSTING_CONFIG: JSON.stringify({ privateEventPence: 1200 }) }).privateEventPence, 1200);
+});
