@@ -205,7 +205,10 @@ export async function allHosts() {
  * could be stripped by, and a page of sixty offers must not be sixty calls.
  */
 async function named(rows, { refKey = 'venue_ref' } = {}) {
-  await resolveInto([{ rows: rows.filter(Boolean), refKey, nameKey: 'venue_label', localityKey: 'venue_area' }],
+  // A host's own words are shown as written, whatever the reference (migration
+  // 341): only a picked place's text is named afresh.
+  const picked = rows.filter((r) => r && r.venue_label_from !== 'host');
+  await resolveInto([{ rows: picked, refKey, nameKey: 'venue_label', localityKey: 'venue_area' }],
     { purpose: 'host.displayName', live: false, householdId: '00000000-0000-0000-0000-000000000000' });
   return rows;
 }
@@ -279,11 +282,11 @@ export async function deleteOffer(id, hostId) {
 export async function cloneOfferOnDate(offer, startsOn, startsAt, client) {
   const { rows } = await on(client)(
     `insert into host_offers (host_id, shape, state, visibility, money, title, summary, description, why_you, includes, category, category_key, format_key, photo_ids, video_id, doc_id, facts, transcript,
-        venue, venue_ref, venue_label, venue_area, venue_lat, venue_lng, venue_country, venue_notes, travel_radius_min, travel_charge_pence, online_platform, duration_min, ends_at,
+        venue, venue_ref, venue_label, venue_label_from, venue_area, venue_lat, venue_lng, venue_country, venue_notes, travel_radius_min, travel_charge_pence, online_platform, duration_min, ends_at,
         min_count, expected_count, max_count, party_max, age_limit, price_mode, price_pence, total_pence, per, refund_rule, starts_on, starts_at, running_order, featured_people,
         sub_detail, rules_accepted, checks, regulated_answer, licence_number, licence_expiry, published_at, submitted_at)
      select host_id, shape, state, visibility, money, title, summary, description, why_you, includes, category, category_key, format_key, photo_ids, video_id, doc_id, facts, transcript,
-        venue, venue_ref, venue_label, venue_area, venue_lat, venue_lng, venue_country, venue_notes, travel_radius_min, travel_charge_pence, online_platform, duration_min, ends_at,
+        venue, venue_ref, venue_label, venue_label_from, venue_area, venue_lat, venue_lng, venue_country, venue_notes, travel_radius_min, travel_charge_pence, online_platform, duration_min, ends_at,
         min_count, expected_count, max_count, party_max, age_limit, price_mode, price_pence, total_pence, per, refund_rule, $2::date, coalesce($3::time, starts_at), running_order, featured_people,
         sub_detail, rules_accepted, checks, regulated_answer, licence_number, licence_expiry, now(), now()
        from host_offers where id = $1 returning *`,
@@ -422,7 +425,7 @@ export async function bookingsOfOffers(offerIds) {
 export async function bookingsOfHousehold(householdId) {
   const { rows } = await query(
     `select b.*, o.title, o.shape, o.starts_on, o.starts_at, o.first_date, o.sessions, o.skipped_dates, o.duration_min, o.venue, o.venue_area, o.venue_label,
-            o.venue_ref as offer_venue_ref, o.state as offer_state, o.cancelled_note as offer_cancelled_note, o.min_count, o.max_count,
+            o.venue_ref as offer_venue_ref, o.venue_label_from, o.state as offer_state, o.cancelled_note as offer_cancelled_note, o.min_count, o.max_count,
             h.name as host_name, h.type as host_type, h.photo_id as host_photo_id,
             (select count(*) from host_reviews r where r.booking_id = b.id and r.side = 'guest') as reviewed
        from experience_bookings b
@@ -438,7 +441,7 @@ export async function bookingsOfHousehold(householdId) {
 export async function bookingById(id) {
   const { rows } = await query(
     `select b.*, o.title, o.shape, o.starts_on, o.starts_at, o.first_date, o.sessions, o.skipped_dates, o.duration_min, o.venue, o.venue_area, o.venue_label,
-            o.venue_ref as offer_venue_ref, o.venue_notes, o.online_platform, o.refund_rule, o.min_count, o.max_count, o.state as offer_state, o.cancelled_note as offer_cancelled_note,
+            o.venue_ref as offer_venue_ref, o.venue_label_from, o.venue_notes, o.online_platform, o.refund_rule, o.min_count, o.max_count, o.state as offer_state, o.cancelled_note as offer_cancelled_note,
             o.price_mode, o.price_pence, o.total_pence, o.per, o.expected_count, o.category,
             h.name as host_name, h.type as host_type, h.trust as host_trust, h.photo_id as host_photo_id, h.location_label as host_location,
             (select count(*) from host_reviews r where r.booking_id = b.id and r.side = 'guest') as reviewed

@@ -200,3 +200,20 @@ test('a person\'s own words beside a provider\'s reference are kept; only a copy
     [ev, 'Bring a towel'], 'the copy goes, the organiser\'s words stay');
   assert.equal((await query('select venue_label from host_offers where host_id = $1 and title = $2', [host.id, 'A'])).rows[0].venue_label, 'Meet by the red door, SL4 1AA');
 });
+
+test('an organiser\'s and a host\'s own words on a provider\'s reference are shown as written', async () => {
+  const groupsRepo = await import('../src/repositories/groups.js');
+  const hostingRepo = await import('../src/repositories/hosting.js');
+  const hh = await household();
+  const g = `google:${randomUUID()}`;
+  const trip = (await query(`insert into trips (household_id, title, origin_label, origin_lat, origin_lng, depart_at, return_at, start_date, end_date)
+    values ($1, 'T', 'Home', 51.4, -0.6, now(), now(), '2026-10-04', '2026-10-05') returning id`, [hh])).rows[0];
+  const group = (await query(`insert into trip_groups (trip_id, household_id, invite_token) values ($1, $2, $3) returning id`, [trip.id, hh, `t-${randomUUID()}`])).rows[0];
+  await query(`insert into group_items (group_id, kind, label, label_from, venue_ref, position) values ($1, 'activity', 'Book lunch for Saturday', 'own', $2, 0)`, [group.id, g]);
+  const [item] = await groupsRepo.itemsOf(group.id);
+  assert.equal(item.label, 'Book lunch for Saturday');
+  const host = (await query(`insert into hosts (household_id, name) values ($1, 'Tom') returning id`, [hh])).rows[0];
+  const { rows: [o] } = await query(`insert into host_offers (host_id, shape, state, title, venue_ref, venue_label, venue_label_from)
+    values ($1, 'anytime', 'draft', 'A', $2, 'Meet by the red door', 'host') returning id`, [host.id, g]);
+  assert.equal((await hostingRepo.offerById(o.id)).venue_label, 'Meet by the red door');
+});

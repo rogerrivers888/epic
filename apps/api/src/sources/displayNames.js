@@ -181,7 +181,15 @@ export async function resolveInto(specs, opts = {}) {
   for (const { rows, refKey, nameKey, localityKey = 'locality' } of specs) {
     for (const r of rows ?? []) {
       const ref = r?.[refKey];
-      if (ref && !tmp.has(ref)) tmp.set(ref, { ref, locality: r[localityKey] ?? null, name: r[nameKey] ?? null });
+      if (!ref) continue;
+      // Any row's own words will do for the place, not only the first row's: a
+      // stop written before the shortlist with the reference standing in must
+      // not hide the shortlist's wording (Codex, 2 Oct 2026).
+      const own = r[nameKey];
+      const usable = typeof own === 'string' && own.trim() && own !== ref ? own : null;
+      const had = tmp.get(ref);
+      if (!had) tmp.set(ref, { ref, locality: r[localityKey] ?? null, name: usable });
+      else if (!had.name && usable) had.name = usable;
     }
   }
   const list = [...tmp.values()];
