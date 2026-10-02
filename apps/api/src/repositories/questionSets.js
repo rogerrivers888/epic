@@ -130,7 +130,11 @@ async function askWaiting(client, subcategoryKey, setKey) {
       // The set now attached may also serve a drawer that ignored this word; the
       // ignore stands, so the fact stays owed rather than asked over it.
       const { rows: words } = await client.query('select norm from attribute_aliases where target_key = $1', [w.attribute_key]);
-      if ((await setIgnores(client, setKey, words.map((r) => r.norm))).length) continue;
+      // Held back only if the set does not already actively ask it: a question
+      // already there means the drawer is asked, and the obligation is met.
+      const { rows: [already] } = await client.query(
+        "select 1 from questions where attribute_key = $1 and scope = 'set' and set_key = $2 and active limit 1", [w.attribute_key, setKey]);
+      if (!already && (await setIgnores(client, setKey, words.map((r) => r.norm))).length) continue;
       const q = await addQuestion({ attributeKey: w.attribute_key, setKey, scope: 'set' }, client);
       if (q && q.active === false) await client.query('update questions set active = true, updated_at = now() where id = $1', [q.id]);
       // The drawer's approved candidates now have a question to point at.
@@ -970,7 +974,14 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
         // Every wording of the fact, not just this spelling: a drawer that ignored
         // another alias of it has refused the same fact (Codex, 2 Oct 2026).
         const vetoes = await setIgnores(client, set.set_key, wordings);
-        if (vetoes.length) {
+        // A set that already actively asks the fact — a question that predates this
+        // approval — is asked, not held back: approval neither switches off a
+        // question somebody set up nor reports it as not asked (Codex, 2 Oct 2026).
+        // A per-drawer ignore has never retired a question; it only keeps approval
+        // from adding or reviving one.
+        const { rows: [already] } = await client.query(
+          "select 1 from questions where attribute_key = $1 and scope = 'set' and set_key = $2 and active limit 1", [key, set.set_key]);
+        if (vetoes.length && !already) {
           blocked.push({ setKey: set.set_key, ignoredIn: vetoes });
           heldSets.add(set.set_key);
           heldBack.push(sub);

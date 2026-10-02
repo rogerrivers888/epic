@@ -1086,4 +1086,32 @@ test('restoring an older per-drawer ignore leaves a later word-level Ignore stan
   assert.equal((await query("select count(*)::int n from feature_tombstones where norm = 'trophy room'")).rows[0].n, 0, 'restoring a candidate that Ignore closed lifts it');
 });
 
+test('a shared set that already asks the fact is reported as asked, not held back', async () => {
+  // Codex, 2 Oct 2026: approval does not switch off a question somebody set up, so a
+  // set that already actively asks the fact is not "held back" — the report says so.
+  const subA = 'c30-pre-a'; const subB = 'c30-pre-b';
+  const a = 'google:ChIJ_c30_pre_a'; const b = 'google:ChIJ_c30_pre_b';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 pre A', 'c30-test-cat') on conflict do nothing", [subA]);
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 pre B', 'c30-test-cat') on conflict do nothing", [subB]);
+  await query("insert into question_sets (key, name) values ('c30-pre-set', 'C30 pre set') on conflict do nothing");
+  await query("insert into question_set_subcategories (subcategory_key, set_key) values ($1, 'c30-pre-set'), ($2, 'c30-pre-set') on conflict do nothing", [subA, subB]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [a, subA]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [b, subB]);
+  await query('delete from harvest_candidates where subcategory = any($1)', [[subA, subB]]);
+  await query('delete from review_sightings where venue_ref = any($1)', [[a, b]]);
+  await query("insert into place_attributes (key, label, kind) values ('tack-shed', 'Tack shed', 'yesno') on conflict (key) do update set active = true");
+  await query("delete from questions where attribute_key = 'tack-shed'");
+  await query("insert into questions (attribute_key, scope, set_key, active) values ('tack-shed', 'set', 'c30-pre-set', true)");
+
+  await spotFromDetail({ venueRef: a, detail: { reviewSummary: 'A tack shed.' } });
+  const { rows: [candA] } = await query("select id from harvest_candidates where norm = 'tack shed' and subcategory = $1", [subA]);
+  await sets.ignoreCandidate(candA.id, { actor: 'tester' });
+  await spotFromDetail({ venueRef: b, detail: { reviewSummary: 'A tack shed.' } });
+  const res = await sets.approveFeature('tack shed', { actor: 'tester' });
+  assert.deepEqual(res.blocked, [], 'not reported as held back');
+  assert.equal(res.asked, 0, 'nothing newly asked — the set already asks it');
+  assert.equal((await query("select active from questions where attribute_key = 'tack-shed' and set_key = 'c30-pre-set'")).rows[0].active, true, 'the existing question is left on');
+});
+
 test.after(async () => { await pool.end(); });
