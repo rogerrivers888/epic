@@ -893,9 +893,9 @@ test('review settles itself for one place: a family\'s later visit, then Google\
   assert.equal(await checkPlace('google:c57-nothing', stubs), null);
 
   // The question was raised ten days ago; a family went after that.
-  await query(`update place_status set review_since = now() - interval '10 days' where venue_ref = $1`, [`atlas:${lonely}`]);
+  await query(`update place_status set review_since = $2::date - 10 where venue_ref = $1`, [`atlas:${lonely}`, TODAY]);
   const { household } = await aHousehold(query, 'c57 visit');
-  await query(`insert into visits (household_id, venue_ref, venue_label, visited_on) values ($1, 'wikidata:Q900001', 'Hidden Folly', current_date - 2)`, [household.id]);
+  await query(`insert into visits (household_id, venue_ref, venue_label, visited_on) values ($1, 'wikidata:Q900001', 'Hidden Folly', $2::date - 2)`, [household.id, TODAY]);
   const out = await checkPlace('wikidata:Q900001', stubs);
   assert.ok(out, 'it was in review, so it was re-judged');
   assert.equal(out.checkId, null, 'no run is recorded for one place');
@@ -1009,10 +1009,10 @@ test('a family visit recorded under the other spelling of the open-map ref settl
   };
   await runClosedCheck({ by: 'test', ...stubs });
   assert.equal((await repo.statusFor(`atlas:${lonely}`)).review, true);
-  await query(`update place_status set review_since = now() - interval '10 days' where venue_ref = $1`, [`atlas:${lonely}`]);
+  await query(`update place_status set review_since = $2::date - 10 where venue_ref = $1`, [`atlas:${lonely}`, TODAY]);
   const { household } = await aHousehold(query, 'c57 osm spelling');
   // The atlas holds the bare '737373'; the family's visit was recorded as the relation.
-  await query(`insert into visits (household_id, venue_ref, venue_label, visited_on) values ($1, 'osm:relation/737373', 'Hidden Folly', current_date - 2)`, [household.id]);
+  await query(`insert into visits (household_id, venue_ref, venue_label, visited_on) values ($1, 'osm:relation/737373', 'Hidden Folly', $2::date - 2)`, [household.id, TODAY]);
   const { checkPlace } = await import('../src/sources/closedCheck.js');
   await checkPlace('osm:relation/737373', stubs);
   const s = await repo.statusFor(`atlas:${lonely}`);
