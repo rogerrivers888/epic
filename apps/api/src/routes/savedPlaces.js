@@ -172,7 +172,7 @@ savedPlacesRouter.post('/backfill', requires('manage_library'), requireOwnerSign
 const REVIEWED = `(pr.venue_ref is not null and not exists (
                     select 1 from image_links l join image_assets i on i.id = l.image_id
                      where l.subject_type = 'place' and l.subject_id = r.venue_ref
-                       and i.moderation = 'pending' and i.fetched_at > pr.reviewed_at)
+                       and i.moderation <> 'rejected' and i.fetched_at > pr.reviewed_at)
                   and not exists (
                     select 1 from venue_site_images v
                      where v.venue_ref = r.venue_ref and v.found_at > pr.reviewed_at))`;
@@ -185,8 +185,10 @@ photoReviewRouter.get('/', requires('view_library'), async (req, res, next) => {
     const args = [];
     // Any picture of ours: one in the library, or one on the venue's own site
     // held by address (Codex, 2 Oct 2026 — those count too, and must be findable).
+    // A turned-down picture still counts here: a place judged not fit stays in
+    // the review, where its verdict can be changed (Codex, 2 Oct 2026).
     const anyPicture = `(exists (select 1 from image_links l join image_assets i on i.id = l.image_id
-                             where l.subject_type = 'place' and l.subject_id = r.venue_ref and i.moderation <> 'rejected')
+                             where l.subject_type = 'place' and l.subject_id = r.venue_ref)
                          or exists (select 1 from venue_site_images v where v.venue_ref = r.venue_ref))`;
     const where = [anyPicture];
     if (q) { args.push(`%${q}%`); where.push(`r.name ilike $${args.length}`); }

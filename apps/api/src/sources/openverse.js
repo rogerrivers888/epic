@@ -134,6 +134,14 @@ export async function picturesFor({ venueRef, name, locality = null }, { keep = 
       moderation: 'pending',
     }, [{ width: 500, actualWidth: pic.width ?? null, actualHeight: pic.height ?? null, mime: pic.mime, bytes: pic.bytes, body: pic.body }]);
     await lib.linkImage(image.id, { subjectType: 'place', subjectId: venueRef, role: 'gallery', position: 10 + stored.length });
+    // Two passes can find the same picture at once, each before the other has
+    // linked it. A picture's moderation is one for every place it is linked
+    // to, so it must belong to one place: if another has it too, this link is
+    // withdrawn (Codex, 2 Oct 2026). Both withdrawing loses a picture; neither
+    // shares an approval.
+    const { rows: [others] } = await query(
+      `select count(*)::int as n from image_links where image_id = $1 and subject_type = 'place' and subject_id <> $2`, [image.id, venueRef]);
+    if (others.n > 0) { await lib.unlinkImage(image.id, 'place', venueRef); continue; }
     stored.push({ imageId: image.id, licence: r.licence, creator: r.creator, landing: r.landing });
   }
   return { ok: true, stored, refused, looked: found.results.length };

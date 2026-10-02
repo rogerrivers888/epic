@@ -188,3 +188,20 @@ test('a venue-site picture found after the verdict reopens the review, and a reo
     assert.ok(after.fine + after.acceptable + after.not_fit <= after.reviewed);
   } finally { await close(); }
 });
+
+test('a place judged not fit stays in the review; a picture added since a verdict reopens it whatever its state', async () => {
+  const ref = `google:nf-${randomUUID()}`;
+  await query(`insert into place_records (venue_ref, name, provenance) values ($1, 'Notfit Only', '{}')`, [ref]);
+  const { rows: [img] } = await query(`insert into image_assets (source, source_ref, licence, may_store, moderation) values ('openverse', $1, 'CC BY 2.0', true, 'pending') returning id`, [`openverse:nf-${randomUUID()}`]);
+  await query(`insert into image_links (image_id, subject_type, subject_id, role, position) values ($1, 'place', $2, 'gallery', 10)`, [img.id, ref]);
+  const { base, close } = await serve();
+  try {
+    await post(`${base}/review/verdict`, { ref, verdict: 'owned_not_fit' });
+    const all = (await (await fetch(`${base}/review?q=Notfit&reviewed=yes`)).json()).places;
+    assert.ok(all.some((p) => p.venueRef === ref && p.verdict === 'owned_not_fit'), 'still there to be changed');
+    const { rows: [c] } = await query(`insert into image_assets (source, source_ref, licence, may_store, moderation, fetched_at) values ('wikimedia', $1, 'CC BY-SA 4.0', true, 'approved', now() + interval '1 minute') returning id`, [`File:nf-${randomUUID()}.jpg`]);
+    await query(`insert into image_links (image_id, subject_type, subject_id, role, position) values ($1, 'place', $2, 'gallery', 11)`, [c.id, ref]);
+    const open = (await (await fetch(`${base}/review?q=Notfit&reviewed=no`)).json()).places;
+    assert.ok(open.some((p) => p.venueRef === ref), 'an approved Commons picture found since reopens it');
+  } finally { await close(); }
+});

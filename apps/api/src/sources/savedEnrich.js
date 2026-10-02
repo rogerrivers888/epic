@@ -252,7 +252,13 @@ export async function afterFree(venueRef, ctx, deps = {}) {
 
     // Pictures: free, and asked before anything paid.
     const ov = await (deps.openverse ?? openversePictures)({ venueRef, name, locality }).catch((err) => ({ ok: false, why: err.message, stored: [] }));
-    found.pictures.openverse = ov.ok ? { stored: ov.stored.length, refused: ov.refused } : { error: ov.why };
+    // What the place holds from Openverse now, not only what this run added:
+    // a re-run that finds nothing new still owns what it found before (Codex,
+    // 2 Oct 2026).
+    const { rows: [heldOv] } = await query(
+      `select count(*)::int as n from image_links l join image_assets i on i.id = l.image_id
+        where l.subject_type = 'place' and l.subject_id = $1 and i.source = 'openverse' and i.moderation <> 'rejected'`, [venueRef]);
+    found.pictures.openverse = ov.ok ? { stored: heldOv.n, added: ov.stored.length, refused: ov.refused } : { error: ov.why, stored: heldOv.n };
     if (record?.website) {
       const vs = await (deps.venuePictures ?? venuePicturesFor)(venueRef, record.website).catch((err) => ({ ok: false, why: err.message }));
       found.pictures.venueSite = vs.ok ? { kept: vs.kept } : { error: vs.why };
