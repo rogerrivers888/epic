@@ -56,7 +56,7 @@ const Page = ({ url }: { url: string | null }) => {
 // ---------------------------------------------------------------------------
 
 export function SavedPlacesBoard({ canManage }: { canManage: boolean }) {
-  const [data, setData] = useState<{ places: SavedPlaceRow[]; summary: SavedPlacesSummary } | null>(null);
+  const [data, setData] = useState<{ places: SavedPlaceRow[]; more?: boolean; summary: SavedPlacesSummary } | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [quote, setQuote] = useState<{ places: number; pence: number; enrolled: boolean } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -117,6 +117,7 @@ export function SavedPlacesBoard({ canManage }: { canManage: boolean }) {
                   ...(r.costPence ? [{ key: 'c', word: pence(r.costPence) }] : []),
                 ],
               })} />
+      {data.more ? <Text style={styles.note}>Newest 500 shown</Text> : null}
       {open ? <SavedPlaceDetailView key={open} refId={open} canManage={canManage} onChanged={load} /> : null}
     </>
   );

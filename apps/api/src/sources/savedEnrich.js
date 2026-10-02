@@ -168,6 +168,10 @@ export async function backfillCandidates(householdId) {
       where hp.household_id = $1
         and hp.venue_ref like '%:%' and hp.venue_ref not like 'photo:%'
         and not exists (select 1 from saved_place_enrichment e where e.venue_ref = hp.venue_ref)
+        -- Dismissed is the owner taking it out, whatever else is on record
+        -- (Codex, 2 Oct 2026: a place visited once and dismissed since).
+        and not exists (select 1 from place_ledger l where l.household_id = hp.household_id
+                          and l.source || ':' || l.source_place_id = hp.venue_ref and l.status = 'dismissed')
         and (exists (select 1 from place_ledger l where l.household_id = hp.household_id
                        and l.source || ':' || l.source_place_id = hp.venue_ref and l.status in ('saved', 'special'))
              or exists (select 1 from visits v where v.household_id = hp.household_id and v.venue_ref = hp.venue_ref))
@@ -497,11 +501,30 @@ export function startSavedEnrichLoop({ everyMs = 10 * 60_000 } = {}) {
   loop.unref?.();
 }
 
-/** Every enrolled saved place and where its research is, for the back office. */
+/** Every enrolled saved place and where its research is, for the back office. One more than asked, so a caller can say there are more. */
 export async function enrichmentList({ limit = 500 } = {}) {
   const { rows } = await query(
     `select e.*, coalesce(r.name, e.venue_ref) as name, r.category, r.website, r.menu_url
        from saved_place_enrichment e left join place_records r on r.venue_ref = e.venue_ref
-      order by e.requested_at desc limit $1`, [limit]);
+      order by e.requested_at desc limit $1`, [limit + 1]);
   return rows;
+}
+
+/**
+ * The brief's measures over every finished pass, uncapped — never derived from
+ * a page of rows (Codex, 2 Oct 2026; CLAUDE.md, "a capped list is not a
+ * complete one"). A field counts as found when it has a value and a source
+ * other than "don't know"; pictures are Openverse kept plus venue-site found.
+ */
+export async function enrichmentSummary() {
+  const { rows: [r] } = await query(
+    `with done as (select * from saved_place_enrichment where state = 'done')
+     select count(*)::int as done,
+            count(*) filter (where found->'fields'->'website'->>'value' is not null and found->'fields'->'website'->>'source' <> 'unknown')::int as website,
+            count(*) filter (where found->'fields'->'menu_url'->>'value' is not null and found->'fields'->'menu_url'->>'source' <> 'unknown')::int as menu,
+            count(*) filter (where coalesce((found->'pictures'->'openverse'->>'stored')::int, 0) + coalesce((found->'pictures'->'venueSite'->>'kept')::int, 0) > 0)::int as pictured,
+            count(*) filter (where coalesce(last_cost_usd, 0) > 0)::int as paid,
+            coalesce(avg(last_cost_usd) filter (where coalesce(last_cost_usd, 0) > 0), 0)::float as avg_cost_usd
+       from done`);
+  return r;
 }

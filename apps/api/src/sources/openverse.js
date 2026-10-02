@@ -20,6 +20,7 @@
 
 import crypto from 'node:crypto';
 import * as lib from '../repositories/library.js';
+import { query } from '../db.js';
 import { isStorableLicence } from './wikimedia.js';
 import { fetchPicture } from './pictureBytes.js';
 import { userAgent } from '../origins.js';
@@ -97,6 +98,14 @@ export async function picturesFor({ venueRef, name, locality = null }, { keep = 
   for (const r of found.results) {
     if (stored.length >= keep) break;
     if (!isStorableLicence(r.licence)) { refused += 1; continue; }
+    // A picture we already hold was judged for the place it was found for.
+    // Its moderation is the picture's, not the link's, so attaching it to a
+    // second place by name would carry an approval across untested — "The
+    // Crown" is half the pubs in England (Codex, 2 Oct 2026). Left alone.
+    const { rows: held } = await query(
+      `select i.id, exists (select 1 from image_links l where l.image_id = i.id and l.subject_type = 'place' and l.subject_id = $2) as here
+         from image_assets i where i.source = 'openverse' and i.source_ref = $1`, [`openverse:${r.id}`, venueRef]);
+    if (held.length && !held[0].here) continue;
     // Openverse's own thumbnail: a few hundred pixels, which is what a card
     // draws, and a polite size to take from somebody else's server.
     const pic = await fetchPictureImpl(r.thumbnail ?? r.url);

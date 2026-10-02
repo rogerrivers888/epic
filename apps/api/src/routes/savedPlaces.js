@@ -29,7 +29,7 @@ import { sourceOff } from '../sources/switches.js';
 import { recordProviderCall } from '../repositories/visits.js';
 import { healthOf } from '../sources/meter.js';
 import { stampImage } from '../sources/photoLinks.js';
-import { enrichmentList, enrichmentOf, rerun, backfill, backfillCandidates, isEnrichAccount, TARGET_PENCE, PURPOSE as ENRICH_PURPOSE } from '../sources/savedEnrich.js';
+import { enrichmentList, enrichmentSummary, enrichmentOf, rerun, backfill, backfillCandidates, isEnrichAccount, TARGET_PENCE, PURPOSE as ENRICH_PURPOSE } from '../sources/savedEnrich.js';
 import { venuePicturesOf } from '../sources/venueImages.js';
 import { USD_TO_GBP, PRICE_PER_UNIT_USD } from '../domain/providerPrices.js';
 
@@ -74,15 +74,14 @@ async function ownedPicturesOf(venueRef) {
 
 savedPlacesRouter.get('/', requires('view_library'), async (_req, res, next) => {
   try {
-    const rows = await enrichmentList();
-    const done = rows.filter((r) => r.state === 'done');
+    const [all, sum] = await Promise.all([enrichmentList({ limit: 500 }), enrichmentSummary()]);
+    const rows = all.slice(0, 500);
     const has = (r, f) => {
       const v = r.found?.fields?.[f];
       return Boolean(v && v.value && v.source !== 'unknown');
     };
     const pics = (r) => Number(r.found?.pictures?.openverse?.stored ?? 0) + Number(r.found?.pictures?.venueSite?.kept ?? 0);
-    const rate = (fn) => (done.length ? Math.round((done.filter(fn).length / done.length) * 100) : null);
-    const paid = done.filter((r) => Number(r.last_cost_usd ?? 0) > 0);
+    const rate = (n) => (sum.done ? Math.round((n / sum.done) * 100) : null);
     res.json({
       places: rows.map((r) => ({
         venueRef: r.venue_ref, name: r.name, category: r.category, state: r.state,
@@ -90,15 +89,16 @@ savedPlacesRouter.get('/', requires('view_library'), async (_req, res, next) => 
         costPence: pence(r.cost_usd), lastCostPence: pence(r.last_cost_usd),
         website: has(r, 'website'), menu: has(r, 'menu_url'), pictures: pics(r), error: r.error,
       })),
-      // The brief's measures, over the places whose research has finished, and
-      // withheld (null) until there is one — never a nought for "not yet".
+      more: all.length > 500,
+      // The brief's measures over every finished pass (uncapped), withheld
+      // (null) until there is one — never a nought for "not yet".
       summary: {
-        done: done.length,
-        websitePct: rate((r) => has(r, 'website')),
-        menuPct: rate((r) => has(r, 'menu_url')),
-        ownedImagePct: rate((r) => pics(r) > 0),
-        avgCostPence: paid.length ? Math.round((paid.reduce((n, r) => n + Number(r.last_cost_usd), 0) / paid.length) * USD_TO_GBP * 1000) / 10 : null,
-        paidPasses: paid.length,
+        done: sum.done,
+        websitePct: rate(sum.website),
+        menuPct: rate(sum.menu),
+        ownedImagePct: rate(sum.pictured),
+        avgCostPence: sum.paid ? Math.round(sum.avg_cost_usd * USD_TO_GBP * 1000) / 10 : null,
+        paidPasses: sum.paid,
         purpose: ENRICH_PURPOSE,
       },
     });

@@ -3068,7 +3068,7 @@ export const api = {
   /** BO2e — the score distribution, staleness, and what is worth owning next. */
   adminPlaceQuality: (p: PlaceWhere) => request<PlaceLevel & PlaceQuality>(`/api/admin/place-index/quality${qs(p)}`),
   /** The owner's saved places and where each one's research has got to (Part 2, 2 Oct 2026). */
-  adminSavedPlaces: () => request<{ places: SavedPlaceRow[]; summary: SavedPlacesSummary }>('/api/admin/saved-places'),
+  adminSavedPlaces: () => request<{ places: SavedPlaceRow[]; more: boolean; summary: SavedPlacesSummary }>('/api/admin/saved-places'),
   adminSavedPlace: (ref: string) => request<SavedPlaceDetail>(`/api/admin/saved-places/place${qs({ ref })}`),
   adminSavedPlaceRerun: (ref: string) => post<{ started: boolean }>('/api/admin/saved-places/rerun', { ref }),
   adminSavedBackfillQuote: () => request<{ places: number; pence: number; perPlacePence?: number; enrolled: boolean }>('/api/admin/saved-places/backfill/quote'),

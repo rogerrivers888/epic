@@ -201,6 +201,8 @@ test('the backfill: saved, loved or been and not yet researched; refused when th
   }
   const ledger = (ref, status) => query(`insert into place_ledger (household_id, source, source_place_id, status) values ($1, 'google', $2, $3)`, [hh, ref.slice(7), status]);
   await ledger(saved, 'saved'); await ledger(dismissed, 'dismissed'); await ledger(done, 'saved');
+  // Been once, dismissed since: out, whatever the visit says.
+  await query(`insert into visits (household_id, venue_ref, venue_label, visited_on) values ($1, $2, 'x', current_date)`, [hh, dismissed]);
   await query(`insert into visits (household_id, venue_ref, venue_label, visited_on) values ($1, $2, 'x', current_date)`, [hh, been]);
   await query(`insert into saved_place_enrichment (venue_ref, household_id, state) values ($1, $2, 'done')`, [done, hh]);
   const refs = await enrich.backfillCandidates(hh);
@@ -239,4 +241,21 @@ test('a re-run is refused while a pass is under way; a pass that fails after Cla
   const row = await enrich.enrichmentOf(ref2);
   assert.equal(Number(row.last_cost_usd), 0.07, 'the ledger and the row agree');
   assert.equal(Number(row.cost_usd), 0.07);
+});
+
+test('an Openverse picture already held for another place is not attached to a second one by name', async () => {
+  const id = `shared-${randomUUID()}`;
+  const body = { results: [{ id, title: 'The Crown', thumbnail: 'https://x/c', license: 'by', license_version: '2.0', creator: 'C' }] };
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16]);
+  const deps = {
+    fetchImpl: async () => ({ ok: true, json: async () => body }),
+    fetchPictureImpl: async () => ({ body: jpeg, mime: 'image/jpeg', bytes: jpeg.length, width: 600, height: 400 }),
+  };
+  const first = `google:crown-a-${randomUUID()}`; const second = `google:crown-b-${randomUUID()}`;
+  assert.equal((await picturesFor({ venueRef: first, name: 'The Crown' }, deps)).stored.length, 1);
+  await query(`update image_assets set moderation = 'approved' where source_ref = $1`, [`openverse:${id}`]);
+  const out = await picturesFor({ venueRef: second, name: 'The Crown' }, deps);
+  assert.equal(out.stored.length, 0, 'an approval for one Crown is not an approval for another');
+  const { rows } = await query(`select count(*)::int as n from image_links where subject_type = 'place' and subject_id = $1`, [second]);
+  assert.equal(rows[0].n, 0);
 });
