@@ -790,7 +790,7 @@ export async function setApprovedHorizon(mode, minutes, { by = null } = {}) {
 }
 
 /** Whether the origin has a build for this mode that stops short of `wantMinutes`. */
-async function builtShort(cell, mode, wantMinutes) {
+export async function builtShort(cell, mode, wantMinutes) {
   const { rows } = await query(
     'select max(cap_minutes)::int as cap from cell_builds where from_cell = $1 and mode = $2',
     [cell, travelMode(mode)]);

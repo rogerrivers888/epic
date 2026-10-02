@@ -84,12 +84,18 @@ router.get('/from', requires('view_library'), async (req, res, next) => {
     const places = req.query.places === '1' ? await reach.placesWithin(cell, { minutes, mode }) : null;
     // What built this origin's rows, so the answer says routed when they are
     // (Codex): an OSRM origin is real journey times; anything else is estimated.
-    const built = await reach.builtMethod(cell, mode, Math.min(HORIZON_MINUTES, minutes + EDGE_MINUTES));
+    const want = Math.min(HORIZON_MINUTES, minutes + EDGE_MINUTES);
+    const built = await reach.builtMethod(cell, mode, want);
     const routed = built === 'osrm';
+    // Asked past what this origin was built to — two hours before the wider
+    // driving build — the rows stop short, and the counts are a floor (Codex).
+    const shortOfHorizon = await reach.builtShort(cell, mode, want);
     res.json({
       cell, label: labelOf(cell), minutes, mode,
       cells: cells.map((c) => ({ cell: c.to_cell, label: labelOf(c.to_cell), minutes: c.minutes, km: c.km })),
       counts: { cells: cells.length, places: places?.length ?? null },
+      shortOfHorizon,
+      atLeast: shortOfHorizon,
       places: places?.map((p) => ({ ref: p.venue_ref, cell: p.cell, minutes: p.minutes })) ?? null,
       estimated: !routed,
       method: built ?? 'none',
