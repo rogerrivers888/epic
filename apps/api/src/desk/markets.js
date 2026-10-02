@@ -18,6 +18,7 @@ import { scaleFor } from '../domain/costBand.js';
 import { OUTCODE_FROM, PCDS_FROM as AS_PCDS, nullCountryAddresses, FOUND_IT } from '../repositories/placeIndex.js';
 import { countryFromAddresses } from '../domain/countryFromAddress.js';
 import { disagreements } from '../domain/countrySignals.js';
+import { ownedRecordSql } from '../domain/placeIndex.js';
 
 /* ------------------------------------------------------------------ markets */
 
@@ -224,6 +225,9 @@ export async function countryContradictions() {
         join place_records r on r.venue_ref = pi.venue_ref
         left join place_facts f on f.venue_ref = pi.venue_ref and f.field = 'address' and f.expires_at is null
        where pi.country_code is not null and pi.venue_ref > $1
+         -- A record that holds something of ours; an empty placeholder row is not
+         -- owned text and must not swell the checked total (Codex).
+         and ${ownedRecordSql('r')}
        group by pi.venue_ref, pi.country_code, r.name, r.phone, r.website, r.price_range
        order by pi.venue_ref limit 5000`, [after]);
     if (!rows.length) break;
