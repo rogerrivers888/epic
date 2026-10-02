@@ -829,14 +829,24 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
     // (ignoreCandidate — "never ask about this word here again"); a place reclassified
     // into a drawer with no candidate of its own is still asked there, since that
     // drawer never ignored it (Codex, 2 Oct 2026).
+    //
+    // And every drawer with an undecided candidate for the word, whatever raised it:
+    // approval closes those candidates below, so each drawer that raised the word is
+    // asked it rather than left with a candidate marked promoted and no question
+    // (Codex, 2 Oct 2026).
     const { rows: drawerRows } = await client.query(
-      `select distinct p.subcategory
+      `select p.subcategory
          from review_sightings s
          join place_index p on p.venue_ref = s.venue_ref
         where s.norm = $1 and p.subcategory is not null
           and not exists (select 1 from harvest_candidates ci
                            where ci.norm = s.norm and ci.subcategory = p.subcategory
-                             and ci.status = 'ignored')`,
+                             and ci.status = 'ignored')
+       union
+       select c.subcategory
+         from harvest_candidates c
+        where c.norm = $1 and c.status in ('new', 'unresolved') and c.subcategory is not null
+       order by 1`,
       [norm]);
     const subs = drawerRows.map((r) => r.subcategory);
     let asked = 0;
@@ -877,7 +887,11 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
       }
     }
     await client.query(
-      "update harvest_candidates set status = 'promoted', decided_by = $2, decided_at = now(), examples = '{}', evidence = null, evidence_ref = null where norm = $1 and status in ('new', 'unresolved') and sources ? 'google'",
+      // Every undecided candidate for the word, owned ones included — approval is about
+      // the word, like ignoreFeature, so none is left to be promoted a second time on
+      // the ordinary candidate screen (Codex, 2 Oct 2026). Each one's drawer was asked
+      // above.
+      "update harvest_candidates set status = 'promoted', decided_by = $2, decided_at = now(), examples = '{}', evidence = null, evidence_ref = null where norm = $1 and status in ('new', 'unresolved')",
       [norm, actor]);
     await client.query('delete from review_sightings where norm = $1', [norm]);
     // A word approved into a fact is no longer ignored: lift any tombstone so the

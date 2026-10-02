@@ -728,4 +728,30 @@ test('a fact named in the plural is known to the singular spotted word, and reus
   assert.equal((await query("select count(*)::int n from place_attributes where key = 'party-room'")).rows[0].n, 0, 'no singular duplicate');
 });
 
+test('approving a word closes its owned candidates too, and asks their drawers', async () => {
+  // Codex, 2 Oct 2026: approval is about the word. An owned-only candidate in
+  // another drawer must not stay open to be promoted a second time — it is closed,
+  // and its drawer is asked the question rather than left with nothing.
+  const subB = 'c30-own-b'; const subC = 'c30-own-c';
+  const b = 'google:ChIJ_c30_own_b';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 own B', 'c30-test-cat') on conflict do nothing", [subB]);
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 own C', 'c30-test-cat') on conflict do nothing", [subC]);
+  await query("insert into question_sets (key, name) values ('c30-own-set-b', 'B'), ('c30-own-set-c', 'C') on conflict do nothing");
+  await query("insert into question_set_subcategories (subcategory_key, set_key) values ($1, 'c30-own-set-b'), ($2, 'c30-own-set-c') on conflict do nothing", [subB, subC]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [b, subB]);
+  await query('delete from harvest_candidates where subcategory = any($1)', [[subB, subC]]);
+  await query('delete from review_sightings where venue_ref = $1', [b]);
+  await query("delete from attribute_aliases where norm = 'craft room'").catch(() => {});
+  await query("delete from place_attributes where key = 'craft-room'").catch(() => {});
+
+  await sets.recordCandidates(subC, [{ norm: 'craft room', raw: 'craft room', rawForms: ['craft room'], sources: ['venue'], examples: [], kind: 'feature', placesSeen: 1, asserts: 1, denies: 0, asks: 0 }], { placesTotal: 1 });
+  await spotFromDetail({ venueRef: b, detail: { reviewSummary: 'A craft room.' } });
+
+  const res = await sets.approveFeature('craft room', { actor: 'tester' });
+  assert.deepEqual(res.subcategories, [subB, subC], 'both drawers that raised it are asked');
+  assert.equal(res.asked, 2, 'one new question in each set');
+  assert.equal((await query("select status from harvest_candidates where norm = 'craft room' and subcategory = $1", [subC])).rows[0].status, 'promoted', 'the owned candidate is closed, not left to be promoted again');
+});
+
 test.after(async () => { await pool.end(); });
