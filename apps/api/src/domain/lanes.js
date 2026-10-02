@@ -111,6 +111,8 @@ const hm = (t) => (t ? String(t).slice(0, 5) : null);
 const minutesOf = (t) => { const m = /^(\d{1,2}):(\d{2})/.exec(String(t ?? '')); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
 const timeOf = (mins) => `${String(Math.floor(mins / 60) % 24).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
 const addMinutes = (t, n) => { const m = minutesOf(t); return m == null || n == null ? null : timeOf(m + n); };
+/** The day a session ends on when it runs past midnight, else null (Codex, 2 Oct 2026). */
+const endsOnFor = (day, t, n) => { const m = minutesOf(t); if (m == null || !n) return null; const over = Math.floor((m + Number(n)) / 1440); return over > 0 ? plusDays(day, over) : null; };
 
 /**
  * A date and a wall-clock time where the host is (UK by default) as an instant.
@@ -209,11 +211,11 @@ export function sessionsFor(offer, holidays = new Map(), cfg = DEFAULT_CONFIG) {
   if (lane === 'course') {
     // By session number: a plan with session 2 left blank keeps session 3's topic on session 3 (Codex, 2 Oct 2026).
     const topics = new Map((offer.weeks ?? []).filter((w) => w?.title).map((w, i) => [Number(w.n) || i + 1, w.title]));
-    return courseRun(offer, holidays, cfg).dates.map((d, i) => ({ n: i + 1, onDate: d, startsAt: start, endsAt: addMinutes(start, len), endsOn: null, topic: topics.get(i + 1) ?? null }));
+    return courseRun(offer, holidays, cfg).dates.map((d, i) => ({ n: i + 1, onDate: d, startsAt: start, endsAt: addMinutes(start, len), endsOn: endsOnFor(d, start, len), topic: topics.get(i + 1) ?? null }));
   }
   if (lane === 'weekly') {
     // The rows laid down start from today once the first date has passed (Codex, 2 Oct 2026).
-    return weeklyRun(offer, holidays, { weeks: cfg.weeklyHorizonWeeks, from: new Date() }).dates.map((d) => ({ n: null, onDate: d, startsAt: start, endsAt: addMinutes(start, len), endsOn: null, topic: null }));
+    return weeklyRun(offer, holidays, { weeks: cfg.weeklyHorizonWeeks, from: new Date() }).dates.map((d) => ({ n: null, onDate: d, startsAt: start, endsAt: addMinutes(start, len), endsOn: endsOnFor(d, start, len), topic: null }));
   }
   return [];
 }
@@ -413,8 +415,13 @@ export function stepFilled(offer, step, cfg = DEFAULT_CONFIG) {
     case 'sessions': return null;
     case 'staydrop': return has(offer.parents);
     case 'why': return has(offer.why_you ?? offer.whyYou);
-    case 'avail': return Object.values(offer.free_hours ?? offer.freeHours ?? {}).some((r) => (r ?? []).length > 0)
-      && (offer.session_lengths ?? offer.sessionLengths ?? []).length > 0;
+    case 'avail': {
+      // At least one session that fits inside the hours given — never a live offer nobody can book (Codex, 2 Oct 2026).
+      const hours = offer.free_hours ?? offer.freeHours ?? {}; const lengths = (offer.session_lengths ?? offer.sessionLengths ?? []).map(Number).filter((n) => n > 0);
+      if (!lengths.length) return false;
+      const shortest = Math.min(...lengths);
+      return [0, 1, 2, 3, 4, 5, 6].some((d) => slotsFor(hours, d, shortest).length > 0);
+    }
     case 'where': {
       const v = offer.venue;
       if (!v) return false;

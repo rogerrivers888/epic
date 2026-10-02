@@ -315,3 +315,11 @@ test('weekly and course need how long, so every session has an end', () => {
   assert.equal(stepFilled({ lane: 'weekly', weekdays: [4], first_date: '2027-01-07', starts_at: '19:00', duration_min: 60 }, 'weekly'), true);
   assert.equal(stepFilled({ lane: 'course', first_date: '2027-01-07', starts_at: '09:00', sessions: 8 }, 'run'), false);
 });
+
+test('on request needs hours a session fits into; a late session ends the next day', () => {
+  assert.equal(stepFilled({ lane: 'onrequest', free_hours: { 1: [['09:00', '10:00']] }, session_lengths: [180] }, 'avail'), false);
+  assert.equal(stepFilled({ lane: 'onrequest', free_hours: { 1: [['09:00', '12:00']] }, session_lengths: [180] }, 'avail'), true);
+  const s = sessionsFor({ lane: 'course', first_date: '2027-01-08', sessions: 2, starts_at: '20:00', duration_min: 300 });
+  assert.equal(s[0].endsAt, '01:00');
+  assert.equal(s[0].endsOn, '2027-01-09');
+});

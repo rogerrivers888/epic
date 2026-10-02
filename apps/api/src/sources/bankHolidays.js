@@ -43,7 +43,8 @@ export async function bankHolidays({ householdId = null, now = Date.now(), fetch
   if (cache.list && now - cache.at < DAY_MS) return cache.list;
   const started = Date.now();
   try {
-    const res = await fetchImpl(URL_, { headers: { accept: 'application/json' } });
+    // Five seconds, then the bundled list: a stalled gov.uk never holds a host's screen up (Codex, 2 Oct 2026).
+    const res = await fetchImpl(URL_, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(5000) });
     const list = res.ok ? parseGovUk(await res.json()) : null;
     if (!list) throw new Error(`http_${res.status}`);
     cache = { at: now, list, source: 'gov.uk' };

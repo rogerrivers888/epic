@@ -899,7 +899,10 @@ export async function replaceSessions(offerId, sessions, client) {
 export async function insertPayment(p, client) {
   const { rows } = await on(client)(
     `insert into hosting_payments (kind, booking_id, offer_id, host_id, household_id, amount_pence, epic_pence, state, stripe_ref, mode, reason)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning *`,
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+     -- A retry after a half-finished write lands on the same row (Codex, 2 Oct 2026).
+     on conflict (stripe_ref, kind) where stripe_ref is not null do update set updated_at = now()
+     returning *`,
     [p.kind, p.bookingId ?? null, p.offerId ?? null, p.hostId ?? null, p.householdId ?? null, p.amountPence ?? 0, p.epicPence ?? null, p.state ?? 'pending', p.stripeRef ?? null, p.mode ?? 'test', p.reason ?? null],
   );
   return rows[0];
