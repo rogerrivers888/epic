@@ -31,6 +31,7 @@ import { healthOf } from '../sources/meter.js';
 import { stampReviewImage } from '../sources/photoLinks.js';
 import { enrichmentList, enrichmentSummary, enrichmentOf, rerun, backfill, backfillCandidates, isEnrichAccount, TARGET_PENCE, PURPOSE as ENRICH_PURPOSE } from '../sources/savedEnrich.js';
 import { venuePicturesOf } from '../sources/venueImages.js';
+import { unscored, scoreAll, PENCE_PER_PICTURE, CHECKS } from '../sources/photoFitness.js';
 import { USD_TO_GBP, PRICE_PER_UNIT_USD } from '../domain/providerPrices.js';
 
 export const savedPlacesRouter = express.Router();
@@ -49,11 +50,23 @@ export const comparePence = () => pence(PRICE_PER_UNIT_USD['google-pro'] + COMPA
  * signed for this sign-in so a picture still waiting for a look can be drawn
  * here and nowhere else (routes/library.js).
  */
+/** The venue's own pictures (by address), each with the machine's look if it has had one. */
+async function venuePicturesWithFitness(venueRef) {
+  const [pics, { rows: fit }] = await Promise.all([
+    venuePicturesOf(venueRef),
+    query(`select image_url, verdict, checks from photo_fitness where venue_ref = $1 and image_id is null`, [venueRef]),
+  ]);
+  const by = new Map(fit.map((f) => [f.image_url, { verdict: f.verdict, checks: f.checks }]));
+  return pics.map((v) => ({ url: v.image_url, pageUrl: v.page_url, how: v.found_how, foundAt: v.found_at, licence: v.licence_status, fitness: by.get(v.image_url) ?? null }));
+}
+
 async function ownedPicturesOf(venueRef) {
   const { rows } = await query(
     `select i.id, i.source, i.licence, i.licence_url, i.creator, i.credit_line, i.source_page_url,
-            i.attribution_required, i.moderation, i.width, i.height, i.lqip, l.role, l.position
+            i.attribution_required, i.moderation, i.width, i.height, i.lqip, l.role, l.position,
+            f.verdict as fitness, f.checks as fitness_checks
        from image_links l join image_assets i on i.id = l.image_id
+       left join photo_fitness f on f.image_id = i.id
       where l.subject_type = 'place' and l.subject_id = $1
       -- Turned-down pictures too: a place judged not fit stays in the review so
       -- its verdict can be changed, and the owner must see what he is
@@ -66,6 +79,7 @@ async function ownedPicturesOf(venueRef) {
       licence: r.licence, licenceUrl: r.licence_url, creator: r.creator, credit: r.credit_line,
       sourceUrl: r.source_page_url, creditRequired: r.attribution_required,
       width: r.width, height: r.height, lqip: r.lqip,
+      fitness: r.fitness ? { verdict: r.fitness, checks: r.fitness_checks } : null,
       ...(signed.sig ? { sig: signed.sig, exp: signed.exp } : {}),
     };
   });
@@ -115,7 +129,7 @@ savedPlacesRouter.get('/place', requires('view_library'), async (req, res, next)
     const ref = String(req.query.ref ?? '').trim();
     if (!ref) throw bad('Which place? Pass its ref.');
     const [row, venuePictures, owned, review] = await Promise.all([
-      enrichmentOf(ref), venuePicturesOf(ref), ownedPicturesOf(ref),
+      enrichmentOf(ref), venuePicturesWithFitness(ref), ownedPicturesOf(ref),
       query('select verdict, note, reviewed_at from photo_reviews where venue_ref = $1', [ref]).then((r) => r.rows[0] ?? null),
     ]);
     res.json({
@@ -127,7 +141,7 @@ savedPlacesRouter.get('/place', requires('view_library'), async (req, res, next)
       } : null,
       // Unlicensed: the venue's own pictures, by address, for this screen and
       // the owner's account only. Drawn straight from the venue's server.
-      venuePictures: venuePictures.map((v) => ({ url: v.image_url, pageUrl: v.page_url, how: v.found_how, foundAt: v.found_at, licence: v.licence_status })),
+      venuePictures,
       ownedPictures: owned,
       review,
     });
@@ -182,6 +196,10 @@ const REVIEWED = `(pr.venue_ref is not null and not exists (
                     select 1 from venue_site_images v
                      where v.venue_ref = r.venue_ref and v.found_at > pr.reviewed_at))`;
 
+// A place's best machine verdict over its pictures (sources/photoFitness.js).
+const MACHINE = `(select f.verdict from photo_fitness f where f.venue_ref = r.venue_ref
+                   order by case f.verdict when 'fit' then 0 when 'borderline' then 1 else 2 end limit 1)`;
+
 photoReviewRouter.get('/', requires('view_library'), async (req, res, next) => {
   try {
     const q = String(req.query.q ?? '').trim();
@@ -201,13 +219,18 @@ photoReviewRouter.get('/', requires('view_library'), async (req, res, next) => {
     if (reviewed === 'yes') where.push(REVIEWED);
     if (reviewed === 'no') where.push(`not ${REVIEWED}`);
     const { rows } = await query(
-      `select r.venue_ref, r.name, r.category, r.postcode, pr.verdict, pr.reviewed_at,
+      `select r.venue_ref, r.name, r.category, r.postcode, pr.verdict, pr.reviewed_at, ${MACHINE} as machine,
               -- Every picture the review shows, turned-down ones included.
               (select count(*) from image_links l where l.subject_type = 'place' and l.subject_id = r.venue_ref)
               + (select count(*) from venue_site_images v where v.venue_ref = r.venue_ref) as pictures
          from place_records r left join photo_reviews pr on pr.venue_ref = r.venue_ref
         where ${where.join(' and ')}
-        order by ${REVIEWED} asc, r.name nulls last
+        -- Not yet reviewed first; within that, the machine's best guess first and
+        -- its Not fit last. The machine sorts the queue and decides nothing
+        -- (owner, 2 Oct 2026).
+        order by ${REVIEWED} asc,
+                 case ${MACHINE} when 'fit' then 0 when 'borderline' then 1 when 'not_fit' then 3 else 2 end,
+                 r.name nulls last
         limit 201`, args);
     // Over every place with owned pictures, whatever the filter: the numbers
     // the owner's policy call is made from.
@@ -216,13 +239,20 @@ photoReviewRouter.get('/', requires('view_library'), async (req, res, next) => {
               count(*) filter (where ${REVIEWED})::int as reviewed,
               count(*) filter (where ${REVIEWED} and pr.verdict = 'owned_fine')::int as fine,
               count(*) filter (where ${REVIEWED} and pr.verdict = 'owned_worse_acceptable')::int as acceptable,
-              count(*) filter (where ${REVIEWED} and pr.verdict = 'owned_not_fit')::int as not_fit
+              count(*) filter (where ${REVIEWED} and pr.verdict = 'owned_not_fit')::int as not_fit,
+              count(*) filter (where ${MACHINE} is not null)::int as scored,
+              count(*) filter (where ${REVIEWED} and ${MACHINE} is not null)::int as both,
+              count(*) filter (where ${REVIEWED} and ${MACHINE} = case pr.verdict
+                when 'owned_fine' then 'fit' when 'owned_worse_acceptable' then 'borderline' else 'not_fit' end)::int as agree
          from place_records r left join photo_reviews pr on pr.venue_ref = r.venue_ref
         where ${anyPicture}`);
+    // Agreement between the owner and the machine, over the places both have
+    // judged; withheld until there are any (CLAUDE.md, can't speak).
+    sum.agreementPct = sum.both ? Math.round((sum.agree / sum.both) * 100) : null;
     // A capped list says what it found, not what is absent (CLAUDE.md).
     res.json({
       summary: sum,
-      places: rows.slice(0, 200).map((r) => ({ venueRef: r.venue_ref, name: r.name, category: r.category, postcode: r.postcode, pictures: Number(r.pictures), verdict: r.verdict, reviewedAt: r.reviewed_at })),
+      places: rows.slice(0, 200).map((r) => ({ venueRef: r.venue_ref, name: r.name, category: r.category, postcode: r.postcode, pictures: Number(r.pictures), verdict: r.verdict, reviewedAt: r.reviewed_at, machine: r.machine })),
       more: rows.length > 200,
       comparePence: comparePence(),
     });
@@ -240,7 +270,7 @@ photoReviewRouter.post('/compare', requires('view_library'), requireOwnerSignedI
     const ref = String(req.body?.ref ?? '').trim();
     if (!ref) throw bad('Which place? Pass its ref.');
     const owned = await ownedPicturesOf(ref);
-    const venuePictures = (await venuePicturesOf(ref)).map((v) => ({ url: v.image_url, pageUrl: v.page_url }));
+    const venuePictures = await venuePicturesWithFitness(ref);
     const [source, ...rest] = ref.split(':');
     if (source !== 'google') return res.json({ venueRef: ref, google: [], googleWhy: 'not_a_google_place', owned, venuePictures });
     if (sourceOff('google')) return res.json({ venueRef: ref, google: [], googleWhy: 'google_off', owned, venuePictures });
@@ -303,5 +333,66 @@ photoReviewRouter.post('/verdict', requires('manage_library'), requireOwnerSigne
       return { ...rows[0], settled: settled.length, hero };
     });
     res.json(out);
+  } catch (err) { next(err); }
+});
+
+/**
+ * The summary board (owner, 2 Oct 2026): "per category and subcategory, % of
+ * places with a Fit owned image, % Borderline, % none." Over the places we hold
+ * research on or a household has claimed (place_index ownership owned/claimed),
+ * filed by our own categories. A place's figure is its best picture's verdict;
+ * "none" is a place with no picture of ours at all, and a place whose pictures
+ * are not yet looked at is counted apart rather than hidden in either.
+ */
+photoReviewRouter.get('/board', requires('view_library'), async (_req, res, next) => {
+  try {
+    const { rows } = await query(
+      `with held as (
+         select pi.venue_ref, coalesce(pi.category, 'unfiled') as category, coalesce(pi.subcategory, 'unfiled') as subcategory,
+                (exists (select 1 from image_links l join image_assets i on i.id = l.image_id
+                          where l.subject_type = 'place' and l.subject_id = pi.venue_ref and i.moderation <> 'rejected')
+                 or exists (select 1 from venue_site_images v where v.venue_ref = pi.venue_ref)) as pictured,
+                (select f.verdict from photo_fitness f where f.venue_ref = pi.venue_ref
+                  order by case f.verdict when 'fit' then 0 when 'borderline' then 1 else 2 end limit 1) as best
+           from place_index pi where pi.ownership in ('owned', 'claimed')
+       )
+       select h.category, c.label as category_label, h.subcategory, sc.label as subcategory_label,
+              count(*)::int as places,
+              count(*) filter (where h.best = 'fit')::int as fit,
+              count(*) filter (where h.best = 'borderline')::int as borderline,
+              count(*) filter (where h.best = 'not_fit')::int as not_fit,
+              count(*) filter (where h.pictured and h.best is null)::int as unscored,
+              count(*) filter (where not h.pictured)::int as none
+         from held h
+         left join shelf_categories c on c.key = h.category
+         left join shelf_subcategories sc on sc.key = h.subcategory
+        group by grouping sets ((h.category, c.label), (h.category, c.label, h.subcategory, sc.label))
+        order by h.category, (h.subcategory is not null), count(*) desc`);
+    const pct = (n, of) => (of ? Math.round((n / of) * 100) : null);
+    res.json({
+      rows: rows.map((r) => ({
+        category: r.category, categoryLabel: r.category_label ?? r.category,
+        subcategory: r.subcategory ?? null, subcategoryLabel: r.subcategory ? (r.subcategory_label ?? r.subcategory) : null,
+        places: r.places, fitPct: pct(r.fit, r.places), borderlinePct: pct(r.borderline, r.places),
+        notFitPct: pct(r.not_fit, r.places), unscoredPct: pct(r.unscored, r.places), nonePct: pct(r.none, r.places),
+      })),
+    });
+  } catch (err) { next(err); }
+});
+
+/** The machine look, priced before the click: every picture not yet looked at. */
+photoReviewRouter.get('/score/quote', requires('view_library'), async (_req, res, next) => {
+  try {
+    const todo = await unscored({ limit: 5000 });
+    res.json({ pictures: todo.length, pence: Math.ceil(todo.length * PENCE_PER_PICTURE), perPicturePence: PENCE_PER_PICTURE, checks: CHECKS });
+  } catch (err) { next(err); }
+});
+
+photoReviewRouter.post('/score', requires('manage_library'), requireOwnerSignedIn('look at every owned picture'), async (req, res, next) => {
+  try {
+    const household = await currentHousehold();
+    const out = await scoreAll({ householdId: household.id, expectPictures: req.body?.expectPictures });
+    if (out.why === 'quote_changed') return res.status(409).json({ error: 'quote_changed', message: `There are ${out.pictures} pictures now — price it again.`, pictures: out.pictures });
+    res.status(202).json(out);
   } catch (err) { next(err); }
 });

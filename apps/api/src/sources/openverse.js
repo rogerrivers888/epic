@@ -136,8 +136,10 @@ export async function picturesFor({ venueRef, name, locality = null }, { keep = 
       title: r.title,
       tags: [name, locality, 'openverse', r.provider].filter(Boolean),
       mime: pic.mime,
-      width: pic.width ?? null,
-      height: pic.height ?? null,
+      // The original's size, not the thumbnail's: "at least 1200 px on the long
+      // edge" is asked of the photograph, and only Openverse knows it.
+      width: r.width ?? pic.width ?? null,
+      height: r.height ?? pic.height ?? null,
       bytes: pic.bytes,
       sha256: crypto.createHash('sha256').update(pic.body).digest('hex'),
       moderation: 'pending',

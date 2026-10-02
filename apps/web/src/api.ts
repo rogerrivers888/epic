@@ -546,7 +546,7 @@ export type SavedPlacesSummary = {
 };
 export type FoundField = { value: unknown; source: string; sourceUrl: string | null; checkedAt: string | null; why?: string };
 export type FoundFact = { label: string; answer: 'yes' | 'no' | 'unknown'; source: string | null; sourceUrl: string | null; checkedAt: string; why?: string };
-export type ReviewPicture = OwnedImage & { role?: string; moderation?: string; creator?: string | null; width?: number | null; height?: number | null };
+export type ReviewPicture = OwnedImage & { role?: string; moderation?: string; creator?: string | null; width?: number | null; height?: number | null; fitness?: Fitness | null };
 export type SavedPlaceDetail = {
   venueRef: string;
   enrichment: null | {
@@ -554,16 +554,22 @@ export type SavedPlaceDetail = {
     lastRunAt: string | null; runs: number; costPence: number | null; lastCostPence: number | null; error: string | null;
     found: { fields?: Record<string, FoundField>; facts?: Record<string, FoundFact>; pictures?: Record<string, any>; notes?: string[] };
   };
-  venuePictures: { url: string; pageUrl: string; how: string | null; foundAt: string; licence: string }[];
+  venuePictures: { url: string; pageUrl: string; how: string | null; foundAt: string; licence: string; fitness?: Fitness | null }[];
   ownedPictures: ReviewPicture[];
   review: { verdict: PhotoVerdict; note: string | null; reviewed_at: string } | null;
 };
 export type PhotoVerdict = 'owned_fine' | 'owned_worse_acceptable' | 'owned_not_fit';
-export type PhotoReviewSummary = { places: number; reviewed: number; fine: number; acceptable: number; not_fit: number };
-export type PhotoReviewRow = { venueRef: string; name: string | null; category: string | null; postcode: string | null; pictures: number; verdict: PhotoVerdict | null; reviewedAt: string | null };
+export type PhotoReviewSummary = { places: number; reviewed: number; fine: number; acceptable: number; not_fit: number; scored: number; both: number; agree: number; agreementPct: number | null };
+export type MachineVerdict = 'fit' | 'borderline' | 'not_fit';
+export type Fitness = { verdict: MachineVerdict; checks: { key: string; answer: 'yes' | 'no' | 'unknown'; reason: string }[] };
+export type PhotoBoardRow = {
+  category: string; categoryLabel: string; subcategory: string | null; subcategoryLabel: string | null; places: number;
+  fitPct: number | null; borderlinePct: number | null; notFitPct: number | null; unscoredPct: number | null; nonePct: number | null;
+};
+export type PhotoReviewRow = { venueRef: string; name: string | null; category: string | null; postcode: string | null; pictures: number; verdict: PhotoVerdict | null; reviewedAt: string | null; machine: MachineVerdict | null };
 export type PhotoCompare = {
   venueRef: string; google: VenuePhotoRef[]; googleWhy: string | null;
-  owned: ReviewPicture[]; venuePictures: { url: string; pageUrl: string }[];
+  owned: ReviewPicture[]; venuePictures: { url: string; pageUrl: string; fitness?: Fitness | null }[];
 };
 
 export type VenuePhotoRef = { ref?: string; url?: string; attribution?: string; sig?: string; exp?: number };
@@ -3077,6 +3083,9 @@ export const api = {
   adminPhotoReview: (p: { q?: string; category?: string; reviewed?: 'yes' | 'no' } = {}) =>
     request<{ places: PhotoReviewRow[]; more: boolean; comparePence: number; summary: PhotoReviewSummary }>(`/api/admin/photo-review${qs(p)}`),
   adminPhotoCompare: (ref: string) => post<PhotoCompare>('/api/admin/photo-review/compare', { ref }),
+  adminPhotoBoard: () => request<{ rows: PhotoBoardRow[] }>('/api/admin/photo-review/board'),
+  adminPhotoScoreQuote: () => request<{ pictures: number; pence: number; perPicturePence: number }>('/api/admin/photo-review/score/quote'),
+  adminPhotoScore: (expectPictures: number) => post<{ started: boolean; pictures: number }>('/api/admin/photo-review/score', { expectPictures }),
   adminPhotoVerdict: (ref: string, verdict: PhotoVerdict, note?: string) =>
     post<{ venue_ref: string; verdict: PhotoVerdict; note: string | null; reviewed_at: string }>('/api/admin/photo-review/verdict', { ref, verdict, note }),
   /** BO2f — the gaps ranked by what was actually searched for. */

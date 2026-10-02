@@ -19,6 +19,7 @@ import { useViewport } from '../../hooks/useViewport';
 import {
   api, API_URL, ownedImageUrl, type SavedPlaceDetail, type SavedPlaceRow, type SavedPlacesSummary,
   type PhotoReviewRow, type PhotoCompare, type PhotoVerdict, type ReviewPicture, type VenuePhotoRef, type PhotoReviewSummary,
+  type Fitness, type MachineVerdict, type PhotoBoardRow,
 } from '../../api';
 import { Ladder, Num, Word, Blank, Tick, Act, Kicker, Stat, type Col } from '../table';
 import { Dropdown, ago, pounds } from '../kit';
@@ -38,7 +39,26 @@ const SOURCE_WORD: Record<string, string> = {
 const VERDICT_WORD: Record<PhotoVerdict, string> = {
   owned_fine: 'Owned is fine', owned_worse_acceptable: 'Owned is worse but acceptable', owned_not_fit: 'Owned not fit',
 };
+const MACHINE_WORD: Record<MachineVerdict, string> = { fit: 'Fit', borderline: 'Borderline', not_fit: 'Not fit' };
+const CHECK_WORD: Record<string, string> = {
+  actual_place: 'The actual place', what_visitors_want: 'What a visitor wants', sharp_lit_size: 'Sharp, lit, 1200 px',
+  crops: '4:3 and 1:1 crop', clean: 'No watermark, text, people', current: 'Looks current',
+};
+const ANSWER_WORD = { yes: 'yes', no: 'no', unknown: "don't know" } as const;
 const pct = (v: number | null) => (v == null ? '—' : `${v}%`);
+
+/** The machine's look at one picture: its verdict, and each check with its reason. */
+function FitnessLines({ f }: { f: Fitness | null | undefined }) {
+  if (!f) return <Word muted>not looked at</Word>;
+  return (
+    <View style={{ gap: 1 }}>
+      <Text style={styles.fitVerdict}>{MACHINE_WORD[f.verdict]}</Text>
+      {f.checks.map((c) => (
+        <Text key={c.key} style={styles.caption} numberOfLines={2}>{`${CHECK_WORD[c.key] ?? c.key}: ${ANSWER_WORD[c.answer]} — ${c.reason}`}</Text>
+      ))}
+    </View>
+  );
+}
 const pence = (p: number | null | undefined) => (p == null ? '—' : p < 100 ? `${p}p` : pounds(p));
 
 /** A page we read, as a link the owner can open. */
@@ -236,9 +256,13 @@ export function PhotoReviewBoard({ canManage }: { canManage: boolean }) {
   const [reviewed, setReviewed] = useState<'' | 'yes' | 'no'>('no');
   const [data, setData] = useState<{ places: PhotoReviewRow[]; more: boolean; comparePence: number; summary: PhotoReviewSummary } | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [view, setView] = useState<'queue' | 'board'>('queue');
+  const [quote, setQuote] = useState<{ pictures: number; pence: number } | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
   const load = useCallback(() => {
     setData(null);
     api.adminPhotoReview({ q: asked || undefined, reviewed: reviewed || undefined }).then(setData).catch(() => setData({ places: [], more: false, comparePence: 0, summary: null as any }));
+    api.adminPhotoScoreQuote().then(setQuote).catch(() => setQuote(null));
   }, [asked, reviewed]);
   useEffect(() => { load(); }, [load]);
 
@@ -246,7 +270,9 @@ export function PhotoReviewBoard({ canManage }: { canManage: boolean }) {
     { key: 'name', label: 'Place', grow: true, cell: (r) => <Text style={styles.rowName}>{r.name ?? r.venueRef}</Text> },
     { key: 'cat', label: 'Kind', width: 120, cell: (r) => <Word muted>{r.category ?? '—'}</Word> },
     { key: 'pics', label: 'Ours', width: 70, align: 'right', cell: (r) => <Num n={r.pictures} /> },
-    { key: 'verdict', label: 'Verdict', width: 220, cell: (r) => (r.verdict ? <Word>{VERDICT_WORD[r.verdict]}</Word> : <Word muted>not reviewed</Word>) },
+    { key: 'machine', label: 'Machine', width: 110, tip: ['Machine', 'Claude\'s look at the best of the pictures. It sorts the queue — Not fit last — and decides nothing.'],
+      cell: (r) => (r.machine ? <Word muted={r.machine === 'not_fit'}>{MACHINE_WORD[r.machine]}</Word> : <Blank />) },
+    { key: 'verdict', label: 'Your verdict', width: 220, cell: (r) => (r.verdict ? <Word>{VERDICT_WORD[r.verdict]}</Word> : <Word muted>not reviewed</Word>) },
   ];
 
   return (
@@ -258,8 +284,18 @@ export function PhotoReviewBoard({ canManage }: { canManage: boolean }) {
         <Dropdown label="Reviewed" value={reviewed === 'yes' ? 'Reviewed' : reviewed === 'no' ? 'Not reviewed' : 'All'} width={200}
                   options={[{ key: '', label: 'All', on: reviewed === '' }, { key: 'no', label: 'Not reviewed', on: reviewed === 'no' }, { key: 'yes', label: 'Reviewed', on: reviewed === 'yes' }]}
                   onPick={(k) => setReviewed(k as any)} />
+        <Act label="Queue" small tone={view === 'queue' ? 'solid' : 'secondary'} onPress={() => setView('queue')} />
+        <Act label="Board" small tone={view === 'board' ? 'solid' : 'secondary'} onPress={() => setView('board')} />
+        {quote && quote.pictures > 0 ? (
+          <Act label={`Look at ${quote.pictures} pictures · ≈${pence(quote.pence)}`} icon="image" small disabled={!canManage}
+               onPress={async () => {
+                 setMsg(null);
+                 try { const r = await api.adminPhotoScore(quote.pictures); setMsg(`${r.pictures} being looked at`); } catch (e: any) { setMsg(e.message); load(); }
+               }} />
+        ) : null}
       </View>
-      {!data ? <Waiting /> : (
+      {msg ? <Text style={styles.note}>{msg}</Text> : null}
+      {view === 'board' ? <PhotoBoard /> : !data ? <Waiting /> : (
         <>
           {data.summary ? (
             <View style={styles.subRow}>
@@ -269,6 +305,7 @@ export function PhotoReviewBoard({ canManage }: { canManage: boolean }) {
                 <Stat label="Owned is fine" value={data.summary.reviewed ? `${Math.round((data.summary.fine / data.summary.reviewed) * 100)}%` : '—'} tip={['Owned is fine', 'Of the places reviewed.']} />
                 <Stat label="Worse, acceptable" value={data.summary.reviewed ? `${Math.round((data.summary.acceptable / data.summary.reviewed) * 100)}%` : '—'} tip={['Worse but acceptable', 'Of the places reviewed.']} />
                 <Stat label="Not fit" value={data.summary.reviewed ? `${Math.round((data.summary.not_fit / data.summary.reviewed) * 100)}%` : '—'} tip={['Not fit', 'Of the places reviewed.']} />
+                <Stat label="Agreement" value={pct(data.summary.agreementPct)} tip={['Agreement', `How often the machine's verdict matched yours, over the ${data.summary.both} places both have judged. Until it is proven, your verdict decides publishing.`]} />
               </View>
             </View>
           ) : null}
@@ -276,12 +313,36 @@ export function PhotoReviewBoard({ canManage }: { canManage: boolean }) {
                   onRow={(r) => setOpen(open === r.venueRef ? null : r.venueRef)}
                   highlight={(r) => r.venueRef === open}
                   empty={<Word muted>No places with owned pictures match</Word>}
-                  phoneRow={(r) => ({ name: r.name ?? r.venueRef, note: r.verdict ? VERDICT_WORD[r.verdict] : 'not reviewed', chips: [{ key: 'p', word: `${r.pictures} ours` }] })} />
+                  phoneRow={(r) => ({ name: r.name ?? r.venueRef, note: r.verdict ? VERDICT_WORD[r.verdict] : 'not reviewed', chips: [{ key: 'p', word: `${r.pictures} ours` }, ...(r.machine ? [{ key: 'm', word: `machine: ${MACHINE_WORD[r.machine]}` }] : [])] })} />
           {data.more ? <Text style={styles.note}>First 200 shown</Text> : null}
           {open ? <CompareView key={open} refId={open} pricePence={data.comparePence} canManage={canManage} onVerdict={load} /> : null}
         </>
       )}
     </>
+  );
+}
+
+/** Per category and subcategory: % of places with a Fit owned picture, % Borderline, % none. */
+function PhotoBoard() {
+  const [rows, setRows] = useState<PhotoBoardRow[] | null>(null);
+  useEffect(() => { api.adminPhotoBoard().then((d) => setRows(d.rows)).catch(() => setRows([])); }, []);
+  if (!rows) return <Waiting />;
+  const columns: Col<PhotoBoardRow>[] = [
+    { key: 'name', label: 'Category', grow: true,
+      cell: (r) => <Text style={[styles.rowName, r.subcategory ? { fontWeight: '400', paddingLeft: spacing.lg } : null]}>{r.subcategory ? r.subcategoryLabel : r.categoryLabel}</Text> },
+    { key: 'places', label: 'Places', width: 80, align: 'right', cell: (r) => <Num n={r.places} strong={!r.subcategory} /> },
+    { key: 'fit', label: 'Fit', width: 70, align: 'right', tip: ['Fit', 'Share of places whose best owned picture the machine judged Fit.'], cell: (r) => <Word strong={!r.subcategory}>{pct(r.fitPct)}</Word> },
+    { key: 'bl', label: 'Borderline', width: 96, align: 'right', cell: (r) => <Word>{pct(r.borderlinePct)}</Word> },
+    { key: 'nf', label: 'Not fit', width: 80, align: 'right', cell: (r) => <Word muted>{pct(r.notFitPct)}</Word> },
+    { key: 'un', label: 'Not looked at', width: 110, align: 'right', tip: ['Not looked at', 'Places with pictures of ours the machine has not looked at yet.'], cell: (r) => <Word muted>{pct(r.unscoredPct)}</Word> },
+    { key: 'none', label: 'None', width: 70, align: 'right', tip: ['None', 'Places with no owned picture at all.'], cell: (r) => <Word>{pct(r.nonePct)}</Word> },
+  ];
+  return (
+    <Ladder columns={columns} rows={rows} keyOf={(r) => `${r.category}|${r.subcategory ?? ''}`}
+            highlight={(r) => !r.subcategory}
+            empty={<Word muted>No places held yet</Word>}
+            phoneRow={(r) => ({ name: r.subcategory ? r.subcategoryLabel : r.categoryLabel, note: `${r.places} places`,
+              chips: [{ key: 'f', word: `fit ${pct(r.fitPct)}` }, { key: 'b', word: `borderline ${pct(r.borderlinePct)}` }, { key: 'n', word: `none ${pct(r.nonePct)}` }] })} />
   );
 }
 
@@ -325,9 +386,9 @@ function CompareView({ refId, pricePence, canManage, onVerdict }: { refId: strin
           <View style={styles.strip}>
             {owned.length ? owned.map((p) => (
               <Frame key={p.id} uri={ownedUri(p)} caption={[p.source, p.licence, p.creator].filter(Boolean).join(' · ')}
-                     sub={p.moderation !== 'approved' ? <Word muted>waiting for a look</Word> : undefined} />
+                     sub={<View style={{ gap: 2 }}>{p.moderation !== 'approved' ? <Word muted>waiting for a look</Word> : null}<FitnessLines f={p.fitness} /></View>} />
             )) : <Word muted>None held</Word>}
-            {venue.map((v) => <Frame key={v.url} uri={v.url} caption="Venue site · no licence" sub={<Page url={v.pageUrl} />} />)}
+            {venue.map((v) => <Frame key={v.url} uri={v.url} caption="Venue site · no licence" sub={<View style={{ gap: 2 }}><Page url={v.pageUrl} /><FitnessLines f={v.fitness} /></View>} />)}
           </View>
         </View>
       </View>
@@ -362,6 +423,7 @@ const styles = StyleSheet.create({
   strip: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, paddingVertical: spacing.sm },
   frame: { width: FRAME_W, height: FRAME_H, overflow: 'hidden', backgroundColor: colors.well },
   caption: { ...type.tiny, color: colors.inkMuted },
+  fitVerdict: { ...type.small, color: colors.ink, fontWeight: '700' },
   sides: { flexDirection: 'row', gap: spacing.xl, alignItems: 'flex-start' },
   side: { flex: 1, minWidth: 0 },
   search: { ...type.body, color: colors.ink, borderBottomWidth: BORDER, borderBottomColor: colors.line, paddingVertical: 6, minWidth: 220, flexGrow: 1, maxWidth: 360 },

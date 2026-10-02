@@ -49,6 +49,7 @@ import { queueEnrichment, recordSiteFacts } from './own.js';
 import { ownedNamesFor } from './displayNames.js';
 import { picturesFor as openversePictures } from './openverse.js';
 import { venuePicturesFor } from './venueImages.js';
+import { scorePlace } from './photoFitness.js';
 
 export const PURPOSE = 'claude.enrich.saved_place';
 export const MODEL = 'claude-haiku-4-5';
@@ -308,6 +309,7 @@ export async function afterFree(venueRef, ctx, deps = {}) {
       found.facts = await answeredFacts(venueRef);
       found.notes.push('The free research found everything; Claude was not asked.');
       await setState(venueRef, 'done', { found, last_cost_usd: 0 });
+      lookAtPictures(venueRef, ctx, deps);
       return { state: 'done', found, costUsd: 0 };
     }
 
@@ -345,6 +347,7 @@ export async function afterFree(venueRef, ctx, deps = {}) {
               paid_runs = paid_runs + (case when $3 > 0 then 1 else 0 end)
         where venue_ref = $1`,
       [venueRef, JSON.stringify(found), pass.costUsd ?? 0]);
+    lookAtPictures(venueRef, ctx, deps);
     return { state: 'done', found, costUsd: pass.costUsd ?? 0 };
   });
 }
@@ -378,6 +381,16 @@ async function answeredFacts(venueRef) {
 async function venueHeld(venueRef) {
   const { rows: [r] } = await query('select count(*)::int as n from venue_site_images where venue_ref = $1', [venueRef]);
   return r.n;
+}
+
+/**
+ * The machine's look at the pictures just found (sources/photoFitness.js),
+ * behind everything else: it sorts the Photo review queue and decides nothing.
+ */
+function lookAtPictures(venueRef, ctx, deps) {
+  Promise.resolve()
+    .then(() => (deps.scorePlace ?? scorePlace)(venueRef, { householdId: ctx.householdId }))
+    .catch((err) => console.warn(`savedEnrich: picture check for ${venueRef}: ${err.message}`));
 }
 
 /**

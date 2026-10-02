@@ -254,8 +254,11 @@ export async function parseStructured({
     system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
     messages,
     // A quick read of half a sentence (the live rows) needs speed, not reasoning: thinking off.
-    thinking: { type: thinking === 'off' ? 'disabled' : 'adaptive' },
-    output_config: { effort, format: zodOutputFormat(schema) },
+    // Haiku 4.5 takes neither adaptive thinking nor an effort setting; it is
+    // asked for the shape alone (the picture check, sources/photoFitness.js).
+    ...(model === 'claude-haiku-4-5'
+      ? { output_config: { format: zodOutputFormat(schema) } }
+      : { thinking: { type: thinking === 'off' ? 'disabled' : 'adaptive' }, output_config: { effort, format: zodOutputFormat(schema) } }),
   }));
 
   const spend = await recordCall({ householdId, sessionId, provider: 'anthropic', purpose, usage: response.usage, model });

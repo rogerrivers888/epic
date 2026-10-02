@@ -125,6 +125,8 @@ export const PURPOSE_CLASSES = {
   // The owner's saved places, researched once by Claude after the free pass
   // (sources/savedEnrich.js, 2 Oct 2026).
   'claude.enrich.saved_place': 'library',
+  // A machine look at each owned picture (sources/photoFitness.js).
+  'claude.photo_fitness': 'library',
   'own.match': 'library',
   'own.where': 'library',
   'places.areas': 'library',
