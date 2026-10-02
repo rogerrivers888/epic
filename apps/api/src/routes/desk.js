@@ -538,6 +538,11 @@ deskRoutes.get('/markets', requires('view_library'), async (_req, res, next) => 
   try { res.json({ markets: await markets.listMarkets(), blocked: markets.blockedMarkets() }); } catch (err) { next(err); }
 });
 
+/** Where a place's own text contradicts its stamped country — a read-only check. */
+deskRoutes.get('/markets/country-contradictions', requires('view_library'), async (_req, res, next) => {
+  try { res.json(await markets.countryContradictions()); } catch (err) { next(err); }
+});
+
 /** The area-key check (markets step 6) — read-only, before migration 326 is written. */
 deskRoutes.get('/markets/area-key-check', requires('view_library'), async (_req, res, next) => {
   try { res.json(await markets.areaKeyCheck()); } catch (err) { next(err); }

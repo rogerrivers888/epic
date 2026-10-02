@@ -17,6 +17,7 @@ import { NAMESPACES, hasDrifted } from '../domain/wording.js';
 import { scaleFor } from '../domain/costBand.js';
 import { OUTCODE_FROM, PCDS_FROM as AS_PCDS, nullCountryAddresses, FOUND_IT } from '../repositories/placeIndex.js';
 import { countryFromAddresses } from '../domain/countryFromAddress.js';
+import { disagreements } from '../domain/countrySignals.js';
 
 /* ------------------------------------------------------------------ markets */
 
@@ -195,6 +196,55 @@ export async function areaKeyCheck() {
     placesByCountry, localitiesByCountry, unprefixed, areaCountsByCountry, nonGbPlacesFiledByArea,
     postcodeRule: rule,
     postcodeRuleReason: loaded ? null : 'the ONS postcode table is empty here, so neither rule can be read',
+  };
+}
+
+/**
+ * Where a place's own text contradicts its stamped country (owner, 2 Oct 2026: "a
+ * stamp that contradicts owned text is the one case where the evidence is probably
+ * better than the pin"). Read-only, and a check rather than a rule: it changes no
+ * country. Every settled place holding an owned record is read, a page at a time,
+ * so the totals are whole; the list names the first 300 by how many signals object.
+ */
+export async function countryContradictions() {
+  const { rows: mk } = await query('select code, currency from markets');
+  const currency = new Map(mk.map((m) => [m.code, m.currency]));
+  const currencyOf = (c) => currency.get(c) ?? null;
+  const bySignal = { address: 0, phone: 0, website: 0, currency: 0 };
+  const byCountry = new Map();
+  let checked = 0; let flagged = 0; let twoOrMore = 0;
+  const list = [];
+  let after = '';
+  for (;;) {
+    const { rows } = await query(`
+      select pi.venue_ref, upper(pi.country_code) as country, r.name, r.phone, r.website, r.price_range,
+             array_remove(array_agg(distinct f.value #>> '{}') || array[r.address], null) as addresses
+        from place_index pi
+        join place_records r on r.venue_ref = pi.venue_ref
+        left join place_facts f on f.venue_ref = pi.venue_ref and f.field = 'address' and f.expires_at is null
+       where pi.country_code is not null and pi.venue_ref > $1
+       group by pi.venue_ref, pi.country_code, r.name, r.phone, r.website, r.price_range, r.address
+       order by pi.venue_ref limit 5000`, [after]);
+    if (!rows.length) break;
+    for (const r of rows) {
+      checked += 1;
+      const d = disagreements({ country: r.country, addresses: r.addresses ?? [], phone: r.phone, website: r.website, priceRange: r.price_range }, currencyOf);
+      if (!d.length) continue;
+      flagged += 1;
+      if (d.length >= 2) twoOrMore += 1;
+      for (const x of d) bySignal[x.signal] += 1;
+      byCountry.set(r.country, (byCountry.get(r.country) ?? 0) + 1);
+      list.push({ venue_ref: r.venue_ref, name: r.name, stamped: r.country, signals: d });
+    }
+    after = rows[rows.length - 1].venue_ref;
+  }
+  list.sort((a, b) => b.signals.length - a.signals.length || a.venue_ref.localeCompare(b.venue_ref));
+  return {
+    checkedAt: new Date().toISOString(),
+    checked, flagged, twoOrMore, bySignal,
+    byStampedCountry: Object.fromEntries(byCountry),
+    places: list.slice(0, 300),
+    listed: list.length > 300 ? `first 300 of ${list.length}` : 'all',
   };
 }
 
