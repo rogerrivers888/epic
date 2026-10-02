@@ -40,6 +40,8 @@ test('the verdict: agree, doubt, or say nothing', () => {
   // Unalike but sharing a distinctive word: as likely a rename as another place.
   assert.equal(nc.judge('Kelpie Fish Grill', 'Kelpie Seafood Shack').verdict, 'cant-speak');
   assert.equal(nc.judge('Skye Cheese Deli', 'Isle of Skye Cheese Company').verdict, 'cant-speak');
+  // One distinctive word is too plain to doubt on: a set-aside costs the point.
+  assert.equal(nc.judge('The Crown', 'Sunrise Nail Studio').verdict, 'cant-speak');
   assert.equal(nc.judge(null, 'The Old Bell Inn').verdict, 'cant-speak');
 });
 
@@ -161,8 +163,9 @@ test('a place with no owned point is matched at first sight, and then shows the 
   nc.forgetChecks();
   live.noteLiveName(ref, 'Selkie Bakehouse', { lat: LAT - 0.003, lng: LNG }, { mayMatch: false });
   assert.equal((await nc.drain()).firstSight, 0, 'a benchmark sighting only checks');
-  // A place we hold, seen by an ordinary read, is.
-  nc.forgetChecks();
+  // A place we hold, seen by an ordinary read, is — and the benchmark's skip
+  // above did not hide it for the day (no forgetChecks needed).
+
   live.noteLiveName(ref, 'Selkie Bakehouse', { lat: LAT - 0.003, lng: LNG });
   const out = await nc.drain();
   assert.equal(out.firstSight, 1);

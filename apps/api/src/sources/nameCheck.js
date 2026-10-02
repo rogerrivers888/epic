@@ -46,8 +46,10 @@ const NAMED_SOURCES = ['fsa', 'historic-england', 'os-open-names', 'osm'];
 /** How a live name stands against an owned one: 'agrees', 'doubtful' or 'cant-speak'. */
 export function judge(live, owned) {
   if (!live || !owned) return { verdict: 'cant-speak', why: 'no name on one side' };
-  // A name with nothing distinctive in it — "The Crown", "Cafe" — cannot tell
-  // one place from another either way.
+  // A name with nothing distinctive in it ("Cafe") cannot tell one place from
+  // another either way, and one with a single distinctive word ("The Crown",
+  // "Lochside") is too plain to doubt on: a set-aside costs the place its
+  // point, so a doubt needs two distinctive words on each side (Codex, 2 Oct 2026).
   if (!significantStems(live).length || !significantStems(owned).length) return { verdict: 'cant-speak', why: 'a name too plain to judge' };
   const score = nameScore(live, owned);
   if (score >= AGREE_AT) return { verdict: 'agrees', score };
@@ -56,8 +58,9 @@ export function judge(live, owned) {
   // renamed menu as another business, and setting a true match aside costs the
   // place its point. That one is not ours to call.
   const shared = significantStems(live).some((x) => significantStems(owned).includes(x));
-  if (score < DOUBT_BELOW && !shared) return { verdict: 'doubtful', score };
-  return { verdict: 'cant-speak', score, why: shared ? 'they share a distinctive word' : 'neither clearly the same nor clearly different' };
+  const plain = significantStems(live).length < 2 || significantStems(owned).length < 2;
+  if (score < DOUBT_BELOW && !shared && !plain) return { verdict: 'doubtful', score };
+  return { verdict: 'cant-speak', score, why: shared ? 'they share a distinctive word' : plain ? 'a name too plain to doubt on' : 'neither clearly the same nor clearly different' };
 }
 
 // A place checked in the last day is not checked again for every search it
@@ -226,7 +229,7 @@ export async function drain({ n = 100, now = Date.now() } = {}) {
     } catch (err) {
       // The batch goes back on the queue for the next minute rather than
       // being lost to one failed read (Codex, 2 Oct 2026).
-      for (const x of batch) if ((x.tries ?? 0) < 2) noteLiveName(x.ref, x.name, x, { tries: (x.tries ?? 0) + 1 });
+      for (const x of batch) if ((x.tries ?? 0) < 2) noteLiveName(x.ref, x.name, x, { tries: (x.tries ?? 0) + 1, mayMatch: x.mayMatch });
       throw err;
     }
     // Ninety days of outcomes is plenty for a weekly figure.
@@ -248,7 +251,13 @@ export async function drain({ n = 100, now = Date.now() } = {}) {
               where venue_ref = $1 and rematched_source is null order by created_at desc limit 1`, [x.ref]);
           // A first sight only for a place we already hold, and only from a
           // sighting allowed to make one; a waiting re-match is always ours.
-          if (!awaiting && (!x.mayMatch || !known.has(x.ref))) { out.cantSpeak += 1; continue; }
+          if (!awaiting && (!x.mayMatch || !known.has(x.ref))) {
+            // Not a check that ran, so not remembered as one: an ordinary
+            // sighting later today may still make the match (Codex, 2 Oct 2026).
+            recently.delete(x.ref);
+            out.cantSpeak += 1;
+            continue;
+          }
           const m = await matchOnLiveName(x.ref, x.name, x, awaiting ?? null);
           if (m.matched && awaiting) out.rematched += 1;
           else if (m.matched) out.firstSight += 1;
@@ -276,7 +285,7 @@ export async function drain({ n = 100, now = Date.now() } = {}) {
         // Back on the queue for the next minute, three tries in all: a
         // transient fault is retried, a lasting one is not retried for ever
         // (Codex, 2 Oct 2026).
-        if ((x.tries ?? 0) < 2) noteLiveName(x.ref, x.name, x, { tries: (x.tries ?? 0) + 1 });
+        if ((x.tries ?? 0) < 2) noteLiveName(x.ref, x.name, x, { tries: (x.tries ?? 0) + 1, mayMatch: x.mayMatch });
         // The reference and the fault only — never the name.
         console.error(`epic-api: name-check — ${x.ref}: ${String(err?.message ?? err).slice(0, 160)}`);
       }
