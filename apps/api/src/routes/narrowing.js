@@ -56,6 +56,15 @@ narrowingRoutes.get('/subcategories', requires('view_library'), async (_req, res
 // ---------------------------------------------------------------------------
 
 /** What the rule would hold back: the live measurement beside the stored state. */
+/** The owner's gate, proved: held or not per named place, and the leak count (must be 0). */
+narrowingRoutes.get('/proof', requires('view_library'), async (req, res, next) => {
+  try {
+    const names = String(req.query.names ?? '').split('|');
+    const checkId = req.query.checkId ? String(req.query.checkId) : null;
+    res.json(await surfacing.gateProof({ names, checkId }));
+  } catch (err) { next(err); }
+});
+
 narrowingRoutes.get('/report', requires('view_library'), async (_req, res, next) => {
   try {
     res.json(await surfacing.surfacingReport({ examples: 10 }));

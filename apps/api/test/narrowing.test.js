@@ -851,3 +851,15 @@ test('Part B (Codex): apply refuses while a check is running, under the shared l
   const ok = await surfacing.applySurfacing({ by: 'test', checkId: done });
   assert.equal(ok.error, undefined, 'once the running check finishes, the completed one applies');
 });
+
+test('the gate proof: held or not per named place, can’t-speak for an unknown name, and no leak into other drawers', async () => {
+  await seedPlace('google:gp_plain', { subcategory: 'churches', record: { name: 'St Gateproof Plain' } });
+  await seedPlace('google:gp_cath', { subcategory: 'churches', record: { name: 'Gateproof Cathedral' } });
+  const run = await surfacing.runSurfacingCheck({ by: 'test', invalidate: async () => {} });
+  const out = await surfacing.gateProof({ names: ['St Gateproof Plain', 'Gateproof Cathedral', 'No Such Place Anywhere'], checkId: run.checkId });
+  const by = Object.fromEntries(out.places.map((p) => [p.name, p]));
+  assert.equal(by['St Gateproof Plain'].held, true, 'the ordinary church is held back by this check');
+  assert.equal(by['Gateproof Cathedral'].held, false, 'the cathedral surfaces');
+  assert.equal(by['No Such Place Anywhere'].held, null, 'an unknown name cannot speak — never a false "surfaces"');
+  assert.equal(out.filedElsewhere, 0, 'no held-back record is filed in a drawer the rule does not narrow');
+});

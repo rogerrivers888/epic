@@ -469,3 +469,39 @@ export async function surfacingReport({ examples = 10 } = {}) {
   ]);
   return { check: latest, running: running ? { id: running.id, startedAt: running.started_at } : null, measurement, determination };
 }
+
+/**
+ * The owner's gate, proved rather than reasoned (owner, 1 Oct 2026: apply only if
+ * "museums/galleries/castles/historic houses/theatres are unchanged, and the 10
+ * notable places still surface"; and "unchanged" needs the proving query). Read
+ * only. For each named place: every record it goes by (owned name or atlas name,
+ * through the one alias closure) and whether any of them sits in a held-back
+ * snapshot — `null` with a reason when no record of that name is held, never a
+ * false "surfaces". And the leak count: snapshot records also filed in a drawer
+ * the rule does not narrow, which must be 0 for the other Culture drawers to be
+ * unchanged. Uncapped: absence is claimed from a count, not from a capped list.
+ */
+export async function gateProof({ names = [], checkId = null } = {}) {
+  const scope = checkId ? 'and s.check_id = $2' : '';
+  const places = [];
+  for (const raw of names.map((n) => String(n).trim()).filter(Boolean).slice(0, 40)) {
+    const { rows } = await query(
+      `select venue_ref as ref from place_records where name ilike $1
+        union select coalesce(venue_ref, 'atlas:' || id::text) from attractions where name ilike $1`, [raw]);
+    const seeds = rows.map((r) => r.ref);
+    if (!seeds.length) { places.push({ name: raw, records: 0, held: null, why: 'no record of that name is held' }); continue; }
+    const { membersOf } = await aliasClosure(seeds);
+    const members = [...new Set([...seeds, ...[...membersOf.values()].flat()])];
+    const { rows: heldRows } = await query(
+      `select distinct s.venue_ref, s.applied, s.check_id from place_surfacing_members m
+         join place_surfacing s on s.venue_ref = m.venue_ref and not s.surfaced
+        where m.member_ref = any($1::text[]) ${scope}`, checkId ? [members, checkId] : [members]);
+    places.push({ name: raw, records: members.length, held: heldRows.length > 0, heldBy: heldRows.map((r) => r.venue_ref) });
+  }
+  const { rows: snap } = await query(
+    `select distinct m.member_ref as ref from place_surfacing_members m
+       join place_surfacing s on s.venue_ref = m.venue_ref and not s.surfaced
+      where true ${checkId ? 'and s.check_id = $1' : ''}`, checkId ? [checkId] : []);
+  const leaked = await filedElsewhere(snap.map((r) => r.ref));
+  return { checkId, places, snapshotRecords: snap.length, filedElsewhere: leaked.size, leakedExamples: [...leaked].slice(0, 10) };
+}
