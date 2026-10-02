@@ -115,3 +115,32 @@ test('a place whose only pictures are on its own website is findable in Photo re
     assert.ok(body.summary.places >= 1);
   } finally { await close(); }
 });
+
+test('a verdict settles the pictures waiting for it: accepted becomes the card picture, not fit is turned down', async () => {
+  const mk = async (ref, n) => {
+    const ids = [];
+    for (let i = 0; i < n; i += 1) {
+      const { rows: [img] } = await query(
+        `insert into image_assets (source, source_ref, licence, may_store, moderation) values ('openverse', $1, 'CC BY 2.0', true, 'pending') returning id`,
+        [`openverse:v-${randomUUID()}`]);
+      await query(`insert into image_links (image_id, subject_type, subject_id, role, position) values ($1, 'place', $2, 'gallery', $3)`, [img.id, ref, 10 + i]);
+      ids.push(img.id);
+    }
+    return ids;
+  };
+  const good = `google:v-good-${randomUUID()}`; const bad = `google:v-bad-${randomUUID()}`;
+  const goodIds = await mk(good, 2); const badIds = await mk(bad, 1);
+  const { base, close } = await serve();
+  try {
+    const ok = await (await post(`${base}/review/verdict`, { ref: good, verdict: 'owned_fine' })).json();
+    assert.equal(ok.settled, 2);
+    assert.equal(ok.hero, goodIds[0], 'the first becomes the card picture where there was none');
+    const { rows: g } = await query(`select i.moderation, l.role from image_assets i join image_links l on l.image_id = i.id where l.subject_id = $1 order by l.position`, [good]);
+    assert.deepEqual(g.map((r) => [r.moderation, r.role]), [['approved', 'hero'], ['approved', 'gallery']]);
+    const no = await (await post(`${base}/review/verdict`, { ref: bad, verdict: 'owned_not_fit' })).json();
+    assert.equal(no.settled, 1);
+    assert.equal(no.hero, null);
+    const { rows: [b] } = await query(`select moderation from image_assets where id = $1`, [badIds[0]]);
+    assert.equal(b.moderation, 'rejected');
+  } finally { await close(); }
+});

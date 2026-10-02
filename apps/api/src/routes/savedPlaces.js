@@ -255,6 +255,28 @@ photoReviewRouter.post('/verdict', requires('manage_library'), requireOwnerSigne
          reviewed_by = excluded.reviewed_by, reviewed_at = now()
        returning venue_ref, verdict, note, reviewed_at`,
       [ref, verdict, note, currentAccount()?.id ?? null]);
-    res.json(rows[0]);
+    // The verdict settles the pictures that were waiting for it (Codex, 2 Oct
+    // 2026). Only the ones found for a saved place (Openverse): a household's
+    // own upload waits for its own look, and is not decided here. Fine or
+    // acceptable publishes them, and the first becomes the card picture where
+    // the place has none; not fit turns them down.
+    const accept = verdict !== 'owned_not_fit';
+    const { rows: settled } = await query(
+      `update image_assets i set moderation = $2, updated_at = now()
+         from image_links l
+        where l.image_id = i.id and l.subject_type = 'place' and l.subject_id = $1
+          and i.source = 'openverse' and i.moderation = 'pending'
+        returning i.id, l.position`, [ref, accept ? 'approved' : 'rejected']);
+    let hero = null;
+    if (accept && settled.length) {
+      const { rows: [has] } = await query(
+        `select 1 from image_links l join image_assets i on i.id = l.image_id
+          where l.subject_type = 'place' and l.subject_id = $1 and l.role = 'hero' and i.moderation <> 'rejected' limit 1`, [ref]);
+      if (!has) {
+        hero = settled.sort((a, b) => a.position - b.position)[0].id;
+        await query(`update image_links set role = 'hero' where image_id = $1 and subject_type = 'place' and subject_id = $2`, [hero, ref]);
+      }
+    }
+    res.json({ ...rows[0], settled: settled.length, hero });
   } catch (err) { next(err); }
 });

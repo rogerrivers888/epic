@@ -76,7 +76,15 @@ const sameSite = (a, b) => {
 const isWikipedia = (u) => /(^|\.)wikipedia\.org$/.test(hostOf(u) ?? '');
 // Fetched pages are compared without their fragment or trailing slash, so
 // "https://x.co/menu/" read and "https://x.co/menu" cited are the same page.
-const norm = (u) => String(u ?? '').replace(/#.*$/, '').replace(/\/+$/, '').toLowerCase();
+const norm = (u) => {
+  const raw = String(u ?? '').replace(/#.*$/, '');
+  // Only the scheme and the host are case-blind; a path is not, so "/Menu"
+  // read does not vouch for "/menu" cited (Codex, 2 Oct 2026).
+  try {
+    const x = new URL(raw);
+    return `${x.protocol.toLowerCase()}//${x.host.toLowerCase()}${x.pathname.replace(/\/+$/, '')}${x.search}`;
+  } catch { return raw.replace(/\/+$/, ''); }
+};
 
 // ---------------------------------------------------------------------------
 // the record

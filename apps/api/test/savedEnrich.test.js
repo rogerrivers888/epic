@@ -278,3 +278,22 @@ test('a website Claude found and opened has its pictures looked for at once', as
   assert.deepEqual(looked, ['https://found.example/'], 'not left for a re-run');
   assert.equal((await enrich.enrichmentOf(ref)).found.pictures.venueSite.kept, 3);
 });
+
+test('a cited page must match the page read in its path case; a rejected Openverse picture is not counted again', async () => {
+  const j = enrich.judge({
+    reply: { fields: { website: { value: 'https://Case.example/', source_url: 'https://Case.example/' }, menu_url: { value: 'https://case.example/menu.pdf', source_url: 'https://case.example/menu' } } },
+    fetched: ['https://CASE.example/', 'https://case.example/Menu'],
+    asks: [],
+  });
+  assert.ok(j.website, 'host case does not matter');
+  assert.equal(j.siteFacts.menu_url, undefined, '"/Menu" read does not vouch for "/menu"');
+
+  const id = `rej-${randomUUID()}`;
+  const ref = `google:rej-${randomUUID()}`;
+  const body = { results: [{ id, title: 'Turned down', thumbnail: 'https://x/r', license: 'by', license_version: '2.0' }] };
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16]);
+  const deps = { fetchImpl: async () => ({ ok: true, json: async () => body }), fetchPictureImpl: async () => ({ body: jpeg, mime: 'image/jpeg', bytes: jpeg.length, width: 600, height: 400 }) };
+  assert.equal((await picturesFor({ venueRef: ref, name: 'Turned down' }, deps)).stored.length, 1);
+  await query(`update image_assets set moderation = 'rejected' where source_ref = $1`, [`openverse:${id}`]);
+  assert.equal((await picturesFor({ venueRef: ref, name: 'Turned down' }, deps)).stored.length, 0);
+});
