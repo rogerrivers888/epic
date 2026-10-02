@@ -104,7 +104,7 @@ export async function areaKeyCheck() {
   // so a placeholder is seen for what it is wherever it sits.
   const placeholderPostcodes = await n(`
       select postcode, count(*)::int as places from place_records
-       where btrim(postcode) ~ '^(0+|9+|x+|-+|n/?a|none|tbc|tba|unknown)$'
+       where btrim(postcode) ~* '^(0+|9+|x+|-+|n/?a|none|tbc|tba|unknown)$'
           or btrim(postcode) ~ '^(.)\\1{3,}$'
        group by 1 order by 2 desc`);
   // Migration 357, confirmed from the database itself rather than from the deploy

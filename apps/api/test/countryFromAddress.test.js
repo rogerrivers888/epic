@@ -27,6 +27,10 @@ test('the country an address names, and only a country', () => {
   assert.equal(countryNamedIn('Atlanta, Georgia'), null, 'a name that is also a US state is refused');
   assert.equal(countryNamedIn('Italy, Via Roma, Milan'), null, 'only the last real component counts');
   assert.equal(countryNamedIn('00000'), null);
+  // Current ISO codes only — never an obsolete one the runtime still names (Codex).
+  for (const [name, code] of [['Germany', 'DE'], ['Serbia', 'RS'], ['Vietnam', 'VN'], ['Curaçao', 'CW'], ['Vanuatu', 'VU'], ['Yemen', 'YE'], ['Kosovo', 'XK']]) {
+    assert.equal(countryNamedIn(`Somewhere, ${name}`), code, name);
+  }
 });
 
 test('owned addresses must agree; a disagreement is not resolved by picking one', () => {
@@ -75,11 +79,14 @@ test('the settle pass fills a missing country from owned addresses, and reports 
 test('the area-key check names the settled, the unsettled with its reason, and the placeholders', async () => {
   const m = await import('../src/desk/markets.js');
   await place('google:addr-unknown', { address: 'Somewhere, 00000' });
+  await query(`insert into place_records (venue_ref, postcode, updated_at) values ('google:addr-na', 'N/A', now())
+               on conflict (venue_ref) do update set postcode = excluded.postcode`);
   const out = await m.areaKeyCheck();
   assert.ok(out.nonGbPlaces.some((p) => p.venue_ref === 'google:addr-vatican' && p.country === 'VA'));
   const v = out.addressVerdicts.find((x) => x.venue_ref === 'google:addr-unknown');
   assert.equal(v.reason, 'no owned address names a country');
   assert.ok(out.placeholderPostcodes.some((p) => p.postcode === '00000' && p.places >= 1));
+  assert.ok(out.placeholderPostcodes.some((p) => p.postcode === 'N/A'), 'in any case');
   // And migration 357 is confirmed from the database, not inferred from a deploy.
   // The test database is built without the runner's ledger, so it cannot say.
   assert.equal(out.migration357.recorded, null);

@@ -31,6 +31,8 @@ const ALIASES = {
 // Codes that name something other than one country: reserved (UK is GB's alias,
 // and its name "United Kingdom" would otherwise shadow GB), unions and unknowns.
 const NOT_COUNTRIES = new Set(['UK', 'EU', 'EZ', 'UN', 'QO', 'ZZ']);
+// ISO 3166's user-assigned ranges: AA, QM–QZ, XA–XZ (Kosovo's XK is the one in use).
+const PRIVATE_USE = (c) => c === 'AA' || (c[0] === 'Q' && c[1] >= 'M') || (c[0] === 'X' && c !== 'XK') || c === 'ZZ';
 
 const fold = (s) => String(s).normalize('NFC').trim().toLowerCase().replace(/\s+/g, ' ');
 
@@ -42,7 +44,14 @@ const NAMES = (() => {
       const code = String.fromCharCode(a, b);
       let name;
       try { name = en.of(code); } catch { continue; }
-      if (!name || name === code || NOT_COUNTRIES.has(code)) continue;
+      if (!name || name === code || NOT_COUNTRIES.has(code) || PRIVATE_USE(code)) continue;
+      // Current codes only. The runtime names obsolete codes too — DD (East Germany)
+      // is "Germany", CS is "Serbia", YD is "Yemen" — and stamping one of those is
+      // for ever, because the pass only fills a missing country (Codex). An obsolete
+      // code canonicalises to its successor (DD → DE), so it is not its own canon.
+      let canon;
+      try { canon = Intl.getCanonicalLocales(`und-${code}`)[0].split('-')[1]; } catch { continue; }
+      if (canon !== code) continue;
       if (!names.has(fold(name))) names.set(fold(name), code); // first code to claim a name keeps it
     }
   }
