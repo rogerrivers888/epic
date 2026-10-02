@@ -52,10 +52,19 @@ export function SiteScreen({ route }: { route: Extract<Route, { name: 'site' }> 
   // to the app: a shortcut saved from epic.day must open Epic, not the brochure
   // (owner, 2 Oct 2026).
   const standaloneSignedIn = Platform.OS === 'web' && typeof window !== 'undefined' && Boolean(sessionToken())
-    && (window.matchMedia?.('(display-mode: standalone)').matches || (window.navigator as unknown as { standalone?: boolean }).standalone === true);
+    && (window.matchMedia?.('(display-mode: standalone)').matches || (window.navigator as unknown as { standalone?: boolean }).standalone === true
+      // Or sent here from epic.day/ before the server could know (epic_root, server.mjs).
+      || cameFromRoot());
   useEffect(() => { if (standaloneSignedIn) navigate(paths.inspire(), { replace: true }); }, [standaloneSignedIn, navigate]);
   if (!open || standaloneSignedIn) return null;
   return <SitePage route={route} />;
+}
+
+/** Whether the server just sent this visit here from epic.day/; read once, then cleared. */
+function cameFromRoot(): boolean {
+  if (typeof document === 'undefined' || !/(?:^|;\s*)epic_root=1(?:;|$)/.test(document.cookie)) return false;
+  document.cookie = 'epic_root=; Max-Age=0; Path=/; SameSite=Lax';
+  return true;
 }
 
 /** The gate as the server wrote it into this page's head, or null (the app shell, or native). */

@@ -75,6 +75,7 @@ test('epic.day/ opens the app for somebody signed in on this browser, the websit
     assert.match(signedIn.headers.get('vary') || '', /Cookie/);
     const visitor = await page(base, '/');
     assert.equal(visitor.headers.get('location'), '/en-gb/', 'a crawler or a stranger gets the website');
+    assert.match(visitor.headers.get('set-cookie') || '', /^epic_root=1; Max-Age=60/, 'and the page is told it came from epic.day/, for one minute');
     const notOurs = await fetch(`${base}/`, { redirect: 'manual', headers: { accept: 'text/html', cookie: 'epic_app=0' } });
     assert.equal(notOurs.headers.get('location'), '/en-gb/');
   });

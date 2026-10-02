@@ -401,6 +401,12 @@ export async function requireSession(req, res, next) {
     // allowed to do — and so that "allowed" has exactly one definition.
     req.access = await accessFor(req);
     void touchSession(session.id);
+    // A device session slides (repositories/sessions.js); the photo-and-stream
+    // cookie slides with it, so it never runs out while the bearer token is still
+    // good. Re-issued at most every few minutes, when the session is marked seen.
+    const seenAt = session.last_seen_at ? new Date(session.last_seen_at).getTime() : 0;
+    const bearerToken = bearer(req);
+    if (session.kind === 'device' && bearerToken && Date.now() - seenAt > 5 * 60 * 1000) sessionCookie(res, bearerToken);
     if (account) void touchAccount(account.id);
 
     // Everything downstream — including `currentHousehold()`, 86 call sites

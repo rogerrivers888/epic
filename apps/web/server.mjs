@@ -232,6 +232,10 @@ const server = http.createServer(guarded(async (req, res) => {
     return;
   }
   if (!siteClosed() && pathname === '/' && !APP_ROOT_PARAMS.some((k) => new URLSearchParams(search).has(k))) {
+    // `epic_root` (one minute) tells the homepage this visit came from epic.day/,
+    // so a browser signed in before `epic_app` existed is handed to the app on
+    // its first visit too (src/site/SiteScreen.tsx).
+    res.setHeader('set-cookie', 'epic_root=1; Max-Age=60; Path=/; SameSite=Lax');
     res.writeHead(302, { location: `/${localeOf(SITE, req)}/${search}`, 'cache-control': 'no-store', vary: 'Accept-Language, Cookie' });
     res.end();
     return;
