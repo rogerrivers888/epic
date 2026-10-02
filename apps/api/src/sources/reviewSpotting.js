@@ -30,61 +30,96 @@ import { candidatesFor, plainKindOf, gateWord, ageWord } from '../domain/questio
 import { recordCandidates } from '../repositories/questionSets.js';
 
 /**
- * The review-generic vocabulary that drowned the 21 Sep pass: opinions, service
- * words and the empty words a review is mostly made of. A candidate matching any
- * of these is not a feature and never reaches the pen. `plainKindOf` already
- * catches the opinion/condition words it knows (friendly, clean, busy …); this
- * is the rest — the food-opinion, service and filler vocabulary the owner named
- * (delicious, staff, great) and its near neighbours. Kept deliberately wide: a
- * feature wrongly dropped is raised again the next time the place is searched,
- * but an opinion let through is exactly the noise this exists to stop.
+ * A concrete feature is admitted by a POSITIVE signal, not by surviving a deny
+ * list (Codex, 2 Oct 2026): the 21 Sep pass let every unknown word through, so
+ * `fun`, `spacious`, `awesome` would land as "features". Here a candidate is a
+ * feature only if it names one — a facility noun — and carries no opinion word.
+ *
+ * `FEATURE_SOLO` are the nouns that are a feature on their own (sauna, waterfall,
+ * playground). `FEATURE_HEADS` are the head nouns a feature phrase ends in (the
+ * `pad` of "splash pad", the `track` of "mini race track", the `room` of "steam
+ * room") — broader, because the *modifier* is where a new feature's novelty lives
+ * (splash, toddler, gruffalo) while the head is an ordinary facility word. A new
+ * feature is still found: a new modifier on a known head. One whose head noun we
+ * did not anticipate is missed rather than guessed at — precision over recall, and
+ * the list grows as real ones turn up.
  */
-const REVIEW_NOISE = /\b(delicious|tasty|yummy|scrumptious|bland|flavour|flavourful|flavoursome|moreish|staff|service|team|waiter|waitress|waiting staff|server|manager|owner|host|hostess|great|good|nice|lovely|amazing|excellent|superb|outstanding|brilliant|fabulous|fantastic|wonderful|gorgeous|decent|okay|fine|poor|mediocre|average|atmosphere|ambience|ambiance|vibe|vibes|experience|time|times|visit|visited|trip|place|places|spot|venue|gem|hidden gem|recommend|recommended|recommendation|love|loved|enjoy|enjoyed|enjoyable|definitely|absolutely|highly|really|very|just|lovely time|price|prices|pricing|cost|costs|money|value|portion|portions|selection|choice|variety|quality|option|options|range|bit|lot|lots|everything|anything|something|nothing|everyone|everybody|anyone|family|families|kids|children|child|adults|people|folk|customer|customers|guest|guests|day|days|hour|hours|minute|minutes|week|weekend|year|years|morning|afternoon|evening|night|today|yesterday|return|returning|again|back|first|second|last|next|around|area|place to|lovely place)\b/i;
-
-/** Words so short or empty they are never a feature on their own. */
-const STOP_SOLO = new Set(['the', 'and', 'for', 'was', 'had', 'are', 'but', 'you', 'our', 'out', 'all', 'one', 'two', 'can', 'get', 'got', 'has', 'his', 'her', 'she', 'him', 'who', 'why', 'how', 'not', 'too', 'very', 'lot', 'bit', 'day']);
+const FEATURE_SOLO = new Set([
+  'pool', 'lido', 'sauna', 'spa', 'jacuzzi', 'steamroom', 'playground', 'playpark', 'maze',
+  'labyrinth', 'aquarium', 'zoo', 'farm', 'museum', 'gallery', 'planetarium', 'cinema', 'theatre',
+  'arena', 'waterfall', 'fountain', 'lake', 'pond', 'reservoir', 'beach', 'cove', 'cave', 'cavern',
+  'grotto', 'quarry', 'castle', 'fort', 'abbey', 'cathedral', 'chapel', 'lighthouse', 'windmill',
+  'bridge', 'pier', 'jetty', 'harbour', 'trampoline', 'carousel', 'rollercoaster', 'flume', 'slide',
+  'zipline', 'zipwire', 'arcade', 'bowling', 'minigolf', 'skatepark', 'splashpad', 'archery',
+  'climbing', 'abseiling', 'kayaking', 'canoeing', 'campsite', 'glamping', 'picnic', 'bbq', 'cafe',
+  'restaurant', 'bar', 'bistro', 'brasserie', 'pub', 'tearoom', 'conservatory', 'greenhouse',
+  'orchard', 'meadow', 'woodland', 'forest', 'wetland', 'boardwalk', 'viewpoint', 'lookout', 'summit',
+  'pavilion', 'bandstand', 'gazebo', 'paddock', 'stables', 'kennels', 'treehouse', 'dungeon',
+  'funfair', 'fairground', 'helterskelter', 'carpark', 'toilets', 'roundabout', 'seesaw', 'swings',
+  'sandpit', 'trail', 'track', 'ridge', 'waterpark', 'splashpark', 'adventure', 'fernery', 'rockery',
+]);
 
 /**
- * Generic nouns and sentence fragments that are not a feature *on their own* —
- * checked only for a single-word candidate, so the two-word feature that contains
- * one still stands: solo `room` is dropped, `steam room` is kept; solo `track` is
- * dropped, `race track` is kept. This is what the n-gram pass mostly leaves behind
- * once the opinions are gone — the halves of real features and the empty nouns a
- * review is built from. A real solo feature (sauna, waterfall, flume, playground,
- * pool) is not here and survives.
+ * The head noun a feature phrase ends in. Includes the generic-but-valid heads
+ * (`area`, `zone`, `room`, `point`, `course`) that are not a feature alone but are
+ * the head of one in context — "picnic area", "soft play zone", "steam room",
+ * "trig point", "assault course". Solo use of those is rejected (they are not in
+ * `FEATURE_SOLO`); only a real modifier in front makes them a feature.
  */
-const GENERIC_SOLO = new Set([
-  'room', 'rooms', 'area', 'areas', 'point', 'points', 'walk', 'walks', 'part', 'parts',
-  'side', 'sides', 'end', 'ends', 'front', 'back', 'top', 'bottom', 'middle',
-  'food', 'foods', 'drink', 'drinks', 'meal', 'meals', 'snack', 'snacks', 'menu', 'coffee', 'tea',
-  'thing', 'things', 'way', 'ways', 'stuff', 'spot', 'spots', 'place', 'places', 'time', 'times',
-  'kid', 'trip', 'trips', 'view', 'views', 'tour', 'tours', 'walkway',
-  'splash', 'steam', 'mini', 'race', 'pad', 'track', 'tracks', 'soft', 'play',
-  'water', 'sand', 'grass', 'field', 'ground', 'space', 'room', 'section', 'bit',
+const FEATURE_HEADS = new Set([
+  ...FEATURE_SOLO,
+  'pad', 'course', 'pitch', 'court', 'rink', 'wall', 'range', 'lane', 'lanes', 'alley', 'area',
+  'zone', 'centre', 'center', 'hall', 'room', 'field', 'green', 'point', 'pit', 'bay', 'deck',
+  'terrace', 'ride', 'rides', 'park', 'garden', 'gardens', 'house', 'barn', 'shed', 'hut', 'cabin',
+  'lodge', 'tent', 'kiosk', 'stall', 'station', 'gym', 'studio', 'show', 'display', 'exhibition',
+  'enclosure', 'sanctuary', 'reserve', 'walk', 'cruise', 'tour', 'workshop', 'frame', 'swing',
+  'climber', 'net', 'nets', 'tunnel', 'tower', 'chute', 'rapids', 'wall', 'golf', 'karting', 'karts',
+  'disco', 'party', 'cafe', 'kitchen', 'parlour', 'den', 'corner', 'yard', 'barn', 'play', 'pool',
+  'slide', 'bridge', 'pond', 'lake', 'trail', 'path', 'maze', 'fountain', 'wheel', 'coaster',
 ]);
+
+/**
+ * Opinion, service and empty review words — rejected wherever they appear in a
+ * phrase, so a real feature head with an opinion in front of it ("lovely garden",
+ * "friendly staff") is not admitted. `plainKindOf` already knows the opinion and
+ * condition words it was built with; this adds the food-opinion, service and
+ * generic review vocabulary (delicious, staff, great) the owner named.
+ */
+const OPINION = new Set([
+  'delicious', 'tasty', 'yummy', 'scrumptious', 'bland', 'moreish', 'staff', 'service', 'team',
+  'waiter', 'waitress', 'server', 'manager', 'owner', 'host', 'hostess', 'great', 'good', 'nice',
+  'lovely', 'amazing', 'excellent', 'superb', 'outstanding', 'brilliant', 'fabulous', 'fantastic',
+  'wonderful', 'gorgeous', 'decent', 'okay', 'poor', 'mediocre', 'average', 'atmosphere', 'ambience',
+  'ambiance', 'vibe', 'vibes', 'experience', 'gem', 'fun', 'interesting', 'spacious', 'awesome',
+  'cosy', 'cozy', 'pretty', 'cute', 'beautiful', 'stunning', 'incredible', 'magical', 'magnificent',
+  'impressive', 'exceptional', 'fresh', 'authentic', 'huge', 'massive', 'tiny', 'big', 'large',
+  'small', 'spotless', 'pristine', 'dated', 'tired', 'shabby', 'cramped', 'modern', 'contemporary',
+  'traditional', 'rustic', 'charming', 'quaint', 'delightful', 'memorable', 'enjoyable', 'relaxing',
+  'peaceful', 'tranquil', 'vibrant', 'lively', 'friendly', 'welcoming', 'helpful', 'worth', 'value',
+  'recommend', 'recommended', 'love', 'loved', 'enjoy', 'enjoyed', 'perfect', 'happy', 'disappointing',
+]);
+
+const isOpinionWord = (word) => OPINION.has(word) || Boolean(plainKindOf(word));
 
 /**
  * Does this candidate name a concrete feature — a thing a place *has*?
  *
- * Conservative on purpose (precision over recall): an opinion or condition
- * (`plainKindOf`), a review-generic word (`REVIEW_NOISE`), or a bare scrap is
- * dropped. A gate or age signal is always kept, rare or not — those are decisive
- * for the people who need them (`gateWord`/`ageWord`). Everything else that
- * survives is treated as a candidate feature and goes to the pen, where a human
- * approves the new ones before they become facts.
+ * Positive signal, precision over recall: no opinion word anywhere in the phrase,
+ * and a facility noun where it counts — a `FEATURE_SOLO` word on its own, a
+ * `FEATURE_HEADS` word at the end of a phrase, or a gate/age signal (step-free,
+ * baby changing) which is decisive for the people who need it. Everything else is
+ * dropped; a feature with an unanticipated head is missed, not guessed at.
  */
 export function looksLikeFeature(norm) {
   const w = String(norm ?? '').trim().toLowerCase();
   if (w.length < 3) return false;
-  if (gateWord(w) || ageWord(w)) return true;
-  if (plainKindOf(w)) return false;            // opinion or condition
-  if (REVIEW_NOISE.test(w)) return false;      // review-generic / service / opinion
   const words = w.split(/\s+/).filter(Boolean);
-  // A single word is held to a higher bar: most of what the n-gram pass leaves
-  // after the opinions are gone is the halves of real features and empty nouns.
-  // A real solo feature (sauna, waterfall, playground) is in neither set.
-  if (words.length === 1 && (STOP_SOLO.has(w) || GENERIC_SOLO.has(w))) return false;
-  return true;
+  // An opinion anywhere disqualifies — "lovely garden", "friendly staff".
+  if (words.some(isOpinionWord)) return false;
+  // Gate and age signals are features that matter at any frequency.
+  if (gateWord(w) || ageWord(w)) return true;
+  if (words.length === 1) return FEATURE_SOLO.has(w);
+  return FEATURE_HEADS.has(words[words.length - 1]);
 }
 
 /**
@@ -154,11 +189,22 @@ export async function spotFromDetail({ venueRef, detail, client = null } = {}) {
   const subcategory = await subcategoryOf(venueRef, client);
   if (!subcategory) return { subcategory: null, queued: 0, filtered, known: 0, features: [] };
 
+  const run = client ? (t, p) => client.query(t, p) : query;
   const known = await knownFeatureKeys(client);
   const entries = [];
   const report = [];
   for (const [norm, e] of features) {
-    const isKnown = known.has(norm);
+    // One sighting per (feature, place), idempotent: searching the same place
+    // again updates its polarity and does not count the place twice.
+    await run(
+      `insert into review_sightings (subcategory, norm, venue_ref, asserts, denies, asks)
+         values ($1, $2, $3, $4, $5, $6)
+       on conflict (subcategory, norm, venue_ref) do update
+         set asserts = greatest(review_sightings.asserts, excluded.asserts),
+             denies  = greatest(review_sightings.denies,  excluded.denies),
+             asks    = greatest(review_sightings.asks,    excluded.asks),
+             last_seen = now()`,
+      [subcategory, norm, venueRef, e.asserts, e.denies, e.asks]);
     entries.push({
       norm, raw: e.raw, rawForms: [e.raw],
       sources: ['google'],            // rented: no evidence quote is kept (QUOTABLE_SOURCES)
@@ -167,11 +213,42 @@ export async function spotFromDetail({ venueRef, detail, client = null } = {}) {
       placesSeen: 1,
       asserts: e.asserts, denies: e.denies, asks: e.asks,
     });
-    report.push({ norm, asserts: e.asserts, denies: e.denies, asks: e.asks, known: isKnown });
+    report.push({ norm, known: known.has(norm) });
   }
+  // Maintain the pen candidate (status, kind, the examples sample, the quote
+  // gate) through the normal door …
   await recordCandidates(subcategory, entries, { placesTotal: 1, client });
-  const knownCount = report.filter((r) => r.known).length;
-  return { subcategory, queued: entries.length, filtered, known: knownCount, features: report };
+  // … then set its counts to the honest aggregate over the sightings: the number
+  // of distinct places, and the polarity summed across them. recordCandidates
+  // merges with greatest(), which cannot accumulate one place at a time, so the
+  // true totals are written here (Codex, 2 Oct 2026). Only the pen rows — a
+  // promoted or ignored word is left as it was decided.
+  const norms = [...features.keys()];
+  await run(
+    `update harvest_candidates c set
+       places_seen = agg.places,
+       places_total = agg.places,
+       asserts = agg.asserts, denies = agg.denies, asks = agg.asks
+     from (
+       select norm,
+              count(distinct venue_ref) as places,
+              sum(asserts) as asserts, sum(denies) as denies, sum(asks) as asks
+         from review_sightings where subcategory = $1 and norm = any($2)
+         group by norm
+     ) agg
+     where c.subcategory = $1 and c.norm = agg.norm and c.status in ('new', 'unresolved')`,
+    [subcategory, norms]);
+
+  // Report accurate place counts for each feature (for the research stream / tests).
+  const { rows: counts } = await run(
+    'select norm, places_seen, asserts, denies, asks from harvest_candidates where subcategory = $1 and norm = any($2)',
+    [subcategory, norms]);
+  const byNorm = Object.fromEntries(counts.map((r) => [r.norm, r]));
+  for (const r of report) {
+    const c = byNorm[r.norm] ?? {};
+    r.places = c.places_seen ?? 1; r.asserts = c.asserts ?? 0; r.denies = c.denies ?? 0; r.asks = c.asks ?? 0;
+  }
+  return { subcategory, queued: entries.length, filtered, known: report.filter((r) => r.known).length, features: report };
 }
 
 /** Never let spotting break or slow the search that fed it (C30 is advisory only). */
