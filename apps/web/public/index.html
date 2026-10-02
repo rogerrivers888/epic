@@ -122,7 +122,10 @@
       (function () {
         var d = document.documentElement;
         function fit() {
-          var standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+          // iOS only: navigator.standalone exists nowhere else. On Android or a desktop
+          // install, screen.height counts the system bars and would push the app off
+          // the bottom (Codex).
+          var standalone = navigator.standalone === true;
           var w = screen.width, h = screen.height;
           var tall = innerWidth > innerHeight ? Math.min(w, h) : Math.max(w, h);
           var short = tall - innerHeight;

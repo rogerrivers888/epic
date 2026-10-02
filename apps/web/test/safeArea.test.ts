@@ -71,6 +71,8 @@ test('the two ends of the app each apply the inset once', () => {
   const html = read('public/index.html');
   assert.match(html, /html\.epic-screen-h #root \{ position: fixed; top: 0; right: 0; left: 0; bottom: auto; height: var\(--epic-screen-h\); \}/);
   assert.match(html, /standalone && short > 1 && short < 120/);
+  // iOS only — on Android or a desktop install screen.height counts system bars.
+  assert.match(html, /var standalone = navigator\.standalone === true;/);
   // Inspire draws its own head, so it takes the top inset itself.
   assert.match(read('src/components/InspireHeader.tsx'), /max\(16px, calc\(var\(--epic-sat\) \+ 10px\)\)/);
 });
