@@ -104,6 +104,9 @@ import { onGoogleStatus, onResearched } from './sources/closedCheck.js';
 import { onResearched as onResurfaced } from './repositories/placeSurfacing.js';
 import * as ownResearch from './sources/own.js';
 
+/** When this process started — the launch gate's fail-closed cutoff if its real one cannot be read (below). */
+const BOOTED_AT = new Date();
+
 const app = express();
 
 // Two proxies now, not one: Cloudflare terminates TLS for epic.day and hands
@@ -734,14 +737,23 @@ await loadSourceSettings();
 // The launch gate's automatic session cutoff: when the clean-slate migration ran
 // (siteGate.js). Resolved BEFORE the server listens, so no request is served while
 // the cutoff is still unknown. If it cannot be read and the gate is up, fail
-// closed — retire every session rather than honour a pre-launch one we cannot date
-// — and keep retrying until the read succeeds (Codex, 1 Oct 2026).
+// closed on what cannot be dated — and keep retrying until the read succeeds
+// (Codex, 1 Oct 2026).
+//
+// "Closed" is the moment this process started, not a date in the future. A
+// future cutoff refused every session including one minted a second ago, so a
+// passcode sign-in succeeded (the door is exempt) and handed back a token the
+// gate then refused on every read — agents signed in and saw only 401
+// coming_soon (owner, 2 Oct 2026: "any request carrying a valid Epic session …
+// passes the gate"). Migrations run before this process starts, so a session
+// minted after boot is after the clean slate by construction and is honoured;
+// one minted earlier waits for the real cutoff, which the retry restores.
 const loadLaunchCutoff = async () => {
   try { setCleanSlateEpoch(await cleanSlateAppliedAt()); return true; }
   catch (err) { console.warn(`epic-api: launch-gate cutoff load failed: ${err.message}`); return false; }
 };
 if (!(await loadLaunchCutoff()) && siteGateOn()) {
-  setCleanSlateEpoch(new Date(Date.now() + 365 * 24 * 3600_000));
+  setCleanSlateEpoch(BOOTED_AT);
   const retry = setInterval(async () => { if (await loadLaunchCutoff()) clearInterval(retry); }, 60_000);
   retry.unref?.();
 }
