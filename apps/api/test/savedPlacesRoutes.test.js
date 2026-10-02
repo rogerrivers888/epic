@@ -101,3 +101,17 @@ test('an agent or shared session can read but cannot compare, verdict or re-run'
     }
   } finally { await close(); }
 });
+
+test('a place whose only pictures are on its own website is findable in Photo review', async () => {
+  const ref = `google:venue-only-${randomUUID()}`;
+  await query(`insert into place_records (venue_ref, name, provenance) values ($1, 'Venue Only Bistro', '{}')`, [ref]);
+  await query(`insert into venue_site_images (venue_ref, image_url, page_url) values ($1, 'https://vo.example/a.jpg', 'https://vo.example/')`, [ref]);
+  const { base, close } = await serve();
+  try {
+    const body = await (await fetch(`${base}/review?q=Venue%20Only&reviewed=no`)).json();
+    const row = body.places.find((p) => p.venueRef === ref);
+    assert.ok(row, 'listed');
+    assert.equal(row.pictures, 1);
+    assert.ok(body.summary.places >= 1);
+  } finally { await close(); }
+});

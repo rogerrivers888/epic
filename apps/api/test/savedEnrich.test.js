@@ -259,3 +259,22 @@ test('an Openverse picture already held for another place is not attached to a s
   const { rows } = await query(`select count(*)::int as n from image_links where subject_type = 'place' and subject_id = $1`, [second]);
   assert.equal(rows[0].n, 0);
 });
+
+test('a website Claude found and opened has its pictures looked for at once', async () => {
+  const hh = await household();
+  const ref = `google:found-site-${randomUUID()}`;
+  await query(`insert into saved_place_enrichment (venue_ref, household_id, state) values ($1, $2, 'free')`, [ref, hh]);
+  await query(`insert into place_records (venue_ref, name, provenance) values ($1, 'Found Later', '{}')`, [ref]);
+  const looked = [];
+  await enrich.afterFree(ref, { householdId: hh, sessionId: null }, {
+    asks: [],
+    openverse: async () => ({ ok: true, stored: [], refused: 0 }),
+    venuePictures: async (_ref, site) => { looked.push(site); return { ok: true, kept: 3 }; },
+    searchWeb: async ({ meta }) => {
+      meta.costUsd = 0.02;
+      return { text: '{"fields":{"website":{"value":"https://found.example/","source_url":"https://found.example/"}}}', fetched: ['https://found.example/'], searches: 1 };
+    },
+  });
+  assert.deepEqual(looked, ['https://found.example/'], 'not left for a re-run');
+  assert.equal((await enrich.enrichmentOf(ref)).found.pictures.venueSite.kept, 3);
+});

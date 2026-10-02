@@ -271,6 +271,12 @@ export async function afterFree(venueRef, ctx, deps = {}) {
     Object.assign(found.fields, pass.fields);
     found.facts = pass.facts;
     found.notes.push(...pass.notes);
+    // A website Claude found and opened is the venue's site now: its pictures
+    // are looked for there and then, not on the next re-run (Codex, 2 Oct 2026).
+    if (!record?.website && pass.website) {
+      const vs = await (deps.venuePictures ?? venuePicturesFor)(venueRef, pass.website).catch((err) => ({ ok: false, why: err.message }));
+      found.pictures.venueSite = vs.ok ? { kept: vs.kept } : { error: vs.why };
+    }
     await query(
       `update saved_place_enrichment set state = 'done', claude_done_at = now(), last_run_at = now(),
               found = $2, cost_usd = cost_usd + $3, last_cost_usd = $3, error = null
@@ -468,6 +474,7 @@ async function writePass({ venueRef, reply, out, record, asks, costUsd }) {
     await scout.recordMenuFound(venueRef, { venueLabel: null, menuUrl: j.siteFacts.menu_url, how: 'saved-place research' }).catch(() => null);
   }
   return {
+    website: j.siteFacts.website ?? null,
     fields: j.fields, facts: j.facts,
     notes: [...j.notes, `Read ${out.fetched.length} page(s), ${out.searches} search(es).`],
     costUsd,

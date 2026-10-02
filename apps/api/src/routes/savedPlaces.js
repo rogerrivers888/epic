@@ -173,8 +173,12 @@ photoReviewRouter.get('/', requires('view_library'), async (req, res, next) => {
     const category = String(req.query.category ?? '').trim() || null;
     const reviewed = ['yes', 'no'].includes(req.query.reviewed) ? req.query.reviewed : null;
     const args = [];
-    const where = [`exists (select 1 from image_links l join image_assets i on i.id = l.image_id
-                             where l.subject_type = 'place' and l.subject_id = r.venue_ref and i.moderation <> 'rejected')`];
+    // Any picture of ours: one in the library, or one on the venue's own site
+    // held by address (Codex, 2 Oct 2026 — those count too, and must be findable).
+    const anyPicture = `(exists (select 1 from image_links l join image_assets i on i.id = l.image_id
+                             where l.subject_type = 'place' and l.subject_id = r.venue_ref and i.moderation <> 'rejected')
+                         or exists (select 1 from venue_site_images v where v.venue_ref = r.venue_ref))`;
+    const where = [anyPicture];
     if (q) { args.push(`%${q}%`); where.push(`r.name ilike $${args.length}`); }
     if (category) { args.push(category); where.push(`r.category = $${args.length}`); }
     if (reviewed === 'yes') where.push('pr.venue_ref is not null');
@@ -182,7 +186,8 @@ photoReviewRouter.get('/', requires('view_library'), async (req, res, next) => {
     const { rows } = await query(
       `select r.venue_ref, r.name, r.category, r.postcode, pr.verdict, pr.reviewed_at,
               (select count(*) from image_links l join image_assets i on i.id = l.image_id
-                where l.subject_type = 'place' and l.subject_id = r.venue_ref and i.moderation <> 'rejected') as pictures
+                where l.subject_type = 'place' and l.subject_id = r.venue_ref and i.moderation <> 'rejected')
+              + (select count(*) from venue_site_images v where v.venue_ref = r.venue_ref) as pictures
          from place_records r left join photo_reviews pr on pr.venue_ref = r.venue_ref
         where ${where.join(' and ')}
         order by (pr.venue_ref is null) desc, r.name nulls last
@@ -196,8 +201,7 @@ photoReviewRouter.get('/', requires('view_library'), async (req, res, next) => {
               count(*) filter (where pr.verdict = 'owned_worse_acceptable')::int as acceptable,
               count(*) filter (where pr.verdict = 'owned_not_fit')::int as not_fit
          from place_records r left join photo_reviews pr on pr.venue_ref = r.venue_ref
-        where exists (select 1 from image_links l join image_assets i on i.id = l.image_id
-                       where l.subject_type = 'place' and l.subject_id = r.venue_ref and i.moderation <> 'rejected')`);
+        where ${anyPicture}`);
     // A capped list says what it found, not what is absent (CLAUDE.md).
     res.json({
       summary: sum,

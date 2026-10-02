@@ -9,7 +9,8 @@
 // from everything already known.
 
 import { Router } from 'express';
-import { withTransaction } from '../db.js';
+import { query, withTransaction } from '../db.js';
+import { currentAccount } from '../context.js';
 import * as atlasRepo from '../repositories/atlas.js';
 import { reverseGeocode, geocode } from '../sources/geocode.js';
 import { searchAreas } from '../sources/areas.js';
@@ -32,6 +33,7 @@ const nearHomeMiles = (h) => closeToHomeRadiusMiles({
 });
 import { fillTaxonomy, needsTaxonomy, taxonomyKept } from '../sources/taxonomy.js';
 import { needsPhoto, photosKept, photosNow } from '../sources/rentedPhoto.js';
+import { isEnrichAccount } from '../sources/savedEnrich.js';
 import { countryOutline, sketchFor, SKETCH_ATTRIBUTION } from '../sources/sketch.js';
 import { atlasRowsFor, heroesForPlaces } from '../repositories/library.js';
 import { shelvesForAtlas, shelvesForVenue } from '../domain/moods.js';
@@ -408,6 +410,22 @@ atlas.get('/places', async (req, res, next) => {
     // provider's photographs travel beside a logo, and VenueThumb draws the
     // photograph first (owner, 12 Sep 2026).
     for (const p of places) p.photos = hasOwn(p) ? undefined : photosKept(p.venueRef) ?? undefined;
+    // The venue's own pictures, held by address and unlicensed, are for the
+    // owner's account and the back office only, until a licence route is
+    // decided (owner, 2 Oct 2026). Only where the row would otherwise draw its
+    // icon, and as a `photos` entry, which offline/policy.ts strips before a
+    // device keeps anything — so they are drawn live and never saved.
+    if (isEnrichAccount(currentAccount())) {
+      const bare = places.filter((p) => !hasOwn(p) && !p.photos?.length).map((p) => p.venueRef);
+      if (bare.length) {
+        const { rows: vs } = await query(
+          `select distinct on (venue_ref) venue_ref, image_url from venue_site_images
+            where venue_ref = any($1) and licence_status in ('none', 'granted')
+            order by venue_ref, (found_how = 'og:image') desc, found_at desc`, [bare]).catch(() => ({ rows: [] }));
+        const byRef = new Map(vs.map((v) => [v.venue_ref, v.image_url]));
+        for (const p of places) if (byRef.has(p.venueRef)) p.photos = [{ url: byRef.get(p.venueRef), attribution: 'venue website' }];
+      }
+    }
     // Where a place is, what kind of place it is, and what everybody else
     // made of it are looked up lazily a few rows per read, after the response
     // has gone; the web asks again shortly while any row is still waiting.
