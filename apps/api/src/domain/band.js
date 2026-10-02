@@ -28,11 +28,16 @@ import { estimateTravelMinutes } from './travel.js';
  * says "31 min drive" inside a thirty-minute band is the screen arguing with
  * itself, and that is what happens when two places compute the same journey.
  */
-export const minutesTo = (from, place, mode = 'driving') => (
-  from && place && place.lat != null && place.lng != null
+export const minutesTo = (from, place, mode = 'driving', minutesOf = null) => {
+  // A routed ring hands its own minutes in (`minutesOf`, from the OSRM matrix):
+  // then that is the number, and a place it has no routed time for is a place
+  // it cannot measure — never the straight-line estimate instead, which is the
+  // very disagreement this exists to prevent.
+  if (typeof minutesOf === 'function') return place ? (minutesOf(place) ?? null) : null;
+  return from && place && place.lat != null && place.lng != null
     ? estimateTravelMinutes(from, place, mode)
-    : null
-);
+    : null;
+};
 
 /**
  * Whether this place may be shown to somebody who asked for `minutes`.
@@ -41,9 +46,9 @@ export const minutesTo = (from, place, mode = 'driving') => (
  * the doubt here: the doubt is exactly how a forty-minute spa in Chiswick
  * reached a thirty-minute screen.
  */
-export function withinBand(place, { from, minutes, mode = 'driving' } = {}) {
+export function withinBand(place, { from, minutes, mode = 'driving', minutesOf = null } = {}) {
   if (!Number.isFinite(minutes)) return false;
-  const mins = minutesTo(from, place, mode);
+  const mins = minutesTo(from, place, mode, minutesOf);
   return mins != null && mins <= minutes;
 }
 

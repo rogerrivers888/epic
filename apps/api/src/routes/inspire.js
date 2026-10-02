@@ -78,7 +78,7 @@ import { censusForRing, categoryPage, peek, pageKey, ASKED } from '../sources/ri
 import { annotateClosed, hiddenAmong, markedAmong } from '../repositories/placeStatus.js';
 import { boxAround, boxKm, outcodeOfCell } from '../domain/ring.js';
 import * as reach from '../repositories/reach.js';
-import { sectorOf } from '../domain/reach.js';
+import { nearestCell, sectorOf } from '../domain/reach.js';
 
 /**
  * A stored picture, in the shape a card draws.
@@ -258,10 +258,14 @@ const asCard = (it, { centre, origin, mode, category, straight = false, circleKm
   // distance as a fraction of the reach — which is at most the minutes asked for
   // and never the journey-time estimate with its fixed overhead (a five-minute
   // transit card would otherwise print eight).
-  travelMinutes: straight && circleKm && origin
-    ? Math.min(minutes, Math.round((kmBetween(origin, it) / circleKm) * minutes))
-    : minutesTo(origin, it, mode),
-  estimated: true,
+  // A routed ring (OSRM) prints the routed minute its fence used — not the
+  // straight-line estimate, which would contradict the list it was kept in.
+  travelMinutes: it.routedMinutes != null
+    ? it.routedMinutes
+    : straight && circleKm && origin
+      ? Math.min(minutes, Math.round((kmBetween(origin, it) / circleKm) * minutes))
+      : minutesTo(origin, it, mode),
+  estimated: it.routedMinutes == null,
   dwellMinutes: 90,
   household: null,
   image: null,
@@ -297,6 +301,33 @@ const ringFrom = (q, { minutes, mode }) => reach.ringFor({
 /** One page of a category: the twenty a single display search returns. */
 const PAGE = 20;
 
+/**
+ * The routed minutes to each place, from an OSRM ring's sector map.
+ *
+ * A place is put in the sector whose centre is nearest — the same proxy
+ * `cellAt` uses — read from one query over the box the page covers rather than
+ * one per place. Keyed by the venue object, so the fence and the card read the
+ * same number; a place with no routed sector is simply absent.
+ */
+export async function routedMinutesFor(venues, minutesByCell) {
+  const out = new Map();
+  const pts = (venues ?? []).filter((v) => v?.lat != null && v?.lng != null);
+  if (!pts.length) return out;
+  const lats = pts.map((v) => Number(v.lat));
+  const lngs = pts.map((v) => Number(v.lng));
+  const pad = 0.05;
+  const { rows } = await query(
+    `select code, lat, lng from geo_cells
+      where scheme = 'sector' and lat between $1 and $2 and lng between $3 and $4`,
+    [Math.min(...lats) - pad, Math.max(...lats) + pad, Math.min(...lngs) - pad, Math.max(...lngs) + pad]);
+  for (const v of pts) {
+    const near = nearestCell({ lat: Number(v.lat), lng: Number(v.lng) }, rows);
+    const m = near ? minutesByCell[near.code] : undefined;
+    if (m != null) out.set(v, m);
+  }
+  return out;
+}
+
 async function placesFor({ ring, category, page, meter, taught, tax, householdId, minutes = 30, mode = 'driving', from = null }) {
   const start = from ?? ring.at ?? null;
   const straight = ring.method === 'straight-line';
@@ -323,7 +354,7 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
   // The reach method is in the key: a straight-line box and a matrix box for the
   // same cell/mode/minutes are different geometry, so when a mode gains a matrix
   // its pages must not be served from a page cached under the old estimate (Codex).
-  const ringKey = `${ring.cell}|${mode}|${minutes}|${start?.lat?.toFixed?.(3)},${start?.lng?.toFixed?.(3)}|${ring.method}`;
+  const ringKey = `${ring.cell}|${mode}|${minutes}|${start?.lat?.toFixed?.(3)},${start?.lng?.toFixed?.(3)}|${ring.method}|${ring.routed ? 'osrm' : 'est'}`;
   // Near and wide (owner, 26 Sep 2026, E13; domain/wideSearch.js). One box the
   // size of the journey hands its twenty to whatever is most famous inside it:
   // from Winchester, things to do within the hour came back at a median of
@@ -476,12 +507,21 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
     // asCard), so it never prints a time past the band and the two never
     // contradict. A matrix ring keeps the journey-time fence from the origin.
     let fenced;
+    let routedOf = null;
     if (straight && start && ring.circle) {
       const centre = { lat: Number(start.lat), lng: Number(start.lng) };
       const limitKm = ring.circle.km;
       fenced = (venues ?? []).filter((v) =>
         v?.lat != null && v?.lng != null
         && kmBetween(centre, { lat: Number(v.lat), lng: Number(v.lng) }) <= limitKm);
+    } else if (ring.routed && ring.minutesByCell) {
+      // An OSRM-routed ring (walking, cycling) fences by the routed minutes of
+      // the sector each place sits in — the same matrix the count reads its band
+      // from — so the list cannot lose a genuinely walkable place the
+      // straight-line estimate overstates (Codex). A place in no routed sector
+      // is one we cannot measure, and is not shown.
+      routedOf = await routedMinutesFor(venues, ring.minutesByCell);
+      fenced = fenceToBand(venues, { minutes, minutesOf: (v) => routedOf.get(v) });
     } else {
       fenced = fenceToBand(venues, { from: start, minutes, mode });
     }
@@ -525,6 +565,7 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
           theirRank: i + 1,
           outcode: v.outcode ?? null,
           lat: v.lat, lng: v.lng,
+          routedMinutes: routedOf?.get(v) ?? null,
           // Rented, shown, never written down: the card draws them and the
           // database never sees them.
           rating: v.rating ?? null, ratingCount: v.ratingCount ?? null,

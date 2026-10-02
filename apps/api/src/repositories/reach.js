@@ -296,6 +296,7 @@ export async function buildMatrix({ mode = 'driving', capMinutes = HORIZON_MINUT
   // rebuild would leave the old rows in place and a search would come back
   // empty (Codex, 17 Sep 2026).
   const canonical = travelMode(mode);
+  await refuseIfOsrmOwns(canonical);
   const cells = await allCells({ scheme });
   const { rows: [run] } = await query(
     `insert into reach_runs (scheme, mode, method, cap_minutes, cells) values ($1, $2, 'estimate', $3, $4) returning id`,
@@ -358,6 +359,7 @@ export async function buildMatrix({ mode = 'driving', capMinutes = HORIZON_MINUT
  */
 export async function refresh({ mode = 'driving', stampLimit = 2000, cellLimit = 2000 } = {}) {
   const canonical = travelMode(mode);
+  await refuseIfOsrmOwns(canonical);
   // One at a time, estate-wide.
   //
   // Two sweeps finishing within a minute of each other would otherwise refresh
@@ -483,7 +485,7 @@ export async function cellAt({ lat, lng, withinKm = 25 }) {
  */
 export async function reachableCells(cell, { minutes = 30, mode = 'driving', edge = EDGE_MINUTES } = {}) {
   const { rows } = await query(
-    'select to_cell, minutes, km from reach where from_cell = $1 and mode = $2 and minutes <= $3 order by minutes',
+    'select to_cell, minutes, km, method from reach where from_cell = $1 and mode = $2 and minutes <= $3 order by minutes',
     [cell, travelMode(mode), Math.min(HORIZON_MINUTES, minutes + edge)],
   );
   return rows;
@@ -569,7 +571,13 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
   // cell with reverse edges from its neighbours while it is not itself built,
   // and that partial ring must not pass as a matrix one (Codex).
   const wantHorizon = Math.min(HORIZON_MINUTES, minutes + EDGE_MINUTES);
-  if (travelMode(mode) !== 'driving' && !(await originBuilt(cell, travelMode(mode), wantHorizon))) {
+  // Which build the origin's marker came from, not only whether there is one:
+  // walking and cycling are routed over the road network by OSRM
+  // (sources/osrmMatrix.js), and a routed ring has to be fenced and printed by
+  // its routed minutes — the straight-line estimate overstates a footpath walk
+  // and would drop a place the matrix (and so the count) holds (Codex).
+  const marker = travelMode(mode) !== 'driving' ? await builtMethod(cell, travelMode(mode), wantHorizon) : null;
+  if (travelMode(mode) !== 'driving' && !marker) {
     method = 'straight-line';
     // Centre the estimate on the requested point when there is one, so the count
     // ring and the display search (which centres on the origin) cover the same
@@ -667,6 +675,12 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
     // distance-and-speed estimate. Callers surface this so a count is never
     // dressed as a journey-time one.
     method,
+    // True when the ring's minutes are OSRM-routed journeys. The display fence
+    // and the card's minute then come from `minutesByCell` (sector → routed
+    // minutes from this origin) rather than the straight-line estimator, so the
+    // list agrees with the count drawn from `band`.
+    routed: marker === 'osrm',
+    minutesByCell: marker === 'osrm' ? Object.fromEntries(within.map((c) => [c.to_cell, c.minutes])) : null,
     at,
   };
 }
@@ -680,11 +694,43 @@ const kmPerMinute = (mode) => straightLineReachKm(mode, 60) / 60;
  *  least the horizon this request needs? A build to a shorter cap does not cover
  *  a longer request, and serving it would freeze the ring past that cap (Codex). */
 async function originBuilt(cell, mode, wantMinutes = 0) {
+  return (await builtMethod(cell, mode, wantMinutes)) != null;
+}
+
+/** The method the origin's marker was built by — 'estimate' or 'osrm' — or null
+ *  when it has not been built for this mode out to `wantMinutes`. */
+export async function builtMethod(cell, mode, wantMinutes = 0) {
   const { rows } = await query(
-    'select 1 from cell_builds where from_cell = $1 and mode = $2 and cap_minutes >= $3 limit 1',
+    'select method from cell_builds where from_cell = $1 and mode = $2 and cap_minutes >= $3 limit 1',
     [cell, travelMode(mode), wantMinutes],
   );
+  return rows.length ? (rows[0].method ?? 'estimate') : null;
+}
+
+/**
+ * Whether OSRM owns this mode — any origin built for it by a routed pass.
+ *
+ * Once it does, the estimator must not write into it: its refresh writes both
+ * directions of every new edge, so a new or recentred cell would plant
+ * `estimate` rows in OSRM origins whose markers still say `osrm`, and a resumed
+ * OSRM pass would then skip them for good (Codex). Driving is the estimator's
+ * own and is never owned.
+ */
+export async function osrmOwns(mode) {
+  const canonical = travelMode(mode);
+  if (canonical === 'driving') return false;
+  const { rows } = await query(
+    "select 1 from cell_builds where mode = $1 and method = 'osrm' limit 1", [canonical]);
   return rows.length > 0;
+}
+
+/** The refusal the estimator's two writers share. */
+async function refuseIfOsrmOwns(mode) {
+  if (await osrmOwns(mode)) {
+    const err = new Error(`${travelMode(mode)} is routed by OSRM; the estimator does not write into it — rebuild it with reach-osrm.`);
+    err.status = 409;
+    throw err;
+  }
 }
 
 /**

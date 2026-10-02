@@ -82,17 +82,24 @@ router.get('/from', requires('view_library'), async (req, res, next) => {
     const mode = travelMode(req.query.mode ?? 'driving');
     const cells = await reach.reachableCells(cell, { minutes, mode });
     const places = req.query.places === '1' ? await reach.placesWithin(cell, { minutes, mode }) : null;
+    // What built this origin's rows, so the answer says routed when they are
+    // (Codex): an OSRM origin is real journey times; anything else is estimated.
+    const built = await reach.builtMethod(cell, mode, Math.min(HORIZON_MINUTES, minutes + EDGE_MINUTES));
+    const routed = built === 'osrm';
     res.json({
       cell, label: labelOf(cell), minutes, mode,
       cells: cells.map((c) => ({ cell: c.to_cell, label: labelOf(c.to_cell), minutes: c.minutes, km: c.km })),
       counts: { cells: cells.length, places: places?.length ?? null },
       places: places?.map((p) => ({ ref: p.venue_ref, cell: p.cell, minutes: p.minutes })) ?? null,
-      estimated: true,
+      estimated: !routed,
+      method: built ?? 'none',
       // Said out loud because the count is deliberately a little generous: the
-      // matrix looks five minutes past what was asked so that a place at the
-      // edge of its sector is offered, and the exact pass then fences it.
+      // matrix looks past what was asked so that a place at the edge of its
+      // sector is offered, and the exact pass then fences it.
       edgeMinutes: EDGE_MINUTES,
-      note: 'Travel times are estimated from distance, not routed, and the ring is widened by a few minutes so places at the edge of a postcode sector are not lost. The matrix is the filter; a list is still ordered by the exact distance to each place.',
+      note: routed
+        ? 'Travel times are routed over the OpenStreetMap network (OSRM), sector centre to sector centre, and the ring is widened by a few minutes so places at the edge of a postcode sector are not lost.'
+        : 'Travel times are estimated from distance, not routed, and the ring is widened by a few minutes so places at the edge of a postcode sector are not lost. The matrix is the filter; a list is still ordered by the exact distance to each place.',
     });
   } catch (err) { next(err); }
 });
@@ -134,6 +141,7 @@ router.post('/stamp', requires('manage_library'), async (req, res, next) => {
 router.post('/refresh', requires('manage_library'), async (req, res, next) => {
   try {
     const mode = travelMode(req.body?.mode ?? 'driving');
+    if (await reach.osrmOwns(mode)) return res.status(409).json({ error: `${mode} is routed by OSRM; rebuild it with reach-osrm, not the estimator.` });
     if (req.body?.wait === true) return res.json(await reach.refresh({ mode }));
     res.json({ started: true, mode });
     void reach.refresh({ mode }).catch(() => null);
@@ -172,6 +180,7 @@ router.post('/build', requires('manage_library'), async (req, res, next) => {
     // edge allowance or the allowance does nothing at ninety minutes.
     const capMinutes = Math.min(180, Math.max(5, Number(req.body?.capMinutes) || HORIZON_MINUTES));
     const mode = travelMode(req.body?.mode ?? 'driving');
+    if (await reach.osrmOwns(mode)) return res.status(409).json({ error: `${mode} is routed by OSRM; rebuild it with reach-osrm, not the estimator.` });
     if (req.body?.wait === true) return res.json(await reach.buildMatrix({ mode, capMinutes }));
     res.json({ started: true, mode, capMinutes });
     void reach.buildMatrix({ mode, capMinutes }).catch(() => null);
