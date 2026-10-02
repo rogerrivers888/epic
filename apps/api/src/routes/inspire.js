@@ -531,7 +531,13 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
       // the estimate when that origin has no routed build (Codex).
       let byCell = null;
       if (ring.routed) {
-        if (!from) byCell = ring.minutesByCell;
+        // The ring's own point is the ring's own origin: /around passes it as
+        // `from`, and re-snapping it to the nearest centroid could pick the
+        // neighbouring sector at a boundary while the count used this ring's
+        // map (Codex). Only a genuinely different travel origin is looked up.
+        const ownPoint = !from || (ring.at && Number(from.lat) === Number(ring.at.lat)
+          && Number(from.lng) === Number(ring.at.lng));
+        if (ownPoint) byCell = ring.minutesByCell;
         else {
           const oc = await reach.cellAt({ lat: Number(start.lat), lng: Number(start.lng) }).catch(() => null);
           byCell = oc?.code === ring.cell ? ring.minutesByCell
