@@ -630,9 +630,12 @@ export async function enrichmentList({ limit = 500 } = {}) {
 export async function enrichmentSummary() {
   const { rows: [r] } = await query(
     `with done as (select * from saved_place_enrichment where state = 'done'),
-          spent as (select coalesce(sum(paid_runs), 0)::int as paid, coalesce(sum(cost_usd), 0)::float as total_cost_usd,
-                           count(*) filter (where state in ('done', 'failed'))::int as researched
-                      from saved_place_enrichment)
+          -- Spend is read from the ledger itself, where every Claude call is
+          -- written as it is made: a pass cut short by a restart after it was
+          -- paid for is still counted (Codex, 2 Oct 2026).
+          spent as (select (select count(*) from provider_calls where purpose = '${PURPOSE}' and coalesce(estimated_cost_usd, 0) > 0)::int as paid,
+                           (select coalesce(sum(estimated_cost_usd), 0) from provider_calls where purpose = '${PURPOSE}')::float as total_cost_usd,
+                           (select count(*) from saved_place_enrichment where state in ('done', 'failed'))::int as researched)
      select count(*)::int as done,
             count(*) filter (where found->'fields'->'website'->>'value' is not null and found->'fields'->'website'->>'source' <> 'unknown')::int as website,
             count(*) filter (where found->'fields'->'menu_url'->>'value' is not null and found->'fields'->'menu_url'->>'source' <> 'unknown')::int as menu,

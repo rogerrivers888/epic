@@ -42,36 +42,34 @@ async function serve({ elevated = true } = {}) {
 
 const post = (url, body) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
-test('the summary says nothing until a pass has finished, then gives its rates', async () => {
+test('the summary says nothing until a pass has finished, then gives its rates; spend comes from the ledger', async () => {
   await query(`delete from saved_place_enrichment`);
+  await query(`delete from provider_calls where purpose = 'claude.enrich.saved_place'`);
   const { base, close } = await serve();
+  const ledger = (usd) => query(`insert into provider_calls (household_id, provider, purpose, estimated_cost_usd) values ($1, 'anthropic', 'claude.enrich.saved_place', $2)`, [HH, usd]);
   try {
     const empty = await (await fetch(`${base}/saved`)).json();
     assert.equal(empty.summary.done, 0);
     assert.equal(empty.summary.websitePct, null, 'withheld, not nought');
     assert.equal(empty.summary.avgCostPence, null);
     const a = `google:sum-${randomUUID()}`; const b = `google:sum-${randomUUID()}`;
-    await query(`insert into saved_place_enrichment (venue_ref, household_id, state, last_cost_usd, cost_usd, paid_runs, found) values
-      ($1, $3, 'done', 0.10, 0.10, 1, '{"fields":{"website":{"value":"https://a.example/","source":"site"}},"pictures":{"openverse":{"stored":1}}}'),
-      ($2, $3, 'done', 0.06, 0.06, 1, '{"fields":{"website":{"value":null,"source":"unknown"}},"pictures":{}}')`, [a, b, HH]);
+    await query(`insert into saved_place_enrichment (venue_ref, household_id, state, found) values
+      ($1, $3, 'done', '{"fields":{"website":{"value":"https://a.example/","source":"site"}},"pictures":{"openverse":{"stored":1}}}'),
+      ($2, $3, 'done', '{"fields":{"website":{"value":null,"source":"unknown"}},"pictures":{}}')`, [a, b, HH]);
+    await ledger(0.10); await ledger(0.06);
     const two = await (await fetch(`${base}/saved`)).json();
     assert.equal(two.summary.done, 2);
     assert.equal(two.summary.websitePct, 50, 'an unknown website is not a found one');
     assert.equal(two.summary.ownedImagePct, 50);
+    assert.equal(two.summary.paidPasses, 2);
     assert.equal(two.summary.avgCostPence, 6.3, '$0.08 average at the ledger rate');
-    // A paid re-run of the first: two passes on it, and its earlier pass still counts.
-    await query(`update saved_place_enrichment set cost_usd = 0.20, last_cost_usd = 0, paid_runs = 2 where venue_ref = $1`, [a]);
+    // A pass cut short after it was paid for: on the ledger, so it counts.
+    await ledger(0.04);
     const three = await (await fetch(`${base}/saved`)).json();
     assert.equal(three.summary.paidPasses, 3);
-    assert.equal(three.summary.avgCostPence, Math.round((0.26 / 3) * 0.79 * 1000) / 10, 'per pass, over every pass paid for');
-    assert.equal(three.summary.avgCostPerPlacePence, Math.round((0.26 / 2) * 0.79 * 1000) / 10);
-    // A paid pass that failed is still money spent.
-    const c = `google:sum-${randomUUID()}`;
-    await query(`insert into saved_place_enrichment (venue_ref, household_id, state, cost_usd, paid_runs) values ($1, $2, 'failed', 0.04, 1)`, [c, HH]);
-    const four = await (await fetch(`${base}/saved`)).json();
-    assert.equal(four.summary.paidPasses, 4);
-    assert.equal(four.summary.totalCostPence, Math.round(0.30 * 0.79 * 1000) / 10);
-    assert.equal(four.summary.done, 2, 'hit rates stay over the finished places');
+    assert.equal(three.summary.totalCostPence, Math.round(0.20 * 0.79 * 1000) / 10);
+    assert.equal(three.summary.avgCostPerPlacePence, Math.round((0.20 / 2) * 0.79 * 1000) / 10);
+    assert.equal(three.summary.done, 2, 'hit rates stay over the finished places');
   } finally { await close(); }
 });
 
