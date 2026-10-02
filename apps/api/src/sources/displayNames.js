@@ -238,8 +238,7 @@ const refsOfJson = (o) => [
  * is written back by itself; a save goes through the trigger again.
  */
 export async function nameJson(doc, { purpose = 'plan.displayName', householdId = null, cap = 25 } = {}) {
-  // Words first: a name tokenised into a title or a reply (tokeniseJson).
-  await untokenise(doc, { purpose, householdId, cap });
+  const tokens = tokensIn(doc);
   const found = [];
   const walk = (node) => {
     if (Array.isArray(node)) { node.forEach(walk); return; }
@@ -251,25 +250,28 @@ export async function nameJson(doc, { purpose = 'plan.displayName', householdId 
     if (keys.length) found.push({ node, refs, keys });
   };
   walk(doc);
-  if (!found.length) return doc;
+  if (!found.length && !tokens.size) return doc;
   // Only a provider's place had its name emptied; any other empty name was
   // empty when it was written and stays so. The provider's reference is the
   // one that names it.
   const rentedSet = await rentedRefs([...new Set(found.flatMap((f) => f.refs))]);
   for (const f of found) f.ref = f.refs.find((r) => rentedSet.has(r)) ?? null;
   found.splice(0, found.length, ...found.filter((f) => f.ref));
-  if (!found.length) return doc;
+  // One capped batch for the places in the words and the places named beside
+  // their references, so the cap is spent once and the two agree (Codex, 2 Oct 2026).
+  const singles = [...new Set([...found.map((f) => f.ref), ...[...tokens].flatMap((t) => t.split('|'))])];
+  if (!singles.length) return doc;
   // The resolver tries what we own, then a name Google gave within the hour
   // (in memory — free), then asks Google, capped, then says "a place".
-  const rows = found;
-  const tmp = [...new Map(rows.map((f) => [f.ref, { ref: f.ref, name: null }])).values()];
+  const tmp = singles.map((ref) => ({ ref, name: null }));
   await resolveNames(tmp, { refKey: 'ref', nameKey: 'name', purpose, householdId, cap });
   const by = new Map(tmp.map((x) => [x.ref, x]));
-  for (const f of rows) {
+  for (const f of found) {
     const x = by.get(f.ref);
     for (const k of f.keys) f.node[k] = x.name;
     f.node.nameSource = x.nameSource;
   }
+  untokenise(doc, new Map(tmp.map((x) => [x.ref, x.name])));
   return doc;
 }
 
@@ -337,23 +339,20 @@ export async function tokeniseJson(doc) {
   return copy;
 }
 
-/** Turn ⟦ref⟧ tokens in every string of `doc` back into names, in place. */
-async function untokenise(doc, opts) {
-  const refs = new Set();
+/** Every ⟦…⟧ token in `doc`'s strings. */
+function tokensIn(doc) {
+  const out = new Set();
   const seek = (node) => {
-    if (Array.isArray(node)) { node.forEach((v) => (typeof v === 'string' ? [...v.matchAll(TOKEN)].forEach((m) => refs.add(m[1])) : seek(v))); return; }
-    if (!node || typeof node !== 'object') return;
-    for (const v of Object.values(node)) {
-      if (typeof v === 'string') for (const m of v.matchAll(TOKEN)) refs.add(m[1]);
-      else seek(v);
-    }
+    if (typeof node === 'string') { for (const m of node.matchAll(TOKEN)) out.add(m[1]); return; }
+    if (Array.isArray(node)) { node.forEach(seek); return; }
+    if (node && typeof node === 'object') Object.values(node).forEach(seek);
   };
   seek(doc);
-  if (!refs.size) return;
-  const singles = [...new Set([...refs].flatMap((t) => t.split('|')))];
-  const rows = singles.map((ref) => ({ ref, name: null }));
-  await resolveNames(rows, { refKey: 'ref', nameKey: 'name', ...opts });
-  const by = new Map(rows.map((r) => [r.ref, r.name]));
+  return out;
+}
+
+/** Turn ⟦…⟧ tokens back into names, in place, from names already resolved (`by`: ref → name). */
+function untokenise(doc, by) {
   const nameOf = (token) => {
     const named = [...new Set(token.split('|').map((r) => by.get(r) ?? 'a place'))];
     return named.length === 1 ? named[0] : 'a place';

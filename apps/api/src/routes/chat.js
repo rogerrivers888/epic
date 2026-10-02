@@ -93,8 +93,11 @@ export async function tripContext(trip, me) {
     trips.daysOf(trip.id), trips.stopsOf(trip.id), trips.attendeesOf(trip.id), tripChat.guestsOf(trip.id), organiserOf(trip), groupOf(trip),
   ]);
   // The anchors a conversation hangs on carry the place's owned name, else a
-  // neutral word — never the stored label.
-  await resolveInto([{ rows: stops, refKey: 'venue_ref', nameKey: 'venue_name' }], { purpose: 'trip.displayName', householdId: trip.household_id });
+  // neutral word — never the stored label, and never a live Google name: an
+  // anchor's label is copied into topics, notices and the device's copy of the
+  // conversation, and a name that may only be shown cannot ride in any of
+  // them (Codex, 2 Oct 2026).
+  await resolveInto([{ rows: stops, refKey: 'venue_ref', nameKey: 'venue_name' }], { purpose: 'trip.displayName', householdId: trip.household_id, live: false });
   // A guest row that stands for a group participant is in the conversation
   // only while that participant is still in the group: somebody who withdrew
   // is not told what the group says after they left (Codex, 13 Sep 2026).
