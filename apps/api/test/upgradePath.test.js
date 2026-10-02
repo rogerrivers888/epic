@@ -47,9 +47,11 @@ async function dropDeadSiblings(admin) {
     if (!Number.isInteger(pid) || pid === process.pid || alive(pid)) continue;
     await admin.query(`drop database if exists ${datname} with (force)`).catch(() => null);
   }
-  // The old fixed name, once, without force: a peer still running the old file
-  // is not cut off mid-run; it goes the first time nobody is in it.
-  await admin.query(`drop database if exists ${PREFIX}`).catch(() => null);
+  // The old fixed name (epic_test_upgrade, no suffix) is deliberately left alone:
+  // a peer still running the old file creates it and only connects a moment
+  // later, and dropping it in that gap fails the peer — the very collision this
+  // name ends (Codex, 2 Oct 2026). One idle leftover costs nothing, and once
+  // every session has this file nothing recreates it.
 }
 
 /** Where the place index begins: everything before it is "an existing installation". */
