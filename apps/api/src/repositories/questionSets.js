@@ -1014,11 +1014,17 @@ export async function ignoreFeature(norm, { actor = null, reason = null } = {}) 
     // closed — not just the Google-sourced one that put it in this queue. An owned
     // feature-harvest candidate for the same word would otherwise stay actionable on
     // the ordinary candidate screen after a "never again" decision (Codex, 2 Oct 2026).
+    //
+    // Except for a word that is already one of our active facts: then this is a
+    // dismissal of the review suggestion, and only the review-raised (Google-sourced)
+    // candidates close — an owned-harvest candidate for the fact in a drawer the
+    // reviews never touched is left alone (Codex, 2 Oct 2026).
+    const dismissal = await isActiveFact(client, norm);
     const { rowCount } = await client.query(
       `update harvest_candidates set status = 'ignored', decided_by = $2, decided_at = now(), examples = '{}',
               decision_reason = coalesce($3, decision_reason)
-        where norm = $1 and status in ('new', 'unresolved')`,
-      [norm, actor, reason ? String(reason).slice(0, 300) : null]);
+        where norm = $1 and status in ('new', 'unresolved') and ($4 = false or sources ? 'google')`,
+      [norm, actor, reason ? String(reason).slice(0, 300) : null, dismissal]);
     if (!rowCount) throw bad(`"${norm}" is not a feature waiting in the review queue.`);
     // One transaction: the queue can never be left holding an actionable sighting
     // for a word whose candidate is already ignored (Codex, 2 Oct 2026).
@@ -1028,7 +1034,7 @@ export async function ignoreFeature(norm, { actor = null, reason = null } = {}) 
     // was suppressed (Codex, 2 Oct 2026). Ignoring it dismisses this suggestion —
     // the drawers it was raised in are closed to it, as a per-drawer ignore — and
     // writes no tombstone. Retiring the fact itself is the facts screen's to do.
-    if (await isActiveFact(client, norm)) return { feature: norm, ignored: rowCount, dismissed: true };
+    if (dismissal) return { feature: norm, ignored: rowCount, dismissed: true };
     // The norm-level tombstone: this Ignore is a decision about the word, so a
     // later spot in a drawer it was never seen in before must not raise it again
     // (Codex, 2 Oct 2026). Only the review queue writes here; ignoreCandidate,

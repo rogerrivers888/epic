@@ -948,8 +948,15 @@ test('ignoring a feature that is already a fact dismisses it, and retires nothin
   await query("delete from feature_tombstones where norm = 'card room'");
   await query("insert into place_attributes (key, label, kind) values ('card-room', 'Card room', 'yesno') on conflict (key) do update set active = true");
 
+  // An owned-harvest candidate for the same fact, in a drawer the reviews never touched.
+  const other = 'c30-dismiss-other';
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 dismiss other', 'c30-test-cat') on conflict do nothing", [other]);
+  await query('delete from harvest_candidates where subcategory = $1', [other]);
+  await sets.recordCandidates(other, [{ norm: 'card room', raw: 'card room', rawForms: ['card room'], sources: ['venue'], examples: [], kind: 'feature', placesSeen: 1, asserts: 1, denies: 0, asks: 0 }], { placesTotal: 1 });
+
   await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A card room.' } });
   const res = await sets.ignoreFeature('card room', { actor: 'tester' });
+  assert.notEqual((await query("select status from harvest_candidates where norm = 'card room' and subcategory = $1", [other])).rows[0].status, 'ignored', 'the owned candidate elsewhere is left alone');
   assert.equal(res.dismissed, true, 'dismissed, not ignored for good');
   assert.equal((await query("select count(*)::int n from feature_tombstones where norm = 'card room'")).rows[0].n, 0, 'no tombstone on an active fact');
   assert.equal((await query("select active from place_attributes where key = 'card-room'")).rows[0].active, true, 'the fact is still ours');
