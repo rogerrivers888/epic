@@ -315,14 +315,20 @@ export async function routedMinutesFor(venues, minutesByCell) {
   if (!pts.length) return out;
   const lats = pts.map((v) => Number(v.lat));
   const lngs = pts.map((v) => Number(v.lng));
-  const pad = 0.05;
+  // The same reach `cellAt` allows a point to its sector — 25km, the longitude
+  // degree taken at the box's poleward edge — so a venue in a sparse rural
+  // sector is not dropped for want of a centroid inside a tighter box (Codex).
+  const WITHIN_KM = 25;
+  const dLat = WITHIN_KM / 111;
+  const poleward = Math.max(Math.abs(Math.min(...lats)), Math.abs(Math.max(...lats)));
+  const dLng = WITHIN_KM / (111 * Math.max(0.3, Math.cos((poleward * Math.PI) / 180)));
   const { rows } = await query(
     `select code, lat, lng from geo_cells
       where scheme = 'sector' and lat between $1 and $2 and lng between $3 and $4`,
-    [Math.min(...lats) - pad, Math.max(...lats) + pad, Math.min(...lngs) - pad, Math.max(...lngs) + pad]);
+    [Math.min(...lats) - dLat, Math.max(...lats) + dLat, Math.min(...lngs) - dLng, Math.max(...lngs) + dLng]);
   for (const v of pts) {
     const near = nearestCell({ lat: Number(v.lat), lng: Number(v.lng) }, rows);
-    const m = near ? minutesByCell[near.code] : undefined;
+    const m = near && near.km <= WITHIN_KM ? minutesByCell[near.code] : undefined;
     if (m != null) out.set(v, m);
   }
   return out;
@@ -514,16 +520,30 @@ async function placesFor({ ring, category, page, meter, taught, tax, householdId
       fenced = (venues ?? []).filter((v) =>
         v?.lat != null && v?.lng != null
         && kmBetween(centre, { lat: Number(v.lat), lng: Number(v.lng) }) <= limitKm);
-    } else if (ring.routed && ring.minutesByCell) {
+    } else {
       // An OSRM-routed ring (walking, cycling) fences by the routed minutes of
       // the sector each place sits in — the same matrix the count reads its band
       // from — so the list cannot lose a genuinely walkable place the
       // straight-line estimate overstates (Codex). A place in no routed sector
-      // is one we cannot measure, and is not shown.
-      routedOf = await routedMinutesFor(venues, ring.minutesByCell);
-      fenced = fenceToBand(venues, { minutes, minutesOf: (v) => routedOf.get(v) });
-    } else {
-      fenced = fenceToBand(venues, { from: start, minutes, mode });
+      // is one we cannot measure, and is not shown. Routed from where the
+      // household travels from: the ring's own map when that is the ring's
+      // centre, the travel origin's when a search is made from elsewhere, and
+      // the estimate when that origin has no routed build (Codex).
+      let byCell = null;
+      if (ring.routed) {
+        if (!from) byCell = ring.minutesByCell;
+        else {
+          const oc = await reach.cellAt({ lat: Number(start.lat), lng: Number(start.lng) }).catch(() => null);
+          byCell = oc?.code === ring.cell ? ring.minutesByCell
+            : oc ? await reach.routedMinutesFrom(oc.code, { minutes, mode }) : null;
+        }
+      }
+      if (byCell) {
+        routedOf = await routedMinutesFor(venues, byCell);
+        fenced = fenceToBand(venues, { minutes, minutesOf: (v) => routedOf.get(v) });
+      } else {
+        fenced = fenceToBand(venues, { from: start, minutes, mode });
+      }
     }
     // Closed places, once the owner has applied the check, are not shown (C57).
     const hidden = await hiddenAmong(fenced.map((v) => `${v.source}:${v.sourcePlaceId}`));

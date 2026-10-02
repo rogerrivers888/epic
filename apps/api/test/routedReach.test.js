@@ -101,3 +101,25 @@ test('the estimator refuses to write into a mode OSRM owns; driving is never own
   await clean();
   assert.equal(await reach.osrmOwns('walking'), false);
 });
+
+test('routed minutes from a travel origin: the origin\'s own OSRM build, or nothing', async () => {
+  await clean(); await seed(); await routeO('osrm');
+  const m = await reach.routedMinutesFrom(O.code, { minutes: 30, mode: 'walking' });
+  assert.equal(m[A.code], 25);
+  // an origin with no routed build is not routed — the caller falls back to the estimate
+  assert.equal(await reach.routedMinutesFrom(A.code, { minutes: 30, mode: 'walking' }), null);
+  assert.equal(await reach.routedMinutesFrom(O.code, { minutes: 30, mode: 'driving' }), null);
+  await clean();
+});
+
+test('a non-driving estimator write still lands through the per-mode lock (no deadlock on a small pool)', async () => {
+  await clean();
+  await query(`delete from reach where mode = 'cycling' and method = 'estimate'`);
+  await query(`delete from cell_builds where mode = 'cycling' and method = 'estimate'`);
+  const res = await reach.refresh({ mode: 'cycling', stampLimit: 0, cellLimit: 1 });
+  assert.equal(res.cells, 1);
+  const { rows } = await query(`select count(*)::int n from cell_builds where mode = 'cycling' and method = 'estimate'`);
+  assert.equal(rows[0].n, 1);
+  await query(`delete from reach where mode = 'cycling' and method = 'estimate'`);
+  await query(`delete from cell_builds where mode = 'cycling' and method = 'estimate'`);
+});

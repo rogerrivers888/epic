@@ -48,6 +48,7 @@
 import { pool, query } from '../db.js';
 import { boundKm, HORIZON_MINUTES } from '../domain/reach.js';
 import { kmBetween, travelMode } from '../domain/travel.js';
+import { modeWriteLockKey } from '../repositories/reach.js';
 
 /**
  * How much wider than the estimator's bound to cast the net for candidates.
@@ -193,6 +194,10 @@ export async function buildOsrmMode({
       const client = await pool.connect();
       try {
         await client.query('begin');
+        // The mode's write lock, the same one the estimator takes per origin
+        // (repositories/reach.js#inModeWrite): from this origin's commit on, no
+        // estimator write can land in this mode.
+        await client.query('select pg_advisory_xact_lock(hashtext($1))', [modeWriteLockKey(canonical)]);
         await client.query('delete from reach where from_cell = $1 and mode = $2', [from.code, canonical]);
         await client.query(
           `insert into reach (from_cell, to_cell, mode, minutes, km, method)

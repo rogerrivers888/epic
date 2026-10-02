@@ -306,9 +306,10 @@ export async function buildMatrix({ mode = 'driving', capMinutes = HORIZON_MINUT
   try {
     for (let i = 0; i < cells.length; i += 1) {
       const rows = reachFrom(cells[i], cells, { mode: canonical, capMinutes });
-      await query('delete from reach where from_cell = $1 and mode = $2', [cells[i].code, canonical]);
+      await writeOrigin(canonical, async (q) => {
+      await q('delete from reach where from_cell = $1 and mode = $2', [cells[i].code, canonical]);
       if (rows.length) {
-        await query(
+        await q(
           `insert into reach (from_cell, to_cell, mode, minutes, km, method)
            select * from unnest($1::text[], $2::text[], $3::text[], $4::smallint[], $5::real[], $6::text[])
            on conflict (from_cell, to_cell, mode) do update set minutes = excluded.minutes, km = excluded.km, method = excluded.method`,
@@ -319,7 +320,7 @@ export async function buildMatrix({ mode = 'driving', capMinutes = HORIZON_MINUT
       // What this origin was built to, written as it finishes. The matrix's
       // completeness is a fact about each origin, not something that can be
       // read back out of the times it happens to hold.
-      await query(
+      await q(
         `insert into cell_builds (from_cell, mode, cap_minutes, pairs, method, built_lat, built_lng, at)
          values ($1, $2, $3, $4, 'estimate', $5, $6, now())
          on conflict (from_cell, mode) do update
@@ -328,6 +329,7 @@ export async function buildMatrix({ mode = 'driving', capMinutes = HORIZON_MINUT
                built_lng = excluded.built_lng, at = excluded.at`,
         [cells[i].code, canonical, capMinutes, rows.length, cells[i].lat, cells[i].lng],
       );
+      });
       pairs += rows.length;
       if (onProgress && i % 100 === 0) { try { onProgress({ done: i + 1, of: cells.length, pairs }); } catch { /* not the build */ } }
     }
@@ -409,7 +411,8 @@ async function refreshWhileLocked({ canonical, stampLimit, cellLimit }) {
     // has moved, a neighbour it has moved away from would otherwise keep a row
     // pointing at it for ever — the write below replaces every edge that
     // touches this cell, so every edge that touches it has to go first.
-    await query('delete from reach where (from_cell = $1 or to_cell = $1) and mode = $2', [cell.code, canonical]);
+    await writeOrigin(canonical, async (q) => {
+    await q('delete from reach where (from_cell = $1 or to_cell = $1) and mode = $2', [cell.code, canonical]);
     if (rows.length) {
       const froms = [], tos = [], mins = [], kms = [];
       for (const r of rows) {
@@ -417,14 +420,14 @@ async function refreshWhileLocked({ canonical, stampLimit, cellLimit }) {
         // The way back, for every cell that is not this one.
         if (r.to_cell !== r.from_cell) { froms.push(r.to_cell); tos.push(r.from_cell); mins.push(r.minutes); kms.push(r.km); }
       }
-      await query(
+      await q(
         `insert into reach (from_cell, to_cell, mode, minutes, km, method)
          select f, t, $3, m, k, 'estimate' from unnest($1::text[], $2::text[], $4::smallint[], $5::real[]) as u(f, t, m, k)
          on conflict (from_cell, to_cell, mode) do update set minutes = excluded.minutes, km = excluded.km, method = excluded.method`,
         [froms, tos, canonical, mins, kms],
       );
     }
-    await query(
+    await q(
       `insert into cell_builds (from_cell, mode, cap_minutes, pairs, method, built_lat, built_lng, at)
        values ($1, $2, $3, $4, 'estimate', $5, $6, now())
        on conflict (from_cell, mode) do update
@@ -432,6 +435,7 @@ async function refreshWhileLocked({ canonical, stampLimit, cellLimit }) {
              built_lat = excluded.built_lat, built_lng = excluded.built_lng, at = excluded.at`,
       [cell.code, canonical, HORIZON_MINUTES, rows.length, cell.lat, cell.lng],
     );
+    });
     pairs += rows.length;
   }
   // The cells that gained a row pointing back at a new neighbour now hold more
@@ -697,6 +701,19 @@ async function originBuilt(cell, mode, wantMinutes = 0) {
   return (await builtMethod(cell, mode, wantMinutes)) != null;
 }
 
+/**
+ * The routed minutes from an origin cell, sector by sector — or null when that
+ * origin has no OSRM build for the mode out to the horizon the request needs.
+ * For a search made from somewhere other than the ring's own centre: the list
+ * and its cards must be routed from where the household is travelling from.
+ */
+export async function routedMinutesFrom(cell, { minutes = 30, mode = 'walking' } = {}) {
+  if (!cell || travelMode(mode) === 'driving') return null;
+  if ((await builtMethod(cell, mode, Math.min(HORIZON_MINUTES, minutes + EDGE_MINUTES))) !== 'osrm') return null;
+  const rows = await reachableCells(cell, { minutes, mode });
+  return Object.fromEntries(rows.map((r) => [r.to_cell, r.minutes]));
+}
+
 /** The method the origin's marker was built by — 'estimate' or 'osrm' — or null
  *  when it has not been built for this mode out to `wantMinutes`. */
 export async function builtMethod(cell, mode, wantMinutes = 0) {
@@ -723,6 +740,43 @@ export async function osrmOwns(mode) {
     "select 1 from cell_builds where mode = $1 and method = 'osrm' limit 1", [canonical]);
   return rows.length > 0;
 }
+
+/** The advisory-lock key every writer of a mode's matrix takes per origin. */
+export const modeWriteLockKey = (mode) => `epic.reach.write:${travelMode(mode)}`;
+
+/**
+ * One estimator origin-write for a walking/cycling/transit matrix, made atomic
+ * against an OSRM build: a transaction that takes the mode's write lock (the
+ * same one `buildOsrmMode` takes per origin) and re-checks ownership *inside*
+ * it. The check before a long build is only a fast refusal; this is the one
+ * that holds — once OSRM has committed its first origin, no estimator write can
+ * follow it, and one already in flight finishes before OSRM's next (Codex).
+ */
+async function inModeWrite(mode, write) {
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    await client.query('select pg_advisory_xact_lock(hashtext($1))', [modeWriteLockKey(mode)]);
+    const { rows } = await client.query(
+      "select 1 from cell_builds where mode = $1 and method = 'osrm' limit 1", [travelMode(mode)]);
+    if (rows.length) {
+      const err = new Error(`${travelMode(mode)} is routed by OSRM; the estimator does not write into it — rebuild it with reach-osrm.`);
+      err.status = 409;
+      throw err;
+    }
+    await write((sql, params) => client.query(sql, params));
+    await client.query('commit');
+  } catch (err) {
+    await client.query('rollback').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** Driving is the estimator's own and is never owned, so it writes as it always
+ *  has; every other mode writes each origin through `inModeWrite`. */
+const writeOrigin = (mode, write) => (travelMode(mode) === 'driving' ? write(query) : inModeWrite(mode, write));
 
 /** The refusal the estimator's two writers share. */
 async function refuseIfOsrmOwns(mode) {
