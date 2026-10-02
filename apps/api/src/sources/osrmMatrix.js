@@ -140,7 +140,7 @@ export function osrmTable(baseUrl, { fetchImpl = fetch, profile = 'driving' } = 
  */
 export async function buildOsrmMode({
   mode, cells, origins = cells, table, horizon = HORIZON_MINUTES, scheme = 'sector',
-  resume = true, since = null, chunk = 300, onProgress = null,
+  resume = true, since = null, chunk = 300, onProgress = null, onRingsDropped = null,
 } = {}) {
   const canonical = travelMode(mode);
   if (canonical !== 'walking' && canonical !== 'cycling') {
@@ -198,6 +198,7 @@ export async function buildOsrmMode({
       // an interruption leaves an origin either fully built or untouched —
       // never wiped-then-marked-complete, which a reader would trust and a
       // resume would skip for good (Codex).
+      let droppedRings = [];
       const client = await pool.connect();
       try {
         await client.query('begin');
@@ -229,15 +230,21 @@ export async function buildOsrmMode({
         // of the 30-day cycle (Codex). Drop them in the same transaction, so the
         // next request recomputes from the routed matrix — never a half-built
         // run leaving a ring that disagrees with the rows under it.
-        await client.query('delete from ring_counts where cell = $1 and mode = $2', [from.code, canonical]);
+        const { rows: dropped } = await client.query(
+          'delete from ring_counts where cell = $1 and mode = $2 returning minutes', [from.code, canonical]);
         await client.query('delete from ring_rankings where cell = $1 and mode = $2', [from.code, canonical]);
         await client.query('commit');
+        droppedRings = [...new Set(dropped.map((r) => r.minutes))]
+          .map((minutes) => ({ cell: from.code, mode: canonical, minutes }));
       } catch (err) {
         await client.query('rollback').catch(() => {});
         throw err;
       } finally {
         client.release();
       }
+      // The rings just dropped are handed back so a caller that owes them a
+      // recount can keep the keys somewhere that outlives this process.
+      if (droppedRings.length && onRingsDropped) await onRingsDropped(droppedRings);
       pairs += edges.length;
       built += 1;
       if (onProgress && i % 100 === 0) {

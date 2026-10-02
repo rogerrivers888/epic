@@ -148,7 +148,9 @@ test('buildOsrmMode drops the stale ring for a rebuilt origin, and only its own 
       `insert into ring_rankings (cell, mode, minutes, category, venue_ref, rank, epic_score) values ('sector:ZZ1 1', $1, 30, 'fun', 'ref:x', 1, 50)`, [mode]);
   }
   const table = async (origin, dests) => dests.map((d) => ({ to: d, seconds: 600, metres: 900 }));
-  await buildOsrmMode({ mode: 'walking', cells: CELLS, table, horizon: 130, scheme: 'test-osrm', resume: false });
+  const handed = [];
+  await buildOsrmMode({ mode: 'walking', cells: CELLS, table, horizon: 130, scheme: 'test-osrm', resume: false, onRingsDropped: (k) => { handed.push(...k); } });
+  assert.deepEqual(handed, [{ cell: 'sector:ZZ1 1', mode: 'walking', minutes: 30 }], 'the dropped ring is handed back');
   // the walking ring, counted from the reach we just replaced, is gone
   const walk = await query(`select 1 from ring_counts where cell='sector:ZZ1 1' and mode='walking'`);
   assert.equal(walk.rows.length, 0);

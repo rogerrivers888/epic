@@ -29,6 +29,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { mkdir, rename, rm, stat } from 'node:fs/promises';
 import { Readable } from 'node:stream';
@@ -40,6 +41,46 @@ import { allCells } from '../repositories/reach.js';
 import { buildOsrmMode, osrmTable } from '../sources/osrmMatrix.js';
 
 export const OSRM_BUILD_KEY = 'reach:osrm-build';
+
+/** The walking/cycling ring keys a build owes a recount, kept where a retry can find them. */
+export const OSRM_RINGS_KEY = 'reach:osrm-build:rings';
+
+const ringId = (k) => `${k.cell}|${k.mode}|${k.minutes}`;
+const fromRingId = (id) => { const [cell, mode, minutes] = id.split('|'); return { cell, mode, minutes: Number(minutes) }; };
+
+/** Add ring keys to the persisted owed-a-recount set (a union; never loses one). */
+export async function rememberRings(keys) {
+  const ids = [...new Set((keys ?? []).map(ringId))];
+  if (!ids.length) return;
+  await query(
+    `insert into bo_settings (key, value, version, updated_by, updated_at)
+     values ($1, jsonb_build_object('rings', $2::jsonb), 1, 'osrm-build service', now())
+     on conflict (key) do update set
+       value = jsonb_build_object('rings', (
+         select coalesce(jsonb_agg(distinct x), '[]'::jsonb)
+           from jsonb_array_elements(coalesce(bo_settings.value->'rings', '[]'::jsonb) || $2::jsonb) as x)),
+       version = bo_settings.version + 1, updated_at = now()`,
+    [OSRM_RINGS_KEY, JSON.stringify(ids)]);
+}
+
+/** The persisted owed-a-recount set. */
+export async function pendingRings() {
+  const { rows: [row] } = await query('select value from bo_settings where key = $1', [OSRM_RINGS_KEY]);
+  return (row?.value?.rings ?? []).map(fromRingId);
+}
+
+/** Forget recounted keys — only those, so a key added meanwhile survives. */
+export async function forgetRings(keys) {
+  const ids = (keys ?? []).map(ringId);
+  if (!ids.length) return;
+  await query(
+    `update bo_settings set value = jsonb_build_object('rings', (
+       select coalesce(jsonb_agg(x), '[]'::jsonb)
+         from jsonb_array_elements(coalesce(value->'rings', '[]'::jsonb)) as x
+        where not (x #>> '{}' = any($2::text[])))), updated_at = now()
+      where key = $1`,
+    [OSRM_RINGS_KEY, ids]);
+}
 
 /** A run that has said `running` for this long without finishing died with its container. */
 export const STALE_RUN_HOURS = 12;
@@ -124,7 +165,7 @@ export async function claimOsrmBuild({ by = 'osrm-build service' } = {}) {
   const out = await writeState(
     (was) => {
       const startedAt = new Date().toISOString();
-      return { state: 'running', startedAt, runBy: by, epoch: was.epoch ?? startedAt };
+      return { state: 'running', startedAt, runBy: by, runId: randomUUID(), epoch: was.epoch ?? startedAt };
     },
     { who: by, expect: (was) => was.state === 'approved' },
   );
@@ -204,6 +245,7 @@ export async function runOsrmBuildJob({
   const d = {
     claim: claimOsrmBuild, retire: retireStaleRun, record: writeState,
     download, run, startRouted, allCells, buildOsrmMode, osrmTable,
+    rememberRings, pendingRings, forgetRings,
     ringKeys: async ({ before = null } = {}) => (await query(
       `select distinct cell, mode, minutes from ring_counts
         where mode in ('walking', 'cycling') and ($1::timestamptz is null or computed_at < $1::timestamptz)`,
@@ -229,7 +271,8 @@ export async function runOsrmBuildJob({
     // The walking and cycling rings that exist now are the ones this build
     // will make stale; their keys are kept so exactly those are recounted at
     // the end, even though the build drops each one as its origin is rebuilt.
-    const ringKeys = await d.ringKeys();
+    // Persisted, not held in memory, so a retry after a failure still owes them.
+    await d.rememberRings(await d.ringKeys());
     await d.download(extractUrl, pbf);
 
     let cells = await d.allCells({ scheme: 'sector' });
@@ -264,6 +307,7 @@ export async function runOsrmBuildJob({
         const out = await d.buildOsrmMode({
           mode: p.mode, cells, origins, table: d.osrmTable(routed.url, { profile: p.label }), horizon,
           resume: true, since: claimed.epoch, chunk: 300,
+          onRingsDropped: (keys) => d.rememberRings(keys),
           onProgress: ({ done, of, pairs }) => d.log(p.mode, `${done}/${of}`, `${pairs} pairs`),
         });
         result.modes[p.mode] = { built: out.built, skipped: out.skipped, pairs: out.pairs, runId: out.runId };
@@ -279,20 +323,27 @@ export async function runOsrmBuildJob({
     // it was replacing (the race osrmMatrix.js recorded). Driving is untouched
     // by this build and is not recounted (Codex).
     const finished = new Date().toISOString();
-    const keys = new Map([...ringKeys, ...(await d.ringKeys({ before: finished }))].map((k) => [`${k.cell}|${k.mode}|${k.minutes}`, k]));
-    let recounted = 0;
-    for (const k of keys.values()) {
-      await d.recountRing(k).catch((err) => d.log('ring recount failed', k, String(err?.message ?? err)));
-      recounted += 1;
+    await d.rememberRings(await d.ringKeys({ before: finished }));
+    const owed = await d.pendingRings();
+    const done = [];
+    for (const k of owed) {
+      try { await d.recountRing(k); done.push(k); } catch (err) { d.log('ring recount failed', k, String(err?.message ?? err)); }
     }
-    result.ringsRecounted = recounted;
+    // Only what was recounted is forgotten: a failed recount stays owed.
+    await d.forgetRings(done);
+    result.ringsRecounted = done.length;
+    result.ringsStillOwed = owed.length - done.length;
     result.minutes = Math.round((Date.now() - t0) / 60000);
-    await d.record({ state: 'done', finishedAt: new Date().toISOString(), result, why: null }, { who: 'osrm-build service' });
+    const mine = (was) => was.state === 'running' && was.runId === claimed.runId;
+    const rec = await d.record({ state: 'done', finishedAt: new Date().toISOString(), result, why: null }, { who: 'osrm-build service', expect: mine });
+    if (rec && rec.changed === false) d.log('this run was superseded; its result is not recorded over the newer one');
     return { ran: true, result };
   } catch (err) {
+    // Only over this run's own `running` state: a run retired for silence and
+    // replaced must never write its ending over the newer build's (Codex).
     await d.record(
       { state: 'failed', finishedAt: new Date().toISOString(), why: String(err?.message ?? err).slice(0, 400), result },
-      { who: 'osrm-build service' },
+      { who: 'osrm-build service', expect: (was) => was.state === 'running' && was.runId === claimed.runId },
     ).catch(() => {});
     throw err;
   }

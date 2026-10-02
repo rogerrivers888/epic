@@ -13,7 +13,7 @@ const job = await import('../src/jobs/osrmBuild.js');
 
 test.after(() => pool.end());
 
-const reset = () => query(`delete from bo_settings where key = $1`, [job.OSRM_BUILD_KEY]);
+const reset = () => query(`delete from bo_settings where key = any($1)`, [[job.OSRM_BUILD_KEY, job.OSRM_RINGS_KEY]]);
 
 test('approve marks it, the service claims it once, and approving again while it runs is refused', async () => {
   await reset();
@@ -49,7 +49,7 @@ const mocks = (calls, overrides = {}) => ({
   buildOsrmMode: async ({ mode }) => { calls.push(`build ${mode}`); return { built: 1, skipped: 0, pairs: 1, runId: 'r' }; },
   osrmTable: () => async () => [],
   ringKeys: async () => [{ cell: 'sector:ZZ1 1', mode: 'walking', minutes: 30 }],
-  recountRing: async () => { calls.push('recount'); },
+  recountRing: async (k) => { calls.push('recount'); calls.push(`recount ${k.cell}|${k.minutes}`); },
   rmrf: async (p) => { calls.push(`rm ${p.split('/').pop()}`); },
   log: () => {},
   ...overrides,
@@ -70,7 +70,7 @@ test('an approved build runs walking then cycling, deletes each graph, recounts 
   const out = await job.runOsrmBuildJob({ dataDir: '/tmp/osrm-job-test', deps: mocks(calls) });
   assert.equal(out.ran, true);
   assert.deepEqual(Object.keys(out.result.modes), ['walking', 'cycling']);
-  const order = calls.filter((c) => /^(osrm-extract|build|rm|recount)/.test(c));
+  const order = calls.filter((c) => /^(osrm-extract|build|rm|recount$)/.test(c));
   assert.deepEqual(order, [
     'rm gb.osm.pbf',
     'rm foot', 'osrm-extract /opt/foot.lua', 'build walking', 'rm foot',
@@ -145,4 +145,44 @@ test('an interrupted download leaves neither the extract nor a partial file', as
   const whole = async () => ({ ok: true, body: new ReadableStream({ start(c) { c.enqueue(new Uint8Array([1, 2, 3])); c.close(); } }) });
   await job.download('http://x', dest, { fetchImpl: whole });
   assert.deepEqual(await readdir(dir), ['gb.osm.pbf']);
+});
+
+test('a ring dropped mid-build is still owed after a failure, and the retry recounts it', async () => {
+  await reset();
+  await job.approveOsrmBuild({ by: 'owner@test' });
+  const dropped = { cell: 'sector:ZZ9 7', mode: 'walking', minutes: 60 };
+  await assert.rejects(() => job.runOsrmBuildJob({
+    dataDir: '/tmp/osrm-job-test',
+    deps: mocks([], {
+      ringKeys: async () => [],
+      buildOsrmMode: async ({ onRingsDropped }) => { await onRingsDropped([dropped]); throw new Error('died mid-build'); },
+    }),
+  }), /died mid-build/);
+  assert.deepEqual(await job.pendingRings(), [dropped], 'kept where the retry can find it');
+  await job.approveOsrmBuild({ by: 'owner@test' });
+  const calls = [];
+  await job.runOsrmBuildJob({ dataDir: '/tmp/osrm-job-test', deps: mocks(calls, { ringKeys: async () => [] }) });
+  assert.ok(calls.includes('recount sector:ZZ9 7|60'), 'the retry recounts the ring the failed run dropped');
+  assert.deepEqual(await job.pendingRings(), [], 'and forgets it once recounted');
+  await reset();
+});
+
+test('a run retired and replaced cannot write its ending over the newer build', async () => {
+  await reset();
+  await job.approveOsrmBuild({ by: 'owner@test' });
+  await job.runOsrmBuildJob({
+    dataDir: '/tmp/osrm-job-test',
+    deps: mocks([], {
+      buildOsrmMode: async ({ mode }) => {
+        if (mode === 'cycling') {
+          // While this run is still going it is retired for silence and approved again.
+          await job.retireStaleRun({ now: Date.now() + (job.STALE_RUN_HOURS + 1) * 3600_000 });
+          await job.approveOsrmBuild({ by: 'owner@test' });
+        }
+        return { built: 1, skipped: 0, pairs: 1, runId: 'r' };
+      },
+    }),
+  });
+  assert.equal((await job.osrmBuildState()).state, 'approved', 'the newer approval stands');
+  await reset();
 });
