@@ -867,6 +867,7 @@ export const googleSource = {
   async peekName(id, { meter = null } = {}) {
     if (off(meter)) return null;
     const p = await call(`/places/${id}`, { method: 'GET', fieldMask: PEEK_FIELDS, meter });
+    noteLiveName(`google:${p.id ?? id}`, p.displayName?.text ?? null);
     return {
       id: p.id ?? id,
       name: p.displayName?.text ?? null,
@@ -963,6 +964,7 @@ export async function examplesOfType({ center, radiusKm = 40, type, words = null
   // dropped rather than shown as an example of it (Codex, 13 Sep 2026).
   const raw = data.places || [];
   const kept = searchable ? raw : raw.filter((p) => (p.types || []).includes(String(type)));
+  for (const p of raw) noteLiveName(`google:${p.id}`, p.displayName?.text ?? null);
   const places = kept.slice(0, limit).map((p) => ({
     id: p.id,
     name: p.displayName?.text ?? null,
@@ -1098,6 +1100,7 @@ export async function rankedSlice({ box, includedType, query, pageToken = null, 
   }
   // A hotel is not a thing to do, even when Google types it as a restaurant
   // because it has one — the same fence displaySlice draws.
+  for (const p of data.places || []) noteLiveName(`google:${p.id}`, p.displayName?.text ?? null);
   const places = (data.places || [])
     .filter((p) => !LODGING.has(p.primaryType))
     .map((p) => ({ id: p.id, name: p.displayName?.text ?? null, primaryType: p.primaryType ?? null }));

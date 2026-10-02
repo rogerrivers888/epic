@@ -34,7 +34,7 @@ import { query, pool } from '../db.js';
 import { nameScore, significantStems } from './openMatch.js';
 import { matchPlace, boxOf, ownedNameGaps } from './ownedMatch.js';
 import { recordOwnedPoint, OWNED_POINT_NAME, lockPlace } from './ownedPoints.js';
-import { takeLiveNames } from './liveNames.js';
+import { takeLiveNames, noteLiveName } from './liveNames.js';
 
 /** As alike as the matcher demands of a match (ownedMatch.js RULES). */
 export const AGREE_AT = 0.85;
@@ -128,6 +128,8 @@ export async function setAside(row, score) {
       [row.venue_ref, row.source, row.source_ref, score, reason]);
     await c.query(`delete from owned_points where venue_ref = $1 and source = $2 and coalesce(source_ref, '') = $3`,
       [row.venue_ref, row.source, row.source_ref]);
+    // Counted with the change it describes, so the one cannot happen without the other.
+    await c.query(`insert into name_checks (venue_ref, outcome, source) values ($1, 'doubted', $2)`, [row.venue_ref, row.source]);
     await c.query(
       `update place_index set lat = null, lng = null, coords_from = null, coords_at = null, cell = null, placed_at = null
         where venue_ref = $1 and coords_from = $2`, [row.venue_ref, row.source]);
@@ -154,9 +156,15 @@ export async function setAside(row, score) {
   } finally { c.release(); }
 }
 
-/** One outcome, written down for the Monday count: a reference and a source, never a name. */
+/**
+ * One outcome, written down for the Monday count: a reference and a source,
+ * never a name. A failure to write it is said in the log and never stops the
+ * work it describes — a committed set-aside still gets its re-match (Codex,
+ * 2 Oct 2026). The set-aside's own outcome is written inside its transaction.
+ */
 const noteOutcome = (ref, outcome, source = null) =>
-  query('insert into name_checks (venue_ref, outcome, source) values ($1, $2, $3)', [ref, outcome, source]);
+  query('insert into name_checks (venue_ref, outcome, source) values ($1, $2, $3)', [ref, outcome, source])
+    .catch((err) => console.error(`epic-api: name-check — could not count ${outcome} for ${ref}: ${String(err?.message ?? err).slice(0, 120)}`));
 
 let draining = false;
 
@@ -172,7 +180,15 @@ export async function drain({ n = 100, now = Date.now() } = {}) {
   try {
     const batch = takeLiveNames(n).filter((x) => !seenRecently(x.ref, now));
     if (!batch.length) return out;
-    const owned = await ownedFor(batch.map((x) => x.ref));
+    let owned;
+    try {
+      owned = await ownedFor(batch.map((x) => x.ref));
+    } catch (err) {
+      // The batch goes back on the queue for the next minute rather than
+      // being lost to one failed read (Codex, 2 Oct 2026).
+      for (const x of batch) noteLiveName(x.ref, x.name, x);
+      throw err;
+    }
     // Ninety days of outcomes is plenty for a weekly figure.
     await query(`delete from name_checks where at < now() - interval '90 days'`).catch(() => null);
     for (const x of batch) {
@@ -203,7 +219,6 @@ export async function drain({ n = 100, now = Date.now() } = {}) {
           const a = await setAside(row, v.score);
           if (!a.setAside) { out.cantSpeak += 1; continue; }
           out.doubted += 1;
-          await noteOutcome(x.ref, 'doubted', row.source);
           const m = await matchOnLiveName(x.ref, x.name, x, 'rematch');
           if (m.matched) {
             out.rematched += 1;
