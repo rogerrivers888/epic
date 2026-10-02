@@ -136,6 +136,7 @@ export async function moneyTick({ now = new Date() } = {}) {
   const guest = await import('../routes/guestBookings.js');
   await guest.lapseRequests({ now });
   await guest.dropUnpaid({ now });
+  await (await import('../routes/hostingAdmin.js')).releaseApproved();
   await warnUnderMinimum({ now });
   await decideDue({ now });
   await processRefunds();

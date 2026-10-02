@@ -27,6 +27,7 @@ import groupRoutes, { startReminderLoop } from './routes/groups.js';
 import hostingRoutes, { adminRouter as hostingAdminRoutes, publicRouter as hostingPublicRoutes, startHostingLoop } from './routes/hosting.js';
 import hostLanesRoutes, { webhookRouter as stripeWebhookRoutes } from './routes/hostLanes.js';
 import hostDeskRoutes from './routes/hostDesk.js';
+import hostingAdminV4Routes from './routes/hostingAdmin.js';
 import guestBookingRoutes, { publicRouter as guestBookingPublicRoutes } from './routes/guestBookings.js';
 import hostingMoneyRoutes, { adminRouter as hostingMoneyAdminRoutes, startHostingMoneyLoop } from './routes/hostingMoney.js';
 import accountRoutes from './routes/accounts.js';
@@ -360,6 +361,8 @@ app.use('/api/postmark', postmarkRoutes);
 // Pitch review and the trust ladder (hosts and events, 12 Sep 2026). A host
 // never sets their own level; this is the only door that does.
 app.use('/api/admin/hosting', requireDoor('admin'), hostingMoneyAdminRoutes);
+// Hosting v4's back office, BO8a–BO8r (routes/hostingAdmin.js).
+app.use('/api/admin/hosting', requireDoor('admin'), hostingAdminV4Routes);
 app.use('/api/admin/hosting', requireDoor('admin'), hostingAdminRoutes);
 // The one ID check in Casual meet ups: nobody clears their own (routes/openTo.js).
 app.use('/api/admin/open', requireDoor('admin'), openToAdminRoutes);
