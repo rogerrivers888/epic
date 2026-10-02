@@ -26,6 +26,7 @@ import prototypeRoutes from './routes/prototypes.js';
 import groupRoutes, { startReminderLoop } from './routes/groups.js';
 import hostingRoutes, { adminRouter as hostingAdminRoutes, publicRouter as hostingPublicRoutes, startHostingLoop } from './routes/hosting.js';
 import hostLanesRoutes, { webhookRouter as stripeWebhookRoutes } from './routes/hostLanes.js';
+import hostDeskRoutes from './routes/hostDesk.js';
 import hostingMoneyRoutes, { adminRouter as hostingMoneyAdminRoutes, startHostingMoneyLoop } from './routes/hostingMoney.js';
 import accountRoutes from './routes/accounts.js';
 import adminRoutes from './routes/admin.js';
@@ -535,6 +536,8 @@ app.use('/api', chatPublicRoutes);
 app.use('/api', hostLanesRoutes);
 // Hosting v4: settings, the ledger's jobs and notifications (routes/hostingMoney.js).
 app.use('/api', hostingMoneyRoutes);
+// Hosting v4: the Host tab for hosts who already host, E1–E13 (routes/hostDesk.js).
+app.use('/api', hostDeskRoutes);
 app.use('/api', hostingRoutes);
 // What a host types into the expertise field, answered from Epic's own tables
 // and never from anybody else's API (Host Skills §5).
