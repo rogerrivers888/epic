@@ -215,6 +215,8 @@ export async function countryContradictions() {
   const byCountry = new Map();
   let checked = 0; let flagged = 0; let twoOrMore = 0;
   const list = [];
+  const kindsOf = (p) => new Set(p.signals.map((x) => x.signal)).size;
+  const byWeight = (a, b) => kindsOf(b) - kindsOf(a) || a.venue_ref.localeCompare(b.venue_ref);
   let after = '';
   for (;;) {
     const { rows } = await query(`
@@ -249,17 +251,18 @@ export async function countryContradictions() {
       for (const k of kinds) bySignal[k] += 1;
       byCountry.set(r.country, (byCountry.get(r.country) ?? 0) + 1);
       list.push({ venue_ref: r.venue_ref, name: r.name, stamped: r.country, signals: d });
+      // Keep only the best 300 as the scan goes; the total is `flagged` (Codex).
+      if (list.length > 600) { list.sort(byWeight); list.length = 300; }
     }
     after = rows[rows.length - 1].venue_ref;
   }
-  const kindsOf = (p) => new Set(p.signals.map((x) => x.signal)).size;
-  list.sort((a, b) => kindsOf(b) - kindsOf(a) || a.venue_ref.localeCompare(b.venue_ref));
+  list.sort(byWeight);
   return {
     checkedAt: new Date().toISOString(),
     checked, flagged, twoOrMore, bySignal,
     byStampedCountry: Object.fromEntries(byCountry),
     places: list.slice(0, 300),
-    listed: list.length > 300 ? `first 300 of ${list.length}` : 'all',
+    listed: flagged > 300 ? `first 300 of ${flagged}` : 'all',
   };
 }
 
