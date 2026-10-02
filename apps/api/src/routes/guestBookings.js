@@ -915,6 +915,8 @@ async function myRequest(id, { retryCapture = false } = {}) {
   if (b.request_state !== 'asked' && !retry) throw refuse(409, 'answered', 'This request has been answered.');
   // A request whose payment never started, or that the guest withdrew, can't be accepted (Codex, 2 Oct 2026).
   if (b.state === 'cancelled') throw refuse(409, 'withdrawn', 'This request was withdrawn.');
+  // A paid request can be answered only once the guest's card is held (Codex, 2 Oct 2026).
+  if (Number(b.value_pence ?? 0) > 0 && b.stripe_payment_intent && b.payment_state !== 'held') throw refuse(409, 'not_held', 'The guest hasn’t finished paying yet.');
   return { host, b, o: await repo.offerById(b.offer_id), retry };
 }
 

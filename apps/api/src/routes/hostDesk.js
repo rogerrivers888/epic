@@ -292,7 +292,8 @@ async function todoItems(host, household, offers, now, s) {
   if (ids.length) {
     const { rows: asks } = await query(
       `select b.id, b.offer_id, b.respond_by, h.name as household from experience_bookings b join households h on h.id = b.household_id
-        where b.offer_id = any($1::uuid[]) and b.request_state = 'asked'`, [ids],
+        where b.offer_id = any($1::uuid[]) and b.request_state = 'asked' and b.state = 'pending'
+          and (coalesce(b.value_pence, 0) = 0 or b.stripe_payment_intent is null or b.payment_state = 'held')`, [ids],
     );
     for (const a of asks) items.push({ kind: 'ask_to_book', title: 'Reply to ask to book', line: `${a.household} · ${title.get(a.offer_id)}`, due: a.respond_by, blocking: true, offerId: a.offer_id, ref: a.id });
     const { rows: qs } = await query(
@@ -962,8 +963,10 @@ router.get('/host/desk/profile', async (_req, res, next) => {
     const { rows: auto } = await query('select * from host_auto_messages where host_id = $1', [host.id]);
     const { rows: quick } = await query('select id, body from host_quick_replies where host_id = $1 order by position, created_at', [host.id]);
     const { rows: [out] } = await query(
-      `select (select count(*) from experience_bookings b join booking_sessions bs on bs.booking_id = b.id join offer_sessions x on x.id = bs.session_id
-                where b.host_id = $1 and b.state in ('pending', 'confirmed') and bs.state = 'booked' and x.state = 'scheduled')::int as bookings,
+      `select (select count(*) from experience_bookings b where b.host_id = $1 and (
+                  (b.request_state = 'asked' and b.state = 'pending')
+                  or exists (select 1 from booking_sessions bs join offer_sessions x on x.id = bs.session_id
+                              where bs.booking_id = b.id and b.state in ('pending', 'confirmed') and bs.state = 'booked' and x.state = 'scheduled')))::int as bookings,
               (select count(*) from host_payouts where host_id = $1 and state in ('scheduled', 'held', 'released'))::int as payouts`,
       [host.id],
     );
@@ -1035,8 +1038,10 @@ router.post('/host/desk/stop', async (_req, res, next) => {
       // The same lock every new booking takes, so none can slip in between the count and the stop (Codex, 2 Oct 2026).
       await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-intro:${host.id}`]);
       const { rows: [o] } = await c.query(
-        `select (select count(*) from experience_bookings b join booking_sessions bs on bs.booking_id = b.id join offer_sessions x on x.id = bs.session_id
-                  where b.host_id = $1 and b.state in ('pending', 'confirmed') and bs.state = 'booked' and x.state = 'scheduled')::int as bookings,
+        `select (select count(*) from experience_bookings b where b.host_id = $1 and (
+                  (b.request_state = 'asked' and b.state = 'pending')
+                  or exists (select 1 from booking_sessions bs join offer_sessions x on x.id = bs.session_id
+                              where bs.booking_id = b.id and b.state in ('pending', 'confirmed') and bs.state = 'booked' and x.state = 'scheduled')))::int as bookings,
                 (select count(*) from host_payouts where host_id = $1 and state in ('scheduled', 'held', 'released'))::int as payouts`,
         [host.id],
       );
