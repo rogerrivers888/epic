@@ -361,3 +361,10 @@ test('a weekly class published after today’s start begins with the next one, a
   assert.equal(hostingConfig({ EPIC_HOSTING_CONFIG: JSON.stringify({ publicShare: [] }) }), DEFAULT_CONFIG);
   assert.equal(hostingConfig({ EPIC_HOSTING_CONFIG: JSON.stringify({ privateEventPence: 1200 }) }).privateEventPence, 1200);
 });
+
+test('Checked counts only while its evidence is still there', () => {
+  const offer = { lane: 'course', visibility: 'public', parents: 'drop_off', age_max: 8 };
+  const passed = { checked_state: 'passed', dbs_number: '001234567890', insurance_media_id: 'm', referees: [{}, {}] };
+  assert.equal(checklist(offer, { host: host(passed), account }).find((i) => i.key === 'checked').done, true);
+  assert.equal(checklist(offer, { host: host({ ...passed, insurance_media_id: null }), account }).find((i) => i.key === 'checked').done, false, 'insurance deleted after the pass');
+});

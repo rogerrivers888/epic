@@ -534,7 +534,7 @@ export function checklist(offer, { host, account } = {}, cfg = DEFAULT_CONFIG) {
   if (pub) push('verified', 'send', host?.identity_state === 'verified');
   // The host makes their own video (owner, 2 Oct 2026: "They need to make their own video").
   push('video', pub ? 'send' : null, Boolean(offer.video_id), { optional: !pub });
-  if (needsChecked(offer, cfg)) push('checked', 'live', host?.checked_state === 'passed', { submitted: host?.checked_state === 'submitted' });
+  if (needsChecked(offer, cfg)) push('checked', 'live', checkedHolds(host), { submitted: host?.checked_state === 'submitted' });
   if (epic) push('payouts', 'send', host?.payouts_state === 'ready', { pending: host?.payouts_state === 'pending' });
   if (epic) push('tax', 'payout', has(host?.tax_reference));
   if (pub) push('review', null, false, { info: true });
@@ -543,6 +543,12 @@ export function checklist(offer, { host, account } = {}, cfg = DEFAULT_CONFIG) {
 
 /** What stands between the host and the button: the unfinished items that block sending. */
 export const sendBlockers = (items) => items.filter((i) => i.blocks === 'send' && !i.done).map((i) => i.key);
+
+/**
+ * Checked counts only while what was read is still there: the DBS number, the insurance
+ * certificate and two referees. Evidence taken away after a pass is no pass (Codex, 2 Oct 2026).
+ */
+export const checkedHolds = (host) => host?.checked_state === 'passed' && Boolean(host?.dbs_number) && Boolean(host?.insurance_media_id) && (host?.referees ?? []).length >= 2;
 
 /** Whole years old on a day. */
 export function ageOn(dob, on = new Date()) {
