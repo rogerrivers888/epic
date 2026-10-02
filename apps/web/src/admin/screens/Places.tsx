@@ -182,7 +182,9 @@ function useFresh<T>(key: string, get: () => Promise<T>, onError?: (e: any) => v
   return [value, askAgain];
 }
 
-export function Places({ canManage }: { canManage: boolean }) {
+// `canSettings` is the closed check's own gate: its Check and Apply are
+// `manage_settings` on the server, not `manage_library` (Codex, 2 Oct 2026).
+export function Places({ canManage, canSettings = false }: { canManage: boolean; canSettings?: boolean }) {
   const { width } = useViewport();
   const phone = width < PHONE;
 
@@ -250,7 +252,7 @@ export function Places({ canManage }: { canManage: boolean }) {
     return (
       <AdminPage>
         <Band kicker="EVERY PLACE HELD" title="Closed places" />
-        <Closed canManage={canManage} />
+        <Closed canManage={canSettings} />
         <Footer><Act label="All countries" tone="secondary" onPress={() => setLens('coverage')} /></Footer>
       </AdminPage>
     );
@@ -260,7 +262,7 @@ export function Places({ canManage }: { canManage: boolean }) {
   return (
     <Level
       where={where} within={within} mode={mode} ring={ring} breakdownBy={breakdownBy}
-      lens={lens} cat={cat} sub={sub} phone={phone} canManage={canManage}
+      lens={lens} cat={cat} sub={sub} phone={phone} canManage={canManage} canSettings={canSettings}
       onWhere={(slug, opts) => {
         setWhere(slug); setWithin(opts?.within ?? null); setBy(opts?.by ?? ''); setCat(''); setSub('');
         // An outcode lands on its categories, and the address says so —
@@ -388,7 +390,7 @@ function Countries({ onPick, onPictures, onBar, onClosed, canManage }: {
 
 function Level(props: {
   where: string; within: number | null; mode: string; ring: boolean; breakdownBy: By;
-  lens: Lens; cat: string; sub: string; phone: boolean; canManage: boolean;
+  lens: Lens; cat: string; sub: string; phone: boolean; canManage: boolean; canSettings: boolean;
   onWhere: (slug: string, opts?: { within?: number | null; by?: string; lens?: Lens }) => void;
   onLens: (l: Lens) => void; onBy: (b: string) => void; onWithin: (m: number | null, opts?: { replace?: boolean }) => void;
   onCat: (c: string) => void; onSub: (s: string) => void; onPlace: (ref: string) => void;
@@ -533,7 +535,7 @@ function Level(props: {
     if (lensHere === 'demand') return <DemandLens q={q} canManage={props.canManage} onCollect={() => props.onLens('collect')} />;
     // The closed check (C57) is of every place held, wherever the board stands;
     // it lived only on Library, which the menu has no entry for (2 Oct 2026).
-    if (lensHere === 'closed') return <Closed canManage={props.canManage} />;
+    if (lensHere === 'closed') return <Closed canManage={props.canSettings} />;
     if (lensHere === 'collect') return <CollectBoard q={q} level={level} canManage={props.canManage} cat={cat} sub={sub} />;
     if (ringHere) return <RingBoard q={q} onSub={props.onSub} onLens={props.onLens} onWithin={props.onWithin} />;
     if (level.areaKind === 'country') return <BreakdownBoard q={q} by={props.breakdownBy} onBy={props.onBy} onWhere={props.onWhere} canManage={props.canManage}

@@ -73,7 +73,7 @@ const STATE_TONE: Record<string, 'plain' | 'ok' | 'warn' | 'crit' | 'accent'> = 
   never: 'plain', queued: 'accent', running: 'accent', done: 'ok', failed: 'crit',
 };
 
-export function Library({ canManage }: { canManage: boolean }) {
+export function Library({ canManage, canSettings = false }: { canManage: boolean; canSettings?: boolean }) {
   const { width } = useViewport();
   const wide = width >= WIDE;
   // Which part of the atlas is in the address, so a colleague can be sent the
@@ -153,7 +153,7 @@ export function Library({ canManage }: { canManage: boolean }) {
         <Attractions regions={overview?.coverage ?? []} region={region} onRegion={setRegion} canManage={canManage} wide={wide} />
       ) : null}
       {section === 'visiting' ? <Visiting canManage={canManage} wide={wide} /> : null}
-      {section === 'closed' ? <Closed canManage={canManage} /> : null}
+      {section === 'closed' ? <Closed canManage={canSettings} /> : null}
       {section === 'reading' ? <Reading canManage={canManage} /> : null}
       {section === 'pictures' ? <Pictures regions={overview?.coverage ?? []} canManage={canManage} wide={wide} /> : null}
       {section === 'uploads' ? <Uploads canManage={canManage} /> : null}
