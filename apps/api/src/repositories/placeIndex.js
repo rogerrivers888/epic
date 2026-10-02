@@ -1408,9 +1408,12 @@ export async function settleCountriesFromAddresses(refs = null, q = query) {
       const verdict = countryFromAddresses(facts.map((f) => f.address));
       if (!verdict.code) return verdict;
       const { rowCount } = await client.query(
-        `update place_index set country_code = $2, placed_at = null, settle_tried_at = null
-          where venue_ref = $1 and country_code is null`, [row.venue_ref, verdict.code]);
-      return rowCount ? verdict : { code: null, reason: 'the place took a country while it was being read' };
+        `update place_index pi set country_code = $2, placed_at = null, settle_tried_at = null
+          where pi.venue_ref = $1 and pi.country_code is null
+            -- Re-checked here, not only at the read: a sweep can link the place to a
+            -- country-bearing area in between, and that source comes first (Codex).
+            and not ${SOURCE_COUNTRY('pi')}`, [row.venue_ref, verdict.code]);
+      return rowCount ? verdict : { code: null, reason: 'the place took a country, or a source area naming one, while it was being read' };
     });
     if (out.code) settled.push({ ref: row.venue_ref, country: out.code, from: out.from });
     else unsettled.push({ ref: row.venue_ref, reason: out.reason });
@@ -1420,17 +1423,20 @@ export async function settleCountriesFromAddresses(refs = null, q = query) {
 
 const NULL_COUNTRY_PASS = 5000;
 
+/** Whether a source area or region names this place's country — settle step 0's evidence, which comes first. */
+const SOURCE_COUNTRY = (pi) => `(exists (select 1 from scout_places sp join scout_areas sa on sa.code = sp.area_code
+             where sp.venue_ref = ${pi}.venue_ref and sa.country_code is not null)
+    or exists (select 1 from attractions a join regions reg on reg.slug = a.region_slug
+             where (a.venue_ref = ${pi}.venue_ref or 'atlas:' || a.id::text = ${pi}.venue_ref)
+               and reg.country_code is not null))`;
+
 /** Places with no country, each with its reverse-geocoded address(es). Read-only. */
 export async function nullCountryAddresses(refs = null, q = query, { limit = NULL_COUNTRY_PASS } = {}) {
   const { rows } = await q(`
     select pi.venue_ref, array_agg(f.value #>> '{}') as addresses,
            -- A source area or region that names a country comes first (settle step
            -- 0); the address is the fallback and must not get ahead of it (Codex).
-           (exists (select 1 from scout_places sp join scout_areas sa on sa.code = sp.area_code
-                     where sp.venue_ref = pi.venue_ref and sa.country_code is not null)
-            or exists (select 1 from attractions a join regions reg on reg.slug = a.region_slug
-                     where (a.venue_ref = pi.venue_ref or 'atlas:' || a.id::text = pi.venue_ref)
-                       and reg.country_code is not null)) as source_country
+           ${SOURCE_COUNTRY('pi')} as source_country
       from place_index pi
       join place_facts f on f.venue_ref = pi.venue_ref and f.field = 'address'
                         and f.source = 'nominatim' and f.expires_at is null
