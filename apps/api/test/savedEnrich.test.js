@@ -203,20 +203,25 @@ test('the backfill: saved, loved or been and not yet researched; refused when th
   await ledger(saved, 'saved'); await ledger(dismissed, 'dismissed'); await ledger(done, 'saved');
   // Been once, dismissed since: out, whatever the visit says.
   await query(`insert into visits (household_id, venue_ref, venue_label, visited_on) values ($1, $2, 'x', current_date)`, [hh, dismissed]);
+  // Dismissed once, saved again since: in Places, so a candidate.
+  const resaved = `google:bf-${randomUUID()}`;
+  await query(`insert into household_places (household_id, venue_ref, label) values ($1, $2, 'x')`, [hh, resaved]);
+  await query(`insert into place_ledger (household_id, source, source_place_id, status, created_at) values ($1, 'google', $2, 'dismissed', now() - interval '1 day')`, [hh, resaved.slice(7)]);
+  await ledger(resaved, 'saved');
   await query(`insert into visits (household_id, venue_ref, venue_label, visited_on) values ($1, $2, 'x', current_date)`, [hh, been]);
   await query(`insert into saved_place_enrichment (venue_ref, household_id, state) values ($1, $2, 'done')`, [done, hh]);
   const refs = await enrich.backfillCandidates(hh);
-  assert.deepEqual(refs.sort(), [been, saved].sort());
+  assert.deepEqual(refs.sort(), [been, saved, resaved].sort());
   const realFetch = globalThis.fetch;
   globalThis.fetch = async () => { throw new Error('network closed in tests'); };
   try {
     const owner = { id: null, email: 'roger@epic.day' };
-    assert.equal((await enrich.backfill({ account: { email: 'x@y.z' }, householdId: hh, expectPlaces: 2 })).why, 'not_enrolled');
+    assert.equal((await enrich.backfill({ account: { email: 'x@y.z' }, householdId: hh, expectPlaces: 3 })).why, 'not_enrolled');
     const moved = await enrich.backfill({ account: owner, householdId: hh, expectPlaces: 5 });
     assert.equal(moved.why, 'quote_changed', 'a list that changed is priced again, not spent');
     assert.equal(moved.started, 0);
-    const ok = await enrich.backfill({ account: owner, householdId: hh, expectPlaces: 2 });
-    assert.equal(ok.started, 2);
+    const ok = await enrich.backfill({ account: owner, householdId: hh, expectPlaces: 3 });
+    assert.equal(ok.started, 3);
     assert.deepEqual(await enrich.backfillCandidates(hh), [], 'once started, they are no longer candidates');
   } finally { globalThis.fetch = realFetch; }
 });

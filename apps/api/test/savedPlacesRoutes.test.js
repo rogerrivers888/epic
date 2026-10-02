@@ -144,3 +144,28 @@ test('a verdict settles the pictures waiting for it: accepted becomes the card p
     assert.equal(b.moderation, 'rejected');
   } finally { await close(); }
 });
+
+test('a changed verdict re-settles its pictures both ways, and a picture found after the verdict reopens the review', async () => {
+  const ref = `google:rev-${randomUUID()}`;
+  await query(`insert into place_records (venue_ref, name, provenance) values ($1, 'Revised Place', '{}')`, [ref]);
+  const { rows: [img] } = await query(
+    `insert into image_assets (source, source_ref, licence, may_store, moderation) values ('openverse', $1, 'CC BY 2.0', true, 'pending') returning id`, [`openverse:rev-${randomUUID()}`]);
+  await query(`insert into image_links (image_id, subject_type, subject_id, role, position) values ($1, 'place', $2, 'gallery', 10)`, [img.id, ref]);
+  const { base, close } = await serve();
+  const state = async () => (await query(`select i.moderation, l.role from image_assets i join image_links l on l.image_id = i.id where i.id = $1`, [img.id])).rows[0];
+  try {
+    await post(`${base}/review/verdict`, { ref, verdict: 'owned_fine' });
+    assert.deepEqual(await state(), { moderation: 'approved', role: 'hero' });
+    await post(`${base}/review/verdict`, { ref, verdict: 'owned_not_fit' });
+    assert.deepEqual(await state(), { moderation: 'rejected', role: 'gallery' }, 'taken down, and off the card');
+    await post(`${base}/review/verdict`, { ref, verdict: 'owned_worse_acceptable' });
+    assert.equal((await state()).moderation, 'approved', 'and brought back');
+
+    const listed = async () => (await (await fetch(`${base}/review?q=Revised&reviewed=no`)).json()).places.some((p) => p.venueRef === ref);
+    assert.equal(await listed(), false, 'reviewed');
+    const { rows: [img2] } = await query(
+      `insert into image_assets (source, source_ref, licence, may_store, moderation, fetched_at) values ('openverse', $1, 'CC BY 2.0', true, 'pending', now() + interval '1 minute') returning id`, [`openverse:rev2-${randomUUID()}`]);
+    await query(`insert into image_links (image_id, subject_type, subject_id, role, position) values ($1, 'place', $2, 'gallery', 11)`, [img2.id, ref]);
+    assert.equal(await listed(), true, 'a new picture since the verdict puts it back in the queue');
+  } finally { await close(); }
+});

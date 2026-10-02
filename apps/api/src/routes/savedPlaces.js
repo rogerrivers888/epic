@@ -167,6 +167,13 @@ savedPlacesRouter.post('/backfill', requires('manage_library'), requireOwnerSign
 // Part 3: photo review
 // ---------------------------------------------------------------------------
 
+// Reviewed means a verdict, and no picture found for the place since it was
+// given: a re-run that finds a new one reopens the review (Codex, 2 Oct 2026).
+const REVIEWED = `(pr.venue_ref is not null and not exists (
+                    select 1 from image_links l join image_assets i on i.id = l.image_id
+                     where l.subject_type = 'place' and l.subject_id = r.venue_ref
+                       and i.moderation = 'pending' and i.fetched_at > pr.reviewed_at))`;
+
 photoReviewRouter.get('/', requires('view_library'), async (req, res, next) => {
   try {
     const q = String(req.query.q ?? '').trim();
@@ -181,8 +188,8 @@ photoReviewRouter.get('/', requires('view_library'), async (req, res, next) => {
     const where = [anyPicture];
     if (q) { args.push(`%${q}%`); where.push(`r.name ilike $${args.length}`); }
     if (category) { args.push(category); where.push(`r.category = $${args.length}`); }
-    if (reviewed === 'yes') where.push('pr.venue_ref is not null');
-    if (reviewed === 'no') where.push('pr.venue_ref is null');
+    if (reviewed === 'yes') where.push(REVIEWED);
+    if (reviewed === 'no') where.push(`not ${REVIEWED}`);
     const { rows } = await query(
       `select r.venue_ref, r.name, r.category, r.postcode, pr.verdict, pr.reviewed_at,
               (select count(*) from image_links l join image_assets i on i.id = l.image_id
@@ -190,13 +197,13 @@ photoReviewRouter.get('/', requires('view_library'), async (req, res, next) => {
               + (select count(*) from venue_site_images v where v.venue_ref = r.venue_ref) as pictures
          from place_records r left join photo_reviews pr on pr.venue_ref = r.venue_ref
         where ${where.join(' and ')}
-        order by (pr.venue_ref is null) desc, r.name nulls last
+        order by ${REVIEWED} asc, r.name nulls last
         limit 201`, args);
     // Over every place with owned pictures, whatever the filter: the numbers
     // the owner's policy call is made from.
     const { rows: [sum] } = await query(
       `select count(*)::int as places,
-              count(pr.venue_ref)::int as reviewed,
+              count(*) filter (where ${REVIEWED})::int as reviewed,
               count(*) filter (where pr.verdict = 'owned_fine')::int as fine,
               count(*) filter (where pr.verdict = 'owned_worse_acceptable')::int as acceptable,
               count(*) filter (where pr.verdict = 'owned_not_fit')::int as not_fit
@@ -260,13 +267,21 @@ photoReviewRouter.post('/verdict', requires('manage_library'), requireOwnerSigne
     // own upload waits for its own look, and is not decided here. Fine or
     // acceptable publishes them, and the first becomes the card picture where
     // the place has none; not fit turns them down.
+    // A changed verdict re-settles what an earlier one decided, both ways
+    // (Codex, 2 Oct 2026): fine → not fit takes a published picture down (and
+    // off the card), not fit → fine brings a turned-down one back.
     const accept = verdict !== 'owned_not_fit';
     const { rows: settled } = await query(
       `update image_assets i set moderation = $2, updated_at = now()
          from image_links l
         where l.image_id = i.id and l.subject_type = 'place' and l.subject_id = $1
-          and i.source = 'openverse' and i.moderation = 'pending'
-        returning i.id, l.position`, [ref, accept ? 'approved' : 'rejected']);
+          and i.source = 'openverse'
+        returning i.id, l.position, l.role`, [ref, accept ? 'approved' : 'rejected']);
+    if (!accept) {
+      await query(
+        `update image_links l set role = 'gallery' from image_assets i
+          where i.id = l.image_id and l.subject_type = 'place' and l.subject_id = $1 and l.role = 'hero' and i.source = 'openverse'`, [ref]);
+    }
     let hero = null;
     if (accept && settled.length) {
       const { rows: [has] } = await query(

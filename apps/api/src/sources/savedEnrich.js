@@ -176,10 +176,12 @@ export async function backfillCandidates(householdId) {
       where hp.household_id = $1
         and hp.venue_ref like '%:%' and hp.venue_ref not like 'photo:%'
         and not exists (select 1 from saved_place_enrichment e where e.venue_ref = hp.venue_ref)
-        -- Dismissed is the owner taking it out, whatever else is on record
-        -- (Codex, 2 Oct 2026: a place visited once and dismissed since).
-        and not exists (select 1 from place_ledger l where l.household_id = hp.household_id
-                          and l.source || ':' || l.source_place_id = hp.venue_ref and l.status = 'dismissed')
+        -- The ledger is append-only, so what counts is its latest word: a place
+        -- dismissed and saved again since is in Places; one saved then
+        -- dismissed, or been then dismissed, is not (Codex, 2 Oct 2026).
+        and (select l.status from place_ledger l where l.household_id = hp.household_id
+               and l.source || ':' || l.source_place_id = hp.venue_ref
+             order by l.created_at desc limit 1) is distinct from 'dismissed'
         and (exists (select 1 from place_ledger l where l.household_id = hp.household_id
                        and l.source || ':' || l.source_place_id = hp.venue_ref and l.status in ('saved', 'special'))
              or exists (select 1 from visits v where v.household_id = hp.household_id and v.venue_ref = hp.venue_ref))
