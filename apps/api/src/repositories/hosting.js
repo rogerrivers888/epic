@@ -293,7 +293,7 @@ export async function cloneOfferOnDate(offer, startsOn, startsAt, client) {
        from host_offers where id = $1 returning *`,
     [offer.id, startsOn, startsAt ?? null],
   );
-  return rows[0];
+  return (await named(rows))[0] ?? null;
 }
 
 /**

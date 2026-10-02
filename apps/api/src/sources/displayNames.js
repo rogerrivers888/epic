@@ -273,7 +273,7 @@ export async function nameJson(doc, { purpose = 'plan.displayName', householdId 
   return doc;
 }
 
-const TOKEN = /⟦([a-z]+:[^⟧\s]+)⟧/g;
+const TOKEN = /⟦([a-z]+:[^⟧\s]+)⟧/g; // one reference, or several joined by | for a shared name
 const escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
@@ -301,11 +301,19 @@ export async function tokeniseJson(doc) {
   collect(copy);
   if (!pairs.length) return copy;
   const rentedSet = await rentedRefs([...new Set(pairs.flatMap((p) => p.refs))]);
-  const byName = new Map();
+  // A name held by more than one place (two cafés of one chain) keeps all
+  // their references: on read it is shown only if they all come back under
+  // the same name, else as "a place" — never pinned to the wrong one (Codex,
+  // 2 Oct 2026).
+  const refsByName = new Map();
   for (const p of pairs) {
     const ref = p.refs.find((r) => rentedSet.has(r));
-    if (ref && !byName.has(p.name)) byName.set(p.name, ref);
+    if (!ref) continue;
+    const set = refsByName.get(p.name) ?? new Set();
+    set.add(ref);
+    refsByName.set(p.name, set);
   }
+  const byName = new Map([...refsByName].map(([n, set]) => [n, [...set].join('|')]));
   if (!byName.size) return copy;
   // Longest first, so "The Crown Inn" is not half-replaced by "The Crown"; and
   // whole names only, so a place called "Spa" leaves "Spanish" alone (Codex,
@@ -342,10 +350,15 @@ async function untokenise(doc, opts) {
   };
   seek(doc);
   if (!refs.size) return;
-  const rows = [...refs].map((ref) => ({ ref, name: null }));
+  const singles = [...new Set([...refs].flatMap((t) => t.split('|')))];
+  const rows = singles.map((ref) => ({ ref, name: null }));
   await resolveNames(rows, { refKey: 'ref', nameKey: 'name', ...opts });
   const by = new Map(rows.map((r) => [r.ref, r.name]));
-  const swap = (text) => text.replace(TOKEN, (_, ref) => by.get(ref) ?? 'a place');
+  const nameOf = (token) => {
+    const named = [...new Set(token.split('|').map((r) => by.get(r) ?? 'a place'))];
+    return named.length === 1 ? named[0] : 'a place';
+  };
+  const swap = (text) => text.replace(TOKEN, (_, token) => nameOf(token));
   const walk = (node) => {
     if (Array.isArray(node)) { node.forEach((v, i) => { if (typeof v === 'string') node[i] = swap(v); else walk(v); }); return; }
     if (!node || typeof node !== 'object') return;

@@ -324,3 +324,14 @@ test('only a whole name is kept as its reference: a place called "Spa" leaves "S
   const out = await tokeniseJson({ pool: [{ source: 'google', sourcePlaceId: id, name: 'Spa' }], transcript: [{ role: 'assistant', text: 'Spanish food, then the Spa.' }] });
   assert.equal(out.transcript[0].text, `Spanish food, then the ⟦google:${id}⟧.`);
 });
+
+test('a name two places share is shown only if both still read that way, else as "a place"', async () => {
+  const { tokeniseJson, nameJson } = await import('../src/sources/displayNames.js');
+  const a = randomUUID(), b = randomUUID();
+  const kept = await tokeniseJson({ pool: [{ source: 'google', sourcePlaceId: a, name: 'Corner Cafe' }, { source: 'google', sourcePlaceId: b, name: 'Corner Cafe' }],
+    transcript: [{ role: 'assistant', text: 'Coffee at Corner Cafe.' }] });
+  assert.equal(kept.transcript[0].text, `Coffee at ⟦google:${a}|google:${b}⟧.`);
+  await query(`insert into place_records (venue_ref, name, provenance) values ($1, 'Corner Cafe North', '{"name":"osm"}'), ($2, 'Corner Cafe South', '{"name":"osm"}')`, [`google:${a}`, `google:${b}`]);
+  await nameJson(kept, { householdId: null });
+  assert.equal(kept.transcript[0].text, 'Coffee at a place.', 'never pinned to the wrong one');
+});
