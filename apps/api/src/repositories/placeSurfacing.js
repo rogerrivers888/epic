@@ -129,8 +129,8 @@ function representative(group) {
  * OK; one coming back (not -> surfaces) no longer hides, so its flag is left as
  * it was. Mirrors placeStatus.propose.
  */
-async function writeDetermination({ ref, surfaced, subcategory = null, reason = null, detail = null, checkId = null, apply = false, by = null }) {
-  await query(
+async function writeDetermination({ ref, surfaced, subcategory = null, reason = null, detail = null, checkId = null, apply = false, by = null }, q = query) {
+  await q(
     `insert into place_surfacing (venue_ref, surfaced, reason, detail, subcategory, check_id, applied, applied_at, applied_by)
      values ($1, $2, $3, $4, $5, $6, $7, case when $7 then now() end, $8)
      on conflict (venue_ref) do update set
@@ -173,6 +173,11 @@ async function writeDetermination({ ref, surfaced, subcategory = null, reason = 
 async function judgeCluster(ref, subcategory, members, signalsByRef, checkId) {
   const notableMember = members.find((m) => notable(signalsByRef.get(m) ?? empty(m)).status === 'kept');
   const surfaces = Boolean(notableMember);
+  // The determination, the obsolete rows' removal and the snapshot are one write:
+  // a reader between them saw a hidden place with no snapshot, i.e. not hidden
+  // (Codex, via the gate proof).
+  return withTransaction(async (c) => {
+  const query = c.query.bind(c);
   const { rows: [prior] } = await query(
     `select applied_by from place_surfacing where venue_ref = any($1::text[]) and applied and not surfaced limit 1`,
     [members]);
@@ -192,11 +197,11 @@ async function judgeCluster(ref, subcategory, members, signalsByRef, checkId) {
     // still not-surfaced hides exactly as before, so it keeps the owner's OK.
     apply: Boolean(prior) && !surfaces,
     by: prior?.applied_by ?? null,
-  });
+  }, query);
   // One live row: every other determination the place goes by goes (its snapshot
   // with it, by cascade).
   await query(`delete from place_surfacing where venue_ref = any($1::text[]) and venue_ref <> $2`, [members, ref]);
-  await writeSnapshot(ref, surfaces ? [] : members, checkId);
+  await writeSnapshot(ref, surfaces ? [] : members, checkId, query);
   const unhid = Boolean(prior) && surfaces;
   let hiddenChanged = unhid;
   if (!unhid && prior && !surfaces) {
@@ -205,6 +210,7 @@ async function judgeCluster(ref, subcategory, members, signalsByRef, checkId) {
     hiddenChanged = was.size !== now.size || [...now].some((m) => !was.has(m));
   }
   return { surfaces, unhid, hiddenChanged };
+  });
 }
 
 /**
@@ -215,11 +221,11 @@ async function judgeCluster(ref, subcategory, members, signalsByRef, checkId) {
  * linked after this moment is not in it, and stays visible until the next check
  * or a reconsider judges the enlarged cluster.
  */
-async function writeSnapshot(ref, members, checkId) {
-  await query(`delete from place_surfacing_members where venue_ref = $1`, [ref]);
+async function writeSnapshot(ref, members, checkId, q = query) {
+  await q(`delete from place_surfacing_members where venue_ref = $1`, [ref]);
   const list = [...new Set([ref, ...(members ?? [])].filter(Boolean).map(String))];
   if (!members?.length) return;
-  await query(
+  await q(
     `insert into place_surfacing_members (venue_ref, member_ref, check_id)
      select $1, m, $3 from unnest($2::text[]) m
      on conflict (venue_ref, member_ref) do update set check_id = excluded.check_id`,
@@ -386,13 +392,16 @@ export async function reconsider(ref) {
   const hidden = Boolean(wasHidden);
   if (!group || !group.length) {
     // Not (or no longer) a candidate: surface any held-back row this place goes by.
-    const { rows: surfacedRows } = await query(
-      `update place_surfacing set surfaced = true, reason = null, detail = null, checked_at = now(),
-         decided_at = now() where venue_ref = any($1::text[]) and not surfaced returning venue_ref`, [members]);
+    // The verdict and its snapshot's removal are one write (Codex).
+    const surfacedRows = await withTransaction(async (c) => {
+      const { rows } = await c.query(
+        `update place_surfacing set surfaced = true, reason = null, detail = null, checked_at = now(),
+           decided_at = now() where venue_ref = any($1::text[]) and not surfaced returning venue_ref`, [members]);
+      // A surfaced row hides nothing, so its snapshot goes with the verdict.
+      if (rows.length) await c.query(`delete from place_surfacing_members where venue_ref = any($1::text[])`, [rows.map((x) => x.venue_ref)]);
+      return rows;
+    });
     if (!surfacedRows.length) return null;
-    // A surfaced row hides nothing, so its snapshot goes with the verdict.
-    await query(`delete from place_surfacing_members where venue_ref = any($1::text[])`,
-      [surfacedRows.map((x) => x.venue_ref)]);
     return { ref: r, surfaced: true, reconsidered: true, unhid: hidden };
   }
   const he = await heritageLoad();
