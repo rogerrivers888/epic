@@ -5,7 +5,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { COOKIES, COOKIES_WITH_TRACKING, PRIVACY, TERMS, LAST_UPDATED } from '../src/site/pages/legal/legalDocs.ts';
+import { COOKIES, cookiesNotice, PRIVACY, TERMS, LAST_UPDATED } from '../src/site/pages/legal/legalDocs.ts';
 import { parseLegal } from '../src/site/pages/legal/legalParse.ts';
 
 test('the company is named as it is registered, and the contact is support@', () => {
@@ -85,9 +85,15 @@ test('the service worker\'s caches are on the list, by their version family', as
   assert.match(COOKIES, /epic-shell-\\\* \(app caches\)/);
 });
 
-test('with the cookie banner on, the notice lists the consent cookie and Google\'s, set only on acceptance', () => {
-  assert.doesNotMatch(COOKIES_WITH_TRACKING, /Nothing is used for statistics or marketing yet/);
-  for (const name of ['epic_consent', '_ga', '_gcl_au']) assert.ok(COOKIES_WITH_TRACKING.includes(name), name);
-  assert.match(COOKIES_WITH_TRACKING, /only if you choose Accept all/);
-  assert.doesNotMatch(COOKIES_WITH_TRACKING, /\[[^\]]*\]/);
+test('with the cookie banner on, the notice lists the consent cookie and only the configured tracker\'s', () => {
+  assert.equal(cookiesNotice({ ga4: false, ads: false }), COOKIES);
+  const both = cookiesNotice({ ga4: true, ads: true });
+  for (const name of ['epic_consent', '_ga', '_gcl_au']) assert.ok(both.includes(name), name);
+  assert.doesNotMatch(both, /Nothing is used for statistics or marketing yet/);
+  assert.match(both, /only if you choose Accept all/);
+  const ga = cookiesNotice({ ga4: true, ads: false });
+  assert.ok(ga.includes('_ga') && !ga.includes('_gcl_au'));
+  const ads = cookiesNotice({ ga4: false, ads: true });
+  assert.ok(ads.includes('_gcl_au') && !/\| _ga,/.test(ads));
+  for (const t of [both, ga, ads]) assert.doesNotMatch(t, /\[[^\]]*\]/);
 });

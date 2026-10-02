@@ -19,12 +19,21 @@ export const COOKIES = "Epic stores small amounts of information on your device,
 
 
 /**
- * The same notice once the cookie banner is switched on (a build with a GA4 or
- * Google Ads ID — site/config.ts › TRACKING_ON): the opening line changes, and
- * the consent cookie and Google's are listed — set only after "Accept all"
- * (owner, 2 Oct 2026: "Add the GA4/Ads cookies only when the consent banner is
- * switched on").
+ * The notice for this build: as above with no tracker; once the cookie banner
+ * is switched on (a GA4 or Google Ads ID — site/config.ts), the opening line
+ * changes and the consent cookie and the configured tracker's own cookies are
+ * listed, set only after "Accept all" (owner, 2 Oct 2026: "Add the GA4/Ads
+ * cookies only when the consent banner is switched on"). Each tracker is
+ * listed only if it is configured.
  */
-export const COOKIES_WITH_TRACKING = COOKIES
-  .replace("**What epic.day stores today.** Nothing is used for statistics or marketing yet; if that changes, it is added here, and it is only set if you accept it in the cookie banner.", "**What epic.day stores today.** The Google Analytics and Google Ads cookies at the end of this list are set only if you choose Accept all in the cookie banner; everything else is listed as it is.")
-  + "\n| epic_consent (cookie) | Remembers whether you accepted or rejected analytics and advertising cookies | 12 months | Essential |\n| _ga, _ga_\\* (cookies, Google Analytics) | Count visits and how the website is used | Up to 2 years | Not essential (statistics) \u2014 only if you accept |\n| _gcl_au (cookie, Google Ads) | Measures whether our ads led to a visit | 90 days | Not essential (marketing) \u2014 only if you accept |";
+export function cookiesNotice({ ga4, ads }: { ga4: boolean; ads: boolean }): string {
+  if (!ga4 && !ads) return COOKIES;
+  const which = ga4 && ads ? 'Google Analytics and Google Ads cookies' : ga4 ? 'Google Analytics cookies' : 'Google Ads cookie';
+  const rows = ['| epic_consent (cookie) | Remembers whether you accepted or rejected analytics and advertising cookies | 12 months | Essential |'];
+  if (ga4) rows.push('| _ga, _ga_\\* (cookies, Google Analytics) | Count visits and how the website is used | Up to 2 years | Not essential (statistics) — only if you accept |');
+  if (ads) rows.push('| _gcl_au (cookie, Google Ads) | Measures whether our ads led to a visit | 90 days | Not essential (marketing) — only if you accept |');
+  return COOKIES.replace(
+    "**What epic.day stores today.** Nothing is used for statistics or marketing yet; if that changes, it is added here, and it is only set if you accept it in the cookie banner.",
+    `**What epic.day stores today.** The ${which} at the end of this list are set only if you choose Accept all in the cookie banner; everything else is listed as it is.`,
+  ) + '\n' + rows.join('\n');
+}
