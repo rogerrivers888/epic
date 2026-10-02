@@ -40,6 +40,7 @@ import { feeFor, priceBooking, tipFee, numbersSettlement } from '../domain/money
 import { mainAction, placesLeft, sessionsForBooking, KINDS_BY_LANE, checkParty, childAge, cancelQuote, answersEditable, tipOpen, guestChip } from '../domain/booking.js';
 import { localInstant, localDay, plusDays, slotsFor, bookableDay, dow, perPersonAt, refundWords, hostingConfig } from '../domain/lanes.js';
 import { mediaRef } from './hosting.js';
+import { opensPrivately } from '../domain/hosting.js';
 
 export const router = Router();
 export const publicRouter = Router();
@@ -142,6 +143,11 @@ publicRouter.get('/experiences/:id/booking/options', async (req, res, next) => {
   try {
     const e = await eventWithSessions(req.params.id);
     if (!e || ['draft', 'in_review', 'approved'].includes(e.offer.state)) throw refuse(404, 'not_found', 'That event isn’t open.');
+    // A private event opens only with its link or an invitation, as its page does (Codex, 2 Oct 2026).
+    if (e.offer.visibility !== 'public') {
+      const invite = typeof req.query.i === 'string' ? await repo.inviteByToken(req.query.i.slice(0, 64)) : null;
+      if (!opensPrivately(e.offer, { linkToken: typeof req.query.l === 'string' ? req.query.l.slice(0, 64) : null, invite })) throw refuse(404, 'not_found', 'This one is invitation only.');
+    }
     const { offer: o, sessions, host } = e;
     const now = new Date();
     const s = await settingsRepo.current();
@@ -253,6 +259,13 @@ async function book({ offerId, body, household, account, invite = null }) {
       if (!e || e.offer.state !== 'live') throw refuse(404, 'not_open', 'That event isn’t open for booking.');
       const { offer: o, sessions, host } = e;
       if (host.paused || host.stopped_at) throw refuse(409, 'host_paused', 'This host isn’t taking new bookings just now.');
+      // A private event is booked only with its link, an invitation, or a booking already held (Codex, 2 Oct 2026).
+      const linkToken = typeof body.linkToken === 'string' ? body.linkToken.slice(0, 64) : null;
+      if (o.visibility !== 'public') {
+        const inv = invite ?? (typeof body.inviteToken === 'string' ? await repo.inviteByToken(body.inviteToken.slice(0, 64), c) : null);
+        const { rows: [held] } = await c.query(`select 1 from experience_bookings where offer_id = $1 and household_id = $2 and state <> 'cancelled' limit 1`, [o.id, household.id]);
+        if (!opensPrivately(o, { linkToken, invite: inv, hasBooking: Boolean(held) })) throw refuse(404, 'not_found', 'This one is invitation only.');
+      }
       if (host.household_id === household.id) throw refuse(409, 'own_event', 'You can’t book your own event.');
       const next = ahead(sessions, o);
       const when = parseWhen(o, next, body.when);
@@ -280,7 +293,9 @@ async function book({ offerId, body, household, account, invite = null }) {
       const price = priceFor(o, when.kind, { adults: check.adults, children: check.children }, when.sessionIds.length);
       const paid = price.valuePence > 0 && paidThroughEpic(o);
       if (paid && !stripe.stripeStatus().ready) throw refuse(503, 'payments_not_open', 'Paying for events opens soon.');
-      const viaHostLink = body.viaHostLink === true || body.source === 'link';
+      // The host-link rate only with the host's own token, or the event's own link — never because the request says so (Codex, 2 Oct 2026).
+      const hostLink = typeof body.hostLink === 'string' ? body.hostLink.slice(0, 64) : null;
+      const viaHostLink = Boolean((hostLink && host.link_token && hostLink === host.link_token) || (linkToken && o.link_token && linkToken === o.link_token));
       const fee = paid ? await feeOn(o, host, price.valuePence, viaHostLink, s, c) : { ratePct: 0, reason: 'free', feePence: 0, hostPence: price.valuePence };
       if (fee.reason === 'not_set') throw refuse(503, 'fees_not_set', 'Booking opens once Epic has finished setting its fees.');
       const asked = when.kind === 'request';
@@ -297,7 +312,7 @@ async function book({ offerId, body, household, account, invite = null }) {
           paid || asked ? 'pending' : 'confirmed', price.valuePence, when.kind, asked ? 'asked' : null, asked ? new Date(Date.now() + askHours * 3_600_000) : null,
           when.slot?.date ?? null, when.slot?.time ?? null, when.slot?.length ?? null,
           policy, JSON.stringify(policy ? s.refund_terms?.[policy] ?? null : null), JSON.stringify(cleanAnswers(body.answers, o.guest_questions)), party.adultConfirmed,
-          ['search', 'link', 'invite', 'profile', 'collection', 'web'].includes(body.source) ? body.source : 'search', viaHostLink,
+          invite ? 'invite' : viaHostLink ? 'link' : ['search', 'profile', 'collection', 'web'].includes(body.source) ? body.source : 'search', viaHostLink,
           JSON.stringify(price.lines), price.grossPence, price.discountPence, price.valuePence, fee.ratePct, fee.reason, fee.feePence, fee.hostPence],
       );
       for (const id of when.sessionIds) await c.query('insert into booking_sessions (booking_id, session_id) values ($1, $2)', [b.id, id]);
@@ -635,7 +650,8 @@ async function quoteFor(b, o, sessionIds, now = new Date()) {
   const s = await settingsRepo.current();
   const terms = b.refund_policy ? { ...(s.refund_terms ?? {}), [b.refund_policy]: b.refund_terms ?? s.refund_terms?.[b.refund_policy] } : s.refund_terms;
   const sessions = live.map((x) => ({ id: x.id, startsAt: startOf(x, o), movedAfterBooking: movedSinceBooking(b, [x]) }));
-  const q = cancelQuote({ booking: { ...b, all_sessions_count: held.length }, lane: o.lane, sessions, losing, now, terms });
+  const forfeited = held.filter((x) => x.held === 'forfeited').length;
+  const q = cancelQuote({ booking: { ...b, all_sessions_count: held.length, forfeited_count: forfeited }, lane: o.lane, sessions, losing, now, terms });
   return { ...q, losing, liveCount: live.length };
 }
 

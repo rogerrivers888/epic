@@ -297,7 +297,11 @@ alter table hosts
   add column if not exists checked_on         date,
   add column if not exists insurance_expires  date,
   add column if not exists away               jsonb not null default '[]'::jsonb,
-  add column if not exists notification_prefs jsonb not null default '{}'::jsonb;
+  add column if not exists notification_prefs jsonb not null default '{}'::jsonb,
+  -- The host's own link (E10): a booking that arrives with it is charged the host-link rate. A token, so the
+  -- rate can't be claimed by sending a flag (Codex, 2 Oct 2026).
+  add column if not exists link_token        text not null default replace(gen_random_uuid()::text, '-', '');
+create unique index if not exists hosts_link_token_idx on hosts (link_token);
 alter table hosts drop constraint if exists hosts_fee_override_check;
 alter table hosts add constraint hosts_fee_override_check
   check (fee_override_pct is null or (fee_override_pct >= 0 and fee_override_pct <= 100));

@@ -172,7 +172,7 @@ export async function claimPayout(id, { by }) {
 export async function holdPayout(id, reason) {
   const { rows: [row] } = await query(
     `update host_payouts set state = 'held', hold_reason = $2, updated_at = now()
-      where id = $1 and state in ('scheduled', 'held') and hold_reason is distinct from $2 returning *`,
+      where id = $1 and state in ('scheduled', 'held', 'released') and (state = 'released' or hold_reason is distinct from $2) returning *`,
     [id, reason],
   );
   return row ?? null;

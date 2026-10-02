@@ -256,7 +256,7 @@ test('fees: the ladder by rating, every booking’s fee as stored, your link', a
     assert.equal(r.body.ladder[0].current, true);
     assert.equal(r.body.movesBack, null, 'nowhere back from the first step');
     assert.equal(r.body.bookings[0].reasonWords, 'Through your link');
-    assert.match(r.body.link.url, new RegExp(`/hosts/${host.id}\\?via=link$`));
+    assert.match(r.body.link.url, new RegExp(`/hosts/${host.id}\\?via=[0-9a-f]{32}$`));
     assert.ok(!JSON.stringify(r.body).includes('Trusted'), 'no "Epic Trusted" anywhere');
   } finally { await srv.close(); }
 });

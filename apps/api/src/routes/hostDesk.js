@@ -539,7 +539,7 @@ router.get('/host/desk/events/:id', async (req, res, next) => {
         priceMode: o.price_mode, minCount: o.min_count, maxCount: o.max_count, waitlistOn: o.waitlist_on === true,
         date: first ? { date: ymd(first.on_date), time: hm(first.starts_at) } : null,
         booked: session?.booked ?? 0, decidesBy: o.lane === 'weekly' ? (o.min_count ? 'day_before' : null) : (first?.decides_at ? ymd(localDay(new Date(first.decides_at), tzOf(o))) : null),
-        chip: eventRow(o, now).chip, link: `${appUrl()}/experiences/${o.id}`,
+        chip: eventRow(o, now).chip, link: `${appUrl()}/experiences/${o.id}${o.link_token ? `?l=${o.link_token}` : ''}`,
         lowerMinimum: o.price_mode !== 'by_numbers' && Boolean(o.min_count),
       },
       view, sessions, sessionId, guests, waitlist, money,
@@ -796,7 +796,8 @@ router.get('/host/desk/fees', async (_req, res, next) => {
       progress: progress?.next ? { ratedEvents: rating.ratedEvents, of: progress.next.ratedEvents, avg: rating.ratedAvg, avgNeeded: progress.next.avgAtLeast } : null,
       movesBack: movesBack(s.public_commission, progress?.rate),
       bookings: rows.map((r) => ({ title: r.title, household: r.household, reason: r.fee_reason, reasonWords: REASON[r.fee_reason] ?? r.fee_reason, ratePct: r.fee_reason === 'minimum' ? null : Number(r.fee_rate_pct), feePence: r.fee_pence, words: feeWords({ ratePct: Number(r.fee_rate_pct), reason: r.fee_reason, feePence: r.fee_pence }) })),
-      link: { url: `${appUrl()}/hosts/${host.id}?via=link`, ratePct: s.host_link_rate ?? null },
+      // The host's own token: bookings that arrive with it are charged the host-link rate (Codex, 2 Oct 2026).
+      link: { url: `${appUrl()}/hosts/${host.id}?via=${host.link_token}`, ratePct: s.host_link_rate ?? null },
       privateOnly: vis.all_out > 0 && vis.pub === 0,
       private: { eventPence: s.private_event_fee ?? null, proPence: s.pro_monthly ?? null, paymentFeePct: s.private_payment_fee ?? null },
     });

@@ -447,3 +447,31 @@ test('Codex: a payment that lands after the booking was let go is refunded in fu
     assert.equal((await query(`select count(*)::int as n from notifications where household_id = $1 and kind = 'booking_confirmed'`, [a.household.id])).rows[0].n, 0);
   } finally { await srv.close(); }
 });
+
+test('Codex: a private event needs its link or an invitation, and the host-link rate needs the host’s token', async () => {
+  settings.forget();
+  const priv = await anEvent();
+  await query(`update host_offers set visibility = 'invite', link_token = 'tok123' where id = $1`, [priv.o.id]);
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    assert.equal((await srv.get(`/api/experiences/${priv.o.id}/booking/options`)).status, 404);
+    assert.equal((await srv.get(`/api/experiences/${priv.o.id}/booking/options?l=tok123`)).status, 200);
+    assert.equal((await srv.send('POST', `/api/experiences/${priv.o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 } })).status, 404);
+    assert.equal((await srv.send('POST', `/api/experiences/${priv.o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 }, linkToken: 'tok123' })).status, 201);
+  } finally { await srv.close(); }
+  const pub = await anEvent({ price: 4000, priceMode: 'same_each' });
+  const { rows: [{ link_token: tok }] } = await query('select link_token from hosts where id = $1', [pub.h.id]);
+  const b = await aPerson();
+  const sb = await server(b.account);
+  try {
+    const flagged = await sb.send('POST', `/api/experiences/${pub.o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 }, viaHostLink: true, source: 'link' });
+    assert.equal((await query('select fee_reason from experience_bookings where id = $1', [flagged.body.booking.id])).rows[0].fee_reason, 'standard', 'a flag alone earns nothing');
+    const c = await aPerson();
+    const sc = await server(c.account);
+    try {
+      const real = await sc.send('POST', `/api/experiences/${pub.o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 }, hostLink: tok });
+      assert.equal((await query('select fee_reason from experience_bookings where id = $1', [real.body.booking.id])).rows[0].fee_reason, 'host_link');
+    } finally { await sc.close(); }
+  } finally { await sb.close(); }
+});

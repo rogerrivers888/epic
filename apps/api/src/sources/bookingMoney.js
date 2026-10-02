@@ -53,7 +53,8 @@ async function lockEvent(c, offerId) {
 async function bookingsOn(c, sessionIds) {
   const { rows } = await c.query(
     `select b.*, array(select bs2.session_id::text from booking_sessions bs2 where bs2.booking_id = b.id) as all_sessions,
-            array(select bs3.session_id::text from booking_sessions bs3 where bs3.booking_id = b.id and bs3.state = 'booked') as booked_sessions
+            array(select bs3.session_id::text from booking_sessions bs3 where bs3.booking_id = b.id and bs3.state = 'booked') as booked_sessions,
+            (select count(*) from booking_sessions bs4 where bs4.booking_id = b.id and bs4.state = 'forfeited')::int as forfeited
        from experience_bookings b
       where ${LIVE_BOOKING}
         and exists (select 1 from booking_sessions bs where bs.booking_id = b.id and bs.session_id = any($1::uuid[]) and bs.state = 'booked')`,
@@ -105,7 +106,9 @@ export function shareOf(booking, losing) {
   const all = booking.all_sessions?.length || 1;
   const left = Math.max(0, Number(booking.charged_pence ?? 0) - Number(booking.refunded_pence ?? 0));
   const stillBooked = (booking.booked_sessions ?? []).filter((id) => !losing.includes(id));
-  if (!stillBooked.length) return { amount: left, whole: true };
+  // Money kept for a session the guest gave up stays kept (Codex, 2 Oct 2026).
+  if (!stillBooked.length && !Number(booking.forfeited ?? 0)) return { amount: left, whole: true };
+  if (!stillBooked.length) return { amount: Math.min(left, Math.floor((Number(booking.charged_pence ?? 0) * losing.length) / all)), whole: true };
   const n = (booking.booked_sessions ?? []).filter((id) => losing.includes(id)).length;
   return { amount: Math.min(left, Math.floor((Number(booking.charged_pence ?? 0) * n) / all)), whole: false };
 }

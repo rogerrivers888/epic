@@ -111,7 +111,8 @@ export function cancelQuote({ booking, lane, sessions, losing, now = new Date(),
   const lose = sessions.filter((s) => losing.includes(s.id));
   const keepsSome = sessions.some((s) => !losing.includes(s.id));
   const all = Math.max(1, Number(booking.all_sessions_count ?? sessions.length));
-  const share = keepsSome ? Math.floor((Number(booking.charged_pence ?? 0) * lose.length) / all) : left;
+  // A session given up earlier with its money kept stays kept: giving up the rest refunds only their share (Codex, 2 Oct 2026).
+  const share = keepsSome || Number(booking.forfeited_count ?? 0) > 0 ? Math.min(left, Math.floor((Number(booking.charged_pence ?? 0) * lose.length) / all)) : left;
   const s = { refund_terms: terms ?? null };
   if (lose.some((x) => x.movedAfterBooking)) return { pence: Math.min(left, share), cause: 'date_changed', words: 'The host moved the date: a full refund.' };
   const first = [...sessions].sort((a, b) => a.startsAt - b.startsAt)[0];

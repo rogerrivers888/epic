@@ -52,11 +52,13 @@ export async function releasePayouts({ now = new Date(), transfer = stripe.trans
   if (!status().ready) return { ...out, skipped: 'stripe_not_ready' };
   const s = await settings.current();
   for (const p of await ledger.payoutsDue({ now })) {
-    const d = p.state === 'released' ? { state: 'release', by: p.released_by ?? 'time' } : payoutDecision({
+    // A retry asks again too: a complaint, missing tax details or a broken Stripe account since the first try still hold it (Codex, 2 Oct 2026).
+    const decided = payoutDecision({
       endsAt: p.session_ends_at ?? p.release_at, now,
       complaintOpen: p.complaint_open, guestConfirmed: p.guest_confirmed, reviewed: p.reviewed,
       taxMissing: !p.tax_reference, stripeReady: p.payouts_state === 'ready' && Boolean(p.stripe_account_id),
     }, s);
+    const d = p.state === 'released' && decided.state !== 'held' ? { state: 'release', by: p.released_by ?? 'time' } : decided;
     if (d.state === 'wait') { out.waiting += 1; continue; }
     if (d.state === 'held') {
       const changed = await ledger.holdPayout(p.id, d.reason);
