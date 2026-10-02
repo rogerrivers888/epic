@@ -77,3 +77,16 @@ test('the check reads every settled place with a record and names the contradict
   assert.deepEqual(typed?.signals.map((x) => [x.signal, x.says, x.source]), [['address', 'FR', 'record']]);
   assert.equal(out.listed, 'all');
 });
+
+test('the composed address is not counted twice', async () => {
+  const m = await import('../src/desk/markets.js');
+  await query(`insert into place_index (venue_ref, country_code) values ('google:cs-dup', 'GB') on conflict (venue_ref) do update set country_code = 'GB'`);
+  await query(`insert into place_facts (venue_ref, field, source, value, licence, retention) values
+               ('google:cs-dup', 'address', 'nominatim', to_jsonb('1 Rue de Rivoli, Paris, France'::text), 'ODbL', 'indefinite')
+               on conflict (venue_ref, field, source) do nothing`);
+  await query(`insert into place_records (venue_ref, address) values ('google:cs-dup', '1 Rue de Rivoli, Paris, France')
+               on conflict (venue_ref) do update set address = excluded.address`);
+  const out = await m.countryContradictions();
+  const dup = out.places.find((p) => p.venue_ref === 'google:cs-dup');
+  assert.deepEqual(dup.signals.map((x) => x.source), ['nominatim']);
+});

@@ -223,7 +223,11 @@ export async function countryContradictions() {
                         filter (where f.venue_ref is not null), '[]'::jsonb)
                -- And the record's own address, which a back-office edit writes only
                -- there (Codex), labelled as the record's.
-               || case when r.address is not null then jsonb_build_array(jsonb_build_object('source', 'record', 'value', r.address))
+               -- Only when no fact already holds it: compose() copies the winning fact
+               -- there, and it is not a second piece of evidence (Codex).
+               || case when r.address is not null
+                        and not bool_or(coalesce(f.value #>> '{}' = r.address, false))
+                       then jsonb_build_array(jsonb_build_object('source', 'record', 'value', r.address))
                        else '[]'::jsonb end as addresses
         from place_index pi
         join place_records r on r.venue_ref = pi.venue_ref
