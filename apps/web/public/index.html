@@ -96,6 +96,16 @@
         anything that does not know it; the last one a browser understands wins.
       */
       #root { display: flex; height: 100vh; height: -webkit-fill-available; height: 100dvh; }
+      /*
+        Opened from an iPhone's home screen with the see-through status bar, iOS
+        reports 100dvh short by about the status bar's height, which left a band
+        of empty ground under the tab bar (owner, 2 Oct 2026: about 50pt more than
+        the bar's own padding in his screenshot). In that mode the app is simply
+        pinned to the four edges of the screen, which cannot come up short.
+      */
+      @media all and (display-mode: standalone) {
+        #root { position: fixed; top: 0; right: 0; bottom: 0; left: 0; height: auto; }
+      }
     </style>
       <style>
       :root { --epic-bg: #FFFDF9; --epic-surface: #FFFDF9; --epic-ink: #201E1D; --epic-headerBg: #C8F542; color-scheme: light; }

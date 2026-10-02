@@ -57,7 +57,9 @@ export function TallBand({ right }: { right?: React.ReactNode }) {
   return (
     <View style={styles.limeTop}>
       <View style={styles.tallRow}>
-        <Wordmark height={40} ground={LIME} />
+        {/* Ink on lime in both modes (owner, 2 Oct 2026: white "Epic" was unreadable on
+            Inspire, Places and Trips): the theme's ink turns cream in dark mode. */}
+        <Wordmark height={40} ink={INK} ground={LIME} />
         {right ?? null}
       </View>
     </View>

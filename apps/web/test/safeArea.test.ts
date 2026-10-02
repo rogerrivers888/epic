@@ -58,7 +58,13 @@ test('the two ends of the app each apply the inset once', () => {
   // first asked it dropped ~half a centimetre (30 Sep 2026), then that it sit
   // ~5mm higher — too close to the bottom — so the floor is 31px and the
   // home-indicator case is (sab + 3), ~19px up from where it was.
-  assert.match(app, /paddingBottom: \(Platform\.OS === 'web' \? 'max\(31px, calc\(var\(--epic-sab\) \+ 3px\)\)'/);
+  // 2 Oct 2026 the owner asked for the opposite, on his iPhone: "right at the foot
+  // of the screen" — the labels just above the home indicator (inset − 18), 12px
+  // off the edge without one.
+  assert.match(app, /paddingBottom: \(Platform\.OS === 'web' \? 'max\(12px, calc\(var\(--epic-sab\) - 18px\)\)'/);
+  // And from the home screen the app is pinned to the screen's four edges, so
+  // iOS's short 100dvh in that mode cannot leave a band under the bar.
+  assert.match(read('public/index.html'), /@media all and \(display-mode: standalone\) \{\s*#root \{ position: fixed; top: 0; right: 0; bottom: 0; left: 0;/);
   // Inspire draws its own head, so it takes the top inset itself.
   assert.match(read('src/components/InspireHeader.tsx'), /max\(16px, calc\(var\(--epic-sat\) \+ 10px\)\)/);
 });

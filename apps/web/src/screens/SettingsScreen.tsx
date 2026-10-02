@@ -10,9 +10,11 @@
  *   SE12 Solo           no face row; just you, and the upsell to Household
  *   SX6  Signed-in devices (a push)
  *
- * Providers (owner), data export and the on-device store are kept — the
- * redesign does not mention them, so rather than drop features the owner has
- * not asked to drop, they sit in a quiet "More" group at the foot of My Account.
+ * My Account is SE2 and nothing else (owner, 2 Oct 2026: the offline card, "Save
+ * everything for offline" and the rest "was not in any of the screenshots I
+ * signed off on, so you need to remove all of that"). The providers table, the
+ * data export and the on-device store's controls are no longer shown here; the
+ * device still keeps its offline copy quietly (useOffline).
  */
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -28,7 +30,6 @@ import { paths, type Route } from '../routes';
 import { storage } from '../storage';
 import { NotificationsSettings } from '../components/chat/NotificationsSettings';
 import { ProvidersTable } from '../components/ProvidersTable';
-import { OfflineCard } from '../components/OfflineCard';
 import { useTheme } from '../hooks/useTheme';
 import { useSession } from '../hooks/useSession';
 import { Icon } from '../components/Icon';
@@ -319,31 +320,28 @@ function MyAccountTab({ data, refresh }: { data: HouseholdResponse; refresh: () 
       <ToggleRow label="Speak replies" value={speak} onChange={(v) => { setSpeak(v); storage.setItem(SPEAK_KEY, v ? 'on' : 'off'); }} />
       <ValueRow label="Language" value="English (UK)" onPress={() => showToast('Language options are coming soon')} />
 
-      <SectionHead>Notifications</SectionHead>
-      <ValueRow label="Notifications" value="Trips and hosted dates" onPress={() => navigate(paths.settingsNotifications())} />
-
-      <SectionHead>Ratings</SectionHead>
+      {/* SE2: Notifications, ratings and appearance follow Voice without heads of their own. */}
+      <View style={{ marginTop: 10 }}>
+        <ValueRow label="Notifications" value="Reminders, replies" onPress={() => navigate(paths.settingsNotifications())} />
+      </View>
       <ValueRow label="Whose ratings to show" value={`${ratingsViewLabel(me?.ratingsView, data.members)} · your setting`} onPress={() => setRatingsOpen(true, { replace: true })} />
-
-      <SectionHead>Appearance</SectionHead>
-      <Appearance value={pref === 'system' ? 'match' : pref} onChange={(v) => setPref(v === 'match' ? 'system' : v)} />
+      <View style={styles.apBlock}>
+        <Text style={styles.rowLabel}>Appearance</Text>
+        <Appearance value={pref === 'system' ? 'match' : pref} onChange={(v) => setPref(v === 'match' ? 'system' : v)} />
+      </View>
 
       <SectionHead>Account</SectionHead>
       {isLead ? <ValueRow label="Plan and billing" value={account?.plan === 'solo' ? 'Solo' : 'Household'} onPress={() => showToast('Plan and billing is coming soon')} /> : null}
       <ValueRow label="Signed-in devices" value={devices == null ? undefined : String(devices)} onPress={() => navigate(paths.settings('devices'))} />
-      <ValueRow label="Sign out" onPress={async () => { await api.signOut(); if (Platform.OS === 'web' && typeof location !== 'undefined') location.reload(); }} />
+      {/* A plain row, no arrow: it does, it does not open (SE2). */}
+      <Press onPress={async () => { await api.signOut(); if (Platform.OS === 'web' && typeof location !== 'undefined') location.reload(); }} accessibilityRole="button" style={styles.row}>
+        <Text style={styles.rowLabel}>Sign out</Text>
+      </Press>
       {isLead
         ? <DangerRow label="Delete household" onPress={() => setConfirmDelete(true)} />
         : <DangerRow label="Leave household" onPress={() => setConfirmLeave(true)} />}
 
       <Footer />
-
-      {/* Kept, not dropped: the owner's providers table, the data export and the
-          on-device store have no home in the redesign, so they sit here. */}
-      <SectionHead>More</SectionHead>
-      {isOwner ? <ValueRow label="Providers and usage" value="The owner's table" onPress={() => navigate(paths.settings('providers'))} /> : null}
-      <ValueRow label="Export everything (JSON)" onPress={() => { void api.downloadExport(); }} />
-      <View style={{ marginTop: spacing.md }}><OfflineCard /></View>
 
       {ratingsOpen && me ? <RatingsSheet member={me} members={data.members} refresh={refresh} onClose={() => setRatingsOpen(false, { replace: true })} /> : null}
       {confirmDelete ? <DeleteHouseholdSheet name={data.household.name} refresh={refresh} onClose={() => setConfirmDelete(false)} /> : null}
@@ -605,7 +603,7 @@ function Footer() {
     }).catch(() => setHashes({ app: 'unknown', api: 'unreachable' }));
   };
   return (
-    <Press onLongPress={reveal} delayLongPress={500} accessibilityRole="button" style={{ paddingVertical: 20 }}>
+    <Press onLongPress={reveal} delayLongPress={500} accessibilityRole="button" style={{ paddingTop: 16, paddingBottom: 20 }}>
       <Text style={styles.footer}>Epic 4.12.0 · <Text style={{ textDecorationLine: 'underline' }} onPress={() => { if (Platform.OS === 'web') window.location.reload(); }}>Get newest version</Text></Text>
       {hashes ? <Text style={[styles.footer, { marginTop: 4 }]}>app {hashes.app} · api {hashes.api}</Text> : null}
     </Press>
@@ -632,8 +630,9 @@ function ValueRow({ label, value, onPress }: { label: string; value?: string; on
 
 function DangerRow({ label, onPress }: { label: string; onPress: () => void }) {
   return (
-    <Press onPress={onPress} accessibilityRole="button" style={styles.row}>
-      <Text style={[styles.rowLabel, { color: colors.overrun, fontWeight: '700' }]}>{label}</Text>
+    // SE2: set apart from Sign out by 22px, and no line under it.
+    <Press onPress={onPress} accessibilityRole="button" style={styles.danger}>
+      <Text style={styles.dangerLabel}>{label}</Text>
     </Press>
   );
 }
@@ -729,5 +728,8 @@ const styles = StyleSheet.create({
   // misc
   input: { minHeight: TARGET, paddingHorizontal: spacing.md, borderWidth: 1.5, borderColor: colors.ruleSoft, backgroundColor: colors.surface, fontSize: 15, color: colors.ink, flex: 1 },
   cancelLink: { fontFamily: fonts.body, fontSize: 14, color: colors.inkMuted, paddingVertical: 6 },
-  footer: { fontFamily: fonts.body, fontSize: 12, color: colors.inkFaint, textAlign: 'center' },
+  footer: { fontFamily: fonts.body, fontSize: 12, color: colors.inkFaint },
+  danger: { paddingTop: 22, paddingBottom: 4 },
+  dangerLabel: { fontFamily: fonts.body, fontSize: 15, fontWeight: '700', color: colors.overrun },
+  apBlock: { paddingTop: 14, paddingBottom: 16, gap: 10, borderBottomWidth: 1, borderBottomColor: colors.ruleSoft },
 });
