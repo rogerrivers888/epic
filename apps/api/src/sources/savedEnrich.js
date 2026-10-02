@@ -125,8 +125,10 @@ export async function requestEnrichment({ venueRef, account, householdId, sessio
   // A re-run is of a place already researched, and nothing else: never a way
   // to start the paid pass on an arbitrary reference (Codex, 2 Oct 2026).
   if (rerun) {
+    // A re-run is a new run: the last one's phase times go with it (Codex, 2 Oct 2026).
     const { rows } = await query(
       `update saved_place_enrichment set state = 'queued', error = null, requested_at = now(),
+              free_done_at = null, claude_done_at = null,
               household_id = $2, session_id = $3
         where venue_ref = $1 and state in ('done', 'failed')
         returning venue_ref`, [venueRef, householdId, sessionId]);

@@ -491,3 +491,13 @@ test('Claude fills only what was missing: a field the free research holds is not
   const found = (await enrich.enrichmentOf(ref)).found.fields;
   assert.equal(found.phone.value, '0100 FREE');
 });
+
+test('a re-run clears the last run\'s phase times', async () => {
+  const hh = await household();
+  const ref = `google:times-${randomUUID()}`;
+  await query(`insert into saved_place_enrichment (venue_ref, household_id, state, free_done_at, claude_done_at) values ($1, $2, 'done', now(), now())`, [ref, hh]);
+  assert.equal((await enrich.requestEnrichment({ venueRef: ref, account: null, householdId: hh, rerun: true })).started, true);
+  const row = await enrich.enrichmentOf(ref);
+  assert.equal(row.free_done_at, null);
+  assert.equal(row.claude_done_at, null);
+});
