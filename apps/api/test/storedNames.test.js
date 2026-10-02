@@ -164,3 +164,39 @@ test('rows of the same open reference keep their own words when resolved togethe
   assert.equal(stops[0].venue_name, 'Meet at the north gate');
   assert.equal(shortlist[0].venue_label, 'The Park');
 });
+
+test('a person\'s own words beside a provider\'s reference are kept; only a copy of the provider\'s name goes', async () => {
+  const purge = await import('../src/sources/namePurge.js');
+  const hh = await household();
+  const g = `google:${randomUUID()}`;
+  const trip = (await query(`insert into trips (household_id, title, origin_label, origin_lat, origin_lng, depart_at, return_at, start_date, end_date)
+    values ($1, 'T', 'Home', 51.4, -0.6, now(), now(), '2026-10-04', '2026-10-05') returning id`, [hh])).rows[0];
+  const group = (await query(`insert into trip_groups (trip_id, household_id, invite_token) values ($1, $2, $3) returning id`, [trip.id, hh, `t-${randomUUID()}`])).rows[0];
+  // The trigger: an organiser's own words stay; a copy from the trip is cleared.
+  await query(`insert into group_items (group_id, kind, label, label_from, venue_ref, position) values
+    ($1, 'activity', 'Book lunch for Saturday', 'own', $2, 0), ($1, 'activity', 'Google Copy', 'trip', $2, 1)`, [group.id, g]);
+  assert.deepEqual((await query('select label from group_items where group_id = $1 order by position', [group.id])).rows.map((r) => r.label),
+    ['Book lunch for Saturday', g]);
+  // A host's own words stay; a picked place's text on a provider's reference goes.
+  const host = (await query(`insert into hosts (household_id, name) values ($1, 'Tom') returning id`, [hh])).rows[0];
+  const offers = (await query(`insert into host_offers (host_id, shape, state, title, venue_ref, venue_label, venue_label_from) values
+    ($1, 'anytime', 'draft', 'A', $2, 'Meet by the red door, SL4 1AA', 'host'),
+    ($1, 'anytime', 'draft', 'B', $2, 'Google Formatted Address', 'place') returning venue_label`, [host.id, g])).rows;
+  assert.deepEqual(offers.map((o) => o.venue_label), ['Meet by the red door, SL4 1AA', null]);
+
+  // The purge, on legacy rows that say nothing of whose they are: an item is
+  // cleared only on evidence it was copied from the trip's own names.
+  const ev = `google:${randomUUID()}`;
+  for (const t of ['group_items', 'trip_shortlist']) await query(`alter table ${t} disable trigger no_rented_name`);
+  try {
+    await query(`insert into trip_shortlist (trip_id, venue_ref, venue_label, kind) values ($1, $2, 'Legacy Google Name', 'activity')`, [trip.id, ev]);
+    await query(`insert into group_items (group_id, kind, label, venue_ref, position) values
+      ($1, 'activity', 'Legacy Google Name', $2, 2), ($1, 'activity', 'Bring a towel', $2, 3)`, [group.id, ev]);
+  } finally {
+    for (const t of ['group_items', 'trip_shortlist']) await query(`alter table ${t} enable trigger no_rented_name`);
+  }
+  await purge.run({ by: 'test' });
+  assert.deepEqual((await query('select label from group_items where group_id = $1 and position >= 2 order by position', [group.id])).rows.map((r) => r.label),
+    [ev, 'Bring a towel'], 'the copy goes, the organiser\'s words stay');
+  assert.equal((await query('select venue_label from host_offers where host_id = $1 and title = $2', [host.id, 'A'])).rows[0].venue_label, 'Meet by the red door, SL4 1AA');
+});

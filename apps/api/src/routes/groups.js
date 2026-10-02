@@ -433,7 +433,7 @@ async function syncFromTrip(group) {
     // A meal is asked about rather than required: what the organiser needs from
     // it is a number for the table.
     await groupsRepo.insertItem(group.id, {
-      kind: 'activity', required: !s.food, label: s.label,
+      kind: 'activity', required: !s.food, label: s.label, labelFrom: 'trip',
       detail: s.food ? 'Are you coming to this?' : null,
       startsAt: s.at, venueRef: s.ref, position: position++,
     });
@@ -505,7 +505,7 @@ router.post('/trips/:id/group', async (req, res, next) => {
         for (const s of shortlist.slice(0, 8)) {
           // A meal is asked about, not required: the organiser books the table, and what they need is a number.
           await groupsRepo.insertItem(created.id, {
-            kind: 'activity', required: s.kind !== 'food', label: s.venue_label,
+            kind: 'activity', required: s.kind !== 'food', label: s.venue_label, labelFrom: 'trip',
             detail: s.kind === 'food' ? 'Are you coming to this?' : null,
             venueRef: s.venue_ref, position: position++,
           }, client);
@@ -603,7 +603,7 @@ router.post('/groups/:id/items', async (req, res, next) => {
     const position = await groupsRepo.nextItemPosition(group.id);
     const pricing = b.pricing === 'variable' ? 'variable' : (b.amountPence != null || kind === 'fee' ? 'fixed' : null);
     await groupsRepo.insertItem(group.id, {
-      kind, required: b.required !== false, label: b.label.trim(), detail: b.detail?.trim() || null,
+      kind, required: b.required !== false, label: b.label.trim(), labelFrom: 'own', detail: b.detail?.trim() || null,
       venueRef: b.venueRef ?? null, stopId: b.stopId ?? null,
       amountPence: b.amountPence == null ? null : Math.round(Number(b.amountPence)),
       refundRule: b.refundRule ?? null, refundUntil: ymd(b.refundUntil), position,
@@ -629,7 +629,8 @@ router.patch('/groups/:id/items/:itemId', async (req, res, next) => {
     const b = req.body || {};
     const sets = []; const params = [req.params.itemId, group.id];
     const put = (col, val) => { params.push(val); sets.push(`${col} = $${params.length}`); };
-    if (b.label !== undefined) put('label', String(b.label).trim());
+    // An organiser who rewrites a label makes it their own words (migration 341).
+    if (b.label !== undefined) { put('label', String(b.label).trim()); put('label_from', 'own'); }
     if (b.detail !== undefined) put('detail', String(b.detail).trim() || null);
     if (b.required !== undefined) put('required', Boolean(b.required));
     if (b.amountPence !== undefined) put('amount_pence', b.amountPence == null ? null : Math.round(Number(b.amountPence)));

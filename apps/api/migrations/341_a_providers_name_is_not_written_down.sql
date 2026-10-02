@@ -14,16 +14,28 @@
 -- A household's own name for a place is kept in household_places.nickname
 -- (migration 310), which this never touches.
 
+-- Two tables keep a person's own words beside a place reference as well as a
+-- copy of a place's name, so they say which a label is (Codex, 2 Oct 2026):
+-- a group checklist item copied from the trip ('trip') or written by the
+-- organiser ('own'); a host's offer venue that came with a picked place
+-- ('place') or that the host wrote ('host'). Only a copy is ever cleared.
+alter table group_items add column if not exists label_from text check (label_from in ('trip', 'own'));
+alter table host_offers add column if not exists venue_label_from text check (venue_label_from in ('place', 'host'));
+
 create or replace function epic_no_rented_name() returns trigger language plpgsql as $$
 declare
   name_col text := TG_ARGV[0];
   ref_col  text := TG_ARGV[1];
   mode     text := TG_ARGV[2];          -- 'ref' (the column may not be empty) or 'null'
+  from_col text := case when TG_NARGS > 3 then TG_ARGV[3] end;   -- whose words, where a table says
+  own_word text := case when TG_NARGS > 4 then TG_ARGV[4] end;   -- the value that means "a person's own"
   rec      jsonb := to_jsonb(NEW);
   ref      text := rec ->> ref_col;
   nm       text := rec ->> name_col;
 begin
   if ref is null or nm is null then return NEW; end if;
+  -- A person's own words are never a provider's, whatever the reference.
+  if from_col is not null and (rec ->> from_col) is not distinct from own_word then return NEW; end if;
   if not (coalesce(epic_ref_true_source(ref), '') = any(epic_rented_sources())) then return NEW; end if;
   if mode = 'ref' then
     if nm = ref then return NEW; end if;
@@ -47,14 +59,14 @@ drop trigger if exists no_rented_name on visits;
 create trigger no_rented_name before insert or update of venue_label, venue_ref on visits
   for each row execute function epic_no_rented_name('venue_label', 'venue_ref', 'ref');
 drop trigger if exists no_rented_name on group_items;
-create trigger no_rented_name before insert or update of label, venue_ref on group_items
-  for each row execute function epic_no_rented_name('label', 'venue_ref', 'ref');
+create trigger no_rented_name before insert or update of label, venue_ref, label_from on group_items
+  for each row execute function epic_no_rented_name('label', 'venue_ref', 'ref', 'label_from', 'own');
 drop trigger if exists no_rented_name on trip_messages;
 create trigger no_rented_name before insert or update of venue_label, venue_ref on trip_messages
   for each row execute function epic_no_rented_name('venue_label', 'venue_ref', 'null');
 drop trigger if exists no_rented_name on host_offers;
-create trigger no_rented_name before insert or update of venue_label, venue_ref on host_offers
-  for each row execute function epic_no_rented_name('venue_label', 'venue_ref', 'null');
+create trigger no_rented_name before insert or update of venue_label, venue_ref, venue_label_from on host_offers
+  for each row execute function epic_no_rented_name('venue_label', 'venue_ref', 'null', 'venue_label_from', 'host');
 drop trigger if exists no_rented_name on orders;
 create trigger no_rented_name before insert or update of venue_label, venue_ref on orders
   for each row execute function epic_no_rented_name('venue_label', 'venue_ref', 'null');

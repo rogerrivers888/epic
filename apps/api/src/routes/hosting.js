@@ -782,6 +782,11 @@ function offerBody(b, current) {
   // family be asked about it after (the visit question, 28 Sep 2026).
   if (b.venueRef === null || (typeof b.venueRef === 'string' && /^(osm|google|atlas|own):[\w/.:-]{1,200}$/.test(b.venueRef))) set('venueRef', b.venueRef);
   set('venueLabel', str(b.venueLabel, 240)); set('venueArea', str(b.venueArea, 120));
+  // Whose words the label is (migration 341): one that arrives with a picked
+  // place is that place's own text ('place'), which on a provider's reference
+  // is a provider's and is not kept; anything else is the host's ('host'), and
+  // is never touched.
+  if (b.venueLabel !== undefined) p.venueLabelFrom = typeof b.venueRef === 'string' && b.venueRef ? 'place' : 'host';
   set('venueLat', b.venueLat == null ? null : Number(b.venueLat)); set('venueLng', b.venueLng == null ? null : Number(b.venueLng));
   set('venueCountry', str(b.venueCountry, 2)?.toUpperCase() ?? null); set('venueNotes', str(b.venueNotes, 600));
   set('travelRadiusMin', int(b.travelRadiusMin)); set('travelChargePence', int(b.travelChargePence)); set('onlinePlatform', str(b.onlinePlatform, 80));
@@ -1093,7 +1098,7 @@ export function seedFromText(offer, text) {
   const time = body.match(/\b([01]?\d|2[0-3])[:.]([0-5]\d)\b/);
   if (!offer.starts_at && time) { patch.startsAt = `${time[1].padStart(2, '0')}:${time[2]}`; keys.push('startsAt'); }
   const postcode = lines.find((l) => /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i.test(l));
-  if (!offer.venue_label && postcode && postcode.length <= 160) { patch.venueLabel = postcode; keys.push('venueLabel'); }
+  if (!offer.venue_label && postcode && postcode.length <= 160) { patch.venueLabel = postcode; patch.venueLabelFrom = 'host'; keys.push('venueLabel'); }
   if (!offer.description) {
     const para = lines.slice(1).find((l) => l.length >= 40) ?? '';
     if (para) { patch.description = para.slice(0, 600); keys.push('description'); }

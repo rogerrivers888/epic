@@ -27,13 +27,26 @@ const RENTED = (ref) => `coalesce(epic_ref_true_source(${ref}), '') = any(epic_r
 
 /** Every column that keeps a name beside a place reference, as migration 341 lists them. */
 export const STORES = [
+  // Group items first: a legacy item is cleared only on evidence it was a copy
+  // — its label is the name the same trip's shortlist or stop held for that
+  // place — and that evidence must still be there when it is asked (Codex,
+  // 2 Oct 2026). An organiser's own words ('own') are never touched.
+  { table: 'group_items', col: 'label', ref: 'venue_ref', mode: 'ref', said: 'group checklist items',
+    only: `label_from is distinct from 'own' and (label_from = 'trip'
+             or exists (select 1 from trip_groups g join trip_shortlist sl on sl.trip_id = g.trip_id
+                         where g.id = group_items.group_id and sl.venue_ref = group_items.venue_ref and sl.venue_label = group_items.label)
+             or exists (select 1 from trip_groups g join trip_stops ts on ts.trip_id = g.trip_id
+                         where g.id = group_items.group_id and ts.venue_ref = group_items.venue_ref and ts.venue_name = group_items.label))` },
   { table: 'household_places', col: 'label', ref: 'venue_ref', mode: 'ref', said: 'saved places' },
   { table: 'trip_stops', col: 'venue_name', ref: 'venue_ref', mode: 'ref', said: 'trip stops' },
   { table: 'trip_shortlist', col: 'venue_label', ref: 'venue_ref', mode: 'ref', said: 'shortlist rows' },
   { table: 'visits', col: 'venue_label', ref: 'venue_ref', mode: 'ref', said: 'visits' },
-  { table: 'group_items', col: 'label', ref: 'venue_ref', mode: 'ref', said: 'group checklist items' },
   { table: 'trip_messages', col: 'venue_label', ref: 'venue_ref', mode: 'null', said: 'trip messages' },
-  { table: 'host_offers', col: 'venue_label', ref: 'venue_ref', mode: 'null', said: 'host offers' },
+  // A host's own words ('host') are never touched. A label with no record of
+  // whose it is came from the wizard, the only writer of a provider reference,
+  // which sends the picked place's own text with it — a provider's.
+  { table: 'host_offers', col: 'venue_label', ref: 'venue_ref', mode: 'null', said: 'host offers',
+    only: `venue_label_from is distinct from 'host'` },
   { table: 'orders', col: 'venue_label', ref: 'venue_ref', mode: 'null', said: 'orders' },
   { table: 'menus', col: 'venue_label', ref: 'venue_ref', mode: 'null', said: 'menus' },
   { table: 'place_menus', col: 'venue_label', ref: 'venue_ref', mode: 'null', said: 'place menus' },
@@ -42,9 +55,9 @@ export const STORES = [
 ];
 
 const keyOf = (s) => `${s.table}.${s.col}`;
-const heldWhere = (s) => (s.mode === 'ref'
+const heldWhere = (s) => `${s.mode === 'ref'
   ? `${s.ref} is not null and ${s.col} is distinct from ${s.ref} and ${RENTED(s.ref)}`
-  : `${s.ref} is not null and ${s.col} is not null and ${RENTED(s.ref)}`);
+  : `${s.ref} is not null and ${s.col} is not null and ${RENTED(s.ref)}`}${s.only ? ` and ${s.only}` : ''}`;
 
 // A chat topic's tag label is only a fallback for when its anchor has gone.
 // About a provider's stop it is that provider's name; about a day it reads

@@ -238,7 +238,7 @@ const OFFER_COLUMNS = {
   // asked on next edit, with that word as the starting suggestion, rather than
   // being guessed at in a data migration.
   categoryKey: 'category_key', formatKey: 'format_key',
-  venue: 'venue', venueRef: 'venue_ref', venueLabel: 'venue_label', venueArea: 'venue_area', venueLat: 'venue_lat', venueLng: 'venue_lng', venueCountry: 'venue_country',
+  venue: 'venue', venueRef: 'venue_ref', venueLabel: 'venue_label', venueLabelFrom: 'venue_label_from', venueArea: 'venue_area', venueLat: 'venue_lat', venueLng: 'venue_lng', venueCountry: 'venue_country',
   venueNotes: 'venue_notes', travelRadiusMin: 'travel_radius_min', travelChargePence: 'travel_charge_pence', onlinePlatform: 'online_platform',
   durationMin: 'duration_min', minCount: 'min_count', expectedCount: 'expected_count', maxCount: 'max_count', partyMax: 'party_max', ageLimit: 'age_limit',
   priceMode: 'price_mode', pricePence: 'price_pence', totalPence: 'total_pence', per: 'per', refundRule: 'refund_rule',

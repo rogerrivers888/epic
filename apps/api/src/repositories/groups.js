@@ -171,6 +171,10 @@ export async function nextItemPosition(groupId) {
  */
 const ITEM_COLUMNS = {
   kind: 'kind', required: 'required', label: 'label', detail: 'detail',
+  // Whose words the label is: 'trip' when copied from the trip's own names,
+  // 'own' when the organiser wrote it (migration 341) — only a copy of a
+  // provider's name may be cleared.
+  labelFrom: 'label_from',
   venueRef: 'venue_ref', stopId: 'stop_id', amountPence: 'amount_pence',
   refundRule: 'refund_rule', refundUntil: 'refund_until', position: 'position',
   pricing: 'pricing', totalPence: 'total_pence', perHead: 'per_head',
