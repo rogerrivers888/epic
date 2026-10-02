@@ -260,7 +260,11 @@ export async function spotFromDetail({ venueRef, detail, client = null } = {}) {
     // greatest(), which is safe — it never overwrites a count another source (the
     // feature harvest) put there; the per-place totals are NOT written to the shared
     // candidate, they are read from review_sightings (Codex, 2 Oct 2026).
-    await recordCandidates(subcategory, entries, { placesTotal: 1, client: tx });
+    const recorded = await recordCandidates(subcategory, entries, { placesTotal: 1, client: tx });
+    // Queued = rows that reached the queue (inserted, or updated while undecided).
+    // A word this drawer ignored, or one already promoted, is refused by the write and
+    // must not be counted as queued (Codex, 2 Oct 2026).
+    const queued = recorded?.touched ?? 0;
 
     // The accurate count per feature, for the report and the review queue: distinct
     // places, in the place's CURRENT drawer, ignoring any since deleted — derived by
@@ -279,8 +283,8 @@ export async function spotFromDetail({ venueRef, detail, client = null } = {}) {
       const c = byNorm[norm] ?? {};
       return { norm, known: known.has(norm), places: Number(c.places ?? 1), asserts: Number(c.asserts ?? 0), denies: Number(c.denies ?? 0), asks: Number(c.asks ?? 0) };
     });
-    await tally(run, { tombstoned: tombstoned.length, queued: entries.length });
-    return { subcategory, queued: entries.length, filtered, known: report.filter((r) => r.known).length, features: report };
+    await tally(run, { tombstoned: tombstoned.length, queued });
+    return { subcategory, queued, filtered, known: report.filter((r) => r.known).length, features: report };
   };
 
   return client ? work(client) : withTransaction(work);

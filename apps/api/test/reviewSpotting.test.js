@@ -785,4 +785,76 @@ test('approving a word closes its owned candidates too, and asks their drawers',
   assert.equal((await query("select status from harvest_candidates where norm = 'craft room' and subcategory = $1", [subC])).rows[0].status, 'promoted', 'the owned candidate is closed, not left to be promoted again');
 });
 
+test('approval waits for a harvest already writing, so no candidate slips in after it', async () => {
+  // Codex, 2 Oct 2026 (P1): approval closes all of the word's candidates; a harvest
+  // holding the shared lock must finish before approval reads them.
+  const sub = 'c30-apprace-parks';
+  const ref = 'google:ChIJ_c30_apprace';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 apprace parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query("insert into question_sets (key, name) values ('c30-apprace-set', 'C30 apprace set') on conflict do nothing");
+  await query("insert into question_set_subcategories (subcategory_key, set_key) values ($1, 'c30-apprace-set') on conflict do nothing", [sub]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
+  await query("delete from attribute_aliases where norm = 'drying room'").catch(() => {});
+  await query("delete from place_attributes where key = 'drying-room'").catch(() => {});
+  await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A drying room.' } });
+
+  const harvest = await pool.connect();
+  let done = false;
+  try {
+    await harvest.query('begin');
+    await harvest.query('select pg_advisory_xact_lock_shared(hashtext($1)::bigint)', ['feature-tombstones']);
+    const approving = sets.approveFeature('drying room', { actor: 'tester' }).then(() => { done = true; });
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(done, false, 'approval waits while the harvest is writing');
+    await harvest.query('commit');
+    await approving;
+    assert.equal(done, true, 'and completes once the harvest has committed');
+  } finally {
+    harvest.release();
+  }
+});
+
+test('a drawer owed a fact that is asked everywhere by the time a set arrives is simply cleared', async () => {
+  // Codex, 2 Oct 2026: only "already asked everywhere" (or retired) discharges a
+  // pending ask without adding a set question; anything else must ask or fail.
+  const sub = 'c30-pendglobal-parks';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 pendglobal parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query('delete from question_set_subcategories where subcategory_key = $1', [sub]);
+  await query("insert into question_sets (key, name) values ('c30-pendglobal-set', 'C30 pendglobal set') on conflict do nothing");
+  await query("insert into place_attributes (key, label, kind) values ('pg-everywhere', 'Asked everywhere', 'yesno') on conflict (key) do update set active = true");
+  await query("delete from questions where attribute_key = 'pg-everywhere'");
+  await query("insert into questions (attribute_key, scope, active) values ('pg-everywhere', 'global', true)");
+  await query("insert into feature_pending_asks (attribute_key, subcategory_key) values ('pg-everywhere', $1) on conflict do nothing", [sub]);
+
+  await sets.attach('c30-pendglobal-set', sub);
+  assert.equal((await query("select count(*)::int n from questions where attribute_key = 'pg-everywhere' and scope = 'set'")).rows[0].n, 0, 'no set question beside the global one');
+  assert.equal((await query("select count(*)::int n from feature_pending_asks where attribute_key = 'pg-everywhere'")).rows[0].n, 0, 'the obligation is met and cleared');
+});
+
+test('a word this drawer ignored is not counted as queued when spotted again', async () => {
+  // Codex, 2 Oct 2026: the tally and report counted attempted writes; a candidate
+  // the drawer ignored is refused by the write and never reaches the queue.
+  const sub = 'c30-qcount-parks';
+  const ref = 'google:ChIJ_c30_qcount';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 qcount parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
+  await query('delete from review_spotting_tallies where venue_ref = $1', [ref]);
+  await query("delete from feature_tombstones where norm = 'tea room'");
+
+  const first = await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A tea room.' } });
+  assert.equal(first.queued, 1, 'queued the first time');
+  const { rows: [cand] } = await query("select id from harvest_candidates where norm = 'tea room' and subcategory = $1", [sub]);
+  await sets.ignoreCandidate(cand.id, { actor: 'tester' });
+  const again = await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A tea room.' } });
+  assert.equal(again.queued, 0, 'not queued once the drawer has ignored it');
+  assert.deepEqual((await query('select queued from review_spotting_tallies where venue_ref = $1 order by id', [ref])).rows.map((r) => r.queued), [1, 0], 'and the tally agrees');
+});
+
 test.after(async () => { await pool.end(); });

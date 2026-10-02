@@ -84,20 +84,26 @@ export async function saveSet({ key, name, active = true }) {
  * else moves it rather than adding a second.
  */
 export async function attach(setKey, subcategoryKey) {
-  // A new subcategory brings vocabulary nobody has harvested, so the set is no
-  // longer settled whatever it said a moment ago (brief §5.4).
-  await query(
-    `update question_sets set vocabulary_settled = false, settled_at = null, settled_on = '{}'::jsonb, updated_at = now()
-      where key = $1 and vocabulary_settled`, [setKey],
-  );
-  const { rows } = await query(
-    `insert into question_set_subcategories (subcategory_key, set_key) values ($1, $2)
-     on conflict (subcategory_key) do update set set_key = excluded.set_key, attached_at = now()
-     returning *`,
-    [subcategoryKey, setKey],
-  );
-  await askWaiting(subcategoryKey, setKey);
-  return rows[0];
+  // One transaction, exclusive against approveFeature: otherwise an approval that
+  // read "no set here" could write its pending ask just after this consumed the
+  // drawer's pending asks, and the fact would wait for ever (Codex, 2 Oct 2026).
+  return withTransaction(async (client) => {
+    await client.query('select pg_advisory_xact_lock(hashtext($1)::bigint)', ['feature-tombstones']);
+    // A new subcategory brings vocabulary nobody has harvested, so the set is no
+    // longer settled whatever it said a moment ago (brief §5.4).
+    await client.query(
+      `update question_sets set vocabulary_settled = false, settled_at = null, settled_on = '{}'::jsonb, updated_at = now()
+        where key = $1 and vocabulary_settled`, [setKey],
+    );
+    const { rows } = await client.query(
+      `insert into question_set_subcategories (subcategory_key, set_key) values ($1, $2)
+       on conflict (subcategory_key) do update set set_key = excluded.set_key, attached_at = now()
+       returning *`,
+      [subcategoryKey, setKey],
+    );
+    await askWaiting(client, subcategoryKey, setKey);
+    return rows[0];
+  });
 }
 
 /**
@@ -106,19 +112,22 @@ export async function attach(setKey, subcategoryKey) {
  * back on if the set already holds it, off — and the drawer stops owing it. A fact
  * asked everywhere already, or since retired, needs nothing and is just cleared.
  */
-async function askWaiting(subcategoryKey, setKey) {
-  const { rows: waiting } = await query(
-    `select w.attribute_key, a.active
+async function askWaiting(client, subcategoryKey, setKey) {
+  const { rows: waiting } = await client.query(
+    `select w.attribute_key, a.active,
+            exists (select 1 from questions g where g.attribute_key = w.attribute_key and g.scope = 'global') as asked_everywhere
        from feature_pending_asks w join place_attributes a on a.key = w.attribute_key
       where w.subcategory_key = $1`, [subcategoryKey]);
   for (const w of waiting) {
-    if (w.active) {
-      try {
-        const q = await addQuestion({ attributeKey: w.attribute_key, setKey, scope: 'set' });
-        if (q && q.active === false) await query('update questions set active = true, updated_at = now() where id = $1', [q.id]);
-      } catch { /* asked everywhere already — nothing more to ask here */ }
+    // Asked everywhere already, or retired since: nothing to add here, so the
+    // obligation is met. Anything else is asked now; a failure is NOT swallowed —
+    // it takes the attachment back with it rather than forgetting the fact
+    // (Codex, 2 Oct 2026).
+    if (w.active && !w.asked_everywhere) {
+      const q = await addQuestion({ attributeKey: w.attribute_key, setKey, scope: 'set' }, client);
+      if (q && q.active === false) await client.query('update questions set active = true, updated_at = now() where id = $1', [q.id]);
     }
-    await query('delete from feature_pending_asks where attribute_key = $1 and subcategory_key = $2', [w.attribute_key, subcategoryKey]);
+    await client.query('delete from feature_pending_asks where attribute_key = $1 and subcategory_key = $2', [w.attribute_key, subcategoryKey]);
   }
 }
 
@@ -780,6 +789,11 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
   return withTransaction(async (client) => {
     // Serialize with review-spotting on this norm (Codex, 2 Oct 2026).
     await client.query('select pg_advisory_xact_lock(hashtext($1)::bigint)', [`feature:${norm}`]);
+    // And exclusively against every harvest and every set attachment: approval closes
+    // all of the word's candidates and decides which drawers wait for a set, so a
+    // harvest must not add a candidate, nor attach() a set, between those reads and
+    // our commit (Codex, 2 Oct 2026). Same order as ignoreFeature — no deadlock.
+    await client.query('select pg_advisory_xact_lock(hashtext($1)::bigint)', ['feature-tombstones']);
     // This is the review queue's door, not the general harvest's: it only acts on a
     // word review-spotting actually raised, which leaves a review_sighting. A legacy
     // Google-pass candidate carries `sources ? 'google'` too but has no sighting, and
