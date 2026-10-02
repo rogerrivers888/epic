@@ -51,14 +51,20 @@ test('the summary says nothing until a pass has finished, then gives its rates',
     assert.equal(empty.summary.websitePct, null, 'withheld, not nought');
     assert.equal(empty.summary.avgCostPence, null);
     const a = `google:sum-${randomUUID()}`; const b = `google:sum-${randomUUID()}`;
-    await query(`insert into saved_place_enrichment (venue_ref, household_id, state, last_cost_usd, cost_usd, found) values
-      ($1, $3, 'done', 0.10, 0.10, '{"fields":{"website":{"value":"https://a.example/","source":"site"}},"pictures":{"openverse":{"stored":1}}}'),
-      ($2, $3, 'done', 0.06, 0.06, '{"fields":{"website":{"value":null,"source":"unknown"}},"pictures":{}}')`, [a, b, HH]);
+    await query(`insert into saved_place_enrichment (venue_ref, household_id, state, last_cost_usd, cost_usd, paid_runs, found) values
+      ($1, $3, 'done', 0.10, 0.10, 1, '{"fields":{"website":{"value":"https://a.example/","source":"site"}},"pictures":{"openverse":{"stored":1}}}'),
+      ($2, $3, 'done', 0.06, 0.06, 1, '{"fields":{"website":{"value":null,"source":"unknown"}},"pictures":{}}')`, [a, b, HH]);
     const two = await (await fetch(`${base}/saved`)).json();
     assert.equal(two.summary.done, 2);
     assert.equal(two.summary.websitePct, 50, 'an unknown website is not a found one');
     assert.equal(two.summary.ownedImagePct, 50);
     assert.equal(two.summary.avgCostPence, 6.3, '$0.08 average at the ledger rate');
+    // A paid re-run of the first: two passes on it, and its earlier pass still counts.
+    await query(`update saved_place_enrichment set cost_usd = 0.20, last_cost_usd = 0, paid_runs = 2 where venue_ref = $1`, [a]);
+    const three = await (await fetch(`${base}/saved`)).json();
+    assert.equal(three.summary.paidPasses, 3);
+    assert.equal(three.summary.avgCostPence, Math.round((0.26 / 3) * 0.79 * 1000) / 10, 'per pass, over every pass paid for');
+    assert.equal(three.summary.avgCostPerPlacePence, Math.round((0.26 / 2) * 0.79 * 1000) / 10);
   } finally { await close(); }
 });
 

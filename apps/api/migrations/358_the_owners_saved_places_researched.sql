@@ -33,6 +33,9 @@ create table if not exists saved_place_enrichment (
   -- in dollars as the ledger records them (provider_calls).
   cost_usd        numeric(10,4) not null default 0,
   last_cost_usd   numeric(10,4),
+  -- How many Claude passes were paid for, all runs together, so the average
+  -- per pass survives re-runs.
+  paid_runs       integer not null default 0,
   -- Field by field: { website: { value, source, sourceUrl, checkedAt }, ... },
   -- facts as { key: { answer, source, sourceUrl, checkedAt } }, and the
   -- pictures each source gave. What the back office draws.

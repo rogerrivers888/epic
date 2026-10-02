@@ -542,7 +542,7 @@ export type SavedPlaceRow = {
 /** Rates over the finished passes; null until there is one, never a nought for "not yet". */
 export type SavedPlacesSummary = {
   done: number; websitePct: number | null; menuPct: number | null; ownedImagePct: number | null;
-  avgCostPence: number | null; paidPasses: number; purpose: string;
+  avgCostPence: number | null; avgCostPerPlacePence?: number | null; totalCostPence?: number; paidPasses: number; purpose: string;
 };
 export type FoundField = { value: unknown; source: string; sourceUrl: string | null; checkedAt: string | null; why?: string };
 export type FoundFact = { label: string; answer: 'yes' | 'no' | 'unknown'; source: string | null; sourceUrl: string | null; checkedAt: string; why?: string };

@@ -397,3 +397,23 @@ test('a listing or social page on record is not trusted as the venue\'s site, fo
   assert.match(prompt, /not known yet/, 'Claude is asked to find the real one');
   assert.match((await enrich.enrichmentOf(ref)).found.fields.website.why, /not the venue's own site/);
 });
+
+test('a pass cut short while Claude was asked is not paid for twice; a re-run keeps the page each fact was read on', async () => {
+  const hh = await household();
+  const ref = `google:cut-${randomUUID()}`;
+  await query(`insert into saved_place_enrichment (venue_ref, household_id, state, last_run_at) values ($1, $2, 'claude', now() - interval '1 hour')`, [ref, hh]);
+  await enrich.resumeStale({ olderThanMinutes: 15 });
+  const row = await enrich.enrichmentOf(ref);
+  assert.equal(row.state, 'failed', 'never asked again by itself');
+  assert.match(row.error, /Re-run/);
+
+  const ref2 = `google:keep-${randomUUID()}`;
+  await query(`insert into place_records (venue_ref, name, phone, provenance) values ($1, 'Kept Page', '0100', '{"phone":"site"}')`, [ref2]);
+  await query(`insert into saved_place_enrichment (venue_ref, household_id, state, found) values ($1, $2, 'free', $3)`,
+    [ref2, hh, JSON.stringify({ fields: { phone: { value: '0100', source: 'site', sourceUrl: 'https://kp.example/contact', checkedAt: '2026-10-02T10:00:00Z' } } })]);
+  await enrich.afterFree(ref2, { householdId: hh, sessionId: null }, {
+    asks: [], openverse: async () => ({ ok: true, stored: [], refused: 0 }),
+    searchWeb: async () => ({ text: '{"fields":{}}', fetched: [], searches: 0 }),
+  });
+  assert.equal((await enrich.enrichmentOf(ref2)).found.fields.phone.sourceUrl, 'https://kp.example/contact');
+});

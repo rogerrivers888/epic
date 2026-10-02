@@ -98,6 +98,8 @@ savedPlacesRouter.get('/', requires('view_library'), async (_req, res, next) => 
         menuPct: rate(sum.menu),
         ownedImagePct: rate(sum.pictured),
         avgCostPence: sum.paid ? Math.round(sum.avg_cost_usd * USD_TO_GBP * 1000) / 10 : null,
+        avgCostPerPlacePence: sum.done ? Math.round(sum.avg_cost_per_place_usd * USD_TO_GBP * 1000) / 10 : null,
+        totalCostPence: Math.round(sum.total_cost_usd * USD_TO_GBP * 1000) / 10,
         paidPasses: sum.paid,
         purpose: ENRICH_PURPOSE,
       },

@@ -251,10 +251,18 @@ export async function afterFree(venueRef, ctx, deps = {}) {
 
     // What the free pass established, so the back office can show it beside
     // what Claude added. The record's own provenance names the source.
+    // A field an earlier pass found keeps the page it was read on: the record
+    // holds the value and its source, not the page, so that comes from the
+    // last pass's own account of it (Codex, 2 Oct 2026).
+    const before = (await enrichmentOf(venueRef))?.found?.fields ?? {};
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     for (const f of ['website', 'phone', 'booking_url', 'menu_url', 'socials']) {
       const v = record?.[f];
       if (v && !(typeof v === 'object' && !Object.keys(v).length)) {
-        found.fields[f] = { value: v, source: record?.provenance?.[f] ?? 'own', sourceUrl: null, checkedAt: record?.enriched_at ?? null };
+        const was = before[f];
+        found.fields[f] = was && was.sourceUrl && same(was.value, v)
+          ? was
+          : { value: v, source: record?.provenance?.[f] ?? 'own', sourceUrl: null, checkedAt: record?.enriched_at ?? null };
       }
     }
 
@@ -305,7 +313,8 @@ export async function afterFree(venueRef, ctx, deps = {}) {
       found.notes.push(`Claude pass failed: ${err.code ?? err.message}`);
       await query(
         `update saved_place_enrichment set state = 'failed', last_run_at = now(), found = $2, error = $3,
-                cost_usd = cost_usd + $4, last_cost_usd = $4
+                cost_usd = cost_usd + $4, last_cost_usd = $4,
+                paid_runs = paid_runs + (case when $4 > 0 then 1 else 0 end)
           where venue_ref = $1`,
         [venueRef, JSON.stringify(found), String(err.code ?? err.message).slice(0, 300), spent]);
       return { state: 'failed', found, costUsd: spent };
@@ -321,7 +330,8 @@ export async function afterFree(venueRef, ctx, deps = {}) {
     }
     await query(
       `update saved_place_enrichment set state = 'done', claude_done_at = now(), last_run_at = now(),
-              found = $2, cost_usd = cost_usd + $3, last_cost_usd = $3, error = null
+              found = $2, cost_usd = cost_usd + $3, last_cost_usd = $3, error = null,
+              paid_runs = paid_runs + (case when $3 > 0 then 1 else 0 end)
         where venue_ref = $1`,
       [venueRef, JSON.stringify(found), pass.costUsd ?? 0]);
     return { state: 'done', found, costUsd: pass.costUsd ?? 0 };
@@ -555,11 +565,17 @@ async function writePass({ venueRef, reply, out, record, asks, costUsd }) {
  */
 export async function resumeStale({ olderThanMinutes = 15 } = {}) {
   const { rows } = await query(
-    `select venue_ref, household_id, session_id from saved_place_enrichment
+    `select venue_ref, household_id, session_id, state from saved_place_enrichment
       where state in ('queued', 'free', 'claude')
         and coalesce(last_run_at, requested_at) < now() - make_interval(mins => $1)
       order by requested_at limit 20`, [olderThanMinutes]);
-  const due = rows.filter((r) => !inProcess.has(r.venue_ref));
+  const due = rows.filter((r) => !inProcess.has(r.venue_ref) && r.state !== 'claude');
+  // A pass cut short while Claude was being asked may already have been paid
+  // for. Asking again would be paying twice, so it is not retried by itself:
+  // it is marked failed and waits for a deliberate Re-run (Codex, 2 Oct 2026).
+  for (const r of rows.filter((x) => !inProcess.has(x.venue_ref) && x.state === 'claude')) {
+    await setState(r.venue_ref, 'failed', { error: 'interrupted during the paid pass — Re-run to try again' });
+  }
   for (const r of due) start(r.venue_ref, { householdId: r.household_id, sessionId: r.session_id });
   return due.length;
 }
@@ -593,8 +609,12 @@ export async function enrichmentSummary() {
             count(*) filter (where found->'fields'->'website'->>'value' is not null and found->'fields'->'website'->>'source' <> 'unknown')::int as website,
             count(*) filter (where found->'fields'->'menu_url'->>'value' is not null and found->'fields'->'menu_url'->>'source' <> 'unknown')::int as menu,
             count(*) filter (where coalesce((found->'pictures'->'openverse'->>'stored')::int, 0) + coalesce((found->'pictures'->'venueSite'->>'kept')::int, 0) > 0)::int as pictured,
-            count(*) filter (where coalesce(last_cost_usd, 0) > 0)::int as paid,
-            coalesce(avg(last_cost_usd) filter (where coalesce(last_cost_usd, 0) > 0), 0)::float as avg_cost_usd
+            coalesce(sum(paid_runs), 0)::int as paid,
+            coalesce(sum(cost_usd), 0)::float as total_cost_usd
        from done`);
+  // Per paid pass, over every pass ever paid for; per place, over every
+  // finished place (including those Claude was never needed for).
+  r.avg_cost_usd = r.paid ? r.total_cost_usd / r.paid : 0;
+  r.avg_cost_per_place_usd = r.done ? r.total_cost_usd / r.done : 0;
   return r;
 }

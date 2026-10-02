@@ -87,7 +87,8 @@ export function SavedPlacesBoard({ canManage }: { canManage: boolean }) {
             <Stat label="Website" value={pct(s.websitePct)} tip={['Website', "Share of researched places with a website found on the venue's own page or the open map."]} />
             <Stat label="Menu" value={pct(s.menuPct)} tip={['Menu', "Share with a menu link read on the venue's own page. The dishes are read into the pooled menu."]} />
             <Stat label="Owned image" value={pct(s.ownedImagePct)} tip={['Owned image', "Share with at least one picture from Openverse or the venue's own site (the latter unlicensed, back office only)."]} />
-            <Stat label="Avg cost" value={s.avgCostPence == null ? '—' : `${s.avgCostPence}p`} tip={['Average cost', `Claude's cost per paid pass (${s.paidPasses} so far), ledgered as ${s.purpose}. Target 12p.`]} />
+            <Stat label="Per place" value={s.avgCostPerPlacePence == null ? '—' : `${s.avgCostPerPlacePence}p`} tip={['Cost per place', `Everything Claude cost, over every researched place — including those it was never needed for. Target 12p.`]} />
+            <Stat label="Per pass" value={s.avgCostPence == null ? '—' : `${s.avgCostPence}p`} tip={['Cost per paid pass', `Over the ${s.paidPasses} Claude passes paid for, ledgered as ${s.purpose}.`]} />
           </View>
         </View>
       ) : null}
