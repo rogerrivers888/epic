@@ -862,4 +862,12 @@ test('the gate proof: held or not per named place, can’t-speak for an unknown 
   assert.equal(by['Gateproof Cathedral'].held, false, 'the cathedral surfaces');
   assert.equal(by['No Such Place Anywhere'].held, null, 'an unknown name cannot speak — never a false "surfaces"');
   assert.equal(out.filedElsewhere, 0, 'no held-back record is filed in a drawer the rule does not narrow');
+  // The live trace agrees with the stored check, copy by copy.
+  assert.equal(by['St Gateproof Plain'].liveHeld, true);
+  assert.equal(by['Gateproof Cathedral'].liveHeld, false);
+  assert.deepEqual(by['St Gateproof Plain'].trace.find((t) => t.ref === 'google:gp_plain').filedIn, ['churches']);
+  // A check id that names no completed check cannot speak for "held", but the trace still can.
+  const none = await surfacing.gateProof({ names: ['St Gateproof Plain'], checkId: '00000000-0000-0000-0000-000000000000' });
+  assert.equal(none.places[0].held, null, 'no completed check: never a false "surfaces"');
+  assert.equal(none.places[0].liveHeld, true);
 });

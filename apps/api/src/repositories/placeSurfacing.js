@@ -483,6 +483,10 @@ export async function surfacingReport({ examples = 10 } = {}) {
  */
 export async function gateProof({ names = [], checkId = null } = {}) {
   const scope = checkId ? 'and s.check_id = $2' : '';
+  const he = await heritageLoad();
+  const { rows: [done] } = await query(
+    `select 1 as ok from surfacing_checks where state = 'done' ${checkId ? 'and id = $1' : ''} limit 1`, checkId ? [checkId] : []);
+  const haveCheck = Boolean(done);
   const places = [];
   for (const raw of names.map((n) => String(n).trim()).filter(Boolean).slice(0, 40)) {
     const { rows } = await query(
@@ -496,7 +500,36 @@ export async function gateProof({ names = [], checkId = null } = {}) {
       `select distinct s.venue_ref, s.applied, s.check_id from place_surfacing_members m
          join place_surfacing s on s.venue_ref = m.venue_ref and not s.surfaced
         where m.member_ref = any($1::text[]) ${scope}`, checkId ? [members, checkId] : [members]);
-    places.push({ name: raw, records: members.length, held: heldRows.length > 0, heldBy: heldRows.map((r) => r.venue_ref) });
+    // The live trace, so a place can be followed before any check has run: which
+    // drawers each copy is filed in, what we hold about it, and the bar's verdict.
+    const [signals, filings, elsewhere] = await Promise.all([
+      gatherSignals(members, { heritageLoad: he.load }),
+      query(`select f.venue_ref as ref, array_agg(distinct f.sub) as subs from (${FILED_SQL}) f
+              where f.venue_ref = any($1::text[]) group by f.venue_ref`, [members]),
+      filedElsewhere(members),
+    ]);
+    const filedIn = new Map(filings.rows.map((r) => [r.ref, r.subs]));
+    const trace = members.map((ref) => {
+      const sg = signals.get(ref) ?? { ref, heritageAvailable: false, heritage: null };
+      const v = notable(sg);
+      return {
+        ref, filedIn: filedIn.get(ref) ?? [], ownedName: sg.name ?? null, nation: sg.nation ?? null,
+        hasWikipedia: !!sg.hasWikipedia, heritage: sg.heritage, heritageAvailable: !!sg.heritageAvailable,
+        verdict: v.status, why: v.reason,
+      };
+    });
+    const narrowedOnly = trace.some((t) => t.filedIn.some((k) => NARROWED.includes(k)))
+      && !members.some((m) => elsewhere.has(m));
+    const liveHeld = narrowedOnly && !trace.some((t) => t.verdict === 'kept');
+    places.push({
+      name: raw, records: members.length,
+      // With no completed check there is nothing stored to be held by: can't speak,
+      // never a "surfaces" that only means no rows were written yet.
+      held: haveCheck ? heldRows.length > 0 : null,
+      ...(haveCheck ? {} : { why: 'no completed narrowing check to read' }),
+      heldBy: heldRows.map((r) => r.venue_ref),
+      liveHeld, trace,
+    });
   }
   const { rows: snap } = await query(
     `select distinct m.member_ref as ref from place_surfacing_members m
